@@ -1,0 +1,241 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{11C018FE-9ADB-415D-BB4E-E17DD0AA4345}|CjERP.Api\\CjERP.Api.csproj|c:\\users\\sistema\\documents\\proyectos\\cj_erp_web\\cjerp.backend\\cjerp.api\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{11C018FE-9ADB-415D-BB4E-E17DD0AA4345}|CjERP.Api\\CjERP.Api.csproj|solutionrelative:cjerp.api\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{11C018FE-9ADB-415D-BB4E-E17DD0AA4345}|CjERP.Api\\CjERP.Api.csproj|c:\\users\\sistema\\documents\\proyectos\\cj_erp_web\\cjerp.backend\\cjerp.api\\properties\\launchsettings.json||{90A6B3A7-C1A3-4009-A288-E2FF89E96FA0}",
+      "RelativeMoniker": "D:0:0:{11C018FE-9ADB-415D-BB4E-E17DD0AA4345}|CjERP.Api\\CjERP.Api.csproj|solutionrelative:cjerp.api\\properties\\launchsettings.json||{90A6B3A7-C1A3-4009-A288-E2FF89E96FA0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{11C018FE-9ADB-415D-BB4E-E17DD0AA4345}|CjERP.Api\\CjERP.Api.csproj|c:\\users\\sistema\\documents\\proyectos\\cj_erp_web\\cjerp.backend\\cjerp.api\\controllers\\authmecontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{11C018FE-9ADB-415D-BB4E-E17DD0AA4345}|CjERP.Api\\CjERP.Api.csproj|solutionrelative:cjerp.api\\controllers\\authmecontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{C75CD766-424D-4366-9F61-75930991E00E}|CjERP.Application\\CjERP.Application.csproj|c:\\users\\sistema\\documents\\proyectos\\cj_erp_web\\cjerp.backend\\cjerp.application\\dtos\\auth\\currentuserdto.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{C75CD766-424D-4366-9F61-75930991E00E}|CjERP.Application\\CjERP.Application.csproj|solutionrelative:cjerp.application\\dtos\\auth\\currentuserdto.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{11C018FE-9ADB-415D-BB4E-E17DD0AA4345}|CjERP.Api\\CjERP.Api.csproj|c:\\users\\sistema\\documents\\proyectos\\cj_erp_web\\cjerp.backend\\cjerp.api\\appsettings.json||{90A6B3A7-C1A3-4009-A288-E2FF89E96FA0}",
+      "RelativeMoniker": "D:0:0:{11C018FE-9ADB-415D-BB4E-E17DD0AA4345}|CjERP.Api\\CjERP.Api.csproj|solutionrelative:cjerp.api\\appsettings.json||{90A6B3A7-C1A3-4009-A288-E2FF89E96FA0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{11C018FE-9ADB-415D-BB4E-E17DD0AA4345}|CjERP.Api\\CjERP.Api.csproj|c:\\users\\sistema\\documents\\proyectos\\cj_erp_web\\cjerp.backend\\cjerp.api\\cjerp.api.csproj||{FA3CD31E-987B-443A-9B81-186104E8DAC1}|",
+      "RelativeMoniker": "D:0:0:{11C018FE-9ADB-415D-BB4E-E17DD0AA4345}|CjERP.Api\\CjERP.Api.csproj|solutionrelative:cjerp.api\\cjerp.api.csproj||{FA3CD31E-987B-443A-9B81-186104E8DAC1}|"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{B51433B4-6630-49DA-83D1-D4F32AD6170B}|CjERP.Infrastructure\\CjERP.Infrastructure.csproj|c:\\users\\sistema\\documents\\proyectos\\cj_erp_web\\cjerp.backend\\cjerp.infrastructure\\cjerp.infrastructure.csproj||{FA3CD31E-987B-443A-9B81-186104E8DAC1}|",
+      "RelativeMoniker": "D:0:0:{B51433B4-6630-49DA-83D1-D4F32AD6170B}|CjERP.Infrastructure\\CjERP.Infrastructure.csproj|solutionrelative:cjerp.infrastructure\\cjerp.infrastructure.csproj||{FA3CD31E-987B-443A-9B81-186104E8DAC1}|"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{B51433B4-6630-49DA-83D1-D4F32AD6170B}|CjERP.Infrastructure\\CjERP.Infrastructure.csproj|c:\\users\\sistema\\documents\\proyectos\\cj_erp_web\\cjerp.backend\\cjerp.infrastructure\\dependencyinjection\\infrastructureserviceregistration.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{B51433B4-6630-49DA-83D1-D4F32AD6170B}|CjERP.Infrastructure\\CjERP.Infrastructure.csproj|solutionrelative:cjerp.infrastructure\\dependencyinjection\\infrastructureserviceregistration.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{B51433B4-6630-49DA-83D1-D4F32AD6170B}|CjERP.Infrastructure\\CjERP.Infrastructure.csproj|c:\\users\\sistema\\documents\\proyectos\\cj_erp_web\\cjerp.backend\\cjerp.infrastructure\\services\\authservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{B51433B4-6630-49DA-83D1-D4F32AD6170B}|CjERP.Infrastructure\\CjERP.Infrastructure.csproj|solutionrelative:cjerp.infrastructure\\services\\authservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{C75CD766-424D-4366-9F61-75930991E00E}|CjERP.Application\\CjERP.Application.csproj|c:\\users\\sistema\\documents\\proyectos\\cj_erp_web\\cjerp.backend\\cjerp.application\\interfaces\\services\\iauthservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{C75CD766-424D-4366-9F61-75930991E00E}|CjERP.Application\\CjERP.Application.csproj|solutionrelative:cjerp.application\\interfaces\\services\\iauthservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{C75CD766-424D-4366-9F61-75930991E00E}|CjERP.Application\\CjERP.Application.csproj|c:\\users\\sistema\\documents\\proyectos\\cj_erp_web\\cjerp.backend\\cjerp.application\\dtos\\auth\\loginrequestdto.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{C75CD766-424D-4366-9F61-75930991E00E}|CjERP.Application\\CjERP.Application.csproj|solutionrelative:cjerp.application\\dtos\\auth\\loginrequestdto.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{11C018FE-9ADB-415D-BB4E-E17DD0AA4345}|CjERP.Api\\CjERP.Api.csproj|c:\\users\\sistema\\documents\\proyectos\\cj_erp_web\\cjerp.backend\\cjerp.api\\controllers\\testconnectioncontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{11C018FE-9ADB-415D-BB4E-E17DD0AA4345}|CjERP.Api\\CjERP.Api.csproj|solutionrelative:cjerp.api\\controllers\\testconnectioncontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{B51433B4-6630-49DA-83D1-D4F32AD6170B}|CjERP.Infrastructure\\CjERP.Infrastructure.csproj|c:\\users\\sistema\\documents\\proyectos\\cj_erp_web\\cjerp.backend\\cjerp.infrastructure\\persistence\\context\\cjerpdbcontext.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{B51433B4-6630-49DA-83D1-D4F32AD6170B}|CjERP.Infrastructure\\CjERP.Infrastructure.csproj|solutionrelative:cjerp.infrastructure\\persistence\\context\\cjerpdbcontext.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 1,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedHeight": 200,
+          "SelectedChildIndex": 1,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "launchSettings.json",
+              "DocumentMoniker": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Api\\Properties\\launchSettings.json",
+              "RelativeDocumentMoniker": "CjERP.Api\\Properties\\launchSettings.json",
+              "ToolTip": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Api\\Properties\\launchSettings.json",
+              "RelativeToolTip": "CjERP.Api\\Properties\\launchSettings.json",
+              "ViewState": "AgIAACEAAAAAAAAAAAAAACkAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001642|",
+              "WhenOpened": "2026-03-28T00:50:20.444Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "Program.cs",
+              "DocumentMoniker": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Api\\Program.cs",
+              "RelativeDocumentMoniker": "CjERP.Api\\Program.cs",
+              "ToolTip": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Api\\Program.cs",
+              "RelativeToolTip": "CjERP.Api\\Program.cs",
+              "ViewState": "AgIAAGMAAAAAAAAAAAAswHoAAAAKAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-26T21:46:39.608Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "AuthMeController.cs",
+              "DocumentMoniker": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Api\\Controllers\\AuthMeController.cs",
+              "RelativeDocumentMoniker": "CjERP.Api\\Controllers\\AuthMeController.cs",
+              "ToolTip": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Api\\Controllers\\AuthMeController.cs",
+              "RelativeToolTip": "CjERP.Api\\Controllers\\AuthMeController.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAACkAAAABAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-26T20:20:38.495Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "CurrentUserDto.cs",
+              "DocumentMoniker": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Application\\DTOs\\Auth\\CurrentUserDto.cs",
+              "RelativeDocumentMoniker": "CjERP.Application\\DTOs\\Auth\\CurrentUserDto.cs",
+              "ToolTip": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Application\\DTOs\\Auth\\CurrentUserDto.cs",
+              "RelativeToolTip": "CjERP.Application\\DTOs\\Auth\\CurrentUserDto.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAsAAAABAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-26T20:20:01.2Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
+              "Title": "appsettings.json",
+              "DocumentMoniker": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Api\\appsettings.json",
+              "RelativeDocumentMoniker": "CjERP.Api\\appsettings.json",
+              "ToolTip": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Api\\appsettings.json",
+              "RelativeToolTip": "CjERP.Api\\appsettings.json",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAIAAABsAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001642|",
+              "WhenOpened": "2026-03-26T18:05:56.803Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 5,
+              "Title": "CjERP.Api",
+              "DocumentMoniker": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Api\\CjERP.Api.csproj",
+              "RelativeDocumentMoniker": "CjERP.Api\\CjERP.Api.csproj",
+              "ToolTip": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Api\\CjERP.Api.csproj",
+              "RelativeToolTip": "CjERP.Api\\CjERP.Api.csproj",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAA4AAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000758|",
+              "WhenOpened": "2026-03-26T14:24:48.263Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 9,
+              "Title": "IAuthService.cs",
+              "DocumentMoniker": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Application\\Interfaces\\Services\\IAuthService.cs",
+              "RelativeDocumentMoniker": "CjERP.Application\\Interfaces\\Services\\IAuthService.cs",
+              "ToolTip": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Application\\Interfaces\\Services\\IAuthService.cs",
+              "RelativeToolTip": "CjERP.Application\\Interfaces\\Services\\IAuthService.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAgAAAABAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-26T17:39:37.498Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 8,
+              "Title": "AuthService.cs",
+              "DocumentMoniker": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Infrastructure\\Services\\AuthService.cs",
+              "RelativeDocumentMoniker": "CjERP.Infrastructure\\Services\\AuthService.cs",
+              "ToolTip": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Infrastructure\\Services\\AuthService.cs",
+              "RelativeToolTip": "CjERP.Infrastructure\\Services\\AuthService.cs",
+              "ViewState": "AgIAABIAAAAAAAAAAAA1wCMAAAABAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-26T17:40:20.098Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 6,
+              "Title": "CjERP.Infrastructure",
+              "DocumentMoniker": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Infrastructure\\CjERP.Infrastructure.csproj",
+              "RelativeDocumentMoniker": "CjERP.Infrastructure\\CjERP.Infrastructure.csproj",
+              "ToolTip": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Infrastructure\\CjERP.Infrastructure.csproj",
+              "RelativeToolTip": "CjERP.Infrastructure\\CjERP.Infrastructure.csproj",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAB8AAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000758|",
+              "WhenOpened": "2026-03-26T00:46:31.711Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 7,
+              "Title": "InfrastructureServiceRegistration.cs",
+              "DocumentMoniker": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Infrastructure\\DependencyInjection\\InfrastructureServiceRegistration.cs",
+              "RelativeDocumentMoniker": "CjERP.Infrastructure\\DependencyInjection\\InfrastructureServiceRegistration.cs",
+              "ToolTip": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Infrastructure\\DependencyInjection\\InfrastructureServiceRegistration.cs",
+              "RelativeToolTip": "CjERP.Infrastructure\\DependencyInjection\\InfrastructureServiceRegistration.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAgAAAAFAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-26T14:51:18.562Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 10,
+              "Title": "LoginRequestDto.cs",
+              "DocumentMoniker": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Application\\DTOs\\Auth\\LoginRequestDto.cs",
+              "RelativeDocumentMoniker": "CjERP.Application\\DTOs\\Auth\\LoginRequestDto.cs",
+              "ToolTip": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Application\\DTOs\\Auth\\LoginRequestDto.cs",
+              "RelativeToolTip": "CjERP.Application\\DTOs\\Auth\\LoginRequestDto.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-26T17:36:06.172Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 12,
+              "Title": "CjERPDbContext.cs",
+              "DocumentMoniker": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Infrastructure\\Persistence\\Context\\CjERPDbContext.cs",
+              "RelativeDocumentMoniker": "CjERP.Infrastructure\\Persistence\\Context\\CjERPDbContext.cs",
+              "ToolTip": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Infrastructure\\Persistence\\Context\\CjERPDbContext.cs",
+              "RelativeToolTip": "CjERP.Infrastructure\\Persistence\\Context\\CjERPDbContext.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAsAAAABAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-26T17:17:22.897Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 11,
+              "Title": "TestConnectionController.cs",
+              "DocumentMoniker": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Api\\Controllers\\TestConnectionController.cs",
+              "RelativeDocumentMoniker": "CjERP.Api\\Controllers\\TestConnectionController.cs",
+              "ToolTip": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Api\\Controllers\\TestConnectionController.cs",
+              "RelativeToolTip": "CjERP.Api\\Controllers\\TestConnectionController.cs",
+              "ViewState": "AgIAAAgAAAAAAAAAAAAAwA0AAAAfAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-26T15:05:05.393Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
