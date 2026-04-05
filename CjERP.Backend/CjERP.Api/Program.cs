@@ -57,6 +57,10 @@ builder.Services.AddInfrastructure(builder.Configuration);
 // Servicios de aplicación
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IJwtService, JwtService>();
+builder.Services.AddScoped<ISegPerfilService, SegPerfilService>();
+builder.Services.AddScoped<ISegRolService, SegRolService>();
+builder.Services.AddScoped<ISegMenuService, SegMenuService>();
+builder.Services.AddScoped<ISegRolMenuPermisoService, SegRolMenuPermisoService>();
 
 // CORS
 builder.Services.AddCors(options =>

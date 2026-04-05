@@ -21,14 +21,23 @@ namespace CjERP.Infrastructure.Services
             using var connection = new SqlConnection(
                 _configuration.GetConnectionString("DefaultConnection"));
 
+            var requestedUser = request.IdUsuario?.Trim();
+
             var parameters = new DynamicParameters();
-            parameters.Add("@pIdUsuario", request.IdUsuario, DbType.String);
+            parameters.Add("@pIdUsuario", requestedUser, DbType.String);
             parameters.Add("@pClave", request.Clave, DbType.String);
 
             var result = await connection.QueryFirstOrDefaultAsync<LoginResponseDto>(
                 "dbo.sp_ValidarUsuario",
                 parameters,
                 commandType: CommandType.StoredProcedure);
+
+            if (result == null)
+                return null;
+
+            // Safety check: reject if the SP returns a different user than requested.
+            if (!string.Equals(result.IdUsuario?.Trim(), requestedUser, StringComparison.OrdinalIgnoreCase))
+                return null;
 
             return result;
         }

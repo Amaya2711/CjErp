@@ -15,11 +15,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Shared\\CjERP.Shared.csproj",
+      "projectUniqueName": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Shared\\CjERP.Shared.csproj",
       "projectName": "CjERP.Shared",
-      "projectPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Shared\\CjERP.Shared.csproj",
+      "projectPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Shared\\CjERP.Shared.csproj",
       "packagesPath": "C:\\Users\\SISTEMA\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Shared\\obj\\",
+      "outputPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Shared\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "C:\\Program Files\\DevExpress 25.2\\Components\\Offline Packages",

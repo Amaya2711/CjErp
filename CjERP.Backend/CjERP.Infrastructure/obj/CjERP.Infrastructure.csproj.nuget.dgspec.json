@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Infrastructure\\CjERP.Infrastructure.csproj": {}
+    "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Infrastructure\\CjERP.Infrastructure.csproj": {}
   },
   "projects": {
-    "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Application\\CjERP.Application.csproj": {
+    "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Application\\CjERP.Application.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Application\\CjERP.Application.csproj",
+        "projectUniqueName": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Application\\CjERP.Application.csproj",
         "projectName": "CjERP.Application",
-        "projectPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Application\\CjERP.Application.csproj",
+        "projectPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Application\\CjERP.Application.csproj",
         "packagesPath": "C:\\Users\\SISTEMA\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Application\\obj\\",
+        "outputPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Application\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files\\DevExpress 25.2\\Components\\Offline Packages",
@@ -36,11 +36,11 @@
           "net8.0": {
             "targetAlias": "net8.0",
             "projectReferences": {
-              "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Domain\\CjERP.Domain.csproj": {
-                "projectPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Domain\\CjERP.Domain.csproj"
+              "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Domain\\CjERP.Domain.csproj": {
+                "projectPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Domain\\CjERP.Domain.csproj"
               },
-              "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Shared\\CjERP.Shared.csproj": {
-                "projectPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Shared\\CjERP.Shared.csproj"
+              "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Shared\\CjERP.Shared.csproj": {
+                "projectPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Shared\\CjERP.Shared.csproj"
               }
             }
           }
@@ -80,14 +80,14 @@
         }
       }
     },
-    "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Domain\\CjERP.Domain.csproj": {
+    "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Domain\\CjERP.Domain.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Domain\\CjERP.Domain.csproj",
+        "projectUniqueName": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Domain\\CjERP.Domain.csproj",
         "projectName": "CjERP.Domain",
-        "projectPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Domain\\CjERP.Domain.csproj",
+        "projectPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Domain\\CjERP.Domain.csproj",
         "packagesPath": "C:\\Users\\SISTEMA\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Domain\\obj\\",
+        "outputPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Domain\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files\\DevExpress 25.2\\Components\\Offline Packages",
@@ -149,14 +149,14 @@
         }
       }
     },
-    "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Infrastructure\\CjERP.Infrastructure.csproj": {
+    "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Infrastructure\\CjERP.Infrastructure.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Infrastructure\\CjERP.Infrastructure.csproj",
+        "projectUniqueName": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Infrastructure\\CjERP.Infrastructure.csproj",
         "projectName": "CjERP.Infrastructure",
-        "projectPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Infrastructure\\CjERP.Infrastructure.csproj",
+        "projectPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Infrastructure\\CjERP.Infrastructure.csproj",
         "packagesPath": "C:\\Users\\SISTEMA\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Infrastructure\\obj\\",
+        "outputPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Infrastructure\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files\\DevExpress 25.2\\Components\\Offline Packages",
@@ -181,14 +181,14 @@
           "net8.0": {
             "targetAlias": "net8.0",
             "projectReferences": {
-              "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Application\\CjERP.Application.csproj": {
-                "projectPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Application\\CjERP.Application.csproj"
+              "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Application\\CjERP.Application.csproj": {
+                "projectPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Application\\CjERP.Application.csproj"
               },
-              "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Domain\\CjERP.Domain.csproj": {
-                "projectPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Domain\\CjERP.Domain.csproj"
+              "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Domain\\CjERP.Domain.csproj": {
+                "projectPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Domain\\CjERP.Domain.csproj"
               },
-              "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Shared\\CjERP.Shared.csproj": {
-                "projectPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Shared\\CjERP.Shared.csproj"
+              "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Shared\\CjERP.Shared.csproj": {
+                "projectPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Shared\\CjERP.Shared.csproj"
               }
             }
           }
@@ -254,14 +254,14 @@
         }
       }
     },
-    "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Shared\\CjERP.Shared.csproj": {
+    "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Shared\\CjERP.Shared.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Shared\\CjERP.Shared.csproj",
+        "projectUniqueName": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Shared\\CjERP.Shared.csproj",
         "projectName": "CjERP.Shared",
-        "projectPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Shared\\CjERP.Shared.csproj",
+        "projectPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Shared\\CjERP.Shared.csproj",
         "packagesPath": "C:\\Users\\SISTEMA\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Shared\\obj\\",
+        "outputPath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Shared\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files\\DevExpress 25.2\\Components\\Offline Packages",

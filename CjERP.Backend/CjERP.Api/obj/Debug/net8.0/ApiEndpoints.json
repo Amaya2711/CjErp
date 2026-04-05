@@ -26,6 +26,291 @@
     "ReturnTypes": []
   },
   {
+    "ContainingType": "CjERP.Api.Controllers.SegMenuController",
+    "Method": "ListarCompleto",
+    "RelativePath": "api/menu/completo",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "CjERP.Api.Controllers.SegMenuController",
+    "Method": "ListarAsignadoPorRol",
+    "RelativePath": "api/menu/rol/{idRol}/asignado",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "idRol",
+        "Type": "System.Int32",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "CjERP.Api.Controllers.SegMenuController",
+    "Method": "GuardarAsignacionRol",
+    "RelativePath": "api/menu/rol/asignacion",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "CjERP.Application.DTOs.Seguridad.GuardarAsignacionMenuRolRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "CjERP.Api.Controllers.SegMenuController",
+    "Method": "ListarPorUsuario",
+    "RelativePath": "api/menu/usuario/{idUsuario}",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "idUsuario",
+        "Type": "System.String",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "CjERP.Api.Controllers.SegPerfilController",
+    "Method": "Listar",
+    "RelativePath": "api/perfiles",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "CjERP.Api.Controllers.SegPerfilController",
+    "Method": "Crear",
+    "RelativePath": "api/perfiles",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "CjERP.Application.DTOs.Seguridad.CrearPerfilRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "CjERP.Api.Controllers.SegPerfilController",
+    "Method": "ObtenerPorId",
+    "RelativePath": "api/perfiles/{id}",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Int32",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "CjERP.Api.Controllers.SegPerfilController",
+    "Method": "Actualizar",
+    "RelativePath": "api/perfiles/{id}",
+    "HttpMethod": "PUT",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Int32",
+        "IsRequired": true
+      },
+      {
+        "Name": "request",
+        "Type": "CjERP.Application.DTOs.Seguridad.ActualizarPerfilRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "CjERP.Api.Controllers.SegPerfilController",
+    "Method": "Eliminar",
+    "RelativePath": "api/perfiles/{id}",
+    "HttpMethod": "DELETE",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Int32",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "CjERP.Api.Controllers.SegPerfilController",
+    "Method": "ListarRolesPorPerfil",
+    "RelativePath": "api/perfiles/{id}/roles",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Int32",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "CjERP.Api.Controllers.SegRolController",
+    "Method": "Listar",
+    "RelativePath": "api/roles",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "CjERP.Api.Controllers.SegRolController",
+    "Method": "Crear",
+    "RelativePath": "api/roles",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "CjERP.Application.DTOs.Seguridad.CrearRolRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "CjERP.Api.Controllers.SegRolController",
+    "Method": "ObtenerPorId",
+    "RelativePath": "api/roles/{id}",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Int32",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "CjERP.Api.Controllers.SegRolController",
+    "Method": "Actualizar",
+    "RelativePath": "api/roles/{id}",
+    "HttpMethod": "PUT",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Int32",
+        "IsRequired": true
+      },
+      {
+        "Name": "request",
+        "Type": "CjERP.Application.DTOs.Seguridad.ActualizarRolRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "CjERP.Api.Controllers.SegRolController",
+    "Method": "Eliminar",
+    "RelativePath": "api/roles/{id}",
+    "HttpMethod": "DELETE",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Int32",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "CjERP.Api.Controllers.Seguridad.SegRolMenuPermisoController",
+    "Method": "Guardar",
+    "RelativePath": "api/seguridad-permisos/guardar",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "dto",
+        "Type": "CjERP.Application.DTOs.Seguridad.GuardarSegRolMenuPermisoDto",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "CjERP.Api.Controllers.Seguridad.SegRolMenuPermisoController",
+    "Method": "ListarPorRol",
+    "RelativePath": "api/seguridad-permisos/rol/{idRol}",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "idRol",
+        "Type": "System.Int32",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "CjERP.Api.Controllers.Seguridad.SegRolMenuPermisoController",
+    "Method": "Obtener",
+    "RelativePath": "api/seguridad-permisos/rol/{idRol}/menu/{idMenu}",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "idRol",
+        "Type": "System.Int32",
+        "IsRequired": true
+      },
+      {
+        "Name": "idMenu",
+        "Type": "System.Int32",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
     "ContainingType": "CjERP.Api.Controllers.SeguridadController",
     "Method": "GetPerfil",
     "RelativePath": "api/Seguridad/perfil",

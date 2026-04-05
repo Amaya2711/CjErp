@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "idfSRZZdjmw=",
+  "dgSpecHash": "UWCgTItHaFw=",
   "success": true,
-  "projectFilePath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\CjERP.Backend\\CjERP.Api\\CjERP.Api.csproj",
+  "projectFilePath": "C:\\Users\\SISTEMA\\Documents\\Proyectos\\Cj_ERP_Web\\Cj-Erp-Web\\CjERP.Backend\\CjERP.Api\\CjERP.Api.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\SISTEMA\\.nuget\\packages\\dapper\\2.1.72\\dapper.2.1.72.nupkg.sha512",
     "C:\\Users\\SISTEMA\\.nuget\\packages\\microsoft.aspnetcore.authentication.jwtbearer\\8.0.25\\microsoft.aspnetcore.authentication.jwtbearer.8.0.25.nupkg.sha512",
