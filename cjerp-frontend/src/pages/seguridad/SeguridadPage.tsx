@@ -1,4 +1,7 @@
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { loadDashboardMenus, type DashboardTile } from "../../features/dashboard/services/dashboardMenuService";
+import { getAuthUser } from "../../utils/authStorage";
 
 type SecurityModule = {
   titulo: string;
@@ -9,39 +12,89 @@ type SecurityModule = {
 
 export default function SeguridadPage() {
   const navigate = useNavigate();
+  const authUser = getAuthUser();
 
-  const modulos: SecurityModule[] = [
-    {
-      titulo: "Usuarios",
+  const [menuLoading, setMenuLoading] = useState(true);
+  const [securityTiles, setSecurityTiles] = useState<DashboardTile[]>([]);
+
+  useEffect(() => {
+    let activo = true;
+
+    const cargarMenuSeguridad = async () => {
+      setMenuLoading(true);
+
+      if (!authUser?.usuario) {
+        if (activo) {
+          setSecurityTiles([]);
+          setMenuLoading(false);
+        }
+        return;
+      }
+
+      const grupos = await loadDashboardMenus(authUser.usuario);
+      const seguridad = grupos.find(
+        (grupo) => grupo.titulo.trim().toLowerCase() === "seguridad"
+      );
+
+      if (activo) {
+        setSecurityTiles(seguridad?.tiles ?? []);
+        setMenuLoading(false);
+      }
+    };
+
+    void cargarMenuSeguridad();
+
+    return () => {
+      activo = false;
+    };
+  }, [authUser?.usuario]);
+
+  const moduleConfigByPath: Record<string, { descripcion: string; color: string }> = {
+    "/seguridad/usuarios": {
       descripcion: "Administración de usuarios del sistema.",
-      ruta: "/seguridad/usuarios",
       color: "#6E4CCB",
     },
-    {
-      titulo: "Perfiles",
+    "/seguridad/usuario-perfil": {
+      descripcion: "Asignación de perfiles por usuario.",
+      color: "#8B5CF6",
+    },
+    "/seguridad/perfiles": {
       descripcion: "Definición de perfiles funcionales por área.",
-      ruta: "/seguridad/perfiles",
       color: "#3FA9F5",
     },
-    {
-      titulo: "Roles",
+    "/seguridad/roles": {
       descripcion: "Gestión de roles y niveles de acceso.",
-      ruta: "/seguridad/roles",
       color: "#F5A623",
     },
-    {
-      titulo: "Menú",
+    "/seguridad/menu": {
       descripcion: "Configuración del árbol de menú del ERP.",
-      ruta: "/seguridad/menu",
       color: "#10B981",
     },
-    {
-      titulo: "Permisos",
+    "/seguridad/permisos": {
       descripcion: "Asignación de accesos por perfil, rol y usuario.",
-      ruta: "/seguridad/permisos",
       color: "#EF4444",
     },
-  ];
+  };
+
+  const modulos: SecurityModule[] = useMemo(
+    () =>
+      securityTiles.map((tile) => {
+        const config = moduleConfigByPath[tile.path] || {
+          descripcion: `Gestión de ${tile.label.toLowerCase()} del módulo de seguridad.`,
+          color: "#64748B",
+        };
+
+        return {
+          titulo: tile.label,
+          descripcion: config.descripcion,
+          ruta: tile.path,
+          color: config.color,
+        };
+      }),
+    [securityTiles]
+  );
+
+  const moduloPermisos = modulos.find((modulo) => modulo.ruta === "/seguridad/permisos");
 
   const indicadores = [
     { label: "Usuarios activos", value: "125" },
@@ -61,12 +114,14 @@ export default function SeguridadPage() {
         </div>
 
         <div style={styles.headerActions}>
-          <button
-            style={styles.primaryButton}
-            onClick={() => navigate("/seguridad/permisos")}
-          >
-            Configurar permisos
-          </button>
+          {moduloPermisos ? (
+            <button
+              style={styles.primaryButton}
+              onClick={() => navigate(moduloPermisos.ruta)}
+            >
+              Configurar permisos
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -88,22 +143,28 @@ export default function SeguridadPage() {
             </p>
           </div>
 
-          <div style={styles.modulesGrid}>
-            {modulos.map((modulo) => (
-              <button
-                key={modulo.titulo}
-                style={{
-                  ...styles.moduleCard,
-                  borderTop: `5px solid ${modulo.color}`,
-                }}
-                onClick={() => navigate(modulo.ruta)}
-              >
-                <div style={styles.moduleTitle}>{modulo.titulo}</div>
-                <div style={styles.moduleDescription}>{modulo.descripcion}</div>
-                <div style={styles.moduleLink}>Abrir módulo</div>
-              </button>
-            ))}
-          </div>
+          {menuLoading ? (
+            <div style={styles.sideItem}>Cargando módulos de seguridad...</div>
+          ) : modulos.length === 0 ? (
+            <div style={styles.sideItem}>No tiene módulos de seguridad asignados.</div>
+          ) : (
+            <div style={styles.modulesGrid}>
+              {modulos.map((modulo) => (
+                <button
+                  key={modulo.titulo}
+                  style={{
+                    ...styles.moduleCard,
+                    borderTop: `5px solid ${modulo.color}`,
+                  }}
+                  onClick={() => navigate(modulo.ruta)}
+                >
+                  <div style={styles.moduleTitle}>{modulo.titulo}</div>
+                  <div style={styles.moduleDescription}>{modulo.descripcion}</div>
+                  <div style={styles.moduleLink}>Abrir módulo</div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div style={styles.sidePanel}>
@@ -121,24 +182,21 @@ export default function SeguridadPage() {
           <div style={styles.sideCard}>
             <h3 style={styles.sideTitle}>Accesos rápidos</h3>
             <div style={styles.quickActions}>
-              <button
-                style={styles.secondaryButton}
-                onClick={() => navigate("/seguridad/usuarios")}
-              >
-                Ir a Usuarios
-              </button>
-              <button
-                style={styles.secondaryButton}
-                onClick={() => navigate("/seguridad/roles")}
-              >
-                Ir a Roles
-              </button>
-              <button
-                style={styles.secondaryButton}
-                onClick={() => navigate("/seguridad/menu")}
-              >
-                Ir a Menú
-              </button>
+              {menuLoading ? (
+                <div style={styles.sideItem}>Cargando accesos...</div>
+              ) : modulos.length === 0 ? (
+                <div style={styles.sideItem}>Sin accesos rápidos disponibles.</div>
+              ) : (
+                modulos.slice(0, 4).map((modulo) => (
+                  <button
+                    key={modulo.ruta}
+                    style={styles.secondaryButton}
+                    onClick={() => navigate(modulo.ruta)}
+                  >
+                    Ir a {modulo.titulo}
+                  </button>
+                ))
+              )}
             </div>
           </div>
 

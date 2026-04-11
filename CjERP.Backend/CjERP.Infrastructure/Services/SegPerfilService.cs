@@ -27,7 +27,7 @@ public class SegPerfilService : ISegPerfilService
         using var connection = CreateConnection();
 
         var result = await connection.QueryAsync<PerfilDto>(
-            "dbo.sp_SegPerfil_Listar",
+            "dbo.sp_SegPerfil_ListarActivos",
             commandType: CommandType.StoredProcedure
         );
 
@@ -104,7 +104,7 @@ public class SegPerfilService : ISegPerfilService
         using var connection = CreateConnection();
 
         var result = await connection.QueryAsync<RolDto>(
-            "dbo.sp_SegPerfilRol_ListarRolesPorPerfil",
+            "dbo.sp_SegPerfilRol_ComboRolesPorPerfil",
             new { IdPerfil = idPerfil },
             commandType: CommandType.StoredProcedure
         );

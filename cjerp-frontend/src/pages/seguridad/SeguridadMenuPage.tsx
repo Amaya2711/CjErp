@@ -4,18 +4,13 @@ import {
   type MenuDto,
 } from "../../features/seguridad/services/menuService";
 import {
-  perfilesService,
-  type PerfilDto,
-} from "../../features/seguridad/services/perfilesService";
-import {
   rolesService,
   type RolDto,
 } from "../../features/seguridad/services/rolesService";
-
-type PerfilOption = {
-  id: number;
-  nombre: string;
-};
+import {
+  perfilesService,
+  type PerfilDto,
+} from "../../features/seguridad/services/perfilesService";
 
 type RolOption = {
   id: number;
@@ -27,6 +22,7 @@ type MenuNode = {
   label: string;
   path?: string;
   parentId: number | null;
+  orden: number;
   children: MenuNode[];
 };
 
@@ -49,6 +45,7 @@ function buildTree(items: MenuDto[]): MenuNode[] {
       label: item.nombreMenu,
       path: item.ruta ?? undefined,
       parentId: item.idMenuPadre ?? null,
+      orden: item.ordenMenu,
       children: [],
     });
   });
@@ -173,9 +170,7 @@ function MenuTreeItem({
 
         <div style={styles.treeLabelBox}>
           <span style={styles.treeLabel}>{node.label}</span>
-          {node.path ? (
-            <span style={styles.treePath}>{node.path}</span>
-          ) : null}
+          {node.path ? <span style={styles.treePath}>{node.path}</span> : null}
         </div>
       </div>
 
@@ -201,13 +196,18 @@ function MenuTreeItem({
 export default function SeguridadMenuPage() {
   const [cargando, setCargando] = useState(false);
   const [guardando, setGuardando] = useState(false);
+  const [creandoNodo, setCreandoNodo] = useState(false);
+  const [mostrarCrearNodo, setMostrarCrearNodo] = useState(false);
   const [mensaje, setMensaje] = useState("");
   const [error, setError] = useState("");
 
-  const [perfiles, setPerfiles] = useState<PerfilOption[]>([]);
-  const [roles, setRoles] = useState<RolOption[]>([]);
+  const [nuevoNombreMenu, setNuevoNombreMenu] = useState("");
+  const [nuevoOrdenMenu, setNuevoOrdenMenu] = useState(0);
 
+  const [perfiles, setPerfiles] = useState<PerfilDto[]>([]);
   const [perfilId, setPerfilId] = useState<number | "">("");
+
+  const [roles, setRoles] = useState<RolOption[]>([]);
   const [rolId, setRolId] = useState<number | "">("");
 
   const [menuBase, setMenuBase] = useState<MenuNode[]>([]);
@@ -217,10 +217,10 @@ export default function SeguridadMenuPage() {
   const totalAsignados = useMemo(() => selectedIds.size, [selectedIds]);
 
   useEffect(() => {
-    void cargarPerfilesYMenu();
+    void cargarDatosIniciales();
   }, []);
 
-  const cargarPerfilesYMenu = async () => {
+  const cargarDatosIniciales = async () => {
     try {
       setCargando(true);
       setError("");
@@ -228,25 +228,31 @@ export default function SeguridadMenuPage() {
 
       const [perfilesResult, menuResult] = await Promise.allSettled([
         perfilesService.listarPerfiles(),
-        menuService.obtenerCompleto(),
+        menuService.obtenerDinamicoTotal(),
       ]);
 
       const perfilesData =
         perfilesResult.status === "fulfilled" ? perfilesResult.value : [];
       const menuData = menuResult.status === "fulfilled" ? menuResult.value : [];
 
-      if (perfilesResult.status === "rejected" || menuResult.status === "rejected") {
+      if (
+        perfilesResult.status === "rejected" ||
+        menuResult.status === "rejected"
+      ) {
         setError("No se pudo cargar completamente perfiles y/o menú.");
       }
 
-      const perfilesMapped: PerfilOption[] = perfilesData.map((p: PerfilDto) => ({
-        id: p.idPerfil,
-        nombre: p.nombrePerfil,
-      }));
-
       const menuTree = buildTree(menuData);
+      const siguienteOrdenPrincipal =
+        menuData
+          .filter((menu) => menu.idMenuPadre == null)
+          .reduce((max, menu) => Math.max(max, menu.ordenMenu || 0), 0) + 1;
 
-      setPerfiles(perfilesMapped);
+      setPerfiles(perfilesData);
+      setPerfilId("");
+      setRoles([]);
+      setRolId("");
+      setNuevoOrdenMenu(siguienteOrdenPrincipal);
       setMenuBase(menuTree);
 
       const allExpanded = new Set<number>();
@@ -258,19 +264,19 @@ export default function SeguridadMenuPage() {
       setExpandedIds(allExpanded);
     } catch (err) {
       console.error(err);
-      setError("No se pudo cargar perfiles y menú.");
+      setError("No se pudieron cargar perfiles y menú.");
     } finally {
       setCargando(false);
     }
   };
 
-  const cargarRoles = async (nuevoPerfilId: number) => {
+  const cargarRolesPorPerfil = async (idPerfil: number) => {
     try {
       setCargando(true);
       setError("");
       setMensaje("");
 
-      const rolesData = await rolesService.listarRolesPorPerfil(nuevoPerfilId);
+      const rolesData = await rolesService.listarRolesPorPerfil(idPerfil);
 
       const rolesMapped: RolOption[] = rolesData.map((r: RolDto) => ({
         id: r.idRol,
@@ -285,19 +291,32 @@ export default function SeguridadMenuPage() {
       setError("No se pudieron cargar los roles del perfil.");
       setRoles([]);
       setRolId("");
-      setSelectedIds(new Set());
     } finally {
       setCargando(false);
     }
   };
 
-  const cargarMenuAsignado = async (nuevoRolId: number) => {
+  const handlePerfilChange = async (value: string) => {
+    const idPerfil = value ? Number(value) : "";
+    setPerfilId(idPerfil);
+
+    if (idPerfil === "") {
+      setRoles([]);
+      setRolId("");
+      setSelectedIds(new Set());
+      return;
+    }
+
+    await cargarRolesPorPerfil(idPerfil);
+  };
+
+  const cargarMenuAsignado = async (nuevoPerfilId: number, nuevoRolId: number) => {
     try {
       setCargando(true);
       setError("");
       setMensaje("");
 
-      const asignados = await menuService.obtenerPorRol(nuevoRolId);
+      const asignados = await menuService.obtenerPorPerfilRol(nuevoPerfilId, nuevoRolId);
       const ids = new Set<number>(asignados.map((x: MenuDto) => x.idMenu));
 
       setSelectedIds(ids);
@@ -317,20 +336,6 @@ export default function SeguridadMenuPage() {
     }
   };
 
-  const handlePerfilChange = async (value: string) => {
-    const nuevoPerfilId = value ? Number(value) : "";
-    setPerfilId(nuevoPerfilId);
-
-    if (nuevoPerfilId === "") {
-      setRoles([]);
-      setRolId("");
-      setSelectedIds(new Set());
-      return;
-    }
-
-    await cargarRoles(nuevoPerfilId);
-  };
-
   const handleRolChange = async (value: string) => {
     const nuevoRolId = value ? Number(value) : "";
     setRolId(nuevoRolId);
@@ -340,7 +345,29 @@ export default function SeguridadMenuPage() {
       return;
     }
 
-    await cargarMenuAsignado(nuevoRolId);
+    if (!perfilId) {
+      setError("Debe seleccionar un perfil.");
+      setSelectedIds(new Set());
+      return;
+    }
+
+    await cargarMenuAsignado(Number(perfilId), nuevoRolId);
+  };
+
+  const recargar = async () => {
+    const perfilActual = perfilId;
+    const rolActual = rolId;
+
+    await cargarDatosIniciales();
+
+    if (!perfilActual || !rolActual) {
+      return;
+    }
+
+    setPerfilId(perfilActual);
+    await cargarRolesPorPerfil(Number(perfilActual));
+    setRolId(rolActual);
+    await cargarMenuAsignado(Number(perfilActual), Number(rolActual));
   };
 
   const toggleExpanded = (id: number) => {
@@ -398,6 +425,12 @@ export default function SeguridadMenuPage() {
   };
 
   const guardarAsignacion = async () => {
+    if (!perfilId) {
+      setError("Debe seleccionar un perfil.");
+      setMensaje("");
+      return;
+    }
+
     if (!rolId) {
       setError("Debe seleccionar un rol.");
       setMensaje("");
@@ -410,6 +443,7 @@ export default function SeguridadMenuPage() {
       setMensaje("");
 
       await menuService.guardarAsignacionMenuRol({
+        idPerfil: Number(perfilId),
         idRol: Number(rolId),
         menuIds: Array.from(selectedIds),
       });
@@ -424,38 +458,110 @@ export default function SeguridadMenuPage() {
     }
   };
 
+  const crearNodoPrincipal = async () => {
+    const nombre = nuevoNombreMenu.trim();
+    const codigoMenu = nombre.toUpperCase();
+
+    if (!nombre) {
+      setError("Debe ingresar el nombre del menú principal.");
+      setMensaje("");
+      return;
+    }
+
+    try {
+      setCreandoNodo(true);
+      setError("");
+      setMensaje("");
+
+      await menuService.crearMenuPrincipal({
+        nombreMenu: nombre,
+        codigoMenu,
+        icono: undefined,
+        ordenMenu: Number.isFinite(nuevoOrdenMenu) ? nuevoOrdenMenu : 0,
+        esVisible: true,
+        esActivo: true,
+      });
+
+      setNuevoNombreMenu("");
+      setNuevoOrdenMenu((prev) => prev + 1);
+
+      await recargar();
+      setMensaje("Nodo principal creado correctamente.");
+    } catch (err) {
+      console.error(err);
+      setError("No se pudo crear el nodo principal.");
+      setMensaje("");
+    } finally {
+      setCreandoNodo(false);
+    }
+  };
+
   const menuVisual = useMemo(() => cloneDeep(menuBase), [menuBase]);
 
   return (
     <div style={styles.page}>
+      {mostrarCrearNodo && (
+      <div style={styles.card}>
+        <div style={styles.treeHeader}>
+          <h2 style={styles.treeTitle}>Nuevo nodo principal</h2>
+        </div>
+
+        <div style={styles.createGrid}>
+          <div style={styles.createField}>
+            <label style={styles.label}>Nombre</label>
+            <input
+              type="text"
+              value={nuevoNombreMenu}
+              onChange={(e) => setNuevoNombreMenu(e.target.value)}
+              style={styles.select}
+              disabled={cargando || creandoNodo}
+              placeholder="Ej. Seguridad"
+            />
+          </div>
+
+          <div style={styles.buttonField}>
+            <button
+              type="button"
+              onClick={() => void crearNodoPrincipal()}
+              disabled={creandoNodo || cargando}
+              style={{
+                ...styles.primaryBtn,
+                opacity: creandoNodo || cargando ? 0.65 : 1,
+                cursor: creandoNodo || cargando ? "not-allowed" : "pointer",
+              }}
+            >
+              {creandoNodo ? "Creando..." : "Crear nodo principal"}
+            </button>
+          </div>
+        </div>
+      </div>
+      )}
+
       <div style={styles.filtersCard}>
-        <div style={styles.filterField}>
-          <label style={styles.label}>
-            Perfil
-          </label>
+        <div style={styles.filterInlineField}>
+          <label style={styles.inlineLabel}>Perfil</label>
           <select
             value={perfilId}
             onChange={(e) => void handlePerfilChange(e.target.value)}
             style={styles.select}
+            disabled={cargando}
           >
             <option value="">Seleccione</option>
             {perfiles.map((perfil) => (
-              <option key={perfil.id} value={perfil.id}>
-                {perfil.nombre}
+              <option key={perfil.idPerfil} value={perfil.idPerfil}>
+                {perfil.nombrePerfil}
               </option>
             ))}
           </select>
         </div>
 
-        <div style={styles.filterField}>
-          <label style={styles.label}>
-            Rol
-          </label>
+        <div style={styles.filterInlineField}>
+          <label style={styles.inlineLabel}>Rol</label>
           <select
             value={rolId}
             onChange={(e) => void handleRolChange(e.target.value)}
             style={styles.select}
-            disabled={!perfilId}
+            disabled={!perfilId || cargando}
           >
             <option value="">Seleccione</option>
             {roles.map((rol) => (
@@ -469,8 +575,9 @@ export default function SeguridadMenuPage() {
         <div style={styles.buttonField}>
           <button
             type="button"
-            onClick={() => void cargarPerfilesYMenu()}
+            onClick={() => void recargar()}
             style={styles.secondaryBtn}
+            disabled={cargando}
           >
             Recargar
           </button>
@@ -480,11 +587,11 @@ export default function SeguridadMenuPage() {
           <button
             type="button"
             onClick={() => void guardarAsignacion()}
-            disabled={!rolId || guardando}
+            disabled={!rolId || guardando || cargando}
             style={{
               ...styles.primaryBtn,
-              opacity: !rolId || guardando ? 0.65 : 1,
-              cursor: !rolId || guardando ? "not-allowed" : "pointer",
+              opacity: !rolId || guardando || cargando ? 0.65 : 1,
+              cursor: !rolId || guardando || cargando ? "not-allowed" : "pointer",
             }}
           >
             {guardando ? "Guardando..." : "Guardar asignación"}
@@ -492,66 +599,71 @@ export default function SeguridadMenuPage() {
         </div>
       </div>
 
-      <div style={styles.actionsCard}>
-        <button
-          type="button"
-          onClick={expandirTodo}
-          style={styles.actionBtn}
-        >
-          Expandir todo
-        </button>
-
-        <button
-          type="button"
-          onClick={colapsarTodo}
-          style={styles.actionBtn}
-        >
-          Colapsar todo
-        </button>
-
-        <button
-          type="button"
-          onClick={seleccionarTodo}
-          style={styles.actionBtn}
-        >
-          Seleccionar todo
-        </button>
-
-        <button
-          type="button"
-          onClick={limpiarSeleccion}
-          style={styles.actionBtn}
-        >
-          Limpiar selección
-        </button>
-
-        <div style={styles.totalText}>
-          Total asignados: <span style={styles.totalValue}>{totalAsignados}</span>
-        </div>
-      </div>
-
-      {cargando ? (
-        <div style={styles.loadingCard}>
-          Cargando información...
-        </div>
-      ) : null}
-
-      {mensaje ? (
-        <div style={styles.successBox}>
-          {mensaje}
-        </div>
-      ) : null}
-
-      {error ? (
-        <div style={styles.errorBox}>
-          {error}
-        </div>
-      ) : null}
+      {cargando ? <div style={styles.loadingCard}>Cargando información...</div> : null}
+      {mensaje ? <div style={styles.successBox}>{mensaje}</div> : null}
+      {error ? <div style={styles.errorBox}>{error}</div> : null}
 
       <div style={styles.card}>
-        <h2 style={styles.treeTitle}>
-          Árbol de menú
-        </h2>
+        <div style={styles.treeHeader}>
+          <h2 style={styles.treeTitle}>Árbol de menú</h2>
+          <div style={styles.treeHeaderActions}>
+            <button
+              type="button"
+              onClick={() => setMostrarCrearNodo((v) => !v)}
+              style={{
+                ...styles.actionBtn,
+                background: mostrarCrearNodo ? "#17143A" : "#FFFFFF",
+                color: mostrarCrearNodo ? "#FFFFFF" : "#334155",
+                fontSize: 13,
+                padding: "0 8px",
+                width: "auto",
+              }}
+              title="Nuevo nodo principal"
+              aria-label="Nuevo nodo principal"
+            >
+              + Nodo
+            </button>
+            <button
+              type="button"
+              onClick={expandirTodo}
+              style={styles.actionBtn}
+              title="Expandir todo"
+              aria-label="Expandir todo"
+            >
+              +
+            </button>
+            <button
+              type="button"
+              onClick={colapsarTodo}
+              style={styles.actionBtn}
+              title="Colapsar todo"
+              aria-label="Colapsar todo"
+            >
+              -
+            </button>
+            <button
+              type="button"
+              onClick={seleccionarTodo}
+              style={styles.actionBtn}
+              title="Seleccionar todo"
+              aria-label="Seleccionar todo"
+            >
+              ✓
+            </button>
+            <button
+              type="button"
+              onClick={limpiarSeleccion}
+              style={styles.actionBtn}
+              title="Limpiar selección"
+              aria-label="Limpiar selección"
+            >
+              ×
+            </button>
+            <div style={styles.totalText}>
+              Total asignados: <span style={styles.totalValue}>{totalAsignados}</span>
+            </div>
+          </div>
+        </div>
 
         {menuVisual.length === 0 ? (
           <div style={styles.emptyText}>No hay menús disponibles.</div>
@@ -608,14 +720,40 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 16,
     boxShadow: "0 8px 24px rgba(23,20,58,0.04)",
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
     gap: 12,
-    alignItems: "end",
+    alignItems: "center",
+  },
+  filterInlineField: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    minWidth: 0,
+  },
+  inlineLabel: {
+    fontSize: 14,
+    fontWeight: 700,
+    color: "#334155",
+    minWidth: 44,
+    whiteSpace: "nowrap",
   },
   filterField: {
     display: "flex",
     flexDirection: "column",
     gap: 8,
+    minWidth: 0,
+  },
+  createGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+    gap: 12,
+    alignItems: "end",
+  },
+  createField: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    minWidth: 0,
   },
   label: {
     fontSize: 14,
@@ -634,7 +772,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   buttonField: {
     display: "flex",
-    alignItems: "end",
+    alignItems: "center",
+    minWidth: 0,
   },
   secondaryBtn: {
     width: "100%",
@@ -655,30 +794,23 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#FFFFFF",
     fontWeight: 700,
   },
-  actionsCard: {
-    background: "#FFFFFF",
-    borderRadius: 16,
-    border: "1px solid #E5E7EB",
-    padding: 12,
-    display: "flex",
-    flexWrap: "wrap",
-    gap: 8,
-    alignItems: "center",
-  },
   actionBtn: {
+    width: 42,
+    height: 34,
     borderRadius: 10,
     border: "1px solid #CBD5E1",
     background: "#FFFFFF",
     color: "#334155",
     fontWeight: 600,
-    fontSize: 13,
-    padding: "8px 12px",
+    fontSize: 18,
+    lineHeight: 1,
+    padding: 0,
     cursor: "pointer",
   },
   totalText: {
-    marginLeft: "auto",
     fontSize: 14,
     color: "#64748B",
+    marginLeft: 8,
   },
   totalValue: {
     fontWeight: 800,
@@ -705,8 +837,23 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#B91C1C",
     padding: 12,
   },
+  treeHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 12,
+    flexWrap: "wrap",
+  },
+  treeHeaderActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+    marginLeft: "auto",
+  },
   treeTitle: {
-    margin: "0 0 12px",
+    margin: 0,
     fontSize: 18,
     fontWeight: 800,
     color: "#1E293B",

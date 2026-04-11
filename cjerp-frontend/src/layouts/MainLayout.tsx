@@ -8,10 +8,13 @@ import {
   type DashboardTile,
 } from "../features/dashboard/services/dashboardMenuService";
 
-type FooterCopy = {
-  title: string;
-  description: string;
-};
+function tileMatchesPath(tile: DashboardTile, pathname: string): boolean {
+  if (pathname.startsWith(tile.path)) {
+    return true;
+  }
+
+  return tile.children?.some((child) => tileMatchesPath(child, pathname)) ?? false;
+}
 
 function formatPathLabel(value: string): string {
   return value
@@ -23,86 +26,25 @@ function formatPathLabel(value: string): string {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function tileMatchesPath(tile: DashboardTile, pathname: string): boolean {
-  if (pathname.startsWith(tile.path)) {
-    return true;
-  }
-
-  return tile.children?.some((child) => tileMatchesPath(child, pathname)) ?? false;
-}
-
-function findDeepestTileMatch(
+function findTileLabelPath(
   tiles: DashboardTile[],
-  pathname: string
-): DashboardTile | null {
-  let bestMatch: DashboardTile | null = null;
-
-  const visit = (tile: DashboardTile) => {
-    if (pathname.startsWith(tile.path)) {
-      if (!bestMatch || tile.path.length > bestMatch.path.length) {
-        bestMatch = tile;
-      }
+  pathname: string,
+  ancestors: string[] = []
+): string[] | null {
+  for (const tile of tiles) {
+    if (!tileMatchesPath(tile, pathname)) {
+      continue;
     }
 
-    tile.children?.forEach(visit);
-  };
+    const currentPath = [...ancestors, tile.label];
+    const nestedPath = tile.children
+      ? findTileLabelPath(tile.children, pathname, currentPath)
+      : null;
 
-  tiles.forEach(visit);
-  return bestMatch;
-}
-
-function getFooterCopy(pathname: string, menuDashboard: DashboardGroup[]): FooterCopy {
-  if (pathname.startsWith("/dashboard")) {
-    return {
-      title: "Panel principal",
-      description: "Seleccione un modulo para continuar con la operacion del sistema",
-    };
+    return nestedPath ?? currentPath;
   }
 
-  type FooterMatch = { groupTitle: string; tileLabel: string; pathLength: number };
-  let bestMatch: FooterMatch | null = null;
-
-  for (const group of menuDashboard) {
-    for (const tile of group.tiles) {
-      const deepestMatch = findDeepestTileMatch([tile], pathname);
-      if (!deepestMatch) {
-        continue;
-      }
-
-      const currentMatch: FooterMatch = {
-        groupTitle: group.titulo,
-        tileLabel: deepestMatch.label,
-        pathLength: deepestMatch.path.length,
-      };
-
-      if (!bestMatch || currentMatch.pathLength > bestMatch.pathLength) {
-        bestMatch = currentMatch;
-      }
-    }
-  }
-
-  if (bestMatch) {
-    return {
-      title: `${bestMatch.groupTitle} - ${bestMatch.tileLabel}`,
-      description: `Gestione ${bestMatch.tileLabel.toLowerCase()} del modulo ${bestMatch.groupTitle}.`,
-    };
-  }
-
-  const segments = pathname.split("/").filter(Boolean);
-  if (segments.length > 0) {
-    const moduleTitle = formatPathLabel(segments[0]);
-    const pageTitle = formatPathLabel(segments[segments.length - 1]);
-
-    return {
-      title: `${moduleTitle} - ${pageTitle}`,
-      description: `Gestione ${pageTitle.toLowerCase()} del modulo ${moduleTitle}.`,
-    };
-  }
-
-  return {
-    title: "Portal de Aplicaciones",
-    description: "Sistema ERP CJ Telecom",
-  };
+  return null;
 }
 
 export default function MainLayout() {
@@ -111,6 +53,10 @@ export default function MainLayout() {
   const authUser = getAuthUser();
   const [menuDashboard, setMenuDashboard] = useState<DashboardGroup[]>([]);
   const [menuLoading, setMenuLoading] = useState(true);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const collapseDirection: "left" | "right" = "left";
 
   const usuarioMostrar = (authUser?.usuario || "").toUpperCase();
   const empleadoMostrar = (authUser?.nombre || "").toUpperCase();
@@ -144,6 +90,39 @@ export default function MainLayout() {
     };
   }, [authUser?.usuario]);
 
+  useEffect(() => {
+    if (menuDashboard.length === 0) {
+      return;
+    }
+
+    const nextExpandedGroups: Record<string, boolean> = {};
+    const nextExpandedNodes: Record<string, boolean> = {};
+
+    const markActiveBranch = (tile: DashboardTile, key: string) => {
+      if (tileMatchesPath(tile, location.pathname) && tile.children?.length) {
+        nextExpandedNodes[key] = true;
+      }
+
+      tile.children?.forEach((child, index) => {
+        markActiveBranch(child, `${key}-${index}`);
+      });
+    };
+
+    menuDashboard.forEach((group, groupIndex) => {
+      const groupKey = `group-${groupIndex}`;
+      if (group.tiles.some((tile) => tileMatchesPath(tile, location.pathname))) {
+        nextExpandedGroups[groupKey] = true;
+      }
+
+      group.tiles.forEach((tile, tileIndex) => {
+        markActiveBranch(tile, `${groupKey}-${tileIndex}`);
+      });
+    });
+
+    setExpandedGroups((prev) => ({ ...prev, ...nextExpandedGroups }));
+    setExpandedNodes((prev) => ({ ...prev, ...nextExpandedNodes }));
+  }, [menuDashboard, location.pathname]);
+
   const cerrarSesion = () => {
     clearAuthUser();
     navigate("/");
@@ -153,17 +132,95 @@ export default function MainLayout() {
     navigate("/dashboard");
   };
 
-  const menuActivo = menuDashboard.find((grupo) =>
-    grupo.tiles.some((tile) => tileMatchesPath(tile, location.pathname))
-  );
+  const alternarMenu = () => {
+    setIsSidebarCollapsed((prev) => !prev);
+  };
 
-  const tileActivo = menuActivo
-    ? menuActivo.tiles.find((tile) => tileMatchesPath(tile, location.pathname)) ?? null
-    : null;
-  const secondLevelItems = menuActivo?.tiles ?? [];
-  const thirdLevelItems = tileActivo?.children ?? [];
+  const getHeaderLabel = (): string => {
+    if (location.pathname.startsWith("/dashboard")) {
+      return "Portal de Aplicaciones";
+    }
 
-  const footerCopy = getFooterCopy(location.pathname, menuDashboard);
+    for (const group of menuDashboard) {
+      const labelPath = findTileLabelPath(group.tiles, location.pathname);
+      if (labelPath) {
+        return [group.titulo, ...labelPath].join(" / ");
+      }
+    }
+
+    const segments = location.pathname.split("/").filter(Boolean);
+    if (segments.length > 0) {
+      return segments.map(formatPathLabel).join(" / ");
+    }
+
+    return "Portal de Aplicaciones";
+  };
+
+  const headerLabel = getHeaderLabel();
+
+  const toggleGroup = (groupKey: string) => {
+    setExpandedGroups((prev) => ({
+      ...prev,
+      [groupKey]: !(prev[groupKey] ?? false),
+    }));
+  };
+
+  const toggleNode = (nodeKey: string) => {
+    setExpandedNodes((prev) => ({
+      ...prev,
+      [nodeKey]: !(prev[nodeKey] ?? false),
+    }));
+  };
+
+  const renderTileNode = (
+    tile: DashboardTile,
+    nodeKey: string,
+    depth: number
+  ) => {
+    const hasChildren = (tile.children?.length ?? 0) > 0;
+    const isActive = tileMatchesPath(tile, location.pathname);
+    const isExpanded = expandedNodes[nodeKey] ?? isActive;
+
+    return (
+      <div key={nodeKey}>
+        <div
+          style={{
+            ...styles.sideNodeRow,
+            paddingLeft: 14 + depth * 14,
+          }}
+        >
+          <NavLink
+            to={tile.path}
+            style={{
+              ...styles.sideNodeLink,
+              ...(isActive ? styles.sideNodeLinkActive : {}),
+            }}
+          >
+            <span>{tile.label}</span>
+          </NavLink>
+
+          {hasChildren && (
+            <button
+              type="button"
+              style={styles.sideExpandButton}
+              onClick={() => toggleNode(nodeKey)}
+              aria-label={isExpanded ? "Contraer submenu" : "Expandir submenu"}
+            >
+              {isExpanded ? "v" : ">"}
+            </button>
+          )}
+        </div>
+
+        {hasChildren && isExpanded && (
+          <div>
+            {tile.children!.map((child, index) =>
+              renderTileNode(child, `${nodeKey}-${index}`, depth + 1)
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div style={styles.wrapper}>
@@ -171,112 +228,129 @@ export default function MainLayout() {
         <header style={styles.header}>
           <div style={styles.brandBox} onClick={irDashboard}>
             <img src={logo} alt="CJ Telecom" style={styles.logo} />
-            <div>
-              <div style={styles.brandTitle}></div>
-              <div style={styles.brandSubtitle}>Portal de Aplicaciones</div>
-            </div>
           </div>
 
-          <div style={styles.headerRight}>
-            <div style={styles.userInfoBox}>
+          <div style={styles.headerPortalLabel}>{headerLabel}</div>
+        </header>
+      </div>
+
+      <div style={styles.bodyContent}>
+        <aside
+          className="sidebar-scroll"
+          style={{
+            ...styles.sidebar,
+            ...(isSidebarCollapsed
+              ? collapseDirection === "left"
+                ? styles.sidebarCollapsedLeft
+                : styles.sidebarCollapsedRight
+              : {}),
+          }}
+        >
+          <div
+            style={{
+              ...styles.sidebarHeaderRow,
+              ...(isSidebarCollapsed ? styles.sidebarHeaderRowCollapsed : {}),
+            }}
+          >
+            {!isSidebarCollapsed && <span style={styles.sidebarHeaderTitle}>Menu</span>}
+            <button
+              type="button"
+              style={styles.footerMenuButton}
+              onClick={alternarMenu}
+              aria-label={isSidebarCollapsed ? "Abrir menu lateral" : "Cerrar menu lateral"}
+              title={isSidebarCollapsed ? "Abrir menu" : "Cerrar menu"}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                style={styles.menuToggleIcon}
+                aria-hidden="true"
+                focusable="false"
+              >
+                {isSidebarCollapsed ? (
+                  <path
+                    d="M4 6h8v2H4V6zm0 5h8v2H4v-2zm0 5h8v2H4v-2zm9.5-5 4-4 1.4 1.4L16.3 11H21v2h-4.7l2.6 2.6L17.5 17l-4-4z"
+                    fill="currentColor"
+                  />
+                ) : (
+                  <path
+                    d="M12 6h8v2h-8V6zm0 5h8v2h-8v-2zm0 5h8v2h-8v-2zm-1.5-5-4-4-1.4 1.4L7.7 11H3v2h4.7l-2.6 2.6L6.5 17l4-4z"
+                    fill="currentColor"
+                  />
+                )}
+              </svg>
+            </button>
+          </div>
+
+          {!isSidebarCollapsed && (
+            <div className="sidebar-scroll" style={styles.sidebarScrollArea}>
+              {menuLoading ? (
+                <div style={styles.sideEmpty}>Cargando menu...</div>
+              ) : menuDashboard.length === 0 ? (
+                <div style={styles.sideEmpty}>Usuario no tiene opciones de menu configurado</div>
+              ) : (
+                menuDashboard.map((grupo, groupIndex) => {
+                  const groupKey = `group-${groupIndex}`;
+                  const groupIsActive = grupo.tiles.some((tile) =>
+                    tileMatchesPath(tile, location.pathname)
+                  );
+                  const groupIsExpanded = expandedGroups[groupKey] ?? groupIsActive;
+
+                  return (
+                    <section key={groupKey} style={styles.sideGroup}>
+                      <div style={styles.sideGroupHeader}>
+                        <button
+                          type="button"
+                          style={{
+                            ...styles.sideGroupButton,
+                            ...(groupIsActive ? styles.sideGroupButtonActive : {}),
+                          }}
+                          onClick={() => toggleGroup(groupKey)}
+                        >
+                          {grupo.titulo}
+                        </button>
+                        <button
+                          type="button"
+                          style={styles.sideExpandButton}
+                          onClick={() => toggleGroup(groupKey)}
+                          aria-label={groupIsExpanded ? "Contraer grupo" : "Expandir grupo"}
+                        >
+                          {groupIsExpanded ? "v" : ">"}
+                        </button>
+                      </div>
+
+                      {groupIsExpanded && (
+                        <div style={styles.sideGroupBody}>
+                          {grupo.tiles.map((tile, tileIndex) =>
+                            renderTileNode(tile, `${groupKey}-${tileIndex}`, 0)
+                          )}
+                        </div>
+                      )}
+                    </section>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </aside>
+
+        <main style={styles.main}>
+          <Outlet />
+        </main>
+      </div>
+
+      <footer style={styles.footer}>
+        <div style={styles.footerContent}>
+          <div style={styles.footerRightGroup}>
+            <div style={styles.footerUserInfoBox}>
               <div style={styles.userLabel}>Usuario: {usuarioMostrar}</div>
               <div style={styles.employeeLabel}>
                 Empleado: {empleadoMostrar || "NO DEFINIDO"}
               </div>
             </div>
-            <button style={styles.logoutButton} onClick={cerrarSesion}>
+            <button style={styles.footerLogoutButton} onClick={cerrarSesion}>
               Cerrar sesión
             </button>
           </div>
-        </header>
-
-        <nav style={styles.topMenu}>
-          {!menuLoading && menuDashboard.length === 0 ? (
-            <div style={styles.topMenuEmpty}>
-              Usuario no tiene opciones de menu configurado
-            </div>
-          ) : (
-            menuDashboard.map((grupo) => {
-              const firstPath = grupo.tiles[0]?.path || "/dashboard";
-              const activo = grupo.tiles.some((tile) =>
-                tileMatchesPath(tile, location.pathname)
-              );
-
-              return (
-                <NavLink
-                  key={grupo.titulo}
-                  to={firstPath}
-                  style={{
-                    ...styles.topMenuItem,
-                    ...(activo ? styles.topMenuItemActive : {}),
-                  }}
-                >
-                  {grupo.titulo}
-                </NavLink>
-              );
-            })
-          )}
-        </nav>
-
-        {menuActivo && (
-          <div style={styles.subMenuBar}>
-            <div style={styles.subMenuSection}>
-              <div style={styles.subMenuTitle}>{menuActivo.titulo}</div>
-              <div style={styles.subMenuItems}>
-                {secondLevelItems.map((tile) => {
-                  const activo = tileMatchesPath(tile, location.pathname);
-
-                  return (
-                    <NavLink
-                      key={tile.path}
-                      to={tile.path}
-                      style={{
-                        ...styles.subMenuItem,
-                        ...(activo ? styles.subMenuItemActive : {}),
-                      }}
-                    >
-                      {tile.label}
-                    </NavLink>
-                  );
-                })}
-              </div>
-            </div>
-
-            {tileActivo && thirdLevelItems.length > 0 && (
-              <div style={{ ...styles.subMenuSection, ...styles.subMenuSectionAlignedRight }}>
-                <div style={styles.subMenuTitle}>{tileActivo.label}</div>
-                <div style={styles.subMenuItems}>
-                  {thirdLevelItems.map((tile) => {
-                    const activo = tileMatchesPath(tile, location.pathname);
-
-                    return (
-                      <NavLink
-                        key={tile.path}
-                        to={tile.path}
-                        style={{
-                          ...styles.thirdMenuItem,
-                          ...(activo ? styles.thirdMenuItemActive : {}),
-                        }}
-                      >
-                        {tile.label}
-                      </NavLink>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      <main style={styles.main}>
-        <Outlet />
-      </main>
-
-      <footer style={styles.footer}>
-        <div style={styles.footerContent}>
-          <span>{footerCopy.title}</span>
-          <span>{footerCopy.description}</span>
         </div>
       </footer>
     </div>
@@ -286,9 +360,11 @@ export default function MainLayout() {
 const styles: Record<string, React.CSSProperties> = {
   wrapper: {
     minHeight: "100vh",
+    height: "100vh",
     background: "#F3F5F9",
     display: "flex",
     flexDirection: "column",
+    overflow: "hidden",
   },
   pageHeader: {
     position: "sticky",
@@ -297,38 +373,44 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: "0 4px 14px rgba(23,20,58,0.08)",
   },
   header: {
-    height: 88,
+    height: 56,
     background: "#17143A",
     color: "#FFFFFF",
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: "0 24px",
+    padding: "0 14px",
     boxSizing: "border-box",
     borderBottom: "3px solid #6E4CCB",
   },
   brandBox: {
     display: "flex",
     alignItems: "center",
-    gap: 16,
+    gap: 10,
     cursor: "pointer",
   },
   logo: {
-    height: 48,
+    height: 38,
     width: "auto",
     objectFit: "contain",
     display: "block",
   },
   brandTitle: {
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: 800,
     lineHeight: 1.1,
   },
   brandSubtitle: {
-    fontSize: 17,
+    fontSize: 12,
     fontWeight: 700,
     opacity: 0.95,
-    marginTop: 2,
+    marginTop: 0,
+  },
+  headerPortalLabel: {
+    fontSize: 18,
+    fontWeight: 800,
+    textAlign: "right",
+    color: "#FFFFFF",
   },
   headerRight: {
     display: "flex",
@@ -360,101 +442,153 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 800,
     fontSize: 14,
   },
-  topMenu: {
+  bodyContent: {
+    display: "flex",
+    alignItems: "stretch",
+    flex: 1,
+    minHeight: 0,
+    position: "relative",
+    overflow: "hidden",
+  },
+  sidebar: {
+    width: 320,
+    minWidth: 280,
+    maxWidth: 360,
     background: "#FFFFFF",
-    minHeight: 56,
-    display: "flex",
-    alignItems: "center",
-    gap: 0,
-    padding: "0 20px",
+    padding: "12px 10px 90px 10px",
     boxSizing: "border-box",
-    borderBottom: "1px solid #E5E7EB",
-    overflowX: "auto",
+    height: "100%",
+    overflow: "hidden",
+    overscrollBehavior: "contain",
+    transform: "translateX(0)",
+    transition:
+      "width 0.24s ease, min-width 0.24s ease, padding 0.24s ease, transform 0.24s ease, opacity 0.2s ease",
   },
-  topMenuItem: {
-    textDecoration: "none",
-    color: "#1F2937",
-    fontWeight: 700,
-    fontSize: 14,
-    padding: "10px 14px",
-    borderRadius: 10,
-    whiteSpace: "nowrap",
+  sidebarCollapsedLeft: {
+    width: 44,
+    minWidth: 44,
+    maxWidth: 44,
+    padding: "8px 6px",
+    overflow: "hidden",
+    transform: "translateX(0)",
+    opacity: 1,
   },
-  topMenuItemActive: {
-    background: "#6E4CCB",
-    color: "#FFFFFF",
+  sidebarCollapsedRight: {
+    width: 44,
+    minWidth: 44,
+    maxWidth: 44,
+    padding: "8px 6px",
+    overflow: "hidden",
+    transform: "translateX(0)",
+    opacity: 1,
   },
-  topMenuEmpty: {
-    color: "#6B7280",
-    fontSize: 14,
-    fontWeight: 600,
-    padding: "10px 14px",
-    whiteSpace: "nowrap",
-  },
-  subMenuBar: {
-    background: "#F8FAFC",
-    borderBottom: "1px solid #E5E7EB",
-    padding: "6px 14px",
+  sidebarHeaderRow: {
     display: "flex",
     alignItems: "center",
-    gap: 10,
-    flexWrap: "wrap",
+    justifyContent: "space-between",
+    gap: 8,
+    marginBottom: 10,
+    background: "#FFFFFF",
+    paddingBottom: 6,
   },
-  subMenuSection: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    flexWrap: "wrap",
+  sidebarHeaderRowCollapsed: {
+    justifyContent: "center",
+    marginBottom: 0,
   },
-  subMenuSectionAlignedRight: {
-    marginLeft: "auto",
-  },
-  subMenuTitle: {
-    fontWeight: 800,
+  sidebarHeaderTitle: {
     fontSize: 13,
-    color: "#17143A",
-    minWidth: 110,
+    fontWeight: 800,
+    color: "#374151",
   },
-  subMenuItems: {
+  sidebarScrollArea: {
+    height: "calc(100% - 40px)",
+    overflowY: "scroll",
+    overflowX: "hidden",
+    scrollbarWidth: "thin",
+    scrollbarColor: "#9CA3AF #F3F4F6",
+    scrollbarGutter: "stable",
+    overscrollBehavior: "contain",
+    paddingRight: 2,
+  },
+  sideGroup: {
+    border: "1px solid #E5E7EB",
+    borderRadius: 12,
+    marginBottom: 8,
+    background: "#FAFBFF",
+  },
+  sideGroupHeader: {
     display: "flex",
-    gap: 6,
-    flexWrap: "wrap",
+    alignItems: "center",
+    padding: "8px 8px 8px 10px",
+    gap: 8,
   },
-  subMenuItem: {
+  sideGroupButton: {
+    flex: 1,
+    border: "none",
+    background: "transparent",
+    textAlign: "left",
+    fontSize: 13,
+    fontWeight: 800,
+    color: "#1F2937",
+    cursor: "pointer",
+    padding: "4px 0",
+  },
+  sideGroupButtonActive: {
+    color: "#4C1D95",
+  },
+  sideGroupBody: {
+    borderTop: "1px solid #E5E7EB",
+    padding: "6px 6px 8px 6px",
+  },
+  sideNodeRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    paddingRight: 4,
+    marginBottom: 2,
+  },
+  sideNodeLink: {
+    flex: 1,
     textDecoration: "none",
     color: "#374151",
-    fontWeight: 600,
     fontSize: 12,
-    padding: "6px 10px",
-    borderRadius: 8,
-    background: "#FFFFFF",
-    border: "1px solid #E5E7EB",
-  },
-  subMenuItemActive: {
-    background: "#EDE9FE",
-    border: "1px solid #C4B5FD",
-    color: "#17143A",
-  },
-  thirdMenuItem: {
-    textDecoration: "none",
-    color: "#4B5563",
     fontWeight: 600,
-    fontSize: 11,
-    padding: "5px 9px",
     borderRadius: 8,
-    background: "#F9FAFB",
-    border: "1px solid #E5E7EB",
+    padding: "7px 8px",
+    lineHeight: 1.2,
   },
-  thirdMenuItemActive: {
-    background: "#DBEAFE",
-    border: "1px solid #93C5FD",
+  sideNodeLinkActive: {
+    background: "#E0E7FF",
     color: "#1E3A8A",
+  },
+  sideExpandButton: {
+    border: "none",
+    background: "transparent",
+    color: "#6B7280",
+    fontWeight: 800,
+    fontSize: 12,
+    cursor: "pointer",
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sideEmpty: {
+    color: "#6B7280",
+    fontSize: 13,
+    fontWeight: 600,
+    padding: "10px 8px",
   },
   main: {
     flex: 1,
+    height: "100%",
     padding: 12,
     paddingBottom: 82,
     boxSizing: "border-box",
+    overflow: "auto",
+    overscrollBehavior: "contain",
   },
   footer: {
     position: "fixed",
@@ -472,7 +606,7 @@ const styles: Record<string, React.CSSProperties> = {
   footerContent: {
     width: "100%",
     display: "flex",
-    justifyContent: "space-between",
+    justifyContent: "flex-end",
     alignItems: "center",
     padding: "10px 24px",
     fontSize: 12,
@@ -480,5 +614,47 @@ const styles: Record<string, React.CSSProperties> = {
     boxSizing: "border-box",
     gap: 12,
     flexWrap: "wrap",
+  },
+  footerRightGroup: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    marginLeft: "auto",
+  },
+  footerUserInfoBox: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: 2,
+  },
+  footerLogoutButton: {
+    border: "none",
+    background: "#F5A623",
+    color: "#17143A",
+    padding: "6px 10px",
+    borderRadius: 7,
+    cursor: "pointer",
+    fontWeight: 800,
+    fontSize: 11,
+  },
+  footerMenuButton: {
+    border: "none",
+    background: "#F5A623",
+    color: "#17143A",
+    width: 28,
+    height: 28,
+    padding: 0,
+    borderRadius: 7,
+    cursor: "pointer",
+    fontWeight: 800,
+    fontSize: 11,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  menuToggleIcon: {
+    width: 14,
+    height: 14,
+    display: "block",
   },
 };

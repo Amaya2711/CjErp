@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import httpClient from "../../api/httpClient";
 
 type PerfilDto = {
@@ -77,6 +77,7 @@ function mapPerfilDtoToView(item: PerfilDto): Perfil {
 }
 
 export default function SeguridadPerfilesPage() {
+  const sidePanelRef = useRef<HTMLDivElement | null>(null);
   const [perfiles, setPerfiles] = useState<Perfil[]>([]);
   const [busqueda, setBusqueda] = useState("");
   const [panelAbierto, setPanelAbierto] = useState(false);
@@ -123,6 +124,11 @@ export default function SeguridadPerfilesPage() {
   useEffect(() => {
     void cargarPerfiles();
   }, []);
+
+  useEffect(() => {
+    if (!panelAbierto) return;
+    sidePanelRef.current?.scrollTo({ top: 0, behavior: "auto" });
+  }, [panelAbierto, modo]);
 
   const abrirNuevo = () => {
     setModo("nuevo");
@@ -316,7 +322,7 @@ export default function SeguridadPerfilesPage() {
 
       {panelAbierto && (
         <div style={styles.overlay}>
-          <div style={styles.sidePanel}>
+          <div style={styles.sidePanel} ref={sidePanelRef}>
             <div style={styles.sidePanelHeader}>
               <div>
                 <h2 style={styles.sideTitle}>
@@ -636,7 +642,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "rgba(15, 23, 42, 0.35)",
     display: "flex",
     justifyContent: "flex-end",
-    zIndex: 1000,
+    zIndex: 3000,
   },
 
   sidePanel: {
@@ -740,7 +746,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    zIndex: 1100,
+    zIndex: 3100,
   },
 
   confirmBox: {

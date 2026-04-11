@@ -54,6 +54,31 @@ public class SegMenuService : ISegMenuService
         return result;
     }
 
+    public async Task<IEnumerable<MenuDto>> ListarDinamicoTotalAsync()
+    {
+        using var connection = CreateConnection();
+
+        var rows = await connection.QueryAsync<MenuDinamicoRow>(
+            "dbo.sp_Seguridad_ObtenerMenuDinamicoTotal",
+            commandType: CommandType.StoredProcedure
+        );
+
+        return BuildMenusFromDynamicRows(rows);
+    }
+
+    public async Task<IEnumerable<MenuDto>> ListarDinamicoPorPerfilAsync(int idPerfil)
+    {
+        using var connection = CreateConnection();
+
+        var rows = await connection.QueryAsync<MenuDinamicoRow>(
+            "dbo.sp_Seguridad_ObtenerMenuDinamico",
+            new { IdPerfil = idPerfil },
+            commandType: CommandType.StoredProcedure
+        );
+
+        return BuildMenusFromDynamicRows(rows);
+    }
+
     public async Task<IEnumerable<MenuDto>> ListarPorUsuarioAsync(string idUsuario)
     {
         using var connection = CreateConnection();
@@ -64,6 +89,41 @@ public class SegMenuService : ISegMenuService
             commandType: CommandType.StoredProcedure
         );
 
+        return BuildMenusFromDynamicRows(rows);
+    }
+
+    public async Task<int> CrearMenuPrincipalAsync(CrearMenuPrincipalRequest request, string usuario)
+    {
+        using var connection = CreateConnection();
+
+        var creado = await connection.QueryFirstOrDefaultAsync<MenuDto>(
+            "dbo.sp_SegMenu_Crear",
+            new
+            {
+                request.NombreMenu,
+                IdMenuPadre = (int?)null,
+                Ruta = (string?)null,
+                request.Icono,
+                request.OrdenMenu,
+                request.CodigoMenu,
+                request.EsVisible,
+                request.EsActivo,
+                EsNodoPrincipal = true,
+                UsuarioCreacion = usuario
+            },
+            commandType: CommandType.StoredProcedure
+        );
+
+        if (creado is null)
+        {
+            throw new InvalidOperationException("No se pudo crear el menú principal.");
+        }
+
+        return creado.IdMenu;
+    }
+
+    private static IEnumerable<MenuDto> BuildMenusFromDynamicRows(IEnumerable<MenuDinamicoRow> rows)
+    {
         var menuMap = new Dictionary<int, MenuDto>();
 
         foreach (var row in rows)
@@ -162,20 +222,20 @@ public class SegMenuService : ISegMenuService
             .ToList();
     }
 
-    public async Task<IEnumerable<MenuDto>> ListarAsignadoPorRolAsync(int idRol)
+    public async Task<IEnumerable<MenuDto>> ListarAsignadoPorPerfilRolAsync(int idPerfil, int idRol)
     {
         using var connection = CreateConnection();
 
         var result = await connection.QueryAsync<MenuDto>(
-            "dbo.sp_SegMenu_ListarAsignadoPorRol",
-            new { IdRol = idRol },
+            "dbo.sp_SegPerfilRolMenu_ListarAsignado",
+            new { IdPerfil = idPerfil, IdRol = idRol },
             commandType: CommandType.StoredProcedure
         );
 
         return result;
     }
 
-    public async Task GuardarAsignacionRolAsync(int idRol, IEnumerable<int> menuIds, string usuario)
+    public async Task GuardarAsignacionPerfilRolAsync(int idPerfil, int idRol, IEnumerable<int> menuIds, string usuario)
     {
         using var connection = CreateConnection();
 
@@ -188,8 +248,8 @@ public class SegMenuService : ISegMenuService
         {
             // Eliminar asignaciones previas
             await connection.ExecuteAsync(
-                "dbo.sp_SegRolMenuAccion_EliminarVerPorRol",
-                new { IdRol = idRol },
+                "dbo.sp_SegPerfilRolMenu_EliminarPorPerfilRol",
+                new { IdPerfil = idPerfil, IdRol = idRol },
                 transaction: transaction,
                 commandType: CommandType.StoredProcedure
             );
@@ -198,9 +258,10 @@ public class SegMenuService : ISegMenuService
             foreach (var idMenu in menuIds.Distinct())
             {
                 await connection.ExecuteAsync(
-                    "dbo.sp_SegRolMenuAccion_InsertarVer",
+                    "dbo.sp_SegPerfilRolMenu_Insertar",
                     new
                     {
+                        IdPerfil = idPerfil,
                         IdRol = idRol,
                         IdMenu = idMenu,
                         UsuarioCreacion = usuario
@@ -216,6 +277,65 @@ public class SegMenuService : ISegMenuService
         catch
         {
             // Revertir si hay error
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    public async Task<int> SincronizarPerfilUsuarioAsync(int idPerfil, string idUsuario)
+    {
+        using var connection = CreateConnection();
+
+        await connection.OpenAsync();
+        using var transaction = connection.BeginTransaction();
+
+        try
+        {
+            var asignaciones = await connection.QueryAsync<(int IdRol, int IdMenu)>(
+                @"
+                SELECT DISTINCT
+                    pr.IdRol,
+                    rma.IdMenu
+                FROM dbo.SegPerfilRol pr
+                INNER JOIN dbo.SegRolMenuAccion rma
+                    ON pr.IdRol = rma.IdRol
+                LEFT JOIN dbo.SegAccion a
+                    ON rma.IdAccion = a.IdAccion
+                WHERE pr.IdPerfil = @IdPerfil
+                  AND ISNULL(pr.EsActivo, 1) = 1
+                  AND ISNULL(rma.EsActivo, 1) = 1
+                  AND ISNULL(rma.EsPermitido, 1) = 1
+                  AND (a.IdAccion IS NULL OR a.CodigoAccion = 'VER')
+                ",
+                new { IdPerfil = idPerfil },
+                transaction: transaction
+            );
+
+            var total = 0;
+
+            foreach (var asignacion in asignaciones)
+            {
+                await connection.ExecuteAsync(
+                    "dbo.sp_SegPerfilRolMenu_Insertar",
+                    new
+                    {
+                        IdPerfil = idPerfil,
+                        IdRol = asignacion.IdRol,
+                        IdMenu = asignacion.IdMenu,
+                        UsuarioCreacion = idUsuario
+                    },
+                    transaction: transaction,
+                    commandType: CommandType.StoredProcedure
+                );
+
+                total++;
+            }
+
+            transaction.Commit();
+            return total;
+        }
+        catch
+        {
             transaction.Rollback();
             throw;
         }

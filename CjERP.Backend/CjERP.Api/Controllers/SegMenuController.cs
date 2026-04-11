@@ -24,6 +24,20 @@ public class SegMenuController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("dinamico-total")]
+    public async Task<IActionResult> ListarDinamicoTotal()
+    {
+        var result = await _segMenuService.ListarDinamicoTotalAsync();
+        return Ok(result);
+    }
+
+    [HttpGet("perfil/{idPerfil:int}/dinamico")]
+    public async Task<IActionResult> ListarDinamicoPorPerfil(int idPerfil)
+    {
+        var result = await _segMenuService.ListarDinamicoPorPerfilAsync(idPerfil);
+        return Ok(result);
+    }
+
     [HttpGet("usuario/{idUsuario}")]
     public async Task<IActionResult> ListarPorUsuario(string idUsuario)
     {
@@ -34,10 +48,36 @@ public class SegMenuController : ControllerBase
         return Ok(result);
     }
 
-    [HttpGet("rol/{idRol:int}/asignado")]
-    public async Task<IActionResult> ListarAsignadoPorRol(int idRol)
+    [HttpPost("principal")]
+    public async Task<IActionResult> CrearMenuPrincipal([FromBody] CrearMenuPrincipalRequest request)
     {
-        var result = await _segMenuService.ListarAsignadoPorRolAsync(idRol);
+        if (request is null)
+            return BadRequest(new { message = "Datos inválidos." });
+
+        if (string.IsNullOrWhiteSpace(request.NombreMenu))
+            return BadRequest(new { message = "El nombre del menú es obligatorio." });
+
+        var usuario = User?.Identity?.Name ?? "SISTEMA";
+
+        var id = await _segMenuService.CrearMenuPrincipalAsync(request, usuario);
+
+        return Ok(new
+        {
+            message = "Nodo principal creado correctamente.",
+            idMenu = id
+        });
+    }
+
+    [HttpGet("perfil/{idPerfil:int}/rol/{idRol:int}/asignado")]
+    public async Task<IActionResult> ListarAsignadoPorPerfilRol(int idPerfil, int idRol)
+    {
+        if (idPerfil <= 0)
+            return BadRequest(new { message = "El perfil es obligatorio." });
+
+        if (idRol <= 0)
+            return BadRequest(new { message = "El rol es obligatorio." });
+
+        var result = await _segMenuService.ListarAsignadoPorPerfilRolAsync(idPerfil, idRol);
         return Ok(result);
     }
 
@@ -47,12 +87,16 @@ public class SegMenuController : ControllerBase
         if (request is null)
             return BadRequest(new { message = "Datos inválidos." });
 
+        if (request.IdPerfil <= 0)
+            return BadRequest(new { message = "El perfil es obligatorio." });
+
         if (request.IdRol <= 0)
             return BadRequest(new { message = "El rol es obligatorio." });
 
         var usuario = User?.Identity?.Name ?? "SISTEMA";
 
-        await _segMenuService.GuardarAsignacionRolAsync(
+        await _segMenuService.GuardarAsignacionPerfilRolAsync(
+            request.IdPerfil,
             request.IdRol,
             request.MenuIds ?? new List<int>(),
             usuario
@@ -61,6 +105,30 @@ public class SegMenuController : ControllerBase
         return Ok(new
         {
             message = "Asignación de menú guardada correctamente."
+        });
+    }
+
+    [HttpPost("perfil-usuario/sincronizar")]
+    public async Task<IActionResult> SincronizarPerfilUsuario([FromBody] SincronizarPerfilUsuarioRequest request)
+    {
+        if (request is null)
+            return BadRequest(new { message = "Datos inválidos." });
+
+        if (request.IdPerfil <= 0)
+            return BadRequest(new { message = "El perfil es obligatorio." });
+
+        if (string.IsNullOrWhiteSpace(request.IdUsuario))
+            return BadRequest(new { message = "El usuario es obligatorio." });
+
+        var total = await _segMenuService.SincronizarPerfilUsuarioAsync(
+            request.IdPerfil,
+            request.IdUsuario.Trim()
+        );
+
+        return Ok(new
+        {
+            message = "Sincronización ejecutada correctamente.",
+            filasProcesadas = total
         });
     }
 }

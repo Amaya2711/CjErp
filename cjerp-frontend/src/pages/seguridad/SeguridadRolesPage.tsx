@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { rolesService, type RolDto } from "../../features/seguridad/services/rolesService";
 
 type Rol = {
   id: number;
@@ -15,37 +16,6 @@ type RolForm = {
   estado: "ACTIVO" | "INACTIVO";
 };
 
-const rolesIniciales: Rol[] = [
-  {
-    id: 1,
-    nombreRol: "CONSULTA",
-    descripcion: "Solo consulta información",
-    estado: "ACTIVO",
-    fechaCreacion: "2026-03-29",
-  },
-  {
-    id: 2,
-    nombreRol: "REGISTRO",
-    descripcion: "Permite registrar información",
-    estado: "ACTIVO",
-    fechaCreacion: "2026-03-29",
-  },
-  {
-    id: 3,
-    nombreRol: "APROBADOR",
-    descripcion: "Permite aprobar operaciones del sistema",
-    estado: "ACTIVO",
-    fechaCreacion: "2026-03-29",
-  },
-  {
-    id: 4,
-    nombreRol: "ADMIN",
-    descripcion: "Acceso total al sistema",
-    estado: "ACTIVO",
-    fechaCreacion: "2026-03-29",
-  },
-];
-
 const formularioInicial: RolForm = {
   id: null,
   nombreRol: "",
@@ -53,14 +23,48 @@ const formularioInicial: RolForm = {
   estado: "ACTIVO",
 };
 
+function mapRolDtoToViewModel(dto: RolDto): Rol {
+  return {
+    id: dto.idRol,
+    nombreRol: dto.nombreRol,
+    descripcion: dto.descripcion ?? "",
+    estado: (dto.esActivo ?? dto.estado ?? false) ? "ACTIVO" : "INACTIVO",
+    fechaCreacion: dto.fechaCreacion
+      ? String(dto.fechaCreacion).slice(0, 10)
+      : "",
+  };
+}
+
 export default function SeguridadRolesPage() {
-  const [roles, setRoles] = useState<Rol[]>(rolesIniciales);
+  const [roles, setRoles] = useState<Rol[]>([]);
   const [busqueda, setBusqueda] = useState("");
   const [panelAbierto, setPanelAbierto] = useState(false);
   const [modo, setModo] = useState<"nuevo" | "editar">("nuevo");
   const [form, setForm] = useState<RolForm>(formularioInicial);
   const [errores, setErrores] = useState<Record<string, string>>({});
   const [idEliminar, setIdEliminar] = useState<number | null>(null);
+  const [cargando, setCargando] = useState(false);
+  const [mensaje, setMensaje] = useState("");
+  const [error, setError] = useState("");
+
+  const cargarRoles = async () => {
+    try {
+      setCargando(true);
+      setError("");
+
+      const data = await rolesService.listarRoles();
+      setRoles(data.map(mapRolDtoToViewModel));
+    } catch (err) {
+      console.error(err);
+      setError("No se pudo cargar la lista de roles.");
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  useEffect(() => {
+    void cargarRoles();
+  }, []);
 
   const rolesFiltrados = useMemo(() => {
     const texto = busqueda.trim().toUpperCase();
@@ -79,6 +83,8 @@ export default function SeguridadRolesPage() {
     setModo("nuevo");
     setForm(formularioInicial);
     setErrores({});
+    setMensaje("");
+    setError("");
     setPanelAbierto(true);
   };
 
@@ -91,6 +97,8 @@ export default function SeguridadRolesPage() {
       estado: rol.estado,
     });
     setErrores({});
+    setMensaje("");
+    setError("");
     setPanelAbierto(true);
   };
 
@@ -129,49 +137,71 @@ export default function SeguridadRolesPage() {
     return Object.keys(nuevosErrores).length === 0;
   };
 
-  const guardar = () => {
+  const guardar = async () => {
     if (!validar()) return;
 
     const nombreFinal = form.nombreRol.trim().toUpperCase();
     const descripcionFinal = form.descripcion.trim();
 
-    if (modo === "nuevo") {
-      const nuevoRol: Rol = {
-        id: roles.length > 0 ? Math.max(...roles.map((x) => x.id)) + 1 : 1,
+    try {
+      setCargando(true);
+      setError("");
+      setMensaje("");
+
+      const payload = {
         nombreRol: nombreFinal,
         descripcion: descripcionFinal,
-        estado: form.estado,
-        fechaCreacion: new Date().toISOString().slice(0, 10),
+        esActivo: form.estado === "ACTIVO",
       };
 
-      setRoles((prev) => [nuevoRol, ...prev]);
-    } else {
-      setRoles((prev) =>
-        prev.map((x) =>
-          x.id === form.id
-            ? {
-                ...x,
-                nombreRol: nombreFinal,
-                descripcion: descripcionFinal,
-                estado: form.estado,
-              }
-            : x
-        )
-      );
-    }
+      if (modo === "nuevo") {
+        await rolesService.crearRol(payload);
+        setMensaje("Rol creado correctamente.");
+      } else if (form.id != null) {
+        await rolesService.actualizarRol(form.id, payload);
+        setMensaje("Rol actualizado correctamente.");
+      }
 
-    cerrarPanel();
+      await cargarRoles();
+      cerrarPanel();
+    } catch (err: any) {
+      console.error(err);
+      const mensajeError =
+        err?.response?.data?.message ||
+        err?.response?.data?.mensaje ||
+        "No se pudo guardar la información del rol.";
+      setError(mensajeError);
+    } finally {
+      setCargando(false);
+    }
   };
 
   const confirmarEliminar = (id: number) => {
     setIdEliminar(id);
   };
 
-  const eliminar = () => {
+  const eliminar = async () => {
     if (idEliminar == null) return;
 
-    setRoles((prev) => prev.filter((x) => x.id !== idEliminar));
-    setIdEliminar(null);
+    try {
+      setCargando(true);
+      setError("");
+      setMensaje("");
+
+      await rolesService.eliminarRol(idEliminar);
+      setMensaje("Rol eliminado correctamente.");
+      await cargarRoles();
+      setIdEliminar(null);
+    } catch (err: any) {
+      console.error(err);
+      const mensajeError =
+        err?.response?.data?.message ||
+        err?.response?.data?.mensaje ||
+        "No se pudo eliminar el rol.";
+      setError(mensajeError);
+    } finally {
+      setCargando(false);
+    }
   };
 
   const rolSeleccionadoEliminar = roles.find((x) => x.id === idEliminar);
@@ -190,6 +220,10 @@ export default function SeguridadRolesPage() {
           Nuevo rol
         </button>
       </div>
+
+      {cargando ? <div style={styles.infoBox}>Cargando información...</div> : null}
+      {mensaje ? <div style={styles.successBox}>{mensaje}</div> : null}
+      {error ? <div style={styles.errorBox}>{error}</div> : null}
 
       <div style={styles.card}>
         <div style={styles.tableWrapper}>
@@ -421,6 +455,36 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: "0 8px 24px rgba(23,20,58,0.08)",
   },
 
+  infoBox: {
+    borderRadius: 12,
+    border: "1px solid #E5E7EB",
+    background: "#FFFFFF",
+    color: "#475569",
+    padding: 10,
+    fontSize: 13,
+    fontWeight: 600,
+  },
+
+  successBox: {
+    borderRadius: 12,
+    border: "1px solid #A7F3D0",
+    background: "#ECFDF5",
+    color: "#047857",
+    padding: 10,
+    fontSize: 13,
+    fontWeight: 700,
+  },
+
+  errorBox: {
+    borderRadius: 12,
+    border: "1px solid #FECACA",
+    background: "#FEF2F2",
+    color: "#B91C1C",
+    padding: 10,
+    fontSize: 13,
+    fontWeight: 700,
+  },
+
   tableWrapper: {
     width: "100%",
     overflowX: "auto",
@@ -557,7 +621,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "rgba(15, 23, 42, 0.35)",
     display: "flex",
     justifyContent: "flex-end",
-    zIndex: 1000,
+    zIndex: 1300,
   },
 
   sidePanel: {
@@ -661,7 +725,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    zIndex: 1100,
+    zIndex: 1400,
   },
 
   confirmBox: {

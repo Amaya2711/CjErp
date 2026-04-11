@@ -7,9 +7,10 @@ import DashboardPage from "../../pages/DashboardPage";
 
 import SeguridadPage from "../../pages/seguridad/SeguridadPage";
 import SeguridadUsuariosPage from "../../pages/seguridad/SeguridadUsuariosPage";
+import SeguridadUsuarioPerfilPage from "../../pages/seguridad/SeguridadUsuarioPerfil";
 import SeguridadPerfilesPage from "../../pages/seguridad/SeguridadPerfilesPage";
 import SeguridadRolesPage from "../../pages/seguridad/SeguridadRolesPage";
-import SeguridadMenuPage from "../../pages/seguridad/SeguridadMenuPage";
+import SeguridadMenuPage from "../../pages/seguridad/SeguridadMenuPage.tsx";
 import SeguridadPermisosPage from "../../pages/seguridad/SeguridadPermisosPage";
 
 import AsistenciaPage from "../../pages/administracion/AsistenciaPage";
@@ -163,6 +164,10 @@ export default function AppRouter() {
 
             <Route path="/seguridad" element={<SeguridadPage />} />
             <Route path="/seguridad/usuarios" element={<SeguridadUsuariosPage />} />
+            <Route
+              path="/seguridad/usuario-perfil"
+              element={<SeguridadUsuarioPerfilPage />}
+            />
             <Route path="/seguridad/perfiles" element={<SeguridadPerfilesPage />} />
             <Route path="/seguridad/roles" element={<SeguridadRolesPage />} />
             <Route path="/seguridad/menu" element={<SeguridadMenuPage />} />

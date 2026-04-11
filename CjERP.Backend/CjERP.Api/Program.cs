@@ -8,7 +8,7 @@ using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configuración JWT
+// Configuraciï¿½n JWT
 builder.Services.Configure<JwtSettings>(
     builder.Configuration.GetSection("JwtSettings"));
 
@@ -32,7 +32,7 @@ builder.Services.AddSwaggerGen(options =>
         Scheme = "bearer",
         BearerFormat = "JWT",
         In = Microsoft.OpenApi.Models.ParameterLocation.Header,
-        Description = "Ingrese el token JWT así: Bearer {token}"
+        Description = "Ingrese el token JWT asï¿½: Bearer {token}"
     });
 
     options.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
@@ -54,12 +54,13 @@ builder.Services.AddSwaggerGen(options =>
 // Infrastructure
 builder.Services.AddInfrastructure(builder.Configuration);
 
-// Servicios de aplicación
+// Servicios de aplicaciï¿½n
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IJwtService, JwtService>();
 builder.Services.AddScoped<ISegPerfilService, SegPerfilService>();
 builder.Services.AddScoped<ISegRolService, SegRolService>();
 builder.Services.AddScoped<ISegMenuService, SegMenuService>();
+builder.Services.AddScoped<ISegUsuarioService, SegUsuarioService>();
 builder.Services.AddScoped<ISegRolMenuPermisoService, SegRolMenuPermisoService>();
 
 // CORS

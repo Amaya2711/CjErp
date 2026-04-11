@@ -26,3 +26,21 @@ body,
   background: var(--color-bg);
   color: var(--color-text);
 }
+
+.sidebar-scroll::-webkit-scrollbar {
+  width: 12px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: #f3f4f6;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: #9ca3af;
+  border-radius: 999px;
+  border: 2px solid #f3f4f6;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}

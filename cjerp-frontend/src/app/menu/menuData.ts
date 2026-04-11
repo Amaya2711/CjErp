@@ -65,6 +65,7 @@ export const menuDashboard: DashboardGroup[] = [
     color: "#F59E0B",
     tiles: [
       { label: "Usuarios", path: "/seguridad/usuarios" },
+      { label: "Usuario Perfil", path: "/seguridad/usuario-perfil" },
       { label: "Perfiles", path: "/seguridad/perfiles" },
       { label: "Roles", path: "/seguridad/roles" },
       { label: "Menú", path: "/seguridad/menu" },

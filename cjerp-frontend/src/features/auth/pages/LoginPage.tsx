@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { login } from "../services/authService";
 import { saveAuthUser } from "../../../utils/authStorage";
+import logoEmpresa from "../../../assets/logo.png";
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -67,14 +68,15 @@ export default function LoginPage() {
 
   return (
     <div style={styles.container}>
-      <div style={styles.card}>
-        <div style={styles.header}>
-          <div style={styles.logo}>CJ</div>
-          <div>
-            <h1 style={styles.title}>CJ Telecom</h1>
-            <p style={styles.subtitle}>Portal ERP</p>
-          </div>
+      <div style={styles.wrapper}>
+        <div style={styles.dock}>
+          <img
+            src={logoEmpresa}
+            alt="Logo CJ Telecom"
+            style={styles.logo}
+          />
         </div>
+        <div style={styles.card}>
 
         <form onSubmit={handleSubmit} style={styles.form}>
           <div style={styles.group}>
@@ -113,6 +115,7 @@ export default function LoginPage() {
             {cargando ? "Ingresando..." : "Ingresar"}
           </button>
         </form>
+        </div>
       </div>
     </div>
   );
@@ -127,43 +130,41 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#f8fafc",
     padding: 24
   },
-  card: {
+  wrapper: {
     width: "100%",
     maxWidth: 420,
+    display: "flex",
+    flexDirection: "column",
+    gap: 0
+  },
+  dock: {
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
     background: "#ffffff",
     border: "1px solid #e2e8f0",
-    borderRadius: 16,
-    padding: 28,
+    borderBottom: "none",
+    borderRadius: "16px 16px 0 0",
+    padding: "8px 28px 6px",
+    boxShadow: "0 10px 30px rgba(0,0,0,0.08)"
+  },
+  card: {
+    width: "100%",
+    background: "#ffffff",
+    border: "1px solid #e2e8f0",
+    borderTop: "none",
+    borderRadius: "0 0 16px 16px",
+    padding: "12px 28px 28px",
     boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
     boxSizing: "border-box"
   },
-  header: {
-    display: "flex",
-    alignItems: "center",
-    gap: 16,
-    marginBottom: 24
-  },
+
   logo: {
-    width: 56,
-    height: 56,
-    borderRadius: 14,
-    background: "#0f172a",
-    color: "#ffffff",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontWeight: 700,
-    fontSize: 20
-  },
-  title: {
-    margin: 0,
-    fontSize: 24,
-    color: "#0f172a"
-  },
-  subtitle: {
-    margin: "4px 0 0 0",
-    color: "#64748b",
-    fontSize: 14
+    width: 180,
+    height: "auto",
+    borderRadius: 10,
+    objectFit: "cover",
+    flexShrink: 0,
   },
   form: {
     display: "flex",
