@@ -10,4 +10,6 @@ public class MenuDto
     public int OrdenMenu { get; set; }
     public int NivelMenu { get; set; }
     public string? CodigoMenu { get; set; }
+    // Indica si el usuario tiene acceso a este menú
+    public int? Acceso { get; set; }
 }
