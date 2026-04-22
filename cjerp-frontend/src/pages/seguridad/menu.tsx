@@ -3,6 +3,19 @@ import {
   menuService,
   type MenuDto,
 } from "../../features/seguridad/services/menuService";
+import {
+  rolesService,
+  type RolDto,
+} from "../../features/seguridad/services/rolesService";
+import {
+  perfilesService,
+  type PerfilDto,
+} from "../../features/seguridad/services/perfilesService";
+
+type RolOption = {
+  id: number;
+  nombre: string;
+};
 
 type MenuNode = {
   id: number;
@@ -11,9 +24,8 @@ type MenuNode = {
   parentId: number | null;
   orden: number;
   children: MenuNode[];
+  acceso: number;
 };
-
-type MenuNivel = 0 | 1 | 2;
 
 type MenuTreeItemProps = {
   node: MenuNode;
@@ -21,14 +33,21 @@ type MenuTreeItemProps = {
   expandedIds: Set<number>;
   onToggleSelected: (node: MenuNode, checked: boolean) => void;
   onToggleExpanded: (id: number) => void;
+  onToggleAcceso: (node: MenuNode, checked: boolean) => void;
   level: number;
 };
+
 
 function buildTree(items: MenuDto[]): MenuNode[] {
   const map = new Map<number, MenuNode>();
   const roots: MenuNode[] = [];
 
   items.forEach((item) => {
+    // Depuración: mostrar el item recibido y el valor de acceso
+    const rawAcceso = (item as any).acceso ?? (item as any).Acceso ?? 0;
+    // console.log('[buildTree] item:', item, 'rawAcceso:', rawAcceso);
+    const accesoValue = Number(rawAcceso) === 1 ? 1 : 0;
+
     map.set(item.idMenu, {
       id: item.idMenu,
       label: item.nombreMenu,
@@ -36,6 +55,7 @@ function buildTree(items: MenuDto[]): MenuNode[] {
       parentId: item.idMenuPadre ?? null,
       orden: item.ordenMenu,
       children: [],
+      acceso: accesoValue,
     });
   });
 
@@ -119,49 +139,6 @@ function findParentChainIds(nodes: MenuNode[], targetId: number): number[] {
   return path;
 }
 
-function findNodeById(nodes: MenuNode[], id: number): MenuNode | null {
-  for (const node of nodes) {
-    if (node.id === id) {
-      return node;
-    }
-
-    if (node.children.length > 0) {
-      const found = findNodeById(node.children, id);
-      if (found) {
-        return found;
-      }
-    }
-  }
-
-  return null;
-}
-
-function collectNodesByLevel(
-  nodes: MenuNode[],
-  targetLevel: MenuNivel,
-  currentLevel: MenuNivel = 0
-): MenuNode[] {
-  const result: MenuNode[] = [];
-
-  for (const node of nodes) {
-    if (currentLevel === targetLevel) {
-      result.push(node);
-    }
-
-    if (node.children.length > 0 && currentLevel < 2) {
-      result.push(
-        ...collectNodesByLevel(
-          node.children,
-          targetLevel,
-          (currentLevel + 1) as MenuNivel
-        )
-      );
-    }
-  }
-
-  return result;
-}
-
 function MenuTreeItem({
   node,
   selectedIds,
@@ -169,6 +146,7 @@ function MenuTreeItem({
   onToggleSelected,
   onToggleExpanded,
   level,
+  onToggleAcceso,
 }: MenuTreeItemProps) {
   const hasChildren = node.children.length > 0;
   const expanded = expandedIds.has(node.id);
@@ -201,7 +179,16 @@ function MenuTreeItem({
         />
 
         <div style={styles.treeLabelBox}>
-          <span style={styles.treeLabel}>{node.label}</span>
+          <span style={styles.treeLabel}>
+            {node.label}
+            <input
+              type="checkbox"
+              style={{ marginLeft: 8 }}
+              disabled={!checked || !node.path}
+              checked={Boolean(node.acceso)}
+              onChange={e => onToggleAcceso(node, e.target.checked)}
+            />
+          </span>
           {node.path ? <span style={styles.treePath}>{node.path}</span> : null}
         </div>
       </div>
@@ -216,6 +203,7 @@ function MenuTreeItem({
               expandedIds={expandedIds}
               onToggleSelected={onToggleSelected}
               onToggleExpanded={onToggleExpanded}
+              onToggleAcceso={onToggleAcceso}
               level={level + 1}
             />
           ))}
@@ -225,37 +213,22 @@ function MenuTreeItem({
   );
 }
 
-export default function SeguridadMenuPage() {
+export default function PerfilRolMenuPage() {
   const [cargando, setCargando] = useState(false);
-  const [creandoNodo, setCreandoNodo] = useState(false);
-  const [mostrarCrearNodo, setMostrarCrearNodo] = useState(false);
+  const [guardando, setGuardando] = useState(false);
+  
   const [mensaje, setMensaje] = useState("");
   const [error, setError] = useState("");
 
-  const [nuevoNombreMenu, setNuevoNombreMenu] = useState("");
-  const [nuevoNivel, setNuevoNivel] = useState<MenuNivel>(0);
-  const [nuevoPadreId, setNuevoPadreId] = useState<number | "">("");
-  const [nuevaRuta, setNuevaRuta] = useState("");
-  const [nuevoOrdenMenu, setNuevoOrdenMenu] = useState(0);
+  const [perfiles, setPerfiles] = useState<PerfilDto[]>([]);
+  const [perfilId, setPerfilId] = useState<number | "">("");
+
+  const [roles, setRoles] = useState<RolOption[]>([]);
+  const [rolId, setRolId] = useState<number | "">("");
 
   const [menuBase, setMenuBase] = useState<MenuNode[]>([]);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-
-  const nodosNivelPrincipal = useMemo(() => collectNodesByLevel(menuBase, 0), [menuBase]);
-  const nodosNivelSecundario = useMemo(() => collectNodesByLevel(menuBase, 1), [menuBase]);
-
-  const opcionesPadre = useMemo(() => {
-    if (nuevoNivel === 1) {
-      return nodosNivelPrincipal;
-    }
-
-    if (nuevoNivel === 2) {
-      return nodosNivelSecundario;
-    }
-
-    return [];
-  }, [nuevoNivel, nodosNivelPrincipal, nodosNivelSecundario]);
 
   const totalAsignados = useMemo(() => selectedIds.size, [selectedIds]);
 
@@ -263,51 +236,34 @@ export default function SeguridadMenuPage() {
     void cargarDatosIniciales();
   }, []);
 
-  useEffect(() => {
-    setNuevoPadreId("");
-  }, [nuevoNivel]);
-
-  useEffect(() => {
-    const getSiguienteOrden = () => {
-      if (nuevoNivel === 0) {
-        const maxOrden = menuBase.reduce((max, node) => Math.max(max, node.orden || 0), 0);
-        return maxOrden + 1;
-      }
-
-      if (!nuevoPadreId) {
-        return 0;
-      }
-
-      const parentNode = findNodeById(menuBase, Number(nuevoPadreId));
-      if (!parentNode) {
-        return 0;
-      }
-
-      const maxOrden = parentNode.children.reduce(
-        (max, child) => Math.max(max, child.orden || 0),
-        0
-      );
-      return maxOrden + 1;
-    };
-
-    setNuevoOrdenMenu(getSiguienteOrden());
-  }, [menuBase, nuevoNivel, nuevoPadreId]);
-
   const cargarDatosIniciales = async () => {
     try {
       setCargando(true);
       setError("");
       setMensaje("");
 
-      const menuData = await menuService.obtenerCompleto();
+      const [perfilesResult, menuResult] = await Promise.allSettled([
+        perfilesService.listarPerfiles(),
+        menuService.obtenerCompleto(),
+      ]);
+
+      const perfilesData =
+        perfilesResult.status === "fulfilled" ? perfilesResult.value : [];
+      const menuData = menuResult.status === "fulfilled" ? menuResult.value : [];
+
+      if (
+        perfilesResult.status === "rejected" ||
+        menuResult.status === "rejected"
+      ) {
+        setError("No se pudo cargar completamente perfiles y/o menú.");
+      }
 
       const menuTree = buildTree(menuData);
-      const siguienteOrdenPrincipal =
-        menuData
-          .filter((menu) => menu.idMenuPadre == null)
-          .reduce((max, menu) => Math.max(max, menu.ordenMenu || 0), 0) + 1;
-
-      setNuevoOrdenMenu(siguienteOrdenPrincipal);
+      
+      setPerfiles(perfilesData);
+      setPerfilId("");
+      setRoles([]);
+      setRolId("");
       setMenuBase(menuTree);
 
       const allExpanded = new Set<number>();
@@ -319,14 +275,129 @@ export default function SeguridadMenuPage() {
       setExpandedIds(allExpanded);
     } catch (err) {
       console.error(err);
-      setError("No se pudo cargar el menú.");
+      setError("No se pudieron cargar perfiles y menú.");
     } finally {
       setCargando(false);
     }
   };
 
+  const cargarRolesPorPerfil = async (idPerfil: number) => {
+    try {
+      setCargando(true);
+      setError("");
+      setMensaje("");
+
+      const rolesData = await rolesService.listarRolesPorPerfil(idPerfil);
+
+      const rolesMapped: RolOption[] = rolesData.map((r: RolDto) => ({
+        id: r.idRol,
+        nombre: r.nombreRol,
+      }));
+
+      setRoles(rolesMapped);
+      setRolId("");
+      setSelectedIds(new Set());
+    } catch (err) {
+      console.error(err);
+      setError("No se pudieron cargar los roles del perfil.");
+      setRoles([]);
+      setRolId("");
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  const handlePerfilChange = async (value: string) => {
+    const idPerfil = value ? Number(value) : "";
+    setPerfilId(idPerfil);
+
+    if (idPerfil === "") {
+      setRoles([]);
+      setRolId("");
+      setSelectedIds(new Set());
+      return;
+    }
+
+    await cargarRolesPorPerfil(idPerfil);
+  };
+
+  // Fusiona los valores de acceso de los menús asignados en el árbol base
+  function mergeAccesoToTree(nodes: MenuNode[], accesoMap: Map<number, number>): MenuNode[] {
+    return nodes.map(node => {
+      const newAcceso = accesoMap.has(node.id) ? accesoMap.get(node.id)! : 0;
+      return {
+        ...node,
+        acceso: newAcceso,
+        children: mergeAccesoToTree(node.children, accesoMap)
+      };
+    });
+  }
+
+  const cargarMenuAsignado = async (nuevoPerfilId: number, nuevoRolId: number) => {
+    try {
+      setCargando(true);
+      setError("");
+      setMensaje("");
+
+      const asignados = await menuService.obtenerPorPerfilRol(nuevoPerfilId, nuevoRolId);
+      const ids = new Set<number>(asignados.map((x: MenuDto) => x.idMenu));
+
+      // Crear un Map para acceso por idMenu
+      const accesoMap = new Map<number, number>();
+      asignados.forEach(x => accesoMap.set(x.idMenu, Number(x.acceso)));
+
+      // Actualizar el árbol base con los valores de acceso correctos
+      setMenuBase(prev => mergeAccesoToTree(prev, accesoMap));
+
+      setSelectedIds(ids);
+
+      const expanded = new Set<number>(expandedIds);
+      asignados.forEach((x: MenuDto) => {
+        const parentChain = findParentChainIds(menuBase, x.idMenu);
+        parentChain.forEach((id) => expanded.add(id));
+      });
+      setExpandedIds(expanded);
+    } catch (err) {
+      console.error(err);
+      setError("No se pudo cargar el menú asignado al rol.");
+      setSelectedIds(new Set());
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  const handleRolChange = async (value: string) => {
+    const nuevoRolId = value ? Number(value) : "";
+    setRolId(nuevoRolId);
+
+    if (nuevoRolId === "") {
+      setSelectedIds(new Set());
+      return;
+    }
+
+    if (!perfilId) {
+      setError("Debe seleccionar un perfil.");
+      setSelectedIds(new Set());
+      return;
+    }
+
+    await cargarMenuAsignado(Number(perfilId), nuevoRolId);
+  };
+
   const recargar = async () => {
+    const perfilActual = perfilId;
+    const rolActual = rolId;
+
     await cargarDatosIniciales();
+
+    if (!perfilActual || !rolActual) {
+      return;
+    }
+
+    setPerfilId(perfilActual);
+    await cargarRolesPorPerfil(Number(perfilActual));
+    setRolId(rolActual);
+    await cargarMenuAsignado(Number(perfilActual), Number(rolActual));
   };
 
   const toggleExpanded = (id: number) => {
@@ -383,63 +454,143 @@ export default function SeguridadMenuPage() {
     setSelectedIds(new Set());
   };
 
-  const crearNodoMenu = async () => {
-    const nombre = nuevoNombreMenu.trim();
-
-    if (!nombre) {
-      setError("Debe ingresar el nombre del menú.");
+  const guardarAsignacion = async () => {
+    if (!perfilId) {
+      setError("Debe seleccionar un perfil.");
       setMensaje("");
       return;
     }
 
-    if (nuevoNivel > 0 && !nuevoPadreId) {
-      setError("Debe seleccionar el nodo padre.");
+    if (!rolId) {
+      setError("Debe seleccionar un rol.");
       setMensaje("");
       return;
     }
 
     try {
-      setCreandoNodo(true);
+      setGuardando(true);
       setError("");
       setMensaje("");
 
-      await menuService.crearNodo({
-        nombreMenu: nombre,
-        idMenuPadre: nuevoNivel === 0 ? undefined : Number(nuevoPadreId),
-        ruta: nuevaRuta.trim() || undefined,
-        codigoMenu: nuevoNivel === 0 ? nombre.toUpperCase() : undefined,
-        icono: undefined,
-        ordenMenu: Number.isFinite(nuevoOrdenMenu) ? nuevoOrdenMenu : 0,
-        esVisible: true,
-        esActivo: true,
-      });
+      // Construir el payload con idMenu y acceso
+      const menusAsignados = getMenusAsignados();
+      const payload = {
+        idPerfil: Number(perfilId),
+        idRol: Number(rolId),
+        menus: menusAsignados // [{ idMenu, acceso }]
+      };
+      console.log('Payload enviado a guardarAsignacionMenuRol:', payload);
+      await menuService.guardarAsignacionMenuRol(payload);
 
-      setNuevoNombreMenu("");
-      setNuevaRuta("");
-
-      await recargar();
-      setMensaje("Nodo creado correctamente.");
+      setMensaje("Asignación de menú guardada correctamente.");
     } catch (err) {
       console.error(err);
-      const errorMessage =
-        err instanceof Error && err.message
-          ? err.message
-          : "No se pudo crear el nodo.";
-      setError(errorMessage);
+      setError("No se pudo guardar la asignación de menú.");
       setMensaje("");
     } finally {
-      setCreandoNodo(false);
+      setGuardando(false);
     }
   };
 
-  const cerrarPanelCrearNodo = () => {
-    setMostrarCrearNodo(false);
-  };
-
+    // menuVisual debe estar accesible en el scope de getMenusAsignados
   const menuVisual = useMemo(() => cloneDeep(menuBase), [menuBase]);
+
+  // Devuelve los menús seleccionados con su campo acceso
+  function getMenusAsignados() {
+    // Busca el nodo en menuVisual para obtener el valor real de acceso
+    const buscarNodo = (nodes: MenuNode[], id: number): MenuNode | undefined => {
+      for (const node of nodes) {
+        if (node.id === id) return node;
+        if (node.children.length > 0) {
+          const found = buscarNodo(node.children, id);
+          if (found) return found;
+        }
+      }
+      return undefined;
+    };
+    return Array.from(selectedIds).map(idMenu => {
+      const nodo = buscarNodo(menuVisual, idMenu);
+      return { idMenu, acceso: !!(nodo && nodo.acceso) };
+    });
+  }
+
+  // Cambia el valor de acceso en el árbol
+  function handleToggleAcceso(target: MenuNode, checked: boolean) {
+    const updateAcceso = (nodes: MenuNode[]): MenuNode[] =>
+      nodes.map((node) =>
+        node.id === target.id
+          ? { ...node, acceso: checked ? 1 : 0 }
+          : { ...node, children: updateAcceso(node.children) }
+      );
+    setMenuBase(updateAcceso(menuBase));
+  }
 
   return (
     <div style={styles.page}>
+      {/* Formulario y botón de nuevo nodo principal ocultos por requerimiento */}
+
+      <div style={styles.filtersCard}>
+        <div style={styles.filterInlineField}>
+          <label style={styles.inlineLabel}>Perfil</label>
+          <select
+            value={perfilId}
+            onChange={(e) => void handlePerfilChange(e.target.value)}
+            style={styles.select}
+            disabled={cargando}
+          >
+            <option value="">Seleccione</option>
+            {perfiles.map((perfil) => (
+              <option key={perfil.idPerfil} value={perfil.idPerfil}>
+                {perfil.nombrePerfil}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div style={styles.filterInlineField}>
+          <label style={styles.inlineLabel}>Rol</label>
+          <select
+            value={rolId}
+            onChange={(e) => void handleRolChange(e.target.value)}
+            style={styles.select}
+            disabled={!perfilId || cargando}
+          >
+            <option value="">Seleccione</option>
+            {roles.map((rol) => (
+              <option key={rol.id} value={rol.id}>
+                {rol.nombre}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div style={styles.buttonField}>
+          <button
+            type="button"
+            onClick={() => void recargar()}
+            style={styles.secondaryBtn}
+            disabled={cargando}
+          >
+            Recargar
+          </button>
+        </div>
+
+        <div style={styles.buttonField}>
+          <button
+            type="button"
+            onClick={() => void guardarAsignacion()}
+            disabled={!rolId || guardando || cargando}
+            style={{
+              ...styles.primaryBtn,
+              opacity: !rolId || guardando || cargando ? 0.65 : 1,
+              cursor: !rolId || guardando || cargando ? "not-allowed" : "pointer",
+            }}
+          >
+            {guardando ? "Guardando..." : "Guardar asignación"}
+          </button>
+        </div>
+      </div>
+
       {cargando ? <div style={styles.loadingCard}>Cargando información...</div> : null}
       {mensaje ? <div style={styles.successBox}>{mensaje}</div> : null}
       {error ? <div style={styles.errorBox}>{error}</div> : null}
@@ -448,22 +599,6 @@ export default function SeguridadMenuPage() {
         <div style={styles.treeHeader}>
           <h2 style={styles.treeTitle}>Árbol de menú</h2>
           <div style={styles.treeHeaderActions}>
-            <button
-              type="button"
-              onClick={() => setMostrarCrearNodo(true)}
-              style={{
-                ...styles.actionBtn,
-                background: mostrarCrearNodo ? "#17143A" : "#FFFFFF",
-                color: mostrarCrearNodo ? "#FFFFFF" : "#334155",
-                fontSize: 13,
-                padding: "0 8px",
-                width: "auto",
-              }}
-              title="Nuevo nodo"
-              aria-label="Nuevo nodo"
-            >
-              + Nodo
-            </button>
             <button
               type="button"
               onClick={expandirTodo}
@@ -518,120 +653,13 @@ export default function SeguridadMenuPage() {
                 expandedIds={expandedIds}
                 onToggleSelected={toggleSelected}
                 onToggleExpanded={toggleExpanded}
+                onToggleAcceso={handleToggleAcceso}
                 level={0}
               />
             ))}
           </div>
         )}
       </div>
-
-      {mostrarCrearNodo && (
-        <div style={styles.overlay}>
-          <div style={styles.sidePanel}>
-            <div style={styles.sidePanelHeader}>
-              <div>
-                <h2 style={styles.sideTitle}>Nuevo nodo de menú</h2>
-                <p style={styles.sideSubtitle}>
-                  Complete la información del nodo.
-                </p>
-              </div>
-
-              <button style={styles.closeButton} onClick={cerrarPanelCrearNodo}>
-                ×
-              </button>
-            </div>
-
-            <div style={styles.formGroup}>
-              <label style={styles.label}>Nivel</label>
-              <select
-                value={nuevoNivel}
-                onChange={(e) => setNuevoNivel(Number(e.target.value) as MenuNivel)}
-                style={styles.select}
-                disabled={cargando || creandoNodo}
-              >
-                <option value={0}>Principal</option>
-                <option value={1}>Secundario</option>
-                <option value={2}>Tercer nivel</option>
-              </select>
-            </div>
-
-            {nuevoNivel > 0 && (
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Nodo padre</label>
-                <select
-                  value={nuevoPadreId}
-                  onChange={(e) => setNuevoPadreId(e.target.value ? Number(e.target.value) : "")}
-                  style={styles.select}
-                  disabled={cargando || creandoNodo || opcionesPadre.length === 0}
-                >
-                  <option value="">Seleccione</option>
-                  {opcionesPadre.map((node) => (
-                    <option key={node.id} value={node.id}>
-                      {node.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            <div style={styles.formGroup}>
-              <label style={styles.label}>Nombre</label>
-              <input
-                type="text"
-                value={nuevoNombreMenu}
-                onChange={(e) => setNuevoNombreMenu(e.target.value)}
-                style={styles.select}
-                disabled={cargando || creandoNodo}
-                placeholder="Ej. Seguridad"
-              />
-            </div>
-
-            <div style={styles.formGroup}>
-              <label style={styles.label}>Ruta (opcional)</label>
-              <input
-                type="text"
-                value={nuevaRuta}
-                onChange={(e) => setNuevaRuta(e.target.value)}
-                style={styles.select}
-                disabled={cargando || creandoNodo}
-                placeholder="Ej. /seguridad/usuarios"
-              />
-            </div>
-
-            <div style={styles.formGroup}>
-              <label style={styles.label}>Orden</label>
-              <input
-                type="number"
-                min={0}
-                value={nuevoOrdenMenu}
-                onChange={(e) => setNuevoOrdenMenu(Number(e.target.value) || 0)}
-                style={styles.select}
-                disabled={cargando || creandoNodo}
-              />
-            </div>
-
-            <div style={styles.panelActions}>
-              <button style={styles.secondaryBtn} onClick={cerrarPanelCrearNodo}>
-                Cancelar
-              </button>
-              <button
-                style={{
-                  ...styles.primaryBtn,
-                  opacity: creandoNodo || cargando || (nuevoNivel > 0 && !nuevoPadreId) ? 0.65 : 1,
-                  cursor:
-                    creandoNodo || cargando || (nuevoNivel > 0 && !nuevoPadreId)
-                      ? "not-allowed"
-                      : "pointer",
-                }}
-                onClick={() => void crearNodoMenu()}
-                disabled={creandoNodo || cargando || (nuevoNivel > 0 && !nuevoPadreId)}
-              >
-                {creandoNodo ? "Creando..." : "Crear nodo"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -705,6 +733,12 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     gap: 8,
     minWidth: 0,
+  },
+  createGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+    gap: 12,
+    alignItems: "end",
   },
   createField: {
     display: "flex",
@@ -863,63 +897,5 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
     color: "#64748B",
   },
-  overlay: {
-    position: "fixed",
-    inset: 0,
-    background: "rgba(15, 23, 42, 0.35)",
-    display: "flex",
-    justifyContent: "flex-end",
-    zIndex: 1300,
-  },
-  sidePanel: {
-    width: 420,
-    maxWidth: "100%",
-    height: "100%",
-    background: "#FFFFFF",
-    boxShadow: "-8px 0 24px rgba(0,0,0,0.12)",
-    padding: 24,
-    boxSizing: "border-box",
-    overflowY: "auto",
-  },
-  sidePanelHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 12,
-    marginBottom: 24,
-  },
-  sideTitle: {
-    margin: 0,
-    fontSize: 24,
-    color: "#17143A",
-  },
-  sideSubtitle: {
-    marginTop: 8,
-    marginBottom: 0,
-    color: "#6B7280",
-    fontSize: 14,
-  },
-  closeButton: {
-    border: "none",
-    background: "#F3F4F6",
-    color: "#17143A",
-    width: 34,
-    height: 34,
-    borderRadius: 8,
-    cursor: "pointer",
-    fontSize: 22,
-    lineHeight: "22px",
-  },
-  formGroup: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 8,
-    marginBottom: 18,
-  },
-  panelActions: {
-    display: "flex",
-    justifyContent: "flex-end",
-    gap: 10,
-    marginTop: 28,
-  },
 };
+

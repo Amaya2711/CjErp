@@ -61,13 +61,12 @@ export default function DashboardPage() {
         const usuario = getAuthUser();
         if (!usuario?.usuario) return;
         const menuRaw = await menuService.obtenerMenuDinamicoPorUsuario(usuario.usuario);
-        console.log("menuRaw", menuRaw);
+        // console.log("menuRaw", menuRaw);
         // Normaliza el campo 'Acceso' a 'acceso' para el frontend
         const menu: MenuAccesoDto[] = (menuRaw as any[]).map(item => {
           // Tomar el valor de Acceso del backend, si no existe, es 0
           let raw = typeof item.Acceso !== "undefined" ? item.Acceso : (typeof item.acceso !== "undefined" ? item.acceso : 0);
-          // Log para depuración
-          console.log(`Menu[${item.idMenu}]: nombreMenu=${item.nombreMenu}, acceso(raw)=${raw}`);
+          // console.log(`Menu[${item.idMenu}]: nombreMenu=${item.nombreMenu}, acceso(raw)=${raw}`);
           let accesoNum = 0;
           if (typeof raw === "boolean") {
             accesoNum = raw ? 1 : 0;
@@ -83,7 +82,7 @@ export default function DashboardPage() {
             acceso: accesoNum
           };
         });
-        console.log("menu normalizado", menu);
+        // console.log("menu normalizado", menu);
         setAccesosDirectos(
           menu.filter(m =>
             m.acceso === 1 &&
@@ -93,7 +92,7 @@ export default function DashboardPage() {
           )
         );
       } catch (e) {
-        console.error("Error al cargar accesos :", e);
+        // console.error("Error al cargar accesos :", e);
         setAccesosDirectos([]);
       }
     }

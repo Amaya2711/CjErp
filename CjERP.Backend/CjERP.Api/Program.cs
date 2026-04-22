@@ -1,10 +1,11 @@
-using System.Text;
 using CjERP.Api.Configuration;
+using CjERP.Application.Interfaces;
 using CjERP.Application.Interfaces.Services;
 using CjERP.Infrastructure.DependencyInjection;
 using CjERP.Infrastructure.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -62,6 +63,8 @@ builder.Services.AddScoped<ISegRolService, SegRolService>();
 builder.Services.AddScoped<ISegMenuService, SegMenuService>();
 builder.Services.AddScoped<ISegUsuarioService, SegUsuarioService>();
 builder.Services.AddScoped<ISegRolMenuPermisoService, SegRolMenuPermisoService>();
+builder.Services.AddScoped<ILookupService,LookupService>();
+builder.Services.AddScoped<IEmpleadoCtaService, EmpleadoCtaService>();
 
 // CORS
 builder.Services.AddCors(options =>
@@ -70,12 +73,8 @@ builder.Services.AddCors(options =>
     {
         policy
             .WithOrigins(
-                "http://localhost:5173",
-                "http://localhost:5174",
-                "http://localhost:5175",
-                "http://localhost:5176",
-                "http://localhost:5177"
-            )
+                "http://localhost:5173"
+             )
             .AllowAnyHeader()
             .AllowAnyMethod();
     });

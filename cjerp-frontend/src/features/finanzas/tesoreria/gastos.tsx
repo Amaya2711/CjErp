@@ -13,7 +13,7 @@ import { FiltroOperativoLookup } from '../../../components/lookups/FiltroOperati
 import { registrarPago } from '../../../api/tesoreriaService';
 import { listarEmpleadosCta } from '../../../api/empleadoService';
 import type { EmpleadoCta } from '../../../models/empleadoCta';
-
+import './gastos.css';
 
 const GastosPage: React.FC = () => {
     // Selección de responsable desde el autocomplete

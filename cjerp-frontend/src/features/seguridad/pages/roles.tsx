@@ -1,153 +1,104 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import httpClient from "../../api/httpClient";
+import { useEffect, useMemo, useState } from "react";
+import { rolesService, type RolDto } from "../services/rolesService";
 
-type PerfilDto = {
-  idPerfil: number;
-  nombrePerfil: string;
-  descripcion: string;
-  esActivo: boolean;
-  fechaCreacion?: string | null;
-};
-
-type PerfilPayload = {
-  nombrePerfil: string;
-  descripcion: string;
-  esActivo: boolean;
-};
-
-const PERFILES_API_URL = "/perfiles";
-
-async function listarPerfiles(): Promise<PerfilDto[]> {
-  const response = await httpClient.get<PerfilDto[]>(PERFILES_API_URL);
-  return response.data;
-}
-
-async function crearPerfil(payload: PerfilPayload): Promise<PerfilDto> {
-  const response = await httpClient.post<PerfilDto>(PERFILES_API_URL, payload);
-  return response.data;
-}
-
-async function actualizarPerfil(
-  id: number,
-  payload: PerfilPayload
-): Promise<PerfilDto> {
-  const response = await httpClient.put<PerfilDto>(
-    `${PERFILES_API_URL}/${id}`,
-    payload
-  );
-  return response.data;
-}
-
-async function eliminarPerfil(id: number): Promise<void> {
-  await httpClient.delete(`${PERFILES_API_URL}/${id}`);
-}
-
-type Perfil = {
+type Rol = {
   id: number;
-  nombrePerfil: string;
+  nombreRol: string;
   descripcion: string;
   estado: "ACTIVO" | "INACTIVO";
   fechaCreacion: string;
 };
 
-type PerfilForm = {
+type RolForm = {
   id: number | null;
-  nombrePerfil: string;
+  nombreRol: string;
   descripcion: string;
   estado: "ACTIVO" | "INACTIVO";
 };
 
-const formularioInicial: PerfilForm = {
+const formularioInicial: RolForm = {
   id: null,
-  nombrePerfil: "",
+  nombreRol: "",
   descripcion: "",
   estado: "ACTIVO",
 };
 
-function mapPerfilDtoToView(item: PerfilDto): Perfil {
+function mapRolDtoToViewModel(dto: RolDto): Rol {
   return {
-    id: item.idPerfil,
-    nombrePerfil: item.nombrePerfil,
-    descripcion: item.descripcion,
-    estado: item.esActivo ? "ACTIVO" : "INACTIVO",
-    fechaCreacion: item.fechaCreacion
-      ? new Date(item.fechaCreacion).toISOString().slice(0, 10)
+    id: dto.idRol,
+    nombreRol: dto.nombreRol,
+    descripcion: dto.descripcion ?? "",
+    estado: (dto.esActivo ?? dto.estado ?? false) ? "ACTIVO" : "INACTIVO",
+    fechaCreacion: dto.fechaCreacion
+      ? String(dto.fechaCreacion).slice(0, 10)
       : "",
   };
 }
 
-export default function SeguridadPerfilesPage() {
-  const sidePanelRef = useRef<HTMLDivElement | null>(null);
-  const [perfiles, setPerfiles] = useState<Perfil[]>([]);
+export default function SeguridadRolesPage() {
+  const [roles, setRoles] = useState<Rol[]>([]);
   const [busqueda, setBusqueda] = useState("");
   const [panelAbierto, setPanelAbierto] = useState(false);
   const [modo, setModo] = useState<"nuevo" | "editar">("nuevo");
-  const [form, setForm] = useState<PerfilForm>(formularioInicial);
+  const [form, setForm] = useState<RolForm>(formularioInicial);
   const [errores, setErrores] = useState<Record<string, string>>({});
   const [idEliminar, setIdEliminar] = useState<number | null>(null);
   const [cargando, setCargando] = useState(false);
-  const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState("");
+  const [error, setError] = useState("");
 
-  const perfilesFiltrados = useMemo(() => {
-    const texto = busqueda.trim().toUpperCase();
-
-    if (!texto) return perfiles;
-
-    return perfiles.filter(
-      (x) =>
-        x.nombrePerfil.toUpperCase().includes(texto) ||
-        x.descripcion.toUpperCase().includes(texto) ||
-        x.estado.toUpperCase().includes(texto)
-    );
-  }, [perfiles, busqueda]);
-
-  const cargarPerfiles = async () => {
+  const cargarRoles = async () => {
     try {
       setCargando(true);
-      setMensaje("");
+      setError("");
 
-      const data = await listarPerfiles();
-      setPerfiles(data.map(mapPerfilDtoToView));
-    } catch (error: any) {
-      const apiMessage =
-        error?.response?.data?.message ||
-        error?.response?.data ||
-        "No se pudieron cargar los perfiles.";
-
-      setMensaje(String(apiMessage));
+      const data = await rolesService.listarRoles();
+      setRoles(data.map(mapRolDtoToViewModel));
+    } catch (err) {
+      console.error(err);
+      setError("No se pudo cargar la lista de roles.");
     } finally {
       setCargando(false);
     }
   };
 
   useEffect(() => {
-    void cargarPerfiles();
+    void cargarRoles();
   }, []);
 
-  useEffect(() => {
-    if (!panelAbierto) return;
-    sidePanelRef.current?.scrollTo({ top: 0, behavior: "auto" });
-  }, [panelAbierto, modo]);
+  const rolesFiltrados = useMemo(() => {
+    const texto = busqueda.trim().toUpperCase();
+
+    if (!texto) return roles;
+
+    return roles.filter(
+      (x) =>
+        x.nombreRol.toUpperCase().includes(texto) ||
+        x.descripcion.toUpperCase().includes(texto) ||
+        x.estado.toUpperCase().includes(texto)
+    );
+  }, [roles, busqueda]);
 
   const abrirNuevo = () => {
     setModo("nuevo");
     setForm(formularioInicial);
     setErrores({});
     setMensaje("");
+    setError("");
     setPanelAbierto(true);
   };
 
-  const abrirEditar = (perfil: Perfil) => {
+  const abrirEditar = (rol: Rol) => {
     setModo("editar");
     setForm({
-      id: perfil.id,
-      nombrePerfil: perfil.nombrePerfil,
-      descripcion: perfil.descripcion,
-      estado: perfil.estado,
+      id: rol.id,
+      nombreRol: rol.nombreRol,
+      descripcion: rol.descripcion,
+      estado: rol.estado,
     });
     setErrores({});
     setMensaje("");
+    setError("");
     setPanelAbierto(true);
   };
 
@@ -160,16 +111,26 @@ export default function SeguridadPerfilesPage() {
   const validar = () => {
     const nuevosErrores: Record<string, string> = {};
 
-    if (!form.nombrePerfil.trim()) {
-      nuevosErrores.nombrePerfil = "Ingrese el nombre del perfil.";
+    if (!form.nombreRol.trim()) {
+      nuevosErrores.nombreRol = "Ingrese el nombre del rol.";
     }
 
-    if (form.nombrePerfil.trim().length > 100) {
-      nuevosErrores.nombrePerfil = "El nombre no debe exceder 100 caracteres.";
+    if (form.nombreRol.trim().length > 100) {
+      nuevosErrores.nombreRol = "El nombre no debe exceder 100 caracteres.";
     }
 
     if (!form.descripcion.trim()) {
       nuevosErrores.descripcion = "Ingrese la descripción.";
+    }
+
+    const nombreNormalizado = form.nombreRol.trim().toUpperCase();
+
+    const yaExiste = roles.some(
+      (x) => x.nombreRol.trim().toUpperCase() === nombreNormalizado && x.id !== form.id
+    );
+
+    if (yaExiste) {
+      nuevosErrores.nombreRol = "Ya existe un rol con ese nombre.";
     }
 
     setErrores(nuevosErrores);
@@ -179,33 +140,39 @@ export default function SeguridadPerfilesPage() {
   const guardar = async () => {
     if (!validar()) return;
 
+    const nombreFinal = form.nombreRol.trim().toUpperCase();
+    const descripcionFinal = form.descripcion.trim();
+
     try {
-      setGuardando(true);
+      setCargando(true);
+      setError("");
       setMensaje("");
 
       const payload = {
-        nombrePerfil: form.nombrePerfil.trim().toUpperCase(),
-        descripcion: form.descripcion.trim(),
+        nombreRol: nombreFinal,
+        descripcion: descripcionFinal,
         esActivo: form.estado === "ACTIVO",
       };
 
       if (modo === "nuevo") {
-        await crearPerfil(payload);
+        await rolesService.crearRol(payload);
+        setMensaje("Rol creado correctamente.");
       } else if (form.id != null) {
-        await actualizarPerfil(form.id, payload);
+        await rolesService.actualizarRol(form.id, payload);
+        setMensaje("Rol actualizado correctamente.");
       }
 
-      await cargarPerfiles();
+      await cargarRoles();
       cerrarPanel();
-    } catch (error: any) {
-      const apiMessage =
-        error?.response?.data?.message ||
-        error?.response?.data ||
-        "No se pudo guardar la información.";
-
-      setMensaje(String(apiMessage));
+    } catch (err: any) {
+      console.error(err);
+      const mensajeError =
+        err?.response?.data?.message ||
+        err?.response?.data?.mensaje ||
+        "No se pudo guardar la información del rol.";
+      setError(mensajeError);
     } finally {
-      setGuardando(false);
+      setCargando(false);
     }
   };
 
@@ -217,22 +184,27 @@ export default function SeguridadPerfilesPage() {
     if (idEliminar == null) return;
 
     try {
+      setCargando(true);
+      setError("");
       setMensaje("");
-      await eliminarPerfil(idEliminar);
-      await cargarPerfiles();
-      setIdEliminar(null);
-    } catch (error: any) {
-      const apiMessage =
-        error?.response?.data?.message ||
-        error?.response?.data ||
-        "No se pudo eliminar el perfil.";
 
-      setMensaje(String(apiMessage));
+      await rolesService.eliminarRol(idEliminar);
+      setMensaje("Rol eliminado correctamente.");
+      await cargarRoles();
       setIdEliminar(null);
+    } catch (err: any) {
+      console.error(err);
+      const mensajeError =
+        err?.response?.data?.message ||
+        err?.response?.data?.mensaje ||
+        "No se pudo eliminar el rol.";
+      setError(mensajeError);
+    } finally {
+      setCargando(false);
     }
   };
 
-  const perfilSeleccionadoEliminar = perfiles.find((x) => x.id === idEliminar);
+  const rolSeleccionadoEliminar = roles.find((x) => x.id === idEliminar);
 
   return (
     <div style={styles.page}>
@@ -245,11 +217,13 @@ export default function SeguridadPerfilesPage() {
           style={styles.searchInput}
         />
         <button style={styles.primaryButton} onClick={abrirNuevo}>
-          Nuevo perfil
+          Nuevo rol
         </button>
       </div>
 
-      {mensaje && <div style={styles.messageBox}>{mensaje}</div>}
+      {cargando ? <div style={styles.infoBox}>Cargando información...</div> : null}
+      {mensaje ? <div style={styles.successBox}>{mensaje}</div> : null}
+      {error ? <div style={styles.errorBox}>{error}</div> : null}
 
       <div style={styles.card}>
         <div style={styles.tableWrapper}>
@@ -257,7 +231,7 @@ export default function SeguridadPerfilesPage() {
             <thead>
               <tr>
                 <th style={styles.th}>Id</th>
-                <th style={styles.th}>Nombre perfil</th>
+                <th style={styles.th}>Nombre rol</th>
                 <th style={styles.th}>Descripción</th>
                 <th style={styles.th}>Estado</th>
                 <th style={styles.th}>Fecha creación</th>
@@ -265,48 +239,42 @@ export default function SeguridadPerfilesPage() {
               </tr>
             </thead>
             <tbody>
-              {cargando ? (
+              {rolesFiltrados.length === 0 ? (
                 <tr>
                   <td colSpan={6} style={styles.emptyCell}>
-                    Cargando perfiles...
-                  </td>
-                </tr>
-              ) : perfilesFiltrados.length === 0 ? (
-                <tr>
-                  <td colSpan={6} style={styles.emptyCell}>
-                    No se encontraron perfiles.
+                    No se encontraron roles.
                   </td>
                 </tr>
               ) : (
-                perfilesFiltrados.map((perfil) => (
-                  <tr key={perfil.id}>
-                    <td style={styles.td}>{perfil.id}</td>
-                    <td style={styles.tdBold}>{perfil.nombrePerfil}</td>
-                    <td style={styles.td}>{perfil.descripcion}</td>
+                rolesFiltrados.map((rol) => (
+                  <tr key={rol.id}>
+                    <td style={styles.td}>{rol.id}</td>
+                    <td style={styles.tdBold}>{rol.nombreRol}</td>
+                    <td style={styles.td}>{rol.descripcion}</td>
                     <td style={styles.td}>
                       <span
                         style={{
                           ...styles.badge,
-                          ...(perfil.estado === "ACTIVO"
+                          ...(rol.estado === "ACTIVO"
                             ? styles.badgeActive
                             : styles.badgeInactive),
                         }}
                       >
-                        {perfil.estado}
+                        {rol.estado}
                       </span>
                     </td>
-                    <td style={styles.td}>{perfil.fechaCreacion}</td>
+                    <td style={styles.td}>{rol.fechaCreacion}</td>
                     <td style={styles.tdCenter}>
                       <div style={styles.actions}>
                         <button
                           style={styles.editButton}
-                          onClick={() => abrirEditar(perfil)}
+                          onClick={() => abrirEditar(rol)}
                         >
                           Editar
                         </button>
                         <button
                           style={styles.deleteButton}
-                          onClick={() => confirmarEliminar(perfil.id)}
+                          onClick={() => confirmarEliminar(rol.id)}
                         >
                           Eliminar
                         </button>
@@ -322,14 +290,14 @@ export default function SeguridadPerfilesPage() {
 
       {panelAbierto && (
         <div style={styles.overlay}>
-          <div style={styles.sidePanel} ref={sidePanelRef}>
+          <div style={styles.sidePanel}>
             <div style={styles.sidePanelHeader}>
               <div>
                 <h2 style={styles.sideTitle}>
-                  {modo === "nuevo" ? "Nuevo perfil" : "Editar perfil"}
+                  {modo === "nuevo" ? "Nuevo rol" : "Editar rol"}
                 </h2>
                 <p style={styles.sideSubtitle}>
-                  Complete la información del perfil.
+                  Complete la información del rol.
                 </p>
               </div>
 
@@ -339,18 +307,18 @@ export default function SeguridadPerfilesPage() {
             </div>
 
             <div style={styles.formGroup}>
-              <label style={styles.label}>Nombre del perfil</label>
+              <label style={styles.label}>Nombre del rol</label>
               <input
                 type="text"
-                value={form.nombrePerfil}
+                value={form.nombreRol}
                 onChange={(e) =>
-                  setForm((prev) => ({ ...prev, nombrePerfil: e.target.value }))
+                  setForm((prev) => ({ ...prev, nombreRol: e.target.value }))
                 }
                 style={styles.input}
-                placeholder="Ejemplo: PAGOS"
+                placeholder="Ejemplo: CONSULTA"
               />
-              {errores.nombrePerfil && (
-                <div style={styles.errorText}>{errores.nombrePerfil}</div>
+              {errores.nombreRol && (
+                <div style={styles.errorText}>{errores.nombreRol}</div>
               )}
             </div>
 
@@ -362,7 +330,7 @@ export default function SeguridadPerfilesPage() {
                   setForm((prev) => ({ ...prev, descripcion: e.target.value }))
                 }
                 style={styles.textarea}
-                placeholder="Descripción del perfil"
+                placeholder="Descripción del rol"
               />
               {errores.descripcion && (
                 <div style={styles.errorText}>{errores.descripcion}</div>
@@ -390,16 +358,8 @@ export default function SeguridadPerfilesPage() {
               <button style={styles.secondaryButton} onClick={cerrarPanel}>
                 Cancelar
               </button>
-              <button
-                style={styles.primaryButton}
-                onClick={guardar}
-                disabled={guardando}
-              >
-                {guardando
-                  ? "Guardando..."
-                  : modo === "nuevo"
-                  ? "Guardar"
-                  : "Actualizar"}
+              <button style={styles.primaryButton} onClick={guardar}>
+                {modo === "nuevo" ? "Guardar" : "Actualizar"}
               </button>
             </div>
           </div>
@@ -411,8 +371,7 @@ export default function SeguridadPerfilesPage() {
           <div style={styles.confirmBox}>
             <h3 style={styles.confirmTitle}>Confirmar eliminación</h3>
             <p style={styles.confirmText}>
-              ¿Desea eliminar el perfil{" "}
-              <strong>{perfilSeleccionadoEliminar?.nombrePerfil}</strong>?
+              ¿Desea eliminar el rol <strong>{rolSeleccionadoEliminar?.nombreRol}</strong>?
             </p>
 
             <div style={styles.confirmActions}>
@@ -489,21 +448,41 @@ const styles: Record<string, React.CSSProperties> = {
     outline: "none",
   },
 
-  messageBox: {
-    background: "#FEF2F2",
-    border: "1px solid #FECACA",
-    color: "#991B1B",
-    padding: 14,
-    borderRadius: 12,
-    fontSize: 14,
-    fontWeight: 600,
-  },
-
   card: {
     background: "#FFFFFF",
     borderRadius: 16,
     padding: 20,
     boxShadow: "0 8px 24px rgba(23,20,58,0.08)",
+  },
+
+  infoBox: {
+    borderRadius: 12,
+    border: "1px solid #E5E7EB",
+    background: "#FFFFFF",
+    color: "#475569",
+    padding: 10,
+    fontSize: 13,
+    fontWeight: 600,
+  },
+
+  successBox: {
+    borderRadius: 12,
+    border: "1px solid #A7F3D0",
+    background: "#ECFDF5",
+    color: "#047857",
+    padding: 10,
+    fontSize: 13,
+    fontWeight: 700,
+  },
+
+  errorBox: {
+    borderRadius: 12,
+    border: "1px solid #FECACA",
+    background: "#FEF2F2",
+    color: "#B91C1C",
+    padding: 10,
+    fontSize: 13,
+    fontWeight: 700,
   },
 
   tableWrapper: {
@@ -642,7 +621,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "rgba(15, 23, 42, 0.35)",
     display: "flex",
     justifyContent: "flex-end",
-    zIndex: 3000,
+    zIndex: 1300,
   },
 
   sidePanel: {
@@ -746,7 +725,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    zIndex: 3100,
+    zIndex: 1400,
   },
 
   confirmBox: {

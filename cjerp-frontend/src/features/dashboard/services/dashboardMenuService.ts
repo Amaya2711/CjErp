@@ -168,7 +168,7 @@ export async function loadDashboardMenus(
     const menus = await menuService.obtenerMenuDinamicoPorUsuario(idUsuario);
     return transformMenusToDashboard(menus);
   } catch (error) {
-    console.error("Error loading dashboard menus for user:", idUsuario, error);
+    // console.error("Error loading dashboard menus for user:", idUsuario, error);
     // Return empty array or default groups on error
     return [];
   }
@@ -183,7 +183,7 @@ export async function loadAllDashboardMenus(): Promise<DashboardGroup[]> {
     const menus = await menuService.obtenerCompleto();
     return transformMenusToDashboard(menus);
   } catch (error) {
-    console.error("Error loading all dashboard menus:", error);
+    // console.error("Error loading all dashboard menus:", error);
     return [];
   }
 }

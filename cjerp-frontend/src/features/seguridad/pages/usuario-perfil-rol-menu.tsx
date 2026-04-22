@@ -2,19 +2,19 @@ import { useEffect, useMemo, useState } from "react";
 import {
   menuService,
   type MenuDto,
-} from "../../features/seguridad/services/menuService";
+} from "../services/menuService";
 import {
   rolesService,
   type RolDto,
-} from "../../features/seguridad/services/rolesService";
+} from "../services/rolesService";
 import {
   perfilesService,
   type PerfilDto,
-} from "../../features/seguridad/services/perfilesService";
+} from "../services/perfilesService";
 import {
   usuariosService,
   type UsuarioDto,
-} from "../../features/seguridad/services/usuariosService";
+} from "../services/usuariosService";
 
 type RolOption = {
   id: number;

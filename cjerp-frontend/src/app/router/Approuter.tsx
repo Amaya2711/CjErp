@@ -7,52 +7,53 @@ import LoginPage from "../../features/auth/pages/LoginPage";
 import DashboardPage from "../../pages/DashboardPage";
 import DynamicMenuRoutePage from "../../pages/DynamicMenuRoutePage";
 
-import SeguridadPage from "../../pages/seguridad/SeguridadPage";
-import SeguridadUsuariosPage from "../../pages/seguridad/SeguridadUsuariosPage";
-import SeguridadUsuarioPerfilPage from "../../pages/seguridad/SeguridadUsuarioPerfil";
-import SeguridadPerfilesPage from "../../pages/seguridad/SeguridadPerfilesPage";
-import SeguridadRolesPage from "../../pages/seguridad/SeguridadRolesPage";
-import SeguridadMenuPage from "../../pages/seguridad/SeguridadMenuPage.tsx";
-import SeguridadPermisosPage from "../../pages/seguridad/SeguridadPermisosPage";
-import SeguridadPerfilRolMenu from "../../pages/seguridad/SeguridadPerfilRolMenu";
-import SeguridadUsuarioPerfilRolMenu from "../../pages/seguridad/SeguridadUsuarioPerfilRolMenu";
+//import SeguridadPage from "../../features/seguridad/pages/seguridad";
+import SeguridadUsuariosPage from "../../features/seguridad/pages/usuarios";
+//import SeguridadUsuarioPerfilPage from "../../features/seguridad/pages/usuario-perfil";
+import SeguridadPerfilesPage from "../../features/seguridad/pages/perfiles";
+import SeguridadRolesPage from "../../features/seguridad/pages/roles";
 
-import AsistenciaPage from "../../pages/administracion/AsistenciaPage";
-import MarcacionPage from "../../pages/administracion/MarcacionPage";
-import SolicitudAdministracionPage from "../../pages/administracion/solicitudadministracion";
-import VacacionesPage from "../../pages/administracion/VacacionesPage";
-import AlmacenPage from "../../pages/logistica/almacen/almacen";
-import InventarioPage from "../../pages/logistica/almacen/inventario";
-import CrucePage from "../../pages/logistica/gestionequipos/cruce";
-import DesmontadoPage from "../../pages/logistica/gestionequipos/desmontado";
-import SolicitudEquipoPage from "../../pages/logistica/gestionequipos/solicitudequipo";
-import TesoreriaDepositoPage from "../../pages/finanzas/tesoreria/deposito";
-import TesoreriaGastosPage from "../../pages/finanzas/tesoreria/gastos";
-import ActFacturaPage from "../../pages/finanzas/facturacionfinanciera/actfactura";
-import OcPage from "../../pages/finanzas/facturacionfinanciera/oc";
-import AsientosPage from "../../pages/finanzas/contabilidad/asientos";
-import CierreContablePage from "../../pages/finanzas/contabilidad/cierrecontable";
-import LibroDiarioPage from "../../pages/finanzas/contabilidad/librodiario";
-import LibroMayorPage from "../../pages/finanzas/contabilidad/libromayor";
-import CapitalizacionPage from "../../pages/operaciones/capitalizacion";
-import OperacionPage from "../../pages/operaciones/operacion";
-import AsignacionPage from "../../pages/operaciones/asignacion";
-import ClientePage from "../../pages/comercial/cliente";
-import FacturacionPage from "../../pages/comercial/facturacion";
-import CobranzasPage from "../../pages/comercial/cobranzas";
-import SolicitudesPage from "../../pages/compras/solicitudes";
-import OrdenCompraPage from "../../pages/compras/ordencompra";
-import PersonalPage from "../../pages/recursoshumanos/personal";
-import RecursosHumanosAsistenciaPage from "../../pages/recursoshumanos/asistencia";
-import RecursosHumanosVacacionesPage from "../../pages/recursoshumanos/vacaciones";
-import ConsultaPage from "../../pages/mantenimiento/consulta";
-import MigracionPage from "../../pages/mantenimiento/migracion";
-import MantenimientoPage from "../../pages/mantenimiento/mantenimiento";
-import IndicadoresGerencialesPage from "../../pages/inicio/indicadoresgerenciales";
-import PanelPrincipalPage from "../../pages/inicio/panelprincipal";
-import AlertasPage from "../../pages/inicio/alertas";
-import PlantaPrincipalPage from "../../pages/planta/principal";
-import EppsPage from "../../pages/planta/epps";
+import SeguridadMenuPage from "../../features/seguridad/pages/menu";
+import SeguridadPermisosPage from "../../features/seguridad/pages/permisos";
+import PerfilRolMenuPage from "../../features/seguridad/pages/perfil-rol-menu";
+import UsuarioPerfilRolMenu from "../../features/seguridad/pages/usuario-perfil-rol-menu";
+
+import AsistenciaPage from "../../features/administracion/AsistenciaPage";
+import MarcacionPage from "../../features/administracion/MarcacionPage";
+import SolicitudAdministracionPage from "../../features/administracion/solicitudadministracion";
+import VacacionesPage from "../../features/administracion/VacacionesPage";
+import AlmacenPage from "../../features/logistica/almacen/almacen";
+import InventarioPage from "../../features/logistica/almacen/inventario";
+import CrucePage from "../../features/logistica/gestionequipos/cruce";
+import DesmontadoPage from "../../features/logistica/gestionequipos/desmontado";
+import SolicitudEquipoPage from "../../features/logistica/gestionequipos/solicitudequipo";
+import TesoreriaDepositoPage from "../../features/finanzas/tesoreria/deposito";
+import TesoreriaGastosPage from "../../features/finanzas/tesoreria/gastos";
+import ActFacturaPage from "../../features/finanzas/facturacionfinanciera/actfactura";
+import OcPage from "../../features/finanzas/facturacionfinanciera/oc";
+import AsientosPage from "../../features/finanzas/contabilidad/asientos";
+import CierreContablePage from "../../features/finanzas/contabilidad/cierrecontable";
+import LibroDiarioPage from "../../features/finanzas/contabilidad/librodiario";
+import LibroMayorPage from "../../features/finanzas/contabilidad/libromayor";
+import CapitalizacionPage from "../../features/operaciones/capitalizacion";
+import OperacionPage from "../../features/operaciones/operacion";
+import AsignacionPage from "../../features/operaciones/asignacion";
+import ClientePage from "../../features/comercial/cliente";
+import FacturacionPage from "../../features/comercial/facturacion";
+import CobranzasPage from "../../features/comercial/cobranzas";
+import SolicitudesPage from "../../features/compras/solicitudes";
+import OrdenCompraPage from "../../features/compras/ordencompra";
+import PersonalPage from "../../features/recursoshumanos/personal";
+import RecursosHumanosAsistenciaPage from "../../features/recursoshumanos/asistencia";
+import RecursosHumanosVacacionesPage from "../../features/recursoshumanos/vacaciones";
+import ConsultaPage from "../../features/mantenimiento/consulta";
+import MigracionPage from "../../features/mantenimiento/migracion";
+import MantenimientoPage from "../../features/mantenimiento/mantenimiento";
+import IndicadoresGerencialesPage from "../../features/inicio/indicadoresgerenciales";
+import PanelPrincipalPage from "../../features/inicio/panelprincipal";
+import AlertasPage from "../../features/inicio/alertas";
+import PlantaPrincipalPage from "../../features/planta/principal";
+import EppsPage from "../../features/planta/epps";
 import OperativoPage from "../../pages/reporte/operativo";
 import AdministrativoPage from "../../pages/reporte/administrativo";
 import FinancieroPage from "../../pages/reporte/financiero";
@@ -166,39 +167,14 @@ export default function AppRouter() {
             <Route path="/finanzas/contabilidad/diario" element={<LibroDiarioPage />} />
             <Route path="/finanzas/contabilidad/mayor" element={<LibroMayorPage />} />
 
-            <Route path="/seguridad" element={<SeguridadPage />} />
+           
             <Route path="/seguridad/usuarios" element={<SeguridadUsuariosPage />} />
-            <Route
-              path="/seguridad/usuario-perfil"
-              element={<SeguridadUsuarioPerfilPage />}
-            />
             <Route path="/seguridad/perfiles" element={<SeguridadPerfilesPage />} />
             <Route path="/seguridad/roles" element={<SeguridadRolesPage />} />
-            <Route path="/seguridad/menu" element={<SeguridadMenuPage />} />
             <Route path="/seguridad/permisos" element={<SeguridadPermisosPage />} />
-
-            <Route
-              path="/seguridad/SeguridadUsuariosPage"
-              element={<SeguridadUsuariosPage />}
-            />
-            <Route
-              path="/seguridad/SeguridadPerfilesPage"
-              element={<SeguridadPerfilesPage />}
-            />
-            <Route path="/seguridad/SeguridadRolesPage" element={<SeguridadRolesPage />} />
-            <Route
-              path="/seguridad/SeguridadPermisosPage"
-              element={<SeguridadPermisosPage />}
-            />
-            <Route path="/seguridad/SeguridadMenuPage" element={<SeguridadMenuPage />} />
-            <Route
-              path="/seguridad/SeguridadPerfilRolMenu"
-              element={<SeguridadPerfilRolMenu />}
-            />
-            <Route
-              path="/seguridad/SeguridadUsuarioPerfilRolMenu"
-              element={<SeguridadUsuarioPerfilRolMenu />}
-            />
+            <Route path="/seguridad/menu" element={<SeguridadMenuPage />} />
+            <Route path="/seguridad/perfil-rol-menu" element={<PerfilRolMenuPage />} />
+            <Route path="/seguridad/usuario-perfil-rol-menu" element={<UsuarioPerfilRolMenu />} />
 
             <Route path="/seguridad/:autoPage" element={<AutoSecurityRoute />} />
 
