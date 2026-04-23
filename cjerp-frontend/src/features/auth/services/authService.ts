@@ -17,6 +17,5 @@ export interface LoginResponse {
 }
 
 export async function login(payload: LoginRequest): Promise<LoginResponse> {
-  const response = await httpClient.post<LoginResponse>("/auth/login", payload);
-  return response.data; // 👈 ahora esto es el objeto real
+  return await httpClient.post<LoginResponse>("/auth/login", payload);
 }

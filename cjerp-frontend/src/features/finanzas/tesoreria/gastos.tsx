@@ -67,24 +67,12 @@ type GastoPayload = {
 
 const GASTOS_API_URL = "/tesoreria/gastos";
 
-function extraerArray<T>(response: any): T[] {
-  if (Array.isArray(response)) {
-    return response;
-  }
-
-  if (Array.isArray(response?.data)) {
-    return response.data;
-  }
-
-  return [];
+function extraerArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? value : [];
 }
 
-function extraerObjeto<T>(response: any): T {
-  if (response?.data) {
-    return response.data as T;
-  }
-
-  return response as T;
+function extraerObjeto<T>(value: T): T {
+  return value;
 }
 
 function mapGastoDtoToView(item: GastoDto): GastoForm {

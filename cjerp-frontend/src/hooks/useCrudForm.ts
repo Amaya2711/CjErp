@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
+import { getHttpErrorMessage } from "../utils/httpError";
 
 interface CrudApi<T, TPayload = Partial<T>> {
   list: () => Promise<T[]>;
-  create: (payload: TPayload) => Promise<T>;
-  update: (id: number, payload: TPayload) => Promise<T>;
-  remove: (id: number) => Promise<void>;
+  create: (payload: TPayload) => Promise<unknown>;
+  update: (id: number, payload: TPayload) => Promise<unknown>;
+  remove: (id: number) => Promise<unknown>;
 }
 
 export function useCrudForm<T, TPayload = Partial<T>>(
@@ -27,16 +28,15 @@ export function useCrudForm<T, TPayload = Partial<T>>(
     try {
       const data = await api.list();
       setItems(data);
-    } catch (err: any) {
-      setError(err.message || "Error al cargar datos");
+    } catch (err: unknown) {
+      setError(getHttpErrorMessage(err, "Error al cargar datos"));
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    load();
-    // eslint-disable-next-line
+    void load();
   }, []);
 
   const handleSave = async () => {
@@ -47,14 +47,14 @@ export function useCrudForm<T, TPayload = Partial<T>>(
       if (mode === "nuevo") {
         await api.create(form);
         setMessage("Registro creado correctamente");
-      } else if (mode === "editar" && (form as any).id) {
-        await api.update((form as any).id, form);
+      } else if (mode === "editar" && (form as { id?: number | null }).id) {
+        await api.update((form as { id?: number | null }).id as number, form);
         setMessage("Registro actualizado correctamente");
       }
       setPanelOpen(false);
       await load();
-    } catch (err: any) {
-      setError(err.message || "Error al guardar");
+    } catch (err: unknown) {
+      setError(getHttpErrorMessage(err, "Error al guardar"));
     } finally {
       setSaving(false);
     }
@@ -67,8 +67,8 @@ export function useCrudForm<T, TPayload = Partial<T>>(
       await api.remove(id);
       setMessage("Registro eliminado correctamente");
       await load();
-    } catch (err: any) {
-      setError(err.message || "Error al eliminar");
+    } catch (err: unknown) {
+      setError(getHttpErrorMessage(err, "Error al eliminar"));
     }
   };
 

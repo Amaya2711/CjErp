@@ -1,4 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import AppCard from "../../../components/base/AppCard";
+import AppStatusMessage from "../../../components/base/AppStatusMessage";
+import SelectBase from "../../../components/base/SelectBase";
+import ToolbarFiltro from "../../../components/base/ToolbarFiltro";
 import {
   menuService,
   type MenuDto,
@@ -11,6 +15,7 @@ import {
   perfilesService,
   type PerfilDto,
 } from "../services/perfilesService";
+import { getHttpErrorMessage } from "../../../utils/httpError";
 
 type RolOption = {
   id: number;
@@ -37,6 +42,18 @@ type MenuTreeItemProps = {
   level: number;
 };
 
+function getMenuAcceso(item: MenuDto): number {
+  if (typeof item.acceso === "boolean") {
+    return item.acceso ? 1 : 0;
+  }
+
+  if (typeof item.acceso === "number") {
+    return item.acceso === 1 ? 1 : 0;
+  }
+
+  return 0;
+}
+
 
 function buildTree(items: MenuDto[]): MenuNode[] {
   const map = new Map<number, MenuNode>();
@@ -44,9 +61,7 @@ function buildTree(items: MenuDto[]): MenuNode[] {
 
   items.forEach((item) => {
     // Depuración: mostrar el item recibido y el valor de acceso
-    const rawAcceso = (item as any).acceso ?? (item as any).Acceso ?? 0;
-    // console.log('[buildTree] item:', item, 'rawAcceso:', rawAcceso);
-    const accesoValue = Number(rawAcceso) === 1 ? 1 : 0;
+    const accesoValue = getMenuAcceso(item);
 
     map.set(item.idMenu, {
       id: item.idMenu,
@@ -273,9 +288,9 @@ export default function SeguridadPerfilRolMenu() {
         }
       });
       setExpandedIds(allExpanded);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error(err);
-      setError("No se pudieron cargar perfiles y menú.");
+      setError(getHttpErrorMessage(err, "No se pudieron cargar perfiles y menú."));
     } finally {
       setCargando(false);
     }
@@ -297,9 +312,9 @@ export default function SeguridadPerfilRolMenu() {
       setRoles(rolesMapped);
       setRolId("");
       setSelectedIds(new Set());
-    } catch (err) {
+    } catch (err: unknown) {
       console.error(err);
-      setError("No se pudieron cargar los roles del perfil.");
+      setError(getHttpErrorMessage(err, "No se pudieron cargar los roles del perfil."));
       setRoles([]);
       setRolId("");
     } finally {
@@ -357,9 +372,9 @@ export default function SeguridadPerfilRolMenu() {
         parentChain.forEach((id) => expanded.add(id));
       });
       setExpandedIds(expanded);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error(err);
-      setError("No se pudo cargar el menú asignado al rol.");
+      setError(getHttpErrorMessage(err, "No se pudo cargar el menú asignado al rol."));
       setSelectedIds(new Set());
     } finally {
       setCargando(false);
@@ -477,15 +492,14 @@ export default function SeguridadPerfilRolMenu() {
       const payload = {
         idPerfil: Number(perfilId),
         idRol: Number(rolId),
-        menus: menusAsignados // [{ idMenu, acceso }]
+        menus: menusAsignados
       };
-      console.log('Payload enviado a guardarAsignacionMenuRol:', payload);
       await menuService.guardarAsignacionMenuRol(payload);
 
       setMensaje("Asignación de menú guardada correctamente.");
-    } catch (err) {
+    } catch (err: unknown) {
       console.error(err);
-      setError("No se pudo guardar la asignación de menú.");
+      setError(getHttpErrorMessage(err, "No se pudo guardar la asignación de menú."));
       setMensaje("");
     } finally {
       setGuardando(false);
@@ -529,39 +543,33 @@ export default function SeguridadPerfilRolMenu() {
     <div style={styles.page}>
       {/* Formulario y botón de nuevo nodo principal ocultos por requerimiento */}
 
-      <div style={styles.filtersCard}>
+      <ToolbarFiltro style={styles.filtersCard}>
         <div style={styles.filterInlineField}>
-          <label style={styles.inlineLabel}>Perfil</label>
-          <select
+          <SelectBase
+            label="Perfil"
             value={perfilId}
             onChange={(e) => void handlePerfilChange(e.target.value)}
-            style={styles.select}
+            selectStyle={styles.select}
             disabled={cargando}
-          >
-            <option value="">Seleccione</option>
-            {perfiles.map((perfil) => (
-              <option key={perfil.idPerfil} value={perfil.idPerfil}>
-                {perfil.nombrePerfil}
-              </option>
-            ))}
-          </select>
+            options={perfiles.map((perfil) => ({
+              value: perfil.idPerfil,
+              label: perfil.nombrePerfil,
+            }))}
+          />
         </div>
 
         <div style={styles.filterInlineField}>
-          <label style={styles.inlineLabel}>Rol</label>
-          <select
+          <SelectBase
+            label="Rol"
             value={rolId}
             onChange={(e) => void handleRolChange(e.target.value)}
-            style={styles.select}
+            selectStyle={styles.select}
             disabled={!perfilId || cargando}
-          >
-            <option value="">Seleccione</option>
-            {roles.map((rol) => (
-              <option key={rol.id} value={rol.id}>
-                {rol.nombre}
-              </option>
-            ))}
-          </select>
+            options={roles.map((rol) => ({
+              value: rol.id,
+              label: rol.nombre,
+            }))}
+          />
         </div>
 
         <div style={styles.buttonField}>
@@ -589,13 +597,13 @@ export default function SeguridadPerfilRolMenu() {
             {guardando ? "Guardando..." : "Guardar asignación"}
           </button>
         </div>
-      </div>
+      </ToolbarFiltro>
 
-      {cargando ? <div style={styles.loadingCard}>Cargando información...</div> : null}
-      {mensaje ? <div style={styles.successBox}>{mensaje}</div> : null}
-      {error ? <div style={styles.errorBox}>{error}</div> : null}
+      {cargando ? <AppStatusMessage tone="info">Cargando información...</AppStatusMessage> : null}
+      {mensaje ? <AppStatusMessage tone="success">{mensaje}</AppStatusMessage> : null}
+      {error ? <AppStatusMessage tone="error">{error}</AppStatusMessage> : null}
 
-      <div style={styles.treeCard}>
+      <AppCard style={styles.treeCard}>
         <div style={styles.treeHeader}>
           <h2 style={styles.treeTitle}>Árbol de menú</h2>
           <div style={styles.treeHeaderActions}>
@@ -659,7 +667,7 @@ export default function SeguridadPerfilRolMenu() {
             ))}
           </div>
         )}
-      </div>
+      </AppCard>
     </div>
   );
 }

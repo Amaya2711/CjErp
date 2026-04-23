@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using System.Threading.Tasks;
 using CjERP.Application.Interfaces;
 
@@ -6,6 +7,7 @@ namespace CjERP.Api.Controllers
 {
     [ApiController]
     [Route("api/lookup/filtro-operativo")]
+    [Authorize]
     public class LookupController : ControllerBase
     {
         private readonly ILookupService _lookupService;

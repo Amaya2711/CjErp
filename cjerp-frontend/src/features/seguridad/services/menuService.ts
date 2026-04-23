@@ -62,26 +62,13 @@ export interface CrearNodoMenuRequest {
 
 const BASE_URL = "/menu";
 
-function extraerArray<T>(response: any): T[] {
-  if (Array.isArray(response)) {
-    return response;
-  }
-
-  if (Array.isArray(response?.data)) {
-    return response.data;
-  }
-
-  return [];
+function extraerArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? value : [];
 }
 
 export const menuService = {
   async obtenerCompleto(): Promise<MenuDto[]> {
-    const response: any = await httpClient.get(`${BASE_URL}/completo`);
-
-    console.log("[menuService] obtenerCompleto", response);
-    console.log("[menuService] obtenerCompleto es array response:", Array.isArray(response));
-    console.log("[menuService] obtenerCompleto es array response.data:", Array.isArray(response?.data));
-
+    const response = await httpClient.get<MenuDto[]>(`${BASE_URL}/completo`);
     return extraerArray<MenuDto>(response);
   },
 
@@ -89,21 +76,14 @@ export const menuService = {
     idUsuario,
     idPerfil,
   }: ExisteUsuarioPerfilRequest): Promise<boolean> {
-    const response: any = await httpClient.get(`${BASE_URL}/usuario-perfil/existe`, {
-      params: { idUsuario, idPerfil },
-    });
+    const response = await httpClient.get<{ existe?: boolean }>(
+      `${BASE_URL}/usuario-perfil/existe`,
+      {
+        params: { idUsuario, idPerfil },
+      }
+    );
 
-    console.log("[menuService] existeUsuarioPerfil", response);
-
-    if (typeof response?.existe === "boolean") {
-      return response.existe;
-    }
-
-    if (typeof response?.data?.existe === "boolean") {
-      return response.data.existe;
-    }
-
-    return false;
+    return typeof response?.existe === "boolean" ? response.existe : false;
   },
 
   async guardarUsuarioPerfil(payload: GuardarUsuarioPerfilRequest) {
@@ -115,39 +95,30 @@ export const menuService = {
   },
 
   async guardarAsignacionMenuRol(payload: GuardarAsignacionMenuRolRequest) {
-    return await httpClient.post(`${BASE_URL}/guardar-rol-menu`, payload);
+    return await httpClient.post(`${BASE_URL}/rol/asignacion`, payload);
   },
 
   async obtenerMenuDinamicoPorUsuario(idUsuario: string): Promise<MenuDto[]> {
-    const response: any = await httpClient.get(`${BASE_URL}/dinamico`, {
+    const response = await httpClient.get<MenuDto[]>(`${BASE_URL}/dinamico`, {
       params: { idUsuario },
     });
-
-    console.log("[menuService] response completo:", response);
-    console.log("[menuService] response.data:", response?.data);
-    console.log("[menuService] es array response:", Array.isArray(response));
-    console.log("[menuService] es array response.data:", Array.isArray(response?.data));
 
     return extraerArray<MenuDto>(response);
   },
 
   async obtenerPorPerfilRol(idPerfil: number, idRol: number): Promise<MenuDto[]> {
-    const response: any = await httpClient.get(
+    const response = await httpClient.get<MenuDto[]>(
       `${BASE_URL}/perfil/${idPerfil}/rol/${idRol}/asignado`
     );
-
-    console.log("[menuService] obtenerPorPerfilRol", response);
-    console.log("[menuService] obtenerPorPerfilRol es array response:", Array.isArray(response));
-    console.log("[menuService] obtenerPorPerfilRol es array response.data:", Array.isArray(response?.data));
 
     return extraerArray<MenuDto>(response);
   },
 
   async crearMenuPrincipal(payload: CrearMenuPrincipalRequest) {
-    return await httpClient.post(`${BASE_URL}/crear-principal`, payload);
+    return await httpClient.post(`${BASE_URL}/principal`, payload);
   },
 
   async crearNodo(payload: CrearNodoMenuRequest) {
-    return await httpClient.post(`${BASE_URL}/crear`, payload);
+    return await httpClient.post(`${BASE_URL}/nodo`, payload);
   },
 };

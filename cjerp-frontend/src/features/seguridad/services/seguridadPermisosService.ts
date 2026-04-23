@@ -14,17 +14,23 @@ export interface PermisoMenu {
 }
 
 export const seguridadPermisosService = {
-  
-  // Obtener permisos de un rol
   async obtenerPorRol(idRol: number): Promise<PermisoMenu[]> {
-    const response = await httpClient.get(`${BASE_URL}/rol/${idRol}`);
-    return response.data;
+    const response = await httpClient.get<PermisoMenu[]>(`${BASE_URL}/rol/${idRol}`);
+    return Array.isArray(response) ? response : [];
   },
 
-  // Guardar permisos completos del rol
-  async guardarPorRol(idRol: number, permisos: PermisoMenu[]) {
-    const response = await httpClient.put(`${BASE_URL}/rol/${idRol}`, permisos);
-    return response.data;
-  }
-
+  async guardarPorRol(idRol: number, permisos: PermisoMenu[], usuario = "SYSTEM") {
+    for (const permiso of permisos) {
+      await httpClient.put(`${BASE_URL}/rol/${idRol}`, {
+        idMenu: permiso.idMenu,
+        puedeVer: permiso.puedeVer,
+        puedeCrear: permiso.puedeCrear,
+        puedeEditar: permiso.puedeEditar,
+        puedeEliminar: permiso.puedeEliminar,
+        puedeAprobar: permiso.puedeAprobar,
+        puedeExportar: permiso.puedeExportar,
+        usuario,
+      });
+    }
+  },
 };

@@ -1,52 +1,19 @@
 import { useMemo, useRef, useState } from "react";
-import { useCrudForm } from '../../../hooks/useCrudForm';
-import httpClient from "../../../api/httpClient";
-
-type PerfilDto = {
-  idPerfil: number;
-  nombrePerfil: string;
-  descripcion: string;
-  esActivo: boolean;
-  fechaCreacion?: string | null;
-};
-
-
+import { useCrudForm } from "../../../hooks/useCrudForm";
+import AppCard from "../../../components/base/AppCard";
+import AppPage from "../../../components/base/AppPage";
+import AppSectionHeader from "../../../components/base/AppSectionHeader";
+import AppStatusMessage from "../../../components/base/AppStatusMessage";
+import AppToolbar from "../../../components/base/AppToolbar";
+import {
+  perfilesService,
+  type PerfilDto,
+} from "../services/perfilesService";
 
 type PerfilPayload = {
   nombrePerfil: string;
   descripcion: string;
   esActivo: boolean;
-};
-
-const PERFILES_API_URL = "/perfiles";
-
-const perfilesApi = {
-  list: async () => {
-    const response = await httpClient.get<PerfilDto[]>(PERFILES_API_URL);
-    // response ahora es { message, data }
-    return (response.data ?? []).map(mapPerfilDtoToView);
-  },
-  create: async (form: PerfilForm) => {
-    const payload: PerfilPayload = {
-      nombrePerfil: form.nombrePerfil.trim().toUpperCase(),
-      descripcion: form.descripcion.trim(),
-      esActivo: form.estado === "ACTIVO",
-    };
-    const response = await httpClient.post<PerfilDto>(PERFILES_API_URL, payload);
-    return mapPerfilDtoToView(response.data);
-  },
-  update: async (id: number, form: PerfilForm) => {
-    const payload: PerfilPayload = {
-      nombrePerfil: form.nombrePerfil.trim().toUpperCase(),
-      descripcion: form.descripcion.trim(),
-      esActivo: form.estado === "ACTIVO",
-    };
-    const response = await httpClient.put<PerfilDto>(`${PERFILES_API_URL}/${id}`, payload);
-    return mapPerfilDtoToView(response.data);
-  },
-  remove: async (id: number) => {
-    await httpClient.delete(`${PERFILES_API_URL}/${id}`);
-  },
 };
 
 type Perfil = {
@@ -75,7 +42,7 @@ function mapPerfilDtoToView(item: PerfilDto): Perfil {
   return {
     id: item.idPerfil,
     nombrePerfil: item.nombrePerfil,
-    descripcion: item.descripcion,
+    descripcion: item.descripcion ?? "",
     estado: item.esActivo ? "ACTIVO" : "INACTIVO",
     fechaCreacion: item.fechaCreacion
       ? new Date(item.fechaCreacion).toISOString().slice(0, 10)
@@ -83,6 +50,31 @@ function mapPerfilDtoToView(item: PerfilDto): Perfil {
   };
 }
 
+const perfilesApi = {
+  list: async () => {
+    const perfiles = await perfilesService.listarPerfiles();
+    return perfiles.map(mapPerfilDtoToView);
+  },
+  create: async (form: PerfilForm) => {
+    const payload: PerfilPayload = {
+      nombrePerfil: form.nombrePerfil.trim().toUpperCase(),
+      descripcion: form.descripcion.trim(),
+      esActivo: form.estado === "ACTIVO",
+    };
+    await perfilesService.crearPerfil(payload);
+  },
+  update: async (id: number, form: PerfilForm) => {
+    const payload: PerfilPayload = {
+      nombrePerfil: form.nombrePerfil.trim().toUpperCase(),
+      descripcion: form.descripcion.trim(),
+      esActivo: form.estado === "ACTIVO",
+    };
+    await perfilesService.actualizarPerfil(id, payload);
+  },
+  remove: async (id: number) => {
+    await perfilesService.eliminarPerfil(id);
+  },
+};
 
 export default function SeguridadPerfilesPage() {
   const sidePanelRef = useRef<HTMLDivElement | null>(null);
@@ -95,7 +87,8 @@ export default function SeguridadPerfilesPage() {
     setForm,
     loading: cargando,
     saving: guardando,
-    error: mensaje,
+    error: errorMensaje,
+    message: mensaje,
     panelOpen: panelAbierto,
     setPanelOpen: setPanelAbierto,
     mode: modo,
@@ -110,6 +103,7 @@ export default function SeguridadPerfilesPage() {
   const perfilesFiltrados = useMemo(() => {
     const texto = busqueda.trim().toUpperCase();
     if (!texto) return perfiles;
+
     return perfiles.filter(
       (x) =>
         x.nombrePerfil.toUpperCase().includes(texto) ||
@@ -145,26 +139,27 @@ export default function SeguridadPerfilesPage() {
 
   const validar = () => {
     const nuevosErrores: Record<string, string> = {};
+
     if (!form.nombrePerfil.trim()) {
       nuevosErrores.nombrePerfil = "Ingrese el nombre del perfil.";
     }
+
     if (form.nombrePerfil.trim().length > 100) {
       nuevosErrores.nombrePerfil = "El nombre no debe exceder 100 caracteres.";
     }
+
     if (!form.descripcion.trim()) {
-      nuevosErrores.descripcion = "Ingrese la descripción.";
+      nuevosErrores.descripcion = "Ingrese la descripcion.";
     }
+
     setErrores(nuevosErrores);
     return Object.keys(nuevosErrores).length === 0;
   };
 
   const guardar = async () => {
     if (!validar()) return;
-    if (modo === "nuevo") {
-      await handleSave();
-    } else if (form.id != null) {
-      await handleSave();
-    }
+
+    await handleSave();
     setPanelAbierto(false);
     setForm(formularioInicial);
     await cargarPerfiles();
@@ -183,11 +178,11 @@ export default function SeguridadPerfilesPage() {
   const perfilSeleccionadoEliminar = perfiles.find((x) => x.id === idEliminar);
 
   return (
-    <div style={styles.page}>
-      <div style={styles.toolbar}>
+    <AppPage title="Perfiles de seguridad">
+      <AppToolbar>
         <input
           type="text"
-          placeholder="Buscar por nombre, descripción o estado"
+          placeholder="Buscar por nombre, descripcion o estado"
           value={busqueda}
           onChange={(e) => setBusqueda(e.target.value)}
           style={styles.searchInput}
@@ -195,20 +190,25 @@ export default function SeguridadPerfilesPage() {
         <button style={styles.primaryButton} onClick={abrirNuevo}>
           Nuevo perfil
         </button>
-      </div>
+      </AppToolbar>
 
-      {mensaje && <div style={styles.messageBox}>{mensaje}</div>}
+      {mensaje ? <AppStatusMessage tone="success">{mensaje}</AppStatusMessage> : null}
+      {errorMensaje ? <AppStatusMessage tone="error">{errorMensaje}</AppStatusMessage> : null}
 
-      <div style={styles.card}>
+      <AppCard style={styles.card}>
+        <AppSectionHeader
+          title="Listado de perfiles"
+          description="Administra los perfiles, su estado y la información base del módulo."
+        />
         <div style={styles.tableWrapper}>
           <table style={styles.table}>
             <thead>
               <tr>
                 <th style={styles.th}>Id</th>
                 <th style={styles.th}>Nombre perfil</th>
-                <th style={styles.th}>Descripción</th>
+                <th style={styles.th}>Descripcion</th>
                 <th style={styles.th}>Estado</th>
-                <th style={styles.th}>Fecha creación</th>
+                <th style={styles.th}>Fecha creacion</th>
                 <th style={styles.thCenter}>Acciones</th>
               </tr>
             </thead>
@@ -266,7 +266,7 @@ export default function SeguridadPerfilesPage() {
             </tbody>
           </table>
         </div>
-      </div>
+      </AppCard>
 
       {panelAbierto && (
         <div style={styles.overlay}>
@@ -277,12 +277,12 @@ export default function SeguridadPerfilesPage() {
                   {modo === "nuevo" ? "Nuevo perfil" : "Editar perfil"}
                 </h2>
                 <p style={styles.sideSubtitle}>
-                  Complete la información del perfil.
+                  Complete la informacion del perfil.
                 </p>
               </div>
 
               <button style={styles.closeButton} onClick={cerrarPanel}>
-                ×
+                x
               </button>
             </div>
 
@@ -303,14 +303,14 @@ export default function SeguridadPerfilesPage() {
             </div>
 
             <div style={styles.formGroup}>
-              <label style={styles.label}>Descripción</label>
+              <label style={styles.label}>Descripcion</label>
               <textarea
                 value={form.descripcion}
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, descripcion: e.target.value }))
                 }
                 style={styles.textarea}
-                placeholder="Descripción del perfil"
+                placeholder="Descripcion del perfil"
               />
               {errores.descripcion && (
                 <div style={styles.errorText}>{errores.descripcion}</div>
@@ -357,9 +357,9 @@ export default function SeguridadPerfilesPage() {
       {idEliminar !== null && (
         <div style={styles.confirmOverlay}>
           <div style={styles.confirmBox}>
-            <h3 style={styles.confirmTitle}>Confirmar eliminación</h3>
+            <h3 style={styles.confirmTitle}>Confirmar eliminacion</h3>
             <p style={styles.confirmText}>
-              ¿Desea eliminar el perfil{" "}
+              Desea eliminar el perfil{" "}
               <strong>{perfilSeleccionadoEliminar?.nombrePerfil}</strong>?
             </p>
 
@@ -377,7 +377,7 @@ export default function SeguridadPerfilesPage() {
           </div>
         </div>
       )}
-    </div>
+    </AppPage>
   );
 }
 
@@ -388,33 +388,6 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     gap: 20,
   },
-
-  header: {
-    background: "#FFFFFF",
-    borderRadius: 16,
-    padding: 24,
-    boxShadow: "0 8px 24px rgba(23,20,58,0.08)",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 16,
-    flexWrap: "wrap",
-  },
-
-  title: {
-    margin: 0,
-    fontSize: 28,
-    color: "#17143A",
-    fontWeight: 700,
-  },
-
-  subtitle: {
-    marginTop: 8,
-    marginBottom: 0,
-    color: "#6B7280",
-    fontSize: 14,
-  },
-
   toolbar: {
     background: "#FFFFFF",
     borderRadius: 16,
@@ -425,7 +398,6 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "space-between",
     gap: 12,
   },
-
   searchInput: {
     width: "100%",
     maxWidth: 420,
@@ -436,7 +408,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 14,
     outline: "none",
   },
-
   messageBox: {
     background: "#FEF2F2",
     border: "1px solid #FECACA",
@@ -446,24 +417,29 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 14,
     fontWeight: 600,
   },
-
+  successBox: {
+    background: "#ECFDF5",
+    border: "1px solid #A7F3D0",
+    color: "#047857",
+    padding: 14,
+    borderRadius: 12,
+    fontSize: 14,
+    fontWeight: 600,
+  },
   card: {
     background: "#FFFFFF",
     borderRadius: 16,
     padding: 20,
     boxShadow: "0 8px 24px rgba(23,20,58,0.08)",
   },
-
   tableWrapper: {
     width: "100%",
     overflowX: "auto",
   },
-
   table: {
     width: "100%",
     borderCollapse: "collapse",
   },
-
   th: {
     textAlign: "left",
     padding: "14px 12px",
@@ -472,7 +448,6 @@ const styles: Record<string, React.CSSProperties> = {
     borderBottom: "1px solid #E5E7EB",
     background: "#F9FAFB",
   },
-
   thCenter: {
     textAlign: "center",
     padding: "14px 12px",
@@ -481,14 +456,12 @@ const styles: Record<string, React.CSSProperties> = {
     borderBottom: "1px solid #E5E7EB",
     background: "#F9FAFB",
   },
-
   td: {
     padding: "14px 12px",
     borderBottom: "1px solid #F3F4F6",
     color: "#374151",
     fontSize: 14,
   },
-
   tdBold: {
     padding: "14px 12px",
     borderBottom: "1px solid #F3F4F6",
@@ -496,20 +469,17 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 14,
     fontWeight: 700,
   },
-
   tdCenter: {
     padding: "14px 12px",
     borderBottom: "1px solid #F3F4F6",
     textAlign: "center",
   },
-
   emptyCell: {
     padding: 24,
     textAlign: "center",
     color: "#6B7280",
     fontSize: 14,
   },
-
   badge: {
     display: "inline-block",
     padding: "6px 10px",
@@ -517,23 +487,19 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
     fontWeight: 700,
   },
-
   badgeActive: {
     background: "#DCFCE7",
     color: "#166534",
   },
-
   badgeInactive: {
     background: "#FEE2E2",
     color: "#991B1B",
   },
-
   actions: {
     display: "flex",
     justifyContent: "center",
     gap: 8,
   },
-
   primaryButton: {
     border: "none",
     background: "#6E4CCB",
@@ -543,7 +509,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     cursor: "pointer",
   },
-
   secondaryButton: {
     border: "1px solid #D1D5DB",
     background: "#FFFFFF",
@@ -553,7 +518,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     cursor: "pointer",
   },
-
   editButton: {
     border: "1px solid #C7D2FE",
     background: "#EEF2FF",
@@ -563,7 +527,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     cursor: "pointer",
   },
-
   deleteButton: {
     border: "1px solid #FECACA",
     background: "#FEF2F2",
@@ -573,7 +536,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     cursor: "pointer",
   },
-
   deleteButtonSolid: {
     border: "none",
     background: "#DC2626",
@@ -583,7 +545,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     cursor: "pointer",
   },
-
   overlay: {
     position: "fixed",
     inset: 0,
@@ -592,7 +553,6 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "flex-end",
     zIndex: 3000,
   },
-
   sidePanel: {
     width: 420,
     maxWidth: "100%",
@@ -603,7 +563,6 @@ const styles: Record<string, React.CSSProperties> = {
     boxSizing: "border-box",
     overflowY: "auto",
   },
-
   sidePanelHeader: {
     display: "flex",
     justifyContent: "space-between",
@@ -611,20 +570,17 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 12,
     marginBottom: 24,
   },
-
   sideTitle: {
     margin: 0,
     fontSize: 24,
     color: "#17143A",
   },
-
   sideSubtitle: {
     marginTop: 8,
     marginBottom: 0,
     color: "#6B7280",
     fontSize: 14,
   },
-
   closeButton: {
     border: "none",
     background: "#F3F4F6",
@@ -636,20 +592,17 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 22,
     lineHeight: "22px",
   },
-
   formGroup: {
     display: "flex",
     flexDirection: "column",
     gap: 8,
     marginBottom: 18,
   },
-
   label: {
     fontSize: 14,
     fontWeight: 700,
     color: "#374151",
   },
-
   input: {
     width: "100%",
     height: 42,
@@ -660,7 +613,6 @@ const styles: Record<string, React.CSSProperties> = {
     outline: "none",
     boxSizing: "border-box",
   },
-
   textarea: {
     width: "100%",
     minHeight: 100,
@@ -673,20 +625,17 @@ const styles: Record<string, React.CSSProperties> = {
     resize: "vertical",
     fontFamily: "inherit",
   },
-
   errorText: {
     fontSize: 12,
     color: "#DC2626",
     fontWeight: 600,
   },
-
   panelActions: {
     display: "flex",
     justifyContent: "flex-end",
     gap: 10,
     marginTop: 28,
   },
-
   confirmOverlay: {
     position: "fixed",
     inset: 0,
@@ -696,7 +645,6 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "center",
     zIndex: 3100,
   },
-
   confirmBox: {
     width: 420,
     maxWidth: "calc(100% - 24px)",
@@ -705,19 +653,16 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 24,
     boxShadow: "0 12px 28px rgba(0,0,0,0.16)",
   },
-
   confirmTitle: {
     marginTop: 0,
     marginBottom: 12,
     color: "#17143A",
   },
-
   confirmText: {
     marginTop: 0,
     color: "#4B5563",
     lineHeight: 1.6,
   },
-
   confirmActions: {
     display: "flex",
     justifyContent: "flex-end",

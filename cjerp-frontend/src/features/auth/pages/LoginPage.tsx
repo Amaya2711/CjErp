@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { login } from "../services/authService";
 import { saveAuthUser } from "../../../utils/authStorage";
+import { getHttpErrorMessage } from "../../../utils/httpError";
 import logoEmpresa from "../../../assets/logo.png";
 
 export default function LoginPage() {
@@ -34,8 +35,6 @@ export default function LoginPage() {
         clave: clave.trim(),
       });
 
-      console.log("Respuesta login:", response);
-
       if (!response || !response.token) {
         setMensaje("No se pudo iniciar sesión.");
         return;
@@ -52,16 +51,9 @@ export default function LoginPage() {
       });
 
       navigate("/admin/dashboardPage", { replace: true });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error al iniciar sesión:", error);
-
-      const mensajeError =
-        error?.response?.data?.message ||
-        error?.response?.data?.mensaje ||
-        error?.message ||
-        "No se pudo iniciar sesión.";
-
-      setMensaje(mensajeError);
+      setMensaje(getHttpErrorMessage(error, "No se pudo iniciar sesión."));
     } finally {
       setCargando(false);
     }

@@ -1,229 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
+import AppCard from "../../../components/base/AppCard";
+import AppStatusMessage from "../../../components/base/AppStatusMessage";
 import {
   menuService,
-  type MenuDto,
 } from "../services/menuService";
-
-type MenuNode = {
-  id: number;
-  label: string;
-  path?: string;
-  parentId: number | null;
-  orden: number;
-  children: MenuNode[];
-};
-
-type MenuNivel = 0 | 1 | 2;
-
-type MenuTreeItemProps = {
-  node: MenuNode;
-  selectedIds: Set<number>;
-  expandedIds: Set<number>;
-  onToggleSelected: (node: MenuNode, checked: boolean) => void;
-  onToggleExpanded: (id: number) => void;
-  level: number;
-};
-
-function buildTree(items: MenuDto[]): MenuNode[] {
-  const map = new Map<number, MenuNode>();
-  const roots: MenuNode[] = [];
-
-  items.forEach((item) => {
-    map.set(item.idMenu, {
-      id: item.idMenu,
-      label: item.nombreMenu,
-      path: item.ruta ?? undefined,
-      parentId: item.idMenuPadre ?? null,
-      orden: item.ordenMenu,
-      children: [],
-    });
-  });
-
-  items.forEach((item) => {
-    const current = map.get(item.idMenu);
-    if (!current) return;
-
-    const parentId = item.idMenuPadre ?? null;
-
-    if (parentId === null || !map.has(parentId)) {
-      roots.push(current);
-      return;
-    }
-
-    map.get(parentId)!.children.push(current);
-  });
-
-  const sortRecursive = (nodes: MenuNode[]) => {
-    nodes.sort((a, b) => a.label.localeCompare(b.label));
-    nodes.forEach((node) => sortRecursive(node.children));
-  };
-
-  sortRecursive(roots);
-
-  return roots;
-}
-
-function flattenTree(nodes: MenuNode[]): MenuNode[] {
-  const result: MenuNode[] = [];
-
-  const recorrer = (items: MenuNode[]) => {
-    items.forEach((item) => {
-      result.push(item);
-      if (item.children.length > 0) {
-        recorrer(item.children);
-      }
-    });
-  };
-
-  recorrer(nodes);
-  return result;
-}
-
-function cloneDeep(nodes: MenuNode[]): MenuNode[] {
-  return nodes.map((node) => ({
-    ...node,
-    children: cloneDeep(node.children),
-  }));
-}
-
-function collectNodeAndChildrenIds(node: MenuNode): number[] {
-  const ids: number[] = [node.id];
-
-  node.children.forEach((child) => {
-    ids.push(...collectNodeAndChildrenIds(child));
-  });
-
-  return ids;
-}
-
-function findParentChainIds(nodes: MenuNode[], targetId: number): number[] {
-  const path: number[] = [];
-
-  const buscar = (items: MenuNode[], parents: number[]): boolean => {
-    for (const item of items) {
-      if (item.id === targetId) {
-        path.push(...parents);
-        return true;
-      }
-
-      if (item.children.length > 0) {
-        const found = buscar(item.children, [...parents, item.id]);
-        if (found) return true;
-      }
-    }
-
-    return false;
-  };
-
-  buscar(nodes, []);
-  return path;
-}
-
-function findNodeById(nodes: MenuNode[], id: number): MenuNode | null {
-  for (const node of nodes) {
-    if (node.id === id) {
-      return node;
-    }
-
-    if (node.children.length > 0) {
-      const found = findNodeById(node.children, id);
-      if (found) {
-        return found;
-      }
-    }
-  }
-
-  return null;
-}
-
-function collectNodesByLevel(
-  nodes: MenuNode[],
-  targetLevel: MenuNivel,
-  currentLevel: MenuNivel = 0
-): MenuNode[] {
-  const result: MenuNode[] = [];
-
-  for (const node of nodes) {
-    if (currentLevel === targetLevel) {
-      result.push(node);
-    }
-
-    if (node.children.length > 0 && currentLevel < 2) {
-      result.push(
-        ...collectNodesByLevel(
-          node.children,
-          targetLevel,
-          (currentLevel + 1) as MenuNivel
-        )
-      );
-    }
-  }
-
-  return result;
-}
-
-function MenuTreeItem({
-  node,
-  selectedIds,
-  expandedIds,
-  onToggleSelected,
-  onToggleExpanded,
-  level,
-}: MenuTreeItemProps) {
-  const hasChildren = node.children.length > 0;
-  const expanded = expandedIds.has(node.id);
-  const checked = selectedIds.has(node.id);
-
-  return (
-    <div>
-      <div
-        style={{
-          ...styles.treeItemRow,
-          paddingLeft: `${level * 20}px`,
-        }}
-      >
-        {hasChildren ? (
-          <button
-            type="button"
-            onClick={() => onToggleExpanded(node.id)}
-            style={styles.treeToggleBtn}
-          >
-            {expanded ? "-" : "+"}
-          </button>
-        ) : (
-          <div style={styles.treeTogglePlaceholder} />
-        )}
-
-        <input
-          type="checkbox"
-          checked={checked}
-          onChange={(e) => onToggleSelected(node, e.target.checked)}
-        />
-
-        <div style={styles.treeLabelBox}>
-          <span style={styles.treeLabel}>{node.label}</span>
-          {node.path ? <span style={styles.treePath}>{node.path}</span> : null}
-        </div>
-      </div>
-
-      {hasChildren && expanded && (
-        <div>
-          {node.children.map((child) => (
-            <MenuTreeItem
-              key={child.id}
-              node={child}
-              selectedIds={selectedIds}
-              expandedIds={expandedIds}
-              onToggleSelected={onToggleSelected}
-              onToggleExpanded={onToggleExpanded}
-              level={level + 1}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+import { getHttpErrorMessage } from "../../../utils/httpError";
+import { MenuTree } from "../components/MenuTree";
+import {
+  buildMenuTree,
+  cloneMenuTree,
+  collectMenuNodesByLevel,
+  collectNodeAndChildrenIds,
+  createExpandedMenuSet,
+  findMenuNodeById,
+  findParentChainIds,
+  flattenMenuTree,
+  type MenuNivel,
+  type MenuTreeNode,
+} from "../utils/menuTree";
 
 export default function SeguridadMenuPage() {
   const [cargando, setCargando] = useState(false);
@@ -238,12 +32,12 @@ export default function SeguridadMenuPage() {
   const [nuevaRuta, setNuevaRuta] = useState("");
   const [nuevoOrdenMenu, setNuevoOrdenMenu] = useState(0);
 
-  const [menuBase, setMenuBase] = useState<MenuNode[]>([]);
+  const [menuBase, setMenuBase] = useState<MenuTreeNode[]>([]);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
-  const nodosNivelPrincipal = useMemo(() => collectNodesByLevel(menuBase, 0), [menuBase]);
-  const nodosNivelSecundario = useMemo(() => collectNodesByLevel(menuBase, 1), [menuBase]);
+  const nodosNivelPrincipal = useMemo(() => collectMenuNodesByLevel(menuBase, 0), [menuBase]);
+  const nodosNivelSecundario = useMemo(() => collectMenuNodesByLevel(menuBase, 1), [menuBase]);
 
   const opcionesPadre = useMemo(() => {
     if (nuevoNivel === 1) {
@@ -278,7 +72,7 @@ export default function SeguridadMenuPage() {
         return 0;
       }
 
-      const parentNode = findNodeById(menuBase, Number(nuevoPadreId));
+      const parentNode = findMenuNodeById(menuBase, Number(nuevoPadreId));
       if (!parentNode) {
         return 0;
       }
@@ -301,7 +95,7 @@ export default function SeguridadMenuPage() {
 
       const menuData = await menuService.obtenerCompleto();
 
-      const menuTree = buildTree(menuData);
+      const menuTree = buildMenuTree(menuData);
       const siguienteOrdenPrincipal =
         menuData
           .filter((menu) => menu.idMenuPadre == null)
@@ -310,16 +104,10 @@ export default function SeguridadMenuPage() {
       setNuevoOrdenMenu(siguienteOrdenPrincipal);
       setMenuBase(menuTree);
 
-      const allExpanded = new Set<number>();
-      flattenTree(menuTree).forEach((node: MenuNode) => {
-        if (node.children.length > 0) {
-          allExpanded.add(node.id);
-        }
-      });
-      setExpandedIds(allExpanded);
-    } catch (err) {
+      setExpandedIds(createExpandedMenuSet(menuTree));
+    } catch (err: unknown) {
       console.error(err);
-      setError("No se pudo cargar el menú.");
+      setError(getHttpErrorMessage(err, "No se pudo cargar el menú."));
     } finally {
       setCargando(false);
     }
@@ -341,7 +129,7 @@ export default function SeguridadMenuPage() {
     });
   };
 
-  const toggleSelected = (node: MenuNode, checked: boolean) => {
+  const toggleSelected = (node: MenuTreeNode, checked: boolean) => {
     const ids = collectNodeAndChildrenIds(node);
     const parentChain = findParentChainIds(menuBase, node.id);
 
@@ -361,7 +149,7 @@ export default function SeguridadMenuPage() {
 
   const expandirTodo = () => {
     const next = new Set<number>();
-    flattenTree(menuBase).forEach((node: MenuNode) => {
+    flattenMenuTree(menuBase).forEach((node) => {
       if (node.children.length > 0) {
         next.add(node.id);
       }
@@ -375,7 +163,7 @@ export default function SeguridadMenuPage() {
 
   const seleccionarTodo = () => {
     const next = new Set<number>();
-    flattenTree(menuBase).forEach((node: MenuNode) => next.add(node.id));
+    flattenMenuTree(menuBase).forEach((node) => next.add(node.id));
     setSelectedIds(next);
   };
 
@@ -419,13 +207,9 @@ export default function SeguridadMenuPage() {
 
       await recargar();
       setMensaje("Nodo creado correctamente.");
-    } catch (err) {
+    } catch (err: unknown) {
       console.error(err);
-      const errorMessage =
-        err instanceof Error && err.message
-          ? err.message
-          : "No se pudo crear el nodo.";
-      setError(errorMessage);
+      setError(getHttpErrorMessage(err, "No se pudo crear el nodo."));
       setMensaje("");
     } finally {
       setCreandoNodo(false);
@@ -436,15 +220,15 @@ export default function SeguridadMenuPage() {
     setMostrarCrearNodo(false);
   };
 
-  const menuVisual = useMemo(() => cloneDeep(menuBase), [menuBase]);
+  const menuVisual = useMemo(() => cloneMenuTree(menuBase), [menuBase]);
 
   return (
     <div style={styles.page}>
-      {cargando ? <div style={styles.loadingCard}>Cargando información...</div> : null}
-      {mensaje ? <div style={styles.successBox}>{mensaje}</div> : null}
-      {error ? <div style={styles.errorBox}>{error}</div> : null}
+      {cargando ? <AppStatusMessage tone="info">Cargando información...</AppStatusMessage> : null}
+      {mensaje ? <AppStatusMessage tone="success">{mensaje}</AppStatusMessage> : null}
+      {error ? <AppStatusMessage tone="error">{error}</AppStatusMessage> : null}
 
-      <div style={styles.treeCard}>
+      <AppCard style={styles.treeCard}>
         <div style={styles.treeHeader}>
           <h2 style={styles.treeTitle}>Árbol de menú</h2>
           <div style={{...styles.treeHeaderActions, flexWrap: 'wrap'}}>
@@ -514,20 +298,16 @@ export default function SeguridadMenuPage() {
           <div style={styles.emptyText}>No hay menús disponibles.</div>
         ) : (
           <div style={styles.treeContainer}>
-            {menuVisual.map((node) => (
-              <MenuTreeItem
-                key={node.id}
-                node={node}
-                selectedIds={selectedIds}
-                expandedIds={expandedIds}
-                onToggleSelected={toggleSelected}
-                onToggleExpanded={toggleExpanded}
-                level={0}
-              />
-            ))}
+            <MenuTree
+              nodes={menuVisual}
+              selectedIds={selectedIds}
+              expandedIds={expandedIds}
+              onToggleSelected={toggleSelected}
+              onToggleExpanded={toggleExpanded}
+            />
           </div>
         )}
-      </div>
+      </AppCard>
 
       {mostrarCrearNodo && (
         <div style={styles.overlay}>

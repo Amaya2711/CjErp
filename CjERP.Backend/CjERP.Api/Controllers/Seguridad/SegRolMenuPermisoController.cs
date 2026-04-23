@@ -1,11 +1,13 @@
-﻿using CjERP.Application.DTOs.Seguridad;
+using CjERP.Application.DTOs.Seguridad;
 using CjERP.Application.Interfaces.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CjERP.Api.Controllers.Seguridad;
 
 [ApiController]
 [Route("api/seguridad-permisos")]
+[Authorize]
 public class SegRolMenuPermisoController : ControllerBase
 {
     private readonly ISegRolMenuPermisoService _service;
@@ -50,7 +52,6 @@ public class SegRolMenuPermisoController : ControllerBase
         return Ok(new { message = "Permiso guardado correctamente." });
     }
 
-    // Nuevo endpoint alineado con el frontend: PUT /rol/{idRol}
     [HttpPut("rol/{idRol:int}")]
     public async Task<IActionResult> GuardarPorRol(int idRol, [FromBody] GuardarSegRolMenuPermisoDto dto)
     {

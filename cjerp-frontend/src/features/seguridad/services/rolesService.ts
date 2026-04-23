@@ -3,6 +3,11 @@ import httpClient from "../../../api/httpClient";
 const PERFILES_BASE_URL = "/perfiles";
 const ROLES_BASE_URL = "/roles";
 
+export interface CommandResult {
+  message?: string;
+  idRol?: number;
+}
+
 export interface RolDto {
   idRol: number;
   idPerfil?: number;
@@ -25,29 +30,36 @@ export interface ActualizarRolRequest {
   esActivo: boolean;
 }
 
+function extraerArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? value : [];
+}
+
 export const rolesService = {
   async listarRolesPorPerfil(idPerfil: number): Promise<RolDto[]> {
-    const response = await httpClient.get(`${PERFILES_BASE_URL}/${idPerfil}/roles`);
-    return response.data ?? [];
+    const data = await httpClient.get<RolDto[]>(
+      `${PERFILES_BASE_URL}/${idPerfil}/roles`
+    );
+
+    return extraerArray<RolDto>(data);
   },
 
   async listarRoles(): Promise<RolDto[]> {
-    const response = await httpClient.get(ROLES_BASE_URL);
-    return response.data ?? [];
+    const data = await httpClient.get<RolDto[]>(ROLES_BASE_URL);
+    return extraerArray<RolDto>(data);
   },
 
-  async crearRol(payload: CrearRolRequest) {
-    const response = await httpClient.post(ROLES_BASE_URL, payload);
-    return response.data;
+  async crearRol(payload: CrearRolRequest): Promise<CommandResult> {
+    return await httpClient.post<CommandResult>(ROLES_BASE_URL, payload);
   },
 
-  async actualizarRol(idRol: number, payload: ActualizarRolRequest) {
-    const response = await httpClient.put(`${ROLES_BASE_URL}/${idRol}`, payload);
-    return response.data;
+  async actualizarRol(
+    idRol: number,
+    payload: ActualizarRolRequest
+  ): Promise<CommandResult> {
+    return await httpClient.put<CommandResult>(`${ROLES_BASE_URL}/${idRol}`, payload);
   },
 
-  async eliminarRol(idRol: number) {
-    const response = await httpClient.delete(`${ROLES_BASE_URL}/${idRol}`);
-    return response.data;
+  async eliminarRol(idRol: number): Promise<CommandResult> {
+    return await httpClient.delete<CommandResult>(`${ROLES_BASE_URL}/${idRol}`);
   },
 };

@@ -1,6 +1,7 @@
 // src/hooks/useFiltroOperativoLookup.ts
 
 import { useEffect, useState, useCallback } from 'react';
+import { getHttpErrorMessage } from '../utils/httpError';
 import type {
   FiltroOperativoItem,
   TipoTrabajoOption,
@@ -45,32 +46,47 @@ export function useFiltroOperativoLookup(
 
   // Load filtros and tareas on mount
   useEffect(() => {
-    setLoading(true);
-    Promise.all([getFiltrosOperativos(), getTareas()])
-      .then(([filtrosData, tareasData]) => {
+    const loadInitialData = async () => {
+      try {
+        setLoading(true);
+        const [filtrosData, tareasData] = await Promise.all([
+          getFiltrosOperativos(),
+          getTareas(),
+        ]);
         setFiltros(filtrosData);
         setTareas(tareasData);
         setError(null);
-      })
-      .catch(() => setError('Error al cargar datos iniciales'))
-      .finally(() => setLoading(false));
+      } catch (error: unknown) {
+        setError(getHttpErrorMessage(error, 'Error al cargar datos iniciales'));
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void loadInitialData();
   }, []);
 
   // Load tipoTrabajo and OT when filtro changes
   useEffect(() => {
     if (value.filtro?.filtroKey) {
-      setLoading(true);
-      Promise.all([
-        getTipoTrabajo(value.filtro.filtroKey),
-        getOTs(value.filtro.filtroKey),
-      ])
-        .then(([tipoTrabajosData, otsData]) => {
+      const loadDependentData = async () => {
+        try {
+          setLoading(true);
+          const [tipoTrabajosData, otsData] = await Promise.all([
+            getTipoTrabajo(value.filtro.filtroKey),
+            getOTs(value.filtro.filtroKey),
+          ]);
           setTipoTrabajos(tipoTrabajosData);
           setOts(otsData);
           setError(null);
-        })
-        .catch(() => setError('Error al cargar tipo de trabajo u OT'))
-        .finally(() => setLoading(false));
+        } catch (error: unknown) {
+          setError(getHttpErrorMessage(error, 'Error al cargar tipo de trabajo u OT'));
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      void loadDependentData();
     } else {
       setTipoTrabajos([]);
       setOts([]);

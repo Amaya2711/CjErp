@@ -1,4 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import AppCard from "../../../components/base/AppCard";
+import AppStatusMessage from "../../../components/base/AppStatusMessage";
+import InputBase from "../../../components/base/InputBase";
+import SelectBase from "../../../components/base/SelectBase";
+import ToolbarFiltro from "../../../components/base/ToolbarFiltro";
 import {
   menuService,
   type MenuDto,
@@ -15,6 +20,7 @@ import {
   usuariosService,
   type UsuarioDto,
 } from "../services/usuariosService";
+import { getHttpErrorMessage } from "../../../utils/httpError";
 
 type RolOption = {
   id: number;
@@ -248,6 +254,11 @@ export default function SeguridadPerfilRolMenu() {
     void cargarDatosIniciales();
   }, []);
 
+  const appendErrorMessage = (baseMessage: string, error: unknown): string => {
+    const detail = getHttpErrorMessage(error, "");
+    return detail ? `${baseMessage} ${detail}` : baseMessage;
+  };
+
   const cargarDatosIniciales = async () => {
     try {
       setCargando(true);
@@ -307,9 +318,9 @@ export default function SeguridadPerfilRolMenu() {
         }
       });
       setExpandedIds(allExpanded);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error(err);
-      setError("No se pudieron cargar perfiles y menú.");
+      setError(getHttpErrorMessage(err, "No se pudieron cargar perfiles y menú."));
     } finally {
       setCargando(false);
     }
@@ -331,9 +342,9 @@ export default function SeguridadPerfilRolMenu() {
       setRoles(rolesMapped);
       setRolId("");
       setSelectedIds(new Set());
-    } catch (err) {
+    } catch (err: unknown) {
       console.error(err);
-      setError("No se pudieron cargar los roles del perfil.");
+      setError(getHttpErrorMessage(err, "No se pudieron cargar los roles del perfil."));
       setRoles([]);
       setRolId("");
     } finally {
@@ -372,9 +383,9 @@ export default function SeguridadPerfilRolMenu() {
         parentChain.forEach((id) => expanded.add(id));
       });
       setExpandedIds(expanded);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error(err);
-      setError("No se pudo cargar el menú asignado al rol.");
+      setError(getHttpErrorMessage(err, "No se pudo cargar el menú asignado al rol."));
       setSelectedIds(new Set());
     } finally {
       setCargando(false);
@@ -476,7 +487,7 @@ export default function SeguridadPerfilRolMenu() {
           idUsuario: usuarioIdSeleccionado,
           idPerfil: Number(perfilId)
         });
-      } catch (e) {
+      } catch (e: unknown) {
         existeRelacion = false;
       }
 
@@ -487,17 +498,8 @@ export default function SeguridadPerfilRolMenu() {
             idUsuario: usuarioIdSeleccionado,
             idPerfil: Number(perfilId)
           });
-        } catch (e: any) {
-          let msg = "No se pudo crear la relación usuario-perfil.";
-          if (typeof e === "object" && e !== null && "response" in e) {
-            const resp = (e as any).response;
-            if (resp && typeof resp === "object" && "data" in resp && resp.data && typeof resp.data === "object" && "message" in resp.data) {
-              msg += " " + resp.data.message;
-            }
-          } else if (e instanceof Error && e.message) {
-            msg += " " + e.message;
-          }
-          setError(msg);
+        } catch (e: unknown) {
+          setError(appendErrorMessage("No se pudo crear la relación usuario-perfil.", e));
           setGuardando(false);
           return;
         }
@@ -521,17 +523,8 @@ export default function SeguridadPerfilRolMenu() {
       });
 
       setMensaje("Relación usuario-perfil-rol y asignación de menú guardadas correctamente.");
-    } catch (err: any) {
-      let errorMsg = "No se pudo guardar la asignación de menú.";
-      if (typeof err === "object" && err !== null && "response" in err) {
-        const resp = (err as any).response;
-        if (resp && typeof resp === "object" && "data" in resp && resp.data && typeof resp.data === "object" && "message" in resp.data) {
-          errorMsg = resp.data.message;
-        }
-      } else if (err instanceof Error && err.message) {
-        errorMsg = err.message;
-      }
-      setError(errorMsg);
+    } catch (err: unknown) {
+      setError(appendErrorMessage("No se pudo guardar la asignación de menú.", err));
       setMensaje("");
     } finally {
       setGuardando(false);
@@ -567,9 +560,9 @@ export default function SeguridadPerfilRolMenu() {
 
       await recargar();
       setMensaje("Nodo principal creado correctamente.");
-    } catch (err) {
+    } catch (err: unknown) {
       console.error(err);
-      setError("No se pudo crear el nodo principal.");
+      setError(getHttpErrorMessage(err, "No se pudo crear el nodo principal."));
       setMensaje("");
     } finally {
       setCreandoNodo(false);
@@ -617,10 +610,10 @@ export default function SeguridadPerfilRolMenu() {
         </div>
       )}
 
-      <div style={styles.filtersCard}>
+      <ToolbarFiltro style={styles.filtersCard}>
         <div style={{ ...styles.filterInlineField, ...styles.usuarioField }}>
-          <label style={styles.inlineLabel}>Usuario</label>
-          <input
+          <InputBase
+            label="Usuario"
             type="text"
             list="usuarios-autocomplete"
             value={usuarioFiltro}
@@ -637,7 +630,7 @@ export default function SeguridadPerfilRolMenu() {
               setUsuarioIdSeleccionado(usuario?.idUsuario ?? "");
 
             }}
-            style={styles.select}
+            inputStyle={styles.select}
             disabled={cargando}
             placeholder="Escriba para filtrar usuario"
           />
@@ -652,37 +645,31 @@ export default function SeguridadPerfilRolMenu() {
         </div>
 
         <div style={{ ...styles.filterInlineField, ...styles.perfilField }}>
-          <label style={styles.inlineLabel}>Perfil</label>
-          <select
+          <SelectBase
+            label="Perfil"
             value={perfilId}
             onChange={(e) => void handlePerfilChange(e.target.value)}
-            style={styles.select}
+            selectStyle={styles.select}
             disabled={cargando}
-          >
-            <option value="">Seleccione</option>
-            {perfiles.map((perfil) => (
-              <option key={perfil.idPerfil} value={perfil.idPerfil}>
-                {perfil.nombrePerfil}
-              </option>
-            ))}
-          </select>
+            options={perfiles.map((perfil) => ({
+              value: perfil.idPerfil,
+              label: perfil.nombrePerfil,
+            }))}
+          />
         </div>
 
         <div style={{ ...styles.filterInlineField, ...styles.rolField }}>
-          <label style={styles.inlineLabel}>Rol</label>
-          <select
+          <SelectBase
+            label="Rol"
             value={rolId}
             onChange={(e) => void handleRolChange(e.target.value)}
-            style={styles.select}
+            selectStyle={styles.select}
             disabled={!perfilId || cargando}
-          >
-            <option value="">Seleccione</option>
-            {roles.map((rol) => (
-              <option key={rol.id} value={rol.id}>
-                {rol.nombre}
-              </option>
-            ))}
-          </select>
+            options={roles.map((rol) => ({
+              value: rol.id,
+              label: rol.nombre,
+            }))}
+          />
         </div>
 
         <div style={styles.filtersActions}>
@@ -712,13 +699,13 @@ export default function SeguridadPerfilRolMenu() {
             </button>
           </div>
         </div>
-      </div>
+      </ToolbarFiltro>
 
-      {cargando ? <div style={styles.loadingCard}>Cargando información...</div> : null}
-      {mensaje ? <div style={styles.successBox}>{mensaje}</div> : null}
-      {error ? <div style={styles.errorBox}>{error}</div> : null}
+      {cargando ? <AppStatusMessage tone="info">Cargando información...</AppStatusMessage> : null}
+      {mensaje ? <AppStatusMessage tone="success">{mensaje}</AppStatusMessage> : null}
+      {error ? <AppStatusMessage tone="error">{error}</AppStatusMessage> : null}
 
-      <div style={styles.treeCard}>
+      <AppCard style={styles.treeCard}>
         <div style={styles.treeHeader}>
           <h2 style={styles.treeTitle}>Árbol de menú</h2>
           <div style={styles.treeHeaderActions}>
@@ -745,7 +732,7 @@ export default function SeguridadPerfilRolMenu() {
             ))}
           </div>
         )}
-      </div>
+      </AppCard>
     </div>
   );
 }

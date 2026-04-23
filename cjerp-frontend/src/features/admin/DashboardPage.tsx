@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { menuService } from "../seguridad/services/menuService";
 import type { MenuDto } from "../../models/seguridad/menu.types";
 import { getAuthUser } from "../../utils/authStorage";
-//import { getAuthUser } from "src/utils/authStorage";
+
 type QuickLink = {
   id: number;
   titulo: string;
@@ -16,14 +16,7 @@ type AvisoItem = {
 };
 
 
-// ...existing code...
-
-// ...existing code...
-
-// Extiende MenuDto para permitir el campo 'acceso' opcional
-type MenuAccesoDto = MenuDto & { acceso?: boolean | number };
-
-// ...existing code...
+type MenuAccesoDto = MenuDto & { acceso?: boolean | number | string | null };
 
 function getSaludo() {
   const hour = new Date().getHours();
@@ -40,6 +33,28 @@ function getInitials(text: string) {
   if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
 
   return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+}
+
+function getAccesoValue(item: MenuAccesoDto): number {
+  const raw = item.acceso;
+
+  if (typeof raw === "boolean") {
+    return raw ? 1 : 0;
+  }
+
+  if (typeof raw === "string") {
+    return raw === "1" || raw.toLowerCase() === "true" ? 1 : 0;
+  }
+
+  if (typeof raw === "number") {
+    return raw === 1 ? 1 : 0;
+  }
+
+  return 0;
+}
+
+function getMenuRoute(item: MenuAccesoDto): string {
+  return typeof item.ruta === "string" ? item.ruta.trim() : "";
 }
 
 
@@ -62,42 +77,22 @@ export default function DashboardPage() {
         const usuario = getAuthUser();
         if (!usuario?.usuario) return;
         const menuRaw = await menuService.obtenerMenuDinamicoPorUsuario(usuario.usuario);
-        // console.log("menuRaw", menuRaw);
-        // Normaliza el campo 'Acceso' a 'acceso' para el frontend
-        const menu: MenuAccesoDto[] = (menuRaw as any[]).map(item => {
-          // Tomar el valor de Acceso del backend, si no existe, es 0
-          let raw = typeof item.Acceso !== "undefined" ? item.Acceso : (typeof item.acceso !== "undefined" ? item.acceso : 0);
-          // console.log(`Menu[${item.idMenu}]: nombreMenu=${item.nombreMenu}, acceso(raw)=${raw}`);
-          let accesoNum = 0;
-          if (typeof raw === "boolean") {
-            accesoNum = raw ? 1 : 0;
-          } else if (typeof raw === "string") {
-            accesoNum = raw === "1" || raw.toLowerCase() === "true" ? 1 : 0;
-          } else if (typeof raw === "number") {
-            accesoNum = raw === 1 ? 1 : 0;
-          } else {
-            accesoNum = 0;
-          }
-          return {
-            ...item,
-            acceso: accesoNum
-          };
-        });
-        // console.log("menu normalizado", menu);
+        const menu: MenuAccesoDto[] = menuRaw.map((item) => ({
+          ...item,
+          acceso: getAccesoValue(item),
+        }));
+
         setAccesosDirectos(
-          menu.filter(m =>
-            m.acceso === 1 &&
-            m.nivelMenu > 0 &&
-            typeof m.ruta === "string" &&
-            m.ruta.trim() !== ""
+          menu.filter(
+            (m) => m.acceso === 1 && m.nivelMenu > 0 && getMenuRoute(m) !== ""
           )
         );
-      } catch (e) {
-        // console.error("Error al cargar accesos :", e);
+      } catch (_error: unknown) {
         setAccesosDirectos([]);
       }
     }
-    cargarAccesos();
+
+    void cargarAccesos();
   }, []);
 
   const usuario = useMemo(() => {
@@ -225,7 +220,12 @@ export default function DashboardPage() {
                       <button
                         key={item.idMenu}
                         style={styles.quickButton}
-                        onClick={() => window.location.href = item.ruta || (item as any).RutaNivel3}
+                        onClick={() => {
+                          const route = getMenuRoute(item);
+                          if (route) {
+                            window.location.href = route;
+                          }
+                        }}
                       >
                         {item.nombreMenu}
                       </button>

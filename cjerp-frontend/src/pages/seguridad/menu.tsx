@@ -11,6 +11,7 @@ import {
   perfilesService,
   type PerfilDto,
 } from "../../features/seguridad/services/perfilesService";
+import { getHttpErrorMessage } from "../../utils/httpError";
 
 type RolOption = {
   id: number;
@@ -37,6 +38,18 @@ type MenuTreeItemProps = {
   level: number;
 };
 
+function getMenuAcceso(item: MenuDto): number {
+  if (typeof item.acceso === "boolean") {
+    return item.acceso ? 1 : 0;
+  }
+
+  if (typeof item.acceso === "number") {
+    return item.acceso === 1 ? 1 : 0;
+  }
+
+  return 0;
+}
+
 
 function buildTree(items: MenuDto[]): MenuNode[] {
   const map = new Map<number, MenuNode>();
@@ -44,9 +57,7 @@ function buildTree(items: MenuDto[]): MenuNode[] {
 
   items.forEach((item) => {
     // Depuración: mostrar el item recibido y el valor de acceso
-    const rawAcceso = (item as any).acceso ?? (item as any).Acceso ?? 0;
-    // console.log('[buildTree] item:', item, 'rawAcceso:', rawAcceso);
-    const accesoValue = Number(rawAcceso) === 1 ? 1 : 0;
+    const accesoValue = getMenuAcceso(item);
 
     map.set(item.idMenu, {
       id: item.idMenu,
@@ -273,9 +284,9 @@ export default function PerfilRolMenuPage() {
         }
       });
       setExpandedIds(allExpanded);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error(err);
-      setError("No se pudieron cargar perfiles y menú.");
+      setError(getHttpErrorMessage(err, "No se pudieron cargar perfiles y menú."));
     } finally {
       setCargando(false);
     }
@@ -297,9 +308,9 @@ export default function PerfilRolMenuPage() {
       setRoles(rolesMapped);
       setRolId("");
       setSelectedIds(new Set());
-    } catch (err) {
+    } catch (err: unknown) {
       console.error(err);
-      setError("No se pudieron cargar los roles del perfil.");
+      setError(getHttpErrorMessage(err, "No se pudieron cargar los roles del perfil."));
       setRoles([]);
       setRolId("");
     } finally {
@@ -357,9 +368,9 @@ export default function PerfilRolMenuPage() {
         parentChain.forEach((id) => expanded.add(id));
       });
       setExpandedIds(expanded);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error(err);
-      setError("No se pudo cargar el menú asignado al rol.");
+      setError(getHttpErrorMessage(err, "No se pudo cargar el menú asignado al rol."));
       setSelectedIds(new Set());
     } finally {
       setCargando(false);
@@ -479,13 +490,12 @@ export default function PerfilRolMenuPage() {
         idRol: Number(rolId),
         menus: menusAsignados // [{ idMenu, acceso }]
       };
-      console.log('Payload enviado a guardarAsignacionMenuRol:', payload);
       await menuService.guardarAsignacionMenuRol(payload);
 
       setMensaje("Asignación de menú guardada correctamente.");
-    } catch (err) {
+    } catch (err: unknown) {
       console.error(err);
-      setError("No se pudo guardar la asignación de menú.");
+      setError(getHttpErrorMessage(err, "No se pudo guardar la asignación de menú."));
       setMensaje("");
     } finally {
       setGuardando(false);

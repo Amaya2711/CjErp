@@ -1,15 +1,14 @@
 import { useMemo, useState } from "react";
-import { useCrudForm } from '../../../hooks/useCrudForm';
-import httpClient from "../../../api/httpClient";
-
-type RolDto = {
-  idRol: number;
-  nombreRol: string;
-  descripcion?: string;
-  estado?: boolean;
-  esActivo?: boolean;
-  fechaCreacion?: string;
-};
+import { useCrudForm } from "../../../hooks/useCrudForm";
+import AppCard from "../../../components/base/AppCard";
+import AppPage from "../../../components/base/AppPage";
+import AppSectionHeader from "../../../components/base/AppSectionHeader";
+import AppStatusMessage from "../../../components/base/AppStatusMessage";
+import AppToolbar from "../../../components/base/AppToolbar";
+import {
+  rolesService,
+  type RolDto,
+} from "../services/rolesService";
 
 type Rol = {
   id: number;
@@ -32,37 +31,6 @@ type RolPayload = {
   esActivo: boolean;
 };
 
-const ROLES_API_URL = "/roles";
-
-const rolesApi = {
-  list: async () => {
-    const response = await httpClient.get<RolDto[]>(ROLES_API_URL);
-    // response ahora es { message, data }
-    return (response.data ?? []).map(mapRolDtoToView);
-  },
-  create: async (form: RolForm) => {
-    const payload: RolPayload = {
-      nombreRol: form.nombreRol.trim().toUpperCase(),
-      descripcion: form.descripcion.trim(),
-      esActivo: form.estado === "ACTIVO",
-    };
-    const response = await httpClient.post<RolDto>(ROLES_API_URL, payload);
-    return mapRolDtoToView(response.data);
-  },
-  update: async (id: number, form: RolForm) => {
-    const payload: RolPayload = {
-      nombreRol: form.nombreRol.trim().toUpperCase(),
-      descripcion: form.descripcion.trim(),
-      esActivo: form.estado === "ACTIVO",
-    };
-    const response = await httpClient.put<RolDto>(`${ROLES_API_URL}/${id}`, payload);
-    return mapRolDtoToView(response.data);
-  },
-  remove: async (id: number) => {
-    await httpClient.delete(`${ROLES_API_URL}/${id}`);
-  },
-};
-
 const formularioInicial: RolForm = {
   id: null,
   nombreRol: "",
@@ -80,8 +48,38 @@ function mapRolDtoToView(dto: RolDto): Rol {
   };
 }
 
+const rolesApi = {
+  list: async () => {
+    const roles = await rolesService.listarRoles();
+    return roles.map(mapRolDtoToView);
+  },
+
+  create: async (form: RolForm) => {
+    const payload: RolPayload = {
+      nombreRol: form.nombreRol.trim().toUpperCase(),
+      descripcion: form.descripcion.trim(),
+      esActivo: form.estado === "ACTIVO",
+    };
+
+    await rolesService.crearRol(payload);
+  },
+
+  update: async (id: number, form: RolForm) => {
+    const payload: RolPayload = {
+      nombreRol: form.nombreRol.trim().toUpperCase(),
+      descripcion: form.descripcion.trim(),
+      esActivo: form.estado === "ACTIVO",
+    };
+
+    await rolesService.actualizarRol(id, payload);
+  },
+
+  remove: async (id: number) => {
+    await rolesService.eliminarRol(id);
+  },
+};
+
 export default function SeguridadRolesPage() {
-  // ...
   const [busqueda, setBusqueda] = useState("");
   const [errores, setErrores] = useState<Record<string, string>>({});
 
@@ -90,8 +88,8 @@ export default function SeguridadRolesPage() {
     form,
     setForm,
     loading: cargando,
-    // saving: guardando,
-    error: mensaje,
+    error: errorMensaje,
+    message: mensaje,
     panelOpen: panelAbierto,
     setPanelOpen: setPanelAbierto,
     mode: modo,
@@ -105,7 +103,9 @@ export default function SeguridadRolesPage() {
 
   const rolesFiltrados = useMemo(() => {
     const texto = busqueda.trim().toUpperCase();
+
     if (!texto) return roles;
+
     return roles.filter(
       (x) =>
         x.nombreRol.toUpperCase().includes(texto) ||
@@ -141,28 +141,35 @@ export default function SeguridadRolesPage() {
 
   const validar = () => {
     const nuevosErrores: Record<string, string> = {};
+
     if (!form.nombreRol.trim()) {
       nuevosErrores.nombreRol = "Ingrese el nombre del rol.";
     }
+
     if (form.nombreRol.trim().length > 100) {
       nuevosErrores.nombreRol = "El nombre no debe exceder 100 caracteres.";
     }
+
     if (!form.descripcion.trim()) {
-      nuevosErrores.descripcion = "Ingrese la descripción.";
+      nuevosErrores.descripcion = "Ingrese la descripcion.";
     }
+
     const nombreNormalizado = form.nombreRol.trim().toUpperCase();
     const yaExiste = roles.some(
       (x) => x.nombreRol.trim().toUpperCase() === nombreNormalizado && x.id !== form.id
     );
+
     if (yaExiste) {
       nuevosErrores.nombreRol = "Ya existe un rol con ese nombre.";
     }
+
     setErrores(nuevosErrores);
     return Object.keys(nuevosErrores).length === 0;
   };
 
   const guardar = async () => {
     if (!validar()) return;
+
     await handleSave();
     setPanelAbierto(false);
     setForm(formularioInicial);
@@ -175,6 +182,7 @@ export default function SeguridadRolesPage() {
 
   const eliminar = async () => {
     if (idEliminar == null) return;
+
     await handleDelete(idEliminar);
     setIdEliminar(null);
     await cargarRoles();
@@ -183,11 +191,11 @@ export default function SeguridadRolesPage() {
   const rolSeleccionadoEliminar = roles.find((x) => x.id === idEliminar);
 
   return (
-    <div style={styles.page}>
-      <div style={styles.toolbar}>
+    <AppPage title="Roles de seguridad">
+      <AppToolbar>
         <input
           type="text"
-          placeholder="Buscar por nombre, descripción o estado"
+          placeholder="Buscar por nombre, descripcion o estado"
           value={busqueda}
           onChange={(e) => setBusqueda(e.target.value)}
           style={styles.searchInput}
@@ -195,21 +203,26 @@ export default function SeguridadRolesPage() {
         <button style={styles.primaryButton} onClick={abrirNuevo}>
           Nuevo rol
         </button>
-      </div>
+      </AppToolbar>
 
-      {cargando ? <div style={styles.infoBox}>Cargando información...</div> : null}
-      {mensaje ? <div style={styles.errorBox}>{mensaje}</div> : null}
+      {cargando ? <AppStatusMessage tone="info">Cargando informacion...</AppStatusMessage> : null}
+      {mensaje ? <AppStatusMessage tone="success">{mensaje}</AppStatusMessage> : null}
+      {errorMensaje ? <AppStatusMessage tone="error">{errorMensaje}</AppStatusMessage> : null}
 
-      <div style={styles.card}>
+      <AppCard style={styles.card}>
+        <AppSectionHeader
+          title="Listado de roles"
+          description="Administra los roles del sistema y controla su estado operativo."
+        />
         <div style={styles.tableWrapper}>
           <table style={styles.table}>
             <thead>
               <tr>
                 <th style={styles.th}>Id</th>
                 <th style={styles.th}>Nombre rol</th>
-                <th style={styles.th}>Descripción</th>
+                <th style={styles.th}>Descripcion</th>
                 <th style={styles.th}>Estado</th>
-                <th style={styles.th}>Fecha creación</th>
+                <th style={styles.th}>Fecha creacion</th>
                 <th style={styles.thCenter}>Acciones</th>
               </tr>
             </thead>
@@ -261,7 +274,7 @@ export default function SeguridadRolesPage() {
             </tbody>
           </table>
         </div>
-      </div>
+      </AppCard>
 
       {panelAbierto && (
         <div style={styles.overlay}>
@@ -272,12 +285,12 @@ export default function SeguridadRolesPage() {
                   {modo === "nuevo" ? "Nuevo rol" : "Editar rol"}
                 </h2>
                 <p style={styles.sideSubtitle}>
-                  Complete la información del rol.
+                  Complete la informacion del rol.
                 </p>
               </div>
 
               <button style={styles.closeButton} onClick={cerrarPanel}>
-                ×
+                x
               </button>
             </div>
 
@@ -298,14 +311,14 @@ export default function SeguridadRolesPage() {
             </div>
 
             <div style={styles.formGroup}>
-              <label style={styles.label}>Descripción</label>
+              <label style={styles.label}>Descripcion</label>
               <textarea
                 value={form.descripcion}
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, descripcion: e.target.value }))
                 }
                 style={styles.textarea}
-                placeholder="Descripción del rol"
+                placeholder="Descripcion del rol"
               />
               {errores.descripcion && (
                 <div style={styles.errorText}>{errores.descripcion}</div>
@@ -344,9 +357,9 @@ export default function SeguridadRolesPage() {
       {idEliminar !== null && (
         <div style={styles.confirmOverlay}>
           <div style={styles.confirmBox}>
-            <h3 style={styles.confirmTitle}>Confirmar eliminación</h3>
+            <h3 style={styles.confirmTitle}>Confirmar eliminacion</h3>
             <p style={styles.confirmText}>
-              ¿Desea eliminar el rol <strong>{rolSeleccionadoEliminar?.nombreRol}</strong>?
+              Desea eliminar el rol <strong>{rolSeleccionadoEliminar?.nombreRol}</strong>?
             </p>
 
             <div style={styles.confirmActions}>
@@ -363,7 +376,7 @@ export default function SeguridadRolesPage() {
           </div>
         </div>
       )}
-    </div>
+    </AppPage>
   );
 }
 
@@ -374,33 +387,6 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     gap: 20,
   },
-
-  header: {
-    background: "#FFFFFF",
-    borderRadius: 16,
-    padding: 24,
-    boxShadow: "0 8px 24px rgba(23,20,58,0.08)",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 16,
-    flexWrap: "wrap",
-  },
-
-  title: {
-    margin: 0,
-    fontSize: 28,
-    color: "#17143A",
-    fontWeight: 700,
-  },
-
-  subtitle: {
-    marginTop: 8,
-    marginBottom: 0,
-    color: "#6B7280",
-    fontSize: 14,
-  },
-
   toolbar: {
     background: "#FFFFFF",
     borderRadius: 16,
@@ -411,7 +397,6 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "space-between",
     gap: 12,
   },
-
   searchInput: {
     width: "100%",
     maxWidth: 420,
@@ -422,14 +407,12 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 14,
     outline: "none",
   },
-
   card: {
     background: "#FFFFFF",
     borderRadius: 16,
     padding: 20,
     boxShadow: "0 8px 24px rgba(23,20,58,0.08)",
   },
-
   infoBox: {
     borderRadius: 12,
     border: "1px solid #E5E7EB",
@@ -439,7 +422,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
     fontWeight: 600,
   },
-
   successBox: {
     borderRadius: 12,
     border: "1px solid #A7F3D0",
@@ -449,7 +431,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
     fontWeight: 700,
   },
-
   errorBox: {
     borderRadius: 12,
     border: "1px solid #FECACA",
@@ -459,17 +440,14 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
     fontWeight: 700,
   },
-
   tableWrapper: {
     width: "100%",
     overflowX: "auto",
   },
-
   table: {
     width: "100%",
     borderCollapse: "collapse",
   },
-
   th: {
     textAlign: "left",
     padding: "14px 12px",
@@ -478,7 +456,6 @@ const styles: Record<string, React.CSSProperties> = {
     borderBottom: "1px solid #E5E7EB",
     background: "#F9FAFB",
   },
-
   thCenter: {
     textAlign: "center",
     padding: "14px 12px",
@@ -487,14 +464,12 @@ const styles: Record<string, React.CSSProperties> = {
     borderBottom: "1px solid #E5E7EB",
     background: "#F9FAFB",
   },
-
   td: {
     padding: "14px 12px",
     borderBottom: "1px solid #F3F4F6",
     color: "#374151",
     fontSize: 14,
   },
-
   tdBold: {
     padding: "14px 12px",
     borderBottom: "1px solid #F3F4F6",
@@ -502,20 +477,17 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 14,
     fontWeight: 700,
   },
-
   tdCenter: {
     padding: "14px 12px",
     borderBottom: "1px solid #F3F4F6",
     textAlign: "center",
   },
-
   emptyCell: {
     padding: 24,
     textAlign: "center",
     color: "#6B7280",
     fontSize: 14,
   },
-
   badge: {
     display: "inline-block",
     padding: "6px 10px",
@@ -523,23 +495,19 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
     fontWeight: 700,
   },
-
   badgeActive: {
     background: "#DCFCE7",
     color: "#166534",
   },
-
   badgeInactive: {
     background: "#FEE2E2",
     color: "#991B1B",
   },
-
   actions: {
     display: "flex",
     justifyContent: "center",
     gap: 8,
   },
-
   primaryButton: {
     border: "none",
     background: "#6E4CCB",
@@ -549,7 +517,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     cursor: "pointer",
   },
-
   secondaryButton: {
     border: "1px solid #D1D5DB",
     background: "#FFFFFF",
@@ -559,7 +526,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     cursor: "pointer",
   },
-
   editButton: {
     border: "1px solid #C7D2FE",
     background: "#EEF2FF",
@@ -569,7 +535,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     cursor: "pointer",
   },
-
   deleteButton: {
     border: "1px solid #FECACA",
     background: "#FEF2F2",
@@ -579,7 +544,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     cursor: "pointer",
   },
-
   deleteButtonSolid: {
     border: "none",
     background: "#DC2626",
@@ -589,7 +553,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     cursor: "pointer",
   },
-
   overlay: {
     position: "fixed",
     inset: 0,
@@ -598,7 +561,6 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "flex-end",
     zIndex: 1300,
   },
-
   sidePanel: {
     width: 420,
     maxWidth: "100%",
@@ -609,7 +571,6 @@ const styles: Record<string, React.CSSProperties> = {
     boxSizing: "border-box",
     overflowY: "auto",
   },
-
   sidePanelHeader: {
     display: "flex",
     justifyContent: "space-between",
@@ -617,20 +578,17 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 12,
     marginBottom: 24,
   },
-
   sideTitle: {
     margin: 0,
     fontSize: 24,
     color: "#17143A",
   },
-
   sideSubtitle: {
     marginTop: 8,
     marginBottom: 0,
     color: "#6B7280",
     fontSize: 14,
   },
-
   closeButton: {
     border: "none",
     background: "#F3F4F6",
@@ -642,20 +600,17 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 22,
     lineHeight: "22px",
   },
-
   formGroup: {
     display: "flex",
     flexDirection: "column",
     gap: 8,
     marginBottom: 18,
   },
-
   label: {
     fontSize: 14,
     fontWeight: 700,
     color: "#374151",
   },
-
   input: {
     width: "100%",
     height: 42,
@@ -666,7 +621,6 @@ const styles: Record<string, React.CSSProperties> = {
     outline: "none",
     boxSizing: "border-box",
   },
-
   textarea: {
     width: "100%",
     minHeight: 100,
@@ -679,20 +633,17 @@ const styles: Record<string, React.CSSProperties> = {
     resize: "vertical",
     fontFamily: "inherit",
   },
-
   errorText: {
     fontSize: 12,
     color: "#DC2626",
     fontWeight: 600,
   },
-
   panelActions: {
     display: "flex",
     justifyContent: "flex-end",
     gap: 10,
     marginTop: 28,
   },
-
   confirmOverlay: {
     position: "fixed",
     inset: 0,
@@ -702,7 +653,6 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "center",
     zIndex: 1400,
   },
-
   confirmBox: {
     width: 420,
     maxWidth: "calc(100% - 24px)",
@@ -711,19 +661,16 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 24,
     boxShadow: "0 12px 28px rgba(0,0,0,0.16)",
   },
-
   confirmTitle: {
     marginTop: 0,
     marginBottom: 12,
     color: "#17143A",
   },
-
   confirmText: {
     marginTop: 0,
     color: "#4B5563",
     lineHeight: 1.6,
   },
-
   confirmActions: {
     display: "flex",
     justifyContent: "flex-end",

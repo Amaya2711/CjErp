@@ -1,11 +1,13 @@
-﻿using CjERP.Application.Interfaces;
+using CjERP.Application.Interfaces;
 using CjERP.Application.Interfaces.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CjERP.Api.Controllers
 {
     [ApiController]
     [Route("api/empleado/cta")]
+    [Authorize]
     public class EmpleadoController : ControllerBase
     {
         private readonly IEmpleadoCtaService _empleadoCtaService;

@@ -82,7 +82,7 @@ function mapNodeToTile(node: MenuNode): DashboardTile | null {
 export async function loadDashboardMenus(idUsuario: string): Promise<DashboardGroup[]> {
   const menus = await menuService.obtenerMenuDinamicoPorUsuario(idUsuario);
 
-  console.log("[dashboardMenuService] menus planos:", menus);
+  //console.log("[dashboardMenuService] menus planos:", menus);
 
   if (!Array.isArray(menus) || menus.length === 0) {
     return [];
@@ -90,7 +90,7 @@ export async function loadDashboardMenus(idUsuario: string): Promise<DashboardGr
 
   const tree = buildMenuTree(menus);
 
-  console.log("[dashboardMenuService] tree:", tree);
+ //console.log("[dashboardMenuService] tree:", tree);
 
   const groups: DashboardGroup[] = tree
     .map((root) => {
@@ -116,7 +116,7 @@ export async function loadDashboardMenus(idUsuario: string): Promise<DashboardGr
     })
     .filter((group) => group.tiles.length > 0);
 
-  console.log("[dashboardMenuService] groups:", groups);
+  //console.log("[dashboardMenuService] groups:", groups);
 
   return groups;
 }

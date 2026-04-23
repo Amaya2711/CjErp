@@ -1,17 +1,23 @@
-import axios from "axios";
+import axios, { type AxiosInstance, type AxiosRequestConfig } from "axios";
 import { getAuthUser, clearAuthUser } from "../utils/authStorage";
+
+type HttpClient = {
+  get<T>(url: string, config?: AxiosRequestConfig): Promise<T>;
+  post<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T>;
+  put<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T>;
+  delete<T>(url: string, config?: AxiosRequestConfig): Promise<T>;
+};
 
 const apiBaseUrl =
   import.meta.env.VITE_API_URL?.trim() || "http://localhost:5015/api";
 
-const httpClient = axios.create({
+const axiosClient: AxiosInstance = axios.create({
   baseURL: apiBaseUrl,
 });
 
-httpClient.interceptors.request.use((config) => {
+axiosClient.interceptors.request.use((config) => {
   const requestUrl = config.url?.toLowerCase() ?? "";
 
-  // En login no enviar token
   if (requestUrl.includes("/auth/login")) {
     return config;
   }
@@ -25,15 +31,12 @@ httpClient.interceptors.request.use((config) => {
   return config;
 });
 
-
-// Interceptor para devolver siempre response.data.data si existe, o response.data
-httpClient.interceptors.response.use(
+axiosClient.interceptors.response.use(
   (response) => {
-    // Si la respuesta tiene el formato estándar { data, ... }, devolver el objeto completo
-    if (response?.data && typeof response.data === 'object' && 'data' in response.data) {
-      return response.data; // Devuelve { message, data }
+    if (response?.data && typeof response.data === "object" && "data" in response.data) {
+      return response.data.data;
     }
-    // Si no, devolver el body completo
+
     return response.data;
   },
   (error) => {
@@ -41,8 +44,24 @@ httpClient.interceptors.response.use(
       clearAuthUser();
       window.location.href = "/";
     }
+
     return Promise.reject(error);
   }
 );
+
+const httpClient: HttpClient = {
+  get<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
+    return axiosClient.get(url, config) as unknown as Promise<T>;
+  },
+  post<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
+    return axiosClient.post(url, data, config) as unknown as Promise<T>;
+  },
+  put<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
+    return axiosClient.put(url, data, config) as unknown as Promise<T>;
+  },
+  delete<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
+    return axiosClient.delete(url, config) as unknown as Promise<T>;
+  },
+};
 
 export default httpClient;
