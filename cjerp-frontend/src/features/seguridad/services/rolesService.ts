@@ -28,12 +28,12 @@ export interface ActualizarRolRequest {
 export const rolesService = {
   async listarRolesPorPerfil(idPerfil: number): Promise<RolDto[]> {
     const response = await httpClient.get(`${PERFILES_BASE_URL}/${idPerfil}/roles`);
-    return response.data;
+    return response.data ?? [];
   },
 
   async listarRoles(): Promise<RolDto[]> {
     const response = await httpClient.get(ROLES_BASE_URL);
-    return response.data;
+    return response.data ?? [];
   },
 
   async crearRol(payload: CrearRolRequest) {

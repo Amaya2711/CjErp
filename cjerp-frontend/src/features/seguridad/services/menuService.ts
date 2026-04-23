@@ -1,4 +1,19 @@
-// Consulta si existe la relación usuario-perfil
+import httpClient from "../../../api/httpClient";
+
+export interface MenuDto {
+  idMenu: number;
+  idMenuPadre?: number | null;
+  nombreMenu: string;
+  ruta?: string | null;
+  icono?: string | null;
+  ordenMenu: number;
+  nivelMenu?: number | null;
+  codigoMenu?: string | null;
+  esVisible?: boolean;
+  esActivo?: boolean;
+  acceso?: number | boolean | null;
+}
+
 export interface ExisteUsuarioPerfilRequest {
   idUsuario: string;
   idPerfil: number;
@@ -7,33 +22,7 @@ export interface ExisteUsuarioPerfilRequest {
 export interface GuardarUsuarioPerfilRequest {
   idUsuario: string;
   idPerfil: number;
-}
-
-import httpClient from "../../../api/httpClient";
-import type { MenuDto } from "../../../models/seguridad/menu.types";
-
-const BASE_URL = "/menu";
-
-export interface GuardarAsignacionMenuRolRequest {
-  idPerfil: number;
-  idRol: number;
-  menus: { idMenu: number; acceso: boolean }[];
-}
-
-export interface CrearMenuPrincipalRequest {
-  nombreMenu: string;
-  idMenuPadre?: number;
-  ruta?: string;
-  codigoMenu?: string;
-  icono?: string;
-  ordenMenu: number;
-  esVisible: boolean;
-  esActivo: boolean;
-}
-
-export interface SincronizarPerfilUsuarioRequest {
-  idPerfil: number;
-  idUsuario: string;
+  usuarioCreacion?: string;
 }
 
 export interface GuardarUsuarioPerfilRolRequest {
@@ -42,91 +31,123 @@ export interface GuardarUsuarioPerfilRolRequest {
   idRol: number;
 }
 
+export interface GuardarAsignacionMenuRolRequest {
+  idPerfil: number;
+  idRol: number;
+  menus: {
+    idMenu: number;
+    acceso: boolean;
+  }[];
+}
+
+export interface CrearMenuPrincipalRequest {
+  nombreMenu: string;
+  codigoMenu: string;
+  icono?: string;
+  ordenMenu?: number;
+  esVisible?: boolean;
+  esActivo?: boolean;
+}
+
+export interface CrearNodoMenuRequest {
+  nombreMenu: string;
+  idMenuPadre?: number;
+  ruta?: string;
+  codigoMenu?: string;
+  icono?: string;
+  ordenMenu?: number;
+  esVisible?: boolean;
+  esActivo?: boolean;
+}
+
+const BASE_URL = "/menu";
+
+function extraerArray<T>(response: any): T[] {
+  if (Array.isArray(response)) {
+    return response;
+  }
+
+  if (Array.isArray(response?.data)) {
+    return response.data;
+  }
+
+  return [];
+}
+
 export const menuService = {
-
-    async existeUsuarioPerfil({ idUsuario, idPerfil }: ExisteUsuarioPerfilRequest): Promise<boolean> {
-      const response = await httpClient.get(`${BASE_URL}/usuario-perfil/existe`, {
-        params: { idUsuario, idPerfil }
-      });
-      return !!response.data?.existe;
-    },
-
-    async guardarUsuarioPerfil(payload: GuardarUsuarioPerfilRequest) {
-      // Suponiendo que existe un endpoint POST /menu/usuario-perfil para crear la relación
-      // Si no existe, deberás implementarlo en el backend
-      const response = await httpClient.post(`${BASE_URL}/usuario-perfil`, payload);
-      return response.data;
-    },
-  async obtenerMenuDinamicoPorUsuario(idUsuario: string): Promise<MenuDto[]> {
-    const response = await httpClient.get(`${BASE_URL}/dinamico`, {
-      params: { IdUsuario: idUsuario }
-    });
-    return response.data;
-  },
-
-  async obtenerPorPerfilRol(idPerfil: number, idRol: number): Promise<MenuDto[]> {
-    const response = await httpClient.get(`${BASE_URL}/perfil/${idPerfil}/rol/${idRol}/asignado`);
-    return response.data;
-  },
-
   async obtenerCompleto(): Promise<MenuDto[]> {
-    const response = await httpClient.get(`${BASE_URL}/completo`);
-    return response.data;
+    const response: any = await httpClient.get(`${BASE_URL}/completo`);
+
+    console.log("[menuService] obtenerCompleto", response);
+    console.log("[menuService] obtenerCompleto es array response:", Array.isArray(response));
+    console.log("[menuService] obtenerCompleto es array response.data:", Array.isArray(response?.data));
+
+    return extraerArray<MenuDto>(response);
   },
 
-  async obtenerDinamicoTotal(): Promise<MenuDto[]> {
-    const response = await httpClient.get(`${BASE_URL}/dinamico-total`);
-    return response.data;
+  async existeUsuarioPerfil({
+    idUsuario,
+    idPerfil,
+  }: ExisteUsuarioPerfilRequest): Promise<boolean> {
+    const response: any = await httpClient.get(`${BASE_URL}/usuario-perfil/existe`, {
+      params: { idUsuario, idPerfil },
+    });
+
+    console.log("[menuService] existeUsuarioPerfil", response);
+
+    if (typeof response?.existe === "boolean") {
+      return response.existe;
+    }
+
+    if (typeof response?.data?.existe === "boolean") {
+      return response.data.existe;
+    }
+
+    return false;
   },
 
-  async obtenerDinamicoPorPerfil(idPerfil: number): Promise<MenuDto[]> {
-    const response = await httpClient.get(`${BASE_URL}/perfil/${idPerfil}/dinamico`);
-    return response.data;
-  },
-
-  async guardarAsignacionMenuRol(payload: GuardarAsignacionMenuRolRequest) {
-    const response = await httpClient.post(`${BASE_URL}/rol/asignacion`, payload);
-    return response.data;
+  async guardarUsuarioPerfil(payload: GuardarUsuarioPerfilRequest) {
+    return await httpClient.post(`${BASE_URL}/usuario-perfil`, payload);
   },
 
   async guardarUsuarioPerfilRol(payload: GuardarUsuarioPerfilRolRequest) {
-    const response = await httpClient.post(`${BASE_URL}/usuario-perfil-rol`, payload);
-    return response.data;
+    return await httpClient.post(`${BASE_URL}/usuario-perfil-rol`, payload);
+  },
+
+  async guardarAsignacionMenuRol(payload: GuardarAsignacionMenuRolRequest) {
+    return await httpClient.post(`${BASE_URL}/guardar-rol-menu`, payload);
+  },
+
+  async obtenerMenuDinamicoPorUsuario(idUsuario: string): Promise<MenuDto[]> {
+    const response: any = await httpClient.get(`${BASE_URL}/dinamico`, {
+      params: { idUsuario },
+    });
+
+    console.log("[menuService] response completo:", response);
+    console.log("[menuService] response.data:", response?.data);
+    console.log("[menuService] es array response:", Array.isArray(response));
+    console.log("[menuService] es array response.data:", Array.isArray(response?.data));
+
+    return extraerArray<MenuDto>(response);
+  },
+
+  async obtenerPorPerfilRol(idPerfil: number, idRol: number): Promise<MenuDto[]> {
+    const response: any = await httpClient.get(
+      `${BASE_URL}/perfil/${idPerfil}/rol/${idRol}/asignado`
+    );
+
+    console.log("[menuService] obtenerPorPerfilRol", response);
+    console.log("[menuService] obtenerPorPerfilRol es array response:", Array.isArray(response));
+    console.log("[menuService] obtenerPorPerfilRol es array response.data:", Array.isArray(response?.data));
+
+    return extraerArray<MenuDto>(response);
   },
 
   async crearMenuPrincipal(payload: CrearMenuPrincipalRequest) {
-    const response = await httpClient.post(`${BASE_URL}/principal`, payload);
-    return response.data;
+    return await httpClient.post(`${BASE_URL}/crear-principal`, payload);
   },
 
-  async crearNodo(payload: CrearMenuPrincipalRequest) {
-    try {
-      const response = await httpClient.post(`${BASE_URL}/nodo`, payload);
-      return response.data;
-    } catch (error: any) {
-      const status = error?.response?.status;
-      const esNodoPrincipal = payload.idMenuPadre == null;
-
-      if (status === 404 && esNodoPrincipal) {
-        // Backward compatibility when API still exposes only /menu/principal.
-        const response = await httpClient.post(`${BASE_URL}/principal`, payload);
-        return response.data;
-      }
-
-      if (status === 404 && !esNodoPrincipal) {
-        throw new Error(
-          "El API no tiene habilitado POST /menu/nodo. Actualice/reinicie el backend para crear nodos secundarios o de tercer nivel."
-        );
-      }
-
-      throw error;
-    }
+  async crearNodo(payload: CrearNodoMenuRequest) {
+    return await httpClient.post(`${BASE_URL}/crear`, payload);
   },
-
-  async sincronizarPerfilUsuario(payload: SincronizarPerfilUsuarioRequest) {
-    const response = await httpClient.post(`${BASE_URL}/perfil-usuario/sincronizar`, payload);
-    return response.data;
-  }
 };
-
-export type { MenuDto };

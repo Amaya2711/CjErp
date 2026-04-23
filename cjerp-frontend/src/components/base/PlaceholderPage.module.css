@@ -1,0 +1,15 @@
+.placeholderPage {
+  padding: 24px;
+  min-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+}
+
+.placeholderPage h1 {
+  font-size: 2rem;
+  color: #1e293b;
+  margin: 0;
+}

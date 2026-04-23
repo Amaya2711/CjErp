@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { menuService } from "../features/seguridad/services/menuService";
-import type { MenuDto } from "../models/seguridad/menu.types";
-import { getAuthUser } from "../utils/authStorage";
+import { menuService } from "../seguridad/services/menuService";
+import type { MenuDto } from "../../models/seguridad/menu.types";
+import { getAuthUser } from "../../utils/authStorage";
+//import { getAuthUser } from "src/utils/authStorage";
 type QuickLink = {
   id: number;
   titulo: string;

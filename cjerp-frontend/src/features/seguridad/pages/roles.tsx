@@ -1,5 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
-import { rolesService, type RolDto } from "../services/rolesService";
+import { useMemo, useState } from "react";
+import { useCrudForm } from '../../../hooks/useCrudForm';
+import httpClient from "../../../api/httpClient";
+
+type RolDto = {
+  idRol: number;
+  nombreRol: string;
+  descripcion?: string;
+  estado?: boolean;
+  esActivo?: boolean;
+  fechaCreacion?: string;
+};
 
 type Rol = {
   id: number;
@@ -16,6 +26,43 @@ type RolForm = {
   estado: "ACTIVO" | "INACTIVO";
 };
 
+type RolPayload = {
+  nombreRol: string;
+  descripcion: string;
+  esActivo: boolean;
+};
+
+const ROLES_API_URL = "/roles";
+
+const rolesApi = {
+  list: async () => {
+    const response = await httpClient.get<RolDto[]>(ROLES_API_URL);
+    // response ahora es { message, data }
+    return (response.data ?? []).map(mapRolDtoToView);
+  },
+  create: async (form: RolForm) => {
+    const payload: RolPayload = {
+      nombreRol: form.nombreRol.trim().toUpperCase(),
+      descripcion: form.descripcion.trim(),
+      esActivo: form.estado === "ACTIVO",
+    };
+    const response = await httpClient.post<RolDto>(ROLES_API_URL, payload);
+    return mapRolDtoToView(response.data);
+  },
+  update: async (id: number, form: RolForm) => {
+    const payload: RolPayload = {
+      nombreRol: form.nombreRol.trim().toUpperCase(),
+      descripcion: form.descripcion.trim(),
+      esActivo: form.estado === "ACTIVO",
+    };
+    const response = await httpClient.put<RolDto>(`${ROLES_API_URL}/${id}`, payload);
+    return mapRolDtoToView(response.data);
+  },
+  remove: async (id: number) => {
+    await httpClient.delete(`${ROLES_API_URL}/${id}`);
+  },
+};
+
 const formularioInicial: RolForm = {
   id: null,
   nombreRol: "",
@@ -23,54 +70,42 @@ const formularioInicial: RolForm = {
   estado: "ACTIVO",
 };
 
-function mapRolDtoToViewModel(dto: RolDto): Rol {
+function mapRolDtoToView(dto: RolDto): Rol {
   return {
     id: dto.idRol,
     nombreRol: dto.nombreRol,
     descripcion: dto.descripcion ?? "",
     estado: (dto.esActivo ?? dto.estado ?? false) ? "ACTIVO" : "INACTIVO",
-    fechaCreacion: dto.fechaCreacion
-      ? String(dto.fechaCreacion).slice(0, 10)
-      : "",
+    fechaCreacion: dto.fechaCreacion ? String(dto.fechaCreacion).slice(0, 10) : "",
   };
 }
 
 export default function SeguridadRolesPage() {
-  const [roles, setRoles] = useState<Rol[]>([]);
+  // ...
   const [busqueda, setBusqueda] = useState("");
-  const [panelAbierto, setPanelAbierto] = useState(false);
-  const [modo, setModo] = useState<"nuevo" | "editar">("nuevo");
-  const [form, setForm] = useState<RolForm>(formularioInicial);
   const [errores, setErrores] = useState<Record<string, string>>({});
-  const [idEliminar, setIdEliminar] = useState<number | null>(null);
-  const [cargando, setCargando] = useState(false);
-  const [mensaje, setMensaje] = useState("");
-  const [error, setError] = useState("");
 
-  const cargarRoles = async () => {
-    try {
-      setCargando(true);
-      setError("");
-
-      const data = await rolesService.listarRoles();
-      setRoles(data.map(mapRolDtoToViewModel));
-    } catch (err) {
-      console.error(err);
-      setError("No se pudo cargar la lista de roles.");
-    } finally {
-      setCargando(false);
-    }
-  };
-
-  useEffect(() => {
-    void cargarRoles();
-  }, []);
+  const {
+    items: roles,
+    form,
+    setForm,
+    loading: cargando,
+    // saving: guardando,
+    error: mensaje,
+    panelOpen: panelAbierto,
+    setPanelOpen: setPanelAbierto,
+    mode: modo,
+    setMode: setModo,
+    idToDelete: idEliminar,
+    setIdToDelete: setIdEliminar,
+    handleSave,
+    handleDelete,
+    load: cargarRoles,
+  } = useCrudForm<Rol, RolForm>(rolesApi, formularioInicial);
 
   const rolesFiltrados = useMemo(() => {
     const texto = busqueda.trim().toUpperCase();
-
     if (!texto) return roles;
-
     return roles.filter(
       (x) =>
         x.nombreRol.toUpperCase().includes(texto) ||
@@ -83,8 +118,6 @@ export default function SeguridadRolesPage() {
     setModo("nuevo");
     setForm(formularioInicial);
     setErrores({});
-    setMensaje("");
-    setError("");
     setPanelAbierto(true);
   };
 
@@ -97,8 +130,6 @@ export default function SeguridadRolesPage() {
       estado: rol.estado,
     });
     setErrores({});
-    setMensaje("");
-    setError("");
     setPanelAbierto(true);
   };
 
@@ -110,70 +141,32 @@ export default function SeguridadRolesPage() {
 
   const validar = () => {
     const nuevosErrores: Record<string, string> = {};
-
     if (!form.nombreRol.trim()) {
       nuevosErrores.nombreRol = "Ingrese el nombre del rol.";
     }
-
     if (form.nombreRol.trim().length > 100) {
       nuevosErrores.nombreRol = "El nombre no debe exceder 100 caracteres.";
     }
-
     if (!form.descripcion.trim()) {
       nuevosErrores.descripcion = "Ingrese la descripción.";
     }
-
     const nombreNormalizado = form.nombreRol.trim().toUpperCase();
-
     const yaExiste = roles.some(
       (x) => x.nombreRol.trim().toUpperCase() === nombreNormalizado && x.id !== form.id
     );
-
     if (yaExiste) {
       nuevosErrores.nombreRol = "Ya existe un rol con ese nombre.";
     }
-
     setErrores(nuevosErrores);
     return Object.keys(nuevosErrores).length === 0;
   };
 
   const guardar = async () => {
     if (!validar()) return;
-
-    const nombreFinal = form.nombreRol.trim().toUpperCase();
-    const descripcionFinal = form.descripcion.trim();
-
-    try {
-      setCargando(true);
-      setError("");
-      setMensaje("");
-
-      const payload = {
-        nombreRol: nombreFinal,
-        descripcion: descripcionFinal,
-        esActivo: form.estado === "ACTIVO",
-      };
-
-      if (modo === "nuevo") {
-        await rolesService.crearRol(payload);
-        setMensaje("Rol creado correctamente.");
-      } else if (form.id != null) {
-        await rolesService.actualizarRol(form.id, payload);
-        setMensaje("Rol actualizado correctamente.");
-      }
-
-      await cargarRoles();
-      cerrarPanel();
-    } catch (err: any) {
-      console.error(err);
-      const mensajeError =
-        err?.response?.data?.message ||
-        err?.response?.data?.mensaje ||
-        "No se pudo guardar la información del rol.";
-      setError(mensajeError);
-    } finally {
-      setCargando(false);
-    }
+    await handleSave();
+    setPanelAbierto(false);
+    setForm(formularioInicial);
+    await cargarRoles();
   };
 
   const confirmarEliminar = (id: number) => {
@@ -182,26 +175,9 @@ export default function SeguridadRolesPage() {
 
   const eliminar = async () => {
     if (idEliminar == null) return;
-
-    try {
-      setCargando(true);
-      setError("");
-      setMensaje("");
-
-      await rolesService.eliminarRol(idEliminar);
-      setMensaje("Rol eliminado correctamente.");
-      await cargarRoles();
-      setIdEliminar(null);
-    } catch (err: any) {
-      console.error(err);
-      const mensajeError =
-        err?.response?.data?.message ||
-        err?.response?.data?.mensaje ||
-        "No se pudo eliminar el rol.";
-      setError(mensajeError);
-    } finally {
-      setCargando(false);
-    }
+    await handleDelete(idEliminar);
+    setIdEliminar(null);
+    await cargarRoles();
   };
 
   const rolSeleccionadoEliminar = roles.find((x) => x.id === idEliminar);
@@ -222,8 +198,7 @@ export default function SeguridadRolesPage() {
       </div>
 
       {cargando ? <div style={styles.infoBox}>Cargando información...</div> : null}
-      {mensaje ? <div style={styles.successBox}>{mensaje}</div> : null}
-      {error ? <div style={styles.errorBox}>{error}</div> : null}
+      {mensaje ? <div style={styles.errorBox}>{mensaje}</div> : null}
 
       <div style={styles.card}>
         <div style={styles.tableWrapper}>

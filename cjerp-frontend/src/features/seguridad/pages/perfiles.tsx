@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { useCrudForm } from '../../../hooks/useCrudForm';
 import httpClient from "../../../api/httpClient";
 
 type PerfilDto = {
@@ -9,6 +10,8 @@ type PerfilDto = {
   fechaCreacion?: string | null;
 };
 
+
+
 type PerfilPayload = {
   nombrePerfil: string;
   descripcion: string;
@@ -17,30 +20,34 @@ type PerfilPayload = {
 
 const PERFILES_API_URL = "/perfiles";
 
-async function listarPerfiles(): Promise<PerfilDto[]> {
-  const response = await httpClient.get<PerfilDto[]>(PERFILES_API_URL);
-  return response.data;
-}
-
-async function crearPerfil(payload: PerfilPayload): Promise<PerfilDto> {
-  const response = await httpClient.post<PerfilDto>(PERFILES_API_URL, payload);
-  return response.data;
-}
-
-async function actualizarPerfil(
-  id: number,
-  payload: PerfilPayload
-): Promise<PerfilDto> {
-  const response = await httpClient.put<PerfilDto>(
-    `${PERFILES_API_URL}/${id}`,
-    payload
-  );
-  return response.data;
-}
-
-async function eliminarPerfil(id: number): Promise<void> {
-  await httpClient.delete(`${PERFILES_API_URL}/${id}`);
-}
+const perfilesApi = {
+  list: async () => {
+    const response = await httpClient.get<PerfilDto[]>(PERFILES_API_URL);
+    // response ahora es { message, data }
+    return (response.data ?? []).map(mapPerfilDtoToView);
+  },
+  create: async (form: PerfilForm) => {
+    const payload: PerfilPayload = {
+      nombrePerfil: form.nombrePerfil.trim().toUpperCase(),
+      descripcion: form.descripcion.trim(),
+      esActivo: form.estado === "ACTIVO",
+    };
+    const response = await httpClient.post<PerfilDto>(PERFILES_API_URL, payload);
+    return mapPerfilDtoToView(response.data);
+  },
+  update: async (id: number, form: PerfilForm) => {
+    const payload: PerfilPayload = {
+      nombrePerfil: form.nombrePerfil.trim().toUpperCase(),
+      descripcion: form.descripcion.trim(),
+      esActivo: form.estado === "ACTIVO",
+    };
+    const response = await httpClient.put<PerfilDto>(`${PERFILES_API_URL}/${id}`, payload);
+    return mapPerfilDtoToView(response.data);
+  },
+  remove: async (id: number) => {
+    await httpClient.delete(`${PERFILES_API_URL}/${id}`);
+  },
+};
 
 type Perfil = {
   id: number;
@@ -76,24 +83,33 @@ function mapPerfilDtoToView(item: PerfilDto): Perfil {
   };
 }
 
+
 export default function SeguridadPerfilesPage() {
   const sidePanelRef = useRef<HTMLDivElement | null>(null);
-  const [perfiles, setPerfiles] = useState<Perfil[]>([]);
   const [busqueda, setBusqueda] = useState("");
-  const [panelAbierto, setPanelAbierto] = useState(false);
-  const [modo, setModo] = useState<"nuevo" | "editar">("nuevo");
-  const [form, setForm] = useState<PerfilForm>(formularioInicial);
   const [errores, setErrores] = useState<Record<string, string>>({});
-  const [idEliminar, setIdEliminar] = useState<number | null>(null);
-  const [cargando, setCargando] = useState(false);
-  const [guardando, setGuardando] = useState(false);
-  const [mensaje, setMensaje] = useState("");
+
+  const {
+    items: perfiles,
+    form,
+    setForm,
+    loading: cargando,
+    saving: guardando,
+    error: mensaje,
+    panelOpen: panelAbierto,
+    setPanelOpen: setPanelAbierto,
+    mode: modo,
+    setMode: setModo,
+    idToDelete: idEliminar,
+    setIdToDelete: setIdEliminar,
+    handleSave,
+    handleDelete,
+    load: cargarPerfiles,
+  } = useCrudForm<Perfil, PerfilForm>(perfilesApi, formularioInicial);
 
   const perfilesFiltrados = useMemo(() => {
     const texto = busqueda.trim().toUpperCase();
-
     if (!texto) return perfiles;
-
     return perfiles.filter(
       (x) =>
         x.nombrePerfil.toUpperCase().includes(texto) ||
@@ -102,39 +118,10 @@ export default function SeguridadPerfilesPage() {
     );
   }, [perfiles, busqueda]);
 
-  const cargarPerfiles = async () => {
-    try {
-      setCargando(true);
-      setMensaje("");
-
-      const data = await listarPerfiles();
-      setPerfiles(data.map(mapPerfilDtoToView));
-    } catch (error: any) {
-      const apiMessage =
-        error?.response?.data?.message ||
-        error?.response?.data ||
-        "No se pudieron cargar los perfiles.";
-
-      setMensaje(String(apiMessage));
-    } finally {
-      setCargando(false);
-    }
-  };
-
-  useEffect(() => {
-    void cargarPerfiles();
-  }, []);
-
-  useEffect(() => {
-    if (!panelAbierto) return;
-    sidePanelRef.current?.scrollTo({ top: 0, behavior: "auto" });
-  }, [panelAbierto, modo]);
-
   const abrirNuevo = () => {
     setModo("nuevo");
     setForm(formularioInicial);
     setErrores({});
-    setMensaje("");
     setPanelAbierto(true);
   };
 
@@ -147,7 +134,6 @@ export default function SeguridadPerfilesPage() {
       estado: perfil.estado,
     });
     setErrores({});
-    setMensaje("");
     setPanelAbierto(true);
   };
 
@@ -159,54 +145,29 @@ export default function SeguridadPerfilesPage() {
 
   const validar = () => {
     const nuevosErrores: Record<string, string> = {};
-
     if (!form.nombrePerfil.trim()) {
       nuevosErrores.nombrePerfil = "Ingrese el nombre del perfil.";
     }
-
     if (form.nombrePerfil.trim().length > 100) {
       nuevosErrores.nombrePerfil = "El nombre no debe exceder 100 caracteres.";
     }
-
     if (!form.descripcion.trim()) {
       nuevosErrores.descripcion = "Ingrese la descripción.";
     }
-
     setErrores(nuevosErrores);
     return Object.keys(nuevosErrores).length === 0;
   };
 
   const guardar = async () => {
     if (!validar()) return;
-
-    try {
-      setGuardando(true);
-      setMensaje("");
-
-      const payload = {
-        nombrePerfil: form.nombrePerfil.trim().toUpperCase(),
-        descripcion: form.descripcion.trim(),
-        esActivo: form.estado === "ACTIVO",
-      };
-
-      if (modo === "nuevo") {
-        await crearPerfil(payload);
-      } else if (form.id != null) {
-        await actualizarPerfil(form.id, payload);
-      }
-
-      await cargarPerfiles();
-      cerrarPanel();
-    } catch (error: any) {
-      const apiMessage =
-        error?.response?.data?.message ||
-        error?.response?.data ||
-        "No se pudo guardar la información.";
-
-      setMensaje(String(apiMessage));
-    } finally {
-      setGuardando(false);
+    if (modo === "nuevo") {
+      await handleSave();
+    } else if (form.id != null) {
+      await handleSave();
     }
+    setPanelAbierto(false);
+    setForm(formularioInicial);
+    await cargarPerfiles();
   };
 
   const confirmarEliminar = (id: number) => {
@@ -215,21 +176,8 @@ export default function SeguridadPerfilesPage() {
 
   const eliminar = async () => {
     if (idEliminar == null) return;
-
-    try {
-      setMensaje("");
-      await eliminarPerfil(idEliminar);
-      await cargarPerfiles();
-      setIdEliminar(null);
-    } catch (error: any) {
-      const apiMessage =
-        error?.response?.data?.message ||
-        error?.response?.data ||
-        "No se pudo eliminar el perfil.";
-
-      setMensaje(String(apiMessage));
-      setIdEliminar(null);
-    }
+    await handleDelete(idEliminar);
+    setIdEliminar(null);
   };
 
   const perfilSeleccionadoEliminar = perfiles.find((x) => x.id === idEliminar);

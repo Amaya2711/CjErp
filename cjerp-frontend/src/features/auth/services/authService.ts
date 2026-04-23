@@ -5,23 +5,18 @@ export interface LoginRequest {
   clave: string;
 }
 
-export interface LoginData {
+export interface LoginResponse {
   token: string;
   idUsuario: string;
   nombreEmpleado?: string;
   correo?: string;
-  codEmp?: string | number | null;
-  codVal?: string | number | null;
-  cuadrilla?: string | number | null;
+  codEmp?: number | null;
+  codVal?: number | null;
+  cuadrilla?: number | null;
   expiration?: string;
 }
 
-export interface LoginResponse {
-  message: string;
-  data: LoginData;
-}
-
 export async function login(payload: LoginRequest): Promise<LoginResponse> {
-  const { data } = await httpClient.post<LoginResponse>("/auth/login", payload);
-  return data;
+  const response = await httpClient.post<LoginResponse>("/auth/login", payload);
+  return response.data; // 👈 ahora esto es el objeto real
 }

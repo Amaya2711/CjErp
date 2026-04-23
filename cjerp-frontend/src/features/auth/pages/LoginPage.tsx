@@ -31,33 +31,34 @@ export default function LoginPage() {
 
       const response = await login({
         idUsuario: idUsuario.trim(),
-        clave: clave.trim()
+        clave: clave.trim(),
       });
 
-      if (!response?.data?.token) {
-        setMensaje(response?.message || "No se pudo iniciar sesión.");
+      console.log("Respuesta login:", response);
+
+      if (!response || !response.token) {
+        setMensaje("No se pudo iniciar sesión.");
         return;
       }
 
-      const payload = response.data;
-
       saveAuthUser({
-        token: payload.token,
-        usuario: payload.idUsuario ?? "",
-        nombre: payload.nombreEmpleado ?? "",
-        correo: payload.correo ?? "",
-        codEmp: payload.codEmp ?? "",
-        codVal: payload.codVal ?? "",
-        cuadrilla: payload.cuadrilla ?? ""
+        token: response.token,
+        usuario: response.idUsuario ?? "",
+        nombre: response.nombreEmpleado ?? "",
+        correo: response.correo ?? "",
+        codEmp: String(response.codEmp ?? ""),
+        codVal: String(response.codVal ?? ""),
+        cuadrilla: String(response.cuadrilla ?? ""),
       });
 
-      navigate("/dashboard", { replace: true });
+      navigate("/admin/dashboardPage", { replace: true });
     } catch (error: any) {
       console.error("Error al iniciar sesión:", error);
 
       const mensajeError =
         error?.response?.data?.message ||
         error?.response?.data?.mensaje ||
+        error?.message ||
         "No se pudo iniciar sesión.";
 
       setMensaje(mensajeError);
@@ -76,45 +77,45 @@ export default function LoginPage() {
             style={styles.logo}
           />
         </div>
+
         <div style={styles.card}>
+          <form onSubmit={handleSubmit} style={styles.form}>
+            <div style={styles.group}>
+              <label htmlFor="idUsuario" style={styles.label}>
+                Usuario
+              </label>
+              <input
+                id="idUsuario"
+                type="text"
+                value={idUsuario}
+                onChange={(e) => setIdUsuario(e.target.value)}
+                placeholder="Ingrese su usuario"
+                autoComplete="username"
+                style={styles.input}
+              />
+            </div>
 
-        <form onSubmit={handleSubmit} style={styles.form}>
-          <div style={styles.group}>
-            <label htmlFor="idUsuario" style={styles.label}>
-              Usuario
-            </label>
-            <input
-              id="idUsuario"
-              type="text"
-              value={idUsuario}
-              onChange={(e) => setIdUsuario(e.target.value)}
-              placeholder="Ingrese su usuario"
-              autoComplete="username"
-              style={styles.input}
-            />
-          </div>
+            <div style={styles.group}>
+              <label htmlFor="clave" style={styles.label}>
+                Clave
+              </label>
+              <input
+                id="clave"
+                type="password"
+                value={clave}
+                onChange={(e) => setClave(e.target.value)}
+                placeholder="Ingrese su clave"
+                autoComplete="current-password"
+                style={styles.input}
+              />
+            </div>
 
-          <div style={styles.group}>
-            <label htmlFor="clave" style={styles.label}>
-              Clave
-            </label>
-            <input
-              id="clave"
-              type="password"
-              value={clave}
-              onChange={(e) => setClave(e.target.value)}
-              placeholder="Ingrese su clave"
-              autoComplete="current-password"
-              style={styles.input}
-            />
-          </div>
+            {mensaje ? <div style={styles.error}>{mensaje}</div> : null}
 
-          {mensaje ? <div style={styles.error}>{mensaje}</div> : null}
-
-          <button type="submit" disabled={cargando} style={styles.button}>
-            {cargando ? "Ingresando..." : "Ingresar"}
-          </button>
-        </form>
+            <button type="submit" disabled={cargando} style={styles.button}>
+              {cargando ? "Ingresando..." : "Ingresar"}
+            </button>
+          </form>
         </div>
       </div>
     </div>
@@ -128,14 +129,14 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "center",
     background: "#f8fafc",
-    padding: 24
+    padding: 24,
   },
   wrapper: {
     width: "100%",
     maxWidth: 420,
     display: "flex",
     flexDirection: "column",
-    gap: 0
+    gap: 0,
   },
   dock: {
     display: "flex",
@@ -146,7 +147,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderBottom: "none",
     borderRadius: "16px 16px 0 0",
     padding: "8px 28px 6px",
-    boxShadow: "0 10px 30px rgba(0,0,0,0.08)"
+    boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
   },
   card: {
     width: "100%",
@@ -156,9 +157,8 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "0 0 16px 16px",
     padding: "12px 28px 28px",
     boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
-    boxSizing: "border-box"
+    boxSizing: "border-box",
   },
-
   logo: {
     width: 180,
     height: "auto",
@@ -169,17 +169,17 @@ const styles: Record<string, React.CSSProperties> = {
   form: {
     display: "flex",
     flexDirection: "column",
-    gap: 16
+    gap: 16,
   },
   group: {
     display: "flex",
     flexDirection: "column",
-    gap: 6
+    gap: 6,
   },
   label: {
     fontSize: 14,
     fontWeight: 600,
-    color: "#334155"
+    color: "#334155",
   },
   input: {
     width: "100%",
@@ -188,7 +188,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #cbd5e1",
     outline: "none",
     fontSize: 14,
-    boxSizing: "border-box"
+    boxSizing: "border-box",
   },
   button: {
     border: "none",
@@ -198,11 +198,11 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 10,
     cursor: "pointer",
     fontWeight: 700,
-    fontSize: 14
+    fontSize: 14,
   },
   error: {
     marginTop: 4,
     color: "#b91c1c",
-    fontSize: 14
-  }
+    fontSize: 14,
+  },
 };

@@ -8,12 +8,18 @@ export interface RegistrarPagoDto {
   monto: number;
   detalle: string;
   comentario: string;
-  fechavencimiento?: string;
-  fecehemision?: string;
-  // Otros campos relevantes
+  fechaVencimiento?: string;
+  fechaEmision?: string;
+  solicitante?: string;
+  gestor?: string;
+  validador?: string;
+  moneda?: string;
+  bien?: string;
+  comprobante?: string;
+  serie?: string;
 }
 
+// Usar el endpoint RESTful estándar y camelCase
 export const registrarPago = async (dto: RegistrarPagoDto) => {
-  const { data } = await http.post('/tesoreria/pagos/registrar', dto);
-  return data;
+  return await http.post('/tesoreria/gastos', dto);
 };

@@ -49,4 +49,23 @@ public class SegRolMenuPermisoController : ControllerBase
 
         return Ok(new { message = "Permiso guardado correctamente." });
     }
+
+    // Nuevo endpoint alineado con el frontend: PUT /rol/{idRol}
+    [HttpPut("rol/{idRol:int}")]
+    public async Task<IActionResult> GuardarPorRol(int idRol, [FromBody] GuardarSegRolMenuPermisoDto dto)
+    {
+        if (idRol <= 0)
+            return BadRequest(new { message = "IdRol es obligatorio." });
+
+        if (dto.IdMenu <= 0)
+            return BadRequest(new { message = "IdMenu es obligatorio." });
+
+        dto.IdRol = idRol;
+        if (string.IsNullOrWhiteSpace(dto.Usuario))
+            dto.Usuario = "SYSTEM";
+
+        await _service.GuardarAsync(dto);
+
+        return Ok(new { message = "Permiso guardado correctamente." });
+    }
 }

@@ -1,7 +1,5 @@
+import PlaceholderPage from '../../../components/base/PlaceholderPage';
+
 export default function CierreContablePage() {
-	return (
-		<div style={{ padding: 24 }}>
-			<h1>Cierre Contable</h1>
-		</div>
-	);
+	return <PlaceholderPage title="Cierre Contable" />;
 }

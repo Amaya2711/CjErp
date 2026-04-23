@@ -260,11 +260,20 @@ export default function SeguridadPerfilRolMenu() {
         menuService.obtenerCompleto(),
       ]);
 
-      const usuariosData =
-        usuariosResult.status === "fulfilled" ? usuariosResult.value : [];
-      const perfilesData =
-        perfilesResult.status === "fulfilled" ? perfilesResult.value : [];
-      const menuData = menuResult.status === "fulfilled" ? menuResult.value : [];
+     const usuariosData =
+      usuariosResult.status === "fulfilled" && Array.isArray(usuariosResult.value)
+    ? usuariosResult.value
+    : [];
+
+    const perfilesData =
+      perfilesResult.status === "fulfilled" && Array.isArray(perfilesResult.value)
+    ? perfilesResult.value
+    : [];
+
+    const menuData =
+      menuResult.status === "fulfilled" && Array.isArray(menuResult.value)
+    ? menuResult.value
+    : [];
 
       if (
         usuariosResult.status === "rejected" ||
@@ -274,11 +283,12 @@ export default function SeguridadPerfilRolMenu() {
         setError("No se pudo cargar completamente usuarios, perfiles y/o menú.");
       }
 
-      const menuTree = buildTree(menuData);
-      const siguienteOrdenPrincipal =
-        menuData
-          .filter((menu) => menu.idMenuPadre == null)
-          .reduce((max, menu) => Math.max(max, menu.ordenMenu || 0), 0) + 1;
+     const menuTree = buildTree(menuData);
+
+     const siguienteOrdenPrincipal =
+      menuData
+        .filter((menu) => menu.idMenuPadre == null)
+        .reduce((max, menu) => Math.max(max, menu.ordenMenu || 0), 0) + 1;
 
       setUsuarios(usuariosData);
       setUsuarioFiltro("");
@@ -718,11 +728,11 @@ export default function SeguridadPerfilRolMenu() {
           </div>
         </div>
 
-        {menuVisual.length === 0 ? (
+        {!Array.isArray(menuVisual) || menuVisual.length === 0 ? (
           <div style={styles.emptyText}>No hay menús disponibles.</div>
         ) : (
           <div style={styles.treeContainer}>
-            {menuVisual.map((node) => (
+            {(menuVisual ?? []).map((node) => (
               <MenuTreeItem
                 key={node.id}
                 node={node}

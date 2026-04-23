@@ -1,577 +1,735 @@
-    // ...existing code...
+import React, { useRef, useState, useEffect } from "react";
+import { useCrudForm } from "../../../hooks/useCrudForm";
+import httpClient from "../../../api/httpClient";
+import { FiltroOperativoLookup } from "../../../components/lookups/FiltroOperativoLookup";
+import { listarEmpleadosCta } from "../../../api/empleadoService";
+import type { FiltroOperativoValue } from "../../../models/filtroOperativo";
+import type { EmpleadoCta } from "../../../models/empleadoCta";
 
-  // ...existing code...
+type GastoDto = {
+  id: number;
+  filtroOperativoKey: string;
+  responsable: string;
+  cuenta: string;
+  tipoPago: string;
+  monto: number;
+  detalle: string;
+  comentario: string;
+  fechaVencimiento?: string;
+  fechaEmision?: string;
+  solicitante?: string;
+  gestor?: string;
+  validador?: string;
+  moneda?: string;
+  bien?: string;
+  comprobante?: string;
+  serie?: string;
+};
 
-  // ...existing code...
+type GastoForm = {
+  id: number | null;
+  filtroOperativo: FiltroOperativoValue;
+  responsable: string;
+  cuenta: string;
+  tipoPago: string;
+  monto: string;
+  detalle: string;
+  comentario: string;
+  fechaVencimiento: string;
+  fechaEmision: string;
+  solicitante: string;
+  gestor: string;
+  validador: string;
+  moneda: string;
+  bien: string;
+  comprobante: string;
+  serie: string;
+};
 
-  // ...existing code...
+type GastoPayload = {
+  filtroOperativoKey: string;
+  responsable: string;
+  cuenta: string;
+  tipoPago: string;
+  monto: number;
+  detalle: string;
+  comentario: string;
+  fechaVencimiento?: string;
+  fechaEmision?: string;
+  solicitante?: string;
+  gestor?: string;
+  validador?: string;
+  moneda?: string;
+  bien?: string;
+  comprobante?: string;
+  serie?: string;
+};
 
-  // ...existing code...
-import React, { useState, useEffect } from 'react';
-import type { FiltroOperativoValue } from '../../../models/filtroOperativo';
-import { FiltroOperativoLookup } from '../../../components/lookups/FiltroOperativoLookup';
-import { registrarPago } from '../../../api/tesoreriaService';
-import { listarEmpleadosCta } from '../../../api/empleadoService';
-import type { EmpleadoCta } from '../../../models/empleadoCta';
-import './gastos.css';
+const GASTOS_API_URL = "/tesoreria/gastos";
 
-const GastosPage: React.FC = () => {
-    // Selección de responsable desde el autocomplete
-    const handleResponsableSelect = (emp: EmpleadoCta) => {
-      setForm(prev => ({
-        ...prev,
-        responsable: String(emp.idEmpleado),
-        cuenta: `Banco: ${emp.nombreBanco || ''}, Tipo Cta: ${emp.nombreCta || ''}, Cta. ${emp.cuenta || ''}, CI: ${emp.cuentaInter || ''}, Nro Doc: ${emp.nroDocumento || ''}`
-      }));
-      setResponsableInput(emp.nombreEmpleado);
-      setShowResponsableDropdown(false);
-      setHighlightedResponsableIdx(-1);
+function extraerArray<T>(response: any): T[] {
+  if (Array.isArray(response)) {
+    return response;
+  }
+
+  if (Array.isArray(response?.data)) {
+    return response.data;
+  }
+
+  return [];
+}
+
+function extraerObjeto<T>(response: any): T {
+  if (response?.data) {
+    return response.data as T;
+  }
+
+  return response as T;
+}
+
+function mapGastoDtoToView(item: GastoDto): GastoForm {
+  return {
+    id: item.id,
+    filtroOperativo: { filtro: { filtroKey: item.filtroOperativoKey } } as FiltroOperativoValue,
+    responsable: item.responsable,
+    cuenta: item.cuenta,
+    tipoPago: item.tipoPago,
+    monto: item.monto?.toString() ?? "",
+    detalle: item.detalle,
+    comentario: item.comentario,
+    fechaVencimiento: item.fechaVencimiento || "",
+    fechaEmision: item.fechaEmision || "",
+    solicitante: item.solicitante || "",
+    gestor: item.gestor || "",
+    validador: item.validador || "",
+    moneda: item.moneda || "",
+    bien: item.bien || "",
+    comprobante: item.comprobante || "",
+    serie: item.serie || "",
+  };
+}
+
+const gastosApi = {
+  list: async () => {
+    const response = await httpClient.get<GastoDto[]>(GASTOS_API_URL);
+    const data = extraerArray<GastoDto>(response);
+    return data.map(mapGastoDtoToView);
+  },
+
+  create: async (form: GastoForm) => {
+    const payload: GastoPayload = {
+      filtroOperativoKey: form.filtroOperativo.filtro?.filtroKey || "",
+      responsable: form.responsable,
+      cuenta: form.cuenta,
+      tipoPago: form.tipoPago,
+      monto: Number(form.monto),
+      detalle: form.detalle,
+      comentario: form.comentario,
+      fechaVencimiento: form.fechaVencimiento || undefined,
+      fechaEmision: form.fechaEmision || undefined,
+      solicitante: form.solicitante || undefined,
+      gestor: form.gestor || undefined,
+      validador: form.validador || undefined,
+      moneda: form.moneda || undefined,
+      bien: form.bien || undefined,
+      comprobante: form.comprobante || undefined,
+      serie: form.serie || undefined,
     };
-  // Estado para empleados responsables (debe ir antes del autocomplete)
+
+    const response = await httpClient.post<GastoDto>(GASTOS_API_URL, payload);
+    const data = extraerObjeto<GastoDto>(response);
+    return mapGastoDtoToView(data);
+  },
+
+  update: async (id: number, form: GastoForm) => {
+    const payload: GastoPayload = {
+      filtroOperativoKey: form.filtroOperativo.filtro?.filtroKey || "",
+      responsable: form.responsable,
+      cuenta: form.cuenta,
+      tipoPago: form.tipoPago,
+      monto: Number(form.monto),
+      detalle: form.detalle,
+      comentario: form.comentario,
+      fechaVencimiento: form.fechaVencimiento || undefined,
+      fechaEmision: form.fechaEmision || undefined,
+      solicitante: form.solicitante || undefined,
+      gestor: form.gestor || undefined,
+      validador: form.validador || undefined,
+      moneda: form.moneda || undefined,
+      bien: form.bien || undefined,
+      comprobante: form.comprobante || undefined,
+      serie: form.serie || undefined,
+    };
+
+    const response = await httpClient.put<GastoDto>(`${GASTOS_API_URL}/${id}`, payload);
+    const data = extraerObjeto<GastoDto>(response);
+    return mapGastoDtoToView(data);
+  },
+
+  remove: async (id: number) => {
+    await httpClient.delete(`${GASTOS_API_URL}/${id}`);
+  },
+};
+
+const formularioInicial: GastoForm = {
+  id: null,
+  filtroOperativo: {},
+  responsable: "",
+  cuenta: "",
+  tipoPago: "",
+  monto: "",
+  detalle: "",
+  comentario: "",
+  fechaVencimiento: "",
+  fechaEmision: "",
+  solicitante: "",
+  gestor: "",
+  validador: "",
+  moneda: "",
+  bien: "",
+  comprobante: "",
+  serie: "",
+};
+
+export default function GastosPage() {
+  const sidePanelRef = useRef<HTMLDivElement | null>(null);
+  const [errores, setErrores] = useState<Record<string, string>>({});
   const [empleados, setEmpleados] = useState<EmpleadoCta[]>([]);
   const [empleadosLoading, setEmpleadosLoading] = useState(false);
   const [empleadosError, setEmpleadosError] = useState<string | null>(null);
-
-  // Estados para el autocomplete de Responsable
-  const [responsableInput, setResponsableInput] = useState('');
+  const [responsableInput, setResponsableInput] = useState("");
   const [showResponsableDropdown, setShowResponsableDropdown] = useState(false);
   const [highlightedResponsableIdx, setHighlightedResponsableIdx] = useState(-1);
-  const filteredResponsables = responsableInput.trim() === ''
-    ? empleados
-    : empleados.filter(emp =>
-        emp.nombreEmpleado.toLowerCase().includes(responsableInput.toLowerCase())
-      );
-// ...existing code...
-  const today = new Date().toISOString().slice(0, 10);
-  const [form, setForm] = useState({
-    filtroOperativo: {} as FiltroOperativoValue,
-    responsable: '',
-    cuenta: '',
-    tipoPago: '',
-    solicitante: '',
-    gestor: '',
-      validador: '',
-    monto: '',
-    igv: '',
-    moneda: '',
-    comentario: '',
-    detalle: '',
-    fechaVencimiento: today,
-    bien: '',
-    comprobante: '',
-    serie: '',
-    // ...otros campos
-  });
 
-  const [showFechaVenc, setShowFechaVenc] = useState(false);
-  // ...existing code...
-  const [showFechaEmi, setShowFechaEmi] = useState(false);
-  const [fechaEmision, setFechaEmision] = useState(today);
-
-
-  const handleFiltroChange = (value: FiltroOperativoValue) => {
-    setForm(prev => ({
-      ...prev,
-      filtroOperativo: value,
-    }));
-  };
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    if (name === 'monto') {
-      // Solo permitir números y punto
-      const clean = value.replace(/[^0-9.]/g, '');
-      // Evitar más de un punto
-      const parts = clean.split('.');
-      let numeric = parts[0];
-      if (parts.length > 1) numeric += '.' + parts.slice(1).join('');
-      setForm(prev => ({ ...prev, [name]: numeric }));
-    } else {
-      setForm(prev => ({ ...prev, [name]: value }));
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!form.filtroOperativo.filtro?.filtroKey) {
-      alert('Debe seleccionar un filtro operativo.');
-      return;
-    }
-    // setLoading(true); // Eliminado: loading no se usa
-    try {
-      await registrarPago({
-        filtroOperativoKey: form.filtroOperativo.filtro.filtroKey,
-        responsable: form.responsable,
-        cuenta: form.cuenta,
-        tipoPago: form.tipoPago,
-        monto: Number(form.monto),
-        comentario: form.comentario,
-        detalle: form.detalle,
-        fechavencimiento: form.fechaVencimiento,
-        fecehemision: fechaEmision,
-        // ...otros campos
-      });
-      alert('Pago registrado correctamente');
-      // Limpia el formulario si lo deseas
-    } catch {
-      alert('Error al registrar el pago');
-    }
-    // setLoading(false); // Eliminado: loading no se usa
-  };
-
-  const [activeTab, setActiveTab] = useState<'registro' | 'resumen'>('registro');
-
-  // ...existing code...
+  const {
+    items: gastos,
+    form,
+    setForm,
+    loading: cargando,
+    saving: guardando,
+    error: mensaje,
+    panelOpen: panelAbierto,
+    setPanelOpen: setPanelAbierto,
+    mode: modo,
+    setMode: setModo,
+    idToDelete: idEliminar,
+    setIdToDelete: setIdEliminar,
+    handleSave,
+    handleDelete,
+    load: cargarGastos,
+  } = useCrudForm<GastoForm, GastoForm>(gastosApi, formularioInicial);
 
   useEffect(() => {
     setEmpleadosLoading(true);
+    setEmpleadosError(null);
+
     listarEmpleadosCta()
-      .then(setEmpleados)
-      .catch(() => setEmpleadosError('Error al cargar responsables'))
+      .then((data) => {
+        setEmpleados(Array.isArray(data) ? data : []);
+      })
+      .catch(() => setEmpleadosError("Error al cargar responsables"))
       .finally(() => setEmpleadosLoading(false));
   }, []);
 
-  // (Eliminado: handleResponsableChange, ya no se usa con el nuevo autocomplete)
+  const empleadosSafe = Array.isArray(empleados) ? empleados : [];
+  const gastosSafe = Array.isArray(gastos) ? gastos : [];
+
+  const filteredResponsables =
+    responsableInput.trim() === ""
+      ? empleadosSafe
+      : empleadosSafe.filter((emp) =>
+          emp.nombreEmpleado.toLowerCase().includes(responsableInput.toLowerCase())
+        );
+
+  const abrirNuevo = () => {
+    setModo("nuevo");
+    setForm(formularioInicial);
+    setResponsableInput("");
+    setHighlightedResponsableIdx(-1);
+    setShowResponsableDropdown(false);
+    setErrores({});
+    setPanelAbierto(true);
+  };
+
+  const abrirEditar = (gasto: GastoForm) => {
+    setModo("editar");
+    setForm(gasto);
+    const responsableNombre =
+      empleadosSafe.find((emp) => String(emp.idEmpleado) === gasto.responsable)?.nombreEmpleado || "";
+    setResponsableInput(responsableNombre);
+    setHighlightedResponsableIdx(-1);
+    setShowResponsableDropdown(false);
+    setErrores({});
+    setPanelAbierto(true);
+  };
+
+  const cerrarPanel = () => {
+    setPanelAbierto(false);
+    setForm(formularioInicial);
+    setResponsableInput("");
+    setHighlightedResponsableIdx(-1);
+    setShowResponsableDropdown(false);
+    setErrores({});
+  };
+
+  const validar = () => {
+    const nuevosErrores: Record<string, string> = {};
+
+    if (!form.filtroOperativo.filtro?.filtroKey) {
+      nuevosErrores.filtroOperativo = "Seleccione un filtro operativo.";
+    }
+
+    if (!form.responsable) {
+      nuevosErrores.responsable = "Seleccione un responsable.";
+    }
+
+    if (!form.tipoPago) {
+      nuevosErrores.tipoPago = "Seleccione el tipo de pago.";
+    }
+
+    if (!form.monto || isNaN(Number(form.monto))) {
+      nuevosErrores.monto = "Ingrese un monto válido.";
+    }
+
+    setErrores(nuevosErrores);
+    return Object.keys(nuevosErrores).length === 0;
+  };
+
+  const guardar = async () => {
+    if (!validar()) return;
+
+    await handleSave();
+    setPanelAbierto(false);
+    setForm(formularioInicial);
+    setResponsableInput("");
+    await cargarGastos();
+  };
+
+  const confirmarEliminar = (id: number) => {
+    setIdEliminar(id);
+  };
+
+  const eliminar = async () => {
+    if (idEliminar == null) return;
+    await handleDelete(idEliminar);
+    setIdEliminar(null);
+  };
+
+  const gastoSeleccionadoEliminar = gastosSafe.find((x) => x.id === idEliminar);
 
   return (
-    <div className="gastos-container" style={{ fontFamily: 'Arial, sans-serif', fontSize: '13px', marginTop: 0 }}>
-      {/* Toolstrip CRUD */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 10, background: '#f5f5f5', borderRadius: 4, padding: '6px 10px', alignItems: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.04)', justifyContent: 'flex-end' }}>
-        <button type="button" title="Nuevo" style={{ padding: '4px 10px', fontSize: 13, border: '1px solid #bbb', borderRadius: 3, background: '#fff', cursor: 'pointer' }}>
-          <span role="img" aria-label="Nuevo">🆕</span> Nuevo
-        </button>
-        <button type="button" title="Editar" style={{ padding: '4px 10px', fontSize: 13, border: '1px solid #bbb', borderRadius: 3, background: '#fff', cursor: 'pointer' }}>
-          <span role="img" aria-label="Editar">✏️</span> Editar
-        </button>
-        <button type="button" title="Eliminar" style={{ padding: '4px 10px', fontSize: 13, border: '1px solid #bbb', borderRadius: 3, background: '#fff', cursor: 'pointer' }}>
-          <span role="img" aria-label="Eliminar">🗑️</span> Eliminar
-        </button>
-        <button type="button" title="Guardar" style={{ padding: '4px 10px', fontSize: 13, border: '1px solid #bbb', borderRadius: 3, background: '#fff', cursor: 'pointer' }}>
-          <span role="img" aria-label="Guardar">💾</span> Guardar
-        </button>
-        <button type="button" title="Cancelar" style={{ padding: '4px 10px', fontSize: 13, border: '1px solid #bbb', borderRadius: 3, background: '#fff', cursor: 'pointer' }}>
-          <span role="img" aria-label="Cancelar">❌</span> Cancelar
+    <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 20 }}>
+      <div
+        style={{
+          background: "#FFFFFF",
+          borderRadius: 16,
+          padding: 16,
+          boxShadow: "0 8px 24px rgba(23,20,58,0.06)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+        }}
+      >
+        <button
+          style={{
+            border: "none",
+            background: "#6E4CCB",
+            color: "#FFFFFF",
+            padding: "10px 16px",
+            borderRadius: 10,
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+          onClick={abrirNuevo}
+        >
+          Nuevo gasto
         </button>
       </div>
-      {/* XtraTabControl simulado */}
-      <div style={{ background: '#e9e9e9', borderRadius: 5, padding: 0, marginBottom: 10, boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
-        {/* Tabs header */}
-        <div style={{ display: 'flex', borderBottom: '1px solid #ccc', background: '#f7f7f7', borderTopLeftRadius: 5, borderTopRightRadius: 5 }}>
-          <div
-            style={{
-              padding: '8px 18px',
-              cursor: 'pointer',
-              borderBottom: activeTab === 'registro' ? '2px solid #1976d2' : 'none',
-              fontWeight: activeTab === 'registro' ? 600 : undefined,
-              color: activeTab === 'registro' ? '#1976d2' : '#555',
-              background: activeTab === 'registro' ? '#fff' : 'transparent',
-              borderTopLeftRadius: 5
-            }}
-            onClick={() => setActiveTab('registro')}
-          >
-            Registro de solicitud
-          </div>
-          <div
-            style={{
-              padding: '8px 18px',
-              cursor: 'pointer',
-              borderBottom: activeTab === 'resumen' ? '2px solid #1976d2' : 'none',
-              fontWeight: activeTab === 'resumen' ? 600 : undefined,
-              color: activeTab === 'resumen' ? '#1976d2' : '#555',
-              background: activeTab === 'resumen' ? '#fff' : 'transparent',
-              borderTopRightRadius: 5
-            }}
-            onClick={() => setActiveTab('resumen')}
-          >
-            Resumen
-          </div>
+
+      {mensaje && (
+        <div
+          style={{
+            background: "#FEF2F2",
+            border: "1px solid #FECACA",
+            color: "#991B1B",
+            padding: 14,
+            borderRadius: 12,
+            fontSize: 14,
+            fontWeight: 600,
+          }}
+        >
+          {mensaje}
         </div>
-        {/* Tab content dinámico */}
-        <div style={{ padding: '18px 18px 10px 18px', background: '#fff', borderBottomLeftRadius: 5, borderBottomRightRadius: 5 }}>
-          {activeTab === 'registro' ? (
-            <form className="gastos-form" onSubmit={handleSubmit} style={{ fontFamily: 'Arial, sans-serif', fontSize: '13px' }}>
-              <div className="gastos-row">
-                <div className="gastos-col" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <FiltroOperativoLookup
-                    value={form.filtroOperativo}
-                    onChange={handleFiltroChange}
-                  />
-                  {/* Detalle y Comentario en la misma fila */}
-                  <div style={{ display: 'flex', gap: 12, marginTop: 2, marginBottom: 2, position: 'relative', zIndex: 1, overflow: 'visible' }}>
-                    {/* Detalle */}
-                    <div style={{ flex: 2, display: 'flex', flexDirection: 'column', gap: 2, maxWidth: 300 }}>
-                      <label htmlFor="detalle" style={{ marginBottom: 2 }}>Detalle</label>
-                      <textarea
-                        id="detalle"
-                        name="detalle"
-                        rows={3}
-                        value={form.detalle}
-                        onChange={handleInputChange}
-                        style={{ width: '100%', maxWidth: 300, fontFamily: 'Arial, sans-serif', fontSize: '13px', resize: 'vertical', minHeight: 150, maxHeight: 150 }}
-                      />
-                    </div>
-                    {/* Comentario, Emisión y Vencimiento */}
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, maxWidth: 200 }}>
-                      <label htmlFor="comentario" style={{ marginBottom: 2 }}>Comentario</label>
-                      <textarea
-                        id="comentario"
-                        name="comentario"
-                        rows={3}
-                        value={form.comentario}
-                        onChange={handleInputChange}
-                        style={{ width: '100%', maxWidth: 200, fontFamily: 'Arial, sans-serif', fontSize: '13px', resize: 'vertical' }}
-                      />
-                      {/* Emisión debajo de Comentario */}
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, marginTop: 8 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <input
-                            type="checkbox"
-                            checked={showFechaEmi}
-                            onChange={e => setShowFechaEmi(e.target.checked)}
-                            style={{ marginRight: 4 }}
-                          />
-                          <label style={{ marginBottom: 0, marginRight: 4 }}>Emisión</label>
-                        </div>
-                        <input
-                          type="date"
-                          name="fechaEmision"
-                          value={fechaEmision}
-                          onChange={e => setFechaEmision(e.target.value)}
-                          style={{ fontFamily: 'Arial, sans-serif', fontSize: '13px', minWidth: 120 }}
-                          disabled={!showFechaEmi}
-                        />
-                      </div>
-                      {/* Vencimiento debajo de Emisión */}
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, marginTop: 8 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <input
-                            type="checkbox"
-                            checked={showFechaVenc}
-                            onChange={e => {
-                              setShowFechaVenc(e.target.checked);
-                              if (e.target.checked && !form.fechaVencimiento) {
-                                setForm(prev => ({ ...prev, fechaVencimiento: today }));
-                              }
-                              if (!e.target.checked) {
-                                setForm(prev => ({ ...prev, fechaVencimiento: '' }));
-                              }
-                            }}
-                            style={{ marginRight: 4 }}
-                          />
-                          <label style={{ marginBottom: 0, marginRight: 4 }}>Vencim.</label>
-                        </div>
-                        <input
-                          type="date"
-                          name="fechaVencimiento"
-                          value={form.fechaVencimiento}
-                          onChange={handleInputChange}
-                          style={{ fontFamily: 'Arial, sans-serif', fontSize: '13px', minWidth: 120 }}
-                          disabled={!showFechaVenc}
-                        />
-                      </div>
-                    </div>
-                    {/* Bien y Comprobante */}
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8, minWidth: 120, maxWidth: 160 }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <label htmlFor="bien" style={{ marginBottom: 2 }}>Bien</label>
-                        <select
-                          id="bien"
-                          name="bien"
-                          value={form.bien || ''}
-                          onChange={handleInputChange}
-                          style={{ width: '100%', fontFamily: 'Arial, sans-serif', fontSize: '13px' }}
-                        >
-                          <option value="">Seleccione...</option>
-                          <option value="BIEN1">Bien 1</option>
-                          <option value="BIEN2">Bien 2</option>
-                          <option value="BIEN3">Bien 3</option>
-                        </select>
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <label htmlFor="comprobante" style={{ marginBottom: 2 }}>Comprobante</label>
-                        <select
-                          id="comprobante"
-                          name="comprobante"
-                          value={form.comprobante || ''}
-                          onChange={handleInputChange}
-                          style={{ width: '100%', fontFamily: 'Arial, sans-serif', fontSize: '13px' }}
-                        >
-                          <option value="">Seleccione...</option>
-                          <option value="FACTURA">Factura</option>
-                          <option value="RECIBO">Recibo</option>
-                          <option value="BOLETA">Boleta</option>
-                        </select>
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <label htmlFor="serie" style={{ marginBottom: 2 }}>Serie</label>
-                        <input
-                          type="text"
-                          id="serie"
-                          name="serie"
-                          value={form.serie || ''}
-                          onChange={handleInputChange}
-                          style={{ width: '100%', fontFamily: 'Arial, sans-serif', fontSize: '13px' }}
-                        />
-                      </div>
-                    </div>
-                    {/* Vencimiento eliminado de columna separada, ahora está debajo de Emisión */}
-                  </div>
-                  <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginTop: -4 }}>
-                    <div style={{ flex: 1 }}>
-                      <label>Responsable</label>
-                      <div style={{ position: 'relative', width: '100%' }}>
-                        <input
-                          type="text"
-                          name="responsable"
-                          value={
-                            empleados.find(emp => String(emp.idEmpleado) === form.responsable)?.nombreEmpleado || responsableInput || ''
-                          }
-                          onChange={e => {
-                            setResponsableInput(e.target.value);
-                            setShowResponsableDropdown(true);
-                            setForm(prev => ({ ...prev, responsable: '' }));
-                          }}
-                          onFocus={() => {
-                            if (filteredResponsables.length > 0) setShowResponsableDropdown(true);
-                          }}
-                          onKeyDown={e => {
-                            if (filteredResponsables.length === 0) return;
-                            if (e.key === 'ArrowDown') {
-                              e.preventDefault();
-                              setHighlightedResponsableIdx(idx => Math.min(idx + 1, filteredResponsables.length - 1));
-                              setShowResponsableDropdown(true);
-                            } else if (e.key === 'ArrowUp') {
-                              e.preventDefault();
-                              setHighlightedResponsableIdx(idx => Math.max(idx - 1, 0));
-                              setShowResponsableDropdown(true);
-                            } else if (e.key === 'Enter') {
-                              if (highlightedResponsableIdx >= 0 && highlightedResponsableIdx < filteredResponsables.length) {
-                                const emp = filteredResponsables[highlightedResponsableIdx];
-                                handleResponsableSelect(emp);
-                              }
-                            }
-                          }}
-                          placeholder="Seleccione..."
-                          autoComplete="off"
-                          required
-                          style={{ fontFamily: 'Arial, sans-serif', fontSize: '13px', width: '100%' }}
-                          disabled={empleadosLoading}
-                        />
-                        {showResponsableDropdown && filteredResponsables.length > 0 && (
-                          <div style={{
-                            position: 'absolute',
-                            top: '100%',
-                            left: 0,
-                            right: 0,
-                            background: '#fff',
-                            border: '1px solid #ccc',
-                            zIndex: 1002,
-                            maxHeight: 180,
-                            overflowY: 'auto',
-                          }}>
-                            {filteredResponsables.map((emp, idx) => (
-                              <div
-                                key={emp.idEmpleado}
-                                style={{
-                                  padding: 6,
-                                  cursor: 'pointer',
-                                  background: idx === highlightedResponsableIdx ? '#e6f7ff' : undefined,
-                                }}
-                                onMouseDown={() => handleResponsableSelect(emp)}
-                              >
-                                {emp.nombreEmpleado}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {empleadosLoading && <span style={{ fontSize: 12, color: '#888' }}>Cargando...</span>}
-                        {empleadosError && <span style={{ fontSize: 12, color: 'red' }}>{empleadosError}</span>}
-                      </div>
-                    </div>
-                    <div style={{ flex: 2, minWidth: 200, width: '100%' }}>
-                      {/* <label>Cuenta</label> */}
-                      <input
-                        name="cuenta"
-                        value={form.cuenta}
-                        onChange={handleInputChange}
-                        required
-                        readOnly={true}
-                        style={{ fontFamily: 'Arial, sans-serif', fontSize: '11px', width: '100%' }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="gastos-row">
-                <div className="gastos-col">
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <label htmlFor="tipoPago" style={{ marginBottom: 0, whiteSpace: 'nowrap' }}>Tipo de Pago</label>
-                      <select
-                        id="tipoPago"
-                        name="tipoPago"
-                        value={form.tipoPago}
-                        onChange={handleInputChange}
-                        required
-                        style={{ fontFamily: 'Arial, sans-serif', fontSize: '13px', width: 120 }}
-                      >
-                        <option value="">Seleccione...</option>
-                        <option value="CONTADO">CONTADO</option>
-                        <option value="CREDITO">CRÉDITO</option>
-                      </select>
-                        <label htmlFor="monto" style={{ marginBottom: 0, whiteSpace: 'nowrap', marginLeft: 8 }}>Monto</label>
-                        <input
-                          type="text"
-                          id="monto"
-                          name="monto"
-                          value={form.monto}
-                          onChange={handleInputChange}
-                          onBlur={e => {
-                            let val = e.target.value;
-                            if (val === '' || isNaN(Number(val))) {
-                              setForm(prev => ({ ...prev, monto: '' }));
-                            } else {
-                              setForm(prev => ({ ...prev, monto: Number(val).toFixed(2) }));
-                            }
-                          }}
-                          required
-                          inputMode="decimal"
-                          pattern="[0-9]*[.,]?[0-9]*"
-                          minLength={1}
-                          style={{ fontFamily: 'Arial, sans-serif', fontSize: '13px', width: 120, textAlign: 'right' }}
-                        />
-                        <span style={{ marginLeft: 8, marginRight: 4, fontSize: '13px', color: '#555' }}>IGV</span>
-                        <input
-                          type="text"
-                          id="igv"
-                          name="igv"
-                          value={(() => {
-                            const monto = parseFloat(form.monto) || 0;
-                            return (monto * 0.13).toFixed(2);
-                          })()}
-                          readOnly
-                          inputMode="decimal"
+      )}
+
+      <div
+        style={{
+          background: "#FFFFFF",
+          borderRadius: 16,
+          padding: 20,
+          boxShadow: "0 8px 24px rgba(23,20,58,0.08)",
+        }}
+      >
+        <div style={{ width: "100%", overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: "left", padding: "14px 12px", fontSize: 13, color: "#374151", borderBottom: "1px solid #E5E7EB", background: "#F9FAFB" }}>
+                  Id
+                </th>
+                <th style={{ textAlign: "left", padding: "14px 12px", fontSize: 13, color: "#374151", borderBottom: "1px solid #E5E7EB", background: "#F9FAFB" }}>
+                  Responsable
+                </th>
+                <th style={{ textAlign: "left", padding: "14px 12px", fontSize: 13, color: "#374151", borderBottom: "1px solid #E5E7EB", background: "#F9FAFB" }}>
+                  Monto
+                </th>
+                <th style={{ textAlign: "left", padding: "14px 12px", fontSize: 13, color: "#374151", borderBottom: "1px solid #E5E7EB", background: "#F9FAFB" }}>
+                  Tipo Pago
+                </th>
+                <th style={{ textAlign: "left", padding: "14px 12px", fontSize: 13, color: "#374151", borderBottom: "1px solid #E5E7EB", background: "#F9FAFB" }}>
+                  Detalle
+                </th>
+                <th style={{ textAlign: "center", padding: "14px 12px", fontSize: 13, color: "#374151", borderBottom: "1px solid #E5E7EB", background: "#F9FAFB" }}>
+                  Acciones
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {cargando ? (
+                <tr>
+                  <td colSpan={6} style={{ padding: 24, textAlign: "center", color: "#6B7280", fontSize: 14 }}>
+                    Cargando gastos...
+                  </td>
+                </tr>
+              ) : gastosSafe.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ padding: 24, textAlign: "center", color: "#6B7280", fontSize: 14 }}>
+                    No se encontraron gastos.
+                  </td>
+                </tr>
+              ) : (
+                gastosSafe.map((gasto) => (
+                  <tr key={gasto.id}>
+                    <td style={{ padding: "14px 12px", borderBottom: "1px solid #F3F4F6", color: "#374151", fontSize: 14 }}>
+                      {gasto.id}
+                    </td>
+                    <td style={{ padding: "14px 12px", borderBottom: "1px solid #F3F4F6", color: "#17143A", fontSize: 14, fontWeight: 700 }}>
+                      {gasto.responsable}
+                    </td>
+                    <td style={{ padding: "14px 12px", borderBottom: "1px solid #F3F4F6", color: "#374151", fontSize: 14 }}>
+                      {gasto.monto}
+                    </td>
+                    <td style={{ padding: "14px 12px", borderBottom: "1px solid #F3F4F6", color: "#374151", fontSize: 14 }}>
+                      {gasto.tipoPago}
+                    </td>
+                    <td style={{ padding: "14px 12px", borderBottom: "1px solid #F3F4F6", color: "#374151", fontSize: 14 }}>
+                      {gasto.detalle}
+                    </td>
+                    <td style={{ padding: "14px 12px", borderBottom: "1px solid #F3F4F6", textAlign: "center" }}>
+                      <div style={{ display: "flex", justifyContent: "center", gap: 8 }}>
+                        <button
                           style={{
-                            fontFamily: 'Arial, sans-serif',
-                            fontSize: '13px',
-                            width: 90,
-                            marginRight: 8,
-                            background: '#f5f5f5',
-                            borderRadius: 3,
-                            padding: '2px 8px',
-                            color: '#1976d2',
+                            border: "1px solid #C7D2FE",
+                            background: "#EEF2FF",
+                            color: "#3730A3",
+                            padding: "8px 12px",
+                            borderRadius: 8,
                             fontWeight: 600,
-                            textAlign: 'right',
-                            border: '1px solid #ccc',
+                            cursor: "pointer",
                           }}
-                        />
-                        <span style={{ marginRight: 4, fontSize: '13px', color: '#555', marginLeft: 0 }}>TOTAL</span>
-                        <input
-                          type="text"
-                          value={(() => {
-                            const monto = parseFloat(form.monto) || 0;
-                            const igv = monto * 0.13;
-                            return (monto + igv).toFixed(2);
-                          })()}
-                          readOnly
-                          inputMode="decimal"
+                          onClick={() => abrirEditar(gasto)}
+                        >
+                          Editar
+                        </button>
+                        <button
                           style={{
-                            minWidth: 90,
-                            display: 'inline-block',
+                            border: "1px solid #FECACA",
+                            background: "#FEF2F2",
+                            color: "#B91C1C",
+                            padding: "8px 12px",
+                            borderRadius: 8,
                             fontWeight: 600,
-                            color: '#1976d2',
-                            fontSize: '13px',
-                            marginRight: 8,
-                            background: '#f5f5f5',
-                            borderRadius: 3,
-                            padding: '2px 8px',
-                            textAlign: 'right',
-                            border: '1px solid #ccc',
+                            cursor: "pointer",
                           }}
-                        />
-                        <label htmlFor="moneda" style={{ marginBottom: 0, marginLeft: 0, whiteSpace: 'nowrap' }}>Moneda</label>
-                        <select
-                          id="moneda"
-                          name="moneda"
-                          value={form.moneda || ''}
-                          onChange={handleInputChange}
-                          required
-                          style={{ fontFamily: 'Arial, sans-serif', fontSize: '13px', width: 90 }}
+                          onClick={() => confirmarEliminar(gasto.id!)}
                         >
-                          <option value="">-</option>
-                          <option value="BOB">BOB</option>
-                          <option value="USD">USD</option>
-                          <option value="EUR">EUR</option>
-                        </select>
-                    </div>
-                    {/* Solicitante y Gestor en la misma fila */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <label htmlFor="solicitante" style={{ marginBottom: 0, whiteSpace: 'nowrap' }}>Solicitante</label>
-                      <input
-                        type="text"
-                        id="solicitante"
-                        name="solicitante"
-                        value={form.solicitante || ''}
-                        onChange={handleInputChange}
-                        style={{ fontFamily: 'Arial, sans-serif', fontSize: '13px', width: 180 }}
-                        placeholder="Nombre del solicitante"
-                      />
-                      <label htmlFor="gestor" style={{ marginBottom: 0, whiteSpace: 'nowrap', marginLeft: 8 }}>Gestor</label>
-                      <select
-                        id="gestor"
-                        name="gestor"
-                        value={form.gestor || ''}
-                        onChange={handleInputChange}
-                        style={{ fontFamily: 'Arial, sans-serif', fontSize: '13px', width: 140 }}
-                      >
-                        <option value="">Seleccione...</option>
-                        <option value="GESTOR1">Gestor 1</option>
-                        <option value="GESTOR2">Gestor 2</option>
-                        <option value="GESTOR3">Gestor 3</option>
-                      </select>
-                        <label htmlFor="validador" style={{ marginBottom: 0, whiteSpace: 'nowrap', marginLeft: 8 }}>Validador</label>
-                        <select
-                          id="validador"
-                          name="validador"
-                          value={form.validador || ''}
-                          onChange={handleInputChange}
-                          style={{ fontFamily: 'Arial, sans-serif', fontSize: '13px', width: 140 }}
-                        >
-                          <option value="">Seleccione...</option>
-                          <option value="VALIDADOR1">Validador 1</option>
-                          <option value="VALIDADOR2">Validador 2</option>
-                          <option value="VALIDADOR3">Validador 3</option>
-                        </select>
-                    </div>
-                    </div>
-                  </div>
+                          Eliminar
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {panelAbierto && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.35)",
+            display: "flex",
+            justifyContent: "flex-end",
+            zIndex: 3000,
+          }}
+        >
+          <div
+            style={{
+              width: 520,
+              maxWidth: "100%",
+              height: "100%",
+              background: "#FFFFFF",
+              boxShadow: "-8px 0 24px rgba(0,0,0,0.12)",
+              padding: 24,
+              boxSizing: "border-box",
+              overflowY: "auto",
+            }}
+            ref={sidePanelRef}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 24 }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 24, color: "#17143A" }}>
+                  {modo === "nuevo" ? "Nuevo gasto" : "Editar gasto"}
+                </h2>
+                <p style={{ marginTop: 8, marginBottom: 0, color: "#6B7280", fontSize: 14 }}>
+                  Complete la información del gasto.
+                </p>
               </div>
-              {/* <div className="gastos-actions">
-                <button type="submit" disabled={loading} style={{ fontFamily: 'Arial, sans-serif', fontSize: '13px' }}>
-                  {loading ? 'Registrando...' : 'Registrar'}
-                </button>
-              </div> */}
-            </form>
-          ) : (
-            <div style={{ fontFamily: 'Arial, sans-serif', fontSize: '13px', color: '#333' }}>
-              <h3 style={{ marginTop: 0, marginBottom: 12, color: '#1976d2' }}>Resumen de la solicitud</h3>
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                <li><strong>Filtro Operativo:</strong> {form.filtroOperativo?.filtro?.filtroKey || '-'}</li>
-                <li><strong>Detalle:</strong> {form.detalle || '-'}</li>
-                <li><strong>Comentario:</strong> {form.comentario || '-'}</li>
-                <li><strong>Fec. Emisión:</strong> {fechaEmision || '-'}</li>
-                <li><strong>Fec. Vencimiento:</strong> {form.fechaVencimiento || '-'}</li>
-                <li><strong>Responsable:</strong> {form.responsable || '-'}</li>
-                <li><strong>Cuenta:</strong> {form.cuenta || '-'}</li>
-                <li><strong>Tipo de Pago:</strong> {form.tipoPago || '-'}</li>
-                <li><strong>Monto:</strong> {form.monto || '-'}</li>
-              </ul>
+              <button
+                style={{
+                  border: "none",
+                  background: "#F3F4F6",
+                  color: "#17143A",
+                  width: 34,
+                  height: 34,
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  fontSize: 22,
+                  lineHeight: "22px",
+                }}
+                onClick={cerrarPanel}
+              >
+                ×
+              </button>
             </div>
-          )}
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <FiltroOperativoLookup
+                value={form.filtroOperativo}
+                onChange={(val) => setForm((prev) => ({ ...prev, filtroOperativo: val }))}
+              />
+              {errores.filtroOperativo && (
+                <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>
+                  {errores.filtroOperativo}
+                </div>
+              )}
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <label style={{ fontSize: 14, fontWeight: 700, color: "#374151" }}>Responsable</label>
+                <div style={{ position: "relative", width: "100%" }}>
+                  <input
+                    type="text"
+                    value={
+                      empleadosSafe.find((emp) => String(emp.idEmpleado) === form.responsable)?.nombreEmpleado ||
+                      responsableInput ||
+                      ""
+                    }
+                    onChange={(e) => {
+                      setResponsableInput(e.target.value);
+                      setShowResponsableDropdown(true);
+                      setForm((prev) => ({ ...prev, responsable: "" }));
+                    }}
+                    onFocus={() => {
+                      if (filteredResponsables.length > 0) setShowResponsableDropdown(true);
+                    }}
+                    onKeyDown={(e) => {
+                      if (filteredResponsables.length === 0) return;
+
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        setHighlightedResponsableIdx((idx) =>
+                          Math.min(idx + 1, filteredResponsables.length - 1)
+                        );
+                        setShowResponsableDropdown(true);
+                      } else if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        setHighlightedResponsableIdx((idx) => Math.max(idx - 1, 0));
+                        setShowResponsableDropdown(true);
+                      } else if (e.key === "Enter") {
+                        if (
+                          highlightedResponsableIdx >= 0 &&
+                          highlightedResponsableIdx < filteredResponsables.length
+                        ) {
+                          const emp = filteredResponsables[highlightedResponsableIdx];
+                          setForm((prev) => ({
+                            ...prev,
+                            responsable: String(emp.idEmpleado),
+                            cuenta: `Banco: ${emp.nombreBanco || ""}, Tipo Cta: ${emp.nombreCta || ""}, Cta. ${emp.cuenta || ""}, CI: ${emp.cuentaInter || ""}, Nro Doc: ${emp.nroDocumento || ""}`,
+                          }));
+                          setResponsableInput(emp.nombreEmpleado);
+                          setShowResponsableDropdown(false);
+                          setHighlightedResponsableIdx(-1);
+                        }
+                      }
+                    }}
+                    placeholder="Seleccione..."
+                    autoComplete="off"
+                    required
+                    style={{ fontFamily: "Arial, sans-serif", fontSize: "13px", width: "100%" }}
+                    disabled={empleadosLoading}
+                  />
+
+                  {showResponsableDropdown && filteredResponsables.length > 0 && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: "100%",
+                        left: 0,
+                        right: 0,
+                        background: "#fff",
+                        border: "1px solid #ccc",
+                        zIndex: 1002,
+                        maxHeight: 180,
+                        overflowY: "auto",
+                      }}
+                    >
+                      {filteredResponsables.map((emp, idx) => (
+                        <div
+                          key={emp.idEmpleado}
+                          style={{
+                            padding: 6,
+                            cursor: "pointer",
+                            background: idx === highlightedResponsableIdx ? "#e6f7ff" : undefined,
+                          }}
+                          onMouseDown={() => {
+                            setForm((prev) => ({
+                              ...prev,
+                              responsable: String(emp.idEmpleado),
+                              cuenta: `Banco: ${emp.nombreBanco || ""}, Tipo Cta: ${emp.nombreCta || ""}, Cta. ${emp.cuenta || ""}, CI: ${emp.cuentaInter || ""}, Nro Doc: ${emp.nroDocumento || ""}`,
+                            }));
+                            setResponsableInput(emp.nombreEmpleado);
+                            setShowResponsableDropdown(false);
+                            setHighlightedResponsableIdx(-1);
+                          }}
+                        >
+                          {emp.nombreEmpleado}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {empleadosLoading && <span style={{ fontSize: 12, color: "#888" }}>Cargando...</span>}
+                  {empleadosError && <span style={{ fontSize: 12, color: "red" }}>{empleadosError}</span>}
+                </div>
+
+                {errores.responsable && (
+                  <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>
+                    {errores.responsable}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 28 }}>
+              <button
+                style={{
+                  border: "1px solid #D1D5DB",
+                  background: "#FFFFFF",
+                  color: "#17143A",
+                  padding: "10px 16px",
+                  borderRadius: 10,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+                onClick={cerrarPanel}
+              >
+                Cancelar
+              </button>
+              <button
+                style={{
+                  border: "none",
+                  background: "#6E4CCB",
+                  color: "#FFFFFF",
+                  padding: "10px 16px",
+                  borderRadius: 10,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+                onClick={guardar}
+                disabled={guardando}
+              >
+                {guardando ? "Guardando..." : modo === "nuevo" ? "Guardar" : "Actualizar"}
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
+
+      {idEliminar !== null && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 3100,
+          }}
+        >
+          <div
+            style={{
+              width: 420,
+              maxWidth: "calc(100% - 24px)",
+              background: "#FFFFFF",
+              borderRadius: 16,
+              padding: 24,
+              boxShadow: "0 12px 28px rgba(0,0,0,0.16)",
+            }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 12, color: "#17143A" }}>
+              Confirmar eliminación
+            </h3>
+            <p style={{ marginTop: 0, color: "#4B5563", lineHeight: 1.6 }}>
+              ¿Desea eliminar el gasto <strong>{gastoSeleccionadoEliminar?.responsable}</strong>?
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 24 }}>
+              <button
+                style={{
+                  border: "1px solid #D1D5DB",
+                  background: "#FFFFFF",
+                  color: "#17143A",
+                  padding: "10px 16px",
+                  borderRadius: 10,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+                onClick={() => setIdEliminar(null)}
+              >
+                Cancelar
+              </button>
+              <button
+                style={{
+                  border: "none",
+                  background: "#DC2626",
+                  color: "#FFFFFF",
+                  padding: "10px 16px",
+                  borderRadius: 10,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+                onClick={eliminar}
+              >
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
-};
-
-export default GastosPage;
+}

@@ -1,7 +1,5 @@
+import PlaceholderPage from '../../components/base/PlaceholderPage';
+
 export default function PlantaPrincipalPage() {
-  return (
-    <div style={{ padding: 24 }}>
-      <h1>Planta Principal</h1>
-    </div>
-  );
+  return <PlaceholderPage title="Planta Principal" />;
 }

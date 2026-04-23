@@ -12,6 +12,6 @@ export interface PerfilDto {
 export const perfilesService = {
   async listarPerfiles(): Promise<PerfilDto[]> {
     const response = await httpClient.get(BASE_URL);
-    return response.data;
+    return response.data ?? [];
   }
 };

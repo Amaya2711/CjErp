@@ -131,7 +131,7 @@ export default function MainLayout() {
   };
 
   const irDashboard = () => {
-    navigate("/dashboard");
+    navigate("/admin/DashboardPage");
   };
 
   const alternarMenu = () => {

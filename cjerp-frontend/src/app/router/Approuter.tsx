@@ -4,7 +4,7 @@ import AutoSecurityRoute from "./AutoSecurityRoute";
 import MainLayout from "../../layouts/MainLayout";
 
 import LoginPage from "../../features/auth/pages/LoginPage";
-import DashboardPage from "../../pages/DashboardPage";
+import DashboardPage from "../../features/admin/DashboardPage";
 import DynamicMenuRoutePage from "../../pages/DynamicMenuRoutePage";
 
 //import SeguridadPage from "../../features/seguridad/pages/seguridad";
@@ -67,7 +67,7 @@ export default function AppRouter() {
 
         <Route element={<PrivateRoute />}>
           <Route element={<MainLayout />}>
-            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/admin/DashboardPage" element={<DashboardPage />} />
 
             <Route path="/administracion/asistencia" element={<AsistenciaPage />} />
             <Route
