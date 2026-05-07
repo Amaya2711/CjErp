@@ -10,8 +10,11 @@ export type AuthUser = {
   username?: string;
   codEmp?: string | number;
   idEmpleado?: string | number;
+  idCargo?: string | number;
   codVal?: string | number;
   cuadrilla?: string | number;
+  idperfil?: number;
+  idrol?: number;
 };
 
 const STORAGE_KEY = "authUser";

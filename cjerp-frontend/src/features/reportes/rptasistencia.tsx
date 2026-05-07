@@ -1,0 +1,2511 @@
+import React, { useDeferredValue, useEffect, useMemo, useState } from "react";
+import {
+  matchesCrudToolbarSearch,
+  type CrudToolbarSearchField,
+} from "../../components/base/CrudToolbar";
+import { buscarAsistencia } from "../../api/asistenciaService";
+import type { AsistenciaReporteItem } from "../../models/asistencia";
+import { getHttpErrorMessage } from "../../utils/httpError";
+
+type SelectFilterKey =
+  | "estado"
+  | "nombreEmpleado"
+  | "empresa"
+  | "cliente"
+  | "area"
+  | "ubicacion"
+  | "estadoAct"
+  | "estadoMarcacionTexto"
+  | "origenMarcacion";
+
+type SortKey =
+  | "fecha"
+  | "nombreEmpleado"
+  | "estado"
+  | "empresa"
+  | "cliente"
+  | "area"
+  | "ubicacion"
+  | "estadoAct"
+  | "estadoMarcacionTexto"
+  | "origenMarcacion"
+  | "hora"
+  | "salida"
+  | "tiempoHoras"
+  | "totalHoras"
+  | "comentario";
+
+type SortState = {
+  key: SortKey;
+  direction: "asc" | "desc";
+};
+
+type TableColumn = {
+  key: SortKey;
+  label: string;
+  width: string;
+  align?: "left" | "right" | "center";
+};
+
+type KPI = {
+  label: string;
+  value: string;
+  tone: "blue" | "green" | "amber" | "red" | "slate";
+};
+
+type DetailDrilldown = {
+  fecha: string | null;
+  estadoMarcacion: string | null;
+  origenMarcacion: string | null;
+  nombreEmpleado: string | null;
+};
+
+type StateDateCell = {
+  state: string;
+  value: number;
+  totalHoras: number;
+};
+
+type EmployeeDateCell = {
+  fecha: string;
+  totalHoras: number;
+  estadoMarcacionTexto: string;
+};
+
+type EmployeeDateRow = {
+  employee: string;
+  ubicacion: string;
+  total: number;
+  totalHorasLaborales: number;
+  estadoValidacionHoras: string;
+  fechas: EmployeeDateCell[];
+};
+
+type EmployeeGridFilters = {
+  employee: string;
+  estadoValidacionHoras: string;
+};
+
+const ALL_OPTION = "__ALL__";
+const OBSERVATION_HOURS_THRESHOLD = 9.6;
+const PRESENT_STATES = new Set(["PRESENTE", "ASISTIO", "OK"]);
+const TARDINESS_STATES = new Set(["TARDANZA", "TARDE"]);
+const CRITICAL_STATES = new Set(["SIN MARCAR", "SIN SALIDA", "SIN ENTRADA", "FALTA"]);
+const SOFT_STATES = new Set(["VACACIONES", "DOMINGO", "SABADO", "SÁBADO"]);
+
+const tableColumns: TableColumn[] = [
+  { key: "fecha", label: "Fecha", width: "110px" },
+  { key: "nombreEmpleado", label: "Nombre empleado", width: "250px" },
+  { key: "estadoMarcacionTexto", label: "Estado marcacion", width: "170px" },
+  { key: "hora", label: "Hora entrada", width: "110px", align: "center" },
+  { key: "salida", label: "Hora salida", width: "110px", align: "center" },
+  { key: "totalHoras", label: "TotalHoras", width: "110px", align: "right" },
+  { key: "empresa", label: "Empresa", width: "180px" },
+  { key: "cliente", label: "Cliente", width: "190px" },
+  { key: "area", label: "Area", width: "160px" },
+  { key: "ubicacion", label: "Ubicacion", width: "170px" },
+  { key: "estadoAct", label: "Estado activo/baja", width: "150px" },
+  { key: "comentario", label: "Comentario", width: "260px" },
+];
+
+const chartPalette = ["#2563EB", "#059669", "#F59E0B", "#DC2626", "#7C3AED", "#0EA5E9"];
+
+function toInputDate(date: Date) {
+  // Devuelve la fecha en formato YYYY-MM-DD en zona horaria de Perú
+  const lima = new Date(date.toLocaleString("en-US", { timeZone: "America/Lima" }));
+  const year = lima.getFullYear();
+  const month = String(lima.getMonth() + 1).padStart(2, "0");
+  const day = String(lima.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function toApiDate(value: string) {
+  if (!value) return "";
+  const [year, month, day] = value.split("-");
+  return `${day}/${month}/${year}`;
+}
+
+function normalizeText(value?: string | null) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .trim();
+}
+
+function formatDateLabel(value: string) {
+  if (!value) return "";
+  if (value.includes("/")) return value;
+
+  const dateOnlyMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (dateOnlyMatch) {
+    const [, year, month, day] = dateOnlyMatch;
+    return `${day}/${month}/${year}`;
+  }
+
+  // Forzar zona horaria de Perú
+  const parsed = new Date(new Date(value).toLocaleString("en-US", { timeZone: "America/Lima" }));
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString("es-PE");
+}
+
+function parseInputDate(value: string) {
+  if (!value) return null;
+  const [year, month, day] = value.split("-");
+  if (!year || !month || !day) return null;
+  const parsed = new Date(Number(year), Number(month) - 1, Number(day));
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getDateRangeLabels(startValue: string, endValue: string) {
+  const start = parseInputDate(startValue);
+  const end = parseInputDate(endValue);
+
+  if (!start || !end || start > end) {
+    return [];
+  }
+
+  const labels: string[] = [];
+  let cursor = new Date(start);
+  while (cursor <= end) {
+    const day = String(cursor.getDate()).padStart(2, "0");
+    const month = String(cursor.getMonth() + 1).padStart(2, "0");
+    const year = cursor.getFullYear();
+    labels.push(`${day}/${month}/${year}`);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return labels;
+}
+
+function parseDisplayDate(value: string) {
+  if (!value) return null;
+
+  const normalized = formatDateLabel(value);
+  const parts = normalized.split("/");
+  if (parts.length !== 3) {
+    return null;
+  }
+
+  const [day, month, year] = parts;
+  const parsed = new Date(Number(year), Number(month) - 1, Number(day));
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function isWithinSelectedRange(value: string, startValue: string, endValue: string) {
+  const current = parseDisplayDate(value);
+  const start = parseInputDate(startValue);
+  const end = parseInputDate(endValue);
+
+  if (!current || !start || !end) {
+    return true;
+  }
+
+  return current >= start && current <= end;
+}
+
+function parseDurationToSeconds(value?: string | null) {
+  if (!value) return null;
+  const text = String(value).trim();
+  const parts = text.split(":");
+  if (parts.length !== 3) return null;
+
+  const [hours, minutes, seconds] = parts.map((part) => Number(part));
+  if (![hours, minutes, seconds].every(Number.isFinite)) return null;
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+function formatDurationFromSeconds(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return "0000:00:00";
+  }
+
+  const totalSeconds = Math.floor(seconds);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+
+  return `${String(hours).padStart(4, "0")}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
+function formatDecimal(value: number, digits = 2) {
+  return value.toLocaleString("es-PE", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
+function buildTiempoHorasDisplay(item: AsistenciaReporteItem) {
+  const workedSeconds = parseDurationToSeconds(item.tiempoTrabajado);
+  if (workedSeconds != null) {
+    const adjusted = workedSeconds - 3600;
+    if (adjusted <= 0) {
+      return item.estadoMarcacionTexto || item.estado || "0000:00:00";
+    }
+    return formatDurationFromSeconds(adjusted);
+  }
+
+  if (item.tiempoHoras) {
+    return item.tiempoHoras;
+  }
+
+  return item.estadoMarcacionTexto || item.estado || "0000:00:00";
+}
+
+function getRowTone(item: AsistenciaReporteItem) {
+  const state = normalizeText(item.estadoMarcacionTexto || item.estado);
+
+  if (state === "ASISTENCIA" && item.totalHoras < OBSERVATION_HOURS_THRESHOLD) {
+    return "#FEF2F2";
+  }
+  if (PRESENT_STATES.has(state)) {
+    return "#ECFDF5";
+  }
+  if (TARDINESS_STATES.has(state)) {
+    return "#FFF7ED";
+  }
+  if (CRITICAL_STATES.has(state)) {
+    return "#FEF2F2";
+  }
+  if (SOFT_STATES.has(state)) {
+    return "#EFF6FF";
+  }
+  return "#FFFFFF";
+}
+
+function buildSelectOptions(rows: AsistenciaReporteItem[], selector: (item: AsistenciaReporteItem) => string) {
+  return [ALL_OPTION, ...Array.from(new Set(rows.map(selector).filter(Boolean))).sort((a, b) => a.localeCompare(b, "es"))];
+}
+
+function getSortValue(item: AsistenciaReporteItem, key: SortKey) {
+  switch (key) {
+    case "totalHoras":
+      return item.totalHoras;
+    case "tiempoHoras":
+      return buildTiempoHorasDisplay(item);
+    default:
+      return item[key];
+  }
+}
+
+function compareValues(left: unknown, right: unknown) {
+  if (typeof left === "number" && typeof right === "number") {
+    return left - right;
+  }
+
+  return String(left ?? "").localeCompare(String(right ?? ""), "es", { sensitivity: "base" });
+}
+
+function getExportRows(rows: AsistenciaReporteItem[]) {
+  return rows.map((item) => ({
+    Fecha: formatDateLabel(item.fecha),
+    NombreEmpleado: item.nombreEmpleado,
+    Estado: item.estado,
+    Empresa: item.empresa,
+    Cliente: item.cliente,
+    Area: item.area,
+    Ubicacion: item.ubicacion,
+    EstadoActivo: item.estadoAct,
+    EstadoMarcacion: item.estadoMarcacionTexto,
+    OrigenMarcacion: item.origenMarcacion,
+    HoraEntrada: item.hora,
+    HoraSalida: item.salida,
+    TiempoHoras: buildTiempoHorasDisplay(item),
+    TotalHoras: Number(formatDecimal(item.totalHoras, 2).replace(/,/g, "")),
+    Comentario: item.comentario,
+  }));
+}
+
+function buildEmployeeDateCellDisplay(cell?: EmployeeDateCell) {
+  const hours = `${formatDecimal(cell?.totalHoras ?? 0, 2)} h`;
+  if (!cell?.estadoMarcacionTexto) {
+    return hours;
+  }
+
+  return `${hours} | ${cell.estadoMarcacionTexto}`;
+}
+
+export default function RptAsistenciaPage() {
+  const today = new Date();
+  const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+
+  const [fechaInicio, setFechaInicio] = useState(toInputDate(startOfMonth));
+  const [fechaFin, setFechaFin] = useState(toInputDate(today));
+  const [rows, setRows] = useState<AsistenciaReporteItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [busqueda, setBusqueda] = useState("");
+  const [activeTab, setActiveTab] = useState<"cuadros" | "detalle" | "empleado">("cuadros");
+  const [detailDrilldown, setDetailDrilldown] = useState<DetailDrilldown>({
+    fecha: null,
+    estadoMarcacion: null,
+    origenMarcacion: null,
+    nombreEmpleado: null,
+  });
+  const [sortState, setSortState] = useState<SortState>({ key: "fecha", direction: "desc" });
+  const [frontendFilters, setFrontendFilters] = useState<Record<SelectFilterKey, string>>({
+    estado: ALL_OPTION,
+    nombreEmpleado: ALL_OPTION,
+    empresa: ALL_OPTION,
+    cliente: ALL_OPTION,
+    area: ALL_OPTION,
+    ubicacion: ALL_OPTION,
+    estadoAct: "ACTIVO",
+    estadoMarcacionTexto: ALL_OPTION,
+    origenMarcacion: ALL_OPTION,
+  });
+  const [employeeGridFilters, setEmployeeGridFilters] = useState<EmployeeGridFilters>({
+    employee: "",
+    estadoValidacionHoras: ALL_OPTION,
+  });
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+
+  const deferredSearch = useDeferredValue(busqueda);
+
+  const searchFields = useMemo<CrudToolbarSearchField<AsistenciaReporteItem>[]>(
+    () => [
+      { key: "nombreEmpleado", label: "Nombre empleado", getValue: (item) => item.nombreEmpleado },
+      { key: "estado", label: "Estado", getValue: (item) => item.estado },
+      { key: "empresa", label: "Empresa", getValue: (item) => item.empresa },
+      { key: "cliente", label: "Cliente", getValue: (item) => item.cliente },
+      { key: "area", label: "Area", getValue: (item) => item.area },
+      { key: "ubicacion", label: "Ubicacion", getValue: (item) => item.ubicacion },
+      { key: "estadoMarcacionTexto", label: "Estado marcacion", getValue: (item) => item.estadoMarcacionTexto },
+      { key: "origenMarcacion", label: "Origen marcacion", getValue: (item) => item.origenMarcacion },
+      { key: "comentario", label: "Comentario", getValue: (item) => item.comentario },
+    ],
+    []
+  );
+
+  const loadData = async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const data = await buscarAsistencia({
+        fechaInicio: toApiDate(fechaInicio),
+        fechaFin: toApiDate(fechaFin),
+      });
+      setRows(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setError(getHttpErrorMessage(err, "No se pudo cargar el reporte de asistencia."));
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadData();
+  }, [fechaFin, fechaInicio]);
+
+  const filterOptions = useMemo(
+    () => ({
+      nombreEmpleado: buildSelectOptions(rows, (item) => item.nombreEmpleado),
+      estado: buildSelectOptions(rows, (item) => item.estado),
+      empresa: buildSelectOptions(rows, (item) => item.empresa),
+      cliente: buildSelectOptions(rows, (item) => item.cliente),
+      area: buildSelectOptions(rows, (item) => item.area),
+      ubicacion: buildSelectOptions(rows, (item) => item.ubicacion),
+      estadoAct: buildSelectOptions(rows, (item) => item.estadoAct),
+      estadoMarcacionTexto: buildSelectOptions(rows, (item) => item.estadoMarcacionTexto),
+      origenMarcacion: buildSelectOptions(rows, (item) => item.origenMarcacion),
+    }),
+    [rows]
+  );
+
+  const filteredRows = useMemo(() => {
+    const base = rows
+      .filter((item) => matchesCrudToolbarSearch(item, deferredSearch, searchFields))
+      .filter((item) => isWithinSelectedRange(item.fecha, fechaInicio, fechaFin))
+      .filter((item) => (
+        (frontendFilters.nombreEmpleado === ALL_OPTION || item.nombreEmpleado === frontendFilters.nombreEmpleado) &&
+        (frontendFilters.estado === ALL_OPTION || item.estado === frontendFilters.estado) &&
+        (frontendFilters.empresa === ALL_OPTION || item.empresa === frontendFilters.empresa) &&
+        (frontendFilters.cliente === ALL_OPTION || item.cliente === frontendFilters.cliente) &&
+        (frontendFilters.area === ALL_OPTION || item.area === frontendFilters.area) &&
+        (frontendFilters.ubicacion === ALL_OPTION || item.ubicacion === frontendFilters.ubicacion) &&
+        (frontendFilters.estadoAct === ALL_OPTION || item.estadoAct === frontendFilters.estadoAct) &&
+        (frontendFilters.estadoMarcacionTexto === ALL_OPTION || item.estadoMarcacionTexto === frontendFilters.estadoMarcacionTexto) &&
+        (frontendFilters.origenMarcacion === ALL_OPTION || item.origenMarcacion === frontendFilters.origenMarcacion)
+      ));
+
+    return [...base].sort((left, right) => {
+      const compared = compareValues(getSortValue(left, sortState.key), getSortValue(right, sortState.key));
+      return sortState.direction === "asc" ? compared : -compared;
+    });
+  }, [deferredSearch, fechaFin, fechaInicio, frontendFilters, rows, searchFields, sortState]);
+
+  const detailRows = useMemo(() => {
+    const base = filteredRows.filter((item) => (
+      (!detailDrilldown.fecha || formatDateLabel(item.fecha) === detailDrilldown.fecha) &&
+      (!detailDrilldown.nombreEmpleado || item.nombreEmpleado === detailDrilldown.nombreEmpleado) &&
+      (!detailDrilldown.estadoMarcacion || (item.estadoMarcacionTexto || item.estado) === detailDrilldown.estadoMarcacion) &&
+      (!detailDrilldown.origenMarcacion || item.origenMarcacion === detailDrilldown.origenMarcacion)
+    ));
+
+    const shouldSortByTotalHoras =
+      normalizeText(detailDrilldown.estadoMarcacion) === "ASISTENCIA" ||
+      normalizeText(frontendFilters.estadoMarcacionTexto) === "ASISTENCIA" ||
+      normalizeText(frontendFilters.estado) === "ASISTENCIA";
+
+    if (!shouldSortByTotalHoras) {
+      return base;
+    }
+
+    return [...base].sort((left, right) => {
+      const compared = left.totalHoras - right.totalHoras;
+      if (compared !== 0) {
+        return compared;
+      }
+
+      return compareValues(left.nombreEmpleado, right.nombreEmpleado);
+    });
+  }, [detailDrilldown, filteredRows, frontendFilters]);
+
+  const totals = useMemo(() => {
+    const totalRegistros = filteredRows.length;
+    const presentes = filteredRows.filter((item) => PRESENT_STATES.has(normalizeText(item.estadoMarcacionTexto || item.estado))).length;
+    const tardanzas = filteredRows.filter((item) => TARDINESS_STATES.has(normalizeText(item.estadoMarcacionTexto || item.estado))).length;
+    const sinMarcar = filteredRows.filter((item) => normalizeText(item.estadoMarcacionTexto || item.estado) === "SIN MARCAR").length;
+    const sinSalida = filteredRows.filter((item) => normalizeText(item.estadoMarcacionTexto || item.estado) === "SIN SALIDA").length;
+    const totalHoras = filteredRows.reduce((sum, item) => sum + item.totalHoras, 0);
+    const empleados = new Set(filteredRows.map((item) => item.idEmpleado ?? item.nombreEmpleado).filter(Boolean)).size;
+    const promedioHoras = empleados > 0 ? totalHoras / empleados : 0;
+    const porcentajeAsistencia = totalRegistros > 0 ? ((presentes + tardanzas) / totalRegistros) * 100 : 0;
+
+    return {
+      totalRegistros,
+      presentes,
+      tardanzas,
+      sinMarcar,
+      sinSalida,
+      totalHoras,
+      promedioHoras,
+      porcentajeAsistencia,
+    };
+  }, [filteredRows]);
+
+  const kpis: KPI[] = useMemo(() => [
+    { label: "Total registros", value: String(totals.totalRegistros), tone: "blue" },
+    { label: "Presentes", value: String(totals.presentes), tone: "green" },
+    { label: "Tardanzas", value: String(totals.tardanzas), tone: "amber" },
+    { label: "Sin marcar", value: String(totals.sinMarcar), tone: "red" },
+    { label: "Sin salida", value: String(totals.sinSalida), tone: "red" },
+    { label: "Total horas", value: formatDecimal(totals.totalHoras, 2), tone: "blue" },
+    { label: "Promedio horas/empleado", value: formatDecimal(totals.promedioHoras, 2), tone: "slate" },
+    { label: "% asistencia", value: `${formatDecimal(totals.porcentajeAsistencia, 2)}%`, tone: "green" },
+  ], [totals]);
+
+  const chartEstadoMarcacion = useMemo(() => {
+    const grouped = new Map<string, number>();
+    filteredRows.forEach((item) => {
+      const key = item.estadoMarcacionTexto || "Sin clasificar";
+      grouped.set(key, (grouped.get(key) ?? 0) + 1);
+    });
+
+    return Array.from(grouped.entries()).map(([name, value]) => ({ name, value }));
+  }, [filteredRows]);
+
+  const chartOrigen = useMemo(() => {
+    const grouped = new Map<string, number>();
+    filteredRows.forEach((item) => {
+      const key = item.origenMarcacion || "Sin origen";
+      grouped.set(key, (grouped.get(key) ?? 0) + 1);
+    });
+
+    return Array.from(grouped.entries()).map(([name, value]) => ({ name, value }));
+  }, [filteredRows]);
+
+  const chartDiario = useMemo(() => {
+    const grouped = new Map<string, number>();
+    filteredRows.forEach((item) => {
+      const key = formatDateLabel(item.fecha);
+      grouped.set(key, (grouped.get(key) ?? 0) + 1);
+    });
+
+    return Array.from(grouped.entries()).map(([fecha, total]) => ({ fecha, total }));
+  }, [filteredRows]);
+
+  const chartEstadoPorDia = useMemo(() => {
+    // Solo fechas presentes en los datos filtrados
+    const fechasPresentes = Array.from(
+      new Set(filteredRows.map((item) => formatDateLabel(item.fecha)))
+    ).sort((a, b) => a.localeCompare(b, "es"));
+
+    // Solo estados presentes en los datos filtrados
+    const states = Array.from(
+      new Set(filteredRows.map((item) => item.estadoMarcacionTexto || item.estado).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b, "es"));
+
+    // Agrupar por fecha y estado
+    const grouped = new Map<string, Map<string, { value: number; totalHoras: number }>>();
+    fechasPresentes.forEach((fecha) => {
+      grouped.set(fecha, new Map<string, { value: number; totalHoras: number }>());
+    });
+
+    filteredRows.forEach((item) => {
+      const fecha = formatDateLabel(item.fecha);
+      const estado = item.estadoMarcacionTexto || item.estado || "Sin clasificar";
+      if (!grouped.has(fecha)) grouped.set(fecha, new Map<string, { value: number; totalHoras: number }>());
+      const dayMap = grouped.get(fecha)!;
+      const current = dayMap.get(estado) ?? { value: 0, totalHoras: 0 };
+      dayMap.set(estado, {
+        value: current.value + 1,
+        totalHoras: current.totalHoras + item.totalHoras,
+      });
+    });
+
+    const rows = Array.from(grouped.entries()).map(([fecha, values]) => {
+      const total = Array.from(values.values()).reduce((sum, value) => sum + value.value, 0);
+      return {
+        fecha,
+        total,
+        estados: states.map((state) => ({
+          state,
+          value: values.get(state)?.value ?? 0,
+          totalHoras: values.get(state)?.totalHoras ?? 0,
+        })),
+      };
+    });
+
+
+    return { states, rows };
+  }, [filteredRows]);
+  // <-- Coma agregada aquí si es necesario
+
+  const chartEmpleadoPorDia = useMemo(() => {
+    const fechas = getDateRangeLabels(fechaInicio, fechaFin);
+    const employees = Array.from(
+      new Set(filteredRows.map((item) => item.nombreEmpleado).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b, "es"));
+
+    const grouped = new Map<string, Map<string, number>>();
+    const groupedStates = new Map<string, Map<string, Set<string>>>();
+    const employeeLocations = new Map<string, Set<string>>();
+    const employeeLaborHours = new Map<string, number>();
+    const employeeValidationStates = new Map<string, Set<string>>();
+    employees.forEach((employee) => {
+      grouped.set(employee, new Map<string, number>());
+      groupedStates.set(employee, new Map<string, Set<string>>());
+      employeeLocations.set(employee, new Set<string>());
+      employeeLaborHours.set(employee, 0);
+      employeeValidationStates.set(employee, new Set<string>());
+    });
+
+    filteredRows.forEach((item) => {
+      const employee = item.nombreEmpleado || "Sin empleado";
+      const fecha = formatDateLabel(item.fecha);
+      if (!grouped.has(employee)) {
+        grouped.set(employee, new Map<string, number>());
+      }
+      if (!groupedStates.has(employee)) {
+        groupedStates.set(employee, new Map<string, Set<string>>());
+      }
+
+      const employeeMap = grouped.get(employee)!;
+      employeeMap.set(fecha, (employeeMap.get(fecha) ?? 0) + item.totalHoras);
+      const employeeStatesMap = groupedStates.get(employee)!;
+      if (!employeeStatesMap.has(fecha)) {
+        employeeStatesMap.set(fecha, new Set<string>());
+      }
+      const estadoMarcacion = item.estadoMarcacionTexto || item.estado;
+      if (estadoMarcacion) {
+        employeeStatesMap.get(fecha)!.add(estadoMarcacion);
+      }
+
+      if (!employeeLocations.has(employee)) {
+        employeeLocations.set(employee, new Set<string>());
+      }
+      if (item.ubicacion) {
+        employeeLocations.get(employee)!.add(item.ubicacion);
+      }
+      employeeLaborHours.set(employee, Math.max(employeeLaborHours.get(employee) ?? 0, item.totalHorasLaborales));
+      if (!employeeValidationStates.has(employee)) {
+        employeeValidationStates.set(employee, new Set<string>());
+      }
+      if (item.estadoValidacionHoras) {
+        employeeValidationStates.get(employee)!.add(item.estadoValidacionHoras);
+      }
+    });
+
+    const rows = employees.map((employee) => {
+      const values = grouped.get(employee) ?? new Map<string, number>();
+      const stateValues = groupedStates.get(employee) ?? new Map<string, Set<string>>();
+      const ubicaciones = Array.from(employeeLocations.get(employee) ?? []).sort((a, b) => a.localeCompare(b, "es"));
+      const validationStates = Array.from(employeeValidationStates.get(employee) ?? []).sort((a, b) => a.localeCompare(b, "es"));
+      return {
+        employee,
+        ubicacion: ubicaciones.join(", "),
+        total: Array.from(values.values()).reduce((sum, value) => sum + value, 0),
+        totalHorasLaborales: employeeLaborHours.get(employee) ?? 0,
+        estadoValidacionHoras: validationStates.join(", "),
+        fechas: fechas.map((fecha) => ({
+          fecha,
+          totalHoras: values.get(fecha) ?? 0,
+          estadoMarcacionTexto: Array.from(stateValues.get(fecha) ?? []).sort((a, b) => a.localeCompare(b, "es")).join(", "),
+        })),
+      };
+    });
+
+    return { fechas, rows };
+  }, [fechaFin, fechaInicio, filteredRows]);
+
+  const employeeGridValidationOptions = useMemo(
+    () => [ALL_OPTION, ...Array.from(new Set(chartEmpleadoPorDia.rows.map((item) => item.estadoValidacionHoras).filter(Boolean))).sort((a, b) => a.localeCompare(b, "es"))],
+    [chartEmpleadoPorDia.rows]
+  );
+
+  const filteredEmployeeGridRows = useMemo(() => {
+    const employeeQuery = normalizeText(employeeGridFilters.employee);
+
+    return chartEmpleadoPorDia.rows.filter((item) => {
+      const matchesEmployee = !employeeQuery ||
+        normalizeText(item.employee).includes(employeeQuery) ||
+        normalizeText(item.ubicacion).includes(employeeQuery);
+      const matchesValidation =
+        employeeGridFilters.estadoValidacionHoras === ALL_OPTION ||
+        item.estadoValidacionHoras === employeeGridFilters.estadoValidacionHoras;
+
+      return matchesEmployee && matchesValidation;
+    });
+  }, [chartEmpleadoPorDia.rows, employeeGridFilters]);
+
+  const activeFilterCount = useMemo(
+    () => Object.values(frontendFilters).filter((value) => value !== ALL_OPTION).length,
+    [frontendFilters]
+  );
+
+  const primaryFilterCount = 5;
+
+  const isExcelExportDisabled = useMemo(() => {
+    if (activeTab === "cuadros") {
+      return chartEstadoPorDia.rows.length === 0 || chartEstadoPorDia.states.length === 0;
+    }
+    if (activeTab === "detalle") {
+      return detailRows.length === 0;
+    }
+    if (activeTab === "empleado") {
+      return filteredEmployeeGridRows.length === 0;
+    }
+    return true;
+  }, [activeTab, chartEstadoPorDia.rows.length, chartEstadoPorDia.states.length, detailRows.length, filteredEmployeeGridRows.length]);
+
+  const isPdfExportDisabled = useMemo(() => {
+    if (activeTab === "cuadros") {
+      return chartEstadoPorDia.rows.length === 0 || chartEstadoPorDia.states.length === 0;
+    }
+    if (activeTab === "detalle") {
+      return detailRows.length === 0;
+    }
+    if (activeTab === "empleado") {
+      return filteredEmployeeGridRows.length === 0;
+    }
+    return true;
+  }, [activeTab, chartEstadoPorDia.rows.length, chartEstadoPorDia.states.length, detailRows.length, filteredEmployeeGridRows.length]);
+
+  const resetFrontendFilters = () => {
+    setFrontendFilters({
+      estado: ALL_OPTION,
+      nombreEmpleado: ALL_OPTION,
+      empresa: ALL_OPTION,
+      cliente: ALL_OPTION,
+      area: ALL_OPTION,
+      ubicacion: ALL_OPTION,
+      estadoAct: "ACTIVO",
+      estadoMarcacionTexto: ALL_OPTION,
+      origenMarcacion: ALL_OPTION,
+    });
+    setBusqueda("");
+    setShowAdvancedFilters(false);
+    setEmployeeGridFilters({
+      employee: "",
+      estadoValidacionHoras: ALL_OPTION,
+    });
+    setDetailDrilldown({
+      fecha: null,
+      estadoMarcacion: null,
+      origenMarcacion: null,
+      nombreEmpleado: null,
+    });
+  };
+
+  const clearDetailDrilldown = () => {
+    setDetailDrilldown({
+      fecha: null,
+      estadoMarcacion: null,
+      origenMarcacion: null,
+      nombreEmpleado: null,
+    });
+  };
+
+  const handleStateDateCellClick = (fecha: string, estadoMarcacion: string) => {
+    setDetailDrilldown((prev) => {
+      const isSameSelection = prev.fecha === fecha && prev.estadoMarcacion === estadoMarcacion;
+      return {
+        ...prev,
+        fecha: isSameSelection ? null : fecha,
+        estadoMarcacion: isSameSelection ? null : estadoMarcacion,
+        nombreEmpleado: null,
+      };
+    });
+    setActiveTab("detalle");
+  };
+
+  const handleEmployeeDateCellClick = (nombreEmpleado: string, fecha: string) => {
+    setDetailDrilldown((prev) => {
+      const isSameSelection = prev.fecha === fecha && prev.nombreEmpleado === nombreEmpleado;
+      return {
+        ...prev,
+        fecha: isSameSelection ? null : fecha,
+        nombreEmpleado: isSameSelection ? null : nombreEmpleado,
+        estadoMarcacion: isSameSelection ? prev.estadoMarcacion : null,
+        origenMarcacion: isSameSelection ? prev.origenMarcacion : null,
+      };
+    });
+    setActiveTab("detalle");
+  };
+
+  const handleOrigenClick = (origenMarcacion: string) => {
+    setDetailDrilldown((prev) => ({
+      ...prev,
+      origenMarcacion: prev.origenMarcacion === origenMarcacion ? null : origenMarcacion,
+    }));
+    setActiveTab("detalle");
+  };
+
+  const toggleSort = (key: SortKey) => {
+    setSortState((prev) => (
+      prev.key === key
+        ? { key, direction: prev.direction === "asc" ? "desc" : "asc" }
+        : { key, direction: "asc" }
+    ));
+  };
+
+  const exportExcel = async () => {
+    const XLSX = await import("xlsx");
+    const workbook = XLSX.utils.book_new();
+
+    if (activeTab === "cuadros") {
+      const estadoRows = chartEstadoPorDia.states.map((state) => {
+        const row: Record<string, string> = {
+          "Estado / Fecha": state,
+        };
+
+        chartEstadoPorDia.rows.forEach((item) => {
+          const cell = item.estados.find((entry) => entry.state === state);
+          const value = cell?.value ?? 0;
+          const totalHoras = cell?.totalHoras ?? 0;
+          row[item.fecha] = `${value} | ${formatDecimal(totalHoras, 2)} h`;
+        });
+
+        return row;
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(estadoRows);
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Fecha x estado");
+    } else if (activeTab === "empleado") {
+      const employeeRows = filteredEmployeeGridRows.map((item) => {
+        const row: Record<string, string | number> = {
+          Empleado: item.employee,
+          Ubicacion: item.ubicacion || "Sin ubicacion",
+          "Total horas": Number(formatDecimal(item.total, 2).replace(/,/g, "")),
+          "Hrs Lab.": Number(formatDecimal(item.totalHorasLaborales, 2).replace(/,/g, "")),
+          "Estado valid.": item.estadoValidacionHoras || "Sin validacion",
+        };
+
+        chartEmpleadoPorDia.fechas.forEach((fecha) => {
+          const cell = item.fechas.find((entry) => entry.fecha === fecha);
+          row[fecha] = buildEmployeeDateCellDisplay(cell);
+        });
+        return row;
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(employeeRows);
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Fecha x empleado");
+    } else if (activeTab === "detalle") {
+      const worksheet = XLSX.utils.json_to_sheet(getExportRows(detailRows));
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Detalle de asistencia");
+    } else {
+      return;
+    }
+
+    XLSX.writeFile(workbook, `reporte_asistencia_${toApiDate(fechaInicio).replaceAll("/", "")}_${toApiDate(fechaFin).replaceAll("/", "")}.xlsx`);
+  };
+
+  const exportPdf = async () => {
+    const [{ jsPDF }, autoTableModule] = await Promise.all([
+      import("jspdf"),
+      import("jspdf-autotable"),
+    ]);
+
+    const doc = new jsPDF({ orientation: "landscape" });
+    doc.setFontSize(16);
+    doc.text("Reporte Gerencial de Asistencia", 14, 16);
+    doc.setFontSize(10);
+    doc.text(`Rango: ${toApiDate(fechaInicio)} - ${toApiDate(fechaFin)}`, 14, 23);
+
+    if (activeTab === "cuadros") {
+      autoTableModule.default(doc, {
+        startY: 30,
+        head: [[
+          "Estado / Fecha",
+          ...chartEstadoPorDia.rows.map((item) => item.fecha),
+        ]],
+        body: chartEstadoPorDia.states.map((state) => [
+          state,
+          ...chartEstadoPorDia.rows.map((item) => {
+            const cell = item.estados.find((entry) => entry.state === state);
+            const value = cell?.value ?? 0;
+            const totalHoras = cell?.totalHoras ?? 0;
+            return `${value} | ${formatDecimal(totalHoras, 2)} h`;
+          }),
+        ]),
+        styles: {
+          fontSize: 6,
+          cellPadding: 1.5,
+          overflow: "linebreak",
+        },
+        headStyles: {
+          fillColor: [37, 99, 235],
+        },
+      });
+    } else if (activeTab === "empleado") {
+      autoTableModule.default(doc, {
+        startY: 30,
+        head: [[
+          "Empleado",
+          "Ubicacion",
+          "Total horas",
+          "Hrs Lab.",
+          "Estado valid.",
+          ...chartEmpleadoPorDia.fechas,
+        ]],
+        body: filteredEmployeeGridRows.map((item) => [
+          item.employee,
+          item.ubicacion || "Sin ubicacion",
+          formatDecimal(item.total, 2),
+          formatDecimal(item.totalHorasLaborales, 2),
+          item.estadoValidacionHoras || "Sin validacion",
+          ...chartEmpleadoPorDia.fechas.map((fecha) => buildEmployeeDateCellDisplay(
+            item.fechas.find((entry) => entry.fecha === fecha)
+          )),
+        ]),
+        styles: {
+          fontSize: 6,
+          cellPadding: 1.5,
+          overflow: "linebreak",
+        },
+        headStyles: {
+          fillColor: [37, 99, 235],
+        },
+      });
+    } else if (activeTab === "detalle") {
+      autoTableModule.default(doc, {
+        startY: 30,
+        head: [[
+          "Fecha",
+          "Nombre empleado",
+          "Estado",
+          "Empresa",
+          "Cliente",
+          "Area",
+          "Ubicacion",
+          "Estado activo/baja",
+          "Estado marcacion",
+          "Origen marcacion",
+          "Hora entrada",
+          "Hora salida",
+          "TiempoHoras",
+          "TotalHoras",
+          "Comentario",
+        ]],
+        body: detailRows.map((item) => [
+          formatDateLabel(item.fecha),
+          item.nombreEmpleado,
+          item.estado,
+          item.empresa,
+          item.cliente,
+          item.area,
+          item.ubicacion,
+          item.estadoAct,
+          item.estadoMarcacionTexto,
+          item.origenMarcacion,
+          item.hora,
+          item.salida,
+          buildTiempoHorasDisplay(item),
+          formatDecimal(item.totalHoras, 2),
+          item.comentario,
+        ]),
+        styles: {
+          fontSize: 7,
+          cellPadding: 2,
+          overflow: "linebreak",
+        },
+        headStyles: {
+          fillColor: [37, 99, 235],
+        },
+      });
+    } else {
+      return;
+    }
+
+    doc.save(`reporte_asistencia_${toApiDate(fechaInicio).replaceAll("/", "")}_${toApiDate(fechaFin).replaceAll("/", "")}.pdf`);
+  };
+
+  return (
+    <div style={styles.page}>
+      <section style={styles.compactHeader}>
+        <div style={styles.headerSearchWrap}>
+          <input
+            type="text"
+            value={busqueda}
+            onChange={(event) => setBusqueda(event.target.value)}
+            placeholder="Busqueda rapida por empleado, estado, cliente, area, ubicacion o comentario"
+            style={styles.headerSearchInput}
+          />
+        </div>
+        <div style={styles.headerTitleWrap}>
+          <span style={styles.eyebrow}>Reporte Gerencial</span>
+          <h1 style={styles.compactTitle}>Analisis de asistencia</h1>
+        </div>
+        <div style={styles.headerActions}>
+          <button type="button" style={styles.headerPrimaryButton} onClick={() => void loadData()} disabled={loading}>
+            {loading ? "Cargando..." : "Actualizar"}
+          </button>
+          <button type="button" style={styles.headerSecondaryButton} onClick={resetFrontendFilters}>
+            Limpiar filtros
+          </button>
+          <button type="button" style={styles.headerPrimaryButton} onClick={() => void exportExcel()} disabled={isExcelExportDisabled}>
+            Exportar Excel
+          </button>
+          <button type="button" style={styles.headerSecondaryButton} onClick={() => void exportPdf()} disabled={isPdfExportDisabled}>
+            Exportar PDF
+          </button>
+        </div>
+      </section>
+
+      <section style={styles.segmentedTabs}>
+        <button
+          type="button"
+          style={activeTab === "cuadros" ? { ...styles.segmentedTabButton, ...styles.segmentedTabButtonActive } : styles.segmentedTabButton}
+          onClick={() => setActiveTab("cuadros")}
+        >
+          Cuadros
+        </button>
+        <button
+          type="button"
+          style={activeTab === "detalle" ? { ...styles.segmentedTabButton, ...styles.segmentedTabButtonActive } : styles.segmentedTabButton}
+          onClick={() => setActiveTab("detalle")}
+        >
+          Detalle
+        </button>
+        <button
+          type="button"
+          style={activeTab === "empleado" ? { ...styles.segmentedTabButton, ...styles.segmentedTabButtonActive } : styles.segmentedTabButton}
+          onClick={() => setActiveTab("empleado")}
+        >
+          x Empleado
+        </button>
+      </section>
+
+      <section style={styles.filterCardCompact}>
+        <div style={styles.filterGridCompact}>
+          <Field label="Fecha inicio">
+            <input type="date" value={fechaInicio} onChange={(event) => setFechaInicio(event.target.value)} style={styles.input} />
+          </Field>
+          <Field label="Fecha fin">
+            <input type="date" value={fechaFin} onChange={(event) => setFechaFin(event.target.value)} style={styles.input} />
+          </Field>
+          <SelectField
+            label="Nombre empleado"
+            value={frontendFilters.nombreEmpleado}
+            options={filterOptions.nombreEmpleado}
+            onChange={(value) => setFrontendFilters((prev) => ({ ...prev, nombreEmpleado: value }))}
+          />
+          <SelectField
+            label="Ubicacion"
+            value={frontendFilters.ubicacion}
+            options={filterOptions.ubicacion}
+            onChange={(value) => setFrontendFilters((prev) => ({ ...prev, ubicacion: value }))}
+          />
+          <SelectField
+            label="Estado activo"
+            value={frontendFilters.estadoAct}
+            options={filterOptions.estadoAct}
+            onChange={(value) => setFrontendFilters((prev) => ({ ...prev, estadoAct: value }))}
+          />
+          <div style={styles.filterToggleWrap}>
+            <span style={styles.filterMetaText}>
+              {showAdvancedFilters ? `${Math.max(activeFilterCount - primaryFilterCount, 0)} filtros avanzados activos` : `${activeFilterCount} filtros activos`}
+            </span>
+            <button
+              type="button"
+              style={styles.moreFiltersButton}
+              onClick={() => setShowAdvancedFilters((prev) => !prev)}
+            >
+              {showAdvancedFilters ? "Menos filtros" : "Mas filtros"}
+            </button>
+          </div>
+        </div>
+
+        {showAdvancedFilters ? (
+          <div style={styles.filterGridAdvanced}>
+            <SelectField
+              label="Empresa"
+              value={frontendFilters.empresa}
+              options={filterOptions.empresa}
+              onChange={(value) => setFrontendFilters((prev) => ({ ...prev, empresa: value }))}
+            />
+            <SelectField
+              label="Cliente"
+              value={frontendFilters.cliente}
+              options={filterOptions.cliente}
+              onChange={(value) => setFrontendFilters((prev) => ({ ...prev, cliente: value }))}
+            />
+            <SelectField
+              label="Area"
+              value={frontendFilters.area}
+              options={filterOptions.area}
+              onChange={(value) => setFrontendFilters((prev) => ({ ...prev, area: value }))}
+            />
+            <SelectField
+              label="Estado"
+              value={frontendFilters.estado}
+              options={filterOptions.estado}
+              onChange={(value) => setFrontendFilters((prev) => ({ ...prev, estado: value }))}
+            />
+            <SelectField
+              label="Estado marcacion"
+              value={frontendFilters.estadoMarcacionTexto}
+              options={filterOptions.estadoMarcacionTexto}
+              onChange={(value) => setFrontendFilters((prev) => ({ ...prev, estadoMarcacionTexto: value }))}
+            />
+            <SelectField
+              label="Origen marcacion"
+              value={frontendFilters.origenMarcacion}
+              options={filterOptions.origenMarcacion}
+              onChange={(value) => setFrontendFilters((prev) => ({ ...prev, origenMarcacion: value }))}
+            />
+          </div>
+        ) : null}
+      </section>
+
+      {error ? <div style={styles.errorBanner}>{error}</div> : null}
+
+      {activeTab === "cuadros" ? (
+        <>
+          <section style={styles.chartGrid}>
+            <div style={{ gridColumn: "1 / 2" }}>
+              <ChartCard title="Origen de marcacion" subtitle="Participacion por origen">
+                <SimpleDonut
+                  data={chartOrigen}
+                  selectedName={detailDrilldown.origenMarcacion}
+                  onSelect={handleOrigenClick}
+                />
+              </ChartCard>
+            </div>
+            <div style={{ gridColumn: "2 / 3" }}>
+              <ChartCard title="Fecha x estado de marcacion por dia" subtitle="Fechas en eje X y estados de marcacion en eje Y">
+                <SimpleStateDateGrid
+                  data={chartEstadoPorDia.rows}
+                  states={chartEstadoPorDia.states}
+                  selectedFecha={detailDrilldown.fecha}
+                  selectedEstado={detailDrilldown.estadoMarcacion}
+                  onSelect={handleStateDateCellClick}
+                />
+              </ChartCard>
+            </div>
+          </section>
+        </>
+      ) : null}
+
+      {activeTab === "detalle" ? (
+        <section style={styles.tableCard}>
+          <div style={styles.filterHeader}>
+            <div>
+              <h2 style={styles.sectionTitle}>Detalle de asistencia</h2>
+              <p style={styles.sectionText}>Tabla con ordenamiento, scroll y resaltado por estado.</p>
+              {detailDrilldown.fecha || detailDrilldown.nombreEmpleado || detailDrilldown.estadoMarcacion || detailDrilldown.origenMarcacion ? (
+                <div style={styles.drilldownBar}>
+                  {detailDrilldown.fecha ? <span style={styles.drilldownPill}>Fecha: {detailDrilldown.fecha}</span> : null}
+                  {detailDrilldown.nombreEmpleado ? <span style={styles.drilldownPill}>Empleado: {detailDrilldown.nombreEmpleado}</span> : null}
+                  {detailDrilldown.estadoMarcacion ? <span style={styles.drilldownPill}>Estado: {detailDrilldown.estadoMarcacion}</span> : null}
+                  {detailDrilldown.origenMarcacion ? <span style={styles.drilldownPill}>Origen: {detailDrilldown.origenMarcacion}</span> : null}
+                  <button type="button" style={styles.clearDrilldownButton} onClick={clearDetailDrilldown}>
+                    Limpiar seleccion
+                  </button>
+                </div>
+              ) : null}
+            </div>
+            <div style={styles.counterPill}>{loading ? "Cargando..." : `${detailRows.length} filas`}</div>
+          </div>
+
+          <div style={styles.tableWrap}>
+            <table style={styles.table}>
+              <colgroup>
+                {tableColumns.map((column) => (
+                  <col key={column.key} style={{ width: column.width }} />
+                ))}
+              </colgroup>
+              <thead>
+                <tr>
+                  {tableColumns.map((column) => (
+                    <th
+                      key={column.key}
+                      style={{ ...styles.th, textAlign: column.align ?? "left" }}
+                      onClick={() => toggleSort(column.key)}
+                    >
+                      <div style={styles.thContent}>
+                        <span>{column.label}</span>
+                        <span style={styles.sortPill}>
+                          {sortState.key === column.key ? (sortState.direction === "asc" ? "ASC" : "DESC") : "ORD"}
+                        </span>
+                      </div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr>
+                    <td style={styles.emptyCell} colSpan={tableColumns.length}>Cargando reporte de asistencia...</td>
+                  </tr>
+                ) : detailRows.length === 0 ? (
+                  <tr>
+                    <td style={styles.emptyCell} colSpan={tableColumns.length}>
+                      {rows.length === 0 ? "No hay datos para el rango seleccionado." : "No hay registros que coincidan con los filtros actuales o la seleccion de cuadros."}
+                    </td>
+                  </tr>
+                ) : (
+                  detailRows.map((item, index) => (
+                    <tr key={`${item.idEmpleado ?? item.nombreEmpleado}-${item.fecha}-${index}`} style={{ ...styles.tr, background: getRowTone(item) }}>
+                      <td style={styles.td}>{formatDateLabel(item.fecha)}</td>
+                      <td style={styles.td}>{item.nombreEmpleado}</td>
+                      <td style={styles.td}>{item.estadoMarcacionTexto}</td>
+                      <td style={{ ...styles.td, textAlign: "center" }}>{item.hora}</td>
+                      <td style={{ ...styles.td, textAlign: "center" }}>{item.salida}</td>
+                      <td style={{ ...styles.td, textAlign: "right" }}>{formatDecimal(item.totalHoras, 2)}</td>
+                      <td style={styles.td}>{item.empresa}</td>
+                      <td style={styles.td}>{item.cliente}</td>
+                      <td style={styles.td}>{item.area}</td>
+                      <td style={styles.td}>{item.ubicacion}</td>
+                      <td style={styles.td}>{item.estadoAct}</td>
+                      <td style={styles.td}>{item.comentario}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
+      {activeTab === "empleado" && (
+        <section style={{ ...styles.tableCard, ...styles.employeeGridSection }}>
+          <div style={styles.filterHeader}>
+            <div>
+              <h2 style={styles.sectionTitle}>Fecha x empleado</h2>
+              <p style={styles.sectionText}>Vista compacta por empleado con filtros en cabecera.</p>
+            </div>
+            <div style={styles.counterPill}>{filteredEmployeeGridRows.length} filas</div>
+          </div>
+          <ChartCard
+            title=""
+            subtitle=""
+            style={styles.employeeGridChartCard}
+          >
+            <SimpleEmployeeDateGrid
+              data={filteredEmployeeGridRows}
+              fechas={chartEmpleadoPorDia.fechas}
+              employeeFilter={employeeGridFilters.employee}
+              onEmployeeFilterChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, employee: value }))}
+              validationFilter={employeeGridFilters.estadoValidacionHoras}
+              validationOptions={employeeGridValidationOptions}
+              onValidationFilterChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, estadoValidacionHoras: value }))}
+              onCellSelect={handleEmployeeDateCellClick}
+            />
+          </ChartCard>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label style={styles.field}>
+      <span style={styles.fieldLabel}>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <Field label={label}>
+      <select value={value} onChange={(event) => onChange(event.target.value)} style={styles.input}>
+        {options.map((option) => (
+          <option key={`${label}-${option}`} value={option}>
+            {option === ALL_OPTION ? "Todos" : option}
+          </option>
+        ))}
+      </select>
+    </Field>
+  );
+}
+
+function ChartCard({
+  title,
+  subtitle,
+  style,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  style?: React.CSSProperties;
+  children: React.ReactNode;
+}) {
+  return (
+    <article style={{ ...styles.chartCard, ...style }}>
+      {title || subtitle ? (
+        <div style={{ marginBottom: 10 }}>
+          {title ? <h3 style={styles.chartTitle}>{title}</h3> : null}
+          {subtitle ? <p style={styles.chartSubtitle}>{subtitle}</p> : null}
+        </div>
+      ) : null}
+      {children}
+    </article>
+  );
+}
+
+function SimpleVerticalBars({
+  data,
+  colorMode,
+}: {
+  data: Array<{ name: string; value: number }>;
+  colorMode?: "palette";
+}) {
+  const max = Math.max(...data.map((item) => item.value), 1);
+
+  return (
+    <div style={styles.simpleChartWrap}>
+      {data.length === 0 ? (
+        <div style={styles.emptyMiniState}>Sin datos para graficar.</div>
+      ) : (
+        <div style={styles.verticalBars}>
+          {data.map((item, index) => (
+            <div key={item.name} style={styles.verticalBarItem}>
+              <div style={styles.verticalBarValue}>{item.value}</div>
+              <div style={styles.verticalBarTrack}>
+                <div
+                  style={{
+                    ...styles.verticalBarFill,
+                    height: `${(item.value / max) * 100}%`,
+                    background: colorMode === "palette" ? chartPalette[index % chartPalette.length] : "#2563EB",
+                  }}
+                />
+              </div>
+              <div style={styles.verticalBarLabel}>{item.name}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SimpleTrendBars({ data }: { data: Array<{ fecha: string; total: number }> }) {
+  const max = Math.max(...data.map((item) => item.total), 1);
+
+  return (
+    <div style={styles.simpleChartWrap}>
+      {data.length === 0 ? (
+        <div style={styles.emptyMiniState}>Sin datos para graficar.</div>
+      ) : (
+        <div style={styles.trendBars}>
+          {data.map((item) => (
+            <div key={item.fecha} style={styles.trendBarItem}>
+              <div style={styles.trendBarTrack}>
+                <div
+                  style={{
+                    ...styles.trendBarFill,
+                    height: `${(item.total / max) * 100}%`,
+                  }}
+                />
+              </div>
+              <div style={styles.trendBarLabel}>{item.fecha}</div>
+              <div style={styles.trendBarValue}>{item.total}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SimpleDailyStateMatrix({
+  data,
+  states,
+}: {
+  data: Array<{ fecha: string; total: number; estados: Array<{ state: string; value: number }> }>;
+  states: string[];
+}) {
+  const max = Math.max(
+    ...data.flatMap((item) => item.estados.map((estado) => estado.value)),
+    1
+  );
+
+  return (
+    <div style={styles.matrixWrap}>
+      {data.length === 0 ? (
+        <div style={styles.emptyMiniState}>Sin datos para graficar.</div>
+      ) : (
+        <>
+          <div style={styles.matrixLegend}>
+            {states.map((state, index) => (
+              <div key={state} style={styles.legendRow}>
+                <span
+                  style={{
+                    ...styles.legendDot,
+                    background: chartPalette[index % chartPalette.length],
+                  }}
+                />
+                <span style={styles.legendLabel}>{state}</span>
+              </div>
+            ))}
+          </div>
+          <div style={styles.matrixRows}>
+            {data.map((item) => (
+              <div key={item.fecha} style={styles.matrixRow}>
+                <div style={styles.matrixDate}>
+                  <strong>{item.fecha}</strong>
+                  <span>{item.total} registros</span>
+                </div>
+                <div style={styles.matrixCells}>
+                  {item.estados.map((estado, index) => (
+                    <div key={`${item.fecha}-${estado.state}`} style={styles.matrixCell}>
+                      <div style={styles.matrixCellHeader}>
+                        <span
+                          style={{
+                            ...styles.legendDot,
+                            width: 10,
+                            height: 10,
+                            background: chartPalette[index % chartPalette.length],
+                          }}
+                        />
+                        <span style={styles.matrixCellLabel}>{estado.state}</span>
+                      </div>
+                      <div style={styles.matrixCellTrack}>
+                        <div
+                          style={{
+                            ...styles.matrixCellFill,
+                            width: `${(estado.value / max) * 100}%`,
+                            background: chartPalette[index % chartPalette.length],
+                          }}
+                        />
+                      </div>
+                      <strong style={styles.matrixCellValue}>{estado.value}</strong>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function SimpleStateDateGrid({
+  data,
+  states,
+  selectedFecha,
+  selectedEstado,
+  onSelect,
+}: {
+  data: Array<{ fecha: string; total: number; estados: StateDateCell[] }>;
+  states: string[];
+  selectedFecha?: string | null;
+  selectedEstado?: string | null;
+  onSelect?: (fecha: string, estado: string) => void;
+}) {
+  const max = Math.max(
+    ...data.flatMap((item) => item.estados.map((estado) => estado.value)),
+    1
+  );
+
+  const getCellTone = (value: number) => {
+    if (value <= 0) return "#F8FAFC";
+    const intensity = Math.max(0.18, value / max);
+    return `rgba(37, 99, 235, ${Math.min(0.95, intensity)})`;
+  };
+
+  return (
+    <div style={styles.stateDateGridWrap}>
+      {data.length === 0 || states.length === 0 ? (
+        <div style={styles.emptyMiniState}>Sin datos para graficar.</div>
+      ) : (
+        <div style={styles.stateDateGridScroller}>
+          <div
+            style={{
+              ...styles.stateDateGrid,
+              gridTemplateColumns: `180px repeat(${data.length}, minmax(68px, 1fr))`,
+            }}
+          >
+            <div style={{ ...styles.stateDateGridHeader, ...styles.stateDateGridCorner }}>
+              Estado / Fecha
+            </div>
+            {data.map((item) => (
+              <div key={`head-${item.fecha}`} style={styles.stateDateGridHeader}>
+                {item.fecha}
+              </div>
+            ))}
+
+            {states.map((state) => (
+              <React.Fragment key={state}>
+                <div style={styles.stateDateGridRowLabel}>{state}</div>
+                {data.map((item) => {
+                  const cell = item.estados.find((entry) => entry.state === state) ?? {
+                    state,
+                    value: 0,
+                    totalHoras: 0,
+                  };
+                  const value = cell.value;
+                  const isSelected = selectedFecha === item.fecha && selectedEstado === state;
+                  return (
+                    <button
+                      type="button"
+                      key={`${state}-${item.fecha}`}
+                      style={{
+                        ...styles.stateDateGridCell,
+                        background: getCellTone(value),
+                        color: value > 0 ? "#FFFFFF" : "#94A3B8",
+                        boxShadow: isSelected ? "inset 0 0 0 3px #0F172A" : "none",
+                        cursor: onSelect ? "pointer" : "default",
+                      }}
+                      title={`${state} | ${item.fecha}: ${value} registros | ${formatDecimal(cell.totalHoras, 2)} horas`}
+                      onClick={() => onSelect?.(item.fecha, state)}
+                    >
+                      <span style={styles.stateDateGridCellCount}>{value}</span>
+                      <span style={styles.stateDateGridCellHours}>
+                        {cell.totalHoras > 0 ? `${formatDecimal(cell.totalHoras, 2)} h` : "0.00 h"}
+                      </span>
+                    </button>
+                  );
+                })}
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SimpleEmployeeDateGrid({
+  data,
+  fechas,
+  employeeFilter,
+  onEmployeeFilterChange,
+  validationFilter,
+  validationOptions,
+  onValidationFilterChange,
+  onCellSelect,
+}: {
+  data: EmployeeDateRow[];
+  fechas: string[];
+  employeeFilter: string;
+  onEmployeeFilterChange: (value: string) => void;
+  validationFilter: string;
+  validationOptions: string[];
+  onValidationFilterChange: (value: string) => void;
+  onCellSelect?: (nombreEmpleado: string, fecha: string) => void;
+}) {
+  const max = Math.max(
+    ...data.flatMap((item) => item.fechas.map((fecha) => fecha.totalHoras)),
+    1
+  );
+
+  const getCellTone = (value: number) => {
+    if (value <= 0) return "#F8FAFC";
+    const intensity = Math.max(0.18, value / max);
+    return `rgba(37, 99, 235, ${Math.min(0.95, intensity)})`;
+  };
+
+  return (
+    <div style={styles.stateDateGridWrap}>
+      {data.length === 0 || fechas.length === 0 ? (
+        <div style={styles.emptyMiniState}>Sin datos para graficar.</div>
+      ) : (
+        <div style={styles.stateDateGridScroller}>
+          <div
+            style={{
+              ...styles.stateDateGrid,
+              gridTemplateColumns: `220px 110px 100px 150px repeat(${fechas.length}, minmax(88px, 1fr))`,
+            }}
+          >
+            <div style={{ ...styles.stateDateGridHeader, ...styles.stateDateGridCorner }}>
+              <div style={styles.employeeGridHeaderStack}>
+                <span>Empleado / Fecha</span>
+                <input
+                  type="text"
+                  value={employeeFilter}
+                  onChange={(event) => onEmployeeFilterChange(event.target.value)}
+                  placeholder="Filtrar empleado"
+                  style={styles.employeeGridHeaderInput}
+                />
+              </div>
+            </div>
+            <div style={styles.stateDateGridHeader}>
+              Total horas
+            </div>
+            <div style={styles.stateDateGridHeader}>
+              Hrs Lab.
+            </div>
+            <div style={styles.stateDateGridHeader}>
+              <div style={styles.employeeGridHeaderStack}>
+                <span>Estado valid.</span>
+                <select
+                  value={validationFilter}
+                  onChange={(event) => onValidationFilterChange(event.target.value)}
+                  style={styles.employeeGridHeaderSelect}
+                >
+                  {validationOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option === ALL_OPTION ? "Todos" : option}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            {fechas.map((fecha) => (
+              <div key={`head-employee-${fecha}`} style={styles.stateDateGridHeader}>
+                {fecha}
+              </div>
+            ))}
+
+            {data.map((item) => (
+              <React.Fragment key={item.employee}>
+                <div style={{ ...styles.stateDateGridRowLabel, ...styles.employeeGridRowLabel }}>
+                  <span style={styles.employeeGridRowName}>{item.employee}</span>
+                  <span style={styles.employeeGridRowMeta}>{item.ubicacion || "Sin ubicacion"}</span>
+                </div>
+                <div
+                  style={{
+                    ...styles.stateDateGridCell,
+                    ...styles.employeeGridTotalCell,
+                    background: item.total > 0 ? "rgba(15, 23, 42, 0.08)" : "#F8FAFC",
+                    color: item.total > 0 ? "#0F172A" : "#94A3B8",
+                  }}
+                  title={`${item.employee}: ${formatDecimal(item.total, 2)} horas totales`}
+                >
+                  <span style={styles.stateDateGridCellCount}>
+                    {item.total > 0 ? formatDecimal(item.total, 2) : "0.00"}
+                  </span>
+                  <span style={styles.stateDateGridCellHours}>h</span>
+                </div>
+                <div
+                  style={{
+                    ...styles.stateDateGridCell,
+                    ...styles.employeeGridTotalCell,
+                    background: item.totalHorasLaborales > 0 ? "rgba(15, 23, 42, 0.06)" : "#F8FAFC",
+                    color: item.totalHorasLaborales > 0 ? "#0F172A" : "#94A3B8",
+                  }}
+                  title={`${item.employee}: ${formatDecimal(item.totalHorasLaborales, 2)} horas laborales`}
+                >
+                  <span style={styles.stateDateGridCellCount}>
+                    {item.totalHorasLaborales > 0 ? formatDecimal(item.totalHorasLaborales, 2) : "0.00"}
+                  </span>
+                  <span style={styles.stateDateGridCellHours}>h</span>
+                </div>
+                <div
+                  style={{
+                    ...styles.stateDateGridCell,
+                    ...styles.employeeGridValidationCell,
+                    background: item.estadoValidacionHoras ? "#F8FAFC" : "#F8FAFC",
+                    color: item.estadoValidacionHoras ? "#334155" : "#94A3B8",
+                  }}
+                  title={`${item.employee}: ${item.estadoValidacionHoras || "Sin validacion"}`}
+                >
+                  <span style={styles.employeeGridValidationText}>
+                    {item.estadoValidacionHoras || "Sin validacion"}
+                  </span>
+                </div>
+                {item.fechas.map((cell) => {
+                  const value = cell.totalHoras;
+                  return (
+                    <button
+                      type="button"
+                      key={`${item.employee}-${cell.fecha}`}
+                      style={{
+                        ...styles.stateDateGridCell,
+                        background: getCellTone(value),
+                        color: value > 0 ? "#FFFFFF" : "#94A3B8",
+                        cursor: onCellSelect ? "pointer" : "default",
+                      }}
+                      title={`${item.employee} | ${cell.fecha}: ${formatDecimal(cell.totalHoras, 2)} horas${cell.estadoMarcacionTexto ? ` | ${cell.estadoMarcacionTexto}` : ""}`}
+                      onClick={() => onCellSelect?.(item.employee, cell.fecha)}
+                    >
+                      <span style={styles.stateDateGridCellCount}>
+                        {value > 0 ? formatDecimal(cell.totalHoras, 2) : "0.00"}
+                      </span>
+                      <span style={styles.stateDateGridCellHours}>h</span>
+                      <span style={styles.employeeGridCellState}>
+                        {cell.estadoMarcacionTexto || "-"}
+                      </span>
+                    </button>
+                  );
+                })}
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SimpleDonut({
+  data,
+  selectedName,
+  onSelect,
+}: {
+  data: Array<{ name: string; value: number }>;
+  selectedName?: string | null;
+  onSelect?: (name: string) => void;
+}) {
+  const total = data.reduce((sum, item) => sum + item.value, 0);
+
+  const gradient = data.length
+    ? (() => {
+        let current = 0;
+        const slices = data.map((item, index) => {
+          const start = current;
+          const percentage = total > 0 ? (item.value / total) * 100 : 0;
+          current += percentage;
+          return `${chartPalette[index % chartPalette.length]} ${start}% ${current}%`;
+        });
+        return `conic-gradient(${slices.join(", ")})`;
+      })()
+    : "#E5E7EB";
+
+  return (
+    <div style={styles.donutLayout}>
+      <div style={{ ...styles.donutChart, background: gradient }}>
+        <div style={styles.donutInner}>
+          <strong style={{ fontSize: 24, color: "#0F172A" }}>{total}</strong>
+          <span style={{ fontSize: 11, color: "#64748B" }}>registros</span>
+        </div>
+      </div>
+      <div style={styles.donutLegend}>
+        {data.length === 0 ? (
+          <div style={styles.emptyMiniState}>Sin datos para graficar.</div>
+        ) : (
+          data.map((item, index) => (
+            <button
+              key={item.name}
+              type="button"
+              style={{
+                ...styles.donutLegendButton,
+                ...(selectedName === item.name ? styles.donutLegendButtonActive : null),
+              }}
+              onClick={() => onSelect?.(item.name)}
+              title={`Filtrar detalle por origen: ${item.name}`}
+            >
+              <span
+                style={{
+                  ...styles.legendDot,
+                  background: chartPalette[index % chartPalette.length],
+                }}
+              />
+              <span style={styles.legendLabel}>{item.name}</span>
+              <strong style={styles.legendValue}>{item.value}</strong>
+            </button>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+const kpiToneStyles: Record<KPI["tone"], React.CSSProperties> = {
+  blue: { background: "linear-gradient(135deg, #DBEAFE 0%, #EFF6FF 100%)" },
+  green: { background: "linear-gradient(135deg, #DCFCE7 0%, #F0FDF4 100%)" },
+  amber: { background: "linear-gradient(135deg, #FEF3C7 0%, #FFF7ED 100%)" },
+  red: { background: "linear-gradient(135deg, #FEE2E2 0%, #FEF2F2 100%)" },
+  slate: { background: "linear-gradient(135deg, #E2E8F0 0%, #F8FAFC 100%)" },
+};
+
+const styles: Record<string, React.CSSProperties> = {
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    minWidth: 0,
+    overflow: "hidden",
+    paddingBottom: 10,
+  },
+  compactHeader: {
+    background: "linear-gradient(135deg, #FFFDF7 0%, #F8FAFC 100%)",
+    border: "1px solid #E5E7EB",
+    borderRadius: 14,
+    padding: "10px 14px",
+    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.05)",
+    display: "grid",
+    gridTemplateColumns: "minmax(240px, 1fr) auto minmax(360px, auto)",
+    gap: 10,
+    alignItems: "center",
+  },
+  headerSearchWrap: {
+    display: "flex",
+    alignItems: "center",
+    minWidth: 0,
+  },
+  headerSearchInput: {
+    width: "100%",
+    height: 32,
+    borderRadius: 10,
+    border: "1px solid #CBD5E1",
+    padding: "4px 10px",
+    fontSize: 12,
+    background: "#FFFFFF",
+    boxSizing: "border-box",
+  },
+  headerTitleWrap: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 0,
+    gap: 1,
+  },
+  compactTitle: {
+    margin: 0,
+    fontSize: 17,
+    lineHeight: 1.1,
+    color: "#0F172A",
+    whiteSpace: "nowrap",
+  },
+  headerActions: {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  eyebrow: {
+    fontSize: 11,
+    fontWeight: 800,
+    color: "#0F766E",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
+  headerPrimaryButton: {
+    border: "none",
+    background: "linear-gradient(135deg, #6E4CCB 0%, #7C3AED 100%)",
+    color: "#FFFFFF",
+    borderRadius: 10,
+    height: 32,
+    padding: "0 12px",
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  headerSecondaryButton: {
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    color: "#334155",
+    borderRadius: 10,
+    height: 32,
+    padding: "0 12px",
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  filterCardCompact: {
+    background: "#FFFFFF",
+    borderRadius: 14,
+    border: "1px solid #E2E8F0",
+    padding: "10px 14px",
+    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.05)",
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  },
+  segmentedTabs: {
+    display: "flex",
+    gap: 6,
+    flexWrap: "wrap",
+    alignItems: "center",
+  },
+  segmentedTabButton: {
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    color: "#334155",
+    borderRadius: 999,
+    height: 30,
+    padding: "0 14px",
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: "pointer",
+    boxShadow: "0 4px 12px rgba(15, 23, 42, 0.04)",
+  },
+  segmentedTabButtonActive: {
+    border: "1px solid #C4B5FD",
+    background: "linear-gradient(135deg, #6E4CCB 0%, #8B5CF6 100%)",
+    color: "#FFFFFF",
+  },
+  filterHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+    flexWrap: "wrap",
+  },
+  sectionTitle: {
+    margin: 0,
+    fontSize: 18,
+    color: "#0F172A",
+  },
+  sectionText: {
+    margin: "2px 0 0",
+    color: "#64748B",
+    fontSize: 11,
+  },
+  filterGridCompact: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+    gap: 8,
+    alignItems: "end",
+  },
+  filterGridAdvanced: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+    gap: 8,
+  },
+  field: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+  },
+  fieldLabel: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: "#334155",
+  },
+  input: {
+    width: "100%",
+    height: 32,
+    borderRadius: 10,
+    border: "1px solid #CBD5E1",
+    padding: "4px 8px",
+    fontSize: 12,
+    background: "#FFFFFF",
+    boxSizing: "border-box",
+  },
+  filterToggleWrap: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    minHeight: 32,
+  },
+  filterMetaText: {
+    fontSize: 11,
+    color: "#64748B",
+    whiteSpace: "nowrap",
+  },
+  moreFiltersButton: {
+    border: "1px solid #C4B5FD",
+    background: "#F5F3FF",
+    color: "#6D28D9",
+    borderRadius: 10,
+    height: 30,
+    padding: "0 10px",
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  counterPill: {
+    padding: "6px 10px",
+    borderRadius: 999,
+    background: "#F1F5F9",
+    color: "#334155",
+    fontWeight: 700,
+    fontSize: 11,
+  },
+  errorBanner: {
+    background: "#FEF2F2",
+    border: "1px solid #FECACA",
+    color: "#B91C1C",
+    borderRadius: 16,
+    padding: 14,
+    fontSize: 13,
+    fontWeight: 700,
+  },
+  kpiGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+    gap: 10,
+  },
+  kpiCard: {
+    borderRadius: 14,
+    padding: "10px 14px",
+    boxShadow: "0 10px 20px rgba(15, 23, 42, 0.05)",
+    border: "1px solid rgba(255,255,255,0.7)",
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    minHeight: 78,
+  },
+  kpiLabel: {
+    fontSize: 12,
+    color: "#475569",
+    fontWeight: 700,
+  },
+  kpiValue: {
+    fontSize: 24,
+    color: "#0F172A",
+    lineHeight: 1.1,
+  },
+  chartGrid: {
+    display: "grid",
+    gridTemplateColumns: "25% 75%",
+    gap: 16,
+    alignItems: "stretch",
+  },
+  chartCard: {
+    background: "#FFFFFF",
+    borderRadius: 14,
+    border: "1px solid #E2E8F0",
+    padding: "10px 14px",
+    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.05)",
+    minWidth: 0,
+    overflow: "hidden",
+  },
+  chartTitle: {
+    margin: 0,
+    fontSize: 18,
+    color: "#0F172A",
+  },
+  chartSubtitle: {
+    margin: "4px 0 0",
+    fontSize: 12,
+    color: "#64748B",
+  },
+  simpleChartWrap: {
+    minHeight: 280,
+    display: "flex",
+    alignItems: "stretch",
+    justifyContent: "center",
+  },
+  emptyMiniState: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+    color: "#64748B",
+    fontSize: 13,
+  },
+  verticalBars: {
+    width: "100%",
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(72px, 1fr))",
+    gap: 12,
+    alignItems: "end",
+  },
+  verticalBarItem: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 8,
+    minWidth: 0,
+  },
+  verticalBarTrack: {
+    height: 170,
+    width: 36,
+    background: "#E5E7EB",
+    borderRadius: 999,
+    display: "flex",
+    alignItems: "flex-end",
+    overflow: "hidden",
+  },
+  verticalBarFill: {
+    width: "100%",
+    borderRadius: 999,
+    minHeight: 6,
+  },
+  verticalBarLabel: {
+    fontSize: 11,
+    color: "#475569",
+    textAlign: "center",
+    wordBreak: "break-word",
+  },
+  verticalBarValue: {
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#0F172A",
+  },
+  trendBars: {
+    width: "100%",
+    minHeight: 280,
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(48px, 1fr))",
+    gap: 10,
+    alignItems: "end",
+  },
+  trendBarItem: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 6,
+  },
+  trendBarTrack: {
+    height: 180,
+    width: 26,
+    background: "#DCFCE7",
+    borderRadius: 999,
+    display: "flex",
+    alignItems: "flex-end",
+    overflow: "hidden",
+  },
+  trendBarFill: {
+    width: "100%",
+    borderRadius: 999,
+    minHeight: 6,
+    background: "#059669",
+  },
+  trendBarLabel: {
+    fontSize: 10,
+    color: "#475569",
+    textAlign: "center",
+    writingMode: "vertical-rl",
+    transform: "rotate(180deg)",
+    minHeight: 84,
+  },
+  trendBarValue: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: "#0F172A",
+  },
+  donutLayout: {
+    minHeight: 280,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    maxWidth: "100%",
+    overflow: "hidden",
+    gap: 12,
+  },
+  donutChart: {
+    width: 180,
+    height: 180,
+    borderRadius: "50%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    justifySelf: "center",
+  },
+  donutInner: {
+    width: 108,
+    height: 108,
+    borderRadius: "50%",
+    background: "#FFFFFF",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    boxShadow: "inset 0 0 0 1px #E5E7EB",
+  },
+  donutLegend: {
+    display: "flex",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    maxWidth: "100%",
+    paddingBottom: 2,
+  },
+  donutLegendButton: {
+    display: "grid",
+    gridTemplateColumns: "12px 1fr auto",
+    gap: 10,
+    alignItems: "center",
+    border: "1px solid transparent",
+    borderRadius: 10,
+    background: "#FFFFFF",
+    padding: "8px 10px",
+    textAlign: "left",
+    cursor: "pointer",
+  },
+  donutLegendButtonActive: {
+    background: "#EFF6FF",
+    border: "1px solid #93C5FD",
+    boxShadow: "0 0 0 1px rgba(37, 99, 235, 0.12)",
+  },
+  matrixWrap: {
+    minHeight: 280,
+    display: "flex",
+    flexDirection: "column",
+    gap: 14,
+  },
+  matrixLegend: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  matrixRows: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+    maxHeight: 320,
+    overflow: "auto",
+    paddingRight: 4,
+  },
+  matrixRow: {
+    border: "1px solid #E2E8F0",
+    borderRadius: 14,
+    padding: 12,
+    background: "#F8FAFC",
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+  },
+  matrixDate: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 10,
+    alignItems: "center",
+    fontSize: 12,
+    color: "#334155",
+  },
+  matrixCells: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+    gap: 10,
+  },
+  matrixCell: {
+    background: "#FFFFFF",
+    border: "1px solid #E5E7EB",
+    borderRadius: 12,
+    padding: 10,
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  },
+  matrixCellHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  },
+  matrixCellLabel: {
+    fontSize: 11,
+    color: "#334155",
+    fontWeight: 600,
+  },
+  matrixCellTrack: {
+    height: 10,
+    background: "#E5E7EB",
+    borderRadius: 999,
+    overflow: "hidden",
+  },
+  matrixCellFill: {
+    height: "100%",
+    borderRadius: 999,
+    minWidth: 4,
+  },
+  matrixCellValue: {
+    fontSize: 12,
+    color: "#0F172A",
+  },
+  stateDateGridWrap: {
+    minHeight: 280,
+    display: "flex",
+    flexDirection: "column",
+    minWidth: 0,
+    width: "100%",
+  },
+  stateDateGridScroller: {
+    overflowX: "auto",
+    overflowY: "auto",
+    flex: 1,
+    height: "100%",
+    minHeight: 200,
+    border: "1px solid #E2E8F0",
+    borderRadius: 14,
+  },
+  stateDateGrid: {
+    display: "grid",
+    alignItems: "stretch",
+    minWidth: "max-content",
+  },
+  stateDateGridHeader: {
+    position: "sticky",
+    top: 0,
+    zIndex: 1,
+    padding: "10px 8px",
+    background: "#E2E8F0",
+    borderRight: "1px solid #CBD5E1",
+    borderBottom: "1px solid #CBD5E1",
+    fontSize: 11,
+    fontWeight: 800,
+    color: "#0F172A",
+    textAlign: "center",
+  },
+  stateDateGridCorner: {
+    left: 0,
+    zIndex: 2,
+  },
+  stateDateGridRowLabel: {
+    position: "sticky",
+    left: 0,
+    zIndex: 1,
+    padding: "10px 12px",
+    background: "#F8FAFC",
+    borderRight: "1px solid #E2E8F0",
+    borderBottom: "1px solid #E2E8F0",
+    fontSize: 11,
+    fontWeight: 700,
+    color: "#334155",
+    display: "flex",
+    alignItems: "center",
+  },
+  employeeGridRowLabel: {
+    flexDirection: "column",
+    alignItems: "flex-start",
+    justifyContent: "center",
+    gap: 4,
+  },
+  employeeGridRowName: {
+    fontSize: 11,
+    fontWeight: 800,
+    color: "#0F172A",
+    lineHeight: 1.15,
+  },
+  employeeGridRowMeta: {
+    fontSize: 10,
+    fontWeight: 600,
+    color: "#64748B",
+    lineHeight: 1.15,
+  },
+  employeeGridTotalCell: {
+    borderRight: "1px solid #CBD5E1",
+  },
+  employeeGridValidationCell: {
+    borderRight: "1px solid #CBD5E1",
+    alignItems: "flex-start",
+    justifyContent: "center",
+    textAlign: "left",
+    padding: "8px 10px",
+  },
+  employeeGridValidationText: {
+    fontSize: 10,
+    fontWeight: 700,
+    lineHeight: 1.2,
+    wordBreak: "break-word",
+  },
+  employeeGridHeaderStack: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    alignItems: "stretch",
+  },
+  employeeGridHeaderInput: {
+    width: "100%",
+    minWidth: 0,
+    height: 28,
+    borderRadius: 8,
+    border: "1px solid #BFDBFE",
+    padding: "4px 8px",
+    fontSize: 11,
+    color: "#0F172A",
+    background: "#FFFFFF",
+    outline: "none",
+  },
+  employeeGridHeaderSelect: {
+    width: "100%",
+    minWidth: 0,
+    height: 28,
+    borderRadius: 8,
+    border: "1px solid #BFDBFE",
+    padding: "4px 8px",
+    fontSize: 11,
+    color: "#0F172A",
+    background: "#FFFFFF",
+    outline: "none",
+  },
+  stateDateGridCell: {
+    minHeight: 54,
+    padding: "8px 6px",
+    border: "none",
+    borderRight: "1px solid #E2E8F0",
+    borderBottom: "1px solid #E2E8F0",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 2,
+    fontSize: 12,
+    fontWeight: 800,
+    appearance: "none",
+  },
+  stateDateGridCellCount: {
+    fontSize: 13,
+    fontWeight: 800,
+    lineHeight: 1.1,
+  },
+  stateDateGridCellHours: {
+    fontSize: 10,
+    fontWeight: 700,
+    lineHeight: 1.1,
+    opacity: 0.92,
+  },
+  employeeGridCellState: {
+    fontSize: 9,
+    fontWeight: 700,
+    lineHeight: 1.15,
+    textAlign: "center",
+    opacity: 0.95,
+    wordBreak: "break-word",
+  },
+  legendRow: {
+    display: "grid",
+    gridTemplateColumns: "12px 1fr",
+    gap: 10,
+    alignItems: "center",
+  },
+  legendDot: {
+    width: 12,
+    height: 12,
+    borderRadius: "50%",
+  },
+  legendLabel: {
+    fontSize: 12,
+    color: "#334155",
+  },
+  legendValue: {
+    fontSize: 12,
+    color: "#0F172A",
+  },
+  drilldownBar: {
+    marginTop: 12,
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 8,
+    alignItems: "center",
+  },
+  drilldownPill: {
+    display: "inline-flex",
+    alignItems: "center",
+    minHeight: 30,
+    padding: "4px 12px",
+    borderRadius: 999,
+    background: "#EFF6FF",
+    border: "1px solid #BFDBFE",
+    color: "#1D4ED8",
+    fontSize: 12,
+    fontWeight: 700,
+  },
+  clearDrilldownButton: {
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    color: "#334155",
+    borderRadius: 999,
+    padding: "6px 12px",
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  tableCard: {
+    background: "#FFFFFF",
+    borderRadius: 14,
+    border: "1px solid #E2E8F0",
+    padding: "10px 14px",
+    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.05)",
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    height: "calc(100vh - 240px)", // Ajusta este valor según el alto de header, filtros, etc.
+    minHeight: 320,
+    maxHeight: "100vh",
+  },
+  employeeGridSection: {
+    height: "calc(100vh - 240px)",
+    minHeight: 320,
+    maxHeight: "100vh",
+    overflow: "hidden",
+    minWidth: 0,
+  },
+  employeeGridChartCard: {
+    flex: 1,
+    minHeight: 0,
+    display: "flex",
+    flexDirection: "column",
+  },
+  tableWrap: {
+    overflow: "auto",
+    border: "1px solid #E2E8F0",
+    borderRadius: 16,
+    maxHeight: "70vh",
+  },
+  table: {
+    width: "100%",
+    minWidth: 2200,
+    borderCollapse: "collapse",
+    tableLayout: "fixed",
+  },
+  th: {
+    position: "sticky",
+    top: 0,
+    zIndex: 1,
+    padding: "10px 12px",
+    background: "#F8FAFC",
+    borderBottom: "1px solid #E2E8F0",
+    fontSize: 12,
+    color: "#334155",
+    whiteSpace: "nowrap",
+    cursor: "pointer",
+  },
+  thContent: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  sortPill: {
+    fontSize: 10,
+    fontWeight: 800,
+    color: "#2563EB",
+    background: "#DBEAFE",
+    padding: "3px 6px",
+    borderRadius: 999,
+  },
+  td: {
+    padding: "10px 12px",
+    borderBottom: "1px solid #E5E7EB",
+    fontSize: 12,
+    color: "#0F172A",
+    verticalAlign: "top",
+    wordBreak: "break-word",
+  },
+  tr: {
+    transition: "background 160ms ease",
+  },
+  emptyCell: {
+    padding: 24,
+    textAlign: "center",
+    color: "#64748B",
+    fontSize: 13,
+  },
+};

@@ -20,7 +20,9 @@ namespace CjERP.Api.Controllers
                 Correo = User.FindFirstValue("Correo"),
                 CodEmp = ParseNullableInt(User.FindFirstValue("CodEmp")),
                 CodVal = ParseNullableInt(User.FindFirstValue("CodVal")),
-                Cuadrilla = ParseNullableInt(User.FindFirstValue("Cuadrilla"))
+                Cuadrilla = ParseNullableInt(User.FindFirstValue("Cuadrilla")),
+                IdPerfil = ParseNullableInt(User.FindFirstValue("IdPerfil")),
+                IdRol = ParseNullableInt(User.FindFirstValue("IdRol"))
             };
 
             return Ok(new

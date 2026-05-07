@@ -4,7 +4,10 @@ import AppCard from "../../../components/base/AppCard";
 import AppPage from "../../../components/base/AppPage";
 import AppSectionHeader from "../../../components/base/AppSectionHeader";
 import AppStatusMessage from "../../../components/base/AppStatusMessage";
-import AppToolbar from "../../../components/base/AppToolbar";
+import CrudToolbar, {
+  matchesCrudToolbarSearch,
+  type CrudToolbarSearchField,
+} from "../../../components/base/CrudToolbar";
 import {
   rolesService,
   type RolDto,
@@ -101,18 +104,20 @@ export default function SeguridadRolesPage() {
     load: cargarRoles,
   } = useCrudForm<Rol, RolForm>(rolesApi, formularioInicial);
 
-  const rolesFiltrados = useMemo(() => {
-    const texto = busqueda.trim().toUpperCase();
-
-    if (!texto) return roles;
-
-    return roles.filter(
-      (x) =>
-        x.nombreRol.toUpperCase().includes(texto) ||
-        x.descripcion.toUpperCase().includes(texto) ||
-        x.estado.toUpperCase().includes(texto)
-    );
-  }, [roles, busqueda]);
+  const camposBusquedaRoles = useMemo<CrudToolbarSearchField<Rol>[]>(
+    () => [
+      { key: "id", label: "Id", getValue: (rol) => rol.id },
+      { key: "nombreRol", label: "Nombre rol", getValue: (rol) => rol.nombreRol },
+      { key: "descripcion", label: "Descripcion", getValue: (rol) => rol.descripcion },
+      { key: "estado", label: "Estado", getValue: (rol) => rol.estado },
+      { key: "fechaCreacion", label: "Fecha creacion", getValue: (rol) => rol.fechaCreacion },
+    ],
+    []
+  );
+  const rolesFiltrados = useMemo(
+    () => roles.filter((rol) => matchesCrudToolbarSearch(rol, busqueda, camposBusquedaRoles)),
+    [roles, busqueda, camposBusquedaRoles]
+  );
 
   const abrirNuevo = () => {
     setModo("nuevo");
@@ -191,29 +196,30 @@ export default function SeguridadRolesPage() {
   const rolSeleccionadoEliminar = roles.find((x) => x.id === idEliminar);
 
   return (
-    <AppPage title="Roles de seguridad">
-      <AppToolbar>
-        <input
-          type="text"
-          placeholder="Buscar por nombre, descripcion o estado"
-          value={busqueda}
-          onChange={(e) => setBusqueda(e.target.value)}
-          style={styles.searchInput}
-        />
-        <button style={styles.primaryButton} onClick={abrirNuevo}>
-          Nuevo rol
-        </button>
-      </AppToolbar>
+    <AppPage title="">
+      <CrudToolbar
+        searchValue={busqueda}
+        onSearchChange={setBusqueda}
+        searchPlaceholder="Buscar roles..."
+        searchFieldsHint={camposBusquedaRoles.map((campo) => campo.label).join(", ")}
+        buttons={[
+          {
+            key: "nuevo",
+            label: "Nuevo rol",
+            onClick: abrirNuevo,
+          },
+        ]}
+      />
 
       {cargando ? <AppStatusMessage tone="info">Cargando informacion...</AppStatusMessage> : null}
       {mensaje ? <AppStatusMessage tone="success">{mensaje}</AppStatusMessage> : null}
       {errorMensaje ? <AppStatusMessage tone="error">{errorMensaje}</AppStatusMessage> : null}
 
       <AppCard style={styles.card}>
-        <AppSectionHeader
-          title="Listado de roles"
-          description="Administra los roles del sistema y controla su estado operativo."
-        />
+        {/* <AppSectionHeader
+          //title="Listado de roles"
+          //description="Administra los roles del sistema y controla su estado operativo."
+        /> */}
         <div style={styles.tableWrapper}>
           <table style={styles.table}>
             <thead>

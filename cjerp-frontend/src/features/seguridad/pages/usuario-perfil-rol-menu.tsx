@@ -457,6 +457,10 @@ export default function SeguridadPerfilRolMenu() {
   };
 
    const guardarAsignacion = async () => {
+
+      console.log("Usuario enviado (raw):", usuarioFiltro);
+      console.log("Usuario enviado (ID limpio):", usuarioIdSeleccionado);
+
     if (!usuarioIdSeleccionado) {
       setError("Debe seleccionar un usuario válido.");
       setMensaje("");
@@ -485,7 +489,8 @@ export default function SeguridadPerfilRolMenu() {
       try {
         existeRelacion = await menuService.existeUsuarioPerfil({
           idUsuario: usuarioIdSeleccionado,
-          idPerfil: Number(perfilId)
+          idPerfil: Number(perfilId),
+          idRol: Number(rolId)
         });
       } catch (e: unknown) {
         existeRelacion = false;
@@ -494,9 +499,10 @@ export default function SeguridadPerfilRolMenu() {
       // 2. Si no existe, crear la relación usuario-perfil
       if (!existeRelacion) {
         try {
-          await menuService.guardarUsuarioPerfil({
+          await menuService.guardarUsuarioPerfilRol({
             idUsuario: usuarioIdSeleccionado,
-            idPerfil: Number(perfilId)
+            idPerfil: Number(perfilId),
+            idRol: Number(rolId),
           });
         } catch (e: unknown) {
           setError(appendErrorMessage("No se pudo crear la relación usuario-perfil.", e));
@@ -617,19 +623,19 @@ export default function SeguridadPerfilRolMenu() {
             type="text"
             list="usuarios-autocomplete"
             value={usuarioFiltro}
+
             onChange={(e) => {
-              const value = e.target.value;
-              setUsuarioFiltro(value);
+            const value = e.target.value;
+            setUsuarioFiltro(value);
 
-              const texto = value.trim().toLowerCase();
-              const usuario = usuarios.find((item) => {
-                const textoCompleto = `${item.idUsuario} - ${item.nombreEmpleado}`.toLowerCase();
-                return item.idUsuario.toLowerCase() === texto || textoCompleto === texto;
-              });
+            const idUsuarioExtraido = value.split("-")[0].trim();
 
-              setUsuarioIdSeleccionado(usuario?.idUsuario ?? "");
+            console.log("Usuario escrito:", value);
+            console.log("ID usuario extraído:", idUsuarioExtraido);
 
-            }}
+            setUsuarioIdSeleccionado(idUsuarioExtraido);
+          }}
+
             inputStyle={styles.select}
             disabled={cargando}
             placeholder="Escriba para filtrar usuario"

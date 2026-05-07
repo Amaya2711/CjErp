@@ -62,8 +62,14 @@ export default function MainLayout() {
   const empleadoMostrar = (authUser?.nombre || authUser?.nombreEmpleado || "").toUpperCase();
   const correoMostrar = (authUser?.correo || authUser?.email || "").toLowerCase();
   const codigoEmpleadoMostrar = (authUser?.codEmp || authUser?.idEmpleado || authUser?.empleado || "").toString();
+  const codigoidperfil: number = Number(authUser?.idperfil ?? 0);
+  const codigoidrol: number = Number(authUser?.idrol ?? 0);
 
   useEffect(() => {
+      //console.log("[MainLayout] authUser", authUser);
+      //console.log("[MainLayout] codigoEmpleadoMostrar", codigoEmpleadoMostrar);
+      //console.log("[MainLayout] codigoidrol", codigoidrol);
+
     let activo = true;
 
     const cargarMenu = async () => {
@@ -356,7 +362,9 @@ export default function MainLayout() {
             <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
               <div style={styles.userLabel}>Usuario: {usuarioMostrar}</div>
               <div style={styles.employeeLabel}>
-                Empleado: {empleadoMostrar || "NO DEFINIDO"} &nbsp;|&nbsp; Código: {codigoEmpleadoMostrar || "NO DEFINIDO"} &nbsp;|&nbsp; Correo: {correoMostrar || "NO DEFINIDO"}
+                Empleado: {empleadoMostrar || "NO DEFINIDO"} &nbsp;|&nbsp; 
+                Código: {`${codigoEmpleadoMostrar || "ND"} - ${codigoidperfil || "ND"} - ${codigoidrol || "ND"}`} 
+                &nbsp;|&nbsp; Correo: {correoMostrar || "NO DEFINIDO"}
               </div>
             </div>
             <button style={styles.footerLogoutButton} onClick={cerrarSesion}>

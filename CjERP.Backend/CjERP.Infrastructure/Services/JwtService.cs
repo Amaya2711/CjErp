@@ -28,7 +28,9 @@ namespace CjERP.Infrastructure.Services
                 new Claim("Correo", usuario.Correo ?? string.Empty),
                 new Claim("CodEmp", usuario.CodEmp?.ToString() ?? string.Empty),
                 new Claim("CodVal", usuario.CodVal?.ToString() ?? string.Empty),
-                new Claim("Cuadrilla", usuario.Cuadrilla?.ToString() ?? string.Empty)
+                new Claim("Cuadrilla", usuario.Cuadrilla?.ToString() ?? string.Empty),
+                new Claim("IdPerfil", usuario.IdPerfil?.ToString() ?? string.Empty),
+                new Claim("IdRol", usuario.IdRol?.ToString() ?? string.Empty)
             };
 
             var key = new SymmetricSecurityKey(

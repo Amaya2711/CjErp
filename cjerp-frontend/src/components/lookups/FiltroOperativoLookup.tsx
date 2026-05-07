@@ -6,9 +6,11 @@ import type {
 } from "../../models/filtroOperativo";
 import { useFiltroOperativoLookup } from "../../hooks/useFiltroOperativoLookup";
 
-export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps> = ({
+export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filtroInputRef?: React.RefObject<HTMLInputElement | null> }> = ({
   value,
   onChange,
+  onSelectionBlur,
+  filtroInputRef,
 }) => {
   const safeValue: FiltroOperativoValue = value ?? {};
   const safeOnChange = onChange ?? (() => {});
@@ -19,6 +21,7 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps> = ({
     tipoTrabajos,
     ots,
     tareas,
+    value: lookupValue,
     handleFiltroChange,
     handleTipoTrabajoChange,
     handleOtChange,
@@ -55,6 +58,32 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps> = ({
     return "";
   });
 
+  useEffect(() => {
+    if (!safeValue?.filtro?.filtroKey) {
+      setFiltroInput("");
+      return;
+    }
+
+    const filtro = filtrosSafe.find((f) => f.filtroKey === safeValue.filtro?.filtroKey);
+    if (filtro) {
+      setFiltroInput(
+        `${filtro.nombreCliente} - ${filtro.nombreProyecto} - ${filtro.nombreSite} - ${filtro.nroInterno}`
+      );
+      return;
+    }
+
+    const fallbackLabel = [
+      safeValue.filtro.nombreCliente,
+      safeValue.filtro.nombreProyecto,
+      safeValue.filtro.nombreSite,
+      safeValue.filtro.nroInterno ? String(safeValue.filtro.nroInterno) : "",
+    ]
+      .filter(Boolean)
+      .join(" - ");
+
+    setFiltroInput(fallbackLabel);
+  }, [safeValue?.filtro, filtrosSafe]);
+
   const [highlightedIdx, setHighlightedIdx] = useState<number>(-1);
   const [showDropdown, setShowDropdown] = useState<boolean>(false);
 
@@ -79,7 +108,7 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps> = ({
         flexDirection: "column",
         gap: 4,
         maxWidth: 600,
-        fontSize: "13px",
+        fontSize: "11px",
         fontFamily: "Arial, sans-serif",
       }}
     >
@@ -95,11 +124,17 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps> = ({
         <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 8 }}>
           <label style={{ whiteSpace: "nowrap" }}>Filtro</label>
           <input
+            ref={filtroInputRef}
             style={{
               width: inputWidth,
-              minWidth: 120,
-              fontSize: "13px",
+              minWidth: 150,
+              fontSize: "11px",
               fontFamily: "Arial, sans-serif",
+              border: "1px solid #D1D5DB",
+              borderRadius: 10,
+              padding: "8px 12px",
+              outline: "none",
+              boxSizing: "border-box"
             }}
             type="text"
             value={filtroInput}
@@ -145,10 +180,20 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps> = ({
                 );
 
                 handleFiltroChange(selected ? selected.filtroKey : "");
+                const nextValue: FiltroOperativoValue = selected
+                  ? {
+                      filtro: selected,
+                      tipoTrabajo: undefined,
+                      ot: undefined,
+                      tarea: undefined,
+                    }
+                  : {};
 
                 if (trabajoSelectRef.current) {
                   trabajoSelectRef.current.focus();
                 }
+
+                onSelectionBlur?.(nextValue);
               }, 100);
             }}
             placeholder="Seleccione..."
@@ -161,7 +206,7 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps> = ({
               position: "absolute",
               visibility: "hidden",
               whiteSpace: "pre",
-              fontSize: "17px",
+              fontSize: "11px",
               fontFamily: "inherit",
               fontWeight: "normal",
               padding: "6px 12px",
@@ -218,8 +263,23 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps> = ({
             <select
               ref={trabajoSelectRef}
               onChange={(e) => handleTipoTrabajoChange(e.target.value)}
+              onBlur={(e) =>
+                onSelectionBlur?.({
+                  ...lookupValue,
+                  tipoTrabajo:
+                    tipoTrabajosSafe.find((t) => t.tipoTrabajo === e.target.value) ?? undefined,
+                })
+              }
               value={safeValue?.tipoTrabajo?.tipoTrabajo || ""}
-              style={{ fontSize: "13px", fontFamily: "Arial, sans-serif" }}
+              style={{
+                fontSize: "11px",
+                fontFamily: "Arial, sans-serif",
+                border: "1px solid #D1D5DB",
+                borderRadius: 10,
+                padding: "8px 12px",
+                outline: "none",
+                boxSizing: "border-box"
+              }}
             >
               <option value="">Seleccione...</option>
               {tipoTrabajosSafe.map((t, idx) => (
@@ -235,8 +295,22 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps> = ({
           <label style={{ whiteSpace: "nowrap" }}>OT</label>
           <select
             onChange={(e) => handleOtChange(e.target.value)}
+            onBlur={(e) =>
+              onSelectionBlur?.({
+                ...lookupValue,
+                ot: otsSafe.find((o) => o.ot === e.target.value) ?? undefined,
+              })
+            }
             value={safeValue?.ot?.ot || ""}
-            style={{ fontSize: "13px", fontFamily: "Arial, sans-serif" }}
+            style={{
+              fontSize: "11px",
+              fontFamily: "Arial, sans-serif",
+              border: "1px solid #D1D5DB",
+              borderRadius: 10,
+              padding: "8px 12px",
+              outline: "none",
+              boxSizing: "border-box"
+            }}
           >
             <option value="">Seleccione...</option>
             {otsSafe.map((o, idx) => (
@@ -283,6 +357,16 @@ function TareaAutocomplete({
   const [tareaDropdown, setTareaDropdown] = useState(false);
   const [tareaHighlight, setTareaHighlight] = useState(-1);
 
+  useEffect(() => {
+    if (!value?.tarea?.correlativo) {
+      setTareaInput("");
+      return;
+    }
+
+    const tareaSel = tareasSafe.find((t) => t.correlativo === value.tarea?.correlativo);
+    setTareaInput(tareaSel?.tarea ?? value.tarea.tarea ?? "");
+  }, [value?.tarea, tareasSafe]);
+
   const tareasFiltradas =
     tareaInput.trim() === ""
       ? tareasSafe
@@ -312,8 +396,13 @@ function TareaAutocomplete({
         style={{
           minWidth: 250,
           width: 350,
-          fontSize: "13px",
+          fontSize: "11px",
           fontFamily: "Arial, sans-serif",
+          border: "1px solid #D1D5DB",
+          borderRadius: 10,
+          padding: "8px 12px",
+          outline: "none",
+          boxSizing: "border-box"
         }}
         type="text"
         value={tareaInput}
@@ -359,7 +448,7 @@ function TareaAutocomplete({
       {tareaDropdown && tareaInput && tareasFiltradas.length > 0 && (
         <div
           style={{
-            fontSize: "13px",
+            fontSize: "11px",
             fontFamily: "Arial, sans-serif",
             position: "absolute",
             top: "100%",

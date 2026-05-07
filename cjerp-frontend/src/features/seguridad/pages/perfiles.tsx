@@ -4,7 +4,10 @@ import AppCard from "../../../components/base/AppCard";
 import AppPage from "../../../components/base/AppPage";
 import AppSectionHeader from "../../../components/base/AppSectionHeader";
 import AppStatusMessage from "../../../components/base/AppStatusMessage";
-import AppToolbar from "../../../components/base/AppToolbar";
+import CrudToolbar, {
+  matchesCrudToolbarSearch,
+  type CrudToolbarSearchField,
+} from "../../../components/base/CrudToolbar";
 import {
   perfilesService,
   type PerfilDto,
@@ -100,17 +103,20 @@ export default function SeguridadPerfilesPage() {
     load: cargarPerfiles,
   } = useCrudForm<Perfil, PerfilForm>(perfilesApi, formularioInicial);
 
-  const perfilesFiltrados = useMemo(() => {
-    const texto = busqueda.trim().toUpperCase();
-    if (!texto) return perfiles;
-
-    return perfiles.filter(
-      (x) =>
-        x.nombrePerfil.toUpperCase().includes(texto) ||
-        x.descripcion.toUpperCase().includes(texto) ||
-        x.estado.toUpperCase().includes(texto)
-    );
-  }, [perfiles, busqueda]);
+  const camposBusquedaPerfiles = useMemo<CrudToolbarSearchField<Perfil>[]>(
+    () => [
+      { key: "id", label: "Id", getValue: (perfil) => perfil.id },
+      { key: "nombrePerfil", label: "Nombre perfil", getValue: (perfil) => perfil.nombrePerfil },
+      { key: "descripcion", label: "Descripcion", getValue: (perfil) => perfil.descripcion },
+      { key: "estado", label: "Estado", getValue: (perfil) => perfil.estado },
+      { key: "fechaCreacion", label: "Fecha creacion", getValue: (perfil) => perfil.fechaCreacion },
+    ],
+    []
+  );
+  const perfilesFiltrados = useMemo(
+    () => perfiles.filter((perfil) => matchesCrudToolbarSearch(perfil, busqueda, camposBusquedaPerfiles)),
+    [perfiles, busqueda, camposBusquedaPerfiles]
+  );
 
   const abrirNuevo = () => {
     setModo("nuevo");
@@ -178,28 +184,29 @@ export default function SeguridadPerfilesPage() {
   const perfilSeleccionadoEliminar = perfiles.find((x) => x.id === idEliminar);
 
   return (
-    <AppPage title="Perfiles de seguridad">
-      <AppToolbar>
-        <input
-          type="text"
-          placeholder="Buscar por nombre, descripcion o estado"
-          value={busqueda}
-          onChange={(e) => setBusqueda(e.target.value)}
-          style={styles.searchInput}
-        />
-        <button style={styles.primaryButton} onClick={abrirNuevo}>
-          Nuevo perfil
-        </button>
-      </AppToolbar>
+    <AppPage title=""> 
+      <CrudToolbar
+        searchValue={busqueda}
+        onSearchChange={setBusqueda}
+        searchPlaceholder="Buscar perfiles..."
+        searchFieldsHint={camposBusquedaPerfiles.map((campo) => campo.label).join(", ")}
+        buttons={[
+          {
+            key: "nuevo",
+            label: "Nuevo perfil",
+            onClick: abrirNuevo,
+          },
+        ]}
+      />
 
       {mensaje ? <AppStatusMessage tone="success">{mensaje}</AppStatusMessage> : null}
       {errorMensaje ? <AppStatusMessage tone="error">{errorMensaje}</AppStatusMessage> : null}
 
       <AppCard style={styles.card}>
-        <AppSectionHeader
-          title="Listado de perfiles"
-          description="Administra los perfiles, su estado y la información base del módulo."
-        />
+        {/* <AppSectionHeader
+          //title="Listado de perfiles"
+          //description="Administra los perfiles, su estado y la información base del módulo."
+        /> */}
         <div style={styles.tableWrapper}>
           <table style={styles.table}>
             <thead>

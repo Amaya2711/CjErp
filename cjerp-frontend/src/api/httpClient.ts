@@ -40,6 +40,10 @@ axiosClient.interceptors.response.use(
     return response.data;
   },
   (error) => {
+    if (error?.response?.data) {
+      console.error("[httpClient] Error response", error.response.data);
+    }
+
     if (error?.response?.status === 401) {
       clearAuthUser();
       window.location.href = "/";

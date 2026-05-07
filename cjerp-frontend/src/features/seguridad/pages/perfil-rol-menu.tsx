@@ -229,6 +229,29 @@ function MenuTreeItem({
 }
 
 export default function SeguridadPerfilRolMenu() {
+    // Cargar todos los roles existentes (no solo los del perfil)
+    const cargarTodosLosRoles = async () => {
+      try {
+        setCargando(true);
+        setError("");
+        setMensaje("");
+        const rolesData = await rolesService.listarRoles();
+        const rolesMapped: RolOption[] = rolesData.map((r: RolDto) => ({
+          id: r.idRol,
+          nombre: r.nombreRol,
+        }));
+        setRoles(rolesMapped);
+        setRolId("");
+        setSelectedIds(new Set());
+      } catch (err: unknown) {
+        console.error(err);
+        setError(getHttpErrorMessage(err, "No se pudieron cargar todos los roles."));
+        setRoles([]);
+        setRolId("");
+      } finally {
+        setCargando(false);
+      }
+    };
   const [cargando, setCargando] = useState(false);
   const [guardando, setGuardando] = useState(false);
   
@@ -494,6 +517,8 @@ export default function SeguridadPerfilRolMenu() {
         idRol: Number(rolId),
         menus: menusAsignados
       };
+      // Log de los parámetros enviados
+      //console.log("Payload enviado a guardarAsignacionMenuRol:", payload);
       await menuService.guardarAsignacionMenuRol(payload);
 
       setMensaje("Asignación de menú guardada correctamente.");
@@ -504,7 +529,7 @@ export default function SeguridadPerfilRolMenu() {
     } finally {
       setGuardando(false);
     }
-  };
+  }
 
     // menuVisual debe estar accesible en el scope de getMenusAsignados
   const menuVisual = useMemo(() => cloneDeep(menuBase), [menuBase]);
@@ -543,61 +568,71 @@ export default function SeguridadPerfilRolMenu() {
     <div style={styles.page}>
       {/* Formulario y botón de nuevo nodo principal ocultos por requerimiento */}
 
-      <ToolbarFiltro style={styles.filtersCard}>
-        <div style={styles.filterInlineField}>
-          <SelectBase
-            label="Perfil"
-            value={perfilId}
-            onChange={(e) => void handlePerfilChange(e.target.value)}
-            selectStyle={styles.select}
-            disabled={cargando}
-            options={perfiles.map((perfil) => ({
-              value: perfil.idPerfil,
-              label: perfil.nombrePerfil,
-            }))}
-          />
-        </div>
 
-        <div style={styles.filterInlineField}>
-          <SelectBase
-            label="Rol"
-            value={rolId}
-            onChange={(e) => void handleRolChange(e.target.value)}
-            selectStyle={styles.select}
-            disabled={!perfilId || cargando}
-            options={roles.map((rol) => ({
-              value: rol.id,
-              label: rol.nombre,
-            }))}
-          />
-        </div>
+<ToolbarFiltro style={styles.filtersCard}>
+  <div style={styles.filterInlineField}>
+    <SelectBase
+      label="Perfil"
+      value={perfilId}
+      onChange={(e) => void handlePerfilChange(e.target.value)}
+      selectStyle={styles.select}
+      disabled={cargando}
+      options={perfiles.map((perfil) => ({
+        value: perfil.idPerfil,
+        label: perfil.nombrePerfil,
+      }))}
+    />
+  </div>
 
-        <div style={styles.buttonField}>
-          <button
-            type="button"
-            onClick={() => void recargar()}
-            style={styles.secondaryBtn}
-            disabled={cargando}
-          >
-            Recargar
-          </button>
-        </div>
 
-        <div style={styles.buttonField}>
-          <button
-            type="button"
-            onClick={() => void guardarAsignacion()}
-            disabled={!rolId || guardando || cargando}
-            style={{
-              ...styles.primaryBtn,
-              opacity: !rolId || guardando || cargando ? 0.65 : 1,
-              cursor: !rolId || guardando || cargando ? "not-allowed" : "pointer",
-            }}
-          >
-            {guardando ? "Guardando..." : "Guardar asignación"}
-          </button>
-        </div>
-      </ToolbarFiltro>
+  <div style={styles.rolField}>
+    <SelectBase
+      label="Rol"
+      value={rolId}
+      onChange={(e) => void handleRolChange(e.target.value)}
+      selectStyle={styles.select}
+      disabled={!perfilId || cargando}
+      options={roles.map((rol) => ({
+        value: rol.id,
+        label: rol.nombre,
+      }))}
+    />
+
+    <button
+      type="button"
+      onClick={cargarTodosLosRoles}
+      style={styles.secondaryBtn}
+      disabled={cargando}
+      title="Cargar todos los roles"
+    >
+      Todos
+    </button>
+  </div>
+
+  <div style={styles.actionsGroup}>
+    <button
+      type="button"
+      onClick={() => void recargar()}
+      style={styles.secondaryBtn}
+      disabled={cargando}
+    >
+      Recargar
+    </button>
+
+    <button
+      type="button"
+      onClick={() => void guardarAsignacion()}
+      disabled={!rolId || guardando || cargando}
+      style={{
+        ...styles.primaryBtn,
+        opacity: !rolId || guardando || cargando ? 0.65 : 1,
+        cursor: !rolId || guardando || cargando ? "not-allowed" : "pointer",
+      }}
+    >
+      {guardando ? "Guardando..." : "Guardar asignación"}
+    </button>
+  </div>
+</ToolbarFiltro>
 
       {cargando ? <AppStatusMessage tone="info">Cargando información...</AppStatusMessage> : null}
       {mensaje ? <AppStatusMessage tone="success">{mensaje}</AppStatusMessage> : null}
@@ -712,23 +747,40 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 26,
     color: "#475569",
   },
-  filtersCard: {
+filtersCard: {
     background: "#FFFFFF",
     borderRadius: 16,
     border: "1px solid #E5E7EB",
     padding: 16,
     boxShadow: "0 8px 24px rgba(23,20,58,0.04)",
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+    gridTemplateColumns: "220px 320px auto",
     gap: 12,
     alignItems: "center",
-  },
+},
+
   filterInlineField: {
     display: "flex",
     alignItems: "center",
     gap: 10,
     minWidth: 0,
   },
+
+    rolField: {
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      minWidth: 0,
+    },
+
+    actionsGroup: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "flex-start",
+      gap: 8,
+      minWidth: 0,
+    },
+
   inlineLabel: {
     fontSize: 14,
     fontWeight: 700,
@@ -772,27 +824,32 @@ const styles: Record<string, React.CSSProperties> = {
   buttonField: {
     display: "flex",
     alignItems: "center",
+    justifyContent: "flex-start",
     minWidth: 0,
   },
-  secondaryBtn: {
-    width: "100%",
-    minHeight: 40,
+ secondaryBtn: {
+    width: "auto",
+    minWidth: 90,
+    height: 34,
     borderRadius: 10,
     border: "1px solid #CBD5E1",
     background: "#F8FAFC",
     color: "#334155",
     fontWeight: 700,
     cursor: "pointer",
-  },
-  primaryBtn: {
-    width: "100%",
-    minHeight: 40,
-    borderRadius: 10,
-    border: "none",
-    background: "#17143A",
-    color: "#FFFFFF",
-    fontWeight: 700,
-  },
+    padding: "0 14px",
+},
+ primaryBtn: {
+      width: "auto",
+      minWidth: 160,
+      height: 34,
+      borderRadius: 10,
+      border: "none",
+      background: "#17143A",
+      color: "#FFFFFF",
+      fontWeight: 700,
+      padding: "0 16px",
+},
   actionBtn: {
     width: 42,
     height: 34,

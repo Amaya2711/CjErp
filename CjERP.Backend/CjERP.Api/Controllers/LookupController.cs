@@ -48,5 +48,76 @@ namespace CjERP.Api.Controllers
             var result = await _lookupService.ListarTareasAsync();
             return Ok(result);
         }
+
+        [HttpGet("valores-gasto")]
+        public async Task<IActionResult> GetValoresGasto(
+            [FromQuery] int idCliente,
+            [FromQuery] int idProyecto,
+            [FromQuery] string idSite,
+            [FromQuery] int correlativo,
+            [FromQuery] string tipoTrabajo,
+            [FromQuery] string? ot,
+            [FromQuery] bool usarOt = false,
+            [FromQuery] decimal tipoCambio = 3.80m)
+        {
+            if (idCliente <= 0)
+                return BadRequest("idCliente es requerido.");
+
+            if (string.IsNullOrWhiteSpace(idSite))
+                return BadRequest("idSite es requerido.");
+
+            if (correlativo <= 0)
+                return BadRequest("correlativo es requerido.");
+
+            if (string.IsNullOrWhiteSpace(tipoTrabajo))
+                return BadRequest("tipoTrabajo es requerido.");
+
+            var result = await _lookupService.ObtenerValoresGastoAsync(
+                idCliente,
+                idProyecto,
+                idSite,
+                correlativo,
+                tipoTrabajo,
+                string.IsNullOrWhiteSpace(ot) ? null : ot,
+                usarOt,
+                tipoCambio);
+
+            return Ok(result);
+        }
+
+        [HttpGet("~/api/lookup/constantes")]
+        public async Task<IActionResult> GetConstantes([FromQuery] string campo)
+        {
+            if (string.IsNullOrWhiteSpace(campo))
+                return BadRequest("campo es requerido.");
+
+            var result = await _lookupService.ListarConstantesPorCampoAsync(campo);
+            return Ok(result);
+        }
+
+        [HttpGet("~/api/lookup/solicitantes")]
+        public async Task<IActionResult> GetSolicitantes([FromQuery] int? idCargo, [FromQuery] int? idEmpleado)
+        {
+            var result = await _lookupService.ListarSolicitantesAsync(
+                idCargo.GetValueOrDefault() <= 0 ? null : idCargo,
+                idEmpleado.GetValueOrDefault() <= 0 ? null : idEmpleado
+            );
+
+            return Ok(result);
+        }
+
+        [HttpGet("~/api/lookup/gestores")]
+        public async Task<IActionResult> GetGestores()
+        {
+            var result = await _lookupService.ListarGestoresAsync();
+            return Ok(result);
+        }
+
+        [HttpGet("~/api/lookup/validador")]
+        public async Task<IActionResult> GetValidador()
+        {
+            var result = await _lookupService.ListarValidadoresAsync();
+            return Ok(result);
+        }
     }
 }

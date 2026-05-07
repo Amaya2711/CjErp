@@ -12,5 +12,6 @@
         public string NroDocumento { get; set; }
         public int? IdCheque { get; set; }
         public string NombreEmpleadoCJ { get; set; }
+        public int IdBancoCta { get; set; }
     }
 }

@@ -1,3 +1,5 @@
+import CruceSeriesPage from "../../features/logistica/CruceSeriesPage";
+            <Route path="/logistica/gestionequipos/cruceseries" element={<CruceSeriesPage />} />
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import PrivateRoute from "./PrivateRoute";
 import AutoSecurityRoute from "./AutoSecurityRoute";
@@ -58,6 +60,7 @@ import OperativoPage from "../../pages/reporte/operativo";
 import AdministrativoPage from "../../pages/reporte/administrativo";
 import FinancieroPage from "../../pages/reporte/financiero";
 import GerencialPage from "../../pages/reporte/gerencial";
+import RptAsistenciaPage from "../../features/reportes/rptasistencia";
 
 export default function AppRouter() {
   return (
@@ -116,6 +119,7 @@ export default function AppRouter() {
             <Route path="/reporte/administrativo" element={<AdministrativoPage />} />
             <Route path="/reporte/financiero" element={<FinancieroPage />} />
             <Route path="/reporte/gerencial" element={<GerencialPage />} />
+            <Route path="/reportes/rptasistencia" element={<RptAsistenciaPage />} />
 
             <Route
               path="/logistica/gestionequipos"

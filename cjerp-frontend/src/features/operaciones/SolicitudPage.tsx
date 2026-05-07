@@ -1,7 +1,7 @@
 // src/pages/operaciones/SolicitudPage.tsx
 
 import React, { useState } from 'react';
-import { FiltroOperativoValue } from '../../models/filtroOperativo';
+import type { FiltroOperativoValue } from '../../models/filtroOperativo';
 import { FiltroOperativoLookup } from '../../components/lookups/FiltroOperativoLookup';
 
 const SolicitudPage: React.FC = () => {

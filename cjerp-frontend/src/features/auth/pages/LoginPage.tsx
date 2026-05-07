@@ -40,15 +40,36 @@ export default function LoginPage() {
         return;
       }
 
+
+
       saveAuthUser({
         token: response.token,
         usuario: response.idUsuario ?? "",
         nombre: response.nombreEmpleado ?? "",
         correo: response.correo ?? "",
         codEmp: String(response.codEmp ?? ""),
+        idEmpleado: String((response as any).IdEmpleado ?? (response as any).idEmpleado ?? response.codEmp ?? ""),
+        idCargo: String((response as any).IdCargo ?? (response as any).idCargo ?? ""),
         codVal: String(response.codVal ?? ""),
         cuadrilla: String(response.cuadrilla ?? ""),
+        idperfil: Number(
+            (response as any).IdPerfil ??
+            (response as any).idPerfil ??
+            (response as any).idperfil ??
+            0
+          ) || undefined,
+
+          idrol: Number(
+            (response as any).IdRol ??
+            (response as any).idRol ??
+            (response as any).idrol ??
+            0
+          ) || undefined,
       });
+
+        //console.log("LOGIN RESPONSE COMPLETO:", response);
+        //console.log("IdPerfil:", (response as any).IdPerfil);
+        //console.log("IdRol:", (response as any).IdRol);
 
       navigate("/admin/dashboardPage", { replace: true });
     } catch (error: unknown) {

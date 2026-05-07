@@ -1,5 +1,6 @@
 export interface EmpleadoCta {
   idEmpleado: number;
+  idBancoCta?: number | null;
   nombreEmpleado: string;
   cuenta: string;
   cuentaInter: string;

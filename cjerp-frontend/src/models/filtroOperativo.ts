@@ -4,7 +4,7 @@ export interface FiltroOperativoItem {
   filtroKey: string;
   idCliente: number;
   idProyecto: number;
-  idSite: number;
+  idSite: string;
   correlativo: number;
   nroInterno: number;
   nombreCliente: string;
@@ -39,6 +39,7 @@ export interface FiltroOperativoValue {
 export interface FiltroOperativoLookupProps {
   value?: FiltroOperativoValue;
   onChange?: (value: FiltroOperativoValue) => void;
+  onSelectionBlur?: (value: FiltroOperativoValue) => void;
   disabled?: boolean;
   readOnly?: boolean;
   className?: string;

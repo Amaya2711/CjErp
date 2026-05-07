@@ -24,6 +24,8 @@ export default function DataGridBase<T>({
   loadingMessage = "Cargando...",
   getRowKey,
 }: DataGridBaseProps<T>) {
+  const columnCount = Math.max(columns.length, 1);
+
   return (
     <div style={styles.wrapper}>
       <table style={styles.table}>
@@ -45,13 +47,13 @@ export default function DataGridBase<T>({
         <tbody>
           {loading ? (
             <tr>
-              <td colSpan={columns.length} style={styles.emptyCell}>
+              <td colSpan={columnCount} style={styles.emptyCell}>
                 {loadingMessage}
               </td>
             </tr>
           ) : rows.length === 0 ? (
             <tr>
-              <td colSpan={columns.length} style={styles.emptyCell}>
+              <td colSpan={columnCount} style={styles.emptyCell}>
                 {emptyMessage}
               </td>
             </tr>

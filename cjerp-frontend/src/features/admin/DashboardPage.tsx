@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { menuService } from "../seguridad/services/menuService";
-import type { MenuDto } from "../../models/seguridad/menu.types";
+//import type { MenuDto } from "../../models/seguridad/menu.types";
+import type { MenuDto as MenuModelDto } from "../../models/seguridad/menu.types";
 import { getAuthUser } from "../../utils/authStorage";
 
 type QuickLink = {
@@ -16,7 +17,25 @@ type AvisoItem = {
 };
 
 
-type MenuAccesoDto = MenuDto & { acceso?: boolean | number | string | null };
+//type MenuAccesoDto = MenuDto & { acceso?: boolean | number | string | null };
+//type MenuAccesoDto = Omit<MenuModelDto, "acceso" | "esNodoPrincipal"> & {
+  //<acceso>?: boolean | number | string | null;
+  //esNodoPrincipal?: boolean;
+//};
+type MenuAccesoDto = {
+  idMenu: number;
+  idMenuPadre?: number | null;
+  nombreMenu: string;
+  ruta?: string | null;
+  icono?: string | null;
+  ordenMenu?: number | null;
+  nivelMenu?: number | null;
+  codigoMenu?: string | null;
+  esVisible?: boolean;
+  esActivo?: boolean;
+  acceso?: boolean | number | string | null;
+  esNodoPrincipal?: boolean;
+};
 
 function getSaludo() {
   const hour = new Date().getHours();
@@ -35,19 +54,33 @@ function getInitials(text: string) {
   return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
 }
 
-function getAccesoValue(item: MenuAccesoDto): number {
+//function getAccesoValue(item: MenuAccesoDto): number {
+//  const raw = item.acceso;
+//
+//  if (typeof raw === "boolean") {
+//    return raw ? 1 : 0;
+//  }
+//
+//  if (typeof raw === "string") {
+//    return raw === "1" || raw.toLowerCase() === "true" ? 1 : 0;
+//  }
+//
+//  if (typeof raw === "number") {
+//    return raw === 1 ? 1 : 0;
+//  }
+
+//  return 0;
+//}
+function getAccesoValue(item: { acceso?: unknown }): number {
   const raw = item.acceso;
 
-  if (typeof raw === "boolean") {
-    return raw ? 1 : 0;
-  }
+  if (typeof raw === "boolean") return raw ? 1 : 0;
+
+  if (typeof raw === "number") return raw === 1 ? 1 : 0;
 
   if (typeof raw === "string") {
-    return raw === "1" || raw.toLowerCase() === "true" ? 1 : 0;
-  }
-
-  if (typeof raw === "number") {
-    return raw === 1 ? 1 : 0;
+    const value = raw.trim().toLowerCase();
+    return value === "1" || value === "true" ? 1 : 0;
   }
 
   return 0;
@@ -77,15 +110,26 @@ export default function DashboardPage() {
         const usuario = getAuthUser();
         if (!usuario?.usuario) return;
         const menuRaw = await menuService.obtenerMenuDinamicoPorUsuario(usuario.usuario);
+        //const menu: MenuAccesoDto[] = menuRaw.map((item) => ({
+        //  ...item,
+        //  acceso: getAccesoValue(item),
+        //}));
         const menu: MenuAccesoDto[] = menuRaw.map((item) => ({
           ...item,
           acceso: getAccesoValue(item),
+          esNodoPrincipal: Boolean((item as any).esNodoPrincipal ?? false),
         }));
 
         setAccesosDirectos(
+          //menu.filter(
+          //  (m) => m.acceso === 1 && m.nivelMenu > 0 && getMenuRoute(m) !== ""
+          //)
           menu.filter(
-            (m) => m.acceso === 1 && m.nivelMenu > 0 && getMenuRoute(m) !== ""
-          )
+          (m) =>
+            Number(m.acceso) === 1 &&
+            Number(m.nivelMenu ?? 0) > 0 &&
+            getMenuRoute(m) !== ""
+        )
         );
       } catch (_error: unknown) {
         setAccesosDirectos([]);
@@ -118,11 +162,21 @@ export default function DashboardPage() {
       authUser?.idEmpleado ||
       "No disponible";
 
+    const idperfil =
+      authUser?.idperfil ||
+      "No disponible";
+
+     const idrol =
+      authUser?.idrol ||
+      "No disponible";
+
     return {
       nombreEmpleado,
       usuarioLogin: String(usuarioLogin).toUpperCase(),
       correo,
       codEmp,
+      idperfil,
+      idrol
     };
   }, [authUser]);
 
@@ -160,6 +214,11 @@ export default function DashboardPage() {
       id: 4,
       titulo: "Cambio de contraseña",
       descripcion: "Gestiona tus credenciales de acceso.",
+    },
+    {
+      id: 5,
+      titulo: "Asistencia",
+      descripcion: "Gestiona las fechas de asistencia en un periodo de tiempo.",
     },
   ];
 

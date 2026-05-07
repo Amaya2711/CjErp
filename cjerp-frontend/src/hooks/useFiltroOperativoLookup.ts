@@ -16,6 +16,23 @@ import {
   getTareas,
 } from '../api/filtroOperativoService';
 
+function areFiltroOperativoValuesEqual(
+  left?: FiltroOperativoValue,
+  right?: FiltroOperativoValue
+): boolean {
+  return (
+    (left?.filtro?.filtroKey ?? '') === (right?.filtro?.filtroKey ?? '') &&
+    (left?.filtro?.idCliente ?? 0) === (right?.filtro?.idCliente ?? 0) &&
+    (left?.filtro?.idProyecto ?? 0) === (right?.filtro?.idProyecto ?? 0) &&
+    (left?.filtro?.idSite ?? '') === (right?.filtro?.idSite ?? '') &&
+    (left?.filtro?.correlativo ?? 0) === (right?.filtro?.correlativo ?? 0) &&
+    (left?.tipoTrabajo?.tipoTrabajo ?? '') === (right?.tipoTrabajo?.tipoTrabajo ?? '') &&
+    (left?.ot?.ot ?? '') === (right?.ot?.ot ?? '') &&
+    (left?.tarea?.correlativo ?? 0) === (right?.tarea?.correlativo ?? 0) &&
+    (left?.tarea?.tarea ?? '') === (right?.tarea?.tarea ?? '')
+  );
+}
+
 interface UseFiltroOperativoLookupResult {
   filtros: FiltroOperativoItem[];
   tipoTrabajos: TipoTrabajoOption[];
@@ -44,15 +61,53 @@ export function useFiltroOperativoLookup(
   const [error, setError] = useState<string | null>(null);
   const [value, setValueState] = useState<FiltroOperativoValue>(initialValue || {});
 
-  // Load filtros and tareas on mount
+  useEffect(() => {
+    const nextValue = initialValue || {};
+
+    setValueState((prev) =>
+      areFiltroOperativoValuesEqual(prev, nextValue) ? prev : nextValue
+    );
+  }, [initialValue]);
+
+  // 🔹 Cargar filtros y tareas al iniciar
+  useEffect(() => {
+    if (filtros.length === 0 || value.filtro?.filtroKey) {
+      return;
+    }
+
+    const matchedFiltro = filtros.find((filtro) =>
+      Number(filtro.idCliente) === Number(value.filtro?.idCliente) &&
+      Number(filtro.idProyecto) === Number(value.filtro?.idProyecto) &&
+      String(filtro.idSite ?? "").trim() === String(value.filtro?.idSite ?? "").trim() &&
+      Number(filtro.correlativo) === Number(value.filtro?.correlativo)
+    );
+
+    if (!matchedFiltro) {
+      return;
+    }
+
+    setValueState((prev) => {
+      if (prev.filtro?.filtroKey === matchedFiltro.filtroKey) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        filtro: matchedFiltro,
+      };
+    });
+  }, [filtros, value.filtro]);
+
   useEffect(() => {
     const loadInitialData = async () => {
       try {
         setLoading(true);
+
         const [filtrosData, tareasData] = await Promise.all([
           getFiltrosOperativos(),
           getTareas(),
         ]);
+
         setFiltros(filtrosData);
         setTareas(tareasData);
         setError(null);
@@ -66,16 +121,20 @@ export function useFiltroOperativoLookup(
     void loadInitialData();
   }, []);
 
-  // Load tipoTrabajo and OT when filtro changes
+  // 🔹 Cargar tipoTrabajo y OT cuando cambia el filtro
   useEffect(() => {
-    if (value.filtro?.filtroKey) {
+    const filtroKey = value.filtro?.filtroKey;
+
+    if (filtroKey) {
       const loadDependentData = async () => {
         try {
           setLoading(true);
+
           const [tipoTrabajosData, otsData] = await Promise.all([
-            getTipoTrabajo(value.filtro.filtroKey),
-            getOTs(value.filtro.filtroKey),
+            getTipoTrabajo(filtroKey),
+            getOTs(filtroKey),
           ]);
+
           setTipoTrabajos(tipoTrabajosData);
           setOts(otsData);
           setError(null);
@@ -93,22 +152,19 @@ export function useFiltroOperativoLookup(
     }
   }, [value.filtro?.filtroKey]);
 
-  // Propagate changes SOLO cuando cambia por acción del usuario
-  // Elimina este useEffect para evitar ciclos infinitos
-  // useEffect(() => {
-  //   if (onChange) onChange(value);
-  // }, [value, onChange]);
-
+  // 🔹 Handlers
 
   const handleFiltroChange = useCallback(
     (filtroKey: string) => {
       const filtro = filtros.find(f => f.filtroKey === filtroKey);
-      const newValue = {
+
+      const newValue: FiltroOperativoValue = {
         filtro,
         tipoTrabajo: undefined,
         ot: undefined,
         tarea: undefined,
       };
+
       setValueState(newValue);
     },
     [filtros]
@@ -138,7 +194,10 @@ export function useFiltroOperativoLookup(
     (correlativo: number | null) => {
       setValueState(prev => ({
         ...prev,
-        tarea: correlativo == null ? undefined : tareas.find(t => t.correlativo === correlativo),
+        tarea:
+          correlativo == null
+            ? undefined
+            : tareas.find(t => t.correlativo === correlativo),
       }));
     },
     [tareas]
@@ -147,7 +206,8 @@ export function useFiltroOperativoLookup(
   const reset = useCallback(() => {
     setValueState({});
   }, []);
-  // Notificar cambios al padre solo después de actualizar el estado interno
+
+  // 🔹 Notificar cambios al padre
   useEffect(() => {
     if (onChange) onChange(value);
     // eslint-disable-next-line react-hooks/exhaustive-deps

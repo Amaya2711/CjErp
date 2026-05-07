@@ -1,4 +1,5 @@
 using CjERP.Api.Configuration;
+using CjERP.Api.Services;
 using CjERP.Application.Interfaces;
 using CjERP.Application.Interfaces.Services;
 using CjERP.Infrastructure.DependencyInjection;
@@ -12,6 +13,8 @@ var builder = WebApplication.CreateBuilder(args);
 // Configuraci�n JWT
 builder.Services.Configure<JwtSettings>(
     builder.Configuration.GetSection("JwtSettings"));
+builder.Services.Configure<SharePointOptions>(
+    builder.Configuration.GetSection(SharePointOptions.SectionName));
 
 var jwtSettings = builder.Configuration
     .GetSection("JwtSettings")
@@ -70,6 +73,11 @@ builder.Services.AddScoped<ISegUsuarioService, SegUsuarioService>();
 builder.Services.AddScoped<ISegRolMenuPermisoService, SegRolMenuPermisoService>();
 builder.Services.AddScoped<ILookupService,LookupService>();
 builder.Services.AddScoped<IEmpleadoCtaService, EmpleadoCtaService>();
+builder.Services.AddScoped<IPlanillaService, PlanillaService>();
+builder.Services.AddScoped<IPlanillaConsultaService, PlanillaConsultaService>();
+builder.Services.AddScoped<IOrdenCompraService, OrdenCompraService>();
+builder.Services.AddScoped<IAsistenciaReporteService, AsistenciaReporteService>();
+builder.Services.AddHttpClient<ISharePointCommercialUploadService, SharePointCommercialUploadService>();
 
 // CORS
 builder.Services.AddCors(options =>

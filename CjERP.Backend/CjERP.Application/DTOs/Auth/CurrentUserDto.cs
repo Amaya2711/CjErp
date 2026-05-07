@@ -8,5 +8,8 @@
         public int? CodEmp { get; set; }
         public int? CodVal { get; set; }
         public int? Cuadrilla { get; set; }
+        public int? IdPerfil { get; set; }
+        public int? IdRol { get; set; }
+
     }
 }

@@ -17,6 +17,7 @@ export interface MenuDto {
 export interface ExisteUsuarioPerfilRequest {
   idUsuario: string;
   idPerfil: number;
+  idRol: number;
 }
 
 export interface GuardarUsuarioPerfilRequest {
@@ -75,11 +76,12 @@ export const menuService = {
   async existeUsuarioPerfil({
     idUsuario,
     idPerfil,
+    idRol,
   }: ExisteUsuarioPerfilRequest): Promise<boolean> {
     const response = await httpClient.get<{ existe?: boolean }>(
-      `${BASE_URL}/usuario-perfil/existe`,
+      `${BASE_URL}/usuario-perfil-rol/existe`,
       {
-        params: { idUsuario, idPerfil },
+        params: { idUsuario, idPerfil, idRol },
       }
     );
 

@@ -63,4 +63,12 @@ export const menuDashboard: DashboardGroup[] = [
       { label: "Permisos", path: "/seguridad/permisos" },
     ],
   },
+  {
+    titulo: "Reportes",
+    subtitulo: "Reportes y analítica",
+    color: "#38BDF8",
+    tiles: [
+      { label: "Reporte asistencia", path: "/reportes/rptasistencia" },
+    ],
+  },
 ];

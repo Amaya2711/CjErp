@@ -5,17 +5,24 @@ export interface RegistrarPagoDto {
   responsable: string;
   cuenta: string;
   tipoPago: string;
+  tipoPagoLabel?: string;
   monto: number;
   detalle: string;
   comentario: string;
   fechaVencimiento?: string;
   fechaEmision?: string;
   solicitante?: string;
+  solicitanteLabel?: string;
   gestor?: string;
+  gestorLabel?: string;
   validador?: string;
+  validadorLabel?: string;
   moneda?: string;
+  monedaLabel?: string;
   bien?: string;
+  bienLabel?: string;
   comprobante?: string;
+  comprobanteLabel?: string;
   serie?: string;
 }
 
