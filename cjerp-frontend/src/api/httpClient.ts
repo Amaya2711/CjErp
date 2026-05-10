@@ -8,8 +8,9 @@ type HttpClient = {
   delete<T>(url: string, config?: AxiosRequestConfig): Promise<T>;
 };
 
+const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
 const apiBaseUrl =
-  import.meta.env.VITE_API_URL?.trim() || "http://localhost:5015/api";
+  configuredApiUrl || (import.meta.env.DEV ? "http://localhost:5015/api" : "/api");
 
 const axiosClient: AxiosInstance = axios.create({
   baseURL: apiBaseUrl,
