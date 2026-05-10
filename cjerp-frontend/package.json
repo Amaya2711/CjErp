@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:local-backend": "vite --mode local-backend",
+    "dev:railway-backend": "vite --mode railway-backend",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"

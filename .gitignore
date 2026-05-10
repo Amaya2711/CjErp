@@ -24,6 +24,8 @@ dist/
 .env
 .env.*
 !.env.example
+!cjerp-frontend/.env.local-backend
+!cjerp-frontend/.env.railway-backend
 
 # OS
 .DS_Store
