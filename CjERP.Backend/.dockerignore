@@ -1,0 +1,6 @@
+.vs/
+**/bin/
+**/obj/
+.git/
+.github/
+node_modules/
