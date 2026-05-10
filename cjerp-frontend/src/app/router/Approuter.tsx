@@ -1,5 +1,3 @@
-import CruceSeriesPage from "../../features/logistica/CruceSeriesPage";
-            <Route path="/logistica/gestionequipos/cruceseries" element={<CruceSeriesPage />} />
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import PrivateRoute from "./PrivateRoute";
 import AutoSecurityRoute from "./AutoSecurityRoute";
@@ -51,6 +49,7 @@ import RecursosHumanosVacacionesPage from "../../features/recursoshumanos/vacaci
 import ConsultaPage from "../../features/mantenimiento/consulta";
 import MigracionPage from "../../features/mantenimiento/migracion";
 import MantenimientoPage from "../../features/mantenimiento/mantenimiento";
+import RptWupPage from "../../features/mantenimiento/sistemas/rptwup";
 import IndicadoresGerencialesPage from "../../features/inicio/indicadoresgerenciales";
 import PanelPrincipalPage from "../../features/inicio/panelprincipal";
 import AlertasPage from "../../features/inicio/alertas";
@@ -104,6 +103,7 @@ export default function AppRouter() {
             <Route path="/mantenimiento/consulta" element={<ConsultaPage />} />
             <Route path="/mantenimiento/migracion" element={<MigracionPage />} />
             <Route path="/mantenimiento/mantenimiento" element={<MantenimientoPage />} />
+            <Route path="/mantenimiento/sistemas/rptwup" element={<RptWupPage />} />
 
             <Route
               path="/inicio/indicadoresgerenciales"

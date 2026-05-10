@@ -1,26 +1,36 @@
+using System.Text;
 using CjERP.Api.Configuration;
 using CjERP.Api.Services;
+using CjERP.Application.DTOs.ReportesWhatsapp;
 using CjERP.Application.Interfaces;
+using CjERP.Application.Interfaces.Repositories;
 using CjERP.Application.Interfaces.Services;
 using CjERP.Infrastructure.DependencyInjection;
+using CjERP.Infrastructure.Repositories;
 using CjERP.Infrastructure.Services;
+using Hangfire;
+using Hangfire.SqlServer;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
-using System.Text;
+using QuestPDF.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configuraci�n JWT
 builder.Services.Configure<JwtSettings>(
     builder.Configuration.GetSection("JwtSettings"));
 builder.Services.Configure<SharePointOptions>(
     builder.Configuration.GetSection(SharePointOptions.SectionName));
+builder.Services.Configure<WupSettings>(
+    builder.Configuration.GetSection("WupSettings"));
+builder.Services.Configure<ReporteWhatsappJobDefaultsOptions>(
+    builder.Configuration.GetSection("ReporteWhatsAppJobDefaults"));
 
 var jwtSettings = builder.Configuration
     .GetSection("JwtSettings")
     .Get<JwtSettings>()!;
 
-// Servicios base
+QuestPDF.Settings.License = LicenseType.Community;
+
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
@@ -28,8 +38,22 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.DictionaryKeyPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
     });
 builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddHangfire(configuration => configuration
+    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+    .UseSimpleAssemblyNameTypeSerializer()
+    .UseRecommendedSerializerSettings()
+    .UseSqlServerStorage(
+        builder.Configuration.GetConnectionString("DefaultConnection"),
+        new SqlServerStorageOptions
+        {
+            PrepareSchemaIfNecessary = true,
+            QueuePollInterval = TimeSpan.FromSeconds(15),
+            CommandBatchMaxTimeout = TimeSpan.FromMinutes(5),
+            SlidingInvisibilityTimeout = TimeSpan.FromMinutes(5),
+            UseRecommendedIsolationLevel = true
+        }));
+builder.Services.AddHangfireServer();
 
-// Swagger con soporte para Bearer
 builder.Services.AddSwaggerGen(options =>
 {
     options.SwaggerDoc("v1", new() { Title = "CjERP API", Version = "v1" });
@@ -41,7 +65,7 @@ builder.Services.AddSwaggerGen(options =>
         Scheme = "bearer",
         BearerFormat = "JWT",
         In = Microsoft.OpenApi.Models.ParameterLocation.Header,
-        Description = "Ingrese el token JWT as�: Bearer {token}"
+        Description = "Ingrese el token JWT así: Bearer {token}"
     });
 
     options.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
@@ -60,10 +84,8 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 
-// Infrastructure
 builder.Services.AddInfrastructure(builder.Configuration);
 
-// Servicios de aplicaci�n
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IJwtService, JwtService>();
 builder.Services.AddScoped<ISegPerfilService, SegPerfilService>();
@@ -71,29 +93,42 @@ builder.Services.AddScoped<ISegRolService, SegRolService>();
 builder.Services.AddScoped<ISegMenuService, SegMenuService>();
 builder.Services.AddScoped<ISegUsuarioService, SegUsuarioService>();
 builder.Services.AddScoped<ISegRolMenuPermisoService, SegRolMenuPermisoService>();
-builder.Services.AddScoped<ILookupService,LookupService>();
+builder.Services.AddScoped<ILookupService, LookupService>();
 builder.Services.AddScoped<IEmpleadoCtaService, EmpleadoCtaService>();
 builder.Services.AddScoped<IPlanillaService, PlanillaService>();
 builder.Services.AddScoped<IPlanillaConsultaService, PlanillaConsultaService>();
 builder.Services.AddScoped<IOrdenCompraService, OrdenCompraService>();
 builder.Services.AddScoped<IAsistenciaReporteService, AsistenciaReporteService>();
+builder.Services.AddScoped<IReporteRepository, ReporteRepository>();
+builder.Services.AddScoped<IReportePdfService, ReportePdfService>();
+builder.Services.AddScoped<IReporteAutomaticoService, ReporteAutomaticoService>();
+builder.Services.AddScoped<IReporteWhatsappJobScheduler, ReporteWhatsappJobScheduler>();
+builder.Services.AddSingleton<IReporteWhatsappRuntimeMonitor, ReporteWhatsappRuntimeMonitor>();
 builder.Services.AddHttpClient<ISharePointCommercialUploadService, SharePointCommercialUploadService>();
+builder.Services.AddHttpClient<IWupAuthService, WupAuthService>((serviceProvider, client) =>
+{
+    var settings = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WupSettings>>().Value;
+    client.BaseAddress = new Uri(settings.BaseUrl.TrimEnd('/') + "/");
+    client.Timeout = TimeSpan.FromSeconds(Math.Max(30, settings.TimeoutSeconds));
+});
+builder.Services.AddHttpClient<IWupService, WupService>((serviceProvider, client) =>
+{
+    var settings = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WupSettings>>().Value;
+    client.BaseAddress = new Uri(settings.BaseUrl.TrimEnd('/') + "/");
+    client.Timeout = TimeSpan.FromSeconds(Math.Max(30, settings.TimeoutSeconds));
+});
 
-// CORS
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("ReactPolicy", policy =>
     {
         policy
-            .WithOrigins(
-                "http://localhost:5173"
-             )
+            .WithOrigins("http://localhost:5173")
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
 });
 
-// Authentication JWT
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -121,7 +156,6 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
-// Pipeline
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -129,12 +163,16 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-
 app.UseCors("ReactPolicy");
-
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+
+using (var scope = app.Services.CreateScope())
+{
+    var scheduler = scope.ServiceProvider.GetRequiredService<IReporteWhatsappJobScheduler>();
+    await scheduler.ReprogramarAsync();
+}
 
 app.Run();
