@@ -114,13 +114,23 @@ builder.Services.AddHttpClient<ISharePointCommercialUploadService, SharePointCom
 builder.Services.AddHttpClient<IWupAuthService, WupAuthService>((serviceProvider, client) =>
 {
     var settings = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WupSettings>>().Value;
-    client.BaseAddress = new Uri(settings.BaseUrl.TrimEnd('/') + "/");
+    var baseUri = settings.TryBuildBaseUri();
+    if (baseUri is not null)
+    {
+        client.BaseAddress = baseUri;
+    }
+
     client.Timeout = TimeSpan.FromSeconds(Math.Max(30, settings.TimeoutSeconds));
 });
 builder.Services.AddHttpClient<IWupService, WupService>((serviceProvider, client) =>
 {
     var settings = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WupSettings>>().Value;
-    client.BaseAddress = new Uri(settings.BaseUrl.TrimEnd('/') + "/");
+    var baseUri = settings.TryBuildBaseUri();
+    if (baseUri is not null)
+    {
+        client.BaseAddress = baseUri;
+    }
+
     client.Timeout = TimeSpan.FromSeconds(Math.Max(30, settings.TimeoutSeconds));
 });
 

@@ -29,6 +29,8 @@ public sealed class WupService : IWupService
 
     public async Task<ReporteWhatsappSendResponseDto> EnviarAdjuntoAsync(ReporteWhatsappSendRequestDto request, CancellationToken cancellationToken = default)
     {
+        _settings.EnsureConfigured();
+
         var token = await _wupAuthService.ObtenerTokenAsync(cancellationToken);
         var requestJson = JsonSerializer.Serialize(request);
 

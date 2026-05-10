@@ -10,6 +10,51 @@ public sealed class WupSettings
     public string Usuario { get; set; } = string.Empty;
     public string Password { get; set; } = string.Empty;
     public int TimeoutSeconds { get; set; } = 120;
+
+    public Uri? TryBuildBaseUri()
+    {
+        var normalized = BaseUrl?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized) || IsPlaceholderValue(normalized))
+        {
+            return null;
+        }
+
+        if (!Uri.TryCreate(normalized.TrimEnd('/') + "/", UriKind.Absolute, out var uri))
+        {
+            return null;
+        }
+
+        return uri;
+    }
+
+    public void EnsureConfigured()
+    {
+        if (TryBuildBaseUri() is null)
+        {
+            throw new InvalidOperationException(
+                "La configuración WUP no es válida. Configure `WupSettings:BaseUrl` con la URL real del servicio y reemplace los valores placeholder del archivo appsettings.");
+        }
+
+        if (string.IsNullOrWhiteSpace(Usuario) || IsPlaceholderValue(Usuario))
+        {
+            throw new InvalidOperationException(
+                "La configuración WUP no es válida. Configure `WupSettings:Usuario` con el usuario real del servicio.");
+        }
+
+        if (string.IsNullOrWhiteSpace(Password) || IsPlaceholderValue(Password))
+        {
+            throw new InvalidOperationException(
+                "La configuración WUP no es válida. Configure `WupSettings:Password` con la contraseña real del servicio.");
+        }
+    }
+
+    private static bool IsPlaceholderValue(string value)
+    {
+        return value.Contains("YOUR_", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("your_", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("REPLACE_", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("example", StringComparison.OrdinalIgnoreCase);
+    }
 }
 
 public sealed class ReporteWhatsappJobDefaultsOptions

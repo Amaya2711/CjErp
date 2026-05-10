@@ -26,6 +26,8 @@ public sealed class WupAuthService : IWupAuthService
 
     public async Task<string?> ObtenerTokenAsync(CancellationToken cancellationToken = default)
     {
+        _settings.EnsureConfigured();
+
         if (!string.IsNullOrWhiteSpace(_cachedToken) && _tokenExpiresAt > DateTimeOffset.UtcNow.AddMinutes(1))
         {
             return _cachedToken;

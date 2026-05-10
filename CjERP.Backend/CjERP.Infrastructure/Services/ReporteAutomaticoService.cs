@@ -20,6 +20,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
     private readonly IReporteWhatsappRuntimeMonitor _runtimeMonitor;
     private readonly ISegMenuService _segMenuService;
     private readonly ReporteWhatsappJobDefaultsOptions _defaults;
+    private readonly WupSettings _wupSettings;
     private readonly ILogger<ReporteAutomaticoService> _logger;
 
     public ReporteAutomaticoService(
@@ -29,6 +30,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
         IReporteWhatsappRuntimeMonitor runtimeMonitor,
         ISegMenuService segMenuService,
         IOptions<ReporteWhatsappJobDefaultsOptions> defaults,
+        IOptions<WupSettings> wupSettings,
         ILogger<ReporteAutomaticoService> logger)
     {
         _reporteRepository = reporteRepository;
@@ -37,6 +39,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
         _runtimeMonitor = runtimeMonitor;
         _segMenuService = segMenuService;
         _defaults = defaults.Value;
+        _wupSettings = wupSettings.Value;
         _logger = logger;
     }
 
@@ -128,6 +131,8 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
 
         try
         {
+            _wupSettings.EnsureConfigured();
+
             var empleados = soloFallidos
                 ? await _reporteRepository.ObtenerEmpleadosFallidosAsync(periodo.FechaProceso, _defaults.TipoReporte, cancellationToken)
                 : await _reporteRepository.ObtenerEmpleadosDestinoAsync(cancellationToken);
