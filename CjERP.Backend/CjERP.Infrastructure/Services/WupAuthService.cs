@@ -27,6 +27,7 @@ public sealed class WupAuthService : IWupAuthService
     public async Task<string?> ObtenerTokenAsync(CancellationToken cancellationToken = default)
     {
         _settings.EnsureConfigured();
+        var loginUri = _settings.BuildRequestUri(_settings.LoginEndpoint);
 
         if (!string.IsNullOrWhiteSpace(_cachedToken) && _tokenExpiresAt > DateTimeOffset.UtcNow.AddMinutes(1))
         {
@@ -43,7 +44,7 @@ public sealed class WupAuthService : IWupAuthService
             }
 
             var response = await _httpClient.PostAsJsonAsync(
-                _settings.LoginEndpoint,
+                loginUri,
                 new
                 {
                     usuario = _settings.Usuario,
@@ -55,14 +56,14 @@ public sealed class WupAuthService : IWupAuthService
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("[WUP] Login falló con código {StatusCode}. Body: {Body}", (int)response.StatusCode, body);
+                _logger.LogWarning("[WUP] Login falló. Url={Url}, Código={StatusCode}, Body={Body}", loginUri, (int)response.StatusCode, body);
                 return null;
             }
 
             var token = ExtractToken(body);
             if (string.IsNullOrWhiteSpace(token))
             {
-                _logger.LogWarning("[WUP] Login exitoso pero no se encontró token en la respuesta.");
+                _logger.LogWarning("[WUP] Login exitoso en {Url} pero no se encontró token en la respuesta.", loginUri);
                 return null;
             }
 

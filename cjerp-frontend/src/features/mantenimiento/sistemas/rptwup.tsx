@@ -3,6 +3,7 @@ import {
   useEffect,
   useEffectEvent,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import type React from "react";
@@ -17,17 +18,38 @@ import type {
   ReporteWhatsappConfiguracion,
   ReporteWhatsappDashboard,
   ReporteWhatsappLog,
+  ReporteWhatsappTipo,
 } from "../../../models/reportesWhatsapp";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 
 const POLLING_RUNNING_MS = 5000;
 const POLLING_IDLE_MS = 20000;
+const DIAS_EJECUCION = [
+  { value: "MONDAY", label: "Lunes" },
+  { value: "TUESDAY", label: "Martes" },
+  { value: "WEDNESDAY", label: "Miercoles" },
+  { value: "THURSDAY", label: "Jueves" },
+  { value: "FRIDAY", label: "Viernes" },
+  { value: "SATURDAY", label: "Sabado" },
+  { value: "SUNDAY", label: "Domingo" },
+] as const;
 
 const formInicial: ReporteWhatsappConfiguracion = {
   horaEjecucion: "07:00",
+  diasEjecucion: [],
   cantidadEmpleadosPorBloque: 10,
   delaySegundosEntreBloques: 30,
   activo: false,
+};
+
+type RptWupModulePageProps = {
+  tipo?: ReporteWhatsappTipo;
+  pageTitle?: string;
+  eyebrow?: string;
+  heroTitle?: string;
+  tableTitle?: string;
+  tableSubtitle?: string;
+  runtimeTitle?: string;
 };
 
 function formatDateTime(value?: string | null) {
@@ -67,7 +89,216 @@ function getEstadoTone(estado: string) {
   return styles.statusNeutral;
 }
 
-export default function RptWupPage() {
+function tryParseJsonObject(value?: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function truncateText(value?: string | null, maxLength = 220) {
+  if (!value) {
+    return "";
+  }
+
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength)}...`;
+}
+
+function getResponsePreview(responseJson?: string) {
+  const parsed = tryParseJsonObject(responseJson);
+  if (parsed) {
+    const candidates = [
+      parsed.message,
+      parsed.mensaje,
+      parsed.error,
+      parsed.detail,
+      parsed.title,
+      parsed.descripcion,
+      parsed.description,
+    ];
+
+    const firstText = candidates.find((item) => typeof item === "string" && item.trim()) as string | undefined;
+    if (firstText) {
+      return truncateText(firstText);
+    }
+  }
+
+  return truncateText(responseJson);
+}
+
+function buildCompactFileName(fileName: string, employeeId: number) {
+  const match = fileName.match(/(\d{8})(?=\.pdf$)/i);
+  const suffix = match?.[1] ?? "SINFECHA";
+  const isGerencial = fileName.toLowerCase().includes("gerencial");
+  return isGerencial
+    ? `rpt_asistencia_gerencial_${employeeId}_${suffix}.pdf`
+    : `rpt_asistencia_${employeeId}_${suffix}.pdf`;
+}
+
+function getRequestPreview(row: ReporteWhatsappLog) {
+  const parsed = tryParseJsonObject(row.requestJson);
+  if (!parsed) {
+    return "";
+  }
+
+  const telefono = typeof parsed.Telefono === "string"
+    ? parsed.Telefono
+    : typeof parsed.telefono === "string"
+      ? parsed.telefono
+      : "";
+  const archivo = typeof parsed.NombreArchivo === "string"
+    ? parsed.NombreArchivo
+    : typeof parsed.nombrearchivo === "string"
+      ? parsed.nombrearchivo
+      : "";
+  const contenidoLength = typeof parsed.contenidoLength === "number"
+    ? parsed.contenidoLength
+    : typeof parsed.ContenidoLength === "number"
+      ? parsed.ContenidoLength
+      : null;
+
+  const compactArchivo = archivo ? buildCompactFileName(archivo, row.idEmpleado) : "";
+
+  const parts = [
+    telefono ? `Tel: ${telefono}` : "",
+    compactArchivo ? `Archivo: ${compactArchivo}` : "",
+    contenidoLength != null ? `Base64: ${contenidoLength} chars` : "",
+  ].filter(Boolean);
+
+  return parts.join(" | ");
+}
+
+function getRequestBase64(requestJson?: string) {
+  const parsed = tryParseJsonObject(requestJson);
+  if (!parsed) {
+    return "";
+  }
+
+  if (typeof parsed.Contenido === "string") {
+    return parsed.Contenido;
+  }
+
+  if (typeof parsed.contenido === "string") {
+    return parsed.contenido;
+  }
+
+  return "";
+}
+
+function buildPostmanPayload(requestJson?: string) {
+  const parsed = tryParseJsonObject(requestJson);
+  if (!parsed) {
+    return null;
+  }
+
+  const payload = {
+    nombrearchivo: typeof parsed.NombreArchivo === "string"
+      ? parsed.NombreArchivo
+      : typeof parsed.nombrearchivo === "string"
+        ? parsed.nombrearchivo
+        : "",
+    mensaje: typeof parsed.Mensaje === "string"
+      ? parsed.Mensaje
+      : typeof parsed.mensaje === "string"
+        ? parsed.mensaje
+        : "",
+    telefono: typeof parsed.Telefono === "string"
+      ? parsed.Telefono
+      : typeof parsed.telefono === "string"
+        ? parsed.telefono
+        : "",
+    contenido: typeof parsed.Contenido === "string"
+      ? parsed.Contenido
+      : typeof parsed.contenido === "string"
+        ? parsed.contenido
+        : "",
+  };
+
+  return payload;
+}
+
+async function copyTextToClipboard(value: string) {
+  if (!value) {
+    return false;
+  }
+
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function renderLogDetail(row: ReporteWhatsappLog) {
+  const responsePreview = getResponsePreview(row.responseJson);
+  const requestPreview = getRequestPreview(row);
+  const requestBase64 = getRequestBase64(row.requestJson);
+  const showDiagnostics = row.estadoEnvio.toUpperCase().startsWith("ERROR");
+
+  return (
+    <div style={styles.logDetailCell}>
+      <span>{row.mensajeError || "Sin observaciones."}</span>
+      {showDiagnostics && responsePreview ? (
+        <span style={styles.logDetailMeta}>Respuesta WUP: {responsePreview}</span>
+      ) : null}
+      {showDiagnostics && requestPreview ? (
+        <span style={styles.logDetailMeta}>Payload: {requestPreview}</span>
+      ) : null}
+      {showDiagnostics && requestBase64 ? (
+        <div style={styles.logActionRow}>
+          <button
+            type="button"
+            style={styles.copyButton}
+            onClick={() => {
+              void copyTextToClipboard(requestBase64).then((copied) => {
+                window.alert(copied ? "Base64 copiado al portapapeles." : "No se pudo copiar el Base64.");
+              });
+            }}
+          >
+            Copiar Base64
+          </button>
+        </div>
+      ) : null}
+      {showDiagnostics && requestBase64 ? (
+        <div style={styles.logBase64Block}>
+          <span style={styles.logDetailMeta}>Base64 completo:</span>
+          <textarea
+            readOnly
+            value={requestBase64}
+            style={styles.logBase64Input}
+            rows={6}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function RptWupModulePage({
+  tipo = "operativo",
+  pageTitle = "Reportes automáticos WUP",
+  eyebrow = "Automatización WUP",
+  heroTitle = "Control operativo del envío de reportes",
+  tableTitle = "Logs del período",
+  tableSubtitle = "Auditoría de envío, omisiones, duplicados y respuestas del endpoint WUP.",
+  runtimeTitle = "Ejecución actual",
+}: RptWupModulePageProps) {
   const [dashboard, setDashboard] = useState<ReporteWhatsappDashboard | null>(null);
   const [form, setForm] = useState<ReporteWhatsappConfiguracion>(formInicial);
   const [errores, setErrores] = useState<Record<string, string>>({});
@@ -76,6 +307,8 @@ export default function RptWupPage() {
   const [runningAction, setRunningAction] = useState<"" | "save" | "run" | "retry" | "reschedule">("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const lastErrorLogSignatureRef = useRef("");
+  const tipoApi = tipo === "gerencial" ? "gerencial" : "operativo";
 
   const progress = useMemo(() => {
     const total = dashboard?.runtime.totalEmpleados ?? 0;
@@ -89,7 +322,7 @@ export default function RptWupPage() {
     }
 
     try {
-      const response = await reportesWhatsappService.obtenerDashboard(200);
+      const response = await reportesWhatsappService.obtenerDashboard(200, tipoApi);
       startTransition(() => {
         setDashboard(response);
         setForm((current) => {
@@ -98,7 +331,9 @@ export default function RptWupPage() {
           }
 
           return {
+            tipoReporte: response.configuracion.tipoReporte,
             horaEjecucion: response.configuracion.horaEjecucion || "07:00",
+            diasEjecucion: response.configuracion.diasEjecucion ?? [],
             cantidadEmpleadosPorBloque: response.configuracion.cantidadEmpleadosPorBloque || 10,
             delaySegundosEntreBloques: response.configuracion.delaySegundosEntreBloques || 30,
             activo: !!response.configuracion.activo,
@@ -110,7 +345,7 @@ export default function RptWupPage() {
       });
       setError("");
     } catch (err) {
-      setError(getHttpErrorMessage(err, "No se pudo cargar el dashboard de reportes WUP."));
+      setError(getHttpErrorMessage(err, `No se pudo cargar el dashboard de reportes ${tipoApi}.`));
     } finally {
       if (!silent) {
         setLoading(false);
@@ -129,6 +364,48 @@ export default function RptWupPage() {
 
     return () => window.clearInterval(interval);
   }, [dashboard?.runtime.isRunning, loadDashboard]);
+
+  useEffect(() => {
+    const failedLogs = (dashboard?.logs ?? [])
+      .filter((row) => row.estadoEnvio.toUpperCase().startsWith("ERROR"))
+      .slice(0, 10);
+
+    if (failedLogs.length === 0) {
+      lastErrorLogSignatureRef.current = "";
+      return;
+    }
+
+    const executionId = dashboard?.runtime.executionId || "no-execution";
+    const nextSignature = `${tipoApi}:${executionId}:${failedLogs.length}:${failedLogs[0]?.idLog ?? 0}`;
+
+    if (nextSignature === lastErrorLogSignatureRef.current) {
+      return;
+    }
+
+    lastErrorLogSignatureRef.current = nextSignature;
+    console.warn(
+      `[RptWup:${tipoApi}] Errores recientes detectados`,
+      failedLogs.map((row) => ({
+        idLog: row.idLog,
+        idEmpleado: row.idEmpleado,
+        empleado: row.nombreEmpleado || row.usuario,
+        telefono: row.telefono,
+        estado: row.estadoEnvio,
+        mensaje: row.mensajeError,
+        respuesta: getResponsePreview(row.responseJson),
+        payload: getRequestPreview(row),
+        base64: getRequestBase64(row.requestJson),
+        requestJson: tryParseJsonObject(row.requestJson) ?? row.requestJson,
+        postmanRequest: {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: buildPostmanPayload(row.requestJson),
+        },
+      }))
+    );
+  }, [dashboard?.logs, tipoApi]);
 
   const columns = useMemo<DataGridColumn<ReporteWhatsappLog>[]>(
     () => [
@@ -172,7 +449,7 @@ export default function RptWupPage() {
       {
         key: "mensajeError",
         header: "Detalle",
-        render: (row) => row.mensajeError || "Sin observaciones.",
+        render: (row) => renderLogDetail(row),
       },
     ],
     []
@@ -187,6 +464,10 @@ export default function RptWupPage() {
 
     if (!/^\d{2}:\d{2}$/.test(form.horaEjecucion.trim())) {
       nextErrors.horaEjecucion = "Use formato HH:mm.";
+    }
+
+    if (tipoApi === "gerencial" && (form.diasEjecucion?.length ?? 0) === 0) {
+      nextErrors.diasEjecucion = "Seleccione al menos un dia para la ejecucion automatica.";
     }
 
     if (form.cantidadEmpleadosPorBloque < 1) {
@@ -209,6 +490,24 @@ export default function RptWupPage() {
     return Object.keys(nextErrors).length === 0;
   };
 
+  const toggleDiaEjecucion = (dia: string) => {
+    setForm((prev) => {
+      const current = new Set(prev.diasEjecucion ?? []);
+      if (current.has(dia)) {
+        current.delete(dia);
+      } else {
+        current.add(dia);
+      }
+
+      return {
+        ...prev,
+        diasEjecucion: DIAS_EJECUCION
+          .map((item) => item.value)
+          .filter((value) => current.has(value)),
+      };
+    });
+  };
+
   const guardarConfiguracion = async () => {
     if (!validar()) {
       return;
@@ -220,7 +519,7 @@ export default function RptWupPage() {
     setSuccess("");
 
     try {
-      await reportesWhatsappService.actualizarConfiguracion(form);
+      await reportesWhatsappService.actualizarConfiguracion({ ...form, tipoReporte: tipoApi }, tipoApi);
       setSuccess("Configuración guardada y job reprogramado correctamente.");
       await loadDashboard(true);
     } catch (err) {
@@ -238,17 +537,17 @@ export default function RptWupPage() {
 
     try {
       if (action === "run") {
-        const response = await reportesWhatsappService.ejecutarAhora();
+        const response = await reportesWhatsappService.ejecutarAhora(tipoApi);
         setSuccess(response.message || "Proceso manual encolado.");
       }
 
       if (action === "retry") {
-        const response = await reportesWhatsappService.reintentarFallidos();
+        const response = await reportesWhatsappService.reintentarFallidos(tipoApi);
         setSuccess(response.message || "Reintento encolado.");
       }
 
       if (action === "reschedule") {
-        await reportesWhatsappService.reprogramarJob();
+        await reportesWhatsappService.reprogramarJob(tipoApi);
         setSuccess("Job reprogramado correctamente.");
       }
 
@@ -261,7 +560,7 @@ export default function RptWupPage() {
   };
 
   return (
-    <AppPage title="Reportes automáticos WUP" style={styles.page}>
+    <AppPage title={pageTitle} style={styles.page}>
       {loading ? <AppStatusMessage tone="info">Cargando configuración y monitoreo...</AppStatusMessage> : null}
       {success ? <AppStatusMessage tone="success">{success}</AppStatusMessage> : null}
       {error ? <AppStatusMessage tone="error">{error}</AppStatusMessage> : null}
@@ -278,8 +577,8 @@ export default function RptWupPage() {
             <AppCard style={styles.heroCard}>
               <div style={styles.heroHeader}>
                 <div>
-                  <div style={styles.eyebrow}>Automatización WUP</div>
-                  <h2 style={styles.heroTitle}>Control operativo del envío de reportes</h2>
+                  <div style={styles.eyebrow}>{eyebrow}</div>
+                  <h2 style={styles.heroTitle}>{heroTitle}</h2>
                   <p style={styles.heroText}>
                     Período actual: <strong>{dashboard?.periodoActual.etiquetaPeriodo || "-"}</strong>
                   </p>
@@ -316,7 +615,7 @@ export default function RptWupPage() {
               <div style={styles.progressPanel}>
                 <div style={styles.progressHeader}>
                   <div>
-                    <div style={styles.progressTitle}>Ejecución actual</div>
+                    <div style={styles.progressTitle}>{runtimeTitle}</div>
                     <div style={styles.progressMeta}>
                       {dashboard?.runtime.isRunning ? dashboard.runtime.mensaje : "Sin ejecución activa."}
                     </div>
@@ -344,7 +643,9 @@ export default function RptWupPage() {
 
             <AppCard style={styles.configCard}>
               <h3 style={styles.cardTitle}>Configuración dinámica</h3>
-              <div style={styles.formGrid}>
+
+              <div style={{ ...styles.formGrid, gridTemplateColumns: "1fr 1fr 1fr" }}>
+                {/* Fila alineada de 3 campos */}
                 <div style={styles.field}>
                   <label style={styles.label}>Hora de ejecución</label>
                   <input
@@ -355,7 +656,6 @@ export default function RptWupPage() {
                   />
                   {errores.horaEjecucion ? <span style={styles.errorText}>{errores.horaEjecucion}</span> : null}
                 </div>
-
                 <div style={styles.field}>
                   <label style={styles.label}>Empleados por bloque</label>
                   <input
@@ -375,7 +675,6 @@ export default function RptWupPage() {
                     <span style={styles.errorText}>{errores.cantidadEmpleadosPorBloque}</span>
                   ) : null}
                 </div>
-
                 <div style={styles.field}>
                   <label style={styles.label}>Espera entre bloques</label>
                   <input
@@ -395,8 +694,42 @@ export default function RptWupPage() {
                     <span style={styles.errorText}>{errores.delaySegundosEntreBloques}</span>
                   ) : null}
                 </div>
+              </div>
 
-                <div style={styles.switchField}>
+              {/* Día de ejecución y switch van debajo */}
+              {tipoApi === "gerencial" ? (
+                <div style={styles.daySelectorField}>
+                  <label style={styles.label}>Dias de ejecucion</label>
+                  <div style={styles.daySelectorGrid}>
+                    {DIAS_EJECUCION.map((dia) => {
+                      const checked = (form.diasEjecucion ?? []).includes(dia.value);
+                      return (
+                        <label
+                          key={dia.value}
+                          style={{
+                            ...styles.daySelectorOption,
+                            ...(checked ? styles.daySelectorOptionActive : {}),
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleDiaEjecucion(dia.value)}
+                          />
+                          <span>{dia.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <span style={styles.helpText}>
+                    Marca los dias en los que el reporte gerencial debe ejecutarse automaticamente a la hora indicada.
+                  </span>
+                  {errores.diasEjecucion ? <span style={styles.errorText}>{errores.diasEjecucion}</span> : null}
+                </div>
+              ) : null}
+
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 16, marginTop: 18 }}>
+                <div style={{ ...styles.switchField, marginBottom: 0, flex: 1 }}>
                   <label style={styles.switchRow}>
                     <input
                       type="checkbox"
@@ -415,17 +748,16 @@ export default function RptWupPage() {
                     <div style={styles.warningNote}>Usando respaldo de `appsettings.json`.</div>
                   ) : null}
                 </div>
-              </div>
-
-              <div style={styles.configActions}>
-                <button
-                  type="button"
-                  style={styles.primaryButton}
-                  onClick={() => void guardarConfiguracion()}
-                  disabled={saving || runningAction !== ""}
-                >
-                  Guardar configuración
-                </button>
+                <div style={{ display: "flex", alignItems: "center", height: "100%" }}>
+                  <button
+                    type="button"
+                    style={styles.primaryButton}
+                    onClick={() => void guardarConfiguracion()}
+                    disabled={saving || runningAction !== ""}
+                  >
+                    Guardar configuración
+                  </button>
+                </div>
               </div>
             </AppCard>
           </div>
@@ -446,10 +778,8 @@ export default function RptWupPage() {
           <AppCard>
             <div style={styles.tableHeader}>
               <div>
-                <h3 style={styles.cardTitle}>Logs del período</h3>
-                <p style={styles.tableSubtitle}>
-                  Auditoría de envío, omisiones, duplicados y respuestas del endpoint WUP.
-                </p>
+                <h3 style={styles.cardTitle}>{tableTitle}</h3>
+                <p style={styles.tableSubtitle}>{tableSubtitle}</p>
               </div>
             </div>
 
@@ -464,6 +794,10 @@ export default function RptWupPage() {
       )}
     </AppPage>
   );
+}
+
+export default function RptWupPage() {
+  return <RptWupModulePage />;
 }
 
 function KpiCard({
@@ -620,6 +954,35 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 14,
     marginTop: 16,
   },
+  daySelectorField: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    gridColumn: "1 / -1",
+  },
+  daySelectorGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+    gap: 10,
+  },
+  daySelectorOption: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "10px 12px",
+    borderRadius: 10,
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    color: "#0F172A",
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  daySelectorOptionActive: {
+    border: "1px solid #17143A",
+    background: "#EEF2FF",
+    boxShadow: "inset 0 0 0 1px rgba(23, 20, 58, 0.12)",
+  },
   field: {
     display: "flex",
     flexDirection: "column",
@@ -668,6 +1031,10 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
     color: "#B45309",
     fontWeight: 700,
+  },
+  helpText: {
+    fontSize: 12,
+    color: "#64748B",
   },
   errorText: {
     color: "#DC2626",
@@ -741,6 +1108,53 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     gap: 2,
+  },
+  logDetailCell: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    minWidth: 260,
+  },
+  logDetailMeta: {
+    fontSize: 12,
+    color: "#64748B",
+    whiteSpace: "normal",
+    wordBreak: "break-word",
+  },
+  logBase64Block: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    marginTop: 4,
+  },
+  logActionRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 4,
+  },
+  copyButton: {
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    color: "#0F172A",
+    borderRadius: 8,
+    padding: "6px 10px",
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  logBase64Input: {
+    width: "100%",
+    minWidth: 320,
+    resize: "vertical",
+    borderRadius: 8,
+    border: "1px solid #CBD5E1",
+    padding: 8,
+    fontSize: 11,
+    fontFamily: "Consolas, 'Courier New', monospace",
+    color: "#0F172A",
+    background: "#F8FAFC",
+    boxSizing: "border-box",
   },
   lockedBox: {
     borderRadius: 14,

@@ -50,6 +50,7 @@ import ConsultaPage from "../../features/mantenimiento/consulta";
 import MigracionPage from "../../features/mantenimiento/migracion";
 import MantenimientoPage from "../../features/mantenimiento/mantenimiento";
 import RptWupPage from "../../features/mantenimiento/sistemas/rptwup";
+import RptWupGerencialPage from "../../features/mantenimiento/sistemas/rptwupgerencial";
 import IndicadoresGerencialesPage from "../../features/inicio/indicadoresgerenciales";
 import PanelPrincipalPage from "../../features/inicio/panelprincipal";
 import AlertasPage from "../../features/inicio/alertas";
@@ -104,6 +105,7 @@ export default function AppRouter() {
             <Route path="/mantenimiento/migracion" element={<MigracionPage />} />
             <Route path="/mantenimiento/mantenimiento" element={<MantenimientoPage />} />
             <Route path="/mantenimiento/sistemas/rptwup" element={<RptWupPage />} />
+            <Route path="/mantenimiento/sistemas/rptwupgerencial" element={<RptWupGerencialPage />} />
 
             <Route
               path="/inicio/indicadoresgerenciales"

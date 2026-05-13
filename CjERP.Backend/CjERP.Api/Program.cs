@@ -53,7 +53,7 @@ builder.Services.AddHangfire(configuration => configuration
         new SqlServerStorageOptions
         {
             PrepareSchemaIfNecessary = true,
-            QueuePollInterval = TimeSpan.FromSeconds(15),
+            QueuePollInterval = TimeSpan.FromSeconds(1),
             CommandBatchMaxTimeout = TimeSpan.FromMinutes(5),
             SlidingInvisibilityTimeout = TimeSpan.FromMinutes(5),
             UseRecommendedIsolationLevel = true
@@ -196,7 +196,8 @@ app.MapControllers();
 using (var scope = app.Services.CreateScope())
 {
     var scheduler = scope.ServiceProvider.GetRequiredService<IReporteWhatsappJobScheduler>();
-    await scheduler.ReprogramarAsync();
+    await scheduler.ReprogramarAsync(ReporteWhatsappTipos.Operativo);
+    await scheduler.ReprogramarAsync(ReporteWhatsappTipos.Gerencial);
 }
 
 app.Run();

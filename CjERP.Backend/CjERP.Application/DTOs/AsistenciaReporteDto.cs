@@ -6,6 +6,29 @@ public class AsistenciaReporteRequestDto
     public string FechaFin { get; set; } = string.Empty;
 }
 
+public class AsistenciaReportePdfRequestDto
+{
+    public string FechaInicio { get; set; } = string.Empty;
+    public string FechaFin { get; set; } = string.Empty;
+    public string Destinatario { get; set; } = "Reporte x Empleado";
+    public IReadOnlyList<AsistenciaReportePdfItemDto> Items { get; set; } = Array.Empty<AsistenciaReportePdfItemDto>();
+}
+
+public class AsistenciaReportePdfItemDto
+{
+    public string Fecha { get; set; } = string.Empty;
+    public string Hora { get; set; } = string.Empty;
+    public string NombreEmpleado { get; set; } = string.Empty;
+    public string Ubicacion { get; set; } = string.Empty;
+    public int? IdEmpleado { get; set; }
+    public string Salida { get; set; } = string.Empty;
+    public string EstadoMarcacionTexto { get; set; } = string.Empty;
+    public decimal TotalHoras { get; set; }
+    public decimal TotalHorasEmpleado { get; set; }
+    public decimal TotalHorasLaborales { get; set; }
+    public string EstadoValidacionHoras { get; set; } = string.Empty;
+}
+
 public class AsistenciaReporteDto
 {
     public string Fecha { get; set; } = string.Empty;

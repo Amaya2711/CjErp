@@ -4,11 +4,11 @@ namespace CjERP.Application.Interfaces.Services;
 
 public interface IReporteAutomaticoService
 {
-    Task<ReporteWhatsappConfiguracionDto> ObtenerConfiguracionAsync(CancellationToken cancellationToken = default);
+    Task<ReporteWhatsappConfiguracionDto> ObtenerConfiguracionAsync(string tipoReporte, CancellationToken cancellationToken = default);
     Task<ReporteWhatsappPeriodoDto> ObtenerPeriodoActualAsync(CancellationToken cancellationToken = default);
-    Task<ReporteWhatsappDashboardDto> ObtenerDashboardAsync(string idUsuario, int topLogs = 200, CancellationToken cancellationToken = default);
+    Task<ReporteWhatsappDashboardDto> ObtenerDashboardAsync(string idUsuario, string tipoReporte, int topLogs = 200, CancellationToken cancellationToken = default);
     Task ActualizarConfiguracionAsync(ReporteWhatsappConfiguracionUpdateDto request, string usuarioModificacion, CancellationToken cancellationToken = default);
-    Task<ReporteWhatsappEjecucionResultadoDto> EjecutarAsync(string origenEjecucion, string usuarioEjecucion, bool soloFallidos, CancellationToken cancellationToken = default);
+    Task<ReporteWhatsappEjecucionResultadoDto> EjecutarAsync(string tipoReporte, string origenEjecucion, string usuarioEjecucion, bool soloFallidos, CancellationToken cancellationToken = default);
     Task<bool> UsuarioTieneAccesoAdministrativoAsync(string idUsuario, CancellationToken cancellationToken = default);
 }
 
@@ -25,7 +25,8 @@ public interface IWupAuthService
 public interface IReportePdfService
 {
     Task<byte[]> GenerarReportePdfAsync(
-        ReporteWhatsappEmpleadoDto empleado,
+        string tipoReporte,
+        ReporteWhatsappEmpleadoDto empleadoDestino,
         ReporteWhatsappPeriodoDto periodo,
         IReadOnlyList<ReporteWhatsappAsistenciaItemDto> detalle,
         CancellationToken cancellationToken = default);
@@ -33,15 +34,15 @@ public interface IReportePdfService
 
 public interface IReporteWhatsappJobScheduler
 {
-    Task ReprogramarAsync(CancellationToken cancellationToken = default);
-    string EncolarEjecucionManual(string usuarioEjecucion);
-    string EncolarReintentoFallidos(string usuarioEjecucion);
+    Task ReprogramarAsync(string tipoReporte, CancellationToken cancellationToken = default);
+    string EncolarEjecucionManual(string tipoReporte, string usuarioEjecucion);
+    string EncolarReintentoFallidos(string tipoReporte, string usuarioEjecucion);
 }
 
 public interface IReporteWhatsappRuntimeMonitor
 {
-    bool TryStart(ReporteWhatsappRuntimeStatusDto snapshot);
-    void Update(ReporteWhatsappRuntimeStatusDto snapshot);
-    void Finish(ReporteWhatsappRuntimeStatusDto snapshot);
-    ReporteWhatsappRuntimeStatusDto GetSnapshot();
+    bool TryStart(string tipoReporte, ReporteWhatsappRuntimeStatusDto snapshot);
+    void Update(string tipoReporte, ReporteWhatsappRuntimeStatusDto snapshot);
+    void Finish(string tipoReporte, ReporteWhatsappRuntimeStatusDto snapshot);
+    ReporteWhatsappRuntimeStatusDto GetSnapshot(string tipoReporte);
 }

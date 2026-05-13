@@ -6,43 +6,47 @@ namespace CjERP.Api.Services;
 public sealed class ReporteWhatsappRuntimeMonitor : IReporteWhatsappRuntimeMonitor
 {
     private readonly object _sync = new();
-    private ReporteWhatsappRuntimeStatusDto _snapshot = new();
+    private readonly Dictionary<string, ReporteWhatsappRuntimeStatusDto> _snapshots = new(StringComparer.OrdinalIgnoreCase);
 
-    public bool TryStart(ReporteWhatsappRuntimeStatusDto snapshot)
+    public bool TryStart(string tipoReporte, ReporteWhatsappRuntimeStatusDto snapshot)
     {
         lock (_sync)
         {
-            if (_snapshot.IsRunning)
+            var key = ReporteWhatsappTipos.Normalize(tipoReporte);
+            if (_snapshots.TryGetValue(key, out var current) && current.IsRunning)
             {
                 return false;
             }
 
-            _snapshot = Clone(snapshot);
+            _snapshots[key] = Clone(snapshot);
             return true;
         }
     }
 
-    public void Update(ReporteWhatsappRuntimeStatusDto snapshot)
+    public void Update(string tipoReporte, ReporteWhatsappRuntimeStatusDto snapshot)
     {
         lock (_sync)
         {
-            _snapshot = Clone(snapshot);
+            _snapshots[ReporteWhatsappTipos.Normalize(tipoReporte)] = Clone(snapshot);
         }
     }
 
-    public void Finish(ReporteWhatsappRuntimeStatusDto snapshot)
+    public void Finish(string tipoReporte, ReporteWhatsappRuntimeStatusDto snapshot)
     {
         lock (_sync)
         {
-            _snapshot = Clone(snapshot);
+            _snapshots[ReporteWhatsappTipos.Normalize(tipoReporte)] = Clone(snapshot);
         }
     }
 
-    public ReporteWhatsappRuntimeStatusDto GetSnapshot()
+    public ReporteWhatsappRuntimeStatusDto GetSnapshot(string tipoReporte)
     {
         lock (_sync)
         {
-            return Clone(_snapshot);
+            var key = ReporteWhatsappTipos.Normalize(tipoReporte);
+            return _snapshots.TryGetValue(key, out var snapshot)
+                ? Clone(snapshot)
+                : new ReporteWhatsappRuntimeStatusDto { TipoReporte = key };
         }
     }
 
@@ -50,6 +54,7 @@ public sealed class ReporteWhatsappRuntimeMonitor : IReporteWhatsappRuntimeMonit
     {
         return new ReporteWhatsappRuntimeStatusDto
         {
+            TipoReporte = source.TipoReporte,
             ExecutionId = source.ExecutionId,
             IsRunning = source.IsRunning,
             OrigenEjecucion = source.OrigenEjecucion,

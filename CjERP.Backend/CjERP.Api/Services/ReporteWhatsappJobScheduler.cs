@@ -10,8 +10,6 @@ namespace CjERP.Api.Services;
 
 public sealed class ReporteWhatsappJobScheduler : IReporteWhatsappJobScheduler
 {
-    private const string RecurringJobId = "reporte-whatsapp-asistencia-wup";
-
     private readonly IRecurringJobManager _recurringJobManager;
     private readonly IBackgroundJobClient _backgroundJobClient;
     private readonly IReporteRepository _reporteRepository;
@@ -29,26 +27,54 @@ public sealed class ReporteWhatsappJobScheduler : IReporteWhatsappJobScheduler
         _defaults = defaults.Value;
     }
 
-    public async Task ReprogramarAsync(CancellationToken cancellationToken = default)
+    public async Task ReprogramarAsync(string tipoReporte, CancellationToken cancellationToken = default)
     {
-        var config = await _reporteRepository.ObtenerConfiguracionAsync(cancellationToken);
-        var activo = config?.Activo ?? _defaults.Activo;
+        var normalizedType = ReporteWhatsappTipos.Normalize(tipoReporte);
+        var config = await _reporteRepository.ObtenerConfiguracionAsync(normalizedType, cancellationToken);
+        var defaults = GetDefaultsForType(normalizedType);
+        var activo = config?.Activo ?? defaults.Activo;
+        var recurringJobId = BuildRecurringJobId(normalizedType);
 
         if (!activo)
         {
-            _recurringJobManager.RemoveIfExists(RecurringJobId);
+            RemoveRecurringJobs(normalizedType);
             return;
         }
 
         var hora = config?.HoraEjecucion;
-        if (!TimeSpan.TryParse(string.IsNullOrWhiteSpace(hora) ? _defaults.HoraEjecucion : hora, CultureInfo.InvariantCulture, out var time))
+        if (!TimeSpan.TryParse(string.IsNullOrWhiteSpace(hora) ? defaults.HoraEjecucion : hora, CultureInfo.InvariantCulture, out var time))
         {
-            time = TimeSpan.Parse(_defaults.HoraEjecucion, CultureInfo.InvariantCulture);
+            time = TimeSpan.Parse(defaults.HoraEjecucion, CultureInfo.InvariantCulture);
+        }
+
+        if (ReporteWhatsappTipos.IsGerencial(normalizedType))
+        {
+            var dias = NormalizeDiasEjecucion(config?.DiasEjecucion, defaults.DiasEjecucion);
+            RemoveRecurringJobs(normalizedType);
+
+            if (dias.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var dia in dias)
+            {
+                _recurringJobManager.AddOrUpdate<ReporteWhatsAppJob>(
+                    BuildRecurringJobId(normalizedType, dia),
+                    job => job.EjecutarProgramadoAsync(normalizedType),
+                    BuildWeeklyCron(dia, time.Hours, time.Minutes),
+                    new RecurringJobOptions
+                    {
+                        TimeZone = ResolvePeruTimeZone()
+                    });
+            }
+
+            return;
         }
 
         _recurringJobManager.AddOrUpdate<ReporteWhatsAppJob>(
-            RecurringJobId,
-            job => job.EjecutarProgramadoAsync(),
+            recurringJobId,
+            job => job.EjecutarProgramadoAsync(normalizedType),
             Cron.Daily(time.Hours, time.Minutes),
             new RecurringJobOptions
             {
@@ -56,14 +82,79 @@ public sealed class ReporteWhatsappJobScheduler : IReporteWhatsappJobScheduler
             });
     }
 
-    public string EncolarEjecucionManual(string usuarioEjecucion)
+    public string EncolarEjecucionManual(string tipoReporte, string usuarioEjecucion)
     {
-        return _backgroundJobClient.Enqueue<ReporteWhatsAppJob>(job => job.EjecutarManualAsync(usuarioEjecucion));
+        var normalizedType = ReporteWhatsappTipos.Normalize(tipoReporte);
+        return _backgroundJobClient.Enqueue<ReporteWhatsAppJob>(job => job.EjecutarManualAsync(normalizedType, usuarioEjecucion));
     }
 
-    public string EncolarReintentoFallidos(string usuarioEjecucion)
+    public string EncolarReintentoFallidos(string tipoReporte, string usuarioEjecucion)
     {
-        return _backgroundJobClient.Enqueue<ReporteWhatsAppJob>(job => job.ReintentarFallidosAsync(usuarioEjecucion));
+        var normalizedType = ReporteWhatsappTipos.Normalize(tipoReporte);
+        return _backgroundJobClient.Enqueue<ReporteWhatsAppJob>(job => job.ReintentarFallidosAsync(normalizedType, usuarioEjecucion));
+    }
+
+    private string BuildRecurringJobId(string tipoReporte) =>
+        ReporteWhatsappTipos.IsGerencial(tipoReporte)
+            ? "reporte-whatsapp-asistencia-wup-gerencial"
+            : "reporte-whatsapp-asistencia-wup";
+
+    private string BuildRecurringJobId(string tipoReporte, string diaEjecucion) =>
+        $"{BuildRecurringJobId(tipoReporte)}-{diaEjecucion.ToLowerInvariant()}";
+
+    private (string HoraEjecucion, IReadOnlyList<string> DiasEjecucion, bool Activo) GetDefaultsForType(string tipoReporte)
+    {
+        if (ReporteWhatsappTipos.IsGerencial(tipoReporte))
+        {
+            return (
+                _defaults.HoraEjecucionGerencial,
+                NormalizeDiasEjecucion(_defaults.DiasEjecucionGerencial, Array.Empty<string>()),
+                _defaults.ActivoGerencial);
+        }
+
+        return (
+            _defaults.HoraEjecucion,
+            NormalizeDiasEjecucion(_defaults.DiasEjecucion, Array.Empty<string>()),
+            _defaults.Activo);
+    }
+
+    private void RemoveRecurringJobs(string tipoReporte)
+    {
+        var baseJobId = BuildRecurringJobId(tipoReporte);
+        _recurringJobManager.RemoveIfExists(baseJobId);
+
+        foreach (var dia in DiasSemana)
+        {
+            _recurringJobManager.RemoveIfExists(BuildRecurringJobId(tipoReporte, dia));
+        }
+    }
+
+    private static string BuildWeeklyCron(string diaEjecucion, int hour, int minute)
+    {
+        var dayNumber = diaEjecucion switch
+        {
+            "MONDAY" => 1,
+            "TUESDAY" => 2,
+            "WEDNESDAY" => 3,
+            "THURSDAY" => 4,
+            "FRIDAY" => 5,
+            "SATURDAY" => 6,
+            "SUNDAY" => 0,
+            _ => throw new InvalidOperationException($"Dia de ejecucion no soportado: {diaEjecucion}.")
+        };
+
+        return $"{minute} {hour} * * {dayNumber}";
+    }
+
+    private static IReadOnlyList<string> NormalizeDiasEjecucion(IEnumerable<string>? configured, IReadOnlyList<string> defaults)
+    {
+        var normalized = (configured ?? Array.Empty<string>())
+            .Select(static dia => dia?.Trim().ToUpperInvariant() ?? string.Empty)
+            .Where(static dia => DiasSemana.Contains(dia, StringComparer.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return normalized.Length > 0 ? normalized : defaults;
     }
 
     private static TimeZoneInfo ResolvePeruTimeZone()
@@ -82,4 +173,15 @@ public sealed class ReporteWhatsappJobScheduler : IReporteWhatsappJobScheduler
 
         return TimeZoneInfo.Utc;
     }
+
+    private static readonly string[] DiasSemana =
+    [
+        "MONDAY",
+        "TUESDAY",
+        "WEDNESDAY",
+        "THURSDAY",
+        "FRIDAY",
+        "SATURDAY",
+        "SUNDAY"
+    ];
 }

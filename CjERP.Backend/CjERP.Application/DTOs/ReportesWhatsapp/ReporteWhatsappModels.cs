@@ -2,6 +2,29 @@ using System.Text.Json.Serialization;
 
 namespace CjERP.Application.DTOs.ReportesWhatsapp;
 
+public static class ReporteWhatsappTipos
+{
+    public const string Operativo = "ASISTENCIA_WUP";
+    public const string Gerencial = "ASISTENCIA_WUP_GERENCIAL";
+
+    public static string Normalize(string? value)
+    {
+        if (string.Equals(value?.Trim(), "gerencial", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value?.Trim(), Gerencial, StringComparison.OrdinalIgnoreCase))
+        {
+            return Gerencial;
+        }
+
+        return Operativo;
+    }
+
+    public static string ToRouteValue(string? value) =>
+        IsGerencial(value) ? "gerencial" : "operativo";
+
+    public static bool IsGerencial(string? value) =>
+        string.Equals(Normalize(value), Gerencial, StringComparison.OrdinalIgnoreCase);
+}
+
 public sealed class WupSettings
 {
     public string BaseUrl { get; set; } = string.Empty;
@@ -32,20 +55,40 @@ public sealed class WupSettings
         if (TryBuildBaseUri() is null)
         {
             throw new InvalidOperationException(
-                "La configuración WUP no es válida. Configure `WupSettings:BaseUrl` con la URL real del servicio y reemplace los valores placeholder del archivo appsettings.");
+                "La configuracion WUP no es valida. Configure `WupSettings:BaseUrl` con la URL real del servicio y reemplace los valores placeholder del archivo appsettings.");
         }
 
         if (string.IsNullOrWhiteSpace(Usuario) || IsPlaceholderValue(Usuario))
         {
             throw new InvalidOperationException(
-                "La configuración WUP no es válida. Configure `WupSettings:Usuario` con el usuario real del servicio.");
+                "La configuracion WUP no es valida. Configure `WupSettings:Usuario` con el usuario real del servicio.");
         }
 
         if (string.IsNullOrWhiteSpace(Password) || IsPlaceholderValue(Password))
         {
             throw new InvalidOperationException(
-                "La configuración WUP no es válida. Configure `WupSettings:Password` con la contraseña real del servicio.");
+                "La configuracion WUP no es valida. Configure `WupSettings:Password` con la contrasena real del servicio.");
         }
+    }
+
+    public Uri BuildRequestUri(string endpoint)
+    {
+        EnsureConfigured();
+
+        if (string.IsNullOrWhiteSpace(endpoint))
+        {
+            throw new InvalidOperationException("La configuracion WUP no es valida. Falta definir el endpoint a invocar.");
+        }
+
+        if (Uri.TryCreate(endpoint.Trim(), UriKind.Absolute, out var absoluteUri))
+        {
+            return absoluteUri;
+        }
+
+        var baseUri = TryBuildBaseUri()
+            ?? throw new InvalidOperationException("La configuracion WUP no es valida. No se pudo resolver la URL base.");
+
+        return new Uri(baseUri, endpoint.Trim().TrimStart('/'));
     }
 
     private static bool IsPlaceholderValue(string value)
@@ -60,16 +103,26 @@ public sealed class WupSettings
 public sealed class ReporteWhatsappJobDefaultsOptions
 {
     public string HoraEjecucion { get; set; } = "07:00";
+    public string[] DiasEjecucion { get; set; } = [];
     public int CantidadEmpleadosPorBloque { get; set; } = 10;
     public int DelaySegundosEntreBloques { get; set; } = 30;
     public bool Activo { get; set; } = false;
-    public string TipoReporte { get; set; } = "ASISTENCIA_WUP";
-    public string MensajeAdjunto { get; set; } = "Estimado usuario, aquí está su reporte.";
+    public string TipoReporte { get; set; } = ReporteWhatsappTipos.Operativo;
+    public string MensajeAdjunto { get; set; } = "Estimado usuario, aqui esta su reporte.";
+    public string HoraEjecucionGerencial { get; set; } = "07:00";
+    public string[] DiasEjecucionGerencial { get; set; } = ["MONDAY"];
+    public int CantidadEmpleadosPorBloqueGerencial { get; set; } = 10;
+    public int DelaySegundosEntreBloquesGerencial { get; set; } = 30;
+    public bool ActivoGerencial { get; set; } = false;
+    public string TipoReporteGerencial { get; set; } = ReporteWhatsappTipos.Gerencial;
+    public string MensajeAdjuntoGerencial { get; set; } = "Estimado usuario, aqui esta su reporte gerencial.";
 }
 
 public sealed class ReporteWhatsappConfiguracionDto
 {
+    public string TipoReporte { get; set; } = ReporteWhatsappTipos.Operativo;
     public string HoraEjecucion { get; set; } = "07:00";
+    public IReadOnlyList<string> DiasEjecucion { get; set; } = Array.Empty<string>();
     public int CantidadEmpleadosPorBloque { get; set; } = 10;
     public int DelaySegundosEntreBloques { get; set; } = 30;
     public bool Activo { get; set; }
@@ -80,7 +133,9 @@ public sealed class ReporteWhatsappConfiguracionDto
 
 public sealed class ReporteWhatsappConfiguracionUpdateDto
 {
+    public string TipoReporte { get; set; } = ReporteWhatsappTipos.Operativo;
     public string HoraEjecucion { get; set; } = string.Empty;
+    public IReadOnlyList<string> DiasEjecucion { get; set; } = Array.Empty<string>();
     public int CantidadEmpleadosPorBloque { get; set; }
     public int DelaySegundosEntreBloques { get; set; }
     public bool Activo { get; set; }
@@ -93,10 +148,12 @@ public sealed class ReporteWhatsappEmpleadoDto
     public string NombreEmpleado { get; set; } = string.Empty;
     public string Correo { get; set; } = string.Empty;
     public string Telefono { get; set; } = string.Empty;
+    public string Ubicacion { get; set; } = string.Empty;
 }
 
 public sealed class ReporteWhatsappAsistenciaItemDto
 {
+    public int IdEmpleado { get; set; }
     public string Fecha { get; set; } = string.Empty;
     public string NombreEmpleado { get; set; } = string.Empty;
     public string EstadoMarcacionTexto { get; set; } = string.Empty;
@@ -105,6 +162,10 @@ public sealed class ReporteWhatsappAsistenciaItemDto
     public string HoraSalida { get; set; } = string.Empty;
     public string TiempoHoras { get; set; } = string.Empty;
     public decimal TotalHoras { get; set; }
+    public decimal TotalHorasEmpleado { get; set; }
+    public decimal TotalHorasLaborales { get; set; }
+    public decimal DiferenciaHoras { get; set; }
+    public string EstadoValidacionHoras { get; set; } = string.Empty;
 }
 
 public sealed class ReporteWhatsappPeriodoDto
@@ -185,6 +246,7 @@ public sealed class ReporteWhatsappKpiDto
 
 public sealed class ReporteWhatsappRuntimeStatusDto
 {
+    public string TipoReporte { get; set; } = ReporteWhatsappTipos.Operativo;
     public string ExecutionId { get; set; } = string.Empty;
     public bool IsRunning { get; set; }
     public string OrigenEjecucion { get; set; } = string.Empty;
@@ -224,4 +286,31 @@ public sealed class ReporteWhatsappEjecucionResultadoDto
     public string ExecutionId { get; set; } = string.Empty;
     public string JobId { get; set; } = string.Empty;
     public string Message { get; set; } = string.Empty;
+}
+
+public sealed class ReporteGerencialEmpleadoResumenDto
+{
+    public int IdEmpleado { get; set; }
+    public string NombreEmpleado { get; set; } = string.Empty;
+    public string Ubicacion { get; set; } = string.Empty;
+    public decimal TotalHoras { get; set; }
+    public decimal HorasLaboradas { get; set; }
+    public decimal DiferenciaHoras { get; set; }
+    public string Estado { get; set; } = string.Empty;
+    public IReadOnlyList<ReporteWhatsappAsistenciaItemDto> Calendario { get; set; } = Array.Empty<ReporteWhatsappAsistenciaItemDto>();
+}
+
+public sealed class ReporteGerencialPieChartItemDto
+{
+    public string Categoria { get; set; } = string.Empty;
+    public int Cantidad { get; set; }
+    public decimal Porcentaje { get; set; }
+}
+
+public sealed class ReporteGerencialPieChartDto
+{
+    public string Titulo { get; set; } = string.Empty;
+    public string Ubicacion { get; set; } = string.Empty;
+    public int Total { get; set; }
+    public IReadOnlyList<ReporteGerencialPieChartItemDto> Items { get; set; } = Array.Empty<ReporteGerencialPieChartItemDto>();
 }

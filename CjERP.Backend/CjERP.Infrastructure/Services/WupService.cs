@@ -33,8 +33,9 @@ public sealed class WupService : IWupService
 
         var token = await _wupAuthService.ObtenerTokenAsync(cancellationToken);
         var requestJson = JsonSerializer.Serialize(request);
+        var sendUri = _settings.BuildRequestUri(_settings.EnviarAdjuntoEndpoint);
 
-        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, _settings.EnviarAdjuntoEndpoint)
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, sendUri)
         {
             Content = new StringContent(requestJson, Encoding.UTF8, "application/json")
         };
@@ -52,7 +53,14 @@ public sealed class WupService : IWupService
 
             if (!success)
             {
-                _logger.LogWarning("[WUP] Envío fallido. Código={StatusCode}, Body={Body}", (int)response.StatusCode, body);
+                _logger.LogWarning(
+                    "[WUP] Envio fallido. Url={Url}, Codigo={StatusCode}, Telefono={Telefono}, Archivo={Archivo}, ContenidoLength={ContenidoLength}, Body={Body}",
+                    sendUri,
+                    (int)response.StatusCode,
+                    request.Telefono,
+                    request.NombreArchivo,
+                    request.Contenido?.Length ?? 0,
+                    body);
             }
 
             return new ReporteWhatsappSendResponseDto
@@ -60,18 +68,20 @@ public sealed class WupService : IWupService
                 Success = success,
                 StatusCode = (int)response.StatusCode,
                 ResponseBody = body,
-                ErrorMessage = success ? string.Empty : $"El endpoint WUP respondió {(int)response.StatusCode}."
+                ErrorMessage = success
+                    ? string.Empty
+                    : BuildErrorMessage((int)response.StatusCode, sendUri, body)
             };
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[WUP] Error no controlado enviando adjunto a {Telefono}", request.Telefono);
+            _logger.LogError(ex, "[WUP] Error no controlado enviando adjunto a {Telefono}. Url={Url}", request.Telefono, sendUri);
             return new ReporteWhatsappSendResponseDto
             {
                 Success = false,
                 StatusCode = 0,
                 ResponseBody = string.Empty,
-                ErrorMessage = ex.Message
+                ErrorMessage = $"Error llamando WUP en {sendUri}: {ex.Message}"
             };
         }
     }
@@ -112,6 +122,55 @@ public sealed class WupService : IWupService
         }
 
         return false;
+    }
+
+    private static string BuildErrorMessage(int statusCode, Uri sendUri, string responseBody)
+    {
+        var suffix = TryExtractErrorSummary(responseBody);
+        return string.IsNullOrWhiteSpace(suffix)
+            ? $"El endpoint WUP respondio {statusCode}. URL: {sendUri}"
+            : $"El endpoint WUP respondio {statusCode}. URL: {sendUri}. Detalle: {suffix}";
+    }
+
+    private static string TryExtractErrorSummary(string responseBody)
+    {
+        if (string.IsNullOrWhiteSpace(responseBody))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(responseBody);
+            var root = document.RootElement;
+
+            if (root.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var propertyName in new[] { "message", "mensaje", "error", "detail", "title", "descripcion", "description" })
+                {
+                    if (TryReadString(root, propertyName, out var value) && !string.IsNullOrWhiteSpace(value))
+                    {
+                        return Truncate(value.Trim(), 240);
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Si no es JSON, se usa el cuerpo crudo truncado.
+        }
+
+        return Truncate(responseBody.Trim().ReplaceLineEndings(" "), 240);
+    }
+
+    private static string Truncate(string value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        return value[..maxLength] + "...";
     }
 
     private static bool TryReadBoolean(JsonElement element, string propertyName, out bool value)

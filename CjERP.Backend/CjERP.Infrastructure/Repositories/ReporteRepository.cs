@@ -10,9 +10,12 @@ namespace CjERP.Infrastructure.Repositories;
 
 public sealed class ReporteRepository : IReporteRepository
 {
-    private const string ReporteAsistenciaSp = "dbo.RptAsistenciaFechas_Wup";
+    private const string ReporteAsistenciaSp = "dbo.RptAsistenciaFechas";
     private const string EmpleadosWupSp = "dbo.sp_EmpleadoCj_Listar_Wup";
+    private const string EmpleadosWupGerenciaSp = "dbo.sp_EmpleadoCj_Listar_Wup_Gerencia";
     private const string ReporteWhatsappLogTable = "dbo.ReporteWhatsAppLog";
+    private const string ReporteWhatsappLogGerenciaTable = "dbo.ReporteWhatsAppLogGerencia";
+    private const string ReporteWhatsappConfigTable = "dbo.ReporteWupConfig";
 
     private readonly string _connectionString;
 
@@ -22,25 +25,46 @@ public sealed class ReporteRepository : IReporteRepository
             ?? throw new InvalidOperationException("No se encontro la cadena de conexion DefaultConnection.");
     }
 
-    public async Task<ReporteWhatsappConfiguracionDto?> ObtenerConfiguracionAsync(CancellationToken cancellationToken = default)
+    public async Task<ReporteWhatsappConfiguracionDto?> ObtenerConfiguracionAsync(string tipoReporte, CancellationToken cancellationToken = default)
     {
-        const string sql = """
-        SELECT TOP 1
-            HoraEjecucion,
-            CantidadEmpleadosPorBloque,
-            DelaySegundosEntreBloques,
-            Activo,
-            UsuarioModificacion,
-            FechaModificacion
-        FROM dbo.ReporteWupConfig
-        ORDER BY FechaModificacion DESC, HoraEjecucion DESC;
-        """;
-
+        var normalizedType = ReporteWhatsappTipos.Normalize(tipoReporte);
         await using var connection = CreateConnection();
+        await EnsureReporteWupConfigSchemaAsync(connection, cancellationToken);
+        var hasTipoReporteColumn = await HasColumnAsync(connection, ReporteWhatsappConfigTable, "TipoReporte", cancellationToken);
+        var hasDiasEjecucionColumn = await HasColumnAsync(connection, ReporteWhatsappConfigTable, "DiasEjecucion", cancellationToken);
+
+        var sql = hasTipoReporteColumn
+            ? $"""
+              SELECT TOP 1
+                  TipoReporte,
+                  HoraEjecucion,
+                  {(hasDiasEjecucionColumn ? "DiasEjecucion," : string.Empty)}
+                  CantidadEmpleadosPorBloque,
+                  DelaySegundosEntreBloques,
+                  Activo,
+                  UsuarioModificacion,
+                  FechaModificacion
+              FROM dbo.ReporteWupConfig
+              WHERE TipoReporte = @TipoReporte
+              ORDER BY FechaModificacion DESC, HoraEjecucion DESC;
+              """
+            : $"""
+              SELECT TOP 1
+                  HoraEjecucion,
+                  {(hasDiasEjecucionColumn ? "DiasEjecucion," : string.Empty)}
+                  CantidadEmpleadosPorBloque,
+                  DelaySegundosEntreBloques,
+                  Activo,
+                  UsuarioModificacion,
+                  FechaModificacion
+              FROM dbo.ReporteWupConfig
+              ORDER BY FechaModificacion DESC, HoraEjecucion DESC;
+              """;
 
         var rows = await connection.QueryAsync(
             new CommandDefinition(
                 sql,
+                hasTipoReporteColumn ? new { TipoReporte = normalizedType } : null,
                 cancellationToken: cancellationToken));
 
         var row = rows.FirstOrDefault();
@@ -51,9 +75,14 @@ public sealed class ReporteRepository : IReporteRepository
 
         var values = ToDictionary(row);
 
+        var tipoReporteConfigurado = GetString(values, "TipoReporte", "tipoReporte");
+        var diasEjecucion = ParseDiasEjecucion(GetString(values, "DiasEjecucion", "diasEjecucion"));
+
         return new ReporteWhatsappConfiguracionDto
         {
+            TipoReporte = string.IsNullOrWhiteSpace(tipoReporteConfigurado) ? normalizedType : tipoReporteConfigurado,
             HoraEjecucion = GetString(values, "HoraEjecucion", "horaEjecucion", "Hora", "hora"),
+            DiasEjecucion = diasEjecucion,
             CantidadEmpleadosPorBloque = GetInt(values, "CantidadEmpleadosPorBloque", "cantidadEmpleadosPorBloque", "CantidadBloque", "cantidadBloque") ?? 0,
             DelaySegundosEntreBloques = GetInt(values, "DelaySegundosEntreBloques", "delaySegundosEntreBloques", "DelaySegundos", "delaySegundos") ?? 0,
             Activo = GetBool(values, "Activo", "activo", "EsActivo", "esActivo"),
@@ -64,53 +93,110 @@ public sealed class ReporteRepository : IReporteRepository
 
     public async Task ActualizarConfiguracionAsync(ReporteWhatsappConfiguracionUpdateDto request, string usuarioModificacion, CancellationToken cancellationToken = default)
     {
-        const string sql = """
-        IF OBJECT_ID('dbo.ReporteWupConfig', 'U') IS NOT NULL
-        BEGIN
-            IF EXISTS (SELECT 1 FROM dbo.ReporteWupConfig)
-            BEGIN
-                UPDATE dbo.ReporteWupConfig
-                SET HoraEjecucion = @HoraEjecucion,
-                    CantidadEmpleadosPorBloque = @CantidadEmpleadosPorBloque,
-                    DelaySegundosEntreBloques = @DelaySegundosEntreBloques,
-                    Activo = @Activo,
-                    UsuarioModificacion = @UsuarioModificacion,
-                    FechaModificacion = GETDATE();
-            END
-            ELSE
-            BEGIN
-                INSERT INTO dbo.ReporteWupConfig
-                (
-                    HoraEjecucion,
-                    CantidadEmpleadosPorBloque,
-                    DelaySegundosEntreBloques,
-                    Activo,
-                    UsuarioModificacion,
-                    FechaModificacion
-                )
-                VALUES
-                (
-                    @HoraEjecucion,
-                    @CantidadEmpleadosPorBloque,
-                    @DelaySegundosEntreBloques,
-                    @Activo,
-                    @UsuarioModificacion,
-                    GETDATE()
-                );
-            END;
-            RETURN;
-        END;
-
-        THROW 50000, 'No existe la tabla dbo.ReporteWupConfig para la configuracion de Reporte WUP.', 1;
-        """;
-
+        var normalizedType = ReporteWhatsappTipos.Normalize(request.TipoReporte);
         await using var connection = CreateConnection();
+        await EnsureReporteWupConfigSchemaAsync(connection, cancellationToken);
+        var hasTipoReporteColumn = await HasColumnAsync(connection, ReporteWhatsappConfigTable, "TipoReporte", cancellationToken);
+        var hasDiasEjecucionColumn = await HasColumnAsync(connection, ReporteWhatsappConfigTable, "DiasEjecucion", cancellationToken);
+        var diasEjecucion = SerializeDiasEjecucion(request.DiasEjecucion);
+
+        var sql = hasTipoReporteColumn
+            ? $"""
+              IF OBJECT_ID('dbo.ReporteWupConfig', 'U') IS NOT NULL
+              BEGIN
+                  IF EXISTS (SELECT 1 FROM dbo.ReporteWupConfig WHERE TipoReporte = @TipoReporte)
+                  BEGIN
+                      UPDATE dbo.ReporteWupConfig
+                      SET HoraEjecucion = @HoraEjecucion,
+                          {(hasDiasEjecucionColumn ? "DiasEjecucion = @DiasEjecucion," : string.Empty)}
+                          CantidadEmpleadosPorBloque = @CantidadEmpleadosPorBloque,
+                          DelaySegundosEntreBloques = @DelaySegundosEntreBloques,
+                          Activo = @Activo,
+                          UsuarioModificacion = @UsuarioModificacion,
+                          FechaModificacion = GETDATE()
+                      WHERE TipoReporte = @TipoReporte;
+                  END
+                  ELSE
+                  BEGIN
+                      INSERT INTO dbo.ReporteWupConfig
+                      (
+                          TipoReporte,
+                          HoraEjecucion,
+                          {(hasDiasEjecucionColumn ? "DiasEjecucion," : string.Empty)}
+                          CantidadEmpleadosPorBloque,
+                          DelaySegundosEntreBloques,
+                          Activo,
+                          UsuarioModificacion,
+                          FechaModificacion
+                      )
+                      VALUES
+                      (
+                          @TipoReporte,
+                          @HoraEjecucion,
+                          {(hasDiasEjecucionColumn ? "@DiasEjecucion," : string.Empty)}
+                          @CantidadEmpleadosPorBloque,
+                          @DelaySegundosEntreBloques,
+                          @Activo,
+                          @UsuarioModificacion,
+                          GETDATE()
+                      );
+                  END;
+                  RETURN;
+              END;
+
+              THROW 50000, 'No existe la tabla dbo.ReporteWupConfig para la configuracion de Reporte WUP.', 1;
+              """
+            : $"""
+              IF OBJECT_ID('dbo.ReporteWupConfig', 'U') IS NOT NULL
+              BEGIN
+                  IF EXISTS (SELECT 1 FROM dbo.ReporteWupConfig)
+                  BEGIN
+                      UPDATE dbo.ReporteWupConfig
+                      SET HoraEjecucion = @HoraEjecucion,
+                          {(hasDiasEjecucionColumn ? "DiasEjecucion = @DiasEjecucion," : string.Empty)}
+                          CantidadEmpleadosPorBloque = @CantidadEmpleadosPorBloque,
+                          DelaySegundosEntreBloques = @DelaySegundosEntreBloques,
+                          Activo = @Activo,
+                          UsuarioModificacion = @UsuarioModificacion,
+                          FechaModificacion = GETDATE();
+                  END
+                  ELSE
+                  BEGIN
+                      INSERT INTO dbo.ReporteWupConfig
+                      (
+                          HoraEjecucion,
+                          {(hasDiasEjecucionColumn ? "DiasEjecucion," : string.Empty)}
+                          CantidadEmpleadosPorBloque,
+                          DelaySegundosEntreBloques,
+                          Activo,
+                          UsuarioModificacion,
+                          FechaModificacion
+                      )
+                      VALUES
+                      (
+                          @HoraEjecucion,
+                          {(hasDiasEjecucionColumn ? "@DiasEjecucion," : string.Empty)}
+                          @CantidadEmpleadosPorBloque,
+                          @DelaySegundosEntreBloques,
+                          @Activo,
+                          @UsuarioModificacion,
+                          GETDATE()
+                      );
+                  END;
+                  RETURN;
+              END;
+
+              THROW 50000, 'No existe la tabla dbo.ReporteWupConfig para la configuracion de Reporte WUP.', 1;
+              """;
+
         await connection.ExecuteAsync(
             new CommandDefinition(
                 sql,
                 new
                 {
+                    TipoReporte = normalizedType,
                     request.HoraEjecucion,
+                    DiasEjecucion = diasEjecucion,
                     request.CantidadEmpleadosPorBloque,
                     request.DelaySegundosEntreBloques,
                     request.Activo,
@@ -119,10 +205,25 @@ public sealed class ReporteRepository : IReporteRepository
                 cancellationToken: cancellationToken));
     }
 
-    public async Task<IReadOnlyList<ReporteWhatsappEmpleadoDto>> ObtenerEmpleadosDestinoAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ReporteWhatsappEmpleadoDto>> ObtenerEmpleadosDestinoAsync(string tipoReporte, CancellationToken cancellationToken = default)
+    {
+        var storedProcedure = ReporteWhatsappTipos.IsGerencial(tipoReporte)
+            ? EmpleadosWupGerenciaSp
+            : EmpleadosWupSp;
+
+        await using var connection = CreateConnection();
+        var rows = await connection.QueryAsync(
+            new CommandDefinition(
+                storedProcedure,
+                commandType: CommandType.StoredProcedure,
+                cancellationToken: cancellationToken));
+
+        return rows.Select(MapEmpleado).ToList();
+    }
+
+    public async Task<IReadOnlyList<ReporteWhatsappEmpleadoDto>> ObtenerEmpleadosReporteGerencialAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = CreateConnection();
-
         var rows = await connection.QueryAsync(
             new CommandDefinition(
                 EmpleadosWupSp,
@@ -134,25 +235,26 @@ public sealed class ReporteRepository : IReporteRepository
 
     public async Task<IReadOnlyList<ReporteWhatsappEmpleadoDto>> ObtenerEmpleadosFallidosAsync(DateTime fechaProceso, string tipoReporte, CancellationToken cancellationToken = default)
     {
-        if (!await ExisteTablaLogAsync(cancellationToken))
+        var logTable = GetLogTableName(tipoReporte);
+        if (!await ExisteTablaLogAsync(tipoReporte, cancellationToken))
         {
             return Array.Empty<ReporteWhatsappEmpleadoDto>();
         }
 
-        const string sql = """
+        var sql = $"""
         SELECT DISTINCT
             l.IdEmpleado,
             l.Usuario,
             l.Telefono,
             l.Usuario AS NombreEmpleado
-        FROM dbo.ReporteWhatsAppLog l
+        FROM {logTable} l
         WHERE CAST(l.FechaProceso AS date) = @FechaProceso
           AND l.TipoReporte = @TipoReporte
           AND l.EstadoEnvio <> 'ENVIADO'
           AND NOT EXISTS
           (
               SELECT 1
-              FROM dbo.ReporteWhatsAppLog ok
+              FROM {logTable} ok
               WHERE ok.IdEmpleado = l.IdEmpleado
                 AND CAST(ok.FechaProceso AS date) = CAST(l.FechaProceso AS date)
                 AND ok.TipoReporte = l.TipoReporte
@@ -168,7 +270,7 @@ public sealed class ReporteRepository : IReporteRepository
                 new
                 {
                     FechaProceso = fechaProceso.Date,
-                    TipoReporte = tipoReporte
+                    TipoReporte = ReporteWhatsappTipos.Normalize(tipoReporte)
                 },
                 cancellationToken: cancellationToken));
 
@@ -182,7 +284,38 @@ public sealed class ReporteRepository : IReporteRepository
         var parameters = new DynamicParameters();
         parameters.Add("@FechaInicio", fechaInicio, DbType.String);
         parameters.Add("@FechaFin", fechaFin, DbType.String);
-        parameters.Add("@IdEmpleado", idEmpleado, DbType.Int32);
+
+        var hasIdEmpleadoParameter = await HasStoredProcedureParameterAsync(
+            connection,
+            ReporteAsistenciaSp,
+            "@IdEmpleado",
+            cancellationToken);
+
+        if (hasIdEmpleadoParameter)
+        {
+            parameters.Add("@IdEmpleado", idEmpleado, DbType.Int32);
+        }
+
+        var rows = await connection.QueryAsync(
+            new CommandDefinition(
+                ReporteAsistenciaSp,
+                parameters,
+                commandType: CommandType.StoredProcedure,
+                cancellationToken: cancellationToken));
+
+        var mapped = rows.Select(MapReporte).ToList();
+        return hasIdEmpleadoParameter
+            ? mapped
+            : mapped.Where(x => x.IdEmpleado == idEmpleado).ToList();
+    }
+
+    public async Task<IReadOnlyList<ReporteWhatsappAsistenciaItemDto>> ObtenerReporteAsistenciaPeriodoAsync(string fechaInicio, string fechaFin, CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+
+        var parameters = new DynamicParameters();
+        parameters.Add("@FechaInicio", fechaInicio, DbType.String);
+        parameters.Add("@FechaFin", fechaFin, DbType.String);
 
         var rows = await connection.QueryAsync(
             new CommandDefinition(
@@ -196,14 +329,15 @@ public sealed class ReporteRepository : IReporteRepository
 
     public async Task<bool> ExisteEnvioExitosoAsync(int idEmpleado, DateTime fechaProceso, string tipoReporte, CancellationToken cancellationToken = default)
     {
-        if (!await ExisteTablaLogAsync(cancellationToken))
+        var logTable = GetLogTableName(tipoReporte);
+        if (!await ExisteTablaLogAsync(tipoReporte, cancellationToken))
         {
             return false;
         }
 
-        const string sql = """
+        var sql = $"""
         SELECT TOP 1 1
-        FROM dbo.ReporteWhatsAppLog
+        FROM {logTable}
         WHERE IdEmpleado = @IdEmpleado
           AND CAST(FechaProceso AS date) = @FechaProceso
           AND TipoReporte = @TipoReporte
@@ -218,7 +352,7 @@ public sealed class ReporteRepository : IReporteRepository
                 {
                     IdEmpleado = idEmpleado,
                     FechaProceso = fechaProceso.Date,
-                    TipoReporte = tipoReporte
+                    TipoReporte = ReporteWhatsappTipos.Normalize(tipoReporte)
                 },
                 cancellationToken: cancellationToken));
 
@@ -227,13 +361,14 @@ public sealed class ReporteRepository : IReporteRepository
 
     public async Task InsertarLogAsync(ReporteWhatsappLogDto log, CancellationToken cancellationToken = default)
     {
-        if (!await ExisteTablaLogAsync(cancellationToken))
+        var logTable = GetLogTableName(log.TipoReporte);
+        if (!await ExisteTablaLogAsync(log.TipoReporte, cancellationToken))
         {
-            throw new InvalidOperationException("No existe la tabla dbo.ReporteWhatsAppLog. Ejecute el script SQL del módulo antes de procesar envíos WUP.");
+            throw new InvalidOperationException($"No existe la tabla {logTable}. Ejecute el script SQL del modulo antes de procesar envios WUP.");
         }
 
-        const string sql = """
-        INSERT INTO dbo.ReporteWhatsAppLog
+        var sql = $"""
+        INSERT INTO {logTable}
         (
             IdEmpleado,
             Usuario,
@@ -281,14 +416,15 @@ public sealed class ReporteRepository : IReporteRepository
                 cancellationToken: cancellationToken));
     }
 
-    public async Task<IReadOnlyList<ReporteWhatsappLogDto>> ObtenerLogsAsync(DateTime? fechaProceso, int top, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ReporteWhatsappLogDto>> ObtenerLogsAsync(DateTime? fechaProceso, string tipoReporte, int top, CancellationToken cancellationToken = default)
     {
-        if (!await ExisteTablaLogAsync(cancellationToken))
+        var logTable = GetLogTableName(tipoReporte);
+        if (!await ExisteTablaLogAsync(tipoReporte, cancellationToken))
         {
             return Array.Empty<ReporteWhatsappLogDto>();
         }
 
-        const string sql = """
+        var sql = $"""
         SELECT TOP (@Top)
             l.IdLog,
             l.IdEmpleado,
@@ -308,8 +444,9 @@ public sealed class ReporteRepository : IReporteRepository
             l.OrigenEjecucion,
             l.UsuarioEjecucion,
             l.Usuario AS NombreEmpleado
-        FROM dbo.ReporteWhatsAppLog l
+        FROM {logTable} l
         WHERE (@FechaProceso IS NULL OR CAST(l.FechaProceso AS date) = @FechaProceso)
+          AND l.TipoReporte = @TipoReporte
         ORDER BY l.IdLog DESC;
         """;
 
@@ -320,21 +457,23 @@ public sealed class ReporteRepository : IReporteRepository
                 new
                 {
                     Top = top,
-                    FechaProceso = fechaProceso?.Date
+                    FechaProceso = fechaProceso?.Date,
+                    TipoReporte = ReporteWhatsappTipos.Normalize(tipoReporte)
                 },
                 cancellationToken: cancellationToken));
 
         return rows.ToList();
     }
 
-    public async Task<ReporteWhatsappKpiDto> ObtenerKpisAsync(DateTime? fechaProceso, CancellationToken cancellationToken = default)
+    public async Task<ReporteWhatsappKpiDto> ObtenerKpisAsync(DateTime? fechaProceso, string tipoReporte, CancellationToken cancellationToken = default)
     {
-        if (!await ExisteTablaLogAsync(cancellationToken))
+        var logTable = GetLogTableName(tipoReporte);
+        if (!await ExisteTablaLogAsync(tipoReporte, cancellationToken))
         {
             return new ReporteWhatsappKpiDto();
         }
 
-        const string sql = """
+        var sql = $"""
         SELECT
             COUNT(1) AS TotalProcesados,
             SUM(CASE WHEN EstadoEnvio = 'ENVIADO' THEN 1 ELSE 0 END) AS TotalEnviados,
@@ -342,15 +481,20 @@ public sealed class ReporteRepository : IReporteRepository
             SUM(CASE WHEN EstadoEnvio LIKE 'OMITIDO%' THEN 1 ELSE 0 END) AS TotalOmitidos,
             SUM(CASE WHEN EstadoEnvio = 'DUPLICADO_OMITIDO' THEN 1 ELSE 0 END) AS TotalDuplicados,
             SUM(CASE WHEN EstadoEnvio <> 'ENVIADO' THEN 1 ELSE 0 END) AS TotalPendientesRetry
-        FROM dbo.ReporteWhatsAppLog
-        WHERE (@FechaProceso IS NULL OR CAST(FechaProceso AS date) = @FechaProceso);
+        FROM {logTable}
+        WHERE (@FechaProceso IS NULL OR CAST(FechaProceso AS date) = @FechaProceso)
+          AND TipoReporte = @TipoReporte;
         """;
 
         await using var connection = CreateConnection();
         var result = await connection.QueryFirstOrDefaultAsync<ReporteWhatsappKpiDto>(
             new CommandDefinition(
                 sql,
-                new { FechaProceso = fechaProceso?.Date },
+                new
+                {
+                    FechaProceso = fechaProceso?.Date,
+                    TipoReporte = ReporteWhatsappTipos.Normalize(tipoReporte)
+                },
                 cancellationToken: cancellationToken));
 
         return result ?? new ReporteWhatsappKpiDto();
@@ -399,17 +543,101 @@ public sealed class ReporteRepository : IReporteRepository
 
     private SqlConnection CreateConnection() => new(_connectionString);
 
-    private async Task<bool> ExisteTablaLogAsync(CancellationToken cancellationToken)
+    private static async Task EnsureReporteWupConfigSchemaAsync(SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+        IF OBJECT_ID('dbo.ReporteWupConfig', 'U') IS NULL
+            RETURN;
+
+        IF COL_LENGTH('dbo.ReporteWupConfig', 'TipoReporte') IS NULL
+        BEGIN
+            ALTER TABLE dbo.ReporteWupConfig
+            ADD TipoReporte nvarchar(50) NULL;
+
+            EXEC sp_executesql N'
+                UPDATE dbo.ReporteWupConfig
+                SET TipoReporte = @TipoReporte
+                WHERE TipoReporte IS NULL OR LTRIM(RTRIM(TipoReporte)) = '''';
+            ', N'@TipoReporte nvarchar(50)', @TipoReporte = N'ASISTENCIA_WUP';
+        END;
+
+        IF COL_LENGTH('dbo.ReporteWupConfig', 'DiasEjecucion') IS NULL
+        BEGIN
+            ALTER TABLE dbo.ReporteWupConfig
+            ADD DiasEjecucion nvarchar(200) NULL;
+        END;
+        """;
+
+        await connection.ExecuteAsync(
+            new CommandDefinition(
+                sql,
+                cancellationToken: cancellationToken));
+    }
+
+    private async Task<bool> ExisteTablaLogAsync(string tipoReporte, CancellationToken cancellationToken)
+    {
+        await using var connection = CreateConnection();
+        return await HasTableAsync(connection, GetLogTableName(tipoReporte), cancellationToken);
+    }
+
+    private static string GetLogTableName(string tipoReporte) =>
+        ReporteWhatsappTipos.IsGerencial(tipoReporte)
+            ? ReporteWhatsappLogGerenciaTable
+            : ReporteWhatsappLogTable;
+
+    private static async Task<bool> HasTableAsync(SqlConnection connection, string tableName, CancellationToken cancellationToken)
     {
         const string sql = """
         SELECT CASE WHEN OBJECT_ID(@TableName, 'U') IS NOT NULL THEN 1 ELSE 0 END;
         """;
 
-        await using var connection = CreateConnection();
         var exists = await connection.ExecuteScalarAsync<int>(
             new CommandDefinition(
                 sql,
-                new { TableName = ReporteWhatsappLogTable },
+                new { TableName = tableName },
+                cancellationToken: cancellationToken));
+
+        return exists == 1;
+    }
+
+    private static async Task<bool> HasColumnAsync(SqlConnection connection, string tableName, string columnName, CancellationToken cancellationToken)
+    {
+        const string sql = """
+        SELECT CASE WHEN COL_LENGTH(@TableName, @ColumnName) IS NOT NULL THEN 1 ELSE 0 END;
+        """;
+
+        var exists = await connection.ExecuteScalarAsync<int>(
+            new CommandDefinition(
+                sql,
+                new { TableName = tableName, ColumnName = columnName },
+                cancellationToken: cancellationToken));
+
+        return exists == 1;
+    }
+
+    private static async Task<bool> HasStoredProcedureParameterAsync(SqlConnection connection, string procedureName, string parameterName, CancellationToken cancellationToken)
+    {
+        const string sql = """
+        SELECT CASE WHEN EXISTS
+        (
+            SELECT 1
+            FROM sys.parameters p
+            INNER JOIN sys.objects o
+                ON p.object_id = o.object_id
+            WHERE o.object_id = OBJECT_ID(@ProcedureName)
+              AND p.name = @ParameterName
+        )
+        THEN 1 ELSE 0 END;
+        """;
+
+        var exists = await connection.ExecuteScalarAsync<int>(
+            new CommandDefinition(
+                sql,
+                new
+                {
+                    ProcedureName = procedureName,
+                    ParameterName = parameterName
+                },
                 cancellationToken: cancellationToken));
 
         return exists == 1;
@@ -425,24 +653,49 @@ public sealed class ReporteRepository : IReporteRepository
             Usuario = GetString(values, "Usuario", "usuario", "IdUsuario", "idUsuario", "NombreEmpleado", "nombreEmpleado"),
             NombreEmpleado = GetString(values, "NombreEmpleado", "nombreEmpleado", "Usuario", "usuario"),
             Correo = GetString(values, "Correo", "correo", "Email", "email"),
-            Telefono = GetString(values, "Telefono", "telefono", "Celular", "celular", "TelefonoWup", "telefonoWup")
+            Telefono = GetString(values, "Telefono", "telefono", "Celular", "celular", "TelefonoWup", "telefonoWup"),
+            Ubicacion = GetString(values, "Ubicacion", "ubicacion", "Sede", "sede")
         };
     }
 
     private static ReporteWhatsappAsistenciaItemDto MapReporte(dynamic row)
     {
         var values = ToDictionary(row);
+        var totalHoras = GetDecimal(values, "TotalHoras", "totalHoras", "HorasLaboradas", "horasLaboradas");
+        var totalHorasEmpleado = GetDecimal(values, "TotalHorasEmpleado", "totalHorasEmpleado", "HorasLaboradas", "horasLaboradas");
+        var totalHorasLaborales = GetDecimal(values, "TotalHorasLaborales", "totalHorasLaborales", "HorasObjetivo", "horasObjetivo", "HorasProgramadas", "horasProgramadas");
+        var diferenciaHoras = GetDecimal(values, "DiferenciaHoras", "diferenciaHoras");
+
+        if (diferenciaHoras == 0m && totalHorasLaborales != 0m)
+        {
+            diferenciaHoras = totalHoras - totalHorasEmpleado;
+            if (diferenciaHoras == 0m)
+            {
+                diferenciaHoras = totalHorasLaborales - totalHorasEmpleado;
+            }
+        }
+
+        var estadoValidacionHoras = GetString(values, "EstadoValidacionHoras", "estadoValidacionHoras");
+        if (string.IsNullOrWhiteSpace(estadoValidacionHoras))
+        {
+            estadoValidacionHoras = diferenciaHoras > 0 ? "COMPLETO" : "REVISAR";
+        }
 
         return new ReporteWhatsappAsistenciaItemDto
         {
+            IdEmpleado = GetInt(values, "IdEmpleado", "idEmpleado", "CodEmp", "codEmp") ?? 0,
             Fecha = GetDateText(values, "Fecha", "fecha"),
             NombreEmpleado = GetString(values, "NombreEmpleado", "nombreEmpleado", "nombreempleado"),
             EstadoMarcacionTexto = GetString(values, "EstadoMarcacionTexto", "estadoMarcacionTexto", "Estado", "estado"),
             Ubicacion = GetString(values, "Ubicacion", "ubicacion"),
-            HoraEntrada = GetString(values, "HoraEntrada", "horaEntrada", "Hora", "hora"),
-            HoraSalida = GetString(values, "HoraSalida", "horaSalida", "Salida", "salida"),
+            HoraEntrada = GetTimeText(values, "HoraEntrada", "horaEntrada", "Hora", "hora"),
+            HoraSalida = GetTimeText(values, "HoraSalida", "horaSalida", "Salida", "salida"),
             TiempoHoras = GetString(values, "TiempoHoras", "tiempoHoras", "TiempoTrabajado", "tiempoTrabajado"),
-            TotalHoras = GetDecimal(values, "TotalHoras", "totalHoras")
+            TotalHoras = totalHoras,
+            TotalHorasEmpleado = totalHorasEmpleado == 0m ? totalHoras : totalHorasEmpleado,
+            TotalHorasLaborales = totalHorasLaborales == 0m ? totalHoras : totalHorasLaborales,
+            DiferenciaHoras = diferenciaHoras,
+            EstadoValidacionHoras = estadoValidacionHoras
         };
     }
 
@@ -468,6 +721,25 @@ public sealed class ReporteRepository : IReporteRepository
             }
 
             return Convert.ToString(value, CultureInfo.InvariantCulture)?.Trim() ?? string.Empty;
+        }
+
+        return string.Empty;
+    }
+
+    private static string GetTimeText(IDictionary<string, object?> values, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (!values.TryGetValue(key, out var value) || value is null || value is DBNull)
+            {
+                continue;
+            }
+
+            var formatted = FormatTimeValue(value);
+            if (!string.IsNullOrWhiteSpace(formatted) && formatted != "00:00:00")
+            {
+                return formatted;
+            }
         }
 
         return string.Empty;
@@ -502,6 +774,52 @@ public sealed class ReporteRepository : IReporteRepository
         }
 
         return string.Empty;
+    }
+
+    private static string FormatTimeValue(object value)
+    {
+        if (value is DateTime dateTime)
+        {
+            if (dateTime.Year == 1900 && dateTime.Month == 1 && dateTime.Day == 1 && dateTime.TimeOfDay == TimeSpan.Zero)
+            {
+                return string.Empty;
+            }
+
+            return dateTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+        }
+
+        if (value is DateTimeOffset dateTimeOffset)
+        {
+            return dateTimeOffset.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+        }
+
+        if (value is TimeSpan timeSpan)
+        {
+            return timeSpan.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture);
+        }
+
+        var text = Convert.ToString(value, CultureInfo.InvariantCulture)?.Trim();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        if (DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDateTime))
+        {
+            if (parsedDateTime.Year == 1900 && parsedDateTime.Month == 1 && parsedDateTime.Day == 1 && parsedDateTime.TimeOfDay == TimeSpan.Zero)
+            {
+                return string.Empty;
+            }
+
+            return parsedDateTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+        }
+
+        if (TimeSpan.TryParse(text, CultureInfo.InvariantCulture, out var parsedTimeSpan))
+        {
+            return parsedTimeSpan.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture);
+        }
+
+        return text;
     }
 
     private static int? GetInt(IDictionary<string, object?> values, params string[] keys)
@@ -569,6 +887,16 @@ public sealed class ReporteRepository : IReporteRepository
                 return decimalValue;
             }
 
+            if (value is double doubleValue)
+            {
+                return (decimal)doubleValue;
+            }
+
+            if (value is float floatValue)
+            {
+                return (decimal)floatValue;
+            }
+
             if (decimal.TryParse(Convert.ToString(value, CultureInfo.InvariantCulture), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed))
             {
                 return parsed;
@@ -599,5 +927,55 @@ public sealed class ReporteRepository : IReporteRepository
         }
 
         return null;
+    }
+
+    private static IReadOnlyList<string> ParseDiasEjecucion(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return Array.Empty<string>();
+        }
+
+        return value
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(NormalizeDiaEjecucion)
+            .Where(static item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static string SerializeDiasEjecucion(IReadOnlyList<string>? dias)
+    {
+        if (dias is null || dias.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        return string.Join(
+            ",",
+            dias
+                .Select(NormalizeDiaEjecucion)
+                .Where(static item => !string.IsNullOrWhiteSpace(item))
+                .Distinct(StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static string NormalizeDiaEjecucion(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return value.Trim().ToUpperInvariant() switch
+        {
+            "LUNES" or "MONDAY" => "MONDAY",
+            "MARTES" or "TUESDAY" => "TUESDAY",
+            "MIERCOLES" or "MIÉRCOLES" or "WEDNESDAY" => "WEDNESDAY",
+            "JUEVES" or "THURSDAY" => "THURSDAY",
+            "VIERNES" or "FRIDAY" => "FRIDAY",
+            "SABADO" or "SÁBADO" or "SATURDAY" => "SATURDAY",
+            "DOMINGO" or "SUNDAY" => "SUNDAY",
+            _ => string.Empty
+        };
     }
 }

@@ -1,3 +1,4 @@
+using CjERP.Application.DTOs.ReportesWhatsapp;
 using CjERP.Application.Interfaces.Services;
 
 namespace CjERP.Api.Jobs;
@@ -11,18 +12,18 @@ public sealed class ReporteWhatsAppJob
         _reporteAutomaticoService = reporteAutomaticoService;
     }
 
-    public Task EjecutarProgramadoAsync()
+    public Task EjecutarProgramadoAsync(string tipoReporte)
     {
-        return _reporteAutomaticoService.EjecutarAsync("AUTOMATICO", "HANGFIRE", false);
+        return _reporteAutomaticoService.EjecutarAsync(ReporteWhatsappTipos.Normalize(tipoReporte), "AUTOMATICO", "HANGFIRE", false);
     }
 
-    public Task EjecutarManualAsync(string usuarioEjecucion)
+    public Task EjecutarManualAsync(string tipoReporte, string usuarioEjecucion)
     {
-        return _reporteAutomaticoService.EjecutarAsync("MANUAL", usuarioEjecucion, false);
+        return _reporteAutomaticoService.EjecutarAsync(ReporteWhatsappTipos.Normalize(tipoReporte), "MANUAL", usuarioEjecucion, false);
     }
 
-    public Task ReintentarFallidosAsync(string usuarioEjecucion)
+    public Task ReintentarFallidosAsync(string tipoReporte, string usuarioEjecucion)
     {
-        return _reporteAutomaticoService.EjecutarAsync("REINTENTO", usuarioEjecucion, true);
+        return _reporteAutomaticoService.EjecutarAsync(ReporteWhatsappTipos.Normalize(tipoReporte), "REINTENTO", usuarioEjecucion, true);
     }
 }

@@ -1,5 +1,9 @@
 import httpClient from "./httpClient";
-import type { AsistenciaReporteItem, AsistenciaReporteQueryParams } from "../models/asistencia";
+import type {
+  AsistenciaReporteItem,
+  AsistenciaReportePdfRequest,
+  AsistenciaReporteQueryParams,
+} from "../models/asistencia";
 
 type AsistenciaReporteApiRow = Record<string, unknown>;
 
@@ -83,4 +87,10 @@ export async function buscarAsistencia(params: AsistenciaReporteQueryParams) {
   const response = await httpClient.get<AsistenciaReporteApiRow[]>("/asistencia/reporte", { params });
   const rows = Array.isArray(response) ? response : [];
   return rows.map(normalizeAsistenciaRow);
+}
+
+export async function exportarAsistenciaEmpleadoPdf(payload: AsistenciaReportePdfRequest) {
+  return await httpClient.post<Blob>("/asistencia/reporte/pdf-empleado", payload, {
+    responseType: "blob",
+  });
 }

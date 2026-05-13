@@ -1,5 +1,9 @@
+export type ReporteWhatsappTipo = "operativo" | "gerencial";
+
 export type ReporteWhatsappConfiguracion = {
+  tipoReporte?: string;
   horaEjecucion: string;
+  diasEjecucion?: string[];
   cantidadEmpleadosPorBloque: number;
   delaySegundosEntreBloques: number;
   activo: boolean;
@@ -16,6 +20,7 @@ export type ReporteWhatsappPeriodo = {
 };
 
 export type ReporteWhatsappRuntime = {
+  tipoReporte?: string;
   executionId: string;
   isRunning: boolean;
   origenEjecucion: string;

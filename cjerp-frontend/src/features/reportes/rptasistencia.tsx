@@ -3,8 +3,8 @@ import {
   matchesCrudToolbarSearch,
   type CrudToolbarSearchField,
 } from "../../components/base/CrudToolbar";
-import { buscarAsistencia } from "../../api/asistenciaService";
-import type { AsistenciaReporteItem } from "../../models/asistencia";
+import { buscarAsistencia, exportarAsistenciaEmpleadoPdf } from "../../api/asistenciaService";
+import type { AsistenciaReporteItem, AsistenciaReportePdfItem } from "../../models/asistencia";
 import { getHttpErrorMessage } from "../../utils/httpError";
 
 type SelectFilterKey =
@@ -76,7 +76,9 @@ type EmployeeDateRow = {
   employee: string;
   ubicacion: string;
   total: number;
+  totalHorasFaltaIncompleto: number;
   totalHorasLaborales: number;
+  diferenciaHoras: number;
   estadoValidacionHoras: string;
   fechas: EmployeeDateCell[];
 };
@@ -84,10 +86,13 @@ type EmployeeDateRow = {
 type EmployeeGridFilters = {
   employee: string;
   estadoValidacionHoras: string;
+  diferenciaOperator: "" | "lt" | "gt" | "eq";
+  diferenciaValue: string;
 };
 
 const ALL_OPTION = "__ALL__";
 const OBSERVATION_HOURS_THRESHOLD = 9.6;
+const MISSING_OR_INCOMPLETE_HOURS = 9.6;
 const PRESENT_STATES = new Set(["PRESENTE", "ASISTIO", "OK"]);
 const TARDINESS_STATES = new Set(["TARDANZA", "TARDE"]);
 const CRITICAL_STATES = new Set(["SIN MARCAR", "SIN SALIDA", "SIN ENTRADA", "FALTA"]);
@@ -192,6 +197,15 @@ function parseDisplayDate(value: string) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+function getDayNameLabel(value: string) {
+  const parsed = parseDisplayDate(value);
+  if (!parsed) {
+    return "";
+  }
+
+  return parsed.toLocaleDateString("es-PE", { weekday: "long" });
+}
+
 function isWithinSelectedRange(value: string, startValue: string, endValue: string) {
   const current = parseDisplayDate(value);
   const start = parseInputDate(startValue);
@@ -277,6 +291,14 @@ function buildSelectOptions(rows: AsistenciaReporteItem[], selector: (item: Asis
   return [ALL_OPTION, ...Array.from(new Set(rows.map(selector).filter(Boolean))).sort((a, b) => a.localeCompare(b, "es"))];
 }
 
+function matchesMultiSelect(value: string, selectedValues: string[]) {
+  if (selectedValues.length === 0 || selectedValues.includes(ALL_OPTION)) {
+    return true;
+  }
+
+  return selectedValues.includes(value);
+}
+
 function getSortValue(item: AsistenciaReporteItem, key: SortKey) {
   switch (key) {
     case "totalHoras":
@@ -354,9 +376,16 @@ export default function RptAsistenciaPage() {
     estadoMarcacionTexto: ALL_OPTION,
     origenMarcacion: ALL_OPTION,
   });
+  const [selectedEstadoMarcacion, setSelectedEstadoMarcacion] = useState<string[]>([]);
   const [employeeGridFilters, setEmployeeGridFilters] = useState<EmployeeGridFilters>({
     employee: "",
     estadoValidacionHoras: ALL_OPTION,
+    diferenciaOperator: "",
+    diferenciaValue: "",
+  });
+  const [employeeGridSort, setEmployeeGridSort] = useState<{ key: "total" | "otros" | "diferencia"; direction: "asc" | "desc" }>({
+    key: "total",
+    direction: "desc",
   });
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
@@ -426,7 +455,7 @@ export default function RptAsistenciaPage() {
         (frontendFilters.area === ALL_OPTION || item.area === frontendFilters.area) &&
         (frontendFilters.ubicacion === ALL_OPTION || item.ubicacion === frontendFilters.ubicacion) &&
         (frontendFilters.estadoAct === ALL_OPTION || item.estadoAct === frontendFilters.estadoAct) &&
-        (frontendFilters.estadoMarcacionTexto === ALL_OPTION || item.estadoMarcacionTexto === frontendFilters.estadoMarcacionTexto) &&
+        matchesMultiSelect(item.estadoMarcacionTexto, selectedEstadoMarcacion) &&
         (frontendFilters.origenMarcacion === ALL_OPTION || item.origenMarcacion === frontendFilters.origenMarcacion)
       ));
 
@@ -434,7 +463,7 @@ export default function RptAsistenciaPage() {
       const compared = compareValues(getSortValue(left, sortState.key), getSortValue(right, sortState.key));
       return sortState.direction === "asc" ? compared : -compared;
     });
-  }, [deferredSearch, fechaFin, fechaInicio, frontendFilters, rows, searchFields, sortState]);
+  }, [deferredSearch, fechaFin, fechaInicio, frontendFilters, rows, searchFields, selectedEstadoMarcacion, sortState]);
 
   const detailRows = useMemo(() => {
     const base = filteredRows.filter((item) => (
@@ -446,7 +475,7 @@ export default function RptAsistenciaPage() {
 
     const shouldSortByTotalHoras =
       normalizeText(detailDrilldown.estadoMarcacion) === "ASISTENCIA" ||
-      normalizeText(frontendFilters.estadoMarcacionTexto) === "ASISTENCIA" ||
+      selectedEstadoMarcacion.some((item) => normalizeText(item) === "ASISTENCIA") ||
       normalizeText(frontendFilters.estado) === "ASISTENCIA";
 
     if (!shouldSortByTotalHoras) {
@@ -634,17 +663,32 @@ export default function RptAsistenciaPage() {
       const stateValues = groupedStates.get(employee) ?? new Map<string, Set<string>>();
       const ubicaciones = Array.from(employeeLocations.get(employee) ?? []).sort((a, b) => a.localeCompare(b, "es"));
       const validationStates = Array.from(employeeValidationStates.get(employee) ?? []).sort((a, b) => a.localeCompare(b, "es"));
+      const fechasDetalle = fechas.map((fecha) => ({
+        fecha,
+        totalHoras: values.get(fecha) ?? 0,
+        estadoMarcacionTexto: Array.from(stateValues.get(fecha) ?? []).sort((a, b) => a.localeCompare(b, "es")).join(", "),
+      }));
+      const totalHorasRango = fechasDetalle.reduce((sum, item) => sum + item.totalHoras, 0);
+      const totalHorasFaltaIncompleto = fechasDetalle.reduce((sum, item) => {
+        const states = item.estadoMarcacionTexto
+          .split(",")
+          .map((state) => normalizeText(state))
+          .filter(Boolean);
+
+        return states.some((state) => state === "FALTA" || state === "INCOMPLETO")
+          ? sum + MISSING_OR_INCOMPLETE_HOURS
+          : sum;
+      }, 0);
+
       return {
         employee,
         ubicacion: ubicaciones.join(", "),
-        total: Array.from(values.values()).reduce((sum, value) => sum + value, 0),
+        total: totalHorasRango,
+        totalHorasFaltaIncompleto,
         totalHorasLaborales: employeeLaborHours.get(employee) ?? 0,
+        diferenciaHoras: (totalHorasRango + totalHorasFaltaIncompleto) - (employeeLaborHours.get(employee) ?? 0),
         estadoValidacionHoras: validationStates.join(", "),
-        fechas: fechas.map((fecha) => ({
-          fecha,
-          totalHoras: values.get(fecha) ?? 0,
-          estadoMarcacionTexto: Array.from(stateValues.get(fecha) ?? []).sort((a, b) => a.localeCompare(b, "es")).join(", "),
-        })),
+        fechas: fechasDetalle,
       };
     });
 
@@ -658,22 +702,47 @@ export default function RptAsistenciaPage() {
 
   const filteredEmployeeGridRows = useMemo(() => {
     const employeeQuery = normalizeText(employeeGridFilters.employee);
+    const differenceFilterValue = Number(employeeGridFilters.diferenciaValue);
 
-    return chartEmpleadoPorDia.rows.filter((item) => {
+    return [...chartEmpleadoPorDia.rows.filter((item) => {
       const matchesEmployee = !employeeQuery ||
         normalizeText(item.employee).includes(employeeQuery) ||
         normalizeText(item.ubicacion).includes(employeeQuery);
       const matchesValidation =
         employeeGridFilters.estadoValidacionHoras === ALL_OPTION ||
         item.estadoValidacionHoras === employeeGridFilters.estadoValidacionHoras;
+      const matchesDifference =
+        !employeeGridFilters.diferenciaOperator ||
+        !employeeGridFilters.diferenciaValue.trim() ||
+        !Number.isFinite(differenceFilterValue)
+          ? true
+          : employeeGridFilters.diferenciaOperator === "lt"
+            ? item.diferenciaHoras < differenceFilterValue
+            : employeeGridFilters.diferenciaOperator === "gt"
+              ? item.diferenciaHoras > differenceFilterValue
+              : item.diferenciaHoras === differenceFilterValue;
 
-      return matchesEmployee && matchesValidation;
+      return matchesEmployee && matchesValidation && matchesDifference;
+    })].sort((left, right) => {
+      const compared = employeeGridSort.key === "diferencia"
+        ? left.diferenciaHoras - right.diferenciaHoras
+        : employeeGridSort.key === "otros"
+          ? left.totalHorasFaltaIncompleto - right.totalHorasFaltaIncompleto
+          : left.total - right.total;
+      if (compared !== 0) {
+        return employeeGridSort.direction === "asc" ? compared : -compared;
+      }
+
+      return left.employee.localeCompare(right.employee, "es");
     });
-  }, [chartEmpleadoPorDia.rows, employeeGridFilters]);
+  }, [chartEmpleadoPorDia.rows, employeeGridFilters, employeeGridSort]);
 
   const activeFilterCount = useMemo(
-    () => Object.values(frontendFilters).filter((value) => value !== ALL_OPTION).length,
-    [frontendFilters]
+    () =>
+      Object.values(frontendFilters).filter((value) => value !== ALL_OPTION).length +
+      (selectedEstadoMarcacion.length > 0 ? 1 : 0) +
+      ((employeeGridFilters.diferenciaOperator && employeeGridFilters.diferenciaValue.trim()) ? 1 : 0),
+    [frontendFilters, selectedEstadoMarcacion, employeeGridFilters.diferenciaOperator, employeeGridFilters.diferenciaValue]
   );
 
   const primaryFilterCount = 5;
@@ -716,12 +785,16 @@ export default function RptAsistenciaPage() {
       estadoMarcacionTexto: ALL_OPTION,
       origenMarcacion: ALL_OPTION,
     });
+    setSelectedEstadoMarcacion([]);
     setBusqueda("");
     setShowAdvancedFilters(false);
     setEmployeeGridFilters({
       employee: "",
       estadoValidacionHoras: ALL_OPTION,
+      diferenciaOperator: "",
+      diferenciaValue: "",
     });
+    setEmployeeGridSort({ key: "total", direction: "desc" });
     setDetailDrilldown({
       fecha: null,
       estadoMarcacion: null,
@@ -834,6 +907,56 @@ export default function RptAsistenciaPage() {
   };
 
   const exportPdf = async () => {
+    if (activeTab === "empleado") {
+      const employeeInfoByName = new Map(
+        filteredRows
+          .filter((item) => item.nombreEmpleado)
+          .map((item) => [
+            item.nombreEmpleado,
+            {
+              idEmpleado: item.idEmpleado,
+              hora: item.hora,
+              salida: item.salida,
+            },
+          ])
+      );
+
+      const pdfItems: AsistenciaReportePdfItem[] = filteredEmployeeGridRows.flatMap((row) => {
+        const employeeInfo = employeeInfoByName.get(row.employee);
+
+        return row.fechas.map((cell) => ({
+          fecha: cell.fecha,
+          hora: employeeInfo?.hora ?? "",
+          nombreEmpleado: row.employee,
+          ubicacion: row.ubicacion,
+          idEmpleado: employeeInfo?.idEmpleado ?? null,
+          salida: employeeInfo?.salida ?? "",
+          estadoMarcacionTexto: cell.estadoMarcacionTexto,
+          totalHoras: cell.totalHoras,
+          totalHorasEmpleado: row.total,
+          totalHorasLaborales: row.totalHorasLaborales,
+          estadoValidacionHoras: row.estadoValidacionHoras,
+        }));
+      });
+
+      const pdfBlob = await exportarAsistenciaEmpleadoPdf({
+        fechaInicio: toApiDate(fechaInicio),
+        fechaFin: toApiDate(fechaFin),
+        destinatario: "Reporte x Empleado",
+        items: pdfItems,
+      });
+
+      const url = URL.createObjectURL(pdfBlob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `reporte_asistencia_${toApiDate(fechaInicio).replaceAll("/", "")}_${toApiDate(fechaFin).replaceAll("/", "")}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
     const [{ jsPDF }, autoTableModule] = await Promise.all([
       import("jspdf"),
       import("jspdf-autotable"),
@@ -860,36 +983,6 @@ export default function RptAsistenciaPage() {
             const totalHoras = cell?.totalHoras ?? 0;
             return `${value} | ${formatDecimal(totalHoras, 2)} h`;
           }),
-        ]),
-        styles: {
-          fontSize: 6,
-          cellPadding: 1.5,
-          overflow: "linebreak",
-        },
-        headStyles: {
-          fillColor: [37, 99, 235],
-        },
-      });
-    } else if (activeTab === "empleado") {
-      autoTableModule.default(doc, {
-        startY: 30,
-        head: [[
-          "Empleado",
-          "Ubicacion",
-          "Total horas",
-          "Hrs Lab.",
-          "Estado valid.",
-          ...chartEmpleadoPorDia.fechas,
-        ]],
-        body: filteredEmployeeGridRows.map((item) => [
-          item.employee,
-          item.ubicacion || "Sin ubicacion",
-          formatDecimal(item.total, 2),
-          formatDecimal(item.totalHorasLaborales, 2),
-          item.estadoValidacionHoras || "Sin validacion",
-          ...chartEmpleadoPorDia.fechas.map((fecha) => buildEmployeeDateCellDisplay(
-            item.fechas.find((entry) => entry.fecha === fecha)
-          )),
         ]),
         styles: {
           fontSize: 6,
@@ -1075,11 +1168,11 @@ export default function RptAsistenciaPage() {
               options={filterOptions.estado}
               onChange={(value) => setFrontendFilters((prev) => ({ ...prev, estado: value }))}
             />
-            <SelectField
+            <MultiSelectField
               label="Estado marcacion"
-              value={frontendFilters.estadoMarcacionTexto}
-              options={filterOptions.estadoMarcacionTexto}
-              onChange={(value) => setFrontendFilters((prev) => ({ ...prev, estadoMarcacionTexto: value }))}
+              values={selectedEstadoMarcacion}
+              options={filterOptions.estadoMarcacionTexto.filter((option) => option !== ALL_OPTION)}
+              onChange={setSelectedEstadoMarcacion}
             />
             <SelectField
               label="Origen marcacion"
@@ -1223,6 +1316,18 @@ export default function RptAsistenciaPage() {
               validationFilter={employeeGridFilters.estadoValidacionHoras}
               validationOptions={employeeGridValidationOptions}
               onValidationFilterChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, estadoValidacionHoras: value }))}
+              differenceOperator={employeeGridFilters.diferenciaOperator}
+              differenceValue={employeeGridFilters.diferenciaValue}
+              onDifferenceOperatorChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, diferenciaOperator: value }))}
+              onDifferenceValueChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, diferenciaValue: value }))}
+              sortKey={employeeGridSort.key}
+              sortDirection={employeeGridSort.direction}
+              onToggleSort={(key) =>
+                setEmployeeGridSort((prev) => ({
+                  key,
+                  direction: prev.key === key ? (prev.direction === "asc" ? "desc" : "asc") : "desc",
+                }))
+              }
               onCellSelect={handleEmployeeDateCellClick}
             />
           </ChartCard>
@@ -1261,6 +1366,61 @@ function SelectField({
           </option>
         ))}
       </select>
+    </Field>
+  );
+}
+
+function MultiSelectField({
+  label,
+  values,
+  options,
+  onChange,
+}: {
+  label: string;
+  values: string[];
+  options: string[];
+  onChange: (values: string[]) => void;
+}) {
+  const summary = values.length === 0
+    ? "Todos"
+    : values.length === 1
+      ? values[0]
+      : `${values.length} seleccionados`;
+
+  return (
+    <Field label={label}>
+      <details style={styles.multiSelectWrap}>
+        <summary style={styles.multiSelectSummary}>{summary}</summary>
+        <div style={styles.multiSelectPanel}>
+          <label style={styles.multiSelectOption}>
+            <input
+              type="checkbox"
+              checked={values.length === 0}
+              onChange={() => onChange([])}
+            />
+            <span>Todos</span>
+          </label>
+          {options.map((option) => {
+            const checked = values.includes(option);
+            return (
+              <label key={`${label}-${option}`} style={styles.multiSelectOption}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => {
+                    onChange(
+                      checked
+                        ? values.filter((item) => item !== option)
+                        : [...values, option]
+                    );
+                  }}
+                />
+                <span>{option}</span>
+              </label>
+            );
+          })}
+        </div>
+      </details>
     </Field>
   );
 }
@@ -1446,11 +1606,33 @@ function SimpleStateDateGrid({
     1
   );
 
-  const getCellTone = (value: number) => {
-    if (value <= 0) return "#F8FAFC";
-    const intensity = Math.max(0.18, value / max);
-    return `rgba(37, 99, 235, ${Math.min(0.95, intensity)})`;
-  };
+  // Mejorar contraste y legibilidad de celdas (igual que grid empleado)
+  const getCellStyle = (value: number) => {
+    if (value <= 0) {
+      return {
+        background: "#FFFFFF",
+        color: "#64748B",
+        border: "1px solid #E5E7EB"
+      };
+    }
+    const intensity = Math.min(1, value / max);
+    let background, color;
+    if (intensity > 0.85) {
+      background = "#2563EB";
+      color = "#FFFFFF";
+    } else if (intensity > 0.5) {
+      background = "#60A5FA";
+      color = "#0F172A";
+    } else {
+      background = "#DBEAFE";
+      color = "#0F172A";
+    }
+    return {
+      background,
+      color,
+      border: "1px solid #E5E7EB"
+    };
+  } 
 
   return (
     <div style={styles.stateDateGridWrap}>
@@ -1484,16 +1666,17 @@ function SimpleStateDateGrid({
                   };
                   const value = cell.value;
                   const isSelected = selectedFecha === item.fecha && selectedEstado === state;
+                  const cellStyle = getCellStyle(value);
                   return (
                     <button
                       type="button"
                       key={`${state}-${item.fecha}`}
                       style={{
                         ...styles.stateDateGridCell,
-                        background: getCellTone(value),
-                        color: value > 0 ? "#FFFFFF" : "#94A3B8",
+                        ...cellStyle,
                         boxShadow: isSelected ? "inset 0 0 0 3px #0F172A" : "none",
                         cursor: onSelect ? "pointer" : "default",
+                        transition: "background 0.2s, color 0.2s"
                       }}
                       title={`${state} | ${item.fecha}: ${value} registros | ${formatDecimal(cell.totalHoras, 2)} horas`}
                       onClick={() => onSelect?.(item.fecha, state)}
@@ -1522,6 +1705,13 @@ function SimpleEmployeeDateGrid({
   validationFilter,
   validationOptions,
   onValidationFilterChange,
+  differenceOperator,
+  differenceValue,
+  onDifferenceOperatorChange,
+  onDifferenceValueChange,
+  sortKey,
+  sortDirection,
+  onToggleSort,
   onCellSelect,
 }: {
   data: EmployeeDateRow[];
@@ -1531,6 +1721,13 @@ function SimpleEmployeeDateGrid({
   validationFilter: string;
   validationOptions: string[];
   onValidationFilterChange: (value: string) => void;
+  differenceOperator: "" | "lt" | "gt" | "eq";
+  differenceValue: string;
+  onDifferenceOperatorChange: (value: "" | "lt" | "gt" | "eq") => void;
+  onDifferenceValueChange: (value: string) => void;
+  sortKey: "total" | "otros" | "diferencia";
+  sortDirection: "asc" | "desc";
+  onToggleSort: (key: "total" | "otros" | "diferencia") => void;
   onCellSelect?: (nombreEmpleado: string, fecha: string) => void;
 }) {
   const max = Math.max(
@@ -1538,10 +1735,61 @@ function SimpleEmployeeDateGrid({
     1
   );
 
-  const getCellTone = (value: number) => {
-    if (value <= 0) return "#F8FAFC";
-    const intensity = Math.max(0.18, value / max);
-    return `rgba(37, 99, 235, ${Math.min(0.95, intensity)})`;
+  // Sin color de fondo si estado es CORRECTO, si no: verde >=9.6, amarillo >0 y <9.6, blanco si 0 o menos
+  const getCellStyle = (value: number, estadoMarcacionTexto?: string) => {
+    const estado = normalizeText(estadoMarcacionTexto);
+    if (estado === "FALTA" || estado === "INCOMPLETO") {
+      return {
+        background: "#fee2e2", // rojo muy tenue
+        color: "#991B1B",
+        border: "1px solid #fef2f2"
+      };
+    }
+    if (estado === "CORRECTO") {
+      return {
+        background: "#fff",
+        color: "#166534",
+        border: "1px solid #E5E7EB"
+      };
+    }
+    if (value >= 9.6) {
+      return {
+        background: "#dcfce7",
+        color: "#166534",
+        border: "1px solid #bbf7d0"
+      };
+    } else if (value > 0) {
+      return {
+        background: "#fef9c3",
+        color: "#a16207",
+        border: "1px solid #fde047"
+      };
+    } else {
+      return {
+        background: "#fff",
+        color: "#64748B",
+        border: "1px solid #E5E7EB"
+      };
+    }
+  };
+
+  const getDifferenceTone = (difference: number) => {
+    if (difference < 0) {
+      return {
+        rowBackground: "#FEF2F2",
+        rowText: "#991B1B",
+        accentBackground: "#FEE2E2",
+        accentText: "#991B1B",
+      };
+    }
+
+    // Blanco si diferencia >= 0
+    return {
+      rowBackground: "#FFFFFF",
+      rowText: "#166534",
+      accentBackground: "#FFFFFF",
+      accentText: "#166534",
+    };
   };
 
   return (
@@ -1553,7 +1801,7 @@ function SimpleEmployeeDateGrid({
           <div
             style={{
               ...styles.stateDateGrid,
-              gridTemplateColumns: `220px 110px 100px 150px repeat(${fechas.length}, minmax(88px, 1fr))`,
+              gridTemplateColumns: `220px 110px 100px 100px 140px 150px repeat(${fechas.length}, minmax(88px, 1fr))`,
             }}
           >
             <div style={{ ...styles.stateDateGridHeader, ...styles.stateDateGridCorner }}>
@@ -1569,10 +1817,69 @@ function SimpleEmployeeDateGrid({
               </div>
             </div>
             <div style={styles.stateDateGridHeader}>
-              Total horas
+              <button
+                type="button"
+                style={styles.employeeGridSortButton}
+                onClick={() => onToggleSort("total")}
+              >
+                <span>Total horas</span>
+                <span style={styles.employeeGridSortPill}>
+                  {sortKey === "total" ? (sortDirection === "asc" ? "ASC" : "DESC") : "ORD"}
+                </span>
+              </button>
+            </div>
+            <div style={styles.stateDateGridHeader}>
+              <button
+                type="button"
+                style={styles.employeeGridSortButton}
+                onClick={() => onToggleSort("otros")}
+              >
+                <span>Hrs Otros</span>
+                <span style={styles.employeeGridSortPill}>
+                  {sortKey === "otros" ? (sortDirection === "asc" ? "ASC" : "DESC") : "ORD"}
+                </span>
+              </button>
             </div>
             <div style={styles.stateDateGridHeader}>
               Hrs Lab.
+            </div>
+            <div style={styles.stateDateGridHeader}>
+              <div style={styles.employeeGridHeaderStack}>
+                <button
+                  type="button"
+                  style={styles.employeeGridSortButton}
+                  onClick={() => onToggleSort("diferencia")}
+                >
+                  <span>Diferencia</span>
+                  <span style={styles.employeeGridSortPill}>
+                    {sortKey === "diferencia" ? (sortDirection === "asc" ? "ASC" : "DESC") : "ORD"}
+                  </span>
+                </button>
+                <select
+                  value={differenceOperator}
+                  onChange={e => {
+                    const val = e.target.value as "" | "lt" | "gt" | "eq";
+                    onDifferenceOperatorChange(val);
+                    if (val === "") onDifferenceValueChange("0");
+                  }}
+                  style={styles.employeeGridHeaderSelect}
+                >
+                  <option value="">Sin filtro</option>
+                  <option value="lt">Menor a</option>
+                  <option value="gt">Mayor a</option>
+                  <option value="eq">Igual a</option>
+                </select>
+                {differenceOperator !== "" && (
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={differenceValue}
+                    onChange={event => onDifferenceValueChange(event.target.value)}
+                    placeholder="Nro"
+                    style={styles.employeeGridHeaderInput}
+                  />
+                )}
+              </div>
             </div>
             <div style={styles.stateDateGridHeader}>
               <div style={styles.employeeGridHeaderStack}>
@@ -1592,13 +1899,25 @@ function SimpleEmployeeDateGrid({
             </div>
             {fechas.map((fecha) => (
               <div key={`head-employee-${fecha}`} style={styles.stateDateGridHeader}>
-                {fecha}
+                <div style={styles.employeeGridDateHeader}>
+                  <span>{fecha}</span>
+                  <span style={styles.employeeGridDateSubheader}>{getDayNameLabel(fecha)}</span>
+                </div>
               </div>
             ))}
 
             {data.map((item) => (
               <React.Fragment key={item.employee}>
-                <div style={{ ...styles.stateDateGridRowLabel, ...styles.employeeGridRowLabel }}>
+                {(() => {
+                  const differenceTone = getDifferenceTone(item.diferenciaHoras);
+                  return (
+                    <>
+                <div style={{
+                  ...styles.stateDateGridRowLabel,
+                  ...styles.employeeGridRowLabel,
+                  background: differenceTone.rowBackground,
+                  color: differenceTone.rowText,
+                }}>
                   <span style={styles.employeeGridRowName}>{item.employee}</span>
                   <span style={styles.employeeGridRowMeta}>{item.ubicacion || "Sin ubicacion"}</span>
                 </div>
@@ -1606,8 +1925,8 @@ function SimpleEmployeeDateGrid({
                   style={{
                     ...styles.stateDateGridCell,
                     ...styles.employeeGridTotalCell,
-                    background: item.total > 0 ? "rgba(15, 23, 42, 0.08)" : "#F8FAFC",
-                    color: item.total > 0 ? "#0F172A" : "#94A3B8",
+                    background: differenceTone.rowBackground,
+                    color: differenceTone.rowText,
                   }}
                   title={`${item.employee}: ${formatDecimal(item.total, 2)} horas totales`}
                 >
@@ -1620,8 +1939,22 @@ function SimpleEmployeeDateGrid({
                   style={{
                     ...styles.stateDateGridCell,
                     ...styles.employeeGridTotalCell,
-                    background: item.totalHorasLaborales > 0 ? "rgba(15, 23, 42, 0.06)" : "#F8FAFC",
-                    color: item.totalHorasLaborales > 0 ? "#0F172A" : "#94A3B8",
+                    background: item.totalHorasFaltaIncompleto > 0 ? "#FEF3C7" : "#F8FAFC",
+                    color: item.totalHorasFaltaIncompleto > 0 ? "#92400E" : "#94A3B8",
+                  }}
+                  title={`${item.employee}: ${formatDecimal(item.totalHorasFaltaIncompleto, 2)} horas por FALTA/INCOMPLETO`}
+                >
+                  <span style={styles.stateDateGridCellCount}>
+                    {item.totalHorasFaltaIncompleto > 0 ? formatDecimal(item.totalHorasFaltaIncompleto, 2) : "0.00"}
+                  </span>
+                  <span style={styles.stateDateGridCellHours}>h</span>
+                </div>
+                <div
+                  style={{
+                    ...styles.stateDateGridCell,
+                    ...styles.employeeGridTotalCell,
+                    background: differenceTone.rowBackground,
+                    color: differenceTone.rowText,
                   }}
                   title={`${item.employee}: ${formatDecimal(item.totalHorasLaborales, 2)} horas laborales`}
                 >
@@ -1633,9 +1966,23 @@ function SimpleEmployeeDateGrid({
                 <div
                   style={{
                     ...styles.stateDateGridCell,
+                    ...styles.employeeGridTotalCell,
+                    background: differenceTone.accentBackground,
+                    color: differenceTone.accentText,
+                  }}
+                  title={`${item.employee}: ${formatDecimal(item.diferenciaHoras, 2)} horas de diferencia`}
+                >
+                  <span style={styles.stateDateGridCellCount}>
+                    {formatDecimal(item.diferenciaHoras, 2)}
+                  </span>
+                  <span style={styles.stateDateGridCellHours}>h</span>
+                </div>
+                <div
+                  style={{
+                    ...styles.stateDateGridCell,
                     ...styles.employeeGridValidationCell,
-                    background: item.estadoValidacionHoras ? "#F8FAFC" : "#F8FAFC",
-                    color: item.estadoValidacionHoras ? "#334155" : "#94A3B8",
+                    background: differenceTone.rowBackground,
+                    color: differenceTone.rowText,
                   }}
                   title={`${item.employee}: ${item.estadoValidacionHoras || "Sin validacion"}`}
                 >
@@ -1645,15 +1992,16 @@ function SimpleEmployeeDateGrid({
                 </div>
                 {item.fechas.map((cell) => {
                   const value = cell.totalHoras;
+                  const cellStyle = getCellStyle(value, cell.estadoMarcacionTexto);
                   return (
                     <button
                       type="button"
                       key={`${item.employee}-${cell.fecha}`}
                       style={{
                         ...styles.stateDateGridCell,
-                        background: getCellTone(value),
-                        color: value > 0 ? "#FFFFFF" : "#94A3B8",
+                        ...cellStyle,
                         cursor: onCellSelect ? "pointer" : "default",
+                        transition: "background 0.2s, color 0.2s"
                       }}
                       title={`${item.employee} | ${cell.fecha}: ${formatDecimal(cell.totalHoras, 2)} horas${cell.estadoMarcacionTexto ? ` | ${cell.estadoMarcacionTexto}` : ""}`}
                       onClick={() => onCellSelect?.(item.employee, cell.fecha)}
@@ -1668,6 +2016,9 @@ function SimpleEmployeeDateGrid({
                     </button>
                   );
                 })}
+                    </>
+                  );
+                })()}
               </React.Fragment>
             ))}
           </div>
@@ -1913,6 +2264,46 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
     background: "#FFFFFF",
     boxSizing: "border-box",
+  },
+  multiSelectWrap: {
+    position: "relative",
+  },
+  multiSelectSummary: {
+    width: "100%",
+    height: 32,
+    borderRadius: 10,
+    border: "1px solid #CBD5E1",
+    padding: "7px 10px",
+    fontSize: 12,
+    background: "#FFFFFF",
+    boxSizing: "border-box",
+    cursor: "pointer",
+    listStyle: "none",
+    color: "#0F172A",
+  },
+  multiSelectPanel: {
+    position: "absolute",
+    top: 36,
+    left: 0,
+    right: 0,
+    zIndex: 20,
+    maxHeight: 220,
+    overflowY: "auto",
+    border: "1px solid #CBD5E1",
+    borderRadius: 10,
+    background: "#FFFFFF",
+    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.12)",
+    padding: 8,
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+  },
+  multiSelectOption: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    fontSize: 12,
+    color: "#334155",
   },
   filterToggleWrap: {
     display: "flex",
@@ -2290,13 +2681,14 @@ const styles: Record<string, React.CSSProperties> = {
   employeeGridRowName: {
     fontSize: 11,
     fontWeight: 800,
-    color: "#0F172A",
+    color: "inherit",
     lineHeight: 1.15,
   },
   employeeGridRowMeta: {
     fontSize: 10,
     fontWeight: 600,
-    color: "#64748B",
+    color: "inherit",
+    opacity: 0.9,
     lineHeight: 1.15,
   },
   employeeGridTotalCell: {
@@ -2312,6 +2704,7 @@ const styles: Record<string, React.CSSProperties> = {
   employeeGridValidationText: {
     fontSize: 10,
     fontWeight: 700,
+    color: "inherit",
     lineHeight: 1.2,
     wordBreak: "break-word",
   },
@@ -2320,6 +2713,19 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     gap: 6,
     alignItems: "stretch",
+  },
+  employeeGridDateHeader: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 2,
+    lineHeight: 1.1,
+  },
+  employeeGridDateSubheader: {
+    fontSize: 9,
+    fontWeight: 600,
+    color: "#64748B",
+    textTransform: "capitalize",
   },
   employeeGridHeaderInput: {
     width: "100%",
@@ -2344,6 +2750,28 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#0F172A",
     background: "#FFFFFF",
     outline: "none",
+  },
+  employeeGridSortButton: {
+    width: "100%",
+    border: "none",
+    background: "transparent",
+    color: "#0F172A",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    fontSize: 11,
+    fontWeight: 800,
+    cursor: "pointer",
+    padding: 0,
+  },
+  employeeGridSortPill: {
+    fontSize: 10,
+    fontWeight: 800,
+    color: "#2563EB",
+    background: "#DBEAFE",
+    padding: "3px 6px",
+    borderRadius: 999,
   },
   stateDateGridCell: {
     minHeight: 54,

@@ -1,6 +1,7 @@
 using System.Data;
 using System.Globalization;
 using CjERP.Application.DTOs;
+using CjERP.Application.DTOs.ReportesWhatsapp;
 using CjERP.Application.Interfaces.Services;
 using Dapper;
 using Microsoft.Data.SqlClient;
@@ -12,10 +13,12 @@ public class AsistenciaReporteService : IAsistenciaReporteService
 {
     private const string ReporteSp = "dbo.RptAsistenciaFechas";
     private readonly IConfiguration _configuration;
+    private readonly IReportePdfService _reportePdfService;
 
-    public AsistenciaReporteService(IConfiguration configuration)
+    public AsistenciaReporteService(IConfiguration configuration, IReportePdfService reportePdfService)
     {
         _configuration = configuration;
+        _reportePdfService = reportePdfService;
     }
 
     public async Task<IEnumerable<AsistenciaReporteDto>> BuscarAsync(
@@ -38,9 +41,117 @@ public class AsistenciaReporteService : IAsistenciaReporteService
         return rows.Select(MapRow).ToList();
     }
 
+    public async Task<byte[]> GenerarPdfGerencialAsync(
+        AsistenciaReportePdfRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var detalle = request.Items
+            .Select(item => new ReporteWhatsappAsistenciaItemDto
+            {
+                IdEmpleado = item.IdEmpleado ?? 0,
+                Fecha = NormalizePdfDate(item.Fecha),
+                NombreEmpleado = item.NombreEmpleado?.Trim() ?? string.Empty,
+                EstadoMarcacionTexto = string.IsNullOrWhiteSpace(item.EstadoMarcacionTexto) ? "SIN CLASIFICAR" : item.EstadoMarcacionTexto.Trim(),
+                Ubicacion = item.Ubicacion?.Trim() ?? string.Empty,
+                HoraEntrada = NormalizeTime(item.Hora),
+                HoraSalida = NormalizeTime(item.Salida),
+                TiempoHoras = string.Empty,
+                TotalHoras = item.TotalHoras,
+                TotalHorasEmpleado = item.TotalHorasEmpleado != 0m ? item.TotalHorasEmpleado : item.TotalHoras,
+                TotalHorasLaborales = item.TotalHorasLaborales,
+                DiferenciaHoras = item.TotalHoras - item.TotalHorasLaborales,
+                EstadoValidacionHoras = string.IsNullOrWhiteSpace(item.EstadoValidacionHoras)
+                    ? (item.TotalHoras - item.TotalHorasLaborales >= 0m ? "COMPLETO" : "REVISAR")
+                    : item.EstadoValidacionHoras.Trim()
+            })
+            .Where(item => item.IdEmpleado > 0 && !string.IsNullOrWhiteSpace(item.NombreEmpleado))
+            .ToList();
+
+        var periodo = new ReporteWhatsappPeriodoDto
+        {
+            FechaInicio = request.FechaInicio?.Trim() ?? string.Empty,
+            FechaFin = request.FechaFin?.Trim() ?? string.Empty,
+            FechaProceso = ResolveFechaProceso(request.FechaFin),
+            EtiquetaPeriodo = $"{request.FechaInicio?.Trim()} - {request.FechaFin?.Trim()}"
+        };
+
+        var destinatario = new ReporteWhatsappEmpleadoDto
+        {
+            IdEmpleado = 0,
+            NombreEmpleado = string.IsNullOrWhiteSpace(request.Destinatario) ? "Reporte x Empleado" : request.Destinatario.Trim()
+        };
+
+        return await _reportePdfService.GenerarReportePdfAsync(
+            ReporteWhatsappTipos.Gerencial,
+            destinatario,
+            periodo,
+            detalle,
+            cancellationToken);
+    }
+
     private static string? NullIfWhiteSpace(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static string NormalizePdfDate(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = value.Trim();
+        if (trimmed.Contains('/'))
+        {
+            return trimmed;
+        }
+
+        if (DateTime.TryParse(trimmed, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+        {
+            return parsed.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+        }
+
+        var parts = trimmed.Split('-', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return parts.Length == 3
+            ? $"{parts[2]}/{parts[1]}/{parts[0]}"
+            : trimmed;
+    }
+
+    private static string NormalizeTime(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        if (TimeSpan.TryParse(value.Trim(), CultureInfo.InvariantCulture, out var time))
+        {
+            return time.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture);
+        }
+
+        return value.Trim();
+    }
+
+    private static DateTime ResolveFechaProceso(string? fechaFin)
+    {
+        if (DateTime.TryParse(fechaFin?.Trim(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+        {
+            return parsed.Date;
+        }
+
+        var parts = fechaFin?.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts?.Length == 3 &&
+            int.TryParse(parts[0], out var day) &&
+            int.TryParse(parts[1], out var month) &&
+            int.TryParse(parts[2], out var year))
+        {
+            return new DateTime(year, month, day);
+        }
+
+        return DateTime.Today;
     }
 
     private static AsistenciaReporteDto MapRow(dynamic row)

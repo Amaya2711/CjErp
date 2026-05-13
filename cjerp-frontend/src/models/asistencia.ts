@@ -27,3 +27,24 @@ export type AsistenciaReporteItem = {
   tiempoHoras: string;
   origenMarcacion: string;
 };
+
+export type AsistenciaReportePdfItem = {
+  fecha: string;
+  hora: string;
+  nombreEmpleado: string;
+  ubicacion: string;
+  idEmpleado: number | null;
+  salida: string;
+  estadoMarcacionTexto: string;
+  totalHoras: number;
+  totalHorasEmpleado: number;
+  totalHorasLaborales: number;
+  estadoValidacionHoras: string;
+};
+
+export type AsistenciaReportePdfRequest = {
+  fechaInicio: string;
+  fechaFin: string;
+  destinatario: string;
+  items: AsistenciaReportePdfItem[];
+};

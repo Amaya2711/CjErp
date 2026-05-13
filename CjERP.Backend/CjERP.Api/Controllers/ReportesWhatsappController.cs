@@ -23,75 +23,80 @@ public sealed class ReportesWhatsappController : ControllerBase
     }
 
     [HttpGet("dashboard")]
-    public async Task<IActionResult> ObtenerDashboard([FromQuery] int topLogs = 200, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> ObtenerDashboard([FromQuery] string? tipo = null, [FromQuery] int topLogs = 200, CancellationToken cancellationToken = default)
     {
-        var dashboard = await _reporteAutomaticoService.ObtenerDashboardAsync(GetUsuarioActual(), topLogs, cancellationToken);
+        var normalizedType = ResolveTipo(tipo);
+        var dashboard = await _reporteAutomaticoService.ObtenerDashboardAsync(GetUsuarioActual(), normalizedType, topLogs, cancellationToken);
         return Ok(new { success = true, message = "ok", data = dashboard });
     }
 
     [HttpGet("configuracion")]
-    public async Task<IActionResult> ObtenerConfiguracion(CancellationToken cancellationToken)
+    public async Task<IActionResult> ObtenerConfiguracion([FromQuery] string? tipo = null, CancellationToken cancellationToken = default)
     {
         if (!await UsuarioAutorizadoAsync(cancellationToken))
         {
             return Forbid();
         }
 
-        var config = await _reporteAutomaticoService.ObtenerConfiguracionAsync(cancellationToken);
+        var normalizedType = ResolveTipo(tipo);
+        var config = await _reporteAutomaticoService.ObtenerConfiguracionAsync(normalizedType, cancellationToken);
         return Ok(new { success = true, message = "ok", data = config });
     }
 
     [HttpPut("configuracion")]
-    public async Task<IActionResult> ActualizarConfiguracion([FromBody] ReporteWhatsappConfiguracionUpdateDto request, CancellationToken cancellationToken)
+    public async Task<IActionResult> ActualizarConfiguracion([FromBody] ReporteWhatsappConfiguracionUpdateDto request, CancellationToken cancellationToken, [FromQuery] string? tipo = null)
     {
         if (!await UsuarioAutorizadoAsync(cancellationToken))
         {
             return Forbid();
         }
 
+        request.TipoReporte = ResolveTipo(tipo, request.TipoReporte);
         await _reporteAutomaticoService.ActualizarConfiguracionAsync(request, GetUsuarioActual(), cancellationToken);
-        await _jobScheduler.ReprogramarAsync(cancellationToken);
-        return Ok(new { success = true, message = "Configuración actualizada.", data = true });
+        await _jobScheduler.ReprogramarAsync(request.TipoReporte, cancellationToken);
+        return Ok(new { success = true, message = "Configuracion actualizada.", data = true });
     }
 
     [HttpPost("reprogramar-job")]
-    public async Task<IActionResult> ReprogramarJob(CancellationToken cancellationToken)
+    public async Task<IActionResult> ReprogramarJob([FromQuery] string? tipo = null, CancellationToken cancellationToken = default)
     {
         if (!await UsuarioAutorizadoAsync(cancellationToken))
         {
             return Forbid();
         }
 
-        await _jobScheduler.ReprogramarAsync(cancellationToken);
+        var normalizedType = ResolveTipo(tipo);
+        await _jobScheduler.ReprogramarAsync(normalizedType, cancellationToken);
         return Ok(new { success = true, message = "Job reprogramado correctamente.", data = true });
     }
 
     [HttpPost("ejecutar-ahora")]
-    public async Task<IActionResult> EjecutarAhora(CancellationToken cancellationToken)
+    public async Task<IActionResult> EjecutarAhora([FromQuery] string? tipo = null, CancellationToken cancellationToken = default)
     {
         if (!await UsuarioAutorizadoAsync(cancellationToken))
         {
             return Forbid();
         }
 
-        var dashboard = await _reporteAutomaticoService.ObtenerDashboardAsync(GetUsuarioActual(), 20, cancellationToken);
+        var normalizedType = ResolveTipo(tipo);
+        var dashboard = await _reporteAutomaticoService.ObtenerDashboardAsync(GetUsuarioActual(), normalizedType, 20, cancellationToken);
         if (dashboard.Runtime.IsRunning)
         {
             return Ok(new
             {
                 success = true,
-                message = "Ya existe una ejecución en curso.",
+                message = "Ya existe una ejecucion en curso.",
                 data = new ReporteWhatsappEjecucionResultadoDto
                 {
                     Accepted = false,
                     AlreadyRunning = true,
                     ExecutionId = dashboard.Runtime.ExecutionId,
-                    Message = "Ya existe una ejecución de reporte WUP en curso."
+                    Message = "Ya existe una ejecucion de reporte WUP en curso."
                 }
             });
         }
 
-        var jobId = _jobScheduler.EncolarEjecucionManual(GetUsuarioActual());
+        var jobId = _jobScheduler.EncolarEjecucionManual(normalizedType, GetUsuarioActual());
         return Ok(new
         {
             success = true,
@@ -106,31 +111,32 @@ public sealed class ReportesWhatsappController : ControllerBase
     }
 
     [HttpPost("reintentar-fallidos")]
-    public async Task<IActionResult> ReintentarFallidos(CancellationToken cancellationToken)
+    public async Task<IActionResult> ReintentarFallidos([FromQuery] string? tipo = null, CancellationToken cancellationToken = default)
     {
         if (!await UsuarioAutorizadoAsync(cancellationToken))
         {
             return Forbid();
         }
 
-        var dashboard = await _reporteAutomaticoService.ObtenerDashboardAsync(GetUsuarioActual(), 20, cancellationToken);
+        var normalizedType = ResolveTipo(tipo);
+        var dashboard = await _reporteAutomaticoService.ObtenerDashboardAsync(GetUsuarioActual(), normalizedType, 20, cancellationToken);
         if (dashboard.Runtime.IsRunning)
         {
             return Ok(new
             {
                 success = true,
-                message = "Ya existe una ejecución en curso.",
+                message = "Ya existe una ejecucion en curso.",
                 data = new ReporteWhatsappEjecucionResultadoDto
                 {
                     Accepted = false,
                     AlreadyRunning = true,
                     ExecutionId = dashboard.Runtime.ExecutionId,
-                    Message = "Ya existe una ejecución de reporte WUP en curso."
+                    Message = "Ya existe una ejecucion de reporte WUP en curso."
                 }
             });
         }
 
-        var jobId = _jobScheduler.EncolarReintentoFallidos(GetUsuarioActual());
+        var jobId = _jobScheduler.EncolarReintentoFallidos(normalizedType, GetUsuarioActual());
         return Ok(new
         {
             success = true,
@@ -143,6 +149,9 @@ public sealed class ReportesWhatsappController : ControllerBase
             }
         });
     }
+
+    private static string ResolveTipo(string? tipo, string? fallback = null) =>
+        ReporteWhatsappTipos.Normalize(string.IsNullOrWhiteSpace(tipo) ? fallback : tipo);
 
     private string GetUsuarioActual()
     {
