@@ -124,19 +124,125 @@ const tableColumns: TableColumn[] = [
 
 const chartPalette = ["#2563EB", "#059669", "#F59E0B", "#DC2626", "#7C3AED", "#0EA5E9"];
 
-function getStateColor(index: number) {
+type StateVisual = {
+  strong: string;
+  soft: string;
+  gradient: string;
+  text: string;
+};
+
+const STATE_VISUALS: Record<string, StateVisual> = {
+  FALTA: {
+    strong: "#E35D5D",
+    soft: "#F28B8B",
+    gradient: "linear-gradient(135deg, #F6B1B1 0%, #EA7373 100%)",
+    text: "#7F1D1D",
+  },
+  PRESENTE: {
+    strong: "#E4BF45",
+    soft: "#EACF71",
+    gradient: "linear-gradient(135deg, #F7E6A1 0%, #E9C95D 100%)",
+    text: "#78350F",
+  },
+  ASISTIO: {
+    strong: "#E4BF45",
+    soft: "#EACF71",
+    gradient: "linear-gradient(135deg, #F7E6A1 0%, #E9C95D 100%)",
+    text: "#78350F",
+  },
+  OK: {
+    strong: "#E4BF45",
+    soft: "#EACF71",
+    gradient: "linear-gradient(135deg, #F7E6A1 0%, #E9C95D 100%)",
+    text: "#78350F",
+  },
+  DOMINGO: {
+    strong: "#8ED94A",
+    soft: "#A9E46D",
+    gradient: "linear-gradient(135deg, #C6F28F 0%, #9DE159 100%)",
+    text: "#365314",
+  },
+  SABADO: {
+    strong: "#59D48A",
+    soft: "#72DD9B",
+    gradient: "linear-gradient(135deg, #92E7B3 0%, #66DA94 100%)",
+    text: "#14532D",
+  },
+  FERIADO: {
+    strong: "#5CC6D8",
+    soft: "#7ED5E3",
+    gradient: "linear-gradient(135deg, #9FE4EE 0%, #65CBDE 100%)",
+    text: "#164E63",
+  },
+  COMPENSACION: {
+    strong: "#3CC7C9",
+    soft: "#74DCDD",
+    gradient: "linear-gradient(135deg, #A6ECEC 0%, #52D0D2 100%)",
+    text: "#134E4A",
+  },
+  "SIN MARCAR": {
+    strong: "#E35D5D",
+    soft: "#F28B8B",
+    gradient: "linear-gradient(135deg, #F6B1B1 0%, #EA7373 100%)",
+    text: "#7F1D1D",
+  },
+  "SIN SALIDA": {
+    strong: "#F08A24",
+    soft: "#F7A95C",
+    gradient: "linear-gradient(135deg, #F9C88D 0%, #F39A38 100%)",
+    text: "#7C2D12",
+  },
+  "SIN ENTRADA": {
+    strong: "#F08A24",
+    soft: "#F7A95C",
+    gradient: "linear-gradient(135deg, #F9C88D 0%, #F39A38 100%)",
+    text: "#7C2D12",
+  },
+  INCOMPLETO: {
+    strong: "#F08A24",
+    soft: "#F7A95C",
+    gradient: "linear-gradient(135deg, #F9C88D 0%, #F39A38 100%)",
+    text: "#7C2D12",
+  },
+  TARDANZA: {
+    strong: "#A855F7",
+    soft: "#C084FC",
+    gradient: "linear-gradient(135deg, #DEC1FB 0%, #B16AF8 100%)",
+    text: "#581C87",
+  },
+  TARDE: {
+    strong: "#A855F7",
+    soft: "#C084FC",
+    gradient: "linear-gradient(135deg, #DEC1FB 0%, #B16AF8 100%)",
+    text: "#581C87",
+  },
+  VACACIONES: {
+    strong: "#0EA5A4",
+    soft: "#2DD4BF",
+    gradient: "linear-gradient(135deg, #99F6E4 0%, #34D399 100%)",
+    text: "#134E4A",
+  },
+  CORRECTO: {
+    strong: "#16A34A",
+    soft: "#4ADE80",
+    gradient: "linear-gradient(135deg, #BBF7D0 0%, #4ADE80 100%)",
+    text: "#14532D",
+  },
+};
+
+function getIndexedFallbackColor(index: number) {
   const hue = (index * 47) % 360;
-  return `hsl(${hue} 72% 52%)`;
+  return {
+    strong: `hsl(${hue} 72% 52%)`,
+    soft: `hsl(${hue} 58% 64%)`,
+    gradient: `linear-gradient(135deg, hsl(${hue} 88% 86%) 0%, hsl(${hue} 72% 68%) 100%)`,
+    text: "#0F172A",
+  };
 }
 
-function getStateSoftColor(index: number) {
-  const hue = (index * 47) % 360;
-  return `hsl(${hue} 58% 64%)`;
-}
-
-function getStateGradient(index: number) {
-  const hue = (index * 47) % 360;
-  return `linear-gradient(135deg, hsl(${hue} 88% 86%) 0%, hsl(${hue} 72% 68%) 100%)`;
+function getStateVisual(state: string, index = 0): StateVisual {
+  const normalized = normalizeText(state);
+  return STATE_VISUALS[normalized] ?? getIndexedFallbackColor(index);
 }
 
 function toInputDate(date: Date) {
@@ -1362,13 +1468,15 @@ export default function RptAsistenciaPage() {
           <section style={styles.stateSummaryRow}>
             {chartEstadoMarcacion.map((item, index) => {
               const isActive = selectedEstadoMarcacion.includes(item.name);
+              const stateVisual = getStateVisual(item.name, index);
               return (
                 <button
                   key={item.name}
                   type="button"
                   style={{
                     ...styles.stateSummaryButton,
-                    background: getStateGradient(index),
+                    background: stateVisual.gradient,
+                    color: stateVisual.text,
                     ...(isActive ? styles.stateSummaryButtonActive : null),
                   }}
                   onClick={() =>
@@ -1840,7 +1948,7 @@ function SimpleDailyStateMatrix({
                 <span
                   style={{
                     ...styles.legendDot,
-                    background: chartPalette[index % chartPalette.length],
+                    background: getStateVisual(state, index).strong,
                   }}
                 />
                 <span style={styles.legendLabel}>{state}</span>
@@ -1863,7 +1971,7 @@ function SimpleDailyStateMatrix({
                             ...styles.legendDot,
                             width: 10,
                             height: 10,
-                            background: chartPalette[index % chartPalette.length],
+                            background: getStateVisual(estado.state, index).strong,
                           }}
                         />
                         <span style={styles.matrixCellLabel}>{estado.state}</span>
@@ -1873,7 +1981,7 @@ function SimpleDailyStateMatrix({
                           style={{
                             ...styles.matrixCellFill,
                             width: `${(estado.value / max) * 100}%`,
-                            background: chartPalette[index % chartPalette.length],
+                            background: getStateVisual(estado.state, index).strong,
                           }}
                         />
                       </div>
@@ -1909,7 +2017,8 @@ function SimpleStateDateGrid({
   );
 
   // Mejorar contraste y legibilidad de celdas (igual que grid empleado)
-  const getCellStyle = (value: number) => {
+  const getCellStyle = (value: number, state: string) => {
+    const stateVisual = getStateVisual(state);
     if (value <= 0) {
       return {
         background: "#FFFFFF",
@@ -1917,21 +2026,9 @@ function SimpleStateDateGrid({
         border: "1px solid #E5E7EB"
       };
     }
-    const intensity = Math.min(1, value / max);
-    let background, color;
-    if (intensity > 0.85) {
-      background = "#2563EB";
-      color = "#FFFFFF";
-    } else if (intensity > 0.5) {
-      background = "#60A5FA";
-      color = "#0F172A";
-    } else {
-      background = "#DBEAFE";
-      color = "#0F172A";
-    }
     return {
-      background,
-      color,
+      background: stateVisual.strong,
+      color: stateVisual.text,
       border: "1px solid #E5E7EB"
     };
   } 
@@ -1968,7 +2065,7 @@ function SimpleStateDateGrid({
                   };
                   const value = cell.value;
                   const isSelected = selectedFecha === item.fecha && selectedEstado === state;
-                  const cellStyle = getCellStyle(value);
+                  const cellStyle = getCellStyle(value, state);
                   return (
                     <button
                       type="button"
@@ -2418,7 +2515,7 @@ function SimpleStateEvolutionChart({
             <span
               style={{
                 ...styles.stateEvolutionLegendLine,
-                background: getStateSoftColor(index),
+                background: getStateVisual(state, index).strong,
               }}
             />
             <span style={styles.legendLabel}>{state}</span>
@@ -2497,7 +2594,7 @@ function SimpleStateEvolutionChart({
                 <path
                   d={path}
                   fill="none"
-                  stroke={getStateSoftColor(stateIndex)}
+                  stroke={getStateVisual(state, stateIndex).strong}
                   strokeWidth={2.5}
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -2508,7 +2605,7 @@ function SimpleStateEvolutionChart({
                       cx={point.x}
                       cy={point.y}
                       r={3.5}
-                      fill={getStateSoftColor(stateIndex)}
+                      fill={getStateVisual(state, stateIndex).strong}
                     />
                     <text
                       x={point.x}
@@ -2616,7 +2713,7 @@ function SimpleAreaStateBars({
 	                <span
 	                  style={{
 	                    ...styles.legendDot,
-	                    background: getStateSoftColor(index),
+	                    background: getStateVisual(state, index).strong,
 	                  }}
 	                />
 	                <span style={styles.legendLabel}>{state}</span>
@@ -2638,6 +2735,7 @@ function SimpleAreaStateBars({
                   <div style={styles.locationStateTrack}>
                     {item.estados.map((estado) => {
                       const colorIndex = states.indexOf(estado.state);
+                      const stateVisual = getStateVisual(estado.state, colorIndex >= 0 ? colorIndex : 0);
                       const width = item.total > 0 ? `${(estado.value / item.total) * 100}%` : "0%";
                       return (
                         <button
@@ -2646,7 +2744,7 @@ function SimpleAreaStateBars({
 	                          style={{
 	                            ...styles.locationStateSegment,
 	                            width,
-	                            background: getStateSoftColor(colorIndex >= 0 ? colorIndex : 0),
+	                            background: stateVisual.strong,
 	                            cursor: onSelect ? "pointer" : "default",
                           }}
                           title={`${item.area} | ${estado.state}: ${estado.value}`}
