@@ -163,6 +163,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             Fecha = GetDateString(values, "Fecha", "fecha"),
             Hora = GetTimeString(values, "Hora", "hora", "Fecha", "fecha", "HoraEntrada", "horaEntrada"),
             NombreEmpleado = GetString(values, "nombreempleado", "NombreEmpleado", "nombreEmpleado"),
+            Responsable = GetString(values, "Responsable", "responsable"),
             Estado = GetString(values, "Estado", "estado"),
             Comentario = GetString(values, "Comentario", "comentario"),
             Empresa = GetString(values, "empresa", "Empresa"),

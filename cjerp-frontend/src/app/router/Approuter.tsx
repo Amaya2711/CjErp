@@ -61,6 +61,7 @@ import AdministrativoPage from "../../pages/reporte/administrativo";
 import FinancieroPage from "../../pages/reporte/financiero";
 import GerencialPage from "../../pages/reporte/gerencial";
 import RptAsistenciaPage from "../../features/reportes/rptasistencia";
+import RptAsistenciaEmpleadoPage from "../../features/reportes/rptasistenciaempleado";
 
 export default function AppRouter() {
   return (
@@ -122,6 +123,7 @@ export default function AppRouter() {
             <Route path="/reporte/financiero" element={<FinancieroPage />} />
             <Route path="/reporte/gerencial" element={<GerencialPage />} />
             <Route path="/reportes/rptasistencia" element={<RptAsistenciaPage />} />
+            <Route path="/reportes/rptasistenciaempleado" element={<RptAsistenciaEmpleadoPage />} />
 
             <Route
               path="/logistica/gestionequipos"

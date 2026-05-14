@@ -7,6 +7,7 @@ export type AsistenciaReporteItem = {
   fecha: string;
   hora: string;
   nombreEmpleado: string;
+  responsable: string;
   estado: string;
   comentario: string;
   empresa: string;

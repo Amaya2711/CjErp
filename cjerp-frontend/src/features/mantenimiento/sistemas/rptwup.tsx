@@ -62,7 +62,8 @@ function formatDateTime(value?: string | null) {
     return value;
   }
 
-  return parsed.toLocaleString("es-PE");
+  // Forzar zona horaria de Lima, Perú
+  return parsed.toLocaleString("es-PE", { timeZone: "America/Lima" });
 }
 
 function formatSeconds(value?: number | null) {

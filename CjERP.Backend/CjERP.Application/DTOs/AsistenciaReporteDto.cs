@@ -34,6 +34,7 @@ public class AsistenciaReporteDto
     public string Fecha { get; set; } = string.Empty;
     public string Hora { get; set; } = string.Empty;
     public string NombreEmpleado { get; set; } = string.Empty;
+    public string Responsable { get; set; } = string.Empty;
     public string Estado { get; set; } = string.Empty;
     public string Comentario { get; set; } = string.Empty;
     public string Empresa { get; set; } = string.Empty;

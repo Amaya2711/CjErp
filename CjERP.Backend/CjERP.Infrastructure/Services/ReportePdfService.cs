@@ -269,15 +269,26 @@ public sealed class ReportePdfService : IReportePdfService
                             header.Cell().Element(CellHeader).AlignCenter().Text("Estado");
                         });
 
-                        foreach (var empleado in resumenEmpleados)
+                        // Agrupar por Ubicacion y ordenar por Diferencia dentro de cada grupo
+                        var empleadosPorUbicacion = resumenEmpleados
+                            .GroupBy(e => string.IsNullOrWhiteSpace(e.Ubicacion) ? "SIN UBICACION" : e.Ubicacion.Trim().ToUpperInvariant())
+                            .OrderBy(g => g.Key);
+
+                        foreach (var grupo in empleadosPorUbicacion)
                         {
-                            var isRevisar = empleado.Estado == "REVISAR";
-                            table.Cell().Element(c => SummaryCell(c, isRevisar).SectionLink(BuildEmpleadoSectionId(empleado.IdEmpleado))).Text(empleado.NombreEmpleado);
-                            table.Cell().Element(c => SummaryCell(c, isRevisar)).Text(EmptyIfMissing(empleado.Ubicacion));
-                            table.Cell().Element(c => SummaryCell(c, isRevisar)).AlignRight().Text(empleado.TotalHoras.ToString("0.00", CultureInfo.InvariantCulture));
-                            table.Cell().Element(c => SummaryCell(c, isRevisar)).AlignRight().Text(empleado.HorasLaboradas.ToString("0.00", CultureInfo.InvariantCulture));
-                            table.Cell().Element(c => SummaryCell(c, isRevisar)).AlignRight().Text(empleado.DiferenciaHoras.ToString("0.00", CultureInfo.InvariantCulture));
-                            table.Cell().Element(c => SummaryCell(c, isRevisar)).AlignCenter().Text(empleado.Estado);
+                            // Fila de título de ubicación
+                            table.Cell().ColumnSpan(6).Element(CellHeader).Text($"UBICACION: {grupo.Key}").FontColor("#0F3D6E").Bold();
+
+                            foreach (var empleado in grupo.OrderBy(x => x.DiferenciaHoras).ThenBy(x => x.NombreEmpleado))
+                            {
+                                var isRevisar = empleado.Estado == "REVISAR";
+                                table.Cell().Element(c => SummaryCell(c, isRevisar).SectionLink(BuildEmpleadoSectionId(empleado.IdEmpleado))).Text(empleado.NombreEmpleado);
+                                table.Cell().Element(c => SummaryCell(c, isRevisar)).Text(EmptyIfMissing(empleado.Ubicacion));
+                                table.Cell().Element(c => SummaryCell(c, isRevisar)).AlignRight().Text(empleado.TotalHoras.ToString("0.00", CultureInfo.InvariantCulture));
+                                table.Cell().Element(c => SummaryCell(c, isRevisar)).AlignRight().Text(empleado.HorasLaboradas.ToString("0.00", CultureInfo.InvariantCulture));
+                                table.Cell().Element(c => SummaryCell(c, isRevisar)).AlignRight().Text(empleado.DiferenciaHoras.ToString("0.00", CultureInfo.InvariantCulture));
+                                table.Cell().Element(c => SummaryCell(c, isRevisar)).AlignCenter().Text(empleado.Estado);
+                            }
                         }
                     });
                 });

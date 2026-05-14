@@ -5,6 +5,7 @@ import {
 } from "../../components/base/CrudToolbar";
 import { buscarAsistencia, exportarAsistenciaEmpleadoPdf } from "../../api/asistenciaService";
 import type { AsistenciaReporteItem, AsistenciaReportePdfItem } from "../../models/asistencia";
+import { getAuthUser } from "../../utils/authStorage";
 import { getHttpErrorMessage } from "../../utils/httpError";
 
 type SelectFilterKey =
@@ -146,6 +147,10 @@ function toInputDate(date: Date) {
   const month = String(lima.getMonth() + 1).padStart(2, "0");
   const day = String(lima.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function normalizeEmployeeCode(value: string | number | null | undefined) {
+  return String(value ?? "").trim();
 }
 
 function toApiDate(value: string) {
@@ -397,9 +402,13 @@ function buildEmployeeDateCellDisplay(cell?: EmployeeDateCell) {
   return `${hours} | ${cell.estadoMarcacionTexto}`;
 }
 
-export default function RptAsistenciaPage() {
+export default function RptAsistenciaEmpleadoPage() {
   const today = new Date();
   const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  const authUser = getAuthUser();
+  const codigoEmpleadoMostrar = normalizeEmployeeCode(
+    authUser?.codEmp || authUser?.idEmpleado || authUser?.empleado || ""
+  );
 
   const [fechaInicio, setFechaInicio] = useState(toInputDate(startOfMonth));
   const [fechaFin, setFechaFin] = useState(toInputDate(today));
@@ -479,7 +488,10 @@ export default function RptAsistenciaPage() {
         fechaInicio: toApiDate(fechaInicio),
         fechaFin: toApiDate(fechaFin),
       });
-      setRows(Array.isArray(data) ? data : []);
+      const filteredData = Array.isArray(data)
+        ? data.filter((item) => normalizeEmployeeCode(item.idEmpleado) === codigoEmpleadoMostrar)
+        : [];
+      setRows(filteredData);
     } catch (err) {
       setError(getHttpErrorMessage(err, "No se pudo cargar el reporte de asistencia."));
       setRows([]);
@@ -489,8 +501,14 @@ export default function RptAsistenciaPage() {
   };
 
   useEffect(() => {
+    if (!codigoEmpleadoMostrar) {
+      setRows([]);
+      setError("No se encontro el codigo de empleado para mostrar el reporte.");
+      return;
+    }
+
     void loadData();
-  }, [fechaFin, fechaInicio]);
+  }, [codigoEmpleadoMostrar, fechaFin, fechaInicio]);
 
   const filterOptions = useMemo(
     () => ({
