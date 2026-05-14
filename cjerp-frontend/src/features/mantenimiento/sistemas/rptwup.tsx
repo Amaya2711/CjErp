@@ -254,7 +254,7 @@ function renderLogDetail(row: ReporteWhatsappLog) {
 
   return (
     <div style={styles.logDetailCell}>
-      <span>{row.mensajeError || "Sin observaciones."}</span>
+      <span>{row.mensajeError || "Sin observaciones"}</span>
       {showDiagnostics && responsePreview ? (
         <span style={styles.logDetailMeta}>Respuesta WUP: {responsePreview}</span>
       ) : null}
