@@ -11,7 +11,7 @@ export interface MenuDto {
   codigoMenu?: string | null;
   esVisible?: boolean;
   esActivo?: boolean;
-  acceso?: number | boolean | null;
+  acceso?: number | boolean | string | null;
 }
 
 export interface ExisteUsuarioPerfilRequest {
