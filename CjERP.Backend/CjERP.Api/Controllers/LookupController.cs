@@ -119,5 +119,12 @@ namespace CjERP.Api.Controllers
             var result = await _lookupService.ListarValidadoresAsync();
             return Ok(result);
         }
+
+        [HttpGet("~/api/lookup/ubigeos")]
+        public async Task<IActionResult> GetUbigeos()
+        {
+            var result = await _lookupService.ListarUbigeosAsync();
+            return Ok(result);
+        }
     }
 }

@@ -26,6 +26,7 @@ import AlmacenPage from "../../features/logistica/almacen/almacen";
 import InventarioPage from "../../features/logistica/almacen/inventario";
 import CrucePage from "../../features/logistica/gestionequipos/cruce";
 import DesmontadoPage from "../../features/logistica/gestionequipos/desmontado";
+import RecojoPage from "../../features/logistica/gestionequipos/recojo";
 import SolicitudEquipoPage from "../../features/logistica/gestionequipos/solicitudequipo";
 import TesoreriaDepositoPage from "../../features/finanzas/tesoreria/deposito";
 import TesoreriaGastosPage from "../../features/finanzas/tesoreria/gastos";
@@ -38,6 +39,8 @@ import LibroMayorPage from "../../features/finanzas/contabilidad/libromayor";
 import CapitalizacionPage from "../../features/operaciones/capitalizacion";
 import OperacionPage from "../../features/operaciones/operacion";
 import AsignacionPage from "../../features/operaciones/asignacion";
+import ReembolsoPage from "../../features/operaciones/operacion/reembolso";
+import SuministroPage from "../../features/operaciones/operacion/suministro";
 import ClientePage from "../../features/comercial/cliente";
 import FacturacionPage from "../../features/comercial/facturacion";
 import CobranzasPage from "../../features/comercial/cobranzas";
@@ -83,6 +86,8 @@ export default function AppRouter() {
 
             <Route path="/operaciones/capitalizacion" element={<CapitalizacionPage />} />
             <Route path="/operaciones/operacion" element={<OperacionPage />} />
+            <Route path="/operaciones/operacion/reembolso" element={<ReembolsoPage />} />
+            <Route path="/operaciones/operacion/suministro" element={<SuministroPage />} />
             <Route path="/operaciones/asignacion" element={<AsignacionPage />} />
 
             <Route path="/comercial/cliente" element={<ClientePage />} />
@@ -137,6 +142,10 @@ export default function AppRouter() {
             <Route
               path="/logistica/gestionequipos/solicitudequipo"
               element={<SolicitudEquipoPage />}
+            />
+            <Route
+              path="/logistica/gestionequipos/recojo"
+              element={<RecojoPage />}
             />
 
             <Route

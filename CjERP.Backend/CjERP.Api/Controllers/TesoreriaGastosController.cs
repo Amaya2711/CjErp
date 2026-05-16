@@ -304,7 +304,10 @@ public class TesoreriaGastosController : ControllerBase
                     request.GastoId,
                     request.FiltroOperativoKey,
                     request.Serie,
-                    request.Responsable),
+                    request.Responsable,
+                    null,
+                    "gastos",
+                    "gasto"),
                 cancellationToken);
 
             return Ok(new

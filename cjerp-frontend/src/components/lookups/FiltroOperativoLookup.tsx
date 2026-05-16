@@ -351,7 +351,8 @@ function TareaAutocomplete({
       );
       return tareaSel ? tareaSel.tarea : "";
     }
-    return "";
+
+    return value?.tarea?.tarea ?? "";
   });
 
   const [tareaDropdown, setTareaDropdown] = useState(false);
@@ -359,7 +360,7 @@ function TareaAutocomplete({
 
   useEffect(() => {
     if (!value?.tarea?.correlativo) {
-      setTareaInput("");
+      setTareaInput(value?.tarea?.tarea ?? "");
       return;
     }
 

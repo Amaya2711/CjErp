@@ -414,6 +414,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             {
                 NombreArchivo = BuildFileName(tipoReporte, empleado, periodo),
                 Mensaje = GetMensajeAdjunto(tipoReporte),
+                Modo = GetModoEnvio(tipoReporte),
                 Telefono = telefonoNormalizado,
                 Contenido = base64
             };
@@ -422,6 +423,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             {
                 request.NombreArchivo,
                 request.Mensaje,
+                request.Modo,
                 request.Telefono,
                 request.Contenido,
                 contenidoLength = request.Contenido.Length,
@@ -582,6 +584,9 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
     }
 
     private string GetMensajeAdjunto(string tipoReporte) => GetDefaults(tipoReporte).MensajeAdjunto;
+
+    private static string GetModoEnvio(string tipoReporte) =>
+        ReporteWhatsappTipos.IsGerencial(tipoReporte) ? "wsp" : "sms";
 
     private static string NormalizeTime(string value)
     {

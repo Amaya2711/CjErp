@@ -135,6 +135,17 @@ namespace CjERP.Infrastructure.Services
             return rows.Select(MapSolicitanteLookup).Cast<SolicitanteLookupDto>();
         }
 
+        public async Task<IEnumerable<UbigeoLookupDto>> ListarUbigeosAsync()
+        {
+            using var connection = new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
+
+            var rows = await connection.QueryAsync(
+                "dbo.sp_Listar_Ubigeo",
+                commandType: CommandType.StoredProcedure);
+
+            return rows.Select(MapUbigeoLookup).Cast<UbigeoLookupDto>();
+        }
+
         private static ConstanteLookupDto MapConstanteLookup(dynamic row, string campo)
         {
             var data = (IDictionary<string, object>)row;
@@ -203,6 +214,22 @@ namespace CjERP.Infrastructure.Services
                 Adelantado = GetDecimal(data, "Adelantado", "adelantado"),
                 Saldo2 = GetDecimal(data, "Saldo2", "saldo2", "SaldoAprobadoMenosPagado", "saldoAprobadoMenosPagado"),
                 Saldo = GetDecimal(data, "Saldo", "saldo", "SaldoFinal", "saldoFinal")
+            };
+        }
+
+        private static UbigeoLookupDto MapUbigeoLookup(dynamic row)
+        {
+            var data = (IDictionary<string, object>)row;
+
+            return new UbigeoLookupDto
+            {
+                IdUbigeo = GetInt(data, "IdUbigeo", "idUbigeo", "Id", "id", "Codigo", "codigo"),
+                NombreUbigeo = GetStringAllowEmpty(
+                    data,
+                    "NombreUbigeo", "nombreUbigeo",
+                    "Descripcion", "descripcion",
+                    "Nombre", "nombre",
+                    "Texto", "texto") ?? string.Empty
             };
         }
 

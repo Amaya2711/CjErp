@@ -14,6 +14,8 @@ obj/
 *.exe
 *.pdb
 *.cache
+*.lscache
+artifacts/
 
 # Node / Frontend
 node_modules/
@@ -26,6 +28,8 @@ dist/
 !.env.example
 !cjerp-frontend/.env.local-backend
 !cjerp-frontend/.env.railway-backend
+appsettings.Development.json
+appsettings.Local.json
 
 # OS
 .DS_Store

@@ -24,5 +24,6 @@ namespace CjERP.Application.Interfaces
         Task<IEnumerable<SolicitanteLookupDto>> ListarSolicitantesAsync(int? idCargo, int? idEmpleado);
         Task<IEnumerable<SolicitanteLookupDto>> ListarGestoresAsync();
         Task<IEnumerable<SolicitanteLookupDto>> ListarValidadoresAsync();
+        Task<IEnumerable<UbigeoLookupDto>> ListarUbigeosAsync();
     }
 }

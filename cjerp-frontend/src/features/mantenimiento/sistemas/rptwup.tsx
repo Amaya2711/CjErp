@@ -172,10 +172,16 @@ function getRequestPreview(row: ReporteWhatsappLog) {
     : typeof parsed.ContenidoLength === "number"
       ? parsed.ContenidoLength
       : null;
+  const modo = typeof parsed.Modo === "string"
+    ? parsed.Modo
+    : typeof parsed.modo === "string"
+      ? parsed.modo
+      : "";
 
   const compactArchivo = archivo ? buildCompactFileName(archivo, row.idEmpleado) : "";
 
   const parts = [
+    modo ? `Modo: ${modo}` : "",
     telefono ? `Tel: ${telefono}` : "",
     compactArchivo ? `Archivo: ${compactArchivo}` : "",
     contenidoLength != null ? `Base64: ${contenidoLength} chars` : "",
@@ -217,6 +223,11 @@ function buildPostmanPayload(requestJson?: string) {
       ? parsed.Mensaje
       : typeof parsed.mensaje === "string"
         ? parsed.mensaje
+        : "",
+    modo: typeof parsed.Modo === "string"
+      ? parsed.Modo
+      : typeof parsed.modo === "string"
+        ? parsed.modo
         : "",
     telefono: typeof parsed.Telefono === "string"
       ? parsed.Telefono

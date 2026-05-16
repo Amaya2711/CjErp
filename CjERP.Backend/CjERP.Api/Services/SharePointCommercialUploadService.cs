@@ -19,7 +19,10 @@ public sealed record ExpenseInvoiceUploadContext(
     int? GastoId,
     string? FiltroOperativoKey,
     string? Serie,
-    string? Responsable);
+    string? Responsable,
+    string? FolderPath = null,
+    string? FolderKey = null,
+    string? FilePrefix = null);
 
 public sealed record SharePointCommercialUploadResult(
     string FileName,
@@ -62,7 +65,7 @@ public sealed class SharePointCommercialUploadService : ISharePointCommercialUpl
         var siteId = await GetSiteIdAsync(accessToken, cancellationToken);
         var driveId = await GetDriveIdAsync(siteId, accessToken, cancellationToken);
         var fileName = BuildFileName(file.FileName, context);
-        var normalizedFolderPath = NormalizeFolderPath(_options.ExpensesFolderPath);
+        var normalizedFolderPath = ResolveFolderPath(context);
         var uploadPath = string.IsNullOrWhiteSpace(normalizedFolderPath)
             ? EncodePathSegment(fileName)
             : $"{EncodePath(normalizedFolderPath)}/{EncodePathSegment(fileName)}";
@@ -89,7 +92,7 @@ public sealed class SharePointCommercialUploadService : ISharePointCommercialUpl
         var webUrl = document.RootElement.TryGetProperty("webUrl", out var webUrlProperty)
             ? webUrlProperty.GetString() ?? string.Empty
             : string.Empty;
-        var storagePath = BuildStoragePath(fileName);
+        var storagePath = BuildStoragePath(fileName, normalizedFolderPath);
 
         return new SharePointCommercialUploadResult(fileName, webUrl, storagePath);
     }
@@ -105,6 +108,18 @@ public sealed class SharePointCommercialUploadService : ISharePointCommercialUpl
         {
             throw new InvalidOperationException(
                 "La integracion con SharePoint no esta configurada. Revise la seccion SharePoint en appsettings.");
+        }
+
+        if (_options.ClientSecret.StartsWith("REPLACE_WITH_", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "La integracion con SharePoint no esta configurada. Reemplace SharePoint:ClientSecret con el client secret VALUE real en appsettings o variables de entorno.");
+        }
+
+        if (Guid.TryParse(_options.ClientSecret, out _))
+        {
+            throw new InvalidOperationException(
+                "SharePoint:ClientSecret parece ser el secret ID y no el secret VALUE. En Azure debe usar el valor del secreto, no el identificador.");
         }
     }
 
@@ -212,10 +227,9 @@ public sealed class SharePointCommercialUploadService : ISharePointCommercialUpl
             $"No se encontro la biblioteca '{_options.DocumentLibraryName}' en SharePoint.");
     }
 
-    private string BuildStoragePath(string fileName)
+    private string BuildStoragePath(string fileName, string folderPath)
     {
         var segments = new List<string> { _options.DocumentLibraryName.Trim('/') };
-        var folderPath = NormalizeFolderPath(_options.ExpensesFolderPath);
 
         if (!string.IsNullOrWhiteSpace(folderPath))
         {
@@ -229,9 +243,10 @@ public sealed class SharePointCommercialUploadService : ISharePointCommercialUpl
     private static string BuildFileName(string originalFileName, ExpenseInvoiceUploadContext context)
     {
         var extension = Path.GetExtension(originalFileName).ToLowerInvariant();
+        var filePrefix = NormalizeToken(context.FilePrefix);
         var baseNameParts = new[]
         {
-            "gasto",
+            string.IsNullOrWhiteSpace(filePrefix) ? "gasto" : filePrefix,
             context.GastoId?.ToString(),
             NormalizeToken(context.FiltroOperativoKey),
             NormalizeToken(context.Serie),
@@ -263,6 +278,28 @@ public sealed class SharePointCommercialUploadService : ISharePointCommercialUpl
     private static string NormalizeFolderPath(string? folderPath)
     {
         return (folderPath ?? string.Empty).Trim().Trim('/');
+    }
+
+    private string ResolveFolderPath(ExpenseInvoiceUploadContext context)
+    {
+        var requestedFolderPath = NormalizeFolderPath(context.FolderPath);
+        if (!string.IsNullOrWhiteSpace(requestedFolderPath))
+        {
+            return requestedFolderPath;
+        }
+
+        var folderKey = context.FolderKey?.Trim();
+        if (!string.IsNullOrWhiteSpace(folderKey) &&
+            _options.FolderPaths.TryGetValue(folderKey, out var configuredFolderPath))
+        {
+            var normalizedConfiguredPath = NormalizeFolderPath(configuredFolderPath);
+            if (!string.IsNullOrWhiteSpace(normalizedConfiguredPath))
+            {
+                return normalizedConfiguredPath;
+            }
+        }
+
+        return NormalizeFolderPath(_options.ExpensesFolderPath);
     }
 
     private static string EncodePath(string path)

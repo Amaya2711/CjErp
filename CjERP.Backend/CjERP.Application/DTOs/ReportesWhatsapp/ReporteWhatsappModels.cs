@@ -197,6 +197,9 @@ public sealed class ReporteWhatsappSendRequestDto
     [JsonPropertyName("mensaje")]
     public string Mensaje { get; set; } = string.Empty;
 
+    [JsonPropertyName("modo")]
+    public string Modo { get; set; } = string.Empty;
+
     [JsonPropertyName("telefono")]
     public string Telefono { get; set; } = string.Empty;
 

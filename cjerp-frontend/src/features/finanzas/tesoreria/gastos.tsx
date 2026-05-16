@@ -159,6 +159,7 @@ import type { FiltroOperativoValue, TareaOption } from "../../../models/filtroOp
 import type { EmpleadoCta } from "../../../models/empleadoCta";
 import type { ValoresGastoRequest, ValoresGastoResponse } from "../../../models/valoresGasto";
 import { getAuthUser } from "../../../utils/authStorage";
+import { compressImageForUpload } from "../../../utils/imageCompression";
 
 type GastoDto = {
   id: number;
@@ -1489,7 +1490,8 @@ export default function GastosPage() {
     setFacturaUploadError(null);
 
     try {
-      const response = await subirFactura(file);
+      const optimizedFile = await compressImageForUpload(file);
+      const response = await subirFactura(optimizedFile);
       setForm((prev) => ({
         ...prev,
         facturaUrl: response.fileUrl || "",
