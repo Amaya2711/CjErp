@@ -21,6 +21,8 @@ type SelectFilterKey =
 type SortKey =
   | "fecha"
   | "nombreEmpleado"
+  | "tipoAprobacion"
+  | "responsable"
   | "estado"
   | "empresa"
   | "cliente"
@@ -110,6 +112,8 @@ const SOFT_STATES = new Set(["VACACIONES", "DOMINGO", "SABADO", "SÁBADO"]);
 const tableColumns: TableColumn[] = [
   { key: "fecha", label: "Fecha", width: "110px" },
   { key: "nombreEmpleado", label: "Nombre empleado", width: "250px" },
+  { key: "tipoAprobacion", label: "Tipo aprobacion", width: "180px" },
+  { key: "responsable", label: "Responsable", width: "220px" },
   { key: "estadoMarcacionTexto", label: "Estado marcacion", width: "170px" },
   { key: "hora", label: "Hora entrada", width: "110px", align: "center" },
   { key: "salida", label: "Hora salida", width: "110px", align: "center" },
@@ -477,6 +481,7 @@ function getExportRows(rows: AsistenciaReporteItem[]) {
   return rows.map((item) => ({
     Fecha: formatDateLabel(item.fecha),
     NombreEmpleado: item.nombreEmpleado,
+    TipoAprobacion: item.tipoAprobacion,
     Responsable: item.responsable,
     Estado: item.estado,
     Empresa: item.empresa,
@@ -563,6 +568,7 @@ export default function RptAsistenciaPage() {
   const searchFields = useMemo<CrudToolbarSearchField<AsistenciaReporteItem>[]>(
     () => [
       { key: "nombreEmpleado", label: "Nombre empleado", getValue: (item) => item.nombreEmpleado },
+      { key: "tipoAprobacion", label: "Tipo aprobacion", getValue: (item) => item.tipoAprobacion },
       { key: "responsable", label: "Responsable", getValue: (item) => item.responsable },
       { key: "estado", label: "Estado", getValue: (item) => item.estado },
       { key: "empresa", label: "Empresa", getValue: (item) => item.empresa },
@@ -1189,38 +1195,67 @@ export default function RptAsistenciaPage() {
 
   const exportPdf = async () => {
     if (activeTab === "empleado") {
-      const employeeInfoByEmployeeAndDate = new Map(
-        filteredRows
-          .filter((item) => item.nombreEmpleado)
-          .map((item) => [
-            `${item.nombreEmpleado}__${formatDateLabel(item.fecha)}`,
-            {
-              idEmpleado: item.idEmpleado,
-              hora: item.hora,
-              salida: item.salida,
-            },
-          ])
-      );
+      const fechas = getDateRangeLabels(fechaInicio, fechaFin);
+      const fullRowsByEmployee = new Map<string, AsistenciaReporteItem[]>();
 
-      const pdfItems: AsistenciaReportePdfItem[] = filteredEmployeeGridRows.flatMap((row) =>
-        row.fechas.map((cell) => {
-          const employeeInfo = employeeInfoByEmployeeAndDate.get(`${row.employee}__${cell.fecha}`);
+      rows.forEach((item) => {
+        const employee = item.nombreEmpleado?.trim();
+        if (!employee) {
+          return;
+        }
+
+        const current = fullRowsByEmployee.get(employee) ?? [];
+        current.push(item);
+        fullRowsByEmployee.set(employee, current);
+      });
+
+      const pdfItems: AsistenciaReportePdfItem[] = filteredEmployeeGridRows.flatMap((row) => {
+        const employeeRows = fullRowsByEmployee.get(row.employee) ?? [];
+        const rowsByDate = new Map<string, AsistenciaReporteItem[]>();
+
+        employeeRows.forEach((item) => {
+          const key = formatDateLabel(item.fecha);
+          const current = rowsByDate.get(key) ?? [];
+          current.push(item);
+          rowsByDate.set(key, current);
+        });
+
+        const totalHorasEmpleado = employeeRows.reduce((sum, item) => sum + item.totalHoras, 0);
+        const totalHorasLaborales = employeeRows.reduce(
+          (max, item) => Math.max(max, item.totalHorasLaborales),
+          0
+        );
+        const validationStates = Array.from(
+          new Set(employeeRows.map((item) => item.estadoValidacionHoras).filter(Boolean))
+        ).sort((a, b) => a.localeCompare(b, "es"));
+        const ubicaciones = Array.from(
+          new Set(employeeRows.map((item) => item.ubicacion).filter(Boolean))
+        ).sort((a, b) => a.localeCompare(b, "es"));
+
+        return fechas.map((fecha) => {
+          const entries = rowsByDate.get(fecha) ?? [];
+          const first = entries[0];
+          const estadoMarcacionTexto = Array.from(
+            new Set(entries.map((item) => item.estadoMarcacionTexto || item.estado).filter(Boolean))
+          ).sort((a, b) => a.localeCompare(b, "es")).join(", ");
+          const totalHoras = entries.reduce((sum, item) => sum + item.totalHoras, 0);
 
           return {
-          fecha: cell.fecha,
-          hora: employeeInfo?.hora ?? "",
-          nombreEmpleado: row.employee,
-          ubicacion: row.ubicacion,
-          idEmpleado: employeeInfo?.idEmpleado ?? null,
-          salida: employeeInfo?.salida ?? "",
-          estadoMarcacionTexto: cell.estadoMarcacionTexto,
-          totalHoras: cell.totalHoras,
-          totalHorasEmpleado: row.total,
-          totalHorasLaborales: row.totalHorasLaborales,
-          estadoValidacionHoras: row.estadoValidacionHoras,
+            fecha,
+            hora: first?.hora ?? "",
+            nombreEmpleado: row.employee,
+            responsable: first?.responsable ?? row.responsable ?? "",
+            ubicacion: ubicaciones.join(", ") || row.ubicacion,
+            idEmpleado: first?.idEmpleado ?? null,
+            salida: first?.salida ?? "",
+            estadoMarcacionTexto,
+            totalHoras,
+            totalHorasEmpleado,
+            totalHorasLaborales,
+            estadoValidacionHoras: validationStates.join(", ") || row.estadoValidacionHoras,
           };
-        })
-      );
+        });
+      });
 
       const pdfBlob = await exportarAsistenciaEmpleadoPdf({
         fechaInicio: toApiDate(fechaInicio),
@@ -1683,6 +1718,8 @@ export default function RptAsistenciaPage() {
                     <tr key={`${item.idEmpleado ?? item.nombreEmpleado}-${item.fecha}-${index}`} style={{ ...styles.tr, background: getRowTone(item) }}>
                       <td style={styles.td}>{formatDateLabel(item.fecha)}</td>
                       <td style={styles.td}>{item.nombreEmpleado}</td>
+                      <td style={styles.td}>{item.tipoAprobacion}</td>
+                      <td style={styles.td}>{item.responsable}</td>
                       <td style={styles.td}>{item.estadoMarcacionTexto}</td>
                       <td style={{ ...styles.td, textAlign: "center" }}>{item.hora}</td>
                       <td style={{ ...styles.td, textAlign: "center" }}>{item.salida}</td>

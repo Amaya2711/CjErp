@@ -7,9 +7,18 @@ import type {
 
 type AsistenciaReporteApiRow = Record<string, unknown>;
 
+function getRowValue(row: AsistenciaReporteApiRow, key: string) {
+  if (key in row) {
+    return row[key];
+  }
+
+  const matchedKey = Object.keys(row).find((item) => item.toLowerCase() === key.toLowerCase());
+  return matchedKey ? row[matchedKey] : undefined;
+}
+
 function getString(row: AsistenciaReporteApiRow, ...keys: string[]): string {
   for (const key of keys) {
-    const value = row[key];
+    const value = getRowValue(row, key);
     if (value != null) {
       return String(value).trim();
     }
@@ -20,7 +29,7 @@ function getString(row: AsistenciaReporteApiRow, ...keys: string[]): string {
 
 function getNumber(row: AsistenciaReporteApiRow, ...keys: string[]): number {
   for (const key of keys) {
-    const value = row[key];
+    const value = getRowValue(row, key);
     if (typeof value === "number" && Number.isFinite(value)) {
       return value;
     }
@@ -61,6 +70,7 @@ function normalizeAsistenciaRow(row: AsistenciaReporteApiRow): AsistenciaReporte
     fecha: getString(row, "Fecha", "fecha"),
     hora: getString(row, "Hora", "hora"),
     nombreEmpleado: getString(row, "nombreempleado", "nombreEmpleado", "NombreEmpleado"),
+    tipoAprobacion: getString(row, "TipoAprobacion", "tipoAprobacion", "tipo_aprobacion"),
     responsable: getString(row, "Responsable", "responsable"),
     estado: getString(row, "Estado", "estado"),
     comentario: getString(row, "Comentario", "comentario", "Observacion", "observacion"),

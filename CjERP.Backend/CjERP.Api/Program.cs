@@ -36,6 +36,14 @@ var allowedOrigins = builder.Configuration
     .ToArray() ?? Array.Empty<string>();
 
 QuestPDF.Settings.License = LicenseType.Community;
+var defaultConnection = builder.Configuration.GetConnectionString("DefaultConnection");
+
+if (string.IsNullOrWhiteSpace(defaultConnection) ||
+    defaultConnection.Contains("SET_VIA_ENVIRONMENT_OR_LOCAL_SETTINGS", StringComparison.OrdinalIgnoreCase))
+{
+    throw new InvalidOperationException(
+        "ConnectionStrings:DefaultConnection no esta configurada. Definela en appsettings.Development.json o mediante variable de entorno antes de iniciar la API.");
+}
 
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
@@ -49,7 +57,7 @@ builder.Services.AddHangfire(configuration => configuration
     .UseSimpleAssemblyNameTypeSerializer()
     .UseRecommendedSerializerSettings()
     .UseSqlServerStorage(
-        builder.Configuration.GetConnectionString("DefaultConnection"),
+        defaultConnection,
         new SqlServerStorageOptions
         {
             PrepareSchemaIfNecessary = true,

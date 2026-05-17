@@ -252,6 +252,7 @@ public sealed class ReportePdfService : IReportePdfService
                         table.ColumnsDefinition(columns =>
                         {
                             columns.RelativeColumn(2.8f);
+                            columns.RelativeColumn(2f);
                             columns.RelativeColumn(1.4f);
                             columns.RelativeColumn(1f);
                             columns.RelativeColumn(1f);
@@ -262,6 +263,7 @@ public sealed class ReportePdfService : IReportePdfService
                         table.Header(header =>
                         {
                             header.Cell().Element(CellHeader).Text("Empleado");
+                            header.Cell().Element(CellHeader).Text("Responsable");
                             header.Cell().Element(CellHeader).Text("Ubicacion");
                             header.Cell().Element(CellHeader).AlignRight().Text("Total Horas");
                             header.Cell().Element(CellHeader).AlignRight().Text("Horas Laboradas");
@@ -277,12 +279,15 @@ public sealed class ReportePdfService : IReportePdfService
                         foreach (var grupo in empleadosPorUbicacion)
                         {
                             // Fila de título de ubicación
-                            table.Cell().ColumnSpan(6).Element(CellHeader).Text($"UBICACION: {grupo.Key}").FontColor("#0F3D6E").Bold();
+                            table.Cell().ColumnSpan(7).Element(CellHeader).Text($"UBICACION: {grupo.Key}").FontColor("#0F3D6E").Bold();
 
-                            foreach (var empleado in grupo.OrderBy(x => x.DiferenciaHoras).ThenBy(x => x.NombreEmpleado))
+                            foreach (var empleado in grupo
+                                .OrderBy(x => string.IsNullOrWhiteSpace(x.Responsable) ? "SIN RESPONSABLE" : x.Responsable.Trim().ToUpperInvariant())
+                                .ThenBy(x => x.NombreEmpleado))
                             {
                                 var isRevisar = empleado.Estado == "REVISAR";
                                 table.Cell().Element(c => SummaryCell(c, isRevisar).SectionLink(BuildEmpleadoSectionId(empleado.IdEmpleado))).Text(empleado.NombreEmpleado);
+                                table.Cell().Element(c => SummaryCell(c, isRevisar)).Text(EmptyIfMissing(empleado.Responsable));
                                 table.Cell().Element(c => SummaryCell(c, isRevisar)).Text(EmptyIfMissing(empleado.Ubicacion));
                                 table.Cell().Element(c => SummaryCell(c, isRevisar)).AlignRight().Text(empleado.TotalHoras.ToString("0.00", CultureInfo.InvariantCulture));
                                 table.Cell().Element(c => SummaryCell(c, isRevisar)).AlignRight().Text(empleado.HorasLaboradas.ToString("0.00", CultureInfo.InvariantCulture));
@@ -321,6 +326,7 @@ public sealed class ReportePdfService : IReportePdfService
                             row.RelativeItem().Column(info =>
                             {
                                 info.Item().Text(empleado.NombreEmpleado).Bold().FontSize(14).FontColor("#123B5D");
+                                info.Item().Text($"Responsable: {EmptyIfMissing(empleado.Responsable)}");
                                 info.Item().Text($"Ubicacion: {EmptyIfMissing(empleado.Ubicacion)}");
                                 info.Item().Text($"Total Horas: {empleado.TotalHoras:0.00}");
                                 info.Item().Text($"Horas Laboradas: {empleado.HorasLaboradas:0.00}");
@@ -558,6 +564,7 @@ public sealed class ReportePdfService : IReportePdfService
                 {
                     IdEmpleado = group.Key,
                     NombreEmpleado = first.NombreEmpleado,
+                    Responsable = first.Responsable,
                     Ubicacion = first.Ubicacion,
                     TotalHoras = totalHoras,
                     HorasLaboradas = horasLaboradas,
@@ -568,7 +575,8 @@ public sealed class ReportePdfService : IReportePdfService
                         .ToList()
                 };
             })
-            .OrderBy(x => x.DiferenciaHoras)
+            .OrderBy(x => string.IsNullOrWhiteSpace(x.Ubicacion) ? "SIN UBICACION" : x.Ubicacion.Trim().ToUpperInvariant())
+            .ThenBy(x => string.IsNullOrWhiteSpace(x.Responsable) ? "SIN RESPONSABLE" : x.Responsable.Trim().ToUpperInvariant())
             .ThenBy(x => x.NombreEmpleado)
             .ToList();
     }

@@ -7,6 +7,7 @@ export type AsistenciaReporteItem = {
   fecha: string;
   hora: string;
   nombreEmpleado: string;
+  tipoAprobacion: string;
   responsable: string;
   estado: string;
   comentario: string;
@@ -33,6 +34,7 @@ export type AsistenciaReportePdfItem = {
   fecha: string;
   hora: string;
   nombreEmpleado: string;
+  responsable: string;
   ubicacion: string;
   idEmpleado: number | null;
   salida: string;

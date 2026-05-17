@@ -1228,6 +1228,7 @@ export default function RptAsistenciaEmpleadoPage() {
           fecha: cell.fecha,
           hora: employeeInfo?.hora ?? "",
           nombreEmpleado: row.employee,
+          responsable: row.responsable ?? "",
           ubicacion: row.ubicacion,
           idEmpleado: employeeInfo?.idEmpleado ?? null,
           salida: employeeInfo?.salida ?? "",

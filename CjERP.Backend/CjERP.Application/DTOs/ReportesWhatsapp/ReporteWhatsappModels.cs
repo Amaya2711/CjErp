@@ -156,6 +156,7 @@ public sealed class ReporteWhatsappAsistenciaItemDto
     public int IdEmpleado { get; set; }
     public string Fecha { get; set; } = string.Empty;
     public string NombreEmpleado { get; set; } = string.Empty;
+    public string Responsable { get; set; } = string.Empty;
     public string EstadoMarcacionTexto { get; set; } = string.Empty;
     public string Ubicacion { get; set; } = string.Empty;
     public string HoraEntrada { get; set; } = string.Empty;
@@ -295,6 +296,7 @@ public sealed class ReporteGerencialEmpleadoResumenDto
 {
     public int IdEmpleado { get; set; }
     public string NombreEmpleado { get; set; } = string.Empty;
+    public string Responsable { get; set; } = string.Empty;
     public string Ubicacion { get; set; } = string.Empty;
     public decimal TotalHoras { get; set; }
     public decimal HorasLaboradas { get; set; }

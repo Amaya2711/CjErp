@@ -53,6 +53,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
                 IdEmpleado = item.IdEmpleado ?? 0,
                 Fecha = NormalizePdfDate(item.Fecha),
                 NombreEmpleado = item.NombreEmpleado?.Trim() ?? string.Empty,
+                Responsable = item.Responsable?.Trim() ?? string.Empty,
                 EstadoMarcacionTexto = string.IsNullOrWhiteSpace(item.EstadoMarcacionTexto) ? "SIN CLASIFICAR" : item.EstadoMarcacionTexto.Trim(),
                 Ubicacion = item.Ubicacion?.Trim() ?? string.Empty,
                 HoraEntrada = NormalizeTime(item.Hora),
@@ -163,6 +164,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             Fecha = GetDateString(values, "Fecha", "fecha"),
             Hora = GetTimeString(values, "Hora", "hora", "Fecha", "fecha", "HoraEntrada", "horaEntrada"),
             NombreEmpleado = GetString(values, "nombreempleado", "NombreEmpleado", "nombreEmpleado"),
+            TipoAprobacion = GetString(values, "TipoAprobacion", "tipoAprobacion", "tipo_aprobacion"),
             Responsable = GetString(values, "Responsable", "responsable"),
             Estado = GetString(values, "Estado", "estado"),
             Comentario = GetString(values, "Comentario", "comentario"),
@@ -190,7 +192,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
     {
         foreach (var key in keys)
         {
-            if (!values.TryGetValue(key, out var value) || value is null || value is DBNull)
+            if (!TryGetValue(values, key, out var value) || value is null || value is DBNull)
             {
                 continue;
             }
@@ -226,7 +228,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
     {
         foreach (var key in keys)
         {
-            if (!values.TryGetValue(key, out var value) || value is null || value is DBNull)
+            if (!TryGetValue(values, key, out var value) || value is null || value is DBNull)
             {
                 continue;
             }
@@ -291,7 +293,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
     {
         foreach (var key in keys)
         {
-            if (!values.TryGetValue(key, out var value) || value is null || value is DBNull)
+            if (!TryGetValue(values, key, out var value) || value is null || value is DBNull)
             {
                 continue;
             }
@@ -321,7 +323,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
     {
         foreach (var key in keys)
         {
-            if (!values.TryGetValue(key, out var value) || value is null || value is DBNull)
+            if (!TryGetValue(values, key, out var value) || value is null || value is DBNull)
             {
                 continue;
             }
@@ -344,7 +346,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
     {
         foreach (var key in keys)
         {
-            if (!values.TryGetValue(key, out var value) || value is null || value is DBNull)
+            if (!TryGetValue(values, key, out var value) || value is null || value is DBNull)
             {
                 continue;
             }
@@ -361,5 +363,24 @@ public class AsistenciaReporteService : IAsistenciaReporteService
         }
 
         return 0m;
+    }
+
+    private static bool TryGetValue(IDictionary<string, object?> values, string key, out object? value)
+    {
+        if (values.TryGetValue(key, out value))
+        {
+            return true;
+        }
+
+        var match = values.Keys.FirstOrDefault(existingKey =>
+            string.Equals(existingKey, key, StringComparison.OrdinalIgnoreCase));
+
+        if (match is not null && values.TryGetValue(match, out value))
+        {
+            return true;
+        }
+
+        value = null;
+        return false;
     }
 }
