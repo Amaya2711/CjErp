@@ -181,7 +181,9 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             EstadoMarcacionTexto = GetString(values, "EstadoMarcacionTexto", "estadoMarcacionTexto"),
             TiempoTrabajado = GetString(values, "TiempoTrabajado", "tiempoTrabajado"),
             TotalHoras = GetDecimal(values, "TotalHoras", "totalHoras"),
+            TotalHorasEmpleado = GetDecimal(values, "TotalHorasEmpleado", "totalHorasEmpleado", "HorasLaboradas", "horasLaboradas"),
             TotalHorasLaborales = GetDecimal(values, "TotalHorasLaborales", "totalHorasLaborales"),
+            TotalHorasFaltaAprobar = GetDecimal(values, "TotalHorasFaltaAprobar", "totalHorasFaltaAprobar"),
             EstadoValidacionHoras = GetString(values, "EstadoValidacionHoras", "estadoValidacionHoras", "Estadovalidacionhoras", "estadovalidacionhoras"),
             TiempoHoras = GetString(values, "TiempoHoras", "tiempoHoras"),
             OrigenMarcacion = GetString(values, "OrigenMarcacion", "origenMarcacion")

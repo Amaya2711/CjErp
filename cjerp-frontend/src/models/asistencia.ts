@@ -24,7 +24,9 @@ export type AsistenciaReporteItem = {
   estadoMarcacionTexto: string;
   tiempoTrabajado: string;
   totalHoras: number;
+  totalHorasEmpleado: number;
   totalHorasLaborales: number;
+  totalHorasFaltaAprobar: number;
   estadoValidacionHoras: string;
   tiempoHoras: string;
   origenMarcacion: string;

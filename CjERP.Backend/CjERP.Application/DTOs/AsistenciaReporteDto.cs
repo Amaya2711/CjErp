@@ -52,7 +52,9 @@ public class AsistenciaReporteDto
     public string EstadoMarcacionTexto { get; set; } = string.Empty;
     public string TiempoTrabajado { get; set; } = string.Empty;
     public decimal TotalHoras { get; set; }
+    public decimal TotalHorasEmpleado { get; set; }
     public decimal TotalHorasLaborales { get; set; }
+    public decimal TotalHorasFaltaAprobar { get; set; }
     public string EstadoValidacionHoras { get; set; } = string.Empty;
     public string TiempoHoras { get; set; } = string.Empty;
     public string OrigenMarcacion { get; set; } = string.Empty;

@@ -80,6 +80,7 @@ type EmployeeDateRow = {
   ubicacion: string;
   total: number;
   totalHorasFaltaIncompleto: number;
+  totalHorasFaltaAprobar: number;
   totalHorasLaborales: number;
   diferenciaHoras: number;
   estadoValidacionHoras: string;
@@ -561,7 +562,7 @@ export default function RptAsistenciaEmpleadoPage() {
     diferenciaOperator: "",
     diferenciaValue: "",
   });
-  const [employeeGridSort, setEmployeeGridSort] = useState<{ key: "responsable" | "total" | "otros" | "diferencia"; direction: "asc" | "desc" }>({
+  const [employeeGridSort, setEmployeeGridSort] = useState<{ key: "responsable" | "total" | "otros" | "faltaAprobar" | "diferencia"; direction: "asc" | "desc" }>({
     key: "total",
     direction: "desc",
   });
@@ -866,14 +867,18 @@ export default function RptAsistenciaEmpleadoPage() {
     const groupedStates = new Map<string, Map<string, Set<string>>>();
     const employeeLocations = new Map<string, Set<string>>();
     const employeeResponsables = new Map<string, Set<string>>();
+    const employeeApprovedHours = new Map<string, number>();
     const employeeLaborHours = new Map<string, number>();
+    const employeePendingApprovalHours = new Map<string, number>();
     const employeeValidationStates = new Map<string, Set<string>>();
     employees.forEach((employee) => {
       grouped.set(employee, new Map<string, number>());
       groupedStates.set(employee, new Map<string, Set<string>>());
       employeeLocations.set(employee, new Set<string>());
       employeeResponsables.set(employee, new Set<string>());
+      employeeApprovedHours.set(employee, 0);
       employeeLaborHours.set(employee, 0);
+      employeePendingApprovalHours.set(employee, 0);
       employeeValidationStates.set(employee, new Set<string>());
     });
 
@@ -910,7 +915,9 @@ export default function RptAsistenciaEmpleadoPage() {
       if (item.responsable) {
         employeeResponsables.get(employee)!.add(item.responsable);
       }
+      employeeApprovedHours.set(employee, Math.max(employeeApprovedHours.get(employee) ?? 0, item.totalHorasEmpleado));
       employeeLaborHours.set(employee, Math.max(employeeLaborHours.get(employee) ?? 0, item.totalHorasLaborales));
+      employeePendingApprovalHours.set(employee, Math.max(employeePendingApprovalHours.get(employee) ?? 0, item.totalHorasFaltaAprobar));
       if (!employeeValidationStates.has(employee)) {
         employeeValidationStates.set(employee, new Set<string>());
       }
@@ -941,15 +948,19 @@ export default function RptAsistenciaEmpleadoPage() {
           ? sum + MISSING_OR_INCOMPLETE_HOURS
           : sum;
       }, 0);
+      const totalHorasAprobadas = employeeApprovedHours.get(employee) ?? 0;
+      const totalHorasFaltaAprobar = employeePendingApprovalHours.get(employee) ?? 0;
+      const totalHorasLaborales = employeeLaborHours.get(employee) ?? 0;
 
       return {
         employee,
         responsable: responsables.join(", "),
         ubicacion: ubicaciones.join(", "),
-        total: totalHorasRango,
+        total: totalHorasAprobadas,
         totalHorasFaltaIncompleto,
-        totalHorasLaborales: employeeLaborHours.get(employee) ?? 0,
-        diferenciaHoras: (totalHorasRango + totalHorasFaltaIncompleto) - (employeeLaborHours.get(employee) ?? 0),
+        totalHorasFaltaAprobar,
+        totalHorasLaborales,
+        diferenciaHoras: (totalHorasAprobadas + totalHorasFaltaAprobar + totalHorasFaltaIncompleto) - totalHorasLaborales,
         estadoValidacionHoras: validationStates.join(", "),
         fechas: fechasDetalle,
       };
@@ -992,6 +1003,8 @@ export default function RptAsistenciaEmpleadoPage() {
     })].sort((left, right) => {
       const compared = employeeGridSort.key === "diferencia"
         ? left.diferenciaHoras - right.diferenciaHoras
+        : employeeGridSort.key === "faltaAprobar"
+          ? left.totalHorasFaltaAprobar - right.totalHorasFaltaAprobar
         : employeeGridSort.key === "otros"
           ? left.totalHorasFaltaIncompleto - right.totalHorasFaltaIncompleto
           : employeeGridSort.key === "responsable"
@@ -1182,6 +1195,7 @@ export default function RptAsistenciaEmpleadoPage() {
           Responsable: item.responsable || "Sin responsable",
           Ubicacion: item.ubicacion || "Sin ubicacion",
           "Total horas": Number(formatDecimal(item.total, 2).replace(/,/g, "")),
+          "Falta aprobar": Number(formatDecimal(item.totalHorasFaltaAprobar, 2).replace(/,/g, "")),
           "Hrs Lab.": Number(formatDecimal(item.totalHorasLaborales, 2).replace(/,/g, "")),
           "Estado valid.": item.estadoValidacionHoras || "Sin validacion",
         };
@@ -2147,9 +2161,9 @@ function SimpleEmployeeDateGrid({
   differenceValue: string;
   onDifferenceOperatorChange: (value: "" | "lt" | "gt" | "eq") => void;
   onDifferenceValueChange: (value: string) => void;
-  sortKey: "responsable" | "total" | "otros" | "diferencia";
+  sortKey: "responsable" | "total" | "otros" | "faltaAprobar" | "diferencia";
   sortDirection: "asc" | "desc";
-  onToggleSort: (key: "responsable" | "total" | "otros" | "diferencia") => void;
+  onToggleSort: (key: "responsable" | "total" | "otros" | "faltaAprobar" | "diferencia") => void;
   onCellSelect?: (nombreEmpleado: string, fecha: string) => void;
 }) {
   const max = Math.max(
@@ -2223,7 +2237,7 @@ function SimpleEmployeeDateGrid({
           <div
             style={{
               ...styles.stateDateGrid,
-              gridTemplateColumns: `220px 180px 110px 100px 100px 140px 150px repeat(${fechas.length}, minmax(88px, 1fr))`,
+              gridTemplateColumns: `220px 180px 110px 110px 100px 140px 150px repeat(${fechas.length}, minmax(88px, 1fr))`,
             }}
           >
             <div style={{ ...styles.stateDateGridHeader, ...styles.stateDateGridCorner }}>
@@ -2280,6 +2294,18 @@ function SimpleEmployeeDateGrid({
                 <span>Hrs Otros</span>
                 <span style={styles.employeeGridSortPill}>
                   {sortKey === "otros" ? (sortDirection === "asc" ? "ASC" : "DESC") : "ORD"}
+                </span>
+              </button>
+            </div>
+            <div style={styles.stateDateGridHeader}>
+              <button
+                type="button"
+                style={styles.employeeGridSortButton}
+                onClick={() => onToggleSort("faltaAprobar")}
+              >
+                <span>Falta aprobar</span>
+                <span style={styles.employeeGridSortPill}>
+                  {sortKey === "faltaAprobar" ? (sortDirection === "asc" ? "ASC" : "DESC") : "ORD"}
                 </span>
               </button>
             </div>
@@ -2406,6 +2432,20 @@ function SimpleEmployeeDateGrid({
                 >
                   <span style={styles.stateDateGridCellCount}>
                     {item.totalHorasFaltaIncompleto > 0 ? formatDecimal(item.totalHorasFaltaIncompleto, 2) : "0.00"}
+                  </span>
+                  <span style={styles.stateDateGridCellHours}>h</span>
+                </div>
+                <div
+                  style={{
+                    ...styles.stateDateGridCell,
+                    ...styles.employeeGridTotalCell,
+                    background: item.totalHorasFaltaAprobar > 0 ? "#DBEAFE" : "#F8FAFC",
+                    color: item.totalHorasFaltaAprobar > 0 ? "#1D4ED8" : "#94A3B8",
+                  }}
+                  title={`${item.employee}: ${formatDecimal(item.totalHorasFaltaAprobar, 2)} horas por FALTA APROBAR`}
+                >
+                  <span style={styles.stateDateGridCellCount}>
+                    {item.totalHorasFaltaAprobar > 0 ? formatDecimal(item.totalHorasFaltaAprobar, 2) : "0.00"}
                   </span>
                   <span style={styles.stateDateGridCellHours}>h</span>
                 </div>
