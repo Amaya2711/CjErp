@@ -5,6 +5,7 @@ using CjERP.Application.Interfaces.Repositories;
 using Dapper;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace CjERP.Infrastructure.Repositories;
 
@@ -18,11 +19,13 @@ public sealed class ReporteRepository : IReporteRepository
     private const string ReporteWhatsappConfigTable = "dbo.ReporteWupConfig";
 
     private readonly string _connectionString;
+    private readonly ILogger<ReporteRepository> _logger;
 
-    public ReporteRepository(IConfiguration configuration)
+    public ReporteRepository(IConfiguration configuration, ILogger<ReporteRepository> logger)
     {
         _connectionString = configuration.GetConnectionString("DefaultConnection")
             ?? throw new InvalidOperationException("No se encontro la cadena de conexion DefaultConnection.");
+        _logger = logger;
     }
 
     public async Task<ReporteWhatsappConfiguracionDto?> ObtenerConfiguracionAsync(string tipoReporte, CancellationToken cancellationToken = default)
@@ -32,6 +35,8 @@ public sealed class ReporteRepository : IReporteRepository
         await EnsureReporteWupConfigSchemaAsync(connection, cancellationToken);
         var hasTipoReporteColumn = await HasColumnAsync(connection, ReporteWhatsappConfigTable, "TipoReporte", cancellationToken);
         var hasDiasEjecucionColumn = await HasColumnAsync(connection, ReporteWhatsappConfigTable, "DiasEjecucion", cancellationToken);
+        var hasUsarSemanaEnCursoColumn = await HasColumnAsync(connection, ReporteWhatsappConfigTable, "UsarSemanaEnCurso", cancellationToken);
+        var hasUsarMesEnCursoColumn = await HasColumnAsync(connection, ReporteWhatsappConfigTable, "UsarMesEnCurso", cancellationToken);
 
         var sql = hasTipoReporteColumn
             ? $"""
@@ -39,6 +44,8 @@ public sealed class ReporteRepository : IReporteRepository
                   TipoReporte,
                   HoraEjecucion,
                   {(hasDiasEjecucionColumn ? "DiasEjecucion," : string.Empty)}
+                  {(hasUsarSemanaEnCursoColumn ? "UsarSemanaEnCurso," : string.Empty)}
+                  {(hasUsarMesEnCursoColumn ? "UsarMesEnCurso," : string.Empty)}
                   CantidadEmpleadosPorBloque,
                   DelaySegundosEntreBloques,
                   Activo,
@@ -52,6 +59,8 @@ public sealed class ReporteRepository : IReporteRepository
               SELECT TOP 1
                   HoraEjecucion,
                   {(hasDiasEjecucionColumn ? "DiasEjecucion," : string.Empty)}
+                  {(hasUsarSemanaEnCursoColumn ? "UsarSemanaEnCurso," : string.Empty)}
+                  {(hasUsarMesEnCursoColumn ? "UsarMesEnCurso," : string.Empty)}
                   CantidadEmpleadosPorBloque,
                   DelaySegundosEntreBloques,
                   Activo,
@@ -83,6 +92,8 @@ public sealed class ReporteRepository : IReporteRepository
             TipoReporte = string.IsNullOrWhiteSpace(tipoReporteConfigurado) ? normalizedType : tipoReporteConfigurado,
             HoraEjecucion = GetString(values, "HoraEjecucion", "horaEjecucion", "Hora", "hora"),
             DiasEjecucion = diasEjecucion,
+            UsarSemanaEnCurso = hasUsarSemanaEnCursoColumn && GetBool(values, "UsarSemanaEnCurso", "usarSemanaEnCurso"),
+            UsarMesEnCurso = hasUsarMesEnCursoColumn && GetBool(values, "UsarMesEnCurso", "usarMesEnCurso"),
             CantidadEmpleadosPorBloque = GetInt(values, "CantidadEmpleadosPorBloque", "cantidadEmpleadosPorBloque", "CantidadBloque", "cantidadBloque") ?? 0,
             DelaySegundosEntreBloques = GetInt(values, "DelaySegundosEntreBloques", "delaySegundosEntreBloques", "DelaySegundos", "delaySegundos") ?? 0,
             Activo = GetBool(values, "Activo", "activo", "EsActivo", "esActivo"),
@@ -98,6 +109,8 @@ public sealed class ReporteRepository : IReporteRepository
         await EnsureReporteWupConfigSchemaAsync(connection, cancellationToken);
         var hasTipoReporteColumn = await HasColumnAsync(connection, ReporteWhatsappConfigTable, "TipoReporte", cancellationToken);
         var hasDiasEjecucionColumn = await HasColumnAsync(connection, ReporteWhatsappConfigTable, "DiasEjecucion", cancellationToken);
+        var hasUsarSemanaEnCursoColumn = await HasColumnAsync(connection, ReporteWhatsappConfigTable, "UsarSemanaEnCurso", cancellationToken);
+        var hasUsarMesEnCursoColumn = await HasColumnAsync(connection, ReporteWhatsappConfigTable, "UsarMesEnCurso", cancellationToken);
         var diasEjecucion = SerializeDiasEjecucion(request.DiasEjecucion);
 
         var sql = hasTipoReporteColumn
@@ -109,6 +122,8 @@ public sealed class ReporteRepository : IReporteRepository
                       UPDATE dbo.ReporteWupConfig
                       SET HoraEjecucion = @HoraEjecucion,
                           {(hasDiasEjecucionColumn ? "DiasEjecucion = @DiasEjecucion," : string.Empty)}
+                          {(hasUsarSemanaEnCursoColumn ? "UsarSemanaEnCurso = @UsarSemanaEnCurso," : string.Empty)}
+                          {(hasUsarMesEnCursoColumn ? "UsarMesEnCurso = @UsarMesEnCurso," : string.Empty)}
                           CantidadEmpleadosPorBloque = @CantidadEmpleadosPorBloque,
                           DelaySegundosEntreBloques = @DelaySegundosEntreBloques,
                           Activo = @Activo,
@@ -123,6 +138,8 @@ public sealed class ReporteRepository : IReporteRepository
                           TipoReporte,
                           HoraEjecucion,
                           {(hasDiasEjecucionColumn ? "DiasEjecucion," : string.Empty)}
+                          {(hasUsarSemanaEnCursoColumn ? "UsarSemanaEnCurso," : string.Empty)}
+                          {(hasUsarMesEnCursoColumn ? "UsarMesEnCurso," : string.Empty)}
                           CantidadEmpleadosPorBloque,
                           DelaySegundosEntreBloques,
                           Activo,
@@ -134,6 +151,8 @@ public sealed class ReporteRepository : IReporteRepository
                           @TipoReporte,
                           @HoraEjecucion,
                           {(hasDiasEjecucionColumn ? "@DiasEjecucion," : string.Empty)}
+                          {(hasUsarSemanaEnCursoColumn ? "@UsarSemanaEnCurso," : string.Empty)}
+                          {(hasUsarMesEnCursoColumn ? "@UsarMesEnCurso," : string.Empty)}
                           @CantidadEmpleadosPorBloque,
                           @DelaySegundosEntreBloques,
                           @Activo,
@@ -154,6 +173,8 @@ public sealed class ReporteRepository : IReporteRepository
                       UPDATE dbo.ReporteWupConfig
                       SET HoraEjecucion = @HoraEjecucion,
                           {(hasDiasEjecucionColumn ? "DiasEjecucion = @DiasEjecucion," : string.Empty)}
+                          {(hasUsarSemanaEnCursoColumn ? "UsarSemanaEnCurso = @UsarSemanaEnCurso," : string.Empty)}
+                          {(hasUsarMesEnCursoColumn ? "UsarMesEnCurso = @UsarMesEnCurso," : string.Empty)}
                           CantidadEmpleadosPorBloque = @CantidadEmpleadosPorBloque,
                           DelaySegundosEntreBloques = @DelaySegundosEntreBloques,
                           Activo = @Activo,
@@ -166,6 +187,8 @@ public sealed class ReporteRepository : IReporteRepository
                       (
                           HoraEjecucion,
                           {(hasDiasEjecucionColumn ? "DiasEjecucion," : string.Empty)}
+                          {(hasUsarSemanaEnCursoColumn ? "UsarSemanaEnCurso," : string.Empty)}
+                          {(hasUsarMesEnCursoColumn ? "UsarMesEnCurso," : string.Empty)}
                           CantidadEmpleadosPorBloque,
                           DelaySegundosEntreBloques,
                           Activo,
@@ -176,6 +199,8 @@ public sealed class ReporteRepository : IReporteRepository
                       (
                           @HoraEjecucion,
                           {(hasDiasEjecucionColumn ? "@DiasEjecucion," : string.Empty)}
+                          {(hasUsarSemanaEnCursoColumn ? "@UsarSemanaEnCurso," : string.Empty)}
+                          {(hasUsarMesEnCursoColumn ? "@UsarMesEnCurso," : string.Empty)}
                           @CantidadEmpleadosPorBloque,
                           @DelaySegundosEntreBloques,
                           @Activo,
@@ -197,6 +222,8 @@ public sealed class ReporteRepository : IReporteRepository
                     TipoReporte = normalizedType,
                     request.HoraEjecucion,
                     DiasEjecucion = diasEjecucion,
+                    request.UsarSemanaEnCurso,
+                    request.UsarMesEnCurso,
                     request.CantidadEmpleadosPorBloque,
                     request.DelaySegundosEntreBloques,
                     request.Activo,
@@ -296,6 +323,14 @@ public sealed class ReporteRepository : IReporteRepository
             parameters.Add("@IdEmpleado", idEmpleado, DbType.Int32);
         }
 
+        _logger.LogInformation(
+            "[ReporteRepository] Ejecutando {StoredProcedure}. FechaInicio={FechaInicio}, FechaFin={FechaFin}, IdEmpleado={IdEmpleado}, HasIdEmpleadoParameter={HasIdEmpleadoParameter}",
+            ReporteAsistenciaSp,
+            fechaInicio,
+            fechaFin,
+            hasIdEmpleadoParameter ? idEmpleado : null,
+            hasIdEmpleadoParameter);
+
         var rows = await connection.QueryAsync(
             new CommandDefinition(
                 ReporteAsistenciaSp,
@@ -316,6 +351,12 @@ public sealed class ReporteRepository : IReporteRepository
         var parameters = new DynamicParameters();
         parameters.Add("@FechaInicio", fechaInicio, DbType.String);
         parameters.Add("@FechaFin", fechaFin, DbType.String);
+
+        _logger.LogInformation(
+            "[ReporteRepository] Ejecutando {StoredProcedure}. FechaInicio={FechaInicio}, FechaFin={FechaFin}, IdEmpleado=NULL, HasIdEmpleadoParameter=false, Contexto=PeriodoCompletoGerencial",
+            ReporteAsistenciaSp,
+            fechaInicio,
+            fechaFin);
 
         var rows = await connection.QueryAsync(
             new CommandDefinition(
@@ -566,11 +607,47 @@ public sealed class ReporteRepository : IReporteRepository
             ALTER TABLE dbo.ReporteWupConfig
             ADD DiasEjecucion nvarchar(200) NULL;
         END;
+
+        IF COL_LENGTH('dbo.ReporteWupConfig', 'UsarSemanaEnCurso') IS NULL
+        BEGIN
+            ALTER TABLE dbo.ReporteWupConfig
+            ADD UsarSemanaEnCurso bit NULL;
+        END;
+
+        IF COL_LENGTH('dbo.ReporteWupConfig', 'UsarMesEnCurso') IS NULL
+        BEGIN
+            ALTER TABLE dbo.ReporteWupConfig
+            ADD UsarMesEnCurso bit NULL;
+        END;
         """;
 
         await connection.ExecuteAsync(
             new CommandDefinition(
                 sql,
+                cancellationToken: cancellationToken));
+
+        const string backfillSql = """
+        IF COL_LENGTH('dbo.ReporteWupConfig', 'UsarSemanaEnCurso') IS NOT NULL
+        BEGIN
+            UPDATE dbo.ReporteWupConfig
+            SET UsarSemanaEnCurso = CASE
+                WHEN UPPER(LTRIM(RTRIM(ISNULL(TipoReporte, '')))) = 'ASISTENCIA_WUP_GERENCIAL' THEN 1
+                ELSE 0
+            END
+            WHERE UsarSemanaEnCurso IS NULL;
+        END;
+
+        IF COL_LENGTH('dbo.ReporteWupConfig', 'UsarMesEnCurso') IS NOT NULL
+        BEGIN
+            UPDATE dbo.ReporteWupConfig
+            SET UsarMesEnCurso = 0
+            WHERE UsarMesEnCurso IS NULL;
+        END;
+        """;
+
+        await connection.ExecuteAsync(
+            new CommandDefinition(
+                backfillSql,
                 cancellationToken: cancellationToken));
     }
 
@@ -661,39 +738,29 @@ public sealed class ReporteRepository : IReporteRepository
     private static ReporteWhatsappAsistenciaItemDto MapReporte(dynamic row)
     {
         var values = ToDictionary(row);
-        var totalHoras = GetDecimal(values, "TotalHoras", "totalHoras", "HorasLaboradas", "horasLaboradas");
-        var totalHorasEmpleado = GetDecimal(values, "TotalHorasEmpleado", "totalHorasEmpleado", "HorasLaboradas", "horasLaboradas");
+        var totalHoras = GetDecimal(values, "TotalHoras", "totalHoras");
+        var totalHorasEmpleado = GetDecimal(values, "TotalHorasEmpleado", "totalHorasEmpleado");
         var totalHorasLaborales = GetDecimal(values, "TotalHorasLaborales", "totalHorasLaborales", "HorasObjetivo", "horasObjetivo", "HorasProgramadas", "horasProgramadas");
         var diferenciaHoras = GetDecimal(values, "DiferenciaHoras", "diferenciaHoras");
-
-        if (diferenciaHoras == 0m && totalHorasLaborales != 0m)
-        {
-            diferenciaHoras = totalHoras - totalHorasEmpleado;
-            if (diferenciaHoras == 0m)
-            {
-                diferenciaHoras = totalHorasLaborales - totalHorasEmpleado;
-            }
-        }
-
         var estadoValidacionHoras = GetString(values, "EstadoValidacionHoras", "estadoValidacionHoras");
-        if (string.IsNullOrWhiteSpace(estadoValidacionHoras))
-        {
-            estadoValidacionHoras = diferenciaHoras > 0 ? "COMPLETO" : "REVISAR";
-        }
 
         return new ReporteWhatsappAsistenciaItemDto
         {
             IdEmpleado = GetInt(values, "IdEmpleado", "idEmpleado", "CodEmp", "codEmp") ?? 0,
             Fecha = GetDateText(values, "Fecha", "fecha"),
             NombreEmpleado = GetString(values, "NombreEmpleado", "nombreEmpleado", "nombreempleado"),
+            Responsable = GetString(values, "Responsable", "responsable"),
+            Estado = GetString(values, "Estado", "estado"),
             EstadoMarcacionTexto = GetString(values, "EstadoMarcacionTexto", "estadoMarcacionTexto", "Estado", "estado"),
             Ubicacion = GetString(values, "Ubicacion", "ubicacion"),
             HoraEntrada = GetTimeText(values, "HoraEntrada", "horaEntrada", "Hora", "hora"),
             HoraSalida = GetTimeText(values, "HoraSalida", "horaSalida", "Salida", "salida"),
             TiempoHoras = GetString(values, "TiempoHoras", "tiempoHoras", "TiempoTrabajado", "tiempoTrabajado"),
             TotalHoras = totalHoras,
-            TotalHorasEmpleado = totalHorasEmpleado == 0m ? totalHoras : totalHorasEmpleado,
-            TotalHorasLaborales = totalHorasLaborales == 0m ? totalHoras : totalHorasLaborales,
+            TotalHorasFaltaIncompleto = GetDecimal(values, "TotalHorasFaltaIncompleto", "totalHorasFaltaIncompleto"),
+            TotalHorasEmpleado = totalHorasEmpleado,
+            TotalHorasLaborales = totalHorasLaborales,
+            TotalHorasFaltaAprobar = GetDecimal(values, "TotalHorasFaltaAprobar", "totalHorasFaltaAprobar"),
             DiferenciaHoras = diferenciaHoras,
             EstadoValidacionHoras = estadoValidacionHoras
         };

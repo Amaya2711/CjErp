@@ -3,6 +3,7 @@ import type {
   LogisticaSuministroBuscarRequest,
   LogisticaSuministroDto,
   LogisticaSuministroInsertRequest,
+  LogisticaSuministroKpis,
   LogisticaSuministroUpdateRequest,
 } from "../models/logisticaSuministro";
 
@@ -14,6 +15,10 @@ export type LogisticaSuministroUploadResponse = {
 
 export async function buscarLogisticaSuministro(payload: LogisticaSuministroBuscarRequest) {
   return await httpClient.post<LogisticaSuministroDto[]>("/operacion/suministro/buscar", payload);
+}
+
+export async function obtenerKpisLogisticaSuministro(payload: LogisticaSuministroBuscarRequest) {
+  return await httpClient.post<LogisticaSuministroKpis>("/operacion/suministro/kpis", payload);
 }
 
 export async function insertarLogisticaSuministro(payload: LogisticaSuministroInsertRequest) {

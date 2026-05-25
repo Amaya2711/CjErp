@@ -163,6 +163,8 @@ import { compressImageForUpload } from "../../../utils/imageCompression";
 
 type GastoDto = {
   id: number;
+  idSuministroProvisional?: number | null;
+  fechaInicioSuministroProvisional?: string;
   filtroOperativoKey: string;
   responsable: string;
   responsableLabel?: string;
@@ -220,6 +222,8 @@ type GastoDto = {
 
 type GastoForm = {
   id: number | null;
+  idSuministroProvisional: string;
+  fechaInicioSuministroProvisional: string;
   filtroOperativo: FiltroOperativoValue;
   responsable: string;
   responsableLabel: string;
@@ -259,6 +263,7 @@ type GastoForm = {
 };
 
 type GastoPayload = {
+  idSuministroProvisional?: number;
   filtroOperativoKey: string;
   responsable: string;
   idBancoCta?: number;
@@ -313,9 +318,26 @@ type FacturaUploadResponse = {
   storagePath: string;
 };
 
+type SuministroProvisionalVigenteOption = {
+  idProvisional: number;
+  idResponsable?: number | null;
+  responsable?: string;
+  idTarea?: number | null;
+  tarea?: string;
+  tipoTrabajo?: string;
+  ot?: string;
+  comentario?: string;
+  monto?: number | null;
+  fechaInicio?: string | null;
+  nombreCliente?: string;
+  nombreProyecto?: string;
+  nombreSite?: string;
+};
+
 const GASTOS_API_URL = "/tesoreria/gastos";
 const FACTURA_UPLOAD_API_URL = `${GASTOS_API_URL}/upload-factura`;
 const TIPO_CAMBIO_GASTO = 3.8;
+const TAREAS_CON_SUMINISTRO_VIGENTE = new Set([52, 53]);
 const VALORES_GASTO_INICIALES: ValoresGastoResponse = {
   porcentaje: 0,
   aprobado: 0,
@@ -530,6 +552,20 @@ function renderGridCellText(value: unknown): React.ReactNode {
       {text}
     </span>
   );
+}
+
+function buildSuministroVigenteLabel(item: SuministroProvisionalVigenteOption): string {
+  const idText = item.idProvisional ? String(item.idProvisional) : "";
+  const fechaText = normalizeDateForInput(item.fechaInicio ?? "");
+  const fechaDisplay = fechaText
+    ? fechaText.split("-").reverse().join("/")
+    : "";
+
+  return [idText, fechaDisplay].filter(Boolean).join(" - ");
+}
+
+function requiereSuministroVigente(idTarea?: number | null): boolean {
+  return idTarea != null && TAREAS_CON_SUMINISTRO_VIGENTE.has(Number(idTarea));
 }
 
 function normalizeColumnOptionValue(value: unknown): string {
@@ -777,6 +813,22 @@ function getRecordNumber(row: Record<string, unknown>, ...keys: string[]): numbe
 function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: number): GastoDto {
   return {
     id: getRecordNumber(row, "Corre", "CorrelativoPlanilla", "Id", "id", "IdPlanilla", "idPlanilla") ?? index + 1,
+    idSuministroProvisional:
+      getRecordNumber(
+        row,
+        "IdSuministroProvisional",
+        "idSuministroProvisional",
+        "IdProvisional",
+        "idProvisional",
+        "idprovisional"
+      ) ??
+      undefined,
+    fechaInicioSuministroProvisional: getRecordString(
+      row,
+      "FechaInicio",
+      "fechaInicio",
+      "fechainicio"
+    ),
     filtroOperativoKey: getRecordString(row, "FiltroOperativoKey", "filtroOperativoKey", "FiltroKey", "filtroKey"),
     responsable: getRecordString(row, "IdResponsable", "idResponsable", "ResponsableId", "responsableId"),
     responsableLabel: getRecordString(row, "Responsable", "responsable", "NomResponsable", "nomResponsable"),
@@ -840,6 +892,9 @@ function mapGastoDtoToView(item: GastoDto): GastoForm {
 
   return {
     id: item.id,
+    idSuministroProvisional:
+      item.idSuministroProvisional != null ? String(item.idSuministroProvisional) : "",
+    fechaInicioSuministroProvisional: item.fechaInicioSuministroProvisional ?? "",
     filtroOperativo: {
       filtro: {
         filtroKey: item.filtroOperativoKey,
@@ -899,6 +954,8 @@ function mapGastoDtoToView(item: GastoDto): GastoForm {
 
 const formularioInicial: GastoForm = {
   id: null,
+  idSuministroProvisional: "",
+  fechaInicioSuministroProvisional: "",
   filtroOperativo: {},
   responsable: "",
   responsableLabel: "",
@@ -948,6 +1005,8 @@ export default function GastosPage() {
   const [showPorcentajePopup, setShowPorcentajePopup] = useState(false);
   const porcentajeRef = useRef<HTMLSpanElement | null>(null);
   const sidePanelRef = useRef<HTMLDivElement | null>(null);
+  const ultimoSuministroVigenteLookupKeyRef = useRef("");
+  const preservarSuministroEdicionRef = useRef(false);
   const authUser = getAuthUser();
   const [errores, setErrores] = useState<Record<string, string>>({});
   const [empleados, setEmpleados] = useState<EmpleadoCta[]>([]);
@@ -955,6 +1014,9 @@ export default function GastosPage() {
   const [empleadosError, setEmpleadosError] = useState<string | null>(null);
   const [tareasCatalogo, setTareasCatalogo] = useState<TareaOption[]>([]);
   const [tareasCatalogoError, setTareasCatalogoError] = useState<string | null>(null);
+  const [suministrosVigentes, setSuministrosVigentes] = useState<SuministroProvisionalVigenteOption[]>([]);
+  const [suministrosVigentesLoading, setSuministrosVigentesLoading] = useState(false);
+  const [suministrosVigentesError, setSuministrosVigentesError] = useState<string | null>(null);
   const [solicitanteOptions, setSolicitanteOptions] = useState<ConstanteOption[]>([]);
   const [solicitanteLoading, setSolicitanteLoading] = useState(false);
   const [solicitanteError, setSolicitanteError] = useState<string | null>(null);
@@ -1035,6 +1097,9 @@ export default function GastosPage() {
     const tipoCambioValue = Number(tipoCambio);
 
     const payload: GastoPayload = {
+      idSuministroProvisional: form.idSuministroProvisional
+        ? Number(form.idSuministroProvisional)
+        : undefined,
       filtroOperativoKey: form.filtroOperativo.filtro?.filtroKey || "",
       responsable: form.responsable,
       idBancoCta: form.idBancoCta ? Number(form.idBancoCta) : undefined,
@@ -1140,7 +1205,7 @@ export default function GastosPage() {
     setForm,
     loading: cargando,
     saving: guardando,
-    error: mensaje,
+    error: errorGuardado,
     panelOpen: panelAbierto,
     setPanelOpen: setPanelAbierto,
     mode: modo,
@@ -1329,6 +1394,21 @@ export default function GastosPage() {
     return JSON.stringify(request);
   }, [form.filtroOperativo]);
 
+  const suministroVigenteLookupKey = useMemo(
+    () =>
+      JSON.stringify({
+        filtroKey: form.filtroOperativo.filtro?.filtroKey ?? "",
+        idCliente: form.filtroOperativo.filtro?.idCliente ?? 0,
+        idProyecto: form.filtroOperativo.filtro?.idProyecto ?? 0,
+        idSite: form.filtroOperativo.filtro?.idSite ?? "",
+        correlativo: form.filtroOperativo.filtro?.correlativo ?? 0,
+        tipoTrabajo: form.filtroOperativo.tipoTrabajo?.tipoTrabajo ?? "",
+        ot: form.filtroOperativo.ot?.ot ?? "",
+        idTarea: form.filtroOperativo.tarea?.correlativo ?? 0,
+      }),
+    [form.filtroOperativo]
+  );
+
   useEffect(() => {
     const label = getConstanteLabelOrFallback(
       solicitanteOptions,
@@ -1389,6 +1469,127 @@ export default function GastosPage() {
 
     void cargarValoresGasto(form.filtroOperativo);
   }, [panelAbierto, modo, valoresGastoRequestKey]);
+
+  useEffect(() => {
+    if (!panelAbierto) {
+      ultimoSuministroVigenteLookupKeyRef.current = "";
+      preservarSuministroEdicionRef.current = false;
+      setSuministrosVigentes([]);
+      setSuministrosVigentesLoading(false);
+      setSuministrosVigentesError(null);
+      return;
+    }
+
+    const filtro = form.filtroOperativo.filtro;
+    const idCliente = toNumberOrZero(filtro?.idCliente);
+    const idProyecto = toNumberOrZero(filtro?.idProyecto);
+    const idSite = String(filtro?.idSite ?? "").trim();
+    const correSite = toNumberOrZero(filtro?.correlativo);
+    const tipoTrabajo = form.filtroOperativo.tipoTrabajo?.tipoTrabajo?.trim() ?? "";
+    const idTarea = toNumberOrZero(form.filtroOperativo.tarea?.correlativo);
+    const requiereCombo = requiereSuministroVigente(idTarea);
+    const conservarSeleccionActual =
+      (modo === "editar" || preservarSuministroEdicionRef.current) &&
+      Boolean(form.idSuministroProvisional?.trim()) &&
+      suministrosVigentes.some(
+        (item) => String(item.idProvisional) === form.idSuministroProvisional.trim()
+      );
+
+    if (!requiereCombo || idCliente <= 0 || idProyecto <= 0 || !idSite || correSite <= 0 || !tipoTrabajo) {
+      if (!conservarSeleccionActual) {
+        ultimoSuministroVigenteLookupKeyRef.current = "";
+        setSuministrosVigentes([]);
+      }
+      setSuministrosVigentesLoading(false);
+      setSuministrosVigentesError(null);
+      if (!conservarSeleccionActual) {
+        setForm((prev) => (prev.idSuministroProvisional ? { ...prev, idSuministroProvisional: "" } : prev));
+      }
+      return;
+    }
+
+    const lookupCambioReal =
+      ultimoSuministroVigenteLookupKeyRef.current !== "" &&
+      ultimoSuministroVigenteLookupKeyRef.current !== suministroVigenteLookupKey;
+    ultimoSuministroVigenteLookupKeyRef.current = suministroVigenteLookupKey;
+
+    let activo = true;
+    setSuministrosVigentesLoading(true);
+    setSuministrosVigentesError(null);
+    if (lookupCambioReal) {
+      setForm((prev) => (prev.idSuministroProvisional ? { ...prev, idSuministroProvisional: "" } : prev));
+    }
+
+    httpClient
+      .get<SuministroProvisionalVigenteOption[]>(`${GASTOS_API_URL}/suministros-vigentes`, {
+        params: {
+          idCliente,
+          idProyecto,
+          idSite,
+          correSite,
+          tipoTrabajo,
+        },
+      })
+      .then((data) => {
+        if (!activo) {
+          return;
+        }
+
+        const items = Array.isArray(data) ? data : [];
+        const valorActual = form.idSuministroProvisional?.trim();
+        const fallbackActual =
+          (modo === "editar" || preservarSuministroEdicionRef.current) && valorActual
+            ? {
+                idProvisional: Number(valorActual),
+                fechaInicio: form.fechaInicioSuministroProvisional || undefined,
+              }
+            : null;
+
+        const itemsNormalizados =
+          fallbackActual &&
+          Number.isFinite(fallbackActual.idProvisional) &&
+          !items.some((item) => String(item.idProvisional) === String(fallbackActual.idProvisional))
+            ? [fallbackActual, ...items]
+            : items;
+
+        setSuministrosVigentes(itemsNormalizados);
+        preservarSuministroEdicionRef.current = false;
+        setForm((prev) => {
+          if (!prev.idSuministroProvisional) {
+            return prev;
+          }
+
+          const existeSeleccion = itemsNormalizados.some(
+            (item) => String(item.idProvisional) === prev.idSuministroProvisional
+          );
+
+          return existeSeleccion ? prev : { ...prev, idSuministroProvisional: "" };
+        });
+      })
+      .catch(() => {
+        if (!activo) {
+          return;
+        }
+
+        setSuministrosVigentes([]);
+        setSuministrosVigentesError("No se pudo cargar el suministro provisional vigente.");
+      })
+      .finally(() => {
+        if (!activo) {
+          return;
+        }
+
+        setSuministrosVigentesLoading(false);
+      });
+
+    return () => {
+      activo = false;
+    };
+  }, [
+    panelAbierto,
+    suministroVigenteLookupKey,
+    setForm,
+  ]);
 
   const cargarValoresGasto = async (filtroOperativo: FiltroOperativoValue) => {
     const request = buildValoresGastoRequest(filtroOperativo);
@@ -1536,6 +1737,9 @@ export default function GastosPage() {
     setResponsableInput("");
     setHighlightedResponsableIdx(-1);
     setShowResponsableDropdown(false);
+    setSuministrosVigentes([]);
+    setSuministrosVigentesLoading(false);
+    setSuministrosVigentesError(null);
     setErrores({});
     setShowFacturaSourceMenu(false);
     setFacturaUploadError(null);
@@ -1585,9 +1789,20 @@ export default function GastosPage() {
     };
 
     setModo("editar");
+    preservarSuministroEdicionRef.current = Boolean(gastoEditable.idSuministroProvisional);
     valoresGastoRequestRef.current += 1;
     setValoresGastoLoading(false);
     setValoresGasto(VALORES_GASTO_INICIALES);
+    setSuministrosVigentes(
+      gastoEditable.idSuministroProvisional
+        ? [
+            {
+              idProvisional: Number(gastoEditable.idSuministroProvisional),
+              fechaInicio: gastoEditable.fechaInicioSuministroProvisional || undefined,
+            },
+          ]
+        : []
+    );
     setForm(gastoEditable);
     setUsarFechaEmision(Boolean(gastoEditable.fechaEmision));
     setUsarFechaVencimiento(Boolean(gastoEditable.fechaVencimiento));
@@ -1660,6 +1875,9 @@ export default function GastosPage() {
     setResponsableInput("");
     setHighlightedResponsableIdx(-1);
     setShowResponsableDropdown(false);
+    setSuministrosVigentes([]);
+    setSuministrosVigentesLoading(false);
+    setSuministrosVigentesError(null);
     setErrores({});
     setShowFacturaSourceMenu(false);
     setFacturaUploadError(null);
@@ -1727,7 +1945,11 @@ export default function GastosPage() {
   const guardar = async () => {
     if (!validar()) return;
 
-    await handleSave();
+    const guardado = await handleSave();
+    if (!guardado) {
+      return;
+    }
+
     setPanelAbierto(false);
     setForm(formularioInicial);
     setResponsableInput("");
@@ -2099,21 +2321,6 @@ export default function GastosPage() {
         ]}
       />
 
-      {mensaje && (
-        <div
-          style={{
-            background: "#FEF2F2",
-            border: "1px solid #FECACA",
-            color: "#991B1B",
-            padding: 14,
-            borderRadius: 12,
-            fontSize: 11,
-            fontWeight: 600,
-          }}
-        >
-          {mensaje}
-        </div>
-      )}
       {rechazoError && (
         <div
           style={{
@@ -2533,6 +2740,9 @@ export default function GastosPage() {
                   <p style={{ marginTop: 8, marginBottom: 0, color: "#6B7280", fontSize: 13 }}>
                     Complete la información del gasto.
                   </p>
+                  <p style={{ marginTop: 6, marginBottom: 0, color: "#475569", fontSize: 12 }}>
+                    El sistema registra auditoria automatica por seccion al guardar o rechazar cambios.
+                  </p>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
                   <span style={{ fontSize: 18, fontWeight: 700, color: "#374151" }}>Porcentaje:</span>
@@ -2594,6 +2804,23 @@ export default function GastosPage() {
                 </div>
               </div>
             </div>
+
+            {errorGuardado && (
+              <div
+                style={{
+                  background: "#FEF2F2",
+                  border: "1px solid #FECACA",
+                  color: "#991B1B",
+                  padding: 14,
+                  borderRadius: 12,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  marginBottom: 16,
+                }}
+              >
+                {errorGuardado}
+              </div>
+            )}
 
             <div style={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
               {/* Enlace para visualizar la factura solo si hay ruta y NO es modo nuevo ni editar */}
@@ -2659,112 +2886,64 @@ export default function GastosPage() {
                 </div>
               ) : null}
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-                <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>Responsable</label>
-                <div style={{ position: "relative", width: "100%" }}>
-                  <input
-                    type="text"
-                    value={
-                      empleadosSafe.find((emp) => String(emp.idEmpleado) === form.responsable)?.nombreEmpleado ||
-                      form.responsableLabel ||
-                      responsableInput ||
-                      ""
-                    }
-                    onChange={(e) => {
-                      setResponsableInput(e.target.value);
-                      setShowResponsableDropdown(true);
-                      setForm((prev) => ({
-                        ...prev,
-                        responsable: "",
-                        responsableLabel: "",
-                        idBancoCta: "",
-                        cuenta: "",
-                        cuentaNumero: "",
-                        cuentaInter: "",
-                        nombreCta: "",
-                        ruc: "",
-                      }));
-                    }}
-                    onFocus={() => {
-                      if (filteredResponsables.length > 0) setShowResponsableDropdown(true);
-                    }}
-                    onKeyDown={(e) => {
-                      if (filteredResponsables.length === 0) return;
-
-                      if (e.key === "ArrowDown") {
-                        e.preventDefault();
-                        setHighlightedResponsableIdx((idx) => Math.min(idx + 1, filteredResponsables.length - 1));
-                        setShowResponsableDropdown(true);
-                      } else if (e.key === "ArrowUp") {
-                        e.preventDefault();
-                        setHighlightedResponsableIdx((idx) => Math.max(idx - 1, 0));
-                        setShowResponsableDropdown(true);
-                      } else if (e.key === "Enter") {
-                        if (highlightedResponsableIdx >= 0 && highlightedResponsableIdx < filteredResponsables.length) {
-                          const emp = filteredResponsables[highlightedResponsableIdx];
-                          const cuentaMetadata = buildCuentaMetadata(emp);
-                          setForm((prev) => ({
-                            ...prev,
-                            responsable: String(emp.idEmpleado),
-                            responsableLabel: emp.nombreEmpleado,
-                            idBancoCta: emp.idBancoCta != null ? String(emp.idBancoCta) : "",
-                            cuenta: buildCuentaResumen(emp),
-                            cuentaNumero: cuentaMetadata.cuentaNumero,
-                            cuentaInter: cuentaMetadata.cuentaInter,
-                            nombreCta: cuentaMetadata.nombreCta,
-                            ruc: cuentaMetadata.ruc,
-                          }));
-                          setResponsableInput(emp.nombreEmpleado);
-                          setShowResponsableDropdown(false);
-                          setHighlightedResponsableIdx(-1);
-                        }
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0, 1.25fr) minmax(260px, 1fr)",
+                  gap: 12,
+                  alignItems: "start",
+                }}
+              >
+                <div style={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>Responsable</label>
+                  <div style={{ position: "relative", width: "100%" }}>
+                    <input
+                      type="text"
+                      value={
+                        empleadosSafe.find((emp) => String(emp.idEmpleado) === form.responsable)?.nombreEmpleado ||
+                        form.responsableLabel ||
+                        responsableInput ||
+                        ""
                       }
-                    }}
-                    placeholder="Seleccione..."
-                    autoComplete="off"
-                    required
-                    style={{
-                      width: "100%",
-                      height: 42,
-                      borderRadius: 10,
-                      border: `1px solid ${errores.responsable ? "#F87171" : "#D1D5DB"}`,
-                      padding: "0 12px",
-                      fontSize: 11,
-                      boxSizing: "border-box",
-                    }}
-                    disabled={empleadosLoading}
-                  />
-
-                  {showResponsableDropdown && filteredResponsables.length > 0 && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: "100%",
-                        left: 0,
-                        right: 0,
-                        background: "#fff",
-                        border: "1px solid #ccc",
-                        zIndex: 1002,
-                        maxHeight: 180,
-                        overflowY: "auto",
+                      onChange={(e) => {
+                        setResponsableInput(e.target.value);
+                        setShowResponsableDropdown(true);
+                        setForm((prev) => ({
+                          ...prev,
+                          responsable: "",
+                          responsableLabel: "",
+                          idSuministroProvisional: "",
+                          idBancoCta: "",
+                          cuenta: "",
+                          cuentaNumero: "",
+                          cuentaInter: "",
+                          nombreCta: "",
+                          ruc: "",
+                        }));
                       }}
-                    >
-                      {filteredResponsables.map((emp, idx) => (
-                        <div
-                          key={`responsable-${emp.idEmpleado || emp.nombreEmpleado || idx}-${idx}`}
-                          style={{
-                            padding: 6,
-                            cursor: "pointer",
-                            background: idx === highlightedResponsableIdx ? "#e6f7ff" : undefined,
-                            fontSize: 11,
-                            lineHeight: 1.1,
-                          }}
-                          onMouseDown={() => {
+                      onFocus={() => {
+                        if (filteredResponsables.length > 0) setShowResponsableDropdown(true);
+                      }}
+                      onKeyDown={(e) => {
+                        if (filteredResponsables.length === 0) return;
+
+                        if (e.key === "ArrowDown") {
+                          e.preventDefault();
+                          setHighlightedResponsableIdx((idx) => Math.min(idx + 1, filteredResponsables.length - 1));
+                          setShowResponsableDropdown(true);
+                        } else if (e.key === "ArrowUp") {
+                          e.preventDefault();
+                          setHighlightedResponsableIdx((idx) => Math.max(idx - 1, 0));
+                          setShowResponsableDropdown(true);
+                        } else if (e.key === "Enter") {
+                          if (highlightedResponsableIdx >= 0 && highlightedResponsableIdx < filteredResponsables.length) {
+                            const emp = filteredResponsables[highlightedResponsableIdx];
                             const cuentaMetadata = buildCuentaMetadata(emp);
                             setForm((prev) => ({
                               ...prev,
                               responsable: String(emp.idEmpleado),
                               responsableLabel: emp.nombreEmpleado,
+                              idSuministroProvisional: "",
                               idBancoCta: emp.idBancoCta != null ? String(emp.idBancoCta) : "",
                               cuenta: buildCuentaResumen(emp),
                               cuentaNumero: cuentaMetadata.cuentaNumero,
@@ -2775,23 +2954,140 @@ export default function GastosPage() {
                             setResponsableInput(emp.nombreEmpleado);
                             setShowResponsableDropdown(false);
                             setHighlightedResponsableIdx(-1);
-                          }}
-                        >
-                          {emp.nombreEmpleado}
-                        </div>
-                      ))}
+                          }
+                        }
+                      }}
+                      placeholder="Seleccione..."
+                      autoComplete="off"
+                      required
+                      style={{
+                        width: "100%",
+                        height: 42,
+                        borderRadius: 10,
+                        border: `1px solid ${errores.responsable ? "#F87171" : "#D1D5DB"}`,
+                        padding: "0 12px",
+                        fontSize: 11,
+                        boxSizing: "border-box",
+                      }}
+                      disabled={empleadosLoading}
+                    />
+
+                    {showResponsableDropdown && filteredResponsables.length > 0 && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "100%",
+                          left: 0,
+                          right: 0,
+                          background: "#fff",
+                          border: "1px solid #ccc",
+                          zIndex: 1002,
+                          maxHeight: 180,
+                          overflowY: "auto",
+                        }}
+                      >
+                        {filteredResponsables.map((emp, idx) => (
+                          <div
+                            key={`responsable-${emp.idEmpleado || emp.nombreEmpleado || idx}-${idx}`}
+                            style={{
+                              padding: 6,
+                              cursor: "pointer",
+                              background: idx === highlightedResponsableIdx ? "#e6f7ff" : undefined,
+                              fontSize: 11,
+                              lineHeight: 1.1,
+                            }}
+                            onMouseDown={() => {
+                              const cuentaMetadata = buildCuentaMetadata(emp);
+                              setForm((prev) => ({
+                                ...prev,
+                                responsable: String(emp.idEmpleado),
+                                responsableLabel: emp.nombreEmpleado,
+                                idSuministroProvisional: "",
+                                idBancoCta: emp.idBancoCta != null ? String(emp.idBancoCta) : "",
+                                cuenta: buildCuentaResumen(emp),
+                                cuentaNumero: cuentaMetadata.cuentaNumero,
+                                cuentaInter: cuentaMetadata.cuentaInter,
+                                nombreCta: cuentaMetadata.nombreCta,
+                                ruc: cuentaMetadata.ruc,
+                              }));
+                              setResponsableInput(emp.nombreEmpleado);
+                              setShowResponsableDropdown(false);
+                              setHighlightedResponsableIdx(-1);
+                            }}
+                          >
+                            {emp.nombreEmpleado}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {empleadosLoading && <span style={{ fontSize: 12, color: "#888" }}>Cargando...</span>}
+                    {empleadosError && <span style={{ fontSize: 12, color: "red" }}>{empleadosError}</span>}
+                  </div>
+
+                  {errores.responsable && (
+                    <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>
+                      {errores.responsable}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>
+                    Suministro vigente
+                  </label>
+                  <select
+                    value={form.idSuministroProvisional}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        idSuministroProvisional: e.target.value,
+                      }))
+                    }
+                    disabled={
+                      !requiereSuministroVigente(form.filtroOperativo.tarea?.correlativo) ||
+                      !form.filtroOperativo.filtro?.filtroKey ||
+                      suministrosVigentesLoading
+                    }
+                    style={{
+                      width: "100%",
+                      height: 42,
+                      borderRadius: 10,
+                      border: `1px solid ${errores.idSuministroProvisional ? "#F87171" : "#D1D5DB"}`,
+                      padding: "0 12px",
+                      fontSize: 11,
+                      boxSizing: "border-box",
+                      background: "#FFFFFF",
+                    }}
+                  >
+                    <option value="">
+                      {!requiereSuministroVigente(form.filtroOperativo.tarea?.correlativo)
+                        ? "No aplica"
+                        : suministrosVigentesLoading
+                        ? "Cargando..."
+                        : suministrosVigentes.length > 0
+                          ? "Seleccione..."
+                          : "Sin registros vigentes"}
+                    </option>
+                    {suministrosVigentes.map((item) => (
+                      <option key={item.idProvisional} value={String(item.idProvisional)}>
+                        {buildSuministroVigenteLabel(item)}
+                      </option>
+                    ))}
+                  </select>
+
+                  {errores.idSuministroProvisional && (
+                    <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>
+                      {errores.idSuministroProvisional}
                     </div>
                   )}
 
-                  {empleadosLoading && <span style={{ fontSize: 12, color: "#888" }}>Cargando...</span>}
-                  {empleadosError && <span style={{ fontSize: 12, color: "red" }}>{empleadosError}</span>}
+                  {suministrosVigentesError && (
+                    <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>
+                      {suministrosVigentesError}
+                    </div>
+                  )}
                 </div>
-
-                {errores.responsable && (
-                  <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>
-                    {errores.responsable}
-                  </div>
-                )}
               </div>
 
         <div

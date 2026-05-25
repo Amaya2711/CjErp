@@ -35,15 +35,29 @@ public sealed class WupService : IWupService
         var requestJson = JsonSerializer.Serialize(request);
         var sendUri = _settings.BuildRequestUri(_settings.EnviarAdjuntoEndpoint);
 
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            _logger.LogWarning(
+                "[WUP] No se obtuvo token antes del envio. LoginEndpoint={LoginEndpoint}, SendUrl={SendUrl}, Usuario={Usuario}",
+                _settings.BuildRequestUri(_settings.LoginEndpoint),
+                sendUri,
+                _settings.Usuario);
+
+            return new ReporteWhatsappSendResponseDto
+            {
+                Success = false,
+                StatusCode = 401,
+                ResponseBody = string.Empty,
+                ErrorMessage = "No se pudo autenticar contra WUP antes del envio. Revise WupSettings:LoginEndpoint, WupSettings:Usuario, WupSettings:Password y la respuesta del endpoint de login."
+            };
+        }
+
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, sendUri)
         {
             Content = new StringContent(requestJson, Encoding.UTF8, "application/json")
         };
 
-        if (!string.IsNullOrWhiteSpace(token))
-        {
-            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        }
+        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
         try
         {

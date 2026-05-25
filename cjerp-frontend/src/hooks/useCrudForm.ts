@@ -53,9 +53,11 @@ export function useCrudForm<T, TPayload = Partial<T>>(
       }
       setPanelOpen(false);
       await load();
+      return true;
     } catch (err: unknown) {
       console.error("[useCrudForm] Error al guardar", err);
       setError(getHttpErrorMessage(err, "Error al guardar"));
+      return false;
     } finally {
       setSaving(false);
     }

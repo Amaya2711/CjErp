@@ -1,5 +1,6 @@
 export type AuthUser = {
   token: string;
+  sessionId?: string;
   nombre?: string;
   nombreEmpleado?: string;
   empleado?: string;

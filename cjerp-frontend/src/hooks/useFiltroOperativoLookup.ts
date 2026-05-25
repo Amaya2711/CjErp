@@ -16,6 +16,21 @@ import {
   getTareas,
 } from '../api/filtroOperativoService';
 
+type DependentLookupCacheEntry = {
+  tipoTrabajos: TipoTrabajoOption[];
+  ots: OtOption[];
+};
+
+let filtrosCache: FiltroOperativoItem[] | null = null;
+let tareasCache: TareaOption[] | null = null;
+let initialLookupPromise: Promise<{ filtros: FiltroOperativoItem[]; tareas: TareaOption[] }> | null = null;
+const dependentLookupCache = new Map<string, DependentLookupCacheEntry>();
+const dependentLookupPromises = new Map<string, Promise<DependentLookupCacheEntry>>();
+
+function normalizeLookupText(value?: string | null): string {
+  return String(value ?? "").trim().toLowerCase();
+}
+
 function areFiltroOperativoValuesEqual(
   left?: FiltroOperativoValue,
   right?: FiltroOperativoValue
@@ -53,10 +68,10 @@ export function useFiltroOperativoLookup(
   initialValue?: FiltroOperativoValue,
   onChange?: (value: FiltroOperativoValue) => void
 ): UseFiltroOperativoLookupResult {
-  const [filtros, setFiltros] = useState<FiltroOperativoItem[]>([]);
+  const [filtros, setFiltros] = useState<FiltroOperativoItem[]>(() => filtrosCache ?? []);
   const [tipoTrabajos, setTipoTrabajos] = useState<TipoTrabajoOption[]>([]);
   const [ots, setOts] = useState<OtOption[]>([]);
-  const [tareas, setTareas] = useState<TareaOption[]>([]);
+  const [tareas, setTareas] = useState<TareaOption[]>(() => tareasCache ?? []);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [value, setValueState] = useState<FiltroOperativoValue>(initialValue || {});
@@ -71,16 +86,22 @@ export function useFiltroOperativoLookup(
 
   // 🔹 Cargar filtros y tareas al iniciar
   useEffect(() => {
-    if (filtros.length === 0 || value.filtro?.filtroKey) {
+    if (filtros.length === 0 || !value.filtro) {
       return;
     }
 
-    const matchedFiltro = filtros.find((filtro) =>
-      Number(filtro.idCliente) === Number(value.filtro?.idCliente) &&
-      Number(filtro.idProyecto) === Number(value.filtro?.idProyecto) &&
-      String(filtro.idSite ?? "").trim() === String(value.filtro?.idSite ?? "").trim() &&
-      Number(filtro.correlativo) === Number(value.filtro?.correlativo)
-    );
+    const matchedFiltroByKey = value.filtro.filtroKey
+      ? filtros.find((filtro) => filtro.filtroKey === value.filtro?.filtroKey)
+      : undefined;
+
+    const matchedFiltro =
+      matchedFiltroByKey ??
+      filtros.find((filtro) =>
+        Number(filtro.idCliente) === Number(value.filtro?.idCliente) &&
+        Number(filtro.idProyecto) === Number(value.filtro?.idProyecto) &&
+        String(filtro.idSite ?? "").trim() === String(value.filtro?.idSite ?? "").trim() &&
+        Number(filtro.correlativo) === Number(value.filtro?.correlativo)
+      );
 
     if (!matchedFiltro) {
       return;
@@ -101,12 +122,29 @@ export function useFiltroOperativoLookup(
   useEffect(() => {
     const loadInitialData = async () => {
       try {
+        if (filtrosCache && tareasCache) {
+          setFiltros(filtrosCache);
+          setTareas(tareasCache);
+          setError(null);
+          return;
+        }
+
         setLoading(true);
 
-        const [filtrosData, tareasData] = await Promise.all([
-          getFiltrosOperativos(),
-          getTareas(),
-        ]);
+        if (!initialLookupPromise) {
+          initialLookupPromise = Promise.all([
+            getFiltrosOperativos(),
+            getTareas(),
+          ]).then(([filtrosData, tareasData]) => ({
+            filtros: filtrosData,
+            tareas: tareasData,
+          }));
+        }
+
+        const { filtros: filtrosData, tareas: tareasData } = await initialLookupPromise;
+
+        filtrosCache = filtrosData;
+        tareasCache = tareasData;
 
         setFiltros(filtrosData);
         setTareas(tareasData);
@@ -114,6 +152,7 @@ export function useFiltroOperativoLookup(
       } catch (error: unknown) {
         setError(getHttpErrorMessage(error, 'Error al cargar datos iniciales'));
       } finally {
+        initialLookupPromise = null;
         setLoading(false);
       }
     };
@@ -128,19 +167,83 @@ export function useFiltroOperativoLookup(
     if (filtroKey) {
       const loadDependentData = async () => {
         try {
+          const cached = dependentLookupCache.get(filtroKey);
+          if (cached) {
+            setTipoTrabajos(cached.tipoTrabajos);
+            setOts(cached.ots);
+            setValueState((prev) => {
+              const selectedTipoTrabajo =
+                cached.tipoTrabajos.find(
+                  (item) =>
+                    normalizeLookupText(item.tipoTrabajo) ===
+                    normalizeLookupText(prev.tipoTrabajo?.tipoTrabajo ?? prev.filtro?.tipoTrabajo)
+                ) ?? prev.tipoTrabajo;
+
+              const selectedOt =
+                cached.ots.find(
+                  (item) =>
+                    normalizeLookupText(item.ot) ===
+                    normalizeLookupText(prev.ot?.ot ?? prev.filtro?.ot)
+                ) ?? prev.ot;
+
+              return {
+                ...prev,
+                tipoTrabajo: selectedTipoTrabajo,
+                ot: selectedOt,
+              };
+            });
+            setError(null);
+            return;
+          }
+
           setLoading(true);
 
-          const [tipoTrabajosData, otsData] = await Promise.all([
-            getTipoTrabajo(filtroKey),
-            getOTs(filtroKey),
-          ]);
+          let dependentPromise = dependentLookupPromises.get(filtroKey);
+          if (!dependentPromise) {
+            dependentPromise = Promise.all([
+              getTipoTrabajo(filtroKey),
+              getOTs(filtroKey),
+            ]).then(([tipoTrabajosData, otsData]) => ({
+              tipoTrabajos: tipoTrabajosData,
+              ots: otsData,
+            }));
+            dependentLookupPromises.set(filtroKey, dependentPromise);
+          }
+
+          const { tipoTrabajos: tipoTrabajosData, ots: otsData } = await dependentPromise;
+          dependentLookupCache.set(filtroKey, {
+            tipoTrabajos: tipoTrabajosData,
+            ots: otsData,
+          });
 
           setTipoTrabajos(tipoTrabajosData);
           setOts(otsData);
+          setValueState((prev) => {
+            const selectedTipoTrabajo =
+              tipoTrabajosData.find(
+                (item) =>
+                  normalizeLookupText(item.tipoTrabajo) ===
+                  normalizeLookupText(prev.tipoTrabajo?.tipoTrabajo ?? prev.filtro?.tipoTrabajo)
+              ) ?? prev.tipoTrabajo;
+
+            const selectedOt =
+              otsData.find(
+                (item) =>
+                  normalizeLookupText(item.ot) ===
+                  normalizeLookupText(prev.ot?.ot ?? prev.filtro?.ot)
+              ) ?? prev.ot;
+
+            return {
+              ...prev,
+              tipoTrabajo: selectedTipoTrabajo,
+              ot: selectedOt,
+            };
+          });
           setError(null);
         } catch (error: unknown) {
           setError(getHttpErrorMessage(error, 'Error al cargar tipo de trabajo u OT'));
         } finally {
+          dependentLookupPromises.delete(filtroKey);
           setLoading(false);
         }
       };

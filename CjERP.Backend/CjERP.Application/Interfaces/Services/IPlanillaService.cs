@@ -4,6 +4,9 @@ namespace CjERP.Application.Interfaces.Services
 {
     public interface IPlanillaService
     {
+        Task<IReadOnlyList<SuministroProvisionalVigenteDto>> ObtenerSuministrosProvisionalesVigentesAsync(
+            SuministroProvisionalVigenteRequestDto request,
+            CancellationToken cancellationToken = default);
         Task InsertarPlanillaAsync(PlanillaInsertRequestDto request, CancellationToken cancellationToken = default);
         Task ActualizarPlanillaAsync(PlanillaUpdateRequestDto request, CancellationToken cancellationToken = default);
         Task ActualizarEstadoPlanillaAsync(PlanillaActualizarEstadoRequestDto request, CancellationToken cancellationToken = default);

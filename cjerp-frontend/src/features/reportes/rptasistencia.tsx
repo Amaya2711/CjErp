@@ -96,9 +96,20 @@ type EmployeeGridFilters = {
   diferenciaValue: string;
 };
 
+type GerencialDetailFilters = {
+  responsable: string[];
+  cliente: string[];
+  proyecto: string[];
+  site: string[];
+};
+
 type CuadrosDetailSortKey =
   | "fecha"
   | "nombreEmpleado"
+  | "responsable"
+  | "cliente"
+  | "proyecto"
+  | "site"
   | "area"
   | "estadoMarcacionTexto";
 
@@ -437,6 +448,10 @@ function buildSelectOptions(rows: AsistenciaReporteItem[], selector: (item: Asis
   return [ALL_OPTION, ...Array.from(new Set(rows.map(selector).filter(Boolean))).sort((a, b) => a.localeCompare(b, "es"))];
 }
 
+function buildValueOptions(values: string[]) {
+  return [ALL_OPTION, ...Array.from(new Set(values.map((item) => item.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, "es"))];
+}
+
 function matchesMultiSelect(value: string, selectedValues: string[]) {
   if (selectedValues.length === 0 || selectedValues.includes(ALL_OPTION)) {
     return true;
@@ -519,7 +534,7 @@ export default function RptAsistenciaPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [busqueda, setBusqueda] = useState("");
-  const [activeTab, setActiveTab] = useState<"cuadros" | "detalle" | "empleado">("cuadros");
+  const [activeTab, setActiveTab] = useState<"cuadros" | "gerencial" | "detalle" | "empleado">("cuadros");
   const [detailDrilldown, setDetailDrilldown] = useState<DetailDrilldown>({
     fecha: null,
     estadoMarcacion: null,
@@ -551,6 +566,12 @@ export default function RptAsistenciaPage() {
     key: "fecha",
     direction: "asc",
   });
+  const [gerencialDetailFilters, setGerencialDetailFilters] = useState<GerencialDetailFilters>({
+    responsable: [],
+    cliente: [],
+    proyecto: [],
+    site: [],
+  });
   const [employeeGridFilters, setEmployeeGridFilters] = useState<EmployeeGridFilters>({
     employee: "",
     responsable: "",
@@ -558,7 +579,7 @@ export default function RptAsistenciaPage() {
     diferenciaOperator: "",
     diferenciaValue: "",
   });
-  const [employeeGridSort, setEmployeeGridSort] = useState<{ key: "responsable" | "total" | "otros" | "faltaAprobar" | "diferencia"; direction: "asc" | "desc" }>({
+  const [employeeGridSort, setEmployeeGridSort] = useState<{ key: "employee" | "responsable" | "total" | "otros" | "faltaAprobar" | "diferencia"; direction: "asc" | "desc" }>({
     key: "total",
     direction: "desc",
   });
@@ -828,12 +849,20 @@ export default function RptAsistenciaPage() {
         key: `${item.idEmpleado ?? item.nombreEmpleado}-${item.fecha}-${index}`,
         fecha: formatDateLabel(item.fecha),
         nombreEmpleado: item.nombreEmpleado,
+        responsable: item.responsable || "Sin responsable",
+        cliente: item.cliente || "Sin cliente",
+        proyecto: item.proyecto || "Sin proyecto",
+        site: item.site || "Sin site",
         area: item.area || "Sin area",
         estadoMarcacionTexto: item.estadoMarcacionTexto || item.estado || "Sin clasificar",
       }))
       .filter((item) => (
         (!cuadrosDetailFilter.area || item.area === cuadrosDetailFilter.area) &&
-        (!cuadrosDetailFilter.estadoMarcacion || item.estadoMarcacionTexto === cuadrosDetailFilter.estadoMarcacion)
+        (!cuadrosDetailFilter.estadoMarcacion || item.estadoMarcacionTexto === cuadrosDetailFilter.estadoMarcacion) &&
+        (activeTab !== "gerencial" || matchesMultiSelect(item.responsable, gerencialDetailFilters.responsable)) &&
+        (activeTab !== "gerencial" || matchesMultiSelect(item.cliente, gerencialDetailFilters.cliente)) &&
+        (activeTab !== "gerencial" || matchesMultiSelect(item.proyecto, gerencialDetailFilters.proyecto)) &&
+        (activeTab !== "gerencial" || matchesMultiSelect(item.site, gerencialDetailFilters.site))
       ));
 
     return [...base].sort((left, right) => {
@@ -843,7 +872,59 @@ export default function RptAsistenciaPage() {
 
       return cuadrosDetailSort.direction === "asc" ? compared : -compared;
     });
-  }, [cuadrosDetailFilter, cuadrosDetailSort, filteredRows]);
+  }, [activeTab, cuadrosDetailFilter, cuadrosDetailSort, filteredRows, gerencialDetailFilters]);
+
+  const gerencialDetailFilterOptions = useMemo(
+    () => ({
+      responsable: buildValueOptions(filteredRows.map((item) => item.responsable || "Sin responsable")).filter((option) => option !== ALL_OPTION),
+      cliente: buildValueOptions(filteredRows.map((item) => item.cliente || "Sin cliente")).filter((option) => option !== ALL_OPTION),
+      proyecto: buildValueOptions(filteredRows.map((item) => item.proyecto || "Sin proyecto")).filter((option) => option !== ALL_OPTION),
+      site: buildValueOptions(filteredRows.map((item) => item.site || "Sin site")).filter((option) => option !== ALL_OPTION),
+    }),
+    [filteredRows]
+  );
+
+  const gerencialAreaSummaryRows = useMemo(() => {
+    const grouped = new Map<string, { responsable: string; cliente: string; estadoMarcacionTexto: string; cantidad: number }>();
+
+    filteredRows.forEach((item) => {
+      const responsable = item.responsable || "Sin responsable";
+      const cliente = item.cliente || "Sin cliente";
+      const estadoMarcacionTexto = item.estadoMarcacionTexto || item.estado || "Sin clasificar";
+      const key = `${responsable}||${cliente}||${estadoMarcacionTexto}`;
+      const current = grouped.get(key);
+
+      if (current) {
+        current.cantidad += 1;
+        return;
+      }
+
+      grouped.set(key, {
+        responsable,
+        cliente,
+        estadoMarcacionTexto,
+        cantidad: 1,
+      });
+    });
+
+    return Array.from(grouped.values()).sort((left, right) => {
+      if (right.cantidad !== left.cantidad) {
+        return right.cantidad - left.cantidad;
+      }
+
+      const responsableCompared = left.responsable.localeCompare(right.responsable, "es", { sensitivity: "base" });
+      if (responsableCompared !== 0) {
+        return responsableCompared;
+      }
+
+      const clienteCompared = left.cliente.localeCompare(right.cliente, "es", { sensitivity: "base" });
+      if (clienteCompared !== 0) {
+        return clienteCompared;
+      }
+
+      return left.estadoMarcacionTexto.localeCompare(right.estadoMarcacionTexto, "es", { sensitivity: "base" });
+    });
+  }, [filteredRows]);
 
   const chartEmpleadoPorDia = useMemo(() => {
     const fechas = getDateRangeLabels(fechaInicio, fechaFin);
@@ -995,6 +1076,8 @@ export default function RptAsistenciaPage() {
           ? left.totalHorasFaltaAprobar - right.totalHorasFaltaAprobar
         : employeeGridSort.key === "otros"
           ? left.totalHorasFaltaIncompleto - right.totalHorasFaltaIncompleto
+          : employeeGridSort.key === "employee"
+            ? left.employee.localeCompare(right.employee, "es", { sensitivity: "base" })
           : employeeGridSort.key === "responsable"
             ? left.responsable.localeCompare(right.responsable, "es", { sensitivity: "base" })
             : left.total - right.total;
@@ -1020,7 +1103,7 @@ export default function RptAsistenciaPage() {
   const primaryFilterCount = 5;
 
   const isExcelExportDisabled = useMemo(() => {
-    if (activeTab === "cuadros") {
+    if (activeTab === "cuadros" || activeTab === "gerencial") {
       return chartEstadoPorDia.rows.length === 0 || chartEstadoPorDia.states.length === 0;
     }
     if (activeTab === "detalle") {
@@ -1033,7 +1116,7 @@ export default function RptAsistenciaPage() {
   }, [activeTab, chartEstadoPorDia.rows.length, chartEstadoPorDia.states.length, detailRows.length, filteredEmployeeGridRows.length]);
 
   const isPdfExportDisabled = useMemo(() => {
-    if (activeTab === "cuadros") {
+    if (activeTab === "cuadros" || activeTab === "gerencial") {
       return chartEstadoPorDia.rows.length === 0 || chartEstadoPorDia.states.length === 0;
     }
     if (activeTab === "detalle") {
@@ -1062,6 +1145,12 @@ export default function RptAsistenciaPage() {
     setSelectedEstadoMarcacion([]);
     setCuadrosDetailFilter({ area: null, estadoMarcacion: null });
     setCuadrosDetailSort({ key: "fecha", direction: "asc" });
+    setGerencialDetailFilters({
+      responsable: [],
+      cliente: [],
+      proyecto: [],
+      site: [],
+    });
     setBusqueda("");
     setShowAdvancedFilters(false);
     setEmployeeGridFilters({
@@ -1158,7 +1247,7 @@ export default function RptAsistenciaPage() {
     const XLSX = await import("xlsx");
     const workbook = XLSX.utils.book_new();
 
-    if (activeTab === "cuadros") {
+    if (activeTab === "cuadros" || activeTab === "gerencial") {
       const estadoRows = chartEstadoPorDia.states.map((state) => {
         const row: Record<string, string> = {
           "Estado / Fecha": state,
@@ -1207,69 +1296,53 @@ export default function RptAsistenciaPage() {
     XLSX.writeFile(workbook, `reporte_asistencia_${toApiDate(fechaInicio).replaceAll("/", "")}_${toApiDate(fechaFin).replaceAll("/", "")}.xlsx`);
   };
 
+  const exportGerencialSummaryExcel = async () => {
+    const XLSX = await import("xlsx");
+    const workbook = XLSX.utils.book_new();
+    const summaryRows = gerencialAreaSummaryRows.map((item) => ({
+      Responsable: item.responsable,
+      Cliente: item.cliente,
+      EstadoMarcacion: item.estadoMarcacionTexto,
+      Cantidad: item.cantidad,
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(summaryRows);
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Resumen responsable");
+    XLSX.writeFile(
+      workbook,
+      `resumen_responsable_${toApiDate(fechaInicio).replaceAll("/", "")}_${toApiDate(fechaFin).replaceAll("/", "")}.xlsx`
+    );
+  };
+
   const exportPdf = async () => {
     if (activeTab === "empleado") {
-      const fechas = getDateRangeLabels(fechaInicio, fechaFin);
-      const fullRowsByEmployee = new Map<string, AsistenciaReporteItem[]>();
+      const employeeSummaryByEmployee = new Map(
+        filteredEmployeeGridRows.map((row) => [row.employee, row] as const)
+      );
 
-      rows.forEach((item) => {
-        const employee = item.nombreEmpleado?.trim();
-        if (!employee) {
-          return;
-        }
-
-        const current = fullRowsByEmployee.get(employee) ?? [];
-        current.push(item);
-        fullRowsByEmployee.set(employee, current);
-      });
-
-      const pdfItems: AsistenciaReportePdfItem[] = filteredEmployeeGridRows.flatMap((row) => {
-        const employeeRows = fullRowsByEmployee.get(row.employee) ?? [];
-        const rowsByDate = new Map<string, AsistenciaReporteItem[]>();
-
-        employeeRows.forEach((item) => {
-          const key = formatDateLabel(item.fecha);
-          const current = rowsByDate.get(key) ?? [];
-          current.push(item);
-          rowsByDate.set(key, current);
-        });
-
-        const totalHorasEmpleado = employeeRows.reduce((sum, item) => sum + item.totalHoras, 0);
-        const totalHorasLaborales = employeeRows.reduce(
-          (max, item) => Math.max(max, item.totalHorasLaborales),
-          0
-        );
-        const validationStates = Array.from(
-          new Set(employeeRows.map((item) => item.estadoValidacionHoras).filter(Boolean))
-        ).sort((a, b) => a.localeCompare(b, "es"));
-        const ubicaciones = Array.from(
-          new Set(employeeRows.map((item) => item.ubicacion).filter(Boolean))
-        ).sort((a, b) => a.localeCompare(b, "es"));
-
-        return fechas.map((fecha) => {
-          const entries = rowsByDate.get(fecha) ?? [];
-          const first = entries[0];
-          const estadoMarcacionTexto = Array.from(
-            new Set(entries.map((item) => item.estadoMarcacionTexto || item.estado).filter(Boolean))
-          ).sort((a, b) => a.localeCompare(b, "es")).join(", ");
-          const totalHoras = entries.reduce((sum, item) => sum + item.totalHoras, 0);
+      const pdfItems: AsistenciaReportePdfItem[] = filteredRows
+        .filter((item) => item.nombreEmpleado)
+        .map((item) => {
+          const summary = employeeSummaryByEmployee.get(item.nombreEmpleado);
 
           return {
-            fecha,
-            hora: first?.hora ?? "",
-            nombreEmpleado: row.employee,
-            responsable: first?.responsable ?? row.responsable ?? "",
-            ubicacion: ubicaciones.join(", ") || row.ubicacion,
-            idEmpleado: first?.idEmpleado ?? null,
-            salida: first?.salida ?? "",
-            estadoMarcacionTexto,
-            totalHoras,
-            totalHorasEmpleado,
-            totalHorasLaborales,
-            estadoValidacionHoras: validationStates.join(", ") || row.estadoValidacionHoras,
+            fecha: formatDateLabel(item.fecha),
+            hora: item.hora ?? "",
+            nombreEmpleado: item.nombreEmpleado,
+            responsable: item.responsable ?? summary?.responsable ?? "",
+            ubicacion: item.ubicacion || summary?.ubicacion || "",
+            idEmpleado: item.idEmpleado ?? null,
+            salida: item.salida ?? "",
+            estadoMarcacionTexto: item.estadoMarcacionTexto || item.estado || "Sin clasificar",
+            totalHoras: summary?.total ?? item.totalHoras,
+            totalHorasFaltaIncompleto: summary?.totalHorasFaltaIncompleto ?? 0,
+            totalHorasEmpleado: summary?.total ?? item.totalHorasEmpleado,
+            totalHorasLaborales: summary?.totalHorasLaborales ?? item.totalHorasLaborales,
+            totalHorasFaltaAprobar: summary?.totalHorasFaltaAprobar ?? item.totalHorasFaltaAprobar,
+            diferenciaHoras: summary?.diferenciaHoras ?? 0,
+            estadoValidacionHoras: summary?.estadoValidacionHoras ?? item.estadoValidacionHoras,
           };
         });
-      });
 
       const pdfBlob = await exportarAsistenciaEmpleadoPdf({
         fechaInicio: toApiDate(fechaInicio),
@@ -1300,7 +1373,7 @@ export default function RptAsistenciaPage() {
     doc.setFontSize(10);
     doc.text(`Rango: ${toApiDate(fechaInicio)} - ${toApiDate(fechaFin)}`, 14, 23);
 
-    if (activeTab === "cuadros") {
+    if (activeTab === "cuadros" || activeTab === "gerencial") {
       autoTableModule.default(doc, {
         startY: 30,
         head: [[
@@ -1420,6 +1493,13 @@ export default function RptAsistenciaPage() {
         </button>
         <button
           type="button"
+          style={activeTab === "gerencial" ? { ...styles.segmentedTabButton, ...styles.segmentedTabButtonActive } : styles.segmentedTabButton}
+          onClick={() => setActiveTab("gerencial")}
+        >
+          Gerencial
+        </button>
+        <button
+          type="button"
           style={activeTab === "detalle" ? { ...styles.segmentedTabButton, ...styles.segmentedTabButtonActive } : styles.segmentedTabButton}
           onClick={() => setActiveTab("detalle")}
         >
@@ -1512,7 +1592,7 @@ export default function RptAsistenciaPage() {
 
       {error ? <div style={styles.errorBanner}>{error}</div> : null}
 
-      {activeTab === "cuadros" ? (
+      {activeTab === "cuadros" || activeTab === "gerencial" ? (
         <>
           <section style={styles.stateSummaryRow}>
             {chartEstadoMarcacion.map((item, index) => {
@@ -1553,26 +1633,28 @@ export default function RptAsistenciaPage() {
                     onSelect={handleOrigenClick}
                   />
                 </ChartCard>
-                <div style={styles.cuadrosRadioPanel}>
-                  <label style={styles.cuadrosRadioOption}>
-                    <input
-                      type="radio"
-                      name="cuadros-view-mode"
-                      checked={cuadrosViewMode === "fechaEstado"}
-                      onChange={() => setCuadrosViewMode("fechaEstado")}
-                    />
-                    <span>Fecha por estado</span>
-                  </label>
-                  <label style={styles.cuadrosRadioOption}>
-                    <input
-                      type="radio"
-                      name="cuadros-view-mode"
-                      checked={cuadrosViewMode === "evolucionDiaria"}
-                      onChange={() => setCuadrosViewMode("evolucionDiaria")}
-                    />
-                    <span>Evolucion diaria</span>
-                  </label>
-                </div>
+                {activeTab === "cuadros" ? (
+                  <div style={styles.cuadrosRadioPanel}>
+                    <label style={styles.cuadrosRadioOption}>
+                      <input
+                        type="radio"
+                        name="cuadros-view-mode"
+                        checked={cuadrosViewMode === "fechaEstado"}
+                        onChange={() => setCuadrosViewMode("fechaEstado")}
+                      />
+                      <span>Fecha por estado</span>
+                    </label>
+                    <label style={styles.cuadrosRadioOption}>
+                      <input
+                        type="radio"
+                        name="cuadros-view-mode"
+                        checked={cuadrosViewMode === "evolucionDiaria"}
+                        onChange={() => setCuadrosViewMode("evolucionDiaria")}
+                      />
+                      <span>Evolucion diaria</span>
+                    </label>
+                  </div>
+                ) : null}
               </div>
             </div>
             <div style={{ gridColumn: "2 / 3" }}>
@@ -1588,9 +1670,59 @@ export default function RptAsistenciaPage() {
                   onAreaSelect={handleCuadrosAreaClick}
                 />
                 </ChartCard>
+                {activeTab === "cuadros" ? (
+                  <ChartCard
+                    title="Detalle filtrado"
+                    subtitle="Fecha, empleado, area y estado segun los filtros activos"
+                  >
+                    <div style={{ ...styles.counterPill, alignSelf: "flex-start", marginBottom: 10 }}>
+                      {cuadroDetalleRows.length} registro{cuadroDetalleRows.length === 1 ? "" : "s"}
+                    </div>
+                    <SimpleCuadrosDetailGrid
+                      data={cuadroDetalleRows}
+                      sortKey={cuadrosDetailSort.key}
+                      sortDirection={cuadrosDetailSort.direction}
+                      onToggleSort={(key) =>
+                        setCuadrosDetailSort((prev) => ({
+                          key,
+                          direction: prev.key === key ? (prev.direction === "asc" ? "desc" : "asc") : "asc",
+                        }))
+                      }
+                    />
+                  </ChartCard>
+                ) : activeTab === "gerencial" ? (
+                  <ChartCard
+                    title="Resumen por responsable"
+                    subtitle="Agrupacion sincronizada con Area x estado de marcacion"
+                  >
+                    <div style={styles.gerencialSummaryToolbar}>
+                      <div style={styles.counterPill}>
+                        {gerencialAreaSummaryRows.length} agrupacion{gerencialAreaSummaryRows.length === 1 ? "" : "es"}
+                      </div>
+                      <button
+                        type="button"
+                        style={styles.gerencialSummaryExportButton}
+                        onClick={() => void exportGerencialSummaryExcel()}
+                        disabled={gerencialAreaSummaryRows.length === 0}
+                        title="Exportar resumen filtrado a Excel"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                          <path d="M10 3V12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                          <path d="M6.5 8.5L10 12L13.5 8.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                          <path d="M4 15.5H16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                        </svg>
+                      </button>
+                    </div>
+                    <SimpleGerencialAreaSummaryGrid data={gerencialAreaSummaryRows} />
+                  </ChartCard>
+                ) : null}
+              </div>
+            </div>
+            {activeTab === "gerencial" ? (
+              <div style={{ gridColumn: "1 / -1" }}>
                 <ChartCard
                   title="Detalle filtrado"
-                  subtitle="Fecha, empleado, area y estado segun los filtros activos"
+                  subtitle="Vista ampliada con filtros por responsable, cliente, proyecto y site"
                 >
                   <div style={{ ...styles.counterPill, alignSelf: "flex-start", marginBottom: 10 }}>
                     {cuadroDetalleRows.length} registro{cuadroDetalleRows.length === 1 ? "" : "s"}
@@ -1599,6 +1731,20 @@ export default function RptAsistenciaPage() {
                     data={cuadroDetalleRows}
                     sortKey={cuadrosDetailSort.key}
                     sortDirection={cuadrosDetailSort.direction}
+                    showExtendedColumns
+                    extendedColumnFilters={gerencialDetailFilters}
+                    extendedColumnOptions={gerencialDetailFilterOptions}
+                    onExtendedColumnFilterChange={(key, value) =>
+                      setGerencialDetailFilters((prev) => ({ ...prev, [key]: value }))
+                    }
+                    onClearExtendedFilters={() =>
+                      setGerencialDetailFilters({
+                        responsable: [],
+                        cliente: [],
+                        proyecto: [],
+                        site: [],
+                      })
+                    }
                     onToggleSort={(key) =>
                       setCuadrosDetailSort((prev) => ({
                         key,
@@ -1608,8 +1754,7 @@ export default function RptAsistenciaPage() {
                   />
                 </ChartCard>
               </div>
-            </div>
-            {cuadrosViewMode === "fechaEstado" ? (
+            ) : cuadrosViewMode === "fechaEstado" ? (
               <div style={{ gridColumn: "1 / -1" }}>
                 <ChartCard title="Fecha x estado de marcacion por dia" subtitle="Fechas en eje X y estados de marcacion en eje Y">
                   <SimpleStateDateGrid
@@ -2179,9 +2324,9 @@ function SimpleEmployeeDateGrid({
   differenceValue: string;
   onDifferenceOperatorChange: (value: "" | "lt" | "gt" | "eq") => void;
   onDifferenceValueChange: (value: string) => void;
-  sortKey: "responsable" | "total" | "otros" | "faltaAprobar" | "diferencia";
+  sortKey: "employee" | "responsable" | "total" | "otros" | "faltaAprobar" | "diferencia";
   sortDirection: "asc" | "desc";
-  onToggleSort: (key: "responsable" | "total" | "otros" | "faltaAprobar" | "diferencia") => void;
+  onToggleSort: (key: "employee" | "responsable" | "total" | "otros" | "faltaAprobar" | "diferencia") => void;
   onCellSelect?: (nombreEmpleado: string, fecha: string) => void;
 }) {
   const max = Math.max(
@@ -2260,7 +2405,16 @@ function SimpleEmployeeDateGrid({
             >
             <div style={{ ...styles.stateDateGridHeader, ...styles.stateDateGridCorner }}>
               <div style={styles.employeeGridHeaderStack}>
-                <span>Empleado / Fecha</span>
+                <button
+                  type="button"
+                  style={styles.employeeGridSortButton}
+                  onClick={() => onToggleSort("employee")}
+                >
+                  <span>Empleado / Fecha</span>
+                  <span style={styles.employeeGridSortPill}>
+                    {sortKey === "employee" ? (sortDirection === "asc" ? "ASC" : "DESC") : "ORD"}
+                  </span>
+                </button>
                 <input
                   type="text"
                   value={employeeFilter}
@@ -2847,17 +3001,31 @@ function SimpleCuadrosDetailGrid({
   data,
   sortKey,
   sortDirection,
+  showExtendedColumns,
+  extendedColumnFilters,
+  extendedColumnOptions,
+  onExtendedColumnFilterChange,
+  onClearExtendedFilters,
   onToggleSort,
 }: {
   data: Array<{
     key: string;
     fecha: string;
     nombreEmpleado: string;
+    responsable: string;
+    cliente: string;
+    proyecto: string;
+    site: string;
     area: string;
     estadoMarcacionTexto: string;
   }>;
   sortKey: CuadrosDetailSortKey;
   sortDirection: "asc" | "desc";
+  showExtendedColumns?: boolean;
+  extendedColumnFilters?: GerencialDetailFilters;
+  extendedColumnOptions?: Record<keyof GerencialDetailFilters, string[]>;
+  onExtendedColumnFilterChange?: (key: keyof GerencialDetailFilters, value: string[]) => void;
+  onClearExtendedFilters?: () => void;
   onToggleSort: (key: CuadrosDetailSortKey) => void;
 }) {
   const renderSortPill = (key: CuadrosDetailSortKey) =>
@@ -2878,6 +3046,26 @@ function SimpleCuadrosDetailGrid({
                 <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("nombreEmpleado")}>
                   <div style={styles.cuadrosDetailThContent}><span>Nombre empleado</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("nombreEmpleado")}</span></div>
                 </th>
+                {showExtendedColumns ? (
+                  <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("responsable")}>
+                    <div style={styles.cuadrosDetailThContent}><span>Responsable</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("responsable")}</span></div>
+                  </th>
+                ) : null}
+                {showExtendedColumns ? (
+                  <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("cliente")}>
+                    <div style={styles.cuadrosDetailThContent}><span>Cliente</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("cliente")}</span></div>
+                  </th>
+                ) : null}
+                {showExtendedColumns ? (
+                  <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("proyecto")}>
+                    <div style={styles.cuadrosDetailThContent}><span>Proyecto</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("proyecto")}</span></div>
+                  </th>
+                ) : null}
+                {showExtendedColumns ? (
+                  <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("site")}>
+                    <div style={styles.cuadrosDetailThContent}><span>Site</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("site")}</span></div>
+                  </th>
+                ) : null}
                 <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("area")}>
                   <div style={styles.cuadrosDetailThContent}><span>Area</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("area")}</span></div>
                 </th>
@@ -2885,14 +3073,161 @@ function SimpleCuadrosDetailGrid({
                   <div style={styles.cuadrosDetailThContent}><span>Estado marcacion</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("estadoMarcacionTexto")}</span></div>
                 </th>
               </tr>
+              {showExtendedColumns && extendedColumnFilters && extendedColumnOptions && onExtendedColumnFilterChange ? (
+                <tr>
+                  <th style={styles.cuadrosDetailFilterTh}>
+                    {onClearExtendedFilters ? (
+                      <button type="button" style={styles.cuadrosDetailClearButton} onClick={onClearExtendedFilters}>
+                        Limpiar
+                      </button>
+                    ) : null}
+                  </th>
+                  <th style={styles.cuadrosDetailFilterTh} />
+                  <th style={styles.cuadrosDetailFilterTh}>
+                    <HeaderCheckboxFilter
+                      values={extendedColumnFilters.responsable}
+                      options={extendedColumnOptions.responsable}
+                      onChange={(value) => onExtendedColumnFilterChange("responsable", value)}
+                    />
+                  </th>
+                  <th style={styles.cuadrosDetailFilterTh}>
+                    <HeaderCheckboxFilter
+                      values={extendedColumnFilters.cliente}
+                      options={extendedColumnOptions.cliente}
+                      onChange={(value) => onExtendedColumnFilterChange("cliente", value)}
+                    />
+                  </th>
+                  <th style={styles.cuadrosDetailFilterTh}>
+                    <HeaderCheckboxFilter
+                      values={extendedColumnFilters.proyecto}
+                      options={extendedColumnOptions.proyecto}
+                      onChange={(value) => onExtendedColumnFilterChange("proyecto", value)}
+                    />
+                  </th>
+                  <th style={styles.cuadrosDetailFilterTh}>
+                    <HeaderCheckboxFilter
+                      values={extendedColumnFilters.site}
+                      options={extendedColumnOptions.site}
+                      onChange={(value) => onExtendedColumnFilterChange("site", value)}
+                    />
+                  </th>
+                  <th style={styles.cuadrosDetailFilterTh} />
+                  <th style={styles.cuadrosDetailFilterTh} />
+                </tr>
+              ) : null}
             </thead>
             <tbody>
               {data.map((item) => (
                 <tr key={item.key}>
                   <td style={styles.cuadrosDetailTd}>{item.fecha}</td>
                   <td style={styles.cuadrosDetailTd}>{item.nombreEmpleado}</td>
+                  {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.responsable}</td> : null}
+                  {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.cliente}</td> : null}
+                  {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.proyecto}</td> : null}
+                  {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.site}</td> : null}
                   <td style={styles.cuadrosDetailTd}>{item.area}</td>
                   <td style={styles.cuadrosDetailTd}>{item.estadoMarcacionTexto}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HeaderCheckboxFilter({
+  values,
+  options,
+  onChange,
+}: {
+  values: string[];
+  options: string[];
+  onChange: (values: string[]) => void;
+}) {
+  const summary = values.length === 0
+    ? "Todos"
+    : values.length === 1
+      ? values[0]
+      : `${values.length} seleccionados`;
+
+  return (
+    <details style={styles.cuadrosDetailHeaderFilterWrap}>
+      <summary style={styles.cuadrosDetailHeaderFilterSummary}>{summary}</summary>
+      <div style={styles.cuadrosDetailHeaderFilterPanel}>
+        <label style={styles.cuadrosDetailHeaderFilterOption}>
+          <input
+            type="checkbox"
+            checked={values.length === 0}
+            onChange={() => onChange([])}
+          />
+          <span>Todos</span>
+        </label>
+        {options.map((option) => {
+          const checked = values.includes(option);
+          return (
+            <label key={`header-filter-${option}`} style={styles.cuadrosDetailHeaderFilterOption}>
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() =>
+                  onChange(
+                    checked
+                      ? values.filter((item) => item !== option)
+                      : [...values, option]
+                  )
+                }
+              />
+              <span>{option}</span>
+            </label>
+          );
+        })}
+      </div>
+    </details>
+  );
+}
+
+function SimpleGerencialAreaSummaryGrid({
+  data,
+}: {
+  data: Array<{
+    responsable: string;
+    cliente: string;
+    estadoMarcacionTexto: string;
+    cantidad: number;
+  }>;
+}) {
+  return (
+    <div style={styles.cuadrosDetailWrap}>
+      {data.length === 0 ? (
+        <div style={styles.emptyMiniState}>Sin registros para mostrar.</div>
+      ) : (
+        <div style={styles.cuadrosDetailScroller}>
+          <table style={styles.cuadrosDetailTable}>
+            <thead>
+              <tr>
+                <th style={styles.cuadrosDetailTh}>
+                  <div style={styles.cuadrosDetailThContent}><span>Responsable</span></div>
+                </th>
+                <th style={styles.cuadrosDetailTh}>
+                  <div style={styles.cuadrosDetailThContent}><span>Cliente</span></div>
+                </th>
+                <th style={styles.cuadrosDetailTh}>
+                  <div style={styles.cuadrosDetailThContent}><span>Estado marcacion</span></div>
+                </th>
+                <th style={styles.cuadrosDetailTh}>
+                  <div style={styles.cuadrosDetailThContent}><span>Cantidad</span></div>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((item, index) => (
+                <tr key={`${item.responsable}-${item.cliente}-${item.estadoMarcacionTexto}-${index}`}>
+                  <td style={styles.cuadrosDetailTd}>{item.responsable}</td>
+                  <td style={styles.cuadrosDetailTd}>{item.cliente}</td>
+                  <td style={styles.cuadrosDetailTd}>{item.estadoMarcacionTexto}</td>
+                  <td style={{ ...styles.cuadrosDetailTd, textAlign: "right", fontWeight: 700 }}>{item.cantidad}</td>
                 </tr>
               ))}
             </tbody>
@@ -3690,6 +4025,109 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#334155",
     verticalAlign: "top",
     wordBreak: "break-word",
+  },
+  cuadrosDetailFilterTh: {
+    position: "sticky",
+    top: 39,
+    zIndex: 1,
+    background: "#F8FAFC",
+    borderBottom: "1px solid #E2E8F0",
+    padding: "6px 8px",
+  },
+  cuadrosDetailClearButton: {
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    color: "#2563EB",
+    borderRadius: 8,
+    padding: "6px 10px",
+    fontSize: 11,
+    fontWeight: 700,
+    cursor: "pointer",
+    width: "100%",
+  },
+  gerencialSummaryToolbar: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    marginBottom: 10,
+  },
+  gerencialSummaryExportButton: {
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    color: "#2563EB",
+    borderRadius: 10,
+    width: 34,
+    height: 34,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    boxShadow: "0 2px 8px rgba(15, 23, 42, 0.06)",
+  },
+  cuadrosDetailHeaderFilterWrap: {
+    position: "relative",
+  },
+  cuadrosDetailHeaderFilterSummary: {
+    width: "100%",
+    minWidth: 110,
+    height: 32,
+    borderRadius: 8,
+    border: "1px solid #CBD5E1",
+    padding: "7px 8px",
+    fontSize: 11,
+    background: "#FFFFFF",
+    boxSizing: "border-box",
+    cursor: "pointer",
+    listStyle: "none",
+    color: "#0F172A",
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+  },
+  cuadrosDetailHeaderFilterPanel: {
+    position: "absolute",
+    top: 36,
+    left: 0,
+    minWidth: 180,
+    maxWidth: 260,
+    zIndex: 30,
+    maxHeight: 220,
+    overflowY: "auto",
+    border: "1px solid #CBD5E1",
+    borderRadius: 10,
+    background: "#FFFFFF",
+    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.12)",
+    padding: 8,
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+  },
+  cuadrosDetailHeaderFilterOption: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    fontSize: 11,
+    color: "#334155",
+  },
+  gerencialDetailFilterGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+    gap: 10,
+    width: "100%",
+    marginBottom: 12,
+  },
+  gerencialDetailFilterField: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+  },
+  gerencialDetailFilterLabel: {
+    fontSize: 11,
+    fontWeight: 800,
+    color: "#475569",
+    letterSpacing: 0.2,
+    textTransform: "uppercase",
   },
   stateDateGridWrap: {
     minHeight: 280,

@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import logo from "../assets/logo.png";
 import { clearAuthUser, getAuthUser } from "../utils/authStorage";
+import { logout, sendLogoutBeacon } from "../features/auth/services/authService";
 import {
   loadDashboardMenus,
   type DashboardGroup,
@@ -57,6 +58,7 @@ export default function MainLayout() {
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const collapseDirection: "left" | "right" = "left";
+  const logoutRef = useRef(false);
 
   const usuarioMostrar = (authUser?.usuario || "").toUpperCase();
   const empleadoMostrar = (authUser?.nombre || authUser?.nombreEmpleado || "").toUpperCase();
@@ -64,6 +66,11 @@ export default function MainLayout() {
   const codigoEmpleadoMostrar = (authUser?.codEmp || authUser?.idEmpleado || authUser?.empleado || "").toString();
   const codigoidperfil: number = Number(authUser?.idperfil ?? 0);
   const codigoidrol: number = Number(authUser?.idrol ?? 0);
+
+  const forceLogoutToLogin = () => {
+    clearAuthUser();
+    window.location.replace("/");
+  };
 
   useEffect(() => {
       //console.log("[MainLayout] authUser", authUser);
@@ -131,10 +138,48 @@ export default function MainLayout() {
     setExpandedNodes((prev) => ({ ...prev, ...nextExpandedNodes }));
   }, [menuDashboard, location.pathname]);
 
-  const cerrarSesion = () => {
-    clearAuthUser();
-    navigate("/");
+  const cerrarSesion = async () => {
+    if (logoutRef.current) {
+      return;
+    }
+
+    logoutRef.current = true;
+
+    try {
+      await logout();
+    } catch {
+      // Ignored on purpose: local cleanup still must happen.
+    } finally {
+      forceLogoutToLogin();
+    }
   };
+
+  useEffect(() => {
+    const handlePageHide = () => {
+      const currentAuthUser = getAuthUser();
+      if (logoutRef.current || !currentAuthUser?.token) {
+        return;
+      }
+
+      logoutRef.current = true;
+      sendLogoutBeacon(currentAuthUser.token);
+      clearAuthUser();
+    };
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === "authUser" && !event.newValue) {
+        window.location.replace("/");
+      }
+    };
+
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
 
   const irDashboard = () => {
     navigate("/admin/DashboardPage");
@@ -367,7 +412,7 @@ export default function MainLayout() {
                 &nbsp;|&nbsp; Correo: {correoMostrar || "NO DEFINIDO"}
               </div>
             </div>
-            <button style={styles.footerLogoutButton} onClick={cerrarSesion}>
+            <button type="button" style={styles.footerLogoutButton} onClick={() => void cerrarSesion()}>
               Cerrar sesión
             </button>
           </div>

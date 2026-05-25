@@ -49,7 +49,8 @@ import OrdenCompraPage from "../../features/compras/ordencompra";
 import PersonalPage from "../../features/recursoshumanos/personal";
 import RecursosHumanosAsistenciaPage from "../../features/recursoshumanos/asistencia";
 import RecursosHumanosVacacionesPage from "../../features/recursoshumanos/vacaciones";
-import ConsultaPage from "../../features/mantenimiento/consulta";
+import ConsultaPage from "../../features/mantenimiento/consulta/consulta";
+import ModificacionesPage from "../../features/mantenimiento/consulta/modificaciones";
 import MigracionPage from "../../features/mantenimiento/migracion";
 import MantenimientoPage from "../../features/mantenimiento/mantenimiento";
 import RptWupPage from "../../features/mantenimiento/sistemas/rptwup";
@@ -108,6 +109,8 @@ export default function AppRouter() {
             />
 
             <Route path="/mantenimiento/consulta" element={<ConsultaPage />} />
+            <Route path="/mantenimiento/consulta/modificaciones" element={<ModificacionesPage />} />
+            <Route path="/mantenimiento/modificaciones" element={<ModificacionesPage />} />
             <Route path="/mantenimiento/migracion" element={<MigracionPage />} />
             <Route path="/mantenimiento/mantenimiento" element={<MantenimientoPage />} />
             <Route path="/mantenimiento/sistemas/rptwup" element={<RptWupPage />} />

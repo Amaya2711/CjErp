@@ -12,6 +12,7 @@
         public int? CodVal { get; set; }
 
         public string? Token { get; set; }
+        public string? SessionId { get; set; }
         public DateTime? Expiration { get; set; }
         public int? IdPerfil { get; set; }
         public int? IdRol { get; set; }

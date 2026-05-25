@@ -4,6 +4,7 @@ namespace CjERP.Application.DTOs
     {
         public string FiltroOperativoKey { get; set; } = string.Empty;
         public string Responsable { get; set; } = string.Empty;
+        public long? IdSuministroProvisional { get; set; }
         public int? IdBancoCta { get; set; }
         public int? IdProyecto { get; set; }
         public string IdSite { get; set; } = string.Empty;
@@ -52,5 +53,33 @@ namespace CjERP.Application.DTOs
     public class PlanillaUpdateRequestDto : PlanillaInsertRequestDto
     {
         public int Correlativo { get; set; }
+    }
+
+    public class SuministroProvisionalVigenteRequestDto
+    {
+        public int? IdResponsable { get; set; }
+        public int? IdTarea { get; set; }
+        public int? IdCliente { get; set; }
+        public int? IdProyecto { get; set; }
+        public string IdSite { get; set; } = string.Empty;
+        public int? CorreSite { get; set; }
+        public string TipoTrabajo { get; set; } = string.Empty;
+    }
+
+    public class SuministroProvisionalVigenteDto
+    {
+        public long? IdProvisional { get; set; }
+        public int? IdResponsable { get; set; }
+        public string Responsable { get; set; } = string.Empty;
+        public int? IdTarea { get; set; }
+        public string Tarea { get; set; } = string.Empty;
+        public string TipoTrabajo { get; set; } = string.Empty;
+        public string Ot { get; set; } = string.Empty;
+        public string Comentario { get; set; } = string.Empty;
+        public decimal? Monto { get; set; }
+        public DateTime? FechaInicio { get; set; }
+        public string NombreCliente { get; set; } = string.Empty;
+        public string NombreProyecto { get; set; } = string.Empty;
+        public string NombreSite { get; set; } = string.Empty;
     }
 }

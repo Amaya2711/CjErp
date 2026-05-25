@@ -859,6 +859,9 @@ export default function OcPage() {
             <p style={styles.sectionText}>Seleccione una orden para consultar sus posiciones.</p>
           </div>
           <span style={styles.counterPill}>{loading ? "Cargando..." : `${cabecerasFiltradas.length} registros`}</span>
+          <span style={{ ...styles.toolbarCaption, fontSize: 12 }}>
+            El sistema registra auditoria automatica al crear o rechazar ordenes de compra.
+          </span>
         </div>
 
         <div style={styles.tableWrap}>
@@ -1087,7 +1090,10 @@ export default function OcPage() {
           <div style={styles.sectionHeader}>
             <div>
               <h2 style={styles.sectionTitle}>Nueva orden de compra</h2>
-              <p style={styles.sectionText}></p>
+              <p style={styles.sectionText}>Registre la cabecera y las posiciones antes de guardar.</p>
+              <p style={{ ...styles.sectionText, fontSize: 12, color: "#475569" }}>
+                El sistema registra auditoria automatica de cabecera y posiciones al guardar cambios.
+              </p>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
               <div style={{ display: "flex", gap: 12 }}>

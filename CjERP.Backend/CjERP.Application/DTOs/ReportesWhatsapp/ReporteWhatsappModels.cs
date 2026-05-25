@@ -96,6 +96,8 @@ public sealed class WupSettings
         return value.Contains("YOUR_", StringComparison.OrdinalIgnoreCase)
             || value.Contains("your_", StringComparison.OrdinalIgnoreCase)
             || value.Contains("REPLACE_", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("TU_PASSWORD", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("PASSWORD_WUP_REAL", StringComparison.OrdinalIgnoreCase)
             || value.Contains("example", StringComparison.OrdinalIgnoreCase);
     }
 }
@@ -114,6 +116,8 @@ public sealed class ReporteWhatsappJobDefaultsOptions
     public int CantidadEmpleadosPorBloqueGerencial { get; set; } = 10;
     public int DelaySegundosEntreBloquesGerencial { get; set; } = 30;
     public bool ActivoGerencial { get; set; } = false;
+    public bool UsarSemanaEnCursoGerencial { get; set; } = true;
+    public bool UsarMesEnCursoGerencial { get; set; } = false;
     public string TipoReporteGerencial { get; set; } = ReporteWhatsappTipos.Gerencial;
     public string MensajeAdjuntoGerencial { get; set; } = "Estimado usuario, aqui esta su reporte gerencial.";
 }
@@ -126,6 +130,8 @@ public sealed class ReporteWhatsappConfiguracionDto
     public int CantidadEmpleadosPorBloque { get; set; } = 10;
     public int DelaySegundosEntreBloques { get; set; } = 30;
     public bool Activo { get; set; }
+    public bool UsarSemanaEnCurso { get; set; }
+    public bool UsarMesEnCurso { get; set; }
     public string UsuarioModificacion { get; set; } = string.Empty;
     public DateTime? FechaModificacion { get; set; }
     public bool UsaRespaldoAppSettings { get; set; }
@@ -139,6 +145,8 @@ public sealed class ReporteWhatsappConfiguracionUpdateDto
     public int CantidadEmpleadosPorBloque { get; set; }
     public int DelaySegundosEntreBloques { get; set; }
     public bool Activo { get; set; }
+    public bool UsarSemanaEnCurso { get; set; }
+    public bool UsarMesEnCurso { get; set; }
 }
 
 public sealed class ReporteWhatsappEmpleadoDto
@@ -157,14 +165,17 @@ public sealed class ReporteWhatsappAsistenciaItemDto
     public string Fecha { get; set; } = string.Empty;
     public string NombreEmpleado { get; set; } = string.Empty;
     public string Responsable { get; set; } = string.Empty;
+    public string Estado { get; set; } = string.Empty;
     public string EstadoMarcacionTexto { get; set; } = string.Empty;
     public string Ubicacion { get; set; } = string.Empty;
     public string HoraEntrada { get; set; } = string.Empty;
     public string HoraSalida { get; set; } = string.Empty;
     public string TiempoHoras { get; set; } = string.Empty;
     public decimal TotalHoras { get; set; }
+    public decimal TotalHorasFaltaIncompleto { get; set; }
     public decimal TotalHorasEmpleado { get; set; }
     public decimal TotalHorasLaborales { get; set; }
+    public decimal TotalHorasFaltaAprobar { get; set; }
     public decimal DiferenciaHoras { get; set; }
     public string EstadoValidacionHoras { get; set; } = string.Empty;
 }
@@ -299,6 +310,8 @@ public sealed class ReporteGerencialEmpleadoResumenDto
     public string Responsable { get; set; } = string.Empty;
     public string Ubicacion { get; set; } = string.Empty;
     public decimal TotalHoras { get; set; }
+    public decimal HorasOtros { get; set; }
+    public decimal FaltaAprobar { get; set; }
     public decimal HorasLaboradas { get; set; }
     public decimal DiferenciaHoras { get; set; }
     public string Estado { get; set; } = string.Empty;

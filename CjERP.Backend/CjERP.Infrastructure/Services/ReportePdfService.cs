@@ -10,6 +10,8 @@ namespace CjERP.Infrastructure.Services;
 
 public sealed class ReportePdfService : IReportePdfService
 {
+    private const decimal MissingOrIncompleteHours = 9.6m;
+
     public Task<byte[]> GenerarReportePdfAsync(
         string tipoReporte,
         ReporteWhatsappEmpleadoDto empleadoDestino,
@@ -176,10 +178,12 @@ public sealed class ReportePdfService : IReportePdfService
         ReporteWhatsappPeriodoDto periodo,
         IReadOnlyList<ReporteWhatsappAsistenciaItemDto> detalle)
     {
+        var resumenEstados = BuildGerencialSummary(detalle);
         var resumenEmpleados = BuildGerencialResumen(detalle);
         var pieCharts = BuildGerencialPieCharts(resumenEmpleados);
         var generalChart = pieCharts.FirstOrDefault(x => x.Titulo == "GENERAL");
         var locationCharts = pieCharts.Where(x => x.Titulo != "GENERAL").ToList();
+        var sectionHeroId = "resumen-estados";
         var sectionSummaryId = "resumen-principal";
 
         return Document.Create(container =>
@@ -190,7 +194,7 @@ public sealed class ReportePdfService : IReportePdfService
                 page.Size(PageSizes.A4.Landscape());
                 page.DefaultTextStyle(x => x.FontSize(9).FontColor(Colors.BlueGrey.Darken4));
 
-                page.Content().Column(column =>
+                page.Content().Section(sectionHeroId).Column(column =>
                 {
                     column.Spacing(8);
 
@@ -203,14 +207,14 @@ public sealed class ReportePdfService : IReportePdfService
                         header.Item().Text($"Destinatario: {empleadoDestino.NombreEmpleado}").FontSize(8).SemiBold();
                     });
 
-                    if (generalChart is not null)
+                    column.Item().Column(summaryColumn =>
                     {
-                        column.Item().Column(summaryColumn =>
-                        {
-                            summaryColumn.Spacing(6);
-                            summaryColumn.Item().Text("Resumen ejecutivo").Bold().FontSize(12).FontColor("#123B5D");
-                            summaryColumn.Item().Element(c => RenderGeneralSummaryCards(c, generalChart));
+                        summaryColumn.Spacing(6);
+                        summaryColumn.Item().Text("Resumen ejecutivo").Bold().FontSize(12).FontColor("#123B5D");
+                        summaryColumn.Item().Element(c => RenderGerencialStatusCards(c, resumenEstados));
 
+                        if (generalChart is not null)
+                        {
                             if (locationCharts.Count > 0)
                             {
                                 summaryColumn.Item().Row(row =>
@@ -224,8 +228,8 @@ public sealed class ReportePdfService : IReportePdfService
                             {
                                 summaryColumn.Item().Element(c => RenderGeneralBarChartCard(c, generalChart, compact: true));
                             }
-                        });
-                    }
+                        }
+                    });
                 });
 
                 page.Footer().AlignCenter().Text(text =>
@@ -251,45 +255,49 @@ public sealed class ReportePdfService : IReportePdfService
                     {
                         table.ColumnsDefinition(columns =>
                         {
-                            columns.RelativeColumn(2.8f);
                             columns.RelativeColumn(2f);
-                            columns.RelativeColumn(1.4f);
+                            columns.RelativeColumn(1.8f);
                             columns.RelativeColumn(1f);
                             columns.RelativeColumn(1f);
                             columns.RelativeColumn(1f);
                             columns.RelativeColumn(1f);
+                            columns.RelativeColumn(1f);
+                            columns.RelativeColumn(1.1f);
                         });
 
                         table.Header(header =>
                         {
-                            header.Cell().Element(CellHeader).Text("Empleado");
+                            header.Cell().Element(CellHeader).Text("Empleado / Fecha");
                             header.Cell().Element(CellHeader).Text("Responsable");
-                            header.Cell().Element(CellHeader).Text("Ubicacion");
                             header.Cell().Element(CellHeader).AlignRight().Text("Total Horas");
-                            header.Cell().Element(CellHeader).AlignRight().Text("Horas Laboradas");
+                            header.Cell().Element(CellHeader).AlignRight().Text("Hrs Otros");
+                            header.Cell().Element(CellHeader).AlignRight().Text("Falta aprobar");
+                            header.Cell().Element(CellHeader).AlignRight().Text("Hrs. lab.");
                             header.Cell().Element(CellHeader).AlignRight().Text("Diferencia");
-                            header.Cell().Element(CellHeader).AlignCenter().Text("Estado");
+                            header.Cell().Element(CellHeader).AlignCenter().Text("Estado valid.");
                         });
 
                         // Agrupar por Ubicacion y ordenar por Diferencia dentro de cada grupo
                         var empleadosPorUbicacion = resumenEmpleados
-                            .GroupBy(e => string.IsNullOrWhiteSpace(e.Ubicacion) ? "SIN UBICACION" : e.Ubicacion.Trim().ToUpperInvariant())
-                            .OrderBy(g => g.Key);
+                            .GroupBy(e => NormalizeGerencialUbicacion(e.Ubicacion))
+                            .OrderBy(g => GetGerencialUbicacionSortOrder(g.Key))
+                            .ThenBy(g => g.Key);
 
                         foreach (var grupo in empleadosPorUbicacion)
                         {
                             // Fila de título de ubicación
-                            table.Cell().ColumnSpan(7).Element(CellHeader).Text($"UBICACION: {grupo.Key}").FontColor("#0F3D6E").Bold();
+                            table.Cell().ColumnSpan(8).Element(CellHeader).Text($"UBICACION: {grupo.Key}").FontColor("#0F3D6E").Bold();
 
                             foreach (var empleado in grupo
-                                .OrderBy(x => string.IsNullOrWhiteSpace(x.Responsable) ? "SIN RESPONSABLE" : x.Responsable.Trim().ToUpperInvariant())
-                                .ThenBy(x => x.NombreEmpleado))
+                                .OrderBy(x => x.NombreEmpleado)
+                                .ThenBy(x => string.IsNullOrWhiteSpace(x.Responsable) ? "SIN RESPONSABLE" : x.Responsable.Trim().ToUpperInvariant()))
                             {
-                                var isRevisar = empleado.Estado == "REVISAR";
+                                var isRevisar = IsObservacionState(empleado.Estado);
                                 table.Cell().Element(c => SummaryCell(c, isRevisar).SectionLink(BuildEmpleadoSectionId(empleado.IdEmpleado))).Text(empleado.NombreEmpleado);
                                 table.Cell().Element(c => SummaryCell(c, isRevisar)).Text(EmptyIfMissing(empleado.Responsable));
-                                table.Cell().Element(c => SummaryCell(c, isRevisar)).Text(EmptyIfMissing(empleado.Ubicacion));
                                 table.Cell().Element(c => SummaryCell(c, isRevisar)).AlignRight().Text(empleado.TotalHoras.ToString("0.00", CultureInfo.InvariantCulture));
+                                table.Cell().Element(c => SummaryCell(c, empleado.HorasOtros > 0m)).AlignRight().Text(empleado.HorasOtros.ToString("0.00", CultureInfo.InvariantCulture));
+                                table.Cell().Element(c => SummaryCell(c, empleado.FaltaAprobar > 0m)).AlignRight().Text(empleado.FaltaAprobar.ToString("0.00", CultureInfo.InvariantCulture));
                                 table.Cell().Element(c => SummaryCell(c, isRevisar)).AlignRight().Text(empleado.HorasLaboradas.ToString("0.00", CultureInfo.InvariantCulture));
                                 table.Cell().Element(c => SummaryCell(c, isRevisar)).AlignRight().Text(empleado.DiferenciaHoras.ToString("0.00", CultureInfo.InvariantCulture));
                                 table.Cell().Element(c => SummaryCell(c, isRevisar)).AlignCenter().Text(empleado.Estado);
@@ -312,7 +320,7 @@ public sealed class ReportePdfService : IReportePdfService
                 container.Page(page =>
                 {
                     var sectionId = BuildEmpleadoSectionId(empleado.IdEmpleado);
-                    var isRevisar = empleado.Estado == "REVISAR";
+                    var isRevisar = IsObservacionState(empleado.Estado);
 
                     page.Margin(20);
                     page.Size(PageSizes.A4.Landscape());
@@ -329,6 +337,8 @@ public sealed class ReportePdfService : IReportePdfService
                                 info.Item().Text($"Responsable: {EmptyIfMissing(empleado.Responsable)}");
                                 info.Item().Text($"Ubicacion: {EmptyIfMissing(empleado.Ubicacion)}");
                                 info.Item().Text($"Total Horas: {empleado.TotalHoras:0.00}");
+                                info.Item().Text($"Hrs Otros: {empleado.HorasOtros:0.00}");
+                                info.Item().Text($"Falta aprobar: {empleado.FaltaAprobar:0.00}");
                                 info.Item().Text($"Horas Laboradas: {empleado.HorasLaboradas:0.00}");
                                 info.Item().Text($"Diferencia: {empleado.DiferenciaHoras:0.00}");
                                 info.Item().Text($"Estado: {empleado.Estado}").Bold().FontColor(isRevisar ? "#B42318" : "#027A48");
@@ -342,6 +352,53 @@ public sealed class ReportePdfService : IReportePdfService
                         });
 
                         card.Item().PaddingTop(6).Element(c => RenderCalendar(c, periodo, empleado.Calendario));
+                    });
+
+                    page.Footer().AlignCenter().Text(text =>
+                    {
+                        text.Span("Cj Telecom - Reporte Gerencial WUP | ");
+                        text.CurrentPageNumber();
+                        text.Span(" / ");
+                        text.TotalPages();
+                    });
+                });
+            }
+
+            foreach (var estado in resumenEstados.Resumen)
+            {
+                container.Page(page =>
+                {
+                    var estadoActual = estado.EstadoMarcacionTexto;
+                    var itemsEstado = detalle
+                        .Where(x => string.Equals(
+                            ResolveGerencialEstadoMarcacion(x),
+                            estadoActual,
+                            StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+
+                    page.Margin(20);
+                    page.Size(PageSizes.A4.Landscape());
+                    page.DefaultTextStyle(x => x.FontSize(9).FontColor(Colors.BlueGrey.Darken4));
+
+                    page.Content().Section(BuildEstadoSectionId(estadoActual)).Background(Colors.White).Border(1).BorderColor("#D9E2EC").Padding(12).Column(card =>
+                    {
+                        card.Spacing(8);
+                        card.Item().Row(row =>
+                        {
+                            row.RelativeItem().Column(info =>
+                            {
+                                info.Item().Text($"Calendario por estado: {estadoActual}").Bold().FontSize(13).FontColor("#123B5D");
+                                info.Item().Text($"Total registros: {estado.Cantidad} | Participacion: {estado.Porcentaje:0.00}%")
+                                    .FontSize(8)
+                                    .FontColor(Colors.Grey.Darken2);
+                            });
+
+                            row.ConstantItem(140).AlignRight().Column(actions =>
+                            {
+                                actions.Item().SectionLink(sectionHeroId).Text("Volver al resumen").FontColor("#2563EB").Underline();
+                            });
+                        });
+                        card.Item().Element(c => RenderStateCalendar(c, periodo, estadoActual, itemsEstado));
                     });
 
                     page.Footer().AlignCenter().Text(text =>
@@ -394,9 +451,76 @@ public sealed class ReportePdfService : IReportePdfService
         });
     }
 
-    private static void RenderSummaryMetricCard(IContainer container, string title, string value, string accentColor, string backgroundColor)
+    private static void RenderGerencialStatusCards(
+        IContainer container,
+        ReporteWhatsappPdfResumenDto resumen)
     {
-        container.Background(backgroundColor).Border(1).BorderColor("#D9E2EC").Padding(10).Column(card =>
+        var totalCard = (
+            Label: "Total registros",
+            Value: resumen.TotalRegistros.ToString(CultureInfo.InvariantCulture),
+            Accent: "#123B5D",
+            Background: "#EFF6FF",
+            SectionId: (string?)null
+        );
+
+        var stateCards = resumen.Resumen.Select(item =>
+        {
+            var (accent, background) = GetDynamicEstadoMarcacionCardColors(item.EstadoMarcacionTexto);
+            return (
+                Label: item.EstadoMarcacionTexto,
+                Value: item.Cantidad.ToString(CultureInfo.InvariantCulture),
+                Accent: accent,
+                Background: background,
+                SectionId: (string?)BuildEstadoSectionId(item.EstadoMarcacionTexto)
+            );
+        }).ToList();
+
+        container.Column(column =>
+        {
+            column.Spacing(8);
+
+            column.Item().Row(row =>
+            {
+                row.RelativeItem().Element(c => RenderSummaryMetricCard(c, totalCard.Label, totalCard.Value, totalCard.Accent, totalCard.Background, totalCard.SectionId));
+                for (var i = 0; i < 5; i++)
+                {
+                    row.RelativeItem();
+                }
+            });
+
+            foreach (var chunk in stateCards.Chunk(6))
+            {
+                column.Item().Row(row =>
+                {
+                    row.Spacing(8);
+                    foreach (var card in chunk)
+                    {
+                        row.RelativeItem().Element(c => RenderSummaryMetricCard(c, card.Label, card.Value, card.Accent, card.Background, card.SectionId));
+                    }
+
+                    for (var i = chunk.Length; i < 6; i++)
+                    {
+                        row.RelativeItem();
+                    }
+                });
+            }
+        });
+    }
+
+    private static void RenderSummaryMetricCard(IContainer container, string title, string value, string accentColor, string backgroundColor, string? sectionId = null)
+    {
+        var cardContainer = container
+            .Background(backgroundColor)
+            .Border(1)
+            .BorderColor("#D9E2EC")
+            .Padding(10);
+
+        if (!string.IsNullOrWhiteSpace(sectionId))
+        {
+            cardContainer = cardContainer.SectionLink(sectionId);
+        }
+
+        cardContainer.Column(card =>
         {
             card.Spacing(4);
             card.Item().Text(title).SemiBold().FontSize(9).FontColor(accentColor);
@@ -528,9 +652,37 @@ public sealed class ReportePdfService : IReportePdfService
 
     private static ReporteWhatsappPdfResumenDto BuildSummary(IReadOnlyList<ReporteWhatsappAsistenciaItemDto> detalle)
     {
-        var total = detalle.Count;
-        var resumen = detalle
-            .GroupBy(x => string.IsNullOrWhiteSpace(x.EstadoMarcacionTexto) ? "SIN CLASIFICAR" : x.EstadoMarcacionTexto.Trim().ToUpperInvariant())
+        var estados = detalle
+            .SelectMany(x => SplitEstadoMarcacion(x.EstadoMarcacionTexto))
+            .ToList();
+        var total = estados.Count;
+        var resumen = estados
+            .GroupBy(x => x)
+            .Select(group => new ReporteWhatsappResumenEstadoDto
+            {
+                EstadoMarcacionTexto = group.Key,
+                Cantidad = group.Count(),
+                Porcentaje = total == 0 ? 0 : Math.Round(group.Count() * 100m / total, 2)
+            })
+            .OrderByDescending(x => x.Cantidad)
+            .ThenBy(x => x.EstadoMarcacionTexto)
+            .ToList();
+
+        return new ReporteWhatsappPdfResumenDto
+        {
+            Resumen = resumen,
+            TotalRegistros = total
+        };
+    }
+
+    private static ReporteWhatsappPdfResumenDto BuildGerencialSummary(IReadOnlyList<ReporteWhatsappAsistenciaItemDto> detalle)
+    {
+        var estados = detalle
+            .Select(ResolveGerencialEstadoMarcacion)
+            .ToList();
+        var total = estados.Count;
+        var resumen = estados
+            .GroupBy(x => x)
             .Select(group => new ReporteWhatsappResumenEstadoDto
             {
                 EstadoMarcacionTexto = group.Key,
@@ -551,34 +703,54 @@ public sealed class ReportePdfService : IReportePdfService
     private static IReadOnlyList<ReporteGerencialEmpleadoResumenDto> BuildGerencialResumen(IReadOnlyList<ReporteWhatsappAsistenciaItemDto> detalle)
     {
         return detalle
+            .Where(x => x.IdEmpleado > 0 && !string.IsNullOrWhiteSpace(x.NombreEmpleado))
             .GroupBy(x => x.IdEmpleado)
             .Select(group =>
             {
-                var first = group.First();
-                var totalHoras = group.Max(x => x.TotalHorasLaborales != 0m ? x.TotalHorasLaborales : x.TotalHoras);
-                var horasLaboradas = group.Max(x => x.TotalHorasEmpleado != 0m ? x.TotalHorasEmpleado : x.TotalHoras);
-                var diferencia = horasLaboradas - totalHoras;
-                var estado = diferencia >= 0m ? "COMPLETO" : "REVISAR";
+                // El resumen gerencial debe respetar los acumulados que devuelve el store.
+                // No usamos la primera fila cronologica porque puede contener un valor diario/parcial.
+                var summaryRow = group
+                    .OrderByDescending(GetGerencialSummaryScore)
+                    .ThenByDescending(x => x.TotalHorasEmpleado)
+                    .ThenByDescending(x => x.TotalHoras)
+                    .ThenBy(x => ParseDate(x.Fecha))
+                    .First();
+                var estado = group
+                    .Select(x => x.EstadoValidacionHoras?.Trim())
+                    .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))
+                    ?? "SIN ESTADO";
 
                 return new ReporteGerencialEmpleadoResumenDto
                 {
                     IdEmpleado = group.Key,
-                    NombreEmpleado = first.NombreEmpleado,
-                    Responsable = first.Responsable,
-                    Ubicacion = first.Ubicacion,
-                    TotalHoras = totalHoras,
-                    HorasLaboradas = horasLaboradas,
-                    DiferenciaHoras = diferencia,
+                    NombreEmpleado = summaryRow.NombreEmpleado,
+                    Responsable = summaryRow.Responsable,
+                    Ubicacion = summaryRow.Ubicacion,
+                    TotalHoras = summaryRow.TotalHorasEmpleado,
+                    HorasOtros = summaryRow.TotalHorasFaltaIncompleto,
+                    FaltaAprobar = summaryRow.TotalHorasFaltaAprobar,
+                    HorasLaboradas = summaryRow.TotalHorasLaborales,
+                    DiferenciaHoras = summaryRow.DiferenciaHoras,
                     Estado = estado,
                     Calendario = group
                         .OrderBy(x => ParseDate(x.Fecha))
                         .ToList()
                 };
             })
-            .OrderBy(x => string.IsNullOrWhiteSpace(x.Ubicacion) ? "SIN UBICACION" : x.Ubicacion.Trim().ToUpperInvariant())
-            .ThenBy(x => string.IsNullOrWhiteSpace(x.Responsable) ? "SIN RESPONSABLE" : x.Responsable.Trim().ToUpperInvariant())
+            .OrderBy(x => GetGerencialUbicacionSortOrder(NormalizeGerencialUbicacion(x.Ubicacion)))
+            .ThenBy(x => NormalizeGerencialUbicacion(x.Ubicacion))
             .ThenBy(x => x.NombreEmpleado)
             .ToList();
+    }
+
+    private static decimal GetGerencialSummaryScore(ReporteWhatsappAsistenciaItemDto item)
+    {
+        return Math.Abs(item.TotalHorasEmpleado)
+            + Math.Abs(item.TotalHoras)
+            + Math.Abs(item.TotalHorasFaltaIncompleto)
+            + Math.Abs(item.TotalHorasFaltaAprobar)
+            + Math.Abs(item.TotalHorasLaborales)
+            + Math.Abs(item.DiferenciaHoras);
     }
 
     private static IReadOnlyList<ReporteGerencialPieChartDto> BuildGerencialPieCharts(IReadOnlyList<ReporteGerencialEmpleadoResumenDto> resumen)
@@ -588,7 +760,10 @@ public sealed class ReportePdfService : IReportePdfService
             BuildPieChart("GENERAL", string.Empty, resumen)
         };
 
-        foreach (var group in resumen.GroupBy(x => string.IsNullOrWhiteSpace(x.Ubicacion) ? "SIN UBICACION" : x.Ubicacion.Trim().ToUpperInvariant()).OrderBy(x => x.Key))
+        foreach (var group in resumen
+            .GroupBy(x => NormalizeGerencialUbicacion(x.Ubicacion))
+            .OrderBy(x => GetGerencialUbicacionSortOrder(x.Key))
+            .ThenBy(x => x.Key))
         {
             result.Add(BuildPieChart(group.Key, group.Key, group.ToList()));
         }
@@ -679,7 +854,7 @@ public sealed class ReportePdfService : IReportePdfService
                 {
                     var date = new DateTime(firstDay.Year, firstDay.Month, day);
                     itemsByDate.TryGetValue(date.Date, out var item);
-                    var status = item?.EstadoMarcacionTexto?.Trim().ToUpperInvariant() ?? "-";
+                    var status = item is null ? "-" : ResolveGerencialEstadoMarcacion(item);
                     var horaEntrada = string.IsNullOrWhiteSpace(item?.HoraEntrada) ? "-" : item!.HoraEntrada.Trim();
                     var horaSalida = string.IsNullOrWhiteSpace(item?.HoraSalida) ? "-" : item!.HoraSalida.Trim();
                     var totalHoras = item is null
@@ -692,6 +867,68 @@ public sealed class ReportePdfService : IReportePdfService
                         cell.Item().Text($"Entrada: {horaEntrada}").FontSize(compact ? 4.5f : 6);
                         cell.Item().Text($"Salida: {horaSalida}").FontSize(compact ? 4.5f : 6);
                         cell.Item().Text($"Total: {totalHoras}").FontSize(compact ? 4.5f : 6).SemiBold();
+                    });
+                }
+            });
+        });
+    }
+
+    private static void RenderStateCalendar(
+        IContainer container,
+        ReporteWhatsappPeriodoDto periodo,
+        string estado,
+        IReadOnlyList<ReporteWhatsappAsistenciaItemDto> items)
+    {
+        var parsedInicio = ParseDate(periodo.FechaInicio);
+        var parsedFin = ParseDate(periodo.FechaFin);
+        var reference = parsedInicio
+            ?? items.Select(x => ParseDate(x.Fecha)).FirstOrDefault(x => x.HasValue)
+            ?? DateTime.Today;
+        var firstDay = new DateTime(reference.Year, reference.Month, 1);
+        var lastDay = new DateTime(reference.Year, reference.Month, DateTime.DaysInMonth(reference.Year, reference.Month));
+        var countsByDate = items
+            .Select(item => ParseDate(item.Fecha))
+            .Where(date => date.HasValue)
+            .GroupBy(date => date!.Value.Date)
+            .ToDictionary(group => group.Key, group => group.Count());
+
+        container.Column(column =>
+        {
+            column.Spacing(6);
+            column.Item().Text($"Calendario {firstDay:MMMM yyyy}".ToUpperInvariant()).Bold().FontSize(11).FontColor("#123B5D");
+            column.Item().Table(table =>
+            {
+                table.ColumnsDefinition(columns =>
+                {
+                    for (var i = 0; i < 7; i++)
+                    {
+                        columns.RelativeColumn();
+                    }
+                });
+
+                foreach (var dayName in new[] { "Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom" })
+                {
+                    table.Cell().Element(CellHeader).AlignCenter().Text(dayName).FontSize(9);
+                }
+
+                var firstColumn = ((int)firstDay.DayOfWeek + 6) % 7;
+                for (var i = 0; i < firstColumn; i++)
+                {
+                    table.Cell().Element(c => EmptyCalendarCell(c, compact: false)).Text(string.Empty);
+                }
+
+                for (var day = 1; day <= lastDay.Day; day++)
+                {
+                    var date = new DateTime(firstDay.Year, firstDay.Month, day);
+                    countsByDate.TryGetValue(date.Date, out var count);
+                    var withinPeriodo = (!parsedInicio.HasValue || date.Date >= parsedInicio.Value.Date)
+                        && (!parsedFin.HasValue || date.Date <= parsedFin.Value.Date);
+
+                    table.Cell().Element(c => StateCalendarCell(c, estado, count, withinPeriodo)).Column(cell =>
+                    {
+                        cell.Item().AlignRight().Text(day.ToString(CultureInfo.InvariantCulture)).FontSize(8).SemiBold();
+                        cell.Item().PaddingTop(4).Text(withinPeriodo ? estado : "Fuera de rango").FontSize(7);
+                        cell.Item().Text(withinPeriodo ? $"Cantidad: {count}" : "-").FontSize(6).SemiBold();
                     });
                 }
             });
@@ -714,6 +951,14 @@ public sealed class ReportePdfService : IReportePdfService
             .Background(GetCalendarStateBackground(status))
             .Padding(compact ? 3 : 4);
 
+    private static IContainer StateCalendarCell(IContainer container, string estado, int count, bool withinPeriodo) =>
+        container
+            .Border(1)
+            .BorderColor("#E2E8F0")
+            .MinHeight(72)
+            .Background(withinPeriodo ? GetStateCountBackground(estado, count) : "#F8FAFC")
+            .Padding(4);
+
     private static string GetCalendarStateBackground(string status)
     {
         return status switch
@@ -731,7 +976,71 @@ public sealed class ReportePdfService : IReportePdfService
         };
     }
 
+    private static string GetStateCountBackground(string estado, int count)
+    {
+        if (count <= 0)
+        {
+            return "#F8FAFC";
+        }
+
+        var (_, background) = GetDynamicEstadoMarcacionCardColors(estado);
+        return background;
+    }
+
+    private static string NormalizeGerencialUbicacion(string? ubicacion)
+    {
+        var normalized = string.IsNullOrWhiteSpace(ubicacion) ? "SIN UBICACION" : ubicacion.Trim().ToUpperInvariant();
+
+        return normalized switch
+        {
+            "CAMPO" => "CAMPO",
+            "CIENEGUILLA" => "CIENEGUILLA",
+            "OFICINA" => "OFICINA",
+            _ => normalized
+        };
+    }
+
+    private static int GetGerencialUbicacionSortOrder(string ubicacion)
+    {
+        return ubicacion switch
+        {
+            "CAMPO" => 0,
+            "CIENEGUILLA" => 1,
+            "OFICINA" => 2,
+            _ => 99
+        };
+    }
+
     private static string BuildEmpleadoSectionId(int idEmpleado) => $"empleado-{idEmpleado}";
+
+    private static string BuildEstadoSectionId(string estado) =>
+        $"estado-{NormalizeAnchorValue(estado)}";
+
+    private static string NormalizeAnchorValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "sin-clasificar";
+        }
+
+        var normalized = value.Trim().ToLowerInvariant();
+        var builder = new StringBuilder(normalized.Length);
+
+        foreach (var character in normalized.Normalize(NormalizationForm.FormD))
+        {
+            var category = CharUnicodeInfo.GetUnicodeCategory(character);
+            if (category == UnicodeCategory.NonSpacingMark)
+            {
+                continue;
+            }
+
+            builder.Append(char.IsLetterOrDigit(character) ? character : '-');
+        }
+
+        return builder
+            .ToString()
+            .Trim('-');
+    }
 
     private static string BuildPieChartSvg(ReporteWhatsappPdfResumenDto resumen, Func<int, string> colorSelector)
     {
@@ -786,6 +1095,7 @@ public sealed class ReportePdfService : IReportePdfService
         return BuildPieChartSvg(resumen, index => GetGerencialStateColor(chart.Items[index].Categoria));
     }
 
+
     private static string GetPaletteColor(int index)
     {
         var palette = new[]
@@ -796,8 +1106,76 @@ public sealed class ReportePdfService : IReportePdfService
         return palette[index % palette.Length];
     }
 
+    private static (string Accent, string Background) GetDynamicEstadoMarcacionCardColors(string? estado)
+    {
+        var normalized = string.IsNullOrWhiteSpace(estado)
+            ? "SIN CLASIFICAR"
+            : estado.Trim().ToUpperInvariant();
+        var palette = new (string Accent, string Background)[]
+        {
+            ("#B42318", "#FEE4E2"),
+            ("#B54708", "#FEF0C7"),
+            ("#027A48", "#D1FADF"),
+            ("#155EEF", "#DBEAFE"),
+            ("#0F766E", "#CCFBF1"),
+            ("#854D0E", "#FEF9C3"),
+            ("#0C4A6E", "#CFFAFE"),
+            ("#7C2D12", "#FED7AA"),
+            ("#4C1D95", "#EDE9FE"),
+            ("#334155", "#E2E8F0")
+        };
+
+        var index = Math.Abs(StringComparer.Ordinal.GetHashCode(normalized)) % palette.Length;
+        return palette[index];
+    }
+
+    private static IReadOnlyList<string> SplitEstadoMarcacion(string? estadoMarcacionTexto)
+    {
+        if (string.IsNullOrWhiteSpace(estadoMarcacionTexto))
+        {
+            return ["SIN CLASIFICAR"];
+        }
+
+        var estados = estadoMarcacionTexto
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(item => string.IsNullOrWhiteSpace(item) ? "SIN CLASIFICAR" : item.Trim().ToUpperInvariant())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return estados.Length == 0 ? ["SIN CLASIFICAR"] : estados;
+    }
+
+    private static string ResolveGerencialEstadoMarcacion(ReporteWhatsappAsistenciaItemDto item)
+    {
+        var estado = ResolveGerencialEstadoMarcacionRaw(item);
+        return string.IsNullOrWhiteSpace(estado)
+            ? "SIN CLASIFICAR"
+            : estado.Trim().ToUpperInvariant();
+    }
+
+    private static string ResolveGerencialEstadoMarcacionRaw(ReporteWhatsappAsistenciaItemDto item)
+    {
+        if (!string.IsNullOrWhiteSpace(item.EstadoMarcacionTexto))
+        {
+            return item.EstadoMarcacionTexto;
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.Estado))
+        {
+            return item.Estado;
+        }
+
+        return "SIN CLASIFICAR";
+    }
+
     private static string GetGerencialStateColor(string status) =>
-        status.Equals("COMPLETO", StringComparison.OrdinalIgnoreCase) ? "#12B76A" : "#F04438";
+        IsObservacionState(status) ? "#F04438" : "#12B76A";
+
+    private static bool IsObservacionState(string? status)
+    {
+        return !string.Equals(status?.Trim(), "CORRECTO", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(status?.Trim(), "COMPLETO", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string BuildSlice(double centerX, double centerY, double radius, double startAngle, double endAngle, string color)
     {

@@ -12,6 +12,7 @@ namespace CjERP.Infrastructure.Services
 {
     public class PlanillaService : IPlanillaService
     {
+        private const string VigenteStoredProcedureName = "dbo.sp_SuministroProvisional_ObtenerVigente";
         private const string InsertStoredProcedureName = "dbo.sp_Planilla_Insertar";
         private const string UpdateStoredProcedureName = "dbo.sp_Planilla_Actualizar";
         private const string UpdateStatusStoredProcedureName = "dbo.sp_Planilla_ActualizarEstado";
@@ -23,6 +24,23 @@ namespace CjERP.Infrastructure.Services
         {
             _configuration = configuration;
             _logger = logger;
+        }
+
+        public async Task<IReadOnlyList<SuministroProvisionalVigenteDto>> ObtenerSuministrosProvisionalesVigentesAsync(
+            SuministroProvisionalVigenteRequestDto request,
+            CancellationToken cancellationToken = default)
+        {
+            using var connection = new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
+            var parameters = await BuildSuministroVigenteParametersAsync(connection, request, cancellationToken);
+
+            var rows = await connection.QueryAsync(
+                new CommandDefinition(
+                    VigenteStoredProcedureName,
+                    parameters,
+                    commandType: CommandType.StoredProcedure,
+                    cancellationToken: cancellationToken));
+
+            return rows.Select(MapSuministroVigenteRow).ToList();
         }
 
         public async Task InsertarPlanillaAsync(PlanillaInsertRequestDto request, CancellationToken cancellationToken = default)
@@ -188,6 +206,10 @@ namespace CjERP.Infrastructure.Services
                     cancellationToken: cancellationToken));
         }
 
+        /*
+            Validacion de suministro provisional removida.
+            El control definitivo vive dentro de dbo.sp_Planilla_Insertar.
+        */
         private static DynamicParameters BuildPlanillaParameters(PlanillaInsertRequestDto request)
         {
             var idResponsable = ParseRequiredInt(request.Responsable, nameof(request.Responsable));
@@ -236,8 +258,204 @@ namespace CjERP.Infrastructure.Services
             parameters.Add("@RutaFactura", NullIfWhiteSpace(request.FacturaPath), DbType.String);
             parameters.Add("@IdUsuarioFactura", request.IdUsuarioFactura, DbType.Int32);
             parameters.Add("@FechaVencimiento", ParseNullableDate(request.FechaVencimiento), DbType.DateTime);
+            parameters.Add("@IdProvisional", request.IdSuministroProvisional, DbType.Int32);
 
             return parameters;
+        }
+
+        private static async Task<DynamicParameters> BuildSuministroVigenteParametersAsync(
+            SqlConnection connection,
+            SuministroProvisionalVigenteRequestDto request,
+            CancellationToken cancellationToken)
+        {
+            var parameters = new DynamicParameters();
+            var availableParameters = NormalizeParameterNames(
+                await GetStoredProcedureParametersAsync(connection, VigenteStoredProcedureName, cancellationToken));
+
+            AddParameterIfExists(availableParameters, parameters, request.IdResponsable, DbType.Int32, "@IdResponsable", "@idResponsable", "@idresponsable");
+            AddParameterIfExists(availableParameters, parameters, request.IdTarea, DbType.Int32, "@IdTarea", "@idTarea", "@idtarea", "@id_tarea");
+            AddParameterIfExists(availableParameters, parameters, request.IdCliente, DbType.Int32, "@IdCliente", "@idCliente", "@idcliente");
+            AddParameterIfExists(availableParameters, parameters, request.IdProyecto, DbType.Int32, "@IdProyecto", "@idProyecto", "@idproyecto");
+            AddParameterIfExists(availableParameters, parameters, NullIfWhiteSpace(request.IdSite), DbType.String, "@IdSite", "@idSite", "@idsite");
+            AddParameterIfExists(availableParameters, parameters, request.CorreSite, DbType.Int32, "@CorreSite", "@correSite", "@corresite", "@Correlativo", "@correlativo");
+            AddParameterIfExists(availableParameters, parameters, 1, DbType.Int32, "@IdEstado", "@idEstado", "@idestado");
+            AddParameterIfExists(availableParameters, parameters, NullIfWhiteSpace(request.TipoTrabajo), DbType.String, "@TipoTrabajo", "@tipoTrabajo", "@tipo_trabajo");
+
+            return parameters;
+        }
+
+        private static IReadOnlySet<string> NormalizeParameterNames(IEnumerable<string> parameters)
+        {
+            return parameters
+                .Where(static name => !string.IsNullOrWhiteSpace(name))
+                .Select(static name => name.Trim())
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static void AddParameterIfExists(
+            IReadOnlySet<string> availableParameters,
+            DynamicParameters parameters,
+            object? value,
+            DbType dbType,
+            params string[] candidateNames)
+        {
+            var parameterName = candidateNames.FirstOrDefault(availableParameters.Contains);
+            if (string.IsNullOrWhiteSpace(parameterName))
+            {
+                return;
+            }
+
+            parameters.Add(parameterName, value, dbType);
+        }
+
+        private static async Task<IReadOnlyList<string>> GetStoredProcedureParametersAsync(
+            SqlConnection connection,
+            string procedureName,
+            CancellationToken cancellationToken)
+        {
+            const string sql = """
+                SELECT p.name
+                FROM sys.parameters p
+                INNER JOIN sys.objects o ON p.object_id = o.object_id
+                INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+                WHERE s.name = @SchemaName
+                  AND o.name = @ProcedureName
+                """;
+
+            var normalized = procedureName.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var schemaName = normalized.Length > 1 ? normalized[0] : "dbo";
+            var objectName = normalized.Length > 1 ? normalized[1] : normalized[0];
+
+            var rows = await connection.QueryAsync<string>(
+                new CommandDefinition(
+                    sql,
+                    new { SchemaName = schemaName, ProcedureName = objectName },
+                    cancellationToken: cancellationToken));
+
+            return rows.ToList();
+        }
+
+        private static SuministroProvisionalVigenteDto MapSuministroVigenteRow(dynamic row)
+        {
+            var values = (IDictionary<string, object?>)row;
+
+            return new SuministroProvisionalVigenteDto
+            {
+                IdProvisional = GetNullableLong(values, "IdProvisional", "idProvisional", "idprovisional", "IdSuministroProvisional", "idSuministroProvisional"),
+                IdResponsable = GetNullableInt(values, "IdResponsable", "idResponsable", "idresponsable"),
+                Responsable = GetNullableString(values, "Responsable", "responsable", "NombreEmpleado", "nombreempleado") ?? string.Empty,
+                IdTarea = GetNullableInt(values, "IdTarea", "idTarea", "idtarea", "Id_Tarea", "id_tarea"),
+                Tarea = GetNullableString(values, "Tarea", "tarea", "valorini") ?? string.Empty,
+                TipoTrabajo = GetNullableString(values, "TipoTrabajo", "tipoTrabajo", "tipo_trabajo") ?? string.Empty,
+                Ot = GetNullableString(values, "Ot", "ot", "OT") ?? string.Empty,
+                Comentario = GetNullableString(values, "Comentario", "comentario") ?? string.Empty,
+                Monto = GetNullableDecimal(values, "Monto", "monto"),
+                FechaInicio = GetNullableDateTime(values, "FechaInicio", "fechaInicio", "fechainicio"),
+                NombreCliente = GetNullableString(values, "NombreCliente", "nombreCliente", "nombrecliente") ?? string.Empty,
+                NombreProyecto = GetNullableString(values, "NombreProyecto", "nombreProyecto", "nombreproyecto") ?? string.Empty,
+                NombreSite = GetNullableString(values, "NombreSite", "nombreSite", "nombresite") ?? string.Empty
+            };
+        }
+
+        private static string? GetNullableString(IDictionary<string, object?> values, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (values.TryGetValue(key, out var value) && value is not null && value != DBNull.Value)
+                {
+                    var text = value.ToString()?.Trim();
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        return text;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static int? GetNullableInt(IDictionary<string, object?> values, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (values.TryGetValue(key, out var value) && value is not null && value != DBNull.Value)
+                {
+                    if (value is int intValue)
+                    {
+                        return intValue;
+                    }
+
+                    if (int.TryParse(value.ToString(), out var parsed))
+                    {
+                        return parsed;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static long? GetNullableLong(IDictionary<string, object?> values, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (values.TryGetValue(key, out var value) && value is not null && value != DBNull.Value)
+                {
+                    if (value is long longValue)
+                    {
+                        return longValue;
+                    }
+
+                    if (long.TryParse(value.ToString(), out var parsed))
+                    {
+                        return parsed;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static decimal? GetNullableDecimal(IDictionary<string, object?> values, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (values.TryGetValue(key, out var value) && value is not null && value != DBNull.Value)
+                {
+                    if (value is decimal decimalValue)
+                    {
+                        return decimalValue;
+                    }
+
+                    if (decimal.TryParse(value.ToString(), out var parsed))
+                    {
+                        return parsed;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static DateTime? GetNullableDateTime(IDictionary<string, object?> values, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (values.TryGetValue(key, out var value) && value is not null && value != DBNull.Value)
+                {
+                    if (value is DateTime dateTime)
+                    {
+                        return dateTime;
+                    }
+
+                    if (DateTime.TryParse(value.ToString(), out var parsed))
+                    {
+                        return parsed;
+                    }
+                }
+            }
+
+            return null;
         }
 
         private static string? NullIfWhiteSpace(string? value)

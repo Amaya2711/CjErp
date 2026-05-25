@@ -41,11 +41,6 @@ public class AsistenciaReporteController : ControllerBase
             return BadRequest(new { success = false, message = "FechaInicio y FechaFin son obligatorias." });
         }
 
-        if (request.Items is null || request.Items.Count == 0)
-        {
-            return BadRequest(new { success = false, message = "No hay datos para exportar el PDF." });
-        }
-
         var pdfBytes = await _asistenciaReporteService.GenerarPdfGerencialAsync(request, cancellationToken);
         var fileName = $"reporte_asistencia_{request.FechaInicio.Replace("/", string.Empty)}_{request.FechaFin.Replace("/", string.Empty)}.pdf";
         return File(pdfBytes, "application/pdf", fileName);

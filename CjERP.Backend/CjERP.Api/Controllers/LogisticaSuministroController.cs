@@ -3,6 +3,7 @@ using CjERP.Application.Interfaces.Services;
 using CjERP.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
 namespace CjERP.Api.Controllers;
 
@@ -39,6 +40,15 @@ public class LogisticaSuministroController : ControllerBase
         return Ok(new { success = true, message = "ok", data });
     }
 
+    [HttpPost("kpis")]
+    public async Task<IActionResult> ObtenerKpis(
+        [FromBody] LogisticaSuministroBuscarRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var data = await _logisticaSuministroService.ObtenerKpisAsync(request, cancellationToken);
+        return Ok(new { success = true, message = "ok", data });
+    }
+
     [HttpPost("insertar")]
     public async Task<IActionResult> Insertar(
         [FromBody] LogisticaSuministroInsertRequestDto request,
@@ -54,7 +64,8 @@ public class LogisticaSuministroController : ControllerBase
             return BadRequest(new { success = false, message = validation });
         }
 
-        var id = await _logisticaSuministroService.InsertarAsync(request, cancellationToken);
+        var usuarioAccion = ResolveUsuarioAccion();
+        var id = await _logisticaSuministroService.InsertarAsync(request, usuarioAccion, cancellationToken);
         return Ok(new
         {
             success = true,
@@ -82,7 +93,8 @@ public class LogisticaSuministroController : ControllerBase
             return BadRequest(new { success = false, message = validation });
         }
 
-        await _logisticaSuministroService.ActualizarAsync(request, cancellationToken);
+        var usuarioAccion = ResolveUsuarioAccion();
+        await _logisticaSuministroService.ActualizarAsync(request, usuarioAccion, cancellationToken);
         return Ok(new { success = true, message = "Suministro actualizado correctamente." });
     }
 
@@ -151,5 +163,13 @@ public class LogisticaSuministroController : ControllerBase
         }
 
         return null;
+    }
+
+    private string ResolveUsuarioAccion()
+    {
+        return User.FindFirstValue("IdUsuario")
+            ?? User.FindFirstValue(ClaimTypes.Name)
+            ?? User.Identity?.Name
+            ?? "sistema";
     }
 }

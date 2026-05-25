@@ -7,6 +7,7 @@ export interface LoginRequest {
 
 export interface LoginResponse {
   token: string;
+  sessionId?: string;
   idUsuario: string;
   nombreEmpleado?: string;
   correo?: string;
@@ -22,4 +23,20 @@ export interface LoginResponse {
 
 export async function login(payload: LoginRequest): Promise<LoginResponse> {
   return await httpClient.post<LoginResponse>("/auth/login", payload);
+}
+
+export async function logout(): Promise<void> {
+  await httpClient.post("/auth/logout");
+}
+
+export function sendLogoutBeacon(token: string) {
+  const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
+  const apiBaseUrl =
+    configuredApiUrl || (import.meta.env.DEV ? "http://localhost:5015/api" : "/api");
+
+  const beaconUrl = `${apiBaseUrl}/auth/logout-beacon`;
+  const payload = JSON.stringify({ token });
+  const blob = new Blob([payload], { type: "application/json" });
+
+  navigator.sendBeacon(beaconUrl, blob);
 }

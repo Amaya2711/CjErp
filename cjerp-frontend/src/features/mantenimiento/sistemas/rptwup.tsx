@@ -40,6 +40,8 @@ const formInicial: ReporteWhatsappConfiguracion = {
   cantidadEmpleadosPorBloque: 10,
   delaySegundosEntreBloques: 30,
   activo: false,
+  usarSemanaEnCurso: false,
+  usarMesEnCurso: false,
 };
 
 type RptWupModulePageProps = {
@@ -57,13 +59,28 @@ function formatDateTime(value?: string | null) {
     return "-";
   }
 
-  const parsed = new Date(value);
+  const normalized = value.trim();
+  const noTimezoneMatch = normalized.match(
+    /^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/
+  );
+
+  if (noTimezoneMatch) {
+    const [, year, month, day, hour, minute, second = "00"] = noTimezoneMatch;
+    const hourNumber = Number(hour);
+    const displayHour = hourNumber % 12 || 12;
+    const period = hourNumber < 12 ? "a. m." : "p. m.";
+    return `${day}/${month}/${year}, ${displayHour}:${minute}:${second} ${period}`;
+  }
+
+  const parsed = new Date(normalized);
   if (Number.isNaN(parsed.getTime())) {
     return value;
   }
 
-  // Forzar zona horaria de Lima, Perú
-  return parsed.toLocaleString("es-PE", { timeZone: "America/Lima" });
+  return parsed.toLocaleString("es-PE", {
+    timeZone: "America/Lima",
+    hour12: true,
+  });
 }
 
 function formatSeconds(value?: number | null) {
@@ -207,6 +224,25 @@ function getRequestBase64(requestJson?: string) {
   return "";
 }
 
+function getRequestFileName(row: ReporteWhatsappLog) {
+  const parsed = tryParseJsonObject(row.requestJson);
+  if (!parsed) {
+    return `reporte_${row.idEmpleado || "wup"}.pdf`;
+  }
+
+  const rawName = typeof parsed.NombreArchivo === "string"
+    ? parsed.NombreArchivo
+    : typeof parsed.nombrearchivo === "string"
+      ? parsed.nombrearchivo
+      : "";
+
+  if (!rawName.trim()) {
+    return `reporte_${row.idEmpleado || "wup"}.pdf`;
+  }
+
+  return buildCompactFileName(rawName.trim(), row.idEmpleado);
+}
+
 function buildPostmanPayload(requestJson?: string) {
   const parsed = tryParseJsonObject(requestJson);
   if (!parsed) {
@@ -254,6 +290,30 @@ async function copyTextToClipboard(value: string) {
     return true;
   } catch {
     return false;
+  }
+}
+
+function downloadBase64Pdf(row: ReporteWhatsappLog) {
+  const base64 = getRequestBase64(row.requestJson);
+  if (!base64) {
+    window.alert("No hay archivo Base64 disponible para este registro.");
+    return;
+  }
+
+  try {
+    const binary = window.atob(base64);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    const blob = new Blob([bytes], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = getRequestFileName(row);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch {
+    window.alert("No se pudo descargar el archivo Base64.");
   }
 }
 
@@ -349,6 +409,8 @@ export function RptWupModulePage({
             cantidadEmpleadosPorBloque: response.configuracion.cantidadEmpleadosPorBloque || 10,
             delaySegundosEntreBloques: response.configuracion.delaySegundosEntreBloques || 30,
             activo: !!response.configuracion.activo,
+            usarSemanaEnCurso: !!response.configuracion.usarSemanaEnCurso,
+            usarMesEnCurso: !!response.configuracion.usarMesEnCurso,
             usuarioModificacion: response.configuracion.usuarioModificacion,
             fechaModificacion: response.configuracion.fechaModificacion,
             usaRespaldoAppSettings: response.configuracion.usaRespaldoAppSettings,
@@ -457,6 +519,20 @@ export function RptWupModulePage({
         key: "fechaEnvio",
         header: "Fecha envío",
         render: (row) => formatDateTime(row.fechaEnvio || row.fechaProceso),
+      },
+      {
+        key: "archivo",
+        header: "Archivo",
+        align: "center",
+        render: (row) => getRequestBase64(row.requestJson) ? (
+          <button
+            type="button"
+            style={styles.copyButton}
+            onClick={() => downloadBase64Pdf(row)}
+          >
+            Descargar
+          </button>
+        ) : "-",
       },
       {
         key: "mensajeError",
@@ -586,76 +662,83 @@ export function RptWupModulePage({
       ) : (
         <>
           <div style={styles.topGrid}>
-            <AppCard style={styles.heroCard}>
-              <div style={styles.heroHeader}>
-                <div>
-                  <div style={styles.eyebrow}>{eyebrow}</div>
-                  <h2 style={styles.heroTitle}>{heroTitle}</h2>
-                  <p style={styles.heroText}>
-                    Período actual: <strong>{dashboard?.periodoActual.etiquetaPeriodo || "-"}</strong>
-                  </p>
-                </div>
-
-                <div style={styles.heroActions}>
-                  <button
-                    type="button"
-                    style={styles.primaryButton}
-                    onClick={() => void ejecutarAccion("run")}
-                    disabled={runningAction !== "" || dashboard?.runtime.isRunning}
-                  >
-                    Ejecutar ahora
-                  </button>
-                  <button
-                    type="button"
-                    style={styles.secondaryButton}
-                    onClick={() => void ejecutarAccion("retry")}
-                    disabled={runningAction !== "" || dashboard?.runtime.isRunning}
-                  >
-                    Reintentar fallidos
-                  </button>
-                  <button
-                    type="button"
-                    style={styles.secondaryButton}
-                    onClick={() => void ejecutarAccion("reschedule")}
-                    disabled={runningAction !== ""}
-                  >
-                    Reprogramar job
-                  </button>
-                </div>
-              </div>
-
-              <div style={styles.progressPanel}>
-                <div style={styles.progressHeader}>
+            <div style={{ display: "flex", flexDirection: "column", flex: 1, gap: 16 }}>
+              <AppCard style={styles.heroCard}>
+                <div style={styles.heroHeader}>
                   <div>
-                    <div style={styles.progressTitle}>{runtimeTitle}</div>
-                    <div style={styles.progressMeta}>
-                      {dashboard?.runtime.isRunning ? dashboard.runtime.mensaje : "Sin ejecución activa."}
-                    </div>
+                    <div style={styles.eyebrow}>{eyebrow}</div>
+                    <h2 style={styles.heroTitle}>{heroTitle}</h2>
+                    <p style={styles.heroText}>
+                      Período actual: <strong>{dashboard?.periodoActual.etiquetaPeriodo || "-"}</strong>
+                    </p>
                   </div>
-                  <strong style={styles.progressValue}>{progress}%</strong>
+                  <div style={styles.heroActions}>
+                    <button
+                      type="button"
+                      style={styles.primaryButton}
+                      onClick={() => void ejecutarAccion("run")}
+                      disabled={runningAction !== "" || dashboard?.runtime.isRunning}
+                    >
+                      Ejecutar ahora
+                    </button>
+                    <button
+                      type="button"
+                      style={styles.secondaryButton}
+                      onClick={() => void ejecutarAccion("retry")}
+                      disabled={runningAction !== "" || dashboard?.runtime.isRunning}
+                    >
+                      Reintentar fallidos
+                    </button>
+                    <button
+                      type="button"
+                      style={styles.secondaryButton}
+                      onClick={() => void ejecutarAccion("reschedule")}
+                      disabled={runningAction !== ""}
+                    >
+                      Reprogramar job
+                    </button>
+                  </div>
                 </div>
-
-                <div style={styles.progressBarTrack}>
-                  <div style={{ ...styles.progressBarFill, width: `${progress}%` }} />
+                <div style={styles.progressPanel}>
+                  <div style={styles.progressHeader}>
+                    <div>
+                      <div style={styles.progressTitle}>{runtimeTitle}</div>
+                      <div style={styles.progressMeta}>
+                        {dashboard?.runtime.isRunning ? dashboard.runtime.mensaje : "Sin ejecución activa."}
+                      </div>
+                    </div>
+                    <strong style={styles.progressValue}>{progress}%</strong>
+                  </div>
+                  <div style={styles.progressBarTrack}>
+                    <div style={{ ...styles.progressBarFill, width: `${progress}%` }} />
+                  </div>
+                  <div style={styles.progressStats}>
+                    <span>Procesados: {dashboard?.runtime.empleadosProcesados ?? 0} / {dashboard?.runtime.totalEmpleados ?? 0}</span>
+                    <span>Bloque: {dashboard?.runtime.bloqueActual ?? 0} / {dashboard?.runtime.totalBloques ?? 0}</span>
+                    <span>Restante: {formatSeconds(dashboard?.runtime.segundosRestantesEstimados)}</span>
+                  </div>
+                  <div style={styles.progressStats}>
+                    <span>Empleado actual: {dashboard?.runtime.empleadoActualNombre || "-"}</span>
+                    <span>Espera bloque: {formatSeconds(dashboard?.runtime.segundosEsperaBloqueActual)}</span>
+                    <span>Inicio: {formatDateTime(dashboard?.runtime.fechaInicio)}</span>
+                  </div>
                 </div>
-
-                <div style={styles.progressStats}>
-                  <span>Procesados: {dashboard?.runtime.empleadosProcesados ?? 0} / {dashboard?.runtime.totalEmpleados ?? 0}</span>
-                  <span>Bloque: {dashboard?.runtime.bloqueActual ?? 0} / {dashboard?.runtime.totalBloques ?? 0}</span>
-                  <span>Restante: {formatSeconds(dashboard?.runtime.segundosRestantesEstimados)}</span>
-                </div>
-
-                <div style={styles.progressStats}>
-                  <span>Empleado actual: {dashboard?.runtime.empleadoActualNombre || "-"}</span>
-                  <span>Espera bloque: {formatSeconds(dashboard?.runtime.segundosEsperaBloqueActual)}</span>
-                  <span>Inicio: {formatDateTime(dashboard?.runtime.fechaInicio)}</span>
+              </AppCard>
+              <div style={{ marginTop: 8 }}>
+                <div style={{ width: "100%" }}>
+                  <div style={{ ...styles.kpiGrid, width: "100%" }}>
+                    <KpiCard label="Total procesados" value={String(dashboard?.kpis.totalProcesados ?? 0)} tone="blue" />
+                    <KpiCard label="Enviados" value={String(dashboard?.kpis.totalEnviados ?? 0)} tone="green" />
+                    <KpiCard label="Errores" value={String(dashboard?.kpis.totalErrores ?? 0)} tone="red" />
+                    <KpiCard label="Omitidos" value={String(dashboard?.kpis.totalOmitidos ?? 0)} tone="amber" />
+                    <KpiCard label="Duplicados" value={String(dashboard?.kpis.totalDuplicados ?? 0)} tone="slate" />
+                    <KpiCard label="Pendientes retry" value={String(dashboard?.kpis.totalPendientesRetry ?? 0)} tone="blue" />
+                  </div>
                 </div>
               </div>
-            </AppCard>
-
+            </div>
             <AppCard style={styles.configCard}>
               <h3 style={styles.cardTitle}>Configuración dinámica</h3>
-
               <div style={{ ...styles.formGrid, gridTemplateColumns: "1fr 1fr 1fr" }}>
                 {/* Fila alineada de 3 campos */}
                 <div style={styles.field}>
@@ -710,34 +793,56 @@ export function RptWupModulePage({
 
               {/* Día de ejecución y switch van debajo */}
               {tipoApi === "gerencial" ? (
-                <div style={styles.daySelectorField}>
-                  <label style={styles.label}>Dias de ejecucion</label>
-                  <div style={styles.daySelectorGrid}>
-                    {DIAS_EJECUCION.map((dia) => {
-                      const checked = (form.diasEjecucion ?? []).includes(dia.value);
-                      return (
-                        <label
-                          key={dia.value}
-                          style={{
-                            ...styles.daySelectorOption,
-                            ...(checked ? styles.daySelectorOptionActive : {}),
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggleDiaEjecucion(dia.value)}
-                          />
-                          <span>{dia.label}</span>
-                        </label>
-                      );
-                    })}
+                <>
+                  <div style={styles.daySelectorField}>
+                    <label style={styles.label}>Dias de ejecucion</label>
+                    <div style={styles.daySelectorGrid}>
+                      {DIAS_EJECUCION.map((dia) => {
+                        const checked = (form.diasEjecucion ?? []).includes(dia.value);
+                        return (
+                          <label
+                            key={dia.value}
+                            style={{
+                              ...styles.daySelectorOption,
+                              ...(checked ? styles.daySelectorOptionActive : {}),
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleDiaEjecucion(dia.value)}
+                            />
+                            <span>{dia.label}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <span style={styles.helpText}>
+                      Marca los dias en los que el reporte gerencial debe ejecutarse automaticamente a la hora indicada.
+                    </span>
+                    {errores.diasEjecucion ? <span style={styles.errorText}>{errores.diasEjecucion}</span> : null}
                   </div>
-                  <span style={styles.helpText}>
-                    Marca los dias en los que el reporte gerencial debe ejecutarse automaticamente a la hora indicada.
-                  </span>
-                  {errores.diasEjecucion ? <span style={styles.errorText}>{errores.diasEjecucion}</span> : null}
-                </div>
+
+                  <div style={{ ...styles.switchField, marginTop: 12 }}>
+                    <label style={styles.switchRow}>
+                      <input
+                        type="checkbox"
+                        checked={!!form.usarMesEnCurso}
+                        onChange={(event) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            usarMesEnCurso: event.target.checked,
+                            usarSemanaEnCurso: false,
+                          }))
+                        }
+                      />
+                      <span>Imprimir mes en curso</span>
+                    </label>
+                    <div style={styles.metaText}>
+                      Si no esta marcado, el reporte gerencial enviara por defecto la semana pasada completa, de lunes a domingo. Si esta marcado, enviara desde el primer dia del mes actual hasta hoy.
+                    </div>
+                  </div>
+                </>
               ) : null}
 
               <div style={{ display: "flex", alignItems: "flex-start", gap: 16, marginTop: 18 }}>
@@ -774,18 +879,7 @@ export function RptWupModulePage({
             </AppCard>
           </div>
 
-          <div style={styles.kpiGrid}>
-            <KpiCard label="Total procesados" value={String(dashboard?.kpis.totalProcesados ?? 0)} tone="blue" />
-            <KpiCard label="Enviados" value={String(dashboard?.kpis.totalEnviados ?? 0)} tone="green" />
-            <KpiCard label="Errores" value={String(dashboard?.kpis.totalErrores ?? 0)} tone="red" />
-            <KpiCard label="Omitidos" value={String(dashboard?.kpis.totalOmitidos ?? 0)} tone="amber" />
-            <KpiCard label="Duplicados" value={String(dashboard?.kpis.totalDuplicados ?? 0)} tone="slate" />
-            <KpiCard
-              label="Pendientes retry"
-              value={String(dashboard?.kpis.totalPendientesRetry ?? 0)}
-              tone="blue"
-            />
-          </div>
+
 
           <AppCard>
             <div style={styles.tableHeader}>
@@ -1177,3 +1271,4 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
   },
 };
+

@@ -10,6 +10,8 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
   value,
   onChange,
   onSelectionBlur,
+  tareaFilter,
+  tareaInputMode = "autocomplete",
   filtroInputRef,
 }) => {
   const safeValue: FiltroOperativoValue = value ?? {};
@@ -32,6 +34,11 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
   const tipoTrabajosSafe = Array.isArray(tipoTrabajos) ? tipoTrabajos : [];
   const otsSafe = Array.isArray(ots) ? ots : [];
   const tareasSafe = Array.isArray(tareas) ? tareas : [];
+  const tareasDisponibles = tareaFilter ? tareasSafe.filter(tareaFilter) : tareasSafe;
+  const currentTipoTrabajo = safeValue?.tipoTrabajo?.tipoTrabajo ?? "";
+  const currentOt = safeValue?.ot?.ot ?? "";
+  const tipoTrabajoMissing = currentTipoTrabajo && !tipoTrabajosSafe.some((t) => t.tipoTrabajo === currentTipoTrabajo);
+  const otMissing = currentOt && !otsSafe.some((o) => o.ot === currentOt);
 
   const spanRef = useRef<HTMLSpanElement>(null);
   const [inputWidth, setInputWidth] = useState<number>(250);
@@ -282,6 +289,9 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
               }}
             >
               <option value="">Seleccione...</option>
+              {tipoTrabajoMissing ? (
+                <option value={currentTipoTrabajo}>{currentTipoTrabajo}</option>
+              ) : null}
               {tipoTrabajosSafe.map((t, idx) => (
                 <option key={t.tipoTrabajo + "-" + idx} value={t.tipoTrabajo}>
                   {t.tipoTrabajo}
@@ -313,6 +323,9 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
             }}
           >
             <option value="">Seleccione...</option>
+            {otMissing ? (
+              <option value={currentOt}>{currentOt}</option>
+            ) : null}
             {otsSafe.map((o, idx) => (
               <option key={o.ot + "-" + idx} value={o.ot}>
                 {o.ot} - {o.fecAsignacion ? new Date(o.fecAsignacion).toLocaleDateString() : ""}
@@ -321,11 +334,19 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
           </select>
         </div>
 
-        <TareaAutocomplete
-          value={safeValue}
-          tareas={tareasSafe}
-          handleTareaChange={handleTareaChange}
-        />
+        {tareaInputMode === "select" ? (
+          <TareaSelect
+            value={safeValue}
+            tareas={tareasDisponibles}
+            handleTareaChange={handleTareaChange}
+          />
+        ) : (
+          <TareaAutocomplete
+            value={safeValue}
+            tareas={tareasDisponibles}
+            handleTareaChange={handleTareaChange}
+          />
+        )}
       </div>
     </div>
   );
@@ -336,6 +357,53 @@ type TareaAutocompleteProps = {
   tareas: TareaOption[];
   handleTareaChange: (correlativo: number | null) => void;
 };
+
+function TareaSelect({
+  value,
+  tareas,
+  handleTareaChange,
+}: TareaAutocompleteProps) {
+  const tareasSafe = Array.isArray(tareas) ? tareas : [];
+  const selectedValue =
+    value?.tarea?.correlativo != null && tareasSafe.some((t) => t.correlativo === value.tarea?.correlativo)
+      ? String(value.tarea.correlativo)
+      : "";
+
+  return (
+    <div
+      style={{
+        flex: 1,
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+      }}
+    >
+      <label style={{ whiteSpace: "nowrap" }}>Tarea</label>
+      <select
+        value={selectedValue}
+        onChange={(e) => handleTareaChange(e.target.value ? Number(e.target.value) : null)}
+        style={{
+          minWidth: 250,
+          width: 350,
+          fontSize: "11px",
+          fontFamily: "Arial, sans-serif",
+          border: "1px solid #D1D5DB",
+          borderRadius: 10,
+          padding: "8px 12px",
+          outline: "none",
+          boxSizing: "border-box"
+        }}
+      >
+        <option value="">Seleccione...</option>
+        {tareasSafe.map((t, idx) => (
+          <option key={String(t.correlativo) + "-" + idx} value={t.correlativo}>
+            {t.tarea}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
 
 function TareaAutocomplete({
   value,

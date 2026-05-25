@@ -7,6 +7,8 @@ export type ReporteWhatsappConfiguracion = {
   cantidadEmpleadosPorBloque: number;
   delaySegundosEntreBloques: number;
   activo: boolean;
+  usarSemanaEnCurso?: boolean;
+  usarMesEnCurso?: boolean;
   usuarioModificacion?: string;
   fechaModificacion?: string | null;
   usaRespaldoAppSettings?: boolean;

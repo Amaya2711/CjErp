@@ -43,6 +43,12 @@ public sealed class WupAuthService : IWupAuthService
                 return _cachedToken;
             }
 
+            _logger.LogInformation(
+                "[WUP] Solicitando token. LoginUrl={LoginUrl}, Usuario={Usuario}, PasswordConfigurado={PasswordConfigurado}",
+                loginUri,
+                _settings.Usuario,
+                !string.IsNullOrWhiteSpace(_settings.Password));
+
             var response = await _httpClient.PostAsJsonAsync(
                 loginUri,
                 new
@@ -56,14 +62,14 @@ public sealed class WupAuthService : IWupAuthService
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("[WUP] Login falló. Url={Url}, Código={StatusCode}, Body={Body}", loginUri, (int)response.StatusCode, body);
+                _logger.LogWarning("[WUP] Login fallo. Url={Url}, Codigo={StatusCode}, Body={Body}", loginUri, (int)response.StatusCode, body);
                 return null;
             }
 
             var token = ExtractToken(body);
             if (string.IsNullOrWhiteSpace(token))
             {
-                _logger.LogWarning("[WUP] Login exitoso en {Url} pero no se encontró token en la respuesta.", loginUri);
+                _logger.LogWarning("[WUP] Login exitoso en {Url} pero no se encontro token en la respuesta. Body={Body}", loginUri, body);
                 return null;
             }
 

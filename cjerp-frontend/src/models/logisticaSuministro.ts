@@ -19,6 +19,24 @@ export type LogisticaSuministroDto = {
   monto?: number | null;
   idMoneda?: number | null;
   moneda?: string | null;
+  idEnergia?: number | null;
+  tarifa?: string | null;
+  idEmpresa?: number | null;
+  empresa?: string | null;
+  idEstado?: number | null;
+  montoClaro?: number | null;
+  montoCj?: number | null;
+  fechaOnAir?: string | null;
+  observacion?: string | null;
+  fechaCnx?: string | null;
+  nroSuministro?: string | null;
+  estadoSuministro?: string | null;
+  validacionCliente?: number | null;
+  validacion?: string | null;
+  fechaEnvioEmail?: string | null;
+  fechaDesembolsoClaro?: string | null;
+  ceco?: string | null;
+  cege?: string | null;
   imagenUrl?: string | null;
   imagenPath?: string | null;
   esActivo?: boolean | null;
@@ -34,6 +52,19 @@ export type LogisticaSuministroBuscarRequest = {
   idProvisional?: number | null;
   idCliente?: number | null;
   idProyecto?: number | null;
+  fechaInicio?: string | null;
+  fechaFin?: string | null;
+};
+
+export type LogisticaSuministroKpis = {
+  totalPagadoMes?: number | null;
+  totalReembolsadoMes?: number | null;
+  saldoPendienteReembolso?: number | null;
+  suministrosProvisionalesActivos?: number | null;
+  casosRiesgoMedio?: number | null;
+  casosRiesgoCritico?: number | null;
+  porcentajePagosValidacionPrevia?: number | null;
+  indiceRecupero?: number | null;
 };
 
 export type LogisticaSuministroInsertRequest = {
@@ -49,11 +80,26 @@ export type LogisticaSuministroInsertRequest = {
   comentario?: string | null;
   monto?: number | null;
   idMoneda?: number | null;
+  idEnergia?: number | null;
+  idEmpresa?: number | null;
+  idEstado?: number | null;
+  montoClaro?: number | null;
+  montoCj?: number | null;
+  fechaOnAir?: string | null;
+  observacion?: string | null;
+  fechaCnx?: string | null;
+  nroSuministro?: string | null;
+  fechaEnvioEmail?: string | null;
+  fechaDesembolsoClaro?: string | null;
+  validacionCliente?: number | null;
+  ceco?: string | null;
+  cege?: string | null;
   imagenUrl?: string | null;
   imagenPath?: string | null;
 };
 
 export type LogisticaSuministroUpdateRequest = {
+  idProvisional?: number | null;
   idCliente: number;
   idProyecto: number;
   idSite: string;
@@ -66,6 +112,20 @@ export type LogisticaSuministroUpdateRequest = {
   comentario?: string | null;
   monto?: number | null;
   idMoneda?: number | null;
+  idEnergia?: number | null;
+  idEmpresa?: number | null;
+  idEstado?: number | null;
+  montoClaro?: number | null;
+  montoCj?: number | null;
+  fechaOnAir?: string | null;
+  observacion?: string | null;
+  fechaCnx?: string | null;
+  nroSuministro?: string | null;
+  fechaEnvioEmail?: string | null;
+  fechaDesembolsoClaro?: string | null;
+  validacionCliente?: number | null;
+  ceco?: string | null;
+  cege?: string | null;
   imagenUrl?: string | null;
   imagenPath?: string | null;
 };

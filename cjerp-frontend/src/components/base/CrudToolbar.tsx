@@ -27,6 +27,7 @@ type CrudToolbarProps = {
   buttons?: CrudToolbarButton[];
   children?: React.ReactNode;
   style?: React.CSSProperties;
+  inputStyle?: React.CSSProperties;
 };
 
 function normalizeToolbarSearchValue(value: unknown): string {
@@ -96,6 +97,7 @@ export default function CrudToolbar({
   buttons = [],
   children,
   style,
+  inputStyle,
 }: CrudToolbarProps) {
   const visibleButtons = buttons.filter((button) => button.visible !== false);
 
@@ -125,13 +127,15 @@ export default function CrudToolbar({
               onChange={(event) => onSearchChange(event.target.value)}
               style={{
                 width: "100%",
-                minWidth: 220,
-                maxWidth: 420,
-                padding: "10px 14px",
+                minWidth: 320,
+                maxWidth: 600,
+                padding: "14px 18px",
                 border: "1px solid #E5E7EB",
-                borderRadius: 8,
-                fontSize: 14,
+                borderRadius: 10,
+                fontSize: 18,
                 outline: "none",
+                background: "#F8FAFC",
+                ...inputStyle,
               }}
             />
             {searchFieldsHint ? (

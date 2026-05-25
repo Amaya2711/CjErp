@@ -40,6 +40,8 @@ export interface FiltroOperativoLookupProps {
   value?: FiltroOperativoValue;
   onChange?: (value: FiltroOperativoValue) => void;
   onSelectionBlur?: (value: FiltroOperativoValue) => void;
+  tareaFilter?: (tarea: TareaOption) => boolean;
+  tareaInputMode?: "autocomplete" | "select";
   disabled?: boolean;
   readOnly?: boolean;
   className?: string;

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { menuService } from "../seguridad/services/menuService";
 //import type { MenuDto } from "../../models/seguridad/menu.types";
 import type { MenuDto as MenuModelDto } from "../../models/seguridad/menu.types";
@@ -92,9 +93,11 @@ function getMenuRoute(item: MenuAccesoDto): string {
 
 
 export default function DashboardPage() {
+  const navigate = useNavigate();
   const authUser = getAuthUser();
   // const [fechaHora, setFechaHora] = useState(formatFechaHora(new Date()));
   const [accesosDirectos, setAccesosDirectos] = useState<MenuAccesoDto[]>([]);
+  const [accesosLoading, setAccesosLoading] = useState(true);
 
   // useEffect(() => {
   //   const timer = setInterval(() => {
@@ -105,11 +108,20 @@ export default function DashboardPage() {
   // }, []);
 
   useEffect(() => {
+    let active = true;
+
     async function cargarAccesos() {
+      setAccesosLoading(true);
       try {
         const usuario = getAuthUser();
-        if (!usuario?.usuario) return;
-        const menuRaw = await menuService.obtenerMenuDinamicoPorUsuario(usuario.usuario);
+        if (!usuario?.usuario) {
+          if (active) {
+            setAccesosDirectos([]);
+            setAccesosLoading(false);
+          }
+          return;
+        }
+        const menuRaw = await menuService.obtenerMenuDinamicoPorUsuario(usuario.usuario, true);
         //const menu: MenuAccesoDto[] = menuRaw.map((item) => ({
         //  ...item,
         //  acceso: getAccesoValue(item),
@@ -119,6 +131,10 @@ export default function DashboardPage() {
           acceso: getAccesoValue(item),
           esNodoPrincipal: Boolean((item as any).esNodoPrincipal ?? false),
         }));
+
+        if (!active) {
+          return;
+        }
 
         setAccesosDirectos(
           //menu.filter(
@@ -132,11 +148,21 @@ export default function DashboardPage() {
         )
         );
       } catch (_error: unknown) {
-        setAccesosDirectos([]);
+        if (active) {
+          setAccesosDirectos([]);
+        }
+      } finally {
+        if (active) {
+          setAccesosLoading(false);
+        }
       }
     }
 
     void cargarAccesos();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const usuario = useMemo(() => {
@@ -263,7 +289,9 @@ export default function DashboardPage() {
             </div>
             <div style={{ color: '#64748B', padding: 12 }}>
               {/* Accesos directos dinámicos agrupados por idMenuPadre */}
-              {accesosDirectos.length === 0 ? (
+              {accesosLoading ? (
+                <em>Cargando accesos directos...</em>
+              ) : accesosDirectos.length === 0 ? (
                 <em>No hay accesos directos configurados.</em>
               ) : (
                 Object.entries(
@@ -282,7 +310,7 @@ export default function DashboardPage() {
                         onClick={() => {
                           const route = getMenuRoute(item);
                           if (route) {
-                            window.location.href = route;
+                            navigate(route);
                           }
                         }}
                       >

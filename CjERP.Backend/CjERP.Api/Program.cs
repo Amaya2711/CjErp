@@ -101,6 +101,7 @@ builder.Services.AddSwaggerGen(options =>
 builder.Services.AddInfrastructure(builder.Configuration);
 
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddSingleton<IActiveUserSessionService, ActiveUserSessionService>();
 builder.Services.AddScoped<IJwtService, JwtService>();
 builder.Services.AddScoped<ISegPerfilService, SegPerfilService>();
 builder.Services.AddScoped<ISegRolService, SegRolService>();
@@ -115,6 +116,7 @@ builder.Services.AddScoped<IOrdenCompraService, OrdenCompraService>();
 builder.Services.AddScoped<ILogisticaRecojoService, LogisticaRecojoService>();
 builder.Services.AddScoped<ILogisticaReembolsoService, LogisticaReembolsoService>();
 builder.Services.AddScoped<ILogisticaSuministroService, LogisticaSuministroService>();
+builder.Services.AddScoped<IAuditoriaCambiosService, AuditoriaCambiosService>();
 builder.Services.AddScoped<IAsistenciaReporteService, AsistenciaReporteService>();
 builder.Services.AddScoped<IReporteRepository, ReporteRepository>();
 builder.Services.AddScoped<IReportePdfService, ReportePdfService>();
@@ -179,6 +181,29 @@ builder.Services.AddAuthentication(options =>
         IssuerSigningKey = new SymmetricSecurityKey(
             Encoding.UTF8.GetBytes(jwtSettings.Key)),
         ClockSkew = TimeSpan.Zero
+    };
+    options.Events = new JwtBearerEvents
+    {
+        OnTokenValidated = context =>
+        {
+            var userId = context.Principal?.FindFirst("IdUsuario")?.Value
+                         ?? context.Principal?.Identity?.Name;
+            var sessionId = context.Principal?.FindFirst("SessionId")?.Value;
+
+            if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(sessionId))
+            {
+                context.Fail("Sesion invalida.");
+                return Task.CompletedTask;
+            }
+
+            var activeSessionService = context.HttpContext.RequestServices.GetRequiredService<IActiveUserSessionService>();
+            if (!activeSessionService.IsSessionActive(userId, sessionId))
+            {
+                context.Fail("La sesion ya no esta activa.");
+            }
+
+            return Task.CompletedTask;
+        }
     };
 });
 

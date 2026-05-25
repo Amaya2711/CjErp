@@ -1,4 +1,4 @@
-﻿using System.IdentityModel.Tokens.Jwt;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using CjERP.Api.Configuration;
@@ -18,7 +18,7 @@ namespace CjERP.Infrastructure.Services
             _jwtSettings = jwtSettings.Value;
         }
 
-        public string GenerateToken(LoginResponseDto usuario)
+        public string GenerateToken(LoginResponseDto usuario, string sessionId)
         {
             var claims = new List<Claim>
             {
@@ -30,7 +30,8 @@ namespace CjERP.Infrastructure.Services
                 new Claim("CodVal", usuario.CodVal?.ToString() ?? string.Empty),
                 new Claim("Cuadrilla", usuario.Cuadrilla?.ToString() ?? string.Empty),
                 new Claim("IdPerfil", usuario.IdPerfil?.ToString() ?? string.Empty),
-                new Claim("IdRol", usuario.IdRol?.ToString() ?? string.Empty)
+                new Claim("IdRol", usuario.IdRol?.ToString() ?? string.Empty),
+                new Claim("SessionId", sessionId ?? string.Empty)
             };
 
             var key = new SymmetricSecurityKey(
@@ -50,6 +51,36 @@ namespace CjERP.Infrastructure.Services
                 signingCredentials: creds);
 
             return new JwtSecurityTokenHandler().WriteToken(token);
+        }
+
+        public ClaimsPrincipal? ValidateToken(string token, bool validateLifetime = true)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                return null;
+            }
+
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var key = Encoding.UTF8.GetBytes(_jwtSettings.Key);
+
+            try
+            {
+                return tokenHandler.ValidateToken(token, new TokenValidationParameters
+                {
+                    ValidateIssuerSigningKey = true,
+                    IssuerSigningKey = new SymmetricSecurityKey(key),
+                    ValidateIssuer = true,
+                    ValidIssuer = _jwtSettings.Issuer,
+                    ValidateAudience = true,
+                    ValidAudience = _jwtSettings.Audience,
+                    ValidateLifetime = validateLifetime,
+                    ClockSkew = TimeSpan.Zero
+                }, out _);
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 }

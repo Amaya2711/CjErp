@@ -62,9 +62,87 @@ export interface CrearNodoMenuRequest {
 }
 
 const BASE_URL = "/menu";
+const MENU_DINAMICO_CACHE_PREFIX = "cj_menu_dinamico_";
+const menuDinamicoMemoryCache = new Map<string, MenuDto[]>();
 
 function extraerArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? value : [];
+}
+
+function getMenuCacheKey(idUsuario: string) {
+  return `${MENU_DINAMICO_CACHE_PREFIX}${idUsuario.trim().toLowerCase()}`;
+}
+
+function readCachedMenu(idUsuario: string): MenuDto[] | null {
+  const normalizedUser = idUsuario.trim();
+  if (!normalizedUser) {
+    return null;
+  }
+
+  const memoryKey = getMenuCacheKey(normalizedUser);
+  const memoryValue = menuDinamicoMemoryCache.get(memoryKey);
+  if (memoryValue) {
+    return memoryValue;
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(memoryKey);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw);
+    const items = extraerArray<MenuDto>(parsed);
+    if (items.length > 0) {
+      menuDinamicoMemoryCache.set(memoryKey, items);
+    }
+    return items;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedMenu(idUsuario: string, items: MenuDto[]) {
+  const normalizedUser = idUsuario.trim();
+  if (!normalizedUser) {
+    return;
+  }
+
+  const cacheKey = getMenuCacheKey(normalizedUser);
+  menuDinamicoMemoryCache.set(cacheKey, items);
+
+  try {
+    window.sessionStorage.setItem(cacheKey, JSON.stringify(items));
+  } catch {
+    // Ignore storage errors and keep in-memory cache only.
+  }
+}
+
+function clearCachedMenu(idUsuario?: string) {
+  if (idUsuario && idUsuario.trim()) {
+    const cacheKey = getMenuCacheKey(idUsuario);
+    menuDinamicoMemoryCache.delete(cacheKey);
+
+    try {
+      window.sessionStorage.removeItem(cacheKey);
+    } catch {
+      // Ignore storage errors.
+    }
+
+    return;
+  }
+
+  for (const key of Array.from(menuDinamicoMemoryCache.keys())) {
+    menuDinamicoMemoryCache.delete(key);
+  }
+
+  try {
+    Object.keys(window.sessionStorage)
+      .filter((key) => key.startsWith(MENU_DINAMICO_CACHE_PREFIX))
+      .forEach((key) => window.sessionStorage.removeItem(key));
+  } catch {
+    // Ignore storage errors.
+  }
 }
 
 export const menuService = {
@@ -89,23 +167,45 @@ export const menuService = {
   },
 
   async guardarUsuarioPerfil(payload: GuardarUsuarioPerfilRequest) {
-    return await httpClient.post(`${BASE_URL}/usuario-perfil`, payload);
+    const response = await httpClient.post(`${BASE_URL}/usuario-perfil`, payload);
+    clearCachedMenu(payload.idUsuario);
+    return response;
   },
 
   async guardarUsuarioPerfilRol(payload: GuardarUsuarioPerfilRolRequest) {
-    return await httpClient.post(`${BASE_URL}/usuario-perfil-rol`, payload);
+    const response = await httpClient.post(`${BASE_URL}/usuario-perfil-rol`, payload);
+    clearCachedMenu(payload.idUsuario);
+    return response;
   },
 
   async guardarAsignacionMenuRol(payload: GuardarAsignacionMenuRolRequest) {
-    return await httpClient.post(`${BASE_URL}/rol/asignacion`, payload);
+    const response = await httpClient.post(`${BASE_URL}/rol/asignacion`, payload);
+    clearCachedMenu();
+    return response;
   },
 
-  async obtenerMenuDinamicoPorUsuario(idUsuario: string): Promise<MenuDto[]> {
-    const response = await httpClient.get<MenuDto[]>(`${BASE_URL}/dinamico`, {
-      params: { idUsuario },
-    });
+  async obtenerMenuDinamicoPorUsuario(idUsuario: string, forceRefresh = false): Promise<MenuDto[]> {
+    const cached = forceRefresh ? null : readCachedMenu(idUsuario);
+    if (cached) {
+      return cached;
+    }
 
-    return extraerArray<MenuDto>(response);
+    try {
+      const response = await httpClient.get<MenuDto[]>(`${BASE_URL}/dinamico`, {
+        params: { idUsuario },
+      });
+
+      const items = extraerArray<MenuDto>(response);
+      writeCachedMenu(idUsuario, items);
+      return items;
+    } catch (error) {
+      const fallback = readCachedMenu(idUsuario);
+      if (fallback) {
+        return fallback;
+      }
+
+      throw error;
+    }
   },
 
   async obtenerPorPerfilRol(idPerfil: number, idRol: number): Promise<MenuDto[]> {
@@ -117,10 +217,14 @@ export const menuService = {
   },
 
   async crearMenuPrincipal(payload: CrearMenuPrincipalRequest) {
-    return await httpClient.post(`${BASE_URL}/principal`, payload);
+    const response = await httpClient.post(`${BASE_URL}/principal`, payload);
+    clearCachedMenu();
+    return response;
   },
 
   async crearNodo(payload: CrearNodoMenuRequest) {
-    return await httpClient.post(`${BASE_URL}/nodo`, payload);
+    const response = await httpClient.post(`${BASE_URL}/nodo`, payload);
+    clearCachedMenu();
+    return response;
   },
 };

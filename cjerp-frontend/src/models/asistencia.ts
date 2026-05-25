@@ -13,6 +13,8 @@ export type AsistenciaReporteItem = {
   comentario: string;
   empresa: string;
   cliente: string;
+  proyecto: string;
+  site: string;
   area: string;
   ubicacion: string;
   idEmpleado: number | null;
@@ -42,8 +44,11 @@ export type AsistenciaReportePdfItem = {
   salida: string;
   estadoMarcacionTexto: string;
   totalHoras: number;
+  totalHorasFaltaIncompleto: number;
   totalHorasEmpleado: number;
   totalHorasLaborales: number;
+  totalHorasFaltaAprobar: number;
+  diferenciaHoras: number;
   estadoValidacionHoras: string;
 };
 
