@@ -86,7 +86,7 @@ const visibleColumns = [
   { key: "responsable", label: "Responsable", width: "180px" },
   { key: "nombreempleado", label: "Empleado", width: "200px" },
   { key: "estado", label: "Estado", width: "140px" },
-  { key: "fechaasistencia", label: "FechaAsistencia", width: "140px" },
+  { key: "fechaasistencia", label: "Fecha", width: "140px" },
   { key: "hora", label: "Ingreso", width: "130px" },
   { key: "horasalida", label: "Salida", width: "130px" },
   { key: "comentario", label: "Comentario", width: "240px" },
@@ -861,7 +861,7 @@ export default function AprobarCampoPage() {
               searchPlaceholder="Buscar responsable, empleado, estado, comentario u observacion..."
               searchFieldsHint="Responsable, empleado, estado, fecha, comentario, observacion y columnas cargadas"
               buttons={[]}
-              style={{ fontSize: 18, padding: "16px 18px", minHeight: 54 }}
+              style={{ fontSize: 16, padding: "16px 18px", minHeight: 54 }}
             />
           </div>
           <button
@@ -1714,7 +1714,7 @@ const styles: Record<string, React.CSSProperties> = {
   td: {
     padding: "14px 12px",
     borderBottom: "1px solid #F1F5F9",
-    fontSize: 14,
+    fontSize: 12,
     color: "#334155",
     verticalAlign: "top",
   },
