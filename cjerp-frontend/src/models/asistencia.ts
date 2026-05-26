@@ -11,6 +11,7 @@ export type AsistenciaReporteItem = {
   responsable: string;
   estado: string;
   comentario: string;
+  observacion: string;
   empresa: string;
   cliente: string;
   proyecto: string;
@@ -50,6 +51,7 @@ export type AsistenciaReportePdfItem = {
   totalHorasFaltaAprobar: number;
   diferenciaHoras: number;
   estadoValidacionHoras: string;
+  observacion: string;
 };
 
 export type AsistenciaReportePdfRequest = {

@@ -145,18 +145,21 @@ public sealed class ReportePdfService : IReportePdfService
                             {
                                 columns.RelativeColumn(1.1f);
                                 columns.RelativeColumn(1.4f);
+                                columns.RelativeColumn(2.2f);
                             });
 
                             table.Header(header =>
                             {
                                 header.Cell().Element(CellHeader).Text("Fecha");
                                 header.Cell().Element(CellHeader).Text("Estado");
+                                header.Cell().Element(CellHeader).Text("Observacion");
                             });
 
                             foreach (var item in detalle)
                             {
                                 table.Cell().Element(CellBody).Text(item.Fecha);
                                 table.Cell().Element(CellBody).Text(item.EstadoMarcacionTexto);
+                                table.Cell().Element(CellBody).Text(EmptyIfMissing(item.Observacion));
                             }
                         });
                     });

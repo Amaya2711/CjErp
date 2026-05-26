@@ -74,6 +74,7 @@ function normalizeAsistenciaRow(row: AsistenciaReporteApiRow): AsistenciaReporte
     responsable: getString(row, "Responsable", "responsable"),
     estado: getString(row, "Estado", "estado"),
     comentario: getString(row, "Comentario", "comentario", "Observacion", "observacion"),
+    observacion: getString(row, "Observacion", "observacion", "Comentario", "comentario"),
     empresa: getString(row, "empresa", "Empresa"),
     cliente: getString(row, "Cliente", "cliente"),
     proyecto: getString(row, "Proyecto", "proyecto", "NombreProyecto", "nombreProyecto"),

@@ -1,4 +1,4 @@
-import React, { useDeferredValue, useEffect, useMemo, useState } from "react";
+import React, { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   matchesCrudToolbarSearch,
   type CrudToolbarSearchField,
@@ -100,6 +100,12 @@ type GerencialDetailFilters = {
   cliente: string[];
   proyecto: string[];
   site: string[];
+};
+
+type GerencialQuickFilters = {
+  responsable: string | null;
+  cliente: string | null;
+  topResponsable: string | null;
 };
 
 type CuadrosDetailSortKey =
@@ -576,6 +582,11 @@ export default function RptAsistenciaEmpleadoPage() {
     proyecto: [],
     site: [],
   });
+  const [gerencialQuickFilters, setGerencialQuickFilters] = useState<GerencialQuickFilters>({
+    responsable: null,
+    cliente: null,
+    topResponsable: null,
+  });
   const [employeeGridFilters, setEmployeeGridFilters] = useState<EmployeeGridFilters>({
     employee: "",
     responsable: "",
@@ -588,6 +599,9 @@ export default function RptAsistenciaEmpleadoPage() {
     direction: "desc",
   });
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [gerencialOverlay, setGerencialOverlay] = useState<"summary" | "area" | "detail" | null>(null);
+  const gerencialDetailSectionRef = useRef<HTMLDivElement | null>(null);
+  const effectiveResponsableFilter = gerencialQuickFilters.topResponsable ?? gerencialQuickFilters.responsable;
 
   const deferredSearch = useDeferredValue(busqueda);
 
@@ -638,6 +652,19 @@ export default function RptAsistenciaEmpleadoPage() {
     void loadData();
   }, [codigoEmpleadoMostrar, fechaFin, fechaInicio]);
 
+  useEffect(() => {
+    if (!gerencialOverlay) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [gerencialOverlay]);
+
   const filterOptions = useMemo(
     () => ({
       nombreEmpleado: buildSelectOptions(rows, (item) => item.nombreEmpleado),
@@ -647,7 +674,7 @@ export default function RptAsistenciaEmpleadoPage() {
       area: buildSelectOptions(rows, (item) => item.area),
       ubicacion: buildSelectOptions(rows, (item) => item.ubicacion),
       estadoAct: buildSelectOptions(rows, (item) => item.estadoAct),
-      estadoMarcacionTexto: buildSelectOptions(rows, (item) => item.estadoMarcacionTexto),
+      estadoMarcacionTexto: buildSelectOptions(rows, (item) => item.estadoMarcacionTexto || item.estado || "Sin clasificar"),
       origenMarcacion: buildSelectOptions(rows, (item) => item.origenMarcacion),
     }),
     [rows]
@@ -665,7 +692,7 @@ export default function RptAsistenciaEmpleadoPage() {
         matchesMultiSelect(item.area, selectedAreas) &&
         (frontendFilters.ubicacion === ALL_OPTION || item.ubicacion === frontendFilters.ubicacion) &&
         (frontendFilters.estadoAct === ALL_OPTION || item.estadoAct === frontendFilters.estadoAct) &&
-        matchesMultiSelect(item.estadoMarcacionTexto, selectedEstadoMarcacion) &&
+        matchesMultiSelect(item.estadoMarcacionTexto || item.estado || "Sin clasificar", selectedEstadoMarcacion) &&
         (frontendFilters.origenMarcacion === ALL_OPTION || item.origenMarcacion === frontendFilters.origenMarcacion)
       ));
 
@@ -855,6 +882,16 @@ export default function RptAsistenciaEmpleadoPage() {
     return { states, rows };
   }, [filteredRows]);
 
+  const gerencialAreaRecordCount = useMemo(
+    () =>
+      filteredRows.filter(
+        (item) =>
+          !cuadrosDetailFilter.estadoMarcacion ||
+          (item.estadoMarcacionTexto || item.estado || "Sin clasificar") === cuadrosDetailFilter.estadoMarcacion
+      ).length,
+    [cuadrosDetailFilter.estadoMarcacion, filteredRows]
+  );
+
   const cuadroDetalleRows = useMemo(() => {
     const base = filteredRows
       .map((item, index) => ({
@@ -871,6 +908,8 @@ export default function RptAsistenciaEmpleadoPage() {
       .filter((item) => (
         (!cuadrosDetailFilter.area || item.area === cuadrosDetailFilter.area) &&
         (!cuadrosDetailFilter.estadoMarcacion || item.estadoMarcacionTexto === cuadrosDetailFilter.estadoMarcacion) &&
+        (activeTab !== "gerencial" || !effectiveResponsableFilter || item.responsable === effectiveResponsableFilter) &&
+        (activeTab !== "gerencial" || !gerencialQuickFilters.cliente || item.cliente === gerencialQuickFilters.cliente) &&
         (activeTab !== "gerencial" || matchesMultiSelect(item.responsable, gerencialDetailFilters.responsable)) &&
         (activeTab !== "gerencial" || matchesMultiSelect(item.cliente, gerencialDetailFilters.cliente)) &&
         (activeTab !== "gerencial" || matchesMultiSelect(item.proyecto, gerencialDetailFilters.proyecto)) &&
@@ -884,7 +923,7 @@ export default function RptAsistenciaEmpleadoPage() {
 
       return cuadrosDetailSort.direction === "asc" ? compared : -compared;
     });
-  }, [activeTab, cuadrosDetailFilter, cuadrosDetailSort, filteredRows, gerencialDetailFilters]);
+  }, [activeTab, cuadrosDetailFilter, cuadrosDetailSort, effectiveResponsableFilter, filteredRows, gerencialDetailFilters, gerencialQuickFilters]);
 
   const gerencialDetailFilterOptions = useMemo(
     () => ({
@@ -897,13 +936,14 @@ export default function RptAsistenciaEmpleadoPage() {
   );
 
   const gerencialAreaSummaryRows = useMemo(() => {
-    const grouped = new Map<string, { responsable: string; cliente: string; estadoMarcacionTexto: string; cantidad: number }>();
+    const grouped = new Map<string, { responsable: string; cliente: string; area: string; estadoMarcacionTexto: string; cantidad: number }>();
 
     filteredRows.forEach((item) => {
       const responsable = item.responsable || "Sin responsable";
       const cliente = item.cliente || "Sin cliente";
+      const area = item.area || "Sin area";
       const estadoMarcacionTexto = item.estadoMarcacionTexto || item.estado || "Sin clasificar";
-      const key = `${responsable}||${cliente}||${estadoMarcacionTexto}`;
+      const key = `${responsable}||${cliente}||${area}||${estadoMarcacionTexto}`;
       const current = grouped.get(key);
 
       if (current) {
@@ -914,12 +954,20 @@ export default function RptAsistenciaEmpleadoPage() {
       grouped.set(key, {
         responsable,
         cliente,
+        area,
         estadoMarcacionTexto,
         cantidad: 1,
       });
     });
 
-    return Array.from(grouped.values()).sort((left, right) => {
+    return Array.from(grouped.values())
+      .filter((item) => (
+        (!cuadrosDetailFilter.area || item.area === cuadrosDetailFilter.area) &&
+        (!cuadrosDetailFilter.estadoMarcacion || item.estadoMarcacionTexto === cuadrosDetailFilter.estadoMarcacion) &&
+        (!effectiveResponsableFilter || item.responsable === effectiveResponsableFilter) &&
+        (!gerencialQuickFilters.cliente || item.cliente === gerencialQuickFilters.cliente)
+      ))
+      .sort((left, right) => {
       if (right.cantidad !== left.cantidad) {
         return right.cantidad - left.cantidad;
       }
@@ -934,9 +982,34 @@ export default function RptAsistenciaEmpleadoPage() {
         return clienteCompared;
       }
 
+      const areaCompared = left.area.localeCompare(right.area, "es", { sensitivity: "base" });
+      if (areaCompared !== 0) {
+        return areaCompared;
+      }
+
       return left.estadoMarcacionTexto.localeCompare(right.estadoMarcacionTexto, "es", { sensitivity: "base" });
     });
-  }, [filteredRows]);
+  }, [cuadrosDetailFilter.area, cuadrosDetailFilter.estadoMarcacion, effectiveResponsableFilter, filteredRows, gerencialQuickFilters.cliente]);
+
+  const gerencialTopResponsablesRows = useMemo(() => {
+    const grouped = new Map<string, number>();
+
+    cuadroDetalleRows.forEach((item) => {
+      const responsable = item.responsable || "Sin responsable";
+      grouped.set(responsable, (grouped.get(responsable) ?? 0) + 1);
+    });
+
+    return Array.from(grouped.entries())
+      .map(([name, value]) => ({ name, value }))
+      .sort((left, right) => {
+        if (right.value !== left.value) {
+          return right.value - left.value;
+        }
+
+        return left.name.localeCompare(right.name, "es", { sensitivity: "base" });
+      })
+      .slice(0, 5);
+  }, [cuadroDetalleRows]);
 
   const chartEmpleadoPorDia = useMemo(() => {
     const fechas = getDateRangeLabels(fechaInicio, fechaFin);
@@ -1163,6 +1236,11 @@ export default function RptAsistenciaEmpleadoPage() {
       proyecto: [],
       site: [],
     });
+    setGerencialQuickFilters({
+      responsable: null,
+      cliente: null,
+      topResponsable: null,
+    });
     setBusqueda("");
     setShowAdvancedFilters(false);
     setEmployeeGridFilters({
@@ -1314,6 +1392,7 @@ export default function RptAsistenciaEmpleadoPage() {
     const summaryRows = gerencialAreaSummaryRows.map((item) => ({
       Responsable: item.responsable,
       Cliente: item.cliente,
+      Area: item.area,
       EstadoMarcacion: item.estadoMarcacionTexto,
       Cantidad: item.cantidad,
     }));
@@ -1324,6 +1403,65 @@ export default function RptAsistenciaEmpleadoPage() {
       workbook,
       `resumen_responsable_${toApiDate(fechaInicio).replaceAll("/", "")}_${toApiDate(fechaFin).replaceAll("/", "")}.xlsx`
     );
+  };
+
+  const exportGerencialDetailExcel = async () => {
+    const XLSX = await import("xlsx");
+    const workbook = XLSX.utils.book_new();
+    const detailExportRows = cuadroDetalleRows.map((item) => ({
+      Fecha: item.fecha,
+      NombreEmpleado: item.nombreEmpleado,
+      Responsable: item.responsable,
+      Cliente: item.cliente,
+      Proyecto: item.proyecto,
+      Site: item.site,
+      Area: item.area,
+      EstadoMarcacion: item.estadoMarcacionTexto,
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(detailExportRows);
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Detalle filtrado");
+    XLSX.writeFile(
+      workbook,
+      `detalle_filtrado_${toApiDate(fechaInicio).replaceAll("/", "")}_${toApiDate(fechaFin).replaceAll("/", "")}.xlsx`
+    );
+  };
+
+  const toggleGerencialSingleFilter = (key: "responsable" | "cliente", value: string) => {
+    setGerencialQuickFilters((prev) => ({
+      ...prev,
+      [key]: prev[key] === value ? null : value,
+      ...(key === "responsable" ? { topResponsable: null } : {}),
+    }));
+
+    setGerencialDetailFilters((prev) => {
+      const currentValues = prev[key];
+      const nextValues =
+        currentValues.length === 1 && currentValues[0] === value
+          ? []
+          : [value];
+
+      return {
+        ...prev,
+        [key]: nextValues,
+      };
+    });
+
+    requestAnimationFrame(() => {
+      gerencialDetailSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
+  const toggleGerencialTopResponsableFilter = (value: string) => {
+    setGerencialQuickFilters((prev) => ({
+      ...prev,
+      topResponsable: prev.topResponsable === value ? null : value,
+      responsable: null,
+    }));
+
+    startTransition(() => {
+      gerencialDetailSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   };
 
   const exportPdf = async () => {
@@ -1353,6 +1491,7 @@ export default function RptAsistenciaEmpleadoPage() {
             totalHorasFaltaAprobar: summary?.totalHorasFaltaAprobar ?? item.totalHorasFaltaAprobar,
             diferenciaHoras: summary?.diferenciaHoras ?? 0,
             estadoValidacionHoras: summary?.estadoValidacionHoras ?? item.estadoValidacionHoras,
+            observacion: item.observacion ?? item.comentario ?? "",
           };
         });
 
@@ -1675,6 +1814,48 @@ export default function RptAsistenciaEmpleadoPage() {
                   title="Area x estado de marcacion"
                   subtitle="Cantidades agrupadas por area y diferenciadas por estado segun los filtros actuales"
                 >
+                {activeTab === "gerencial" ? (
+                  <div style={styles.gerencialSummaryToolbar}>
+                    <div style={styles.gerencialSummaryToolbarMetrics}>
+                      <div style={styles.counterPill}>
+                        {chartAreaPorEstado.rows.length} area{chartAreaPorEstado.rows.length === 1 ? "" : "s"}
+                      </div>
+                      <div style={styles.counterPill}>
+                        {gerencialAreaRecordCount} registro{gerencialAreaRecordCount === 1 ? "" : "s"}
+                      </div>
+                    </div>
+                    <div style={styles.gerencialSummaryToolbarActions}>
+                      {cuadrosDetailFilter.area ? (
+                        <button
+                          type="button"
+                          style={styles.gerencialInlineClearButton}
+                          onClick={() =>
+                            setCuadrosDetailFilter((prev) => ({
+                              area: null,
+                              estadoMarcacion: prev.estadoMarcacion,
+                            }))
+                          }
+                          title="Limpiar area seleccionada"
+                        >
+                          Limpiar area
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        style={styles.gerencialSummaryExportButton}
+                        onClick={() => setGerencialOverlay("area")}
+                        title="Ampliar area por estado de marcacion"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                          <path d="M7 3H3V7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                          <path d="M13 3H17V7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                          <path d="M17 13V17H13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                          <path d="M3 13V17H7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                 <SimpleAreaStateBars
                   data={chartAreaPorEstado.rows}
                   states={chartAreaPorEstado.states}
@@ -1711,12 +1892,64 @@ export default function RptAsistenciaEmpleadoPage() {
                       <div style={styles.counterPill}>
                         {gerencialAreaSummaryRows.length} agrupacion{gerencialAreaSummaryRows.length === 1 ? "" : "es"}
                       </div>
+                    <div style={styles.gerencialSummaryToolbarActions}>
                       <button
                         type="button"
                         style={styles.gerencialSummaryExportButton}
-                        onClick={() => void exportGerencialSummaryExcel()}
-                        disabled={gerencialAreaSummaryRows.length === 0}
-                        title="Exportar resumen filtrado a Excel"
+                          onClick={() => void exportGerencialSummaryExcel()}
+                          disabled={gerencialAreaSummaryRows.length === 0}
+                          title="Exportar resumen filtrado a Excel"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <path d="M10 3V12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                            <path d="M6.5 8.5L10 12L13.5 8.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M4 15.5H16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          style={styles.gerencialSummaryExportButton}
+                          onClick={() => setGerencialOverlay("summary")}
+                          title="Ampliar resumen por responsable"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <path d="M7 3H3V7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M13 3H17V7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M17 13V17H13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M3 13V17H7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                    <SimpleGerencialAreaSummaryGrid
+                      data={gerencialAreaSummaryRows}
+                      selectedResponsables={effectiveResponsableFilter ? [effectiveResponsableFilter] : gerencialDetailFilters.responsable}
+                      selectedClientes={gerencialQuickFilters.cliente ? [gerencialQuickFilters.cliente] : gerencialDetailFilters.cliente}
+                      onResponsableClick={(value) => toggleGerencialSingleFilter("responsable", value)}
+                      onClienteClick={(value) => toggleGerencialSingleFilter("cliente", value)}
+                    />
+                  </ChartCard>
+                ) : null}
+              </div>
+            </div>
+            {activeTab === "gerencial" ? (
+              <div ref={gerencialDetailSectionRef} style={{ gridColumn: "1 / -1" }}>
+                <div style={styles.gerencialDetailSectionGrid}>
+                  <ChartCard
+                    title="Detalle filtrado"
+                    subtitle="Vista ampliada con filtros por responsable, cliente, proyecto y site"
+                  >
+                    <div style={styles.gerencialSummaryToolbar}>
+                      <div style={styles.counterPill}>
+                        {cuadroDetalleRows.length} registro{cuadroDetalleRows.length === 1 ? "" : "s"}
+                      </div>
+                    <div style={styles.gerencialSummaryToolbarActions}>
+                      <button
+                        type="button"
+                        style={styles.gerencialSummaryExportButton}
+                        onClick={() => void exportGerencialDetailExcel()}
+                        disabled={cuadroDetalleRows.length === 0}
+                        title="Exportar detalle filtrado a Excel"
                       >
                         <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                           <path d="M10 3V12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
@@ -1724,47 +1957,100 @@ export default function RptAsistenciaEmpleadoPage() {
                           <path d="M4 15.5H16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
                         </svg>
                       </button>
+                      <button
+                        type="button"
+                        style={styles.gerencialSummaryExportButton}
+                          onClick={() => setGerencialOverlay("detail")}
+                          title="Ampliar detalle filtrado"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <path d="M7 3H3V7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M13 3H17V7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M17 13V17H13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M3 13V17H7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
-                    <SimpleGerencialAreaSummaryGrid data={gerencialAreaSummaryRows} />
+                    {effectiveResponsableFilter || gerencialQuickFilters.cliente ? (
+                      <div style={styles.gerencialQuickFilterBar}>
+                        {effectiveResponsableFilter ? <span style={styles.drilldownPill}>Responsable: {effectiveResponsableFilter}</span> : null}
+                        {gerencialQuickFilters.cliente ? <span style={styles.drilldownPill}>Cliente: {gerencialQuickFilters.cliente}</span> : null}
+                      </div>
+                    ) : null}
+                    <SimpleCuadrosDetailGrid
+                      data={cuadroDetalleRows}
+                      sortKey={cuadrosDetailSort.key}
+                      sortDirection={cuadrosDetailSort.direction}
+                      showExtendedColumns
+                      extendedColumnFilters={gerencialDetailFilters}
+                      extendedColumnOptions={gerencialDetailFilterOptions}
+                      onExtendedColumnFilterChange={(key, value) =>
+                        setGerencialDetailFilters((prev) => ({ ...prev, [key]: value }))
+                      }
+                      onClearExtendedFilters={() =>
+                        {
+                          setGerencialDetailFilters({
+                            responsable: [],
+                            cliente: [],
+                            proyecto: [],
+                            site: [],
+                          });
+                          setGerencialQuickFilters({
+                            responsable: null,
+                            cliente: null,
+                            topResponsable: null,
+                          });
+                        }
+                      }
+                      onToggleSort={(key) =>
+                        setCuadrosDetailSort((prev) => ({
+                          key,
+                          direction: prev.key === key ? (prev.direction === "asc" ? "desc" : "asc") : "asc",
+                        }))
+                      }
+                    />
                   </ChartCard>
-                ) : null}
-              </div>
-            </div>
-            {activeTab === "gerencial" ? (
-              <div style={{ gridColumn: "1 / -1" }}>
-                <ChartCard
-                  title="Detalle filtrado"
-                  subtitle="Vista ampliada con filtros por responsable, cliente, proyecto y site"
-                >
-                  <div style={{ ...styles.counterPill, alignSelf: "flex-start", marginBottom: 10 }}>
-                    {cuadroDetalleRows.length} registro{cuadroDetalleRows.length === 1 ? "" : "s"}
-                  </div>
-                  <SimpleCuadrosDetailGrid
-                    data={cuadroDetalleRows}
-                    sortKey={cuadrosDetailSort.key}
-                    sortDirection={cuadrosDetailSort.direction}
-                    showExtendedColumns
-                    extendedColumnFilters={gerencialDetailFilters}
-                    extendedColumnOptions={gerencialDetailFilterOptions}
-                    onExtendedColumnFilterChange={(key, value) =>
-                      setGerencialDetailFilters((prev) => ({ ...prev, [key]: value }))
-                    }
-                    onClearExtendedFilters={() =>
-                      setGerencialDetailFilters({
-                        responsable: [],
-                        cliente: [],
-                        proyecto: [],
-                        site: [],
-                      })
-                    }
-                    onToggleSort={(key) =>
-                      setCuadrosDetailSort((prev) => ({
-                        key,
-                        direction: prev.key === key ? (prev.direction === "asc" ? "desc" : "asc") : "asc",
-                      }))
-                    }
-                  />
-                </ChartCard>
+                  <ChartCard
+                    title="Top 5 responsables"
+                    subtitle="Ranking actualizado segun los filtros activos y la seleccion aplicada desde Area x estado de marcacion"
+                  >
+                    <div style={styles.gerencialSummaryToolbar}>
+                      <div style={styles.counterPill}>
+                        {gerencialTopResponsablesRows.length} responsable{gerencialTopResponsablesRows.length === 1 ? "" : "s"}
+                      </div>
+                      <div style={styles.gerencialSummaryToolbarActions}>
+                        {gerencialQuickFilters.topResponsable ? (
+                          <button
+                            type="button"
+                            style={styles.gerencialInlineClearButton}
+                            onClick={() =>
+                              setGerencialQuickFilters((prev) => ({
+                                ...prev,
+                                topResponsable: null,
+                              }))
+                            }
+                            title="Limpiar responsable seleccionado en Top 5"
+                          >
+                            Limpiar top
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                    {gerencialTopResponsablesRows.length > 0 ? (
+                      <SimpleVerticalBars
+                        data={gerencialTopResponsablesRows}
+                        colorMode="palette"
+                        onBarClick={toggleGerencialTopResponsableFilter}
+                        activeName={gerencialQuickFilters.topResponsable}
+                      />
+                    ) : (
+                      <div style={styles.emptyMiniState}>
+                        No hay registros filtrados para visualizar el ranking.
+                      </div>
+                    )}
+                  </ChartCard>
+                </div>
               </div>
             ) : cuadrosViewMode === "fechaEstado" ? (
               <div style={{ gridColumn: "1 / -1" }}>
@@ -1949,6 +2235,130 @@ export default function RptAsistenciaEmpleadoPage() {
           </ChartCard>
         </section>
       )}
+
+      {gerencialOverlay ? (
+        <div style={styles.summaryOverlay}>
+          <div style={styles.summaryOverlayCard}>
+            <div style={styles.summaryOverlayHeader}>
+              <div>
+                <h2 style={styles.summaryOverlayTitle}>
+                  {gerencialOverlay === "summary"
+                    ? "Resumen por responsable"
+                    : gerencialOverlay === "area"
+                      ? "Area x estado de marcacion"
+                      : "Detalle filtrado"}
+                </h2>
+                <p style={styles.summaryOverlayText}>
+                  {gerencialOverlay === "summary"
+                    ? "Vista ampliada temporal del resumen filtrado."
+                    : gerencialOverlay === "area"
+                      ? "Vista ampliada temporal del agrupado por area y estado."
+                      : "Vista ampliada temporal del detalle filtrado."}
+                </p>
+              </div>
+              <div style={styles.summaryOverlayActions}>
+                <div style={styles.counterPill}>
+                  {gerencialOverlay === "summary"
+                    ? `${gerencialAreaSummaryRows.length} agrupacion${gerencialAreaSummaryRows.length === 1 ? "" : "es"}`
+                    : gerencialOverlay === "area"
+                      ? `${chartAreaPorEstado.rows.length} area${chartAreaPorEstado.rows.length === 1 ? "" : "s"}`
+                      : `${cuadroDetalleRows.length} registro${cuadroDetalleRows.length === 1 ? "" : "s"}`}
+                </div>
+                {gerencialOverlay === "summary" ? (
+                  <button
+                    type="button"
+                    style={styles.gerencialSummaryExportButton}
+                    onClick={() => void exportGerencialSummaryExcel()}
+                    disabled={gerencialAreaSummaryRows.length === 0}
+                    title="Exportar resumen filtrado a Excel"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                      <path d="M10 3V12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                      <path d="M6.5 8.5L10 12L13.5 8.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M4 15.5H16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  style={styles.summaryOverlayCloseButton}
+                  onClick={() => setGerencialOverlay(null)}
+                >
+                  Cerrar
+                </button>
+              </div>
+            </div>
+            <div style={styles.summaryOverlayBody}>
+              {gerencialOverlay === "summary" ? (
+                <ChartCard title="" subtitle="" style={styles.summaryOverlayChartCard}>
+                  <SimpleGerencialAreaSummaryGrid
+                    data={gerencialAreaSummaryRows}
+                    selectedResponsables={effectiveResponsableFilter ? [effectiveResponsableFilter] : gerencialDetailFilters.responsable}
+                    selectedClientes={gerencialQuickFilters.cliente ? [gerencialQuickFilters.cliente] : gerencialDetailFilters.cliente}
+                    onResponsableClick={(value) => toggleGerencialSingleFilter("responsable", value)}
+                    onClienteClick={(value) => toggleGerencialSingleFilter("cliente", value)}
+                    expanded
+                  />
+                </ChartCard>
+              ) : null}
+              {gerencialOverlay === "area" ? (
+                <ChartCard title="" subtitle="" style={styles.summaryOverlayChartCard}>
+                  <SimpleAreaStateBars
+                    data={chartAreaPorEstado.rows}
+                    states={chartAreaPorEstado.states}
+                    onSelect={handleAreaStateClick}
+                    onAreaSelect={handleCuadrosAreaClick}
+                    expanded
+                  />
+                </ChartCard>
+              ) : null}
+              {gerencialOverlay === "detail" ? (
+                <ChartCard title="" subtitle="" style={styles.summaryOverlayChartCard}>
+                  {effectiveResponsableFilter || gerencialQuickFilters.cliente ? (
+                    <div style={styles.gerencialQuickFilterBar}>
+                      {effectiveResponsableFilter ? <span style={styles.drilldownPill}>Responsable: {effectiveResponsableFilter}</span> : null}
+                      {gerencialQuickFilters.cliente ? <span style={styles.drilldownPill}>Cliente: {gerencialQuickFilters.cliente}</span> : null}
+                    </div>
+                  ) : null}
+                  <SimpleCuadrosDetailGrid
+                    data={cuadroDetalleRows}
+                    sortKey={cuadrosDetailSort.key}
+                    sortDirection={cuadrosDetailSort.direction}
+                    showExtendedColumns
+                    extendedColumnFilters={gerencialDetailFilters}
+                    extendedColumnOptions={gerencialDetailFilterOptions}
+                    onExtendedColumnFilterChange={(key, value) =>
+                      setGerencialDetailFilters((prev) => ({ ...prev, [key]: value }))
+                    }
+                    onClearExtendedFilters={() =>
+                      {
+                        setGerencialDetailFilters({
+                          responsable: [],
+                          cliente: [],
+                          proyecto: [],
+                          site: [],
+                        });
+                        setGerencialQuickFilters({
+                          responsable: null,
+                          cliente: null,
+                          topResponsable: null,
+                        });
+                      }
+                    }
+                    onToggleSort={(key) =>
+                      setCuadrosDetailSort((prev) => ({
+                        key,
+                        direction: prev.key === key ? (prev.direction === "asc" ? "desc" : "asc") : "asc",
+                      }))
+                    }
+                    expanded
+                  />
+                </ChartCard>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2068,9 +2478,13 @@ function ChartCard({
 function SimpleVerticalBars({
   data,
   colorMode,
+  onBarClick,
+  activeName,
 }: {
   data: Array<{ name: string; value: number }>;
   colorMode?: "palette";
+  onBarClick?: (name: string) => void;
+  activeName?: string | null;
 }) {
   const max = Math.max(...data.map((item) => item.value), 1);
 
@@ -2083,16 +2497,26 @@ function SimpleVerticalBars({
           {data.map((item, index) => (
             <div key={item.name} style={styles.verticalBarItem}>
               <div style={styles.verticalBarValue}>{item.value}</div>
-              <div style={styles.verticalBarTrack}>
-                <div
-                  style={{
-                    ...styles.verticalBarFill,
-                    height: `${(item.value / max) * 100}%`,
-                    background: colorMode === "palette" ? chartPalette[index % chartPalette.length] : "#2563EB",
-                  }}
-                />
-              </div>
-              <div style={styles.verticalBarLabel}>{item.name}</div>
+              <button
+                type="button"
+                style={onBarClick ? {
+                  ...styles.verticalBarButton,
+                  ...(activeName === item.name ? styles.verticalBarButtonActive : null),
+                } : styles.verticalBarButtonPassive}
+                onClick={() => onBarClick?.(item.name)}
+                title={onBarClick ? `Filtrar por responsable: ${item.name}` : item.name}
+              >
+                <div style={styles.verticalBarTrack}>
+                  <div
+                    style={{
+                      ...styles.verticalBarFill,
+                      height: `${(item.value / max) * 100}%`,
+                      background: colorMode === "palette" ? chartPalette[index % chartPalette.length] : "#2563EB",
+                    }}
+                  />
+                </div>
+                <div style={styles.verticalBarLabel}>{item.name}</div>
+              </button>
             </div>
           ))}
         </div>
@@ -2936,11 +3360,13 @@ function SimpleAreaStateBars({
   states,
   onSelect,
   onAreaSelect,
+  expanded,
 }: {
   data: Array<{ area: string; total: number; estados: Array<{ state: string; value: number }> }>;
   states: string[];
   onSelect?: (area: string, estadoMarcacion: string) => void;
   onAreaSelect?: (area: string) => void;
+  expanded?: boolean;
 }) {
   return (
     <div style={styles.locationStateWrap}>
@@ -2961,7 +3387,7 @@ function SimpleAreaStateBars({
 	              </div>
 	            ))}
           </div>
-          <div style={styles.locationStateRows}>
+          <div style={expanded ? { ...styles.locationStateRows, ...styles.locationStateRowsExpanded } : styles.locationStateRows}>
             {data.map((item) => (
               <div key={item.area} style={styles.locationStateRow}>
                 <div style={styles.locationStateChartRow}>
@@ -3017,6 +3443,7 @@ function SimpleCuadrosDetailGrid({
   onExtendedColumnFilterChange,
   onClearExtendedFilters,
   onToggleSort,
+  expanded,
 }: {
   data: Array<{
     key: string;
@@ -3037,6 +3464,7 @@ function SimpleCuadrosDetailGrid({
   onExtendedColumnFilterChange?: (key: keyof GerencialDetailFilters, value: string[]) => void;
   onClearExtendedFilters?: () => void;
   onToggleSort: (key: CuadrosDetailSortKey) => void;
+  expanded?: boolean;
 }) {
   const renderSortPill = (key: CuadrosDetailSortKey) =>
     sortKey === key ? (sortDirection === "asc" ? "ASC" : "DESC") : "ORD";
@@ -3046,7 +3474,7 @@ function SimpleCuadrosDetailGrid({
       {data.length === 0 ? (
         <div style={styles.emptyMiniState}>Sin registros para mostrar.</div>
       ) : (
-        <div style={styles.cuadrosDetailScroller}>
+        <div style={expanded ? { ...styles.cuadrosDetailScroller, ...styles.cuadrosDetailScrollerExpanded } : styles.cuadrosDetailScroller}>
           <table style={styles.cuadrosDetailTable}>
             <thead>
               <tr>
@@ -3200,33 +3628,47 @@ function HeaderCheckboxFilter({
 
 function SimpleGerencialAreaSummaryGrid({
   data,
+  selectedResponsables,
+  selectedClientes,
+  onResponsableClick,
+  onClienteClick,
+  expanded,
 }: {
   data: Array<{
     responsable: string;
     cliente: string;
+    area: string;
     estadoMarcacionTexto: string;
     cantidad: number;
   }>;
+  selectedResponsables: string[];
+  selectedClientes: string[];
+  onResponsableClick: (value: string) => void;
+  onClienteClick: (value: string) => void;
+  expanded?: boolean;
 }) {
   return (
     <div style={styles.cuadrosDetailWrap}>
       {data.length === 0 ? (
         <div style={styles.emptyMiniState}>Sin registros para mostrar.</div>
       ) : (
-        <div style={styles.cuadrosDetailScroller}>
+        <div style={expanded ? { ...styles.cuadrosDetailScroller, ...styles.cuadrosDetailScrollerExpanded } : styles.cuadrosDetailScroller}>
           <table style={styles.cuadrosDetailTable}>
             <thead>
               <tr>
-                <th style={styles.cuadrosDetailTh}>
+                <th style={styles.cuadrosDetailStaticTh}>
                   <div style={styles.cuadrosDetailThContent}><span>Responsable</span></div>
                 </th>
-                <th style={styles.cuadrosDetailTh}>
+                <th style={styles.cuadrosDetailStaticTh}>
                   <div style={styles.cuadrosDetailThContent}><span>Cliente</span></div>
                 </th>
-                <th style={styles.cuadrosDetailTh}>
+                <th style={styles.cuadrosDetailStaticTh}>
+                  <div style={styles.cuadrosDetailThContent}><span>Area</span></div>
+                </th>
+                <th style={styles.cuadrosDetailStaticTh}>
                   <div style={styles.cuadrosDetailThContent}><span>Estado marcacion</span></div>
                 </th>
-                <th style={styles.cuadrosDetailTh}>
+                <th style={styles.cuadrosDetailStaticTh}>
                   <div style={styles.cuadrosDetailThContent}><span>Cantidad</span></div>
                 </th>
               </tr>
@@ -3234,8 +3676,21 @@ function SimpleGerencialAreaSummaryGrid({
             <tbody>
               {data.map((item, index) => (
                 <tr key={`${item.responsable}-${item.cliente}-${item.estadoMarcacionTexto}-${index}`}>
-                  <td style={styles.cuadrosDetailTd}>{item.responsable}</td>
-                  <td style={styles.cuadrosDetailTd}>{item.cliente}</td>
+                  <td
+                    style={selectedResponsables.includes(item.responsable) ? { ...styles.cuadrosDetailTd, ...styles.summaryClickableCell, ...styles.summaryClickableCellActive } : { ...styles.cuadrosDetailTd, ...styles.summaryClickableCell }}
+                    onClick={() => onResponsableClick(item.responsable)}
+                    title={`Filtrar detalle por responsable: ${item.responsable}`}
+                  >
+                    {item.responsable}
+                  </td>
+                  <td
+                    style={selectedClientes.includes(item.cliente) ? { ...styles.cuadrosDetailTd, ...styles.summaryClickableCell, ...styles.summaryClickableCellActive } : { ...styles.cuadrosDetailTd, ...styles.summaryClickableCell }}
+                    onClick={() => onClienteClick(item.cliente)}
+                    title={`Filtrar detalle por cliente: ${item.cliente}`}
+                  >
+                    {item.cliente}
+                  </td>
+                  <td style={styles.cuadrosDetailTd}>{item.area}</td>
                   <td style={styles.cuadrosDetailTd}>{item.estadoMarcacionTexto}</td>
                   <td style={{ ...styles.cuadrosDetailTd, textAlign: "right", fontWeight: 700 }}>{item.cantidad}</td>
                 </tr>
@@ -3562,6 +4017,12 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 16,
     alignItems: "stretch",
   },
+  gerencialDetailSectionGrid: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1.65fr) minmax(280px, 0.8fr)",
+    gap: 16,
+    alignItems: "stretch",
+  },
   cuadrosLeftColumn: {
     display: "flex",
     flexDirection: "column",
@@ -3661,6 +4122,33 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     gap: 8,
     minWidth: 0,
+  },
+  verticalBarButton: {
+    border: "none",
+    background: "transparent",
+    padding: 6,
+    borderRadius: 12,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 8,
+    cursor: "pointer",
+    width: "100%",
+  },
+  verticalBarButtonPassive: {
+    border: "none",
+    background: "transparent",
+    padding: 6,
+    borderRadius: 12,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 8,
+    width: "100%",
+  },
+  verticalBarButtonActive: {
+    background: "#EFF6FF",
+    boxShadow: "inset 0 0 0 1px #BFDBFE",
   },
   verticalBarTrack: {
     height: 170,
@@ -3877,6 +4365,10 @@ const styles: Record<string, React.CSSProperties> = {
     overflowY: "auto",
     paddingRight: 4,
   },
+  locationStateRowsExpanded: {
+    maxHeight: "none",
+    height: "100%",
+  },
   locationStateRow: {
     padding: "6px 0",
   },
@@ -3994,6 +4486,10 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #E2E8F0",
     borderRadius: 12,
   },
+  cuadrosDetailScrollerExpanded: {
+    maxHeight: "none",
+    height: "100%",
+  },
   cuadrosDetailTable: {
     width: "100%",
     borderCollapse: "separate",
@@ -4013,6 +4509,18 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#0F172A",
     textAlign: "left",
     cursor: "pointer",
+  },
+  cuadrosDetailStaticTh: {
+    position: "sticky",
+    top: 0,
+    zIndex: 1,
+    background: "#F8FAFC",
+    borderBottom: "1px solid #E2E8F0",
+    padding: "10px 8px",
+    fontSize: 11,
+    fontWeight: 800,
+    color: "#0F172A",
+    textAlign: "left",
   },
   cuadrosDetailThContent: {
     display: "flex",
@@ -4062,6 +4570,34 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 10,
     marginBottom: 10,
   },
+  gerencialSummaryToolbarMetrics: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  gerencialSummaryToolbarActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  },
+  gerencialInlineClearButton: {
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    color: "#0F172A",
+    borderRadius: 10,
+    padding: "8px 12px",
+    fontSize: 11,
+    fontWeight: 700,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  gerencialQuickFilterBar: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 10,
+  },
   gerencialSummaryExportButton: {
     border: "1px solid #CBD5E1",
     background: "#FFFFFF",
@@ -4074,6 +4610,104 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "center",
     cursor: "pointer",
     boxShadow: "0 2px 8px rgba(15, 23, 42, 0.06)",
+  },
+  summaryOverlay: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 9999,
+    background: "rgba(15, 23, 42, 0.52)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  summaryOverlayCard: {
+    width: "min(1280px, 96vw)",
+    height: "min(820px, 92vh)",
+    background: "#FFFFFF",
+    borderRadius: 18,
+    boxShadow: "0 24px 64px rgba(15, 23, 42, 0.22)",
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+  },
+  summaryOverlayHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 16,
+    padding: "18px 22px",
+    borderBottom: "1px solid #E2E8F0",
+    background: "#F8FAFC",
+  },
+  summaryOverlayTitle: {
+    margin: 0,
+    fontSize: 22,
+    color: "#0F172A",
+  },
+  summaryOverlayText: {
+    margin: "4px 0 0 0",
+    fontSize: 13,
+    color: "#475569",
+  },
+  summaryOverlayActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+  },
+  summaryOverlayCloseButton: {
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    color: "#0F172A",
+    borderRadius: 10,
+    padding: "8px 14px",
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  summaryOverlayBody: {
+    flex: 1,
+    minHeight: 0,
+    padding: 18,
+    overflow: "hidden",
+    display: "flex",
+    flexDirection: "column",
+  },
+  summaryOverlayChartCard: {
+    flex: 1,
+    minHeight: 0,
+    display: "flex",
+    flexDirection: "column",
+  },
+  summaryLinkButton: {
+    border: "none",
+    background: "transparent",
+    color: "#2563EB",
+    padding: 0,
+    fontSize: 11,
+    fontWeight: 700,
+    cursor: "pointer",
+    textAlign: "left",
+    textDecoration: "underline",
+  },
+  summaryLinkButtonActive: {
+    color: "#1D4ED8",
+    background: "#DBEAFE",
+    borderRadius: 6,
+    padding: "2px 6px",
+    textDecoration: "none",
+  },
+  summaryClickableCell: {
+    cursor: "pointer",
+    color: "#2563EB",
+    fontWeight: 700,
+    textDecoration: "underline",
+  },
+  summaryClickableCellActive: {
+    background: "#DBEAFE",
+    color: "#1D4ED8",
+    textDecoration: "none",
+    borderRadius: 6,
   },
   cuadrosDetailHeaderFilterWrap: {
     position: "relative",

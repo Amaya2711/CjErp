@@ -41,6 +41,7 @@ import OperacionPage from "../../features/operaciones/operacion";
 import AsignacionPage from "../../features/operaciones/asignacion";
 import ReembolsoPage from "../../features/operaciones/operacion/reembolso";
 import SuministroPage from "../../features/operaciones/operacion/suministro";
+import AprobarCampoPage from "../../features/operaciones/operacion/aprobarcampo";
 import ClientePage from "../../features/comercial/cliente";
 import FacturacionPage from "../../features/comercial/facturacion";
 import CobranzasPage from "../../features/comercial/cobranzas";
@@ -89,6 +90,7 @@ export default function AppRouter() {
             <Route path="/operaciones/operacion" element={<OperacionPage />} />
             <Route path="/operaciones/operacion/reembolso" element={<ReembolsoPage />} />
             <Route path="/operaciones/operacion/suministro" element={<SuministroPage />} />
+            <Route path="/operaciones/operacion/aprobarcampo" element={<AprobarCampoPage />} />
             <Route path="/operaciones/asignacion" element={<AsignacionPage />} />
 
             <Route path="/comercial/cliente" element={<ClientePage />} />

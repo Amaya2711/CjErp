@@ -120,6 +120,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             Responsable = GetString(values, "Responsable", "responsable"),
             Estado = GetString(values, "Estado", "estado"),
             Comentario = GetString(values, "Comentario", "comentario"),
+            Observacion = GetString(values, "Observacion", "observacion", "Comentario", "comentario"),
             Empresa = GetString(values, "empresa", "Empresa"),
             Cliente = GetString(values, "Cliente", "cliente"),
             Proyecto = GetString(values, "Proyecto", "proyecto", "NombreProyecto", "nombreProyecto"),
@@ -166,7 +167,8 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             TotalHorasLaborales = GetDecimal(values, "TotalHorasLaborales", "totalHorasLaborales"),
             TotalHorasFaltaAprobar = GetDecimal(values, "TotalHorasFaltaAprobar", "totalHorasFaltaAprobar"),
             DiferenciaHoras = GetDecimal(values, "DiferenciaHoras", "diferenciaHoras"),
-            EstadoValidacionHoras = GetString(values, "EstadoValidacionHoras", "estadoValidacionHoras", "Estadovalidacionhoras", "estadovalidacionhoras")
+            EstadoValidacionHoras = GetString(values, "EstadoValidacionHoras", "estadoValidacionHoras", "Estadovalidacionhoras", "estadovalidacionhoras"),
+            Observacion = GetString(values, "Observacion", "observacion", "Comentario", "comentario")
         };
     }
 

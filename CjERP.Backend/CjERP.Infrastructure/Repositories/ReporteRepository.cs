@@ -762,7 +762,8 @@ public sealed class ReporteRepository : IReporteRepository
             TotalHorasLaborales = totalHorasLaborales,
             TotalHorasFaltaAprobar = GetDecimal(values, "TotalHorasFaltaAprobar", "totalHorasFaltaAprobar"),
             DiferenciaHoras = diferenciaHoras,
-            EstadoValidacionHoras = estadoValidacionHoras
+            EstadoValidacionHoras = estadoValidacionHoras,
+            Observacion = GetString(values, "Observacion", "observacion", "Comentario", "comentario")
         };
     }
 

@@ -31,6 +31,7 @@ public class AsistenciaReportePdfItemDto
     public decimal TotalHorasFaltaAprobar { get; set; }
     public decimal DiferenciaHoras { get; set; }
     public string EstadoValidacionHoras { get; set; } = string.Empty;
+    public string Observacion { get; set; } = string.Empty;
 }
 
 public class AsistenciaReporteDto
@@ -42,6 +43,7 @@ public class AsistenciaReporteDto
     public string Responsable { get; set; } = string.Empty;
     public string Estado { get; set; } = string.Empty;
     public string Comentario { get; set; } = string.Empty;
+    public string Observacion { get; set; } = string.Empty;
     public string Empresa { get; set; } = string.Empty;
     public string Cliente { get; set; } = string.Empty;
     public string Proyecto { get; set; } = string.Empty;

@@ -118,6 +118,7 @@ builder.Services.AddScoped<ILogisticaReembolsoService, LogisticaReembolsoService
 builder.Services.AddScoped<ILogisticaSuministroService, LogisticaSuministroService>();
 builder.Services.AddScoped<IAuditoriaCambiosService, AuditoriaCambiosService>();
 builder.Services.AddScoped<IAsistenciaReporteService, AsistenciaReporteService>();
+builder.Services.AddScoped<IAsistenciaValidarCampoService, AsistenciaValidarCampoService>();
 builder.Services.AddScoped<IReporteRepository, ReporteRepository>();
 builder.Services.AddScoped<IReportePdfService, ReportePdfService>();
 builder.Services.AddScoped<IReporteAutomaticoService, ReporteAutomaticoService>();
