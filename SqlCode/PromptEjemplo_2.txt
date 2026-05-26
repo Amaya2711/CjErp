@@ -1,0 +1,56 @@
+Quiero crear una nueva página web tomando como referencia funcional y visual la página `oc.tsx` del módulo de órdenes de compra. Debe mantener el mismo patrón de arquitectura del proyecto actual, tanto en frontend como en backend, y generar todo lo necesario para dejar la funcionalidad completa.
+
+Objetivo:
+Construir una página CRUD/listado con panel de registro/edición, usando la misma experiencia que `oc.tsx`, pero adaptada a una nueva entidad.
+
+Requerimientos funcionales:
+1. Debe existir un filtro en la cabecera para filtrar los datos del grid principal.
+2. Debe existir un grid principal que muestre la información de un store determinado.
+3. Las cabeceras del grid deben incluir filtro por columna.
+4. Debe haber una columna de acciones con botones para editar cada registro.
+5. Cuando el usuario presione el botón `Nuevo`, se debe mostrar una pantalla, panel lateral o modal para agregar nuevos datos.
+6. También debe permitirse editar desde ese mismo formulario reutilizando la misma estructura.
+7. Debe contemplarse paginación, búsqueda, carga inicial, manejo de estados vacíos y mensajes de error.
+8. Debe respetar el estilo visual actual del sistema y reutilizar componentes/patrones ya existentes en `oc.tsx` si corresponde.
+9. Debe incluir validaciones de formulario y control de estados de guardado.
+10. Debe incluir integración completa con backend y persistencia real.
+
+Alcance técnico obligatorio:
+1. Generar todo lo necesario en el frontend:
+   - página principal
+   - tipos/interfaces/modelos
+   - servicios API
+   - hooks o lógica de estado si aplica
+   - componentes auxiliares reutilizables si son necesarios
+   - formulario de nuevo/edición
+   - integración con rutas y menú si corresponde
+2. Generar todo lo necesario en el backend:
+   - entidad o DTOs
+   - interfaz de servicio
+   - implementación de servicio
+   - repositorio o acceso a datos
+   - controlador API
+   - endpoints para listar, filtrar, obtener por id, crear y editar
+   - validaciones necesarias
+   - configuración e inyección de dependencias si aplica
+3. No crear una solución paralela ni una estructura nueva innecesaria; debe integrarse en las carpetas existentes del proyecto.
+4. Seguir la arquitectura y convenciones ya usadas en el repositorio actual.
+5. Reutilizar como referencia directa el comportamiento de `oc.tsx`, especialmente:
+   - cabecera con búsqueda
+   - grid principal con filtros por columna
+   - botones de acción
+   - botón `Nuevo`
+   - panel o vista de detalle/registro
+   - flujo de guardado
+
+Resultado esperado:
+Entregar la implementación completa, lista para compilar, con frontend y backend conectados, usando la misma línea visual y funcional de `oc.tsx`.
+
+Antes de implementar:
+1. Revisar cómo está construido `oc.tsx`
+2. Identificar los servicios frontend que consume
+3. Identificar los endpoints backend relacionados
+4. Replicar la misma estructura para la nueva página, adaptándola a la nueva entidad
+
+Importante:
+No quiero solo una maqueta visual. Quiero una implementación real, completa, integrada y funcional en frontend y backend.

@@ -1,0 +1,209 @@
+Quiero implementar una nueva página real, completa e integrada en el ERP React + .NET para logística de recojo.
+
+Ruta de la página:
+ /operaciones/operacion/suministro
+ 
+Referencia obligatoria:
+- Revisar y tomar como base funcional y visual la página existente oc.tsx del módulo de órdenes de compra.
+- Mantener el mismo patrón visual, arquitectura, servicios, manejo de estados, estructura de carpetas, nombres y convenciones actuales del proyecto.
+- No crear una maqueta.
+- No crear una estructura paralela.
+
+Entidad principal:
+Tabla SQL: dbo.Suministro_provisional
+
+Stores obligatorios:
+1. Consulta principal:
+   dbo.sp_SuministroProvisional_Listar
+   dbo.sp_SuministroProvisional_Insertar
+   dbo.sp_SuministroProvisional_Actualizar
+
+Objetivo:
+Crear una página web completa para actualizar, buscar, listar y preparar edición de suministro de dinero por parte del cliente.
+
+====================================================================
+FRONTEND
+====================================================================
+
+Crear todo lo necesario en el frontend siguiendo la arquitectura actual:
+
+1. Página principal:
+   Crear la página para la ruta:
+    /operaciones/operacion/suministro
+
+   Nombre sugerido:
+   suministro.tsx
+   o respetar la convención actual del proyecto.
+
+2. Modelo / interfaces:
+   Crear los tipos necesarios para:
+   - LogisticasuministroDto
+   - LogisticasuministroBuscarRequest
+   - respuesta estándar del backend si el proyecto ya usa una.
+
+3. Servicio API:
+   Crear o extender el servicio correspondiente para consumir:
+   - GET/POST búsqueda principal
+   - endpoint preparado para update si el patrón actual lo contempla
+
+4. Filtros de cabecera:
+   La página debe tener una zona superior de filtros generales.
+   Como mínimo considerar:
+   - Cliente / Proyecto / Site usando FiltroOperativoLookup.tsx
+   - Correlativo
+
+5. Grid principal:
+   Debe mostrar la información devuelta por sp_SuministroProvisional_Listar
+
+   Requisitos del grid:
+   - Filtro por columna en cabecera.
+   - Ordenamiento si el grid base lo soporta.
+   - Estado de carga.
+   - Estado vacío.
+   - Mensaje de error.
+   - Columna de acciones.
+   - Botón editar por fila.
+
+6. Botón Nuevo:
+   Debe existir un botón Actualizar.
+   Al presionarlo debe abrir un panel lateral, modal o formulario según el patrón usado en oc.tsx.
+
+7. Formulario Actualizar / Edición:
+   El mismo formulario debe servir para actualizar y edición si la lógica lo permite.
+
+8. Validaciones frontend:
+   - Correlativo obligatorio
+   - Mostrar mensajes claros al usuario
+   - No permitir guardar si faltan obligatorios
+
+10. Ruta y menú:
+   Integrar la página en el router actual.
+   Ruta final:
+   /operaciones/operacion/suministro
+
+   Si existe configuración dinámica de menú, dejar indicado el registro necesario o agregarlo si el proyecto ya maneja rutas estáticas.
+
+====================================================================
+BACKEND
+====================================================================
+
+Crear todo lo necesario en el backend siguiendo la arquitectura actual del proyecto .NET 8:
+
+1. DTOs:
+   Crear DTOs para:
+
+   a. LogisticaSuministroDto
+      Debe mapear el resultado de sp_SuministroProvisional_Listar:
+
+   b. LogisticaSuministroBuscarRequest
+      
+   c. LogisticaSuministroInsertRequest
+    
+2. Controller:
+   Crear controlador API siguiendo el patrón actual.
+
+   Nombre sugerido:
+   LogisticaSuministroController
+
+   Endpoints sugeridos:
+   POST /api/operacion/suministro/buscar
+   POST /api/operacion/suministro/actualizar
+
+   Si el proyecto usa otro patrón de rutas, respetarlo.
+
+3. Servicio e interfaz:
+   Crear:
+   ILogisticacService
+   LogisticasuministroService
+
+4. Repositorio / acceso a datos:
+   Crear o extender repositorio según patrón actual.
+
+   Debe ejecutar:
+   - sp_SuministroProvisional_Listar
+
+   Usar Dapper si el proyecto actualmente ejecuta stores con Dapper.
+
+5. Parámetros del store de búsqueda:
+   Mapear correctamente:
+   @idcliente
+   @idproyecto
+   @idsite
+   @correlativo
+   @tipo_trabajo
+
+6. Parámetros del store insert:
+   Mapear correctamente:
+   @idcliente
+   @idproyecto
+   @idsite
+   @correlativo
+   @tipo_trabajo
+
+7. Validaciones backend:
+ 
+
+8. Respuesta:
+   Devolver una respuesta compatible con el frontend actual.
+   Si el proyecto usa estructura tipo:
+   {
+     success,
+     message,
+     data
+   }
+   usar la misma.
+
+9. Inyección de dependencias:
+   Registrar:
+   - servicio
+   - repositorio
+   o lo que corresponda según Program.cs / DependencyInjection actual.
+
+====================================================================
+STORE DE BÚSQUEDA
+====================================================================
+
+La consulta principal debe basarse en:
+
+sp_SuministroProvisional_Listar
+
+====================================================================
+COMPORTAMIENTO ESPERADO
+====================================================================
+
+1. Al ingresar a /operaciones/operacion/suministro:
+   - Cargar datos iniciales desde sp_SuministroProvisional_Listar.
+   - Mostrar grid principal.
+   - Mostrar filtros superiores.
+
+2. Al usar filtros:
+   - Ejecutar búsqueda usando backend.
+   - Refrescar grid.
+
+3. Al presionar Nuevo:
+   - Abrir formulario.
+   - Permitir llenar datos.
+   
+4. Al presionar Editar:
+   - Abrir el mismo formulario con los datos de la fila.
+   - Si todavía no existe store update, dejar el endpoint y método preparados o mostrar el modo edición cargando datos, pero sin romper la funcionalidad.
+   - No implementar edición falsa.
+
+====================================================================
+IMPORTANTE
+====================================================================
+
+Antes de codificar:
+1. Revisar oc.tsx.
+2. Revisar cómo consume servicios API.
+3. Revisar estructura de rutas.
+4. Revisar patrón backend para controllers, services, repositories y Dapper.
+5. Implementar respetando exactamente esos patrones.
+
+Resultado esperado:
+Una funcionalidad completa, integrada y funcional para la página:
+
+/operaciones/operacion/suministro
+
+No entregar solo explicación.
+Generar los archivos necesarios y modificar los existentes que correspondan.

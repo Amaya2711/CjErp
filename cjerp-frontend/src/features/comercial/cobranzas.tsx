@@ -1,5 +1,0 @@
-import PlaceholderPage from '../../components/base/PlaceholderPage';
-
-export default function CobranzasPage() {
-	return <PlaceholderPage title="Cobranzas" />;
-}
