@@ -1,11 +1,16 @@
+import { getAuthUser } from "../../utils/authStorage";
+function normalizeEmployeeCode(value: string | number | null | undefined) {
+  return String(value ?? "").trim();
+}
 import React, { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   matchesCrudToolbarSearch,
   type CrudToolbarSearchField,
 } from "../../components/base/CrudToolbar";
 import { buscarAsistencia, exportarAsistenciaEmpleadoPdf } from "../../api/asistenciaService";
 import type { AsistenciaReporteItem, AsistenciaReportePdfItem } from "../../models/asistencia";
-import { getAuthUser } from "../../utils/authStorage";
+import type { AprobarCampoRow } from "../../models/aprobarCampo";
 import { getHttpErrorMessage } from "../../utils/httpError";
 
 type SelectFilterKey =
@@ -22,6 +27,8 @@ type SelectFilterKey =
 type SortKey =
   | "fecha"
   | "nombreEmpleado"
+  | "tipoAprobacion"
+  | "responsable"
   | "estado"
   | "empresa"
   | "cliente"
@@ -118,6 +125,20 @@ type CuadrosDetailSortKey =
   | "area"
   | "estadoMarcacionTexto";
 
+type RptAsistenciaReturnState = {
+  returnFromAprobarCampo?: boolean;
+  fechaInicio?: string;
+  fechaFin?: string;
+  activeTab?: "cuadros" | "gerencial" | "detalle" | "empleado";
+  selectedEstadoMarcacion?: string[];
+  selectedAreas?: string[];
+  selectedEstados?: string[];
+  frontendFilters?: Partial<Record<SelectFilterKey, string>>;
+  gerencialQuickFilters?: Partial<GerencialQuickFilters & { topEmpleado?: string | null }>;
+  gerencialDetailFilters?: Partial<GerencialDetailFilters & { nombreEmpleado?: string[] }>;
+  cuadrosDetailFilter?: Partial<{ area: string | null; estadoMarcacion: string | null }>;
+};
+
 const ALL_OPTION = "__ALL__";
 const OBSERVATION_HOURS_THRESHOLD = 9.6;
 const MISSING_OR_INCOMPLETE_HOURS = 9.6;
@@ -129,6 +150,8 @@ const SOFT_STATES = new Set(["VACACIONES", "DOMINGO", "SABADO", "SÁBADO"]);
 const tableColumns: TableColumn[] = [
   { key: "fecha", label: "Fecha", width: "110px" },
   { key: "nombreEmpleado", label: "Nombre empleado", width: "250px" },
+  { key: "tipoAprobacion", label: "Tipo aprobacion", width: "180px" },
+  { key: "responsable", label: "Responsable", width: "220px" },
   { key: "estadoMarcacionTexto", label: "Estado marcacion", width: "170px" },
   { key: "hora", label: "Hora entrada", width: "110px", align: "center" },
   { key: "salida", label: "Hora salida", width: "110px", align: "center" },
@@ -271,10 +294,6 @@ function toInputDate(date: Date) {
   const month = String(lima.getMonth() + 1).padStart(2, "0");
   const day = String(lima.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
-}
-
-function normalizeEmployeeCode(value: string | number | null | undefined) {
-  return String(value ?? "").trim();
 }
 
 function toApiDate(value: string) {
@@ -504,6 +523,7 @@ function getExportRows(rows: AsistenciaReporteItem[]) {
   return rows.map((item) => ({
     Fecha: formatDateLabel(item.fecha),
     NombreEmpleado: item.nombreEmpleado,
+    TipoAprobacion: item.tipoAprobacion,
     Responsable: item.responsable,
     Estado: item.estado,
     Empresa: item.empresa,
@@ -530,13 +550,32 @@ function buildEmployeeDateCellDisplay(cell?: EmployeeDateCell) {
   return `${hours} | ${cell.estadoMarcacionTexto}`;
 }
 
-export default function RptAsistenciaEmpleadoPage() {
+function mapAsistenciaRowToAprobarCampoRow(item: AsistenciaReporteItem): AprobarCampoRow {
+  return {
+    idEmpleado: item.idEmpleado ?? undefined,
+    idempleado: item.idEmpleado ?? undefined,
+    responsable: item.responsable || "",
+    empleado: item.nombreEmpleado || "",
+    nombreempleado: item.nombreEmpleado || "",
+    nombreEmpleado: item.nombreEmpleado || "",
+    estado: item.estadoMarcacionTexto || item.estado || "",
+    fechaasistencia: item.fecha || "",
+    fechaAsistencia: item.fecha || "",
+    ingreso: item.hora || "",
+    hora: item.hora || "",
+    salida: item.salida || "",
+    horasalida: item.salida || "",
+    horaSalida: item.salida || "",
+    comentario: item.comentario || "",
+    observacion: item.observacion || item.comentario || "",
+  };
+}
+
+export default function RptAsistenciaPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const today = new Date();
   const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-  const authUser = getAuthUser();
-  const codigoEmpleadoMostrar = normalizeEmployeeCode(
-    authUser?.codEmp || authUser?.idEmpleado || authUser?.empleado || ""
-  );
 
   const [fechaInicio, setFechaInicio] = useState(toInputDate(startOfMonth));
   const [fechaFin, setFechaFin] = useState(toInputDate(today));
@@ -544,7 +583,7 @@ export default function RptAsistenciaEmpleadoPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [busqueda, setBusqueda] = useState("");
-  const [activeTab, setActiveTab] = useState<"cuadros" | "gerencial" | "detalle" | "empleado">("cuadros");
+  const [activeTab, setActiveTab] = useState<"cuadros" | "gerencial" | "detalle" | "empleado">("gerencial");
   const [detailDrilldown, setDetailDrilldown] = useState<DetailDrilldown>({
     fecha: null,
     estadoMarcacion: null,
@@ -567,7 +606,6 @@ export default function RptAsistenciaEmpleadoPage() {
   const [selectedEstadoMarcacion, setSelectedEstadoMarcacion] = useState<string[]>([]);
   const [selectedAreas, setSelectedAreas] = useState<string[]>([]);
   const [selectedEstados, setSelectedEstados] = useState<string[]>([]);
-  const [cuadrosViewMode, setCuadrosViewMode] = useState<"fechaEstado" | "evolucionDiaria">("fechaEstado");
   const [cuadrosDetailFilter, setCuadrosDetailFilter] = useState<{ area: string | null; estadoMarcacion: string | null }>({
     area: null,
     estadoMarcacion: null,
@@ -576,16 +614,18 @@ export default function RptAsistenciaEmpleadoPage() {
     key: "fecha",
     direction: "asc",
   });
-  const [gerencialDetailFilters, setGerencialDetailFilters] = useState<GerencialDetailFilters>({
+  const [gerencialDetailFilters, setGerencialDetailFilters] = useState<GerencialDetailFilters & { nombreEmpleado?: string[] }>({
     responsable: [],
     cliente: [],
     proyecto: [],
     site: [],
+    nombreEmpleado: [],
   });
-  const [gerencialQuickFilters, setGerencialQuickFilters] = useState<GerencialQuickFilters>({
+  const [gerencialQuickFilters, setGerencialQuickFilters] = useState<GerencialQuickFilters & { topEmpleado?: string | null }>({
     responsable: null,
     cliente: null,
     topResponsable: null,
+    topEmpleado: null,
   });
   const [employeeGridFilters, setEmployeeGridFilters] = useState<EmployeeGridFilters>({
     employee: "",
@@ -599,15 +639,20 @@ export default function RptAsistenciaEmpleadoPage() {
     direction: "desc",
   });
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [gerencialOverlay, setGerencialOverlay] = useState<"summary" | "area" | "detail" | null>(null);
+  const [gerencialOverlay, setGerencialOverlay] = useState<"summary" | "area" | "detail" | "top" | "empleados" | null>(null);
   const gerencialDetailSectionRef = useRef<HTMLDivElement | null>(null);
   const effectiveResponsableFilter = gerencialQuickFilters.topResponsable ?? gerencialQuickFilters.responsable;
+  const effectiveEmployeeFilter = gerencialQuickFilters.topEmpleado ?? null;
+  const showAprobarCampoShortcut =
+    activeTab === "gerencial" &&
+    selectedEstadoMarcacion.includes("FALTA APROBAR");
 
   const deferredSearch = useDeferredValue(busqueda);
 
   const searchFields = useMemo<CrudToolbarSearchField<AsistenciaReporteItem>[]>(
     () => [
       { key: "nombreEmpleado", label: "Nombre empleado", getValue: (item) => item.nombreEmpleado },
+      { key: "tipoAprobacion", label: "Tipo aprobacion", getValue: (item) => item.tipoAprobacion },
       { key: "responsable", label: "Responsable", getValue: (item) => item.responsable },
       { key: "estado", label: "Estado", getValue: (item) => item.estado },
       { key: "empresa", label: "Empresa", getValue: (item) => item.empresa },
@@ -621,18 +666,36 @@ export default function RptAsistenciaEmpleadoPage() {
     []
   );
 
+  const authUser = getAuthUser();
+  const codigoEmpleadoMostrar = normalizeEmployeeCode(
+    authUser?.codEmp || 
+    authUser?.idEmpleado || 
+    authUser?.empleado || 
+    ""
+  );
+
   const loadData = async () => {
     setLoading(true);
     setError("");
 
     try {
+      if (!codigoEmpleadoMostrar) {
+        setRows([]);
+        setError("No se encontró el código de empleado para mostrar el reporte.");
+        return;
+      }
+
       const data = await buscarAsistencia({
         fechaInicio: toApiDate(fechaInicio),
         fechaFin: toApiDate(fechaFin),
       });
+
       const filteredData = Array.isArray(data)
-        ? data.filter((item) => normalizeEmployeeCode(item.idEmpleado) === codigoEmpleadoMostrar)
+        ? data.filter((item) =>
+            normalizeEmployeeCode(item.idEmpleado) === codigoEmpleadoMostrar
+          )
         : [];
+
       setRows(filteredData);
     } catch (err) {
       setError(getHttpErrorMessage(err, "No se pudo cargar el reporte de asistencia."));
@@ -645,12 +708,55 @@ export default function RptAsistenciaEmpleadoPage() {
   useEffect(() => {
     if (!codigoEmpleadoMostrar) {
       setRows([]);
-      setError("No se encontro el codigo de empleado para mostrar el reporte.");
+      setError("No se encontró el código de empleado para mostrar el reporte.");
       return;
     }
 
     void loadData();
   }, [codigoEmpleadoMostrar, fechaFin, fechaInicio]);
+
+  useEffect(() => {
+    const navigationState = (location.state as RptAsistenciaReturnState | null) ?? null;
+
+    if (!navigationState?.returnFromAprobarCampo) {
+      return;
+    }
+
+    if (navigationState.fechaInicio) {
+      setFechaInicio(navigationState.fechaInicio);
+    }
+
+    if (navigationState.fechaFin) {
+      setFechaFin(navigationState.fechaFin);
+    }
+
+    setActiveTab(navigationState.activeTab ?? "gerencial");
+    setSelectedEstadoMarcacion(
+      navigationState.selectedEstadoMarcacion?.length
+        ? navigationState.selectedEstadoMarcacion
+        : ["FALTA APROBAR"]
+    );
+    setSelectedAreas(navigationState.selectedAreas ?? []);
+    setSelectedEstados(navigationState.selectedEstados ?? []);
+    setFrontendFilters((prev) => ({
+      ...prev,
+      ...(navigationState.frontendFilters ?? {}),
+    }));
+    setGerencialQuickFilters((prev) => ({
+      ...prev,
+      ...(navigationState.gerencialQuickFilters ?? {}),
+    }));
+    setGerencialDetailFilters((prev) => ({
+      ...prev,
+      ...(navigationState.gerencialDetailFilters ?? {}),
+    }));
+    setCuadrosDetailFilter((prev) => ({
+      ...prev,
+      ...(navigationState.cuadrosDetailFilter ?? {}),
+    }));
+
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.pathname, location.state, navigate]);
 
   useEffect(() => {
     if (!gerencialOverlay) {
@@ -909,8 +1015,10 @@ export default function RptAsistenciaEmpleadoPage() {
         (!cuadrosDetailFilter.area || item.area === cuadrosDetailFilter.area) &&
         (!cuadrosDetailFilter.estadoMarcacion || item.estadoMarcacionTexto === cuadrosDetailFilter.estadoMarcacion) &&
         (activeTab !== "gerencial" || !effectiveResponsableFilter || item.responsable === effectiveResponsableFilter) &&
+        (activeTab !== "gerencial" || !effectiveEmployeeFilter || item.nombreEmpleado === effectiveEmployeeFilter) &&
         (activeTab !== "gerencial" || !gerencialQuickFilters.cliente || item.cliente === gerencialQuickFilters.cliente) &&
         (activeTab !== "gerencial" || matchesMultiSelect(item.responsable, gerencialDetailFilters.responsable)) &&
+        (activeTab !== "gerencial" || matchesMultiSelect(item.nombreEmpleado, gerencialDetailFilters.nombreEmpleado ?? [])) &&
         (activeTab !== "gerencial" || matchesMultiSelect(item.cliente, gerencialDetailFilters.cliente)) &&
         (activeTab !== "gerencial" || matchesMultiSelect(item.proyecto, gerencialDetailFilters.proyecto)) &&
         (activeTab !== "gerencial" || matchesMultiSelect(item.site, gerencialDetailFilters.site))
@@ -923,7 +1031,84 @@ export default function RptAsistenciaEmpleadoPage() {
 
       return cuadrosDetailSort.direction === "asc" ? compared : -compared;
     });
-  }, [activeTab, cuadrosDetailFilter, cuadrosDetailSort, effectiveResponsableFilter, filteredRows, gerencialDetailFilters, gerencialQuickFilters]);
+  }, [activeTab, cuadrosDetailFilter, cuadrosDetailSort, effectiveEmployeeFilter, effectiveResponsableFilter, filteredRows, gerencialDetailFilters, gerencialQuickFilters]);
+
+  const aprobarCampoInitialRows = useMemo(
+    () =>
+      filteredRows
+        .filter((item) => (
+          (!cuadrosDetailFilter.area || (item.area || "Sin area") === cuadrosDetailFilter.area) &&
+          (!cuadrosDetailFilter.estadoMarcacion || (item.estadoMarcacionTexto || item.estado || "Sin clasificar") === cuadrosDetailFilter.estadoMarcacion) &&
+          (!effectiveResponsableFilter || (item.responsable || "Sin responsable") === effectiveResponsableFilter) &&
+          (!effectiveEmployeeFilter || item.nombreEmpleado === effectiveEmployeeFilter) &&
+          (!gerencialQuickFilters.cliente || (item.cliente || "Sin cliente") === gerencialQuickFilters.cliente) &&
+          matchesMultiSelect(item.responsable || "Sin responsable", gerencialDetailFilters.responsable) &&
+          matchesMultiSelect(item.nombreEmpleado, gerencialDetailFilters.nombreEmpleado ?? []) &&
+          matchesMultiSelect(item.cliente || "Sin cliente", gerencialDetailFilters.cliente) &&
+          matchesMultiSelect(item.proyecto || "Sin proyecto", gerencialDetailFilters.proyecto) &&
+          matchesMultiSelect(item.site || "Sin site", gerencialDetailFilters.site)
+        ))
+        .map(mapAsistenciaRowToAprobarCampoRow),
+    [
+      cuadrosDetailFilter.area,
+      cuadrosDetailFilter.estadoMarcacion,
+      effectiveEmployeeFilter,
+      effectiveResponsableFilter,
+      filteredRows,
+      gerencialDetailFilters,
+      gerencialQuickFilters.cliente,
+    ]
+  );
+
+  const goToAprobarCampo = () => {
+    navigate("/operaciones/operacion/aprobarcampo", {
+      state: {
+        initialRows: aprobarCampoInitialRows,
+        initialColumns: [
+          "responsable",
+          "nombreempleado",
+          "estado",
+          "fechaasistencia",
+          "hora",
+          "horasalida",
+          "comentario",
+          "observacion",
+        ],
+        initialFilters: {
+          responsable: effectiveResponsableFilter ?? "",
+          empleado: effectiveEmployeeFilter ?? "",
+          estado:
+            selectedEstadoMarcacion.length === 1
+              ? selectedEstadoMarcacion[0]
+              : selectedEstadoMarcacion.includes("FALTA APROBAR")
+                ? "FALTA APROBAR"
+                : "",
+          fechaDesde: fechaInicio,
+          fechaHasta: fechaFin,
+        },
+        returnToAsistencia: true,
+        returnState: {
+          returnFromAprobarCampo: true,
+          fechaInicio,
+          fechaFin,
+          activeTab: "gerencial",
+          selectedEstadoMarcacion: selectedEstadoMarcacion.includes("FALTA APROBAR")
+            ? selectedEstadoMarcacion
+            : ["FALTA APROBAR", ...selectedEstadoMarcacion],
+          selectedAreas,
+          selectedEstados,
+          frontendFilters,
+          gerencialQuickFilters,
+          gerencialDetailFilters,
+          cuadrosDetailFilter: {
+            area: cuadrosDetailFilter.area,
+            estadoMarcacion: cuadrosDetailFilter.estadoMarcacion ?? "FALTA APROBAR",
+          },
+        },
+        sourceLabel: "Detalle filtrado de asistencia",
+      },
+    });
+  };
 
   const gerencialDetailFilterOptions = useMemo(
     () => ({
@@ -1007,9 +1192,13 @@ export default function RptAsistenciaEmpleadoPage() {
         }
 
         return left.name.localeCompare(right.name, "es", { sensitivity: "base" });
-      })
-      .slice(0, 5);
+      });
   }, [cuadroDetalleRows]);
+
+  const gerencialTopResponsablesPreviewRows = useMemo(
+    () => gerencialTopResponsablesRows.slice(0, 4),
+    [gerencialTopResponsablesRows]
+  );
 
   const chartEmpleadoPorDia = useMemo(() => {
     const fechas = getDateRangeLabels(fechaInicio, fechaFin);
@@ -1270,19 +1459,6 @@ export default function RptAsistenciaEmpleadoPage() {
     });
   };
 
-  const handleStateDateCellClick = (fecha: string, estadoMarcacion: string) => {
-    setDetailDrilldown((prev) => {
-      const isSameSelection = prev.fecha === fecha && prev.estadoMarcacion === estadoMarcacion;
-      return {
-        ...prev,
-        fecha: isSameSelection ? null : fecha,
-        estadoMarcacion: isSameSelection ? null : estadoMarcacion,
-        nombreEmpleado: null,
-      };
-    });
-    setActiveTab("detalle");
-  };
-
   const handleEmployeeDateCellClick = (nombreEmpleado: string, fecha: string) => {
     setDetailDrilldown((prev) => {
       const isSameSelection = prev.fecha === fecha && prev.nombreEmpleado === nombreEmpleado;
@@ -1452,16 +1628,47 @@ export default function RptAsistenciaEmpleadoPage() {
     });
   };
 
-  const toggleGerencialTopResponsableFilter = (value: string) => {
-    setGerencialQuickFilters((prev) => ({
-      ...prev,
-      topResponsable: prev.topResponsable === value ? null : value,
-      responsable: null,
-    }));
-
+  // Permite filtrar por responsable o por empleado (para ambos gráficos)
+  // Permite filtrar por responsable o por empleado (para ambos gráficos)
+  const toggleGerencialTopResponsableFilter = (value: string, type: 'responsable' | 'empleado' = 'responsable') => {
+    if (type === 'responsable') {
+      setGerencialQuickFilters((prev) => ({
+        ...prev,
+        topResponsable: prev.topResponsable === value ? null : value,
+        responsable: null,
+        topEmpleado: null,
+      }));
+      setGerencialDetailFilters((prev) => ({
+        ...prev,
+        responsable: prev.responsable.length === 1 && prev.responsable[0] === value ? [] : [value],
+        nombreEmpleado: [],
+      }));
+    } else {
+      setGerencialQuickFilters((prev) => ({
+        ...prev,
+        topResponsable: null,
+        responsable: null,
+        topEmpleado: prev.topEmpleado === value ? null : value,
+      }));
+      setGerencialDetailFilters((prev) => ({
+        ...prev,
+        nombreEmpleado: prev.nombreEmpleado && prev.nombreEmpleado.length === 1 && prev.nombreEmpleado[0] === value ? [] : [value],
+        responsable: [],
+      }));
+    }
     startTransition(() => {
       gerencialDetailSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
+  };
+
+  const handleTopResponsableOverlaySelect = (value: string) => {
+    setGerencialOverlay(null);
+    toggleGerencialTopResponsableFilter(value);
+  };
+
+  const handleTopEmpleadoOverlaySelect = (value: string) => {
+    setGerencialOverlay(null);
+    toggleGerencialTopResponsableFilter(value, "empleado");
   };
 
   const exportPdf = async () => {
@@ -1602,6 +1809,172 @@ export default function RptAsistenciaEmpleadoPage() {
     doc.save(`reporte_asistencia_${toApiDate(fechaInicio).replaceAll("/", "")}_${toApiDate(fechaFin).replaceAll("/", "")}.pdf`);
   };
 
+  const gerencialTopResponsablesCard = (
+    <ChartCard
+      title="Top 5 responsables"
+      subtitle="Ranking actualizado segun los filtros activos y la seleccion aplicada desde Area x estado de marcacion"
+    >
+      <div style={styles.gerencialSummaryToolbar}>
+        <div style={styles.counterPill}>
+          {gerencialTopResponsablesPreviewRows.length} de {gerencialTopResponsablesRows.length} responsable{gerencialTopResponsablesRows.length === 1 ? "" : "s"}
+        </div>
+        <div style={styles.gerencialSummaryToolbarActions}>
+          {gerencialQuickFilters.topResponsable ? (
+            <button
+              type="button"
+              style={styles.gerencialInlineClearButton}
+              onClick={() =>
+                setGerencialQuickFilters((prev) => ({
+                  ...prev,
+                  topResponsable: null,
+                  topEmpleado: null,
+                }))
+              }
+              title="Limpiar responsable seleccionado en Top 5"
+            >
+              Limpiar top
+            </button>
+          ) : null}
+          <button
+            type="button"
+            style={styles.gerencialSummaryExportButton}
+            onClick={() => setGerencialOverlay("top")}
+            title="Ampliar top de responsables"
+          >
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path d="M7 3H3V7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M13 3H17V7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M17 13V17H13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M3 13V17H7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      {gerencialTopResponsablesPreviewRows.length > 0 ? (
+        <SimpleVerticalBars
+          data={gerencialTopResponsablesPreviewRows}
+          colorMode="palette"
+          onBarClick={(name) => toggleGerencialTopResponsableFilter(name, 'responsable')}
+          activeName={gerencialQuickFilters.topResponsable}
+        />
+      ) : (
+        <div style={styles.emptyMiniState}>
+          No hay registros filtrados para visualizar el ranking.
+        </div>
+      )}
+    </ChartCard>
+  );
+
+  const gerencialEmployeeSummaryCard = (
+    <ChartCard
+      title="Resumen por empleado"
+      subtitle="Cantidad de registros por empleado segun el filtro seleccionado"
+    >
+      <div style={styles.gerencialSummaryToolbar}>
+        <div style={styles.counterPill}>
+          {(() => {
+            const grouped = new Map();
+            cuadroDetalleRows.forEach((item) => {
+              const empleado = item.nombreEmpleado || "Sin empleado";
+              grouped.set(empleado, (grouped.get(empleado) ?? 0) + 1);
+            });
+            const all = Array.from(grouped.entries())
+              .map(([name, value]) => ({ name, value }))
+              .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name, "es"));
+            return `${Math.min(4, all.length)} de ${all.length} empleado${all.length === 1 ? "" : "s"}`;
+          })()}
+        </div>
+        <div style={styles.gerencialSummaryToolbarActions}>
+          <button
+            type="button"
+            style={styles.gerencialSummaryExportButton}
+            onClick={() => setGerencialOverlay("empleados")}
+            title="Expandir resumen por empleado"
+          >
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <rect x="6" y="6" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5" fill="none" />
+              <path d="M10 8V12M8 10H12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
+        <div style={{ flex: 1 }}>
+          <SimpleVerticalBars
+            data={(() => {
+              const grouped = new Map();
+              cuadroDetalleRows.forEach((item) => {
+                const empleado = item.nombreEmpleado || "Sin empleado";
+                grouped.set(empleado, (grouped.get(empleado) ?? 0) + 1);
+              });
+              return Array.from(grouped.entries())
+                .map(([name, value]) => ({ name, value }))
+                .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name, "es"))
+                .slice(0, 4);
+            })()}
+            colorMode="palette"
+            onBarClick={(name) => toggleGerencialTopResponsableFilter(name, 'empleado')}
+            activeName={gerencialQuickFilters.topEmpleado}
+          />
+        </div>
+      </div>
+      {gerencialOverlay === "empleados" && (
+        <div style={styles.summaryOverlay}>
+          <div style={styles.summaryOverlayCard}>
+            <div style={styles.summaryOverlayHeader}>
+              <div>
+                <h2 style={styles.summaryOverlayTitle}>Resumen por empleado (completo)</h2>
+                <div style={styles.counterPill}>
+                  {(() => {
+                    const grouped = new Map();
+                    cuadroDetalleRows.forEach((item) => {
+                      const empleado = item.nombreEmpleado || "Sin empleado";
+                      grouped.set(empleado, (grouped.get(empleado) ?? 0) + 1);
+                    });
+                    const all = Array.from(grouped.entries())
+                      .map(([name, value]) => ({ name, value }))
+                      .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name, "es"));
+                    return `${all.length} empleado${all.length === 1 ? "" : "s"}`;
+                  })()}
+                </div>
+              </div>
+              <button
+                type="button"
+                style={styles.summaryOverlayCloseButton}
+                onClick={() => setGerencialOverlay(null)}
+              >
+                Cerrar
+              </button>
+            </div>
+            <div style={styles.summaryOverlayBody}>
+              {(() => {
+                const grouped = new Map();
+                cuadroDetalleRows.forEach((item) => {
+                  const empleado = item.nombreEmpleado || "Sin empleado";
+                  grouped.set(empleado, (grouped.get(empleado) ?? 0) + 1);
+                });
+                const all = Array.from(grouped.entries())
+                  .map(([name, value]) => ({ name, value }))
+                  .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name, "es"));
+                if (all.length === 0) {
+                  return <div style={styles.emptyMiniState}>No hay empleados para mostrar.</div>;
+                }
+                return (
+                  <SimpleVerticalBars
+                    data={all}
+                    colorMode="palette"
+                    onBarClick={handleTopEmpleadoOverlaySelect}
+                    activeName={gerencialQuickFilters.topEmpleado}
+                  />
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
+    </ChartCard>
+  );
+
   return (
     <div style={styles.page}>
       <section style={styles.compactHeader}>
@@ -1635,13 +2008,6 @@ export default function RptAsistenciaEmpleadoPage() {
       </section>
 
       <section style={styles.segmentedTabs}>
-        <button
-          type="button"
-          style={activeTab === "cuadros" ? { ...styles.segmentedTabButton, ...styles.segmentedTabButtonActive } : styles.segmentedTabButton}
-          onClick={() => setActiveTab("cuadros")}
-        >
-          Cuadros
-        </button>
         <button
           type="button"
           style={activeTab === "gerencial" ? { ...styles.segmentedTabButton, ...styles.segmentedTabButtonActive } : styles.segmentedTabButton}
@@ -1784,28 +2150,6 @@ export default function RptAsistenciaEmpleadoPage() {
                     onSelect={handleOrigenClick}
                   />
                 </ChartCard>
-                {activeTab === "cuadros" ? (
-                  <div style={styles.cuadrosRadioPanel}>
-                    <label style={styles.cuadrosRadioOption}>
-                      <input
-                        type="radio"
-                        name="cuadros-view-mode"
-                        checked={cuadrosViewMode === "fechaEstado"}
-                        onChange={() => setCuadrosViewMode("fechaEstado")}
-                      />
-                      <span>Fecha por estado</span>
-                    </label>
-                    <label style={styles.cuadrosRadioOption}>
-                      <input
-                        type="radio"
-                        name="cuadros-view-mode"
-                        checked={cuadrosViewMode === "evolucionDiaria"}
-                        onChange={() => setCuadrosViewMode("evolucionDiaria")}
-                      />
-                      <span>Evolucion diaria</span>
-                    </label>
-                  </div>
-                ) : null}
               </div>
             </div>
             <div style={{ gridColumn: "2 / 3" }}>
@@ -1863,73 +2207,111 @@ export default function RptAsistenciaEmpleadoPage() {
                   onAreaSelect={handleCuadrosAreaClick}
                 />
                 </ChartCard>
-                {activeTab === "cuadros" ? (
+                {activeTab === "gerencial" ? (false ? (
                   <ChartCard
-                    title="Detalle filtrado"
-                    subtitle="Fecha, empleado, area y estado segun los filtros activos"
-                  >
-                    <div style={{ ...styles.counterPill, alignSelf: "flex-start", marginBottom: 10 }}>
-                      {cuadroDetalleRows.length} registro{cuadroDetalleRows.length === 1 ? "" : "s"}
-                    </div>
-                    <SimpleCuadrosDetailGrid
-                      data={cuadroDetalleRows}
-                      sortKey={cuadrosDetailSort.key}
-                      sortDirection={cuadrosDetailSort.direction}
-                      onToggleSort={(key) =>
-                        setCuadrosDetailSort((prev) => ({
-                          key,
-                          direction: prev.key === key ? (prev.direction === "asc" ? "desc" : "asc") : "asc",
-                        }))
-                      }
-                    />
-                  </ChartCard>
-                ) : activeTab === "gerencial" ? (
-                  <ChartCard
-                    title="Resumen por responsable"
-                    subtitle="Agrupacion sincronizada con Area x estado de marcacion"
+                    title="Resumen por empleado"
+                    subtitle="Cantidad de registros por empleado según el filtro seleccionado"
                   >
                     <div style={styles.gerencialSummaryToolbar}>
                       <div style={styles.counterPill}>
-                        {gerencialAreaSummaryRows.length} agrupacion{gerencialAreaSummaryRows.length === 1 ? "" : "es"}
+                        {(() => {
+                          const grouped = new Map();
+                          cuadroDetalleRows.forEach((item) => {
+                            const empleado = item.nombreEmpleado || "Sin empleado";
+                            grouped.set(empleado, (grouped.get(empleado) ?? 0) + 1);
+                          });
+                          const all = Array.from(grouped.entries())
+                            .map(([name, value]) => ({ name, value }))
+                            .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name, "es"));
+                          return `${Math.min(4, all.length)} de ${all.length} empleado${all.length === 1 ? '' : 's'}`;
+                        })()}
                       </div>
-                    <div style={styles.gerencialSummaryToolbarActions}>
-                      <button
-                        type="button"
-                        style={styles.gerencialSummaryExportButton}
-                          onClick={() => void exportGerencialSummaryExcel()}
-                          disabled={gerencialAreaSummaryRows.length === 0}
-                          title="Exportar resumen filtrado a Excel"
-                        >
-                          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                            <path d="M10 3V12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                            <path d="M6.5 8.5L10 12L13.5 8.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                            <path d="M4 15.5H16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                          </svg>
-                        </button>
+                      <div style={styles.gerencialSummaryToolbarActions}>
                         <button
                           type="button"
                           style={styles.gerencialSummaryExportButton}
-                          onClick={() => setGerencialOverlay("summary")}
-                          title="Ampliar resumen por responsable"
+                          onClick={() => setGerencialOverlay("empleados")}
+                          title="Expandir resumen por empleado"
                         >
                           <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                            <path d="M7 3H3V7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                            <path d="M13 3H17V7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                            <path d="M17 13V17H13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                            <path d="M3 13V17H7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                            <rect x="6" y="6" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                            <path d="M10 8V12M8 10H12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                           </svg>
                         </button>
                       </div>
                     </div>
-                    <SimpleGerencialAreaSummaryGrid
-                      data={gerencialAreaSummaryRows}
-                      selectedResponsables={effectiveResponsableFilter ? [effectiveResponsableFilter] : gerencialDetailFilters.responsable}
-                      selectedClientes={gerencialQuickFilters.cliente ? [gerencialQuickFilters.cliente] : gerencialDetailFilters.cliente}
-                      onResponsableClick={(value) => toggleGerencialSingleFilter("responsable", value)}
-                      onClienteClick={(value) => toggleGerencialSingleFilter("cliente", value)}
-                    />
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
+                      <div style={{ flex: 1 }}>
+                        <SimpleVerticalBars
+                          data={(() => {
+                            const grouped = new Map();
+                            cuadroDetalleRows.forEach((item) => {
+                              const empleado = item.nombreEmpleado || "Sin empleado";
+                              grouped.set(empleado, (grouped.get(empleado) ?? 0) + 1);
+                            });
+                            return Array.from(grouped.entries())
+                              .map(([name, value]) => ({ name, value }))
+                              .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name, "es"))
+                              .slice(0, 4);
+                          })()}
+                          colorMode="palette"
+                        />
+                      </div>
+                    </div>
+                    {gerencialOverlay === "empleados" && (
+                      <div style={styles.summaryOverlay}>
+                        <div style={styles.summaryOverlayCard}>
+                          <div style={styles.summaryOverlayHeader}>
+                            <div>
+                              <h2 style={styles.summaryOverlayTitle}>Resumen por empleado (completo)</h2>
+                              <div style={styles.counterPill}>
+                                {(() => {
+                                  const grouped = new Map();
+                                  cuadroDetalleRows.forEach((item) => {
+                                    const empleado = item.nombreEmpleado || "Sin empleado";
+                                    grouped.set(empleado, (grouped.get(empleado) ?? 0) + 1);
+                                  });
+                                  const all = Array.from(grouped.entries())
+                                    .map(([name, value]) => ({ name, value }))
+                                    .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name, "es"));
+                                  return `${all.length} empleado${all.length === 1 ? '' : 's'}`;
+                                })()}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              style={styles.summaryOverlayCloseButton}
+                              onClick={() => setGerencialOverlay(null)}
+                            >
+                              Cerrar
+                            </button>
+                          </div>
+                          <div style={styles.summaryOverlayBody}>
+                            {(() => {
+                              const grouped = new Map();
+                              cuadroDetalleRows.forEach((item) => {
+                                const empleado = item.nombreEmpleado || "Sin empleado";
+                                grouped.set(empleado, (grouped.get(empleado) ?? 0) + 1);
+                              });
+                              const all = Array.from(grouped.entries())
+                                .map(([name, value]) => ({ name, value }))
+                                .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name, "es"));
+                              if (all.length === 0) {
+                                return <div style={styles.emptyMiniState}>No hay empleados para mostrar.</div>;
+                              }
+                              return (
+                                <SimpleVerticalBars
+                                  data={all}
+                                  colorMode="palette"
+                                />
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </ChartCard>
-                ) : null}
+                ) : gerencialTopResponsablesCard) : null}
               </div>
             </div>
             {activeTab === "gerencial" ? (
@@ -1938,6 +2320,7 @@ export default function RptAsistenciaEmpleadoPage() {
                   <ChartCard
                     title="Detalle filtrado"
                     subtitle="Vista ampliada con filtros por responsable, cliente, proyecto y site"
+                    style={styles.gerencialDetailChartCard}
                   >
                     <div style={styles.gerencialSummaryToolbar}>
                       <div style={styles.counterPill}>
@@ -1957,6 +2340,20 @@ export default function RptAsistenciaEmpleadoPage() {
                           <path d="M4 15.5H16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
                         </svg>
                       </button>
+                      {showAprobarCampoShortcut ? (
+                        <button
+                          type="button"
+                          style={styles.gerencialSummaryExportButton}
+                          onClick={goToAprobarCampo}
+                          title="Ir a Aprobar Campo"
+                          aria-label="Ir a Aprobar Campo"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <path d="M7 5H5.8C5.11994 5 4.7799 5 4.52001 5.13239C4.29185 5.24863 4.10663 5.43386 3.99039 5.66202C3.858 5.92191 3.858 6.26194 3.858 6.942V14.058C3.858 14.7381 3.858 15.0781 3.99039 15.338C4.10663 15.5661 4.29185 15.7514 4.52001 15.8676C4.7799 16 5.11994 16 5.8 16H13.2C13.8801 16 14.2201 16 14.48 15.8676C14.7081 15.7514 14.8934 15.5661 15.0096 15.338C15.142 15.0781 15.142 14.7381 15.142 14.058V12.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                            <path d="M10.5 9.5L16 4M16 4H12.2M16 4V7.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         style={styles.gerencialSummaryExportButton}
@@ -2011,13 +2408,13 @@ export default function RptAsistenciaEmpleadoPage() {
                       }
                     />
                   </ChartCard>
-                  <ChartCard
+                  {false ? <ChartCard
                     title="Top 5 responsables"
                     subtitle="Ranking actualizado segun los filtros activos y la seleccion aplicada desde Area x estado de marcacion"
                   >
                     <div style={styles.gerencialSummaryToolbar}>
                       <div style={styles.counterPill}>
-                        {gerencialTopResponsablesRows.length} responsable{gerencialTopResponsablesRows.length === 1 ? "" : "s"}
+                        {gerencialTopResponsablesPreviewRows.length} de {gerencialTopResponsablesRows.length} responsable{gerencialTopResponsablesRows.length === 1 ? "" : "s"}
                       </div>
                       <div style={styles.gerencialSummaryToolbarActions}>
                         {gerencialQuickFilters.topResponsable ? (
@@ -2035,11 +2432,24 @@ export default function RptAsistenciaEmpleadoPage() {
                             Limpiar top
                           </button>
                         ) : null}
+                        <button
+                          type="button"
+                          style={styles.gerencialSummaryExportButton}
+                          onClick={() => setGerencialOverlay("top")}
+                          title="Ampliar top de responsables"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <path d="M7 3H3V7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M13 3H17V7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M17 13V17H13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M3 13V17H7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </button>
                       </div>
                     </div>
-                    {gerencialTopResponsablesRows.length > 0 ? (
+                    {gerencialTopResponsablesPreviewRows.length > 0 ? (
                       <SimpleVerticalBars
-                        data={gerencialTopResponsablesRows}
+                        data={gerencialTopResponsablesPreviewRows}
                         colorMode="palette"
                         onBarClick={toggleGerencialTopResponsableFilter}
                         activeName={gerencialQuickFilters.topResponsable}
@@ -2049,34 +2459,10 @@ export default function RptAsistenciaEmpleadoPage() {
                         No hay registros filtrados para visualizar el ranking.
                       </div>
                     )}
-                  </ChartCard>
+                  </ChartCard> : gerencialEmployeeSummaryCard}
                 </div>
               </div>
-            ) : cuadrosViewMode === "fechaEstado" ? (
-              <div style={{ gridColumn: "1 / -1" }}>
-                <ChartCard title="Fecha x estado de marcacion por dia" subtitle="Fechas en eje X y estados de marcacion en eje Y">
-                  <SimpleStateDateGrid
-                    data={chartEstadoPorDia.rows}
-                    states={chartEstadoPorDia.states}
-                    selectedFecha={detailDrilldown.fecha}
-                    selectedEstado={detailDrilldown.estadoMarcacion}
-                    onSelect={handleStateDateCellClick}
-                  />
-                </ChartCard>
-              </div>
-            ) : (
-              <div style={{ gridColumn: "1 / -1" }}>
-                <ChartCard
-                  title="Evolucion diaria por estado de marcacion"
-                  subtitle="Cantidad de registros por EstadoMarcacionTexto en el tiempo"
-                >
-                  <SimpleStateEvolutionChart
-                    data={chartEstadoPorDia.rows}
-                    states={chartEstadoPorDia.states}
-                  />
-                </ChartCard>
-              </div>
-            )}
+            ) : null}
           </section>
         </>
       ) : null}
@@ -2106,9 +2492,9 @@ export default function RptAsistenciaEmpleadoPage() {
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <button
                 type="button"
-                title="Ir a Cuadros"
+                title="Ir a Gerencial"
                 style={{ ...styles.iconButton, marginRight: 4 }}
-                onClick={() => setActiveTab("cuadros")}
+                onClick={() => setActiveTab("gerencial")}
               >
                 <span style={{ display: "inline-block", verticalAlign: "middle" }}>
                   {/* Icono flecha izquierda */}
@@ -2175,6 +2561,8 @@ export default function RptAsistenciaEmpleadoPage() {
                     <tr key={`${item.idEmpleado ?? item.nombreEmpleado}-${item.fecha}-${index}`} style={{ ...styles.tr, background: getRowTone(item) }}>
                       <td style={styles.td}>{formatDateLabel(item.fecha)}</td>
                       <td style={styles.td}>{item.nombreEmpleado}</td>
+                      <td style={styles.td}>{item.tipoAprobacion}</td>
+                      <td style={styles.td}>{item.responsable}</td>
                       <td style={styles.td}>{item.estadoMarcacionTexto}</td>
                       <td style={{ ...styles.td, textAlign: "center" }}>{item.hora}</td>
                       <td style={{ ...styles.td, textAlign: "center" }}>{item.salida}</td>
@@ -2233,6 +2621,23 @@ export default function RptAsistenciaEmpleadoPage() {
               onCellSelect={handleEmployeeDateCellClick}
             />
           </ChartCard>
+          <div style={styles.gerencialSummaryToolbar}>
+            <div />
+            <div className="gerencialSummaryToolbarActions" style={styles.gerencialSummaryToolbarActions}>
+              <button
+                type="button"
+                style={styles.gerencialSummaryExportButton}
+                onClick={() => setGerencialOverlay("empleados")}
+                title="Ampliar resumen por empleado"
+                aria-label="Ampliar resumen por empleado"
+              >
+                <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <rect x="6" y="6" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                  <path d="M10 8V12M8 10H12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+          </div>
         </section>
       )}
 
@@ -2246,14 +2651,22 @@ export default function RptAsistenciaEmpleadoPage() {
                     ? "Resumen por responsable"
                     : gerencialOverlay === "area"
                       ? "Area x estado de marcacion"
-                      : "Detalle filtrado"}
+                      : gerencialOverlay === "top"
+                        ? "Todos los responsables"
+                        : gerencialOverlay === "empleados"
+                          ? "Todos los empleados"
+                        : "Detalle filtrado"}
                 </h2>
                 <p style={styles.summaryOverlayText}>
                   {gerencialOverlay === "summary"
                     ? "Vista ampliada temporal del resumen filtrado."
                     : gerencialOverlay === "area"
                       ? "Vista ampliada temporal del agrupado por area y estado."
-                      : "Vista ampliada temporal del detalle filtrado."}
+                      : gerencialOverlay === "top"
+                        ? "Vista ampliada temporal del ranking completo de responsables."
+                        : gerencialOverlay === "empleados"
+                          ? "Vista ampliada temporal del ranking completo de empleados."
+                        : "Vista ampliada temporal del detalle filtrado."}
                 </p>
               </div>
               <div style={styles.summaryOverlayActions}>
@@ -2262,22 +2675,42 @@ export default function RptAsistenciaEmpleadoPage() {
                     ? `${gerencialAreaSummaryRows.length} agrupacion${gerencialAreaSummaryRows.length === 1 ? "" : "es"}`
                     : gerencialOverlay === "area"
                       ? `${chartAreaPorEstado.rows.length} area${chartAreaPorEstado.rows.length === 1 ? "" : "s"}`
-                      : `${cuadroDetalleRows.length} registro${cuadroDetalleRows.length === 1 ? "" : "s"}`}
+                      : gerencialOverlay === "top"
+                        ? `${gerencialTopResponsablesRows.length} responsable${gerencialTopResponsablesRows.length === 1 ? "" : "s"}`
+                        : gerencialOverlay === "empleados"
+                          ? `${filteredEmployeeGridRows.length} empleado${filteredEmployeeGridRows.length === 1 ? '' : 's'}`
+                        : `${cuadroDetalleRows.length} registro${cuadroDetalleRows.length === 1 ? "" : "s"}`}
                 </div>
                 {gerencialOverlay === "summary" ? (
-                  <button
-                    type="button"
-                    style={styles.gerencialSummaryExportButton}
-                    onClick={() => void exportGerencialSummaryExcel()}
-                    disabled={gerencialAreaSummaryRows.length === 0}
-                    title="Exportar resumen filtrado a Excel"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                      <path d="M10 3V12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                      <path d="M6.5 8.5L10 12L13.5 8.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                      <path d="M4 15.5H16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                    </svg>
-                  </button>
+                  <>
+                    {showAprobarCampoShortcut ? (
+                      <button
+                        type="button"
+                        style={styles.gerencialSummaryExportButton}
+                        onClick={goToAprobarCampo}
+                        title="Ir a Aprobar Campo"
+                        aria-label="Ir a Aprobar Campo"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                          <path d="M7 5H5.8C5.11994 5 4.7799 5 4.52001 5.13239C4.29185 5.24863 4.10663 5.43386 3.99039 5.66202C3.858 5.92191 3.858 6.26194 3.858 6.942V14.058C3.858 14.7381 3.858 15.0781 3.99039 15.338C4.10663 15.5661 4.29185 15.7514 4.52001 15.8676C4.7799 16 5.11994 16 5.8 16H13.2C13.8801 16 14.2201 16 14.48 15.8676C14.7081 15.7514 14.8934 15.5661 15.0096 15.338C15.142 15.0781 15.142 14.7381 15.142 14.058V12.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                          <path d="M10.5 9.5L16 4M16 4H12.2M16 4V7.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      style={styles.gerencialSummaryExportButton}
+                      onClick={() => void exportGerencialSummaryExcel()}
+                      disabled={gerencialAreaSummaryRows.length === 0}
+                      title="Exportar resumen filtrado a Excel"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path d="M10 3V12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                        <path d="M6.5 8.5L10 12L13.5 8.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                        <path d="M4 15.5H16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                      </svg>
+                    </button>
+                  </>
                 ) : null}
                 <button
                   type="button"
@@ -2310,6 +2743,43 @@ export default function RptAsistenciaEmpleadoPage() {
                     onAreaSelect={handleCuadrosAreaClick}
                     expanded
                   />
+                </ChartCard>
+              ) : null}
+              {gerencialOverlay === "top" ? (
+                <ChartCard title="" subtitle="" style={styles.summaryOverlayChartCard}>
+                  <SimpleVerticalBars
+                    data={gerencialTopResponsablesRows}
+                    colorMode="palette"
+                    onBarClick={handleTopResponsableOverlaySelect}
+                    activeName={gerencialQuickFilters.topResponsable}
+                  />
+                </ChartCard>
+              ) : null}
+              {gerencialOverlay === "empleados" ? (
+                <ChartCard title="" subtitle="" style={{ ...styles.summaryOverlayChartCard, maxHeight: 600, overflowY: 'auto' }}>
+                  {cuadroDetalleRows.length === 0 ? (
+                    <div style={styles.emptyMiniState}>No hay empleados para mostrar.</div>
+                  ) : (
+                    (() => {
+                      // Agrupar por empleado y contar registros reales
+                      const grouped = new Map();
+                      cuadroDetalleRows.forEach((item) => {
+                        const empleado = item.nombreEmpleado || "Sin empleado";
+                        grouped.set(empleado, (grouped.get(empleado) ?? 0) + 1);
+                      });
+                      const all = Array.from(grouped.entries())
+                        .map(([name, value]) => ({ name, value }))
+                        .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name, "es"));
+                      return (
+                        <SimpleVerticalBars
+                          data={all}
+                          colorMode="palette"
+                          onBarClick={handleTopEmpleadoOverlaySelect}
+                          activeName={gerencialQuickFilters.topEmpleado}
+                        />
+                      );
+                    })()
+                  )}
                 </ChartCard>
               ) : null}
               {gerencialOverlay === "detail" ? (
@@ -2831,12 +3301,12 @@ function SimpleEmployeeDateGrid({
         <div style={styles.emptyMiniState}>Sin datos para graficar.</div>
       ) : (
         <div style={styles.stateDateGridScroller}>
-          <div
-            style={{
-              ...styles.stateDateGrid,
-              gridTemplateColumns: `220px 180px 110px 110px 100px 140px 150px repeat(${fechas.length}, minmax(88px, 1fr))`,
-            }}
-          >
+            <div
+              style={{
+                ...styles.stateDateGrid,
+                gridTemplateColumns: `220px 180px 110px 110px 100px 140px 150px 150px repeat(${fechas.length}, minmax(88px, 1fr))`,
+              }}
+            >
             <div style={{ ...styles.stateDateGridHeader, ...styles.stateDateGridCorner }}>
               <div style={styles.employeeGridHeaderStack}>
                 <button
@@ -3048,7 +3518,7 @@ function SimpleEmployeeDateGrid({
                     background: item.totalHorasFaltaAprobar > 0 ? "#DBEAFE" : "#F8FAFC",
                     color: item.totalHorasFaltaAprobar > 0 ? "#1D4ED8" : "#94A3B8",
                   }}
-                  title={`${item.employee}: ${formatDecimal(item.totalHorasFaltaAprobar, 2)} horas por FALTA APROBAR`}
+                  title={`${item.employee}: ${formatDecimal(item.totalHorasFaltaAprobar, 2)} horas por falta aprobar`}
                 >
                   <span style={styles.stateDateGridCellCount}>
                     {item.totalHorasFaltaAprobar > 0 ? formatDecimal(item.totalHorasFaltaAprobar, 2) : "0.00"}
@@ -3374,18 +3844,18 @@ function SimpleAreaStateBars({
         <div style={styles.emptyMiniState}>Sin datos para graficar.</div>
       ) : (
         <>
-	          <div style={styles.locationStateLegend}>
-	            {states.map((state, index) => (
-	              <div key={state} style={styles.legendRow}>
-	                <span
-	                  style={{
-	                    ...styles.legendDot,
-	                    background: getStateVisual(state, index).strong,
-	                  }}
-	                />
-	                <span style={styles.legendLabel}>{state}</span>
-	              </div>
-	            ))}
+            <div style={styles.locationStateLegend}>
+              {states.map((state, index) => (
+                <div key={state} style={styles.legendRow}>
+                  <span
+                    style={{
+                      ...styles.legendDot,
+                      background: getStateVisual(state, index).strong,
+                    }}
+                  />
+                  <span style={styles.legendLabel}>{state}</span>
+                </div>
+              ))}
           </div>
           <div style={expanded ? { ...styles.locationStateRows, ...styles.locationStateRowsExpanded } : styles.locationStateRows}>
             {data.map((item) => (
@@ -3408,11 +3878,11 @@ function SimpleAreaStateBars({
                         <button
                           type="button"
                           key={`${item.area}-bar-${estado.state}`}
-	                          style={{
-	                            ...styles.locationStateSegment,
-	                            width,
-	                            background: stateVisual.strong,
-	                            cursor: onSelect ? "pointer" : "default",
+                            style={{
+                              ...styles.locationStateSegment,
+                              width,
+                              background: stateVisual.strong,
+                              cursor: onSelect ? "pointer" : "default",
                           }}
                           title={`${item.area} | ${estado.state}: ${estado.value}`}
                           onClick={() => onSelect?.(item.area, estado.state)}
@@ -3557,9 +4027,45 @@ function SimpleCuadrosDetailGrid({
             <tbody>
               {data.map((item) => (
                 <tr key={item.key}>
-                  <td style={styles.cuadrosDetailTd}>{item.fecha}</td>
-                  <td style={styles.cuadrosDetailTd}>{item.nombreEmpleado}</td>
-                  {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.responsable}</td> : null}
+                  <td style={{
+                    ...styles.cuadrosDetailTd,
+                    maxWidth: 90,
+                    minWidth: 70,
+                    width: 90,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                    title={item.fecha}
+                  >
+                    {item.fecha}
+                  </td>
+                  <td style={{
+                    ...styles.cuadrosDetailTd,
+                    maxWidth: 160,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    verticalAlign: "top",
+                  }}
+                    title={item.nombreEmpleado}
+                  >
+                    {item.nombreEmpleado}
+                  </td>
+                  {showExtendedColumns ? (
+                    <td style={{
+                      ...styles.cuadrosDetailTd,
+                      maxWidth: 160,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      verticalAlign: "top",
+                    }}
+                      title={item.responsable}
+                    >
+                      {item.responsable}
+                    </td>
+                  ) : null}
                   {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.cliente}</td> : null}
                   {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.proyecto}</td> : null}
                   {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.site}</td> : null}
@@ -4474,13 +4980,16 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
   },
   cuadrosDetailWrap: {
-    minHeight: 280,
+    flex: 1,
+    minHeight: 0,
+    height: "100%",
     display: "flex",
     flexDirection: "column",
     minWidth: 0,
   },
   cuadrosDetailScroller: {
     flex: 1,
+    minHeight: 0,
     maxHeight: 312,
     overflow: "auto",
     border: "1px solid #E2E8F0",
@@ -4678,6 +5187,11 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: 0,
     display: "flex",
     flexDirection: "column",
+  },
+  gerencialDetailChartCard: {
+    display: "flex",
+    flexDirection: "column",
+    minHeight: 0,
   },
   summaryLinkButton: {
     border: "none",

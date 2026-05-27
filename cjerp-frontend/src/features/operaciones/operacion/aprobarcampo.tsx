@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, ClipboardList } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import CrudToolbar, {
   matchesCrudToolbarSearch,
   type CrudToolbarSearchField,
@@ -70,6 +70,13 @@ type MediaViewerState =
 type ResponsableResumenItem = {
   responsable: string;
   cantidad: number;
+};
+
+type AprobarCampoNavigationState = {
+  initialFilters?: Partial<FilterState>;
+  returnToAsistencia?: boolean;
+  returnState?: Record<string, unknown>;
+  sourceLabel?: string;
 };
 
 type ColumnFilterDropdownProps = {
@@ -146,6 +153,60 @@ function getValorIngreso(row: AprobarCampoRow) {
 function getValorSalida(row: AprobarCampoRow) {
   const val = toText(row.salida || row.horasalida);
   return val && val !== "-" ? val : "";
+}
+
+function getIngresoCoordinates(row: AprobarCampoRow) {
+  const lat = toText(
+    row.latitud ||
+      (row as Record<string, unknown>).latitudIngreso ||
+      (row as Record<string, unknown>).latitudentrada
+  );
+  const lng = toText(
+    row.longitud ||
+      (row as Record<string, unknown>).longitudIngreso ||
+      (row as Record<string, unknown>).longitudentrada
+  );
+
+  row.latitud = lat;
+  row.longitud = lng;
+
+  return { lat, lng };
+}
+
+function getSalidaCoordinates(row: AprobarCampoRow) {
+  const lat = toText(
+    (row as Record<string, unknown>).latitudsalida ||
+      row.latitudSalida ||
+      (row as Record<string, unknown>).latitudSalidaRuta
+  );
+  const lng = toText(
+    (row as Record<string, unknown>).longitudsalida ||
+      row.longitudSalida ||
+      (row as Record<string, unknown>).longitudSalidaRuta
+  );
+
+  (row as Record<string, unknown>).latitudsalida = lat;
+  (row as Record<string, unknown>).longitudsalida = lng;
+  row.latitudSalida = lat;
+  row.longitudSalida = lng;
+
+  return { lat, lng };
+}
+
+function getIngresoImage(row: AprobarCampoRow) {
+  return toText(
+    row.imagen ||
+      (row as Record<string, unknown>).imgFactura ||
+      (row as Record<string, unknown>).imagenIngreso
+  );
+}
+
+function getSalidaImage(row: AprobarCampoRow) {
+  return toText(
+    (row as Record<string, unknown>).imagensalida ||
+      row.imagenSalida ||
+      (row as Record<string, unknown>).imagenSalidaRuta
+  );
 }
 
 function normalizeColumnValue(value: unknown) {
@@ -230,6 +291,26 @@ function buildRowKey(row: AprobarCampoRow) {
   }
 
   return `${toText(row.idEmpleado ?? row.idempleado)}|${normalizeDateInput(toText(row.fechaAsistencia ?? row.fechaasistencia))}`;
+}
+
+function buildNavigationMatchKey(row: AprobarCampoRow) {
+  return [
+    toText(row.idEmpleado ?? row.idempleado),
+    normalizeDateInput(toText(row.fechaAsistencia ?? row.fechaasistencia)),
+    formatTime(toText(row.hora ?? row.ingreso)),
+    formatTime(toText(row.horasalida ?? row.horaSalida ?? row.salida)),
+    toText(row.responsable).toUpperCase(),
+    toText(row.empleado || row.nombreempleado || row.nombreEmpleado).toUpperCase(),
+  ].join("|");
+}
+
+function buildNavigationMatchKeyLoose(row: AprobarCampoRow) {
+  return [
+    toText(row.idEmpleado ?? row.idempleado),
+    normalizeDateInput(toText(row.fechaAsistencia ?? row.fechaasistencia)),
+    toText(row.responsable).toUpperCase(),
+    toText(row.empleado || row.nombreempleado || row.nombreEmpleado).toUpperCase(),
+  ].join("|");
 }
 
 function buildClaveFromRow(row: AprobarCampoRow): AprobarCampoClave {
@@ -377,6 +458,7 @@ export default function AprobarCampoPage() {
     // Estado para el checkbox 'Incluido día actual'
     const [incluirDiaActual, setIncluirDiaActual] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
   const authUser = getAuthUser();
   const usuarioAccion =
     String(
@@ -416,7 +498,14 @@ export default function AprobarCampoPage() {
   const [filtrosColumnas, setFiltrosColumnas] = useState<Record<string, string[]>>({});
   const [sort, setSort] = useState<SortState | null>(null);
   const filtroColumnaMenuRef = useRef<HTMLDivElement | null>(null);
-  const sortableColumns = ["responsable", "nombreempleado", "estado", "fechaasistencia"];
+  const sortableColumns = ["responsable", "nombreempleado", "estado", "fechaasistencia", "hora", "horasalida"];
+
+  const navigationState = (location.state as AprobarCampoNavigationState | null) ?? null;
+  const [showInitialNavigationBanner, setShowInitialNavigationBanner] = useState(
+    Boolean(navigationState?.sourceLabel)
+  );
+  const [canReturnToAsistencia, setCanReturnToAsistencia] = useState(navigationState?.returnToAsistencia === true);
+  const hasInitialNavigationFilters = Boolean(navigationState?.initialFilters);
 
   const searchFields = useMemo<CrudToolbarSearchField<AprobarCampoRow>[]>(() => {
     const preferredKeys = ["responsable", "nombreempleado", "empleado", "estado", "comentario", "observacion", "fechaasistencia"];
@@ -464,9 +553,16 @@ export default function AprobarCampoPage() {
   };
 
   useEffect(() => {
+    if (hasInitialNavigationFilters) {
+      const nextFilters = { ...initialFilters, ...(navigationState?.initialFilters ?? {}) };
+      setFilters(nextFilters);
+      void loadRows(nextFilters);
+      return;
+    }
+
     void loadRows();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [hasInitialNavigationFilters]);
 
   // Recargar datos cuando cambia el checkbox de día actual
   useEffect(() => {
@@ -540,8 +636,8 @@ export default function AprobarCampoPage() {
       result = [...result].sort((a, b) => {
         const aValue = toText(a[sort.key]);
         const bValue = toText(b[sort.key]);
-        if (sort.key === 'fechaasistencia') {
-          // Ordenar por fecha
+        if (sort.key === 'fechaasistencia' || sort.key === 'hora' || sort.key === 'horasalida') {
+          // Ordenar por fecha/hora/salida
           const aDate = new Date(aValue);
           const bDate = new Date(bValue);
           if (aDate < bDate) return sort.direction === 'asc' ? -1 : 1;
@@ -589,11 +685,12 @@ export default function AprobarCampoPage() {
 
     try {
       const data = await listarAprobarCampo(payload);
-      setRows(Array.isArray(data.rows) ? data.rows : []);
+      const nextRows = Array.isArray(data.rows) ? data.rows : [];
+      setRows(nextRows);
       setAvailableColumns(Array.isArray(data.columns) ? data.columns : []);
       setCurrentPage(1);
       // Actualizar el total solo cuando se cargan datos nuevos
-      setTotalRows(Array.isArray(data.rows) ? data.rows.length : 0);
+      setTotalRows(nextRows.length);
     } catch (err) {
       setRows([]);
       setAvailableColumns([]);
@@ -873,11 +970,33 @@ export default function AprobarCampoPage() {
           </button>
           <button
             type="button"
+            style={canReturnToAsistencia ? styles.secondaryButton : styles.disabledSecondaryButton}
+            onClick={() => {
+              if (!canReturnToAsistencia) {
+                return;
+              }
+              navigate("/reportes/rptasistencia", {
+                state: navigationState?.returnState ?? { returnFromAprobarCampo: true },
+              });
+            }}
+            disabled={!canReturnToAsistencia}
+            title={
+              canReturnToAsistencia
+                ? "Regresar a Asistencia"
+                : "Disponible solo cuando se abre desde Asistencia"
+            }
+          >
+            Regresar a Asistencia
+          </button>
+          <button
+            type="button"
             style={styles.secondaryButton}
             onClick={async () => {
               setSearch("");
               setFilters(initialFilters);
               setFiltrosColumnas({});
+              setShowInitialNavigationBanner(false);
+              setCanReturnToAsistencia(false);
               await loadRows(initialFilters);
             }}
           >
@@ -911,6 +1030,11 @@ export default function AprobarCampoPage() {
       <div style={{ ...styles.card, paddingTop: 10 }}>
 
         {error ? <div style={styles.errorBanner}>{error}</div> : null}
+        {showInitialNavigationBanner ? (
+          <div style={styles.prefillBanner}>
+            Mostrando data inicial recibida desde {navigationState?.sourceLabel || "la pantalla anterior"}.
+          </div>
+        ) : null}
 
         <div style={styles.tableWrapper}>
           <table style={styles.table}>
@@ -990,10 +1114,11 @@ export default function AprobarCampoPage() {
                           type="button"
                           style={{
                             ...styles.successTinyButton,
-                            ...(getValorIngreso(row) ? {} : disabledButtonStyle),
+                            // Deshabilitar si el botón de mapa ingreso está inactivo
+                            ...(getValorIngreso(row) && hasCoordinates(getIngresoCoordinates(row).lat, getIngresoCoordinates(row).lng) ? {} : disabledButtonStyle),
                           }}
                           onClick={() => handleOpenAction("aprobar-ingreso", row)}
-                          disabled={!getValorIngreso(row)}
+                          disabled={!(getValorIngreso(row) && hasCoordinates(getIngresoCoordinates(row).lat, getIngresoCoordinates(row).lng))}
                           title="Aprobar ingreso"
                         >
                           <span role="img" aria-label="Aprobar ingreso">✅</span>
@@ -1002,10 +1127,11 @@ export default function AprobarCampoPage() {
                           type="button"
                           style={{
                             ...styles.successTinyButton,
-                            ...(getValorSalida(row) ? {} : disabledButtonStyle),
+                            // Deshabilitar si el botón de mapa salida está inactivo
+                            ...(getValorSalida(row) && hasCoordinates(getSalidaCoordinates(row).lat, getSalidaCoordinates(row).lng) ? {} : disabledButtonStyle),
                           }}
                           onClick={() => handleOpenAction("aprobar-salida", row)}
-                          disabled={!getValorSalida(row)}
+                          disabled={!(getValorSalida(row) && hasCoordinates(getSalidaCoordinates(row).lat, getSalidaCoordinates(row).lng))}
                           title="Aprobar salida"
                         >
                           <span role="img" aria-label="Aprobar salida">🕒</span>
@@ -1040,9 +1166,9 @@ export default function AprobarCampoPage() {
                         type="button"
                         style={{
                           ...styles.linkButton,
-                          ...((getValorIngreso(row) && hasCoordinates(toText(row.latitud), toText(row.longitud))) ? {} : disabledButtonStyle),
+                          ...((getValorIngreso(row) && hasCoordinates(getIngresoCoordinates(row).lat, getIngresoCoordinates(row).lng)) ? {} : disabledButtonStyle),
                         }}
-                        disabled={!getValorIngreso(row) || !hasCoordinates(toText(row.latitud), toText(row.longitud))}
+                        disabled={!getValorIngreso(row) || !hasCoordinates(getIngresoCoordinates(row).lat, getIngresoCoordinates(row).lng)}
                         onClick={() => handleOpenMap("Ubicación de ingreso", toText(row.latitud), toText(row.longitud))}
                       >
                         Ver mapa
@@ -1053,9 +1179,9 @@ export default function AprobarCampoPage() {
                         type="button"
                         style={{
                           ...styles.linkButton,
-                          ...((getValorSalida(row) && hasCoordinates(toText(row.latitudsalida || row.latitudSalida), toText(row.longitudsalida || row.longitudSalida))) ? {} : disabledButtonStyle),
+                          ...((getValorSalida(row) && hasCoordinates(getSalidaCoordinates(row).lat, getSalidaCoordinates(row).lng)) ? {} : disabledButtonStyle),
                         }}
-                        disabled={!getValorSalida(row) || !hasCoordinates(toText(row.latitudsalida || row.latitudSalida), toText(row.longitudsalida || row.longitudSalida))}
+                        disabled={!getValorSalida(row) || !hasCoordinates(getSalidaCoordinates(row).lat, getSalidaCoordinates(row).lng)}
                         onClick={() =>
                           handleOpenMap("Ubicación de salida", toText(row.latitudsalida || row.latitudSalida), toText(row.longitudsalida || row.longitudSalida))
                         }
@@ -1068,10 +1194,10 @@ export default function AprobarCampoPage() {
                         type="button"
                         style={{
                           ...styles.linkButton,
-                          ...((getValorIngreso(row) && toText(row.imagen)) ? {} : disabledButtonStyle),
+                          ...((getValorIngreso(row) && getIngresoImage(row)) ? {} : disabledButtonStyle),
                         }}
-                        disabled={!getValorIngreso(row) || !toText(row.imagen)}
-                        onClick={() => handleOpenImage("Imagen de ingreso", toText(row.imagen))}
+                        disabled={!getValorIngreso(row) || !getIngresoImage(row)}
+                        onClick={() => handleOpenImage("Imagen de ingreso", getIngresoImage(row))}
                       >
                         Ver imagen
                       </button>
@@ -1081,10 +1207,10 @@ export default function AprobarCampoPage() {
                         type="button"
                         style={{
                           ...styles.linkButton,
-                          ...((getValorSalida(row) && toText(row.imagensalida || row.imagenSalida)) ? {} : disabledButtonStyle),
+                          ...((getValorSalida(row) && getSalidaImage(row)) ? {} : disabledButtonStyle),
                         }}
-                        disabled={!getValorSalida(row) || !toText(row.imagensalida || row.imagenSalida)}
-                        onClick={() => handleOpenImage("Imagen de salida", toText(row.imagensalida || row.imagenSalida))}
+                        disabled={!getValorSalida(row) || !getSalidaImage(row)}
+                        onClick={() => handleOpenImage("Imagen de salida", getSalidaImage(row))}
                       >
                         Ver imagen
                       </button>
@@ -1395,6 +1521,18 @@ export default function AprobarCampoPage() {
                 <p style={styles.modalText}>
                   Responsables ordenados de mayor a menor según la cantidad de registros pendientes.
                 </p>
+                {/* Botón Enviar reporte SIEMPRE visible debajo del título */}
+                <button
+                  type="button"
+                  style={styles.primaryButton}
+                  disabled={!faltaAprobarSelected}
+                  onClick={() => {
+                    // Acción de envío de reporte aquí
+                    alert('Reporte enviado');
+                  }}
+                >
+                  Enviar reporte
+                </button>
               </div>
               <div style={styles.modalHeaderActions}>
                 {faltaAprobarSelected ? (
@@ -1420,6 +1558,12 @@ export default function AprobarCampoPage() {
                   Cerrar
                 </button>
               </div>
+            // ---
+            // ¿Cómo agregar más estados para habilitar el botón?
+            // Cambia la condición de 'faltaAprobarSelected' por:
+            // const estadosReporte = ["FALTA APROBAR", "OTRO_ESTADO", ...];
+            // const puedeEnviarReporte = estadosReporte.includes(filters.estado.trim().toUpperCase());
+            // Y usa 'puedeEnviarReporte' en lugar de 'faltaAprobarSelected' en el botón.
             </div>
 
             {responsablesResumenLoading ? (
@@ -1610,6 +1754,16 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "10px 16px",
     cursor: "pointer",
   },
+  disabledSecondaryButton: {
+    border: "1px solid #E2E8F0",
+    borderRadius: 12,
+    background: "#F8FAFC",
+    color: "#94A3B8",
+    fontWeight: 700,
+    padding: "10px 16px",
+    cursor: "not-allowed",
+    opacity: 0.85,
+  },
   successTinyButton: {
     border: "1px solid #BBF7D0",
     borderRadius: 10,
@@ -1677,6 +1831,15 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#B91C1C",
     padding: "12px 14px",
     fontSize: 14,
+  },
+  prefillBanner: {
+    borderRadius: 12,
+    background: "#EFF6FF",
+    border: "1px solid #BFDBFE",
+    color: "#1D4ED8",
+    padding: "12px 14px",
+    fontSize: 14,
+    fontWeight: 600,
   },
   tableWrapper: {
     width: "100%",

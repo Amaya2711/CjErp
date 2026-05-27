@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import logo from "../assets/logo.png";
 import { clearAuthUser, getAuthUser } from "../utils/authStorage";
-import { logout, sendLogoutBeacon } from "../features/auth/services/authService";
+import { logout } from "../features/auth/services/authService";
 import {
   loadDashboardMenus,
   type DashboardGroup,
@@ -155,28 +155,15 @@ export default function MainLayout() {
   };
 
   useEffect(() => {
-    const handlePageHide = () => {
-      const currentAuthUser = getAuthUser();
-      if (logoutRef.current || !currentAuthUser?.token) {
-        return;
-      }
-
-      logoutRef.current = true;
-      sendLogoutBeacon(currentAuthUser.token);
-      clearAuthUser();
-    };
-
     const handleStorage = (event: StorageEvent) => {
       if (event.key === "authUser" && !event.newValue) {
         window.location.replace("/");
       }
     };
 
-    window.addEventListener("pagehide", handlePageHide);
     window.addEventListener("storage", handleStorage);
 
     return () => {
-      window.removeEventListener("pagehide", handlePageHide);
       window.removeEventListener("storage", handleStorage);
     };
   }, []);

@@ -1,12 +1,13 @@
 import React, { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   matchesCrudToolbarSearch,
   type CrudToolbarSearchField,
 } from "../../components/base/CrudToolbar";
 import { buscarAsistencia, exportarAsistenciaEmpleadoPdf } from "../../api/asistenciaService";
 import type { AsistenciaReporteItem, AsistenciaReportePdfItem } from "../../models/asistencia";
-import { getHttpErrorMessage } from "../../utils/httpError";
+import type { AprobarCampoRow } from "../../models/aprobarCampo";
+import { getHttpErrorMessage } from "../../utils/httpError.ts";
 
 type SelectFilterKey =
   | "estado"
@@ -119,6 +120,20 @@ type CuadrosDetailSortKey =
   | "site"
   | "area"
   | "estadoMarcacionTexto";
+
+type RptAsistenciaReturnState = {
+  returnFromAprobarCampo?: boolean;
+  fechaInicio?: string;
+  fechaFin?: string;
+  activeTab?: "cuadros" | "gerencial" | "detalle" | "empleado";
+  selectedEstadoMarcacion?: string[];
+  selectedAreas?: string[];
+  selectedEstados?: string[];
+  frontendFilters?: Partial<Record<SelectFilterKey, string>>;
+  gerencialQuickFilters?: Partial<GerencialQuickFilters & { topEmpleado?: string | null }>;
+  gerencialDetailFilters?: Partial<GerencialDetailFilters & { nombreEmpleado?: string[] }>;
+  cuadrosDetailFilter?: Partial<{ area: string | null; estadoMarcacion: string | null }>;
+};
 
 const ALL_OPTION = "__ALL__";
 const OBSERVATION_HOURS_THRESHOLD = 9.6;
@@ -531,8 +546,30 @@ function buildEmployeeDateCellDisplay(cell?: EmployeeDateCell) {
   return `${hours} | ${cell.estadoMarcacionTexto}`;
 }
 
+function mapAsistenciaRowToAprobarCampoRow(item: AsistenciaReporteItem): AprobarCampoRow {
+  return {
+    idEmpleado: item.idEmpleado ?? undefined,
+    idempleado: item.idEmpleado ?? undefined,
+    responsable: item.responsable || "",
+    empleado: item.nombreEmpleado || "",
+    nombreempleado: item.nombreEmpleado || "",
+    nombreEmpleado: item.nombreEmpleado || "",
+    estado: item.estadoMarcacionTexto || item.estado || "",
+    fechaasistencia: item.fecha || "",
+    fechaAsistencia: item.fecha || "",
+    ingreso: item.hora || "",
+    hora: item.hora || "",
+    salida: item.salida || "",
+    horasalida: item.salida || "",
+    horaSalida: item.salida || "",
+    comentario: item.comentario || "",
+    observacion: item.observacion || item.comentario || "",
+  };
+}
+
 export default function RptAsistenciaPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const today = new Date();
   const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
@@ -542,7 +579,7 @@ export default function RptAsistenciaPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [busqueda, setBusqueda] = useState("");
-  const [activeTab, setActiveTab] = useState<"cuadros" | "principal" | "detalle" | "empleado">("principal");
+  const [activeTab, setActiveTab] = useState<"cuadros" | "gerencial" | "detalle" | "empleado">("gerencial");
   const [detailDrilldown, setDetailDrilldown] = useState<DetailDrilldown>({
     fecha: null,
     estadoMarcacion: null,
@@ -603,7 +640,7 @@ export default function RptAsistenciaPage() {
   const effectiveResponsableFilter = gerencialQuickFilters.topResponsable ?? gerencialQuickFilters.responsable;
   const effectiveEmployeeFilter = gerencialQuickFilters.topEmpleado ?? null;
   const showAprobarCampoShortcut =
-    activeTab === "principal" &&
+    activeTab === "gerencial" &&
     selectedEstadoMarcacion.includes("FALTA APROBAR");
 
   const deferredSearch = useDeferredValue(busqueda);
@@ -646,6 +683,49 @@ export default function RptAsistenciaPage() {
   useEffect(() => {
     void loadData();
   }, [fechaFin, fechaInicio]);
+
+  useEffect(() => {
+    const navigationState = (location.state as RptAsistenciaReturnState | null) ?? null;
+
+    if (!navigationState?.returnFromAprobarCampo) {
+      return;
+    }
+
+    if (navigationState.fechaInicio) {
+      setFechaInicio(navigationState.fechaInicio);
+    }
+
+    if (navigationState.fechaFin) {
+      setFechaFin(navigationState.fechaFin);
+    }
+
+    setActiveTab(navigationState.activeTab ?? "gerencial");
+    setSelectedEstadoMarcacion(
+      navigationState.selectedEstadoMarcacion?.length
+        ? navigationState.selectedEstadoMarcacion
+        : ["FALTA APROBAR"]
+    );
+    setSelectedAreas(navigationState.selectedAreas ?? []);
+    setSelectedEstados(navigationState.selectedEstados ?? []);
+    setFrontendFilters((prev) => ({
+      ...prev,
+      ...(navigationState.frontendFilters ?? {}),
+    }));
+    setGerencialQuickFilters((prev) => ({
+      ...prev,
+      ...(navigationState.gerencialQuickFilters ?? {}),
+    }));
+    setGerencialDetailFilters((prev) => ({
+      ...prev,
+      ...(navigationState.gerencialDetailFilters ?? {}),
+    }));
+    setCuadrosDetailFilter((prev) => ({
+      ...prev,
+      ...(navigationState.cuadrosDetailFilter ?? {}),
+    }));
+
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.pathname, location.state, navigate]);
 
   useEffect(() => {
     if (!gerencialOverlay) {
@@ -903,14 +983,14 @@ export default function RptAsistenciaPage() {
       .filter((item) => (
         (!cuadrosDetailFilter.area || item.area === cuadrosDetailFilter.area) &&
         (!cuadrosDetailFilter.estadoMarcacion || item.estadoMarcacionTexto === cuadrosDetailFilter.estadoMarcacion) &&
-        (activeTab !== "principal" || !effectiveResponsableFilter || item.responsable === effectiveResponsableFilter) &&
-        (activeTab !== "principal" || !effectiveEmployeeFilter || item.nombreEmpleado === effectiveEmployeeFilter) &&
-        (activeTab !== "principal" || !gerencialQuickFilters.cliente || item.cliente === gerencialQuickFilters.cliente) &&
-        (activeTab !== "principal" || matchesMultiSelect(item.responsable, gerencialDetailFilters.responsable)) &&
-        (activeTab !== "principal" || matchesMultiSelect(item.nombreEmpleado, gerencialDetailFilters.nombreEmpleado ?? [])) &&
-        (activeTab !== "principal" || matchesMultiSelect(item.cliente, gerencialDetailFilters.cliente)) &&
-        (activeTab !== "principal" || matchesMultiSelect(item.proyecto, gerencialDetailFilters.proyecto)) &&
-        (activeTab !== "principal" || matchesMultiSelect(item.site, gerencialDetailFilters.site))
+        (activeTab !== "gerencial" || !effectiveResponsableFilter || item.responsable === effectiveResponsableFilter) &&
+        (activeTab !== "gerencial" || !effectiveEmployeeFilter || item.nombreEmpleado === effectiveEmployeeFilter) &&
+        (activeTab !== "gerencial" || !gerencialQuickFilters.cliente || item.cliente === gerencialQuickFilters.cliente) &&
+        (activeTab !== "gerencial" || matchesMultiSelect(item.responsable, gerencialDetailFilters.responsable)) &&
+        (activeTab !== "gerencial" || matchesMultiSelect(item.nombreEmpleado, gerencialDetailFilters.nombreEmpleado ?? [])) &&
+        (activeTab !== "gerencial" || matchesMultiSelect(item.cliente, gerencialDetailFilters.cliente)) &&
+        (activeTab !== "gerencial" || matchesMultiSelect(item.proyecto, gerencialDetailFilters.proyecto)) &&
+        (activeTab !== "gerencial" || matchesMultiSelect(item.site, gerencialDetailFilters.site))
       ));
 
     return [...base].sort((left, right) => {
@@ -921,6 +1001,70 @@ export default function RptAsistenciaPage() {
       return cuadrosDetailSort.direction === "asc" ? compared : -compared;
     });
   }, [activeTab, cuadrosDetailFilter, cuadrosDetailSort, effectiveEmployeeFilter, effectiveResponsableFilter, filteredRows, gerencialDetailFilters, gerencialQuickFilters]);
+
+  const aprobarCampoInitialRows = useMemo(
+    () =>
+      filteredRows
+        .filter((item) => (
+          (!cuadrosDetailFilter.area || (item.area || "Sin area") === cuadrosDetailFilter.area) &&
+          (!cuadrosDetailFilter.estadoMarcacion || (item.estadoMarcacionTexto || item.estado || "Sin clasificar") === cuadrosDetailFilter.estadoMarcacion) &&
+          (!effectiveResponsableFilter || (item.responsable || "Sin responsable") === effectiveResponsableFilter) &&
+          (!effectiveEmployeeFilter || item.nombreEmpleado === effectiveEmployeeFilter) &&
+          (!gerencialQuickFilters.cliente || (item.cliente || "Sin cliente") === gerencialQuickFilters.cliente) &&
+          matchesMultiSelect(item.responsable || "Sin responsable", gerencialDetailFilters.responsable) &&
+          matchesMultiSelect(item.nombreEmpleado, gerencialDetailFilters.nombreEmpleado ?? []) &&
+          matchesMultiSelect(item.cliente || "Sin cliente", gerencialDetailFilters.cliente) &&
+          matchesMultiSelect(item.proyecto || "Sin proyecto", gerencialDetailFilters.proyecto) &&
+          matchesMultiSelect(item.site || "Sin site", gerencialDetailFilters.site)
+        ))
+        .map(mapAsistenciaRowToAprobarCampoRow),
+    [
+      cuadrosDetailFilter.area,
+      cuadrosDetailFilter.estadoMarcacion,
+      effectiveEmployeeFilter,
+      effectiveResponsableFilter,
+      filteredRows,
+      gerencialDetailFilters,
+      gerencialQuickFilters.cliente,
+    ]
+  );
+
+  const goToAprobarCampo = () => {
+    const responsableSeleccionado =
+      effectiveResponsableFilter ??
+      (gerencialDetailFilters.responsable.length === 1
+        ? gerencialDetailFilters.responsable[0]
+        : null) ??
+      "";
+
+    navigate("/operaciones/operacion/aprobarcampo", {
+      state: {
+        initialFilters: {
+          responsable: responsableSeleccionado,
+        },
+        returnToAsistencia: true,
+        returnState: {
+          returnFromAprobarCampo: true,
+          fechaInicio,
+          fechaFin,
+          activeTab: "gerencial",
+          selectedEstadoMarcacion: selectedEstadoMarcacion.includes("FALTA APROBAR")
+            ? selectedEstadoMarcacion
+            : ["FALTA APROBAR", ...selectedEstadoMarcacion],
+          selectedAreas,
+          selectedEstados,
+          frontendFilters,
+          gerencialQuickFilters,
+          gerencialDetailFilters,
+          cuadrosDetailFilter: {
+            area: cuadrosDetailFilter.area,
+            estadoMarcacion: cuadrosDetailFilter.estadoMarcacion ?? "FALTA APROBAR",
+          },
+        },
+        sourceLabel: "Detalle filtrado de asistencia",
+      },
+    });
+  };
 
   const gerencialDetailFilterOptions = useMemo(
     () => ({
@@ -1189,7 +1333,7 @@ export default function RptAsistenciaPage() {
   const primaryFilterCount = 5;
 
   const isExcelExportDisabled = useMemo(() => {
-    if (activeTab === "cuadros" || activeTab === "principal") {
+    if (activeTab === "cuadros" || activeTab === "gerencial") {
       return chartEstadoPorDia.rows.length === 0 || chartEstadoPorDia.states.length === 0;
     }
     if (activeTab === "detalle") {
@@ -1202,7 +1346,7 @@ export default function RptAsistenciaPage() {
   }, [activeTab, chartEstadoPorDia.rows.length, chartEstadoPorDia.states.length, detailRows.length, filteredEmployeeGridRows.length]);
 
   const isPdfExportDisabled = useMemo(() => {
-    if (activeTab === "cuadros" || activeTab === "principal") {
+    if (activeTab === "cuadros" || activeTab === "gerencial") {
       return chartEstadoPorDia.rows.length === 0 || chartEstadoPorDia.states.length === 0;
     }
     if (activeTab === "detalle") {
@@ -1325,7 +1469,7 @@ export default function RptAsistenciaPage() {
     const XLSX = await import("xlsx");
     const workbook = XLSX.utils.book_new();
 
-    if (activeTab === "cuadros" || activeTab === "principal") {
+    if (activeTab === "cuadros" || activeTab === "gerencial") {
       const estadoRows = chartEstadoPorDia.states.map((state) => {
         const row: Record<string, string> = {
           "Estado / Fecha": state,
@@ -1543,7 +1687,7 @@ export default function RptAsistenciaPage() {
     doc.setFontSize(10);
     doc.text(`Rango: ${toApiDate(fechaInicio)} - ${toApiDate(fechaFin)}`, 14, 23);
 
-    if (activeTab === "cuadros" || activeTab === "principal") {
+    if (activeTab === "cuadros" || activeTab === "gerencial") {
       autoTableModule.default(doc, {
         startY: 30,
         head: [[
@@ -1800,7 +1944,7 @@ export default function RptAsistenciaPage() {
           />
         </div>
         <div style={styles.headerTitleWrap}>
-          <span style={styles.eyebrow}>Reporte Principal</span>
+          <span style={styles.eyebrow}>Reporte Gerencial</span>
           <h1 style={styles.compactTitle}>Analisis de asistencia</h1>
         </div>
         <div style={styles.headerActions}>
@@ -1822,10 +1966,10 @@ export default function RptAsistenciaPage() {
       <section style={styles.segmentedTabs}>
         <button
           type="button"
-          style={activeTab === "principal" ? { ...styles.segmentedTabButton, ...styles.segmentedTabButtonActive } : styles.segmentedTabButton}
-          onClick={() => setActiveTab("principal")}
+          style={activeTab === "gerencial" ? { ...styles.segmentedTabButton, ...styles.segmentedTabButtonActive } : styles.segmentedTabButton}
+          onClick={() => setActiveTab("gerencial")}
         >
-          Principal
+          Gerencial
         </button>
         <button
           type="button"
@@ -1921,7 +2065,7 @@ export default function RptAsistenciaPage() {
 
       {error ? <div style={styles.errorBanner}>{error}</div> : null}
 
-      {activeTab === "cuadros" || activeTab === "principal" ? (
+      {activeTab === "cuadros" || activeTab === "gerencial" ? (
         <>
           <section style={styles.stateSummaryRow}>
             {chartEstadoMarcacion.map((item, index) => {
@@ -1970,7 +2114,7 @@ export default function RptAsistenciaPage() {
                   title="Area x estado de marcacion"
                   subtitle="Cantidades agrupadas por area y diferenciadas por estado segun los filtros actuales"
                 >
-                {activeTab === "principal" ? (
+                {activeTab === "gerencial" ? (
                   <div style={styles.gerencialSummaryToolbar}>
                     <div style={styles.gerencialSummaryToolbarMetrics}>
                       <div style={styles.counterPill}>
@@ -2019,7 +2163,7 @@ export default function RptAsistenciaPage() {
                   onAreaSelect={handleCuadrosAreaClick}
                 />
                 </ChartCard>
-                {activeTab === "principal" ? (false ? (
+                {activeTab === "gerencial" ? (false ? (
                   <ChartCard
                     title="Resumen por empleado"
                     subtitle="Cantidad de registros por empleado según el filtro seleccionado"
@@ -2126,7 +2270,7 @@ export default function RptAsistenciaPage() {
                 ) : gerencialTopResponsablesCard) : null}
               </div>
             </div>
-            {activeTab === "principal" ? (
+            {activeTab === "gerencial" ? (
               <div ref={gerencialDetailSectionRef} style={{ gridColumn: "1 / -1" }}>
                 <div style={styles.gerencialDetailSectionGrid}>
                   <ChartCard
@@ -2156,7 +2300,7 @@ export default function RptAsistenciaPage() {
                         <button
                           type="button"
                           style={styles.gerencialSummaryExportButton}
-                          onClick={() => navigate("/operaciones/operacion/aprobarcampo")}
+                          onClick={goToAprobarCampo}
                           title="Ir a Aprobar Campo"
                           aria-label="Ir a Aprobar Campo"
                         >
@@ -2306,7 +2450,7 @@ export default function RptAsistenciaPage() {
                 type="button"
                 title="Ir a Gerencial"
                 style={{ ...styles.iconButton, marginRight: 4 }}
-                onClick={() => setActiveTab("principal")}
+                onClick={() => setActiveTab("gerencial")}
               >
                 <span style={{ display: "inline-block", verticalAlign: "middle" }}>
                   {/* Icono flecha izquierda */}
@@ -2499,7 +2643,7 @@ export default function RptAsistenciaPage() {
                       <button
                         type="button"
                         style={styles.gerencialSummaryExportButton}
-                        onClick={() => navigate("/operaciones/operacion/aprobarcampo")}
+                        onClick={goToAprobarCampo}
                         title="Ir a Aprobar Campo"
                         aria-label="Ir a Aprobar Campo"
                       >
@@ -2524,6 +2668,19 @@ export default function RptAsistenciaPage() {
                     </button>
                   </>
                 ) : null}
+                {gerencialOverlay === "top" && (
+                  <button
+                    type="button"
+                    style={styles.headerPrimaryButton}
+                    disabled={selectedEstadoMarcacion.length !== 1 || selectedEstadoMarcacion[0].toUpperCase() !== "FALTA APROBAR"}
+                    onClick={() => {
+                      // Acción de envío de reporte aquí
+                      alert('Reporte enviado');
+                    }}
+                  >
+                    Enviar reporte
+                  </button>
+                )}
                 <button
                   type="button"
                   style={styles.summaryOverlayCloseButton}
