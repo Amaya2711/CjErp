@@ -542,7 +542,7 @@ export default function RptAsistenciaPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [busqueda, setBusqueda] = useState("");
-  const [activeTab, setActiveTab] = useState<"cuadros" | "principal" | "detalle" | "empleado">("principal");
+  const [activeTab, setActiveTab] = useState<"cuadros" | "gerencial" | "detalle" | "empleado">("cuadros");
   const [detailDrilldown, setDetailDrilldown] = useState<DetailDrilldown>({
     fecha: null,
     estadoMarcacion: null,
@@ -565,6 +565,7 @@ export default function RptAsistenciaPage() {
   const [selectedEstadoMarcacion, setSelectedEstadoMarcacion] = useState<string[]>([]);
   const [selectedAreas, setSelectedAreas] = useState<string[]>([]);
   const [selectedEstados, setSelectedEstados] = useState<string[]>([]);
+  const [cuadrosViewMode, setCuadrosViewMode] = useState<"fechaEstado" | "evolucionDiaria">("fechaEstado");
   const [cuadrosDetailFilter, setCuadrosDetailFilter] = useState<{ area: string | null; estadoMarcacion: string | null }>({
     area: null,
     estadoMarcacion: null,
@@ -603,7 +604,7 @@ export default function RptAsistenciaPage() {
   const effectiveResponsableFilter = gerencialQuickFilters.topResponsable ?? gerencialQuickFilters.responsable;
   const effectiveEmployeeFilter = gerencialQuickFilters.topEmpleado ?? null;
   const showAprobarCampoShortcut =
-    activeTab === "principal" &&
+    activeTab === "gerencial" &&
     selectedEstadoMarcacion.includes("FALTA APROBAR");
 
   const deferredSearch = useDeferredValue(busqueda);
@@ -903,14 +904,14 @@ export default function RptAsistenciaPage() {
       .filter((item) => (
         (!cuadrosDetailFilter.area || item.area === cuadrosDetailFilter.area) &&
         (!cuadrosDetailFilter.estadoMarcacion || item.estadoMarcacionTexto === cuadrosDetailFilter.estadoMarcacion) &&
-        (activeTab !== "principal" || !effectiveResponsableFilter || item.responsable === effectiveResponsableFilter) &&
-        (activeTab !== "principal" || !effectiveEmployeeFilter || item.nombreEmpleado === effectiveEmployeeFilter) &&
-        (activeTab !== "principal" || !gerencialQuickFilters.cliente || item.cliente === gerencialQuickFilters.cliente) &&
-        (activeTab !== "principal" || matchesMultiSelect(item.responsable, gerencialDetailFilters.responsable)) &&
-        (activeTab !== "principal" || matchesMultiSelect(item.nombreEmpleado, gerencialDetailFilters.nombreEmpleado ?? [])) &&
-        (activeTab !== "principal" || matchesMultiSelect(item.cliente, gerencialDetailFilters.cliente)) &&
-        (activeTab !== "principal" || matchesMultiSelect(item.proyecto, gerencialDetailFilters.proyecto)) &&
-        (activeTab !== "principal" || matchesMultiSelect(item.site, gerencialDetailFilters.site))
+        (activeTab !== "gerencial" || !effectiveResponsableFilter || item.responsable === effectiveResponsableFilter) &&
+        (activeTab !== "gerencial" || !effectiveEmployeeFilter || item.nombreEmpleado === effectiveEmployeeFilter) &&
+        (activeTab !== "gerencial" || !gerencialQuickFilters.cliente || item.cliente === gerencialQuickFilters.cliente) &&
+        (activeTab !== "gerencial" || matchesMultiSelect(item.responsable, gerencialDetailFilters.responsable)) &&
+        (activeTab !== "gerencial" || matchesMultiSelect(item.nombreEmpleado, gerencialDetailFilters.nombreEmpleado ?? [])) &&
+        (activeTab !== "gerencial" || matchesMultiSelect(item.cliente, gerencialDetailFilters.cliente)) &&
+        (activeTab !== "gerencial" || matchesMultiSelect(item.proyecto, gerencialDetailFilters.proyecto)) &&
+        (activeTab !== "gerencial" || matchesMultiSelect(item.site, gerencialDetailFilters.site))
       ));
 
     return [...base].sort((left, right) => {
@@ -1189,7 +1190,7 @@ export default function RptAsistenciaPage() {
   const primaryFilterCount = 5;
 
   const isExcelExportDisabled = useMemo(() => {
-    if (activeTab === "cuadros" || activeTab === "principal") {
+    if (activeTab === "cuadros" || activeTab === "gerencial") {
       return chartEstadoPorDia.rows.length === 0 || chartEstadoPorDia.states.length === 0;
     }
     if (activeTab === "detalle") {
@@ -1202,7 +1203,7 @@ export default function RptAsistenciaPage() {
   }, [activeTab, chartEstadoPorDia.rows.length, chartEstadoPorDia.states.length, detailRows.length, filteredEmployeeGridRows.length]);
 
   const isPdfExportDisabled = useMemo(() => {
-    if (activeTab === "cuadros" || activeTab === "principal") {
+    if (activeTab === "cuadros" || activeTab === "gerencial") {
       return chartEstadoPorDia.rows.length === 0 || chartEstadoPorDia.states.length === 0;
     }
     if (activeTab === "detalle") {
@@ -1271,6 +1272,19 @@ export default function RptAsistenciaPage() {
     });
   };
 
+  const handleStateDateCellClick = (fecha: string, estadoMarcacion: string) => {
+    setDetailDrilldown((prev) => {
+      const isSameSelection = prev.fecha === fecha && prev.estadoMarcacion === estadoMarcacion;
+      return {
+        ...prev,
+        fecha: isSameSelection ? null : fecha,
+        estadoMarcacion: isSameSelection ? null : estadoMarcacion,
+        nombreEmpleado: null,
+      };
+    });
+    setActiveTab("detalle");
+  };
+
   const handleEmployeeDateCellClick = (nombreEmpleado: string, fecha: string) => {
     setDetailDrilldown((prev) => {
       const isSameSelection = prev.fecha === fecha && prev.nombreEmpleado === nombreEmpleado;
@@ -1325,7 +1339,7 @@ export default function RptAsistenciaPage() {
     const XLSX = await import("xlsx");
     const workbook = XLSX.utils.book_new();
 
-    if (activeTab === "cuadros" || activeTab === "principal") {
+    if (activeTab === "cuadros" || activeTab === "gerencial") {
       const estadoRows = chartEstadoPorDia.states.map((state) => {
         const row: Record<string, string> = {
           "Estado / Fecha": state,
@@ -1543,7 +1557,7 @@ export default function RptAsistenciaPage() {
     doc.setFontSize(10);
     doc.text(`Rango: ${toApiDate(fechaInicio)} - ${toApiDate(fechaFin)}`, 14, 23);
 
-    if (activeTab === "cuadros" || activeTab === "principal") {
+    if (activeTab === "cuadros" || activeTab === "gerencial") {
       autoTableModule.default(doc, {
         startY: 30,
         head: [[
@@ -1800,7 +1814,7 @@ export default function RptAsistenciaPage() {
           />
         </div>
         <div style={styles.headerTitleWrap}>
-          <span style={styles.eyebrow}>Reporte Principal</span>
+          <span style={styles.eyebrow}>Reporte Gerencial</span>
           <h1 style={styles.compactTitle}>Analisis de asistencia</h1>
         </div>
         <div style={styles.headerActions}>
@@ -1822,10 +1836,17 @@ export default function RptAsistenciaPage() {
       <section style={styles.segmentedTabs}>
         <button
           type="button"
-          style={activeTab === "principal" ? { ...styles.segmentedTabButton, ...styles.segmentedTabButtonActive } : styles.segmentedTabButton}
-          onClick={() => setActiveTab("principal")}
+          style={activeTab === "cuadros" ? { ...styles.segmentedTabButton, ...styles.segmentedTabButtonActive } : styles.segmentedTabButton}
+          onClick={() => setActiveTab("cuadros")}
         >
-          Principal
+          Cuadros
+        </button>
+        <button
+          type="button"
+          style={activeTab === "gerencial" ? { ...styles.segmentedTabButton, ...styles.segmentedTabButtonActive } : styles.segmentedTabButton}
+          onClick={() => setActiveTab("gerencial")}
+        >
+          Gerencial
         </button>
         <button
           type="button"
@@ -1921,7 +1942,7 @@ export default function RptAsistenciaPage() {
 
       {error ? <div style={styles.errorBanner}>{error}</div> : null}
 
-      {activeTab === "cuadros" || activeTab === "principal" ? (
+      {activeTab === "cuadros" || activeTab === "gerencial" ? (
         <>
           <section style={styles.stateSummaryRow}>
             {chartEstadoMarcacion.map((item, index) => {
@@ -1962,6 +1983,28 @@ export default function RptAsistenciaPage() {
                     onSelect={handleOrigenClick}
                   />
                 </ChartCard>
+                {activeTab === "cuadros" ? (
+                  <div style={styles.cuadrosRadioPanel}>
+                    <label style={styles.cuadrosRadioOption}>
+                      <input
+                        type="radio"
+                        name="cuadros-view-mode"
+                        checked={cuadrosViewMode === "fechaEstado"}
+                        onChange={() => setCuadrosViewMode("fechaEstado")}
+                      />
+                      <span>Fecha por estado</span>
+                    </label>
+                    <label style={styles.cuadrosRadioOption}>
+                      <input
+                        type="radio"
+                        name="cuadros-view-mode"
+                        checked={cuadrosViewMode === "evolucionDiaria"}
+                        onChange={() => setCuadrosViewMode("evolucionDiaria")}
+                      />
+                      <span>Evolucion diaria</span>
+                    </label>
+                  </div>
+                ) : null}
               </div>
             </div>
             <div style={{ gridColumn: "2 / 3" }}>
@@ -1970,7 +2013,7 @@ export default function RptAsistenciaPage() {
                   title="Area x estado de marcacion"
                   subtitle="Cantidades agrupadas por area y diferenciadas por estado segun los filtros actuales"
                 >
-                {activeTab === "principal" ? (
+                {activeTab === "gerencial" ? (
                   <div style={styles.gerencialSummaryToolbar}>
                     <div style={styles.gerencialSummaryToolbarMetrics}>
                       <div style={styles.counterPill}>
@@ -2019,7 +2062,27 @@ export default function RptAsistenciaPage() {
                   onAreaSelect={handleCuadrosAreaClick}
                 />
                 </ChartCard>
-                {activeTab === "principal" ? (false ? (
+                {activeTab === "cuadros" ? (
+                  <ChartCard
+                    title="Detalle filtrado"
+                    subtitle="Fecha, empleado, area y estado segun los filtros activos"
+                  >
+                    <div style={{ ...styles.counterPill, alignSelf: "flex-start", marginBottom: 10 }}>
+                      {cuadroDetalleRows.length} registro{cuadroDetalleRows.length === 1 ? "" : "s"}
+                    </div>
+                    <SimpleCuadrosDetailGrid
+                      data={cuadroDetalleRows}
+                      sortKey={cuadrosDetailSort.key}
+                      sortDirection={cuadrosDetailSort.direction}
+                      onToggleSort={(key) =>
+                        setCuadrosDetailSort((prev) => ({
+                          key,
+                          direction: prev.key === key ? (prev.direction === "asc" ? "desc" : "asc") : "asc",
+                        }))
+                      }
+                    />
+                  </ChartCard>
+                ) : activeTab === "gerencial" ? (false ? (
                   <ChartCard
                     title="Resumen por empleado"
                     subtitle="Cantidad de registros por empleado según el filtro seleccionado"
@@ -2126,7 +2189,7 @@ export default function RptAsistenciaPage() {
                 ) : gerencialTopResponsablesCard) : null}
               </div>
             </div>
-            {activeTab === "principal" ? (
+            {activeTab === "gerencial" ? (
               <div ref={gerencialDetailSectionRef} style={{ gridColumn: "1 / -1" }}>
                 <div style={styles.gerencialDetailSectionGrid}>
                   <ChartCard
@@ -2274,7 +2337,31 @@ export default function RptAsistenciaPage() {
                   </ChartCard> : gerencialEmployeeSummaryCard}
                 </div>
               </div>
-            ) : null}
+            ) : cuadrosViewMode === "fechaEstado" ? (
+              <div style={{ gridColumn: "1 / -1" }}>
+                <ChartCard title="Fecha x estado de marcacion por dia" subtitle="Fechas en eje X y estados de marcacion en eje Y">
+                  <SimpleStateDateGrid
+                    data={chartEstadoPorDia.rows}
+                    states={chartEstadoPorDia.states}
+                    selectedFecha={detailDrilldown.fecha}
+                    selectedEstado={detailDrilldown.estadoMarcacion}
+                    onSelect={handleStateDateCellClick}
+                  />
+                </ChartCard>
+              </div>
+            ) : (
+              <div style={{ gridColumn: "1 / -1" }}>
+                <ChartCard
+                  title="Evolucion diaria por estado de marcacion"
+                  subtitle="Cantidad de registros por EstadoMarcacionTexto en el tiempo"
+                >
+                  <SimpleStateEvolutionChart
+                    data={chartEstadoPorDia.rows}
+                    states={chartEstadoPorDia.states}
+                  />
+                </ChartCard>
+              </div>
+            )}
           </section>
         </>
       ) : null}
@@ -2304,9 +2391,9 @@ export default function RptAsistenciaPage() {
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <button
                 type="button"
-                title="Ir a Gerencial"
+                title="Ir a Cuadros"
                 style={{ ...styles.iconButton, marginRight: 4 }}
-                onClick={() => setActiveTab("principal")}
+                onClick={() => setActiveTab("cuadros")}
               >
                 <span style={{ display: "inline-block", verticalAlign: "middle" }}>
                   {/* Icono flecha izquierda */}
