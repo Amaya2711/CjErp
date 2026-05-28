@@ -17,6 +17,10 @@ export type AprobarCampoRow = Record<string, unknown> & {
   horaSalida?: string;
   comentario?: string;
   observacion?: string;
+  estadomarcacion?: number | string;
+  estadoMarcacion?: number | string;
+  estadosalida?: number | string;
+  estadoSalida?: number | string;
   latitud?: string;
   longitud?: string;
   latitudsalida?: string;
@@ -69,6 +73,7 @@ export type AprobarCampoGuardarRequest = {
 
 export type AprobarCampoAccionRequest = AprobarCampoClave & {
   observacion: string;
+  idAprobador?: number;
   usuarioAccion?: string;
 };
 

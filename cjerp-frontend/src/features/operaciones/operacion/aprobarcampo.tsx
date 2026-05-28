@@ -145,6 +145,22 @@ function toText(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function isEstadoPendienteValidacion(value: unknown) {
+  return Number(toText(value)) === 9;
+}
+
+function canApproveIngreso(row: AprobarCampoRow) {
+  return isEstadoPendienteValidacion(row.estadomarcacion ?? row.estadoMarcacion);
+}
+
+function canApproveSalida(row: AprobarCampoRow) {
+  return isEstadoPendienteValidacion(row.estadosalida ?? row.estadoSalida);
+}
+
+function canRejectRow(row: AprobarCampoRow) {
+  return canApproveIngreso(row) || canApproveSalida(row);
+}
+
 function getValorIngreso(row: AprobarCampoRow) {
   const val = toText(row.ingreso || row.hora);
   return val && val !== "-" ? val : "";
@@ -469,6 +485,7 @@ export default function AprobarCampoPage() {
         authUser?.nombreEmpleado ??
         "sistema"
     ).trim() || "sistema";
+  const idAprobador = Number(authUser?.idEmpleado ?? authUser?.codEmp ?? 0) || undefined;
 
   const [filters, setFilters] = useState<FilterState>(initialFilters);
   const [search, setSearch] = useState("");
@@ -820,7 +837,7 @@ export default function AprobarCampoPage() {
   const handleConfirmAction = async () => {
     if (!actionModal) return;
 
-    if (!actionComment.trim()) {
+    if (actionModal.type === "rechazar" && !actionComment.trim()) {
       setActionError("Debe ingresar una observación.");
       return;
     }
@@ -828,6 +845,7 @@ export default function AprobarCampoPage() {
     const payload: AprobarCampoAccionRequest = {
       ...buildClaveFromRow(actionModal.row),
       observacion: actionComment.trim(),
+      idAprobador,
       usuarioAccion,
     };
 
@@ -1105,7 +1123,24 @@ export default function AprobarCampoPage() {
                   </td>
                 </tr>
               ) : (
-                pagedRows.map((row) => (
+                pagedRows.map((row) => {
+                  const ingresoActionEnabled =
+                    canApproveIngreso(row) &&
+                    Boolean(getValorIngreso(row)) &&
+                    hasCoordinates(getIngresoCoordinates(row).lat, getIngresoCoordinates(row).lng);
+                  const salidaActionEnabled =
+                    canApproveSalida(row) &&
+                    Boolean(getValorSalida(row)) &&
+                    hasCoordinates(getSalidaCoordinates(row).lat, getSalidaCoordinates(row).lng);
+                  const rechazoEnabled = canRejectRow(row);
+                  const ingresoMapEnabled = ingresoActionEnabled;
+                  const salidaMapEnabled = salidaActionEnabled;
+                  const ingresoImageEnabled =
+                    canApproveIngreso(row) && Boolean(getValorIngreso(row)) && Boolean(getIngresoImage(row));
+                  const salidaImageEnabled =
+                    canApproveSalida(row) && Boolean(getValorSalida(row)) && Boolean(getSalidaImage(row));
+
+                  return (
                   <tr key={buildRowKey(row)}>
                     <td style={styles.td}>
                       <div style={styles.rowActions}>
@@ -1115,10 +1150,10 @@ export default function AprobarCampoPage() {
                           style={{
                             ...styles.successTinyButton,
                             // Deshabilitar si el botón de mapa ingreso está inactivo
-                            ...(getValorIngreso(row) && hasCoordinates(getIngresoCoordinates(row).lat, getIngresoCoordinates(row).lng) ? {} : disabledButtonStyle),
+                            ...(ingresoActionEnabled ? {} : disabledButtonStyle),
                           }}
                           onClick={() => handleOpenAction("aprobar-ingreso", row)}
-                          disabled={!(getValorIngreso(row) && hasCoordinates(getIngresoCoordinates(row).lat, getIngresoCoordinates(row).lng))}
+                          disabled={!ingresoActionEnabled}
                           title="Aprobar ingreso"
                         >
                           <span role="img" aria-label="Aprobar ingreso">✅</span>
@@ -1128,18 +1163,22 @@ export default function AprobarCampoPage() {
                           style={{
                             ...styles.successTinyButton,
                             // Deshabilitar si el botón de mapa salida está inactivo
-                            ...(getValorSalida(row) && hasCoordinates(getSalidaCoordinates(row).lat, getSalidaCoordinates(row).lng) ? {} : disabledButtonStyle),
+                            ...(salidaActionEnabled ? {} : disabledButtonStyle),
                           }}
                           onClick={() => handleOpenAction("aprobar-salida", row)}
-                          disabled={!(getValorSalida(row) && hasCoordinates(getSalidaCoordinates(row).lat, getSalidaCoordinates(row).lng))}
+                          disabled={!salidaActionEnabled}
                           title="Aprobar salida"
                         >
                           <span role="img" aria-label="Aprobar salida">🕒</span>
                         </button>
                         <button
                           type="button"
-                          style={styles.dangerTinyButton}
+                          style={{
+                            ...styles.dangerTinyButton,
+                            ...(rechazoEnabled ? {} : disabledButtonStyle),
+                          }}
                           onClick={() => handleOpenAction("rechazar", row)}
+                          disabled={!rechazoEnabled}
                           title="Rechazar"
                         >
                           <span role="img" aria-label="Rechazar">❌</span>
@@ -1166,9 +1205,9 @@ export default function AprobarCampoPage() {
                         type="button"
                         style={{
                           ...styles.linkButton,
-                          ...((getValorIngreso(row) && hasCoordinates(getIngresoCoordinates(row).lat, getIngresoCoordinates(row).lng)) ? {} : disabledButtonStyle),
+                          ...(ingresoMapEnabled ? {} : disabledButtonStyle),
                         }}
-                        disabled={!getValorIngreso(row) || !hasCoordinates(getIngresoCoordinates(row).lat, getIngresoCoordinates(row).lng)}
+                        disabled={!ingresoMapEnabled}
                         onClick={() => handleOpenMap("Ubicación de ingreso", toText(row.latitud), toText(row.longitud))}
                       >
                         Ver mapa
@@ -1179,9 +1218,9 @@ export default function AprobarCampoPage() {
                         type="button"
                         style={{
                           ...styles.linkButton,
-                          ...((getValorSalida(row) && hasCoordinates(getSalidaCoordinates(row).lat, getSalidaCoordinates(row).lng)) ? {} : disabledButtonStyle),
+                          ...(salidaMapEnabled ? {} : disabledButtonStyle),
                         }}
-                        disabled={!getValorSalida(row) || !hasCoordinates(getSalidaCoordinates(row).lat, getSalidaCoordinates(row).lng)}
+                        disabled={!salidaMapEnabled}
                         onClick={() =>
                           handleOpenMap("Ubicación de salida", toText(row.latitudsalida || row.latitudSalida), toText(row.longitudsalida || row.longitudSalida))
                         }
@@ -1194,9 +1233,9 @@ export default function AprobarCampoPage() {
                         type="button"
                         style={{
                           ...styles.linkButton,
-                          ...((getValorIngreso(row) && getIngresoImage(row)) ? {} : disabledButtonStyle),
+                          ...(ingresoImageEnabled ? {} : disabledButtonStyle),
                         }}
-                        disabled={!getValorIngreso(row) || !getIngresoImage(row)}
+                        disabled={!ingresoImageEnabled}
                         onClick={() => handleOpenImage("Imagen de ingreso", getIngresoImage(row))}
                       >
                         Ver imagen
@@ -1207,16 +1246,17 @@ export default function AprobarCampoPage() {
                         type="button"
                         style={{
                           ...styles.linkButton,
-                          ...((getValorSalida(row) && getSalidaImage(row)) ? {} : disabledButtonStyle),
+                          ...(salidaImageEnabled ? {} : disabledButtonStyle),
                         }}
-                        disabled={!getValorSalida(row) || !getSalidaImage(row)}
+                        disabled={!salidaImageEnabled}
                         onClick={() => handleOpenImage("Imagen de salida", getSalidaImage(row))}
                       >
                         Ver imagen
                       </button>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>

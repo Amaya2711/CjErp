@@ -156,25 +156,95 @@ public class AsistenciaValidarCampoService : IAsistenciaValidarCampoService
         };
     }
 
-    public Task<AsistenciaValidarCampoOperacionResultadoDto> AprobarIngresoAsync(
+    public async Task<AsistenciaValidarCampoOperacionResultadoDto> AprobarIngresoAsync(
         AsistenciaValidarCampoAccionDto request,
         CancellationToken cancellationToken = default)
     {
-        return EjecutarAccionAsync("Aprobar ingreso", request, cancellationToken);
+        ValidateClave(request);
+        if (request.IdAprobador is not > 0)
+        {
+            throw new InvalidOperationException("No se pudo resolver el IdAprobador de la acciÃ³n.");
+        }
+        using var connection = BuildConnection();
+        var parameters = new DynamicParameters();
+        parameters.Add("@idempleado", request.IdEmpleado, DbType.Int32);
+        parameters.Add("@Fechaasistencia", NormalizeDate(request.FechaAsistencia!), DbType.String);
+        parameters.Add("@IdAprobador", request.IdAprobador.Value, DbType.Int32);
+        // El SP puede requerir otros parámetros, agregar si es necesario
+        await connection.ExecuteAsync(new CommandDefinition(
+            "sp_Asistencia_AprobarIngreso",
+            parameters,
+            commandType: CommandType.StoredProcedure,
+            cancellationToken: cancellationToken));
+
+        // Obtener el registro actualizado para devolverlo
+        var row = await GetCurrentRowAsync(connection, request, cancellationToken);
+        return new AsistenciaValidarCampoOperacionResultadoDto
+        {
+            IdRegistro = BuildRegistroId(request),
+            Row = row
+        };
     }
 
-    public Task<AsistenciaValidarCampoOperacionResultadoDto> AprobarSalidaAsync(
+    public async Task<AsistenciaValidarCampoOperacionResultadoDto> AprobarSalidaAsync(
         AsistenciaValidarCampoAccionDto request,
         CancellationToken cancellationToken = default)
     {
-        return EjecutarAccionAsync("Aprobar salida", request, cancellationToken);
+        ValidateClave(request);
+        if (request.IdAprobador is not > 0)
+        {
+            throw new InvalidOperationException("No se pudo resolver el IdAprobador de la acciÃ³n.");
+        }
+        using var connection = BuildConnection();
+        var parameters = new DynamicParameters();
+        parameters.Add("@idempleado", request.IdEmpleado, DbType.Int32);
+        parameters.Add("@Fechaasistencia", NormalizeDate(request.FechaAsistencia!), DbType.String);
+        parameters.Add("@IdAprobador", request.IdAprobador.Value, DbType.Int32);
+        await connection.ExecuteAsync(new CommandDefinition(
+            "sp_Asistencia_AprobarSalida",
+            parameters,
+            commandType: CommandType.StoredProcedure,
+            cancellationToken: cancellationToken));
+
+        var row = await GetCurrentRowAsync(connection, request, cancellationToken);
+        return new AsistenciaValidarCampoOperacionResultadoDto
+        {
+            IdRegistro = BuildRegistroId(request),
+            Row = row
+        };
     }
 
-    public Task<AsistenciaValidarCampoOperacionResultadoDto> RechazarAsync(
+    public async Task<AsistenciaValidarCampoOperacionResultadoDto> RechazarAsync(
         AsistenciaValidarCampoAccionDto request,
         CancellationToken cancellationToken = default)
     {
-        return EjecutarAccionAsync("Rechazar", request, cancellationToken);
+        ValidateClave(request);
+        if (request.IdAprobador is not > 0)
+        {
+            throw new InvalidOperationException("No se pudo resolver el IdAprobador de la acciÃ³n.");
+        }
+        if (string.IsNullOrWhiteSpace(request.Observacion))
+        {
+            throw new InvalidOperationException("Debe ingresar un motivo de rechazo.");
+        }
+        using var connection = BuildConnection();
+        var parameters = new DynamicParameters();
+        parameters.Add("@idempleado", request.IdEmpleado, DbType.Int32);
+        parameters.Add("@Fechaasistencia", NormalizeDate(request.FechaAsistencia!), DbType.String);
+        parameters.Add("@IdAprobador", request.IdAprobador.Value, DbType.Int32);
+        parameters.Add("@Motivo", request.Observacion.Trim(), DbType.String);
+        await connection.ExecuteAsync(new CommandDefinition(
+            "sp_Asistencia_RechazarDocumento",
+            parameters,
+            commandType: CommandType.StoredProcedure,
+            cancellationToken: cancellationToken));
+
+        var row = await GetCurrentRowAsync(connection, request, cancellationToken);
+        return new AsistenciaValidarCampoOperacionResultadoDto
+        {
+            IdRegistro = BuildRegistroId(request),
+            Row = row
+        };
     }
 
     private async Task<AsistenciaValidarCampoOperacionResultadoDto> EjecutarAccionAsync(

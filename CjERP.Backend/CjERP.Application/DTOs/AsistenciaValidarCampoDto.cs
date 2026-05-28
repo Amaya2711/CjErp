@@ -42,6 +42,7 @@ public class AsistenciaValidarCampoGuardarDto
 public class AsistenciaValidarCampoAccionDto : AsistenciaValidarCampoClaveDto
 {
     public string Observacion { get; set; } = string.Empty;
+    public int? IdAprobador { get; set; }
     public string? UsuarioAccion { get; set; }
 }
 

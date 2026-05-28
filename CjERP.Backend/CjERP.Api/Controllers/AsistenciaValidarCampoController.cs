@@ -67,6 +67,11 @@ public class AsistenciaValidarCampoController : ControllerBase
         CancellationToken cancellationToken)
     {
         request.UsuarioAccion = ResolveUsuario(request.UsuarioAccion);
+        request.IdAprobador ??= ResolveIdAprobador();
+        if (request.IdAprobador is null or <= 0)
+        {
+            return BadRequest(new { success = false, message = "No se pudo resolver el aprobador actual." });
+        }
         var data = await _asistenciaValidarCampoService.AprobarIngresoAsync(request, cancellationToken);
         return Ok(new { success = true, message = "Ingreso aprobado correctamente.", data });
     }
@@ -77,6 +82,11 @@ public class AsistenciaValidarCampoController : ControllerBase
         CancellationToken cancellationToken)
     {
         request.UsuarioAccion = ResolveUsuario(request.UsuarioAccion);
+        request.IdAprobador ??= ResolveIdAprobador();
+        if (request.IdAprobador is null or <= 0)
+        {
+            return BadRequest(new { success = false, message = "No se pudo resolver el aprobador actual." });
+        }
         var data = await _asistenciaValidarCampoService.AprobarSalidaAsync(request, cancellationToken);
         return Ok(new { success = true, message = "Salida aprobada correctamente.", data });
     }
@@ -87,8 +97,24 @@ public class AsistenciaValidarCampoController : ControllerBase
         CancellationToken cancellationToken)
     {
         request.UsuarioAccion = ResolveUsuario(request.UsuarioAccion);
+        request.IdAprobador ??= ResolveIdAprobador();
+        if (request.IdAprobador is null or <= 0)
+        {
+            return BadRequest(new { success = false, message = "No se pudo resolver el aprobador actual." });
+        }
         var data = await _asistenciaValidarCampoService.RechazarAsync(request, cancellationToken);
         return Ok(new { success = true, message = "Registro rechazado correctamente.", data });
+    }
+
+    private int? ResolveIdAprobador()
+    {
+        var aprobadorClaim = User.FindFirstValue("IdEmpleado")
+            ?? User.FindFirstValue("CodEmp")
+            ?? User.FindFirstValue("CodEmpleadoMostrar");
+
+        return int.TryParse(aprobadorClaim, out var idAprobador) && idAprobador > 0
+            ? idAprobador
+            : null;
     }
 
     private string ResolveUsuario(string? usuario)
