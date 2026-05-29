@@ -201,7 +201,6 @@ public class AsistenciaValidarCampoService : IAsistenciaValidarCampoService
         parameters.Add("@idempleado", request.IdEmpleado, DbType.Int32);
         parameters.Add("@Fechaasistencia", NormalizeDate(request.FechaAsistencia!), DbType.String);
         parameters.Add("@IdAprobador", request.IdAprobador.Value, DbType.Int32);
-        parameters.Add("@Usuario", ResolveUsuarioAccion(request.UsuarioAccion), DbType.String);
         await connection.ExecuteAsync(new CommandDefinition(
             "sp_Asistencia_AprobarSalida",
             parameters,
