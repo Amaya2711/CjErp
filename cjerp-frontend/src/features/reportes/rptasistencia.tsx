@@ -1479,6 +1479,14 @@ export default function RptAsistenciaPage() {
     setActiveTab("detalle");
   };
 
+  const handleCuadroEmployeeSelect = (employee: string) => {
+    setEmployeeGridFilters((prev) => ({
+      ...prev,
+      employee,
+    }));
+    setActiveTab("empleado");
+  };
+
   const handleOrigenClick = (origenMarcacion: string) => {
     setDetailDrilldown((prev) => ({
       ...prev,
@@ -2597,6 +2605,7 @@ export default function RptAsistenciaPage() {
                   direction: prev.key === key ? (prev.direction === "asc" ? "desc" : "asc") : "desc",
                 }))
               }
+              onRowSelect={handleCuadroEmployeeSelect}
             />
           </ChartCard>
         </section>
@@ -3769,6 +3778,7 @@ function SimpleEmployeeStateGrid({
   sortKey,
   sortDirection,
   onToggleSort,
+  onRowSelect,
 }: {
   data: EmployeeDateRow[];
   states: string[];
@@ -3786,6 +3796,7 @@ function SimpleEmployeeStateGrid({
   sortKey: EmployeeGridSortKey;
   sortDirection: "asc" | "desc";
   onToggleSort: (key: EmployeeGridSortKey) => void;
+  onRowSelect?: (employee: string) => void;
 }) {
   const getDifferenceTone = (difference: number) => {
     if (difference < 0) {
@@ -3974,6 +3985,12 @@ function SimpleEmployeeStateGrid({
             </div>
           ) : data.map((item) => {
             const differenceTone = getDifferenceTone(item.diferenciaHoras);
+            const rowSelectProps = onRowSelect
+              ? {
+                  onClick: () => onRowSelect(item.employee),
+                  title: `Ver ${item.employee} en x empleado`,
+                }
+              : {};
             return (
               <React.Fragment key={item.employee}>
                 <div
@@ -3982,7 +3999,9 @@ function SimpleEmployeeStateGrid({
                     ...styles.employeeGridRowLabel,
                     background: differenceTone.rowBackground,
                     color: differenceTone.rowText,
+                    cursor: onRowSelect ? "pointer" : "default",
                   }}
+                  {...rowSelectProps}
                 >
                   <span style={styles.employeeGridRowName}>{item.employee}</span>
                   <span style={styles.employeeGridRowMeta}>{item.ubicacion || "Sin ubicacion"}</span>
@@ -3993,8 +4012,9 @@ function SimpleEmployeeStateGrid({
                     ...styles.employeeGridValidationCell,
                     background: differenceTone.rowBackground,
                     color: differenceTone.rowText,
+                    cursor: onRowSelect ? "pointer" : "default",
                   }}
-                  title={`${item.employee}: ${item.responsable || "Sin responsable"}`}
+                  {...rowSelectProps}
                 >
                   <span style={styles.employeeGridValidationText}>{item.responsable || "Sin responsable"}</span>
                 </div>
@@ -4004,7 +4024,9 @@ function SimpleEmployeeStateGrid({
                     ...styles.employeeGridTotalCell,
                     background: differenceTone.rowBackground,
                     color: differenceTone.rowText,
+                    cursor: onRowSelect ? "pointer" : "default",
                   }}
+                  {...rowSelectProps}
                 >
                   <span style={styles.stateDateGridCellCount}>{item.total > 0 ? formatDecimal(item.total, 2) : "0.00"}</span>
                   <span style={styles.stateDateGridCellHours}>h</span>
@@ -4015,7 +4037,9 @@ function SimpleEmployeeStateGrid({
                     ...styles.employeeGridTotalCell,
                     background: item.totalHorasFaltaIncompleto > 0 ? "#FEF3C7" : "#F8FAFC",
                     color: item.totalHorasFaltaIncompleto > 0 ? "#92400E" : "#94A3B8",
+                    cursor: onRowSelect ? "pointer" : "default",
                   }}
+                  {...rowSelectProps}
                 >
                   <span style={styles.stateDateGridCellCount}>{item.totalHorasFaltaIncompleto > 0 ? formatDecimal(item.totalHorasFaltaIncompleto, 2) : "0.00"}</span>
                   <span style={styles.stateDateGridCellHours}>h</span>
@@ -4026,7 +4050,9 @@ function SimpleEmployeeStateGrid({
                     ...styles.employeeGridTotalCell,
                     background: item.totalHorasFaltaAprobar > 0 ? "#DBEAFE" : "#F8FAFC",
                     color: item.totalHorasFaltaAprobar > 0 ? "#1D4ED8" : "#94A3B8",
+                    cursor: onRowSelect ? "pointer" : "default",
                   }}
+                  {...rowSelectProps}
                 >
                   <span style={styles.stateDateGridCellCount}>{item.totalHorasFaltaAprobar > 0 ? formatDecimal(item.totalHorasFaltaAprobar, 2) : "0.00"}</span>
                   <span style={styles.stateDateGridCellHours}>h</span>
@@ -4037,7 +4063,9 @@ function SimpleEmployeeStateGrid({
                     ...styles.employeeGridTotalCell,
                     background: differenceTone.rowBackground,
                     color: differenceTone.rowText,
+                    cursor: onRowSelect ? "pointer" : "default",
                   }}
+                  {...rowSelectProps}
                 >
                   <span style={styles.stateDateGridCellCount}>{item.totalHorasLaborales > 0 ? formatDecimal(item.totalHorasLaborales, 2) : "0.00"}</span>
                   <span style={styles.stateDateGridCellHours}>h</span>
@@ -4048,7 +4076,9 @@ function SimpleEmployeeStateGrid({
                     ...styles.employeeGridTotalCell,
                     background: differenceTone.accentBackground,
                     color: differenceTone.accentText,
+                    cursor: onRowSelect ? "pointer" : "default",
                   }}
+                  {...rowSelectProps}
                 >
                   <span style={styles.stateDateGridCellCount}>{formatDecimal(item.diferenciaHoras, 2)}</span>
                   <span style={styles.stateDateGridCellHours}>h</span>
@@ -4059,7 +4089,9 @@ function SimpleEmployeeStateGrid({
                     ...styles.employeeGridValidationCell,
                     background: differenceTone.rowBackground,
                     color: differenceTone.rowText,
+                    cursor: onRowSelect ? "pointer" : "default",
                   }}
+                  {...rowSelectProps}
                 >
                   <span style={styles.employeeGridValidationText}>{item.estadoValidacionHoras || "Sin validacion"}</span>
                 </div>
@@ -4074,8 +4106,9 @@ function SimpleEmployeeStateGrid({
                         background: count > 0 ? stateVisual.soft : "#FFFFFF",
                         color: count > 0 ? stateVisual.text : "#94A3B8",
                         border: "1px solid #E5E7EB",
+                        cursor: onRowSelect ? "pointer" : "default",
                       }}
-                      title={`${item.employee}: ${count} registro${count === 1 ? "" : "s"} en ${state}`}
+                      {...rowSelectProps}
                     >
                       <span style={styles.stateDateGridCellCount}>{count}</span>
                     </div>
