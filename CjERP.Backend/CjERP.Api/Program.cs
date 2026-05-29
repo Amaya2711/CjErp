@@ -29,11 +29,22 @@ builder.Services.Configure<ReporteWhatsappJobDefaultsOptions>(
 var jwtSettings = builder.Configuration
     .GetSection("JwtSettings")
     .Get<JwtSettings>()!;
-var allowedOrigins = builder.Configuration
+var configuredOrigins = builder.Configuration
     .GetSection("Cors:AllowedOrigins")
     .Get<string[]>()?
     .Where(origin => !string.IsNullOrWhiteSpace(origin))
     .ToArray() ?? Array.Empty<string>();
+var defaultCorsOrigins = new[]
+{
+    "https://cj-erp.vercel.app",
+    "http://localhost:5173",
+    "https://localhost:5173"
+};
+var allowedOrigins = configuredOrigins
+    .Concat(defaultCorsOrigins)
+    .Where(origin => !string.IsNullOrWhiteSpace(origin))
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
 
 QuestPDF.Settings.License = LicenseType.Community;
 var defaultConnection = builder.Configuration.GetConnectionString("DefaultConnection");
@@ -152,13 +163,10 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("ReactPolicy", policy =>
     {
-        if (allowedOrigins.Length > 0)
-        {
-            policy
-                .WithOrigins(allowedOrigins)
-                .AllowAnyHeader()
-                .AllowAnyMethod();
-        }
+        policy
+            .WithOrigins(allowedOrigins)
+            .AllowAnyHeader()
+            .AllowAnyMethod();
     });
 });
 
