@@ -731,7 +731,7 @@ public sealed class ReporteRepository : IReporteRepository
             NombreEmpleado = GetString(values, "NombreEmpleado", "nombreEmpleado", "Usuario", "usuario"),
             Correo = GetString(values, "Correo", "correo", "Email", "email"),
             Telefono = GetString(values, "Telefono", "telefono", "Celular", "celular", "TelefonoWup", "telefonoWup"),
-            Ubicacion = GetString(values, "Ubicacion", "ubicacion", "Sede", "sede")
+            Ubicacion = GetString(values, "Ubicacion", "ubicacion", "ValorIni", "valorini", "Sede", "sede")
         };
     }
 
@@ -752,7 +752,7 @@ public sealed class ReporteRepository : IReporteRepository
             Responsable = GetString(values, "Responsable", "responsable"),
             Estado = GetString(values, "Estado", "estado"),
             EstadoMarcacionTexto = GetString(values, "EstadoMarcacionTexto", "estadoMarcacionTexto", "Estado", "estado"),
-            Ubicacion = GetString(values, "Ubicacion", "ubicacion"),
+            Ubicacion = GetString(values, "Ubicacion", "ubicacion", "ValorIni", "valorini"),
             HoraEntrada = GetTimeText(values, "HoraEntrada", "horaEntrada", "Hora", "hora"),
             HoraSalida = GetTimeText(values, "HoraSalida", "horaSalida", "Salida", "salida"),
             TiempoHoras = GetString(values, "TiempoHoras", "tiempoHoras", "TiempoTrabajado", "tiempoTrabajado"),
