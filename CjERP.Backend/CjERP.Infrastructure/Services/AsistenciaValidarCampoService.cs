@@ -234,7 +234,6 @@ public class AsistenciaValidarCampoService : IAsistenciaValidarCampoService
         parameters.Add("@Fechaasistencia", NormalizeDate(request.FechaAsistencia!), DbType.String);
         parameters.Add("@IdAprobador", request.IdAprobador.Value, DbType.Int32);
         parameters.Add("@Motivo", request.Observacion.Trim(), DbType.String);
-        parameters.Add("@Usuario", ResolveUsuarioAccion(request.UsuarioAccion), DbType.String);
         await connection.ExecuteAsync(new CommandDefinition(
             "sp_Asistencia_RechazarDocumento",
             parameters,

@@ -121,6 +121,7 @@ builder.Services.AddScoped<ISegUsuarioService, SegUsuarioService>();
 builder.Services.AddScoped<ISegRolMenuPermisoService, SegRolMenuPermisoService>();
 builder.Services.AddScoped<ILookupService, LookupService>();
 builder.Services.AddScoped<IEmpleadoCtaService, EmpleadoCtaService>();
+builder.Services.AddScoped<IChequeEmpleadoService, ChequeEmpleadoService>();
 builder.Services.AddScoped<IPlanillaService, PlanillaService>();
 builder.Services.AddScoped<IPlanillaConsultaService, PlanillaConsultaService>();
 builder.Services.AddScoped<IOrdenCompraService, OrdenCompraService>();
