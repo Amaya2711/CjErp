@@ -232,7 +232,7 @@ public class AsistenciaValidarCampoService : IAsistenciaValidarCampoService
         var parameters = new DynamicParameters();
         parameters.Add("@idempleado", request.IdEmpleado, DbType.Int32);
         parameters.Add("@Fechaasistencia", NormalizeDate(request.FechaAsistencia!), DbType.String);
-        parameters.Add("@IdAprobador", request.IdAprobador.Value, DbType.Int32);
+        parameters.Add("@IdRechazador", request.IdAprobador.Value, DbType.Int32);
         parameters.Add("@Motivo", request.Observacion.Trim(), DbType.String);
         await connection.ExecuteAsync(new CommandDefinition(
             "sp_Asistencia_RechazarDocumento",
