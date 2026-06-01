@@ -265,7 +265,11 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             })
             .ToList();
 
-        var topResponsables = alertRows
+        var criticalResponsableRows = detalle
+            .Where(IsCriticalResponsableState)
+            .ToList();
+
+        var topResponsables = criticalResponsableRows
             .GroupBy(item => EmptyIfMissing(item.Responsable, "Sin responsable"))
             .Select(group => new AsistenciaGerencialRankingItemDto
             {
@@ -625,6 +629,12 @@ public class AsistenciaReporteService : IAsistenciaReporteService
     {
         var estado = NormalizeText(GetDisplayState(item));
         return estado == "FALTA APROBAR" && item.TotalHorasFaltaAprobar > 0m;
+    }
+
+    private static bool IsCriticalResponsableState(ReporteWhatsappAsistenciaItemDto item)
+    {
+        var states = SplitStates(item.EstadoMarcacionTexto, item.Estado);
+        return states.Any(state => state is "FALTA" or "FALTA APROBAR" or "INCOMPLETO" or "RECHAZADO");
     }
 
     private static bool IsWarningState(ReporteWhatsappAsistenciaItemDto item)

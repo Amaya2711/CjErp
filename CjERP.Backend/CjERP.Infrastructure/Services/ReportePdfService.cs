@@ -1272,7 +1272,7 @@ public sealed class ReportePdfService : IReportePdfService
                 row.RelativeItem().Column(left =>
                 {
                     left.Item().Text("CJ TELECOM").Bold().FontSize(18).FontColor("#0F3D6E");
-                    left.Item().Text("Reporte Ejecutivo de Asistencia").FontSize(12).SemiBold().FontColor("#1E3A5F");
+                    left.Item().Text("Reporte de Asistencia").FontSize(12).SemiBold().FontColor("#1E3A5F");
                 });
 
                 row.ConstantItem(210).AlignRight().Column(right =>
@@ -1305,8 +1305,8 @@ public sealed class ReportePdfService : IReportePdfService
             {
                 left.Spacing(2);
                 left.Item().Text("Dashboard ejecutivo de asistencia").Bold().FontSize(17).FontColor("#0F3D6E");
-                left.Item().Text($"Periodo consultado: {reporte.PeriodoConsultado}").FontSize(10);
-                left.Item().Text($"Destinatario: {reporte.Destinatario}").FontSize(10);
+                //left.Item().Text($"Periodo consultado: {reporte.PeriodoConsultado}").FontSize(10);
+                //left.Item().Text($"Destinatario: {reporte.Destinatario}").FontSize(10);
             });
 
             row.ConstantItem(160).AlignMiddle().Element(card =>
@@ -1400,7 +1400,7 @@ public sealed class ReportePdfService : IReportePdfService
         {
             column.Spacing(6);
             column.Item().Text(title).Bold().FontSize(12).FontColor("#0F3D6E");
-            column.Item().Text("Estados considerados (EstadoMarcacionTexto): FALTA, FALTA APROBAR, INCOMPLETO, RECHAZADO, SIN MARCAR, SIN SALIDA y SIN ENTRADA.")
+            column.Item().Text("Estados considerados (EstadoMarcacionTexto): FALTA, FALTA APROBAR, INCOMPLETO y RECHAZADO.")
                 .FontSize(8)
                 .FontColor("#667085");
             column.Item().AlignCenter().Height(220).Svg(BuildSimpleBubbleSvg(topItems));
