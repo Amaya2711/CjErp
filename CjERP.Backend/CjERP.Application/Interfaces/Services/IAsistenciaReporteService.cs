@@ -19,4 +19,9 @@ public interface IAsistenciaReporteService
     Task<byte[]> GenerarPdfGerencialEjecutivoAsync(
         AsistenciaGerencialPdfRequestDto request,
         CancellationToken cancellationToken = default);
+
+    Task ActualizarEstadoMarcacionAsync(
+        AsistenciaActualizarEstadoMarcacionRequestDto request,
+        string usuarioAccion,
+        CancellationToken cancellationToken = default);
 }

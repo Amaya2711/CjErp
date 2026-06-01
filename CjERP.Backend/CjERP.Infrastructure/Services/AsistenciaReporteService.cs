@@ -13,6 +13,7 @@ namespace CjERP.Infrastructure.Services;
 public class AsistenciaReporteService : IAsistenciaReporteService
 {
     private const string ReporteSp = "dbo.RptAsistenciaFechas";
+    private const string UpdateEstadoMarcacionSp = "dbo.sp_Asistencia_ActualizarEstadoEmpleado";
     private const decimal MissingOrIncompleteHours = 9.6m;
 
     private static readonly HashSet<string> PresentStates = new(StringComparer.OrdinalIgnoreCase)
@@ -32,11 +33,16 @@ public class AsistenciaReporteService : IAsistenciaReporteService
 
     private readonly IConfiguration _configuration;
     private readonly IReportePdfService _reportePdfService;
+    private readonly IAuditoriaCambiosService _auditoriaCambiosService;
 
-    public AsistenciaReporteService(IConfiguration configuration, IReportePdfService reportePdfService)
+    public AsistenciaReporteService(
+        IConfiguration configuration,
+        IReportePdfService reportePdfService,
+        IAuditoriaCambiosService auditoriaCambiosService)
     {
         _configuration = configuration;
         _reportePdfService = reportePdfService;
+        _auditoriaCambiosService = auditoriaCambiosService;
     }
 
     public async Task<IEnumerable<AsistenciaReporteDto>> BuscarAsync(
@@ -105,6 +111,62 @@ public class AsistenciaReporteService : IAsistenciaReporteService
     {
         var reporte = await ObtenerReporteGerencialAsync(request, cancellationToken);
         return await _reportePdfService.GenerarReporteGerencialEjecutivoPdfAsync(reporte, cancellationToken);
+    }
+
+    public async Task ActualizarEstadoMarcacionAsync(
+        AsistenciaActualizarEstadoMarcacionRequestDto request,
+        string usuarioAccion,
+        CancellationToken cancellationToken = default)
+    {
+        if (request.IdEmpleado is null or <= 0)
+        {
+            throw new InvalidOperationException("El IdEmpleado es obligatorio para actualizar el estado de marcacion.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.FechaAsistencia))
+        {
+            throw new InvalidOperationException("La fecha de asistencia es obligatoria para actualizar el estado de marcacion.");
+        }
+
+        if (request.IdEstado <= 0)
+        {
+            throw new InvalidOperationException("El IdEstado seleccionado no es valido.");
+        }
+
+        var fechaAsistencia = ParseDate(request.FechaAsistencia);
+        if (!fechaAsistencia.HasValue)
+        {
+            throw new InvalidOperationException("La fecha de asistencia no tiene un formato valido.");
+        }
+
+        using var connection = new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
+        var parameters = new DynamicParameters();
+        parameters.Add("@IdEmpleado", request.IdEmpleado.Value, DbType.Int32);
+        parameters.Add("@FechaAsistencia", fechaAsistencia.Value.Date, DbType.Date);
+        parameters.Add("@IdEstado", request.IdEstado, DbType.Int32);
+
+        await connection.ExecuteAsync(
+            new CommandDefinition(
+                UpdateEstadoMarcacionSp,
+                parameters,
+                commandType: CommandType.StoredProcedure,
+                cancellationToken: cancellationToken));
+
+        await _auditoriaCambiosService.RegistrarAsync(
+            new AuditoriaCambioDto
+            {
+                Modulo = "Reportes & Inteligencia",
+                Entidad = "AsistenciaReporte",
+                IdRegistro = $"{request.IdEmpleado.Value}-{request.FechaAsistencia.Trim()}",
+                Accion = "UPDATE",
+                Seccion = "Detalle filtrado",
+                Campo = "Estado marcacion",
+                ValorAnterior = request.EstadoMarcacionAnterior?.Trim(),
+                ValorNuevo = request.EstadoMarcacionNuevo?.Trim(),
+                UsuarioAccion = string.IsNullOrWhiteSpace(usuarioAccion) ? "SISTEMA" : usuarioAccion.Trim(),
+                Observacion = "Actualizacion de estado de marcacion desde detalle filtrado."
+            },
+            cancellationToken);
     }
 
     private async Task<IEnumerable<dynamic>> QueryReporteRowsAsync(
@@ -616,13 +678,14 @@ public class AsistenciaReporteService : IAsistenciaReporteService
 
     private static bool IsAlertState(ReporteWhatsappAsistenciaItemDto item)
     {
-        return item.IdEstado is 0 or 2 or 20 or 22;
+        var states = SplitStates(item.EstadoMarcacionTexto, item.Estado);
+        return states.Any(IsCriticalIncidentState);
     }
 
     private static bool IsNonEffectiveAttendanceState(ReporteWhatsappAsistenciaItemDto item)
     {
-        var estado = NormalizeText(GetDisplayState(item));
-        return estado is "FALTA" or "FALTA APROBAR" or "INCOMPLETO" or "RECHAZADO";
+        var states = SplitStates(item.EstadoMarcacionTexto, item.Estado);
+        return states.Any(IsCriticalIncidentState);
     }
 
     private static bool IsPendingApprovalRow(ReporteWhatsappAsistenciaItemDto item)
@@ -634,7 +697,17 @@ public class AsistenciaReporteService : IAsistenciaReporteService
     private static bool IsCriticalResponsableState(ReporteWhatsappAsistenciaItemDto item)
     {
         var states = SplitStates(item.EstadoMarcacionTexto, item.Estado);
-        return states.Any(state => state is "FALTA" or "FALTA APROBAR" or "INCOMPLETO" or "RECHAZADO");
+        return states.Any(IsCriticalIncidentState);
+    }
+
+    private static bool IsCriticalIncidentState(string state)
+    {
+        var normalized = NormalizeText(state);
+
+        return normalized.Contains("FALTA", StringComparison.Ordinal)
+            || normalized.Contains("INCOMPLETO", StringComparison.Ordinal)
+            || normalized.Contains("RECHAZADO", StringComparison.Ordinal)
+            || normalized.Contains("RECHAZO", StringComparison.Ordinal);
     }
 
     private static bool IsWarningState(ReporteWhatsappAsistenciaItemDto item)

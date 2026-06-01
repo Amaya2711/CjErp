@@ -68,3 +68,11 @@ export type AsistenciaGerencialPdfRequest = {
   usarPeriodoAutomatico?: boolean;
   destinatario?: string;
 };
+
+export type AsistenciaActualizarEstadoMarcacionRequest = {
+  idEmpleado: number;
+  fechaAsistencia: string;
+  idEstado: number;
+  estadoMarcacionAnterior: string;
+  estadoMarcacionNuevo: string;
+};

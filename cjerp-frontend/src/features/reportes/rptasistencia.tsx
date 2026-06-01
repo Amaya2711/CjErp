@@ -4,7 +4,8 @@ import {
   matchesCrudToolbarSearch,
   type CrudToolbarSearchField,
 } from "../../components/base/CrudToolbar";
-import { buscarAsistencia, exportarAsistenciaEmpleadoPdf } from "../../api/asistenciaService";
+import { actualizarEstadoMarcacionAsistencia, buscarAsistencia, exportarAsistenciaEmpleadoPdf } from "../../api/asistenciaService";
+import { useConstantesPorCampo } from "../../hooks/useConstantesPorCampo";
 import type { AsistenciaReporteItem, AsistenciaReportePdfItem } from "../../models/asistencia";
 import type { AprobarCampoRow } from "../../models/aprobarCampo";
 import { getHttpErrorMessage } from "../../utils/httpError.ts";
@@ -636,6 +637,8 @@ export default function RptAsistenciaPage() {
     topResponsable: null,
     topEmpleado: null,
   });
+  const [detalleEstadoEdits, setDetalleEstadoEdits] = useState<Record<string, string>>({});
+  const [detalleEstadoSaving, setDetalleEstadoSaving] = useState<Record<string, boolean>>({});
   const [employeeGridFilters, setEmployeeGridFilters] = useState<EmployeeGridFilters>({
     employee: "",
     responsable: "",
@@ -655,6 +658,7 @@ export default function RptAsistenciaPage() {
   const showAprobarCampoShortcut =
     activeTab === "gerencial" &&
     selectedEstadoMarcacion.includes("FALTA APROBAR");
+  const { constantesPorCampo } = useConstantesPorCampo(["estado_asistencia"]);
 
   const deferredSearch = useDeferredValue(busqueda);
 
@@ -984,6 +988,8 @@ export default function RptAsistenciaPage() {
     const base = filteredRows
       .map((item, index) => ({
         key: `${item.idEmpleado ?? item.nombreEmpleado}-${item.fecha}-${index}`,
+        idEmpleado: item.idEmpleado ?? null,
+        fechaAsistenciaRaw: item.fecha,
         fecha: formatDateLabel(item.fecha),
         nombreEmpleado: item.nombreEmpleado,
         responsable: item.responsable || "Sin responsable",
@@ -1091,6 +1097,70 @@ export default function RptAsistenciaPage() {
     }),
     [filteredRows]
   );
+  const estadoAsistenciaOptions = useMemo(
+    () =>
+      (constantesPorCampo.estado_asistencia ?? []).map((option) => ({
+        idEstado: Number(option.codigo || option.value || 0),
+        value: option.codigo || option.value || option.label,
+        label: option.label || option.value,
+      })).filter((option) => Number.isFinite(option.idEstado) && option.idEstado > 0),
+    [constantesPorCampo]
+  );
+
+  const handleDetalleEstadoMarcacionChange = async (
+    item: {
+      key: string;
+      idEmpleado: number | null;
+      fechaAsistenciaRaw: string;
+      fecha: string;
+      estadoMarcacionTexto: string;
+    },
+    selectedValue: string
+  ) => {
+    const selectedOption = estadoAsistenciaOptions.find((option) => option.value === selectedValue);
+    if (!selectedOption || !item.idEmpleado) {
+      return;
+    }
+
+    const estadoAnterior = item.estadoMarcacionTexto;
+    const estadoNuevo = selectedOption.label;
+
+    if (estadoAnterior.trim().toUpperCase() === estadoNuevo.trim().toUpperCase()) {
+      setDetalleEstadoEdits((prev) => ({ ...prev, [item.key]: selectedOption.value }));
+      return;
+    }
+
+    setDetalleEstadoEdits((prev) => ({ ...prev, [item.key]: selectedOption.value }));
+    setDetalleEstadoSaving((prev) => ({ ...prev, [item.key]: true }));
+    setError("");
+
+    try {
+      await actualizarEstadoMarcacionAsistencia({
+        idEmpleado: item.idEmpleado,
+        fechaAsistencia: item.fechaAsistenciaRaw,
+        idEstado: selectedOption.idEstado,
+        estadoMarcacionAnterior: estadoAnterior,
+        estadoMarcacionNuevo: estadoNuevo,
+      });
+
+      setRows((prev) =>
+        prev.map((row) =>
+          row.idEmpleado === item.idEmpleado && formatDateLabel(row.fecha) === item.fecha
+            ? { ...row, estadoMarcacionTexto: estadoNuevo, estado: estadoNuevo }
+            : row
+        )
+      );
+    } catch (err: unknown) {
+      setDetalleEstadoEdits((prev) => {
+        const next = { ...prev };
+        delete next[item.key];
+        return next;
+      });
+      setError(getHttpErrorMessage(err, "No se pudo actualizar el estado de marcacion."));
+    } finally {
+      setDetalleEstadoSaving((prev) => ({ ...prev, [item.key]: false }));
+    }
+  };
 
   const gerencialAreaSummaryRows = useMemo(() => {
     const grouped = new Map<string, { responsable: string; cliente: string; area: string; estadoMarcacionTexto: string; cantidad: number }>();
@@ -1549,12 +1619,12 @@ export default function RptAsistenciaPage() {
         "Responsable",
         "Total horas",
         "Hrs Otros",
-        "Falta aprobar",
+        "Falta aprobar (hrs)",
         "Hrs Lab.",
         "Diferencia",
         "Estado valid."
       ];
-      const headers = [...staticHeaders, ...employeeStateGridStates];
+      const headers = [...staticHeaders, ...employeeStateGridStates.map((state) => `${state} (registros)`)];
       const data = filteredEmployeeGridRows.map((item) => [
         item.employee,
         item.responsable || "Sin responsable",
@@ -1575,7 +1645,7 @@ export default function RptAsistenciaPage() {
         "Responsable",
         "Ubicacion",
         "Total horas",
-        "Falta aprobar",
+        "Falta aprobar (hrs)",
         "Hrs Lab.",
         "Estado valid."
       ];
@@ -1823,11 +1893,11 @@ export default function RptAsistenciaPage() {
           "Responsable",
           "Total horas",
           "Hrs Otros",
-          "Falta aprobar",
+          "Falta aprobar (hrs)",
           "Hrs Lab.",
           "Diferencia",
           "Estado valid.",
-          ...employeeStateGridStates,
+          ...employeeStateGridStates.map((state) => `${state} (registros)`),
         ]],
         body: filteredEmployeeGridRows.map((item) => [
           item.employee,
@@ -2481,6 +2551,10 @@ export default function RptAsistenciaPage() {
                       data={cuadroDetalleRows}
                       sortKey={cuadrosDetailSort.key}
                       sortDirection={cuadrosDetailSort.direction}
+                      estadoMarcacionOptions={estadoAsistenciaOptions}
+                      estadoMarcacionValues={detalleEstadoEdits}
+                      estadoMarcacionSaving={detalleEstadoSaving}
+                      onEstadoMarcacionChange={handleDetalleEstadoMarcacionChange}
                       showExtendedColumns
                       extendedColumnFilters={gerencialDetailFilters}
                       extendedColumnOptions={gerencialDetailFilterOptions}
@@ -2951,6 +3025,10 @@ export default function RptAsistenciaPage() {
                     data={cuadroDetalleRows}
                     sortKey={cuadrosDetailSort.key}
                     sortDirection={cuadrosDetailSort.direction}
+                    estadoMarcacionOptions={estadoAsistenciaOptions}
+                    estadoMarcacionValues={detalleEstadoEdits}
+                    estadoMarcacionSaving={detalleEstadoSaving}
+                    onEstadoMarcacionChange={handleDetalleEstadoMarcacionChange}
                     showExtendedColumns
                     extendedColumnFilters={gerencialDetailFilters}
                     extendedColumnOptions={gerencialDetailFilterOptions}
@@ -3536,7 +3614,7 @@ function SimpleEmployeeDateGrid({
                 style={styles.employeeGridSortButton}
                 onClick={() => onToggleSort("faltaAprobar")}
               >
-                <span>Falta aprobar</span>
+                <span>Falta aprobar (hrs)</span>
                 <span style={styles.employeeGridSortPill}>
                   {sortKey === "faltaAprobar" ? (sortDirection === "asc" ? "ASC" : "DESC") : "ORD"}
                 </span>
@@ -3897,7 +3975,7 @@ function SimpleEmployeeStateGrid({
               style={styles.employeeGridSortButton}
               onClick={() => onToggleSort("faltaAprobar")}
             >
-              <span>Falta aprobar</span>
+              <span>Falta aprobar (hrs)</span>
               <span style={styles.employeeGridSortPill}>
                 {sortKey === "faltaAprobar" ? (sortDirection === "asc" ? "ASC" : "DESC") : "ORD"}
               </span>
@@ -4426,6 +4504,10 @@ function SimpleCuadrosDetailGrid({
   data,
   sortKey,
   sortDirection,
+  estadoMarcacionOptions,
+  estadoMarcacionValues,
+  estadoMarcacionSaving,
+  onEstadoMarcacionChange,
   showExtendedColumns,
   extendedColumnFilters,
   extendedColumnOptions,
@@ -4436,6 +4518,8 @@ function SimpleCuadrosDetailGrid({
 }: {
   data: Array<{
     key: string;
+    idEmpleado: number | null;
+    fechaAsistenciaRaw: string;
     fecha: string;
     nombreEmpleado: string;
     responsable: string;
@@ -4450,6 +4534,13 @@ function SimpleCuadrosDetailGrid({
   }>;
   sortKey: CuadrosDetailSortKey;
   sortDirection: "asc" | "desc";
+  estadoMarcacionOptions: Array<{ idEstado: number; value: string; label: string }>;
+  estadoMarcacionValues: Record<string, string>;
+  estadoMarcacionSaving: Record<string, boolean>;
+  onEstadoMarcacionChange: (
+    item: { key: string; idEmpleado: number | null; fechaAsistenciaRaw: string; fecha: string; estadoMarcacionTexto: string },
+    value: string
+  ) => void;
   showExtendedColumns?: boolean;
   extendedColumnFilters?: GerencialDetailFilters;
   extendedColumnOptions?: Record<keyof GerencialDetailFilters, string[]>;
@@ -4607,7 +4698,37 @@ function SimpleCuadrosDetailGrid({
                   <td style={{ ...styles.cuadrosDetailTd, textAlign: "center" }}>{item.hora || "-"}</td>
                   <td style={{ ...styles.cuadrosDetailTd, textAlign: "center" }}>{item.salida || "-"}</td>
                   <td style={styles.cuadrosDetailTd}>{item.area}</td>
-                  <td style={styles.cuadrosDetailTd}>{item.estadoMarcacionTexto}</td>
+                  <td style={styles.cuadrosDetailTd}>
+                    {(() => {
+                      const matchedOption = estadoMarcacionOptions.find((option) =>
+                        option.label.trim().toUpperCase() === item.estadoMarcacionTexto.trim().toUpperCase() ||
+                        option.value.trim().toUpperCase() === item.estadoMarcacionTexto.trim().toUpperCase()
+                      );
+                      const selectedValue = estadoMarcacionValues[item.key] ?? matchedOption?.value ?? item.estadoMarcacionTexto;
+                      const isSaving = Boolean(estadoMarcacionSaving[item.key]);
+
+                      return (
+                    <select
+                      value={selectedValue}
+                      onChange={(event) => onEstadoMarcacionChange(item, event.target.value)}
+                      style={styles.cuadrosDetailSelect}
+                      disabled={isSaving}
+                    >
+                      {estadoMarcacionOptions.length === 0 ? (
+                        <option value={item.estadoMarcacionTexto}>{item.estadoMarcacionTexto}</option>
+                      ) : null}
+                      {!estadoMarcacionOptions.some((option) => option.value === selectedValue) ? (
+                        <option value={item.estadoMarcacionTexto}>{item.estadoMarcacionTexto}</option>
+                      ) : null}
+                      {estadoMarcacionOptions.map((option) => (
+                        <option key={`${item.key}-${option.value}`} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                      );
+                    })()}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -5589,6 +5710,17 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#334155",
     verticalAlign: "top",
     wordBreak: "break-word",
+  },
+  cuadrosDetailSelect: {
+    width: "100%",
+    minWidth: 120,
+    border: "1px solid #CBD5E1",
+    borderRadius: 8,
+    padding: "6px 8px",
+    fontSize: 11,
+    color: "#0F172A",
+    background: "#FFFFFF",
+    outline: "none",
   },
   cuadrosDetailFilterTh: {
     position: "sticky",

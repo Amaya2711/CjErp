@@ -1246,7 +1246,7 @@ public sealed class ReportePdfService : IReportePdfService
                 page.Content().Column(column =>
                 {
                     column.Spacing(12);
-                    column.Item().Text("Segmentacion gerencial y plan de accion").Bold().FontSize(16).FontColor("#0F3D6E");
+                    column.Item().Text("Segmentacion y plan de accion").Bold().FontSize(16).FontColor("#0F3D6E");
                     column.Item().Element(c => RenderExecutiveDonutCard(c, "Incidencias por cliente", reporte.Incidencias.IncidenciasPorCliente));
                     column.Item().Row(row =>
                     {
@@ -1304,7 +1304,7 @@ public sealed class ReportePdfService : IReportePdfService
             row.RelativeItem().Column(left =>
             {
                 left.Spacing(2);
-                left.Item().Text("Dashboard ejecutivo de asistencia").Bold().FontSize(17).FontColor("#0F3D6E");
+                left.Item().Text("Dashboard de asistencia").Bold().FontSize(17).FontColor("#0F3D6E");
                 //left.Item().Text($"Periodo consultado: {reporte.PeriodoConsultado}").FontSize(10);
                 //left.Item().Text($"Destinatario: {reporte.Destinatario}").FontSize(10);
             });
@@ -1441,13 +1441,16 @@ public sealed class ReportePdfService : IReportePdfService
         {
             column.Spacing(8);
             column.Item().Text(title).Bold().FontSize(12).FontColor("#0F3D6E");
+            column.Item().Text("Calculo: total de incidencias agrupadas por cliente sobre los estados criticos del periodo. La leyenda muestra cliente, porcentaje de participacion y cantidad de registros.")
+                .FontSize(8)
+                .FontColor("#667085");
             column.Item().AlignCenter().Height(220).Svg(BuildSimpleDonutSvg(topItems));
             column.Item().Column(summary =>
             {
                 summary.Spacing(2);
                 foreach (var item in topItems.Take(3))
                 {
-                    summary.Item().Text($"{item.Nombre}: {item.Cantidad} ({item.Porcentaje:0.##}%)").FontSize(8).FontColor("#334155");
+                    summary.Item().Text($"{item.Nombre}: {item.Porcentaje:0.##}% | {item.Cantidad} registros").FontSize(8).FontColor("#334155");
                 }
             });
         });
@@ -1640,7 +1643,7 @@ public sealed class ReportePdfService : IReportePdfService
         foreach (var indexed in items.Select((value, index) => new { value, index }))
         {
             builder.Append($"""<rect x="290" y="{legendY}" width="10" height="10" fill="{GetPaletteColor(indexed.index)}" />""");
-            builder.Append($"""<text x="306" y="{legendY + 9}" font-size="8" fill="#111827">{EscapeXml(ShortenName(indexed.value.Nombre, 20))} {indexed.value.Porcentaje:0.#}%</text>""");
+            builder.Append($"""<text x="306" y="{legendY + 9}" font-size="8" fill="#111827">{EscapeXml(ShortenName(indexed.value.Nombre, 16))} {indexed.value.Porcentaje:0.#}% ({indexed.value.Cantidad})</text>""");
             legendY += 22;
         }
 

@@ -22,6 +22,15 @@ public sealed class AsistenciaGerencialPdfRequestDto
     public string Destinatario { get; set; } = "Gerencia CJ Telecom";
 }
 
+public sealed class AsistenciaActualizarEstadoMarcacionRequestDto
+{
+    public int? IdEmpleado { get; set; }
+    public string FechaAsistencia { get; set; } = string.Empty;
+    public int IdEstado { get; set; }
+    public string EstadoMarcacionAnterior { get; set; } = string.Empty;
+    public string EstadoMarcacionNuevo { get; set; } = string.Empty;
+}
+
 public class AsistenciaReportePdfItemDto
 {
     public string Fecha { get; set; } = string.Empty;

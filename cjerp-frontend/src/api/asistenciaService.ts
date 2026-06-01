@@ -1,5 +1,6 @@
 import httpClient from "./httpClient";
 import type {
+  AsistenciaActualizarEstadoMarcacionRequest,
   AsistenciaGerencialPdfRequest,
   AsistenciaReporteItem,
   AsistenciaReportePdfRequest,
@@ -117,4 +118,8 @@ export async function exportarAsistenciaGerencialPdf(payload: AsistenciaGerencia
     responseType: "blob",
     timeout: 120000,
   });
+}
+
+export async function actualizarEstadoMarcacionAsistencia(payload: AsistenciaActualizarEstadoMarcacionRequest) {
+  return await httpClient.put<{ success: boolean; message: string }>("/asistencia/reporte/estado-marcacion", payload);
 }

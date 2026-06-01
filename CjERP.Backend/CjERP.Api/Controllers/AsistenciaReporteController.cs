@@ -2,6 +2,7 @@ using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
 namespace CjERP.Api.Controllers;
 
@@ -61,6 +62,45 @@ public class AsistenciaReporteController : ControllerBase
 
             var pdfBytes = await _asistenciaReporteService.GenerarPdfGerencialEjecutivoAsync(request, cancellationToken);
             return File(pdfBytes, "application/pdf", reporte.NombreArchivo);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpPut("estado-marcacion")]
+    public async Task<IActionResult> ActualizarEstadoMarcacion(
+        [FromBody] AsistenciaActualizarEstadoMarcacionRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (request.IdEmpleado is null or <= 0)
+        {
+            return BadRequest(new { success = false, message = "El IdEmpleado es obligatorio." });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.FechaAsistencia))
+        {
+            return BadRequest(new { success = false, message = "La FechaAsistencia es obligatoria." });
+        }
+
+        if (request.IdEstado <= 0)
+        {
+            return BadRequest(new { success = false, message = "El IdEstado es obligatorio." });
+        }
+
+        try
+        {
+            var usuarioAccion =
+                User.FindFirstValue("Usuario")
+                ?? User.FindFirstValue("usuario")
+                ?? User.FindFirstValue(ClaimTypes.Name)
+                ?? User.FindFirstValue("unique_name")
+                ?? User.Identity?.Name
+                ?? "SISTEMA";
+
+            await _asistenciaReporteService.ActualizarEstadoMarcacionAsync(request, usuarioAccion, cancellationToken);
+            return Ok(new { success = true, message = "Estado de marcacion actualizado correctamente." });
         }
         catch (InvalidOperationException ex)
         {
