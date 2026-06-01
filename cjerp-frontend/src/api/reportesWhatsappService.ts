@@ -1,3 +1,4 @@
+import type { AxiosRequestConfig } from "axios";
 import httpClient from "./httpClient";
 import type {
   ReporteWhatsappConfiguracion,
@@ -11,8 +12,9 @@ const buildConfig = (tipo?: string) => ({
 });
 
 export const reportesWhatsappService = {
-  async obtenerDashboard(topLogs = 200, tipo?: string) {
+  async obtenerDashboard(topLogs = 200, tipo?: string, config?: AxiosRequestConfig) {
     return await httpClient.get<ReporteWhatsappDashboard>(`${BASE_URL}/dashboard`, {
+      ...config,
       params: { topLogs, ...(tipo ? { tipo } : {}) },
     });
   },

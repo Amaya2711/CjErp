@@ -122,6 +122,9 @@ type CuadrosDetailSortKey =
   | "cliente"
   | "proyecto"
   | "site"
+  | "ubicacion"
+  | "hora"
+  | "salida"
   | "area"
   | "estadoMarcacionTexto";
 
@@ -1008,6 +1011,9 @@ export default function RptAsistenciaPage() {
         cliente: item.cliente || "Sin cliente",
         proyecto: item.proyecto || "Sin proyecto",
         site: item.site || "Sin site",
+        ubicacion: item.ubicacion || "Sin ubicacion",
+        hora: item.hora || "",
+        salida: item.salida || "",
         area: item.area || "Sin area",
         estadoMarcacionTexto: item.estadoMarcacionTexto || item.estado || "Sin clasificar",
       }))
@@ -1591,6 +1597,9 @@ export default function RptAsistenciaPage() {
       Cliente: item.cliente,
       Proyecto: item.proyecto,
       Site: item.site,
+      Ubicacion: item.ubicacion,
+      HoraEntrada: item.hora,
+      Salida: item.salida,
       Area: item.area,
       EstadoMarcacion: item.estadoMarcacionTexto,
     }));
@@ -1698,7 +1707,8 @@ export default function RptAsistenciaPage() {
             totalHorasFaltaAprobar: summary?.totalHorasFaltaAprobar ?? item.totalHorasFaltaAprobar,
             diferenciaHoras: summary?.diferenciaHoras ?? 0,
             estadoValidacionHoras: summary?.estadoValidacionHoras ?? item.estadoValidacionHoras,
-            observacion: item.observacion ?? item.comentario ?? "",
+            comentario: item.comentario ?? "",
+            observacion: item.observacion ?? "",
           };
         });
 
@@ -1775,6 +1785,7 @@ export default function RptAsistenciaPage() {
           "TiempoHoras",
           "TotalHoras",
           "Comentario",
+          "Observacion",
         ]],
         body: detailRows.map((item) => [
           formatDateLabel(item.fecha),
@@ -1792,6 +1803,7 @@ export default function RptAsistenciaPage() {
           buildTiempoHorasDisplay(item),
           formatDecimal(item.totalHoras, 2),
           item.comentario,
+          item.observacion,
         ]),
         styles: {
           fontSize: 7,
@@ -3923,6 +3935,9 @@ function SimpleCuadrosDetailGrid({
     cliente: string;
     proyecto: string;
     site: string;
+    ubicacion: string;
+    hora: string;
+    salida: string;
     area: string;
     estadoMarcacionTexto: string;
   }>;
@@ -3974,6 +3989,15 @@ function SimpleCuadrosDetailGrid({
                     <div style={styles.cuadrosDetailThContent}><span>Site</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("site")}</span></div>
                   </th>
                 ) : null}
+                <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("ubicacion")}>
+                  <div style={styles.cuadrosDetailThContent}><span>Ubicacion</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("ubicacion")}</span></div>
+                </th>
+                <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("hora")}>
+                  <div style={styles.cuadrosDetailThContent}><span>Hora entrada</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("hora")}</span></div>
+                </th>
+                <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("salida")}>
+                  <div style={styles.cuadrosDetailThContent}><span>Salida</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("salida")}</span></div>
+                </th>
                 <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("area")}>
                   <div style={styles.cuadrosDetailThContent}><span>Area</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("area")}</span></div>
                 </th>
@@ -4019,6 +4043,9 @@ function SimpleCuadrosDetailGrid({
                       onChange={(value) => onExtendedColumnFilterChange("site", value)}
                     />
                   </th>
+                  <th style={styles.cuadrosDetailFilterTh} />
+                  <th style={styles.cuadrosDetailFilterTh} />
+                  <th style={styles.cuadrosDetailFilterTh} />
                   <th style={styles.cuadrosDetailFilterTh} />
                   <th style={styles.cuadrosDetailFilterTh} />
                 </tr>
@@ -4069,6 +4096,9 @@ function SimpleCuadrosDetailGrid({
                   {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.cliente}</td> : null}
                   {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.proyecto}</td> : null}
                   {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.site}</td> : null}
+                  <td style={styles.cuadrosDetailTd}>{item.ubicacion}</td>
+                  <td style={{ ...styles.cuadrosDetailTd, textAlign: "center" }}>{item.hora || "-"}</td>
+                  <td style={{ ...styles.cuadrosDetailTd, textAlign: "center" }}>{item.salida || "-"}</td>
                   <td style={styles.cuadrosDetailTd}>{item.area}</td>
                   <td style={styles.cuadrosDetailTd}>{item.estadoMarcacionTexto}</td>
                 </tr>

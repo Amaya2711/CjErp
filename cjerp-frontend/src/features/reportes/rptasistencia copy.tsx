@@ -1524,7 +1524,8 @@ export default function RptAsistenciaPage() {
             totalHorasFaltaAprobar: summary?.totalHorasFaltaAprobar ?? item.totalHorasFaltaAprobar,
             diferenciaHoras: summary?.diferenciaHoras ?? 0,
             estadoValidacionHoras: summary?.estadoValidacionHoras ?? item.estadoValidacionHoras,
-            observacion: item.observacion ?? item.comentario ?? "",
+            comentario: item.comentario ?? "",
+            observacion: item.observacion ?? "",
           };
         });
 
@@ -1601,6 +1602,7 @@ export default function RptAsistenciaPage() {
           "TiempoHoras",
           "TotalHoras",
           "Comentario",
+          "Observacion",
         ]],
         body: detailRows.map((item) => [
           formatDateLabel(item.fecha),
@@ -1618,6 +1620,7 @@ export default function RptAsistenciaPage() {
           buildTiempoHorasDisplay(item),
           formatDecimal(item.totalHoras, 2),
           item.comentario,
+          item.observacion,
         ]),
         styles: {
           fontSize: 7,
@@ -1637,7 +1640,7 @@ export default function RptAsistenciaPage() {
 
   const gerencialTopResponsablesCard = (
     <ChartCard
-      title="Top 5 responsables"
+      title="Top responsables"
       subtitle="Ranking actualizado segun los filtros activos y la seleccion aplicada desde Area x estado de marcacion"
     >
       <div style={styles.gerencialSummaryToolbar}>
@@ -1656,7 +1659,7 @@ export default function RptAsistenciaPage() {
                   topEmpleado: null,
                 }))
               }
-              title="Limpiar responsable seleccionado en Top 5"
+              title="Limpiar responsable seleccionado en Top "
             >
               Limpiar top
             </button>
@@ -2284,7 +2287,7 @@ export default function RptAsistenciaPage() {
                     />
                   </ChartCard>
                   {false ? <ChartCard
-                    title="Top 5 responsables"
+                    title="Top responsables"
                     subtitle="Ranking actualizado segun los filtros activos y la seleccion aplicada desde Area x estado de marcacion"
                   >
                     <div style={styles.gerencialSummaryToolbar}>
@@ -2302,7 +2305,7 @@ export default function RptAsistenciaPage() {
                                 topResponsable: null,
                               }))
                             }
-                            title="Limpiar responsable seleccionado en Top 5"
+                            title="Limpiar responsable seleccionado en Top "
                           >
                             Limpiar top
                           </button>
