@@ -1,5 +1,6 @@
 export type AuthUser = {
   token: string;
+  expiration?: string;
   sessionId?: string;
   nombre?: string;
   nombreEmpleado?: string;
@@ -19,9 +20,11 @@ export type AuthUser = {
 };
 
 const STORAGE_KEY = "authUser";
+const LAST_ACTIVITY_KEY = "authLastActivityAt";
 
 export function saveAuthUser(user: AuthUser) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
+  markAuthActivity();
 }
 
 export function getAuthUser(): AuthUser | null {
@@ -37,4 +40,18 @@ export function getAuthUser(): AuthUser | null {
 
 export function clearAuthUser() {
   localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(LAST_ACTIVITY_KEY);
+  sessionStorage.clear();
+}
+
+export function markAuthActivity(timestamp = Date.now()) {
+  localStorage.setItem(LAST_ACTIVITY_KEY, timestamp.toString());
+}
+
+export function getLastAuthActivity(): number | null {
+  const value = localStorage.getItem(LAST_ACTIVITY_KEY);
+  if (!value) return null;
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }

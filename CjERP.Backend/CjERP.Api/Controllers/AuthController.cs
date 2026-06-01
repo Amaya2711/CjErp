@@ -1,8 +1,11 @@
 using System.Security.Claims;
+using CjERP.Api.Configuration;
 using CjERP.Application.DTOs.Auth;
 using CjERP.Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Options;
 
 namespace CjERP.Api.Controllers
 {
@@ -13,19 +16,23 @@ namespace CjERP.Api.Controllers
         private readonly IAuthService _authService;
         private readonly IJwtService _jwtService;
         private readonly IActiveUserSessionService _activeUserSessionService;
+        private readonly JwtSettings _jwtSettings;
 
         public AuthController(
             IAuthService authService,
             IJwtService jwtService,
-            IActiveUserSessionService activeUserSessionService)
+            IActiveUserSessionService activeUserSessionService,
+            IOptions<JwtSettings> jwtSettings)
         {
             _authService = authService;
             _jwtService = jwtService;
             _activeUserSessionService = activeUserSessionService;
+            _jwtSettings = jwtSettings.Value;
         }
 
+        [DisableRateLimiting]
         [HttpPost("login")]
-        public async Task<IActionResult> Login([FromBody] LoginRequestDto request)
+        public async Task<IActionResult> Login([FromBody] LoginRequestDto request, CancellationToken cancellationToken)
         {
             if (request == null)
                 return BadRequest("Debe enviar los datos del login.");
@@ -36,7 +43,7 @@ namespace CjERP.Api.Controllers
             if (string.IsNullOrWhiteSpace(request.Clave))
                 return BadRequest("Debe ingresar la clave.");
 
-            var usuario = await _authService.LoginAsync(request);
+            var usuario = await _authService.LoginAsync(request, cancellationToken);
 
             if (usuario == null)
                 return Unauthorized("Usuario o contraseña incorrectos.");
@@ -47,7 +54,7 @@ namespace CjERP.Api.Controllers
             var token = _jwtService.GenerateToken(usuario, sessionId);
             usuario.Token = token;
             usuario.SessionId = sessionId;
-            usuario.Expiration = DateTime.UtcNow.AddMinutes(60);
+            usuario.Expiration = DateTime.UtcNow.AddMinutes(_jwtSettings.DurationInMinutes);
 
             return Ok(new
             {

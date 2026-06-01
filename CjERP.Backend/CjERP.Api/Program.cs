@@ -1,5 +1,8 @@
 using System.Text;
+using System.Threading.RateLimiting;
 using CjERP.Api.Configuration;
+using CjERP.Api.Health;
+using CjERP.Api.Middleware;
 using CjERP.Api.Services;
 using CjERP.Application.DTOs.ReportesWhatsapp;
 using CjERP.Application.Interfaces;
@@ -12,6 +15,7 @@ using Hangfire;
 using Hangfire.SqlServer;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using QuestPDF.Infrastructure;
 
@@ -19,6 +23,10 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<JwtSettings>(
     builder.Configuration.GetSection("JwtSettings"));
+builder.Services.Configure<SessionSettings>(
+    builder.Configuration.GetSection("SessionSettings"));
+builder.Services.Configure<SqlSettings>(
+    builder.Configuration.GetSection("SqlSettings"));
 builder.Services.Configure<SharePointOptions>(
     builder.Configuration.GetSection(SharePointOptions.SectionName));
 builder.Services.Configure<WupSettings>(
@@ -63,6 +71,21 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.DictionaryKeyPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
     });
 builder.Services.AddEndpointsApiExplorer();
+var sqlSettings = builder.Configuration
+    .GetSection("SqlSettings")
+    .Get<SqlSettings>() ?? new SqlSettings();
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddFixedWindowLimiter("api", limiterOptions =>
+    {
+        limiterOptions.PermitLimit = sqlSettings.RateLimitPermitLimit;
+        limiterOptions.Window = TimeSpan.FromSeconds(sqlSettings.RateLimitWindowSeconds);
+        limiterOptions.QueueLimit = 0;
+    });
+});
+builder.Services.AddHealthChecks()
+    .AddCheck<SqlServerHealthCheck>("sqlserver");
 builder.Services.AddHangfire(configuration => configuration
     .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
     .UseSimpleAssemblyNameTypeSerializer()
@@ -207,9 +230,9 @@ builder.Services.AddAuthentication(options =>
             }
 
             var activeSessionService = context.HttpContext.RequestServices.GetRequiredService<IActiveUserSessionService>();
-            if (!activeSessionService.IsSessionActive(userId, sessionId))
+            if (!activeSessionService.ValidateAndRefreshSession(userId, sessionId))
             {
-                context.Fail("La sesion ya no esta activa.");
+                context.Fail("La sesion expiro o ya no esta activa.");
             }
 
             return Task.CompletedTask;
@@ -220,6 +243,20 @@ builder.Services.AddAuthentication(options =>
 builder.Services.AddAuthorization();
 
 var app = builder.Build();
+
+app.UseExceptionHandler(exceptionApp =>
+{
+    exceptionApp.Run(async context =>
+    {
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsJsonAsync(new
+        {
+            success = false,
+            message = "Ocurrio un error interno al procesar la solicitud."
+        });
+    });
+});
 
 app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
@@ -233,11 +270,14 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseMiddleware<SlowRequestLoggingMiddleware>();
 app.UseCors("ReactPolicy");
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapControllers();
+app.MapControllers().RequireRateLimiting("api");
+app.MapHealthChecks("/health").RequireRateLimiting("api");
 
 using (var scope = app.Services.CreateScope())
 {

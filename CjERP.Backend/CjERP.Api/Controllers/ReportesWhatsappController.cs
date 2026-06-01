@@ -3,12 +3,14 @@ using CjERP.Application.DTOs.ReportesWhatsapp;
 using CjERP.Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace CjERP.Api.Controllers;
 
 [ApiController]
 [Route("api/reportes-whatsapp")]
 [Authorize]
+[DisableRateLimiting]
 public sealed class ReportesWhatsappController : ControllerBase
 {
     private readonly IReporteAutomaticoService _reporteAutomaticoService;

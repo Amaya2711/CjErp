@@ -1,5 +1,6 @@
 import axios, { type AxiosInstance, type AxiosRequestConfig } from "axios";
 import { getAuthUser, clearAuthUser } from "../utils/authStorage";
+import { isJwtExpired } from "../utils/jwt";
 
 type HttpClient = {
   get<T>(url: string, config?: AxiosRequestConfig): Promise<T>;
@@ -9,11 +10,14 @@ type HttpClient = {
 };
 
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
+//const apiBaseUrl =
+  //configuredApiUrl || (import.meta.env.DEV ? "http://localhost:5015/api" : "/api");
 const apiBaseUrl =
-  configuredApiUrl || (import.meta.env.DEV ? "http://localhost:5015/api" : "https://cjerp-production.up.railway.app/api");
+ configuredApiUrl || "https://cjerp-production.up.railway.app/api";
 
 const axiosClient: AxiosInstance = axios.create({
   baseURL: apiBaseUrl,
+  timeout: 30000,
 });
 
 axiosClient.interceptors.request.use((config) => {
@@ -26,6 +30,12 @@ axiosClient.interceptors.request.use((config) => {
   const authUser = getAuthUser();
 
   if (authUser?.token) {
+    if (isJwtExpired(authUser.token)) {
+      clearAuthUser();
+      window.location.replace("/");
+      return Promise.reject(new axios.CanceledError("JWT expirado."));
+    }
+
     config.headers.Authorization = `Bearer ${authUser.token}`;
   }
 
@@ -47,7 +57,7 @@ axiosClient.interceptors.response.use(
 
     if (error?.response?.status === 401) {
       clearAuthUser();
-      window.location.href = "/";
+      window.location.replace("/");
     }
 
     return Promise.reject(error);

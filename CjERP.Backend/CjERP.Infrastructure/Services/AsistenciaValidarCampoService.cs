@@ -4,9 +4,9 @@ using System.Text;
 using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces;
 using CjERP.Application.Interfaces.Services;
+using CjERP.Infrastructure.Persistence.Sql;
 using Dapper;
 using Microsoft.Data.SqlClient;
-using Microsoft.Extensions.Configuration;
 
 namespace CjERP.Infrastructure.Services;
 
@@ -15,16 +15,16 @@ public class AsistenciaValidarCampoService : IAsistenciaValidarCampoService
     private const string ListarSp = "dbo.sp_Asistencia_ValidarCampo";
     private const string TablaAsistencia = "Asistencia";
 
-    private readonly IConfiguration _configuration;
+    private readonly ISqlCommandFactory _sqlCommandFactory;
     private readonly IAuditoriaCambiosService _auditoriaCambiosService;
     private readonly ILookupService _lookupService;
 
     public AsistenciaValidarCampoService(
-        IConfiguration configuration,
+        ISqlCommandFactory sqlCommandFactory,
         IAuditoriaCambiosService auditoriaCambiosService,
         ILookupService lookupService)
     {
-        _configuration = configuration;
+        _sqlCommandFactory = sqlCommandFactory;
         _auditoriaCambiosService = auditoriaCambiosService;
         _lookupService = lookupService;
     }
@@ -33,9 +33,9 @@ public class AsistenciaValidarCampoService : IAsistenciaValidarCampoService
         AsistenciaValidarCampoFiltroDto filtro,
         CancellationToken cancellationToken = default)
     {
-        using var connection = BuildConnection();
+        await using var connection = BuildConnection();
         var rows = (await connection.QueryAsync(
-                new CommandDefinition(
+                CreateCommand(
                     ListarSp,
                     commandType: CommandType.StoredProcedure,
                     cancellationToken: cancellationToken)))
@@ -70,7 +70,7 @@ public class AsistenciaValidarCampoService : IAsistenciaValidarCampoService
     {
         ValidateGuardarRequest(request, isUpdate: false);
 
-        using var connection = BuildConnection();
+        await using var connection = BuildConnection();
         var tableColumns = await GetTableColumnsAsync(connection, cancellationToken);
         var payload = BuildPersistedValues(request, tableColumns);
         payload["FechaAsistencia"] = NormalizeDate(request.FechaAsistencia);
@@ -100,7 +100,7 @@ public class AsistenciaValidarCampoService : IAsistenciaValidarCampoService
         );
         """;
 
-        await connection.ExecuteAsync(new CommandDefinition(sql, payload, cancellationToken: cancellationToken));
+        await connection.ExecuteAsync(CreateCommand(sql, payload, cancellationToken: cancellationToken, commandTimeout: 120));
 
         var clave = new AsistenciaValidarCampoClaveDto
         {
@@ -130,7 +130,7 @@ public class AsistenciaValidarCampoService : IAsistenciaValidarCampoService
     {
         ValidateGuardarRequest(request, isUpdate: true);
 
-        using var connection = BuildConnection();
+        await using var connection = BuildConnection();
         var anterior = await GetCurrentRowAsync(connection, ToClave(request), cancellationToken)
             ?? throw new InvalidOperationException("No se encontró el registro de asistencia a actualizar.");
 
@@ -165,18 +165,19 @@ public class AsistenciaValidarCampoService : IAsistenciaValidarCampoService
         {
             throw new InvalidOperationException("No se pudo resolver el IdAprobador de la acciÃ³n.");
         }
-        using var connection = BuildConnection();
+        await using var connection = BuildConnection();
         var parameters = new DynamicParameters();
         parameters.Add("@idempleado", request.IdEmpleado, DbType.Int32);
         parameters.Add("@Fechaasistencia", NormalizeDate(request.FechaAsistencia!), DbType.String);
         parameters.Add("@IdAprobador", request.IdAprobador.Value, DbType.Int32);
         // El SP puede requerir otros parámetros, agregar si es necesario
         parameters.Add("@Usuario", ResolveUsuarioAccion(request.UsuarioAccion), DbType.String);
-        await connection.ExecuteAsync(new CommandDefinition(
+        await connection.ExecuteAsync(CreateCommand(
             "sp_Asistencia_AprobarIngreso",
             parameters,
             commandType: CommandType.StoredProcedure,
-            cancellationToken: cancellationToken));
+            cancellationToken: cancellationToken,
+            commandTimeout: 120));
 
         // Obtener el registro actualizado para devolverlo
         var row = await GetCurrentRowAsync(connection, request, cancellationToken);
@@ -196,16 +197,17 @@ public class AsistenciaValidarCampoService : IAsistenciaValidarCampoService
         {
             throw new InvalidOperationException("No se pudo resolver el IdAprobador de la acciÃ³n.");
         }
-        using var connection = BuildConnection();
+        await using var connection = BuildConnection();
         var parameters = new DynamicParameters();
         parameters.Add("@idempleado", request.IdEmpleado, DbType.Int32);
         parameters.Add("@Fechaasistencia", NormalizeDate(request.FechaAsistencia!), DbType.String);
         parameters.Add("@IdAprobador", request.IdAprobador.Value, DbType.Int32);
-        await connection.ExecuteAsync(new CommandDefinition(
+        await connection.ExecuteAsync(CreateCommand(
             "sp_Asistencia_AprobarSalida",
             parameters,
             commandType: CommandType.StoredProcedure,
-            cancellationToken: cancellationToken));
+            cancellationToken: cancellationToken,
+            commandTimeout: 120));
 
         var row = await GetCurrentRowAsync(connection, request, cancellationToken);
         return new AsistenciaValidarCampoOperacionResultadoDto
@@ -228,17 +230,18 @@ public class AsistenciaValidarCampoService : IAsistenciaValidarCampoService
         {
             throw new InvalidOperationException("Debe ingresar un motivo de rechazo.");
         }
-        using var connection = BuildConnection();
+        await using var connection = BuildConnection();
         var parameters = new DynamicParameters();
         parameters.Add("@idempleado", request.IdEmpleado, DbType.Int32);
         parameters.Add("@Fechaasistencia", NormalizeDate(request.FechaAsistencia!), DbType.String);
         parameters.Add("@IdRechazador", request.IdAprobador.Value, DbType.Int32);
         parameters.Add("@Motivo", request.Observacion.Trim(), DbType.String);
-        await connection.ExecuteAsync(new CommandDefinition(
+        await connection.ExecuteAsync(CreateCommand(
             "sp_Asistencia_RechazarDocumento",
             parameters,
             commandType: CommandType.StoredProcedure,
-            cancellationToken: cancellationToken));
+            cancellationToken: cancellationToken,
+            commandTimeout: 120));
 
         var row = await GetCurrentRowAsync(connection, request, cancellationToken);
         return new AsistenciaValidarCampoOperacionResultadoDto
@@ -260,7 +263,7 @@ public class AsistenciaValidarCampoService : IAsistenciaValidarCampoService
 
         ValidateClave(request);
 
-        using var connection = BuildConnection();
+        await using var connection = BuildConnection();
         var anterior = await GetCurrentRowAsync(connection, request, cancellationToken)
             ?? throw new InvalidOperationException("No se encontró el registro de asistencia.");
 
@@ -356,7 +359,7 @@ public class AsistenciaValidarCampoService : IAsistenciaValidarCampoService
         """;
 
         var affected = await connection.ExecuteAsync(
-            new CommandDefinition(sql, parameters, cancellationToken: cancellationToken));
+            CreateCommand(sql, parameters, cancellationToken: cancellationToken, commandTimeout: 120));
 
         if (affected == 0)
         {
@@ -384,7 +387,7 @@ public class AsistenciaValidarCampoService : IAsistenciaValidarCampoService
         """;
 
         var row = await connection.QueryFirstOrDefaultAsync(
-            new CommandDefinition(sql, parameters, cancellationToken: cancellationToken));
+            CreateCommand(sql, parameters, cancellationToken: cancellationToken, commandTimeout: 120));
 
         return row is null ? null : MapRow(row);
     }
@@ -401,7 +404,7 @@ public class AsistenciaValidarCampoService : IAsistenciaValidarCampoService
         """;
 
         var columns = await connection.QueryAsync<string>(
-            new CommandDefinition(sql, new { TableName = TablaAsistencia }, cancellationToken: cancellationToken));
+            CreateCommand(sql, new { TableName = TablaAsistencia }, cancellationToken: cancellationToken));
 
         return columns.ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
@@ -476,7 +479,7 @@ public class AsistenciaValidarCampoService : IAsistenciaValidarCampoService
             return accion;
         }
 
-        var constantes = (await _lookupService.ListarConstantesPorCampoAsync("estado_asistencia")).ToList();
+        var constantes = (await _lookupService.ListarConstantesPorCampoAsync("estado_asistencia", cancellationToken)).ToList();
         if (constantes.Count == 0)
         {
             return null;
@@ -931,10 +934,15 @@ public class AsistenciaValidarCampoService : IAsistenciaValidarCampoService
         return string.IsNullOrWhiteSpace(usuario) ? "sistema" : usuario.Trim();
     }
 
-    private SqlConnection BuildConnection()
-    {
-        return new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
-    }
+    private SqlConnection BuildConnection() => _sqlCommandFactory.CreateConnection();
+
+    private CommandDefinition CreateCommand(
+        string sql,
+        object? parameters = null,
+        CommandType? commandType = null,
+        CancellationToken cancellationToken = default,
+        int? commandTimeout = null) =>
+        _sqlCommandFactory.Create(sql, parameters, commandType, cancellationToken, commandTimeout);
 
     private static string Bracket(string name) => $"[{name}]";
 }

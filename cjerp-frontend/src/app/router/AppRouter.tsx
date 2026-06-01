@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import PrivateRoute from "./PrivateRoute";
 import AutoSecurityRoute from "./AutoSecurityRoute";
+import SessionManager from "../session/SessionManager";
 import MainLayout from "../../layouts/MainLayout";
 
 import LoginPage from "../../features/auth/pages/LoginPage";
@@ -72,6 +73,7 @@ import RptAsistenciaEmpleadoPage from "../../features/reportes/rptasistenciaempl
 export default function AppRouter() {
   return (
     <BrowserRouter>
+      <SessionManager />
       <Routes>
         <Route path="/" element={<LoginPage />} />
 

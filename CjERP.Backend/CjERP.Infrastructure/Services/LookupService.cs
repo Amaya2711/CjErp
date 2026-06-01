@@ -1,49 +1,66 @@
-﻿using System.Collections.Generic;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
 using System.Threading.Tasks;
 using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces;
+using CjERP.Infrastructure.Persistence.Sql;
 using Dapper;
-using System.Data;
-using Microsoft.Data.SqlClient;
-using Microsoft.Extensions.Configuration;
-using System;
-using System.Linq;
 
 namespace CjERP.Infrastructure.Services
 {
     public class LookupService : ILookupService
     {
-        private readonly IConfiguration _configuration;
+        private readonly ISqlCommandFactory _sqlCommandFactory;
 
-        public LookupService(IConfiguration configuration)
+        public LookupService(ISqlCommandFactory sqlCommandFactory)
         {
-            _configuration = configuration;
+            _sqlCommandFactory = sqlCommandFactory;
         }
 
-        public async Task<IEnumerable<FiltroOperativoDto>> ListarFiltrosOperativosAsync()
+        public async Task<IEnumerable<FiltroOperativoDto>> ListarFiltrosOperativosAsync(CancellationToken cancellationToken = default)
         {
-            using var connection = new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
-            return await connection.QueryAsync<FiltroOperativoDto>("sp_Importar_FiltroOperativo_Listar", commandType: CommandType.StoredProcedure);
+            await using var connection = _sqlCommandFactory.CreateConnection();
+            return await connection.QueryAsync<FiltroOperativoDto>(
+                _sqlCommandFactory.Create(
+                    "sp_Importar_FiltroOperativo_Listar",
+                    commandType: CommandType.StoredProcedure,
+                    cancellationToken: cancellationToken));
         }
 
-        public async Task<IEnumerable<TipoTrabajoDto>> ListarTipoTrabajoAsync(string filtroKey)
+        public async Task<IEnumerable<TipoTrabajoDto>> ListarTipoTrabajoAsync(string filtroKey, CancellationToken cancellationToken = default)
         {
-            using var connection = new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
+            await using var connection = _sqlCommandFactory.CreateConnection();
             var parameters = new { filtroKey };
-            return await connection.QueryAsync<TipoTrabajoDto>("sp_Importar_TipoTrabajo_Listar", parameters, commandType: CommandType.StoredProcedure);
+            return await connection.QueryAsync<TipoTrabajoDto>(
+                _sqlCommandFactory.Create(
+                    "sp_Importar_TipoTrabajo_Listar",
+                    parameters,
+                    CommandType.StoredProcedure,
+                    cancellationToken));
         }
 
-        public async Task<IEnumerable<OTDto>> ListarOTAsync(string filtroKey)
+        public async Task<IEnumerable<OTDto>> ListarOTAsync(string filtroKey, CancellationToken cancellationToken = default)
         {
-            using var connection = new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
+            await using var connection = _sqlCommandFactory.CreateConnection();
             var parameters = new { filtroKey };
-            return await connection.QueryAsync<OTDto>("sp_Importar_OT_Listar", parameters, commandType: CommandType.StoredProcedure);
+            return await connection.QueryAsync<OTDto>(
+                _sqlCommandFactory.Create(
+                    "sp_Importar_OT_Listar",
+                    parameters,
+                    CommandType.StoredProcedure,
+                    cancellationToken));
         }
 
-        public async Task<IEnumerable<TareaDto>> ListarTareasAsync()
+        public async Task<IEnumerable<TareaDto>> ListarTareasAsync(CancellationToken cancellationToken = default)
         {
-            using var connection = new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
-            return await connection.QueryAsync<TareaDto>("sp_Constante_Tarea_Listar", commandType: CommandType.StoredProcedure);
+            await using var connection = _sqlCommandFactory.CreateConnection();
+            return await connection.QueryAsync<TareaDto>(
+                _sqlCommandFactory.Create(
+                    "sp_Constante_Tarea_Listar",
+                    commandType: CommandType.StoredProcedure,
+                    cancellationToken: cancellationToken));
         }
 
         public async Task<ValoresGastoDto> ObtenerValoresGastoAsync(
@@ -54,9 +71,10 @@ namespace CjERP.Infrastructure.Services
             string tipoTrabajo,
             string? ot,
             bool usarOt,
-            decimal tipoCambio)
+            decimal tipoCambio,
+            CancellationToken cancellationToken = default)
         {
-            using var connection = new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
+            await using var connection = _sqlCommandFactory.CreateConnection();
 
             var parameters = new DynamicParameters();
             parameters.Add("@IdCliente", idCliente, DbType.Int32);
@@ -72,9 +90,12 @@ namespace CjERP.Infrastructure.Services
                 $"[LookupService] sp_Finanzas_CargarValoresGasto => IdCliente={idCliente}, IdProyecto={idProyecto}, IdSite={idSite}, Correlativo={correlativo}, TipoTrabajo={tipoTrabajo}, Ot={ot}, UsarOt={usarOt}, TipoCambio={tipoCambio}");
 
             var row = await connection.QueryFirstOrDefaultAsync(
-                "dbo.sp_Finanzas_CargarValoresGasto",
-                parameters,
-                commandType: CommandType.StoredProcedure);
+                _sqlCommandFactory.Create(
+                    "dbo.sp_Finanzas_CargarValoresGasto",
+                    parameters,
+                    CommandType.StoredProcedure,
+                    cancellationToken,
+                    commandTimeout: 120));
 
             if (row == null)
             {
@@ -84,64 +105,73 @@ namespace CjERP.Infrastructure.Services
             return MapValoresGasto(row);
         }
 
-        public async Task<IEnumerable<ConstanteLookupDto>> ListarConstantesPorCampoAsync(string campo)
+        public async Task<IEnumerable<ConstanteLookupDto>> ListarConstantesPorCampoAsync(string campo, CancellationToken cancellationToken = default)
         {
-            using var connection = new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
+            await using var connection = _sqlCommandFactory.CreateConnection();
 
             var rows = await connection.QueryAsync(
-                "sp_Constante_ListarPorCampo",
-                new { Campo = campo },
-                commandType: CommandType.StoredProcedure);
+                _sqlCommandFactory.Create(
+                    "sp_Constante_ListarPorCampo",
+                    new { Campo = campo },
+                    CommandType.StoredProcedure,
+                    cancellationToken));
 
-            // Solución: proyectar explícitamente a IEnumerable<ConstanteLookupDto>
             return rows.Select(row => MapConstanteLookup(row, campo)).Cast<ConstanteLookupDto>();
         }
 
-        public async Task<IEnumerable<SolicitanteLookupDto>> ListarSolicitantesAsync(int? idCargo, int? idEmpleado)
+        public async Task<IEnumerable<SolicitanteLookupDto>> ListarSolicitantesAsync(int? idCargo, int? idEmpleado, CancellationToken cancellationToken = default)
         {
-            using var connection = new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
+            await using var connection = _sqlCommandFactory.CreateConnection();
 
             var parameters = new DynamicParameters();
             parameters.Add("@IdCargo", idCargo, DbType.Int32);
             parameters.Add("@IdEmpleado", idEmpleado, DbType.Int32);
 
             var rows = await connection.QueryAsync(
-                "dbo.sp_ListarSolicitante",
-                parameters,
-                commandType: CommandType.StoredProcedure);
+                _sqlCommandFactory.Create(
+                    "dbo.sp_ListarSolicitante",
+                    parameters,
+                    CommandType.StoredProcedure,
+                    cancellationToken));
 
             return rows.Select(MapSolicitanteLookup).Cast<SolicitanteLookupDto>();
         }
 
-        public async Task<IEnumerable<SolicitanteLookupDto>> ListarGestoresAsync()
+        public async Task<IEnumerable<SolicitanteLookupDto>> ListarGestoresAsync(CancellationToken cancellationToken = default)
         {
-            using var connection = new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
+            await using var connection = _sqlCommandFactory.CreateConnection();
 
             var rows = await connection.QueryAsync(
-                "dbo.sp_ListarGestor",
-                commandType: CommandType.StoredProcedure);
+                _sqlCommandFactory.Create(
+                    "dbo.sp_ListarGestor",
+                    commandType: CommandType.StoredProcedure,
+                    cancellationToken: cancellationToken));
 
             return rows.Select(MapSolicitanteLookup).Cast<SolicitanteLookupDto>();
         }
 
-        public async Task<IEnumerable<SolicitanteLookupDto>> ListarValidadoresAsync()
+        public async Task<IEnumerable<SolicitanteLookupDto>> ListarValidadoresAsync(CancellationToken cancellationToken = default)
         {
-            using var connection = new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
+            await using var connection = _sqlCommandFactory.CreateConnection();
 
             var rows = await connection.QueryAsync(
-                "dbo.sp_ListarValidador",
-                commandType: CommandType.StoredProcedure);
+                _sqlCommandFactory.Create(
+                    "dbo.sp_ListarValidador",
+                    commandType: CommandType.StoredProcedure,
+                    cancellationToken: cancellationToken));
 
             return rows.Select(MapSolicitanteLookup).Cast<SolicitanteLookupDto>();
         }
 
-        public async Task<IEnumerable<UbigeoLookupDto>> ListarUbigeosAsync()
+        public async Task<IEnumerable<UbigeoLookupDto>> ListarUbigeosAsync(CancellationToken cancellationToken = default)
         {
-            using var connection = new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
+            await using var connection = _sqlCommandFactory.CreateConnection();
 
             var rows = await connection.QueryAsync(
-                "dbo.sp_Listar_Ubigeo",
-                commandType: CommandType.StoredProcedure);
+                _sqlCommandFactory.Create(
+                    "dbo.sp_Listar_Ubigeo",
+                    commandType: CommandType.StoredProcedure,
+                    cancellationToken: cancellationToken));
 
             return rows.Select(MapUbigeoLookup).Cast<UbigeoLookupDto>();
         }

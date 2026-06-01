@@ -3,9 +3,9 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces.Services;
+using CjERP.Infrastructure.Persistence.Sql;
 using Dapper;
 using Microsoft.Data.SqlClient;
-using Microsoft.Extensions.Configuration;
 
 namespace CjERP.Infrastructure.Services;
 
@@ -17,14 +17,14 @@ public class LogisticaSuministroService : ILogisticaSuministroService
     private const string ActualizarSp = "dbo.sp_SuministroProvisional_Actualizar";
     private static readonly ConcurrentDictionary<string, HashSet<string>> ProcedureParameterCache = new(StringComparer.OrdinalIgnoreCase);
 
-    private readonly IConfiguration _configuration;
+    private readonly ISqlCommandFactory _sqlCommandFactory;
     private readonly IAuditoriaCambiosService _auditoriaCambiosService;
 
     public LogisticaSuministroService(
-        IConfiguration configuration,
+        ISqlCommandFactory sqlCommandFactory,
         IAuditoriaCambiosService auditoriaCambiosService)
     {
-        _configuration = configuration;
+        _sqlCommandFactory = sqlCommandFactory;
         _auditoriaCambiosService = auditoriaCambiosService;
     }
 
@@ -32,14 +32,15 @@ public class LogisticaSuministroService : ILogisticaSuministroService
         LogisticaSuministroBuscarRequestDto request,
         CancellationToken cancellationToken = default)
     {
-        using var connection = BuildConnection();
+        await using var connection = BuildConnection();
         var parameters = await BuildBuscarParametersAsync(connection, request, cancellationToken);
         var rows = await connection.QueryAsync(
-            new CommandDefinition(
+            _sqlCommandFactory.Create(
                 BuscarSp,
                 parameters,
-                commandType: CommandType.StoredProcedure,
-                cancellationToken: cancellationToken));
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120));
 
         return rows.Select(MapRowToDto).ToList();
     }
@@ -48,14 +49,15 @@ public class LogisticaSuministroService : ILogisticaSuministroService
         LogisticaSuministroBuscarRequestDto request,
         CancellationToken cancellationToken = default)
     {
-        using var connection = BuildConnection();
+        await using var connection = BuildConnection();
         var parameters = await BuildBuscarParametersAsync(connection, request, cancellationToken, KpisSp);
         var row = await connection.QueryFirstOrDefaultAsync(
-            new CommandDefinition(
+            _sqlCommandFactory.Create(
                 KpisSp,
                 parameters,
-                commandType: CommandType.StoredProcedure,
-                cancellationToken: cancellationToken));
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120));
 
         if (row is null)
         {
@@ -70,7 +72,7 @@ public class LogisticaSuministroService : ILogisticaSuministroService
         string usuarioAccion,
         CancellationToken cancellationToken = default)
     {
-        using var connection = BuildConnection();
+        await using var connection = BuildConnection();
         var parameters = await BuildUpsertParametersAsync(
             connection,
             InsertarSp,
@@ -105,11 +107,12 @@ public class LogisticaSuministroService : ILogisticaSuministroService
             request.ImagenPath,
             cancellationToken);
         var result = await connection.ExecuteScalarAsync<object?>(
-            new CommandDefinition(
+            _sqlCommandFactory.Create(
                 InsertarSp,
                 parameters,
-                commandType: CommandType.StoredProcedure,
-                cancellationToken: cancellationToken));
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120));
 
         var id = TryConvertToInt(result);
 
@@ -125,7 +128,7 @@ public class LogisticaSuministroService : ILogisticaSuministroService
         string usuarioAccion,
         CancellationToken cancellationToken = default)
     {
-        using var connection = BuildConnection();
+        await using var connection = BuildConnection();
         var previousData = request.IdProvisional.GetValueOrDefault() > 0
             ? await ObtenerPorIdProvisionalAsync(connection, request.IdProvisional!.Value, cancellationToken)
             : null;
@@ -164,23 +167,21 @@ public class LogisticaSuministroService : ILogisticaSuministroService
             request.ImagenPath,
             cancellationToken);
         await connection.ExecuteAsync(
-            new CommandDefinition(
+            _sqlCommandFactory.Create(
                 ActualizarSp,
                 parameters,
-                commandType: CommandType.StoredProcedure,
-                cancellationToken: cancellationToken));
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120));
 
         await _auditoriaCambiosService.RegistrarLoteAsync(
             BuildUpdateAuditEntries(request, previousData, usuarioAccion),
             cancellationToken);
     }
 
-    private SqlConnection BuildConnection()
-    {
-        return new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
-    }
+    private SqlConnection BuildConnection() => _sqlCommandFactory.CreateConnection();
 
-    private static async Task<LogisticaSuministroDto?> ObtenerPorIdProvisionalAsync(
+    private async Task<LogisticaSuministroDto?> ObtenerPorIdProvisionalAsync(
         SqlConnection connection,
         long idProvisional,
         CancellationToken cancellationToken)
@@ -194,11 +195,12 @@ public class LogisticaSuministroService : ILogisticaSuministroService
             cancellationToken);
 
         var rows = await connection.QueryAsync(
-            new CommandDefinition(
+            _sqlCommandFactory.Create(
                 BuscarSp,
                 parameters,
-                commandType: CommandType.StoredProcedure,
-                cancellationToken: cancellationToken));
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120));
 
         return rows.Select(MapRowToDto).FirstOrDefault();
     }
@@ -408,7 +410,7 @@ public class LogisticaSuministroService : ILogisticaSuministroService
             : value.Trim();
     }
 
-    private static async Task<DynamicParameters> BuildBuscarParametersAsync(
+    private async Task<DynamicParameters> BuildBuscarParametersAsync(
         SqlConnection connection,
         LogisticaSuministroBuscarRequestDto request,
         CancellationToken cancellationToken,
@@ -449,7 +451,7 @@ public class LogisticaSuministroService : ILogisticaSuministroService
         return parameters;
     }
 
-    private static async Task<DynamicParameters> BuildUpsertParametersAsync(
+    private async Task<DynamicParameters> BuildUpsertParametersAsync(
         SqlConnection connection,
         string procedureName,
         long? idProvisional,
@@ -713,7 +715,7 @@ public class LogisticaSuministroService : ILogisticaSuministroService
         return Task.CompletedTask;
     }
 
-    private static async Task<HashSet<string>> GetStoredProcedureParametersAsync(
+    private async Task<HashSet<string>> GetStoredProcedureParametersAsync(
         SqlConnection connection,
         string procedureName,
         CancellationToken cancellationToken)
@@ -732,7 +734,7 @@ public class LogisticaSuministroService : ILogisticaSuministroService
         }
 
         var result = await connection.QueryAsync<string>(
-            new CommandDefinition(
+            _sqlCommandFactory.Create(
                 sql,
                 new
                 {

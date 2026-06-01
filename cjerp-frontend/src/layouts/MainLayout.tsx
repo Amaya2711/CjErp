@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import logo from "../assets/logo.png";
 import { clearAuthUser, getAuthUser } from "../utils/authStorage";
-import { logout } from "../features/auth/services/authService";
+import { logoutSession } from "../features/auth/services/logoutSession";
 import {
   loadDashboardMenus,
   type DashboardGroup,
@@ -146,9 +146,7 @@ export default function MainLayout() {
     logoutRef.current = true;
 
     try {
-      await logout();
-    } catch {
-      // Ignored on purpose: local cleanup still must happen.
+      await logoutSession({ redirectToLogin: false });
     } finally {
       forceLogoutToLogin();
     }

@@ -1,9 +1,8 @@
 using System.Data;
 using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces.Services;
+using CjERP.Infrastructure.Persistence.Sql;
 using Dapper;
-using Microsoft.Data.SqlClient;
-using Microsoft.Extensions.Configuration;
 
 namespace CjERP.Infrastructure.Services;
 
@@ -11,23 +10,24 @@ public class LogisticaReembolsoService : ILogisticaReembolsoService
 {
     private const string BuscarSp = "dbo.sp_Planilla_Listar_Reembolso";
 
-    private readonly IConfiguration _configuration;
+    private readonly ISqlCommandFactory _sqlCommandFactory;
 
-    public LogisticaReembolsoService(IConfiguration configuration)
+    public LogisticaReembolsoService(ISqlCommandFactory sqlCommandFactory)
     {
-        _configuration = configuration;
+        _sqlCommandFactory = sqlCommandFactory;
     }
 
     public async Task<IEnumerable<LogisticaReembolsoDto>> BuscarAsync(
         LogisticaReembolsoBuscarRequestDto request,
         CancellationToken cancellationToken = default)
     {
-        using var connection = BuildConnection();
+        await using var connection = _sqlCommandFactory.CreateConnection();
         var data = await connection.QueryAsync<LogisticaReembolsoDto>(
-            new CommandDefinition(
+            _sqlCommandFactory.Create(
                 BuscarSp,
                 commandType: CommandType.StoredProcedure,
-                cancellationToken: cancellationToken));
+                cancellationToken: cancellationToken,
+                commandTimeout: 120));
 
         if (request.Correlativo is > 0)
         {
@@ -43,10 +43,5 @@ public class LogisticaReembolsoService : ILogisticaReembolsoService
     {
         throw new NotSupportedException(
             "No existe store de actualizacion configurado para reembolso. El endpoint queda preparado, pero no ejecuta cambios.");
-    }
-
-    private SqlConnection BuildConnection()
-    {
-        return new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
     }
 }

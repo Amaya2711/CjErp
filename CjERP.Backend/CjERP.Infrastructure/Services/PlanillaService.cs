@@ -3,9 +3,9 @@ using System.Globalization;
 using System.Text.Json;
 using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces.Services;
+using CjERP.Infrastructure.Persistence.Sql;
 using Dapper;
 using Microsoft.Data.SqlClient;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace CjERP.Infrastructure.Services
@@ -17,12 +17,12 @@ namespace CjERP.Infrastructure.Services
         private const string UpdateStoredProcedureName = "dbo.sp_Planilla_Actualizar";
         private const string UpdateStatusStoredProcedureName = "dbo.sp_Planilla_ActualizarEstado";
 
-        private readonly IConfiguration _configuration;
+        private readonly ISqlCommandFactory _sqlCommandFactory;
         private readonly ILogger<PlanillaService> _logger;
 
-        public PlanillaService(IConfiguration configuration, ILogger<PlanillaService> logger)
+        public PlanillaService(ISqlCommandFactory sqlCommandFactory, ILogger<PlanillaService> logger)
         {
-            _configuration = configuration;
+            _sqlCommandFactory = sqlCommandFactory;
             _logger = logger;
         }
 
@@ -30,22 +30,22 @@ namespace CjERP.Infrastructure.Services
             SuministroProvisionalVigenteRequestDto request,
             CancellationToken cancellationToken = default)
         {
-            using var connection = new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
+            await using var connection = _sqlCommandFactory.CreateConnection();
             var parameters = await BuildSuministroVigenteParametersAsync(connection, request, cancellationToken);
 
             var rows = await connection.QueryAsync(
-                new CommandDefinition(
+                _sqlCommandFactory.Create(
                     VigenteStoredProcedureName,
                     parameters,
-                    commandType: CommandType.StoredProcedure,
-                    cancellationToken: cancellationToken));
+                    CommandType.StoredProcedure,
+                    cancellationToken));
 
             return rows.Select(MapSuministroVigenteRow).ToList();
         }
 
         public async Task InsertarPlanillaAsync(PlanillaInsertRequestDto request, CancellationToken cancellationToken = default)
         {
-            using var connection = new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
+            await using var connection = _sqlCommandFactory.CreateConnection();
 
             var parameters = BuildPlanillaParameters(request);
 
@@ -92,21 +92,22 @@ namespace CjERP.Infrastructure.Services
             };
 
             _logger.LogInformation(
-                "[PlanillaService] Parámetros enviados a sp_Planilla_Insertar:{NewLine}{Payload}",
+                "[PlanillaService] ParÃ¡metros enviados a sp_Planilla_Insertar:{NewLine}{Payload}",
                 Environment.NewLine,
                 JsonSerializer.Serialize(logObject, new JsonSerializerOptions { WriteIndented = true }));
 
             await connection.ExecuteAsync(
-                new CommandDefinition(
+                _sqlCommandFactory.Create(
                     InsertStoredProcedureName,
                     parameters,
-                    commandType: CommandType.StoredProcedure,
-                    cancellationToken: cancellationToken));
+                    CommandType.StoredProcedure,
+                    cancellationToken,
+                    commandTimeout: 120));
         }
 
         public async Task ActualizarPlanillaAsync(PlanillaUpdateRequestDto request, CancellationToken cancellationToken = default)
         {
-            using var connection = new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
+            await using var connection = _sqlCommandFactory.CreateConnection();
 
             var parameters = BuildPlanillaParameters(request);
             parameters.Add("@Correlativo", request.Correlativo, DbType.Int32);
@@ -155,21 +156,22 @@ namespace CjERP.Infrastructure.Services
             };
 
             _logger.LogInformation(
-                "[PlanillaService] Parámetros enviados a sp_Planilla_Actualizar:{NewLine}{Payload}",
+                "[PlanillaService] ParÃ¡metros enviados a sp_Planilla_Actualizar:{NewLine}{Payload}",
                 Environment.NewLine,
                 JsonSerializer.Serialize(logObject, new JsonSerializerOptions { WriteIndented = true }));
 
             await connection.ExecuteAsync(
-                new CommandDefinition(
+                _sqlCommandFactory.Create(
                     UpdateStoredProcedureName,
                     parameters,
-                    commandType: CommandType.StoredProcedure,
-                    cancellationToken: cancellationToken));
+                    CommandType.StoredProcedure,
+                    cancellationToken,
+                    commandTimeout: 120));
         }
 
         public async Task ActualizarEstadoPlanillaAsync(PlanillaActualizarEstadoRequestDto request, CancellationToken cancellationToken = default)
         {
-            using var connection = new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
+            await using var connection = _sqlCommandFactory.CreateConnection();
 
             var idAprobador = request.IdAprobador.GetValueOrDefault();
             if (idAprobador <= 0)
@@ -185,7 +187,7 @@ namespace CjERP.Infrastructure.Services
             parameters.Add("@Observacion", NullIfWhiteSpace(request.Observacion), DbType.String);
 
             _logger.LogInformation(
-                "[PlanillaService] Parámetros enviados a sp_Planilla_ActualizarEstado:{NewLine}{Payload}",
+                "[PlanillaService] ParÃ¡metros enviados a sp_Planilla_ActualizarEstado:{NewLine}{Payload}",
                 Environment.NewLine,
                 JsonSerializer.Serialize(
                     new
@@ -199,17 +201,14 @@ namespace CjERP.Infrastructure.Services
                     new JsonSerializerOptions { WriteIndented = true }));
 
             await connection.ExecuteAsync(
-                new CommandDefinition(
+                _sqlCommandFactory.Create(
                     UpdateStatusStoredProcedureName,
                     parameters,
-                    commandType: CommandType.StoredProcedure,
-                    cancellationToken: cancellationToken));
+                    CommandType.StoredProcedure,
+                    cancellationToken,
+                    commandTimeout: 120));
         }
 
-        /*
-            Validacion de suministro provisional removida.
-            El control definitivo vive dentro de dbo.sp_Planilla_Insertar.
-        */
         private static DynamicParameters BuildPlanillaParameters(PlanillaInsertRequestDto request)
         {
             var idResponsable = ParseRequiredInt(request.Responsable, nameof(request.Responsable));
@@ -263,7 +262,7 @@ namespace CjERP.Infrastructure.Services
             return parameters;
         }
 
-        private static async Task<DynamicParameters> BuildSuministroVigenteParametersAsync(
+        private async Task<DynamicParameters> BuildSuministroVigenteParametersAsync(
             SqlConnection connection,
             SuministroProvisionalVigenteRequestDto request,
             CancellationToken cancellationToken)
@@ -308,7 +307,7 @@ namespace CjERP.Infrastructure.Services
             parameters.Add(parameterName, value, dbType);
         }
 
-        private static async Task<IReadOnlyList<string>> GetStoredProcedureParametersAsync(
+        private async Task<IReadOnlyList<string>> GetStoredProcedureParametersAsync(
             SqlConnection connection,
             string procedureName,
             CancellationToken cancellationToken)
@@ -327,7 +326,7 @@ namespace CjERP.Infrastructure.Services
             var objectName = normalized.Length > 1 ? normalized[1] : normalized[0];
 
             var rows = await connection.QueryAsync<string>(
-                new CommandDefinition(
+                _sqlCommandFactory.Create(
                     sql,
                     new { SchemaName = schemaName, ProcedureName = objectName },
                     cancellationToken: cancellationToken));
@@ -483,7 +482,7 @@ namespace CjERP.Infrastructure.Services
             }
 
             throw new InvalidOperationException(
-                $"El campo {fieldName} debe enviarse como código numérico. Valor recibido: '{value ?? "null"}'.");
+                $"El campo {fieldName} debe enviarse como cÃ³digo numÃ©rico. Valor recibido: '{value ?? "null"}'.");
         }
     }
 }

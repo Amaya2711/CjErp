@@ -2,9 +2,9 @@ using System.Data;
 using System.Globalization;
 using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces.Services;
+using CjERP.Infrastructure.Persistence.Sql;
 using Dapper;
 using Microsoft.Data.SqlClient;
-using Microsoft.Extensions.Configuration;
 
 namespace CjERP.Infrastructure.Services;
 
@@ -15,14 +15,14 @@ public class ChequeEmpleadoService : IChequeEmpleadoService
     private const string InsertarSp = "dbo.sp_ChequeEmpleado_Insertar";
     private const string ActualizarSp = "dbo.sp_ChequeEmpleado_Actualizar";
 
-    private readonly IConfiguration _configuration;
+    private readonly ISqlCommandFactory _sqlCommandFactory;
     private readonly IAuditoriaCambiosService _auditoriaCambiosService;
 
     public ChequeEmpleadoService(
-        IConfiguration configuration,
+        ISqlCommandFactory sqlCommandFactory,
         IAuditoriaCambiosService auditoriaCambiosService)
     {
-        _configuration = configuration;
+        _sqlCommandFactory = sqlCommandFactory;
         _auditoriaCambiosService = auditoriaCambiosService;
     }
 
@@ -30,17 +30,17 @@ public class ChequeEmpleadoService : IChequeEmpleadoService
         ChequeEmpleadoFiltroDto filtro,
         CancellationToken cancellationToken = default)
     {
-        using var connection = BuildConnection();
+        await using var connection = BuildConnection();
         var rows = await connection.QueryAsync(
-            new CommandDefinition(
+            _sqlCommandFactory.Create(
                 ListarSp,
                 new
                 {
                     idempleado = filtro.IdEmpleado,
                     idestado = filtro.IdEstado
                 },
-                commandType: CommandType.StoredProcedure,
-                cancellationToken: cancellationToken));
+                CommandType.StoredProcedure,
+                cancellationToken));
 
         return rows.Select(MapRow).ToList();
     }
@@ -49,7 +49,7 @@ public class ChequeEmpleadoService : IChequeEmpleadoService
         int idCheque,
         CancellationToken cancellationToken = default)
     {
-        using var connection = BuildConnection();
+        await using var connection = BuildConnection();
         return await ObtenerInternoAsync(connection, idCheque, cancellationToken);
     }
 
@@ -59,16 +59,17 @@ public class ChequeEmpleadoService : IChequeEmpleadoService
     {
         ValidateGuardarRequest(request, isUpdate: false);
 
-        using var connection = BuildConnection();
+        await using var connection = BuildConnection();
         var usuarioAccion = ResolveUsuarioAccion(request.UsuarioAccion);
         var parameters = BuildGuardarParameters(request, includeIdCheque: false);
 
         var result = await connection.QueryFirstOrDefaultAsync<ChequeEmpleadoSpResult>(
-            new CommandDefinition(
+            _sqlCommandFactory.Create(
                 InsertarSp,
                 parameters,
-                commandType: CommandType.StoredProcedure,
-                cancellationToken: cancellationToken));
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120));
 
         ValidateStoredProcedureResult(result, "No se pudo crear el cheque.");
 
@@ -93,18 +94,19 @@ public class ChequeEmpleadoService : IChequeEmpleadoService
     {
         ValidateGuardarRequest(request, isUpdate: true);
 
-        using var connection = BuildConnection();
+        await using var connection = BuildConnection();
         var anterior = await ObtenerInternoAsync(connection, request.IdCheque!.Value, cancellationToken)
             ?? throw new InvalidOperationException("No se encontro el cheque a actualizar.");
         var usuarioAccion = ResolveUsuarioAccion(request.UsuarioAccion);
         var parameters = BuildGuardarParameters(request, includeIdCheque: true);
 
         var result = await connection.QueryFirstOrDefaultAsync<ChequeEmpleadoSpResult>(
-            new CommandDefinition(
+            _sqlCommandFactory.Create(
                 ActualizarSp,
                 parameters,
-                commandType: CommandType.StoredProcedure,
-                cancellationToken: cancellationToken));
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120));
 
         ValidateStoredProcedureResult(result, "No se pudo actualizar el cheque.");
 
@@ -142,7 +144,7 @@ public class ChequeEmpleadoService : IChequeEmpleadoService
             throw new InvalidOperationException("Debe ingresar una observacion para rechazar el cheque.");
         }
 
-        using var connection = BuildConnection();
+        await using var connection = BuildConnection();
         var anterior = await ObtenerInternoAsync(connection, idCheque, cancellationToken)
             ?? throw new InvalidOperationException("No se encontro el cheque a rechazar.");
 
@@ -162,11 +164,12 @@ public class ChequeEmpleadoService : IChequeEmpleadoService
         };
 
         var result = await connection.QueryFirstOrDefaultAsync<ChequeEmpleadoSpResult>(
-            new CommandDefinition(
+            _sqlCommandFactory.Create(
                 ActualizarSp,
                 BuildGuardarParameters(updateRequest, includeIdCheque: true),
-                commandType: CommandType.StoredProcedure,
-                cancellationToken: cancellationToken));
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120));
 
         ValidateStoredProcedureResult(result, "No se pudo rechazar el cheque.");
 
@@ -190,11 +193,11 @@ public class ChequeEmpleadoService : IChequeEmpleadoService
         CancellationToken cancellationToken)
     {
         var row = await connection.QueryFirstOrDefaultAsync(
-            new CommandDefinition(
+            _sqlCommandFactory.Create(
                 ObtenerSp,
                 new { IdCheque = idCheque },
-                commandType: CommandType.StoredProcedure,
-                cancellationToken: cancellationToken));
+                CommandType.StoredProcedure,
+                cancellationToken));
 
         return row is null ? null : MapRow(row);
     }
@@ -537,10 +540,7 @@ public class ChequeEmpleadoService : IChequeEmpleadoService
         return null;
     }
 
-    private SqlConnection BuildConnection()
-    {
-        return new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
-    }
+    private SqlConnection BuildConnection() => _sqlCommandFactory.CreateConnection();
 
     private sealed class ChequeEmpleadoSpResult
     {

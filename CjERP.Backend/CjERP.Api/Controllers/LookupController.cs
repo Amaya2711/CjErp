@@ -18,34 +18,34 @@ namespace CjERP.Api.Controllers
         }
 
         [HttpGet("filtros")]
-        public async Task<IActionResult> GetFiltros()
+        public async Task<IActionResult> GetFiltros(CancellationToken cancellationToken)
         {
-            var result = await _lookupService.ListarFiltrosOperativosAsync();
+            var result = await _lookupService.ListarFiltrosOperativosAsync(cancellationToken);
             return Ok(result);
         }
 
         [HttpGet("tipotrabajo")]
-        public async Task<IActionResult> GetTipoTrabajo([FromQuery] string filtroKey)
+        public async Task<IActionResult> GetTipoTrabajo([FromQuery] string filtroKey, CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(filtroKey))
                 return BadRequest("filtroKey es requerido.");
-            var result = await _lookupService.ListarTipoTrabajoAsync(filtroKey);
+            var result = await _lookupService.ListarTipoTrabajoAsync(filtroKey, cancellationToken);
             return Ok(result);
         }
 
         [HttpGet("ot")]
-        public async Task<IActionResult> GetOT([FromQuery] string filtroKey)
+        public async Task<IActionResult> GetOT([FromQuery] string filtroKey, CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(filtroKey))
                 return BadRequest("filtroKey es requerido.");
-            var result = await _lookupService.ListarOTAsync(filtroKey);
+            var result = await _lookupService.ListarOTAsync(filtroKey, cancellationToken);
             return Ok(result);
         }
 
         [HttpGet("tareas")]
-        public async Task<IActionResult> GetTareas()
+        public async Task<IActionResult> GetTareas(CancellationToken cancellationToken)
         {
-            var result = await _lookupService.ListarTareasAsync();
+            var result = await _lookupService.ListarTareasAsync(cancellationToken);
             return Ok(result);
         }
 
@@ -58,7 +58,8 @@ namespace CjERP.Api.Controllers
             [FromQuery] string tipoTrabajo,
             [FromQuery] string? ot,
             [FromQuery] bool usarOt = false,
-            [FromQuery] decimal tipoCambio = 3.80m)
+            [FromQuery] decimal tipoCambio = 3.80m,
+            CancellationToken cancellationToken = default)
         {
             if (idCliente <= 0)
                 return BadRequest("idCliente es requerido.");
@@ -80,50 +81,52 @@ namespace CjERP.Api.Controllers
                 tipoTrabajo,
                 string.IsNullOrWhiteSpace(ot) ? null : ot,
                 usarOt,
-                tipoCambio);
+                tipoCambio,
+                cancellationToken);
 
             return Ok(result);
         }
 
         [HttpGet("~/api/lookup/constantes")]
-        public async Task<IActionResult> GetConstantes([FromQuery] string campo)
+        public async Task<IActionResult> GetConstantes([FromQuery] string campo, CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(campo))
                 return BadRequest("campo es requerido.");
 
-            var result = await _lookupService.ListarConstantesPorCampoAsync(campo);
+            var result = await _lookupService.ListarConstantesPorCampoAsync(campo, cancellationToken);
             return Ok(result);
         }
 
         [HttpGet("~/api/lookup/solicitantes")]
-        public async Task<IActionResult> GetSolicitantes([FromQuery] int? idCargo, [FromQuery] int? idEmpleado)
+        public async Task<IActionResult> GetSolicitantes([FromQuery] int? idCargo, [FromQuery] int? idEmpleado, CancellationToken cancellationToken)
         {
             var result = await _lookupService.ListarSolicitantesAsync(
                 idCargo.GetValueOrDefault() <= 0 ? null : idCargo,
-                idEmpleado.GetValueOrDefault() <= 0 ? null : idEmpleado
+                idEmpleado.GetValueOrDefault() <= 0 ? null : idEmpleado,
+                cancellationToken
             );
 
             return Ok(result);
         }
 
         [HttpGet("~/api/lookup/gestores")]
-        public async Task<IActionResult> GetGestores()
+        public async Task<IActionResult> GetGestores(CancellationToken cancellationToken)
         {
-            var result = await _lookupService.ListarGestoresAsync();
+            var result = await _lookupService.ListarGestoresAsync(cancellationToken);
             return Ok(result);
         }
 
         [HttpGet("~/api/lookup/validador")]
-        public async Task<IActionResult> GetValidador()
+        public async Task<IActionResult> GetValidador(CancellationToken cancellationToken)
         {
-            var result = await _lookupService.ListarValidadoresAsync();
+            var result = await _lookupService.ListarValidadoresAsync(cancellationToken);
             return Ok(result);
         }
 
         [HttpGet("~/api/lookup/ubigeos")]
-        public async Task<IActionResult> GetUbigeos()
+        public async Task<IActionResult> GetUbigeos(CancellationToken cancellationToken)
         {
-            var result = await _lookupService.ListarUbigeosAsync();
+            var result = await _lookupService.ListarUbigeosAsync(cancellationToken);
             return Ok(result);
         }
     }

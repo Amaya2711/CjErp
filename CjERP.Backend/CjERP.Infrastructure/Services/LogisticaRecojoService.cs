@@ -1,9 +1,8 @@
 using System.Data;
 using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces.Services;
+using CjERP.Infrastructure.Persistence.Sql;
 using Dapper;
-using Microsoft.Data.SqlClient;
-using Microsoft.Extensions.Configuration;
 
 namespace CjERP.Infrastructure.Services;
 
@@ -12,31 +11,32 @@ public class LogisticaRecojoService : ILogisticaRecojoService
     private const string BuscarSp = "dbo.sp_Logistica_Recojo_Buscar";
     private const string InsertarSp = "dbo.sp_Logistica_Recojo_Insertar";
 
-    private readonly IConfiguration _configuration;
+    private readonly ISqlCommandFactory _sqlCommandFactory;
 
-    public LogisticaRecojoService(IConfiguration configuration)
+    public LogisticaRecojoService(ISqlCommandFactory sqlCommandFactory)
     {
-        _configuration = configuration;
+        _sqlCommandFactory = sqlCommandFactory;
     }
 
     public async Task<IEnumerable<LogisticaRecojoDto>> BuscarAsync(
         LogisticaRecojoBuscarRequestDto request,
         CancellationToken cancellationToken = default)
     {
-        using var connection = BuildConnection();
+        await using var connection = _sqlCommandFactory.CreateConnection();
         return await connection.QueryAsync<LogisticaRecojoDto>(
-            new CommandDefinition(
+            _sqlCommandFactory.Create(
                 BuscarSp,
                 BuildBuscarParameters(request),
-                commandType: CommandType.StoredProcedure,
-                cancellationToken: cancellationToken));
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120));
     }
 
     public async Task<int> InsertarAsync(
         LogisticaRecojoInsertRequestDto request,
         CancellationToken cancellationToken = default)
     {
-        using var connection = BuildConnection();
+        await using var connection = _sqlCommandFactory.CreateConnection();
         var parameters = new DynamicParameters();
         parameters.Add("@IdCliente", request.IdCliente, DbType.Int32);
         parameters.Add("@IdProyecto", request.IdProyecto, DbType.Int32);
@@ -58,18 +58,14 @@ public class LogisticaRecojoService : ILogisticaRecojoService
         parameters.Add("@UsuarioCreacion", NullIfWhiteSpace(request.UsuarioCreacion), DbType.String);
 
         var result = await connection.ExecuteScalarAsync<object?>(
-            new CommandDefinition(
+            _sqlCommandFactory.Create(
                 InsertarSp,
                 parameters,
-                commandType: CommandType.StoredProcedure,
-                cancellationToken: cancellationToken));
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120));
 
         return TryConvertToInt(result);
-    }
-
-    private SqlConnection BuildConnection()
-    {
-        return new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
     }
 
     private static DynamicParameters BuildBuscarParameters(LogisticaRecojoBuscarRequestDto request)

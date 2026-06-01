@@ -2,9 +2,8 @@ using System.Data;
 using System.Text.Json;
 using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces.Services;
+using CjERP.Infrastructure.Persistence.Sql;
 using Dapper;
-using Microsoft.Data.SqlClient;
-using Microsoft.Extensions.Configuration;
 
 namespace CjERP.Infrastructure.Services;
 
@@ -20,44 +19,46 @@ public class OrdenCompraService : IOrdenCompraService
         WHERE IdOc = @IdOc;
         """;
 
-    private readonly IConfiguration _configuration;
+    private readonly ISqlCommandFactory _sqlCommandFactory;
 
-    public OrdenCompraService(IConfiguration configuration)
+    public OrdenCompraService(ISqlCommandFactory sqlCommandFactory)
     {
-        _configuration = configuration;
+        _sqlCommandFactory = sqlCommandFactory;
     }
 
     public async Task<IEnumerable<OrdenCompraCabeceraDto>> BuscarCabeceraAsync(
         OrdenCompraConsultaRequestDto request,
         CancellationToken cancellationToken = default)
     {
-        using var connection = BuildConnection();
+        await using var connection = _sqlCommandFactory.CreateConnection();
         return await connection.QueryAsync<OrdenCompraCabeceraDto>(
-            new CommandDefinition(
+            _sqlCommandFactory.Create(
                 BuscarCabeceraSp,
                 BuildConsultaParameters(request),
-                commandType: CommandType.StoredProcedure,
-                cancellationToken: cancellationToken));
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120));
     }
 
     public async Task<IEnumerable<OrdenCompraDetalleDto>> BuscarDetalleAsync(
         OrdenCompraConsultaRequestDto request,
         CancellationToken cancellationToken = default)
     {
-        using var connection = BuildConnection();
+        await using var connection = _sqlCommandFactory.CreateConnection();
         return await connection.QueryAsync<OrdenCompraDetalleDto>(
-            new CommandDefinition(
+            _sqlCommandFactory.Create(
                 BuscarDetalleSp,
                 BuildConsultaParameters(request),
-                commandType: CommandType.StoredProcedure,
-                cancellationToken: cancellationToken));
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120));
     }
 
     public async Task<int> InsertarAsync(
         OrdenCompraInsertRequestDto request,
         CancellationToken cancellationToken = default)
     {
-        using var connection = BuildConnection();
+        await using var connection = _sqlCommandFactory.CreateConnection();
 
         var detalleJson = JsonSerializer.Serialize(
             request.Detalle.Select(item => new
@@ -89,20 +90,22 @@ public class OrdenCompraService : IOrdenCompraService
         parameters.Add("@Detalle", detalleJson, DbType.String);
 
         var idOc = await connection.ExecuteScalarAsync<int>(
-            new CommandDefinition(
+            _sqlCommandFactory.Create(
                 InsertarSp,
                 parameters,
-                commandType: CommandType.StoredProcedure,
-                cancellationToken: cancellationToken));
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120));
 
         if (request.IdWeb > 0 && idOc > 0)
         {
             await connection.ExecuteAsync(
-                new CommandDefinition(
+                _sqlCommandFactory.Create(
                     ActualizarIdWebSql,
                     new { IdWeb = request.IdWeb, IdOc = idOc },
-                    commandType: CommandType.Text,
-                    cancellationToken: cancellationToken));
+                    CommandType.Text,
+                    cancellationToken,
+                    commandTimeout: 120));
         }
 
         return idOc;
@@ -112,7 +115,7 @@ public class OrdenCompraService : IOrdenCompraService
         OrdenCompraRechazoMasivoRequestDto request,
         CancellationToken cancellationToken = default)
     {
-        using var connection = BuildConnection();
+        await using var connection = _sqlCommandFactory.CreateConnection();
 
         var idsOc = request.IdsOc
             .Where(id => id > 0)
@@ -127,16 +130,12 @@ public class OrdenCompraService : IOrdenCompraService
         parameters.Add("@IdRechazador", request.IdAprobador, DbType.Int32);
 
         await connection.ExecuteAsync(
-            new CommandDefinition(
+            _sqlCommandFactory.Create(
                 RechazarMasivoSp,
                 parameters,
-                commandType: CommandType.StoredProcedure,
-                cancellationToken: cancellationToken));
-    }
-
-    private SqlConnection BuildConnection()
-    {
-        return new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120));
     }
 
     private static DynamicParameters BuildConsultaParameters(OrdenCompraConsultaRequestDto request)

@@ -1,25 +1,23 @@
-﻿using System.Data;
-using Dapper;
-using Microsoft.Data.SqlClient;
+using System.Data;
 using CjERP.Application.DTOs.Auth;
 using CjERP.Application.Interfaces.Services;
-using Microsoft.Extensions.Configuration;
+using CjERP.Infrastructure.Persistence.Sql;
+using Dapper;
 
 namespace CjERP.Infrastructure.Services
 {
     public class AuthService : IAuthService
     {
-        private readonly IConfiguration _configuration;
+        private readonly ISqlCommandFactory _sqlCommandFactory;
 
-        public AuthService(IConfiguration configuration)
+        public AuthService(ISqlCommandFactory sqlCommandFactory)
         {
-            _configuration = configuration;
+            _sqlCommandFactory = sqlCommandFactory;
         }
 
-        public async Task<LoginResponseDto?> LoginAsync(LoginRequestDto request)
+        public async Task<LoginResponseDto?> LoginAsync(LoginRequestDto request, CancellationToken cancellationToken = default)
         {
-            using var connection = new SqlConnection(
-                _configuration.GetConnectionString("DefaultConnection"));
+            await using var connection = _sqlCommandFactory.CreateConnection();
 
             var requestedUser = request.IdUsuario?.Trim();
 
@@ -28,14 +26,15 @@ namespace CjERP.Infrastructure.Services
             parameters.Add("@pClave", request.Clave, DbType.String);
 
             var result = await connection.QueryFirstOrDefaultAsync<LoginResponseDto>(
-                "dbo.sp_ValidarUsuario",
-                parameters,
-                commandType: CommandType.StoredProcedure);
+                _sqlCommandFactory.Create(
+                    "dbo.sp_ValidarUsuario",
+                    parameters,
+                    CommandType.StoredProcedure,
+                    cancellationToken));
 
             if (result == null)
                 return null;
 
-            // Safety check: reject if the SP returns a different user than requested.
             if (!string.Equals(result.IdUsuario?.Trim(), requestedUser, StringComparison.OrdinalIgnoreCase))
                 return null;
 

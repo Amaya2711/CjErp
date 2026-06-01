@@ -7,10 +7,10 @@ namespace CjERP.Application.Interfaces
 {
     public interface ILookupService
     {
-        Task<IEnumerable<FiltroOperativoDto>> ListarFiltrosOperativosAsync();
-        Task<IEnumerable<TipoTrabajoDto>> ListarTipoTrabajoAsync(string filtroKey);
-        Task<IEnumerable<OTDto>> ListarOTAsync(string filtroKey);
-        Task<IEnumerable<TareaDto>> ListarTareasAsync();
+        Task<IEnumerable<FiltroOperativoDto>> ListarFiltrosOperativosAsync(CancellationToken cancellationToken = default);
+        Task<IEnumerable<TipoTrabajoDto>> ListarTipoTrabajoAsync(string filtroKey, CancellationToken cancellationToken = default);
+        Task<IEnumerable<OTDto>> ListarOTAsync(string filtroKey, CancellationToken cancellationToken = default);
+        Task<IEnumerable<TareaDto>> ListarTareasAsync(CancellationToken cancellationToken = default);
         Task<ValoresGastoDto> ObtenerValoresGastoAsync(
             int idCliente,
             int idProyecto,
@@ -19,11 +19,12 @@ namespace CjERP.Application.Interfaces
             string tipoTrabajo,
             string? ot,
             bool usarOt,
-            decimal tipoCambio);
-        Task<IEnumerable<ConstanteLookupDto>> ListarConstantesPorCampoAsync(string campo);
-        Task<IEnumerable<SolicitanteLookupDto>> ListarSolicitantesAsync(int? idCargo, int? idEmpleado);
-        Task<IEnumerable<SolicitanteLookupDto>> ListarGestoresAsync();
-        Task<IEnumerable<SolicitanteLookupDto>> ListarValidadoresAsync();
-        Task<IEnumerable<UbigeoLookupDto>> ListarUbigeosAsync();
+            decimal tipoCambio,
+            CancellationToken cancellationToken = default);
+        Task<IEnumerable<ConstanteLookupDto>> ListarConstantesPorCampoAsync(string campo, CancellationToken cancellationToken = default);
+        Task<IEnumerable<SolicitanteLookupDto>> ListarSolicitantesAsync(int? idCargo, int? idEmpleado, CancellationToken cancellationToken = default);
+        Task<IEnumerable<SolicitanteLookupDto>> ListarGestoresAsync(CancellationToken cancellationToken = default);
+        Task<IEnumerable<SolicitanteLookupDto>> ListarValidadoresAsync(CancellationToken cancellationToken = default);
+        Task<IEnumerable<UbigeoLookupDto>> ListarUbigeosAsync(CancellationToken cancellationToken = default);
     }
 }

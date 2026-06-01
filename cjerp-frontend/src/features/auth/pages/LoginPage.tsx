@@ -44,6 +44,7 @@ export default function LoginPage() {
 
       saveAuthUser({
         token: response.token,
+        expiration: response.expiration,
         sessionId: response.sessionId ?? "",
         usuario: response.idUsuario ?? "",
         nombre: response.nombreEmpleado ?? "",

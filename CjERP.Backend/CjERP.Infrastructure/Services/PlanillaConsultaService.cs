@@ -7,41 +7,41 @@ using System.Threading;
 using System.Threading.Tasks;
 using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces.Services;
+using CjERP.Infrastructure.Persistence.Sql;
 using Dapper;
 using Microsoft.Data.SqlClient;
-using Microsoft.Extensions.Configuration;
 
 namespace CjERP.Infrastructure.Services
 {
     public class PlanillaConsultaService : IPlanillaConsultaService
     {
         private const string StoredProcedureName = "dbo.sp_Planilla_Consulta_Estados";
+        private readonly ISqlCommandFactory _sqlCommandFactory;
 
-        private readonly IConfiguration _configuration;
-
-        public PlanillaConsultaService(IConfiguration configuration)
+        public PlanillaConsultaService(ISqlCommandFactory sqlCommandFactory)
         {
-            _configuration = configuration;
+            _sqlCommandFactory = sqlCommandFactory;
         }
 
         public async Task<PlanillaConsultaEstadosResponseDto> ConsultarEstadosAsync(
             IEnumerable<PlanillaConsultaParametroDto> parametros,
             CancellationToken cancellationToken = default)
         {
-            using var connection = new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
+            await using var connection = _sqlCommandFactory.CreateConnection();
 
             var dynamicParameters = BuildParameters(parametros ?? []);
 
             var rows = (await connection.QueryAsync(
-                new CommandDefinition(
+                _sqlCommandFactory.Create(
                     StoredProcedureName,
                     dynamicParameters,
-                    commandType: CommandType.StoredProcedure,
-                    cancellationToken: cancellationToken)))
+                    CommandType.StoredProcedure,
+                    cancellationToken,
+                    commandTimeout: 120)))
                 .Select(MapRow)
                 .ToList();
 
-           await EnrichRowsWithFacturaDataAsync(connection, rows, cancellationToken);
+            await EnrichRowsWithFacturaDataAsync(connection, rows, cancellationToken);
 
             var columns = rows
                 .SelectMany(row => row.Keys)
@@ -55,7 +55,17 @@ namespace CjERP.Infrastructure.Services
             };
         }
 
-        private static async Task EnrichRowsWithFacturaDataAsync(
+        private CommandDefinition CreateCommand(
+            string sql,
+            object? parameters = null,
+            CommandType? commandType = null,
+            CancellationToken cancellationToken = default,
+            int? commandTimeout = null)
+        {
+            return _sqlCommandFactory.Create(sql, parameters, commandType, cancellationToken, commandTimeout);
+        }
+
+        private async Task EnrichRowsWithFacturaDataAsync(
             SqlConnection connection,
             List<Dictionary<string, object?>> rows,
             CancellationToken cancellationToken)
@@ -73,7 +83,7 @@ namespace CjERP.Infrastructure.Services
             }
 
             var availableColumns = (await connection.QueryAsync<string>(
-                new CommandDefinition(
+                CreateCommand(
                     @"
 SELECT c.name
 FROM sys.columns c
@@ -95,8 +105,8 @@ WHERE s.name = 'dbo'
                             "IdUsuarioFactura",
                         }
                     },
-                    commandType: CommandType.Text,
-                    cancellationToken: cancellationToken)))
+                    CommandType.Text,
+                    cancellationToken)))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -131,11 +141,12 @@ FROM Planilla
 WHERE Correlativo IN @Correlativos";
 
             var facturaRows = (await connection.QueryAsync(
-                new CommandDefinition(
+                CreateCommand(
                     sql,
                     new { Correlativos = correlativos },
-                    commandType: CommandType.Text,
-                    cancellationToken: cancellationToken)))
+                    CommandType.Text,
+                    cancellationToken,
+                    commandTimeout: 120)))
                 .Select(MapRow)
                 .Select(row => new
                 {
