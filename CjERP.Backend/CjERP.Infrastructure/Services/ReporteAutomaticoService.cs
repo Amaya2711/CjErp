@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
+using CjERP.Application.DTOs;
 using CjERP.Application.DTOs.ReportesWhatsapp;
 using CjERP.Application.Interfaces.Repositories;
 using CjERP.Application.Interfaces.Services;
@@ -11,6 +12,10 @@ namespace CjERP.Infrastructure.Services;
 
 public sealed class ReporteAutomaticoService : IReporteAutomaticoService
 {
+    private static readonly TimeSpan PdfGenerationTimeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan WupSendTimeout = TimeSpan.FromSeconds(30);
+    private const int WupMaxAttempts = 2;
+    private const int WupRetryDelaySeconds = 2;
     private static readonly string[] RutasModuloRptWup =
     [
         "/mantenimiento/sistemas/rptwup",
@@ -21,16 +26,19 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
 
     private readonly IReporteRepository _reporteRepository;
     private readonly IReportePdfService _reportePdfService;
+    private readonly IAsistenciaReporteService _asistenciaReporteService;
     private readonly IWupService _wupService;
     private readonly IReporteWhatsappRuntimeMonitor _runtimeMonitor;
     private readonly ISegMenuService _segMenuService;
     private readonly ReporteWhatsappJobDefaultsOptions _defaults;
     private readonly WupSettings _wupSettings;
     private readonly ILogger<ReporteAutomaticoService> _logger;
+    private static readonly TimeSpan PdfGenerationDiagnosticTimeout = TimeSpan.FromSeconds(60);
 
     public ReporteAutomaticoService(
         IReporteRepository reporteRepository,
         IReportePdfService reportePdfService,
+        IAsistenciaReporteService asistenciaReporteService,
         IWupService wupService,
         IReporteWhatsappRuntimeMonitor runtimeMonitor,
         ISegMenuService segMenuService,
@@ -40,6 +48,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
     {
         _reporteRepository = reporteRepository;
         _reportePdfService = reportePdfService;
+        _asistenciaReporteService = asistenciaReporteService;
         _wupService = wupService;
         _runtimeMonitor = runtimeMonitor;
         _segMenuService = segMenuService;
@@ -337,6 +346,8 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
 
         try
         {
+            SetRuntimeStep(tipoReporte, runtime, $"Validando destino WUP de {empleado.NombreEmpleado}.");
+
             if (string.IsNullOrWhiteSpace(empleado.Telefono))
             {
                 log.EstadoEnvio = "OMITIDO_SIN_TELEFONO";
@@ -362,10 +373,12 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             IReadOnlyList<ReporteWhatsappAsistenciaItemDto> detalle;
             if (ReporteWhatsappTipos.IsGerencial(tipoReporte))
             {
+                SetRuntimeStep(tipoReporte, runtime, $"Preparando dataset gerencial para {empleado.NombreEmpleado}.");
                 detalle = detalleGerencial ?? Array.Empty<ReporteWhatsappAsistenciaItemDto>();
             }
             else
             {
+                SetRuntimeStep(tipoReporte, runtime, $"Consultando asistencia para {empleado.NombreEmpleado}.");
                 detalle = await _reporteRepository.ObtenerReporteAsistenciaAsync(
                     periodo.FechaInicio,
                     periodo.FechaFin,
@@ -383,7 +396,58 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             byte[] pdfBytes;
             try
             {
-                pdfBytes = await _reportePdfService.GenerarReportePdfAsync(tipoReporte, empleado, periodo, detalle, cancellationToken);
+                SetRuntimeStep(
+                    tipoReporte,
+                    runtime,
+                    ReporteWhatsappTipos.IsGerencial(tipoReporte)
+                        ? $"Generando PDF gerencial ejecutivo para {empleado.NombreEmpleado}."
+                        : $"Generando PDF de asistencia para {empleado.NombreEmpleado}.");
+
+                using var pdfTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                pdfTimeoutCts.CancelAfter(PdfGenerationTimeout);
+                if (ReporteWhatsappTipos.IsGerencial(tipoReporte))
+                {
+                    pdfBytes = await _asistenciaReporteService.GenerarPdfGerencialEjecutivoAsync(
+                        new AsistenciaGerencialPdfRequestDto
+                        {
+                            FechaInicio = periodo.FechaInicio,
+                            FechaFin = periodo.FechaFin,
+                            UsarPeriodoAutomatico = false,
+                            Destinatario = "Gerencia CJ Telecom"
+                        },
+                        pdfTimeoutCts.Token);
+                }
+                else
+                {
+                    pdfBytes = await _reportePdfService.GenerarReportePdfAsync(tipoReporte, empleado, periodo, detalle, pdfTimeoutCts.Token);
+                }
+
+                _logger.LogInformation(
+                    "[ReporteWUP] PDF generado. Tipo={TipoReporte}, EmpleadoId={EmpleadoId}, Empleado={Empleado}, Registros={Registros}, PdfBytes={PdfBytes}, AdvertenciaTimeout={AdvertenciaTimeout}",
+                    tipoReporte,
+                    empleado.IdEmpleado,
+                    empleado.NombreEmpleado,
+                    detalle.Count,
+                    pdfBytes.Length,
+                    "Si el dashboard vuelve a quedarse en esta etapa mas de 60s, el foco es QuestPDF/report builder.");
+
+                if (stopwatch.Elapsed > PdfGenerationDiagnosticTimeout)
+                {
+                    _logger.LogWarning(
+                        "[ReporteWUP] La generacion del PDF tomo mas de lo esperado. Tipo={TipoReporte}, EmpleadoId={EmpleadoId}, Empleado={Empleado}, Segundos={Segundos}",
+                        tipoReporte,
+                        empleado.IdEmpleado,
+                        empleado.NombreEmpleado,
+                        Math.Round(stopwatch.Elapsed.TotalSeconds, 2));
+                }
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                log.EstadoEnvio = "ERROR_GENERANDO_REPORTE_TIMEOUT";
+                log.MensajeError = $"La generacion del PDF supero el tiempo maximo permitido de {PdfGenerationTimeout.TotalSeconds:0} segundos.";
+                runtime.Errores++;
+                SetRuntimeStep(tipoReporte, runtime, $"Timeout generando PDF para {empleado.NombreEmpleado}.");
+                return;
             }
             catch (Exception ex)
             {
@@ -410,9 +474,13 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
                 return;
             }
 
+            var nombreArchivo = ReporteWhatsappTipos.IsGerencial(tipoReporte)
+                ? $"Reporte_Gerencial_Asistencia_{ParsePeriodoDate(periodo.FechaInicio):yyyyMMdd}_{ParsePeriodoDate(periodo.FechaFin):yyyyMMdd}.pdf"
+                : BuildFileName(tipoReporte, empleado, periodo);
+
             var request = new ReporteWhatsappSendRequestDto
             {
-                NombreArchivo = BuildFileName(tipoReporte, empleado, periodo),
+                NombreArchivo = nombreArchivo,
                 Mensaje = GetMensajeAdjunto(tipoReporte),
                 Modo = GetModoEnvio(tipoReporte),
                 Telefono = telefonoNormalizado,
@@ -427,13 +495,32 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
                 request.Telefono,
                 request.Contenido,
                 contenidoLength = request.Contenido.Length,
+                pdfBytesLength = pdfBytes.Length,
                 reporteGerencial = ReporteWhatsappTipos.IsGerencial(tipoReporte),
-                totalEmpleadosResumen = ReporteWhatsappTipos.IsGerencial(tipoReporte) ? empleadosDestino.Count : 1
+                totalEmpleadosResumen = ReporteWhatsappTipos.IsGerencial(tipoReporte) ? empleadosDestino.Count : 1,
+                pdfGeneratorVersion = ReporteWhatsappTipos.IsGerencial(tipoReporte)
+                    ? "GERENCIAL_EXEC_V2_20260530"
+                    : "OPERATIVO_V1"
             });
 
+            SetRuntimeStep(tipoReporte, runtime, $"Enviando PDF a WUP para {empleado.NombreEmpleado}.");
+            _logger.LogInformation(
+                "[ReporteWUP] Iniciando envio WUP. Tipo={TipoReporte}, EmpleadoId={EmpleadoId}, Empleado={Empleado}, Telefono={Telefono}, Archivo={Archivo}, Base64Length={Base64Length}",
+                tipoReporte,
+                empleado.IdEmpleado,
+                empleado.NombreEmpleado,
+                telefonoNormalizado,
+                request.NombreArchivo,
+                request.Contenido?.Length ?? 0);
+
             var response = await ExecuteWithRetryAsync(
-                () => _wupService.EnviarAdjuntoAsync(request, cancellationToken),
-                2,
+                async sendToken =>
+                {
+                    using var attemptTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(sendToken);
+                    attemptTimeoutCts.CancelAfter(WupSendTimeout);
+                    return await _wupService.EnviarAdjuntoAsync(request, attemptTimeoutCts.Token);
+                },
+                WupMaxAttempts,
                 cancellationToken);
 
             log.ResponseJson = response.ResponseBody;
@@ -445,18 +532,21 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
                     ? "El endpoint WUP respondio sin confirmar exito."
                     : response.ErrorMessage;
                 runtime.Errores++;
+                SetRuntimeStep(tipoReporte, runtime, $"WUP rechazo o no confirmo el envio para {empleado.NombreEmpleado}.");
                 return;
             }
 
             log.EstadoEnvio = "ENVIADO";
             log.FechaEnvio = GetPeruNow();
             runtime.Enviados++;
+            SetRuntimeStep(tipoReporte, runtime, $"PDF enviado correctamente a {empleado.NombreEmpleado}.");
         }
         catch (Exception ex)
         {
             log.EstadoEnvio = "ERROR";
             log.MensajeError = ex.Message;
             runtime.Errores++;
+            SetRuntimeStep(tipoReporte, runtime, $"Error procesando a {empleado.NombreEmpleado}: {ex.Message}");
         }
         finally
         {
@@ -476,7 +566,23 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             runtime.EmpleadosProcesados++;
             runtime.SegundosRestantesEstimados = EstimateRemainingSeconds(runtime, configuracion.DelaySegundosEntreBloques);
 
-            await _reporteRepository.InsertarLogAsync(log, cancellationToken);
+            try
+            {
+                await _reporteRepository.InsertarLogAsync(log, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                runtime.Errores++;
+                runtime.Mensaje = $"No se pudo registrar el log del envio: {ex.Message}";
+                _logger.LogError(
+                    ex,
+                    "[ReporteWUP] No se pudo registrar el log. Tipo={TipoReporte}, EmpleadoId={EmpleadoId}, Empleado={Empleado}, Estado={Estado}",
+                    tipoReporte,
+                    empleado.IdEmpleado,
+                    empleado.NombreEmpleado,
+                    log.EstadoEnvio);
+            }
+
             _runtimeMonitor.Update(tipoReporte, Clone(runtime));
         }
     }
@@ -511,7 +617,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
     }
 
     private static async Task<ReporteWhatsappSendResponseDto> ExecuteWithRetryAsync(
-        Func<Task<ReporteWhatsappSendResponseDto>> action,
+        Func<CancellationToken, Task<ReporteWhatsappSendResponseDto>> action,
         int maxAttempts,
         CancellationToken cancellationToken)
     {
@@ -520,7 +626,21 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            last = await action();
+            try
+            {
+                last = await action(cancellationToken);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                last = new ReporteWhatsappSendResponseDto
+                {
+                    Success = false,
+                    StatusCode = 408,
+                    ResponseBody = string.Empty,
+                    ErrorMessage = $"El envio a WUP supero el tiempo maximo permitido de {WupSendTimeout.TotalSeconds:0} segundos."
+                };
+            }
+
             if (last.Success)
             {
                 return last;
@@ -528,7 +648,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
 
             if (attempt < maxAttempts)
             {
-                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                await Task.Delay(TimeSpan.FromSeconds(WupRetryDelaySeconds), cancellationToken);
             }
         }
 
@@ -537,6 +657,18 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             Success = false,
             ErrorMessage = "No se obtuvo respuesta del servicio WUP."
         };
+    }
+
+    private void SetRuntimeStep(string tipoReporte, ReporteWhatsappRuntimeStatusDto runtime, string message)
+    {
+        runtime.Mensaje = message;
+        _runtimeMonitor.Update(tipoReporte, Clone(runtime));
+        _logger.LogInformation(
+            "[ReporteWUP] Runtime step. Tipo={TipoReporte}, ExecutionId={ExecutionId}, EmpleadoActual={EmpleadoActual}, Mensaje={Mensaje}",
+            tipoReporte,
+            runtime.ExecutionId,
+            runtime.EmpleadoActualNombre,
+            message);
     }
 
     private ReporteWhatsappConfiguracionDto MergeConfiguracion(string tipoReporte, ReporteWhatsappConfiguracionDto? fromDb)
@@ -688,8 +820,23 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
     {
         var employeeId = empleado.IdEmpleado > 0 ? empleado.IdEmpleado.ToString(CultureInfo.InvariantCulture) : "0";
         return ReporteWhatsappTipos.IsGerencial(tipoReporte)
-            ? $"rpt_asistencia_gerencial_{employeeId}_{periodo.FechaProceso:yyyyMMdd}.pdf"
+            ? $"Reporte_Gerencial_Asistencia_{ParsePeriodoDate(periodo.FechaInicio):yyyyMMdd}_{ParsePeriodoDate(periodo.FechaFin):yyyyMMdd}.pdf"
             : $"rpt_asistencia_{employeeId}_{periodo.FechaProceso:yyyyMMdd}.pdf";
+    }
+
+    private static DateTime ParsePeriodoDate(string value)
+    {
+        if (DateTime.TryParseExact(value, "dd/MM/yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var displayDate))
+        {
+            return displayDate;
+        }
+
+        if (DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+        {
+            return parsed;
+        }
+
+        return DateTime.Today;
     }
 
     private static string? NormalizePhone(string? value)

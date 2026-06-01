@@ -2,9 +2,9 @@ using System.Data;
 using System.Globalization;
 using CjERP.Application.DTOs.ReportesWhatsapp;
 using CjERP.Application.Interfaces.Repositories;
+using CjERP.Infrastructure.Persistence.Sql;
 using Dapper;
 using Microsoft.Data.SqlClient;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace CjERP.Infrastructure.Repositories;
@@ -18,13 +18,12 @@ public sealed class ReporteRepository : IReporteRepository
     private const string ReporteWhatsappLogGerenciaTable = "dbo.ReporteWhatsAppLogGerencia";
     private const string ReporteWhatsappConfigTable = "dbo.ReporteWupConfig";
 
-    private readonly string _connectionString;
+    private readonly ISqlCommandFactory _sqlCommandFactory;
     private readonly ILogger<ReporteRepository> _logger;
 
-    public ReporteRepository(IConfiguration configuration, ILogger<ReporteRepository> logger)
+    public ReporteRepository(ISqlCommandFactory sqlCommandFactory, ILogger<ReporteRepository> logger)
     {
-        _connectionString = configuration.GetConnectionString("DefaultConnection")
-            ?? throw new InvalidOperationException("No se encontro la cadena de conexion DefaultConnection.");
+        _sqlCommandFactory = sqlCommandFactory;
         _logger = logger;
     }
 
@@ -582,7 +581,7 @@ public sealed class ReporteRepository : IReporteRepository
         return result.HasValue;
     }
 
-    private SqlConnection CreateConnection() => new(_connectionString);
+    private SqlConnection CreateConnection() => _sqlCommandFactory.CreateConnection();
 
     private static async Task EnsureReporteWupConfigSchemaAsync(SqlConnection connection, CancellationToken cancellationToken)
     {
@@ -747,6 +746,7 @@ public sealed class ReporteRepository : IReporteRepository
         return new ReporteWhatsappAsistenciaItemDto
         {
             IdEmpleado = GetInt(values, "IdEmpleado", "idEmpleado", "CodEmp", "codEmp") ?? 0,
+            IdEstado = GetInt(values, "IdEstado", "idEstado", "Id_Estado", "id_estado"),
             Fecha = GetDateText(values, "Fecha", "fecha"),
             NombreEmpleado = GetString(values, "NombreEmpleado", "nombreEmpleado", "nombreempleado"),
             Responsable = GetString(values, "Responsable", "responsable"),

@@ -1,5 +1,6 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
+using CjERP.Application.DTOs;
 using CjERP.Application.DTOs.ReportesWhatsapp;
 using CjERP.Application.Interfaces.Services;
 using QuestPDF.Fluent;
@@ -26,6 +27,15 @@ public sealed class ReportePdfService : IReportePdfService
             ? BuildGerencialDocument(empleadoDestino, periodo, detalle)
             : BuildOperativoDocument(empleadoDestino, periodo, detalle);
 
+        return Task.FromResult(document.GeneratePdf());
+    }
+
+    public Task<byte[]> GenerarReporteGerencialEjecutivoPdfAsync(
+        AsistenciaGerencialPdfDto reporte,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var document = BuildExecutiveGerencialDocument(reporte);
         return Task.FromResult(document.GeneratePdf());
     }
 
@@ -1195,6 +1205,468 @@ public sealed class ReportePdfService : IReportePdfService
     {
         var radians = Math.PI * angleDegrees / 180d;
         return (centerX + radius * Math.Cos(radians), centerY + radius * Math.Sin(radians));
+    }
+
+    private static Document BuildExecutiveGerencialDocument(AsistenciaGerencialPdfDto reporte)
+    {
+        QuestPDF.Settings.EnableDebugging = true;
+
+        return Document.Create(container =>
+        {
+            container.Page(page =>
+            {
+                ConfigureExecutivePage(page, reporte, "1");
+
+                page.Content().Column(column =>
+                {
+                    column.Spacing(10);
+                    column.Item().Element(c => RenderExecutiveHero(c, reporte));
+                    column.Item().Element(c => RenderExecutiveKpis(c, reporte));
+                    column.Item().Element(c => RenderStateCompositionBars(c, reporte.Graficos.DistribucionPorEstado));
+                });
+            });
+
+            container.Page(page =>
+            {
+                ConfigureExecutivePage(page, reporte, "2");
+
+                page.Content().Column(column =>
+                {
+                    column.Spacing(12);
+                    column.Item().Text("Analisis de gestion").Bold().FontSize(16).FontColor("#0F3D6E");
+                    column.Item().Element(c => RenderExecutiveBubbleCard(c, "Responsables criticos", reporte.Graficos.TopResponsables));
+                    column.Item().Element(c => RenderExecutiveLollipopCard(c, "Empleados con mayor brecha", reporte.Graficos.TopEmpleados));
+                });
+            });
+
+            container.Page(page =>
+            {
+                ConfigureExecutivePage(page, reporte, "3");
+
+                page.Content().Column(column =>
+                {
+                    column.Spacing(12);
+                    column.Item().Text("Segmentacion gerencial y plan de accion").Bold().FontSize(16).FontColor("#0F3D6E");
+                    column.Item().Element(c => RenderExecutiveDonutCard(c, "Incidencias por cliente", reporte.Incidencias.IncidenciasPorCliente));
+                    column.Item().Row(row =>
+                    {
+                        row.Spacing(10);
+                        row.RelativeItem().Element(c => RenderExecutiveTreemapCard(c, "Incidencias por area", reporte.Incidencias.IncidenciasPorArea));
+                        row.RelativeItem().Element(c => RenderExecutiveRiskPanel(c, reporte));
+                    });
+                });
+            });
+        });
+    }
+
+    private static void ConfigureExecutivePage(PageDescriptor page, AsistenciaGerencialPdfDto reporte, string pageMarker)
+    {
+        page.Size(PageSizes.A4);
+        page.Margin(22);
+        page.DefaultTextStyle(x => x.FontSize(9).FontColor("#334155"));
+
+        page.Header().Element(header =>
+        {
+            header.BorderBottom(1).BorderColor("#D9E2EC").PaddingBottom(8).Row(row =>
+            {
+                row.RelativeItem().Column(left =>
+                {
+                    left.Item().Text("CJ TELECOM").Bold().FontSize(18).FontColor("#0F3D6E");
+                    left.Item().Text("Reporte Ejecutivo de Asistencia").FontSize(12).SemiBold().FontColor("#1E3A5F");
+                });
+
+                row.ConstantItem(210).AlignRight().Column(right =>
+                {
+                    right.Item().Text($"Periodo: {reporte.PeriodoConsultado}").FontSize(9);
+                    right.Item().Text($"Generado: {reporte.FechaGeneracion:dd/MM/yyyy HH:mm}").FontSize(9);
+                    right.Item().Text($"Pagina ejecutiva {pageMarker}/3").FontSize(9).FontColor("#64748B");
+                });
+            });
+        });
+
+        page.Footer().AlignCenter().Text(text =>
+        {
+            text.Span("Cj Telecom - Reporte Gerencial de Asistencia | ");
+            text.CurrentPageNumber();
+            text.Span(" / ");
+            text.TotalPages();
+        });
+    }
+
+    private static void RenderExecutiveHero(IContainer container, AsistenciaGerencialPdfDto reporte)
+    {
+        var status = reporte.Kpis.PorcentajeAsistencia >= 95m ? "SATISFACTORIO" : "ALERTA";
+        var statusColor = reporte.Kpis.PorcentajeAsistencia >= 95m ? "#027A48" : "#B42318";
+        var statusBg = reporte.Kpis.PorcentajeAsistencia >= 95m ? "#D1FADF" : "#FEE4E2";
+
+        container.Background("#F8FAFC").Border(1).BorderColor("#16A34A").Padding(14).Row(row =>
+        {
+            row.RelativeItem().Column(left =>
+            {
+                left.Spacing(2);
+                left.Item().Text("Dashboard ejecutivo de asistencia").Bold().FontSize(17).FontColor("#0F3D6E");
+                left.Item().Text($"Periodo consultado: {reporte.PeriodoConsultado}").FontSize(10);
+                left.Item().Text($"Destinatario: {reporte.Destinatario}").FontSize(10);
+            });
+
+            row.ConstantItem(160).AlignMiddle().Element(card =>
+            {
+                card.Background(statusBg).Border(1).BorderColor(statusColor).Padding(10).Column(info =>
+                {
+                    info.Spacing(2);
+                    info.Item().Text("Estado general").FontSize(10).FontColor("#475467");
+                    info.Item().Text(status).Bold().FontSize(18).FontColor(statusColor);
+                });
+            });
+        });
+    }
+
+    private static void RenderExecutiveKpis(IContainer container, AsistenciaGerencialPdfDto reporte)
+    {
+        var metrics = new[]
+        {
+            ("Asistencia efectiva", $"{reporte.Kpis.PorcentajeAsistencia:0.00}%", "Meta 95%", "#027A48", "#D1FADF"),
+            ("Incidencias criticas", GetCriticalCount(reporte).ToString(CultureInfo.InvariantCulture), "Faltas / rechazados / sin marcar", "#B42318", "#FEE4E2"),
+            ("Empleados en riesgo", reporte.Kpis.EmpleadosConDiferenciaNegativa.ToString(CultureInfo.InvariantCulture), "Con brecha negativa", "#B42318", "#FEE4E2"),
+            ("Total registros", reporte.Kpis.TotalRegistros.ToString(CultureInfo.InvariantCulture), "Marcaciones procesadas", "#0F3D6E", "#ECFDF3")
+        };
+
+        container.Row(row =>
+        {
+            row.Spacing(10);
+            foreach (var metric in metrics)
+            {
+                row.RelativeItem().Element(c => RenderMetricCard(c, metric.Item1, metric.Item2, metric.Item3, metric.Item4, metric.Item5));
+            }
+        });
+    }
+
+    private static void RenderMetricCard(IContainer container, string title, string value, string caption, string accent, string background)
+    {
+        container.Background(background).Border(1).BorderColor(accent).Padding(12).Column(column =>
+        {
+            column.Spacing(4);
+            column.Item().Text(title).SemiBold().FontSize(10).FontColor("#475467");
+            column.Item().Text(value).Bold().FontSize(18).FontColor(accent);
+            column.Item().Text(caption).FontSize(9).FontColor("#667085");
+        });
+    }
+
+    private static void RenderStateCompositionBars(IContainer container, IReadOnlyList<AsistenciaGerencialEstadoChartItemDto> items)
+    {
+        var ordered = items
+            .OrderByDescending(item => item.Cantidad)
+            .ThenBy(item => item.Estado, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var max = Math.Max(1, ordered.FirstOrDefault()?.Cantidad ?? 1);
+
+        container.Border(1).BorderColor("#D9E2EC").Padding(14).Column(column =>
+        {
+            column.Spacing(8);
+            column.Item().Text("Composicion de estados").Bold().FontSize(12).FontColor("#0F3D6E");
+
+            foreach (var item in ordered)
+            {
+                var fillPercent = (float)item.Cantidad / max;
+                var tone = GetToneColors(item.Semaforo);
+
+                column.Item().Row(row =>
+                {
+                    row.Spacing(8);
+                    row.ConstantItem(140).Text(item.Estado).FontSize(10).FontColor("#1F2937");
+                    row.RelativeItem().Height(14).Element(bar =>
+                    {
+                        var fillUnits = Math.Max(1, (int)Math.Round(fillPercent * 100));
+                        var emptyUnits = Math.Max(1, 100 - fillUnits);
+
+                        bar.Row(inner =>
+                        {
+                            inner.RelativeItem(fillUnits).Background(tone.Accent);
+                            inner.RelativeItem(emptyUnits).Background("#E5E7EB");
+                        });
+                    });
+                    row.ConstantItem(42).AlignRight().Text($"{item.Porcentaje:0.#}%").FontSize(10);
+                    row.ConstantItem(40).AlignRight().Text(item.Cantidad.ToString(CultureInfo.InvariantCulture)).FontSize(10);
+                });
+            }
+        });
+    }
+
+    private static void RenderExecutiveBubbleCard(IContainer container, string title, IReadOnlyList<AsistenciaGerencialRankingItemDto> items)
+    {
+        var topItems = items.Take(7).ToList();
+        container.Border(1).BorderColor("#D9E2EC").Padding(12).Column(column =>
+        {
+            column.Spacing(6);
+            column.Item().Text(title).Bold().FontSize(12).FontColor("#0F3D6E");
+            column.Item().Text("Estados considerados (EstadoMarcacionTexto): FALTA, FALTA APROBAR, INCOMPLETO, RECHAZADO, SIN MARCAR, SIN SALIDA y SIN ENTRADA.")
+                .FontSize(8)
+                .FontColor("#667085");
+            column.Item().AlignCenter().Height(220).Svg(BuildSimpleBubbleSvg(topItems));
+            column.Item().Column(legend =>
+            {
+                legend.Spacing(2);
+                foreach (var item in topItems.Take(3))
+                {
+                    legend.Item().Text($"{item.Nombre}: {item.Cantidad} inc. / {item.Horas:0.##} h").FontSize(8).FontColor("#334155");
+                }
+            });
+        });
+    }
+
+    private static void RenderExecutiveLollipopCard(IContainer container, string title, IReadOnlyList<AsistenciaGerencialRankingItemDto> items)
+    {
+        var topItems = items.Take(7).ToList();
+        container.Border(1).BorderColor("#D9E2EC").Padding(12).Column(column =>
+        {
+            column.Spacing(6);
+            column.Item().Text(title).Bold().FontSize(12).FontColor("#0F3D6E");
+            column.Item().AlignCenter().Height(220).Svg(BuildSimpleLollipopSvg(topItems));
+            column.Item().Column(summary =>
+            {
+                summary.Spacing(2);
+                foreach (var item in topItems.Take(3))
+                {
+                    summary.Item().Text($"{item.Nombre}: {item.Horas:0.##} h / {item.Cantidad} inc.").FontSize(8).FontColor("#334155");
+                }
+            });
+        });
+    }
+
+    private static void RenderExecutiveDonutCard(IContainer container, string title, IReadOnlyList<AsistenciaGerencialGrupoIncidenciaDto> items)
+    {
+        var topItems = items.Take(6).ToList();
+        container.Border(1).BorderColor("#D9E2EC").Padding(12).Column(column =>
+        {
+            column.Spacing(8);
+            column.Item().Text(title).Bold().FontSize(12).FontColor("#0F3D6E");
+            column.Item().AlignCenter().Height(220).Svg(BuildSimpleDonutSvg(topItems));
+            column.Item().Column(summary =>
+            {
+                summary.Spacing(2);
+                foreach (var item in topItems.Take(3))
+                {
+                    summary.Item().Text($"{item.Nombre}: {item.Cantidad} ({item.Porcentaje:0.##}%)").FontSize(8).FontColor("#334155");
+                }
+            });
+        });
+    }
+
+    private static void RenderExecutiveTreemapCard(IContainer container, string title, IReadOnlyList<AsistenciaGerencialGrupoIncidenciaDto> items)
+    {
+        var topItems = items.Take(6).ToList();
+        container.Border(1).BorderColor("#D9E2EC").Padding(12).Column(column =>
+        {
+            column.Spacing(8);
+            column.Item().Text(title).Bold().FontSize(12).FontColor("#0F3D6E");
+            column.Item().Column(summary =>
+            {
+                summary.Spacing(6);
+                foreach (var indexed in topItems.Select((value, index) => new { value, index }))
+                {
+                    summary.Item().Column(block =>
+                    {
+                        block.Spacing(2);
+                        block.Item().Row(row =>
+                        {
+                            row.RelativeItem().Text(indexed.value.Nombre).FontSize(9).SemiBold().FontColor("#1F2937");
+                            row.ConstantItem(36).AlignRight().Text(indexed.value.Cantidad.ToString(CultureInfo.InvariantCulture)).FontSize(9);
+                            row.ConstantItem(52).AlignRight().Text($"{indexed.value.Porcentaje:0.##}%").FontSize(9);
+                        });
+                        block.Item().Height(16).Background("#E5E7EB").Row(row =>
+                        {
+                            var fillUnits = Math.Max(1, (int)Math.Round(indexed.value.Porcentaje));
+                            var emptyUnits = Math.Max(1, 100 - fillUnits);
+                            row.RelativeItem(fillUnits).Background(GetPaletteColor(indexed.index));
+                            row.RelativeItem(emptyUnits).Background("#E5E7EB");
+                        });
+                    });
+                }
+            });
+        });
+    }
+
+    private static void RenderExecutiveRiskPanel(IContainer container, AsistenciaGerencialPdfDto reporte)
+    {
+        var conclusions = BuildExecutiveReadingRows(reporte);
+        var recommendations = MergeRecommendations(conclusions, reporte.Incidencias.RecomendacionesEjecutivas).Take(8).ToList();
+
+        container.Border(1).BorderColor("#D9E2EC").Padding(12).Column(column =>
+        {
+            column.Spacing(8);
+            column.Item().Text("Riesgo y plan de accion").Bold().FontSize(12).FontColor("#0F3D6E");
+            foreach (var item in recommendations)
+            {
+                column.Item().Row(row =>
+                {
+                    row.ConstantItem(10).Text("•").FontColor("#1D4ED8");
+                    row.RelativeItem().Text(item).FontSize(9).FontColor("#334155");
+                });
+            }
+        });
+    }
+
+    private static IReadOnlyList<string> BuildExecutiveReadingRows(AsistenciaGerencialPdfDto reporte)
+    {
+        var rows = new List<string>
+        {
+            $"La asistencia efectiva del periodo es {reporte.Kpis.PorcentajeAsistencia:0.00}%, frente a una meta sugerida de 95%."
+        };
+
+        var alertStates = reporte.Graficos.DistribucionPorEstado
+            .Where(item => string.Equals(item.Semaforo, "ROJO", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(item => item.Cantidad)
+            .Take(3)
+            .ToList();
+
+        if (alertStates.Count > 0)
+        {
+            rows.Add($"Se identifican {string.Join(", ", alertStates.Select(item => $"{item.Cantidad} registros en {item.Estado.ToLowerInvariant()}"))}.");
+        }
+
+        var topResponsable = reporte.Graficos.TopResponsables.FirstOrDefault();
+        if (topResponsable is not null)
+        {
+            rows.Add($"El responsable con mayor concentracion de incidencias es {topResponsable.Nombre}, con {topResponsable.Cantidad} incidencias.");
+        }
+
+        var topBrecha = reporte.Graficos.TopEmpleados.OrderBy(item => item.Horas).FirstOrDefault();
+        if (topBrecha is not null)
+        {
+            rows.Add($"La mayor brecha de horas corresponde a {topBrecha.Nombre}, con {topBrecha.Horas:0.##} horas.");
+        }
+
+        return rows;
+    }
+
+    private static IReadOnlyList<string> MergeRecommendations(IReadOnlyList<string> executiveRows, IReadOnlyList<string> recommendations)
+    {
+        return executiveRows
+            .Concat(recommendations)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static (string Accent, string Background) GetToneColors(string tone)
+    {
+        return tone?.Trim().ToUpperInvariant() switch
+        {
+            "ROJO" => ("#F04438", "#FEE4E2"),
+            "AMARILLO" => ("#F79009", "#FEF3C7"),
+            _ => ("#12B76A", "#D1FADF")
+        };
+    }
+
+    private static int GetCriticalCount(AsistenciaGerencialPdfDto reporte) =>
+        reporte.Graficos.DistribucionPorEstado
+            .Where(item => string.Equals(item.Semaforo, "ROJO", StringComparison.OrdinalIgnoreCase))
+            .Sum(item => item.Cantidad);
+
+    private static string BuildSimpleBubbleSvg(IReadOnlyList<AsistenciaGerencialRankingItemDto> items)
+    {
+        if (items.Count == 0)
+        {
+            return EmptyExecutiveSvg("Sin datos para visualizar");
+        }
+
+        var positions = new (double X, double Y)[] { (90, 95), (215, 85), (330, 100), (430, 82), (145, 155), (275, 145), (385, 145) };
+        var max = Math.Max(1, items.Max(item => item.Cantidad));
+        var builder = new StringBuilder();
+        builder.Append("""<svg width="500" height="220" viewBox="0 0 500 220" xmlns="http://www.w3.org/2000/svg">""");
+        builder.Append("""<rect x="0" y="0" width="500" height="220" fill="#FFFFFF" />""");
+
+        for (var i = 0; i < items.Count && i < positions.Length; i++)
+        {
+            var item = items[i];
+            var radius = 24 + (item.Cantidad * 28d / max);
+            var color = GetPaletteColor(i);
+            builder.Append($"""<circle cx="{positions[i].X:0.##}" cy="{positions[i].Y:0.##}" r="{radius:0.##}" fill="{color}" fill-opacity="0.9" />""");
+            builder.Append($"""<text x="{positions[i].X:0.##}" y="{positions[i].Y - 2:0.##}" text-anchor="middle" font-size="18" font-weight="700" fill="#111827">{item.Cantidad}</text>""");
+            builder.Append($"""<text x="{positions[i].X:0.##}" y="{positions[i].Y + 16:0.##}" text-anchor="middle" font-size="8" fill="#111827">{EscapeXml(ShortenName(item.Nombre, 18))}</text>""");
+        }
+
+        builder.Append("</svg>");
+        return builder.ToString();
+    }
+
+    private static string BuildSimpleLollipopSvg(IReadOnlyList<AsistenciaGerencialRankingItemDto> items)
+    {
+        if (items.Count == 0)
+        {
+            return EmptyExecutiveSvg("Sin datos para visualizar");
+        }
+
+        var ordered = items.OrderBy(item => item.Horas).ToList();
+        var maxAbs = Math.Max(1m, ordered.Max(item => Math.Abs(item.Horas)));
+        var builder = new StringBuilder();
+        builder.Append("""<svg width="500" height="220" viewBox="0 0 500 220" xmlns="http://www.w3.org/2000/svg">""");
+        builder.Append("""<rect x="0" y="0" width="500" height="220" fill="#FFFFFF" />""");
+
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var item = ordered[i];
+            var y = 22 + (i * 27);
+            var startX = 170d;
+            var endX = startX + (double)(Math.Abs(item.Horas) * 250m / maxAbs);
+            builder.Append($"""<text x="0" y="{y + 4:0.##}" font-size="8" fill="#111827">{EscapeXml(ShortenName(item.Nombre, 24))}</text>""");
+            builder.Append($"""<line x1="{startX:0.##}" y1="{y:0.##}" x2="{endX:0.##}" y2="{y:0.##}" stroke="#CBD5E1" stroke-width="3" />""");
+            builder.Append($"""<circle cx="{endX:0.##}" cy="{y:0.##}" r="6" fill="#EF4444" />""");
+            builder.Append($"""<text x="{endX + 8:0.##}" y="{y + 4:0.##}" font-size="8" fill="#111827">{item.Horas:0.##}</text>""");
+        }
+
+        builder.Append("</svg>");
+        return builder.ToString();
+    }
+
+    private static string BuildSimpleDonutSvg(IReadOnlyList<AsistenciaGerencialGrupoIncidenciaDto> items)
+    {
+        if (items.Count == 0)
+        {
+            return EmptyExecutiveSvg("Sin datos para visualizar");
+        }
+
+        var total = Math.Max(1, items.Sum(item => item.Cantidad));
+        var centerX = 170d;
+        var centerY = 110d;
+        var radius = 64d;
+        var innerRadius = 34d;
+        var startAngle = -90d;
+        var builder = new StringBuilder();
+        builder.Append("""<svg width="500" height="220" viewBox="0 0 500 220" xmlns="http://www.w3.org/2000/svg">""");
+        builder.Append("""<rect x="0" y="0" width="500" height="220" fill="#FFFFFF" />""");
+
+        foreach (var indexed in items.Select((value, index) => new { value, index }))
+        {
+            var sweep = indexed.value.Cantidad * 360d / total;
+            builder.Append(BuildSlice(centerX, centerY, radius, startAngle, startAngle + sweep, GetPaletteColor(indexed.index)));
+            startAngle += sweep;
+        }
+
+        builder.Append($"""<circle cx="{centerX}" cy="{centerY}" r="{innerRadius}" fill="#FFFFFF" />""");
+        builder.Append($"""<text x="{centerX}" y="{centerY - 4}" text-anchor="middle" font-size="12" font-weight="700" fill="#0F3D6E">{total}</text>""");
+        builder.Append($"""<text x="{centerX}" y="{centerY + 12}" text-anchor="middle" font-size="8" fill="#64748B">incidencias</text>""");
+
+        var legendY = 42;
+        foreach (var indexed in items.Select((value, index) => new { value, index }))
+        {
+            builder.Append($"""<rect x="290" y="{legendY}" width="10" height="10" fill="{GetPaletteColor(indexed.index)}" />""");
+            builder.Append($"""<text x="306" y="{legendY + 9}" font-size="8" fill="#111827">{EscapeXml(ShortenName(indexed.value.Nombre, 20))} {indexed.value.Porcentaje:0.#}%</text>""");
+            legendY += 22;
+        }
+
+        builder.Append("</svg>");
+        return builder.ToString();
+    }
+
+    private static string EmptyExecutiveSvg(string message) =>
+        $"""<svg width="500" height="220" viewBox="0 0 500 220" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="500" height="220" fill="#FFFFFF" /><text x="250" y="110" text-anchor="middle" font-size="10" fill="#64748B">{EscapeXml(message)}</text></svg>""";
+
+    private static string ShortenName(string? value, int maxLength)
+    {
+        var text = EmptyIfMissing(value);
+        return text.Length <= maxLength ? text : text[..Math.Max(0, maxLength - 1)] + "…";
     }
 
     private static DateTime? ParseDate(string? value)

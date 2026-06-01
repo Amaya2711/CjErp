@@ -162,9 +162,14 @@ public sealed class ReporteWhatsappEmpleadoDto
 public sealed class ReporteWhatsappAsistenciaItemDto
 {
     public int IdEmpleado { get; set; }
+    public int? IdEstado { get; set; }
     public string Fecha { get; set; } = string.Empty;
     public string NombreEmpleado { get; set; } = string.Empty;
     public string Responsable { get; set; } = string.Empty;
+    public string Cliente { get; set; } = string.Empty;
+    public string Area { get; set; } = string.Empty;
+    public string Proyecto { get; set; } = string.Empty;
+    public string Site { get; set; } = string.Empty;
     public string Estado { get; set; } = string.Empty;
     public string EstadoMarcacionTexto { get; set; } = string.Empty;
     public string Ubicacion { get; set; } = string.Empty;
@@ -178,6 +183,7 @@ public sealed class ReporteWhatsappAsistenciaItemDto
     public decimal TotalHorasFaltaAprobar { get; set; }
     public decimal DiferenciaHoras { get; set; }
     public string EstadoValidacionHoras { get; set; } = string.Empty;
+    public string Comentario { get; set; } = string.Empty;
     public string Observacion { get; set; } = string.Empty;
 }
 

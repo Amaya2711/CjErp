@@ -13,6 +13,7 @@ import AppStatusMessage from "../../../components/base/AppStatusMessage";
 import DataGridBase, {
   type DataGridColumn,
 } from "../../../components/base/DataGridBase";
+import { exportarAsistenciaGerencialPdf } from "../../../api/asistenciaService";
 import { reportesWhatsappService } from "../../../api/reportesWhatsappService";
 import type {
   ReporteWhatsappConfiguracion,
@@ -22,8 +23,9 @@ import type {
 } from "../../../models/reportesWhatsapp";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 
-const POLLING_RUNNING_MS = 5000;
-const POLLING_IDLE_MS = 20000;
+const POLLING_RUNNING_MS = 1500;
+const POLLING_IDLE_MS = 8000;
+const DASHBOARD_TOP_LOGS = 50;
 const DIAS_EJECUCION = [
   { value: "MONDAY", label: "Lunes" },
   { value: "TUESDAY", label: "Martes" },
@@ -52,7 +54,55 @@ type RptWupModulePageProps = {
   tableTitle?: string;
   tableSubtitle?: string;
   runtimeTitle?: string;
+  enableGerencialPdfPreview?: boolean;
 };
+
+type BlobErrorResponse = {
+  response?: {
+    data?: unknown;
+  };
+};
+
+async function getBlobHttpErrorMessage(error: unknown, fallback: string) {
+  if (typeof error === "object" && error !== null) {
+    const candidate = error as BlobErrorResponse;
+    const responseData = candidate.response?.data;
+
+    if (responseData instanceof Blob) {
+      try {
+        const text = (await responseData.text()).trim();
+        if (text) {
+          try {
+            const parsed = JSON.parse(text) as Record<string, unknown>;
+            const messages = [
+              parsed.message,
+              parsed.mensaje,
+              parsed.detail,
+              parsed.error,
+              parsed.title,
+            ];
+
+            const firstMessage = messages.find(
+              (item) => typeof item === "string" && item.trim()
+            ) as string | undefined;
+
+            if (firstMessage) {
+              return firstMessage;
+            }
+          } catch {
+            return text;
+          }
+
+          return text;
+        }
+      } catch {
+        // Si no se puede leer el blob, usamos el fallback normal.
+      }
+    }
+  }
+
+  return getHttpErrorMessage(error, fallback);
+}
 
 function formatDateTime(value?: string | null) {
   if (!value) {
@@ -160,6 +210,24 @@ function getResponsePreview(responseJson?: string) {
 }
 
 function buildCompactFileName(fileName: string, employeeId: number) {
+  const normalized = fileName.trim();
+
+  if (/^Reporte_Gerencial_Asistencia_\d{8}_\d{8}\.pdf$/i.test(normalized)) {
+    return normalized;
+  }
+
+  if (/^rpt_asistencia_gerencial_/i.test(normalized) || normalized.toLowerCase().includes("gerencial")) {
+    return normalized;
+  }
+
+  if (/^rpt_asistencia_/i.test(normalized)) {
+    return normalized;
+  }
+
+  if (/\.pdf$/i.test(normalized)) {
+    return normalized;
+  }
+
   const match = fileName.match(/(\d{8})(?=\.pdf$)/i);
   const suffix = match?.[1] ?? "SINFECHA";
   const isGerencial = fileName.toLowerCase().includes("gerencial");
@@ -370,16 +438,19 @@ export function RptWupModulePage({
   tableTitle = "Logs del período",
   tableSubtitle = "Auditoría de envío, omisiones, duplicados y respuestas del endpoint WUP.",
   runtimeTitle = "Ejecución actual",
+  enableGerencialPdfPreview = false,
 }: RptWupModulePageProps) {
   const [dashboard, setDashboard] = useState<ReporteWhatsappDashboard | null>(null);
   const [form, setForm] = useState<ReporteWhatsappConfiguracion>(formInicial);
   const [errores, setErrores] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [runningAction, setRunningAction] = useState<"" | "save" | "run" | "retry" | "reschedule">("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const lastErrorLogSignatureRef = useRef("");
+  const dashboardRequestInFlightRef = useRef(false);
   const tipoApi = tipo === "gerencial" ? "gerencial" : "operativo";
 
   const progress = useMemo(() => {
@@ -388,13 +459,19 @@ export function RptWupModulePage({
     return total <= 0 ? 0 : Math.min(100, Math.round((processed * 100) / total));
   }, [dashboard]);
 
-  const loadDashboard = useEffectEvent(async (silent = false) => {
+  const loadDashboard = useEffectEvent(async (silent = false, signal?: AbortSignal) => {
+    if (dashboardRequestInFlightRef.current) {
+      return;
+    }
+
+    dashboardRequestInFlightRef.current = true;
+
     if (!silent) {
       setLoading(true);
     }
 
     try {
-      const response = await reportesWhatsappService.obtenerDashboard(200, tipoApi);
+      const response = await reportesWhatsappService.obtenerDashboard(DASHBOARD_TOP_LOGS, tipoApi, { signal });
       startTransition(() => {
         setDashboard(response);
         setForm((current) => {
@@ -419,16 +496,33 @@ export function RptWupModulePage({
       });
       setError("");
     } catch (err) {
+      if (signal?.aborted) {
+        return;
+      }
+
       setError(getHttpErrorMessage(err, `No se pudo cargar el dashboard de reportes ${tipoApi}.`));
     } finally {
+      dashboardRequestInFlightRef.current = false;
       if (!silent) {
         setLoading(false);
       }
     }
   });
 
+  const refreshDashboardBurst = useEffectEvent(() => {
+    void loadDashboard(true);
+
+    for (const delayMs of [1000, 2500, 5000]) {
+      window.setTimeout(() => {
+        void loadDashboard(true);
+      }, delayMs);
+    }
+  });
+
   useEffect(() => {
-    void loadDashboard(false);
+    const controller = new AbortController();
+    void loadDashboard(false, controller.signal);
+    return () => controller.abort();
   }, []);
 
   useEffect(() => {
@@ -436,8 +530,10 @@ export function RptWupModulePage({
       void loadDashboard(true);
     }, dashboard?.runtime.isRunning ? POLLING_RUNNING_MS : POLLING_IDLE_MS);
 
-    return () => window.clearInterval(interval);
-  }, [dashboard?.runtime.isRunning, loadDashboard]);
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [dashboard?.runtime.isRunning]);
 
   useEffect(() => {
     const failedLogs = (dashboard?.logs ?? [])
@@ -639,11 +735,49 @@ export function RptWupModulePage({
         setSuccess("Job reprogramado correctamente.");
       }
 
-      await loadDashboard(true);
+      refreshDashboardBurst();
     } catch (err) {
       setError(getHttpErrorMessage(err, "No se pudo ejecutar la acción solicitada."));
     } finally {
       setRunningAction("");
+    }
+  };
+
+  const descargarPdfGerencial = async () => {
+    setDownloadingPdf(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const blob = await exportarAsistenciaGerencialPdf({
+        usarPeriodoAutomatico: true,
+        destinatario: "Gerencia CJ Telecom",
+      });
+
+      if (!(blob instanceof Blob) || blob.size === 0) {
+        throw new Error("El PDF gerencial no contiene datos.");
+      }
+
+      const fechaInicio = dashboard?.periodoActual?.fechaInicio?.replaceAll("/", "") ?? "";
+      const fechaFin = dashboard?.periodoActual?.fechaFin?.replaceAll("/", "") ?? "";
+      const fileName = fechaInicio && fechaFin
+        ? `Reporte_Gerencial_Asistencia_${fechaInicio}_${fechaFin}.pdf`
+        : "Reporte_Gerencial_Asistencia.pdf";
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+
+      setSuccess("Vista previa del nuevo PDF gerencial descargada correctamente.");
+    } catch (err) {
+      setError(await getBlobHttpErrorMessage(err, "No se pudo descargar el PDF gerencial."));
+    } finally {
+      setDownloadingPdf(false);
     }
   };
 
@@ -673,6 +807,16 @@ export function RptWupModulePage({
                     </p>
                   </div>
                   <div style={styles.heroActions}>
+                    {tipoApi === "gerencial" && enableGerencialPdfPreview ? (
+                      <button
+                        type="button"
+                        style={styles.secondaryButton}
+                        onClick={() => void descargarPdfGerencial()}
+                        disabled={runningAction !== "" || downloadingPdf}
+                      >
+                        Ver nuevo PDF
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       style={styles.primaryButton}
@@ -1271,4 +1415,3 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
   },
 };
-

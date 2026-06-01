@@ -1,4 +1,5 @@
 using CjERP.Application.DTOs.ReportesWhatsapp;
+using CjERP.Application.DTOs;
 
 namespace CjERP.Application.Interfaces.Services;
 
@@ -29,6 +30,10 @@ public interface IReportePdfService
         ReporteWhatsappEmpleadoDto empleadoDestino,
         ReporteWhatsappPeriodoDto periodo,
         IReadOnlyList<ReporteWhatsappAsistenciaItemDto> detalle,
+        CancellationToken cancellationToken = default);
+
+    Task<byte[]> GenerarReporteGerencialEjecutivoPdfAsync(
+        AsistenciaGerencialPdfDto reporte,
         CancellationToken cancellationToken = default);
 }
 

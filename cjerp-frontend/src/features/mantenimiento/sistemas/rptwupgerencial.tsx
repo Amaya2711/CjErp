@@ -4,6 +4,7 @@ export default function RptWupGerencialPage() {
   return (
     <RptWupModulePage
       tipo="gerencial"
+      enableGerencialPdfPreview
       pageTitle="Reportes gerenciales WUP"
       eyebrow="Automatización WUP gerencial"
       heroTitle="Control gerencial del envío de reportes"

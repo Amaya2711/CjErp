@@ -14,6 +14,14 @@ public class AsistenciaReportePdfRequestDto
     public IReadOnlyList<AsistenciaReportePdfItemDto> Items { get; set; } = Array.Empty<AsistenciaReportePdfItemDto>();
 }
 
+public sealed class AsistenciaGerencialPdfRequestDto
+{
+    public string? FechaInicio { get; set; }
+    public string? FechaFin { get; set; }
+    public bool UsarPeriodoAutomatico { get; set; } = true;
+    public string Destinatario { get; set; } = "Gerencia CJ Telecom";
+}
+
 public class AsistenciaReportePdfItemDto
 {
     public string Fecha { get; set; } = string.Empty;
@@ -66,4 +74,119 @@ public class AsistenciaReporteDto
     public string EstadoValidacionHoras { get; set; } = string.Empty;
     public string TiempoHoras { get; set; } = string.Empty;
     public string OrigenMarcacion { get; set; } = string.Empty;
+}
+
+public sealed class AsistenciaGerencialPdfDto
+{
+    public string Titulo { get; set; } = "Reporte Gerencial de Asistencia";
+    public string PeriodoConsultado { get; set; } = string.Empty;
+    public DateTime FechaGeneracion { get; set; }
+    public string Destinatario { get; set; } = string.Empty;
+    public string NombreArchivo { get; set; } = string.Empty;
+    public AsistenciaGerencialPeriodoDto Periodo { get; set; } = new();
+    public AsistenciaGerencialKpisDto Kpis { get; set; } = new();
+    public AsistenciaGerencialGraficosDto Graficos { get; set; } = new();
+    public AsistenciaGerencialIncidenciasDto Incidencias { get; set; } = new();
+    public IReadOnlyList<AsistenciaGerencialConclusionDto> ResumenEjecutivo { get; set; } = Array.Empty<AsistenciaGerencialConclusionDto>();
+}
+
+public sealed class AsistenciaGerencialPeriodoDto
+{
+    public DateTime FechaInicio { get; set; }
+    public DateTime FechaFin { get; set; }
+    public string FechaInicioTexto { get; set; } = string.Empty;
+    public string FechaFinTexto { get; set; } = string.Empty;
+}
+
+public sealed class AsistenciaGerencialKpisDto
+{
+    public int TotalEmpleados { get; set; }
+    public int TotalRegistros { get; set; }
+    public decimal PorcentajeAsistencia { get; set; }
+    public int Presentes { get; set; }
+    public int Tardanzas { get; set; }
+    public int SinMarcar { get; set; }
+    public int SinSalida { get; set; }
+    public decimal TotalHorasLaboradas { get; set; }
+    public decimal PromedioHorasPorEmpleado { get; set; }
+    public int PendientesAprobacion { get; set; }
+    public int EmpleadosConDiferenciaNegativa { get; set; }
+    public string SemaforoGeneral { get; set; } = "VERDE";
+}
+
+public sealed class AsistenciaGerencialGraficosDto
+{
+    public IReadOnlyList<AsistenciaGerencialEstadoChartItemDto> DistribucionPorEstado { get; set; } = Array.Empty<AsistenciaGerencialEstadoChartItemDto>();
+    public IReadOnlyList<AsistenciaGerencialTendenciaDiariaDto> TendenciaDiaria { get; set; } = Array.Empty<AsistenciaGerencialTendenciaDiariaDto>();
+    public IReadOnlyList<AsistenciaGerencialRankingItemDto> TopResponsables { get; set; } = Array.Empty<AsistenciaGerencialRankingItemDto>();
+    public IReadOnlyList<AsistenciaGerencialRankingItemDto> TopEmpleados { get; set; } = Array.Empty<AsistenciaGerencialRankingItemDto>();
+}
+
+public sealed class AsistenciaGerencialIncidenciasDto
+{
+    public IReadOnlyList<AsistenciaGerencialGrupoIncidenciaDto> IncidenciasPorResponsable { get; set; } = Array.Empty<AsistenciaGerencialGrupoIncidenciaDto>();
+    public IReadOnlyList<AsistenciaGerencialGrupoIncidenciaDto> IncidenciasPorCliente { get; set; } = Array.Empty<AsistenciaGerencialGrupoIncidenciaDto>();
+    public IReadOnlyList<AsistenciaGerencialGrupoIncidenciaDto> IncidenciasPorArea { get; set; } = Array.Empty<AsistenciaGerencialGrupoIncidenciaDto>();
+    public IReadOnlyList<AsistenciaGerencialGrupoIncidenciaDto> IncidenciasPorEstado { get; set; } = Array.Empty<AsistenciaGerencialGrupoIncidenciaDto>();
+    public IReadOnlyList<AsistenciaGerencialPendienteAprobacionDto> PendientesAprobacion { get; set; } = Array.Empty<AsistenciaGerencialPendienteAprobacionDto>();
+    public IReadOnlyList<AsistenciaGerencialEmpleadoDiferenciaDto> EmpleadosConDiferenciaNegativa { get; set; } = Array.Empty<AsistenciaGerencialEmpleadoDiferenciaDto>();
+    public IReadOnlyList<string> RecomendacionesEjecutivas { get; set; } = Array.Empty<string>();
+}
+
+public sealed class AsistenciaGerencialConclusionDto
+{
+    public string Semaforo { get; set; } = "VERDE";
+    public string Titulo { get; set; } = string.Empty;
+    public string Descripcion { get; set; } = string.Empty;
+}
+
+public sealed class AsistenciaGerencialEstadoChartItemDto
+{
+    public string Estado { get; set; } = string.Empty;
+    public int Cantidad { get; set; }
+    public decimal Porcentaje { get; set; }
+    public string Semaforo { get; set; } = "VERDE";
+}
+
+public sealed class AsistenciaGerencialTendenciaDiariaDto
+{
+    public DateTime Fecha { get; set; }
+    public string FechaTexto { get; set; } = string.Empty;
+    public int TotalRegistros { get; set; }
+    public int Presentes { get; set; }
+    public int Incidencias { get; set; }
+    public decimal PorcentajeAsistencia { get; set; }
+}
+
+public sealed class AsistenciaGerencialRankingItemDto
+{
+    public string Nombre { get; set; } = string.Empty;
+    public int Cantidad { get; set; }
+    public decimal Horas { get; set; }
+    public string EtiquetaSecundaria { get; set; } = string.Empty;
+    public string Semaforo { get; set; } = "VERDE";
+}
+
+public sealed class AsistenciaGerencialGrupoIncidenciaDto
+{
+    public string Nombre { get; set; } = string.Empty;
+    public int Cantidad { get; set; }
+    public decimal Porcentaje { get; set; }
+}
+
+public sealed class AsistenciaGerencialPendienteAprobacionDto
+{
+    public string NombreEmpleado { get; set; } = string.Empty;
+    public string Responsable { get; set; } = string.Empty;
+    public int CantidadPendientes { get; set; }
+    public decimal HorasPendientes { get; set; }
+}
+
+public sealed class AsistenciaGerencialEmpleadoDiferenciaDto
+{
+    public string NombreEmpleado { get; set; } = string.Empty;
+    public string Responsable { get; set; } = string.Empty;
+    public decimal DiferenciaHoras { get; set; }
+    public decimal HorasLaboradas { get; set; }
+    public decimal HorasConsideradas { get; set; }
 }

@@ -51,6 +51,7 @@ export type AsistenciaReportePdfItem = {
   totalHorasFaltaAprobar: number;
   diferenciaHoras: number;
   estadoValidacionHoras: string;
+  comentario: string;
   observacion: string;
 };
 
@@ -59,4 +60,11 @@ export type AsistenciaReportePdfRequest = {
   fechaFin: string;
   destinatario: string;
   items: AsistenciaReportePdfItem[];
+};
+
+export type AsistenciaGerencialPdfRequest = {
+  fechaInicio?: string;
+  fechaFin?: string;
+  usarPeriodoAutomatico?: boolean;
+  destinatario?: string;
 };

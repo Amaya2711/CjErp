@@ -1,5 +1,6 @@
 import httpClient from "./httpClient";
 import type {
+  AsistenciaGerencialPdfRequest,
   AsistenciaReporteItem,
   AsistenciaReportePdfRequest,
   AsistenciaReporteQueryParams,
@@ -108,5 +109,12 @@ export async function buscarAsistencia(params: AsistenciaReporteQueryParams) {
 export async function exportarAsistenciaEmpleadoPdf(payload: AsistenciaReportePdfRequest) {
   return await httpClient.post<Blob>("/asistencia/reporte/pdf-empleado", payload, {
     responseType: "blob",
+  });
+}
+
+export async function exportarAsistenciaGerencialPdf(payload: AsistenciaGerencialPdfRequest = {}) {
+  return await httpClient.post<Blob>("/asistencia/reporte/pdf-gerencial", payload, {
+    responseType: "blob",
+    timeout: 120000,
   });
 }

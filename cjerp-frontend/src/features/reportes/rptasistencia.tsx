@@ -1906,7 +1906,7 @@ export default function RptAsistenciaPage() {
 
   const gerencialTopResponsablesCard = (
     <ChartCard
-      title="Top 5 responsables"
+      title="Top responsables"
       subtitle="Ranking actualizado segun los filtros activos y la seleccion aplicada desde Area x estado de marcacion"
     >
       <div style={styles.gerencialSummaryToolbar}>
@@ -2511,7 +2511,7 @@ export default function RptAsistenciaPage() {
                     />
                   </ChartCard>
                   {false ? <ChartCard
-                    title="Top 5 responsables"
+                    title="Top responsables"
                     subtitle="Ranking actualizado segun los filtros activos y la seleccion aplicada desde Area x estado de marcacion"
                   >
                     <div style={styles.gerencialSummaryToolbar}>

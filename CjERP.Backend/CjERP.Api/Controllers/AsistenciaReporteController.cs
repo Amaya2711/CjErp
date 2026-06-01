@@ -45,4 +45,26 @@ public class AsistenciaReporteController : ControllerBase
         var fileName = $"reporte_asistencia_{request.FechaInicio.Replace("/", string.Empty)}_{request.FechaFin.Replace("/", string.Empty)}.pdf";
         return File(pdfBytes, "application/pdf", fileName);
     }
+
+    [HttpPost("pdf-gerencial")]
+    public async Task<IActionResult> ExportarPdfGerencial(
+        [FromBody] AsistenciaGerencialPdfRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var reporte = await _asistenciaReporteService.ObtenerReporteGerencialAsync(request, cancellationToken);
+            if (reporte.Kpis.TotalRegistros <= 0)
+            {
+                return BadRequest(new { success = false, message = "No existen datos para generar el PDF gerencial." });
+            }
+
+            var pdfBytes = await _asistenciaReporteService.GenerarPdfGerencialEjecutivoAsync(request, cancellationToken);
+            return File(pdfBytes, "application/pdf", reporte.NombreArchivo);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
 }
