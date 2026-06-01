@@ -1,0 +1,63 @@
+export type CompensacionFiltro = {
+  idEmpleadoCj?: number;
+  idEstado?: number;
+  fechaDesde?: string;
+  fechaHasta?: string;
+  incluirInactivos?: boolean;
+};
+
+export type CompensacionRow = {
+  id: number;
+  idEmpleadoCompensacion: number;
+  idEmpleadoCj: number | null;
+  idEstado: number | null;
+  fecha: string;
+  idActivo: number | null;
+  idAutorizado: number | null;
+  fechaAutorizado: string;
+  fechaInicio: string;
+  fechaFin: string;
+  fechaPre: string;
+  fechaPrimera: string;
+  idPre: number | null;
+  idPrimera: number | null;
+  idGestor: number | null;
+  usuario: string;
+  fechaCreacion: string;
+  idRechazo: number | null;
+  fechaRechazo: string;
+  pagada: boolean;
+  comentario: string;
+  tipoCompensacion: string;
+  cantidadDias: number;
+  idSaldoCompensacion: number | null;
+  idMovimiento: number | null;
+  procesadoSaldo: boolean;
+};
+
+export type CompensacionGuardarRequest = {
+  id?: number;
+  idEmpleadoCj: number | null;
+  idEstado: number | null;
+  fecha: string;
+  idActivo: number | null;
+  idAutorizado: number | null;
+  fechaAutorizado: string;
+  fechaInicio: string;
+  fechaFin: string;
+  fechaPre: string;
+  fechaPrimera: string;
+  idPre: number | null;
+  idPrimera: number | null;
+  idGestor: number | null;
+  usuario: string;
+  idRechazo: number | null;
+  fechaRechazo: string;
+  pagada: boolean;
+  comentario: string;
+  tipoCompensacion: string;
+  cantidadDias: number;
+  idSaldoCompensacion: number | null;
+  idMovimiento: number | null;
+  procesadoSaldo: boolean;
+};

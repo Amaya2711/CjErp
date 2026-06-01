@@ -10,10 +10,10 @@ type HttpClient = {
 };
 
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
-const apiBaseUrl =
-  configuredApiUrl || (import.meta.env.DEV ? "http://localhost:5015/api" : "/api");
 //const apiBaseUrl =
- //configuredApiUrl || "https://cjerp-production.up.railway.app/api";
+ // configuredApiUrl || (import.meta.env.DEV ? "http://localhost:5015/api" : "/api");
+const apiBaseUrl =
+configuredApiUrl || "https://cjerp-production.up.railway.app/api";
 
 const axiosClient: AxiosInstance = axios.create({
   baseURL: apiBaseUrl,

@@ -151,6 +151,7 @@ builder.Services.AddScoped<IOrdenCompraService, OrdenCompraService>();
 builder.Services.AddScoped<ILogisticaRecojoService, LogisticaRecojoService>();
 builder.Services.AddScoped<ILogisticaReembolsoService, LogisticaReembolsoService>();
 builder.Services.AddScoped<ILogisticaSuministroService, LogisticaSuministroService>();
+builder.Services.AddScoped<ICompensacionService, CompensacionService>();
 builder.Services.AddScoped<IAuditoriaCambiosService, AuditoriaCambiosService>();
 builder.Services.AddScoped<IAsistenciaReporteService, AsistenciaReporteService>();
 builder.Services.AddScoped<IAsistenciaValidarCampoService, AsistenciaValidarCampoService>();
