@@ -51,7 +51,6 @@ import SolicitudesPage from "../../features/compras/solicitudes";
 import OrdenCompraPage from "../../features/compras/ordencompra";
 import PersonalPage from "../../features/recursoshumanos/personal";
 import RecursosHumanosAsistenciaPage from "../../features/recursoshumanos/asistencia";
-import CompensacionPage from "../../features/recursoshumanos/compensacion";
 import CompensacionRealPage from "../../features/recursoshumanos/compensacionreal";
 import RecursosHumanosVacacionesPage from "../../features/recursoshumanos/vacaciones";
 import ConsultaPage from "../../features/mantenimiento/consulta/consulta";
@@ -111,11 +110,11 @@ export default function AppRouter() {
               element={<RecursosHumanosAsistenciaPage />}
             />
             <Route
-              path="/recursoshumanos/compensacion"
-              element={<CompensacionPage />}
+              path="/recursoshumanos/compensacionreal"
+              element={<CompensacionRealPage />}
             />
             <Route
-              path="/recursoshumanos/compensacionreal"
+              path="/recursoshumanos/compensacion"
               element={<CompensacionRealPage />}
             />
             <Route
