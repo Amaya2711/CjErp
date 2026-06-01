@@ -1525,18 +1525,6 @@ public sealed class ReportePdfService : IReportePdfService
             rows.Add($"Se identifican {string.Join(", ", alertStates.Select(item => $"{item.Cantidad} registros en {item.Estado.ToLowerInvariant()}"))}.");
         }
 
-        var topResponsable = reporte.Graficos.TopResponsables.FirstOrDefault();
-        if (topResponsable is not null)
-        {
-            rows.Add($"El responsable con mayor concentracion de incidencias es {topResponsable.Nombre}, con {topResponsable.Cantidad} incidencias.");
-        }
-
-        var topBrecha = reporte.Graficos.TopEmpleados.OrderBy(item => item.Horas).FirstOrDefault();
-        if (topBrecha is not null)
-        {
-            rows.Add($"La mayor brecha de horas corresponde a {topBrecha.Nombre}, con {topBrecha.Horas:0.##} horas.");
-        }
-
         return rows;
     }
 
