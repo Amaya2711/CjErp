@@ -5,3 +5,8 @@ export async function listarEmpleadosCta(): Promise<EmpleadoCta[]> {
   const response = await httpClient.get<EmpleadoCta[]>("/empleado/cta/listar");
   return Array.isArray(response) ? response : [];
 }
+
+export async function listarEmpleadosWup(): Promise<EmpleadoCta[]> {
+  const response = await httpClient.get<EmpleadoCta[]>("/empleado/cta/listar-wup");
+  return Array.isArray(response) ? response : [];
+}

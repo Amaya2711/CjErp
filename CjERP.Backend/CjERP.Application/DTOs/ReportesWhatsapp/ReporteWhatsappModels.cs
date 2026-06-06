@@ -6,9 +6,16 @@ public static class ReporteWhatsappTipos
 {
     public const string Operativo = "ASISTENCIA_WUP";
     public const string Gerencial = "ASISTENCIA_WUP_GERENCIAL";
+    public const string Boleta = "PLANILLA_BOLETA_WUP";
 
     public static string Normalize(string? value)
     {
+        if (string.Equals(value?.Trim(), "boleta", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value?.Trim(), Boleta, StringComparison.OrdinalIgnoreCase))
+        {
+            return Boleta;
+        }
+
         if (string.Equals(value?.Trim(), "gerencial", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(value?.Trim(), Gerencial, StringComparison.OrdinalIgnoreCase))
         {
@@ -19,10 +26,14 @@ public static class ReporteWhatsappTipos
     }
 
     public static string ToRouteValue(string? value) =>
+        IsBoleta(value) ? "boleta" :
         IsGerencial(value) ? "gerencial" : "operativo";
 
     public static bool IsGerencial(string? value) =>
         string.Equals(Normalize(value), Gerencial, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsBoleta(string? value) =>
+        string.Equals(Normalize(value), Boleta, StringComparison.OrdinalIgnoreCase);
 }
 
 public sealed class WupSettings
@@ -120,6 +131,13 @@ public sealed class ReporteWhatsappJobDefaultsOptions
     public bool UsarMesEnCursoGerencial { get; set; } = false;
     public string TipoReporteGerencial { get; set; } = ReporteWhatsappTipos.Gerencial;
     public string MensajeAdjuntoGerencial { get; set; } = "Estimado usuario, aqui esta su reporte gerencial.";
+    public string HoraEjecucionBoleta { get; set; } = "08:00";
+    public string[] DiasEjecucionBoleta { get; set; } = [];
+    public int CantidadEmpleadosPorBloqueBoleta { get; set; } = 10;
+    public int DelaySegundosEntreBloquesBoleta { get; set; } = 30;
+    public bool ActivoBoleta { get; set; } = false;
+    public string TipoReporteBoleta { get; set; } = ReporteWhatsappTipos.Boleta;
+    public string MensajeAdjuntoBoleta { get; set; } = "Estimado colaborador, adjuntamos su boleta de pago.";
 }
 
 public sealed class ReporteWhatsappConfiguracionDto
@@ -157,6 +175,27 @@ public sealed class ReporteWhatsappEmpleadoDto
     public string Correo { get; set; } = string.Empty;
     public string Telefono { get; set; } = string.Empty;
     public string Ubicacion { get; set; } = string.Empty;
+    public string NumeroDocumento { get; set; } = string.Empty;
+    public int? IdBoleta { get; set; }
+    public string PeriodoBoleta { get; set; } = string.Empty;
+    public bool PdfDisponible { get; set; }
+}
+
+public sealed class ReporteWhatsappBoletaDestinoDto
+{
+    public int IdEmpleado { get; set; }
+    public int? IdBoleta { get; set; }
+    public string Usuario { get; set; } = string.Empty;
+    public string NombreEmpleado { get; set; } = string.Empty;
+    public string NumeroDocumento { get; set; } = string.Empty;
+    public string Telefono { get; set; } = string.Empty;
+    public string Correo { get; set; } = string.Empty;
+    public string Periodo { get; set; } = string.Empty;
+    public string NombreTrabajador { get; set; } = string.Empty;
+    public bool PdfDisponible { get; set; }
+    public bool TieneTelefonoConfigurado { get; set; }
+    public string EstadoPdf { get; set; } = string.Empty;
+    public string EstadoDestino { get; set; } = string.Empty;
 }
 
 public sealed class ReporteWhatsappAsistenciaItemDto
@@ -193,6 +232,7 @@ public sealed class ReporteWhatsappPeriodoDto
     public string FechaFin { get; set; } = string.Empty;
     public DateTime FechaProceso { get; set; }
     public string EtiquetaPeriodo { get; set; } = string.Empty;
+    public string Periodo { get; set; } = string.Empty;
 }
 
 public sealed class ReporteWhatsappResumenEstadoDto
@@ -299,6 +339,7 @@ public sealed class ReporteWhatsappDashboardDto
     public ReporteWhatsappRuntimeStatusDto Runtime { get; set; } = new();
     public ReporteWhatsappKpiDto Kpis { get; set; } = new();
     public IReadOnlyList<ReporteWhatsappLogDto> Logs { get; set; } = Array.Empty<ReporteWhatsappLogDto>();
+    public IReadOnlyList<ReporteWhatsappBoletaDestinoDto> Destinatarios { get; set; } = Array.Empty<ReporteWhatsappBoletaDestinoDto>();
 }
 
 public sealed class ReporteWhatsappEjecucionResultadoDto

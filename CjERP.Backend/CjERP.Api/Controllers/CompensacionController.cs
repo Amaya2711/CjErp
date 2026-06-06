@@ -27,6 +27,39 @@ public class CompensacionController : ControllerBase
         return Ok(new { success = true, message = "ok", data });
     }
 
+    [HttpGet("saldos")]
+    public async Task<IActionResult> ListarSaldos(CancellationToken cancellationToken)
+    {
+        var data = await _compensacionService.ListarSaldosAsync(cancellationToken);
+        return Ok(new { success = true, message = "ok", data });
+    }
+
+    [HttpGet("{id:long}")]
+    public async Task<IActionResult> ObtenerPorId(long id, CancellationToken cancellationToken)
+    {
+        var data = await _compensacionService.ObtenerPorIdAsync(id, cancellationToken);
+        if (data is null)
+        {
+            return NotFound(new { success = false, message = "No se encontró la compensación solicitada." });
+        }
+
+        return Ok(new { success = true, message = "ok", data });
+    }
+
+    [HttpGet("saldo")]
+    public async Task<IActionResult> ObtenerSaldo(
+        [FromQuery] int idEmpleadoCj,
+        CancellationToken cancellationToken)
+    {
+        if (idEmpleadoCj <= 0)
+        {
+            return BadRequest(new { success = false, message = "IdEmpleadoCj es obligatorio." });
+        }
+
+        var data = await _compensacionService.ObtenerSaldoAsync(idEmpleadoCj, cancellationToken);
+        return Ok(new { success = true, message = "ok", data });
+    }
+
     [HttpPost]
     public async Task<IActionResult> Crear(
         [FromBody] CompensacionUpsertDto request,
@@ -46,11 +79,15 @@ public class CompensacionController : ControllerBase
         {
             return BadRequest(new { success = false, message = ex.Message });
         }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { success = false, message = ex.Message, detail = ex.InnerException?.Message });
+        }
     }
 
-    [HttpPut("{id:int}")]
+    [HttpPut("{id:long}")]
     public async Task<IActionResult> Actualizar(
-        int id,
+        long id,
         [FromBody] CompensacionUpsertDto request,
         CancellationToken cancellationToken)
     {
@@ -63,10 +100,66 @@ public class CompensacionController : ControllerBase
         {
             return BadRequest(new { success = false, message = ex.Message });
         }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { success = false, message = ex.Message, detail = ex.InnerException?.Message });
+        }
     }
 
-    [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Eliminar(int id, CancellationToken cancellationToken)
+    [HttpPost("procesar")]
+    public async Task<IActionResult> Procesar(
+        [FromBody] ProcesarCompensacionRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var comentario = request.Comentario?.Trim();
+
+        if (request.Accion == "RECHAZAR" && string.IsNullOrWhiteSpace(comentario))
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = "Debe ingresar un comentario o motivo de rechazo antes de continuar."
+            });
+        }
+
+        if (!string.IsNullOrEmpty(comentario) && comentario.Length > 500)
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = "El comentario no puede superar los 500 caracteres."
+            });
+        }
+
+        request.Comentario = comentario;
+
+        try
+        {
+            var result = await _compensacionService.ProcesarAsync(
+                request,
+                ResolveUsuarioAccion(),
+                ResolveEmpleadoAccion(),
+                cancellationToken);
+
+            return Ok(new
+            {
+                success = true,
+                message = result.Mensaje,
+                data = result
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { success = false, message = ex.Message, detail = ex.InnerException?.Message });
+        }
+    }
+
+    [HttpDelete("{id:long}")]
+    public async Task<IActionResult> Eliminar(long id, CancellationToken cancellationToken)
     {
         try
         {
@@ -77,6 +170,10 @@ public class CompensacionController : ControllerBase
         {
             return BadRequest(new { success = false, message = ex.Message });
         }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { success = false, message = ex.Message, detail = ex.InnerException?.Message });
+        }
     }
 
     private string ResolveUsuarioAccion()
@@ -86,5 +183,16 @@ public class CompensacionController : ControllerBase
             ?? User.FindFirstValue(ClaimTypes.Name)
             ?? User.Identity?.Name
             ?? "sistema";
+    }
+
+    private int? ResolveEmpleadoAccion()
+    {
+        var empleadoClaim = User.FindFirstValue("IdEmpleado")
+            ?? User.FindFirstValue("CodEmp")
+            ?? User.FindFirstValue("CodEmpleadoMostrar");
+
+        return int.TryParse(empleadoClaim, out var empleadoId) && empleadoId > 0
+            ? empleadoId
+            : null;
     }
 }

@@ -14,8 +14,10 @@ import DataGridBase, {
   type DataGridColumn,
 } from "../../../components/base/DataGridBase";
 import { exportarAsistenciaGerencialPdf } from "../../../api/asistenciaService";
+import { descargarPdfBoleta } from "../../../api/planillaBoletaApi";
 import { reportesWhatsappService } from "../../../api/reportesWhatsappService";
 import type {
+  ReporteWhatsappBoletaDestino,
   ReporteWhatsappConfiguracion,
   ReporteWhatsappDashboard,
   ReporteWhatsappLog,
@@ -104,6 +106,12 @@ async function getBlobHttpErrorMessage(error: unknown, fallback: string) {
   return getHttpErrorMessage(error, fallback);
 }
 
+function openBlobInNewTab(blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  window.open(url, "_blank", "noopener,noreferrer");
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 function formatDateTime(value?: string | null) {
   if (!value) {
     return "-";
@@ -145,6 +153,26 @@ function formatSeconds(value?: number | null) {
   const minutes = Math.floor(value / 60);
   const seconds = value % 60;
   return `${minutes}m ${seconds}s`;
+}
+
+function getCurrentMonthInputValue() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function formatPeriodoBoleta(value: string) {
+  if (!value) {
+    return "";
+  }
+
+  const [year, month] = value.split("-");
+  if (!year || !month) {
+    return value;
+  }
+
+  return `${month}/${year}`;
 }
 
 function getEstadoTone(estado: string) {
@@ -442,6 +470,7 @@ export function RptWupModulePage({
 }: RptWupModulePageProps) {
   const [dashboard, setDashboard] = useState<ReporteWhatsappDashboard | null>(null);
   const [form, setForm] = useState<ReporteWhatsappConfiguracion>(formInicial);
+  const [periodoBoleta, setPeriodoBoleta] = useState(getCurrentMonthInputValue);
   const [errores, setErrores] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -451,7 +480,8 @@ export function RptWupModulePage({
   const [success, setSuccess] = useState("");
   const lastErrorLogSignatureRef = useRef("");
   const dashboardRequestInFlightRef = useRef(false);
-  const tipoApi = tipo === "gerencial" ? "gerencial" : "operativo";
+  const tipoApi = tipo === "gerencial" ? "gerencial" : tipo === "boleta" ? "boleta" : "operativo";
+  const periodoBoletaApi = tipoApi === "boleta" ? formatPeriodoBoleta(periodoBoleta) : undefined;
 
   const progress = useMemo(() => {
     const total = dashboard?.runtime.totalEmpleados ?? 0;
@@ -471,7 +501,12 @@ export function RptWupModulePage({
     }
 
     try {
-      const response = await reportesWhatsappService.obtenerDashboard(DASHBOARD_TOP_LOGS, tipoApi, { signal });
+      const response = await reportesWhatsappService.obtenerDashboard(
+        DASHBOARD_TOP_LOGS,
+        tipoApi,
+        periodoBoletaApi,
+        { signal }
+      );
       startTransition(() => {
         setDashboard(response);
         setForm((current) => {
@@ -523,7 +558,7 @@ export function RptWupModulePage({
     const controller = new AbortController();
     void loadDashboard(false, controller.signal);
     return () => controller.abort();
-  }, []);
+  }, [tipoApi, periodoBoletaApi]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -533,7 +568,7 @@ export function RptWupModulePage({
     return () => {
       window.clearInterval(interval);
     };
-  }, [dashboard?.runtime.isRunning]);
+  }, [dashboard?.runtime.isRunning, tipoApi, periodoBoletaApi]);
 
   useEffect(() => {
     const failedLogs = (dashboard?.logs ?? [])
@@ -639,6 +674,62 @@ export function RptWupModulePage({
     []
   );
 
+  const destinatarioColumns = useMemo<DataGridColumn<ReporteWhatsappBoletaDestino>[]>(
+    () => [
+      {
+        key: "estadoPdf",
+        header: "PDF",
+        render: (row) => (
+          row.estadoPdf === "PDF_DISPONIBLE" && row.idBoleta ? (
+            <button
+              type="button"
+              onClick={() => {
+                void visualizarPdfBoleta(row);
+              }}
+              style={{
+                ...styles.statusBadgeButton,
+                ...styles.statusBadge,
+                ...getEstadoTone(row.estadoPdf),
+              }}
+              disabled={downloadingPdf}
+              title="Visualizar PDF de boleta"
+            >
+              {row.estadoPdf}
+            </button>
+          ) : (
+            <span style={{ ...styles.statusBadge, ...getEstadoTone(row.estadoPdf) }}>
+              {row.estadoPdf}
+            </span>
+          )
+        ),
+      },
+      {
+        key: "estadoDestino",
+        header: "Destino",
+        render: (row) => (
+          <span style={{ ...styles.statusBadge, ...getEstadoTone(row.estadoDestino) }}>
+            {row.estadoDestino}
+          </span>
+        ),
+      },
+      {
+        key: "empleado",
+        header: "Empleado",
+        render: (row) => (
+          <div style={styles.logEmployeeCell}>
+            <strong>{row.nombreTrabajador || row.nombreEmpleado}</strong>
+            <span>{row.usuario || `ID ${row.idEmpleado}`}</span>
+          </div>
+        ),
+      },
+      { key: "numeroDocumento", header: "Documento", render: (row) => row.numeroDocumento || "-" },
+      { key: "telefono", header: "Telefono", render: (row) => row.telefono || "-" },
+      { key: "correo", header: "Correo", render: (row) => row.correo || "-" },
+      { key: "periodo", header: "Periodo", render: (row) => row.periodo || "-" },
+    ],
+    [downloadingPdf]
+  );
+
   const validar = () => {
     const nextErrors: Record<string, string> = {};
 
@@ -662,8 +753,8 @@ export function RptWupModulePage({
       nextErrors.cantidadEmpleadosPorBloque = "El máximo recomendado es 50.";
     }
 
-    if (form.delaySegundosEntreBloques < 10) {
-      nextErrors.delaySegundosEntreBloques = "Debe ser mayor o igual a 10.";
+    if (form.delaySegundosEntreBloques < 5) {
+      nextErrors.delaySegundosEntreBloques = "Debe ser mayor o igual a 5.";
     }
 
     if (form.delaySegundosEntreBloques > 600) {
@@ -721,12 +812,12 @@ export function RptWupModulePage({
 
     try {
       if (action === "run") {
-        const response = await reportesWhatsappService.ejecutarAhora(tipoApi);
+        const response = await reportesWhatsappService.ejecutarAhora(tipoApi, periodoBoletaApi);
         setSuccess(response.message || "Proceso manual encolado.");
       }
 
       if (action === "retry") {
-        const response = await reportesWhatsappService.reintentarFallidos(tipoApi);
+        const response = await reportesWhatsappService.reintentarFallidos(tipoApi, periodoBoletaApi);
         setSuccess(response.message || "Reintento encolado.");
       }
 
@@ -781,6 +872,32 @@ export function RptWupModulePage({
     }
   };
 
+  const visualizarPdfBoleta = async (row: ReporteWhatsappBoletaDestino) => {
+    if (!row.idBoleta || row.idBoleta <= 0) {
+      setError("No se encontro la boleta asociada para visualizar el PDF.");
+      return;
+    }
+
+    setDownloadingPdf(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const blob = await descargarPdfBoleta(row.idBoleta);
+
+      if (!(blob instanceof Blob) || blob.size === 0) {
+        throw new Error("El PDF de la boleta no contiene datos.");
+      }
+
+      openBlobInNewTab(blob);
+      setSuccess(`PDF de boleta abierto para ${row.nombreTrabajador || row.nombreEmpleado}.`);
+    } catch (err) {
+      setError(await getBlobHttpErrorMessage(err, "No se pudo visualizar el PDF de la boleta."));
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
+
   return (
     <AppPage title={pageTitle} style={styles.page}>
       {loading ? <AppStatusMessage tone="info">Cargando configuración y monitoreo...</AppStatusMessage> : null}
@@ -805,6 +922,17 @@ export function RptWupModulePage({
                     <p style={styles.heroText}>
                       Período actual: <strong>{dashboard?.periodoActual.etiquetaPeriodo || "-"}</strong>
                     </p>
+                    {tipoApi === "boleta" ? (
+                      <div style={styles.periodoField}>
+                        <label style={styles.label}>Periodo de boleta</label>
+                        <input
+                          type="month"
+                          value={periodoBoleta}
+                          onChange={(event) => setPeriodoBoleta(event.target.value)}
+                          style={styles.input}
+                        />
+                      </div>
+                    ) : null}
                   </div>
                   <div style={styles.heroActions}>
                     {tipoApi === "gerencial" && enableGerencialPdfPreview ? (
@@ -918,7 +1046,7 @@ export function RptWupModulePage({
                   <label style={styles.label}>Espera entre bloques</label>
                   <input
                     type="number"
-                    min={10}
+                    min={5}
                     max={600}
                     value={form.delaySegundosEntreBloques}
                     onChange={(event) =>
@@ -1025,6 +1153,26 @@ export function RptWupModulePage({
 
 
 
+          {tipoApi === "boleta" ? (
+            <AppCard>
+              <div style={styles.tableHeader}>
+                <div>
+                  <h3 style={styles.cardTitle}>Destinatarios activos</h3>
+                  <p style={styles.tableSubtitle}>
+                    Empleados activos del padrÃ³n WUP cruzados con boletas y PDF del perÃ­odo seleccionado.
+                  </p>
+                </div>
+              </div>
+
+              <DataGridBase
+                columns={destinatarioColumns}
+                rows={dashboard?.destinatarios ?? []}
+                getRowKey={(row) => `${row.idEmpleado}-${row.idBoleta ?? "sin-boleta"}`}
+                emptyMessage="No hay destinatarios disponibles para el perÃ­odo seleccionado."
+              />
+            </AppCard>
+          ) : null}
+
           <AppCard>
             <div style={styles.tableHeader}>
               <div>
@@ -1117,6 +1265,13 @@ const styles: Record<string, React.CSSProperties> = {
     margin: 0,
     color: "#475569",
     fontSize: 14,
+  },
+  periodoField: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    marginTop: 14,
+    maxWidth: 220,
   },
   heroActions: {
     display: "flex",
@@ -1333,6 +1488,10 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 999,
     fontSize: 12,
     fontWeight: 800,
+  },
+  statusBadgeButton: {
+    border: "none",
+    cursor: "pointer",
   },
   statusSuccess: {
     background: "#DCFCE7",

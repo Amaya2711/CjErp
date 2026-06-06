@@ -1,4 +1,4 @@
-export type ReporteWhatsappTipo = "operativo" | "gerencial";
+export type ReporteWhatsappTipo = "operativo" | "gerencial" | "boleta";
 
 export type ReporteWhatsappConfiguracion = {
   tipoReporte?: string;
@@ -19,6 +19,7 @@ export type ReporteWhatsappPeriodo = {
   fechaFin: string;
   fechaProceso: string;
   etiquetaPeriodo: string;
+  periodo?: string;
 };
 
 export type ReporteWhatsappRuntime = {
@@ -75,6 +76,22 @@ export type ReporteWhatsappLog = {
   nombreEmpleado: string;
 };
 
+export type ReporteWhatsappBoletaDestino = {
+  idEmpleado: number;
+  idBoleta?: number | null;
+  usuario: string;
+  nombreEmpleado: string;
+  numeroDocumento: string;
+  telefono: string;
+  correo: string;
+  periodo: string;
+  nombreTrabajador: string;
+  pdfDisponible: boolean;
+  tieneTelefonoConfigurado: boolean;
+  estadoPdf: string;
+  estadoDestino: string;
+};
+
 export type ReporteWhatsappDashboard = {
   puedeAdministrar: boolean;
   configuracion: ReporteWhatsappConfiguracion;
@@ -82,6 +99,7 @@ export type ReporteWhatsappDashboard = {
   runtime: ReporteWhatsappRuntime;
   kpis: ReporteWhatsappKpis;
   logs: ReporteWhatsappLog[];
+  destinatarios?: ReporteWhatsappBoletaDestino[];
 };
 
 export type ReporteWhatsappEjecucionResultado = {

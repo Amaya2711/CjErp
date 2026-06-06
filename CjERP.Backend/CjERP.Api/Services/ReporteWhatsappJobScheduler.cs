@@ -82,16 +82,16 @@ public sealed class ReporteWhatsappJobScheduler : IReporteWhatsappJobScheduler
             });
     }
 
-    public string EncolarEjecucionManual(string tipoReporte, string usuarioEjecucion)
+    public string EncolarEjecucionManual(string tipoReporte, string usuarioEjecucion, string? periodo = null)
     {
         var normalizedType = ReporteWhatsappTipos.Normalize(tipoReporte);
-        return _backgroundJobClient.Enqueue<ReporteWhatsAppJob>(job => job.EjecutarManualAsync(normalizedType, usuarioEjecucion));
+        return _backgroundJobClient.Enqueue<ReporteWhatsAppJob>(job => job.EjecutarManualAsync(normalizedType, usuarioEjecucion, periodo));
     }
 
-    public string EncolarReintentoFallidos(string tipoReporte, string usuarioEjecucion)
+    public string EncolarReintentoFallidos(string tipoReporte, string usuarioEjecucion, string? periodo = null)
     {
         var normalizedType = ReporteWhatsappTipos.Normalize(tipoReporte);
-        return _backgroundJobClient.Enqueue<ReporteWhatsAppJob>(job => job.ReintentarFallidosAsync(normalizedType, usuarioEjecucion));
+        return _backgroundJobClient.Enqueue<ReporteWhatsAppJob>(job => job.ReintentarFallidosAsync(normalizedType, usuarioEjecucion, periodo));
     }
 
     private string BuildRecurringJobId(string tipoReporte) =>

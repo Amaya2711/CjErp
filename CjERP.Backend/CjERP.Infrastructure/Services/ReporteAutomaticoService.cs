@@ -19,7 +19,8 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
     private static readonly string[] RutasModuloRptWup =
     [
         "/mantenimiento/sistemas/rptwup",
-        "/mantenimiento/sistemas/rptwupgerencial"
+        "/mantenimiento/sistemas/rptwupgerencial",
+        "/mantenimiento/sistemas/rptboleta"
     ];
 
     private static readonly string[] RolesPermitidos = ["ADMIN", "ADMINISTRADOR", "TI", "RRHH", "SISTEMAS", "SUPERADMIN"];
@@ -27,6 +28,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
     private readonly IReporteRepository _reporteRepository;
     private readonly IReportePdfService _reportePdfService;
     private readonly IAsistenciaReporteService _asistenciaReporteService;
+    private readonly IPlanillaBoletaService _planillaBoletaService;
     private readonly IWupService _wupService;
     private readonly IReporteWhatsappRuntimeMonitor _runtimeMonitor;
     private readonly ISegMenuService _segMenuService;
@@ -39,6 +41,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
         IReporteRepository reporteRepository,
         IReportePdfService reportePdfService,
         IAsistenciaReporteService asistenciaReporteService,
+        IPlanillaBoletaService planillaBoletaService,
         IWupService wupService,
         IReporteWhatsappRuntimeMonitor runtimeMonitor,
         ISegMenuService segMenuService,
@@ -49,6 +52,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
         _reporteRepository = reporteRepository;
         _reportePdfService = reportePdfService;
         _asistenciaReporteService = asistenciaReporteService;
+        _planillaBoletaService = planillaBoletaService;
         _wupService = wupService;
         _runtimeMonitor = runtimeMonitor;
         _segMenuService = segMenuService;
@@ -67,27 +71,31 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
     public Task<ReporteWhatsappPeriodoDto> ObtenerPeriodoActualAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(BuildPeriodoActual(ReporteWhatsappTipos.Operativo, null));
+        return Task.FromResult(BuildPeriodoActual(ReporteWhatsappTipos.Operativo, null, null));
     }
 
-    public async Task<ReporteWhatsappDashboardDto> ObtenerDashboardAsync(string idUsuario, string tipoReporte, int topLogs = 200, CancellationToken cancellationToken = default)
+    public async Task<ReporteWhatsappDashboardDto> ObtenerDashboardAsync(string idUsuario, string tipoReporte, string? periodo = null, int topLogs = 200, CancellationToken cancellationToken = default)
     {
         var normalizedType = ReporteWhatsappTipos.Normalize(tipoReporte);
         var configuracion = await ObtenerConfiguracionAsync(normalizedType, cancellationToken);
-        var periodo = BuildPeriodoActual(normalizedType, configuracion);
-        var logs = await _reporteRepository.ObtenerLogsAsync(periodo.FechaProceso, normalizedType, topLogs, cancellationToken);
-        var kpis = await _reporteRepository.ObtenerKpisAsync(periodo.FechaProceso, normalizedType, cancellationToken);
+        var periodoActual = BuildPeriodoActual(normalizedType, configuracion, periodo);
+        var logs = await _reporteRepository.ObtenerLogsAsync(periodoActual.FechaProceso, normalizedType, topLogs, cancellationToken);
+        var kpis = await _reporteRepository.ObtenerKpisAsync(periodoActual.FechaProceso, normalizedType, cancellationToken);
         var runtime = _runtimeMonitor.GetSnapshot(normalizedType);
         var puedeAdministrar = await UsuarioTieneAccesoAdministrativoAsync(idUsuario, cancellationToken);
+        var destinatarios = ReporteWhatsappTipos.IsBoleta(normalizedType)
+            ? await BuildBoletaDestinatariosAsync(periodoActual, cancellationToken)
+            : Array.Empty<ReporteWhatsappBoletaDestinoDto>();
 
         return new ReporteWhatsappDashboardDto
         {
             PuedeAdministrar = puedeAdministrar,
             Configuracion = configuracion,
-            PeriodoActual = periodo,
+            PeriodoActual = periodoActual,
             Runtime = runtime,
             Kpis = kpis,
-            Logs = logs
+            Logs = logs,
+            Destinatarios = destinatarios
         };
     }
 
@@ -117,19 +125,19 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             throw new InvalidOperationException("La cantidad de empleados por bloque debe ser mayor o igual a 1.");
         }
 
-        if (request.DelaySegundosEntreBloques < 10)
+        if (request.DelaySegundosEntreBloques < 5)
         {
-            throw new InvalidOperationException("El tiempo de espera entre bloques debe ser mayor o igual a 10 segundos.");
+            throw new InvalidOperationException("El tiempo de espera entre bloques debe ser mayor o igual a 5 segundos.");
         }
 
         await _reporteRepository.ActualizarConfiguracionAsync(request, usuarioModificacion, cancellationToken);
     }
 
-    public async Task<ReporteWhatsappEjecucionResultadoDto> EjecutarAsync(string tipoReporte, string origenEjecucion, string usuarioEjecucion, bool soloFallidos, CancellationToken cancellationToken = default)
+    public async Task<ReporteWhatsappEjecucionResultadoDto> EjecutarAsync(string tipoReporte, string origenEjecucion, string usuarioEjecucion, bool soloFallidos, string? periodo = null, CancellationToken cancellationToken = default)
     {
         var normalizedType = ReporteWhatsappTipos.Normalize(tipoReporte);
         var configuracion = await ObtenerConfiguracionAsync(normalizedType, cancellationToken);
-        var periodo = BuildPeriodoActual(normalizedType, configuracion);
+        var periodoActual = BuildPeriodoActual(normalizedType, configuracion, periodo);
         var executionId = Guid.NewGuid().ToString("N");
 
         var runtime = new ReporteWhatsappRuntimeStatusDto
@@ -141,7 +149,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             UsuarioEjecucion = usuarioEjecucion,
             FechaInicio = GetPeruNow(),
             Mensaje = "Iniciando proceso...",
-            Periodo = periodo
+            Periodo = periodoActual
         };
 
         if (!_runtimeMonitor.TryStart(normalizedType, runtime))
@@ -161,8 +169,29 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             _wupSettings.EnsureConfigured();
 
             var empleados = soloFallidos
-                ? await _reporteRepository.ObtenerEmpleadosFallidosAsync(periodo.FechaProceso, normalizedType, cancellationToken)
+                ? await _reporteRepository.ObtenerEmpleadosFallidosAsync(periodoActual.FechaProceso, normalizedType, cancellationToken)
                 : await _reporteRepository.ObtenerEmpleadosDestinoAsync(normalizedType, cancellationToken);
+
+            if (ReporteWhatsappTipos.IsBoleta(normalizedType))
+            {
+                var destinatariosBoleta = await BuildBoletaDestinatariosAsync(periodoActual, cancellationToken);
+                if (soloFallidos)
+                {
+                    var empleadosFallidos = empleados
+                        .Where(x => x.IdEmpleado > 0)
+                        .Select(x => x.IdEmpleado)
+                        .ToHashSet();
+
+                    empleados = destinatariosBoleta
+                        .Where(x => x.IdEmpleado > 0 && empleadosFallidos.Contains(x.IdEmpleado))
+                        .Select(MapBoletaEmpleado)
+                        .ToList();
+                }
+                else
+                {
+                    empleados = destinatariosBoleta.Select(MapBoletaEmpleado).ToList();
+                }
+            }
 
             empleados = empleados
                 .Where(x => x.IdEmpleado > 0)
@@ -180,7 +209,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
                     .Select(group => group.First())
                     .ToArray();
 
-                detalleGerencial = await BuildGerencialDetalleAsync(empleadosReporteGerencial, periodo, cancellationToken);
+                detalleGerencial = await BuildGerencialDetalleAsync(empleadosReporteGerencial, periodoActual, cancellationToken);
             }
 
             runtime.TotalEmpleados = empleados.Count;
@@ -230,7 +259,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
                         empleado,
                         ReporteWhatsappTipos.IsGerencial(normalizedType) ? empleadosReporteGerencial : empleados,
                         detalleGerencial,
-                        periodo,
+                        periodoActual,
                         configuracion,
                         origenEjecucion,
                         usuarioEjecucion,
@@ -370,6 +399,19 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
                 return;
             }
 
+            if (ReporteWhatsappTipos.IsBoleta(tipoReporte))
+            {
+                await ProcesarBoletaEmpleadoAsync(
+                    tipoReporte,
+                    empleado,
+                    periodo,
+                    runtime,
+                    log,
+                    telefonoNormalizado,
+                    cancellationToken);
+                return;
+            }
+
             IReadOnlyList<ReporteWhatsappAsistenciaItemDto> detalle;
             if (ReporteWhatsappTipos.IsGerencial(tipoReporte))
             {
@@ -481,7 +523,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             var request = new ReporteWhatsappSendRequestDto
             {
                 NombreArchivo = nombreArchivo,
-                Mensaje = GetMensajeAdjunto(tipoReporte),
+                Mensaje = GetMensajeAdjunto(tipoReporte, periodo),
                 Modo = GetModoEnvio(tipoReporte),
                 Telefono = telefonoNormalizado,
                 Contenido = base64
@@ -616,6 +658,142 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             .ToList();
     }
 
+    private async Task<IReadOnlyList<ReporteWhatsappBoletaDestinoDto>> BuildBoletaDestinatariosAsync(
+        ReporteWhatsappPeriodoDto periodo,
+        CancellationToken cancellationToken)
+    {
+        var empleados = await _reporteRepository.ObtenerEmpleadosDestinoAsync(ReporteWhatsappTipos.Boleta, cancellationToken);
+        var boletas = await _reporteRepository.ObtenerBoletasDestinoAsync(periodo.Periodo, cancellationToken);
+
+        var boletasByDocumento = boletas
+            .Where(x => !string.IsNullOrWhiteSpace(x.NumeroDocumento))
+            .GroupBy(x => NormalizeDocument(x.NumeroDocumento))
+            .ToDictionary(group => group.Key, group => group.First());
+
+        return empleados
+            .Where(x => x.IdEmpleado > 0)
+            .GroupBy(x => x.IdEmpleado)
+            .Select(group => group.First())
+            .Select(empleado =>
+            {
+                var documento = NormalizeDocument(empleado.NumeroDocumento);
+                ReporteWhatsappBoletaDestinoDto? boleta = null;
+                var tieneBoleta = !string.IsNullOrWhiteSpace(documento) && boletasByDocumento.TryGetValue(documento, out boleta);
+
+                return new ReporteWhatsappBoletaDestinoDto
+                {
+                    IdEmpleado = empleado.IdEmpleado,
+                    IdBoleta = tieneBoleta ? boleta!.IdBoleta : null,
+                    Usuario = empleado.Usuario,
+                    NombreEmpleado = empleado.NombreEmpleado,
+                    NumeroDocumento = empleado.NumeroDocumento,
+                    Telefono = empleado.Telefono,
+                    Correo = empleado.Correo,
+                    Periodo = tieneBoleta ? boleta!.Periodo : periodo.Periodo,
+                    NombreTrabajador = tieneBoleta ? boleta!.NombreTrabajador : empleado.NombreEmpleado,
+                    PdfDisponible = tieneBoleta && boleta!.PdfDisponible,
+                    TieneTelefonoConfigurado = !string.IsNullOrWhiteSpace(NormalizePhone(empleado.Telefono)),
+                    EstadoPdf = !tieneBoleta
+                        ? "SIN_BOLETA"
+                        : boleta!.PdfDisponible ? "PDF_DISPONIBLE" : "PENDIENTE_PDF",
+                    EstadoDestino = string.IsNullOrWhiteSpace(NormalizePhone(empleado.Telefono))
+                        ? "SIN_DESTINO"
+                        : "DESTINO_OK"
+                };
+            })
+            .OrderBy(x => string.IsNullOrWhiteSpace(x.NombreEmpleado) ? x.NombreTrabajador : x.NombreEmpleado)
+            .ThenBy(x => x.NumeroDocumento)
+            .ToList();
+    }
+
+    private async Task ProcesarBoletaEmpleadoAsync(
+        string tipoReporte,
+        ReporteWhatsappEmpleadoDto empleado,
+        ReporteWhatsappPeriodoDto periodo,
+        ReporteWhatsappRuntimeStatusDto runtime,
+        ReporteWhatsappLogDto log,
+        string telefonoNormalizado,
+        CancellationToken cancellationToken)
+    {
+        if (empleado.IdBoleta is null or <= 0)
+        {
+            log.EstadoEnvio = "OMITIDO_SIN_BOLETA";
+            log.MensajeError = "El empleado activo no tiene boleta disponible para el periodo seleccionado.";
+            return;
+        }
+
+        string base64;
+        try
+        {
+            SetRuntimeStep(tipoReporte, runtime, $"Obteniendo PDF de boleta para {empleado.NombreEmpleado}.");
+            base64 = await _planillaBoletaService.ObtenerPdfBase64Async(empleado.IdBoleta.Value, cancellationToken);
+            if (string.IsNullOrWhiteSpace(base64))
+            {
+                throw new InvalidOperationException("No se obtuvo el PDF Base64 de la boleta.");
+            }
+        }
+        catch (Exception ex)
+        {
+            log.EstadoEnvio = "ERROR_GENERANDO_REPORTE";
+            log.MensajeError = ex.Message;
+            runtime.Errores++;
+            return;
+        }
+
+        var documento = string.IsNullOrWhiteSpace(empleado.NumeroDocumento) ? empleado.IdEmpleado.ToString(CultureInfo.InvariantCulture) : empleado.NumeroDocumento;
+        var nombreArchivo = $"Boleta_{NormalizePeriodoToken(periodo.Periodo)}_{documento}.pdf";
+        var request = new ReporteWhatsappSendRequestDto
+        {
+            NombreArchivo = nombreArchivo,
+            Mensaje = GetMensajeAdjunto(tipoReporte, periodo),
+            Modo = GetModoEnvio(tipoReporte),
+            Telefono = telefonoNormalizado,
+            Contenido = base64
+        };
+
+        log.RequestJson = JsonSerializer.Serialize(new
+        {
+            request.NombreArchivo,
+            request.Mensaje,
+            request.Modo,
+            request.Telefono,
+            request.Contenido,
+            contenidoLength = request.Contenido.Length,
+            idBoleta = empleado.IdBoleta,
+            numeroDocumento = empleado.NumeroDocumento,
+            tipoReporte = "BOLETA"
+        });
+
+        SetRuntimeStep(tipoReporte, runtime, $"Enviando boleta PDF a WUP para {empleado.NombreEmpleado}.");
+        var response = await ExecuteWithRetryAsync(
+            async sendToken =>
+            {
+                using var attemptTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(sendToken);
+                attemptTimeoutCts.CancelAfter(WupSendTimeout);
+                return await _wupService.EnviarAdjuntoAsync(request, attemptTimeoutCts.Token);
+            },
+            WupMaxAttempts,
+            cancellationToken);
+
+        log.ResponseJson = response.ResponseBody;
+
+        if (!response.Success)
+        {
+            log.EstadoEnvio = "ERROR_ENDPOINT_WUP";
+            log.MensajeError = string.IsNullOrWhiteSpace(response.ErrorMessage)
+                ? "El endpoint WUP respondio sin confirmar exito."
+                : response.ErrorMessage;
+            runtime.Errores++;
+            SetRuntimeStep(tipoReporte, runtime, $"WUP rechazo o no confirmo la boleta para {empleado.NombreEmpleado}.");
+            return;
+        }
+
+        log.EstadoEnvio = "ENVIADO";
+        log.FechaEnvio = GetPeruNow();
+        runtime.Enviados++;
+        SetRuntimeStep(tipoReporte, runtime, $"Boleta enviada correctamente a {empleado.NombreEmpleado}.");
+    }
+
     private static async Task<ReporteWhatsappSendResponseDto> ExecuteWithRetryAsync(
         Func<CancellationToken, Task<ReporteWhatsappSendResponseDto>> action,
         int maxAttempts,
@@ -703,6 +881,19 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
 
     private (string HoraEjecucion, IReadOnlyList<string> DiasEjecucion, int CantidadEmpleadosPorBloque, int DelaySegundosEntreBloques, bool Activo, bool UsarSemanaEnCurso, bool UsarMesEnCurso, string MensajeAdjunto) GetDefaults(string tipoReporte)
     {
+        if (ReporteWhatsappTipos.IsBoleta(tipoReporte))
+        {
+            return (
+                string.IsNullOrWhiteSpace(_defaults.HoraEjecucionBoleta) ? _defaults.HoraEjecucion : _defaults.HoraEjecucionBoleta,
+                NormalizeDiasEjecucion(_defaults.DiasEjecucionBoleta),
+                _defaults.CantidadEmpleadosPorBloqueBoleta > 0 ? _defaults.CantidadEmpleadosPorBloqueBoleta : _defaults.CantidadEmpleadosPorBloque,
+                _defaults.DelaySegundosEntreBloquesBoleta > 0 ? _defaults.DelaySegundosEntreBloquesBoleta : _defaults.DelaySegundosEntreBloques,
+                _defaults.ActivoBoleta,
+                false,
+                false,
+                string.IsNullOrWhiteSpace(_defaults.MensajeAdjuntoBoleta) ? _defaults.MensajeAdjunto : _defaults.MensajeAdjuntoBoleta);
+        }
+
         if (ReporteWhatsappTipos.IsGerencial(tipoReporte))
         {
             return (
@@ -727,7 +918,22 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             _defaults.MensajeAdjunto);
     }
 
-    private string GetMensajeAdjunto(string tipoReporte) => GetDefaults(tipoReporte).MensajeAdjunto;
+    private string GetMensajeAdjunto(string tipoReporte, ReporteWhatsappPeriodoDto? periodo = null)
+    {
+        var mensaje = GetDefaults(tipoReporte).MensajeAdjunto;
+        if (!ReporteWhatsappTipos.IsBoleta(tipoReporte))
+        {
+            return mensaje;
+        }
+
+        var periodoTexto = periodo?.Periodo?.Trim();
+        if (string.IsNullOrWhiteSpace(periodoTexto))
+        {
+            return mensaje;
+        }
+
+        return $"Estimado colaborador, adjuntamos su boleta de pago del periodo {periodoTexto}.";
+    }
 
     private static string GetModoEnvio(string tipoReporte) =>
         ReporteWhatsappTipos.IsGerencial(tipoReporte) ? "wsp" : "sms";
@@ -753,13 +959,30 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             .ToArray();
     }
 
-    private static ReporteWhatsappPeriodoDto BuildPeriodoActual(string tipoReporte, ReporteWhatsappConfiguracionDto? configuracion)
+    private static ReporteWhatsappPeriodoDto BuildPeriodoActual(string tipoReporte, ReporteWhatsappConfiguracionDto? configuracion, string? periodoSeleccionado)
     {
         var timeZone = ResolvePeruTimeZone();
         var now = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, timeZone).Date;
 
         DateTime start;
         DateTime end;
+
+        if (ReporteWhatsappTipos.IsBoleta(tipoReporte))
+        {
+            var periodoBoleta = NormalizeBoletaPeriod(periodoSeleccionado);
+            var monthStart = ParseBoletaPeriodStart(periodoBoleta);
+            start = monthStart;
+            end = new DateTime(monthStart.Year, monthStart.Month, DateTime.DaysInMonth(monthStart.Year, monthStart.Month));
+
+            return new ReporteWhatsappPeriodoDto
+            {
+                FechaInicio = start.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture),
+                FechaFin = end.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture),
+                FechaProceso = end.Date,
+                EtiquetaPeriodo = periodoBoleta,
+                Periodo = periodoBoleta
+            };
+        }
 
         if (ReporteWhatsappTipos.IsGerencial(tipoReporte) && configuracion?.UsarMesEnCurso == true)
         {
@@ -790,7 +1013,8 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             FechaInicio = start.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture),
             FechaFin = end.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture),
             FechaProceso = end.Date,
-            EtiquetaPeriodo = $"{start:dd/MM/yyyy} - {end:dd/MM/yyyy}"
+            EtiquetaPeriodo = $"{start:dd/MM/yyyy} - {end:dd/MM/yyyy}",
+            Periodo = $"{start:MM/yyyy}"
         };
     }
 
@@ -819,10 +1043,51 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
     private static string BuildFileName(string tipoReporte, ReporteWhatsappEmpleadoDto empleado, ReporteWhatsappPeriodoDto periodo)
     {
         var employeeId = empleado.IdEmpleado > 0 ? empleado.IdEmpleado.ToString(CultureInfo.InvariantCulture) : "0";
+        if (ReporteWhatsappTipos.IsBoleta(tipoReporte))
+        {
+            var documento = string.IsNullOrWhiteSpace(empleado.NumeroDocumento) ? employeeId : empleado.NumeroDocumento;
+            return $"Boleta_{NormalizePeriodoToken(periodo.Periodo)}_{documento}.pdf";
+        }
+
         return ReporteWhatsappTipos.IsGerencial(tipoReporte)
             ? $"Reporte_Gerencial_Asistencia_{ParsePeriodoDate(periodo.FechaInicio):yyyyMMdd}_{ParsePeriodoDate(periodo.FechaFin):yyyyMMdd}.pdf"
             : $"rpt_asistencia_{employeeId}_{periodo.FechaProceso:yyyyMMdd}.pdf";
     }
+
+    private static string NormalizeBoletaPeriod(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            var now = GetPeruNow();
+            return now.ToString("MM/yyyy", CultureInfo.InvariantCulture);
+        }
+
+        normalized = normalized.Replace("-", "/");
+        if (DateTime.TryParseExact(normalized, new[] { "MM/yyyy", "yyyy/MM", "yyyy/M", "M/yyyy", "yyyyMM" }, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+        {
+            return parsed.ToString("MM/yyyy", CultureInfo.InvariantCulture);
+        }
+
+        return normalized;
+    }
+
+    private static DateTime ParseBoletaPeriodStart(string period)
+    {
+        if (DateTime.TryParseExact(period, new[] { "MM/yyyy", "yyyy/MM", "yyyy/M", "M/yyyy", "yyyyMM" }, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+        {
+            return new DateTime(parsed.Year, parsed.Month, 1);
+        }
+
+        var now = GetPeruNow();
+        return new DateTime(now.Year, now.Month, 1);
+    }
+
+    private static string NormalizePeriodoToken(string? value) =>
+        new string((value ?? string.Empty).Where(char.IsLetterOrDigit).ToArray());
+
+    private static string NormalizeDocument(string? value) =>
+        new string((value ?? string.Empty).Where(char.IsLetterOrDigit).ToArray()).Trim();
 
     private static DateTime ParsePeriodoDate(string value)
     {
@@ -858,6 +1123,22 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
         }
 
         return null;
+    }
+
+    private static ReporteWhatsappEmpleadoDto MapBoletaEmpleado(ReporteWhatsappBoletaDestinoDto item)
+    {
+        return new ReporteWhatsappEmpleadoDto
+        {
+            IdEmpleado = item.IdEmpleado,
+            IdBoleta = item.IdBoleta,
+            Usuario = item.Usuario,
+            NombreEmpleado = string.IsNullOrWhiteSpace(item.NombreTrabajador) ? item.NombreEmpleado : item.NombreTrabajador,
+            Correo = item.Correo,
+            Telefono = item.Telefono,
+            NumeroDocumento = item.NumeroDocumento,
+            PeriodoBoleta = item.Periodo,
+            PdfDisponible = item.PdfDisponible
+        };
     }
 
     private static int EstimateRemainingSeconds(ReporteWhatsappRuntimeStatusDto runtime, int delaySegundosEntreBloques)

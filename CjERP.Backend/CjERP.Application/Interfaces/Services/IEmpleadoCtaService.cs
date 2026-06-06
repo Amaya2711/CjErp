@@ -7,5 +7,6 @@ namespace CjERP.Application.Interfaces.Services
     public interface IEmpleadoCtaService
     {
         Task<List<EmpleadoCtaDto>> ListarAsync();
+        Task<List<EmpleadoCtaDto>> ListarWupAsync();
     }
 }

@@ -244,7 +244,9 @@ public sealed class ReporteRepository : IReporteRepository
                 commandType: CommandType.StoredProcedure,
                 cancellationToken: cancellationToken));
 
-        return rows.Select(MapEmpleado).ToList();
+        var empleados = rows.Select(MapEmpleado).ToList();
+        await EnrichEmpleadoDocumentsAsync(connection, empleados, cancellationToken);
+        return empleados;
     }
 
     public async Task<IReadOnlyList<ReporteWhatsappEmpleadoDto>> ObtenerEmpleadosReporteGerencialAsync(CancellationToken cancellationToken = default)
@@ -301,6 +303,78 @@ public sealed class ReporteRepository : IReporteRepository
                 cancellationToken: cancellationToken));
 
         return rows.ToList();
+    }
+
+    public async Task<IReadOnlyList<ReporteWhatsappBoletaDestinoDto>> ObtenerBoletasDestinoAsync(string periodo, CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        if (!await HasTableAsync(connection, "dbo.PlanillaBoletaCabecera", cancellationToken))
+        {
+            return Array.Empty<ReporteWhatsappBoletaDestinoDto>();
+        }
+
+        var hasIdActivoColumn = await HasColumnAsync(connection, "dbo.PlanillaBoletaCabecera", "IdActivo", cancellationToken);
+        var hasNumeroDocumentoColumn = await HasColumnAsync(connection, "dbo.PlanillaBoletaCabecera", "NumeroDocumento", cancellationToken);
+        var hasNroDocumentoColumn = !hasNumeroDocumentoColumn &&
+                                    await HasColumnAsync(connection, "dbo.PlanillaBoletaCabecera", "NroDocumento", cancellationToken);
+        var hasNombreTrabajadorColumn = await HasColumnAsync(connection, "dbo.PlanillaBoletaCabecera", "NombreTrabajador", cancellationToken);
+        var hasPdfTable = await HasTableAsync(connection, "dbo.PlanillaBoletaPdf", cancellationToken);
+        var hasPdfIdColumn = hasPdfTable && await HasColumnAsync(connection, "dbo.PlanillaBoletaPdf", "IdPdf", cancellationToken);
+        var hasPdfArchivoBase64Column = hasPdfTable && await HasColumnAsync(connection, "dbo.PlanillaBoletaPdf", "ArchivoBase64", cancellationToken);
+
+        var numeroDocumentoSelect = hasNumeroDocumentoColumn
+            ? "cab.NumeroDocumento"
+            : hasNroDocumentoColumn
+                ? "cab.NroDocumento AS NumeroDocumento"
+                : "CAST('' AS nvarchar(50)) AS NumeroDocumento";
+
+        var nombreTrabajadorSelect = hasNombreTrabajadorColumn
+            ? "cab.NombreTrabajador"
+            : "CAST('' AS nvarchar(200)) AS NombreTrabajador";
+
+        var pdfDisponibleSelect = hasPdfTable && hasPdfIdColumn && hasPdfArchivoBase64Column
+            ? """
+              CASE
+                  WHEN pdf.IdPdf IS NOT NULL AND LEN(LTRIM(RTRIM(ISNULL(pdf.ArchivoBase64, '')))) > 0 THEN CAST(1 AS bit)
+                  ELSE CAST(0 AS bit)
+              END AS PdfDisponible
+              """
+            : "CAST(0 AS bit) AS PdfDisponible";
+
+        var pdfJoin = hasPdfTable
+            ? """
+              LEFT JOIN dbo.PlanillaBoletaPdf pdf
+                  ON pdf.IdBoleta = cab.IdBoleta
+              """
+            : string.Empty;
+
+        var idActivoFilter = hasIdActivoColumn
+            ? "AND ISNULL(cab.IdActivo, 1) = 1"
+            : string.Empty;
+
+        var periodoTokens = BuildPeriodoTokens(periodo);
+
+        var sql = $"""
+        SELECT
+            cab.IdBoleta,
+            cab.Periodo,
+            {numeroDocumentoSelect},
+            {nombreTrabajadorSelect},
+            {pdfDisponibleSelect}
+        FROM dbo.PlanillaBoletaCabecera cab
+        {pdfJoin}
+        WHERE REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(cab.Periodo, ''))), '-', ''), '/', '') IN @PeriodoTokens
+          {idActivoFilter}
+        ORDER BY NombreTrabajador, NumeroDocumento;
+        """;
+
+        var rows = await connection.QueryAsync(
+            new CommandDefinition(
+                sql,
+                new { PeriodoTokens = periodoTokens },
+                cancellationToken: cancellationToken));
+
+        return rows.Select(MapBoletaDestino).ToList();
     }
 
     public async Task<IReadOnlyList<ReporteWhatsappAsistenciaItemDto>> ObtenerReporteAsistenciaAsync(string fechaInicio, string fechaFin, int idEmpleado, CancellationToken cancellationToken = default)
@@ -730,7 +804,22 @@ public sealed class ReporteRepository : IReporteRepository
             NombreEmpleado = GetString(values, "NombreEmpleado", "nombreEmpleado", "Usuario", "usuario"),
             Correo = GetString(values, "Correo", "correo", "Email", "email"),
             Telefono = GetString(values, "Telefono", "telefono", "Celular", "celular", "TelefonoWup", "telefonoWup"),
-            Ubicacion = GetString(values, "Ubicacion", "ubicacion", "ValorIni", "valorini", "Sede", "sede")
+            Ubicacion = GetString(values, "Ubicacion", "ubicacion", "ValorIni", "valorini", "Sede", "sede"),
+            NumeroDocumento = GetString(values, "NroDocumento", "NumeroDocumento", "Documento", "nroDocumento")
+        };
+    }
+
+    private static ReporteWhatsappBoletaDestinoDto MapBoletaDestino(dynamic row)
+    {
+        var values = ToDictionary(row);
+
+        return new ReporteWhatsappBoletaDestinoDto
+        {
+            IdBoleta = GetInt(values, "IdBoleta", "idBoleta"),
+            Periodo = GetString(values, "Periodo", "periodo"),
+            NumeroDocumento = GetString(values, "NumeroDocumento", "numeroDocumento", "NroDocumento"),
+            NombreTrabajador = GetString(values, "NombreTrabajador", "nombreTrabajador"),
+            PdfDisponible = GetBool(values, "PdfDisponible", "pdfDisponible")
         };
     }
 
@@ -765,6 +854,108 @@ public sealed class ReporteRepository : IReporteRepository
             EstadoValidacionHoras = estadoValidacionHoras,
             Observacion = GetString(values, "Observacion", "observacion", "Comentario", "comentario")
         };
+    }
+
+    private async Task EnrichEmpleadoDocumentsAsync(
+        SqlConnection connection,
+        List<ReporteWhatsappEmpleadoDto> empleados,
+        CancellationToken cancellationToken)
+    {
+        var missingDocumentIds = empleados
+            .Where(x => x.IdEmpleado > 0 && string.IsNullOrWhiteSpace(x.NumeroDocumento))
+            .Select(x => x.IdEmpleado)
+            .Distinct()
+            .ToArray();
+
+        if (missingDocumentIds.Length == 0)
+        {
+            return;
+        }
+
+        foreach (var tableName in new[] { "dbo.EmpleadoCj_Wup", "dbo.EmpleadoCj" })
+        {
+            if (!await HasTableAsync(connection, tableName, cancellationToken))
+            {
+                continue;
+            }
+
+            if (!await HasColumnAsync(connection, tableName, "IdEmpleado", cancellationToken) ||
+                !await HasColumnAsync(connection, tableName, "NroDocumento", cancellationToken))
+            {
+                continue;
+            }
+
+            var sql = $"""
+            SELECT
+                IdEmpleado,
+                NroDocumento
+            FROM {tableName}
+            WHERE IdEmpleado IN @Ids;
+            """;
+
+            var rows = await connection.QueryAsync(
+                new CommandDefinition(
+                    sql,
+                    new { Ids = missingDocumentIds },
+                    cancellationToken: cancellationToken));
+
+            var documentsByEmployeeId = rows
+                .Select(ToDictionary)
+                .Where(values => (GetInt(values, "IdEmpleado", "idEmpleado") ?? 0) > 0)
+                .GroupBy(values => GetInt(values, "IdEmpleado", "idEmpleado") ?? 0)
+                .ToDictionary(
+                    group => group.Key,
+                    group => GetString(group.First(), "NroDocumento", "NumeroDocumento", "Documento", "nroDocumento"));
+
+            foreach (var empleado in empleados)
+            {
+                if (!string.IsNullOrWhiteSpace(empleado.NumeroDocumento))
+                {
+                    continue;
+                }
+
+                if (documentsByEmployeeId.TryGetValue(empleado.IdEmpleado, out var numeroDocumento) &&
+                    !string.IsNullOrWhiteSpace(numeroDocumento))
+                {
+                    empleado.NumeroDocumento = numeroDocumento;
+                }
+            }
+
+            if (empleados.All(x => !string.IsNullOrWhiteSpace(x.NumeroDocumento) || x.IdEmpleado <= 0))
+            {
+                return;
+            }
+        }
+    }
+
+    private static string[] BuildPeriodoTokens(string? periodo)
+    {
+        var normalized = (periodo ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return Array.Empty<string>();
+        }
+
+        var compact = normalized.Replace("-", string.Empty).Replace("/", string.Empty).Trim();
+        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(compact))
+        {
+            tokens.Add(compact);
+        }
+
+        if (DateTime.TryParseExact(
+                normalized.Replace("-", "/"),
+                new[] { "MM/yyyy", "M/yyyy", "yyyy/MM", "yyyy/M", "yyyyMM" },
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var parsed))
+        {
+            tokens.Add(parsed.ToString("MMyyyy", CultureInfo.InvariantCulture));
+            tokens.Add(parsed.ToString("yyyyMM", CultureInfo.InvariantCulture));
+        }
+
+        return tokens.ToArray();
     }
 
     private static IDictionary<string, object?> ToDictionary(dynamic row) => (IDictionary<string, object?>)row;

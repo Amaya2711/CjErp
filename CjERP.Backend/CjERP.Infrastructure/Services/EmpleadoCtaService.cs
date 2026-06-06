@@ -12,6 +12,9 @@ namespace CjERP.Infrastructure.Services
 {
     public class EmpleadoCtaService : IEmpleadoCtaService
     {
+        private const string ListarSp = "sp_Empleado_Cta_Listar";
+        private const string ListarWupSp = "sp_EmpleadoCj_Listar_Wup";
+
         private readonly IConfiguration _configuration;
 
         public EmpleadoCtaService(IConfiguration configuration)
@@ -25,7 +28,19 @@ namespace CjERP.Infrastructure.Services
                 _configuration.GetConnectionString("DefaultConnection"));
 
             var result = await connection.QueryAsync<EmpleadoCtaDto>(
-                "sp_Empleado_Cta_Listar",
+                ListarSp,
+                commandType: CommandType.StoredProcedure
+            );
+            return result.AsList();
+        }
+
+        public async Task<List<EmpleadoCtaDto>> ListarWupAsync()
+        {
+            using var connection = new SqlConnection(
+                _configuration.GetConnectionString("DefaultConnection"));
+
+            var result = await connection.QueryAsync<EmpleadoCtaDto>(
+                ListarWupSp,
                 commandType: CommandType.StoredProcedure
             );
             return result.AsList();

@@ -79,6 +79,8 @@ export function useCrudForm<T, TPayload = Partial<T>>(
     items,
     form,
     setForm,
+    setError,
+    setMessage,
     loading,
     saving,
     error,

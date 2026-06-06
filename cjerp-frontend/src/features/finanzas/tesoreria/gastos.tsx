@@ -160,6 +160,7 @@ import type { EmpleadoCta } from "../../../models/empleadoCta";
 import type { ValoresGastoRequest, ValoresGastoResponse } from "../../../models/valoresGasto";
 import { getAuthUser } from "../../../utils/authStorage";
 import { compressImageForUpload } from "../../../utils/imageCompression";
+import { SHAREPOINT_BASE_URL } from "../../../utils/sharepoint";
 
 type GastoDto = {
   id: number;
@@ -1646,11 +1647,9 @@ export default function GastosPage() {
   const aplicaIgv = isFacturaComprobante(comprobanteOptions, form.comprobante);
   const igvAmount = roundToTwoDecimals(aplicaIgv ? subtotalAmount * IGV_RATE : 0);
   const totalAmount = roundToTwoDecimals(subtotalAmount + igvAmount);
-  // Lógica para anteponer la URL de SharePoint solo al editar
-  const SHAREPOINT_URL = "https://cjtelecom.sharepoint.com/sites/CJ-PROYECTOS/";
   const facturaDisplayPath =
     modo === "editar" && form.facturaPath && !form.facturaPath.startsWith("http")
-      ? SHAREPOINT_URL + form.facturaPath.replace(/^\/+/, "")
+      ? SHAREPOINT_BASE_URL + form.facturaPath.replace(/^\/+/, "")
       : getFacturaDisplayPath(form.facturaPath, form.facturaUrl);
 
   const subirFactura = async (file: File) => {

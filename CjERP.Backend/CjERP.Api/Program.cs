@@ -11,6 +11,7 @@ using CjERP.Application.Interfaces.Services;
 using CjERP.Infrastructure.DependencyInjection;
 using CjERP.Infrastructure.Repositories;
 using CjERP.Infrastructure.Services;
+using CjERP.Shared.Configuration;
 using Hangfire;
 using Hangfire.SqlServer;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -29,6 +30,8 @@ builder.Services.Configure<SqlSettings>(
     builder.Configuration.GetSection("SqlSettings"));
 builder.Services.Configure<SharePointOptions>(
     builder.Configuration.GetSection(SharePointOptions.SectionName));
+builder.Services.Configure<PlanillaXmlOptions>(
+    builder.Configuration.GetSection(PlanillaXmlOptions.SectionName));
 builder.Services.Configure<WupSettings>(
     builder.Configuration.GetSection("WupSettings"));
 builder.Services.Configure<ReporteWhatsappJobDefaultsOptions>(
@@ -146,8 +149,11 @@ builder.Services.AddScoped<ILookupService, LookupService>();
 builder.Services.AddScoped<IEmpleadoCtaService, EmpleadoCtaService>();
 builder.Services.AddScoped<IChequeEmpleadoService, ChequeEmpleadoService>();
 builder.Services.AddScoped<IPlanillaService, PlanillaService>();
+builder.Services.AddScoped<IPlanillaBoletaService, PlanillaBoletaService>();
+builder.Services.AddScoped<PlanillaBoletaPdfGenerator>();
 builder.Services.AddScoped<IPlanillaConsultaService, PlanillaConsultaService>();
 builder.Services.AddScoped<IOrdenCompraService, OrdenCompraService>();
+builder.Services.AddScoped<IEmpleadoPendienteService, EmpleadoPendienteService>();
 builder.Services.AddScoped<ILogisticaRecojoService, LogisticaRecojoService>();
 builder.Services.AddScoped<ILogisticaReembolsoService, LogisticaReembolsoService>();
 builder.Services.AddScoped<ILogisticaSuministroService, LogisticaSuministroService>();
@@ -156,6 +162,7 @@ builder.Services.AddScoped<IAuditoriaCambiosService, AuditoriaCambiosService>();
 builder.Services.AddScoped<IAsistenciaReporteService, AsistenciaReporteService>();
 builder.Services.AddScoped<IAsistenciaValidarCampoService, AsistenciaValidarCampoService>();
 builder.Services.AddScoped<IReporteRepository, ReporteRepository>();
+builder.Services.AddScoped<IPlanillaBoletaRepository, PlanillaBoletaRepository>();
 builder.Services.AddScoped<IReportePdfService, ReportePdfService>();
 builder.Services.AddScoped<IReporteAutomaticoService, ReporteAutomaticoService>();
 builder.Services.AddScoped<IReporteWhatsappJobScheduler, ReporteWhatsappJobScheduler>();

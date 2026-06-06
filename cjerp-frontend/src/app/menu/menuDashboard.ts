@@ -47,6 +47,7 @@ export const menuDashboard: DashboardGroup[] = [
     color: "#22C55E",
     tiles: [
       { label: "Asistencia", path: "/administracion/asistencia" },
+      { label: "Pendientes", path: "/administracion/pendientes" },
       { label: "Vacaciones", path: "/administracion/vacaciones" },
     ],
   },

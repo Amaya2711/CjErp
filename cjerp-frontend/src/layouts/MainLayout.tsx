@@ -497,6 +497,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "stretch",
     flex: 1,
     minHeight: 0,
+    minWidth: 0,
     position: "relative",
     overflow: "hidden",
   },
@@ -637,11 +638,14 @@ const styles: Record<string, React.CSSProperties> = {
   },
   main: {
     flex: 1,
+    minWidth: 0,
+    width: 0,
     height: "100%",
     padding: 12,
     paddingBottom: 82,
     boxSizing: "border-box",
-    overflow: "auto",
+    overflowY: "auto",
+    overflowX: "hidden",
     overscrollBehavior: "contain",
   },
   footer: {

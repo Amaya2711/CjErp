@@ -114,12 +114,21 @@ export default function CrudToolbar({
           display: "flex",
           flex: "1 1 320px",
           minWidth: 240,
-          alignItems: "center",
+          alignItems: "flex-start",
+          flexWrap: "wrap",
           gap: 12,
         }}
       >
         {onSearchChange ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, width: "100%" }}>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+              flex: "1 1 420px",
+              minWidth: 280,
+            }}
+          >
             <input
               type="text"
               placeholder={searchPlaceholder}
@@ -127,8 +136,8 @@ export default function CrudToolbar({
               onChange={(event) => onSearchChange(event.target.value)}
               style={{
                 width: "100%",
-                minWidth: 320,
-                maxWidth: 600,
+                minWidth: 0,
+                maxWidth: 680,
                 padding: "14px 18px",
                 border: "1px solid #E5E7EB",
                 borderRadius: 10,

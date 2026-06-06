@@ -28,5 +28,17 @@ namespace CjERP.Api.Controllers
                 data = empleados
             });
         }
+
+        [HttpGet("listar-wup")]
+        public async Task<IActionResult> ListarWup()
+        {
+            var empleados = await _empleadoCtaService.ListarWupAsync();
+            return Ok(new
+            {
+                success = true,
+                message = "Lista WUP de empleados obtenida correctamente.",
+                data = empleados
+            });
+        }
     }
 }

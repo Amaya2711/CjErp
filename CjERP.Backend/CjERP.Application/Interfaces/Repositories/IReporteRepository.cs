@@ -9,6 +9,7 @@ public interface IReporteRepository
     Task<IReadOnlyList<ReporteWhatsappEmpleadoDto>> ObtenerEmpleadosDestinoAsync(string tipoReporte, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ReporteWhatsappEmpleadoDto>> ObtenerEmpleadosReporteGerencialAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ReporteWhatsappEmpleadoDto>> ObtenerEmpleadosFallidosAsync(DateTime fechaProceso, string tipoReporte, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ReporteWhatsappBoletaDestinoDto>> ObtenerBoletasDestinoAsync(string periodo, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ReporteWhatsappAsistenciaItemDto>> ObtenerReporteAsistenciaAsync(string fechaInicio, string fechaFin, int idEmpleado, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ReporteWhatsappAsistenciaItemDto>> ObtenerReporteAsistenciaPeriodoAsync(string fechaInicio, string fechaFin, CancellationToken cancellationToken = default);
     Task<bool> ExisteEnvioExitosoAsync(int idEmpleado, DateTime fechaProceso, string tipoReporte, CancellationToken cancellationToken = default);

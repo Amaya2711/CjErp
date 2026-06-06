@@ -21,6 +21,7 @@ import type { ChequeGuardarRequest, ChequeRow } from "../../../models/cheque";
 import { getAuthUser } from "../../../utils/authStorage";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 import { compressImageForUpload } from "../../../utils/imageCompression";
+import { buildSharePointUrl } from "../../../utils/sharepoint";
 
 type SortKey =
   | "fechaCheque"
@@ -523,13 +524,7 @@ export default function TesoreriaChequesPage() {
   };
 
   const getRutaVisualizacion = (ruta?: string | null) => {
-    const raw = String(ruta ?? "").trim();
-    if (!raw) return "";
-    if (raw.startsWith("http://") || raw.startsWith("https://")) {
-      return raw;
-    }
-
-    return `https://cjtelecom.sharepoint.com/sites/CJ-PROYECTOS/${raw.replace(/^\/+/, "")}`;
+    return buildSharePointUrl(ruta);
   };
 
   const abrirVistaImagen = (ruta?: string | null, title = "Imagen adjunta") => {

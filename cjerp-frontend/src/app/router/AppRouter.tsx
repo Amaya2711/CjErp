@@ -21,6 +21,7 @@ import UsuarioPerfilRolMenu from "../../features/seguridad/pages/usuario-perfil-
 
 import AsistenciaPage from "../../features/administracion/AsistenciaPage";
 import MarcacionPage from "../../features/administracion/MarcacionPage";
+import PendientesPage from "../../features/administracion/pendientes";
 import SolicitudAdministracionPage from "../../features/administracion/solicitudadministracion";
 import VacacionesPage from "../../features/administracion/VacacionesPage";
 import AlmacenPage from "../../features/logistica/almacen/almacen";
@@ -52,6 +53,7 @@ import OrdenCompraPage from "../../features/compras/ordencompra";
 import PersonalPage from "../../features/recursoshumanos/personal";
 import RecursosHumanosAsistenciaPage from "../../features/recursoshumanos/asistencia";
 import CompensacionRealPage from "../../features/recursoshumanos/compensacionreal";
+import ImportarPlanillaXmlPage from "../../features/recursoshumanos/planillas";
 import RecursosHumanosVacacionesPage from "../../features/recursoshumanos/vacaciones";
 import ConsultaPage from "../../features/mantenimiento/consulta/consulta";
 import ModificacionesPage from "../../features/mantenimiento/consulta/modificaciones";
@@ -59,6 +61,7 @@ import MigracionPage from "../../features/mantenimiento/migracion";
 import MantenimientoPage from "../../features/mantenimiento/mantenimiento";
 import RptWupPage from "../../features/mantenimiento/sistemas/rptwup";
 import RptWupGerencialPage from "../../features/mantenimiento/sistemas/rptwupgerencial";
+import RptBoletaPage from "../../features/mantenimiento/sistemas/rptboleta";
 import IndicadoresGerencialesPage from "../../features/inicio/indicadoresgerenciales";
 import PanelPrincipalPage from "../../features/inicio/panelprincipal";
 import AlertasPage from "../../features/inicio/alertas";
@@ -83,6 +86,7 @@ export default function AppRouter() {
             <Route path="/admin/DashboardPage" element={<DashboardPage />} />
 
             <Route path="/administracion/asistencia" element={<AsistenciaPage />} />
+            <Route path="/administracion/pendientes" element={<PendientesPage />} />
             <Route
               path="/administracion/solicitudadministracion"
               element={<SolicitudAdministracionPage />}
@@ -118,6 +122,10 @@ export default function AppRouter() {
               element={<CompensacionRealPage />}
             />
             <Route
+              path="/recursoshumanos/planillas"
+              element={<ImportarPlanillaXmlPage />}
+            />
+            <Route
               path="/recursoshumanos/vacaciones"
               element={<RecursosHumanosVacacionesPage />}
             />
@@ -129,6 +137,7 @@ export default function AppRouter() {
             <Route path="/mantenimiento/mantenimiento" element={<MantenimientoPage />} />
             <Route path="/mantenimiento/sistemas/rptwup" element={<RptWupPage />} />
             <Route path="/mantenimiento/sistemas/rptwupgerencial" element={<RptWupGerencialPage />} />
+            <Route path="/mantenimiento/sistemas/rptboleta" element={<RptBoletaPage />} />
 
             <Route
               path="/inicio/indicadoresgerenciales"

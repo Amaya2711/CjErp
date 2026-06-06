@@ -37,7 +37,14 @@ public sealed class SharePointCommercialUploadService : ISharePointCommercialUpl
         ".jpeg",
         ".png",
         ".webp",
-        ".bmp"
+        ".bmp",
+        ".pdf",
+        ".doc",
+        ".docx",
+        ".xls",
+        ".xlsx",
+        ".csv",
+        ".txt"
     };
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -133,7 +140,8 @@ public sealed class SharePointCommercialUploadService : ISharePointCommercialUpl
         var extension = Path.GetExtension(file.FileName);
         if (string.IsNullOrWhiteSpace(extension) || !AllowedExtensions.Contains(extension))
         {
-            throw new InvalidOperationException("Solo se permiten imagenes JPG, JPEG, PNG, WEBP o BMP.");
+            throw new InvalidOperationException(
+                "Solo se permiten archivos JPG, JPEG, PNG, WEBP, BMP, PDF, DOC, DOCX, XLS, XLSX, CSV o TXT.");
         }
     }
 

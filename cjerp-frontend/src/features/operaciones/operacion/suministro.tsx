@@ -25,6 +25,7 @@ import type {
 import { getAuthUser } from "../../../utils/authStorage";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 import { compressImageForUpload } from "../../../utils/imageCompression";
+import { buildSharePointUrl } from "../../../utils/sharepoint";
 
 type ColumnFilterDropdownProps = {
   header: { key: string; label: string };
@@ -98,8 +99,6 @@ type SuministroDraft = {
   usuarioActualizacion: string;
   fechaActualizacion: string;
 };
-
-const SHAREPOINT_URL = "https://cjtelecom.sharepoint.com/sites/CJ-PROYECTOS/";
 
 function getFirstDayOfMonthInputValue() {
   const today = new Date();
@@ -413,7 +412,7 @@ function getImageDisplayPath(path?: string | null, url?: string | null) {
   const resolved = url?.trim() || path?.trim() || "";
   if (!resolved) return "";
   if (resolved.startsWith("http")) return resolved;
-  return `${SHAREPOINT_URL}${resolved.replace(/^\/+/, "")}`;
+  return buildSharePointUrl(resolved);
 }
 
 function sameSuministroRow(left: LogisticaSuministroDto, right: LogisticaSuministroDto) {

@@ -25,10 +25,10 @@ public sealed class ReportesWhatsappController : ControllerBase
     }
 
     [HttpGet("dashboard")]
-    public async Task<IActionResult> ObtenerDashboard([FromQuery] string? tipo = null, [FromQuery] int topLogs = 200, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> ObtenerDashboard([FromQuery] string? tipo = null, [FromQuery] string? periodo = null, [FromQuery] int topLogs = 200, CancellationToken cancellationToken = default)
     {
         var normalizedType = ResolveTipo(tipo);
-        var dashboard = await _reporteAutomaticoService.ObtenerDashboardAsync(GetUsuarioActual(), normalizedType, topLogs, cancellationToken);
+        var dashboard = await _reporteAutomaticoService.ObtenerDashboardAsync(GetUsuarioActual(), normalizedType, periodo, topLogs, cancellationToken);
         return Ok(new { success = true, message = "ok", data = dashboard });
     }
 
@@ -73,7 +73,7 @@ public sealed class ReportesWhatsappController : ControllerBase
     }
 
     [HttpPost("ejecutar-ahora")]
-    public async Task<IActionResult> EjecutarAhora([FromQuery] string? tipo = null, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> EjecutarAhora([FromQuery] string? tipo = null, [FromQuery] string? periodo = null, CancellationToken cancellationToken = default)
     {
         if (!await UsuarioAutorizadoAsync(cancellationToken))
         {
@@ -81,7 +81,7 @@ public sealed class ReportesWhatsappController : ControllerBase
         }
 
         var normalizedType = ResolveTipo(tipo);
-        var dashboard = await _reporteAutomaticoService.ObtenerDashboardAsync(GetUsuarioActual(), normalizedType, 20, cancellationToken);
+        var dashboard = await _reporteAutomaticoService.ObtenerDashboardAsync(GetUsuarioActual(), normalizedType, periodo, 20, cancellationToken);
         if (dashboard.Runtime.IsRunning)
         {
             return Ok(new
@@ -98,7 +98,7 @@ public sealed class ReportesWhatsappController : ControllerBase
             });
         }
 
-        var jobId = _jobScheduler.EncolarEjecucionManual(normalizedType, GetUsuarioActual());
+        var jobId = _jobScheduler.EncolarEjecucionManual(normalizedType, GetUsuarioActual(), periodo);
         return Ok(new
         {
             success = true,
@@ -113,7 +113,7 @@ public sealed class ReportesWhatsappController : ControllerBase
     }
 
     [HttpPost("reintentar-fallidos")]
-    public async Task<IActionResult> ReintentarFallidos([FromQuery] string? tipo = null, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> ReintentarFallidos([FromQuery] string? tipo = null, [FromQuery] string? periodo = null, CancellationToken cancellationToken = default)
     {
         if (!await UsuarioAutorizadoAsync(cancellationToken))
         {
@@ -121,7 +121,7 @@ public sealed class ReportesWhatsappController : ControllerBase
         }
 
         var normalizedType = ResolveTipo(tipo);
-        var dashboard = await _reporteAutomaticoService.ObtenerDashboardAsync(GetUsuarioActual(), normalizedType, 20, cancellationToken);
+        var dashboard = await _reporteAutomaticoService.ObtenerDashboardAsync(GetUsuarioActual(), normalizedType, periodo, 20, cancellationToken);
         if (dashboard.Runtime.IsRunning)
         {
             return Ok(new
@@ -138,7 +138,7 @@ public sealed class ReportesWhatsappController : ControllerBase
             });
         }
 
-        var jobId = _jobScheduler.EncolarReintentoFallidos(normalizedType, GetUsuarioActual());
+        var jobId = _jobScheduler.EncolarReintentoFallidos(normalizedType, GetUsuarioActual(), periodo);
         return Ok(new
         {
             success = true,

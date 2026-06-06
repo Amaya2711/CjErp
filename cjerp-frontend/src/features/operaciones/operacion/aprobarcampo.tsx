@@ -26,6 +26,7 @@ import type {
 import type { AuditoriaCambioItem } from "../../../models/auditoria";
 import { getAuthUser } from "../../../utils/authStorage";
 import { getHttpErrorMessage } from "../../../utils/httpError";
+import { SHAREPOINT_BASE_URL } from "../../../utils/sharepoint";
 
 type SortState = {
   key: string;
@@ -953,7 +954,7 @@ export default function AprobarCampoPage() {
     };
   }, [responsablesModalOpen]);
 
-  const SHAREPOINT_PREFIX = "https://cjtelecom.sharepoint.com/sites/CJ-PROYECTOS/APLICATIVOS%20EXTERNOS/ASISTENCIA/";
+  const SHAREPOINT_PREFIX = `${SHAREPOINT_BASE_URL}APLICATIVOS%20EXTERNOS/ASISTENCIA/`;
   const handleOpenImage = (title: string, url: string) => {
     if (!url.trim()) return;
     // Si la url ya es absoluta (empieza con http), no anteponer el prefijo
