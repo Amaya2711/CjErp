@@ -17,13 +17,13 @@ public sealed class ReporteWhatsAppJob
         return _reporteAutomaticoService.EjecutarAsync(ReporteWhatsappTipos.Normalize(tipoReporte), "AUTOMATICO", "HANGFIRE", false, null);
     }
 
-    public Task EjecutarManualAsync(string tipoReporte, string usuarioEjecucion, string? periodo = null)
+    public Task EjecutarManualAsync(string tipoReporte, string usuarioEjecucion, string? periodo = null, IReadOnlyList<int>? idsEmpleadoSeleccionados = null)
     {
-        return _reporteAutomaticoService.EjecutarAsync(ReporteWhatsappTipos.Normalize(tipoReporte), "MANUAL", usuarioEjecucion, false, periodo);
+        return _reporteAutomaticoService.EjecutarAsync(ReporteWhatsappTipos.Normalize(tipoReporte), "MANUAL", usuarioEjecucion, false, periodo, idsEmpleadoSeleccionados);
     }
 
-    public Task ReintentarFallidosAsync(string tipoReporte, string usuarioEjecucion, string? periodo = null)
+    public Task ReintentarFallidosAsync(string tipoReporte, string usuarioEjecucion, string? periodo = null, IReadOnlyList<int>? idsEmpleadoSeleccionados = null)
     {
-        return _reporteAutomaticoService.EjecutarAsync(ReporteWhatsappTipos.Normalize(tipoReporte), "REINTENTO", usuarioEjecucion, true, periodo);
+        return _reporteAutomaticoService.EjecutarAsync(ReporteWhatsappTipos.Normalize(tipoReporte), "REINTENTO", usuarioEjecucion, true, periodo, idsEmpleadoSeleccionados);
     }
 }

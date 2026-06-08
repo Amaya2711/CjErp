@@ -133,12 +133,16 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
         await _reporteRepository.ActualizarConfiguracionAsync(request, usuarioModificacion, cancellationToken);
     }
 
-    public async Task<ReporteWhatsappEjecucionResultadoDto> EjecutarAsync(string tipoReporte, string origenEjecucion, string usuarioEjecucion, bool soloFallidos, string? periodo = null, CancellationToken cancellationToken = default)
+    public async Task<ReporteWhatsappEjecucionResultadoDto> EjecutarAsync(string tipoReporte, string origenEjecucion, string usuarioEjecucion, bool soloFallidos, string? periodo = null, IReadOnlyList<int>? idsEmpleadoSeleccionados = null, CancellationToken cancellationToken = default)
     {
         var normalizedType = ReporteWhatsappTipos.Normalize(tipoReporte);
         var configuracion = await ObtenerConfiguracionAsync(normalizedType, cancellationToken);
         var periodoActual = BuildPeriodoActual(normalizedType, configuracion, periodo);
         var executionId = Guid.NewGuid().ToString("N");
+        var empleadosSeleccionados = (idsEmpleadoSeleccionados ?? Array.Empty<int>())
+            .Where(id => id > 0)
+            .Distinct()
+            .ToHashSet();
 
         var runtime = new ReporteWhatsappRuntimeStatusDto
         {
@@ -198,6 +202,13 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
                 .GroupBy(x => x.IdEmpleado)
                 .Select(group => group.First())
                 .ToList();
+
+            if (empleadosSeleccionados.Count > 0)
+            {
+                empleados = empleados
+                    .Where(x => empleadosSeleccionados.Contains(x.IdEmpleado))
+                    .ToList();
+            }
 
             var empleadosReporteGerencial = Array.Empty<ReporteWhatsappEmpleadoDto>();
             IReadOnlyList<ReporteWhatsappAsistenciaItemDto>? detalleGerencial = null;
@@ -315,6 +326,147 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
                 Message = ex.Message
             };
         }
+    }
+
+    public async Task<ReporteWhatsappManualSendResultDto> EnviarMensajeManualAsync(
+        ReporteWhatsappManualSendRequestDto request,
+        string usuarioEjecucion,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _wupSettings.EnsureConfigured();
+
+        var mensaje = request.Mensaje?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(mensaje))
+        {
+            throw new InvalidOperationException("El mensaje es obligatorio.");
+        }
+
+        var destinatarios = (request.Destinatarios ?? Array.Empty<ReporteWhatsappManualDestinatarioDto>())
+            .Where(item => item is not null)
+            .Where(item => item.IdEmpleado > 0 || !string.IsNullOrWhiteSpace(item.Telefono))
+            .GroupBy(item => item.IdEmpleado > 0 ? $"ID:{item.IdEmpleado}" : $"TEL:{item.Telefono.Trim()}")
+            .Select(group => group.First())
+            .ToList();
+
+        if (destinatarios.Count == 0)
+        {
+            throw new InvalidOperationException("Debe seleccionar al menos un destinatario.");
+        }
+
+        var adjuntos = (request.Adjuntos ?? Array.Empty<ReporteWhatsappManualAdjuntoDto>())
+            .Where(item => item is not null)
+            .Where(item => !string.IsNullOrWhiteSpace(item.NombreArchivo) || !string.IsNullOrWhiteSpace(item.ContenidoBase64))
+            .ToList();
+
+        var totalMensajes = destinatarios.Count * Math.Max(1, adjuntos.Count);
+        var resultados = new List<ReporteWhatsappManualSendItemResultDto>(destinatarios.Count);
+        var enviados = 0;
+        var errores = 0;
+
+        foreach (var destinatario in destinatarios)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var telefonoNormalizado = NormalizePhone(destinatario.Telefono);
+            if (string.IsNullOrWhiteSpace(telefonoNormalizado))
+            {
+                errores++;
+                resultados.Add(new ReporteWhatsappManualSendItemResultDto
+                {
+                    IdEmpleado = destinatario.IdEmpleado,
+                    Usuario = destinatario.Usuario,
+                    NombreEmpleado = destinatario.NombreEmpleado,
+                    Telefono = destinatario.Telefono,
+                    TotalAdjuntos = adjuntos.Count,
+                    Enviados = 0,
+                    Errores = Math.Max(1, adjuntos.Count),
+                    Estado = "OMITIDO_TELEFONO_INVALIDO",
+                    Detalle = string.IsNullOrWhiteSpace(destinatario.Telefono)
+                        ? "El destinatario no tiene telefono configurado."
+                        : $"El telefono '{destinatario.Telefono}' no cumple el formato internacional esperado."
+                });
+                continue;
+            }
+
+            var enviadosDestinatario = 0;
+            var erroresDestinatario = 0;
+            var detalleErrores = new List<string>();
+            IReadOnlyList<ReporteWhatsappManualAdjuntoDto> loteAdjuntos = adjuntos.Count == 0
+                ? [new ReporteWhatsappManualAdjuntoDto()]
+                : adjuntos;
+
+            foreach (var adjunto in loteAdjuntos)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var sendRequest = new ReporteWhatsappSendRequestDto
+                {
+                    NombreArchivo = adjunto.NombreArchivo?.Trim() ?? string.Empty,
+                    Mensaje = mensaje,
+                    Modo = "sms",
+                    Telefono = telefonoNormalizado,
+                    Contenido = adjunto.ContenidoBase64?.Trim() ?? string.Empty
+                };
+
+                var response = await ExecuteWithRetryAsync(
+                    async sendToken =>
+                    {
+                        using var attemptTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(sendToken);
+                        attemptTimeoutCts.CancelAfter(WupSendTimeout);
+                        return await _wupService.EnviarAdjuntoAsync(sendRequest, attemptTimeoutCts.Token);
+                    },
+                    WupMaxAttempts,
+                    cancellationToken);
+
+                if (response.Success)
+                {
+                    enviados++;
+                    enviadosDestinatario++;
+                    continue;
+                }
+
+                errores++;
+                erroresDestinatario++;
+                detalleErrores.Add(string.IsNullOrWhiteSpace(response.ErrorMessage)
+                    ? "El servicio WUP no confirmo el envio."
+                    : response.ErrorMessage);
+            }
+
+            resultados.Add(new ReporteWhatsappManualSendItemResultDto
+            {
+                IdEmpleado = destinatario.IdEmpleado,
+                Usuario = destinatario.Usuario,
+                NombreEmpleado = destinatario.NombreEmpleado,
+                Telefono = telefonoNormalizado,
+                TotalAdjuntos = adjuntos.Count,
+                Enviados = enviadosDestinatario,
+                Errores = erroresDestinatario,
+                Estado = erroresDestinatario == 0 ? "ENVIADO" : enviadosDestinatario > 0 ? "PARCIAL" : "ERROR",
+                Detalle = detalleErrores.Count == 0
+                    ? $"Mensaje enviado correctamente por {Math.Max(1, loteAdjuntos.Count)} elemento(s)."
+                    : string.Join(" | ", detalleErrores.Distinct())
+            });
+        }
+
+        _logger.LogInformation(
+            "[ReporteWUP] Envio manual finalizado. Usuario={Usuario}, Titulo={Titulo}, Destinatarios={Destinatarios}, Adjuntos={Adjuntos}, Enviados={Enviados}, Errores={Errores}",
+            usuarioEjecucion,
+            request.Titulo,
+            destinatarios.Count,
+            adjuntos.Count,
+            enviados,
+            errores);
+
+        return new ReporteWhatsappManualSendResultDto
+        {
+            TotalDestinatarios = destinatarios.Count,
+            TotalAdjuntos = adjuntos.Count,
+            TotalMensajes = totalMensajes,
+            Enviados = enviados,
+            Errores = errores,
+            Resultados = resultados
+        };
     }
 
     public async Task<bool> UsuarioTieneAccesoAdministrativoAsync(string idUsuario, CancellationToken cancellationToken = default)

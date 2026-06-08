@@ -274,6 +274,53 @@ public sealed class ReporteWhatsappSendResponseDto
     public string ErrorMessage { get; set; } = string.Empty;
 }
 
+public sealed class ReporteWhatsappManualDestinatarioDto
+{
+    public int IdEmpleado { get; set; }
+    public string Usuario { get; set; } = string.Empty;
+    public string NombreEmpleado { get; set; } = string.Empty;
+    public string Telefono { get; set; } = string.Empty;
+    public string Correo { get; set; } = string.Empty;
+}
+
+public sealed class ReporteWhatsappManualAdjuntoDto
+{
+    public string NombreArchivo { get; set; } = string.Empty;
+    public string ContenidoBase64 { get; set; } = string.Empty;
+    public string ContentType { get; set; } = string.Empty;
+}
+
+public sealed class ReporteWhatsappManualSendRequestDto
+{
+    public string Titulo { get; set; } = string.Empty;
+    public string Mensaje { get; set; } = string.Empty;
+    public IReadOnlyList<ReporteWhatsappManualDestinatarioDto> Destinatarios { get; set; } = Array.Empty<ReporteWhatsappManualDestinatarioDto>();
+    public IReadOnlyList<ReporteWhatsappManualAdjuntoDto> Adjuntos { get; set; } = Array.Empty<ReporteWhatsappManualAdjuntoDto>();
+}
+
+public sealed class ReporteWhatsappManualSendItemResultDto
+{
+    public int IdEmpleado { get; set; }
+    public string Usuario { get; set; } = string.Empty;
+    public string NombreEmpleado { get; set; } = string.Empty;
+    public string Telefono { get; set; } = string.Empty;
+    public int TotalAdjuntos { get; set; }
+    public int Enviados { get; set; }
+    public int Errores { get; set; }
+    public string Estado { get; set; } = string.Empty;
+    public string Detalle { get; set; } = string.Empty;
+}
+
+public sealed class ReporteWhatsappManualSendResultDto
+{
+    public int TotalDestinatarios { get; set; }
+    public int TotalAdjuntos { get; set; }
+    public int TotalMensajes { get; set; }
+    public int Enviados { get; set; }
+    public int Errores { get; set; }
+    public IReadOnlyList<ReporteWhatsappManualSendItemResultDto> Resultados { get; set; } = Array.Empty<ReporteWhatsappManualSendItemResultDto>();
+}
+
 public sealed class ReporteWhatsappLogDto
 {
     public int IdLog { get; set; }
@@ -349,6 +396,11 @@ public sealed class ReporteWhatsappEjecucionResultadoDto
     public string ExecutionId { get; set; } = string.Empty;
     public string JobId { get; set; } = string.Empty;
     public string Message { get; set; } = string.Empty;
+}
+
+public sealed class ReporteWhatsappEjecucionRequestDto
+{
+    public IReadOnlyList<int> IdsEmpleadoSeleccionados { get; set; } = Array.Empty<int>();
 }
 
 public sealed class ReporteGerencialEmpleadoResumenDto

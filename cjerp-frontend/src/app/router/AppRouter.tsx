@@ -65,6 +65,7 @@ import RptBoletaPage from "../../features/mantenimiento/sistemas/rptboleta";
 import IndicadoresGerencialesPage from "../../features/inicio/indicadoresgerenciales";
 import PanelPrincipalPage from "../../features/inicio/panelprincipal";
 import AlertasPage from "../../features/inicio/alertas";
+import EnvioMensajesPage from "../../features/inicio/enviomensajes";
 import PlantaPrincipalPage from "../../features/planta/principal";
 import EppsPage from "../../features/planta/epps";
 import OperativoPage from "../../pages/reporte/operativo";
@@ -145,6 +146,7 @@ export default function AppRouter() {
             />
             <Route path="/inicio/panelprincipal" element={<PanelPrincipalPage />} />
             <Route path="/inicio/alertas" element={<AlertasPage />} />
+            <Route path="/inicio/enviomensajes" element={<EnvioMensajesPage />} />
 
             <Route path="/planta/principal" element={<PlantaPrincipalPage />} />
             <Route path="/planta/epps" element={<EppsPage />} />

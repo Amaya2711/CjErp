@@ -99,6 +99,7 @@ function buildInitialForm(): CompensacionGuardarRequest {
 const initialForm: CompensacionGuardarRequest = buildInitialForm();
 const SHOW_EDIT_BUTTON = false;
 const MAX_COMMENT_LENGTH = 500;
+const DEFAULT_HIDDEN_ESTADOS = new Set([-1, 9]);
 
 type ActivoFilter = "activos" | "todos" | "inactivos";
 type ActiveTab = "solicitudes" | "resumen";
@@ -440,6 +441,7 @@ export default function CompensacionRealPage() {
   const [dateFromFilter, setDateFromFilter] = useState<string>("");
   const [dateToFilter, setDateToFilter] = useState<string>("");
   const [estadoFilter, setEstadoFilter] = useState<string[]>([]);
+  const [estadoFilterInicializado, setEstadoFilterInicializado] = useState(false);
   const [activeFilter, setActiveFilter] = useState<ActivoFilter>("activos");
   const [empleados, setEmpleados] = useState<EmpleadoCta[]>([]);
   const [empleadosLoading, setEmpleadosLoading] = useState(false);
@@ -655,6 +657,29 @@ export default function CompensacionRealPage() {
     );
   }, [items]);
 
+  const defaultEstadoSelections = useMemo(() => {
+    const visibles = new Set<string>();
+
+    items.forEach((item) => {
+      const estadoLabel = String(item.estado || item.idEstado || "-").trim() || "-";
+      const estadoId = Number(item.idEstado ?? 0);
+      if (!DEFAULT_HIDDEN_ESTADOS.has(estadoId)) {
+        visibles.add(estadoLabel);
+      }
+    });
+
+    return estadoOptions.filter((estado) => visibles.has(estado));
+  }, [estadoOptions, items]);
+
+  useEffect(() => {
+    if (estadoFilterInicializado || estadoOptions.length === 0) {
+      return;
+    }
+
+    setEstadoFilter(defaultEstadoSelections);
+    setEstadoFilterInicializado(true);
+  }, [defaultEstadoSelections, estadoFilterInicializado, estadoOptions]);
+
   useEffect(() => {
     if (!estadoDropdownOpen) return;
 
@@ -672,10 +697,11 @@ export default function CompensacionRealPage() {
   }, [estadoDropdownOpen]);
 
   const estadoFilterLabel = useMemo(() => {
-    if (estadoFilter.length === 0) return "Todos";
+    if (estadoOptions.length > 0 && estadoFilter.length === estadoOptions.length) return "Todos";
+    if (estadoFilter.length === 0) return "Ninguno";
     if (estadoFilter.length === 1) return estadoFilter[0];
     return `${estadoFilter.length} seleccionados`;
-  }, [estadoFilter]);
+  }, [estadoFilter, estadoOptions]);
 
   const toggleEstadoSelection = (estado: string) => {
     setEstadoFilter((current) =>
@@ -1185,8 +1211,8 @@ export default function CompensacionRealPage() {
                   <label style={styles.multiSelectOption}>
                     <input
                       type="checkbox"
-                      checked={estadoFilter.length === 0}
-                      onChange={() => setEstadoFilter([])}
+                      checked={estadoOptions.length > 0 && estadoFilter.length === estadoOptions.length}
+                      onChange={() => setEstadoFilter(estadoOptions)}
                     />
                     <span>Todos</span>
                   </label>
@@ -1372,6 +1398,7 @@ export default function CompensacionRealPage() {
                 ) : (
                   sortedItems.map((item) => {
                     const itemEstado = Number(item.idEstado ?? 0);
+                    const isEstadoInvalidoRechazo = itemEstado === -1;
                     const isEstadoBloqueado = itemEstado === 9;
                     const isEstadoRechazado = itemEstado === 22;
                     const canUseFirstApproverByEstado = itemEstado === 97;
@@ -1400,6 +1427,8 @@ export default function CompensacionRealPage() {
                       detailLoading ||
                       isEstadoBloqueado ||
                       isEstadoRechazado;
+                    const disableRejectButton =
+                      disableEditButton || isEstadoInvalidoRechazo;
 
                     return (
                     <tr
@@ -1463,10 +1492,10 @@ export default function CompensacionRealPage() {
                             type="button"
                             style={{
                               ...styles.dangerButton,
-                              ...(disableEditButton ? styles.secondaryButtonDisabled : {}),
+                              ...(disableRejectButton ? styles.secondaryButtonDisabled : {}),
                             }}
                             onClick={() => handleOpenProcesar("RECHAZAR", item)}
-                            disabled={disableEditButton}
+                            disabled={disableRejectButton}
                           >
                             Rechazar
                           </button>

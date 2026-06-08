@@ -7,6 +7,7 @@ type SidePanelFormProps = {
   onClose: () => void;
   children: React.ReactNode;
   footer?: React.ReactNode;
+  maxWidth?: number | string;
 };
 
 export default function SidePanelForm({
@@ -16,6 +17,7 @@ export default function SidePanelForm({
   onClose,
   children,
   footer,
+  maxWidth,
 }: SidePanelFormProps) {
   if (!open) {
     return null;
@@ -23,7 +25,7 @@ export default function SidePanelForm({
 
   return (
     <div style={styles.overlay}>
-      <div style={styles.panel}>
+      <div style={{ ...styles.panel, ...(maxWidth ? { maxWidth } : {}) }}>
         <div style={styles.header}>
           <div>
             <h2 style={styles.title}>{title}</h2>
@@ -52,7 +54,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   panel: {
     width: "100%",
-    maxWidth: 460,
+    maxWidth: 1000,
     height: "100vh",
     background: "#FFFFFF",
     boxShadow: "-8px 0 24px rgba(15,23,42,0.18)",

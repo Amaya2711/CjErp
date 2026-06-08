@@ -113,9 +113,11 @@ public class ChequeEmpleadoService : IChequeEmpleadoService
         var actual = await ObtenerInternoAsync(connection, request.IdCheque.Value, cancellationToken)
             ?? throw new InvalidOperationException("No se pudo obtener el cheque actualizado.");
 
-        await _auditoriaCambiosService.RegistrarLoteAsync(
-            BuildUpdateAuditEntries(anterior, actual, usuarioAccion),
-            cancellationToken);
+        var auditEntries = BuildUpdateAuditEntries(anterior, actual, usuarioAccion).ToList();
+        if (auditEntries.Count > 0)
+        {
+            await _auditoriaCambiosService.RegistrarLoteAsync(auditEntries, cancellationToken);
+        }
 
         return new ChequeEmpleadoOperacionResultadoDto
         {
@@ -159,6 +161,7 @@ public class ChequeEmpleadoService : IChequeEmpleadoService
             IdMoneda = anterior.IdMoneda,
             IdEmpleado = anterior.IdEmpleado,
             IdEstado = request.IdEstadoRechazado.Value,
+            Comentario = anterior.Comentario,
             Ruta = anterior.Ruta,
             UsuarioAccion = usuarioAccion
         };
@@ -220,6 +223,7 @@ public class ChequeEmpleadoService : IChequeEmpleadoService
         parameters.Add("@idmoneda", request.IdMoneda, DbType.Int32);
         parameters.Add("@idempleado", request.IdEmpleado, DbType.Int32);
         parameters.Add("@idestado", request.IdEstado, DbType.Int32);
+        parameters.Add("@comentario", NullIfWhiteSpace(request.Comentario), DbType.String);
         parameters.Add("@ruta", NullIfWhiteSpace(request.Ruta), DbType.String);
 
         return parameters;
@@ -437,14 +441,15 @@ public class ChequeEmpleadoService : IChequeEmpleadoService
     {
         return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["IdBanco"] = item.IdBanco.ToString(CultureInfo.InvariantCulture),
-            ["FechaCheque"] = item.FechaCheque.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-            ["NroCheque"] = item.NroCheque,
+            ["Banco"] = item.IdBanco.ToString(CultureInfo.InvariantCulture),
+            ["Fecha cheque"] = item.FechaCheque.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            ["Nro cheque"] = item.NroCheque.Trim(),
             ["Importe"] = item.Importe.ToString("0.00", CultureInfo.InvariantCulture),
-            ["IdMoneda"] = item.IdMoneda.ToString(CultureInfo.InvariantCulture),
-            ["IdEmpleado"] = item.IdEmpleado.ToString(CultureInfo.InvariantCulture),
-            ["IdEstado"] = item.IdEstado.ToString(CultureInfo.InvariantCulture),
-            ["Ruta"] = item.Ruta ?? string.Empty
+            ["Moneda"] = item.IdMoneda.ToString(CultureInfo.InvariantCulture),
+            ["Empleado"] = item.IdEmpleado.ToString(CultureInfo.InvariantCulture),
+            ["Estado"] = item.IdEstado.ToString(CultureInfo.InvariantCulture),
+            ["Comentario"] = item.Comentario?.Trim() ?? string.Empty,
+            ["Ruta"] = item.Ruta?.Trim() ?? string.Empty
         };
     }
 
@@ -470,8 +475,40 @@ public class ChequeEmpleadoService : IChequeEmpleadoService
             NroCheque = GetString(data, "nro_cheque", "NroCheque", "nroCheque"),
             Importe = GetDecimal(data, "importe", "Importe"),
             IdMoneda = GetInt(data, "idmoneda", "IdMoneda", "idMoneda"),
+            NombreMoneda = GetNullableString(
+                data,
+                "nombremoneda",
+                "NombreMoneda",
+                "nombreMoneda",
+                "moneda",
+                "Moneda"),
             IdEmpleado = GetInt(data, "idempleado", "IdEmpleado", "idEmpleado"),
+            NombreEmpleado = GetNullableString(
+                data,
+                "nombreempleado",
+                "NombreEmpleado",
+                "nombreEmpleado",
+                "empleado",
+                "Empleado",
+                "nombreempleadocj",
+                "NombreEmpleadoCJ",
+                "nombreEmpleadoCJ"),
+            NombreBanco = GetNullableString(
+                data,
+                "nombrebanco",
+                "NombreBanco",
+                "nombreBanco",
+                "banco",
+                "Banco"),
             IdEstado = GetInt(data, "idestado", "IdEstado", "idEstado"),
+            NombreEstado = GetNullableString(
+                data,
+                "nombreestado",
+                "NombreEstado",
+                "nombreEstado",
+                "estado",
+                "Estado"),
+            Comentario = GetNullableString(data, "comentario", "Comentario"),
             Ruta = GetNullableString(data, "ruta", "Ruta"),
             FechaCreacion = GetNullableDate(data, "fecha_creacion", "FechaCreacion", "fechaCreacion"),
             FechaModificacion = GetNullableDate(data, "fecha_modificacion", "FechaModificacion", "fechaModificacion")

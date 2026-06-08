@@ -109,3 +109,49 @@ export type ReporteWhatsappEjecucionResultado = {
   jobId: string;
   message: string;
 };
+
+export type ReporteWhatsappEjecucionRequest = {
+  idsEmpleadoSeleccionados?: number[];
+};
+
+export type ReporteWhatsappManualDestinatario = {
+  idEmpleado: number;
+  usuario: string;
+  nombreEmpleado: string;
+  telefono: string;
+  correo: string;
+};
+
+export type ReporteWhatsappManualAdjunto = {
+  nombreArchivo: string;
+  contenidoBase64: string;
+  contentType: string;
+};
+
+export type ReporteWhatsappManualSendRequest = {
+  titulo: string;
+  mensaje: string;
+  destinatarios: ReporteWhatsappManualDestinatario[];
+  adjuntos: ReporteWhatsappManualAdjunto[];
+};
+
+export type ReporteWhatsappManualSendItemResult = {
+  idEmpleado: number;
+  usuario: string;
+  nombreEmpleado: string;
+  telefono: string;
+  totalAdjuntos: number;
+  enviados: number;
+  errores: number;
+  estado: string;
+  detalle: string;
+};
+
+export type ReporteWhatsappManualSendResult = {
+  totalDestinatarios: number;
+  totalAdjuntos: number;
+  totalMensajes: number;
+  enviados: number;
+  errores: number;
+  resultados: ReporteWhatsappManualSendItemResult[];
+};

@@ -20,6 +20,7 @@ import type {
   ReporteWhatsappBoletaDestino,
   ReporteWhatsappConfiguracion,
   ReporteWhatsappDashboard,
+  ReporteWhatsappEjecucionRequest,
   ReporteWhatsappLog,
   ReporteWhatsappTipo,
 } from "../../../models/reportesWhatsapp";
@@ -476,6 +477,7 @@ export function RptWupModulePage({
   const [saving, setSaving] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [runningAction, setRunningAction] = useState<"" | "save" | "run" | "retry" | "reschedule">("");
+  const [selectedDestinatarioIds, setSelectedDestinatarioIds] = useState<number[]>([]);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const lastErrorLogSignatureRef = useRef("");
@@ -488,6 +490,18 @@ export function RptWupModulePage({
     const processed = dashboard?.runtime.empleadosProcesados ?? 0;
     return total <= 0 ? 0 : Math.min(100, Math.round((processed * 100) / total));
   }, [dashboard]);
+
+  const destinatariosBoleta = dashboard?.destinatarios ?? [];
+  const destinatariosSeleccionadosSet = useMemo(
+    () => new Set(selectedDestinatarioIds),
+    [selectedDestinatarioIds]
+  );
+  const destinatariosBoletaSeleccionados = useMemo(
+    () => destinatariosBoleta.filter((row) => destinatariosSeleccionadosSet.has(row.idEmpleado)),
+    [destinatariosBoleta, destinatariosSeleccionadosSet]
+  );
+  const requiereSeleccionBoleta = tipoApi === "boleta";
+  const puedeEjecutarBoleta = !requiereSeleccionBoleta || destinatariosBoletaSeleccionados.length > 0;
 
   const loadDashboard = useEffectEvent(async (silent = false, signal?: AbortSignal) => {
     if (dashboardRequestInFlightRef.current) {
@@ -569,6 +583,18 @@ export function RptWupModulePage({
       window.clearInterval(interval);
     };
   }, [dashboard?.runtime.isRunning, tipoApi, periodoBoletaApi]);
+
+  useEffect(() => {
+    if (tipoApi !== "boleta") {
+      if (selectedDestinatarioIds.length > 0) {
+        setSelectedDestinatarioIds([]);
+      }
+      return;
+    }
+
+    const idsDisponibles = new Set(destinatariosBoleta.map((row) => row.idEmpleado).filter((id) => id > 0));
+    setSelectedDestinatarioIds((current) => current.filter((id) => idsDisponibles.has(id)));
+  }, [destinatariosBoleta, selectedDestinatarioIds.length, tipoApi]);
 
   useEffect(() => {
     const failedLogs = (dashboard?.logs ?? [])
@@ -677,6 +703,29 @@ export function RptWupModulePage({
   const destinatarioColumns = useMemo<DataGridColumn<ReporteWhatsappBoletaDestino>[]>(
     () => [
       {
+        key: "select",
+        header: "Sel.",
+        align: "center",
+        render: (row) => (
+          <input
+            type="checkbox"
+            checked={destinatariosSeleccionadosSet.has(row.idEmpleado)}
+            onChange={(event) => {
+              setSelectedDestinatarioIds((current) => {
+                const next = new Set(current);
+                if (event.target.checked) {
+                  next.add(row.idEmpleado);
+                } else {
+                  next.delete(row.idEmpleado);
+                }
+
+                return Array.from(next);
+              });
+            }}
+          />
+        ),
+      },
+      {
         key: "estadoPdf",
         header: "PDF",
         render: (row) => (
@@ -727,7 +776,7 @@ export function RptWupModulePage({
       { key: "correo", header: "Correo", render: (row) => row.correo || "-" },
       { key: "periodo", header: "Periodo", render: (row) => row.periodo || "-" },
     ],
-    [downloadingPdf]
+    [destinatariosSeleccionadosSet, downloadingPdf]
   );
 
   const validar = () => {
@@ -806,18 +855,29 @@ export function RptWupModulePage({
   };
 
   const ejecutarAccion = async (action: "run" | "retry" | "reschedule") => {
+    if ((action === "run" || action === "retry") && !puedeEjecutarBoleta) {
+      setError("Marque al menos un destinatario antes de enviar o reintentar.");
+      setSuccess("");
+      return;
+    }
+
     setRunningAction(action);
     setError("");
     setSuccess("");
 
     try {
+      const payload: ReporteWhatsappEjecucionRequest | undefined =
+        requiereSeleccionBoleta && (action === "run" || action === "retry")
+          ? { idsEmpleadoSeleccionados: destinatariosBoletaSeleccionados.map((row) => row.idEmpleado) }
+          : undefined;
+
       if (action === "run") {
-        const response = await reportesWhatsappService.ejecutarAhora(tipoApi, periodoBoletaApi);
+        const response = await reportesWhatsappService.ejecutarAhora(tipoApi, periodoBoletaApi, payload);
         setSuccess(response.message || "Proceso manual encolado.");
       }
 
       if (action === "retry") {
-        const response = await reportesWhatsappService.reintentarFallidos(tipoApi, periodoBoletaApi);
+        const response = await reportesWhatsappService.reintentarFallidos(tipoApi, periodoBoletaApi, payload);
         setSuccess(response.message || "Reintento encolado.");
       }
 
@@ -949,7 +1009,7 @@ export function RptWupModulePage({
                       type="button"
                       style={styles.primaryButton}
                       onClick={() => void ejecutarAccion("run")}
-                      disabled={runningAction !== "" || dashboard?.runtime.isRunning}
+                      disabled={runningAction !== "" || dashboard?.runtime.isRunning || !puedeEjecutarBoleta}
                     >
                       Ejecutar ahora
                     </button>
@@ -957,7 +1017,7 @@ export function RptWupModulePage({
                       type="button"
                       style={styles.secondaryButton}
                       onClick={() => void ejecutarAccion("retry")}
-                      disabled={runningAction !== "" || dashboard?.runtime.isRunning}
+                      disabled={runningAction !== "" || dashboard?.runtime.isRunning || !puedeEjecutarBoleta}
                     >
                       Reintentar fallidos
                     </button>
@@ -1162,6 +1222,27 @@ export function RptWupModulePage({
                     Empleados activos del padrÃ³n WUP cruzados con boletas y PDF del perÃ­odo seleccionado.
                   </p>
                 </div>
+              </div>
+              <div style={styles.selectionToolbar}>
+                <span style={styles.selectionSummary}>
+                  Marcados: {destinatariosBoletaSeleccionados.length} / {destinatariosBoleta.length}
+                </span>
+                <button
+                  type="button"
+                  style={styles.secondaryButton}
+                  onClick={() => setSelectedDestinatarioIds(destinatariosBoleta.map((row) => row.idEmpleado))}
+                  disabled={destinatariosBoleta.length === 0}
+                >
+                  Marcar todos
+                </button>
+                <button
+                  type="button"
+                  style={styles.secondaryButton}
+                  onClick={() => setSelectedDestinatarioIds([])}
+                  disabled={destinatariosBoletaSeleccionados.length === 0}
+                >
+                  Limpiar
+                </button>
               </div>
 
               <DataGridBase
@@ -1474,6 +1555,19 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     gap: 10,
     marginBottom: 14,
+  },
+  selectionToolbar: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 10,
+    flexWrap: "wrap",
+    marginBottom: 14,
+  },
+  selectionSummary: {
+    fontSize: 13,
+    color: "#334155",
+    fontWeight: 700,
   },
   tableSubtitle: {
     margin: "4px 0 0",

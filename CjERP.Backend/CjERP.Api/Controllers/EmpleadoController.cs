@@ -40,5 +40,17 @@ namespace CjERP.Api.Controllers
                 data = empleados
             });
         }
+
+        [HttpGet("listar-cargo")]
+        public async Task<IActionResult> ListarPorCargo([FromQuery] int idCargo = 30)
+        {
+            var empleados = await _empleadoCtaService.ListarPorCargoAsync(idCargo);
+            return Ok(new
+            {
+                success = true,
+                message = "Lista de empleados por cargo obtenida correctamente.",
+                data = empleados
+            });
+        }
     }
 }

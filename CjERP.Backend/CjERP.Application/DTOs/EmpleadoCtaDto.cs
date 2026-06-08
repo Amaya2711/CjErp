@@ -4,6 +4,8 @@
     {
         public int IdEmpleado { get; set; }
         public string NombreEmpleado { get; set; }
+        public string Telefono { get; set; }
+        public string Correo { get; set; }
         public string Cuenta { get; set; }
         public string CuentaInter { get; set; }
         public string NombreCta { get; set; }

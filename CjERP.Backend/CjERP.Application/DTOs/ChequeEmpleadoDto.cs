@@ -14,8 +14,13 @@ public class ChequeEmpleadoDto
     public string NroCheque { get; set; } = string.Empty;
     public decimal Importe { get; set; }
     public int IdMoneda { get; set; }
+    public string? NombreMoneda { get; set; }
     public int IdEmpleado { get; set; }
+    public string? NombreEmpleado { get; set; }
+    public string? NombreBanco { get; set; }
     public int IdEstado { get; set; }
+    public string? NombreEstado { get; set; }
+    public string? Comentario { get; set; }
     public string? Ruta { get; set; }
     public DateTime? FechaCreacion { get; set; }
     public DateTime? FechaModificacion { get; set; }
@@ -31,6 +36,7 @@ public class ChequeEmpleadoGuardarDto
     public int IdMoneda { get; set; }
     public int IdEmpleado { get; set; }
     public int IdEstado { get; set; }
+    public string? Comentario { get; set; }
     public string? Ruta { get; set; }
     public string? UsuarioAccion { get; set; }
 }

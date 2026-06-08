@@ -3,7 +3,10 @@ import httpClient from "./httpClient";
 import type {
   ReporteWhatsappConfiguracion,
   ReporteWhatsappDashboard,
+  ReporteWhatsappEjecucionRequest,
   ReporteWhatsappEjecucionResultado,
+  ReporteWhatsappManualSendRequest,
+  ReporteWhatsappManualSendResult,
 } from "../models/reportesWhatsapp";
 
 const BASE_URL = "/reportes-whatsapp";
@@ -34,11 +37,15 @@ export const reportesWhatsappService = {
     return await httpClient.post<boolean>(`${BASE_URL}/reprogramar-job`, undefined, buildConfig(tipo));
   },
 
-  async ejecutarAhora(tipo?: string, periodo?: string) {
-    return await httpClient.post<ReporteWhatsappEjecucionResultado>(`${BASE_URL}/ejecutar-ahora`, undefined, buildConfig(tipo, periodo));
+  async ejecutarAhora(tipo?: string, periodo?: string, payload?: ReporteWhatsappEjecucionRequest) {
+    return await httpClient.post<ReporteWhatsappEjecucionResultado>(`${BASE_URL}/ejecutar-ahora`, payload, buildConfig(tipo, periodo));
   },
 
-  async reintentarFallidos(tipo?: string, periodo?: string) {
-    return await httpClient.post<ReporteWhatsappEjecucionResultado>(`${BASE_URL}/reintentar-fallidos`, undefined, buildConfig(tipo, periodo));
+  async reintentarFallidos(tipo?: string, periodo?: string, payload?: ReporteWhatsappEjecucionRequest) {
+    return await httpClient.post<ReporteWhatsappEjecucionResultado>(`${BASE_URL}/reintentar-fallidos`, payload, buildConfig(tipo, periodo));
+  },
+
+  async enviarMensajeManual(payload: ReporteWhatsappManualSendRequest) {
+    return await httpClient.post<ReporteWhatsappManualSendResult>(`${BASE_URL}/enviar-mensaje-manual`, payload);
   },
 };

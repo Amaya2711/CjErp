@@ -73,7 +73,7 @@ public sealed class ReportesWhatsappController : ControllerBase
     }
 
     [HttpPost("ejecutar-ahora")]
-    public async Task<IActionResult> EjecutarAhora([FromQuery] string? tipo = null, [FromQuery] string? periodo = null, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> EjecutarAhora([FromBody] ReporteWhatsappEjecucionRequestDto? request = null, [FromQuery] string? tipo = null, [FromQuery] string? periodo = null, CancellationToken cancellationToken = default)
     {
         if (!await UsuarioAutorizadoAsync(cancellationToken))
         {
@@ -98,7 +98,7 @@ public sealed class ReportesWhatsappController : ControllerBase
             });
         }
 
-        var jobId = _jobScheduler.EncolarEjecucionManual(normalizedType, GetUsuarioActual(), periodo);
+        var jobId = _jobScheduler.EncolarEjecucionManual(normalizedType, GetUsuarioActual(), periodo, request?.IdsEmpleadoSeleccionados);
         return Ok(new
         {
             success = true,
@@ -113,7 +113,7 @@ public sealed class ReportesWhatsappController : ControllerBase
     }
 
     [HttpPost("reintentar-fallidos")]
-    public async Task<IActionResult> ReintentarFallidos([FromQuery] string? tipo = null, [FromQuery] string? periodo = null, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> ReintentarFallidos([FromBody] ReporteWhatsappEjecucionRequestDto? request = null, [FromQuery] string? tipo = null, [FromQuery] string? periodo = null, CancellationToken cancellationToken = default)
     {
         if (!await UsuarioAutorizadoAsync(cancellationToken))
         {
@@ -138,7 +138,7 @@ public sealed class ReportesWhatsappController : ControllerBase
             });
         }
 
-        var jobId = _jobScheduler.EncolarReintentoFallidos(normalizedType, GetUsuarioActual(), periodo);
+        var jobId = _jobScheduler.EncolarReintentoFallidos(normalizedType, GetUsuarioActual(), periodo, request?.IdsEmpleadoSeleccionados);
         return Ok(new
         {
             success = true,
@@ -149,6 +149,23 @@ public sealed class ReportesWhatsappController : ControllerBase
                 JobId = jobId,
                 Message = "Reintento de fallidos encolado correctamente."
             }
+        });
+    }
+
+    [HttpPost("enviar-mensaje-manual")]
+    public async Task<IActionResult> EnviarMensajeManual([FromBody] ReporteWhatsappManualSendRequestDto request, CancellationToken cancellationToken = default)
+    {
+        if (!await UsuarioAutorizadoAsync(cancellationToken))
+        {
+            return Forbid();
+        }
+
+        var result = await _reporteAutomaticoService.EnviarMensajeManualAsync(request, GetUsuarioActual(), cancellationToken);
+        return Ok(new
+        {
+            success = true,
+            message = "Mensaje manual procesado correctamente.",
+            data = result
         });
     }
 

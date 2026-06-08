@@ -63,7 +63,7 @@ public sealed class WupService : IWupService
         {
             var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            var success = response.IsSuccessStatusCode && !IndicatesFailure(body);
+            var success = response.IsSuccessStatusCode && IsProviderDeliveryConfirmed(request, body);
 
             if (!success)
             {
@@ -100,11 +100,15 @@ public sealed class WupService : IWupService
         }
     }
 
-    private static bool IndicatesFailure(string responseBody)
+    private static bool IsProviderDeliveryConfirmed(ReporteWhatsappSendRequestDto request, string responseBody)
     {
+        var requiresExplicitConfirmation =
+            string.IsNullOrWhiteSpace(request.Contenido) &&
+            string.IsNullOrWhiteSpace(request.NombreArchivo);
+
         if (string.IsNullOrWhiteSpace(responseBody))
         {
-            return false;
+            return !requiresExplicitConfirmation;
         }
 
         try
@@ -116,26 +120,94 @@ public sealed class WupService : IWupService
             {
                 if (TryReadBoolean(root, "success", out var success))
                 {
-                    return !success;
+                    return success;
                 }
 
                 if (TryReadBoolean(root, "ok", out var ok))
                 {
-                    return !ok;
+                    return ok;
                 }
 
                 if (TryReadString(root, "estado", out var estado))
                 {
-                    return estado.Equals("error", StringComparison.OrdinalIgnoreCase);
+                    var normalizedEstado = estado.Trim().ToUpperInvariant();
+                    if (normalizedEstado is "OK" or "SUCCESS" or "ENVIADO" or "SENT" or "PROCESADO" or "RECEPCIONADO")
+                    {
+                        return true;
+                    }
+
+                    if (normalizedEstado is "ERROR" or "FAILED" or "RECHAZADO" or "INVALIDO")
+                    {
+                        return false;
+                    }
                 }
+
+                if (TryReadString(root, "status", out var status))
+                {
+                    var normalizedStatus = status.Trim().ToUpperInvariant();
+                    if (normalizedStatus is "OK" or "SUCCESS" or "ENVIADO" or "SENT" or "PROCESADO" or "RECEPCIONADO")
+                    {
+                        return true;
+                    }
+
+                    if (normalizedStatus is "ERROR" or "FAILED" or "RECHAZADO" or "INVALIDO")
+                    {
+                        return false;
+                    }
+                }
+
+                foreach (var propertyName in new[] { "message", "mensaje", "detail", "descripcion", "description" })
+                {
+                    if (TryReadString(root, propertyName, out var value))
+                    {
+                        var normalizedValue = value.Trim().ToUpperInvariant();
+                        if (normalizedValue.Contains("ERROR", StringComparison.Ordinal) ||
+                            normalizedValue.Contains("FAILED", StringComparison.Ordinal) ||
+                            normalizedValue.Contains("RECHAZ", StringComparison.Ordinal) ||
+                            normalizedValue.Contains("INVALID", StringComparison.Ordinal))
+                        {
+                            return false;
+                        }
+
+                        if (normalizedValue.Contains("SUCCESS", StringComparison.Ordinal) ||
+                            normalizedValue.Contains("ENVIADO", StringComparison.Ordinal) ||
+                            normalizedValue.Contains("CORRECTAMENTE", StringComparison.Ordinal) ||
+                            normalizedValue.Contains("RECEPCIONADO", StringComparison.Ordinal) ||
+                            normalizedValue.Contains("SENT", StringComparison.Ordinal) ||
+                            normalizedValue.Equals("OK", StringComparison.Ordinal))
+                        {
+                            return true;
+                        }
+                    }
+                }
+
+                return !requiresExplicitConfirmation;
             }
         }
         catch
         {
-            return false;
+            var normalizedBody = responseBody.Trim().ToUpperInvariant();
+
+            if (normalizedBody.Contains("ERROR", StringComparison.Ordinal) ||
+                normalizedBody.Contains("FAILED", StringComparison.Ordinal) ||
+                normalizedBody.Contains("RECHAZ", StringComparison.Ordinal) ||
+                normalizedBody.Contains("INVALID", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (normalizedBody.Contains("SUCCESS", StringComparison.Ordinal) ||
+                normalizedBody.Contains("ENVIADO", StringComparison.Ordinal) ||
+                normalizedBody.Contains("CORRECTAMENTE", StringComparison.Ordinal) ||
+                normalizedBody.Contains("RECEPCIONADO", StringComparison.Ordinal) ||
+                normalizedBody.Contains("SENT", StringComparison.Ordinal) ||
+                normalizedBody.Equals("OK", StringComparison.Ordinal))
+            {
+                return true;
+            }
         }
 
-        return false;
+        return !requiresExplicitConfirmation;
     }
 
     private static string BuildErrorMessage(int statusCode, Uri sendUri, string responseBody)

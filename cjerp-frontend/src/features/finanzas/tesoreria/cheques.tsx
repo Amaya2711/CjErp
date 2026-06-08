@@ -13,7 +13,7 @@ import {
   rechazarCheque,
   subirImagenCheque,
 } from "../../../api/chequeService";
-import { listarEmpleadosCta } from "../../../api/empleadoService";
+import { listarEmpleadosCta, listarEmpleadosPorCargo } from "../../../api/empleadoService";
 import { useConstantesPorCampo } from "../../../hooks/useConstantesPorCampo";
 import type { ConstanteOption } from "../../../models/constante";
 import type { EmpleadoCta } from "../../../models/empleadoCta";
@@ -30,7 +30,8 @@ type SortKey =
   | "banco"
   | "importe"
   | "moneda"
-  | "estado";
+  | "estado"
+  | "comentario";
 
 type SortState = {
   key: SortKey;
@@ -46,12 +47,8 @@ type FormState = {
   importe: string;
   idMoneda: string;
   idEstado: string;
+  comentario: string;
   ruta: string;
-};
-
-type FilterState = {
-  idEmpleado: string;
-  idEstado: string;
 };
 
 type RejectModalState = {
@@ -65,23 +62,6 @@ type ImageViewerState = {
   title: string;
   url: string;
 } | null;
-
-const initialForm: FormState = {
-  idCheque: null,
-  idEmpleado: "",
-  idBanco: "",
-  fechaCheque: "",
-  nroCheque: "",
-  importe: "",
-  idMoneda: "",
-  idEstado: "",
-  ruta: "",
-};
-
-const initialFilters: FilterState = {
-  idEmpleado: "",
-  idEstado: "",
-};
 
 function normalizeOptionValue(option: ConstanteOption): string {
   return String(option.value || option.valor || option.codigo || "").trim();
@@ -130,9 +110,63 @@ function formatMoney(value?: number | null) {
   });
 }
 
+function getTodayInputDate() {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function toNumber(value: string) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function resolveDefaultMonedaId(options: ConstanteOption[]) {
+  const normalizeText = (value?: string | null) => String(value ?? "").trim().toLowerCase();
+
+  const solesOption = options.find((option) => {
+    const label = normalizeText(option.label);
+    const codigo = normalizeText(option.codigo);
+    const valor = normalizeText(option.valor);
+    return (
+      label.includes("soles") ||
+      label === "sol" ||
+      codigo.includes("sol") ||
+      valor === "soles"
+    );
+  });
+
+  return solesOption ? normalizeOptionValue(solesOption) : "";
+}
+
+function resolveDefaultEstadoId(options: ConstanteOption[]) {
+  const normalizeText = (value?: string | null) => String(value ?? "").trim().toLowerCase();
+
+  const generatedOption = options.find((option) => {
+    const label = normalizeText(option.label);
+    const codigo = normalizeText(option.codigo);
+    const valor = normalizeText(option.valor);
+    return label.includes("generado") || codigo.includes("generado") || valor === "generado";
+  });
+
+  return generatedOption ? normalizeOptionValue(generatedOption) : "";
+}
+
+function buildInitialForm(defaultMonedaId = "", defaultEstadoId = ""): FormState {
+  return {
+    idCheque: null,
+    idEmpleado: "",
+    idBanco: "",
+    fechaCheque: getTodayInputDate(),
+    nroCheque: "",
+    importe: "",
+    idMoneda: defaultMonedaId,
+    idEstado: defaultEstadoId,
+    comentario: "",
+    ruta: "",
+  };
 }
 
 function buildFormFromRow(row: ChequeRow): FormState {
@@ -145,6 +179,7 @@ function buildFormFromRow(row: ChequeRow): FormState {
     importe: row.importe != null ? String(row.importe) : "",
     idMoneda: row.idMoneda ? String(row.idMoneda) : "",
     idEstado: row.idEstado != null ? String(row.idEstado) : "",
+    comentario: row.comentario ?? "",
     ruta: row.ruta ?? "",
   };
 }
@@ -171,6 +206,7 @@ function buildPayload(form: FormState): ChequeGuardarRequest {
     importe: Number(form.importe),
     idMoneda: toNumber(form.idMoneda),
     idEstado: toNumber(form.idEstado),
+    comentario: form.comentario.trim() || null,
     ruta: form.ruta.trim() || null,
     usuarioAccion: resolveUserName(),
   };
@@ -188,6 +224,18 @@ function resolveRejectStateId(options: ConstanteOption[]) {
   return 0;
 }
 
+function isEstadoAnulado(options: ConstanteOption[], idEstado: number) {
+  const estadoLabel = getConstanteLabel(options, idEstado).trim().toLowerCase();
+  return estadoLabel.includes("anulad");
+}
+
+function isEstadoAnuladoOption(option: ConstanteOption) {
+  return String(option.label ?? "")
+    .trim()
+    .toLowerCase()
+    .includes("anulad");
+}
+
 function getPageTitle() {
   return "Tesoreria / Cheques";
 }
@@ -195,19 +243,20 @@ function getPageTitle() {
 export default function TesoreriaChequesPage() {
   const [rows, setRows] = useState<ChequeRow[]>([]);
   const [empleados, setEmpleados] = useState<EmpleadoCta[]>([]);
-  const [filters, setFilters] = useState<FilterState>(initialFilters);
+  const [empleadosCargo, setEmpleadosCargo] = useState<EmpleadoCta[]>([]);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortState>({ key: "fechaCheque", direction: "desc" });
   const [loading, setLoading] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelLoading, setPanelLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState<FormState>(initialForm);
+  const [form, setForm] = useState<FormState>(() => buildInitialForm());
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [rejectModal, setRejectModal] = useState<RejectModalState>(null);
   const [imageViewer, setImageViewer] = useState<ImageViewerState>(null);
+  const [showPanelImagePreview, setShowPanelImagePreview] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [uploadImageError, setUploadImageError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -220,10 +269,16 @@ export default function TesoreriaChequesPage() {
   );
   const { constantesPorCampo } = useConstantesPorCampo(camposConstantes);
   const monedaOptions = constantesPorCampo.tipo_moneda ?? [];
+  const defaultMonedaId = useMemo(() => resolveDefaultMonedaId(monedaOptions), [monedaOptions]);
   const estadoOptions =
     constantesPorCampo.estado_cheque?.length
       ? constantesPorCampo.estado_cheque
       : constantesPorCampo.tipo_estado ?? [];
+  const estadoEditOptions = useMemo(
+    () => estadoOptions.filter((option) => !isEstadoAnuladoOption(option)),
+    [estadoOptions]
+  );
+  const defaultEstadoId = useMemo(() => resolveDefaultEstadoId(estadoOptions), [estadoOptions]);
 
   const empleadosUnicos = useMemo(() => {
     const map = new Map<number, EmpleadoCta>();
@@ -240,13 +295,30 @@ export default function TesoreriaChequesPage() {
     );
   }, [empleados]);
 
+  const empleadosCargoUnicos = useMemo(() => {
+    const map = new Map<number, EmpleadoCta>();
+    empleadosCargo.forEach((item) => {
+      if (!map.has(item.idEmpleado)) {
+        map.set(item.idEmpleado, item);
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) =>
+      (a.nombreEmpleadoCJ || a.nombreEmpleado || "").localeCompare(
+        b.nombreEmpleadoCJ || b.nombreEmpleado || "",
+        "es"
+      )
+    );
+  }, [empleadosCargo]);
+
   const bancosUnicos = useMemo(() => {
     const map = new Map<number, { id: number; nombre: string }>();
     empleados.forEach((item) => {
-      if (item.idBancoCta != null && !map.has(item.idBancoCta)) {
+      const nombreBanco = item.nombreBanco?.trim();
+      if (item.idBancoCta != null && nombreBanco && !map.has(item.idBancoCta)) {
         map.set(item.idBancoCta, {
           id: item.idBancoCta,
-          nombre: item.nombreBanco || `Banco ${item.idBancoCta}`,
+          nombre: nombreBanco,
         });
       }
     });
@@ -273,10 +345,7 @@ export default function TesoreriaChequesPage() {
     try {
       setLoading(true);
       setError(null);
-      const data = await listarCheques({
-        idEmpleado: filters.idEmpleado ? toNumber(filters.idEmpleado) : undefined,
-        idEstado: filters.idEstado ? toNumber(filters.idEstado) : undefined,
-      });
+      const data = await listarCheques();
       setRows(data);
       setCurrentPage(1);
     } catch (err: unknown) {
@@ -295,13 +364,18 @@ export default function TesoreriaChequesPage() {
 
     const loadCatalogs = async () => {
       try {
-        const data = await listarEmpleadosCta();
+        const [empleadosCuentaData, empleadosCargoData] = await Promise.all([
+          listarEmpleadosCta(),
+          listarEmpleadosPorCargo(30),
+        ]);
         if (!cancelled) {
-          setEmpleados(data);
+          setEmpleados(empleadosCuentaData);
+          setEmpleadosCargo(empleadosCargoData);
         }
       } catch {
         if (!cancelled) {
           setEmpleados([]);
+          setEmpleadosCargo([]);
         }
       }
     };
@@ -313,6 +387,29 @@ export default function TesoreriaChequesPage() {
     };
   }, []);
 
+  const empleadosPanelOptions = useMemo(() => {
+    const map = new Map<number, EmpleadoCta>();
+
+    empleadosCargoUnicos.forEach((item) => {
+      map.set(item.idEmpleado, item);
+    });
+
+    const selectedId = toNumber(form.idEmpleado);
+    if (selectedId > 0 && !map.has(selectedId)) {
+      const selectedEmpleado = empleadosUnicos.find((item) => item.idEmpleado === selectedId);
+      if (selectedEmpleado) {
+        map.set(selectedEmpleado.idEmpleado, selectedEmpleado);
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) =>
+      (a.nombreEmpleadoCJ || a.nombreEmpleado || "").localeCompare(
+        b.nombreEmpleadoCJ || b.nombreEmpleado || "",
+        "es"
+      )
+    );
+  }, [empleadosCargoUnicos, empleadosUnicos, form.idEmpleado]);
+
   const searchFields = useMemo<CrudToolbarSearchField<ChequeRow>[]>(() => {
     return [
       { key: "nroCheque", label: "Nro cheque", getValue: (item) => item.nroCheque },
@@ -321,6 +418,7 @@ export default function TesoreriaChequesPage() {
         key: "empleado",
         label: "Empleado",
         getValue: (item) =>
+          item.nombreEmpleado ||
           employeeById.get(item.idEmpleado)?.nombreEmpleadoCJ ||
           employeeById.get(item.idEmpleado)?.nombreEmpleado ||
           item.idEmpleado,
@@ -328,19 +426,20 @@ export default function TesoreriaChequesPage() {
       {
         key: "banco",
         label: "Banco",
-        getValue: (item) => bankById.get(item.idBanco) || item.idBanco,
+        getValue: (item) => item.nombreBanco || bankById.get(item.idBanco) || item.idBanco,
       },
       { key: "importe", label: "Importe", getValue: (item) => item.importe },
       {
         key: "moneda",
         label: "Moneda",
-        getValue: (item) => getConstanteLabel(monedaOptions, item.idMoneda),
+        getValue: (item) => item.nombreMoneda || getConstanteLabel(monedaOptions, item.idMoneda),
       },
       {
         key: "estado",
         label: "Estado",
-        getValue: (item) => getConstanteLabel(estadoOptions, item.idEstado),
+        getValue: (item) => item.nombreEstado || getConstanteLabel(estadoOptions, item.idEstado),
       },
+      { key: "comentario", label: "Comentario", getValue: (item) => item.comentario },
       { key: "ruta", label: "Ruta", getValue: (item) => item.ruta },
     ];
   }, [bankById, employeeById, estadoOptions, monedaOptions]);
@@ -357,18 +456,21 @@ export default function TesoreriaChequesPage() {
             return row.nroCheque || "";
           case "empleado":
             return (
+              row.nombreEmpleado ||
               employeeById.get(row.idEmpleado)?.nombreEmpleadoCJ ||
               employeeById.get(row.idEmpleado)?.nombreEmpleado ||
               ""
             );
           case "banco":
-            return bankById.get(row.idBanco) || "";
+            return row.nombreBanco || bankById.get(row.idBanco) || "";
           case "importe":
             return row.importe || 0;
           case "moneda":
-            return getConstanteLabel(monedaOptions, row.idMoneda);
+            return row.nombreMoneda || getConstanteLabel(monedaOptions, row.idMoneda);
           case "estado":
-            return getConstanteLabel(estadoOptions, row.idEstado);
+            return row.nombreEstado || getConstanteLabel(estadoOptions, row.idEstado);
+          case "comentario":
+            return row.comentario || "";
           default:
             return "";
         }
@@ -402,16 +504,22 @@ export default function TesoreriaChequesPage() {
     () => ({
       total: rows.length,
       visibles: filteredRows.length,
-      monto: filteredRows.reduce((acc, row) => acc + (row.importe || 0), 0),
+      anulados: filteredRows.filter((row) => isEstadoAnulado(estadoOptions, row.idEstado)).length,
+      monto: filteredRows.reduce(
+        (acc, row) =>
+          isEstadoAnulado(estadoOptions, row.idEstado) ? acc : acc + (row.importe || 0),
+        0
+      ),
     }),
-    [filteredRows, rows.length]
+    [estadoOptions, filteredRows, rows.length]
   );
 
   const openCreatePanel = () => {
     setMessage(null);
     setFormError(null);
     setUploadImageError(null);
-    setForm(initialForm);
+    setShowPanelImagePreview(false);
+    setForm(buildInitialForm(defaultMonedaId, defaultEstadoId));
     setPanelOpen(true);
   };
 
@@ -421,6 +529,7 @@ export default function TesoreriaChequesPage() {
       setMessage(null);
       setFormError(null);
       setUploadImageError(null);
+      setShowPanelImagePreview(false);
       const row = await obtenerCheque(idCheque);
       setForm(buildFormFromRow(row));
       setPanelOpen(true);
@@ -478,7 +587,8 @@ export default function TesoreriaChequesPage() {
       }
 
       setPanelOpen(false);
-      setForm(initialForm);
+      setShowPanelImagePreview(false);
+      setForm(buildInitialForm(defaultMonedaId, defaultEstadoId));
       await loadRows();
     } catch (err: unknown) {
       setFormError(getHttpErrorMessage(err, "No se pudo guardar el cheque."));
@@ -486,6 +596,28 @@ export default function TesoreriaChequesPage() {
       setSaving(false);
     }
   };
+
+  useEffect(() => {
+    if (!panelOpen || form.idCheque || form.idMoneda || !defaultMonedaId) {
+      return;
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      idMoneda: defaultMonedaId,
+    }));
+  }, [defaultMonedaId, form.idCheque, form.idMoneda, panelOpen]);
+
+  useEffect(() => {
+    if (!panelOpen || form.idCheque || form.idEstado || !defaultEstadoId) {
+      return;
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      idEstado: defaultEstadoId,
+    }));
+  }, [defaultEstadoId, form.idCheque, form.idEstado, panelOpen]);
 
   const handleReject = async () => {
     if (!rejectModal) return;
@@ -571,6 +703,7 @@ export default function TesoreriaChequesPage() {
         ...prev,
         ruta: response.fileUrl || response.storagePath || "",
       }));
+      setShowPanelImagePreview(false);
     } catch (err: unknown) {
       setUploadImageError(getHttpErrorMessage(err, "No se pudo cargar la imagen en SharePoint."));
     } finally {
@@ -592,14 +725,15 @@ export default function TesoreriaChequesPage() {
           <StatCard label="Total" value={String(stats.total)} />
           <StatCard label="Filtrados" value={String(stats.visibles)} />
           <StatCard label="Importe" value={formatMoney(stats.monto)} />
+          <StatCard label="Anulados" value={String(stats.anulados)} />
         </div>
       </div>
 
       <CrudToolbar
         searchValue={search}
         onSearchChange={setSearch}
-        searchPlaceholder="Buscar empleado, banco, numero de cheque, ruta o estado..."
-        searchFieldsHint="Empleado, banco, numero de cheque, fecha, importe, moneda, estado y ruta"
+        searchPlaceholder="Buscar empleado, banco, numero de cheque, comentario, ruta o estado..."
+        searchFieldsHint="Empleado, banco, numero de cheque, fecha, importe, moneda, estado, comentario y ruta"
         buttons={[
           {
             key: "nuevo",
@@ -607,22 +741,8 @@ export default function TesoreriaChequesPage() {
             onClick: openCreatePanel,
             icon: <Plus size={16} />,
           },
-          {
-            key: "limpiar",
-            label: "Limpiar filtros",
-            onClick: () => {
-              setFilters(initialFilters);
-              setSearch("");
-              setCurrentPage(1);
-            },
-            variant: "secondary",
-          },
-          {
-            key: "consultar",
-            label: "Consultar",
-            onClick: () => void loadRows(),
-            variant: "secondary",
-          },
+          
+          
         ]}
       >
         <div style={styles.toolbarCaptionWrap}>
@@ -637,46 +757,6 @@ export default function TesoreriaChequesPage() {
       {message ? <div style={styles.successBanner}>{message}</div> : null}
 
       <section style={styles.card}>
-        <div style={styles.filterRow}>
-          <div style={styles.fieldGroup}>
-            <label style={styles.label}>Empleado</label>
-            <select
-              value={filters.idEmpleado}
-              onChange={(event) =>
-                setFilters((prev) => ({ ...prev, idEmpleado: event.target.value }))
-              }
-              style={styles.input}
-            >
-              <option value="">Todos</option>
-              {empleadosUnicos.map((item) => (
-                <option key={`filter-emp-${item.idEmpleado}`} value={item.idEmpleado}>
-                  {item.nombreEmpleadoCJ || item.nombreEmpleado}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div style={styles.fieldGroup}>
-            <label style={styles.label}>Estado</label>
-            <select
-              value={filters.idEstado}
-              onChange={(event) =>
-                setFilters((prev) => ({ ...prev, idEstado: event.target.value }))
-              }
-              style={styles.input}
-            >
-              <option value="">Todos</option>
-              {estadoOptions.map((option) => (
-                <option
-                  key={`filter-state-${normalizeOptionValue(option)}-${option.label}`}
-                  value={normalizeOptionValue(option)}
-                >
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
         <div style={styles.tableWrap}>
           <table style={styles.table}>
             <thead>
@@ -689,6 +769,7 @@ export default function TesoreriaChequesPage() {
                 <SortableHeader label="Importe" sortKey="importe" sort={sort} setSort={setSort} />
                 <SortableHeader label="Moneda" sortKey="moneda" sort={sort} setSort={setSort} />
                 <SortableHeader label="Estado" sortKey="estado" sort={sort} setSort={setSort} />
+                <SortableHeader label="Comentario" sortKey="comentario" sort={sort} setSort={setSort} />
                 <th style={{ ...styles.th, minWidth: 220 }}>Ruta</th>
                 <th style={{ ...styles.th, minWidth: 160 }}>F. creacion</th>
                 <th style={{ ...styles.th, minWidth: 160 }}>F. modificacion</th>
@@ -697,34 +778,45 @@ export default function TesoreriaChequesPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td style={styles.emptyCell} colSpan={11}>
+                  <td style={styles.emptyCell} colSpan={12}>
                     Cargando cheques...
                   </td>
                 </tr>
               ) : pagedRows.length === 0 ? (
                 <tr>
-                  <td style={styles.emptyCell} colSpan={11}>
+                  <td style={styles.emptyCell} colSpan={12}>
                     No hay registros para los filtros seleccionados.
                   </td>
                 </tr>
               ) : (
                 pagedRows.map((row) => {
                   const empleado = employeeById.get(row.idEmpleado);
+                  const accionesDeshabilitadas = row.idEstado === 0;
+                  const rechazoDeshabilitado = accionesDeshabilitadas || row.idEstado === -1;
                   return (
                     <tr key={row.idCheque}>
                       <td style={styles.td}>
                         <div style={styles.actionRow}>
                           <button
                             type="button"
-                            style={styles.editButton}
+                            style={
+                              accionesDeshabilitadas
+                                ? { ...styles.editButton, ...styles.disabledActionButton }
+                                : styles.editButton
+                            }
                             title="Editar cheque"
                             onClick={() => void openEditPanel(row.idCheque)}
+                            disabled={accionesDeshabilitadas}
                           >
                             <Pencil size={14} />
                           </button>
                           <button
                             type="button"
-                            style={styles.rejectButton}
+                            style={
+                              rechazoDeshabilitado
+                                ? { ...styles.rejectButton, ...styles.disabledActionButton }
+                                : styles.rejectButton
+                            }
                             title="Rechazar cheque"
                             onClick={() =>
                               setRejectModal({
@@ -734,6 +826,7 @@ export default function TesoreriaChequesPage() {
                                 submitting: false,
                               })
                             }
+                            disabled={rechazoDeshabilitado}
                           >
                             <Ban size={14} />
                           </button>
@@ -742,12 +835,18 @@ export default function TesoreriaChequesPage() {
                       <td style={styles.td}>{formatDate(row.fechaCheque)}</td>
                       <td style={styles.td}>{row.nroCheque}</td>
                       <td style={styles.td}>
-                        {empleado?.nombreEmpleadoCJ || empleado?.nombreEmpleado || row.idEmpleado}
+                        {row.nombreEmpleado ||
+                          empleado?.nombreEmpleadoCJ ||
+                          empleado?.nombreEmpleado ||
+                          row.idEmpleado}
                       </td>
-                      <td style={styles.td}>{bankById.get(row.idBanco) || row.idBanco}</td>
+                      <td style={styles.td}>{row.nombreBanco || bankById.get(row.idBanco) || row.idBanco}</td>
                       <td style={styles.td}>{formatMoney(row.importe)}</td>
-                      <td style={styles.td}>{getConstanteLabel(monedaOptions, row.idMoneda)}</td>
-                      <td style={styles.td}>{getConstanteLabel(estadoOptions, row.idEstado)}</td>
+                      <td style={styles.td}>{row.nombreMoneda || getConstanteLabel(monedaOptions, row.idMoneda)}</td>
+                      <td style={styles.td}>{row.nombreEstado || getConstanteLabel(estadoOptions, row.idEstado)}</td>
+                      <td style={styles.td} title={row.comentario ?? ""}>
+                        {row.comentario?.trim() || "-"}
+                      </td>
                       <td style={styles.td} title={row.ruta ?? ""}>
                         {row.ruta ? (
                           <button
@@ -817,6 +916,7 @@ export default function TesoreriaChequesPage() {
       <SidePanelForm
         open={panelOpen}
         title={form.idCheque ? "Editar cheque" : "Nuevo cheque"}
+        maxWidth={920}
         subtitle={
           form.idCheque
             ? "Actualice los campos del cheque. La auditoria registrara los cambios."
@@ -835,6 +935,7 @@ export default function TesoreriaChequesPage() {
               onClick={() => {
                 setPanelOpen(false);
                 setFormError(null);
+                setShowPanelImagePreview(false);
               }}
               disabled={saving || panelLoading}
             >
@@ -856,14 +957,14 @@ export default function TesoreriaChequesPage() {
         {uploadImageError ? <div style={styles.errorBanner}>{uploadImageError}</div> : null}
 
         <div style={styles.formGrid}>
-          <Field label="Empleado">
+          <Field label="Empleado" style={styles.formGridWideSpan}>
             <select
               value={form.idEmpleado}
               onChange={(event) => handleEmpleadoChange(event.target.value)}
               style={styles.input}
             >
               <option value="">Seleccione</option>
-              {empleadosUnicos.map((item) => (
+              {empleadosPanelOptions.map((item) => (
                 <option key={`emp-${item.idEmpleado}`} value={item.idEmpleado}>
                   {item.nombreEmpleadoCJ || item.nombreEmpleado}
                 </option>
@@ -871,7 +972,7 @@ export default function TesoreriaChequesPage() {
             </select>
           </Field>
 
-          <Field label="Banco">
+          <Field label="Banco" style={styles.formGridWideSpan}>
             <select
               value={form.idBanco}
               onChange={(event) => setForm((prev) => ({ ...prev, idBanco: event.target.value }))}
@@ -957,9 +1058,10 @@ export default function TesoreriaChequesPage() {
                   setForm((prev) => ({ ...prev, idEstado: event.target.value }))
                 }
                 style={styles.input}
+                disabled={!form.idCheque}
               >
-                <option value="">Seleccione</option>
-                {estadoOptions.map((option) => (
+                {form.idCheque ? <option value="">Seleccione</option> : null}
+                {(form.idCheque ? estadoEditOptions : estadoOptions).map((option) => (
                   <option
                     key={`estado-${normalizeOptionValue(option)}-${option.label}`}
                     value={normalizeOptionValue(option)}
@@ -978,11 +1080,12 @@ export default function TesoreriaChequesPage() {
                 }
                 style={styles.input}
                 placeholder="Id estado"
+                readOnly={!form.idCheque}
               />
             )}
           </Field>
 
-          <Field label="Ruta">
+          <Field label="Ruta" style={styles.formGridFullSpan}>
             <div style={styles.uploadField}>
               <div style={styles.uploadRow}>
                 <button
@@ -997,9 +1100,9 @@ export default function TesoreriaChequesPage() {
                   <button
                     type="button"
                     style={styles.linkButton}
-                    onClick={() => abrirVistaImagen(form.ruta, "Imagen adjunta del cheque")}
+                    onClick={() => setShowPanelImagePreview((prev) => !prev)}
                   >
-                    Ver imagen
+                    {showPanelImagePreview ? "Ocultar imagen" : "Ver imagen"}
                   </button>
                 ) : null}
               </div>
@@ -1017,7 +1120,28 @@ export default function TesoreriaChequesPage() {
                 style={{ ...styles.input, background: "#F8FAFC" }}
                 placeholder="Se mostrara la URL o ruta almacenada"
               />
+              {showPanelImagePreview && getRutaVisualizacion(form.ruta) ? (
+                <div style={styles.panelImagePreviewCard}>
+                  <img
+                    src={getRutaVisualizacion(form.ruta) || ""}
+                    alt="Imagen adjunta del cheque"
+                    style={styles.panelImagePreview}
+                  />
+                </div>
+              ) : null}
             </div>
+          </Field>
+
+          <Field label="Comentario" style={styles.formGridFullSpan}>
+            <textarea
+              value={form.comentario}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, comentario: event.target.value }))
+              }
+              rows={4}
+              style={styles.textarea}
+              placeholder="Ingrese un comentario adicional"
+            />
           </Field>
         </div>
       </SidePanelForm>
@@ -1132,12 +1256,14 @@ function StatCard({ label, value }: { label: string; value: string }) {
 function Field({
   label,
   children,
+  style,
 }: {
   label: string;
   children: React.ReactNode;
+  style?: React.CSSProperties;
 }) {
   return (
-    <label style={styles.fieldGroup}>
+    <label style={{ ...styles.fieldGroup, ...style }}>
       <span style={styles.label}>{label}</span>
       {children}
     </label>
@@ -1227,11 +1353,6 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     gap: 18,
-  },
-  filterRow: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-    gap: 16,
   },
   fieldGroup: {
     display: "flex",
@@ -1326,6 +1447,13 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "center",
   },
+  disabledActionButton: {
+    border: "1px solid #E2E8F0",
+    background: "#F8FAFC",
+    color: "#94A3B8",
+    cursor: "not-allowed",
+    opacity: 0.7,
+  },
   footerRow: {
     display: "flex",
     justifyContent: "space-between",
@@ -1402,8 +1530,15 @@ const styles: Record<string, React.CSSProperties> = {
   },
   formGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
     gap: 16,
+    alignItems: "start",
+  },
+  formGridWideSpan: {
+    gridColumn: "span 2",
+  },
+  formGridFullSpan: {
+    gridColumn: "1 / -1",
   },
   successBanner: {
     borderRadius: 14,
@@ -1499,6 +1634,24 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: "auto",
     display: "flex",
     justifyContent: "center",
+  },
+  panelImagePreviewCard: {
+    marginTop: 8,
+    borderRadius: 18,
+    border: "1px solid #E2E8F0",
+    background: "#F8FAFC",
+    padding: 16,
+    display: "flex",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  panelImagePreview: {
+    maxWidth: "100%",
+    maxHeight: 320,
+    objectFit: "contain",
+    borderRadius: 12,
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
   },
   imagePreview: {
     maxWidth: "100%",

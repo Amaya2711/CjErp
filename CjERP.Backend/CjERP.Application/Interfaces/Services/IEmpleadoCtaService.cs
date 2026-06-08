@@ -8,5 +8,6 @@ namespace CjERP.Application.Interfaces.Services
     {
         Task<List<EmpleadoCtaDto>> ListarAsync();
         Task<List<EmpleadoCtaDto>> ListarWupAsync();
+        Task<List<EmpleadoCtaDto>> ListarPorCargoAsync(int idCargo = 30);
     }
 }

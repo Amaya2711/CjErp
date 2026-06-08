@@ -9,7 +9,8 @@ public interface IReporteAutomaticoService
     Task<ReporteWhatsappPeriodoDto> ObtenerPeriodoActualAsync(CancellationToken cancellationToken = default);
     Task<ReporteWhatsappDashboardDto> ObtenerDashboardAsync(string idUsuario, string tipoReporte, string? periodo = null, int topLogs = 200, CancellationToken cancellationToken = default);
     Task ActualizarConfiguracionAsync(ReporteWhatsappConfiguracionUpdateDto request, string usuarioModificacion, CancellationToken cancellationToken = default);
-    Task<ReporteWhatsappEjecucionResultadoDto> EjecutarAsync(string tipoReporte, string origenEjecucion, string usuarioEjecucion, bool soloFallidos, string? periodo = null, CancellationToken cancellationToken = default);
+    Task<ReporteWhatsappEjecucionResultadoDto> EjecutarAsync(string tipoReporte, string origenEjecucion, string usuarioEjecucion, bool soloFallidos, string? periodo = null, IReadOnlyList<int>? idsEmpleadoSeleccionados = null, CancellationToken cancellationToken = default);
+    Task<ReporteWhatsappManualSendResultDto> EnviarMensajeManualAsync(ReporteWhatsappManualSendRequestDto request, string usuarioEjecucion, CancellationToken cancellationToken = default);
     Task<bool> UsuarioTieneAccesoAdministrativoAsync(string idUsuario, CancellationToken cancellationToken = default);
 }
 
@@ -40,8 +41,8 @@ public interface IReportePdfService
 public interface IReporteWhatsappJobScheduler
 {
     Task ReprogramarAsync(string tipoReporte, CancellationToken cancellationToken = default);
-    string EncolarEjecucionManual(string tipoReporte, string usuarioEjecucion, string? periodo = null);
-    string EncolarReintentoFallidos(string tipoReporte, string usuarioEjecucion, string? periodo = null);
+    string EncolarEjecucionManual(string tipoReporte, string usuarioEjecucion, string? periodo = null, IReadOnlyList<int>? idsEmpleadoSeleccionados = null);
+    string EncolarReintentoFallidos(string tipoReporte, string usuarioEjecucion, string? periodo = null, IReadOnlyList<int>? idsEmpleadoSeleccionados = null);
 }
 
 public interface IReporteWhatsappRuntimeMonitor
