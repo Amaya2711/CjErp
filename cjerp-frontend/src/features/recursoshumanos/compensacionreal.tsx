@@ -434,6 +434,7 @@ export default function CompensacionRealPage() {
   const authUser = getAuthUser();
   const currentEmployeeId = toNumber(authUser?.idEmpleado ?? authUser?.codEmp);
   const currentRoleCode = toNumber(authUser?.idrol ?? authUser?.idCargo);
+  const isAdminRole = currentRoleCode === 4;
 
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState<ActiveTab>("solicitudes");
@@ -728,7 +729,7 @@ export default function CompensacionRealPage() {
 
       const matchesSearch = !searchTerm || searchableValues.includes(searchTerm);
       const matchesEmployee =
-        !employeeFilter || String(item.idEmpleadoCj ?? "") === employeeFilter;
+        isAdminRole || !employeeFilter || String(item.idEmpleadoCj ?? "") === employeeFilter;
       const itemStartDate = toDateInput(item.fechaInicio || item.fecha || "");
       const itemEndDate = toDateInput(item.fechaFin || item.fechaInicio || item.fecha || "");
       const matchesDateFrom =
@@ -755,7 +756,7 @@ export default function CompensacionRealPage() {
         matchesActive
       );
     });
-  }, [activeFilter, dateFromFilter, dateToFilter, employeeById, employeeFilter, estadoFilter, items, search]);
+  }, [activeFilter, dateFromFilter, dateToFilter, employeeById, employeeFilter, estadoFilter, isAdminRole, items, search]);
 
   const stats = useMemo(() => {
     const totalBase = saldos.reduce((sum, item) => sum + item.diasBase, 0);
@@ -783,7 +784,7 @@ export default function CompensacionRealPage() {
 
     return saldos.filter((item) => {
       const matchesEmployee =
-        !employeeFilter || String(item.idEmpleadoCj ?? "") === employeeFilter;
+        isAdminRole || !employeeFilter || String(item.idEmpleadoCj ?? "") === employeeFilter;
       const searchableValues = [
         item.idEmpleadoCj,
         item.nombreEmpleado,
@@ -798,7 +799,7 @@ export default function CompensacionRealPage() {
 
       return matchesEmployee && matchesSearch;
     });
-  }, [employeeFilter, saldos, search]);
+  }, [employeeFilter, isAdminRole, saldos, search]);
 
   const resumenTotales = useMemo(() => {
     const totalBase = filteredSaldos.reduce((sum, item) => sum + item.diasBase, 0);
@@ -1151,18 +1152,20 @@ export default function CompensacionRealPage() {
         ]}
       >
         <div style={styles.toolbarFilters}>
-          <label style={styles.toolbarField}>
-            <span>Empleado</span>
-            <EmployeeTypeahead
-              value={employeeFilter}
-              options={employeeOptions}
-              onChange={setEmployeeFilter}
-              placeholder="Todos"
-              disabled={empleadosLoading}
-              allowEmpty
-              emptyLabel="No hay empleados WUP"
-            />
-          </label>
+          {!isAdminRole ? (
+            <label style={styles.toolbarField}>
+              <span>Empleado</span>
+              <EmployeeTypeahead
+                value={employeeFilter}
+                options={employeeOptions}
+                onChange={setEmployeeFilter}
+                placeholder="Todos"
+                disabled={empleadosLoading}
+                allowEmpty
+                emptyLabel="No hay empleados WUP"
+              />
+            </label>
+          ) : null}
           <label style={styles.toolbarField}>
             <span>Fecha desde</span>
             <input
@@ -1403,7 +1406,7 @@ export default function CompensacionRealPage() {
                     const isEstadoRechazado = itemEstado === 22;
                     const canUseFirstApproverByEstado = itemEstado === 97;
                     const canUseSecondApproverByEstado = itemEstado === 98;
-                    const hasRoleOverride = currentRoleCode === 5;
+                    const hasRoleOverride = currentRoleCode === 5 || currentRoleCode === 4;
                     const isFirstApproverOwner =
                       currentEmployeeId > 0 && toNumber(item.idResponsableCj) === currentEmployeeId;
                     const isSecondApproverOwner =

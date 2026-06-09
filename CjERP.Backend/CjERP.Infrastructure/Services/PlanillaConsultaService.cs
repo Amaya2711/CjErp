@@ -25,11 +25,13 @@ namespace CjERP.Infrastructure.Services
 
         public async Task<PlanillaConsultaEstadosResponseDto> ConsultarEstadosAsync(
             IEnumerable<PlanillaConsultaParametroDto> parametros,
+            int? maxRows = null,
             CancellationToken cancellationToken = default)
         {
             await using var connection = _sqlCommandFactory.CreateConnection();
 
-            var dynamicParameters = BuildParameters(parametros ?? []);
+            var parametrosList = (parametros ?? []).ToList();
+            var dynamicParameters = BuildParameters(parametrosList);
 
             var rows = (await connection.QueryAsync(
                 _sqlCommandFactory.Create(
@@ -41,7 +43,18 @@ namespace CjERP.Infrastructure.Services
                 .Select(MapRow)
                 .ToList();
 
-            await EnrichRowsWithFacturaDataAsync(connection, rows, cancellationToken);
+            var fechaInicioFiltro = GetDateParameterValue(parametrosList, "FechaInicio");
+            var fechaFinFiltro = GetDateParameterValue(parametrosList, "FechaFin");
+
+            rows = ApplyFecIngresoFilter(rows, fechaInicioFiltro, fechaFinFiltro);
+
+            var totalRows = rows.Count;
+            var limitExceeded = maxRows.HasValue && maxRows.Value > 0 && totalRows > maxRows.Value;
+
+            if (!limitExceeded)
+            {
+                await EnrichRowsWithFacturaDataAsync(connection, rows, cancellationToken);
+            }
 
             var columns = rows
                 .SelectMany(row => row.Keys)
@@ -51,8 +64,51 @@ namespace CjERP.Infrastructure.Services
             return new PlanillaConsultaEstadosResponseDto
             {
                 Columns = columns,
-                Rows = rows
+                Rows = limitExceeded ? [] : rows,
+                TotalRows = totalRows,
+                MaxRowsAllowed = maxRows,
+                LimitExceeded = limitExceeded,
+                Message = limitExceeded
+                    ? $"Se encontraron {totalRows} registros. El máximo permitido para mostrar es {maxRows}. Aplique más filtros, preferiblemente por rango de fechas."
+                    : null
             };
+        }
+
+        private static List<Dictionary<string, object?>> ApplyFecIngresoFilter(
+            List<Dictionary<string, object?>> rows,
+            DateTime? fechaInicio,
+            DateTime? fechaFin)
+        {
+            if (!fechaInicio.HasValue && !fechaFin.HasValue)
+            {
+                return rows;
+            }
+
+            return rows
+                .Where(row =>
+                {
+                    var fechaRegistro = TryGetDate(row, "FecIngreso", "fecIngreso", "fecingreso");
+
+                    if (!fechaRegistro.HasValue)
+                    {
+                        return false;
+                    }
+
+                    var date = fechaRegistro.Value.Date;
+
+                    if (fechaInicio.HasValue && date < fechaInicio.Value.Date)
+                    {
+                        return false;
+                    }
+
+                    if (fechaFin.HasValue && date > fechaFin.Value.Date)
+                    {
+                        return false;
+                    }
+
+                    return true;
+                })
+                .ToList();
         }
 
         private CommandDefinition CreateCommand(
@@ -140,26 +196,42 @@ SELECT
 FROM Planilla
 WHERE Correlativo IN @Correlativos";
 
-            var facturaRows = (await connection.QueryAsync(
-                CreateCommand(
-                    sql,
-                    new { Correlativos = correlativos },
-                    CommandType.Text,
-                    cancellationToken,
-                    commandTimeout: 120)))
-                .Select(MapRow)
-                .Select(row => new
+            var facturaRows = new Dictionary<int, Dictionary<string, object?>>();
+            const int maxCorrelativosPorLote = 2000;
+
+            for (var i = 0; i < correlativos.Count; i += maxCorrelativosPorLote)
+            {
+                var correlativosLote = correlativos
+                    .Skip(i)
+                    .Take(maxCorrelativosPorLote)
+                    .ToList();
+
+                var facturaRowsLote = (await connection.QueryAsync(
+                    CreateCommand(
+                        sql,
+                        new { Correlativos = correlativosLote },
+                        CommandType.Text,
+                        cancellationToken,
+                        commandTimeout: 120)))
+                    .Select(MapRow)
+                    .Select(row => new
+                    {
+                        Correlativo = TryGetInt(row, "Correlativo") ?? 0,
+                        Row = row
+                    })
+                    .Where(item => item.Correlativo > 0)
+                    .GroupBy(item => item.Correlativo)
+                    .ToDictionary(
+                        group => group.Key,
+                        group => group
+                            .Select(item => item.Row)
+                            .First());
+
+                foreach (var item in facturaRowsLote)
                 {
-                    Correlativo = TryGetInt(row, "Correlativo") ?? 0,
-                    Row = row
-                })
-                .Where(item => item.Correlativo > 0)
-                .GroupBy(item => item.Correlativo)
-                .ToDictionary(
-                    group => group.Key,
-                    group => group
-                        .Select(item => item.Row)
-                        .First());
+                    facturaRows[item.Key] = item.Value;
+                }
+            }
 
             foreach (var row in rows)
             {
@@ -213,11 +285,21 @@ WHERE Correlativo IN @Correlativos";
         private static Dictionary<string, object?> MapRow(dynamic row)
         {
             var data = (IDictionary<string, object>)row;
+            var result = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
 
-            return data.ToDictionary(
-                item => item.Key,
-                item => NormalizeValue(item.Value),
-                StringComparer.OrdinalIgnoreCase);
+            foreach (var item in data)
+            {
+                if (string.IsNullOrWhiteSpace(item.Key))
+                {
+                    continue;
+                }
+
+                // Algunos SP devuelven aliases repetidos o que solo difieren en casing.
+                // En ese caso conservamos el ultimo valor en lugar de lanzar un 500.
+                result[item.Key] = NormalizeValue(item.Value);
+            }
+
+            return result;
         }
 
         private static object? NormalizeValue(object? value)
@@ -253,6 +335,81 @@ WHERE Correlativo IN @Correlativos";
                     ? parsed
                     : null
             };
+        }
+
+        private static DateTime? TryGetDate(
+            IReadOnlyDictionary<string, object?> row,
+            params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (!row.TryGetValue(key, out var rawValue) || rawValue is null)
+                {
+                    continue;
+                }
+
+                switch (rawValue)
+                {
+                    case DateTime dateTime:
+                        return dateTime;
+                    case DateTimeOffset dateTimeOffset:
+                        return dateTimeOffset.DateTime;
+                }
+
+                var text = rawValue.ToString()?.Trim();
+
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    continue;
+                }
+
+                if (DateTime.TryParseExact(text, "dd/MM/yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var peruDate))
+                {
+                    return peruDate;
+                }
+
+                if (DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate))
+                {
+                    return parsedDate;
+                }
+            }
+
+            return null;
+        }
+
+        private static DateTime? GetDateParameterValue(
+            IEnumerable<PlanillaConsultaParametroDto> parametros,
+            string parameterName)
+        {
+            var parametro = parametros.FirstOrDefault(p =>
+                string.Equals(
+                    p.Nombre?.Trim().TrimStart('@'),
+                    parameterName,
+                    StringComparison.OrdinalIgnoreCase));
+
+            if (parametro is null || string.IsNullOrWhiteSpace(parametro.Valor))
+            {
+                return null;
+            }
+
+            var value = parametro.Valor.Trim();
+
+            if (DateTime.TryParseExact(value, "MM/dd/yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var usDate))
+            {
+                return usDate;
+            }
+
+            if (DateTime.TryParseExact(value, "dd/MM/yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var peruDate))
+            {
+                return peruDate;
+            }
+
+            if (DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate))
+            {
+                return parsedDate;
+            }
+
+            return null;
         }
 
         private static object? ParseValue(string? rawValue, string? rawType)

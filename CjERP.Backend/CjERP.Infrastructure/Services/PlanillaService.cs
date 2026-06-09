@@ -83,7 +83,7 @@ namespace CjERP.Infrastructure.Services
                 Usuario = request.Usuario,
                 Ot = request.Ot,
                 TipoCambio = request.TipoCambio ?? 0m,
-                FecEmision = request.FechaEmision,
+                FecEmision = request.FechaEmision,//request.FechaEmision,
                 RutaFacturaOriginal = request.FacturaPath,
                 RutaFacturaUrl = request.FacturaUrl,
                 RutaFacturaEnviada = request.FacturaPath,
@@ -92,7 +92,7 @@ namespace CjERP.Infrastructure.Services
             };
 
             _logger.LogInformation(
-                "[PlanillaService] ParÃ¡metros enviados a sp_Planilla_Insertar:{NewLine}{Payload}",
+                "[PlanillaService] Parámetros enviados a sp_Planilla_Insertar:{NewLine}{Payload}",
                 Environment.NewLine,
                 JsonSerializer.Serialize(logObject, new JsonSerializerOptions { WriteIndented = true }));
 

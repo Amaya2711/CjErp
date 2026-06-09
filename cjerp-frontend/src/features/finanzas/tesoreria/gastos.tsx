@@ -1,142 +1,3 @@
-// --- ColumnFilterDropdown component for typing and filtering options ---
-
-type ColumnFilterDropdownProps = {
-  header: any;
-  filtroColumnaMenuRef: React.RefObject<HTMLDivElement | null>;
-  filtrosColumnas: Record<string, string[]>;
-  setFiltrosColumnas: React.Dispatch<React.SetStateAction<Record<string, string[]>>>;
-  opcionesFiltroPorColumna: Record<string, string[]>;
-  filtroBusqueda: string;
-  setFiltroBusqueda: (valor: string) => void;
-};
-
-const ColumnFilterDropdown: React.FC<ColumnFilterDropdownProps> = ({ header, filtroColumnaMenuRef, filtrosColumnas, setFiltrosColumnas, opcionesFiltroPorColumna, filtroBusqueda, setFiltroBusqueda }) => {
-  const opciones = (opcionesFiltroPorColumna[header.key] ?? []).filter((opcion) =>
-    (opcion || "(Vacío)").toLowerCase().includes(filtroBusqueda.toLowerCase())
-  );
-  return (
-    <div
-      ref={filtroColumnaMenuRef}
-      onClick={(e) => e.stopPropagation()}
-      style={{
-        position: "absolute",
-        top: "calc(100% + 8px)",
-        left: 0,
-        width: 220,
-        maxHeight: 280,
-        overflow: "auto",
-        background: "#FFFFFF",
-        border: "1px solid #E5E7EB",
-        borderRadius: 12,
-        boxShadow: "0 10px 28px rgba(15, 23, 42, 0.14)",
-        padding: 10,
-        zIndex: 20,
-      }}
-    >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <strong style={{ fontSize: 11, color: "#17143A" }}>{header.label}</strong>
-        <button
-          type="button"
-          onClick={() =>
-            setFiltrosColumnas((prev) => ({
-              ...prev,
-              [header.key]: [],
-            }))
-          }
-          style={{
-            border: "none",
-            background: "transparent",
-            color: "#6E4CCB",
-            fontSize: 10,
-            fontWeight: 700,
-            cursor: "pointer",
-          }}
-        >
-          Limpiar
-        </button>
-      </div>
-      <input
-        type="text"
-        placeholder="Buscar opción..."
-        value={filtroBusqueda}
-        onChange={e => setFiltroBusqueda(e.target.value)}
-        style={{
-          width: "100%",
-          marginBottom: 8,
-          padding: "4px 8px",
-          fontSize: 11,
-          border: "1px solid #E5E7EB",
-          borderRadius: 6,
-        }}
-      />
-      <label
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "6px 4px",
-          fontSize: 11,
-          color: "#374151",
-          cursor: "pointer",
-          borderBottom: "1px solid #F3F4F6",
-          marginBottom: 4,
-        }}
-      >
-        <input
-          type="checkbox"
-          checked={(filtrosColumnas[header.key] ?? []).length === 0}
-          onChange={() =>
-            setFiltrosColumnas((prev) => ({
-              ...prev,
-              [header.key]: [],
-            }))
-          }
-        />
-        <span>(Todas)</span>
-      </label>
-      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        {opciones.map((opcion) => {
-          const seleccionadas = filtrosColumnas[header.key] ?? [];
-          const checked = seleccionadas.includes(opcion);
-          return (
-            <label
-              key={`${header.key}-${opcion || "__empty__"}`}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "6px 4px",
-                fontSize: 11,
-                color: "#374151",
-                cursor: "pointer",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={checked}
-                onChange={() =>
-                  setFiltrosColumnas((prev) => {
-                    const actuales = prev[header.key] ?? [];
-                    const siguientes = checked
-                      ? actuales.filter((item) => item !== opcion)
-                      : [...actuales, opcion];
-                    return {
-                      ...prev,
-                      [header.key]: siguientes,
-                    };
-                  })
-                }
-              />
-              <span title={opcion || "(Vacío)"}>
-                {opcion || "(Vacío)"}
-              </span>
-            </label>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
 import React, { useEffect, useMemo, useRef, useState } from "react";
   // Estado para fila seleccionada
  
@@ -146,6 +7,7 @@ import {
   buildPlanillaConsultaEstadosRequest,
   consultarPlanillaEstados,
 } from "../../../api/planillaConsultaService";
+import type { PlanillaConsultaParametro } from "../../../models/planillaConsulta";
 import CrudToolbar, { matchesCrudToolbarSearch, type CrudToolbarSearchField } from "../../../components/base/CrudToolbar";
 import { FiltroOperativoLookup } from "../../../components/lookups/FiltroOperativoLookup";
 import { listarEmpleadosCta } from "../../../api/empleadoService";
@@ -190,6 +52,7 @@ type GastoDto = {
   detalle: string;
   comentario: string;
   fechaVencimiento?: string;
+  fecIngreso?: string;
   fechaEmision?: string;
   solicitante?: string;
   solicitanteLabel?: string;
@@ -219,6 +82,7 @@ type GastoDto = {
   tipoCambio?: number;
   idUsuarioFactura?: number | null;
   estado?: number;
+  estadoLabel?: string;
 };
 
 type GastoForm = {
@@ -240,6 +104,7 @@ type GastoForm = {
   detalle: string;
   comentario: string;
   fechaVencimiento: string;
+  fecIngreso: string;
   fechaEmision: string;
   solicitante: string;
   solicitanteLabel: string;
@@ -261,6 +126,7 @@ type GastoForm = {
   rutaFacturaUrl?: string;
   rutaFacturaEnviada?: string;
   estado: number;
+  estadoLabel?: string;
 };
 
 type GastoPayload = {
@@ -287,6 +153,7 @@ type GastoPayload = {
   detalle: string;
   comentario: string;
   fechaVencimiento?: string;
+  fecIngreso?: string;
   fechaEmision?: string;
   solicitante?: string;
   solicitanteLabel?: string;
@@ -311,6 +178,59 @@ type GastoPayload = {
   tipoCambio?: number;
   idUsuarioFactura?: number;
   imgFactura?: string;
+};
+
+type GastosHeaderFilters = {
+  id: string;
+  fechaInicio: string;
+  fechaFin: string;
+  estado: string[];
+  comprobante: string[];
+  moneda: string[];
+  cliente: string[];
+  proyecto: string[];
+  site: string[];
+  tipoTrabajo: string[];
+  solicitante: string[];
+  responsable: string[];
+  validador: string[];
+};
+
+const GASTOS_HEADER_FILTERS_INITIAL: GastosHeaderFilters = {
+  id: "",
+  fechaInicio: "",
+  fechaFin: "",
+  estado: ["0", "2"],
+  comprobante: [],
+  moneda: [],
+  cliente: [],
+  proyecto: [],
+  site: [],
+  tipoTrabajo: [],
+  solicitante: [],
+  responsable: [],
+  validador: [],
+};
+
+const GASTOS_ESTADOS_DISPONIBLES = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "99"];
+type GastosHeaderMultiFilterKey =
+  | "estado"
+  | "comprobante"
+  | "moneda"
+  | "cliente"
+  | "proyecto"
+  | "site"
+  | "tipoTrabajo"
+  | "solicitante"
+  | "responsable"
+  | "validador";
+
+type GastosHeaderSearchableFilterKey = "solicitante" | "responsable" | "validador";
+
+const GASTOS_HEADER_FILTER_SEARCH_INITIAL: Record<GastosHeaderSearchableFilterKey, string> = {
+  solicitante: "",
+  responsable: "",
+  validador: "",
 };
 
 type FacturaUploadResponse = {
@@ -338,6 +258,7 @@ type SuministroProvisionalVigenteOption = {
 const GASTOS_API_URL = "/tesoreria/gastos";
 const FACTURA_UPLOAD_API_URL = `${GASTOS_API_URL}/upload-factura`;
 const TIPO_CAMBIO_GASTO = 3.8;
+const MAX_GASTOS_PARA_MOSTRAR = 500;
 const TAREAS_CON_SUMINISTRO_VIGENTE = new Set([52, 53]);
 const VALORES_GASTO_INICIALES: ValoresGastoResponse = {
   porcentaje: 0,
@@ -383,6 +304,122 @@ function toPositiveNumber(...values: Array<string | number | null | undefined>):
 
 function getConstanteStoredValue(option: ConstanteOption): string {
   return option.codigo || option.value || option.label;
+}
+
+function buildUniqueFilterOptions(values: Array<string | number | null | undefined>): string[] {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value ?? "").trim())
+        .filter(Boolean)
+    )
+  ).sort((left, right) => left.localeCompare(right, "es", { sensitivity: "base" }));
+}
+
+function normalizeDateFilterValue(dateValue?: string): string {
+  const normalized = (dateValue ?? "").trim();
+
+  if (!normalized) {
+    return "";
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    return normalized;
+  }
+
+  const slashMatch = normalized.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+
+  if (slashMatch) {
+    const [, day, month, year] = slashMatch;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+
+  const parsed = new Date(normalized);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatInputDateForPlanillaParametro(dateValue?: string): string {
+  const normalized = (dateValue ?? "").trim();
+
+  if (!normalized) {
+    return "";
+  }
+
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (!match) {
+    return normalized;
+  }
+
+  const [, year, month, day] = match;
+  return `${month}/${day}/${year}`;
+}
+
+function formatInputDateForDisplay(dateValue?: string): string {
+  const normalized = (dateValue ?? "").trim();
+
+  if (!normalized) {
+    return "";
+  }
+
+  const slashMatch = normalized.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+
+  if (slashMatch) {
+    const [, day, month, year] = slashMatch;
+    return `${day.padStart(2, "0")}/${month.padStart(2, "0")}/${year}`;
+  }
+
+  const isoMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch;
+    return `${day}/${month}/${year}`;
+  }
+
+  return normalized;
+}
+
+function formatInputDateForInternalValidation(dateValue?: string): string {
+  const normalized = (dateValue ?? "").trim();
+
+  if (!normalized) {
+    return "";
+  }
+
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (!match) {
+    return normalized;
+  }
+
+  const [, year, month, day] = match;
+  return `${month}/${day}/${year}`;
+}
+
+function isInputDateRangeValid(startDate?: string, endDate?: string): boolean {
+  const startText = formatInputDateForInternalValidation(startDate);
+  const endText = formatInputDateForInternalValidation(endDate);
+
+  if (!startText || !endText) {
+    return true;
+  }
+
+  const start = new Date(startText);
+  const end = new Date(endText);
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return true;
+  }
+
+  return start.getTime() <= end.getTime();
 }
 
 function normalizeLookupToken(value?: string | null): string {
@@ -441,6 +478,45 @@ function getConstanteLabelOrFallback(
   }
 
   return fallbackLabel?.trim() ?? "";
+}
+
+function getEstadoLabel(
+  estadoOptions: ConstanteOption[],
+  selectedValue?: string | number | null,
+  fallbackLabel?: string | null
+): string {
+  const fallback = fallbackLabel?.trim() ?? "";
+
+  if (fallback) {
+    return fallback;
+  }
+
+  const normalizedValue =
+    selectedValue == null || selectedValue === ""
+      ? ""
+      : String(selectedValue).trim();
+
+  if (normalizedValue) {
+    const match = findConstanteOption(estadoOptions, normalizedValue);
+
+    if (match?.label) {
+      return match.label;
+    }
+  }
+
+  return normalizedValue;
+}
+
+function buildHeaderFilterSummary(values: string[], emptyLabel = "Todos"): string {
+  if (values.length === 0) {
+    return emptyLabel;
+  }
+
+  if (values.length === 1) {
+    return values[0];
+  }
+
+  return `${values.length} seleccionados`;
 }
 
 function getSelectValue(options: ConstanteOption[], selectedValue?: string | null): string {
@@ -521,6 +597,10 @@ function matchesFlexibleSearch(label: string, query: string): boolean {
   return true;
 }
 
+function isSearchableHeaderFilterKey(key: string): key is GastosHeaderSearchableFilterKey {
+  return key === "solicitante" || key === "responsable" || key === "validador";
+}
+
 function toNumberOrZero(value: unknown): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -571,18 +651,6 @@ function requiereSuministroVigente(idTarea?: number | null): boolean {
 
 function normalizeColumnOptionValue(value: unknown): string {
   return String(value ?? "").trim();
-}
-
-function matchesColumnFilterValue(value: unknown, selectedValues: string[]): boolean {
-  if (selectedValues.length === 0) {
-    return true;
-  }
-
-  const normalizedValue = normalizeSearchText(normalizeColumnOptionValue(value));
-
-  return selectedValues.some(
-    (selectedValue) => normalizeSearchText(selectedValue) === normalizedValue
-  );
 }
 
 function areFiltroOperativoValuesEqual(
@@ -712,6 +780,41 @@ function getNumericUserId(value?: string | null): number | undefined {
 }
 
 function normalizeDateForInput(dateStr?: string | null): string {
+  const value = dateStr?.trim();
+
+  if (!value) {
+    return "";
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
+  }
+
+  const slashMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(value);
+  if (slashMatch) {
+    const day = Number(slashMatch[1]);
+    const month = Number(slashMatch[2]);
+    const year = slashMatch[3];
+
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    }
+
+    return value;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeFecIngresoFromStore(dateStr?: string | null): string {
   const value = dateStr?.trim();
 
   if (!value) {
@@ -854,7 +957,26 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     detalle: getRecordString(row, "Detalle", "detalle"),
     comentario: getRecordString(row, "Observacion", "observacion", "Comentario", "comentario"),
     fechaVencimiento: getRecordString(row, "FechaDeposito", "fechaDeposito", "FechaVencimiento", "fechaVencimiento"),
-    fechaEmision: getRecordString(row, "FecIngreso", "fecIngreso", "FechaEmision", "fechaEmision", "FecEmision", "fecEmision"),
+    fecIngreso: getRecordString(
+      row,
+      "FecIngreso",
+      "fecIngreso",
+      "fecingreso",
+      "FechaIngreso",
+      "fechaIngreso"
+    ),
+    fechaEmision: getRecordString(
+      row,
+      "FecIngreso",
+      "fecIngreso",
+      "fecingreso",
+      "FechaIngreso",
+      "fechaIngreso",
+      "FechaEmision",
+      "fechaEmision",
+      "FecEmision",
+      "fecEmision"
+    ),
     solicitante: getRecordString(row, "IdSolicitante", "idSolicitante"),
     solicitanteLabel: getRecordString(row, "Solicitante", "solicitante", "SolicitanteLabel", "solicitanteLabel"),
     gestor: getRecordString(row, "Gestor", "gestor"),
@@ -883,6 +1005,17 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     tipoCambio: getRecordNumber(row, "TipoCambio", "tipoCambio") ?? undefined,
     idUsuarioFactura: getRecordNumber(row, "IdUsuarioFactura", "idUsuarioFactura"),
     estado: getRecordNumber(row, "Estado", "estado") ?? 0,
+    estadoLabel: getRecordString(
+      row,
+      "EstadoNombre",
+      "estadoNombre",
+      "NombreEstado",
+      "nombreEstado",
+      "DescEstado",
+      "descEstado",
+      "DescripcionEstado",
+      "descripcionEstado"
+    ),
   };
 }
 
@@ -929,6 +1062,7 @@ function mapGastoDtoToView(item: GastoDto): GastoForm {
     detalle: item.detalle,
     comentario: item.comentario ?? (item as any).observacion ?? "",
     fechaVencimiento: normalizeDateForInput(item.fechaVencimiento),
+    fecIngreso: normalizeFecIngresoFromStore(item.fecIngreso || item.fechaEmision),
     fechaEmision: normalizeDateForInput(item.fechaEmision),
     solicitante: item.solicitante || item.solicitanteLabel || "",
     solicitanteLabel: item.solicitanteLabel || "",
@@ -950,6 +1084,7 @@ function mapGastoDtoToView(item: GastoDto): GastoForm {
     rutaFacturaUrl: item.rutaFacturaUrl || "",
     rutaFacturaEnviada: item.rutaFacturaEnviada || "",
     estado: item.estado ?? 0,
+    estadoLabel: item.estadoLabel || "",
     };
 }
 
@@ -972,6 +1107,7 @@ const formularioInicial: GastoForm = {
   detalle: "",
   comentario: "",
   fechaVencimiento: "",
+  fecIngreso: "",
   fechaEmision: "",
   solicitante: "",
   solicitanteLabel: "",
@@ -993,9 +1129,18 @@ const formularioInicial: GastoForm = {
 
 export default function GastosPage() {
   // Estado para fila seleccionada
-  const [selectedRowId, setSelectedRowId] = useState<number | null>(null);
-  // Estado para filtro de búsqueda por columna (para el dropdown de filtro tipo Excel)
-  const [filtroBusquedaPorColumna, setFiltroBusquedaPorColumna] = useState<Record<string, string>>({});
+  const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
+  const [filtrosCabecera, setFiltrosCabecera] = useState<GastosHeaderFilters>(GASTOS_HEADER_FILTERS_INITIAL);
+  const [headerFilterSearch, setHeaderFilterSearch] = useState<Record<GastosHeaderSearchableFilterKey, string>>(
+    GASTOS_HEADER_FILTER_SEARCH_INITIAL
+  );
+  const [cabeceraFiltroAbierto, setCabeceraFiltroAbierto] = useState<string | null>(null);
+  const [mensajeFiltroCabecera, setMensajeFiltroCabecera] = useState<string | null>(null);
+  const [limiteConsultaServidor, setLimiteConsultaServidor] = useState<{
+    totalRows: number;
+    maxRowsAllowed: number;
+    message: string;
+  } | null>(null);
     // Estado para ordenamiento
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
 
@@ -1006,6 +1151,8 @@ export default function GastosPage() {
   const [showPorcentajePopup, setShowPorcentajePopup] = useState(false);
   const porcentajeRef = useRef<HTMLSpanElement | null>(null);
   const sidePanelRef = useRef<HTMLDivElement | null>(null);
+  const cabeceraFiltroMenuRef = useRef<HTMLDivElement | null>(null);
+  const hasLoadedEstadoFilterRef = useRef(false);
   const ultimoSuministroVigenteLookupKeyRef = useRef("");
   const preservarSuministroEdicionRef = useRef(false);
   const authUser = getAuthUser();
@@ -1060,7 +1207,7 @@ export default function GastosPage() {
     String(authUser?.codEmp ?? authUser?.idEmpleado ?? authUser?.empleado ?? "")
   );
   const camposConstantes = useMemo(
-    () => ["tipo_bien", "tipo_comprobante", "tipo_pago", "tipo_moneda"],
+    () => ["tipo_bien", "tipo_comprobante", "tipo_pago", "tipo_moneda", "estado"],
     []
   );
   const {
@@ -1073,6 +1220,7 @@ export default function GastosPage() {
   const monedaOptions = constantesPorCampo.tipo_moneda ?? [];
   const bienOptions = constantesPorCampo.tipo_bien ?? [];
   const comprobanteOptions = constantesPorCampo.tipo_comprobante ?? [];
+  const estadoOptions = constantesPorCampo.estado ?? [];
 
   // Utilidad para formatear fecha a MM/DD/YYYY en zona horaria de Perú (UTC-5)
   function formatDateToMMDDYYYYPeru(dateStr?: string) {
@@ -1163,16 +1311,68 @@ export default function GastosPage() {
 
   const gastosApi = {
     list: async () => {
-      // Enviar el parámetro @Estados = '0,2' al endpoint
+      const estadosSeleccionados = filtrosCabecera.estado;
+      const fechaInicio = filtrosCabecera.fechaInicio.trim();
+      const fechaFin = filtrosCabecera.fechaFin.trim();
+      const fechaInicioParametro = formatInputDateForPlanillaParametro(fechaInicio);
+      const fechaFinParametro = formatInputDateForPlanillaParametro(fechaFin);
+
+      if (estadosSeleccionados.length === 0) {
+        setMensajeFiltroCabecera("Seleccione al menos un estado para realizar la búsqueda.");
+        setLimiteConsultaServidor(null);
+        return [];
+      }
+
+      if (!isInputDateRangeValid(fechaInicio, fechaFin)) {
+        setMensajeFiltroCabecera("La fecha inicio no puede ser mayor que la fecha fin.");
+        setLimiteConsultaServidor(null);
+        return [];
+      }
+
+      setMensajeFiltroCabecera(null);
+      setLimiteConsultaServidor(null);
+
+      const parametros: PlanillaConsultaParametro[] = [
+        {
+          nombre: "Estados",
+          valor: estadosSeleccionados.join(","),
+          tipo: "string",
+        },
+      ];
+
+      if (fechaInicio) {
+        parametros.push({
+          nombre: "FechaInicio",
+          valor: fechaInicioParametro,
+          tipo: "string",
+        });
+      }
+
+      if (fechaFin) {
+        parametros.push({
+          nombre: "FechaFin",
+          valor: fechaFinParametro,
+          tipo: "string",
+        });
+      }
+
       const response = await consultarPlanillaEstados(
-        buildPlanillaConsultaEstadosRequest([
-          {
-            nombre: "Estados",
-            valor: "0,2",
-            tipo: "string",
-          },
-        ])
+        {
+          ...buildPlanillaConsultaEstadosRequest(parametros),
+          maxRows: MAX_GASTOS_PARA_MOSTRAR,
+        }
       );
+
+      if (response.limitExceeded) {
+        setLimiteConsultaServidor({
+          totalRows: Number(response.totalRows ?? 0),
+          maxRowsAllowed: Number(response.maxRowsAllowed ?? MAX_GASTOS_PARA_MOSTRAR),
+          message:
+            response.message?.trim() ||
+            `Se encontraron ${response.totalRows ?? 0} registros. Aplique más filtros antes de mostrar la información.`,
+        });
+        return [];
+      }
 
       return extraerArray<Record<string, unknown>>(response.rows).map((row, index) =>
         mapGastoDtoToView(mapPlanillaConsultaRowToGastoDto(row, index))
@@ -1216,6 +1416,22 @@ export default function GastosPage() {
     handleSave,
     load: cargarGastos,
   } = useCrudForm<GastoForm, GastoForm>(gastosApi, formularioInicial);
+
+  const filtrosConsultaKey = [
+    filtrosCabecera.id,
+    filtrosCabecera.estado.join(","),
+    filtrosCabecera.fechaInicio,
+    filtrosCabecera.fechaFin,
+  ].join("|");
+
+  useEffect(() => {
+    if (!hasLoadedEstadoFilterRef.current) {
+      hasLoadedEstadoFilterRef.current = true;
+      return;
+    }
+
+    void cargarGastos();
+  }, [filtrosConsultaKey]);
 
   // Determinar color del porcentaje
   const porcentajeValue = Number(valoresGasto?.porcentaje ?? 0);
@@ -1384,6 +1600,7 @@ export default function GastosPage() {
     validadorInput.trim() === ""
       ? validadorOptions
       : validadorOptions.filter((option) => matchesFlexibleSearch(option.label, validadorInput));
+  const esModoVisualizacion = modo === "ver";
 
   const valoresGastoRequestKey = useMemo(() => {
     const request = buildValoresGastoRequest(form.filtroOperativo);
@@ -1719,6 +1936,7 @@ export default function GastosPage() {
     setValoresGasto(VALORES_GASTO_INICIALES);
     setForm({
       ...formularioInicial,
+      fecIngreso: fechaActual,
       fechaEmision: fechaActual,
       fechaVencimiento: "",
     });
@@ -1781,6 +1999,7 @@ export default function GastosPage() {
             }
           : undefined,
       },
+      fecIngreso: normalizeFecIngresoFromStore(gasto.fecIngreso || gasto.fechaEmision),
       fechaEmision: normalizeDateForInput(gasto.fechaEmision),
       fechaVencimiento: normalizeDateForInput(gasto.fechaVencimiento),
       facturaUrl: facturaEditFields.facturaUrl,
@@ -1852,6 +2071,11 @@ export default function GastosPage() {
     setPanelAbierto(true);
     // Actualizar valores de gasto (porcentaje, etc.) al editar
     void cargarValoresGasto(gastoEditable.filtroOperativo);
+  };
+
+  const abrirVisualizar = (gasto: GastoForm) => {
+    abrirEditar(gasto);
+    setModo("ver");
   };
 
   const cerrarPanel = () => {
@@ -1957,8 +2181,8 @@ export default function GastosPage() {
     await cargarGastos();
   };
 
-  const confirmarEliminar = (gasto: GastoForm) => {
-    if (selectedRowId !== gasto.id) {
+  const confirmarEliminar = (gasto: GastoForm, rowIndex: number) => {
+    if (selectedRowKey !== getGastoRowKey(gasto, rowIndex)) {
       setRechazoError("Seleccione primero el registro que desea rechazar.");
       return;
     }
@@ -2011,7 +2235,7 @@ export default function GastosPage() {
       });
 
       cancelarRechazo();
-      setSelectedRowId(null);
+      setSelectedRowKey(null);
       await cargarGastos();
     } catch (error) {
       setRechazoError(getHttpMessage(error, "No se pudo rechazar el registro."));
@@ -2024,10 +2248,7 @@ export default function GastosPage() {
 
 
   const [busqueda, setBusqueda] = useState("");
-  const [filtrosColumnas, setFiltrosColumnas] = useState<Record<string, string[]>>({});
-  const [columnaFiltroAbierta, setColumnaFiltroAbierta] = useState<string | null>(null);
-  const filtroColumnaMenuRef = useRef<HTMLDivElement>(null);
-  // Solo columnas visibles: id, monto, tipoPago, ot, fechaEmision, fechaVencimiento
+  // Solo columnas visibles: id, monto, tipoPago, ot, fecIngreso, fechaVencimiento
   const camposBusquedaGastos = useMemo<CrudToolbarSearchField<GastoForm>[]>(
     () => [
       { key: "id", label: "Id", getValue: (gasto) => gasto.id },
@@ -2040,15 +2261,15 @@ export default function GastosPage() {
       { key: "comprobante", label: "Comprobante", getValue: (gasto) => getConstanteLabel(comprobanteOptions, gasto.comprobante) },
       { key: "monto", label: "Monto", getValue: (gasto) => gasto.monto },
       { key: "moneda", label: "Moneda", getValue: (gasto) => gasto.monedaLabel || getConstanteLabel(monedaOptions, gasto.moneda) },
-      { key: "fechaEmision", label: "Fecha emisión", getValue: (gasto) => gasto.fechaEmision },
+      { key: "fecIngreso", label: "FecIngreso", getValue: (gasto) => gasto.fecIngreso },
       { key: "ot", label: "OT", getValue: (gasto) => gasto.filtroOperativo.ot?.ot },
       { key: "solicitante", label: "Solicitante", getValue: (gasto) => getConstanteLabelOrFallback(solicitanteOptions, gasto.solicitante, gasto.solicitanteLabel) },
       { key: "responsable", label: "Responsable", getValue: (gasto) => gasto.responsableLabel || gasto.responsable },
       { key: "validador", label: "Validador", getValue: (gasto) => getConstanteLabelOrFallback(validadorOptions, gasto.validador, gasto.validadorLabel) },
       { key: "detalle", label: "Detalle", getValue: (gasto) => gasto.detalle },
-      { key: "estado", label: "Estado", getValue: (gasto) => gasto.estado  },
+      { key: "estado", label: "Estado", getValue: (gasto) => getEstadoLabel(estadoOptions, gasto.estado, gasto.estadoLabel) },
     ],
-    [bienOptions, comprobanteOptions, monedaOptions, solicitanteOptions, tareasCatalogo, tipoPagoOptions, validadorOptions]
+    [bienOptions, comprobanteOptions, estadoOptions, monedaOptions, solicitanteOptions, tareasCatalogo, tipoPagoOptions, validadorOptions]
   );
   const getGridColumnValue = React.useCallback(
     (gasto: GastoForm, key: string): string | number => {
@@ -2079,10 +2300,11 @@ export default function GastosPage() {
             : "";
         case "moneda":
           return gasto.monedaLabel || getConstanteLabel(monedaOptions, gasto.moneda);
-        case "fechaEmision":
-          return gasto.fechaEmision
-            ? new Date(gasto.fechaEmision).toLocaleDateString("es-PE")
-            : "";
+        case "fecIngreso":
+          return formatInputDateForDisplay(gasto.fecIngreso);
+          //return gasto.fechaEmision
+          //  ? new Date(gasto.fechaEmision).toLocaleDateString("es-PE")
+          //  : "";
         case "ot":
           return gasto.filtroOperativo.ot?.ot ?? "";
         case "solicitante":
@@ -2094,17 +2316,61 @@ export default function GastosPage() {
         case "detalle":
           return gasto.detalle ? String(gasto.detalle).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim() : "";
         case "estado":
-          return gasto.estado ?? "";
+          return getEstadoLabel(estadoOptions, gasto.estado, gasto.estadoLabel);
         default:
           return (gasto as unknown as Record<string, unknown>)[key] == null
             ? ""
             : String((gasto as unknown as Record<string, unknown>)[key]);
       }
     },
-    [bienOptions, comprobanteOptions, monedaOptions, solicitanteOptions, tareasCatalogo, validadorOptions]
+    [bienOptions, comprobanteOptions, estadoOptions, monedaOptions, solicitanteOptions, tareasCatalogo, validadorOptions]
   );
+
+  const headerFilterOptions = useMemo(
+    () => ({
+      estado: GASTOS_ESTADOS_DISPONIBLES,
+      comprobante: buildUniqueFilterOptions(
+        gastosSafe.map((gasto) =>
+          getConstanteLabel(comprobanteOptions, gasto.comprobante) || gasto.comprobanteLabel || gasto.comprobante
+        )
+      ),
+      moneda: buildUniqueFilterOptions(
+        gastosSafe.map((gasto) => gasto.monedaLabel || getConstanteLabel(monedaOptions, gasto.moneda) || gasto.moneda)
+      ),
+      cliente: buildUniqueFilterOptions(gastosSafe.map((gasto) => gasto.filtroOperativo.filtro?.nombreCliente)),
+      proyecto: buildUniqueFilterOptions(gastosSafe.map((gasto) => gasto.filtroOperativo.filtro?.nombreProyecto)),
+      site: buildUniqueFilterOptions(gastosSafe.map((gasto) => gasto.filtroOperativo.filtro?.nombreSite)),
+      tipoTrabajo: buildUniqueFilterOptions(
+        gastosSafe.map((gasto) => gasto.filtroOperativo.filtro?.tipoTrabajo ?? gasto.filtroOperativo.tipoTrabajo?.tipoTrabajo)
+      ),
+      solicitante: buildUniqueFilterOptions(
+        gastosSafe.map((gasto) =>
+          getConstanteLabelOrFallback(solicitanteOptions, gasto.solicitante, gasto.solicitanteLabel)
+        )
+      ),
+      responsable: buildUniqueFilterOptions(gastosSafe.map((gasto) => gasto.responsableLabel || gasto.responsable)),
+      validador: buildUniqueFilterOptions(
+        gastosSafe.map((gasto) =>
+          getConstanteLabelOrFallback(validadorOptions, gasto.validador, gasto.validadorLabel)
+        )
+      ),
+    }),
+    [comprobanteOptions, gastosSafe, monedaOptions, solicitanteOptions, validadorOptions]
+  );
+
+  const toggleMultiHeaderFilter = React.useCallback((
+    key: GastosHeaderMultiFilterKey,
+    value: string
+  ) => {
+    setFiltrosCabecera((prev) => ({
+      ...prev,
+      [key]: prev[key].includes(value)
+        ? prev[key].filter((item) => item !== value)
+        : [...prev[key], value].sort((left, right) => left.localeCompare(right, "es", { sensitivity: "base" })),
+    }));
+  }, []);
   // Ordenar y luego filtrar gastos: el ordenamiento se aplica a todos los registros cargados
-  const gastosFiltrados = useMemo(() => {
+  const gastosFiltradosBase = useMemo(() => {
     let sorted = [...gastosSafe];
     if (sortConfig) {
       const { key, direction } = sortConfig;
@@ -2129,15 +2395,63 @@ export default function GastosPage() {
     // Filtrar después de ordenar
     return sorted
       .filter((gasto) => matchesCrudToolbarSearch(gasto, busqueda, camposBusquedaGastos))
-      .filter((gasto) =>
-        camposBusquedaGastos.every((campo) =>
-          matchesColumnFilterValue(
-            getGridColumnValue(gasto, campo.key),
-            filtrosColumnas[campo.key] ?? []
-          )
-        )
-      );
-  }, [busqueda, camposBusquedaGastos, filtrosColumnas, gastosSafe, getGridColumnValue, sortConfig]);
+      .filter((gasto) => {
+        const fechaGasto = normalizeDateFilterValue(gasto.fecIngreso);
+        const idGasto = String(gasto.id ?? "").trim();
+        const estadoGasto = String(gasto.estado ?? "").trim();
+        const comprobanteGasto = String(
+          getConstanteLabel(comprobanteOptions, gasto.comprobante) || gasto.comprobanteLabel || gasto.comprobante || ""
+        ).trim();
+        const monedaGasto = String(
+          gasto.monedaLabel || getConstanteLabel(monedaOptions, gasto.moneda) || gasto.moneda || ""
+        ).trim();
+        const clienteGasto = String(gasto.filtroOperativo.filtro?.nombreCliente ?? "").trim();
+        const proyectoGasto = String(gasto.filtroOperativo.filtro?.nombreProyecto ?? "").trim();
+        const siteGasto = String(gasto.filtroOperativo.filtro?.nombreSite ?? "").trim();
+        const tipoTrabajoGasto = String(
+          gasto.filtroOperativo.filtro?.tipoTrabajo ?? gasto.filtroOperativo.tipoTrabajo?.tipoTrabajo ?? ""
+        ).trim();
+        const solicitanteGasto = String(
+          getConstanteLabelOrFallback(solicitanteOptions, gasto.solicitante, gasto.solicitanteLabel)
+        ).trim();
+        const responsableGasto = String(gasto.responsableLabel || gasto.responsable || "").trim();
+        const validadorGasto = String(
+          getConstanteLabelOrFallback(validadorOptions, gasto.validador, gasto.validadorLabel)
+        ).trim();
+
+        return (
+          (!filtrosCabecera.id || idGasto.includes(filtrosCabecera.id.trim())) &&
+          (!filtrosCabecera.fechaInicio || (fechaGasto && fechaGasto >= filtrosCabecera.fechaInicio)) &&
+          (!filtrosCabecera.fechaFin || (fechaGasto && fechaGasto <= filtrosCabecera.fechaFin)) &&
+          (filtrosCabecera.estado.length === 0 || filtrosCabecera.estado.includes(estadoGasto)) &&
+          (filtrosCabecera.comprobante.length === 0 || filtrosCabecera.comprobante.includes(comprobanteGasto)) &&
+          (filtrosCabecera.moneda.length === 0 || filtrosCabecera.moneda.includes(monedaGasto)) &&
+          (filtrosCabecera.cliente.length === 0 || filtrosCabecera.cliente.includes(clienteGasto)) &&
+          (filtrosCabecera.proyecto.length === 0 || filtrosCabecera.proyecto.includes(proyectoGasto)) &&
+          (filtrosCabecera.site.length === 0 || filtrosCabecera.site.includes(siteGasto)) &&
+          (filtrosCabecera.tipoTrabajo.length === 0 || filtrosCabecera.tipoTrabajo.includes(tipoTrabajoGasto)) &&
+          (filtrosCabecera.solicitante.length === 0 || filtrosCabecera.solicitante.includes(solicitanteGasto)) &&
+          (filtrosCabecera.responsable.length === 0 || filtrosCabecera.responsable.includes(responsableGasto)) &&
+          (filtrosCabecera.validador.length === 0 || filtrosCabecera.validador.includes(validadorGasto))
+        );
+      });
+  }, [
+    busqueda,
+    camposBusquedaGastos,
+    comprobanteOptions,
+    filtrosCabecera,
+    gastosSafe,
+    monedaOptions,
+    solicitanteOptions,
+    sortConfig,
+    validadorOptions,
+  ]);
+  const cantidadRegistrosFiltrados = gastosFiltradosBase.length;
+  const excedeLimiteRegistros = cantidadRegistrosFiltrados > MAX_GASTOS_PARA_MOSTRAR;
+  const gastosFiltrados = useMemo(
+    () => (excedeLimiteRegistros ? [] : gastosFiltradosBase),
+    [excedeLimiteRegistros, gastosFiltradosBase]
+  );
   const handleFiltroOperativoChange = React.useCallback(
     (val: FiltroOperativoValue) => {
       setForm((prev) =>
@@ -2150,7 +2464,7 @@ export default function GastosPage() {
   );
   const columnasGridGastos = [
     { key: "id", label: "Id", width: "60px", align: "left" as const },
-    { key: "acciones", label: "Acciones", width: "100px", align: "center" as const },
+    { key: "acciones", label: "Acciones", width: "140px", align: "center" as const },
     { key: "cliente", label: "Cliente", width: "90px", align: "left" as const },
     { key: "nombreProyecto", label: "Proyecto", width: "100px", align: "left" as const },
     { key: "site", label: "Site", width: "180px", align: "left" as const },
@@ -2160,7 +2474,7 @@ export default function GastosPage() {
     { key: "comprobante", label: "Comprobante", width: "140px", align: "left" as const },
     { key: "monto", label: "Monto", width: "100px", align: "left" as const },
     { key: "moneda", label: "Moneda", width: "80px", align: "left" as const },
-    { key: "fechaEmision", label: "Fecha emisión", width: "130px", align: "left" as const },
+    { key: "fecIngreso", label: "FecIngreso", width: "130px", align: "left" as const },
     { key: "ot", label: "OT", width: "70px", align: "left" as const },
     { key: "solicitante", label: "Solicitante", width: "160px", align: "left" as const },
     { key: "responsable", label: "Responsable", width: "180px", align: "left" as const },
@@ -2192,39 +2506,24 @@ export default function GastosPage() {
     return offsets;
   }, [columnasGridGastos]);
 
-  const opcionesFiltroPorColumna = useMemo(() => {
-    const opciones: Record<string, string[]> = {};
-
-    camposBusquedaGastos.forEach((campo) => {
-      const valoresUnicos = Array.from(
-        new Set(
-          gastosSafe.map((gasto) => normalizeColumnOptionValue(getGridColumnValue(gasto, campo.key)))
-        )
-      ).sort((left, right) => left.localeCompare(right, "es", { sensitivity: "base" }));
-
-      opciones[campo.key] = valoresUnicos;
-    });
-
-    return opciones;
-  }, [camposBusquedaGastos, gastosSafe, getGridColumnValue]);
-
   useEffect(() => {
-    if (!columnaFiltroAbierta) {
+    if (!cabeceraFiltroAbierto) {
+      setHeaderFilterSearch(GASTOS_HEADER_FILTER_SEARCH_INITIAL);
       return;
     }
 
     const handlePointerDown = (event: MouseEvent) => {
       if (
-        filtroColumnaMenuRef.current &&
-        !filtroColumnaMenuRef.current.contains(event.target as Node)
+        cabeceraFiltroMenuRef.current &&
+        !cabeceraFiltroMenuRef.current.contains(event.target as Node)
       ) {
-        setColumnaFiltroAbierta(null);
+        setCabeceraFiltroAbierto(null);
       }
     };
 
     document.addEventListener("mousedown", handlePointerDown);
     return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, [columnaFiltroAbierta]);
+  }, [cabeceraFiltroAbierto]);
 
   return (
     <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 5 }}>
@@ -2246,8 +2545,9 @@ export default function GastosPage() {
             title: "Exportar",
             iconOnly: true,
             icon: "⤓",
-            onClick: () => {
-              // Exportar a CSV los registros filtrados y columnas visibles
+            onClick: async () => {
+              // Exportar a Excel los registros filtrados y columnas visibles
+              const XLSX = await import("xlsx");
               const headers = columnasGridGastos.filter(c => c.key !== "acciones").map(c => c.label);
               const keys = columnasGridGastos.filter(c => c.key !== "acciones").map(c => c.key);
               const rows = gastosFiltrados.map(gasto =>
@@ -2286,39 +2586,342 @@ export default function GastosPage() {
                         : "";
                     case "ot":
                       return gasto.filtroOperativo.ot?.ot ?? "";
-                    case "fechaEmision":
-                      return gasto.fechaEmision ? (new Date(gasto.fechaEmision).toLocaleDateString("es-PE")) : "";
+                    case "fecIngreso":
+                      return formatInputDateForDisplay(gasto.fecIngreso);
                     case "comentario":                      // Migrar el campo Comentario a una sola línea, reemplazando saltos de línea por espacio
                       return gasto.comentario ? String(gasto.comentario).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim() : "";
                     case "estado": {
-                      const estado = Number(gasto.estado);
-                      return Number.isFinite(estado)
-                        ? estado
-                        : "";
+                      return getEstadoLabel(estadoOptions, gasto.estado, gasto.estadoLabel);
                     }
                       default:
                       return (gasto as any)[key] ?? "";
                   }
                 })
               );
-              const csv = [headers, ...rows]
-                .map(row => row.map(val => `"${String(val).replace(/"/g, '""')}"`).join(","))
-                .join("\r\n");
-              const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url;
-              a.download = `gastos_export_${new Date().toISOString().slice(0,10)}.csv`;
-              document.body.appendChild(a);
-              a.click();
-              setTimeout(() => {
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-              }, 0);
+              const sheetData = [headers, ...rows];
+              const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+              worksheet["!cols"] = headers.map((header, index) => {
+                const maxRowLength = rows.reduce((max, row) => {
+                  const cellValue = row[index];
+                  return Math.max(max, String(cellValue ?? "").length);
+                }, header.length);
+
+                return { wch: Math.min(Math.max(maxRowLength + 2, 12), 40) };
+              });
+
+              const workbook = XLSX.utils.book_new();
+              XLSX.utils.book_append_sheet(workbook, worksheet, "Gastos");
+              XLSX.writeFile(workbook, `gastos_export_${new Date().toISOString().slice(0,10)}.xlsx`);
             },
           },
         ]}
       />
+
+      <div
+        style={{
+          background: "#FFFFFF",
+          borderRadius: 16,
+          padding: 16,
+          boxShadow: "0 8px 24px rgba(23,20,58,0.08)",
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+          gap: 12,
+        }}
+      >
+        {[
+          {
+            key: "id",
+            label: "Id",
+            type: "text" as const,
+            selectedValue: filtrosCabecera.id,
+          },
+          {
+            key: "estado",
+            label: "Estado",
+            options: headerFilterOptions.estado.map((option) => ({
+              value: option,
+              label: getEstadoLabel(estadoOptions, option),
+            })),
+            selectedValues: filtrosCabecera.estado,
+          },
+          {
+            key: "fechaInicio",
+            label: "Fecha inicio",
+            type: "date" as const,
+            selectedValue: filtrosCabecera.fechaInicio,
+          },
+          {
+            key: "fechaFin",
+            label: "Fecha fin",
+            type: "date" as const,
+            selectedValue: filtrosCabecera.fechaFin,
+          },
+          {
+            key: "comprobante",
+            label: "Comprobante",
+            options: headerFilterOptions.comprobante.map((option) => ({ value: option, label: option })),
+            selectedValues: filtrosCabecera.comprobante,
+          },
+          {
+            key: "moneda",
+            label: "Moneda",
+            options: headerFilterOptions.moneda.map((option) => ({ value: option, label: option })),
+            selectedValues: filtrosCabecera.moneda,
+          },
+          {
+            key: "cliente",
+            label: "Cliente",
+            options: headerFilterOptions.cliente.map((option) => ({ value: option, label: option })),
+            selectedValues: filtrosCabecera.cliente,
+          },
+          {
+            key: "proyecto",
+            label: "Proyecto",
+            options: headerFilterOptions.proyecto.map((option) => ({ value: option, label: option })),
+            selectedValues: filtrosCabecera.proyecto,
+          },
+          {
+            key: "site",
+            label: "Site",
+            options: headerFilterOptions.site.map((option) => ({ value: option, label: option })),
+            selectedValues: filtrosCabecera.site,
+          },
+          {
+            key: "tipoTrabajo",
+            label: "Tipo de trabajo",
+            options: headerFilterOptions.tipoTrabajo.map((option) => ({ value: option, label: option })),
+            selectedValues: filtrosCabecera.tipoTrabajo,
+          },
+          {
+            key: "solicitante",
+            label: "Solicitante",
+            options: headerFilterOptions.solicitante.map((option) => ({ value: option, label: option })),
+            selectedValues: filtrosCabecera.solicitante,
+          },
+          {
+            key: "responsable",
+            label: "Responsable",
+            options: headerFilterOptions.responsable.map((option) => ({ value: option, label: option })),
+            selectedValues: filtrosCabecera.responsable,
+          },
+          {
+            key: "validador",
+            label: "Validador",
+            options: headerFilterOptions.validador.map((option) => ({ value: option, label: option })),
+            selectedValues: filtrosCabecera.validador,
+          },
+        ].map((filter) => {
+          const isOpen = cabeceraFiltroAbierto === filter.key;
+          const searchTerm = isSearchableHeaderFilterKey(filter.key) ? headerFilterSearch[filter.key] : "";
+          const visibleOptions =
+            filter.type === "date" || filter.type === "text"
+              ? filter.options ?? []
+              : (filter.options ?? []).filter((option) =>
+                  !searchTerm ? true : matchesFlexibleSearch(option.label, searchTerm)
+                );
+          const summary =
+            filter.type === "date"
+              ? formatInputDateForDisplay(filter.selectedValue) || "Seleccionar fecha"
+              : filter.type === "text"
+                ? filter.selectedValue?.trim() || "Todos"
+              : buildHeaderFilterSummary(
+                  (filter.options ?? [])
+                    .filter((option) => filter.selectedValues?.includes(option.value))
+                    .map((option) => option.label)
+                );
+
+          return (
+            <div
+              key={filter.key}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+                fontSize: 11,
+                color: "#374151",
+                fontWeight: 600,
+                position: "relative",
+              }}
+            >
+              <span>{filter.label}</span>
+              <button
+                type="button"
+                onClick={() =>
+                  setCabeceraFiltroAbierto((prev) => {
+                    const nextValue = prev === filter.key ? null : filter.key;
+
+                    if (!nextValue && isSearchableHeaderFilterKey(filter.key)) {
+                      setHeaderFilterSearch((prevSearch) => ({
+                        ...prevSearch,
+                        [filter.key]: "",
+                      }));
+                    }
+
+                    return nextValue;
+                  })
+                }
+                style={{
+                  height: 36,
+                  borderRadius: 10,
+                  border: "1px solid #D1D5DB",
+                  padding: "0 10px",
+                  fontSize: 11,
+                  color: "#111827",
+                  background: "#FFFFFF",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <span
+                  style={{
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    flex: 1,
+                  }}
+                >
+                  {summary}
+                </span>
+                <span style={{ color: "#6B7280", fontSize: 10 }}>{isOpen ? "▲" : "▼"}</span>
+              </button>
+
+              {isOpen && (
+                <div
+                  ref={cabeceraFiltroMenuRef}
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 6px)",
+                    left: 0,
+                    width: "100%",
+                    minWidth: 180,
+                    maxHeight: 320,
+                    overflow: "auto",
+                    borderRadius: 12,
+                    border: "1px solid #D1D5DB",
+                    background: "#FFFFFF",
+                    boxShadow: "0 12px 28px rgba(15,23,42,0.12)",
+                    padding: 10,
+                    zIndex: 20,
+                  }}
+                >
+                  {filter.type === "date" ? (
+                    <input
+                      type="date"
+                      value={filter.selectedValue}
+                      onChange={(event) =>
+                        setFiltrosCabecera((prev) => ({
+                          ...prev,
+                          [filter.key]: event.target.value,
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        height: 36,
+                        borderRadius: 10,
+                        border: "1px solid #D1D5DB",
+                        padding: "0 10px",
+                        fontSize: 11,
+                        color: "#111827",
+                        background: "#FFFFFF",
+                      }}
+                    />
+                  ) : filter.type === "text" ? (
+                    <input
+                      type="text"
+                      value={filter.selectedValue ?? ""}
+                      onChange={(event) =>
+                        setFiltrosCabecera((prev) => ({
+                          ...prev,
+                          [filter.key]: event.target.value.replace(/\D/g, ""),
+                        }))
+                      }
+                      placeholder="Ingrese Id"
+                      style={{
+                        width: "100%",
+                        height: 36,
+                        borderRadius: 10,
+                        border: "1px solid #D1D5DB",
+                        padding: "0 10px",
+                        fontSize: 11,
+                        color: "#111827",
+                        background: "#FFFFFF",
+                      }}
+                    />
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {isSearchableHeaderFilterKey(filter.key) && (
+                        <input
+                          type="text"
+                          value={searchTerm}
+                          onChange={(event) =>
+                            setHeaderFilterSearch((prev) => ({
+                              ...prev,
+                              [filter.key]: event.target.value,
+                            }))
+                          }
+                          placeholder={`Buscar ${filter.label.toLowerCase()}...`}
+                          style={{
+                            width: "100%",
+                            height: 36,
+                            borderRadius: 10,
+                            border: "1px solid #D1D5DB",
+                            padding: "0 10px",
+                            fontSize: 11,
+                            color: "#111827",
+                            background: "#FFFFFF",
+                          }}
+                        />
+                      )}
+                      {visibleOptions.length === 0 && (
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: "#6B7280",
+                            fontWeight: 500,
+                            padding: "4px 2px",
+                          }}
+                        >
+                          No se encontraron opciones.
+                        </div>
+                      )}
+                      {visibleOptions.map((option) => (
+                        <label
+                          key={`${filter.key}-${option.value}`}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            fontSize: 11,
+                            color: "#111827",
+                            fontWeight: 500,
+                            cursor: "pointer",
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={filter.selectedValues?.includes(option.value) ?? false}
+                            onChange={() =>
+                              toggleMultiHeaderFilter(
+                                filter.key as GastosHeaderMultiFilterKey,
+                                option.value
+                              )
+                            }
+                          />
+                          <span>{option.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
 
       {rechazoError && (
         <div
@@ -2333,6 +2936,57 @@ export default function GastosPage() {
           }}
         >
           {rechazoError}
+        </div>
+      )}
+
+      {mensajeFiltroCabecera && (
+        <div
+          style={{
+            marginTop: 12,
+            borderRadius: 12,
+            border: "1px solid #FCA5A5",
+            background: "#FEF2F2",
+            color: "#991B1B",
+            padding: 14,
+            fontSize: 11,
+            fontWeight: 600,
+          }}
+        >
+          {mensajeFiltroCabecera}
+        </div>
+      )}
+
+      {limiteConsultaServidor && (
+        <div
+          style={{
+            marginTop: 12,
+            borderRadius: 12,
+            border: "1px solid #F59E0B",
+            background: "#FFFBEB",
+            color: "#92400E",
+            padding: 14,
+            fontSize: 11,
+            fontWeight: 600,
+          }}
+        >
+          {limiteConsultaServidor.message}
+        </div>
+      )}
+
+      {excedeLimiteRegistros && (
+        <div
+          style={{
+            marginTop: 12,
+            borderRadius: 12,
+            border: "1px solid #F59E0B",
+            background: "#FFFBEB",
+            color: "#92400E",
+            padding: 14,
+            fontSize: 11,
+            fontWeight: 600,
+          }}
+        >
+          {`Se encontraron ${cantidadRegistrosFiltrados} registros. Por rendimiento solo se permite mostrar hasta ${MAX_GASTOS_PARA_MOSTRAR}. Aplique más filtros, preferiblemente por fecha, cliente, proyecto, site o estado.`}
         </div>
       )}
 
@@ -2403,83 +3057,6 @@ export default function GastosPage() {
                   );
                 })}
               </tr>
-              <tr>
-                {columnasGridGastos.map((header) => {
-                  const isFrozen = columnasCongeladasGrid.has(header.key);
-
-                  return (
-                    <th
-                      key={`filter-${header.key}`}
-                      style={{
-                        padding: "2px 11px 10px",
-                        borderBottom: "1px solid #E5E7EB",
-                        background: "#F9FAFB",
-                        position: "sticky",
-                        top: 42,
-                        left: isFrozen ? stickyLeftByColumn[header.key] : undefined,
-                        zIndex: isFrozen ? 4 : 3,
-                        borderRight: isFrozen ? "1px solid #E5E7EB" : undefined,
-                      }}
-                    >
-                      {header.key === "acciones" ? null : (
-                        <div style={{ position: "relative" }}>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setColumnaFiltroAbierta((prev) => (prev === header.key ? null : header.key));
-                            }}
-                            style={{
-                              width: "100%",
-                              height: 30,
-                              borderRadius: 8,
-                              border: (filtrosColumnas[header.key] ?? []).length > 0 ? "1px solid #C7D2FE" : "1px solid #D1D5DB",
-                              padding: "0 9px",
-                              fontSize: 10,
-                              color: (filtrosColumnas[header.key] ?? []).length > 0 ? "#4338CA" : "#374151",
-                              background: (filtrosColumnas[header.key] ?? []).length > 0 ? "#EEF2FF" : "#FFFFFF",
-                              boxSizing: "border-box",
-                              cursor: "pointer",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "space-between",
-                              gap: 8,
-                            }}
-                          >
-                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" 
-                                stroke={(filtrosColumnas[header.key] ?? []).length > 0 ? '#4338CA' : '#6B7280'} 
-                                strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <line x1="22" y1="3" x2="2" y2="3" />
-                                <line x1="16" y1="7" x2="8" y2="7" />
-                                <line x1="10" y1="11" x2="14" y2="11" />
-                                <line x1="21" y1="3" x2="14" y2="11" />
-                                <line x1="3" y1="3" x2="10" y2="11" />
-                                <line x1="8" y1="7" x2="8" y2="21" />
-                                <line x1="16" y1="7" x2="16" y2="21" />
-                              </svg>
-                              {(filtrosColumnas[header.key] ?? []).length > 0 && (
-                                <span style={{ fontSize: 10, color: '#4338CA', fontWeight: 600 }}>{(filtrosColumnas[header.key] ?? []).length}</span>
-                              )}
-                            </span>
-                          </button>
-                          {columnaFiltroAbierta === header.key && (
-                            <ColumnFilterDropdown
-                              header={header}
-                              filtroColumnaMenuRef={filtroColumnaMenuRef}
-                              filtrosColumnas={filtrosColumnas}
-                              setFiltrosColumnas={setFiltrosColumnas}
-                              opcionesFiltroPorColumna={opcionesFiltroPorColumna}
-                              filtroBusqueda={filtroBusquedaPorColumna[header.key] || ""}
-                              setFiltroBusqueda={valor => setFiltroBusquedaPorColumna((prev: Record<string, string>) => ({ ...prev, [header.key]: valor }))}
-                            />
-                          )}
-                        </div>
-                      )}
-                    </th>
-                  );
-                })}
-              </tr>
             </thead>
             <tbody>
               {cargando ? (
@@ -2491,19 +3068,28 @@ export default function GastosPage() {
               ) : gastosFiltrados.length === 0 ? (
                 <tr>
                   <td colSpan={columnasGridGastos.length} style={{ padding: 24, textAlign: "center", color: "#6B7280", fontSize: 11 }}>
-                    No se encontraron gastos.
+                    {mensajeFiltroCabecera
+                      ? mensajeFiltroCabecera
+                      : limiteConsultaServidor
+                        ? limiteConsultaServidor.message
+                        : excedeLimiteRegistros
+                      ? `Se encontraron ${cantidadRegistrosFiltrados} registros y el máximo permitido para mostrar es ${MAX_GASTOS_PARA_MOSTRAR}. Aplique más filtros.`
+                      : "No se encontraron gastos."}
                   </td>
                 </tr>
               ) : (
-                  gastosFiltrados.map((gasto) => (
+                  gastosFiltrados.map((gasto, rowIndex) => {
+                    const rowKey = getGastoRowKey(gasto, rowIndex);
+
+                    return (
                     <tr
-                      key={gasto.id}
+                      key={rowKey}
                       style={{
-                        background: selectedRowId === gasto.id ? "#E0E7FF" : "transparent",
+                        background: selectedRowKey === rowKey ? "#E0E7FF" : "transparent",
                       transition: "background 0.1s"
                     }}
                     onClick={() => {
-                      setSelectedRowId(gasto.id);
+                      setSelectedRowKey(rowKey);
                       if (rechazoError) {
                         setRechazoError(null);
                       }
@@ -2528,7 +3114,7 @@ export default function GastosPage() {
                             : undefined,
                           zIndex: columnasCongeladasGrid.has(col.key) ? 2 : 1,
                           background: columnasCongeladasGrid.has(col.key)
-                            ? selectedRowId === gasto.id
+                            ? selectedRowKey === rowKey
                               ? "#E0E7FF"
                               : "#FFFFFF"
                             : undefined,
@@ -2604,25 +3190,24 @@ export default function GastosPage() {
                             case "ot":
                               return renderGridCellText(gasto.filtroOperativo.ot?.ot);
                             case "estado":
-                              return renderGridCellText(String(gasto.estado ?? ""));
-                            case "fechaEmision":
+                              return renderGridCellText(getEstadoLabel(estadoOptions, gasto.estado, gasto.estadoLabel));
+                            case "fecIngreso":
                               return renderGridCellText(
-                                gasto.fechaEmision
-                                  ? new Date(gasto.fechaEmision).toLocaleDateString("es-PE")
-                                  : ""
+                                formatInputDateForDisplay(gasto.fecIngreso)
                               );
                             case "acciones":
+                              const accionesHabilitadas = gasto.estado === 0 || gasto.estado === 2;
                               return (
                                 <div style={{ display: "flex", justifyContent: "center", gap: 8 }}>
                                   <button
-                                    title="Editar"
-                                    aria-label="Editar"
+                                    title="Visualizar"
+                                    aria-label="Visualizar"
                                     style={{
                                       width: 34,
                                       height: 34,
-                                      border: "1px solid #C7D2FE",
-                                      background: "#EEF2FF",
-                                      color: "#3730A3",
+                                      border: "1px solid #BFDBFE",
+                                      background: "#EFF6FF",
+                                      color: "#1D4ED8",
                                       borderRadius: 8,
                                       fontWeight: 700,
                                       cursor: "pointer",
@@ -2633,8 +3218,35 @@ export default function GastosPage() {
                                     }}
                                     onClick={(e) => {
                                       e.stopPropagation();
+                                      abrirVisualizar(gasto);
+                                    }}
+                                  >
+                                    👁
+                                  </button>
+                                  <button
+                                    title="Editar"
+                                    aria-label="Editar"
+                                    style={{
+                                      width: 34,
+                                      height: 34,
+                                      border: `1px solid ${accionesHabilitadas ? "#C7D2FE" : "#E5E7EB"}`,
+                                      background: accionesHabilitadas ? "#EEF2FF" : "#F3F4F6",
+                                      color: accionesHabilitadas ? "#3730A3" : "#9CA3AF",
+                                      borderRadius: 8,
+                                      fontWeight: 700,
+                                      cursor: accionesHabilitadas ? "pointer" : "not-allowed",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      fontSize: 15,
+                                      opacity: accionesHabilitadas ? 1 : 0.65,
+                                    }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (!accionesHabilitadas) return;
                                       abrirEditar(gasto);
                                     }}
+                                    disabled={!accionesHabilitadas}
                                   >
                                     ✎
                                   </button>
@@ -2645,21 +3257,24 @@ export default function GastosPage() {
                                     style={{
                                       width: 34,
                                       height: 34,
-                                      border: "1px solid #FECACA",
-                                      background: "#FEF2F2",
-                                      color: "#B91C1C",
+                                      border: `1px solid ${accionesHabilitadas ? "#FECACA" : "#E5E7EB"}`,
+                                      background: accionesHabilitadas ? "#FEF2F2" : "#F3F4F6",
+                                      color: accionesHabilitadas ? "#B91C1C" : "#9CA3AF",
                                       borderRadius: 8,
                                       fontWeight: 700,
-                                      cursor: "pointer",
+                                      cursor: accionesHabilitadas ? "pointer" : "not-allowed",
                                       display: "flex",
                                       alignItems: "center",
                                       justifyContent: "center",
                                       fontSize: 15,
+                                      opacity: accionesHabilitadas ? 1 : 0.65,
                                     }}
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      confirmarEliminar(gasto);
+                                      if (!accionesHabilitadas) return;
+                                      confirmarEliminar(gasto, rowIndex);
                                     }}
+                                    disabled={!accionesHabilitadas}
                                   >
                                     🗑
                                   </button>
@@ -2671,8 +3286,9 @@ export default function GastosPage() {
                         })()}
                       </td>
                     ))}
-                  </tr>
-                ))
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -2687,7 +3303,13 @@ export default function GastosPage() {
           justifyContent: "space-between",
           alignItems: "center"
         }}>
-          <span>{`Registros encontrados: ${gastosFiltrados.length}`}</span>
+          <span>
+            {limiteConsultaServidor
+              ? `Registros encontrados: ${limiteConsultaServidor.totalRows} | Máximo permitido para mostrar: ${limiteConsultaServidor.maxRowsAllowed}`
+              : excedeLimiteRegistros
+              ? `Registros encontrados: ${cantidadRegistrosFiltrados} | Máximo permitido para mostrar: ${MAX_GASTOS_PARA_MOSTRAR}`
+              : `Registros encontrados: ${gastosFiltrados.length}`}
+          </span>
           <span>
             {(() => {
               // Agrupar y sumar montos por moneda
@@ -2734,7 +3356,7 @@ export default function GastosPage() {
               <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", width: "100%" }}>
                 <div>
                   <h2 style={{ margin: 0, fontSize: 24, color: "#17143A" }}>
-                    {modo === "nuevo" ? "Nuevo gasto" : "Editar gasto"}
+{modo === "nuevo" ? "Nuevo gasto" : modo === "ver" ? "Visualizar gasto" : "Editar gasto"}
                   </h2>
                   <p style={{ marginTop: 8, marginBottom: 0, color: "#6B7280", fontSize: 13 }}>
                     Complete la información del gasto.
@@ -2821,7 +3443,15 @@ export default function GastosPage() {
               </div>
             )}
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 1.5,
+                pointerEvents: esModoVisualizacion ? "none" : "auto",
+                opacity: esModoVisualizacion ? 0.92 : 1,
+              }}
+            >
               {/* Enlace para visualizar la factura solo si hay ruta y NO es modo nuevo ni editar */}
               {modo !== "nuevo" && modo !== "editar" && (form.facturaPath || form.facturaUrl) && (
                 <a
@@ -3196,7 +3826,7 @@ export default function GastosPage() {
     marginBottom: 8,
   }}
 >
-  {/* FECHA EMISION */}
+  {/* FECHA INGRESO */}
   <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
     <label style={{ fontSize: 11, fontWeight: 700, display: "flex", gap: 6 }}>
       <input
@@ -3213,7 +3843,7 @@ export default function GastosPage() {
           }));
         }}
       />
-      Fecha emisión
+      Fecha emision
     </label>
 
     <input
@@ -3783,15 +4413,15 @@ export default function GastosPage() {
                       border: "none",
                       padding: 0,
                       marginLeft: 0,
-                      cursor: facturaUploadLoading ? "wait" : "pointer",
+                      cursor: esModoVisualizacion ? "not-allowed" : facturaUploadLoading ? "wait" : "pointer",
                       display: "flex",
                       alignItems: "center",
                       height: 36,
-                      opacity: facturaUploadLoading ? 0.7 : 1,
+                      opacity: facturaUploadLoading || esModoVisualizacion ? 0.7 : 1,
                     }}
                     title="Cargar factura"
                     type="button"
-                    disabled={facturaUploadLoading}
+                    disabled={facturaUploadLoading || esModoVisualizacion}
                     onClick={() => setShowFacturaSourceMenu((prev) => !prev)}
                   >
                     <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -3904,7 +4534,7 @@ export default function GastosPage() {
                             </div>
                           </div>
                         )}
-                  {showFacturaSourceMenu && (
+                  {showFacturaSourceMenu && !esModoVisualizacion && (
                     <div
                       style={{
                         position: "absolute",
@@ -3990,20 +4620,20 @@ export default function GastosPage() {
                   }}
                   onClick={cerrarPanel}
                 >
-                  Cancelar
+                  {esModoVisualizacion ? "Cerrar" : "Cancelar"}
                 </button>
                 <button
                   style={{
                     border: "none",
-                    background: "#6E4CCB",
+                    background: esModoVisualizacion ? "#CBD5E1" : "#6E4CCB",
                     color: "#FFFFFF",
                     padding: "10px 16px",
                     borderRadius: 10,
                     fontWeight: 700,
-                    cursor: "pointer",
+                    cursor: esModoVisualizacion ? "not-allowed" : "pointer",
                   }}
-                  onClick={guardar}
-                  disabled={guardando}
+                  onClick={esModoVisualizacion ? undefined : guardar}
+                  disabled={guardando || esModoVisualizacion}
                 >
                   {guardando ? "Guardando..." : modo === "nuevo" ? "Guardar" : "Actualizar"}
                 </button>
@@ -4161,3 +4791,13 @@ export default function GastosPage() {
     </div>
   );
 }
+const getGastoRowKey = (gasto: GastoForm, rowIndex: number) => {
+  const id = Number(gasto.id ?? 0);
+  const idSite = String(gasto.filtroOperativo.filtro?.idSite ?? "").trim();
+
+  if (id > 0 && idSite) {
+    return `${id}-${idSite}`;
+  }
+
+  return `${gasto.id || "sin-id"}-${rowIndex}`;
+};

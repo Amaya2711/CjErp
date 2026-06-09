@@ -16,11 +16,16 @@ export type PlanillaConsultaParametro = {
 
 export type PlanillaConsultaEstadosRequest = {
   parametros: PlanillaConsultaParametro[];
+  maxRows?: number;
 };
 
 export type PlanillaConsultaEstadosResponse = {
   columns: string[];
   rows: Array<Record<string, unknown>>;
+  totalRows?: number;
+  maxRowsAllowed?: number | null;
+  limitExceeded?: boolean;
+  message?: string | null;
 };
 
 export type StoredProcedureGridColumnConfig = {

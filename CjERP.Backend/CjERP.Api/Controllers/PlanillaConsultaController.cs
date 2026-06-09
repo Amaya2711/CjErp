@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CjERP.Api.Controllers
@@ -18,10 +19,14 @@ namespace CjERP.Api.Controllers
         private static readonly string[] RequiredParameters = ["IdCargo", "IdEmpleado", "Estados"];
 
         private readonly IPlanillaConsultaService _planillaConsultaService;
+        private readonly ILogger<PlanillaConsultaController> _logger;
 
-        public PlanillaConsultaController(IPlanillaConsultaService planillaConsultaService)
+        public PlanillaConsultaController(
+            IPlanillaConsultaService planillaConsultaService,
+            ILogger<PlanillaConsultaController> logger)
         {
             _planillaConsultaService = planillaConsultaService;
+            _logger = logger;
         }
 
         [HttpPost]
@@ -79,16 +84,31 @@ namespace CjERP.Api.Controllers
                 });
             }
 
-            var result = await _planillaConsultaService.ConsultarEstadosAsync(
-                parametros,
-                cancellationToken);
-
-            return Ok(new
+            try
             {
-                success = true,
-                message = "Consulta ejecutada correctamente.",
-                data = result
-            });
+                var result = await _planillaConsultaService.ConsultarEstadosAsync(
+                    parametros,
+                    request?.MaxRows,
+                    cancellationToken);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Consulta ejecutada correctamente.",
+                    data = result
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "[PlanillaConsulta] Error ejecutando consulta-estados. Parametros={Parametros}",
+                    string.Join(
+                        ", ",
+                        parametros.Select(p => $"{p.Nombre}={p.Valor} ({p.Tipo})")));
+
+                throw;
+            }
         }
     }
 }

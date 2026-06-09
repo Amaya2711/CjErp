@@ -15,6 +15,7 @@ using CjERP.Shared.Configuration;
 using Hangfire;
 using Hangfire.SqlServer;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
@@ -256,12 +257,17 @@ app.UseExceptionHandler(exceptionApp =>
 {
     exceptionApp.Run(async context =>
     {
+        var exceptionFeature = context.Features.Get<IExceptionHandlerFeature>();
+        var exception = exceptionFeature?.Error;
+
         context.Response.StatusCode = StatusCodes.Status500InternalServerError;
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsJsonAsync(new
         {
             success = false,
-            message = "Ocurrio un error interno al procesar la solicitud."
+            message = "Ocurrio un error interno al procesar la solicitud.",
+            detail = app.Environment.IsDevelopment() ? exception?.Message : null,
+            exceptionType = app.Environment.IsDevelopment() ? exception?.GetType().FullName : null
         });
     });
 });

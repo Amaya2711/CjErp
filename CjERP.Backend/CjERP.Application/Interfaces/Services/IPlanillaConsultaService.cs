@@ -9,6 +9,7 @@ namespace CjERP.Application.Interfaces.Services
     {
         Task<PlanillaConsultaEstadosResponseDto> ConsultarEstadosAsync(
             IEnumerable<PlanillaConsultaParametroDto> parametros,
+            int? maxRows = null,
             CancellationToken cancellationToken = default);
     }
 }

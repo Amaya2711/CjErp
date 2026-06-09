@@ -19,7 +19,7 @@ export function useCrudForm<T, TPayload = Partial<T>>(
   const [error, setError] = useState<string>("");
   const [message, setMessage] = useState<string>("");
   const [panelOpen, setPanelOpen] = useState(false);
-  const [mode, setMode] = useState<"nuevo" | "editar">("nuevo");
+  const [mode, setMode] = useState<"nuevo" | "editar" | "ver">("nuevo");
   const [idToDelete, setIdToDelete] = useState<number | null>(null);
 
   const load = async () => {

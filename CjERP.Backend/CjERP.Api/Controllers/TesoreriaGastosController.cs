@@ -58,6 +58,7 @@ public class TesoreriaGastosController : ControllerBase
         public string Detalle { get; set; } = string.Empty;
         public string Comentario { get; set; } = string.Empty;
         public string FechaVencimiento { get; set; } = string.Empty;
+        public string FecIngreso { get; set; } = string.Empty;
         public string FechaEmision { get; set; } = string.Empty;
         public string Solicitante { get; set; } = string.Empty;
         public string SolicitanteLabel { get; set; } = string.Empty;
@@ -439,6 +440,7 @@ public class TesoreriaGastosController : ControllerBase
             Detalle = dto.Detalle?.Trim() ?? string.Empty,
             Comentario = dto.Comentario?.Trim() ?? string.Empty,
             FechaVencimiento = dto.FechaVencimiento?.Trim() ?? string.Empty,
+            FecIngreso = dto.FecIngreso?.Trim() ?? string.Empty,
             FechaEmision = dto.FechaEmision?.Trim() ?? string.Empty,
             Solicitante = dto.Solicitante?.Trim() ?? string.Empty,
             SolicitanteLabel = dto.SolicitanteLabel?.Trim() ?? string.Empty,
@@ -731,6 +733,7 @@ public class TesoreriaGastosController : ControllerBase
             ["Serie"] = new("Documento", NullIfWhiteSpace(gasto.Serie)),
             ["Detalle"] = new("Documento", NullIfWhiteSpace(gasto.Detalle)),
             ["Comentario"] = new("Documento", NullIfWhiteSpace(gasto.Comentario)),
+            ["FecIngreso"] = new("Fechas", NullIfWhiteSpace(gasto.FecIngreso)),
             ["Fecha Emision"] = new("Fechas", NullIfWhiteSpace(gasto.FechaEmision)),
             ["Fecha Vencimiento"] = new("Fechas", NullIfWhiteSpace(gasto.FechaVencimiento)),
             ["Solicitante"] = new("Flujo", NullIfWhiteSpace(gasto.Solicitante)),
