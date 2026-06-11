@@ -1,8 +1,21 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
   // Estado para fila seleccionada
-  
+ 
 import { useCrudForm } from "../../../hooks/useCrudForm";
-import { ArrowDown, ArrowUp } from "lucide-react";
+import {
+  AlertTriangle,
+  Bug,
+  CheckCircle2,
+  CircleX,
+  Eraser,
+  Eye,
+  ArrowDown,
+  ArrowUp,
+  ListFilter,
+  PencilLine,
+  FileDown,
+  RotateCcw,
+} from "lucide-react";
 import httpClient from "../../../api/httpClient";
 import {
   buildPlanillaConsultaEstadosRequest,
@@ -27,6 +40,7 @@ import { SHAREPOINT_BASE_URL } from "../../../utils/sharepoint";
 
 type GastoDto = {
   id: number;
+  idOc?: number;
   idSuministroProvisional?: number | null;
   fechaInicioSuministroProvisional?: string;
   filtroOperativoKey: string;
@@ -49,6 +63,15 @@ type GastoDto = {
   subtotal?: number;
   total?: number;
   igv?: number;
+  subOc?: number;
+  subPlanilla?: number;
+  porce?: number;
+  idMonedaOc?: number;
+  adelaFic?: number;
+  diferenciaFic?: number;
+  codigoValidacionFic?: number;
+  resultadoValidacionFic?: string;
+  porcentajeFic?: number;
   idRendicion?: number;
   detalle: string;
   comentario: string;
@@ -88,6 +111,7 @@ type GastoDto = {
 
 type GastoForm = {
   id: number | null;
+  idOc?: number;
   idSuministroProvisional: string;
   fechaInicioSuministroProvisional: string;
   filtroOperativo: FiltroOperativoValue;
@@ -128,6 +152,16 @@ type GastoForm = {
   rutaFacturaEnviada?: string;
   estado: number;
   estadoLabel?: string;
+  tipoCambio?: number;
+  subOc?: number;
+  subPlanilla?: number;
+  porce?: number;
+  idMonedaOc?: number;
+  adelaFic?: number;
+  diferenciaFic?: number;
+  codigoValidacionFic?: number;
+  resultadoValidacionFic?: string;
+  porcentajeFic?: number;
 };
 
 type GastoPayload = {
@@ -183,6 +217,8 @@ type GastoPayload = {
 
 type GastosHeaderFilters = {
   id: string;
+  idOc: string;
+  porcentajeFic: string;
   fechaInicio: string;
   fechaFin: string;
   estado: string[];
@@ -199,9 +235,11 @@ type GastosHeaderFilters = {
 
 const GASTOS_HEADER_FILTERS_INITIAL: GastosHeaderFilters = {
   id: "",
+  idOc: "",
+  porcentajeFic: "",
   fechaInicio: "",
   fechaFin: "",
-  estado: ["0", "2"],
+  estado: ["0"],
   comprobante: [],
   moneda: [],
   cliente: [],
@@ -213,7 +251,25 @@ const GASTOS_HEADER_FILTERS_INITIAL: GastosHeaderFilters = {
   validador: [],
 };
 
-const GASTOS_ESTADOS_DISPONIBLES = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "99"];
+const GASTOS_ESTADOS_DISPONIBLES = ["0", "2", "10", "6"];
+const GASTOS_ESTADO_PRESETS = {
+  aprobar: ["0"],
+  reaprobar: ["2"],
+  observado: ["10"],
+  hormiga: ["6"],
+  todos: ["0", "2", "10", "6"],
+} as const;
+
+type GastosEstadoPresetKey = keyof typeof GASTOS_ESTADO_PRESETS;
+
+const GASTOS_ESTADO_PRESET_LABELS: Record<GastosEstadoPresetKey, string> = {
+  aprobar: "Aprobar",
+  observado: "Hormiga",
+  hormiga: "ReAprobar",
+  reaprobar: "Observadas",
+  todos: "Todos",
+};
+
 type GastosHeaderMultiFilterKey =
   | "estado"
   | "comprobante"
@@ -226,12 +282,13 @@ type GastosHeaderMultiFilterKey =
   | "responsable"
   | "validador";
 
-type GastosHeaderSearchableFilterKey = "solicitante" | "responsable" | "validador";
+type GastosHeaderSearchableFilterKey = "solicitante" | "responsable" | "validador" | "site";
 
 const GASTOS_HEADER_FILTER_SEARCH_INITIAL: Record<GastosHeaderSearchableFilterKey, string> = {
   solicitante: "",
   responsable: "",
   validador: "",
+  site: "",
 };
 
 type FacturaUploadResponse = {
@@ -324,18 +381,24 @@ function normalizeDateFilterValue(dateValue?: string): string {
     return "";
   }
 
-  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
-    return normalized;
+  const datePart = normalized.split(/[ T]/)[0].trim();
+
+  if (!datePart) {
+    return "";
   }
 
-  const slashMatch = normalized.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+    return datePart;
+  }
+
+  const slashMatch = datePart.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
 
   if (slashMatch) {
     const [, day, month, year] = slashMatch;
     return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
   }
 
-  const parsed = new Date(normalized);
+  const parsed = new Date(datePart);
 
   if (Number.isNaN(parsed.getTime())) {
     return "";
@@ -374,7 +437,7 @@ function formatInputDateForDisplay(dateValue?: string): string {
   const slashMatch = normalized.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
 
   if (slashMatch) {
-    const [, day, month, year] = slashMatch;
+    const [, month, day, year] = slashMatch;
     return `${day.padStart(2, "0")}/${month.padStart(2, "0")}/${year}`;
   }
 
@@ -599,7 +662,7 @@ function matchesFlexibleSearch(label: string, query: string): boolean {
 }
 
 function isSearchableHeaderFilterKey(key: string): key is GastosHeaderSearchableFilterKey {
-  return key === "solicitante" || key === "responsable" || key === "validador";
+  return key === "solicitante" || key === "responsable" || key === "validador" || key === "site";
 }
 
 function toNumberOrZero(value: unknown): number {
@@ -723,7 +786,7 @@ function formatDecimalValue(value: number): string {
 }
 
 function getFacturaDisplayPath(facturaPath?: string, facturaUrl?: string): string {
-  // Prioriza la URL pública de SharePoint si existe
+  // Prioriza la URL pÃºblica de SharePoint si existe
   return facturaUrl?.trim() || facturaPath?.trim() || "";
 }
 
@@ -822,23 +885,28 @@ function normalizeFecIngresoFromStore(dateStr?: string | null): string {
     return "";
   }
 
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return value;
+  const datePart = value.split(/[ T]/)[0].trim();
+
+  if (!datePart) {
+    return "";
   }
 
-  const slashMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+    return datePart;
+  }
+
+  const slashMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(datePart);
   if (slashMatch) {
     const first = Number(slashMatch[1]);
     const second = Number(slashMatch[2]);
     const year = slashMatch[3];
 
-    const month = first > 12 ? second : first;
-    const day = first > 12 ? first : second;
+    const dayFirst = `${year}-${String(second).padStart(2, "0")}-${String(first).padStart(2, "0")}`;
 
-    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    return dayFirst;
   }
 
-  const parsed = new Date(value);
+  const parsed = new Date(datePart);
   if (Number.isNaN(parsed.getTime())) {
     return value;
   }
@@ -916,8 +984,18 @@ function getRecordNumber(row: Record<string, unknown>, ...keys: string[]): numbe
 }
 
 function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: number): GastoDto {
+  const subtotalValue = getRecordNumber(row, "Subtotal", "subtotal", "Subtotalb", "subtotalb");
+  const totalValue = getRecordNumber(row, "Total", "total", "Totalb", "totalb", "TotalPagar", "totalPagar");
+  const igvValue = getRecordNumber(row, "IGV", "Igv", "igv", "Igvb", "igvb");
+  const fallbackSubtotal =
+    subtotalValue ??
+    (totalValue != null && igvValue != null
+      ? roundToTwoDecimals(totalValue - igvValue)
+      : totalValue ?? 0);
+
   return {
     id: getRecordNumber(row, "Corre", "CorrelativoPlanilla", "Id", "id", "IdPlanilla", "idPlanilla") ?? index + 1,
+    idOc: getRecordNumber(row, "IdOc", "idOc") ?? undefined,
     idSuministroProvisional:
       getRecordNumber(
         row,
@@ -950,10 +1028,10 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     nombreCta: getRecordString(row, "NombreCta", "nombreCta"),
     ruc: getRecordString(row, "RUC", "Ruc", "ruc"),
     tipoPago: getRecordString(row, "IdTipoPago", "idTipoPago", "TipoPago", "tipoPago"),
-    monto: getRecordNumber(row, "Total", "total", "Totalb", "totalb", "TotalPagar", "totalPagar") ?? 0,
-    subtotal: getRecordNumber(row, "Subtotal", "subtotal", "Subtotalb", "subtotalb") ?? undefined,
-    total: getRecordNumber(row, "Total", "total", "Totalb", "totalb", "TotalPagar", "totalPagar") ?? undefined,
-    igv: getRecordNumber(row, "IGV", "Igv", "igv", "Igvb", "igvb") ?? undefined,
+    monto: fallbackSubtotal,
+    subtotal: subtotalValue ?? undefined,
+    total: totalValue ?? undefined,
+    igv: igvValue ?? undefined,
     idRendicion: getRecordNumber(row, "IdRendicion", "idRendicion") ?? undefined,
     detalle: getRecordString(row, "Detalle", "detalle"),
     comentario: getRecordString(row, "Observacion", "observacion", "Comentario", "comentario"),
@@ -991,17 +1069,7 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     comprobante: getRecordString(row, "IdComprobante", "idComprobante", "Comprobante", "comprobante"),
     comprobanteLabel: getRecordString(row, "Comprobante", "comprobante", "ComprobanteLabel", "comprobanteLabel"),
     tipoPagoLabel: getRecordString(row, "TipoPago", "tipoPago", "TipoPagoLabel", "tipoPagoLabel"),
-    serie: getRecordString(
-      row,
-      "Serie",
-      "serie",
-      "Documento",
-      "documento",
-      "SerieDocumento",
-      "serieDocumento",
-      "SerieFactura",
-      "serieFactura"
-    ),
+    serie: getRecordString(row, "Serie", "serie"),
     facturaUrl: getRecordString(row, "FacturaUrl", "facturaUrl", "RutaFacturaUrl", "rutaFacturaUrl","imgFactura","ImgFactura"),
     //facturaPath: getRecordString(row, "FacturaPath", "facturaPath", "RutaFactura", "rutaFactura"),
     //rutaFactura: getRecordString(row, "RutaFactura", "rutaFactura"),
@@ -1013,7 +1081,6 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     tipoTrabajo: getRecordString(row, "Tipo_Trabajo", "tipo_Trabajo", "TipoTrabajo", "tipoTrabajo"),
     siteNombre: getRecordString(row, "Site", "site", "SiteNombre", "siteNombre", "NombreSite", "nombreSite"),
     ot: getRecordString(row, "Ot", "ot", "OT"),
-    tipoCambio: getRecordNumber(row, "TipoCambio", "tipoCambio") ?? undefined,
     idUsuarioFactura: getRecordNumber(row, "IdUsuarioFactura", "idUsuarioFactura"),
     estado: getRecordNumber(row, "Estado", "estado") ?? 0,
     estadoLabel: getRecordString(
@@ -1027,6 +1094,16 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
       "DescripcionEstado",
       "descripcionEstado"
     ),
+    tipoCambio: getRecordNumber(row, "TipoCambio", "tipoCambio") ?? TIPO_CAMBIO_GASTO,
+    subOc: getRecordNumber(row, "SubOc", "subOc") ?? undefined,
+    subPlanilla: getRecordNumber(row, "SubPlanilla", "subPlanilla") ?? undefined,
+    porce: getRecordNumber(row, "Porce", "porce") ?? undefined,
+    idMonedaOc: getRecordNumber(row, "IdMonedaOc", "idMonedaOc") ?? undefined,
+    adelaFic: getRecordNumber(row, "AdelaFic", "adelaFic") ?? undefined,
+    diferenciaFic: getRecordNumber(row, "DiferenciaFic", "diferenciaFic") ?? undefined,
+    codigoValidacionFic: getRecordNumber(row, "CodigoValidacionFic", "codigoValidacionFic") ?? undefined,
+    resultadoValidacionFic: getRecordString(row, "ResultadoValidacionFic", "resultadoValidacionFic"),
+    porcentajeFic: getRecordNumber(row, "PorcentajeFic", "porcentajeFic") ?? undefined,
   };
 }
 
@@ -1042,6 +1119,7 @@ function mapGastoDtoToView(item: GastoDto): GastoForm {
 
   return {
     id: item.id,
+    idOc: item.idOc,
     idSuministroProvisional:
       item.idSuministroProvisional != null ? String(item.idSuministroProvisional) : "",
     fechaInicioSuministroProvisional: item.fechaInicioSuministroProvisional ?? "",
@@ -1101,6 +1179,16 @@ function mapGastoDtoToView(item: GastoDto): GastoForm {
     rutaFacturaEnviada: item.rutaFacturaEnviada || "",
     estado: item.estado ?? 0,
     estadoLabel: item.estadoLabel || "",
+    tipoCambio: item.tipoCambio ?? TIPO_CAMBIO_GASTO,
+    subOc: item.subOc,
+    subPlanilla: item.subPlanilla,
+    porce: item.porce,
+    idMonedaOc: item.idMonedaOc,
+    adelaFic: item.adelaFic,
+    diferenciaFic: item.diferenciaFic,
+    codigoValidacionFic: item.codigoValidacionFic,
+    resultadoValidacionFic: item.resultadoValidacionFic || "",
+    porcentajeFic: item.porcentajeFic,
     };
 }
 
@@ -1143,9 +1231,11 @@ const formularioInicial: GastoForm = {
   estado: 0,
 };
 
-export default function GastosPage() {
+export default function GastosAprobarPage() {
   // Estado para fila seleccionada
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
+  const selectAllCheckboxRef = useRef<HTMLInputElement | null>(null);
   const [filtrosCabecera, setFiltrosCabecera] = useState<GastosHeaderFilters>(GASTOS_HEADER_FILTERS_INITIAL);
   const [headerFilterSearch, setHeaderFilterSearch] = useState<Record<GastosHeaderSearchableFilterKey, string>>(
     GASTOS_HEADER_FILTER_SEARCH_INITIAL
@@ -1239,12 +1329,12 @@ export default function GastosPage() {
   const comprobanteOptions = constantesPorCampo.tipo_comprobante ?? [];
   const estadoOptions = constantesPorCampo.estado ?? [];
 
-  // Utilidad para formatear fecha a MM/DD/YYYY en zona horaria de Perú (UTC-5)
+  // Utilidad para formatear fecha a MM/DD/YYYY en zona horaria de PerÃº (UTC-5)
   function formatDateToMMDDYYYYPeru(dateStr?: string) {
     if (!dateStr) return undefined;
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return undefined;
-    // Convertir a UTC-5 (hora de Perú)
+    // Convertir a UTC-5 (hora de PerÃº)
     // Obtener los componentes de la fecha en UTC-5
     const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
     // UTC-5 son -5 horas respecto a UTC
@@ -1321,7 +1411,7 @@ export default function GastosPage() {
       imgFactura: form.facturaUrl || undefined,
     };
 
-    //console.log("[Gastos] Parámetros enviados a Guardar/Planilla", payload);
+    //console.log("[Gastos] ParÃ¡metros enviados a Guardar/Planilla", payload);
 
     return payload;
   };
@@ -1331,11 +1421,16 @@ export default function GastosPage() {
       const estadosSeleccionados = filtrosCabecera.estado;
       const fechaInicio = filtrosCabecera.fechaInicio.trim();
       const fechaFin = filtrosCabecera.fechaFin.trim();
+      const incluirEstado99 = !isEstadoPresetActive("reaprobar");
+      const tipoCambioConsulta = Number(tipoCambio);
+      const tipoCambioValido = Number.isFinite(tipoCambioConsulta) && tipoCambioConsulta > 0
+        ? tipoCambioConsulta
+        : TIPO_CAMBIO_GASTO;
       const fechaInicioParametro = formatInputDateForPlanillaParametro(fechaInicio);
       const fechaFinParametro = formatInputDateForPlanillaParametro(fechaFin);
 
       if (estadosSeleccionados.length === 0) {
-        setMensajeFiltroCabecera("Seleccione al menos un estado para realizar la búsqueda.");
+        setMensajeFiltroCabecera("Seleccione al menos un estado para realizar la bÃºsqueda.");
         setLimiteConsultaServidor(null);
         return [];
       }
@@ -1349,11 +1444,21 @@ export default function GastosPage() {
       setMensajeFiltroCabecera(null);
       setLimiteConsultaServidor(null);
 
-      const parametros: PlanillaConsultaParametro[] = [
+    const parametros: PlanillaConsultaParametro[] = [
+      {
+        nombre: "Estados",
+        valor: estadosSeleccionados.join(","),
+        tipo: "string",
+        },
         {
-          nombre: "Estados",
-          valor: estadosSeleccionados.join(","),
-          tipo: "string",
+          nombre: "IncluirEstado99",
+          valor: incluirEstado99 ? "true" : "false",
+          tipo: "bool",
+        },
+        {
+          nombre: "TipoCambio",
+          valor: tipoCambioValido.toFixed(2),
+          tipo: "decimal",
         },
       ];
 
@@ -1361,7 +1466,7 @@ export default function GastosPage() {
         parametros.push({
           nombre: "FechaInicio",
           valor: fechaInicioParametro,
-          tipo: "string",
+          tipo: "date",
         });
       }
 
@@ -1369,7 +1474,7 @@ export default function GastosPage() {
         parametros.push({
           nombre: "FechaFin",
           valor: fechaFinParametro,
-          tipo: "string",
+          tipo: "date",
         });
       }
 
@@ -1377,6 +1482,7 @@ export default function GastosPage() {
         {
           ...buildPlanillaConsultaEstadosRequest(parametros),
           maxRows: MAX_GASTOS_PARA_MOSTRAR,
+          consulta: "aprobar",
         }
       );
 
@@ -1386,7 +1492,7 @@ export default function GastosPage() {
           maxRowsAllowed: Number(response.maxRowsAllowed ?? MAX_GASTOS_PARA_MOSTRAR),
           message:
             response.message?.trim() ||
-            `Se encontraron ${response.totalRows ?? 0} registros. Aplique más filtros antes de mostrar la información.`,
+            `Se encontraron ${response.totalRows ?? 0} registros. Aplique mÃ¡s filtros antes de mostrar la informaciÃ³n.`,
         });
         return [];
       }
@@ -1473,6 +1579,29 @@ export default function GastosPage() {
       { label: "Pendiente", value: formatDecimalValue(valoresGasto.saldo) }, // antes Saldo
     ],
     [valoresGasto]
+  );
+
+  const validacionOcValores = useMemo(
+    () => [
+      { label: "Sub OC", value: form.subOc != null ? formatDecimalValue(form.subOc) : "-" },
+      { label: "Sub planilla", value: form.subPlanilla != null ? formatDecimalValue(form.subPlanilla) : "-" },
+      { label: "Porce", value: form.porce != null ? `${formatDecimalValue(form.porce)} %` : "-" },
+      { label: "Adela fic", value: form.adelaFic != null ? formatDecimalValue(form.adelaFic) : "-" },
+      { label: "Diferencia fic", value: form.diferenciaFic != null ? formatDecimalValue(form.diferenciaFic) : "-" },
+      { label: "Código", value: form.codigoValidacionFic != null ? String(form.codigoValidacionFic) : "-" },
+      { label: "Resultado", value: form.resultadoValidacionFic || "-" },
+      { label: "Porcentaje fic", value: form.porcentajeFic != null ? `${formatDecimalValue(form.porcentajeFic)} %` : "-" },
+    ],
+    [
+      form.adelaFic,
+      form.codigoValidacionFic,
+      form.diferenciaFic,
+      form.porce,
+      form.porcentajeFic,
+      form.resultadoValidacionFic,
+      form.subOc,
+      form.subPlanilla,
+    ]
   );
 
   // Detectar si la moneda seleccionada es SOLES
@@ -1830,7 +1959,7 @@ export default function GastosPage() {
     const request = buildValoresGastoRequest(filtroOperativo);
 
     if (!request) {
-      //console.log("[Gastos] No se ejecuta sp_Finanzas_CargarValoresGasto porque faltan parámetros válidos.", {
+      //console.log("[Gastos] No se ejecuta sp_Finanzas_CargarValoresGasto porque faltan parÃ¡metros vÃ¡lidos.", {
       //  filtroOperativo,
       //});
       valoresGastoRequestRef.current += 1;
@@ -1839,7 +1968,7 @@ export default function GastosPage() {
       return;
     }
 
-    //console.log("[Gastos] Parámetros enviados a sp_Finanzas_CargarValoresGasto", request);
+    //console.log("[Gastos] ParÃ¡metros enviados a sp_Finanzas_CargarValoresGasto", request);
 
     const currentRequestId = valoresGastoRequestRef.current + 1;
     valoresGastoRequestRef.current = currentRequestId;
@@ -1978,6 +2107,7 @@ export default function GastosPage() {
     setShowFacturaSourceMenu(false);
     setFacturaUploadError(null);
     setPanelAbierto(true);
+    setTipoCambio(String(TIPO_CAMBIO_GASTO.toFixed(2)));
     // Actualizar valores de gasto (porcentaje, etc.) al crear nuevo
     void cargarValoresGasto(formularioInicial.filtroOperativo);
   };
@@ -2086,6 +2216,7 @@ export default function GastosPage() {
     setShowFacturaSourceMenu(false);
     setFacturaUploadError(null);
     setPanelAbierto(true);
+    setTipoCambio(String(gastoEditable.tipoCambio ?? TIPO_CAMBIO_GASTO));
     // Actualizar valores de gasto (porcentaje, etc.) al editar
     void cargarValoresGasto(gastoEditable.filtroOperativo);
   };
@@ -2121,6 +2252,7 @@ export default function GastosPage() {
     setErrores({});
     setShowFacturaSourceMenu(false);
     setFacturaUploadError(null);
+    setTipoCambio(String(TIPO_CAMBIO_GASTO.toFixed(2)));
   };
 
   const validar = () => {
@@ -2139,7 +2271,7 @@ export default function GastosPage() {
     }
 
     if (form.responsable && !form.idBancoCta) {
-      nuevosErrores.responsable = "El responsable seleccionado no tiene una cuenta válida.";
+      nuevosErrores.responsable = "El responsable seleccionado no tiene una cuenta vÃ¡lida.";
     }
 
     if (!form.tipoPago) {
@@ -2147,7 +2279,7 @@ export default function GastosPage() {
     }
 
     if (!form.monto || isNaN(Number(form.monto))) {
-      nuevosErrores.monto = "Ingrese un monto válido.";
+      nuevosErrores.monto = "Ingrese un monto vÃ¡lido.";
     }
 
     if (form.tipoPago && !esConstanteValida(tipoPagoOptions, form.tipoPago)) {
@@ -2269,6 +2401,7 @@ export default function GastosPage() {
   const camposBusquedaGastos = useMemo<CrudToolbarSearchField<GastoForm>[]>(
     () => [
       { key: "id", label: "Id", getValue: (gasto) => gasto.id },
+      { key: "idOc", label: "Id OC", getValue: (gasto) => gasto.idOc ?? "" },
       { key: "cliente", label: "Cliente", getValue: (gasto) => gasto.filtroOperativo.filtro?.nombreCliente ?? "" },
       { key: "nombreProyecto", label: "Proyecto", getValue: (gasto) => gasto.filtroOperativo.filtro?.nombreProyecto ?? "" },
       { key: "site", label: "Site", getValue: (gasto) => gasto.filtroOperativo.filtro?.nombreSite ?? "" },
@@ -2277,6 +2410,8 @@ export default function GastosPage() {
       { key: "bien", label: "Bien", getValue: (gasto) => getConstanteLabel(bienOptions, gasto.bien) },
       { key: "comprobante", label: "Comprobante", getValue: (gasto) => getConstanteLabel(comprobanteOptions, gasto.comprobante) },
       { key: "monto", label: "Monto", getValue: (gasto) => gasto.monto },
+      { key: "porce", label: "Porce", getValue: (gasto) => gasto.porce },
+      { key: "porcentajeFic", label: "PorcentajeFic", getValue: (gasto) => gasto.porcentajeFic },
       { key: "moneda", label: "Moneda", getValue: (gasto) => gasto.monedaLabel || getConstanteLabel(monedaOptions, gasto.moneda) },
       { key: "fecIngreso", label: "FecIngreso", getValue: (gasto) => gasto.fecIngreso },
       { key: "ot", label: "OT", getValue: (gasto) => gasto.filtroOperativo.ot?.ot },
@@ -2314,6 +2449,14 @@ export default function GastosPage() {
         case "monto":
           return gasto.monto !== undefined && gasto.monto !== null && gasto.monto !== ""
             ? Number(gasto.monto).toLocaleString("es-PE", { minimumFractionDigits: 2 })
+            : "";
+        case "porce":
+          return gasto.porce !== undefined && gasto.porce !== null
+            ? Number(gasto.porce)
+            : "";
+        case "porcentajeFic":
+          return gasto.porcentajeFic !== undefined && gasto.porcentajeFic !== null
+            ? Number(gasto.porcentajeFic)
             : "";
         case "moneda":
           return gasto.monedaLabel || getConstanteLabel(monedaOptions, gasto.moneda);
@@ -2386,6 +2529,42 @@ export default function GastosPage() {
         : [...prev[key], value].sort((left, right) => left.localeCompare(right, "es", { sensitivity: "base" })),
     }));
   }, []);
+
+  const setEstadoPreset = React.useCallback((preset: GastosEstadoPresetKey) => {
+    setFiltrosCabecera((prev) => ({
+      ...prev,
+      estado: [...GASTOS_ESTADO_PRESETS[preset]],
+    }));
+  }, []);
+
+  const limpiarFiltrosCabecera = React.useCallback(() => {
+    setFiltrosCabecera(GASTOS_HEADER_FILTERS_INITIAL);
+    setHeaderFilterSearch(GASTOS_HEADER_FILTER_SEARCH_INITIAL);
+    setCabeceraFiltroAbierto(null);
+    setMostrarFiltrosAdicionales(false);
+  }, []);
+
+  const isEstadoPresetActive = React.useCallback(
+    (preset: GastosEstadoPresetKey) => {
+      const expected = GASTOS_ESTADO_PRESETS[preset];
+      const current = filtrosCabecera.estado;
+
+      return (
+        current.length === expected.length &&
+        expected.every((estado) => current.includes(estado))
+      );
+    },
+    [filtrosCabecera.estado]
+  );
+
+  const estadoPresetActivo = useMemo(() => {
+    const preset = (Object.keys(GASTOS_ESTADO_PRESETS) as GastosEstadoPresetKey[]).find((key) =>
+      isEstadoPresetActive(key)
+    );
+
+    return preset ? GASTOS_ESTADO_PRESET_LABELS[preset] : "";
+  }, [isEstadoPresetActive]);
+
   // Ordenar y luego filtrar gastos: el ordenamiento se aplica a todos los registros cargados
   const gastosFiltradosBase = useMemo(() => {
     let sorted = [...gastosSafe];
@@ -2396,7 +2575,7 @@ export default function GastosPage() {
         sorted.sort((a, b) => {
           let aValue = col.getValue(a);
           let bValue = col.getValue(b);
-          // Si es string, comparar insensible a mayúsculas
+          // Si es string, comparar insensible a mayÃºsculas
           if (typeof aValue === 'string' && typeof bValue === 'string') {
             aValue = aValue.toLowerCase();
             bValue = bValue.toLowerCase();
@@ -2409,12 +2588,13 @@ export default function GastosPage() {
         });
       }
     }
-    // Filtrar después de ordenar
+    // Filtrar despuÃ©s de ordenar
     return sorted
       .filter((gasto) => matchesCrudToolbarSearch(gasto, busqueda, camposBusquedaGastos))
       .filter((gasto) => {
-        const fechaGasto = normalizeDateFilterValue(gasto.fecIngreso);
         const idGasto = String(gasto.id ?? "").trim();
+        const idOcGasto = String(gasto.idOc ?? "").trim();
+        const porcentajeFicGasto = String(gasto.porcentajeFic ?? "").trim();
         const estadoGasto = String(gasto.estado ?? "").trim();
         const comprobanteGasto = String(
           getConstanteLabel(comprobanteOptions, gasto.comprobante) || gasto.comprobanteLabel || gasto.comprobante || ""
@@ -2438,8 +2618,8 @@ export default function GastosPage() {
 
         return (
           (!filtrosCabecera.id || idGasto.includes(filtrosCabecera.id.trim())) &&
-          (!filtrosCabecera.fechaInicio || (fechaGasto && fechaGasto >= filtrosCabecera.fechaInicio)) &&
-          (!filtrosCabecera.fechaFin || (fechaGasto && fechaGasto <= filtrosCabecera.fechaFin)) &&
+          (!filtrosCabecera.idOc || idOcGasto.includes(filtrosCabecera.idOc.trim())) &&
+          (!filtrosCabecera.porcentajeFic || porcentajeFicGasto.includes(filtrosCabecera.porcentajeFic.trim())) &&
           (filtrosCabecera.estado.length === 0 || filtrosCabecera.estado.includes(estadoGasto)) &&
           (filtrosCabecera.comprobante.length === 0 || filtrosCabecera.comprobante.includes(comprobanteGasto)) &&
           (filtrosCabecera.moneda.length === 0 || filtrosCabecera.moneda.includes(monedaGasto)) &&
@@ -2469,6 +2649,43 @@ export default function GastosPage() {
     () => (excedeLimiteRegistros ? [] : gastosFiltradosBase),
     [excedeLimiteRegistros, gastosFiltradosBase]
   );
+  const gastosFiltradosKeys = useMemo(
+    () => gastosFiltrados.map((gasto, rowIndex) => getGastoRowKey(gasto, rowIndex)),
+    [gastosFiltrados]
+  );
+  const todosLosVisiblesSeleccionados = useMemo(
+    () => gastosFiltradosKeys.length > 0 && gastosFiltradosKeys.every((key) => selectedRowKeys.includes(key)),
+    [gastosFiltradosKeys, selectedRowKeys]
+  );
+  const algunosVisiblesSeleccionados = useMemo(
+    () => gastosFiltradosKeys.some((key) => selectedRowKeys.includes(key)),
+    [gastosFiltradosKeys, selectedRowKeys]
+  );
+
+  useEffect(() => {
+    if (!selectAllCheckboxRef.current) return;
+    selectAllCheckboxRef.current.indeterminate = algunosVisiblesSeleccionados && !todosLosVisiblesSeleccionados;
+  }, [algunosVisiblesSeleccionados, todosLosVisiblesSeleccionados]);
+
+  const alternarSeleccionVisible = React.useCallback(
+    (checked: boolean) => {
+      setSelectedRowKeys((prev) => {
+        const actuales = new Set(prev);
+
+        for (const rowKey of gastosFiltradosKeys) {
+          if (checked) {
+            actuales.add(rowKey);
+          } else {
+            actuales.delete(rowKey);
+          }
+        }
+
+        return Array.from(actuales);
+      });
+    },
+    [gastosFiltradosKeys]
+  );
+
   const handleFiltroOperativoChange = React.useCallback(
     (val: FiltroOperativoValue) => {
       setForm((prev) =>
@@ -2480,7 +2697,9 @@ export default function GastosPage() {
     [setForm]
   );
   const columnasGridGastos = [
+    { key: "seleccion", label: "", width: "44px", align: "center" as const },
     { key: "id", label: "Id", width: "60px", align: "left" as const },
+    { key: "idOc", label: "Id OC", width: "78px", align: "left" as const },
     { key: "acciones", label: "Acciones", width: "140px", align: "center" as const },
     { key: "cliente", label: "Cliente", width: "90px", align: "left" as const },
     { key: "nombreProyecto", label: "Proyecto", width: "100px", align: "left" as const },
@@ -2490,6 +2709,7 @@ export default function GastosPage() {
     { key: "bien", label: "Bien", width: "80px", align: "left" as const },
     { key: "comprobante", label: "Comprobante", width: "140px", align: "left" as const },
     { key: "monto", label: "Monto", width: "100px", align: "left" as const },
+    { key: "porcentajeFic", label: "PorcentajeFic", width: "120px", align: "right" as const },
     { key: "moneda", label: "Moneda", width: "80px", align: "left" as const },
     { key: "fecIngreso", label: "FecIngreso", width: "130px", align: "left" as const },
     { key: "ot", label: "OT", width: "70px", align: "left" as const },
@@ -2500,6 +2720,7 @@ export default function GastosPage() {
     { key: "detalle", label: "Detalle", width: "320px", align: "left" as const },
   ];
   const columnasCongeladasGrid = new Set([
+    "seleccion",
     "id",
     "acciones",
     "cliente",
@@ -2507,6 +2728,55 @@ export default function GastosPage() {
     "site",
     "tipoTrabajo",
   ]);
+  const getRowHighlightByPorcentajeFic = React.useCallback((valor: number | string | null | undefined) => {
+    const porcentaje = typeof valor === "number" ? valor : Number(valor);
+
+    if (!Number.isFinite(porcentaje)) {
+      return {
+        background: "transparent",
+        color: "#374151",
+        fontWeight: 400,
+      };
+    }
+
+    if (porcentaje > 100) {
+      return {
+        background: "#DC2626",
+        color: "#FFFFFF",
+        fontWeight: 700,
+      };
+    }
+
+    if (porcentaje > 70) {
+      return {
+        background: "#FCA5A5",
+        color: "#374151",
+        fontWeight: 400,
+      };
+    }
+
+    if (porcentaje >= 50) {
+      return {
+        background: "#FEF3C7",
+        color: "#374151",
+        fontWeight: 400,
+      };
+    }
+
+    if (porcentaje < 50) {
+      return {
+        background: "#DCFCE7",
+        color: "#374151",
+        fontWeight: 400,
+      };
+    }
+
+    return {
+      background: "transparent",
+      color: "#374151",
+      fontWeight: 400,
+    };
+  }, []);
   const stickyLeftByColumn = useMemo(() => {
     let left = 0;
     const offsets: Record<string, number> = {};
@@ -2550,6 +2820,142 @@ export default function GastosPage() {
         onSearchChange={setBusqueda}
         searchPlaceholder="Buscar gastos..."
         //searchFieldsHint={camposBusquedaGastos.map((campo) => campo.label).join(", ")}
+        children={
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              flexWrap: "wrap",
+            }}
+          >
+            <button
+              type="button"
+              title="Aprobar"
+              aria-label="Aprobar"
+              onClick={() => setEstadoPreset("aprobar")}
+              style={{
+                minWidth: 118,
+                height: 36,
+                borderRadius: 10,
+                border: `1px solid ${isEstadoPresetActive("aprobar") ? "#86EFAC" : "#D1D5DB"}`,
+                background: isEstadoPresetActive("aprobar") ? "#F0FDF4" : "#FFFFFF",
+                color: "#15803D",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                padding: "0 12px",
+                cursor: "pointer",
+                boxShadow: isEstadoPresetActive("aprobar") ? "0 0 0 2px rgba(34,197,94,0.10)" : "none",
+              }}
+            >
+              <CheckCircle2 size={18} />
+              <span style={{ fontSize: 12, fontWeight: 700 }}>Aprobar</span>
+            </button>
+
+            
+
+            <button
+              type="button"
+              title="ReAprobar"
+              aria-label="ReAprobar"
+              onClick={() => setEstadoPreset("hormiga")}
+              style={{
+                minWidth: 128,
+                height: 36,
+                borderRadius: 10,
+                border: `1px solid ${isEstadoPresetActive("hormiga") ? "#FCD34D" : "#D1D5DB"}`,
+                background: isEstadoPresetActive("hormiga") ? "#FFFBEB" : "#FFFFFF",
+                color: "#B45309",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                padding: "0 12px",
+                cursor: "pointer",
+                boxShadow: isEstadoPresetActive("hormiga") ? "0 0 0 2px rgba(245,158,11,0.10)" : "none",
+              }}
+            >
+              <AlertTriangle size={18} />
+              <span style={{ fontSize: 12, fontWeight: 700 }}>ReAprobar</span>
+            </button>
+
+            <button
+              type="button"
+              title="Observadas"
+              aria-label="Observadas"
+              onClick={() => setEstadoPreset("reaprobar")}
+              style={{
+                minWidth: 132,
+                height: 36,
+                borderRadius: 10,
+                border: `1px solid ${isEstadoPresetActive("reaprobar") ? "#FCA5A5" : "#D1D5DB"}`,
+                background: isEstadoPresetActive("reaprobar") ? "#FEF2F2" : "#FFFFFF",
+                color: "#DC2626",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                padding: "0 12px",
+                cursor: "pointer",
+                boxShadow: isEstadoPresetActive("reaprobar") ? "0 0 0 2px rgba(239,68,68,0.10)" : "none",
+              }}
+            >
+              <Bug size={18} />
+              <span style={{ fontSize: 12, fontWeight: 700 }}>Observadas</span>
+            </button>
+
+            <button
+              type="button"
+              title="Hormiga"
+              aria-label="Hormiga"
+              onClick={() => setEstadoPreset("observado")}
+              style={{
+                minWidth: 118,
+                height: 36,
+                borderRadius: 10,
+                border: `1px solid ${isEstadoPresetActive("observado") ? "#93C5FD" : "#D1D5DB"}`,
+                background: isEstadoPresetActive("observado") ? "#EFF6FF" : "#FFFFFF",
+                color: "#1D4ED8",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                padding: "0 12px",
+                cursor: "pointer",
+                boxShadow: isEstadoPresetActive("observado") ? "0 0 0 2px rgba(59,130,246,0.10)" : "none",
+              }}
+            >
+              <RotateCcw size={18} />
+              <span style={{ fontSize: 12, fontWeight: 700 }}>Hormiga</span>
+            </button>
+
+            <button
+              type="button"
+              title="Todos"
+              aria-label="Mostrar todos"
+              disabled
+              onClick={() => setEstadoPreset("todos")}
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                border: `1px solid ${isEstadoPresetActive("todos") ? "#C4B5FD" : "#D1D5DB"}`,
+                background: isEstadoPresetActive("todos") ? "#F5F3FF" : "#FFFFFF",
+                color: "#6D28D9",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "not-allowed",
+                boxShadow: isEstadoPresetActive("todos") ? "0 0 0 2px rgba(109,40,217,0.10)" : "none",
+                opacity: 0.55,
+              }}
+            >
+              <ListFilter size={18} />
+            </button>
+          </div>
+        }
         buttons={[
           {
             key: "nuevo",
@@ -2561,15 +2967,21 @@ export default function GastosPage() {
             label: "Exportar",
             title: "Exportar",
             iconOnly: true,
-            icon: "⤓",
+            icon: <FileDown size={18} strokeWidth={2.2} />,
             onClick: async () => {
               // Exportar a Excel los registros filtrados y columnas visibles
               const XLSX = await import("xlsx");
-              const headers = columnasGridGastos.filter(c => c.key !== "acciones").map(c => c.label);
-              const keys = columnasGridGastos.filter(c => c.key !== "acciones").map(c => c.key);
+              const headers = columnasGridGastos
+                .filter(c => c.key !== "acciones" && c.key !== "seleccion")
+                .map(c => c.label);
+              const keys = columnasGridGastos
+                .filter(c => c.key !== "acciones" && c.key !== "seleccion")
+                .map(c => c.key);
               const rows = gastosFiltrados.map(gasto =>
                 keys.map(key => {
                   switch (key) {
+                    case "idOc":
+                      return gasto.idOc ?? "";
                     case "cliente":
                       return gasto.filtroOperativo.filtro?.nombreCliente ?? "";
                     case "nombreProyecto":
@@ -2589,7 +3001,7 @@ export default function GastosPage() {
                     case "tarea":
                       return getTareaLabelOrFallback(tareasCatalogo, gasto.filtroOperativo.tarea?.correlativo, gasto.filtroOperativo.tarea?.tarea);
                     case "detalle":
-                      // Migrar el campo Detalle a una sola línea, reemplazando saltos de línea por espacio
+                      // Migrar el campo Detalle a una sola lÃ­nea, reemplazando saltos de lÃ­nea por espacio
                       return gasto.detalle ? String(gasto.detalle).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim() : "";
                     case "bien":
                       return getConstanteLabel(bienOptions, gasto.bien);
@@ -2601,11 +3013,15 @@ export default function GastosPage() {
                       return gasto.monto !== undefined && gasto.monto !== null && gasto.monto !== ""
                         ? Number(gasto.monto).toLocaleString("es-PE", { minimumFractionDigits: 2 })
                         : "";
+                    case "porce":
+                      return gasto.porce ?? "";
+                    case "porcentajeFic":
+                      return gasto.porcentajeFic ?? "";
                     case "ot":
                       return gasto.filtroOperativo.ot?.ot ?? "";
                     case "fecIngreso":
                       return formatInputDateForDisplay(gasto.fecIngreso);
-                    case "comentario":                      // Migrar el campo Comentario a una sola línea, reemplazando saltos de línea por espacio
+                    case "comentario":                      // Migrar el campo Comentario a una sola lÃ­nea, reemplazando saltos de lÃ­nea por espacio
                       return gasto.comentario ? String(gasto.comentario).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim() : "";
                     case "estado": {
                       return getEstadoLabel(estadoOptions, gasto.estado, gasto.estadoLabel);
@@ -2654,9 +3070,16 @@ export default function GastosPage() {
             selectedValue: filtrosCabecera.id,
           },
           {
+            key: "porcentajeFic",
+            label: "Porcentaje Fic",
+            section: "basic" as const,
+            type: "text" as const,
+            selectedValue: filtrosCabecera.porcentajeFic,
+          },
+          {
             key: "estado",
             label: "Estado",
-            section: "basic" as const,
+            section: "advanced" as const,
             options: headerFilterOptions.estado.map((option) => ({
               value: option,
               label: getEstadoLabel(estadoOptions, option),
@@ -2690,6 +3113,13 @@ export default function GastosPage() {
             section: "basic" as const,
             options: headerFilterOptions.solicitante.map((option) => ({ value: option, label: option })),
             selectedValues: filtrosCabecera.solicitante,
+          },
+          {
+            key: "idOc",
+            label: "Id OC",
+            section: "advanced" as const,
+            type: "text" as const,
+            selectedValue: filtrosCabecera.idOc,
           },
           {
             key: "proyecto",
@@ -2778,19 +3208,22 @@ export default function GastosPage() {
               <span>{filter.label}</span>
               <button
                 type="button"
+                disabled={filter.key === "estado"}
                 onClick={() =>
-                  setCabeceraFiltroAbierto((prev) => {
-                    const nextValue = prev === filter.key ? null : filter.key;
+                  filter.key === "estado"
+                    ? undefined
+                    : setCabeceraFiltroAbierto((prev) => {
+                        const nextValue = prev === filter.key ? null : filter.key;
 
-                    if (!nextValue && isSearchableHeaderFilterKey(filter.key)) {
-                      setHeaderFilterSearch((prevSearch) => ({
-                        ...prevSearch,
-                        [filter.key]: "",
-                      }));
-                    }
+                        if (!nextValue && isSearchableHeaderFilterKey(filter.key)) {
+                          setHeaderFilterSearch((prevSearch) => ({
+                            ...prevSearch,
+                            [filter.key]: "",
+                          }));
+                        }
 
-                    return nextValue;
-                  })
+                        return nextValue;
+                      })
                 }
                 style={{
                   height: 36,
@@ -2804,8 +3237,9 @@ export default function GastosPage() {
                   alignItems: "center",
                   justifyContent: "space-between",
                   gap: 8,
-                  cursor: "pointer",
+                  cursor: filter.key === "estado" ? "not-allowed" : "pointer",
                   textAlign: "left",
+                  opacity: filter.key === "estado" ? 0.65 : 1,
                 }}
               >
                 <span
@@ -2818,7 +3252,7 @@ export default function GastosPage() {
                 >
                   {summary}
                 </span>
-                <span style={{ color: "#6B7280", fontSize: 10 }}>{isOpen ? "▲" : "▼"}</span>
+                <span style={{ color: "#6B7280", fontSize: 10 }}>{isOpen ? "â–²" : "â–¼"}</span>
               </button>
 
               {isOpen && (
@@ -2964,37 +3398,64 @@ export default function GastosPage() {
           }}
         >
           <span>Más opciones</span>
-          <button
-            type="button"
-            onClick={() => {
-              setMostrarFiltrosAdicionales((prev) => {
-                const nextValue = !prev;
-                if (!nextValue && cabeceraFiltroAbierto && ["proyecto", "site", "comprobante", "moneda", "tipoTrabajo", "responsable", "validador"].includes(cabeceraFiltroAbierto)) {
-                  setCabeceraFiltroAbierto(null);
-                }
-                return nextValue;
-              });
-            }}
-            style={{
-              height: 36,
-              borderRadius: 10,
-              border: "1px solid #C7D2FE",
-              padding: "0 10px",
-              fontSize: 11,
-              color: "#3730A3",
-              background: "#EEF2FF",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 8,
-              cursor: "pointer",
-              textAlign: "left",
-              fontWeight: 700,
-            }}
-          >
-            <span>{mostrarFiltrosAdicionales ? "Ocultar filtros" : "Filtros adicionales"}</span>
-            <span style={{ color: "#6B7280", fontSize: 10 }}>{mostrarFiltrosAdicionales ? "â–²" : "â–¼"}</span>
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              type="button"
+              title={mostrarFiltrosAdicionales ? "Ocultar filtros" : "Filtros adicionales"}
+              aria-label={mostrarFiltrosAdicionales ? "Ocultar filtros" : "Filtros adicionales"}
+              onClick={() => {
+                setMostrarFiltrosAdicionales((prev) => {
+                  const nextValue = !prev;
+                  if (
+                    !nextValue &&
+                    cabeceraFiltroAbierto &&
+                    ["idOc", "estado", "proyecto", "site", "comprobante", "moneda", "tipoTrabajo", "responsable", "validador"].includes(
+                      cabeceraFiltroAbierto
+                    )
+                  ) {
+                    setCabeceraFiltroAbierto(null);
+                  }
+                  return nextValue;
+                });
+              }}
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                border: "1px solid #C7D2FE",
+                background: "#EEF2FF",
+                color: "#3730A3",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                boxShadow: "0 1px 2px rgba(55,48,163,0.10)",
+              }}
+            >
+              <ListFilter size={18} strokeWidth={2.2} />
+            </button>
+            <button
+              type="button"
+              title="Limpiar filtros"
+              aria-label="Limpiar filtros"
+              onClick={limpiarFiltrosCabecera}
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                border: "1px solid #FCA5A5",
+                background: "#FEF2F2",
+                color: "#B91C1C",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                boxShadow: "0 1px 2px rgba(185,28,28,0.10)",
+              }}
+            >
+              <Eraser size={16} strokeWidth={2.2} />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -3061,7 +3522,7 @@ export default function GastosPage() {
             fontWeight: 600,
           }}
         >
-          {`Se encontraron ${cantidadRegistrosFiltrados} registros. Por rendimiento solo se permite mostrar hasta ${MAX_GASTOS_PARA_MOSTRAR}. Aplique más filtros, preferiblemente por fecha, cliente, proyecto, site o estado.`}
+          {`Se encontraron ${cantidadRegistrosFiltrados} registros. Por rendimiento solo se permite mostrar hasta ${MAX_GASTOS_PARA_MOSTRAR}. Aplique mÃ¡s filtros, preferiblemente por fecha, cliente, proyecto, site o estado.`}
         </div>
       )}
 
@@ -3092,6 +3553,7 @@ export default function GastosPage() {
                 {columnasGridGastos.map((header) => {
                   const isSorted = sortConfig?.key === header.key;
                   const isFrozen = columnasCongeladasGrid.has(header.key);
+                  const esColumnaSeleccion = header.key === "seleccion";
                   return (
                     <th
                       key={header.key}
@@ -3108,21 +3570,42 @@ export default function GastosPage() {
                         zIndex: isFrozen ? 4 : 3,
                         boxShadow: "0 1px 0 #E5E7EB",
                         borderRight: isFrozen ? "1px solid #E5E7EB" : undefined,
-                        cursor: header.key !== 'acciones' ? 'pointer' : 'default',
+                        cursor: header.key !== 'acciones' && header.key !== 'seleccion' ? 'pointer' : 'default',
                         userSelect: 'none',
                       }}
                       onClick={() => {
-                        if (header.key === 'acciones') return;
+                        if (header.key === 'acciones' || header.key === 'seleccion') return;
                         setSortConfig((prev) => {
                           if (prev?.key === header.key) {
-                            // Alternar dirección
+                            // Alternar direcciÃ³n
                             return { key: header.key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
                           }
                           return { key: header.key, direction: 'asc' };
                         });
                       }}
                     >
-                      {header.label}
+                      {esColumnaSeleccion ? (
+                        <input
+                          ref={selectAllCheckboxRef}
+                          type="checkbox"
+                          aria-label="Seleccionar o deseleccionar todos los registros visibles"
+                          checked={todosLosVisiblesSeleccionados}
+                          disabled={gastosFiltradosKeys.length === 0}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            alternarSeleccionVisible(e.currentTarget.checked);
+                          }}
+                          style={{
+                            width: 16,
+                            height: 16,
+                            cursor: gastosFiltradosKeys.length > 0 ? "pointer" : "not-allowed",
+                            accentColor: "#6E4CCB",
+                          }}
+                        />
+                      ) : (
+                        header.label
+                      )}
                       {isSorted && (
                         <span
                           aria-hidden="true"
@@ -3160,21 +3643,30 @@ export default function GastosPage() {
                       : limiteConsultaServidor
                         ? limiteConsultaServidor.message
                         : excedeLimiteRegistros
-                      ? `Se encontraron ${cantidadRegistrosFiltrados} registros y el máximo permitido para mostrar es ${MAX_GASTOS_PARA_MOSTRAR}. Aplique más filtros.`
+                      ? `Se encontraron ${cantidadRegistrosFiltrados} registros y el mÃ¡ximo permitido para mostrar es ${MAX_GASTOS_PARA_MOSTRAR}. Aplique mÃ¡s filtros.`
                       : "No se encontraron gastos."}
                   </td>
                 </tr>
               ) : (
                   gastosFiltrados.map((gasto, rowIndex) => {
                     const rowKey = getGastoRowKey(gasto, rowIndex);
+                    const highlightStyle = getRowHighlightByPorcentajeFic(gasto.porcentajeFic);
+                    const isSelectedRow = selectedRowKeys.includes(rowKey) || selectedRowKey === rowKey;
+                    const rowBackground = highlightStyle.background;
+                    const rowColor = highlightStyle.color;
+                    const rowFontWeight = highlightStyle.fontWeight;
 
-                    return (
+                  return (
                     <tr
                       key={rowKey}
                       style={{
-                        background: selectedRowKey === rowKey ? "#E0E7FF" : "transparent",
-                      transition: "background 0.1s"
-                    }}
+                        background: rowBackground,
+                        transition: "background 0.1s",
+                        color: rowColor,
+                        fontWeight: rowFontWeight,
+                        outline: isSelectedRow ? "2px solid #6366F1" : "none",
+                        outlineOffset: "-2px",
+                      }}
                     onClick={() => {
                       setSelectedRowKey(rowKey);
                       if (rechazoError) {
@@ -3185,25 +3677,23 @@ export default function GastosPage() {
                       {columnasGridGastos.map((col) => (
                       <td
                         key={col.key}
-                        style={{
-                          padding: "13px 11px",
-                          borderBottom: "1px solid #F3F4F6",
-                          color: col.key === "responsable" ? "#17143A" : "#374151",
-                          fontSize: 11,
-                          fontWeight: col.key === "responsable" ? 700 : undefined,
-                          overflow: "hidden",
-                          whiteSpace: "nowrap",
-                          textOverflow: "ellipsis",
-                          maxWidth: "100%",
-                          position: columnasCongeladasGrid.has(col.key) ? "sticky" : undefined,
+                          style={{
+                            padding: "13px 11px",
+                            borderBottom: "1px solid #F3F4F6",
+                            color: rowColor,
+                            fontSize: 11,
+                            fontWeight: rowFontWeight || (col.key === "responsable" ? 700 : undefined),
+                            overflow: "hidden",
+                            whiteSpace: "nowrap",
+                            textOverflow: "ellipsis",
+                            maxWidth: "100%",
+                            position: columnasCongeladasGrid.has(col.key) ? "sticky" : undefined,
                           left: columnasCongeladasGrid.has(col.key)
                             ? stickyLeftByColumn[col.key]
                             : undefined,
                           zIndex: columnasCongeladasGrid.has(col.key) ? 2 : 1,
                           background: columnasCongeladasGrid.has(col.key)
-                            ? selectedRowKey === rowKey
-                              ? "#E0E7FF"
-                              : "#FFFFFF"
+                            ? rowBackground
                             : undefined,
                           borderRight: columnasCongeladasGrid.has(col.key)
                             ? "1px solid #E5E7EB"
@@ -3215,6 +3705,37 @@ export default function GastosPage() {
                         {/* Renderizado de cada celda */}
                         {(() => {
                           switch (col.key) {
+                            case "seleccion":
+                              return (
+                                <input
+                                  type="checkbox"
+                                  aria-label={`Seleccionar registro ${gasto.id}`}
+                                  checked={selectedRowKeys.includes(rowKey)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    const checked = e.currentTarget.checked;
+                                    setSelectedRowKeys((prev) => {
+                                      if (checked) {
+                                        if (prev.includes(rowKey)) return prev;
+                                        return [...prev, rowKey];
+                                      }
+                                      return prev.filter((key) => key !== rowKey);
+                                    });
+                                    if (checked) {
+                                      setSelectedRowKey(rowKey);
+                                    } else if (selectedRowKey === rowKey) {
+                                      setSelectedRowKey(null);
+                                    }
+                                  }}
+                                  style={{
+                                    width: 16,
+                                    height: 16,
+                                    cursor: "pointer",
+                                    accentColor: "#6E4CCB",
+                                  }}
+                                />
+                              );
                             case "cliente":
                               return renderGridCellText(gasto.filtroOperativo.filtro?.nombreCliente);
                             case "nombreProyecto":
@@ -3226,6 +3747,8 @@ export default function GastosPage() {
                               );
                             case "id":
                               return renderGridCellText(gasto.id);
+                            case "idOc":
+                              return renderGridCellText(gasto.idOc);
                             case "site":
                               return renderGridCellText(gasto.filtroOperativo.filtro?.nombreSite);
                             case "solicitante":
@@ -3274,6 +3797,22 @@ export default function GastosPage() {
                                     })
                                   : ""
                               );
+                            case "porce":
+                              return renderGridCellText(
+                                gasto.porce !== undefined && gasto.porce !== null
+                                  ? Number(gasto.porce).toLocaleString("es-PE", {
+                                      minimumFractionDigits: 2,
+                                    })
+                                  : ""
+                              );
+                            case "porcentajeFic":
+                              return renderGridCellText(
+                                gasto.porcentajeFic !== undefined && gasto.porcentajeFic !== null
+                                  ? Number(gasto.porcentajeFic).toLocaleString("es-PE", {
+                                      minimumFractionDigits: 2,
+                                    })
+                                  : ""
+                              );
                             case "ot":
                               return renderGridCellText(gasto.filtroOperativo.ot?.ot);
                             case "estado":
@@ -3308,7 +3847,7 @@ export default function GastosPage() {
                                       abrirVisualizar(gasto);
                                     }}
                                   >
-                                    👁
+                                    <Eye size={17} strokeWidth={2.2} />
                                   </button>
                                   <button
                                     title="Editar"
@@ -3335,7 +3874,7 @@ export default function GastosPage() {
                                     }}
                                     disabled={!accionesHabilitadas}
                                   >
-                                    ✎
+                                    <PencilLine size={17} strokeWidth={2.2} />
                                   </button>
 
                                   <button
@@ -3363,7 +3902,7 @@ export default function GastosPage() {
                                     }}
                                     disabled={!accionesHabilitadas}
                                   >
-                                    🗑
+                                    <CircleX size={17} strokeWidth={2.2} />
                                   </button>
                                 </div>
                               );
@@ -3392,9 +3931,9 @@ export default function GastosPage() {
         }}>
           <span>
             {limiteConsultaServidor
-              ? `Registros encontrados: ${limiteConsultaServidor.totalRows} | Máximo permitido para mostrar: ${limiteConsultaServidor.maxRowsAllowed}`
+              ? `Registros encontrados: ${limiteConsultaServidor.totalRows} | MÃ¡ximo permitido para mostrar: ${limiteConsultaServidor.maxRowsAllowed}`
               : excedeLimiteRegistros
-              ? `Registros encontrados: ${cantidadRegistrosFiltrados} | Máximo permitido para mostrar: ${MAX_GASTOS_PARA_MOSTRAR}`
+              ? `Registros encontrados: ${cantidadRegistrosFiltrados} | MÃ¡ximo permitido para mostrar: ${MAX_GASTOS_PARA_MOSTRAR}`
               : `Registros encontrados: ${gastosFiltrados.length}`}
           </span>
           <span>
@@ -3446,7 +3985,7 @@ export default function GastosPage() {
 {modo === "nuevo" ? "Nuevo gasto" : modo === "ver" ? "Visualizar gasto" : "Editar gasto"}
                   </h2>
                   <p style={{ marginTop: 8, marginBottom: 0, color: "#6B7280", fontSize: 13 }}>
-                    Complete la información del gasto.
+                    Complete la informaciÃ³n del gasto.
                   </p>
                   <p style={{ marginTop: 6, marginBottom: 0, color: "#475569", fontSize: 12 }}>
                     El sistema registra auditoria automatica por seccion al guardar o rechazar cambios.
@@ -3506,9 +4045,9 @@ export default function GastosPage() {
                     }}
                     onClick={cerrarPanel}
                   >
-                    ×
+                    Ã—
                   </button>
-                  {/* Eliminado: Etiqueta Utilidad bajo el botón */}
+                  {/* Eliminado: Etiqueta Utilidad bajo el botÃ³n */}
                 </div>
               </div>
             </div>
@@ -4041,7 +4580,7 @@ export default function GastosPage() {
         onChange={(e) => setForm((prev) => ({ ...prev, rendicion: e.target.checked }))}
         style={{ width: 16, height: 16 }}
       />
-      <label htmlFor="rendicion" style={{ fontSize: 11, fontWeight: 700, color: "#374151", cursor: "pointer" }}>Rendición</label>
+      <label htmlFor="rendicion" style={{ fontSize: 11, fontWeight: 700, color: "#374151", cursor: "pointer" }}>RendiciÃ³n</label>
     </div>
   </div>
 
@@ -4194,6 +4733,44 @@ export default function GastosPage() {
       </div>
     )}
   </div>
+
+  {(form.subOc != null ||
+    form.subPlanilla != null ||
+    form.porce != null ||
+    form.adelaFic != null ||
+    form.diferenciaFic != null ||
+    form.codigoValidacionFic != null ||
+    form.resultadoValidacionFic ||
+    form.porcentajeFic != null) && (
+    <div
+      style={{
+        gridColumn: "span 4",
+        border: "1px solid #E5E7EB",
+        borderRadius: 12,
+        background: "#F8FAFC",
+        padding: "12px 14px",
+        marginBottom: 8,
+      }}
+    >
+      <div style={{ fontSize: 11, fontWeight: 800, color: "#334155", marginBottom: 8 }}>
+        Validación OC
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+          gap: 10,
+        }}
+      >
+        {validacionOcValores.map((item) => (
+          <div key={item.label} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: "#64748B" }}>{item.label}</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#0F172A" }}>{item.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )}
 
   <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 4" }}>
     <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>Solicitante</label>
@@ -4491,7 +5068,7 @@ export default function GastosPage() {
             </div>
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 10 }}>
-              {/* Botón de factura alineado a la izquierda */}
+              {/* BotÃ³n de factura alineado a la izquierda */}
               <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0, flex: 1 }}>
                 <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
                   <button
@@ -4587,7 +5164,7 @@ export default function GastosPage() {
                                 onClick={() => setShowFacturaViewer(false)}
                                 title="Cerrar"
                               >
-                                ×
+                                Ã—
                               </button>
                               {facturaDisplayPath.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
                                 <img
@@ -4753,10 +5330,10 @@ export default function GastosPage() {
             }}
           >
             <h3 style={{ marginTop: 0, marginBottom: 12, color: "#17143A" }}>
-              Confirmar eliminación
+              Confirmar eliminaciÃ³n
             </h3>
             <p style={{ marginTop: 0, color: "#4B5563", lineHeight: 1.6 }}>
-              ¿Desea rechazar el gasto <strong>{gastoSeleccionadoEliminar?.id}</strong>?
+              Â¿Desea rechazar el gasto <strong>{gastoSeleccionadoEliminar?.id}</strong>?
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 24 }}>
               <button
@@ -4818,7 +5395,7 @@ export default function GastosPage() {
               Motivo del rechazo
             </h3>
             <p style={{ marginTop: 0, color: "#4B5563", lineHeight: 1.6 }}>
-              Ingrese la observación que se enviará al rechazo del registro seleccionado.
+              Ingrese la observaciÃ³n que se enviarÃ¡ al rechazo del registro seleccionado.
             </p>
             <textarea
               value={motivoRechazo}

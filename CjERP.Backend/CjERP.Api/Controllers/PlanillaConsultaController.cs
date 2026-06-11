@@ -34,6 +34,7 @@ namespace CjERP.Api.Controllers
             [FromBody] PlanillaConsultaEstadosRequestDto request,
             CancellationToken cancellationToken)
         {
+            var consulta = request?.Consulta?.Trim();
             var parametros = (request?.Parametros ?? new List<PlanillaConsultaParametroDto>())
                 .Where(parametro => parametro is not null)
                 .ToList();
@@ -66,7 +67,7 @@ namespace CjERP.Api.Controllers
                 return BadRequest(new
                 {
                     success = false,
-                    message = $"Faltan parametros requeridos para sp_Planilla_Consulta_Estados: {string.Join(", ", missingParameters)}."
+                    message = $"Faltan parametros requeridos para {(string.Equals(consulta, "aprobar", StringComparison.OrdinalIgnoreCase) ? "sp_Planilla_Consulta_Aprobar" : "sp_Planilla_Consulta_Estados")}: {string.Join(", ", missingParameters)}."
                 });
             }
 
@@ -88,6 +89,7 @@ namespace CjERP.Api.Controllers
             {
                 var result = await _planillaConsultaService.ConsultarEstadosAsync(
                     parametros,
+                    consulta,
                     request?.MaxRows,
                     cancellationToken);
 

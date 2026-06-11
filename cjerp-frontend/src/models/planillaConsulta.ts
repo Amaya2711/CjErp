@@ -17,6 +17,7 @@ export type PlanillaConsultaParametro = {
 export type PlanillaConsultaEstadosRequest = {
   parametros: PlanillaConsultaParametro[];
   maxRows?: number;
+  consulta?: string;
 };
 
 export type PlanillaConsultaEstadosResponse = {

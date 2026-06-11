@@ -6,6 +6,7 @@ namespace CjERP.Application.DTOs
     {
         public List<PlanillaConsultaParametroDto> Parametros { get; set; } = [];
         public int? MaxRows { get; set; }
+        public string? Consulta { get; set; }
     }
 
     public class PlanillaConsultaParametroDto

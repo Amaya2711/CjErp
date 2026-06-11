@@ -15,7 +15,8 @@ namespace CjERP.Infrastructure.Services
 {
     public class PlanillaConsultaService : IPlanillaConsultaService
     {
-        private const string StoredProcedureName = "dbo.sp_Planilla_Consulta_Estados";
+        private const string StoredProcedureEstados = "dbo.sp_Planilla_Consulta_Estados";
+        private const string StoredProcedureAprobar = "dbo.sp_Planilla_Consulta_Aprobar";
         private readonly ISqlCommandFactory _sqlCommandFactory;
 
         public PlanillaConsultaService(ISqlCommandFactory sqlCommandFactory)
@@ -25,17 +26,20 @@ namespace CjERP.Infrastructure.Services
 
         public async Task<PlanillaConsultaEstadosResponseDto> ConsultarEstadosAsync(
             IEnumerable<PlanillaConsultaParametroDto> parametros,
+            string? consulta = null,
             int? maxRows = null,
             CancellationToken cancellationToken = default)
         {
             await using var connection = _sqlCommandFactory.CreateConnection();
 
             var parametrosList = (parametros ?? []).ToList();
-            var dynamicParameters = BuildParameters(parametrosList);
+            var storedProcedureName = ResolveStoredProcedureName(consulta);
+            var parametrosFiltrados = FilterParametersForStoredProcedure(storedProcedureName, parametrosList);
+            var dynamicParameters = BuildParameters(parametrosFiltrados);
 
             var rows = (await connection.QueryAsync(
                 _sqlCommandFactory.Create(
-                    StoredProcedureName,
+                    storedProcedureName,
                     dynamicParameters,
                     CommandType.StoredProcedure,
                     cancellationToken,
@@ -71,6 +75,15 @@ namespace CjERP.Infrastructure.Services
                 Message = limitExceeded
                     ? $"Se encontraron {totalRows} registros. El máximo permitido para mostrar es {maxRows}. Aplique más filtros, preferiblemente por rango de fechas."
                     : null
+            };
+        }
+
+        private static string ResolveStoredProcedureName(string? consulta)
+        {
+            return (consulta ?? string.Empty).Trim().ToLowerInvariant() switch
+            {
+                "aprobar" => StoredProcedureAprobar,
+                _ => StoredProcedureEstados
             };
         }
 
@@ -282,6 +295,31 @@ WHERE Correlativo IN @Correlativos";
             return dynamicParameters;
         }
 
+        private static IEnumerable<PlanillaConsultaParametroDto> FilterParametersForStoredProcedure(
+            string storedProcedureName,
+            IEnumerable<PlanillaConsultaParametroDto> parametros)
+        {
+            if (!string.Equals(storedProcedureName, StoredProcedureAprobar, StringComparison.OrdinalIgnoreCase))
+            {
+                return parametros;
+            }
+
+            var allowedParameters = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "IdSolicitante",
+                "IdValidador",
+                "Estados",
+                "IncluirEstado99",
+                "TipoCambio",
+                "FechaInicio",
+                "FechaFin"
+            };
+
+            return parametros.Where(parametro =>
+                !string.IsNullOrWhiteSpace(parametro.Nombre) &&
+                allowedParameters.Contains(parametro.Nombre.Trim().TrimStart('@')));
+        }
+
         private static Dictionary<string, object?> MapRow(dynamic row)
         {
             var data = (IDictionary<string, object>)row;
@@ -299,7 +337,32 @@ WHERE Correlativo IN @Correlativos";
                 result[item.Key] = NormalizeValue(item.Value);
             }
 
+            if (!result.ContainsKey("Serie"))
+            {
+                var serieAlias = GetFirstExistingValue(result, "Serie", "serie", "Documento", "documento", "SerieDocumento", "serieDocumento", "SerieFactura", "serieFactura");
+
+                if (serieAlias is not null)
+                {
+                    result["Serie"] = serieAlias;
+                }
+            }
+
             return result;
+        }
+
+        private static object? GetFirstExistingValue(
+            IReadOnlyDictionary<string, object?> row,
+            params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (row.TryGetValue(key, out var value) && value is not null)
+                {
+                    return value;
+                }
+            }
+
+            return null;
         }
 
         private static object? NormalizeValue(object? value)
@@ -363,12 +426,34 @@ WHERE Correlativo IN @Correlativos";
                     continue;
                 }
 
-                if (DateTime.TryParseExact(text, "dd/MM/yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var peruDate))
+                var dateText = text.Split(' ', 'T')[0].Trim();
+
+                if (string.IsNullOrWhiteSpace(dateText))
+                {
+                    continue;
+                }
+
+                if (DateTime.TryParseExact(dateText, "MMddyyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var compactUsDate))
+                {
+                    return compactUsDate;
+                }
+
+                if (DateTime.TryParseExact(dateText, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var isoDate))
+                {
+                    return isoDate;
+                }
+
+                if (DateTime.TryParseExact(dateText, "MM/dd/yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var usDate))
+                {
+                    return usDate;
+                }
+
+                if (DateTime.TryParseExact(dateText, "dd/MM/yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var peruDate))
                 {
                     return peruDate;
                 }
 
-                if (DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate))
+                if (DateTime.TryParse(dateText, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate))
                 {
                     return parsedDate;
                 }
@@ -393,18 +478,29 @@ WHERE Correlativo IN @Correlativos";
             }
 
             var value = parametro.Valor.Trim();
+            var dateText = value.Split(' ', 'T')[0].Trim();
 
-            if (DateTime.TryParseExact(value, "MM/dd/yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var usDate))
+            if (DateTime.TryParseExact(dateText, "MMddyyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var compactUsDate))
+            {
+                return compactUsDate;
+            }
+
+            if (DateTime.TryParseExact(dateText, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var isoDate))
+            {
+                return isoDate;
+            }
+
+            if (DateTime.TryParseExact(dateText, "MM/dd/yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var usDate))
             {
                 return usDate;
             }
 
-            if (DateTime.TryParseExact(value, "dd/MM/yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var peruDate))
+            if (DateTime.TryParseExact(dateText, "dd/MM/yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var peruDate))
             {
                 return peruDate;
             }
 
-            if (DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate))
+            if (DateTime.TryParse(dateText, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate))
             {
                 return parsedDate;
             }
@@ -432,11 +528,45 @@ WHERE Correlativo IN @Correlativos";
                 "bool" or "boolean" => bool.TryParse(rawValue, out var boolValue)
                     ? boolValue
                     : null,
-                "date" or "datetime" => DateTime.TryParse(rawValue, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dateValue)
-                    ? dateValue
-                    : null,
+                "date" or "datetime" => TryParseDateValue(rawValue),
                 _ => rawValue.Trim()
             };
+        }
+
+        private static DateTime? TryParseDateValue(string rawValue)
+        {
+            var value = rawValue.Trim();
+
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return null;
+            }
+
+            var dateText = value.Split(' ', 'T')[0].Trim();
+
+            if (DateTime.TryParseExact(dateText, "MMddyyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var compactUsDate))
+            {
+                return compactUsDate;
+            }
+
+            if (DateTime.TryParseExact(dateText, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var isoDate))
+            {
+                return isoDate;
+            }
+
+            if (DateTime.TryParseExact(dateText, "MM/dd/yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var usDate))
+            {
+                return usDate;
+            }
+
+            if (DateTime.TryParseExact(dateText, "dd/MM/yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var peruDate))
+            {
+                return peruDate;
+            }
+
+            return DateTime.TryParse(dateText, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate)
+                ? parsedDate
+                : null;
         }
 
         private static DbType? ResolveDbType(string? rawType)

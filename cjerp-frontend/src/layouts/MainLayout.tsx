@@ -10,7 +10,13 @@ import {
 } from "../features/dashboard/services/dashboardMenuService";
 
 function tileMatchesPath(tile: DashboardTile, pathname: string): boolean {
-  if (pathname.startsWith(tile.path)) {
+  const tilePath = tile.path.trim();
+
+  if (!tilePath || tilePath === "#") {
+    return false;
+  }
+
+  if (pathname === tilePath || pathname.startsWith(`${tilePath}/`)) {
     return true;
   }
 
@@ -177,6 +183,10 @@ export default function MainLayout() {
   const getHeaderLabel = (): string => {
     if (location.pathname.startsWith("/dashboard")) {
       return "Portal de Aplicaciones";
+    }
+
+    if (location.pathname.startsWith("/finanzas/tesoreria/gastosaprobar")) {
+      return "Finanzas / Tesoreria / Aprobar gastos";
     }
 
     for (const group of menuDashboard) {

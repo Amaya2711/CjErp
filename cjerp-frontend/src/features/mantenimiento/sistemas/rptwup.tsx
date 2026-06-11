@@ -593,7 +593,13 @@ export function RptWupModulePage({
     }
 
     const idsDisponibles = new Set(destinatariosBoleta.map((row) => row.idEmpleado).filter((id) => id > 0));
-    setSelectedDestinatarioIds((current) => current.filter((id) => idsDisponibles.has(id)));
+    setSelectedDestinatarioIds((current) => {
+      const next = current.filter((id) => idsDisponibles.has(id));
+      if (next.length === current.length && next.every((id, index) => id === current[index])) {
+        return current;
+      }
+      return next;
+    });
   }, [destinatariosBoleta, selectedDestinatarioIds.length, tipoApi]);
 
   useEffect(() => {

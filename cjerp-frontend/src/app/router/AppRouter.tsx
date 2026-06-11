@@ -33,6 +33,7 @@ import SolicitudEquipoPage from "../../features/logistica/gestionequipos/solicit
 import TesoreriaDepositoPage from "../../features/finanzas/tesoreria/deposito";
 import TesoreriaChequesPage from "../../features/finanzas/tesoreria/cheques";
 import TesoreriaGastosPage from "../../features/finanzas/tesoreria/gastos";
+import TesoreriaGastosAprobarPage from "../../features/finanzas/tesoreria/gastosaprobar";
 import ActFacturaPage from "../../features/finanzas/facturacionfinanciera/actfactura";
 import OcPage from "../../features/finanzas/facturacionfinanciera/oc";
 import AsientosPage from "../../features/finanzas/contabilidad/asientos";
@@ -194,6 +195,7 @@ export default function AppRouter() {
             <Route path="/finanzas/tesoreria/cheque" element={<TesoreriaChequesPage />} />
             <Route path="/finanzas/tesoreria/cheques" element={<TesoreriaChequesPage />} />
             <Route path="/finanzas/tesoreria/gastos" element={<TesoreriaGastosPage />} />
+            <Route path="/finanzas/tesoreria/gastosaprobar" element={<TesoreriaGastosAprobarPage />} />
 
             <Route
               path="/finanzas/facturacionfinanciera"
