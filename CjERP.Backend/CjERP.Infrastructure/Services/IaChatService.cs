@@ -89,6 +89,13 @@ public sealed class IaChatService : IIaChatService
             return Failure(module, "No puedo ejecutar SQL libre ni instrucciones que intenten modificar el sistema. Reformula tu consulta en lenguaje natural.");
         }
 
+        if (NeedsClarification(question))
+        {
+            return Failure(
+                module,
+                "Para listados o consultas muy amplias necesito un periodo o filtro adicional. Ejemplo: 'Lista de clientes de este mes' o 'Resumen de gastos por cliente de 2026'.");
+        }
+
         if (!HasAnthropicConfiguration(out var configurationError))
         {
             return Failure(module, configurationError);
@@ -270,6 +277,7 @@ public sealed class IaChatService : IIaChatService
         {
             Model = _anthropicSettings.Model.Trim(),
             MaxTokens = _anthropicSettings.MaxTokens > 0 ? _anthropicSettings.MaxTokens : 1500,
+            Temperature = 0,
             System = systemPrompt,
             Messages = messages,
             Tools = GetToolsForModule(ModuleGastos)
@@ -1007,6 +1015,64 @@ ConversationId:
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant));
     }
 
+    private static bool NeedsClarification(string question)
+    {
+        var normalized = question.ToLowerInvariant();
+        var hasTimeContext =
+            normalized.Contains("hoy", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("ayer", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("este mes", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("este año", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("mes pasado", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("ultima semana", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("última semana", StringComparison.OrdinalIgnoreCase) ||
+            System.Text.RegularExpressions.Regex.IsMatch(normalized, @"\b(202[0-9]|19[0-9]{2})\b", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+        if (hasTimeContext)
+        {
+            return false;
+        }
+
+        var broadListingTokens = new[]
+        {
+            "lista",
+            "listar",
+            "listado",
+            "muestreme",
+            "muéstrame",
+            "muestre",
+            "buscar",
+            "busca",
+            "detalle",
+            "detalla",
+            "resumen",
+            "agrupa"
+        };
+
+        var entityTokens = new[]
+        {
+            "cliente",
+            "clientes",
+            "proyecto",
+            "proyectos",
+            "site",
+            "sitio",
+            "sitios",
+            "responsable",
+            "responsables",
+            "gasto",
+            "gastos",
+            "orden de compra",
+            "oc"
+        };
+
+        return broadListingTokens.Any(token => normalized.Contains(token, StringComparison.OrdinalIgnoreCase))
+               && entityTokens.Any(token => normalized.Contains(token, StringComparison.OrdinalIgnoreCase))
+               && !normalized.Contains("pendiente", StringComparison.OrdinalIgnoreCase)
+               && !normalized.Contains("combustible", StringComparison.OrdinalIgnoreCase)
+               && !normalized.Contains("lim001", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static IaChatResponseDto Failure(string module, string errorMessage)
     {
         return new IaChatResponseDto
@@ -1094,6 +1160,9 @@ ConversationId:
 
         [JsonPropertyName("max_tokens")]
         public int MaxTokens { get; set; }
+
+        [JsonPropertyName("temperature")]
+        public double? Temperature { get; set; }
 
         public string System { get; set; } = string.Empty;
 
