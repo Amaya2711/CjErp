@@ -234,7 +234,7 @@ function MessageBubble({ message }: { message: IaChatMessage }) {
       >
         {message.title && <div style={styles.messageTitle}>{message.title}</div>}
         <div style={styles.messageText}>{message.text}</div>
-        {message.response && <StructuredResponseBlock response={message.response} />}
+        {message.response?.success && <StructuredResponseBlock response={message.response} />}
       </div>
 
       {!isAssistant && (
@@ -538,17 +538,25 @@ export default function IaChatPage() {
       const assistantMessage: IaChatMessage = {
         id: `assistant-${Date.now()}`,
         role: "assistant",
-        title: response.responseType === "conversation"
-          ? "Respuesta"
-          : response.responseType === "detail"
-            ? "Detalle"
-            : response.responseType === "summary"
-              ? "Resumen"
-              : "Grafico",
-        text: response.answer,
+        title: response.success
+          ? response.responseType === "conversation"
+            ? "Respuesta"
+            : response.responseType === "detail"
+              ? "Detalle"
+              : response.responseType === "summary"
+                ? "Resumen"
+                : "Grafico"
+          : "No se pudo completar la consulta",
+        text: response.success
+          ? response.answer
+          : response.errorMessage || response.answer || "No fue posible completar la consulta.",
         response,
         tone: response.success ? "success" : "error",
       };
+
+      if (!response.success) {
+        setErrorMessage(response.errorMessage || response.answer || "No fue posible completar la consulta.");
+      }
 
       updateCurrentThread((messages) => [...messages, assistantMessage]);
     } catch (error) {

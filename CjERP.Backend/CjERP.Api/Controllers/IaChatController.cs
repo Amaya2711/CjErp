@@ -39,12 +39,10 @@ public sealed class IaChatController : ControllerBase
             ?? User.Identity?.Name;
 
         var response = await _iaChatService.ConsultarAsync(request, usuarioId, cancellationToken);
-
-        if (!response.Success)
+        return Ok(new
         {
-            return BadRequest(response);
-        }
-
-        return Ok(response);
+            success = true,
+            data = response
+        });
     }
 }

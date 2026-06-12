@@ -110,6 +110,57 @@ public sealed class IaChatService : IIaChatService
             ["timeZone"] = "America/Lima"
         };
 
+        if (TryBuildDeterministicResumenArgs(question, out var deterministicResumenArgs))
+        {
+            try
+            {
+                var deterministicResult = await EjecutarResumenPlanillaAsync(deterministicResumenArgs, question, cancellationToken);
+                var deterministicResponseType = deterministicResult.Chart is not null ? "chart" : "summary";
+                var deterministicAnswer = BuildSummaryAnswer(
+                    deterministicResponseType,
+                    deterministicResult.Summary,
+                    deterministicResult.Chart,
+                    deterministicResult.TotalRows,
+                    deterministicResumenArgs);
+
+                interpretedFilters["toolName"] = ToolResumirPlanilla;
+                interpretedFilters["toolParameters"] = deterministicResumenArgs.AsDictionary();
+                interpretedFilters["responseType"] = deterministicResponseType;
+                interpretedFilters["routingMode"] = "deterministic";
+
+                stopwatch.Stop();
+                await RegistrarAuditoriaAsync(
+                    idUsuario,
+                    module,
+                    question,
+                    ToolResumirPlanilla,
+                    deterministicResumenArgs.AsDictionary(),
+                    (int)Math.Min(int.MaxValue, stopwatch.ElapsedMilliseconds),
+                    deterministicResult.TotalRows,
+                    true,
+                    null,
+                    cancellationToken);
+
+                return new IaChatResponseDto
+                {
+                    Success = true,
+                    Module = module,
+                    Answer = deterministicAnswer,
+                    ResponseType = deterministicResponseType,
+                    InterpretedFilters = interpretedFilters,
+                    Summary = deterministicResult.Summary,
+                    Chart = deterministicResult.Chart,
+                    TotalRows = deterministicResult.TotalRows
+                };
+            }
+            catch (Exception ex)
+            {
+                stopwatch.Stop();
+                _logger.LogError(ex, "Error en ruta deterministica de IA Chat. Usuario={Usuario} Module={Module}", idUsuario, module);
+                return Failure(module, BuildFriendlyErrorMessage(ex));
+            }
+        }
+
         var systemPrompt = BuildSystemPrompt();
         var messages = new List<AnthropicMessageRequest>
         {
@@ -1013,6 +1064,141 @@ ConversationId:
                 question,
                 $@"\b{System.Text.RegularExpressions.Regex.Escape(token)}\b",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant));
+    }
+
+    private static bool TryBuildDeterministicResumenArgs(string question, out ResumenPlanillaArgs args)
+    {
+        args = new ResumenPlanillaArgs();
+        var normalized = question.ToLowerInvariant();
+
+        var groupBy = ResolveDeterministicGroupBy(normalized);
+        if (groupBy is null)
+        {
+            return false;
+        }
+
+        var wantsSummary =
+            normalized.Contains("resumen", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("top", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("mayor", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("menor", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("ranking", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("graf", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("gastos por", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("consumo por", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("agrupa", StringComparison.OrdinalIgnoreCase);
+
+        if (!wantsSummary)
+        {
+            return false;
+        }
+
+        args.AgruparPor = groupBy;
+        args.Top = ExtractTop(question) ?? 20;
+
+        if (TryExtractYearRange(question, out var yearStart, out var yearEnd))
+        {
+            args.FechaInicio = yearStart;
+            args.FechaFin = yearEnd;
+        }
+        else if (normalized.Contains("este año", StringComparison.OrdinalIgnoreCase))
+        {
+            var peruNow = DateTimeOffset.UtcNow.ToOffset(PeruOffset);
+            args.FechaInicio = new DateOnly(peruNow.Year, 1, 1);
+            args.FechaFin = new DateOnly(peruNow.Year, 12, 31);
+        }
+        else if (normalized.Contains("este mes", StringComparison.OrdinalIgnoreCase))
+        {
+            var peruNow = DateTimeOffset.UtcNow.ToOffset(PeruOffset);
+            args.FechaInicio = new DateOnly(peruNow.Year, peruNow.Month, 1);
+            args.FechaFin = new DateOnly(peruNow.Year, peruNow.Month, DateTime.DaysInMonth(peruNow.Year, peruNow.Month));
+        }
+        else if (normalized.Contains("mes pasado", StringComparison.OrdinalIgnoreCase))
+        {
+            var peruNow = DateTimeOffset.UtcNow.ToOffset(PeruOffset).AddMonths(-1);
+            args.FechaInicio = new DateOnly(peruNow.Year, peruNow.Month, 1);
+            args.FechaFin = new DateOnly(peruNow.Year, peruNow.Month, DateTime.DaysInMonth(peruNow.Year, peruNow.Month));
+        }
+
+        if (normalized.Contains("pendiente", StringComparison.OrdinalIgnoreCase))
+        {
+            args.Estados = "PENDIENTE";
+        }
+
+        args = args.Normalize();
+        return true;
+    }
+
+    private static string? ResolveDeterministicGroupBy(string normalizedQuestion)
+    {
+        if (normalizedQuestion.Contains("cliente", StringComparison.OrdinalIgnoreCase))
+        {
+            return "CLIENTE";
+        }
+
+        if (normalizedQuestion.Contains("proyecto", StringComparison.OrdinalIgnoreCase))
+        {
+            return "PROYECTO";
+        }
+
+        if (normalizedQuestion.Contains("responsable", StringComparison.OrdinalIgnoreCase))
+        {
+            return "RESPONSABLE";
+        }
+
+        if (normalizedQuestion.Contains("site", StringComparison.OrdinalIgnoreCase) ||
+            normalizedQuestion.Contains("sitio", StringComparison.OrdinalIgnoreCase))
+        {
+            return "SITE";
+        }
+
+        if (normalizedQuestion.Contains("estado", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ESTADO";
+        }
+
+        if (normalizedQuestion.Contains("mes", StringComparison.OrdinalIgnoreCase))
+        {
+            return "MES";
+        }
+
+        return null;
+    }
+
+    private static int? ExtractTop(string question)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(
+            question,
+            @"\btop\s*(\d{1,3})\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        return int.TryParse(match.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
+            ? Math.Clamp(value, 1, MaxTop)
+            : null;
+    }
+
+    private static bool TryExtractYearRange(string question, out DateOnly start, out DateOnly end)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(
+            question,
+            @"\b(20\d{2}|19\d{2})\b",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+        if (match.Success && int.TryParse(match.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var year))
+        {
+            start = new DateOnly(year, 1, 1);
+            end = new DateOnly(year, 12, 31);
+            return true;
+        }
+
+        start = default;
+        end = default;
+        return false;
     }
 
     private static bool NeedsClarification(string question)
