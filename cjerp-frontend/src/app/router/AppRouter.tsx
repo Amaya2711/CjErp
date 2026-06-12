@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { Suspense, lazy } from "react";
 import PrivateRoute from "./PrivateRoute";
 import AutoSecurityRoute from "./AutoSecurityRoute";
 import SessionManager from "../session/SessionManager";
@@ -70,11 +71,12 @@ import EnvioMensajesPage from "../../features/inicio/enviomensajes";
 import PlantaPrincipalPage from "../../features/planta/principal";
 import EppsPage from "../../features/planta/epps";
 import OperativoPage from "../../pages/reporte/operativo";
-import AdministrativoPage from "../../pages/reporte/administrativo";
 import FinancieroPage from "../../pages/reporte/financiero";
 import GerencialPage from "../../pages/reporte/gerencial";
 import RptAsistenciaPage from "../../features/reportes/rptasistencia";
 import RptAsistenciaEmpleadoPage from "../../features/reportes/rptasistenciaempleado";
+import ClaudeiaPage from "../../features/reportes/administrativo/claudeia";
+const IaChatPage = lazy(() => import("../../features/reportes/administrativo/iachat"));
 
 export default function AppRouter() {
   return (
@@ -153,7 +155,24 @@ export default function AppRouter() {
             <Route path="/planta/epps" element={<EppsPage />} />
 
             <Route path="/reporte/operativo" element={<OperativoPage />} />
-            <Route path="/reporte/administrativo" element={<AdministrativoPage />} />
+            <Route path="/reporte/administrativo/claudeia" element={<ClaudeiaPage />} />
+            <Route path="/reportes/administrativo/claudeia" element={<ClaudeiaPage />} />
+            <Route
+              path="/reporte/administrativo/iachat"
+              element={
+                <Suspense fallback={<div style={{ padding: 24 }}>Cargando IA Chat...</div>}>
+                  <IaChatPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/reportes/administrativo/iachat"
+              element={
+                <Suspense fallback={<div style={{ padding: 24 }}>Cargando IA Chat...</div>}>
+                  <IaChatPage />
+                </Suspense>
+              }
+            />
             <Route path="/reporte/financiero" element={<FinancieroPage />} />
             <Route path="/reporte/gerencial" element={<GerencialPage />} />
             <Route path="/reportes/rptasistencia" element={<RptAsistenciaPage />} />

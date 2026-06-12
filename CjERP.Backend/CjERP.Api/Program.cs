@@ -37,6 +37,25 @@ builder.Services.Configure<WupSettings>(
     builder.Configuration.GetSection("WupSettings"));
 builder.Services.Configure<ReporteWhatsappJobDefaultsOptions>(
     builder.Configuration.GetSection("ReporteWhatsAppJobDefaults"));
+builder.Services.Configure<AnthropicSettings>(
+    builder.Configuration.GetSection("Anthropic"));
+
+var anthropicSettings = builder.Configuration
+    .GetSection("Anthropic")
+    .Get<AnthropicSettings>() ?? new AnthropicSettings();
+var anthropicApiKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
+if (!string.IsNullOrWhiteSpace(anthropicApiKey))
+{
+    anthropicSettings.ApiKey = anthropicApiKey;
+}
+
+var anthropicModel = Environment.GetEnvironmentVariable("ANTHROPIC_MODEL");
+if (!string.IsNullOrWhiteSpace(anthropicModel))
+{
+    anthropicSettings.Model = anthropicModel;
+}
+
+builder.Services.AddSingleton(Microsoft.Extensions.Options.Options.Create(anthropicSettings));
 
 var jwtSettings = builder.Configuration
     .GetSection("JwtSettings")
@@ -168,6 +187,11 @@ builder.Services.AddScoped<IReportePdfService, ReportePdfService>();
 builder.Services.AddScoped<IReporteAutomaticoService, ReporteAutomaticoService>();
 builder.Services.AddScoped<IReporteWhatsappJobScheduler, ReporteWhatsappJobScheduler>();
 builder.Services.AddSingleton<IReporteWhatsappRuntimeMonitor, ReporteWhatsappRuntimeMonitor>();
+builder.Services.AddHttpClient<IIaChatService, IaChatService>(client =>
+{
+    client.BaseAddress = new Uri("https://api.anthropic.com");
+    client.Timeout = TimeSpan.FromSeconds(90);
+});
 builder.Services.AddHttpClient<ISharePointCommercialUploadService, SharePointCommercialUploadService>();
 builder.Services.AddHttpClient<IWupAuthService, WupAuthService>((serviceProvider, client) =>
 {

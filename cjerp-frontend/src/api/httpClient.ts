@@ -10,10 +10,7 @@ type HttpClient = {
 };
 
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
-//const apiBaseUrl =
-//  configuredApiUrl || (import.meta.env.DEV ? "http://localhost:5015/api" : "/api");
-const apiBaseUrl =
-configuredApiUrl || "https://cjerp-production.up.railway.app/api";
+const apiBaseUrl = configuredApiUrl || "https://cjerp-production.up.railway.app/api";
 
 const axiosClient: AxiosInstance = axios.create({
   baseURL: apiBaseUrl,
@@ -44,19 +41,25 @@ axiosClient.interceptors.request.use((config) => {
 
 axiosClient.interceptors.response.use(
   (response) => {
-    if (response?.data && typeof response.data === "object") {
-      const payload = response.data as {
+    const data = response?.data;
+
+    if (data && typeof data === "object") {
+      const payload = data as {
         success?: boolean;
         message?: string;
         data?: unknown;
       };
 
       if (typeof payload.success === "boolean") {
-        if (!payload.success) {
-          return Promise.reject(new Error(payload.message || "La operación no fue completada por el servidor."));
+        if (payload.success === false) {
+          return Promise.reject(new Error(payload.message || "La operacion no fue completada por el servidor."));
         }
 
-        return payload.data;
+        if ("data" in payload) {
+          return payload.data;
+        }
+
+        return data;
       }
 
       if ("data" in payload) {
@@ -64,7 +67,7 @@ axiosClient.interceptors.response.use(
       }
     }
 
-    return response.data;
+    return data;
   },
   (error) => {
     if (error?.response?.data) {
