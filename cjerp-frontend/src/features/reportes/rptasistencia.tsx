@@ -2016,11 +2016,12 @@ export default function RptAsistenciaPage() {
         </div>
       </div>
       {gerencialTopResponsablesPreviewRows.length > 0 ? (
-        <SimpleVerticalBars
+        <SimpleResponsableRankingBars
           data={gerencialTopResponsablesPreviewRows}
-          colorMode="palette"
-          onBarClick={(name) => toggleGerencialTopResponsableFilter(name, 'responsable')}
+          onItemClick={(name) => toggleGerencialTopResponsableFilter(name, 'responsable')}
           activeName={gerencialQuickFilters.topResponsable}
+          showLegend={false}
+          maxHeight={330}
         />
       ) : (
         <div style={styles.emptyMiniState}>
@@ -2624,11 +2625,12 @@ export default function RptAsistenciaPage() {
                       </div>
                     </div>
                     {gerencialTopResponsablesPreviewRows.length > 0 ? (
-                      <SimpleVerticalBars
+                      <SimpleResponsableRankingBars
                         data={gerencialTopResponsablesPreviewRows}
-                        colorMode="palette"
-                        onBarClick={toggleGerencialTopResponsableFilter}
+                        onItemClick={toggleGerencialTopResponsableFilter}
                         activeName={gerencialQuickFilters.topResponsable}
+                        showLegend={false}
+                        maxHeight={330}
                       />
                     ) : (
                       <div style={styles.emptyMiniState}>
@@ -2978,11 +2980,12 @@ export default function RptAsistenciaPage() {
               ) : null}
               {gerencialOverlay === "top" ? (
                 <ChartCard title="" subtitle="" style={styles.summaryOverlayChartCard}>
-                  <SimpleVerticalBars
+                  <SimpleResponsableRankingBars
                     data={gerencialTopResponsablesRows}
-                    colorMode="palette"
-                    onBarClick={handleTopResponsableOverlaySelect}
+                    onItemClick={handleTopResponsableOverlaySelect}
                     activeName={gerencialQuickFilters.topResponsable}
+                    showLegend
+                    maxHeight={560}
                   />
                 </ChartCard>
               ) : null}
@@ -3225,6 +3228,157 @@ function SimpleVerticalBars({
             </div>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+function getResponsableRankingVisual(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return {
+      bar: "#BDBDBD",
+      barSoft: "#E5E7EB",
+      value: "#6B7280",
+      border: "#D1D5DB",
+      text: "#111827",
+    };
+  }
+
+  if (value >= 10) {
+    return {
+      bar: "#EF4444",
+      barSoft: "#FEE2E2",
+      value: "#B91C1C",
+      border: "#FCA5A5",
+      text: "#111827",
+    };
+  }
+
+  if (value >= 5) {
+    return {
+      bar: "#F97316",
+      barSoft: "#FFEDD5",
+      value: "#C2410C",
+      border: "#FDBA74",
+      text: "#111827",
+    };
+  }
+
+  if (value >= 2) {
+    return {
+      bar: "#FBBF24",
+      barSoft: "#FEF3C7",
+      value: "#A16207",
+      border: "#FCD34D",
+      text: "#111827",
+    };
+  }
+
+  return {
+    bar: "#FDE047",
+    barSoft: "#FEF9C3",
+    value: "#A16207",
+    border: "#FDE68A",
+    text: "#111827",
+  };
+}
+
+function SimpleResponsableRankingBars({
+  data,
+  onItemClick,
+  activeName,
+  showLegend = true,
+  maxHeight = 560,
+}: {
+  data: Array<{ name: string; value: number }>;
+  onItemClick?: (name: string) => void;
+  activeName?: string | null;
+  showLegend?: boolean;
+  maxHeight?: number;
+}) {
+  const max = Math.max(...data.map((item) => item.value), 1);
+
+  return (
+    <div style={styles.responsibleRankingWrap}>
+      {data.length === 0 ? (
+        <div style={styles.emptyMiniState}>Sin datos para graficar.</div>
+      ) : (
+        <>
+          <div style={{ ...styles.responsibleRankingList, maxHeight }}>
+            <div style={styles.responsibleRankingHeader}>
+              <div style={styles.responsibleRankingHeaderIndex}>#</div>
+              <div style={styles.responsibleRankingHeaderName}>Responsable</div>
+              <div style={styles.responsibleRankingHeaderBar} />
+              <div style={styles.responsibleRankingHeaderValue}>Pendientes</div>
+            </div>
+            {data.map((item, index) => {
+              const tone = getResponsableRankingVisual(item.value);
+              const width = `${Math.max((item.value / max) * 100, item.value > 0 ? 6 : 0)}%`;
+              const isActive = activeName === item.name;
+
+              return (
+                <button
+                  type="button"
+                  key={item.name}
+                  onClick={() => onItemClick?.(item.name)}
+                  title={onItemClick ? `Filtrar por responsable: ${item.name}` : item.name}
+                  style={{
+                    ...styles.responsibleRankingRow,
+                    ...(isActive ? styles.responsibleRankingRowActive : null),
+                    cursor: onItemClick ? "pointer" : "default",
+                  }}
+                >
+                  <div style={styles.responsibleRankingIndex}>{index + 1}</div>
+                  <div style={styles.responsibleRankingName}>{item.name}</div>
+                  <div style={styles.responsibleRankingBarCell}>
+                    <div style={styles.responsibleRankingBarTrack}>
+                      <div
+                        style={{
+                          ...styles.responsibleRankingBarFill,
+                          width,
+                          background: tone.bar,
+                          boxShadow: `0 0 0 1px ${tone.border} inset`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      ...styles.responsibleRankingValue,
+                      color: tone.value,
+                    }}
+                  >
+                    {item.value}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          {showLegend ? (
+            <div style={styles.responsibleRankingLegend}>
+              <div style={styles.responsibleRankingLegendItem}>
+                <span style={{ ...styles.responsibleRankingLegendSwatch, background: "#EF4444" }} />
+                <span style={styles.responsibleRankingLegendText}>10 o más pendientes</span>
+              </div>
+              <div style={styles.responsibleRankingLegendItem}>
+                <span style={{ ...styles.responsibleRankingLegendSwatch, background: "#F97316" }} />
+                <span style={styles.responsibleRankingLegendText}>5 a 9 pendientes</span>
+              </div>
+              <div style={styles.responsibleRankingLegendItem}>
+                <span style={{ ...styles.responsibleRankingLegendSwatch, background: "#FBBF24" }} />
+                <span style={styles.responsibleRankingLegendText}>2 a 4 pendientes</span>
+              </div>
+              <div style={styles.responsibleRankingLegendItem}>
+                <span style={{ ...styles.responsibleRankingLegendSwatch, background: "#FDE047" }} />
+                <span style={styles.responsibleRankingLegendText}>1 pendiente</span>
+              </div>
+              <div style={styles.responsibleRankingLegendItem}>
+                <span style={{ ...styles.responsibleRankingLegendSwatch, background: "#BDBDBD" }} />
+                <span style={styles.responsibleRankingLegendText}>Sin responsable</span>
+              </div>
+            </div>
+          ) : null}
+        </>
       )}
     </div>
   );
@@ -4435,6 +4589,8 @@ function SimpleAreaStateBars({
   onAreaSelect?: (area: string) => void;
   expanded?: boolean;
 }) {
+  const maxTotal = Math.max(...data.map((item) => item.total), 1);
+
   return (
     <div style={styles.locationStateWrap}>
       {data.length === 0 ? (
@@ -4470,16 +4626,16 @@ function SimpleAreaStateBars({
                     {item.estados.map((estado) => {
                       const colorIndex = states.indexOf(estado.state);
                       const stateVisual = getStateVisual(estado.state, colorIndex >= 0 ? colorIndex : 0);
-                      const width = item.total > 0 ? `${(estado.value / item.total) * 100}%` : "0%";
+                      const width = maxTotal > 0 ? `${(estado.value / maxTotal) * 100}%` : "0%";
                       return (
                         <button
                           type="button"
                           key={`${item.area}-bar-${estado.state}`}
 	                          style={{
-	                            ...styles.locationStateSegment,
-	                            width,
-	                            background: stateVisual.strong,
-	                            cursor: onSelect ? "pointer" : "default",
+                            ...styles.locationStateSegment,
+                            width,
+                            background: stateVisual.strong,
+                            cursor: onSelect ? "pointer" : "default",
                           }}
                           title={`${item.area} | ${estado.state}: ${estado.value}`}
                           onClick={() => onSelect?.(item.area, estado.state)}
@@ -5235,6 +5391,117 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "stretch",
     justifyContent: "center",
+  },
+  responsibleRankingWrap: {
+    width: "100%",
+    display: "flex",
+    flexDirection: "column",
+    gap: 18,
+  },
+  responsibleRankingList: {
+    width: "100%",
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    overflowY: "auto",
+    paddingRight: 6,
+  },
+  responsibleRankingHeader: {
+    display: "grid",
+    gridTemplateColumns: "44px minmax(220px, 320px) 1fr 88px",
+    gap: 14,
+    alignItems: "center",
+    padding: "0 6px 8px",
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: 700,
+    borderBottom: "1px solid #E2E8F0",
+  },
+  responsibleRankingHeaderIndex: {
+    textAlign: "center",
+  },
+  responsibleRankingHeaderName: {
+    textAlign: "left",
+  },
+  responsibleRankingHeaderBar: {
+    minHeight: 1,
+  },
+  responsibleRankingHeaderValue: {
+    textAlign: "right",
+  },
+  responsibleRankingRow: {
+    display: "grid",
+    gridTemplateColumns: "44px minmax(220px, 320px) 1fr 88px",
+    gap: 14,
+    alignItems: "center",
+    width: "100%",
+    padding: "6px 6px",
+    border: "none",
+    background: "transparent",
+    borderRadius: 12,
+    textAlign: "left",
+  },
+  responsibleRankingRowActive: {
+    background: "#F8FAFC",
+    boxShadow: "inset 0 0 0 1px #BFDBFE",
+  },
+  responsibleRankingIndex: {
+    textAlign: "center",
+    color: "#111827",
+    fontSize: 14,
+    fontWeight: 700,
+  },
+  responsibleRankingName: {
+    color: "#111827",
+    fontSize: 14,
+    fontWeight: 700,
+    lineHeight: 1.1,
+    whiteSpace: "normal",
+    wordBreak: "break-word",
+  },
+  responsibleRankingBarCell: {
+    width: "100%",
+  },
+  responsibleRankingBarTrack: {
+    width: "100%",
+    height: 18,
+    borderRadius: 999,
+    background: "#E5E7EB",
+    overflow: "hidden",
+    position: "relative",
+  },
+  responsibleRankingBarFill: {
+    height: "100%",
+    borderRadius: 999,
+    transition: "width 0.25s ease, background 0.25s ease",
+  },
+  responsibleRankingValue: {
+    textAlign: "right",
+    fontSize: 18,
+    fontWeight: 800,
+    lineHeight: 1,
+  },
+  responsibleRankingLegend: {
+    display: "flex",
+    justifyContent: "center",
+    gap: 18,
+    flexWrap: "wrap",
+    paddingTop: 6,
+    borderTop: "1px solid #E2E8F0",
+  },
+  responsibleRankingLegendItem: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    fontSize: 12,
+    color: "#334155",
+    fontWeight: 600,
+  },
+  responsibleRankingLegendSwatch: {
+    width: 18,
+    height: 12,
+    borderRadius: 3,
+    display: "inline-block",
   },
   emptyMiniState: {
     display: "flex",

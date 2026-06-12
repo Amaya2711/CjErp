@@ -1,0 +1,222 @@
+.datos-oc-drawer__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.24);
+  z-index: 1220;
+}
+
+.datos-oc-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: min(560px, calc(100vw - 24px));
+  height: 100vh;
+  background: #ffffff;
+  box-shadow: -12px 0 30px rgba(15, 23, 42, 0.18);
+  z-index: 1230;
+  display: flex;
+  flex-direction: column;
+}
+
+.datos-oc-drawer__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.datos-oc-drawer__eyebrow {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #6d28d9;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.datos-oc-drawer__title {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.1;
+  color: #111827;
+}
+
+.datos-oc-drawer__close {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: #4b5563;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.datos-oc-drawer__content {
+  padding: 18px;
+  overflow: auto;
+  display: grid;
+  gap: 16px;
+}
+
+.datos-oc-drawer__section {
+  background: #fafafa;
+  border: 1px solid #eef2f7;
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.datos-oc-drawer__section-title {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 800;
+  color: #111827;
+}
+
+.datos-oc-drawer__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.datos-oc-drawer__field,
+.datos-oc-drawer__mini,
+.datos-oc-drawer__range-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.datos-oc-drawer__field span,
+.datos-oc-drawer__mini span,
+.datos-oc-drawer__range-card span,
+.datos-oc-drawer__note {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.datos-oc-drawer__field strong,
+.datos-oc-drawer__mini strong,
+.datos-oc-drawer__range-card strong {
+  font-size: 14px;
+  font-weight: 800;
+  color: #111827;
+  min-width: 0;
+}
+
+.datos-oc-drawer__truncate {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.datos-oc-drawer__progress-block {
+  display: grid;
+  gap: 10px;
+}
+
+.datos-oc-drawer__progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #374151;
+}
+
+.datos-oc-drawer__progress-track,
+.datos-oc-drawer__range-bar {
+  height: 12px;
+  background: #e5e7eb;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.datos-oc-drawer__progress-fill,
+.datos-oc-drawer__range-fill {
+  height: 100%;
+  border-radius: inherit;
+}
+
+.datos-oc-drawer__progress-fill--success {
+  background: linear-gradient(90deg, #22c55e, #16a34a);
+}
+
+.datos-oc-drawer__progress-fill--warning {
+  background: linear-gradient(90deg, #f59e0b, #f97316);
+}
+
+.datos-oc-drawer__progress-fill--danger {
+  background: linear-gradient(90deg, #ef4444, #b91c1c);
+}
+
+.datos-oc-drawer__note {
+  margin: 0;
+}
+
+.datos-oc-drawer__stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.datos-oc-drawer__badge {
+  grid-column: 1 / -1;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.datos-oc-drawer__badge--success {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.datos-oc-drawer__badge--warning {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.datos-oc-drawer__badge--danger {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.datos-oc-drawer__mini--hidden,
+.datos-oc-drawer__section--hidden {
+  display: none;
+}
+
+.datos-oc-drawer__ranges {
+  display: grid;
+  gap: 12px;
+}
+
+.datos-oc-drawer__range-bar--client .datos-oc-drawer__range-fill {
+  background: linear-gradient(90deg, #2563eb, #7c3aed);
+}
+
+.datos-oc-drawer__range-bar--site .datos-oc-drawer__range-fill {
+  background: linear-gradient(90deg, #059669, #14b8a6);
+}
+
+@media (max-width: 720px) {
+  .datos-oc-drawer {
+    width: 100vw;
+  }
+
+  .datos-oc-drawer__grid,
+  .datos-oc-drawer__stats {
+    grid-template-columns: 1fr;
+  }
+}

@@ -11,6 +11,16 @@ export type DashboardGroup = {
   tiles: DashboardTile[];
 };
 
+const CLAUDEIA_TILE: DashboardTile = {
+  label: "Claudeia",
+  path: "/reportes/administrativo/claudeia",
+};
+
+const IACHAT_TILE: DashboardTile = {
+  label: "IA Chat",
+  path: "/reportes/administrativo/iachat",
+};
+
 type MenuNode = {
   idMenu: number;
   idMenuPadre: number | null;
@@ -115,6 +125,30 @@ export async function loadDashboardMenus(idUsuario: string): Promise<DashboardGr
       };
     })
     .filter((group) => group.tiles.length > 0);
+
+  const ensureTile = (tileToEnsure: DashboardTile) => {
+    const exists = groups.some((group) =>
+      group.tiles.some((tile) => tile.path.trim() === tileToEnsure.path)
+    );
+
+    if (!exists) {
+      const reportesGroup = groups.find((group) =>
+        group.titulo.toLowerCase().includes("reporte")
+      );
+
+      if (reportesGroup) {
+        reportesGroup.tiles = [...reportesGroup.tiles, tileToEnsure];
+      } else {
+        groups.push({
+          titulo: "Reportes",
+          tiles: [tileToEnsure],
+        });
+      }
+    }
+  };
+
+  ensureTile(CLAUDEIA_TILE);
+  ensureTile(IACHAT_TILE);
 
   //console.log("[dashboardMenuService] groups:", groups);
 

@@ -13,27 +13,27 @@ export type DashboardGroup = {
 
 export const menuDashboard: DashboardGroup[] = [
   {
-    titulo: "Gestión",
+    titulo: "Gestion",
     subtitulo: "Operaciones",
     color: "#6E4CCB",
     tiles: [
-      { label: "Capitalización / Cierre", path: "/operaciones/cierre" },
+      { label: "Capitalizacion / Cierre", path: "/operaciones/cierre" },
       { label: "Operaciones", path: "/operaciones" },
       { label: "Asignaciones", path: "/operaciones/asignaciones" },
     ],
   },
   {
     titulo: "Finanzas",
-    subtitulo: "Tesorería y pagos",
+    subtitulo: "Tesoreria y pagos",
     color: "#E74C3C",
     tiles: [
-      { label: "Depósitos", path: "/finanzas/deposito" },
+      { label: "Depositos", path: "/finanzas/deposito" },
       { label: "Aprobaciones", path: "/finanzas/aprobar" },
       { label: "Orden Compra", path: "/finanzas/orden-compra" },
     ],
   },
   {
-    titulo: "Logística",
+    titulo: "Logistica",
     subtitulo: "Inventario y control",
     color: "#0EA5E9",
     tiles: [
@@ -42,7 +42,7 @@ export const menuDashboard: DashboardGroup[] = [
     ],
   },
   {
-    titulo: "Administración",
+    titulo: "Administracion",
     subtitulo: "Control administrativo",
     color: "#22C55E",
     tiles: [
@@ -60,15 +60,17 @@ export const menuDashboard: DashboardGroup[] = [
       { label: "Usuario Perfil", path: "/seguridad/usuario-perfil" },
       { label: "Perfiles", path: "/seguridad/perfiles" },
       { label: "Roles", path: "/seguridad/roles" },
-      { label: "Menú", path: "/seguridad/menu" },
+      { label: "Menu", path: "/seguridad/menu" },
       { label: "Permisos", path: "/seguridad/permisos" },
     ],
   },
   {
     titulo: "Reportes",
-    subtitulo: "Reportes y analítica",
+    subtitulo: "Reportes y analitica",
     color: "#38BDF8",
     tiles: [
+      { label: "Claudeia", path: "/reportes/administrativo/claudeia" },
+      { label: "IA Chat", path: "/reportes/administrativo/iachat" },
       { label: "Reporte asistencia", path: "/reportes/rptasistencia" },
     ],
   },

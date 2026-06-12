@@ -10,7 +10,7 @@ import {
 } from "../features/dashboard/services/dashboardMenuService";
 
 function tileMatchesPath(tile: DashboardTile, pathname: string): boolean {
-  const tilePath = tile.path.trim();
+  const tilePath = normalizeRoutePath(tile.path);
 
   if (!tilePath || tilePath === "#") {
     return false;
@@ -31,6 +31,20 @@ function formatPathLabel(value: string): string {
     .trim()
     .replace(/\s+/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function normalizeRoutePath(value: string): string {
+  const path = value.trim();
+
+  if (!path) {
+    return "";
+  }
+
+  if (path === "#") {
+    return path;
+  }
+
+  return path.startsWith("/") ? path : `/${path}`;
 }
 
 function findTileLabelPath(
@@ -226,7 +240,8 @@ export default function MainLayout() {
     depth: number
   ) => {
     const hasChildren = (tile.children?.length ?? 0) > 0;
-    const isActive = tileMatchesPath(tile, location.pathname);
+    const normalizedPath = normalizeRoutePath(tile.path);
+    const isActive = tileMatchesPath({ ...tile, path: normalizedPath }, location.pathname);
     const isExpanded = expandedNodes[nodeKey] ?? isActive;
 
     return (
@@ -238,7 +253,7 @@ export default function MainLayout() {
           }}
         >
           <NavLink
-            to={tile.path}
+            to={normalizedPath || "#"}
             style={{
               ...styles.sideNodeLink,
               ...(isActive ? styles.sideNodeLinkActive : {}),

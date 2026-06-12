@@ -1,0 +1,304 @@
+.datos-oc-floating-card {
+  position: fixed;
+  right: 20px;
+  bottom: 56px;
+  width: min(390px, calc(100vw - 24px));
+  max-height: calc(100vh - 110px);
+  overflow: auto;
+  background: #ffffff;
+  border: 1px solid rgba(229, 231, 235, 0.95);
+  border-radius: 18px;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.14);
+  z-index: 1200;
+  color: #1f2937;
+}
+
+.datos-oc-floating-card--minimized {
+  width: auto;
+  max-height: none;
+  overflow: hidden;
+}
+
+.datos-oc-floating-card__minimized-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.datos-oc-floating-card__minimized-main {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  display: flex;
+  align-items: flex-start;
+  cursor: pointer;
+}
+
+.datos-oc-floating-card__minimized-title {
+  font-size: 12px;
+  font-weight: 800;
+  color: #6d28d9;
+  white-space: nowrap;
+}
+
+.datos-oc-floating-card__minimized-actions,
+.datos-oc-floating-card__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.datos-oc-floating-card__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 16px 10px;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.datos-oc-floating-card__eyebrow {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #6d28d9;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.datos-oc-floating-card__title {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.15;
+  color: #111827;
+}
+
+.datos-oc-floating-card__icon-button {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: #4b5563;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.datos-oc-floating-card__icon-button:hover {
+  border-color: #c4b5fd;
+  background: #f5f3ff;
+  transform: translateY(-1px);
+}
+
+.datos-oc-floating-card__summary,
+.datos-oc-floating-card__section,
+.datos-oc-floating-card__footer {
+  padding: 14px 16px;
+}
+
+.datos-oc-floating-card__summary-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.datos-oc-floating-card__field,
+.datos-oc-floating-card__detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.datos-oc-floating-card__detail-item--inline {
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.datos-oc-floating-card__label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #6b7280;
+}
+
+.datos-oc-floating-card__value {
+  font-size: 14px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.datos-oc-floating-card__metric-header,
+.datos-oc-floating-card__metric-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.datos-oc-floating-card__metric {
+  font-size: 15px;
+  font-weight: 800;
+  color: #111827;
+}
+
+.datos-oc-floating-card__subtext,
+.datos-oc-floating-card__hint {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.datos-oc-floating-card__hint {
+  margin: 6px 0 8px;
+}
+
+.datos-oc-floating-card__progress-track {
+  height: 10px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  overflow: hidden;
+}
+
+.datos-oc-floating-card__progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  transition: width 0.25s ease;
+}
+
+.datos-oc-floating-card__progress-fill--disponible {
+  background: linear-gradient(90deg, #22c55e, #16a34a);
+}
+
+.datos-oc-floating-card__progress-fill--cercano-al-límite,
+.datos-oc-floating-card__progress-fill--cercano-al-limite {
+  background: linear-gradient(90deg, #f59e0b, #f97316);
+}
+
+.datos-oc-floating-card__progress-fill--excedido {
+  background: linear-gradient(90deg, #ef4444, #b91c1c);
+}
+
+.datos-oc-floating-card__progress-meta {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #4b5563;
+}
+
+.datos-oc-floating-card__section--soft {
+  border-top: 1px solid #eef2f7;
+  background: #fafafa;
+}
+
+.datos-oc-floating-card__tone {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 12px;
+}
+
+.datos-oc-floating-card__tone--success {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.datos-oc-floating-card__tone--warning {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.datos-oc-floating-card__tone--danger {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.datos-oc-floating-card__detail-list {
+  display: grid;
+  gap: 12px;
+}
+
+.datos-oc-floating-card__footer {
+  border-top: 1px solid #eef2f7;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.datos-oc-floating-card__action-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.datos-oc-floating-card__primary-button {
+  border: 1px solid #c4b5fd;
+  background: linear-gradient(180deg, #7c3aed 0%, #6d28d9 100%);
+  color: #ffffff;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  box-shadow: 0 10px 20px rgba(109, 40, 217, 0.18);
+}
+
+.datos-oc-floating-card__primary-button:hover {
+  filter: brightness(1.03);
+}
+
+.datos-oc-floating-card__secondary-button {
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+  color: #3730a3;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: transform 0.15s ease, filter 0.15s ease, opacity 0.15s ease;
+}
+
+.datos-oc-floating-card__secondary-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.01);
+}
+
+.datos-oc-floating-card__secondary-button--danger {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.datos-oc-floating-card__secondary-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+@media (max-width: 520px) {
+  .datos-oc-floating-card {
+    right: 12px;
+    left: 12px;
+    width: auto;
+  }
+}

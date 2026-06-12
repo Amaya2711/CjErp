@@ -37,6 +37,9 @@ import type { ValoresGastoRequest, ValoresGastoResponse } from "../../../models/
 import { getAuthUser } from "../../../utils/authStorage";
 import { compressImageForUpload } from "../../../utils/imageCompression";
 import { SHAREPOINT_BASE_URL } from "../../../utils/sharepoint";
+import { DatosOcFloatingCard, type OcDetalle } from "./components/DatosOcFloatingCard";
+import { DatosOcDrawer } from "./components/DatosOcDrawer";
+import "./gastosaprobar.css";
 
 type GastoDto = {
   id: number;
@@ -63,6 +66,10 @@ type GastoDto = {
   subtotal?: number;
   total?: number;
   igv?: number;
+  montoOc?: number;
+  conPagado?: number;
+  conPagadoDisplay?: string;
+  montoOc2?: string;
   subOc?: number;
   subPlanilla?: number;
   porce?: number;
@@ -126,6 +133,16 @@ type GastoForm = {
   rendicion: boolean;
   tipoPago: string;
   monto: string;
+  subtotal?: number;
+  total?: number;
+  igv?: number;
+  montoOc?: number;
+  conPagado?: number;
+  conPagadoDisplay?: string;
+  montoOc2: string;
+  clienteNombre?: string;
+  nombreProyecto?: string;
+  siteNombre?: string;
   detalle: string;
   comentario: string;
   fechaVencimiento: string;
@@ -688,6 +705,7 @@ function renderGridCellText(value: unknown): React.ReactNode {
       title={text}
       style={{
         display: "block",
+        textAlign: "inherit",
         overflow: "hidden",
         whiteSpace: "nowrap",
         textOverflow: "ellipsis",
@@ -783,6 +801,43 @@ function formatDecimalValue(value: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value);
+}
+
+function parseDisplayNumber(value?: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+
+  let normalized = String(value)
+    .trim()
+    .replace(/[^0-9,.-]/g, "");
+
+  normalized = normalized.replace(/^[^0-9-]+/, "");
+
+  const hasComma = normalized.includes(",");
+  const hasDot = normalized.includes(".");
+
+  if (hasComma && hasDot) {
+    const lastComma = normalized.lastIndexOf(",");
+    const lastDot = normalized.lastIndexOf(".");
+
+    if (lastComma > lastDot) {
+      normalized = normalized.replace(/\./g, "").replace(",", ".");
+    } else {
+      normalized = normalized.replace(/,/g, "");
+    }
+  } else if (hasComma) {
+    const commaParts = normalized.split(",");
+    if (commaParts.length === 2 && commaParts[1].length <= 2) {
+      normalized = normalized.replace(",", ".");
+    } else {
+      normalized = normalized.replace(/,/g, "");
+    }
+  }
+
+  const parsed = Number(normalized);
+
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function getFacturaDisplayPath(facturaPath?: string, facturaUrl?: string): string {
@@ -901,9 +956,9 @@ function normalizeFecIngresoFromStore(dateStr?: string | null): string {
     const second = Number(slashMatch[2]);
     const year = slashMatch[3];
 
-    const dayFirst = `${year}-${String(second).padStart(2, "0")}-${String(first).padStart(2, "0")}`;
+    const monthFirst = `${year}-${String(first).padStart(2, "0")}-${String(second).padStart(2, "0")}`;
 
-    return dayFirst;
+    return monthFirst;
   }
 
   const parsed = new Date(datePart);
@@ -1032,6 +1087,18 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     subtotal: subtotalValue ?? undefined,
     total: totalValue ?? undefined,
     igv: igvValue ?? undefined,
+    montoOc: parseDisplayNumber(getRecordString(row, "MontoOc", "montoOc", "MontoOc2", "montoOc2")) ?? undefined,
+    conPagado: parseDisplayNumber(
+      getRecordString(row, "ConPagado", "conPagado") ??
+        getRecordNumber(row, "ConPagado", "conPagado")?.toString() ??
+        ""
+    ) ?? getRecordNumber(row, "ConPagado", "conPagado") ?? undefined,
+    conPagadoDisplay:
+      getRecordString(row, "ConPagado", "conPagado") ||
+      (getRecordNumber(row, "ConPagado", "conPagado") != null
+        ? formatDecimalValue(getRecordNumber(row, "ConPagado", "conPagado") ?? 0)
+        : ""),
+    montoOc2: getRecordString(row, "MontoOc2", "montoOc2"),
     idRendicion: getRecordNumber(row, "IdRendicion", "idRendicion") ?? undefined,
     detalle: getRecordString(row, "Detalle", "detalle"),
     comentario: getRecordString(row, "Observacion", "observacion", "Comentario", "comentario"),
@@ -1153,6 +1220,13 @@ function mapGastoDtoToView(item: GastoDto): GastoForm {
     rendicion: Number(item.idRendicion ?? 0) === 1,
     tipoPago: item.tipoPago || item.tipoPagoLabel || "",
     monto: subtotalValue != null ? subtotalValue.toString() : "",
+    subtotal: item.subtotal,
+    total: item.total,
+    igv: item.igv,
+    montoOc: item.montoOc,
+    conPagado: item.conPagado,
+    conPagadoDisplay: item.conPagadoDisplay?.trim() || formatDecimalValue(Number(item.conPagado ?? 0)),
+    montoOc2: item.montoOc2 || "",
     detalle: item.detalle,
     comentario: item.comentario ?? (item as any).observacion ?? "",
     fechaVencimiento: normalizeDateForInput(item.fechaVencimiento),
@@ -1177,6 +1251,9 @@ function mapGastoDtoToView(item: GastoDto): GastoForm {
     rutaFacturaOriginal: item.rutaFacturaOriginal || "",
     rutaFacturaUrl: item.rutaFacturaUrl || "",
     rutaFacturaEnviada: item.rutaFacturaEnviada || "",
+    clienteNombre: item.clienteNombre || "",
+    nombreProyecto: item.nombreProyecto || "",
+    siteNombre: item.siteNombre || "",
     estado: item.estado ?? 0,
     estadoLabel: item.estadoLabel || "",
     tipoCambio: item.tipoCambio ?? TIPO_CAMBIO_GASTO,
@@ -1208,6 +1285,13 @@ const formularioInicial: GastoForm = {
   rendicion: false,
   tipoPago: "",
   monto: "",
+  subtotal: undefined,
+  total: undefined,
+  igv: undefined,
+  montoOc: undefined,
+  conPagado: undefined,
+  conPagadoDisplay: "",
+  montoOc2: "",
   detalle: "",
   comentario: "",
   fechaVencimiento: "",
@@ -1235,6 +1319,11 @@ export default function GastosAprobarPage() {
   // Estado para fila seleccionada
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
+  const [filaActiva, setFilaActiva] = useState<GastoForm | null>(null);
+  const [filaActivaKey, setFilaActivaKey] = useState<string | null>(null);
+  const [resumenOcMinimizado, setResumenOcMinimizado] = useState(false);
+  const [drawerOcAbierto, setDrawerOcAbierto] = useState(false);
+  const [actualizacionBloqueada, setActualizacionBloqueada] = useState(false);
   const selectAllCheckboxRef = useRef<HTMLInputElement | null>(null);
   const [filtrosCabecera, setFiltrosCabecera] = useState<GastosHeaderFilters>(GASTOS_HEADER_FILTERS_INITIAL);
   const [headerFilterSearch, setHeaderFilterSearch] = useState<Record<GastosHeaderSearchableFilterKey, string>>(
@@ -2076,6 +2165,7 @@ export default function GastosAprobarPage() {
   };
 
   const abrirNuevo = () => {
+    setActualizacionBloqueada(false);
     setModo("nuevo");
     valoresGastoRequestRef.current += 1;
     setValoresGastoLoading(false);
@@ -2153,6 +2243,7 @@ export default function GastosAprobarPage() {
       facturaPath: facturaEditFields.facturaPath,
     };
 
+    setActualizacionBloqueada(false);
     setModo("editar");
     preservarSuministroEdicionRef.current = Boolean(gastoEditable.idSuministroProvisional);
     valoresGastoRequestRef.current += 1;
@@ -2223,11 +2314,12 @@ export default function GastosAprobarPage() {
 
   const abrirVisualizar = (gasto: GastoForm) => {
     abrirEditar(gasto);
-    setModo("ver");
+    setActualizacionBloqueada(true);
   };
 
   const cerrarPanel = () => {
     setPanelAbierto(false);
+    setActualizacionBloqueada(false);
     valoresGastoRequestRef.current += 1;
     setValoresGastoLoading(false);
     setValoresGasto(VALORES_GASTO_INICIALES);
@@ -2410,8 +2502,15 @@ export default function GastosAprobarPage() {
       { key: "bien", label: "Bien", getValue: (gasto) => getConstanteLabel(bienOptions, gasto.bien) },
       { key: "comprobante", label: "Comprobante", getValue: (gasto) => getConstanteLabel(comprobanteOptions, gasto.comprobante) },
       { key: "monto", label: "Monto", getValue: (gasto) => gasto.monto },
+      { key: "subtotal", label: "Subtotal", getValue: (gasto) => gasto.subtotal },
+      { key: "igv", label: "IGV", getValue: (gasto) => gasto.igv },
+      { key: "total", label: "Total", getValue: (gasto) => gasto.total },
+      { key: "subOc", label: "SubOc", getValue: (gasto) => gasto.subOc },
+      { key: "adelaFic", label: "AdelaFic", getValue: (gasto) => gasto.adelaFic },
       { key: "porce", label: "Porce", getValue: (gasto) => gasto.porce },
       { key: "porcentajeFic", label: "PorcentajeFic", getValue: (gasto) => gasto.porcentajeFic },
+      { key: "montoOc2", label: "MontoOc2", getValue: (gasto) => parseDisplayNumber(gasto.montoOc2) ?? gasto.montoOc2 ?? "" },
+      { key: "conPagado", label: "ConPagado", getValue: (gasto) => gasto.conPagado },
       { key: "moneda", label: "Moneda", getValue: (gasto) => gasto.monedaLabel || getConstanteLabel(monedaOptions, gasto.moneda) },
       { key: "fecIngreso", label: "FecIngreso", getValue: (gasto) => gasto.fecIngreso },
       { key: "ot", label: "OT", getValue: (gasto) => gasto.filtroOperativo.ot?.ot },
@@ -2450,6 +2549,16 @@ export default function GastosAprobarPage() {
           return gasto.monto !== undefined && gasto.monto !== null && gasto.monto !== ""
             ? Number(gasto.monto).toLocaleString("es-PE", { minimumFractionDigits: 2 })
             : "";
+        case "subtotal":
+          return gasto.subtotal ?? "";
+        case "igv":
+          return gasto.igv ?? "";
+        case "total":
+          return gasto.total ?? "";
+        case "subOc":
+          return gasto.subOc ?? "";
+        case "adelaFic":
+          return gasto.adelaFic ?? "";
         case "porce":
           return gasto.porce !== undefined && gasto.porce !== null
             ? Number(gasto.porce)
@@ -2458,6 +2567,12 @@ export default function GastosAprobarPage() {
           return gasto.porcentajeFic !== undefined && gasto.porcentajeFic !== null
             ? Number(gasto.porcentajeFic)
             : "";
+        case "montoOc2":
+          return parseDisplayNumber(gasto.montoOc2) ?? gasto.montoOc2 ?? "";
+        case "conPagado":
+          return gasto.conPagadoDisplay?.trim()
+            ? gasto.conPagadoDisplay
+            : gasto.conPagado ?? "";
         case "moneda":
           return gasto.monedaLabel || getConstanteLabel(monedaOptions, gasto.moneda);
         case "fecIngreso":
@@ -2708,8 +2823,15 @@ export default function GastosAprobarPage() {
     { key: "tarea", label: "Tarea", width: "140px", align: "left" as const },
     { key: "bien", label: "Bien", width: "80px", align: "left" as const },
     { key: "comprobante", label: "Comprobante", width: "140px", align: "left" as const },
-    { key: "monto", label: "Monto", width: "100px", align: "left" as const },
-    { key: "porcentajeFic", label: "PorcentajeFic", width: "120px", align: "right" as const },
+    { key: "monto", label: "Monto", width: "100px", align: "center" as const, visible: false },
+    { key: "subtotal", label: "Subtotal", width: "100px", align: "center" as const },
+    { key: "igv", label: "IGV", width: "90px", align: "center" as const },
+    { key: "total", label: "Total", width: "100px", align: "center" as const },
+    { key: "subOc", label: "SubOc", width: "100px", align: "center" as const, visible: false },
+    { key: "adelaFic", label: "AdelaFic", width: "100px", align: "center" as const, visible: false },
+    { key: "porcentajeFic", label: "PorcentajeFic", width: "120px", align: "center" as const, visible: false },
+    { key: "montoOc2", label: "MontoOc2", width: "120px", align: "center" as const, visible: false },
+    { key: "conPagado", label: "ConPagado", width: "120px", align: "center" as const, visible: false },
     { key: "moneda", label: "Moneda", width: "80px", align: "left" as const },
     { key: "fecIngreso", label: "FecIngreso", width: "130px", align: "left" as const },
     { key: "ot", label: "OT", width: "70px", align: "left" as const },
@@ -2719,6 +2841,7 @@ export default function GastosAprobarPage() {
     { key: "estado", label: "Estado", width: "80px", align: "left" as const },
     { key: "detalle", label: "Detalle", width: "320px", align: "left" as const },
   ];
+  const columnasGridGastosVisibles = columnasGridGastos.filter((columna) => columna.visible !== false);
   const columnasCongeladasGrid = new Set([
     "seleccion",
     "id",
@@ -2777,6 +2900,94 @@ export default function GastosAprobarPage() {
       fontWeight: 400,
     };
   }, []);
+  const mapearDatosOc = React.useCallback(
+    (row: GastoForm): OcDetalle => {
+      const montoOcTexto = row.montoOc2 || "";
+      const montoOc = parseDisplayNumber(montoOcTexto) ?? Number(row.montoOc ?? 0);
+      const conPagadoTexto = row.conPagadoDisplay?.trim() || formatDecimalValue(Number(row.conPagado ?? 0));
+      const conPagado = parseDisplayNumber(conPagadoTexto) ?? Number(row.conPagado ?? 0);
+      const montoOcAdelanto = Number(row.adelaFic ?? 0);
+
+      return {
+        idRegistro: Number(row.id ?? row.idOc ?? 0),
+        idOc: Number(row.idOc ?? 0),
+        cliente: row.filtroOperativo.filtro?.nombreCliente ?? row.clienteNombre ?? "",
+        proyecto: row.filtroOperativo.filtro?.nombreProyecto ?? row.nombreProyecto ?? "",
+        site: row.filtroOperativo.filtro?.nombreSite ?? row.siteNombre ?? "",
+        montoOc,
+        conPagado,
+        conPagadoDisplay: conPagadoTexto,
+        montoOcDisplay: montoOcTexto,
+        subOc: Number(row.subOc ?? 0),
+        adelaFic: Number(row.adelaFic ?? 0),
+        porcentajeFic: Number(row.porcentajeFic ?? 0),
+        montoOcAdelanto,
+        porcentajeOcAdelanto: montoOc > 0 ? (montoOcAdelanto / montoOc) * 100 : 0,
+      };
+    },
+    []
+  );
+  const detalleOcActiva = useMemo(() => (filaActiva ? mapearDatosOc(filaActiva) : null), [filaActiva, mapearDatosOc]);
+  const filaActivaIndex = useMemo(() => {
+    if (!filaActivaKey) {
+      return -1;
+    }
+
+    return gastosFiltrados.findIndex((gasto, rowIndex) => getGastoRowKey(gasto, rowIndex) === filaActivaKey);
+  }, [filaActivaKey, gastosFiltrados]);
+  const accionesHabilitadasFilaActiva = useMemo(
+    () => filaActiva?.estado === 0 || filaActiva?.estado === 2,
+    [filaActiva]
+  );
+  useEffect(() => {
+    if (detalleOcActiva) {
+      console.log("[GastosAprobar] Detalle OC calculado", JSON.stringify(detalleOcActiva, null, 2));
+    }
+  }, [detalleOcActiva]);
+  const handleRowClick = React.useCallback((gasto: GastoForm, rowKey: string) => {
+    setSelectedRowKey(rowKey);
+    setFilaActiva(gasto);
+    setFilaActivaKey(rowKey);
+    setResumenOcMinimizado(false);
+    console.log("[GastosAprobar] Registro seleccionado", JSON.stringify(gasto, null, 2));
+  }, []);
+  const abrirDrawerOc = React.useCallback((gasto: GastoForm, rowKey: string) => {
+    setFilaActiva(gasto);
+    setFilaActivaKey(rowKey);
+    setResumenOcMinimizado(false);
+    setDrawerOcAbierto(true);
+    console.log("[GastosAprobar] Detalle OC abierto", JSON.stringify(mapearDatosOc(gasto), null, 2));
+  }, []);
+  const cerrarResumenOc = React.useCallback(() => {
+    setDrawerOcAbierto(false);
+    setFilaActiva(null);
+    setFilaActivaKey(null);
+    setResumenOcMinimizado(false);
+  }, []);
+  const verDetalleCompleto = React.useCallback(() => {
+    setDrawerOcAbierto(true);
+  }, []);
+  const editarFilaActiva = React.useCallback(() => {
+    if (!filaActiva) {
+      return;
+    }
+
+    abrirEditar(filaActiva);
+  }, [abrirEditar, filaActiva]);
+  const visualizarFilaActiva = React.useCallback(() => {
+    if (!filaActiva) {
+      return;
+    }
+
+    abrirVisualizar(filaActiva);
+  }, [abrirVisualizar, filaActiva]);
+  const rechazarFilaActiva = React.useCallback(() => {
+    if (!filaActiva || filaActivaIndex < 0) {
+      return;
+    }
+
+    confirmarEliminar(filaActiva, filaActivaIndex);
+  }, [confirmarEliminar, filaActiva, filaActivaIndex]);
   const stickyLeftByColumn = useMemo(() => {
     let left = 0;
     const offsets: Record<string, number> = {};
@@ -2858,6 +3069,31 @@ export default function GastosAprobarPage() {
 
             <button
               type="button"
+              title="Hormiga"
+              aria-label="Hormiga"
+              onClick={() => setEstadoPreset("observado")}
+              style={{
+                minWidth: 118,
+                height: 36,
+                borderRadius: 10,
+                border: `1px solid ${isEstadoPresetActive("observado") ? "#93C5FD" : "#D1D5DB"}`,
+                background: isEstadoPresetActive("observado") ? "#EFF6FF" : "#FFFFFF",
+                color: "#1D4ED8",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                padding: "0 12px",
+                cursor: "pointer",
+                boxShadow: isEstadoPresetActive("observado") ? "0 0 0 2px rgba(59,130,246,0.10)" : "none",
+              }}
+            >
+              <RotateCcw size={18} />
+              <span style={{ fontSize: 12, fontWeight: 700 }}>Hormiga</span>
+            </button>
+
+            <button
+              type="button"
               title="ReAprobar"
               aria-label="ReAprobar"
               onClick={() => setEstadoPreset("hormiga")}
@@ -2904,31 +3140,6 @@ export default function GastosAprobarPage() {
             >
               <Bug size={18} />
               <span style={{ fontSize: 12, fontWeight: 700 }}>Observadas</span>
-            </button>
-
-            <button
-              type="button"
-              title="Hormiga"
-              aria-label="Hormiga"
-              onClick={() => setEstadoPreset("observado")}
-              style={{
-                minWidth: 118,
-                height: 36,
-                borderRadius: 10,
-                border: `1px solid ${isEstadoPresetActive("observado") ? "#93C5FD" : "#D1D5DB"}`,
-                background: isEstadoPresetActive("observado") ? "#EFF6FF" : "#FFFFFF",
-                color: "#1D4ED8",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 8,
-                padding: "0 12px",
-                cursor: "pointer",
-                boxShadow: isEstadoPresetActive("observado") ? "0 0 0 2px rgba(59,130,246,0.10)" : "none",
-              }}
-            >
-              <RotateCcw size={18} />
-              <span style={{ fontSize: 12, fontWeight: 700 }}>Hormiga</span>
             </button>
 
             <button
@@ -3013,10 +3224,34 @@ export default function GastosAprobarPage() {
                       return gasto.monto !== undefined && gasto.monto !== null && gasto.monto !== ""
                         ? Number(gasto.monto).toLocaleString("es-PE", { minimumFractionDigits: 2 })
                         : "";
+                    case "subtotal":
+                      return gasto.subtotal !== undefined && gasto.subtotal !== null
+                        ? formatDecimalValue(Number(gasto.subtotal))
+                        : "";
+                    case "igv":
+                      return gasto.igv !== undefined && gasto.igv !== null
+                        ? formatDecimalValue(Number(gasto.igv))
+                        : "";
+                    case "total":
+                      return gasto.total !== undefined && gasto.total !== null
+                        ? formatDecimalValue(Number(gasto.total))
+                        : "";
+                    case "subOc":
+                      return gasto.subOc !== undefined && gasto.subOc !== null
+                        ? formatDecimalValue(Number(gasto.subOc))
+                        : "";
+                    case "adelaFic":
+                      return gasto.adelaFic !== undefined && gasto.adelaFic !== null
+                        ? formatDecimalValue(Number(gasto.adelaFic))
+                        : "";
                     case "porce":
                       return gasto.porce ?? "";
                     case "porcentajeFic":
                       return gasto.porcentajeFic ?? "";
+                    case "montoOc2":
+                      return gasto.montoOc2 ?? "";
+                    case "conPagado":
+                      return gasto.conPagado ?? "";
                     case "ot":
                       return gasto.filtroOperativo.ot?.ot ?? "";
                     case "fecIngreso":
@@ -3542,15 +3777,15 @@ export default function GastosAprobarPage() {
             position: "relative",
           }}
         >
-          <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
-            <colgroup>
-              {columnasGridGastos.map((columna) => (
-                <col key={`col-${columna.key}`} style={{ width: columna.width }} />
-              ))}
-            </colgroup>
-            <thead>
-              <tr>
-                {columnasGridGastos.map((header) => {
+            <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+              <colgroup>
+                {columnasGridGastosVisibles.map((columna) => (
+                  <col key={`col-${columna.key}`} style={{ width: columna.width }} />
+                ))}
+              </colgroup>
+              <thead>
+                <tr>
+                {columnasGridGastosVisibles.map((header) => {
                   const isSorted = sortConfig?.key === header.key;
                   const isFrozen = columnasCongeladasGrid.has(header.key);
                   const esColumnaSeleccion = header.key === "seleccion";
@@ -3631,13 +3866,13 @@ export default function GastosAprobarPage() {
             <tbody>
               {cargando ? (
                 <tr>
-                  <td colSpan={columnasGridGastos.length} style={{ padding: 24, textAlign: "center", color: "#6B7280", fontSize: 11 }}>
+                    <td colSpan={columnasGridGastosVisibles.length} style={{ padding: 24, textAlign: "center", color: "#6B7280", fontSize: 11 }}>
                     Cargando gastos...
                   </td>
                 </tr>
               ) : gastosFiltrados.length === 0 ? (
                 <tr>
-                  <td colSpan={columnasGridGastos.length} style={{ padding: 24, textAlign: "center", color: "#6B7280", fontSize: 11 }}>
+                    <td colSpan={columnasGridGastosVisibles.length} style={{ padding: 24, textAlign: "center", color: "#6B7280", fontSize: 11 }}>
                     {mensajeFiltroCabecera
                       ? mensajeFiltroCabecera
                       : limiteConsultaServidor
@@ -3659,6 +3894,7 @@ export default function GastosAprobarPage() {
                   return (
                     <tr
                       key={rowKey}
+                      className={filaActivaKey === rowKey ? "gasto-row-active" : undefined}
                       style={{
                         background: rowBackground,
                         transition: "background 0.1s",
@@ -3668,13 +3904,13 @@ export default function GastosAprobarPage() {
                         outlineOffset: "-2px",
                       }}
                     onClick={() => {
-                      setSelectedRowKey(rowKey);
+                      handleRowClick(gasto, rowKey);
                       if (rechazoError) {
                         setRechazoError(null);
                       }
                     }}
                     >
-                      {columnasGridGastos.map((col) => (
+                      {columnasGridGastosVisibles.map((col) => (
                       <td
                         key={col.key}
                           style={{
@@ -3683,6 +3919,7 @@ export default function GastosAprobarPage() {
                             color: rowColor,
                             fontSize: 11,
                             fontWeight: rowFontWeight || (col.key === "responsable" ? 700 : undefined),
+                            textAlign: col.align,
                             overflow: "hidden",
                             whiteSpace: "nowrap",
                             textOverflow: "ellipsis",
@@ -3797,6 +4034,36 @@ export default function GastosAprobarPage() {
                                     })
                                   : ""
                               );
+                            case "subtotal":
+                              return renderGridCellText(
+                                gasto.subtotal !== undefined && gasto.subtotal !== null
+                                  ? formatDecimalValue(Number(gasto.subtotal))
+                                  : ""
+                              );
+                            case "igv":
+                              return renderGridCellText(
+                                gasto.igv !== undefined && gasto.igv !== null
+                                  ? formatDecimalValue(Number(gasto.igv))
+                                  : ""
+                              );
+                            case "total":
+                              return renderGridCellText(
+                                gasto.total !== undefined && gasto.total !== null
+                                  ? formatDecimalValue(Number(gasto.total))
+                                  : ""
+                              );
+                            case "subOc":
+                              return renderGridCellText(
+                                gasto.subOc !== undefined && gasto.subOc !== null
+                                  ? formatDecimalValue(Number(gasto.subOc))
+                                  : ""
+                              );
+                            case "adelaFic":
+                              return renderGridCellText(
+                                gasto.adelaFic !== undefined && gasto.adelaFic !== null
+                                  ? formatDecimalValue(Number(gasto.adelaFic))
+                                  : ""
+                              );
                             case "porce":
                               return renderGridCellText(
                                 gasto.porce !== undefined && gasto.porce !== null
@@ -3813,6 +4080,18 @@ export default function GastosAprobarPage() {
                                     })
                                   : ""
                               );
+                            case "conPagado":
+                              return renderGridCellText(
+                                gasto.conPagadoDisplay?.trim()
+                                  ? gasto.conPagadoDisplay
+                                  : gasto.conPagado !== undefined && gasto.conPagado !== null
+                                    ? Number(gasto.conPagado).toLocaleString("es-PE", {
+                                        minimumFractionDigits: 2,
+                                      })
+                                    : ""
+                              );
+                            case "montoOc2":
+                              return renderGridCellText(gasto.montoOc2);
                             case "ot":
                               return renderGridCellText(gasto.filtroOperativo.ot?.ot);
                             case "estado":
@@ -3844,7 +4123,7 @@ export default function GastosAprobarPage() {
                                     }}
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      abrirVisualizar(gasto);
+                                      abrirDrawerOc(gasto, rowKey);
                                     }}
                                   >
                                     <Eye size={17} strokeWidth={2.2} />
@@ -3982,7 +4261,7 @@ export default function GastosAprobarPage() {
               <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", width: "100%" }}>
                 <div>
                   <h2 style={{ margin: 0, fontSize: 24, color: "#17143A" }}>
-{modo === "nuevo" ? "Nuevo gasto" : modo === "ver" ? "Visualizar gasto" : "Editar gasto"}
+{modo === "nuevo" ? "Nuevo gasto" : actualizacionBloqueada || modo === "ver" ? "Visualizar gasto" : "Editar gasto"}
                   </h2>
                   <p style={{ marginTop: 8, marginBottom: 0, color: "#6B7280", fontSize: 13 }}>
                     Complete la informaciÃ³n del gasto.
@@ -5296,8 +5575,8 @@ export default function GastosAprobarPage() {
                     fontWeight: 700,
                     cursor: esModoVisualizacion ? "not-allowed" : "pointer",
                   }}
-                  onClick={esModoVisualizacion ? undefined : guardar}
-                  disabled={guardando || esModoVisualizacion}
+                  onClick={guardando || esModoVisualizacion || actualizacionBloqueada ? undefined : guardar}
+                  disabled={guardando || esModoVisualizacion || actualizacionBloqueada}
                 >
                   {guardando ? "Guardando..." : modo === "nuevo" ? "Guardar" : "Actualizar"}
                 </button>
@@ -5452,6 +5731,26 @@ export default function GastosAprobarPage() {
           </div>
         </div>
       )}
+      {detalleOcActiva && (
+        <DatosOcFloatingCard
+          detalle={detalleOcActiva}
+          minimized={resumenOcMinimizado}
+          onMinimize={() => setResumenOcMinimizado(true)}
+          onRestore={() => setResumenOcMinimizado(false)}
+          onClose={cerrarResumenOc}
+          onVisualize={visualizarFilaActiva}
+          onViewDetails={verDetalleCompleto}
+          onEdit={editarFilaActiva}
+          onReject={rechazarFilaActiva}
+          accionesHabilitadas={accionesHabilitadasFilaActiva}
+        />
+      )}
+
+      <DatosOcDrawer
+        open={drawerOcAbierto}
+        detalle={detalleOcActiva}
+        onClose={() => setDrawerOcAbierto(false)}
+      />
     </div>
   );
 }
