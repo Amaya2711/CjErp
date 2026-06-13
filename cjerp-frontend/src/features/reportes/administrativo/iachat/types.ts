@@ -8,11 +8,21 @@ export type IaChatModuleCode =
 
 export type IaChatResponseType = "conversation" | "detail" | "summary" | "chart";
 export type IaChatChartType = "bar" | "line" | "pie";
+export type IaChatPresentationMode = "auto" | "executive" | "detail";
 
 export type IaChatRequest = {
   module: IaChatModuleCode;
   question: string;
   conversationId: string | null;
+  presentationMode?: IaChatPresentationMode | null;
+  attachment?: IaChatImageAttachment | null;
+};
+
+export type IaChatImageAttachment = {
+  fileName?: string | null;
+  mimeType: string;
+  base64Data: string;
+  previewUrl?: string | null;
 };
 
 export type IaChatResponse = {
