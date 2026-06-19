@@ -2217,10 +2217,6 @@ export default function RecursosHumanosVacacionesPage() {
     if (vacacionForm.fechaInicio && vacacionForm.fechaFin && vacacionForm.fechaFin < vacacionForm.fechaInicio) {
       erroresVacacion.fechaFin = "La fecha fin no puede ser menor que la fecha inicio.";
     }
-    if (!vacacionForm.idResponsableCj) erroresVacacion.idResponsableCj = "Seleccione el 1er aprobador.";
-    if (!vacacionForm.idSegundoVacaciones) erroresVacacion.idSegundoVacaciones = "Seleccione el 2do aprobador.";
-    if (!vacacionForm.idTerceroVacaciones) erroresVacacion.idTerceroVacaciones = "Seleccione el 3er aprobador.";
-
     if (Object.keys(erroresVacacion).length > 0) {
       setVacacionErrores(erroresVacacion);
       setVacacionError("Revise los campos obligatorios antes de guardar.");
@@ -2236,9 +2232,6 @@ export default function RecursosHumanosVacacionesPage() {
         idEmpleadoCj: Number(vacacionForm.idEmpleadoCj),
         fechaInicio: vacacionForm.fechaInicio,
         fechaFin: vacacionForm.fechaFin,
-        idResponsableCj: Number(vacacionForm.idResponsableCj),
-        idSegundoVacaciones: Number(vacacionForm.idSegundoVacaciones),
-        idTerceroVacaciones: Number(vacacionForm.idTerceroVacaciones),
         idEstado: 97,
       });
       cerrarVacacionPanel();
@@ -5736,85 +5729,6 @@ export default function RecursosHumanosVacacionesPage() {
                     }}
                   />
                   {vacacionErrores.fechaFin && <div style={{ fontSize: 12, color: "#DC2626", marginTop: 4 }}>{vacacionErrores.fechaFin}</div>}
-                </div>
-              </div>
-
-              <div>
-                <label style={{ display: "block", marginBottom: 6, fontSize: 11, fontWeight: 700, color: "#374151" }}>1er aprobador</label>
-                <select
-                  value={vacacionForm.idResponsableCj}
-                  onChange={(e) => actualizarVacacionCampo("idResponsableCj", e.target.value)}
-                  disabled={vacacionGuardando}
-                  style={{
-                    width: "100%",
-                    height: 42,
-                    borderRadius: 10,
-                    border: `1px solid ${vacacionErrores.idResponsableCj ? "#F87171" : "#D1D5DB"}`,
-                    padding: "0 12px",
-                    fontSize: 12,
-                    boxSizing: "border-box",
-                  }}
-                >
-                  <option value="">Seleccione el 1er aprobador</option>
-                  {empleadosSafe.map((empleado) => (
-                    <option key={empleado.idEmpleado} value={empleado.idEmpleado}>
-                      {empleado.nombreEmpleado}
-                    </option>
-                  ))}
-                </select>
-                {vacacionErrores.idResponsableCj && <div style={{ fontSize: 12, color: "#DC2626", marginTop: 4 }}>{vacacionErrores.idResponsableCj}</div>}
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
-                <div>
-                  <label style={{ display: "block", marginBottom: 6, fontSize: 11, fontWeight: 700, color: "#374151" }}>2do aprobador</label>
-                  <select
-                    value={vacacionForm.idSegundoVacaciones}
-                    onChange={(e) => actualizarVacacionCampo("idSegundoVacaciones", e.target.value)}
-                    disabled={vacacionGuardando}
-                    style={{
-                      width: "100%",
-                      height: 42,
-                      borderRadius: 10,
-                      border: `1px solid ${vacacionErrores.idSegundoVacaciones ? "#F87171" : "#D1D5DB"}`,
-                      padding: "0 12px",
-                      fontSize: 12,
-                      boxSizing: "border-box",
-                    }}
-                  >
-                    <option value="">Seleccione el 2do aprobador</option>
-                    {empleadosSafe.map((empleado) => (
-                      <option key={empleado.idEmpleado} value={empleado.idEmpleado}>
-                        {empleado.nombreEmpleado}
-                      </option>
-                    ))}
-                  </select>
-                  {vacacionErrores.idSegundoVacaciones && <div style={{ fontSize: 12, color: "#DC2626", marginTop: 4 }}>{vacacionErrores.idSegundoVacaciones}</div>}
-                </div>
-                <div>
-                  <label style={{ display: "block", marginBottom: 6, fontSize: 11, fontWeight: 700, color: "#374151" }}>3er aprobador</label>
-                  <select
-                    value={vacacionForm.idTerceroVacaciones}
-                    onChange={(e) => actualizarVacacionCampo("idTerceroVacaciones", e.target.value)}
-                    disabled={vacacionGuardando}
-                    style={{
-                      width: "100%",
-                      height: 42,
-                      borderRadius: 10,
-                      border: `1px solid ${vacacionErrores.idTerceroVacaciones ? "#F87171" : "#D1D5DB"}`,
-                      padding: "0 12px",
-                      fontSize: 12,
-                      boxSizing: "border-box",
-                    }}
-                  >
-                    <option value="">Seleccione el 3er aprobador</option>
-                    {empleadosSafe.map((empleado) => (
-                      <option key={empleado.idEmpleado} value={empleado.idEmpleado}>
-                        {empleado.nombreEmpleado}
-                      </option>
-                    ))}
-                  </select>
-                  {vacacionErrores.idTerceroVacaciones && <div style={{ fontSize: 12, color: "#DC2626", marginTop: 4 }}>{vacacionErrores.idTerceroVacaciones}</div>}
                 </div>
               </div>
 

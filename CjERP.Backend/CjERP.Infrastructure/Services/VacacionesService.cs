@@ -90,19 +90,5 @@ public sealed class VacacionesService : IVacacionesService
             throw new InvalidOperationException("La fecha fin no puede ser menor que la fecha inicio.");
         }
 
-        if (request.IdResponsableCj is null || request.IdResponsableCj <= 0)
-        {
-            throw new InvalidOperationException("Debe seleccionar el primer aprobador.");
-        }
-
-        if (request.IdSegundoVacaciones is null || request.IdSegundoVacaciones <= 0)
-        {
-            throw new InvalidOperationException("Debe seleccionar el segundo aprobador.");
-        }
-
-        if (request.IdTerceroVacaciones is null || request.IdTerceroVacaciones <= 0)
-        {
-            throw new InvalidOperationException("Debe seleccionar el tercer aprobador.");
-        }
     }
 }
