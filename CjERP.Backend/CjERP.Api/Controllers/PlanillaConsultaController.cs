@@ -16,7 +16,9 @@ namespace CjERP.Api.Controllers
     [Authorize]
     public class PlanillaConsultaController : ControllerBase
     {
-        private static readonly string[] RequiredParameters = ["IdCargo", "IdEmpleado", "Estados"];
+        private static readonly string[] RequiredParameters = ["IdCargo", "IdEmpleado"];
+        private static readonly string[] RequiredParametersAprobar = ["IdCargo", "IdEmpleado", "Estados"];
+        private static readonly string[] RequiredParametersVacaciones = [];
 
         private readonly IPlanillaConsultaService _planillaConsultaService;
         private readonly ILogger<PlanillaConsultaController> _logger;
@@ -58,7 +60,13 @@ namespace CjERP.Api.Controllers
                 providedParameters.Keys,
                 StringComparer.OrdinalIgnoreCase);
 
-            var missingParameters = RequiredParameters
+            var requiredParameters = string.Equals(consulta, "aprobar", StringComparison.OrdinalIgnoreCase)
+                ? RequiredParametersAprobar
+                : string.Equals(consulta, "vacaciones", StringComparison.OrdinalIgnoreCase)
+                    ? RequiredParametersVacaciones
+                    : RequiredParameters;
+
+            var missingParameters = requiredParameters
                 .Where(requiredName => !providedNames.Contains(requiredName))
                 .ToList();
 
@@ -67,11 +75,11 @@ namespace CjERP.Api.Controllers
                 return BadRequest(new
                 {
                     success = false,
-                    message = $"Faltan parametros requeridos para {(string.Equals(consulta, "aprobar", StringComparison.OrdinalIgnoreCase) ? "sp_Planilla_Consulta_Aprobar" : "sp_Planilla_Consulta_Estados")}: {string.Join(", ", missingParameters)}."
+                    message = $"Faltan parametros requeridos para {GetStoredProcedureLabel(consulta)}: {string.Join(", ", missingParameters)}."
                 });
             }
 
-            var emptyValueParameters = RequiredParameters
+            var emptyValueParameters = requiredParameters
                 .Where(requiredName => string.IsNullOrWhiteSpace(
                     providedParameters.TryGetValue(requiredName, out var value) ? value : null))
                 .ToList();
@@ -111,6 +119,16 @@ namespace CjERP.Api.Controllers
 
                 throw;
             }
+        }
+
+        private static string GetStoredProcedureLabel(string? consulta)
+        {
+            return (consulta ?? string.Empty).Trim().ToLowerInvariant() switch
+            {
+                "aprobar" => "sp_Planilla_Consulta_Aprobar",
+                "vacaciones" => "sp_EmpleadoOtros_ListarVacaciones",
+                _ => "sp_Planilla_Consulta_Estados"
+            };
         }
     }
 }

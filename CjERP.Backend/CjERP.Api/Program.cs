@@ -197,6 +197,7 @@ builder.Services.AddScoped<IPlanillaService, PlanillaService>();
 builder.Services.AddScoped<IPlanillaBoletaService, PlanillaBoletaService>();
 builder.Services.AddScoped<PlanillaBoletaPdfGenerator>();
 builder.Services.AddScoped<IPlanillaConsultaService, PlanillaConsultaService>();
+builder.Services.AddScoped<IVacacionesService, VacacionesService>();
 builder.Services.AddScoped<IOrdenCompraService, OrdenCompraService>();
 builder.Services.AddScoped<IEmpleadoPendienteService, EmpleadoPendienteService>();
 builder.Services.AddScoped<ILogisticaRecojoService, LogisticaRecojoService>();

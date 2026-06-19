@@ -17,6 +17,7 @@ namespace CjERP.Infrastructure.Services
     {
         private const string StoredProcedureEstados = "dbo.sp_Planilla_Consulta_Estados";
         private const string StoredProcedureAprobar = "dbo.sp_Planilla_Consulta_Aprobar";
+        private const string StoredProcedureVacaciones = "dbo.sp_EmpleadoOtros_ListarVacaciones";
         private readonly ISqlCommandFactory _sqlCommandFactory;
 
         public PlanillaConsultaService(ISqlCommandFactory sqlCommandFactory)
@@ -47,10 +48,13 @@ namespace CjERP.Infrastructure.Services
                 .Select(MapRow)
                 .ToList();
 
-            var fechaInicioFiltro = GetDateParameterValue(parametrosList, "FechaInicio");
-            var fechaFinFiltro = GetDateParameterValue(parametrosList, "FechaFin");
+            if (!string.Equals(storedProcedureName, StoredProcedureVacaciones, StringComparison.OrdinalIgnoreCase))
+            {
+                var fechaInicioFiltro = GetDateParameterValue(parametrosList, "FechaInicio");
+                var fechaFinFiltro = GetDateParameterValue(parametrosList, "FechaFin");
 
-            rows = ApplyFecIngresoFilter(rows, fechaInicioFiltro, fechaFinFiltro);
+                rows = ApplyFecIngresoFilter(rows, fechaInicioFiltro, fechaFinFiltro);
+            }
 
             var totalRows = rows.Count;
             var limitExceeded = maxRows.HasValue && maxRows.Value > 0 && totalRows > maxRows.Value;
@@ -83,6 +87,7 @@ namespace CjERP.Infrastructure.Services
             return (consulta ?? string.Empty).Trim().ToLowerInvariant() switch
             {
                 "aprobar" => StoredProcedureAprobar,
+                "vacaciones" => StoredProcedureVacaciones,
                 _ => StoredProcedureEstados
             };
         }
@@ -301,6 +306,20 @@ WHERE Correlativo IN @Correlativos";
         {
             if (!string.Equals(storedProcedureName, StoredProcedureAprobar, StringComparison.OrdinalIgnoreCase))
             {
+                if (string.Equals(storedProcedureName, StoredProcedureVacaciones, StringComparison.OrdinalIgnoreCase))
+                {
+                    var allowedParametersVacaciones = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        "FechaInicial",
+                        "FechaFinal",
+                        "IdEstado"
+                    };
+
+                    return parametros.Where(parametro =>
+                        !string.IsNullOrWhiteSpace(parametro.Nombre) &&
+                        allowedParametersVacaciones.Contains(parametro.Nombre.Trim().TrimStart('@')));
+                }
+
                 return parametros;
             }
 
