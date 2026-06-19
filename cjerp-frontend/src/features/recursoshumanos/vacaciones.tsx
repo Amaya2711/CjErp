@@ -1848,9 +1848,9 @@ export default function RecursosHumanosVacacionesPage() {
 
   const filteredEmpleadosVacacion =
     empleadoVacacionInput.trim() === ""
-      ? empleadosSafe
-      : empleadosSafe.filter((emp) => matchesFlexibleSearch(emp.nombreEmpleado, empleadoVacacionInput));
-  const empleadoVacacionSeleccionado = empleadosSafe.find((emp) => String(emp.idEmpleado) === vacacionForm.idEmpleadoCj);
+      ? solicitanteOptions
+      : solicitanteOptions.filter((option) => matchesFlexibleSearch(option.label, empleadoVacacionInput));
+  const empleadoVacacionSeleccionado = findConstanteOption(solicitanteOptions, vacacionForm.idEmpleadoCj);
 
   const filteredGestores =
     gestorInput.trim() === ""
@@ -5686,7 +5686,7 @@ export default function RecursosHumanosVacacionesPage() {
                   <input
                     type="text"
                     value={
-                      empleadoVacacionSeleccionado?.nombreEmpleado ||
+                      empleadoVacacionSeleccionado?.label ||
                       empleadoVacacionInput ||
                       ""
                     }
@@ -5720,8 +5720,8 @@ export default function RecursosHumanosVacacionesPage() {
                           highlightedEmpleadoVacacionIdx < filteredEmpleadosVacacion.length
                         ) {
                           const empleado = filteredEmpleadosVacacion[highlightedEmpleadoVacacionIdx];
-                          setVacacionForm((prev) => ({ ...prev, idEmpleadoCj: String(empleado.idEmpleado) }));
-                          setEmpleadoVacacionInput(empleado.nombreEmpleado);
+                          setVacacionForm((prev) => ({ ...prev, idEmpleadoCj: empleado.value }));
+                          setEmpleadoVacacionInput(empleado.label);
                           setShowEmpleadoVacacionDropdown(false);
                           setHighlightedEmpleadoVacacionIdx(-1);
                         }
@@ -5739,7 +5739,7 @@ export default function RecursosHumanosVacacionesPage() {
                       boxSizing: "border-box",
                       background: empleadosLoading ? "#F3F4F6" : "#FFFFFF",
                     }}
-                    disabled={vacacionGuardando || empleadosLoading || empleadosSafe.length === 0}
+                    disabled={vacacionGuardando || solicitanteLoading || solicitanteOptions.length === 0}
                   />
                   {showEmpleadoVacacionDropdown && filteredEmpleadosVacacion.length > 0 && (
                     <div
@@ -5757,7 +5757,7 @@ export default function RecursosHumanosVacacionesPage() {
                     >
                       {filteredEmpleadosVacacion.map((empleado, idx) => (
                         <div
-                          key={`vacacion-empleado-${empleado.idEmpleado}-${idx}`}
+                        key={`vacacion-empleado-${empleado.value}-${idx}`}
                           style={{
                             padding: 6,
                             cursor: "pointer",
@@ -5766,13 +5766,13 @@ export default function RecursosHumanosVacacionesPage() {
                             lineHeight: 1.1,
                           }}
                           onMouseDown={() => {
-                            setVacacionForm((prev) => ({ ...prev, idEmpleadoCj: String(empleado.idEmpleado) }));
-                            setEmpleadoVacacionInput(empleado.nombreEmpleado);
+                            setVacacionForm((prev) => ({ ...prev, idEmpleadoCj: empleado.value }));
+                            setEmpleadoVacacionInput(empleado.label);
                             setShowEmpleadoVacacionDropdown(false);
                             setHighlightedEmpleadoVacacionIdx(-1);
                           }}
                         >
-                          {empleado.nombreEmpleado}
+                          {empleado.label}
                         </div>
                       ))}
                     </div>
