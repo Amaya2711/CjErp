@@ -4,8 +4,13 @@
 
 Configura estas variables solo en el backend:
 
-- `ANTHROPIC_API_KEY`: clave privada de Anthropic.
-- `ANTHROPIC_MODEL`: modelo Claude que atendera el modulo GASTOS.
+- `OPENAI_API_KEY`: clave privada de OpenAI.
+- `OPENAI_MODEL`: modelo que atendera el modulo GASTOS.
+- `ANTHROPIC_API_KEY`: clave privada de Anthropic, usada para generar el dashboard HTML.
+- `ANTHROPIC_MODEL`: modelo de Anthropic para el exportador del dashboard.
+- `ANTHROPIC_MAX_TOKENS`: limite de tokens para la respuesta HTML del dashboard.
+
+La ruta principal de consulta usa OpenAI y el exportador HTML del dashboard usa Anthropic. La integracion con IA generativa anterior quedo como referencia de rollback dentro del codigo.
 
 El archivo `appsettings.json` solo debe contener valores vacios o de ejemplo. No guardes la clave real en el repositorio ni en el frontend.
 
@@ -14,8 +19,8 @@ El archivo `appsettings.json` solo debe contener valores vacios o de ejemplo. No
 ### PowerShell
 
 ```powershell
-$env:ANTHROPIC_API_KEY="tu_clave"
-$env:ANTHROPIC_MODEL="tu_modelo"
+$env:OPENAI_API_KEY="tu_clave"
+$env:OPENAI_MODEL="gpt-4.1-mini"
 dotnet run --project CjERP.Backend/CjERP.Api/CjERP.Api.csproj
 ```
 
@@ -27,15 +32,19 @@ Agrega las variables en el perfil de depuracion del proyecto API o en `launchSet
 
 Agrega las variables en la seccion de Environment Variables del servicio:
 
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
 - `ANTHROPIC_API_KEY`
 - `ANTHROPIC_MODEL`
+- `ANTHROPIC_MAX_TOKENS`
 
 ## Produccion
 
 Define las variables en el administrador de secretos de tu plataforma:
 
 - Azure App Service: Application settings.
-- Docker: `-e ANTHROPIC_API_KEY=... -e ANTHROPIC_MODEL=...`
+- Docker: `-e OPENAI_API_KEY=... -e OPENAI_MODEL=...`
+- Docker: `-e ANTHROPIC_API_KEY=... -e ANTHROPIC_MODEL=... -e ANTHROPIC_MAX_TOKENS=4000`
 - Kubernetes: `Secret` + `envFrom` o `valueFrom`.
 
 ## Pruebas rapidas

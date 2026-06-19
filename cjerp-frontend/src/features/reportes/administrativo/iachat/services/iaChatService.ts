@@ -1,10 +1,23 @@
 import axios from "axios";
 import httpClient from "../../../../../api/httpClient";
-import type { IaChatRequest, IaChatResponse } from "../types";
+import type {
+  IaChatDashboardExportRequest,
+  IaChatDashboardExportResponse,
+  IaChatRequest,
+  IaChatResponse,
+} from "../types";
 
 export async function consultarIaChat(request: IaChatRequest): Promise<IaChatResponse> {
   return httpClient.post<IaChatResponse>("/ia-chat/consultar", request, {
-    timeout: 120000,
+    timeout: 300000,
+  });
+}
+
+export async function exportarDashboardIaChat(
+  request: IaChatDashboardExportRequest,
+): Promise<IaChatDashboardExportResponse> {
+  return httpClient.post<IaChatDashboardExportResponse>("/ia-chat/exportar-dashboard", request, {
+    timeout: 300000,
   });
 }
 

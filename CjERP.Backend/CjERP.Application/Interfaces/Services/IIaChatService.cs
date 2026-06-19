@@ -8,4 +8,9 @@ public interface IIaChatService
         IaChatConsultarRequestDto request,
         string? idUsuario,
         CancellationToken cancellationToken = default);
+
+    Task<IaChatDashboardExportResponseDto> GenerarDashboardReporteAsync(
+        IaChatDashboardExportRequestDto request,
+        string? idUsuario,
+        CancellationToken cancellationToken = default);
 }

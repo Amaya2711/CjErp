@@ -44,6 +44,23 @@ export type IaChatResponse = {
   errorMessage?: string;
 };
 
+export type IaChatDashboardExportRequest = {
+  module: IaChatModuleCode;
+  question: string;
+  contextualSummary: string;
+  structuredDataJson?: string | null;
+  conversationId?: string | null;
+  responseType?: IaChatResponseType | null;
+};
+
+export type IaChatDashboardExportResponse = {
+  success: boolean;
+  module: IaChatModuleCode;
+  htmlContent: string;
+  fileName: string;
+  errorMessage?: string;
+};
+
 export type IaChatModuleInfo = {
   id: IaChatModuleCode;
   name: string;

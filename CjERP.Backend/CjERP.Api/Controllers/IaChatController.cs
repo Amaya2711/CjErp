@@ -39,10 +39,29 @@ public sealed class IaChatController : ControllerBase
             ?? User.Identity?.Name;
 
         var response = await _iaChatService.ConsultarAsync(request, usuarioId, cancellationToken);
-        return Ok(new
+        return Ok(response);
+    }
+
+    [HttpPost("exportar-dashboard")]
+    public async Task<IActionResult> ExportarDashboard(
+        [FromBody] IaChatDashboardExportRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
         {
-            success = true,
-            data = response
-        });
+            return BadRequest(new IaChatDashboardExportResponseDto
+            {
+                Success = false,
+                Module = "GASTOS",
+                ErrorMessage = "La solicitud no puede venir vacia."
+            });
+        }
+
+        var usuarioId = User.FindFirstValue("IdUsuario")
+            ?? User.FindFirstValue(ClaimTypes.Name)
+            ?? User.Identity?.Name;
+
+        var response = await _iaChatService.GenerarDashboardReporteAsync(request, usuarioId, cancellationToken);
+        return Ok(response);
     }
 }

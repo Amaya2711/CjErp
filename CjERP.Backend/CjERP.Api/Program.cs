@@ -37,8 +37,27 @@ builder.Services.Configure<WupSettings>(
     builder.Configuration.GetSection("WupSettings"));
 builder.Services.Configure<ReporteWhatsappJobDefaultsOptions>(
     builder.Configuration.GetSection("ReporteWhatsAppJobDefaults"));
+builder.Services.Configure<OpenAiSettings>(
+    builder.Configuration.GetSection("OpenAI"));
 builder.Services.Configure<AnthropicSettings>(
     builder.Configuration.GetSection("Anthropic"));
+
+var openAiSettings = builder.Configuration
+    .GetSection("OpenAI")
+    .Get<OpenAiSettings>() ?? new OpenAiSettings();
+var openAiApiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+if (!string.IsNullOrWhiteSpace(openAiApiKey))
+{
+    openAiSettings.ApiKey = openAiApiKey;
+}
+
+var openAiModel = Environment.GetEnvironmentVariable("OPENAI_MODEL");
+if (!string.IsNullOrWhiteSpace(openAiModel))
+{
+    openAiSettings.Model = openAiModel;
+}
+
+builder.Services.AddSingleton(Microsoft.Extensions.Options.Options.Create(openAiSettings));
 
 var anthropicSettings = builder.Configuration
     .GetSection("Anthropic")
@@ -53,6 +72,12 @@ var anthropicModel = Environment.GetEnvironmentVariable("ANTHROPIC_MODEL");
 if (!string.IsNullOrWhiteSpace(anthropicModel))
 {
     anthropicSettings.Model = anthropicModel;
+}
+
+var anthropicMaxTokens = Environment.GetEnvironmentVariable("ANTHROPIC_MAX_TOKENS");
+if (int.TryParse(anthropicMaxTokens, out var parsedAnthropicMaxTokens) && parsedAnthropicMaxTokens > 0)
+{
+    anthropicSettings.MaxTokens = parsedAnthropicMaxTokens;
 }
 
 builder.Services.AddSingleton(Microsoft.Extensions.Options.Options.Create(anthropicSettings));
@@ -189,7 +214,7 @@ builder.Services.AddScoped<IReporteWhatsappJobScheduler, ReporteWhatsappJobSched
 builder.Services.AddSingleton<IReporteWhatsappRuntimeMonitor, ReporteWhatsappRuntimeMonitor>();
 builder.Services.AddHttpClient<IIaChatService, IaChatService>(client =>
 {
-    client.BaseAddress = new Uri("https://api.anthropic.com");
+    client.BaseAddress = new Uri("https://api.openai.com");
     client.Timeout = TimeSpan.FromSeconds(90);
 });
 builder.Services.AddHttpClient<ISharePointCommercialUploadService, SharePointCommercialUploadService>();
@@ -276,6 +301,22 @@ builder.Services.AddAuthentication(options =>
 builder.Services.AddAuthorization();
 
 var app = builder.Build();
+
+app.Logger.LogInformation(
+    "OpenAI config loaded. ApiKeyFromEnv={ApiKeyFromEnv} ApiKeyConfigured={ApiKeyConfigured} ModelFromEnv={ModelFromEnv} Model={Model} MaxTokens={MaxTokens}",
+    !string.IsNullOrWhiteSpace(openAiApiKey),
+    !string.IsNullOrWhiteSpace(openAiSettings.ApiKey),
+    !string.IsNullOrWhiteSpace(openAiModel),
+    string.IsNullOrWhiteSpace(openAiSettings.Model) ? "(vacío)" : openAiSettings.Model,
+    openAiSettings.MaxTokens);
+
+app.Logger.LogInformation(
+    "Anthropic config loaded. ApiKeyFromEnv={ApiKeyFromEnv} ApiKeyConfigured={ApiKeyConfigured} ModelFromEnv={ModelFromEnv} Model={Model} MaxTokens={MaxTokens}",
+    !string.IsNullOrWhiteSpace(anthropicApiKey),
+    !string.IsNullOrWhiteSpace(anthropicSettings.ApiKey),
+    !string.IsNullOrWhiteSpace(anthropicModel),
+    string.IsNullOrWhiteSpace(anthropicSettings.Model) ? "(vacio)" : anthropicSettings.Model,
+    anthropicSettings.MaxTokens);
 
 app.UseExceptionHandler(exceptionApp =>
 {

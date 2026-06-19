@@ -12,7 +12,7 @@ export type DashboardGroup = {
 };
 
 const CLAUDEIA_TILE: DashboardTile = {
-  label: "Claudeia",
+  label: "IA Chat",
   path: "/reportes/administrativo/claudeia",
 };
 

@@ -89,7 +89,7 @@ IMPORTANTE PARA ESTA PANTALLA:
 
 function buildStructuredInput(form: ClaudeiaForm) {
   return {
-    asistente: "Claudeia",
+    asistente: "IA Chat",
     store: {
       nombre: form.storeNombre.trim(),
       ddl: form.ddl.trim(),
@@ -202,7 +202,7 @@ export default function ClaudeiaPage() {
 
   return (
     <AppPage
-      title="Claudeia"
+      title="IA Chat"
       actions={
         <div style={styles.headerActions}>
           <span style={styles.badge}>Reportes / Administrativo</span>
@@ -224,7 +224,7 @@ export default function ClaudeiaPage() {
           <AppCard style={styles.card}>
             <div style={styles.sectionHead}>
               <div>
-                <h2 style={styles.sectionTitle}>Contexto obligatorio</h2>
+                <h2 style={styles.sectionTitle}>Contexto obligatorio de IA Chat</h2>
                 <p style={styles.sectionSubtitle}>
                   La consulta se construye a partir del store seleccionado y el esquema que pegues aqui.
                 </p>

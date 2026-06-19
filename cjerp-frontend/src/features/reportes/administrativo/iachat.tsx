@@ -1,15 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ChangeEvent } from "react";
 import {
   Bot,
   Download,
   FileText,
-  Maximize2,
   Loader2,
   MessageSquareText,
   Paperclip,
   Sparkles,
-  Table2,
   Trash2,
   X,
   WandSparkles,
@@ -29,21 +27,33 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import AppCard from "../../../components/base/AppCard";
 import AppPage from "../../../components/base/AppPage";
 import AppStatusMessage from "../../../components/base/AppStatusMessage";
-import { consultarIaChat, getIaChatErrorMessage } from "./iachat/services/iaChatService";
+import {
+  consultarIaChat,
+  exportarDashboardIaChat,
+  getIaChatErrorMessage,
+} from "./iachat/services/iaChatService";
 import type {
   IaChatMessage,
   IaChatModuleCode,
   IaChatModuleInfo,
   IaChatImageAttachment,
   IaChatPresentationMode,
+  IaChatRequest,
   IaChatResponse,
   IaChatChartType,
 } from "./iachat/types";
+
+declare global {
+  interface Window {
+    __IA_CHAT_REPORT_DATA__?: ReturnType<typeof buildDashboardStructuredData>;
+  }
+}
 
 const MODULES: IaChatModuleInfo[] = [
   {
@@ -113,6 +123,14 @@ const PENDING_MESSAGE = (module: IaChatModuleInfo): IaChatMessage => ({
 });
 
 const COLORS = ["#0F766E", "#2563EB", "#F59E0B", "#7C3AED", "#DC2626", "#16A34A", "#334155"];
+const IA_CHAT_SESSION_STORAGE_KEY = "iachat.gastos.session.v1";
+
+type IaChatSessionState = {
+  selectedModuleId?: IaChatModuleCode;
+  threads?: Record<string, IaChatMessage[]>;
+  conversationIds?: Record<string, string>;
+  presentationMode?: IaChatPresentationMode;
+};
 
 function createConversationId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -120,6 +138,48 @@ function createConversationId() {
   }
 
   return `conv-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function readIaChatSessionState(): IaChatSessionState | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(IA_CHAT_SESSION_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw) as IaChatSessionState;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeIaChatSessionState(state: IaChatSessionState) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.sessionStorage.setItem(IA_CHAT_SESSION_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // Ignoramos errores de almacenamiento local para no afectar la UX del chat.
+  }
+}
+
+function clearIaChatSessionState() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.sessionStorage.removeItem(IA_CHAT_SESSION_STORAGE_KEY);
+  } catch {
+    // No-op
+  }
 }
 
 function formatValue(value: unknown) {
@@ -224,9 +284,728 @@ function buildKeyValueExportRows(entries: Array<[string, unknown]>) {
   }));
 }
 
-function toPdfRows(rows: Record<string, unknown>[]) {
-  return rows.map((row) => flattenExportRecord(row));
+function formatSqlString(value: string | null | undefined) {
+  if (!value?.trim()) {
+    return "NULL";
+  }
+
+  return `'${value.replace(/'/g, "''")}'`;
 }
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function extractNamedFilterPreview(question: string, label: string) {
+  const normalized = normalizeQuestion(question);
+  const pattern = new RegExp(
+    String.raw`\b(?:para\s+el\s+|para\s+la\s+|del\s+|de\s+el\s+|de\s+la\s+)?${escapeRegExp(label)}(?:\s+de)?\s+(?<value>.+?)(?=\b(?:para|durante|desde|hasta|de fecha|en fecha|en el periodo|periodo|mes|ano|anio|cliente|proyecto|responsable|solicitante|site|sitio|ot)\b|$)`,
+    "i",
+  );
+
+  const match = normalized.match(pattern);
+  const value = match?.groups?.value?.trim().replace(/\s{2,}/g, " ");
+  return value ? value : null;
+}
+
+function formatSqlBit(value: boolean) {
+  return value ? "1" : "0";
+}
+
+function formatSqlValue(value: string | null | undefined) {
+  if (value === null || value === undefined) {
+    return "NULL";
+  }
+
+  const trimmed = String(value).trim();
+  if (!trimmed) {
+    return "NULL";
+  }
+
+  return `'${trimmed.replace(/'/g, "''")}'`;
+}
+
+function formatSqlDate(value: Date | null) {
+  if (!value) {
+    return "NULL";
+  }
+
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `'${year}${month}${day}'`;
+}
+
+function stripDiacritics(value: string) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function normalizeQuestion(value: string) {
+  return stripDiacritics(value).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function normalizeFilterValue(value: string | null | undefined) {
+  return normalizeQuestion(String(value ?? "")).replace(/\s+/g, " ").trim();
+}
+
+function extractStateFilters(question: string) {
+  const normalized = normalizeQuestion(question);
+  const states: string[] = [];
+
+  const rules: Array<[RegExp, string]> = [
+    [/\b(aprobado|aprobada|aprobados|aprobadas)\b/g, "APROBADO"],
+    [/\b(pendiente|pendientes)\b/g, "PENDIENTE"],
+    [/\b(observado|observada|observados|observadas)\b/g, "OBSERVADO"],
+    [/\b(rechazado|rechazada|rechazados|rechazadas)\b/g, "RECHAZADO"],
+    [/\b(pagado|pagada|pagados|pagadas)\b/g, "PAGADO"],
+  ];
+
+  for (const [pattern, mappedValue] of rules) {
+    if (pattern.test(normalized)) {
+      states.push(mappedValue);
+    }
+  }
+
+  return states;
+}
+
+function inferDateRangeFromQuestion(question: string) {
+  const normalized = normalizeQuestion(question);
+
+  const monthMatch = normalized.match(
+    /\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|setiembre|septiembre|octubre|noviembre|diciembre)\s+(?:de\s+)?(19\d{2}|20\d{2})\b/,
+  );
+
+  if (monthMatch) {
+    const monthMap: Record<string, number> = {
+      enero: 0,
+      febrero: 1,
+      marzo: 2,
+      abril: 3,
+      mayo: 4,
+      junio: 5,
+      julio: 6,
+      agosto: 7,
+      setiembre: 8,
+      septiembre: 8,
+      octubre: 9,
+      noviembre: 10,
+      diciembre: 11,
+    };
+
+    const year = Number(monthMatch[2]);
+    const monthIndex = monthMap[monthMatch[1]];
+    const start = new Date(year, monthIndex, 1);
+    const end = new Date(year, monthIndex + 1, 0);
+
+    return { start, end, normalized };
+  }
+
+  const yearMatch = normalized.match(/\b(19\d{2}|20\d{2})\b/);
+  if (yearMatch) {
+    const year = Number(yearMatch[1]);
+    const start = new Date(year, 0, 1);
+    const end = new Date(year, 11, 31);
+    return { start, end, normalized };
+  }
+
+  return {
+    start: null,
+    end: null,
+    normalized,
+  };
+}
+
+function extractProjectFromQuestion(question: string) {
+  const normalized = normalizeQuestion(question);
+  const projectMatch = normalized.match(
+    /\bproyecto\s+(?<value>.+?)(?=\b(?:para|durante|desde|hasta|de fecha|en fecha|en el periodo|en el periodo|periodo|periodo|mes|ano|año|de|del|en)\b|$)/i,
+  );
+
+  if (!projectMatch?.groups?.value) {
+    return null;
+  }
+
+  const value = projectMatch.groups.value
+    .replace(/\b(de fecha|en fecha|en el periodo|durante|desde|hasta|para|periodo|periodo|mes|ano|año)\b.*$/i, "")
+    .trim()
+    .replace(/\s{2,}/g, " ");
+
+  return value ? value.toUpperCase() : null;
+}
+
+function extractTextSearchFromQuestion(question: string) {
+  const normalized = normalizeQuestion(question);
+  const withoutDates = normalized
+    .replace(/\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|setiembre|septiembre|octubre|noviembre|diciembre)\s+(?:de\s+)?(19\d{2}|20\d{2})\b/g, " ")
+    .replace(/\b(19\d{2}|20\d{2})\b/g, " ");
+
+  const cleaned = withoutDates
+    .replace(/\b(proyecto|cliente|proveedor|responsable|solicitante|site|sitio|ot|orden|ordenes|gasto|gastos|planilla|registro|registros|cuanto|cuantos|cuanta|cuantas|quiero|saber|mostrar|consultar|buscar|de|del|para|por|con|en|el|la|los|las|periodo|periodo|mes|ano|año|tiene|tengo|hay|del)\b/g, " ")
+    .replace(/\b(en el periodo|durante|desde|hasta|de fecha|en fecha)\b/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  if (!cleaned) {
+    return null;
+  }
+
+  return cleaned
+    .split(" ")
+    .filter((token) => token.length > 1)
+    .slice(0, 4)
+    .join(" ");
+}
+
+function shouldUseExactMatch(question: string) {
+  const normalized = normalizeQuestion(question);
+  return /\b(coincidencia exacta|coincidir todas|todos los terminos|todos los términos|términos exactos|terminos exactos)\b/i.test(normalized);
+}
+
+function parseFrontendGastosQuestion(question: string) {
+  const dateRange = inferDateRangeFromQuestion(question);
+  const project = extractProjectFromQuestion(question);
+  const textSearch = extractTextSearchFromQuestion(question);
+
+  return {
+    start: dateRange.start,
+    end: dateRange.end,
+    searchText: textSearch,
+    project,
+    coincideTodas: shouldUseExactMatch(question),
+  };
+}
+
+function buildFrontendStorePreview(request: IaChatRequest) {
+  const parsed = parseFrontendGastosQuestionForPreview(request.question);
+
+  return [
+    "EXEC dbo.sp_IA_Planilla_Buscar",
+    `    @FechaInicio     = ${formatSqlDate(parsed.start)},`,
+    `    @FechaFin        = ${formatSqlDate(parsed.end)},`,
+    `    @TextoBusqueda   = ${formatSqlValue(parsed.searchText)},`,
+    `    @Estados         = ${formatSqlValue(parsed.estados)},`,
+    "    @IdSite          = NULL,",
+    `    @Site            = ${formatSqlValue(parsed.site)},`,
+    "    @CorreSite       = NULL,",
+    `    @Cliente         = ${formatSqlValue(parsed.cliente)},`,
+    `    @Proyecto        = ${formatSqlValue(parsed.project)},`,
+    `    @Responsable     = ${formatSqlValue(parsed.responsable)},`,
+    `    @Solicitante     = ${formatSqlValue(parsed.solicitante)},`,
+    `    @Ot              = ${formatSqlValue(parsed.ot)},`,
+    `    @CoincidirTodas  = ${formatSqlBit(parsed.coincideTodas)},`,
+    `    @IncluirEstado99 = ${formatSqlBit(true)},`,
+    "    @Pagina          = 1,",
+    "    @TamanoPagina    = 20000,",
+    "    @TipoCambio      = 3.8;",
+  ].join("\n");
+}
+
+function sanitizePdfFileName(fileName: string | null | undefined) {
+  const baseName = (fileName ?? "").trim() || `gastos-reporte-dashboard-${Date.now()}.pdf`;
+  const normalized = baseName.replace(/[<>:"/\\|?*\u0000-\u001F]/g, "-");
+  return normalized.toLowerCase().endsWith(".pdf") ? normalized : `${normalized}.pdf`;
+}
+
+function dashboardFallbackRuntime() {
+  const reportData = ((window as Window & { __IA_CHAT_REPORT_DATA__?: any }).__IA_CHAT_REPORT_DATA__ || {}) as any;
+  const fallbackSections = [
+    {
+      title: "Distribución mensual",
+      labels: ["distribucion mensual", "evolucion mensual", "comportamiento mensual", "gasto mensual", "gastos mensuales"],
+      rows: Array.isArray(reportData.monthChartRows) ? reportData.monthChartRows : [],
+      labelKey: "label",
+      amountKey: "amount",
+    },
+    {
+      title: "Por proyecto",
+      labels: ["por proyecto", "proyecto principal", "concentracion por proyecto", "principales concentraciones por cliente / proyecto", "principales proyectos"],
+      rows: Array.isArray(reportData.projectChartRows) ? reportData.projectChartRows : [],
+      labelKey: "label",
+      amountKey: "amount",
+    },
+    {
+      title: "Top solicitantes",
+      labels: ["top solicitantes", "solicitante principal", "por solicitante", "participacion por solicitante"],
+      rows: Array.isArray(reportData.solicitanteChartRows) ? reportData.solicitanteChartRows : [],
+      labelKey: "label",
+      amountKey: "amount",
+    },
+    {
+      title: "Top sites",
+      labels: ["top sites", "site principal", "por site", "sitios principales"],
+      rows: Array.isArray(reportData.siteChartRows) ? reportData.siteChartRows : [],
+      labelKey: "label",
+      amountKey: "amount",
+    },
+    {
+      title: "Desglose por moneda",
+      labels: ["desglose por moneda", "por moneda", "participacion por moneda", "moneda principal"],
+      rows: Array.isArray(reportData.currencyTotals) ? reportData.currencyTotals : [],
+      labelKey: "Moneda",
+      amountKey: "Monto",
+    },
+  ];
+
+  function normalizeText(value: any) {
+    return String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function toNumber(value: any) {
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : 0;
+    }
+
+    const raw = String(value || "").trim();
+    if (!raw) {
+      return 0;
+    }
+
+    let cleaned = raw.replace(/[^\d,.-]/g, "");
+    const hasDot = cleaned.includes(".");
+    const hasComma = cleaned.includes(",");
+
+    if (hasDot && hasComma) {
+      cleaned = cleaned.replace(/,/g, "");
+    } else if (hasComma && !hasDot) {
+      const pieces = cleaned.split(",");
+      cleaned = pieces.length === 2 && pieces[1].length !== 3 ? pieces.join(".") : pieces.join("");
+    }
+
+    cleaned = cleaned.replace(/(?!^)-/g, "");
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function formatMoney(value: any) {
+    return new Intl.NumberFormat("es-PE", {
+      style: "currency",
+      currency: "PEN",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(value);
+  }
+
+  function getAmountText(row: any, amountKey: string, amountNumber: number) {
+    if (amountKey === "Monto" && typeof row.Monto === "string") {
+      return String(row.Monto);
+    }
+
+    if (amountKey === "amount" && typeof row.amount === "string") {
+      return String(row.amount);
+    }
+
+    return formatMoney(amountNumber);
+  }
+
+  function createCard(title: string, rows: any[], labelKey: string, amountKey: string) {
+    const wrapper = document.createElement("section");
+    wrapper.setAttribute("data-iachat-fallback-chart", "true");
+    wrapper.style.cssText = [
+      "margin: 14px 0 4px",
+      "padding: 14px 14px 10px",
+      "border: 1px solid rgba(148, 163, 184, 0.28)",
+      "border-radius: 18px",
+      "background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.96))",
+      "box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06)",
+      "overflow: hidden",
+    ].join(";");
+
+    const header = document.createElement("div");
+    header.style.cssText = "display:flex;flex-direction:column;gap:4px;margin-bottom:10px;";
+
+    const titleEl = document.createElement("div");
+    titleEl.textContent = title;
+    titleEl.style.cssText = "font-size:12px;font-weight:800;letter-spacing:0.16em;text-transform:uppercase;color:#475569;";
+    header.appendChild(titleEl);
+
+    const subtitleEl = document.createElement("div");
+    subtitleEl.textContent = rows.length > 0
+      ? rows.length + " agrupaciones detectadas"
+      : "Sin datos suficientes para el gráfico";
+    subtitleEl.style.cssText = "font-size:12px;color:#64748b;";
+    header.appendChild(subtitleEl);
+
+    wrapper.appendChild(header);
+
+    const chartArea = document.createElement("div");
+    chartArea.style.cssText = "display:flex;flex-direction:column;gap:10px;";
+
+    const items = rows.slice(0, 6).map((row: any) => {
+      const typedRow = row as Record<string, unknown>;
+      const rawAmount = typedRow[amountKey];
+      const participationValue = typeof typedRow.participation === "number"
+        ? Number(typedRow.participation)
+        : typeof typedRow.Participacion === "string"
+          ? toNumber(typedRow.Participacion)
+          : null;
+
+      return {
+        label: String(typedRow[labelKey] ?? "Sin dato"),
+        amount: toNumber(rawAmount),
+        amountText: getAmountText(typedRow, amountKey, toNumber(rawAmount)),
+        participation: participationValue,
+      };
+    });
+
+    const maxAmount = Math.max(...items.map((item) => item.amount), 1);
+    const accent = title === "Distribución mensual"
+      ? "#2563EB"
+      : title === "Por proyecto"
+        ? "#0F766E"
+        : title === "Top solicitantes"
+          ? "#7C3AED"
+          : title === "Top sites"
+            ? "#F59E0B"
+            : "#DC2626";
+
+    if (items.length > 0) {
+      const bars = document.createElement("div");
+      bars.style.cssText = "display:flex;flex-direction:column;gap:8px;";
+
+      for (const item of items) {
+        const row = document.createElement("div");
+        row.style.cssText = "display:grid;grid-template-columns:minmax(110px,1.2fr) minmax(0,2.6fr) auto;gap:10px;align-items:center;";
+
+        const label = document.createElement("div");
+        label.textContent = item.label;
+        label.style.cssText = "font-size:12px;font-weight:700;color:#1e293b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+
+        const track = document.createElement("div");
+        track.style.cssText = "height:12px;background:#e2e8f0;border-radius:999px;overflow:hidden;position:relative;";
+
+        const fill = document.createElement("div");
+        const ratio = maxAmount > 0 ? Math.max(6, (item.amount / maxAmount) * 100) : 6;
+        fill.style.cssText = "height:100%;width:" + ratio + "%;background:" + accent + ";border-radius:999px;";
+        track.appendChild(fill);
+
+        const amount = document.createElement("div");
+        amount.textContent = item.participation !== null
+          ? item.amountText + " • " + item.participation.toFixed(2) + "%"
+          : item.amountText;
+        amount.style.cssText = "font-size:12px;font-weight:700;color:#0f172a;white-space:nowrap;";
+
+        row.appendChild(label);
+        row.appendChild(track);
+        row.appendChild(amount);
+        bars.appendChild(row);
+      }
+
+      chartArea.appendChild(bars);
+    }
+
+    const table = document.createElement("table");
+    table.style.cssText = "width:100%;border-collapse:collapse;margin-top:4px;font-size:12px;";
+    const thead = document.createElement("thead");
+    const headRow = document.createElement("tr");
+    for (const headerText of ["Categoría", "Monto", "%"]) {
+      const th = document.createElement("th");
+      th.textContent = headerText;
+      th.style.cssText = "text-align:left;padding:6px 8px;background:#f8fafc;color:#64748b;border-bottom:1px solid #e2e8f0;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;";
+      headRow.appendChild(th);
+    }
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    for (const item of items) {
+      const tr = document.createElement("tr");
+      const labelCell = document.createElement("td");
+      labelCell.textContent = item.label;
+      labelCell.style.cssText = "padding:6px 8px;border-bottom:1px solid #eef2f7;color:#1e293b;";
+      const amountCell = document.createElement("td");
+      amountCell.textContent = item.amountText;
+      amountCell.style.cssText = "padding:6px 8px;border-bottom:1px solid #eef2f7;font-weight:700;color:#1d4ed8;";
+      const pctCell = document.createElement("td");
+      pctCell.textContent = item.participation !== null ? item.participation.toFixed(2) + "%" : "—";
+      pctCell.style.cssText = "padding:6px 8px;border-bottom:1px solid #eef2f7;color:#475569;";
+      tr.appendChild(labelCell);
+      tr.appendChild(amountCell);
+      tr.appendChild(pctCell);
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    chartArea.appendChild(table);
+
+    wrapper.appendChild(chartArea);
+    return wrapper;
+  }
+
+  function getCanvasAlpha(canvas: any) {
+    try {
+      const context = canvas.getContext("2d");
+      if (!context || canvas.width <= 0 || canvas.height <= 0) {
+        return 0;
+      }
+
+      const sample = context.getImageData(
+        Math.max(0, Math.floor(canvas.width / 2) - 1),
+        Math.max(0, Math.floor(canvas.height / 2) - 1),
+        1,
+        1,
+      ).data;
+      return sample[3];
+    } catch {
+      return 0;
+    }
+  }
+
+  function findHeading(labels: string[]) {
+    const selectors = "h1,h2,h3,h4,h5,h6,p,div,span,strong";
+    const nodes = Array.from(document.querySelectorAll(selectors));
+    return nodes.find((node: any) => {
+      const text = normalizeText(node.textContent);
+      return labels.some((label) => text.includes(label));
+    }) || null;
+  }
+
+  function findCardContainer(node: any) {
+    let current = node instanceof Element ? node : node && node.parentElement ? node.parentElement : null;
+    while (current && current !== document.body) {
+      const rect = current.getBoundingClientRect();
+      if (rect.width > 220 && rect.height > 140 && (current.querySelector("table") || current.querySelector("canvas") || current.children.length > 1)) {
+        return current;
+      }
+      current = current.parentElement;
+    }
+
+    return node instanceof Element ? node.parentElement : document.body;
+  }
+
+  function injectFallback(section: any) {
+    const heading = findHeading(section.labels);
+    if (!heading) {
+      return;
+    }
+
+    const card = findCardContainer(heading);
+    if (!card) {
+      return;
+    }
+
+    const canvases = Array.from(card.querySelectorAll("canvas")) as HTMLCanvasElement[];
+    let hasVisibleCanvas = false;
+
+    for (const canvas of canvases) {
+      const alpha = getCanvasAlpha(canvas);
+      if (alpha > 0) {
+        hasVisibleCanvas = true;
+      } else {
+        canvas.remove();
+      }
+    }
+
+    if (hasVisibleCanvas || card.querySelector("[data-iachat-fallback-chart]")) {
+      return;
+    }
+
+    const fallback = createCard(section.title, section.rows, section.labelKey, section.amountKey);
+    const table = card.querySelector("table");
+    if (table && table.parentElement) {
+      table.parentElement.insertBefore(fallback, table);
+    } else {
+      card.appendChild(fallback);
+    }
+  }
+
+  function run() {
+    for (const section of fallbackSections) {
+      injectFallback(section);
+    }
+  }
+
+  if (document.readyState === "complete" || document.readyState === "interactive") {
+    setTimeout(run, 1200);
+  } else {
+    window.addEventListener("load", () => setTimeout(run, 1200), { once: true });
+  }
+}
+
+function injectDashboardFallbacksIntoHtml(
+  htmlContent: string,
+  dashboardData: ReturnType<typeof buildDashboardStructuredData>,
+) {
+  const dataJson = JSON.stringify(dashboardData).replace(/</g, "\\u003c");
+  const injection = `<script>window.__IA_CHAT_REPORT_DATA__ = ${dataJson};</script><script>(${dashboardFallbackRuntime.toString()})();</script>`;
+  return /<\/body>\s*$/i.test(htmlContent)
+    ? htmlContent.replace(/<\/body>\s*$/i, `${injection}</body>`)
+    : `${htmlContent}${injection}`;
+}
+
+async function waitForDashboardRender(frame: HTMLIFrameElement) {
+  const maxAttempts = 30;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const frameDocument = frame.contentDocument;
+    const frameWindow = frame.contentWindow;
+    const body = frameDocument?.body;
+
+    if (body && body.scrollHeight > 120) {
+      const canvases = Array.from(frameDocument.querySelectorAll("canvas"));
+      const hasRenderedCanvas = canvases.length === 0 || canvases.some((canvas) => {
+        const context = canvas.getContext("2d");
+        if (!context) {
+          return false;
+        }
+
+        const sample = context.getImageData(
+          Math.max(0, Math.floor(canvas.width / 2) - 1),
+          Math.max(0, Math.floor(canvas.height / 2) - 1),
+          1,
+          1,
+        ).data;
+        return sample[3] > 0;
+      });
+
+      if (hasRenderedCanvas) {
+        return;
+      }
+    }
+
+    await new Promise((resolve) => frameWindow?.setTimeout(resolve, 250) ?? window.setTimeout(resolve, 250));
+  }
+}
+
+function getReportRootElement(frameDocument: Document) {
+  return (
+    frameDocument.querySelector<HTMLElement>("#report-root, #claude-report-root, [data-report-root], main, article") ??
+    frameDocument.body.firstElementChild as HTMLElement | null ??
+    frameDocument.body
+  );
+}
+
+async function exportDashboardHtmlAsPdf(htmlContent: string, fileName: string, viewportWidth?: number) {
+  const sourceFrame = document.createElement("iframe");
+  sourceFrame.style.position = "fixed";
+  sourceFrame.style.right = "-10000px";
+  sourceFrame.style.bottom = "0";
+  sourceFrame.style.width = `${Math.max(980, Math.round(viewportWidth ?? 1440))}px`;
+  sourceFrame.style.height = "2200px";
+  sourceFrame.style.border = "0";
+  sourceFrame.style.opacity = "0";
+  sourceFrame.style.pointerEvents = "none";
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      sourceFrame.onload = () => resolve();
+      sourceFrame.onerror = () => reject(new Error("No se pudo renderizar el dashboard para exportarlo."));
+      sourceFrame.srcdoc = htmlContent;
+      document.body.appendChild(sourceFrame);
+    });
+
+    await waitForDashboardRender(sourceFrame);
+
+    const frameDocument = sourceFrame.contentDocument;
+    const frameWindow = sourceFrame.contentWindow;
+    if (!frameDocument?.body || !frameWindow) {
+      throw new Error("No se pudo obtener el contenido del dashboard generado.");
+    }
+
+    if (frameDocument.fonts?.ready) {
+      await frameDocument.fonts.ready.catch(() => undefined);
+    }
+
+    const exportRoot = getReportRootElement(frameDocument);
+    if (!exportRoot) {
+      throw new Error("No se pudo identificar el contenedor principal del dashboard generado.");
+    }
+
+    const canvas = await html2canvas(exportRoot, {
+      backgroundColor: null,
+      scale: 2,
+      useCORS: true,
+      scrollY: -frameWindow.scrollY,
+      windowWidth: Math.max(exportRoot.scrollWidth, frameDocument.documentElement.scrollWidth, Math.round(viewportWidth ?? 1440)),
+      windowHeight: Math.max(exportRoot.scrollHeight, frameDocument.documentElement.scrollHeight, 2200),
+    });
+
+    const pdf = new jsPDF({
+      orientation: "landscape",
+      unit: "mm",
+      format: "a4",
+      compress: true,
+    });
+
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const marginX = 6;
+    const marginY = 6;
+    const printableWidth = pageWidth - marginX * 2;
+    const printableHeight = pageHeight - marginY * 2;
+    const imageData = canvas.toDataURL("image/png", 1.0);
+    const imageWidth = canvas.width;
+    const imageHeight = canvas.height;
+    const imageHeightMm = (imageHeight * printableWidth) / imageWidth;
+    pdf.addImage(imageData, "PNG", marginX, marginY, printableWidth, imageHeightMm, undefined, "FAST");
+
+    let remainingHeight = imageHeightMm - printableHeight;
+    let offset = printableHeight;
+
+    while (remainingHeight > 0) {
+      pdf.addPage();
+      pdf.addImage(imageData, "PNG", marginX, marginY - offset, printableWidth, imageHeightMm, undefined, "FAST");
+      offset += printableHeight;
+      remainingHeight -= printableHeight;
+    }
+
+    pdf.save(sanitizePdfFileName(fileName));
+  } finally {
+    sourceFrame.remove();
+  }
+}
+
+function getDashboardQuestion(response: IaChatResponse) {
+  const interpretedQuestion = response.interpretedFilters?.question;
+  if (typeof interpretedQuestion === "string" && interpretedQuestion.trim()) {
+    return interpretedQuestion.trim();
+  }
+
+  return "Generar reporte ejecutivo del resultado actual";
+}
+
+function buildDashboardStructuredData(response: IaChatResponse) {
+  const report = buildExecutiveWeeklyReportData(response);
+  const filters = buildDisplayFilters(response).map((item) => ({
+    campo: item.label,
+    valor: item.value,
+  }));
+
+  return {
+    module: response.module,
+    responseType: response.responseType,
+    totalRows: response.totalRows ?? response.detailRows?.length ?? 0,
+    metric: report.metric,
+    currency: report.currency,
+    hasMultipleCurrencies: report.hasMultipleCurrencies,
+    period: report.period,
+    filters,
+    summaryRows: report.summaryRows,
+    kpiRows: report.kpiRows,
+    monthTable: report.monthTable,
+    projectTable: report.projectTable,
+    solicitanteTable: report.solicitanteTable,
+    siteTable: report.siteTable,
+    currencyTable: report.currencyTable,
+    currencyTotals: report.currencyTotals,
+    semaphoreTable: report.semaphoreTable,
+    executiveReading: report.executiveReading,
+    conclusion: report.conclusion,
+    recommendations: report.recommendations,
+    monthChartRows: report.monthChartRows,
+    projectChartRows: report.projectChartRows,
+    solicitanteChartRows: report.solicitanteChartRows,
+    siteChartRows: report.siteChartRows,
+  };
+}
+
+  function toPdfRows(rows: Record<string, unknown>[]) {
+    return rows.map((row) => flattenExportRecord(row));
+  }
 
 function addPdfSection(
   doc: jsPDF,
@@ -272,6 +1051,753 @@ function addPdfSection(
   return ((doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? startY + 18) + 10;
 }
 
+function addPdfTextBlock(
+  doc: jsPDF,
+  title: string,
+  text: string,
+  startY: number,
+  options?: { accentColor?: [number, number, number] },
+) {
+  const accent = options?.accentColor ?? [15, 118, 110];
+  doc.setDrawColor(...accent);
+  doc.setFillColor(248, 250, 252);
+  doc.roundedRect(14, startY, 269, 8, 2, 2, "FD");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(15, 23, 42);
+  doc.text(title, 18, startY + 5.5);
+
+  const paragraphs = text
+    .split(/\n{2,}/)
+    .map((item) => item.replace(/\*\*/g, "").replace(/^#+\s*/gm, "").trim())
+    .filter(Boolean);
+
+  let cursorY = startY + 14;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(51, 65, 85);
+
+  for (const paragraph of paragraphs) {
+    const lines = doc.splitTextToSize(paragraph, 265);
+    doc.text(lines, 16, cursorY);
+    cursorY += lines.length * 5 + 3;
+
+    if (cursorY > 188) {
+      doc.addPage();
+      cursorY = 18;
+    }
+  }
+
+  return cursorY + 4;
+}
+
+function getPdfPageSize(doc: jsPDF) {
+  return {
+    width: doc.internal.pageSize.getWidth(),
+    height: doc.internal.pageSize.getHeight(),
+  };
+}
+
+function drawPdfHeader(doc: jsPDF, module: string, generatedAt: string, reportLabel: string) {
+  const { width } = getPdfPageSize(doc);
+  doc.setFillColor(15, 23, 42);
+  doc.rect(0, 0, width, 22, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.text("Reporte Ejecutivo Semanal", 14, 13);
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.text(`Modulo: ${module}  |  Generado: ${generatedAt}`, width - 14, 13, { align: "right" });
+
+  doc.setTextColor(15, 23, 42);
+  doc.setFontSize(11);
+  doc.setFont("helvetica", "bold");
+  doc.text(reportLabel, 14, 32);
+}
+
+function ensurePdfSpace(doc: jsPDF, cursorY: number, neededHeight: number, headerDrawer: () => void) {
+  const { height } = getPdfPageSize(doc);
+  if (cursorY + neededHeight <= height - 14) {
+    return cursorY;
+  }
+
+  doc.addPage();
+  headerDrawer();
+  return 38;
+}
+
+function drawWrappedText(doc: jsPDF, text: string, x: number, y: number, width: number, lineHeight = 4.2) {
+  const lines = doc.splitTextToSize(text, width);
+  doc.text(lines, x, y);
+  return y + lines.length * lineHeight;
+}
+
+function addPdfKpiCards(
+  doc: jsPDF,
+  rows: Array<{ Indicador: string; Resultado: string }>,
+  startY: number,
+  headerDrawer: () => void,
+) {
+  let cursorY = ensurePdfSpace(doc, startY, 48, headerDrawer);
+  const { width } = getPdfPageSize(doc);
+  const marginX = 14;
+  const gap = 6;
+  const columns = 3;
+  const cardWidth = (width - marginX * 2 - gap * (columns - 1)) / columns;
+  const cardHeight = 22;
+  const palette: Array<[number, number, number]> = [
+    [15, 118, 110],
+    [37, 99, 235],
+    [245, 158, 11],
+    [124, 58, 237],
+    [220, 38, 38],
+  ];
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(15, 23, 42);
+  doc.text("2. Indicadores principales", marginX, cursorY);
+  cursorY += 6;
+
+  rows.slice(0, 5).forEach((row, index) => {
+    const column = index % columns;
+    const rowIndex = Math.floor(index / columns);
+    const x = marginX + column * (cardWidth + gap);
+    const y = cursorY + rowIndex * (cardHeight + gap);
+    const accent = palette[index % palette.length];
+
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(...accent);
+    doc.roundedRect(x, y, cardWidth, cardHeight, 3, 3, "FD");
+
+    doc.setFillColor(...accent);
+    doc.roundedRect(x, y, cardWidth, 4, 3, 3, "F");
+
+    doc.setTextColor(71, 85, 105);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text(row.Indicador.toUpperCase(), x + 3, y + 8);
+
+    doc.setTextColor(15, 23, 42);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    const valueLines = doc.splitTextToSize(row.Resultado, cardWidth - 6);
+    doc.text(valueLines, x + 3, y + 15);
+  });
+
+  return cursorY + Math.ceil(Math.min(rows.length, 5) / columns) * (cardHeight + gap) + 2;
+}
+
+function addPdfVerticalBarChart(
+  doc: jsPDF,
+  title: string,
+  rows: Array<{ label: string; amount: number }>,
+  currency: string,
+  startY: number,
+  headerDrawer: () => void,
+) {
+  let cursorY = ensurePdfSpace(doc, startY, 88, headerDrawer);
+  const marginX = 14;
+  const chartWidth = 180;
+  const chartHeight = 52;
+  const chartX = marginX;
+  const chartY = cursorY + 8;
+  const maxAmount = Math.max(...rows.map((item) => item.amount), 0);
+  const barGap = 6;
+  const usableBars = Math.max(rows.length, 1);
+  const barWidth = Math.max((chartWidth - barGap * (usableBars - 1)) / usableBars, 10);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(15, 23, 42);
+  doc.text(title, marginX, cursorY);
+
+  doc.setDrawColor(203, 213, 225);
+  doc.line(chartX, chartY + chartHeight, chartX + chartWidth, chartY + chartHeight);
+  doc.line(chartX, chartY, chartX, chartY + chartHeight);
+
+  rows.forEach((item, index) => {
+    const x = chartX + index * (barWidth + barGap);
+    const barHeight = maxAmount > 0 ? (item.amount / maxAmount) * (chartHeight - 6) : 0;
+    const y = chartY + chartHeight - barHeight;
+
+    doc.setFillColor(37, 99, 235);
+    doc.roundedRect(x, y, barWidth, Math.max(barHeight, 1), 1.5, 1.5, "F");
+
+    doc.setTextColor(71, 85, 105);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    const label = item.label.length > 10 ? `${item.label.slice(0, 10)}...` : item.label;
+    doc.text(label, x + barWidth / 2, chartY + chartHeight + 5, { align: "center" });
+  });
+
+  const top = rows.slice().sort((a, b) => b.amount - a.amount)[0];
+  let sideY = chartY + 3;
+  doc.setTextColor(15, 23, 42);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.text("Lectura ejecutiva", 205, sideY);
+  sideY += 6;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  sideY = drawWrappedText(
+    doc,
+    top
+      ? `${top.label} concentra el mayor monto del periodo con ${formatMoneyByCurrency(top.amount, currency)}.`
+      : "No hay datos suficientes para graficar esta vista.",
+    205,
+    sideY,
+    74,
+  );
+
+  return Math.max(chartY + chartHeight + 14, sideY + 4);
+}
+
+function addPdfHorizontalBarChart(
+  doc: jsPDF,
+  title: string,
+  rows: Array<{ label: string; amount: number; participation: number }>,
+  currency: string,
+  startY: number,
+  headerDrawer: () => void,
+) {
+  const visibleRows = rows.slice(0, 5);
+  let cursorY = ensurePdfSpace(doc, startY, 72, headerDrawer);
+  const marginX = 14;
+  const barX = 70;
+  const barMaxWidth = 125;
+  const maxAmount = Math.max(...visibleRows.map((item) => item.amount), 0);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(15, 23, 42);
+  doc.text(title, marginX, cursorY);
+  cursorY += 8;
+
+  visibleRows.forEach((item, index) => {
+    const y = cursorY + index * 11;
+    const width = maxAmount > 0 ? (item.amount / maxAmount) * barMaxWidth : 0;
+
+    doc.setTextColor(51, 65, 85);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text(item.label.length > 28 ? `${item.label.slice(0, 28)}...` : item.label, marginX, y + 4);
+
+    doc.setFillColor(226, 232, 240);
+    doc.roundedRect(barX, y, barMaxWidth, 5, 1.5, 1.5, "F");
+    doc.setFillColor(15, 118, 110);
+    doc.roundedRect(barX, y, Math.max(width, 1), 5, 1.5, 1.5, "F");
+
+    doc.setTextColor(15, 23, 42);
+    doc.setFont("helvetica", "normal");
+    doc.text(formatMoneyByCurrency(item.amount, currency), barX + barMaxWidth + 6, y + 4);
+    doc.text(`${item.participation.toFixed(2)}%`, 276, y + 4, { align: "right" });
+  });
+
+  return cursorY + visibleRows.length * 11 + 2;
+}
+
+function addPdfTopSitesVisual(
+  doc: jsPDF,
+  rows: Array<{ label: string; amount: number }>,
+  currency: string,
+  startY: number,
+  headerDrawer: () => void,
+) {
+  const visibleRows = rows.slice(0, 5);
+  let cursorY = ensurePdfSpace(doc, startY, 64, headerDrawer);
+  const marginX = 14;
+  const cardWidth = 52;
+  const gap = 5;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(15, 23, 42);
+  doc.text("Top 5 sites", marginX, cursorY);
+  cursorY += 7;
+
+  visibleRows.forEach((item, index) => {
+    const x = marginX + index * (cardWidth + gap);
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(148, 163, 184);
+    doc.roundedRect(x, cursorY, cardWidth, 24, 3, 3, "FD");
+
+    doc.setFillColor(15, 118, 110);
+    doc.circle(x + 6, cursorY + 6, 3.5, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text(String(index + 1), x + 6, cursorY + 6.9, { align: "center" });
+
+    doc.setTextColor(51, 65, 85);
+    doc.setFontSize(7.5);
+    doc.text(item.label.length > 18 ? `${item.label.slice(0, 18)}...` : item.label, x + 11, cursorY + 6.7);
+    doc.setTextColor(15, 23, 42);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    const amountLines = doc.splitTextToSize(formatMoneyByCurrency(item.amount, currency), cardWidth - 6);
+    doc.text(amountLines, x + 3, cursorY + 15);
+  });
+
+  return cursorY + 30;
+}
+
+function addPdfSemaphoreVisual(
+  doc: jsPDF,
+  rows: Array<{ Indicador: string; Estado: string; Comentario: string }>,
+  startY: number,
+  headerDrawer: () => void,
+) {
+  let cursorY = ensurePdfSpace(doc, startY, 68, headerDrawer);
+  const marginX = 14;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(15, 23, 42);
+  doc.text("4. Semaforo ejecutivo", marginX, cursorY);
+
+  autoTable(doc, {
+    startY: cursorY + 4,
+    head: [["Indicador", "Estado", "Comentario"]],
+    body: rows.map((row) => [row.Indicador, row.Estado, row.Comentario]),
+    styles: {
+      font: "helvetica",
+      fontSize: 9,
+      cellPadding: 2.5,
+      valign: "middle",
+    },
+    headStyles: {
+      fillColor: [220, 38, 38],
+      textColor: 255,
+      fontStyle: "bold",
+    },
+    didParseCell(data) {
+      if (data.section !== "body" || data.column.index !== 1) {
+        return;
+      }
+
+      const value = String(data.cell.raw ?? "").toLowerCase();
+      if (value.includes("verde")) {
+        data.cell.styles.fillColor = [220, 252, 231];
+        data.cell.styles.textColor = [22, 101, 52];
+        data.cell.styles.fontStyle = "bold";
+      } else if (value.includes("amarillo")) {
+        data.cell.styles.fillColor = [254, 249, 195];
+        data.cell.styles.textColor = [133, 77, 14];
+        data.cell.styles.fontStyle = "bold";
+      } else if (value.includes("rojo")) {
+        data.cell.styles.fillColor = [254, 226, 226];
+        data.cell.styles.textColor = [153, 27, 27];
+        data.cell.styles.fontStyle = "bold";
+      }
+    },
+    margin: { left: 14, right: 14 },
+    theme: "striped",
+  });
+
+  return ((doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? cursorY + 18) + 8;
+}
+
+function resolvePeriodLabel(filters: Array<{ label: string; value: unknown }>) {
+  const fechaInicio = filters.find((item) => item.label.toLowerCase() === "fechainicio")?.value;
+  const fechaFin = filters.find((item) => item.label.toLowerCase() === "fechafin")?.value;
+
+  if (!fechaInicio && !fechaFin) {
+    return "No especificado";
+  }
+
+  return `${formatValue(fechaInicio)} al ${formatValue(fechaFin)}`;
+}
+
+function parseReportDate(value: unknown) {
+  if (!value) {
+    return null;
+  }
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value;
+  }
+
+  const text = String(value).trim();
+  if (!text) {
+    return null;
+  }
+
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    const parsed = new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const slashMatch = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashMatch) {
+    const parsed = new Date(Number(slashMatch[3]), Number(slashMatch[2]) - 1, Number(slashMatch[1]));
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const fallback = new Date(text);
+  return Number.isNaN(fallback.getTime()) ? null : fallback;
+}
+
+function monthLabel(date: Date) {
+  return date.toLocaleDateString("es-PE", { month: "long", year: "numeric" });
+}
+
+function normalizeStateLabel(value: unknown) {
+  return String(value ?? "Sin estado").trim() || "Sin estado";
+}
+
+function normalizeCurrencyLabel(value: unknown) {
+  const normalized = normalizeQuestion(String(value ?? ""));
+  if (normalized.includes("usd") || normalized.includes("dolar") || normalized.includes("dólar") || normalized.includes("us$")) {
+    return "USD";
+  }
+
+  return "PEN";
+}
+
+function formatMoneyByCurrency(value: number, currency: string) {
+  const safeValue = Number.isFinite(value) ? value : 0;
+  return currency === "USD"
+    ? `US$ ${safeValue.toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : `S/ ${safeValue.toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function detectReportMetric(response: IaChatResponse) {
+  const question = String(response.interpretedFilters?.question ?? "").toLowerCase();
+  const answer = String(response.answer ?? "").toLowerCase();
+  const wantsVentas = question.includes("venta") || answer.includes("venta");
+
+  return wantsVentas ? "ventas" : "gastos";
+}
+
+function resolveMetricAmountField(metric: "ventas" | "gastos") {
+  return metric === "ventas" ? "Ventas" : "Subtotal";
+}
+
+function normalizeRowsForMetric(rows: Record<string, unknown>[], metric: "ventas" | "gastos") {
+  if (metric !== "ventas") {
+    return rows;
+  }
+
+  const grouped = new Map<string, Record<string, unknown>>();
+  for (const row of rows) {
+    const ot = String(resolveFieldValue(row, ["Ot", "OT"]) ?? "").trim();
+    const site = String(resolveFieldValue(row, ["Site", "Sitio", "site", "sitio"]) ?? "").trim();
+    const fallbackKey = String(resolveFieldValue(row, ["IdPlanilla", "IDPLANILLA"]) ?? crypto.randomUUID?.() ?? Math.random());
+    const key = ot || site ? `${ot}||${site}` : fallbackKey;
+
+    if (!grouped.has(key)) {
+      grouped.set(key, row);
+      continue;
+    }
+
+    const current = grouped.get(key)!;
+    const currentVentas = resolveNumericField(current, ["Ventas", "ventas"]);
+    const nextVentas = resolveNumericField(row, ["Ventas", "ventas"]);
+    if (nextVentas > currentVentas) {
+      grouped.set(key, row);
+    }
+  }
+
+  return Array.from(grouped.values());
+}
+
+function resolveReportAmount(row: Record<string, unknown>, metric: "ventas" | "gastos") {
+  const amountField = resolveMetricAmountField(metric);
+  return resolveNumericField(row, [amountField, amountField.toLowerCase()]);
+}
+
+function buildTopRowsByField(
+  rows: Record<string, unknown>[],
+  metric: "ventas" | "gastos",
+  fields: string[],
+  limit = 5,
+  includeRanking = false,
+  splitByCurrency = false,
+) {
+  const grouped = new Map<string, { label: string; amount: number; count: number; currency?: string }>();
+
+  for (const row of rows) {
+    const label = formatValue(resolveFieldValue(row, fields));
+    const normalizedLabel = label === "-" ? "Sin dato" : label;
+    const currency = splitByCurrency
+      ? normalizeCurrencyLabel(resolveFieldValue(row, ["Moneda"]))
+      : undefined;
+    const key = `${normalizedLabel}||${currency ?? ""}`;
+    const amount = resolveReportAmount(row, metric);
+    const current = grouped.get(key) ?? { label: normalizedLabel, amount: 0, count: 0, currency };
+    current.amount += amount;
+    current.count += 1;
+    grouped.set(key, current);
+  }
+
+  const total = Array.from(grouped.values()).reduce((acc, item) => acc + item.amount, 0);
+
+  return Array.from(grouped.values())
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, limit)
+    .map((item, index) => ({
+      ...(includeRanking ? { Ranking: index + 1 } : {}),
+      label: item.currency ? `${item.label} (${item.currency})` : item.label,
+      currency: item.currency ?? null,
+      amount: item.amount,
+      count: item.count,
+      participation: total > 0 ? (item.amount / total) * 100 : 0,
+    }));
+}
+
+function buildMonthlyRows(
+  rows: Record<string, unknown>[],
+  metric: "ventas" | "gastos",
+  splitByCurrency = false,
+) {
+  const grouped = new Map<string, { month: string; amount: number; currency?: string }>();
+
+  for (const row of rows) {
+    const date = parseReportDate(resolveFieldValue(row, ["Fecha", "FECHA", "FechaIngresoTexto"]));
+    if (!date) {
+      continue;
+    }
+
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    const currency = splitByCurrency ? normalizeCurrencyLabel(resolveFieldValue(row, ["Moneda"])) : undefined;
+    const compositeKey = splitByCurrency ? `${key}||${currency ?? ""}` : key;
+    const current = grouped.get(compositeKey) ?? { month: monthLabel(date), amount: 0, currency };
+    current.amount += resolveReportAmount(row, metric);
+    grouped.set(compositeKey, current);
+  }
+
+  return Array.from(grouped.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([, value]) => value);
+}
+
+function buildExecutiveWeeklyReportData(response: IaChatResponse) {
+  const rawRows = response.detailRows ?? [];
+  const metric = detectReportMetric(response);
+  const metricRows = normalizeRowsForMetric(rawRows, metric);
+  const filters = buildDisplayFilters(response);
+  const period = resolvePeriodLabel(filters);
+  const currencies = buildTopRowsByField(metricRows, metric, ["Moneda"], 10);
+  const hasMultipleCurrencies = currencies.length > 1;
+  const primaryCurrency = currencies[0]?.label ? normalizeCurrencyLabel(currencies[0].label) : "PEN";
+  const totalAmount = metricRows.reduce((acc, row) => acc + resolveReportAmount(row, metric), 0);
+  const totalRecords = metricRows.length;
+  const baseRecords = rawRows.length;
+  const statusRows = buildTopRowsByField(rawRows, metric, ["Estado"], 20);
+  const totalPagado = statusRows
+    .filter((item) => normalizeQuestion(item.label).includes("pagado"))
+    .reduce((acc, item) => acc + item.count, 0);
+  const paidPercent = baseRecords > 0 ? (totalPagado / baseRecords) * 100 : 0;
+  const monthRows = buildMonthlyRows(metricRows, metric, hasMultipleCurrencies);
+  const projectRows = buildTopRowsByField(metricRows, metric, ["Proyecto"], 8, false, hasMultipleCurrencies);
+  const solicitanteRows = buildTopRowsByField(metricRows, metric, ["Solicitante"], 8, false, hasMultipleCurrencies);
+  const siteRows = buildTopRowsByField(metricRows, metric, ["Site", "Sitio"], 5, true, hasMultipleCurrencies);
+  const clientRows = buildTopRowsByField(metricRows, metric, ["Cliente"], 5, false, hasMultipleCurrencies);
+  const responsibleRows = buildTopRowsByField(metricRows, metric, ["Responsable"], 5, false, hasMultipleCurrencies);
+
+  const topMonth = monthRows.slice().sort((a, b) => b.amount - a.amount)[0];
+  const topProject = projectRows[0];
+  const topSolicitante = solicitanteRows[0];
+  const topSite = siteRows[0];
+  const topClient = clientRows[0];
+  const topResponsable = responsibleRows[0];
+  const topStatus = statusRows[0];
+  const currenciesLabel = currencies.length > 0
+    ? currencies.map((item) => item.label).join(", ")
+    : "Sin moneda";
+  const currencyTotalsLabel = currencies.length > 0
+    ? currencies.map((item) => `${item.label}: ${formatMoneyByCurrency(item.amount, item.label)}`).join(" | ")
+    : "Sin moneda";
+
+  const concentrationProject = topProject?.participation ?? 0;
+  const concentrationSolicitante = topSolicitante?.participation ?? 0;
+  const concentrationMonth = topMonth && totalAmount > 0 ? (topMonth.amount / totalAmount) * 100 : 0;
+  const hasRiskStates = statusRows.some((item) => {
+    const state = normalizeQuestion(item.label);
+    return state.includes("rechaz") || state.includes("observ") || state.includes("pend");
+  });
+  const hasNegative = metricRows.some((row) => resolveReportAmount(row, metric) < 0);
+
+  const buildSemaphore = (share: number, comment: string) => ({
+    state: hasNegative ? "Rojo" : share >= 60 ? "Rojo" : share >= 40 ? "Amarillo" : "Verde",
+    comment,
+  });
+
+  const semaphore = [
+    {
+      indicator: "Estado de registros",
+      state: hasRiskStates ? (paidPercent >= 80 ? "Amarillo" : "Rojo") : "Verde",
+      comment: topStatus
+        ? `Predomina ${topStatus.label} con ${topStatus.count} registros.`
+        : "No hay estado disponible para evaluar.",
+    },
+    {
+      indicator: "Concentración mensual",
+      ...buildSemaphore(
+        concentrationMonth,
+        topMonth ? `${topMonth.month} concentra ${formatMoneyByCurrency(topMonth.amount, topMonth.currency ?? primaryCurrency)}.` : "Sin distribución mensual suficiente.",
+      ),
+    },
+    {
+      indicator: "Concentración por proyecto",
+      ...buildSemaphore(concentrationProject, topProject ? `${topProject.label} concentra ${topProject.participation.toFixed(2)}% del total.` : "Sin proyecto principal identificado."),
+    },
+    {
+      indicator: "Concentración por solicitante",
+      ...buildSemaphore(concentrationSolicitante, topSolicitante ? `${topSolicitante.label} concentra ${topSolicitante.participation.toFixed(2)}% del total.` : "Sin solicitante principal identificado."),
+    },
+    {
+      indicator: "Seguimiento operativo",
+      state: hasNegative || hasRiskStates ? "Amarillo" : "Verde",
+      comment: hasNegative
+        ? "Existen montos negativos que requieren validación."
+        : hasRiskStates
+          ? "Se recomienda seguimiento a estados no pagados."
+          : "El comportamiento operativo luce controlado con la información disponible.",
+    },
+  ];
+
+  const primarySubject = topResponsable?.label || topClient?.label || topProject?.label || "Selección actual";
+  const summaryRows = buildKeyValueExportRows([
+    ["Responsable / cliente / proyecto analizado", primarySubject],
+    ["Periodo evaluado", period],
+    ["Total general", hasMultipleCurrencies ? "No consolidado por mezcla de monedas" : formatMoneyByCurrency(totalAmount, primaryCurrency)],
+    ["Cantidad de registros", totalRecords],
+    ["Estado principal", topStatus?.label ?? "Sin estado"],
+    ["Monedas identificadas", currenciesLabel],
+    ...(hasMultipleCurrencies
+      ? currencies.map((item) => [item.label, formatMoneyByCurrency(item.amount, item.label)] as [string, string])
+      : []),
+    ...(hasMultipleCurrencies ? [["Desglose por moneda", currencyTotalsLabel] as [string, string]] : []),
+    ["Cobertura del análisis", metric === "ventas"
+      ? `${baseRecords} filas fuente y ${totalRecords} operaciones únicas OT + Site`
+      : `${totalRecords} registros analizados`],
+  ]);
+
+  const kpiRows = [
+    {
+      Indicador: "Total analizado",
+      Resultado: hasMultipleCurrencies
+        ? "No consolidado por mezcla de monedas"
+        : formatMoneyByCurrency(totalAmount, primaryCurrency),
+    },
+    { Indicador: "Total registros", Resultado: String(totalRecords) },
+    { Indicador: "% pagado", Resultado: `${paidPercent.toFixed(2)}%` },
+    {
+      Indicador: "Desglose por moneda",
+      Resultado: currencies.length > 0
+        ? currencies.map((item) => `${item.label}: ${formatMoneyByCurrency(item.amount, item.label)}`).join(" | ")
+        : "Sin dato",
+    },
+    {
+      Indicador: "Mes con mayor monto",
+      Resultado: topMonth ? `${topMonth.month} (${formatMoneyByCurrency(topMonth.amount, topMonth.currency ?? primaryCurrency)})` : "Sin dato",
+    },
+    { Indicador: "Proyecto principal", Resultado: topProject ? topProject.label : "Sin dato" },
+    { Indicador: "Solicitante principal", Resultado: topSolicitante ? topSolicitante.label : "Sin dato" },
+    { Indicador: "Site principal", Resultado: topSite ? topSite.label : "Sin dato" },
+  ];
+
+  const monthTable = monthRows.map((item) => ({
+    Mes: item.month,
+    ...(hasMultipleCurrencies ? { Moneda: item.currency ?? primaryCurrency } : {}),
+    Monto: formatMoneyByCurrency(item.amount, item.currency ?? primaryCurrency),
+  }));
+
+  const projectTable = projectRows.map((item) => ({
+    Proyecto: item.label,
+    ...(hasMultipleCurrencies ? { Moneda: item.currency ?? primaryCurrency } : {}),
+    Monto: formatMoneyByCurrency(item.amount, item.currency ?? primaryCurrency),
+    Participación: `${item.participation.toFixed(2)}%`,
+  }));
+
+  const solicitanteTable = solicitanteRows.map((item) => ({
+    Solicitante: item.label,
+    ...(hasMultipleCurrencies ? { Moneda: item.currency ?? primaryCurrency } : {}),
+    Monto: formatMoneyByCurrency(item.amount, item.currency ?? primaryCurrency),
+    Participación: `${item.participation.toFixed(2)}%`,
+  }));
+
+  const siteTable = siteRows.map((item) => ({
+    Ranking: item.Ranking,
+    Site: item.label,
+    ...(hasMultipleCurrencies ? { Moneda: item.currency ?? primaryCurrency } : {}),
+    Monto: formatMoneyByCurrency(item.amount, item.currency ?? primaryCurrency),
+  }));
+
+  const currencyTable = currencies.map((item) => ({
+    Moneda: item.label,
+    Monto: formatMoneyByCurrency(item.amount, item.label === "DOLARES" || item.label === "USD" ? "USD" : item.label),
+    Participación: `${item.participation.toFixed(2)}%`,
+  }));
+
+  const semaphoreTable = semaphore.map((item) => ({
+    Indicador: item.indicator,
+    Estado: item.state,
+    Comentario: item.comment,
+  }));
+
+  const executiveReading = [
+    hasMultipleCurrencies
+      ? `La data mezcla monedas, por lo que el analisis se separa en: ${currencyTotalsLabel}.`
+      : null,
+    topMonth ? `El mes con mayor concentración es ${topMonth.month}, con ${formatMoneyByCurrency(topMonth.amount, topMonth.currency ?? primaryCurrency)}.` : null,
+    topProject ? `El proyecto principal es ${topProject.label}, con una participación de ${topProject.participation.toFixed(2)}% del total analizado.` : null,
+    topSolicitante ? `El solicitante con mayor participación es ${topSolicitante.label}, lo que sugiere un punto prioritario de seguimiento.` : null,
+    topSite ? `El site de mayor impacto es ${topSite.label}, que concentra ${formatMoneyByCurrency(topSite.amount, topSite.currency ?? primaryCurrency)}.` : null,
+  ].filter(Boolean).join(" ");
+
+  const conclusion = topProject
+    ? `La gestión se concentra principalmente en ${topProject.label}. Conviene monitorear semanalmente su evolución y validar el comportamiento de ${topSolicitante?.label ?? "los solicitantes principales"} para sostener control gerencial.`
+    : "La información disponible permite un seguimiento general, pero se recomienda profundizar el análisis por proyecto o responsable para una lectura gerencial más precisa.";
+
+  const recommendations = [
+    topProject ? `Dar seguimiento semanal al proyecto ${topProject.label} por su mayor participación.` : null,
+    topSolicitante ? `Revisar la concentración económica del solicitante ${topSolicitante.label}.` : null,
+    topSite ? `Monitorear el impacto operativo del site ${topSite.label}.` : null,
+    hasRiskStates ? "Revisar los registros no pagados o con estados de seguimiento antes del próximo corte." : "Mantener el control de estados para sostener el nivel de pago observado.",
+    metric === "ventas"
+      ? "Validar la continuidad comercial comparando ventas contra gasto o rentabilidad cuando corresponda."
+      : "Separar el análisis por cliente, proyecto o estado para reforzar la toma de decisiones.",
+  ].filter((item): item is string => Boolean(item)).slice(0, 5);
+
+  return {
+    metric,
+    currency: primaryCurrency,
+    hasMultipleCurrencies,
+    currencyTotals: currencies.map((item) => ({
+      Moneda: item.label,
+      Monto: formatMoneyByCurrency(item.amount, item.label),
+      Registros: item.count,
+      Participacion: `${item.participation.toFixed(2)}%`,
+    })),
+    period,
+    summaryRows,
+    kpiRows,
+    monthTable,
+    projectTable,
+    solicitanteTable,
+    siteTable,
+    currencyTable,
+    semaphoreTable,
+    executiveReading,
+    conclusion,
+    recommendations,
+    monthChartRows: monthRows.map((item) => ({ label: item.month, amount: item.amount })),
+    projectChartRows: projectRows.map((item) => ({ label: item.label, amount: item.amount, participation: item.participation })),
+    solicitanteChartRows: solicitanteRows.map((item) => ({ label: item.label, amount: item.amount, participation: item.participation })),
+    siteChartRows: siteRows.map((item) => ({ label: item.label, amount: item.amount })),
+    annexRows: detailSourceRowsFromRaw(metricRows),
+  };
+}
+
+function detailSourceRowsFromRaw(rows: Record<string, unknown>[]) {
+  return buildDetailedGridRows(rows);
+}
+
 function getModuleBadgeStyles(enabled: boolean): CSSProperties {
   return enabled
     ? {
@@ -310,6 +1836,56 @@ function buildDetailColumns(rows?: Record<string, unknown>[]) {
   return columns;
 }
 
+const DETAIL_GRID_COLUMNS = [
+  "IdPlanilla",
+  "Fecha",
+  "Detalle",
+  "Comentario",
+  "Estado",
+  "Cliente",
+  "Proyecto",
+  "IdSite",
+  "Site",
+  "Ot",
+  "Ventas",
+  "Responsable",
+  "Solicitante",
+  "Bien",
+  "Comprobante",
+  "TipoPago",
+  "Moneda",
+  "Subtotal",
+  "Igv",
+  "Total",
+  "IdOc",
+] as const;
+
+function buildDetailedGridRows(rows: Record<string, unknown>[]) {
+  return rows.map((row) => ({
+    IdPlanilla: getCaseInsensitiveValue(row, "IdPlanilla") ?? getCaseInsensitiveValue(row, "IDPLANILLA") ?? null,
+    Fecha: getCaseInsensitiveValue(row, "Fecha") ?? getCaseInsensitiveValue(row, "FECHA") ?? getCaseInsensitiveValue(row, "FechaIngresoTexto") ?? null,
+    Detalle: getCaseInsensitiveValue(row, "Detalle") ?? null,
+    Comentario: getCaseInsensitiveValue(row, "Comentario") ?? null,
+    Estado: getCaseInsensitiveValue(row, "Estado") ?? null,
+    Cliente: getCaseInsensitiveValue(row, "Cliente") ?? null,
+    Proyecto: getCaseInsensitiveValue(row, "Proyecto") ?? null,
+    IdSite: getCaseInsensitiveValue(row, "IdSite") ?? null,
+    Site: getCaseInsensitiveValue(row, "Site") ?? getCaseInsensitiveValue(row, "Sitio") ?? null,
+    Ot: getCaseInsensitiveValue(row, "Ot") ?? getCaseInsensitiveValue(row, "OT") ?? null,
+    Ventas: getCaseInsensitiveValue(row, "Ventas") ?? null,
+    Responsable: getCaseInsensitiveValue(row, "Responsable") ?? null,
+    Solicitante: getCaseInsensitiveValue(row, "Solicitante") ?? null,
+    Bien: getCaseInsensitiveValue(row, "Bien") ?? null,
+    Comprobante: getCaseInsensitiveValue(row, "Comprobante") ?? null,
+    TipoPago: getCaseInsensitiveValue(row, "TipoPago") ?? null,
+    Moneda: getCaseInsensitiveValue(row, "Moneda") ?? null,
+    Subtotal: getCaseInsensitiveValue(row, "Subtotal") ?? getCaseInsensitiveValue(row, "SubTotal") ?? null,
+    Igv: getCaseInsensitiveValue(row, "Igv") ?? getCaseInsensitiveValue(row, "IGV") ?? null,
+    Total: getCaseInsensitiveValue(row, "Total") ?? null,
+    IdOc: getCaseInsensitiveValue(row, "IdOc") ?? getCaseInsensitiveValue(row, "IDOC") ?? null,
+  }));
+}
+
 function summarizeNumericEntries(summary?: Record<string, unknown>) {
   if (!summary) {
     return [];
@@ -324,13 +1900,145 @@ function summarizeNumericEntries(summary?: Record<string, unknown>) {
     }));
 }
 
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("es-PE", {
+    style: "currency",
+    currency: "PEN",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number.isFinite(value) ? value : 0);
+}
+
+function resolveFieldValue(row: Record<string, unknown>, fields: string[]) {
+  for (const field of fields) {
+    const value = getCaseInsensitiveValue(row, field);
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function resolveNumericField(row: Record<string, unknown>, fields: string[]) {
+  for (const field of fields) {
+    const value = getCaseInsensitiveValue(row, field);
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+
+    const numericValue = normalizeNumericValue(value);
+    if (numericValue !== 0 || value === 0 || value === "0" || value === "0.00") {
+      return numericValue;
+    }
+  }
+
+  return 0;
+}
+
+function buildSiteExecutiveCards(rows: Record<string, unknown>[], metric: "ventas" | "gastos") {
+  const grouped = new Map<
+    string,
+    {
+      key: string;
+      cliente: string;
+      proyecto: string;
+      site: string;
+      amount: number;
+      amountLabel: string;
+      totalAcumulado: number;
+      saldoReferencial: number;
+      usedPercent: number;
+    }
+  >();
+
+  const amountField = resolveMetricAmountField(metric);
+  const amountLabel = metric === "ventas" ? "Ventas" : "Subtotal";
+
+  for (const row of rows) {
+    const cliente = formatValue(resolveFieldValue(row, ["Cliente", "cliente"])) || "Sin cliente";
+    const proyecto = formatValue(resolveFieldValue(row, ["Proyecto", "proyecto"])) || "Sin proyecto";
+    const site = formatValue(resolveFieldValue(row, ["Site", "Sitio", "site", "sitio"])) || "Sin sitio";
+    const key = `${cliente}||${proyecto}||${site}`;
+    const amount = resolveNumericField(row, [amountField, amountField.toLowerCase()]);
+    const totalAcumulado = resolveNumericField(row, ["ConPagadoSoles", "ConPagado", "Con Pagado", "conPagado", "con_pagado"]);
+
+    const current = grouped.get(key) ?? {
+      key,
+      cliente,
+      proyecto,
+      site,
+      amount: 0,
+      amountLabel,
+      totalAcumulado: 0,
+      saldoReferencial: 0,
+      usedPercent: 0,
+    };
+
+    current.amount += amount;
+    current.totalAcumulado += totalAcumulado;
+    current.saldoReferencial = current.amount - current.totalAcumulado;
+    current.usedPercent = current.amount > 0 ? (current.totalAcumulado / current.amount) * 100 : 0;
+    grouped.set(key, current);
+  }
+
+  return Array.from(grouped.values())
+    .sort((left, right) => {
+      const clienteCompare = left.cliente.localeCompare(right.cliente, "es", { sensitivity: "base" });
+      if (clienteCompare !== 0) return clienteCompare;
+
+      const proyectoCompare = left.proyecto.localeCompare(right.proyecto, "es", { sensitivity: "base" });
+      if (proyectoCompare !== 0) return proyectoCompare;
+
+      return left.site.localeCompare(right.site, "es", { sensitivity: "base" });
+    })
+    .map((item) => ({
+      ...item,
+      usedPercent: Math.max(0, Math.min(100, item.usedPercent)),
+    }));
+}
+
+function buildSiteExecutiveCardsFromSummary(summary?: Record<string, unknown>) {
+  const rawCards = summary?.executiveCards;
+  if (!Array.isArray(rawCards)) {
+    return [];
+  }
+
+  return rawCards
+    .filter((card): card is Record<string, unknown> => Boolean(card) && typeof card === "object")
+    .map((card) => ({
+      key: formatValue(card.key ?? `${formatValue(card.cliente)}||${formatValue(card.proyecto)}||${formatValue(card.site)}`),
+      cliente: formatValue(card.cliente ?? "Sin cliente"),
+      proyecto: formatValue(card.proyecto ?? "Sin proyecto"),
+      site: formatValue(card.site ?? "Sin sitio"),
+      amount: normalizeNumericValue(card.amount ?? card.montoOc),
+      amountLabel: formatValue(card.amountLabel ?? "Subtotal"),
+      totalAcumulado: normalizeNumericValue(card.totalAcumulado),
+      saldoReferencial: normalizeNumericValue(card.saldoReferencial),
+      usedPercent: Math.max(0, Math.min(100, normalizeNumericValue(card.usedPercent))),
+    }));
+}
+
+function buildExecutiveRowsFromSiteCards(cards: ReturnType<typeof buildSiteExecutiveCards>, metric: "ventas" | "gastos") {
+  const amountLabel = metric === "ventas" ? "Ventas" : "Subtotal";
+  return cards.map((card) => ({
+    Cliente: card.cliente,
+    Proyecto: card.proyecto,
+    Site: card.site,
+    [amountLabel]: card.amount,
+    "Total acumulado del sitio": card.totalAcumulado,
+    "Saldo referencial despues del sitio": card.saldoReferencial,
+    "Uso %": `${card.usedPercent.toFixed(2)}%`,
+  }));
+}
+
 function normalizeNumericValue(value: unknown) {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : 0;
   }
 
   if (typeof value === "string") {
-    const normalized = value.replace(/,/g, "").trim();
+    const normalized = value.replace(/s\/\.\s*/gi, "").replace(/\$/g, "").replace(/,/g, "").trim();
     const parsed = Number(normalized);
     return Number.isFinite(parsed) ? parsed : 0;
   }
@@ -405,7 +2113,10 @@ function buildDisplayFilters(response: IaChatResponse) {
     "toolName",
     "responseType",
     "routingMode",
+    "analysisIntent",
     "question",
+    "followUpIntent",
+    "reusedLastResult",
   ]);
 
   const filters: Array<{ label: string; value: unknown }> = [];
@@ -446,7 +2157,7 @@ function buildDisplayFilters(response: IaChatResponse) {
 function normalizeExecutiveRows(rows: Record<string, unknown>[]) {
   const normalizedRows = rows.map((row) => {
     const groupKey =
-      Object.keys(row).find((key) => /categoria|grupo|estado|cliente|proyecto|responsable|site|sitio|mes|ot/i.test(key)) ??
+      Object.keys(row).find((key) => /categoria|grupo|estado|cliente|proyecto|responsable|solicitante|site|sitio|mes|ot/i.test(key)) ??
       Object.keys(row)[0];
     const countKey =
       Object.keys(row).find((key) => /cantidad|registros|count|nro/i.test(key)) ??
@@ -478,6 +2189,7 @@ function aggregateDetailRows(rows: Record<string, unknown>[]) {
 
   const preferredGroupKeys = [
     "Responsable",
+    "Solicitante",
     "Cliente",
     "Proyecto",
     "Site",
@@ -490,7 +2202,7 @@ function aggregateDetailRows(rows: Record<string, unknown>[]) {
   const sampleRow = rows[0];
   const groupKey =
     preferredGroupKeys.find((candidate) => Object.keys(sampleRow).some((key) => key.toLowerCase() === candidate.toLowerCase())) ??
-    Object.keys(sampleRow).find((key) => /responsable|cliente|proyecto|site|sitio|estado|mes|ot/i.test(key)) ??
+    Object.keys(sampleRow).find((key) => /responsable|solicitante|cliente|proyecto|site|sitio|estado|mes|ot/i.test(key)) ??
     Object.keys(sampleRow)[0];
 
   const amountKey =
@@ -529,16 +2241,6 @@ function aggregateDetailRows(rows: Record<string, unknown>[]) {
     .sort((a, b) => Number(b.__value) - Number(a.__value));
 }
 
-function buildFallbackChartConfig(rows: Array<Record<string, unknown> & { __category?: unknown; __value?: number }>) {
-  return {
-    chartType: "bar" as const,
-    title: "Distribución ejecutiva",
-    categoryField: "__category",
-    valueField: "__value",
-    rows: rows as Record<string, unknown>[],
-  };
-}
-
 function getChartTitle(chartType: IaChatChartType) {
   return chartType === "pie"
     ? "Distribucion"
@@ -571,7 +2273,14 @@ function MessageBubble({ message }: { message: IaChatMessage }) {
         }}
       >
         {message.title && <div style={styles.messageTitle}>{message.title}</div>}
-        <div style={styles.messageText}>{message.text}</div>
+        {isAssistant && message.tone !== "error" ? (
+          <div style={styles.assistantNarrativeCard}>
+            <div style={styles.assistantNarrativeLabel}>Resumen contextual</div>
+            <div style={styles.assistantNarrativeText}>{message.text}</div>
+          </div>
+        ) : (
+          <div style={styles.messageText}>{message.text}</div>
+        )}
         {message.response?.success && <StructuredResponseBlock response={message.response} />}
       </div>
 
@@ -585,33 +2294,48 @@ function MessageBubble({ message }: { message: IaChatMessage }) {
 }
 
 function StructuredResponseBlock({ response }: { response: IaChatResponse }) {
+  const [showExecutive, setShowExecutive] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
+  const [showDetailedGrid, setShowDetailedGrid] = useState(false);
+  const [reportPreviewHtml, setReportPreviewHtml] = useState<string | null>(null);
+  const [reportPreviewTitle, setReportPreviewTitle] = useState<string | null>(null);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [isExportingReportPdf, setIsExportingReportPdf] = useState(false);
+  const [isExportingDetailExcel, setIsExportingDetailExcel] = useState(false);
+  const autoExportKeyRef = useRef<string | null>(null);
+  const reportPreviewRef = useRef<HTMLDivElement | null>(null);
   const rawRows = response.detailRows ?? [];
+  const reportMetric = detectReportMetric(response);
+  const detailedGridRows = buildDetailedGridRows(rawRows);
+  const summaryExecutiveCards = buildSiteExecutiveCardsFromSummary(response.summary).map((card) => ({
+    ...card,
+    amountLabel: card.amountLabel || (reportMetric === "ventas" ? "Ventas" : "Subtotal"),
+  }));
+  const followUpIntent = typeof response.interpretedFilters?.followUpIntent === "string"
+    ? response.interpretedFilters.followUpIntent
+    : null;
+  const isNoResultsSample = Boolean(response.interpretedFilters?.noResultsSample);
   const chartData = buildChartData(response);
   const chartExecutiveRows = buildExecutiveRowsFromChart(response);
   const executiveRows = response.responseType === "detail"
-    ? aggregateDetailRows(rawRows)
+    ? summaryExecutiveCards.length > 0
+      ? buildExecutiveRowsFromSiteCards(summaryExecutiveCards as ReturnType<typeof buildSiteExecutiveCards>, reportMetric)
+      : aggregateDetailRows(rawRows)
     : chartExecutiveRows.length > 0
       ? chartExecutiveRows
       : normalizeExecutiveRows(rawRows);
+  const siteExecutiveCards = summaryExecutiveCards.length > 0 ? summaryExecutiveCards : buildSiteExecutiveCards(rawRows, reportMetric);
   const detailColumns = buildDetailColumns(executiveRows);
   const numericSummary = summarizeNumericEntries(response.summary);
   const displayFilters = buildDisplayFilters(response);
-  const topFiveRows = executiveRows.slice(0, 5);
-  const executiveChartData = response.chart && chartData.length > 0
-    ? chartData
-    : response.responseType === "summary" || response.responseType === "detail"
-      ? buildExecutiveChartData(topFiveRows)
-      : chartData;
-  const executiveChartConfig = response.chart && chartData.length > 0
-    ? response.chart
-    : executiveChartData.length > 0
-      ? buildFallbackChartConfig(executiveChartData)
-      : null;
+  const executiveChartData = response.chart && chartData.length > 0 ? chartData : [];
+  const executiveChartConfig = response.chart && chartData.length > 0 ? response.chart : null;
   const shouldShowChart = executiveChartConfig !== null && executiveChartData.length > 0;
-  const shouldShowExecutiveSummary = detailColumns.length > 0 && executiveRows.length > 0;
-  const shouldShowTable = showDetail && rawRows.length > 0;
+  const shouldShowExecutiveSummary = showExecutive && siteExecutiveCards.length > 0 && !isNoResultsSample;
+  const shouldShowTable = (showDetail && rawRows.length > 0) || (isNoResultsSample && rawRows.length > 0);
+  const shouldShowDetailedGrid = showDetailedGrid && detailedGridRows.length > 0 && !isNoResultsSample;
+  const canShowDetailedGrid = detailedGridRows.length > 0 && !isNoResultsSample;
+  const executiveRecordCount = typeof response.totalRows === "number" ? response.totalRows : rawRows.length;
   const canExport = response.success && (
     rawRows.length > 0 ||
     executiveRows.length > 0 ||
@@ -621,119 +2345,128 @@ function StructuredResponseBlock({ response }: { response: IaChatResponse }) {
     Boolean(response.answer)
   );
 
-  const handleExport = () => {
-    if (!canExport || isExporting) {
+  const handleReportPreview = async () => {
+    if (!canExport || isGeneratingReport) {
       return;
     }
 
-    setIsExporting(true);
+    setIsGeneratingReport(true);
 
     try {
-      const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-      const fileLabel = response.module.toLowerCase();
-      const reportLabel = response.responseType === "detail"
-        ? "detalle"
-        : response.responseType === "summary"
-          ? "resumen"
-          : response.responseType === "chart"
-            ? "grafico"
-            : "reporte";
-      const generatedAt = new Date().toLocaleString("es-PE");
-
-      doc.setFillColor(15, 23, 42);
-      doc.rect(0, 0, 297, 22, "F");
-      doc.setTextColor(255, 255, 255);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(16);
-      doc.text("IA Chat Administrativo - Reporte exportado", 14, 13);
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "normal");
-      doc.text(`Modulo: ${response.module}  |  Generado: ${generatedAt}`, 198, 13, { align: "right" });
-
-      doc.setTextColor(15, 23, 42);
-      doc.setFontSize(11);
-      doc.setFont("helvetica", "bold");
-      doc.text(`Tipo de respuesta: ${formatValue(response.responseType)}`, 14, 32);
-
-      const summaryRows = buildKeyValueExportRows([
-        ["Modulo", response.module],
-        ["Tipo de respuesta", response.responseType],
-        ["Total de filas", response.totalRows ?? ""],
-        ["Generado el", generatedAt],
-        ["Respuesta", response.answer],
-      ]);
-
-      let cursorY = 38;
-      cursorY = addPdfSection(doc, "Resumen general", summaryRows, cursorY, {
-        headStyleFill: [15, 118, 110],
+      const dashboardData = buildDashboardStructuredData(response);
+      const exportResponse = await exportarDashboardIaChat({
+        module: response.module,
+        question: getDashboardQuestion(response),
+        contextualSummary: response.answer,
+        structuredDataJson: JSON.stringify(dashboardData),
+        conversationId:
+          typeof response.interpretedFilters?.conversationId === "string"
+            ? response.interpretedFilters.conversationId
+            : null,
+        responseType: response.responseType,
       });
 
-      if (displayFilters.length > 0) {
-        cursorY = addPdfSection(
-          doc,
-          "Filtros interpretados",
-          displayFilters.map((item) => ({
-            Campo: item.label,
-            Valor: normalizeExportValue(item.value),
-          })),
-          cursorY,
-          { headStyleFill: [37, 99, 235] },
-        );
+      if (!exportResponse.success || !exportResponse.htmlContent) {
+        throw new Error(exportResponse.errorMessage || "No fue posible generar el dashboard ejecutivo.");
       }
 
-      if (numericSummary.length > 0) {
-        cursorY = addPdfSection(
-          doc,
-          "Indicadores ejecutivos",
-          numericSummary.map((item) => ({
-            Campo: item.label,
-            Valor: item.value,
-          })),
-          cursorY,
-          { headStyleFill: [124, 58, 237] },
-        );
-      }
-
-      if (shouldShowExecutiveSummary && executiveRows.length > 0) {
-        cursorY = addPdfSection(
-          doc,
-          executiveRows.length > 5 ? `Cuadro ejecutivo - Top 5 de ${executiveRows.length}` : "Cuadro ejecutivo",
-          toPdfRows(executiveRows.slice(0, 5)),
-          cursorY,
-          { headStyleFill: [15, 118, 110] },
-        );
-      }
-
-      if (shouldShowChart) {
-        const chartRows = executiveChartData.slice(0, 10).map((row) => flattenExportRecord(row));
-        cursorY = addPdfSection(
-          doc,
-          "Distribucion del grafico",
-          chartRows,
-          cursorY,
-          { headStyleFill: [245, 158, 11] },
-        );
-      }
-
-      if (rawRows.length > 0) {
-        cursorY = addPdfSection(
-          doc,
-          response.responseType === "detail" ? "Detalle completo" : "Detalle original",
-          toPdfRows(rawRows.slice(0, 100)),
-          cursorY,
-          { headStyleFill: [100, 116, 139] },
-        );
-      }
-
-      doc.save(`${fileLabel}-${reportLabel}-${Date.now()}.pdf`);
+      setReportPreviewHtml(injectDashboardFallbacksIntoHtml(exportResponse.htmlContent, dashboardData));
+      setReportPreviewTitle(
+        exportResponse.fileName?.trim()
+          ? exportResponse.fileName.trim().replace(/\.(pdf|html?)$/i, "")
+          : "Reporte gerencial generado por Claude",
+      );
+    } catch (error) {
+      window.alert(getIaChatErrorMessage(error));
     } finally {
-      setIsExporting(false);
+      setIsGeneratingReport(false);
+    }
+  };
+
+  const handleReportPdfExport = async () => {
+    if (!reportPreviewHtml || isExportingReportPdf) {
+      return;
+    }
+
+    setIsExportingReportPdf(true);
+
+    try {
+      const previewIframe = reportPreviewRef.current?.querySelector("iframe") as HTMLIFrameElement | null;
+      const previewWidth = previewIframe?.getBoundingClientRect().width ?? reportPreviewRef.current?.getBoundingClientRect().width ?? 1440;
+      const fileName = sanitizePdfFileName(
+        `${reportPreviewTitle?.trim() ? reportPreviewTitle.trim() : `reporte-gerencial-${response.module.toLowerCase()}`}.pdf`,
+      );
+      await exportDashboardHtmlAsPdf(reportPreviewHtml, fileName, previewWidth);
+    } catch (error) {
+      window.alert(getIaChatErrorMessage(error));
+    } finally {
+      setIsExportingReportPdf(false);
+    }
+  };
+
+  const handleDetailExcelExport = async () => {
+    if (detailedGridRows.length === 0 || isExportingDetailExcel) {
+      return;
+    }
+
+    setIsExportingDetailExcel(true);
+
+    try {
+      const XLSX = await import("xlsx");
+      const exportRows = detailedGridRows.map((row) => {
+        const ordered: Record<string, unknown> = {};
+        for (const column of DETAIL_GRID_COLUMNS) {
+          ordered[column] = row[column] ?? null;
+        }
+        return ordered;
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(exportRows, {
+        header: [...DETAIL_GRID_COLUMNS],
+      });
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Detalle");
+      XLSX.writeFile(workbook, `iachat_detalle_${response.module.toLowerCase()}_${Date.now()}.xlsx`);
+    } finally {
+      setIsExportingDetailExcel(false);
     }
   };
 
   useEffect(() => {
     setShowDetail(false);
+    setShowExecutive(false);
+    setShowDetailedGrid(false);
+    setReportPreviewHtml(null);
+    setReportPreviewTitle(null);
+    autoExportKeyRef.current = null;
   }, [response.answer, response.responseType, response.totalRows]);
+
+  useEffect(() => {
+    if (followUpIntent !== "export_report" && followUpIntent !== "view_executive") {
+      return;
+    }
+
+    if (followUpIntent !== "export_report") {
+      setShowExecutive(true);
+      return;
+    }
+
+    const exportKey = `${response.responseType ?? "response"}|${response.totalRows ?? 0}|${response.answer}`;
+    if (autoExportKeyRef.current === exportKey) {
+      return;
+    }
+
+    autoExportKeyRef.current = exportKey;
+    void handleReportPreview();
+  }, [followUpIntent, response.answer, response.responseType, response.totalRows]);
+
+  useEffect(() => {
+    if (!reportPreviewHtml || !reportPreviewRef.current) {
+      return;
+    }
+
+    reportPreviewRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [reportPreviewHtml]);
 
   return (
     <div style={styles.responseStack}>
@@ -751,34 +2484,34 @@ function StructuredResponseBlock({ response }: { response: IaChatResponse }) {
           {typeof response.totalRows === "number" && (
             <span style={styles.metaChip}>Filas: {response.totalRows}</span>
           )}
+          {isNoResultsSample && (
+            <span style={styles.metaChip}>Muestra top 5</span>
+          )}
         </div>
         <button
           type="button"
-          onClick={handleExport}
-          disabled={!canExport || isExporting}
+          onClick={() => void handleReportPreview()}
+          disabled={!canExport || isGeneratingReport}
           style={{
-            ...styles.exportButton,
-            ...(canExport && !isExporting ? {} : styles.exportButtonDisabled),
+            ...styles.executiveFormatButton,
+            ...(!canExport || isGeneratingReport ? styles.executiveFormatButtonDisabled : {}),
           }}
         >
-          <Download size={14} />
-          {isExporting ? "Exportando..." : "Exportar reporte"}
+          <Sparkles size={14} />
+          {isGeneratingReport ? "Generando formato..." : "Ver formato ejecutivo"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowDetailedGrid((current) => !current)}
+          disabled={!canShowDetailedGrid}
+          style={{
+            ...styles.detailToggleButton,
+            ...(!canShowDetailedGrid ? styles.executiveFormatButtonDisabled : {}),
+          }}
+        >
+          {showDetailedGrid ? "Ocultar detalle" : "Mostrar detalle"}
         </button>
       </div>
-
-      {displayFilters.length > 0 && (
-        <div style={styles.sectionBox}>
-          <div style={styles.sectionBoxTitle}>Filtros interpretados</div>
-          <div style={styles.filterGrid}>
-            {displayFilters.map((item) => (
-              <div key={item.label} style={styles.filterItem}>
-                <span style={styles.filterLabel}>{item.label}</span>
-                <span style={styles.filterValue}>{formatValue(item.value)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {numericSummary.length > 0 && (
         <div style={styles.kpiGrid}>
@@ -800,54 +2533,133 @@ function StructuredResponseBlock({ response }: { response: IaChatResponse }) {
 
       {shouldShowExecutiveSummary && (
         <ExecutiveSummaryBlock
+          cards={siteExecutiveCards}
           columns={detailColumns}
-          rows={topFiveRows}
-          totalRows={executiveRows.length}
+          rows={executiveRows}
+          totalRows={executiveRecordCount}
           detailOpen={showDetail}
+          metric={reportMetric}
           onToggleDetail={() => setShowDetail((current) => !current)}
-          summary={response.summary}
         />
       )}
 
       {shouldShowTable && (
-        <DetailTable
-          columns={buildDetailColumns(rawRows)}
-          rows={rawRows}
-          title="Detalle completo"
-        />
+        <>
+          {isNoResultsSample && (
+            <div style={{ marginTop: 8, marginBottom: 8, color: "#0F766E", fontSize: 13, fontWeight: 600 }}>
+              Consulta no obtiene resultados, validar la informacion solicitada. Se adjunta muestra de los campos que pueden utilizar en su consulta.
+            </div>
+          )}
+          <DetailTable
+            columns={buildDetailColumns(rawRows)}
+            rows={rawRows}
+            title={isNoResultsSample ? "Muestra de campos disponibles (top 5)" : "Detalle completo"}
+          />
+        </>
+      )}
+
+      {shouldShowDetailedGrid && (
+        <div style={styles.detailGridWrapper}>
+          <div style={styles.detailGridHeader}>
+            <div style={styles.sectionBoxTitle}>Detalle para exportar</div>
+            <button
+              type="button"
+              onClick={() => void handleDetailExcelExport()}
+              disabled={isExportingDetailExcel}
+              style={{
+                ...styles.exportButton,
+                ...(isExportingDetailExcel ? styles.exportButtonDisabled : {}),
+              }}
+            >
+              <Download size={14} />
+              {isExportingDetailExcel ? "Exportando Excel..." : "Exportar Excel"}
+            </button>
+          </div>
+          <DetailTable
+            columns={[...DETAIL_GRID_COLUMNS]}
+            rows={detailedGridRows}
+            title="Detalle completo de registros"
+          />
+        </div>
+      )}
+
+      {reportPreviewHtml && (
+        <div ref={reportPreviewRef} style={styles.reportPreviewWrapper}>
+          <div style={styles.reportPreviewHeader}>
+            <div>
+              <div style={styles.sectionBoxTitle}>Reporte gerencial</div>
+              <div style={styles.reportPreviewSubtitle}>
+                {reportPreviewTitle ?? "Vista previa generada por Claude"}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleReportPdfExport()}
+              disabled={!reportPreviewHtml || isExportingReportPdf}
+              style={{
+                ...styles.exportButton,
+                ...(!reportPreviewHtml || isExportingReportPdf ? styles.exportButtonDisabled : {}),
+              }}
+            >
+              <Download size={14} />
+              {isExportingReportPdf ? "Exportando PDF..." : "Exportar PDF"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setReportPreviewHtml(null);
+                setReportPreviewTitle(null);
+              }}
+              style={styles.reportPreviewCloseButton}
+            >
+              <X size={14} />
+              Cerrar vista previa
+            </button>
+          </div>
+          <div style={styles.reportPreviewFrameShell}>
+            <iframe
+              title="Reporte gerencial Claude"
+              srcDoc={reportPreviewHtml}
+              sandbox="allow-scripts allow-same-origin"
+              style={styles.reportPreviewFrame}
+            />
+          </div>
+        </div>
       )}
     </div>
   );
 }
 
 function ExecutiveSummaryBlock({
+  cards,
   columns,
   rows,
   totalRows,
   detailOpen,
+  metric,
   onToggleDetail,
-  summary,
 }: {
+  cards: ReturnType<typeof buildSiteExecutiveCards>;
   columns: string[];
   rows: Record<string, unknown>[];
   totalRows: number;
   detailOpen: boolean;
+  metric: "ventas" | "gastos";
   onToggleDetail: () => void;
-  summary?: Record<string, unknown>;
 }) {
   const hasMoreThanFive = totalRows > 5;
-  const scorecards = buildExecutiveScorecards(columns, rows, totalRows, summary);
+  const scorecards = cards;
   const tableColumns = buildExecutiveTableColumns(columns, rows);
 
   return (
     <div style={styles.executiveCard}>
       <div style={styles.executiveHeader}>
         <div>
-          <div style={styles.sectionBoxTitle}>Cuadro resumen</div>
+          <div style={styles.sectionBoxTitle}>Cuadro ejecutivo</div>
           <div style={styles.executiveSubtitle}>
             {hasMoreThanFive
-              ? `Mostrando top 5 de ${totalRows} registros agrupados.`
-              : `Mostrando ${totalRows} registros agrupados.`}
+              ? `Mostrando ${scorecards.length} cuadros agrupados desde ${totalRows} registros.`
+              : `Mostrando ${scorecards.length} cuadros agrupados.`}
           </div>
         </div>
         <div style={styles.executiveActions}>
@@ -855,7 +2667,7 @@ function ExecutiveSummaryBlock({
             {detailOpen ? "Detalle completo" : "Vista ejecutiva"}
           </div>
           <div style={styles.executiveBadge}>
-            {hasMoreThanFive ? "Top 5" : "Completo"}
+            {scorecards.length > 5 ? "Top 5" : "Completo"}
           </div>
           <button type="button" onClick={onToggleDetail} style={styles.detailToggleButton}>
             {detailOpen ? "Volver a ejecutivo" : "Abrir detalle"}
@@ -864,22 +2676,55 @@ function ExecutiveSummaryBlock({
       </div>
 
       <div style={styles.executiveCardsGrid}>
-        {scorecards.map((card, index) => (
-          <div key={`exec-${index}`} style={styles.executiveRowCard}>
-            <div style={styles.executiveRowTop}>
-              <span style={styles.executiveRowIndex}>#{index + 1}</span>
-              <span style={styles.executiveRowLabel}>
-                {card.label}
-              </span>
-            </div>
-            <div style={styles.executiveRowValue}>
-              {formatValue(card.value)}
-            </div>
-            {card.subtitle && (
-              <div style={styles.executiveRowSecondary}>
-                {card.subtitle}
+        {scorecards.map((card) => (
+          <div key={card.key} style={styles.siteExecutiveCard}>
+            <div style={styles.siteExecutiveHeader}>
+              <div style={styles.siteExecutiveField}>
+                <div style={styles.siteExecutiveFieldLabel}>Cliente</div>
+                <div style={styles.siteExecutiveFieldValue}>{card.cliente}</div>
               </div>
-            )}
+              <div style={styles.siteExecutiveField}>
+                <div style={styles.siteExecutiveFieldLabel}>Proyecto</div>
+                <div style={styles.siteExecutiveFieldValue}>{card.proyecto}</div>
+              </div>
+              <div style={styles.siteExecutiveField}>
+                <div style={styles.siteExecutiveFieldLabel}>Site</div>
+                <div style={styles.siteExecutiveFieldValue}>{card.site}</div>
+              </div>
+            </div>
+
+            <div style={styles.siteExecutiveMetrics}>
+              <div style={styles.siteExecutiveMetric}>
+                <div style={styles.siteExecutiveMetricLabel}>{card.amountLabel ?? (metric === "ventas" ? "Ventas" : "Subtotal")}</div>
+                <div style={styles.siteExecutiveMetricValue}>{formatCurrency(card.amount)}</div>
+              </div>
+              <div style={styles.siteExecutiveMetric}>
+                <div style={styles.siteExecutiveMetricLabel}>Total acumulado del sitio</div>
+                <div style={styles.siteExecutiveMetricValue}>{formatCurrency(card.totalAcumulado)}</div>
+              </div>
+            </div>
+
+            <div style={styles.siteExecutiveProgressBlock}>
+              <div style={styles.siteExecutiveProgressTrack}>
+                <div
+                  style={{
+                    ...styles.siteExecutiveProgressFill,
+                    width: `${Math.max(0, Math.min(100, card.usedPercent))}%`,
+                  }}
+                />
+              </div>
+              <div style={styles.siteExecutiveProgressRow}>
+                <span style={styles.siteExecutiveProgressPercent}>{card.usedPercent.toFixed(2)}%</span>
+                <span style={styles.siteExecutiveProgressState}>{card.saldoReferencial > 0 ? "Disponible" : "Sin saldo"}</span>
+              </div>
+            </div>
+
+            <div style={styles.siteExecutiveBadge}>{card.saldoReferencial > 0 ? "Disponible" : "Agotado"}</div>
+
+            <div style={styles.siteExecutiveSaldoBlock}>
+              <div style={styles.siteExecutiveSaldoLabel}>Saldo referencial despues del sitio</div>
+              <div style={styles.siteExecutiveSaldoValue}>{formatCurrency(card.saldoReferencial)}</div>
+            </div>
           </div>
         ))}
       </div>
@@ -1000,30 +2845,6 @@ function ExecutiveChartBlock({
   } | null;
   data: Array<Record<string, unknown> & { __category: unknown; __value: number }>;
 }) {
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  useEffect(() => {
-    if (!isExpanded) {
-      return;
-    }
-
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsExpanded(false);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [isExpanded]);
-
   if (!chart) {
     return null;
   }
@@ -1031,15 +2852,7 @@ function ExecutiveChartBlock({
   return (
     <div style={styles.sectionBox}>
       <div style={styles.sectionBoxTitle}>
-        <span>{chart.title}</span>
-        <button
-          type="button"
-          onClick={() => setIsExpanded(true)}
-          style={styles.expandButton}
-        >
-          <Maximize2 size={14} />
-          Ampliar
-        </button>
+        {chart.title.trim().length > 0 && <span>{chart.title}</span>}
       </div>
       <div style={styles.chartShell}>
         <ResponsiveContainer width="100%" height={320}>
@@ -1084,70 +2897,6 @@ function ExecutiveChartBlock({
       <div style={styles.chartHint}>
         {`${getChartTitle(chart.chartType)}: ${chart.categoryField} vs ${chart.valueField}`}
       </div>
-
-      {isExpanded && (
-        <div style={styles.chartOverlay} onClick={() => setIsExpanded(false)} role="presentation">
-          <div style={styles.chartModal} onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
-            <div style={styles.chartModalHeader}>
-              <div>
-                <div style={styles.chartModalTitle}>{chart.title}</div>
-                <div style={styles.chartModalSubtitle}>
-                  {getChartTitle(chart.chartType)}: {chart.categoryField} vs {chart.valueField}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsExpanded(false)}
-                style={styles.closeButton}
-              >
-                <X size={16} />
-                Cerrar
-              </button>
-            </div>
-
-            <div style={styles.chartShellExpanded}>
-              <ResponsiveContainer width="100%" height={560}>
-                {chart.chartType === "line" ? (
-                  <LineChart data={data}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-                    <XAxis dataKey="__category" stroke="#64748B" tick={{ fontSize: 12 }} />
-                    <YAxis stroke="#64748B" tick={{ fontSize: 12 }} />
-                    <Tooltip />
-                    <Legend />
-                    <Line type="monotone" dataKey="__value" stroke="#0F766E" strokeWidth={3} dot={{ r: 4 }} />
-                  </LineChart>
-                ) : chart.chartType === "pie" ? (
-                  <PieChart>
-                    <Tooltip />
-                    <Legend />
-                    <Pie
-                      data={data}
-                      dataKey="__value"
-                      nameKey="__category"
-                      outerRadius={180}
-                      innerRadius={75}
-                      paddingAngle={2}
-                    >
-                      {data.map((_, index) => (
-                        <Cell key={`pie-expanded-cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                  </PieChart>
-                ) : (
-                  <BarChart data={data}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-                    <XAxis dataKey="__category" stroke="#64748B" tick={{ fontSize: 12 }} />
-                    <YAxis stroke="#64748B" tick={{ fontSize: 12 }} />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="__value" fill="#2563EB" radius={[8, 8, 0, 0]} />
-                  </BarChart>
-                )}
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -1189,7 +2938,7 @@ function buildExecutiveScorecards(
   const projects = summaryNumber(["cantidadProyectos"]);
   const sites = summaryNumber(["cantidadSitios"]);
 
-  const primaryGroupField = columns.find((column) => /categoria|grupo|cliente|proyecto|responsable|site|sitio|estado|mes/i.test(column));
+  const primaryGroupField = columns.find((column) => /categoria|grupo|cliente|proyecto|responsable|solicitante|site|sitio|estado|mes/i.test(column));
   const topLabel = primaryGroupField ? formatValue(rows[0]?.[primaryGroupField]) : "Agrupado";
   const topCount = rows[0] ? (rows[0].Registros ?? rows[0].Cantidad ?? rows[0].count ?? rows[0].Count ?? 0) : 0;
   const topAmount = rows[0] ? (rows[0].Monto ?? rows[0].Total ?? rows[0].total ?? rows[0].Valor ?? 0) : 0;
@@ -1222,7 +2971,7 @@ function buildExecutiveScorecards(
 
 function buildExecutiveTableColumns(columns: string[], rows?: Record<string, unknown>[]) {
   const preferredOrder = columns.filter((column) =>
-    /categoria|grupo|estado|cliente|proyecto|responsable|site|sitio|total|monto|subtotal|cantidad|registros|porcentaje|mes/i.test(column)
+    /categoria|grupo|estado|cliente|proyecto|responsable|solicitante|site|sitio|total|monto|subtotal|cantidad|registros|porcentaje|mes/i.test(column)
   );
 
   if (preferredOrder.length > 0) {
@@ -1240,50 +2989,28 @@ function buildExecutiveTableColumns(columns: string[], rows?: Record<string, unk
   return columns.slice(0, Math.min(columns.length, 4));
 }
 
-function buildExecutiveChartData(rows: Record<string, unknown>[]) {
-  if (rows.length === 0) {
-    return [];
-  }
-
-  const firstRow = rows[0];
-  const keys = Object.keys(firstRow);
-  const categoryKey =
-    keys.find((key) => /estado|cliente|proyecto|responsable|site|sitio|mes/i.test(key)) ??
-    keys.find((key) => !/total|monto|importe|valor|saldo|cantidad|subtotal/i.test(key)) ??
-    keys[0];
-  const valueKey =
-    keys.find((key) => /total|monto|importe|valor|saldo|cantidad|subtotal|pagado|conpagado/i.test(key)) ??
-    keys.find((key) => typeof firstRow[key] === "number") ??
-    keys[1];
-
-  return rows.map((row) => {
-    const categoryValue = row[categoryKey];
-    const rawValue = row[valueKey];
-    const numericValue = typeof rawValue === "number" ? rawValue : Number(String(rawValue ?? "0").replace(/,/g, ""));
-
-    return {
-      ...row,
-      __category: categoryValue ?? "Sin dato",
-      __value: Number.isFinite(numericValue) ? numericValue : 0,
-    };
-  })
-    .filter((row) => row.__category !== "Sin dato" || row.__value !== 0)
-    .sort((left, right) => right.__value - left.__value);
-}
-
 export default function IaChatPage() {
-  const [selectedModuleId, setSelectedModuleId] = useState<IaChatModuleCode>("GASTOS");
-  const [threads, setThreads] = useState<Record<string, IaChatMessage[]>>({
-    GASTOS: createInitialThread(MODULES[0]),
-  });
-  const [conversationIds, setConversationIds] = useState<Record<string, string>>({
-    GASTOS: createConversationId(),
-  });
+  const sessionState = readIaChatSessionState();
+  const [selectedModuleId, setSelectedModuleId] = useState<IaChatModuleCode>(
+    sessionState?.selectedModuleId ?? "GASTOS"
+  );
+  const [threads, setThreads] = useState<Record<string, IaChatMessage[]>>(
+    sessionState?.threads ?? {
+      GASTOS: createInitialThread(MODULES[0]),
+    }
+  );
+  const [conversationIds, setConversationIds] = useState<Record<string, string>>(
+    sessionState?.conversationIds ?? {
+      GASTOS: createConversationId(),
+    }
+  );
   const [question, setQuestion] = useState("");
   const [attachment, setAttachment] = useState<IaChatImageAttachment | null>(null);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [presentationMode, setPresentationMode] = useState<IaChatPresentationMode>("auto");
+  const [presentationMode, setPresentationMode] = useState<IaChatPresentationMode>(
+    sessionState?.presentationMode ?? "auto"
+  );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
 
@@ -1331,6 +3058,15 @@ export default function IaChatPage() {
     }));
   };
 
+  useEffect(() => {
+    writeIaChatSessionState({
+      selectedModuleId,
+      threads,
+      conversationIds,
+      presentationMode,
+    });
+  }, [selectedModuleId, threads, conversationIds, presentationMode]);
+
   const handleModuleChange = (module: IaChatModuleInfo) => {
     setSelectedModuleId(module.id);
     setErrorMessage(null);
@@ -1358,10 +3094,6 @@ export default function IaChatPage() {
         [module.id]: createConversationId(),
       };
     });
-  };
-
-  const handleKeywordClick = (keyword: string) => {
-    setQuestion((current) => (current.trim().length > 0 ? `${current} ${keyword}` : keyword));
   };
 
   const triggerAttachmentPicker = () => {
@@ -1420,14 +3152,32 @@ export default function IaChatPage() {
   const clearConversation = () => {
     setErrorMessage(null);
     setAttachment(null);
-    setThreads((current) => ({
-      ...current,
-      [selectedModule.id]: createInitialThread(selectedModule),
-    }));
-    setConversationIds((current) => ({
-      ...current,
-      [selectedModule.id]: createConversationId(),
-    }));
+    setThreads((current) => {
+      const next = {
+        ...current,
+        [selectedModule.id]: createInitialThread(selectedModule),
+      };
+      writeIaChatSessionState({
+        selectedModuleId,
+        threads: next,
+        conversationIds,
+        presentationMode,
+      });
+      return next;
+    });
+    setConversationIds((current) => {
+      const next = {
+        ...current,
+        [selectedModule.id]: createConversationId(),
+      };
+      writeIaChatSessionState({
+        selectedModuleId,
+        threads,
+        conversationIds: next,
+        presentationMode,
+      });
+      return next;
+    });
   };
 
   const sendQuestion = async (modeOverride?: IaChatPresentationMode, questionOverride?: string) => {
@@ -1465,7 +3215,7 @@ export default function IaChatPage() {
     setPresentationMode(modeOverride ?? presentationMode);
 
     try {
-      const response = await consultarIaChat({
+      const requestPayload: IaChatRequest = {
         module: selectedModule.id,
         question: trimmedQuestion,
         conversationId: conversationIds[selectedModule.id] ?? null,
@@ -1477,10 +3227,33 @@ export default function IaChatPage() {
               base64Data: attachment.base64Data,
             }
           : null,
+      };
+
+      console.log("[IA Chat] API Payload", {
+        ...requestPayload,
+        attachment: requestPayload.attachment
+          ? {
+              fileName: requestPayload.attachment.fileName,
+              mimeType: requestPayload.attachment.mimeType,
+              hasBase64Data: Boolean(requestPayload.attachment.base64Data),
+            }
+          : null,
       });
+      console.log(
+        "[IA Chat] SQL Preview estimado (frontend, antes del parseo backend)\n%s",
+        buildFrontendStorePreview(requestPayload),
+      );
+
+      const response = await consultarIaChat(requestPayload);
 
       if (!response) {
         throw new Error("El asistente no devolvio una respuesta valida.");
+      }
+
+      console.log("[IA Chat] Response", response);
+      const executedSqlPreview = response.interpretedFilters?.executedSqlPreview;
+      if (typeof executedSqlPreview === "string" && executedSqlPreview.trim()) {
+        console.log("[IA Chat] SQL Real ejecutado por backend\n%s", executedSqlPreview);
       }
 
       const assistantMessage: IaChatMessage = {
@@ -1529,15 +3302,7 @@ export default function IaChatPage() {
   return (
     <AppPage
       title="IA Chat Administrativo"
-      actions={
-        <div style={styles.pageActions}>
-          <span style={styles.pageTag}>Reportes / Administrativo</span>
-          <span style={styles.connectionPill}>
-            <Sparkles size={14} />
-            <span>{isEnabled ? "Conexion segura activa" : "Pendiente de configuracion"}</span>
-          </span>
-        </div>
-      }
+      
       style={styles.page}
     >
       <div style={styles.shell}>
@@ -1583,12 +3348,7 @@ export default function IaChatPage() {
         </AppCard>
 
         <div style={styles.chatColumn}>
-          <AppStatusMessage tone={isEnabled ? "success" : "info"} style={styles.statusBanner}>
-            {isEnabled
-              ? "Gastos esta habilitado con Claude + SQL Server y solo usa herramientas de lectura."
-              : "Este modulo aun no esta habilitado. Selecciona Gastos para ejecutar consultas reales."}
-          </AppStatusMessage>
-
+          
           {errorMessage && (
             <AppStatusMessage tone="error" style={styles.errorBanner}>
               {errorMessage}
@@ -1618,7 +3378,7 @@ export default function IaChatPage() {
                   </div>
                   <div style={styles.loadingBubble}>
                     <div style={styles.loadingTitle}>Analizando tu consulta...</div>
-                    <div style={styles.loadingText}>Claude esta interpretando la pregunta y validando la herramienta correcta.</div>
+                    <div style={styles.loadingText}>IA esta interpretando la pregunta y validando la herramienta correcta.</div>
                   </div>
                 </div>
               )}
@@ -1636,16 +3396,6 @@ export default function IaChatPage() {
               />
 
               <div style={styles.composerTools}>
-                <button
-                  type="button"
-                  onClick={triggerAttachmentPicker}
-                  style={styles.attachButton}
-                  disabled={loading || !isEnabled}
-                >
-                  <Paperclip size={16} />
-                  Adjuntar archivo
-                </button>
-
                 {attachment && (
                   <div style={styles.attachmentChip}>
                     <span style={styles.attachmentChipLabel}>{attachment.fileName ?? "Imagen adjunta"}</span>
@@ -1669,7 +3419,7 @@ export default function IaChatPage() {
                       style={styles.attachmentPreviewImage}
                     />
                     <div style={styles.attachmentPreviewMeta}>
-                      <div style={styles.attachmentPreviewTitle}>Imagen lista para Claude</div>
+                      <div style={styles.attachmentPreviewTitle}>Imagen lista para IA</div>
                       <div style={styles.attachmentPreviewText}>
                         {attachment.fileName ?? "Sin nombre"} · {attachment.mimeType}
                       </div>
@@ -1683,7 +3433,7 @@ export default function IaChatPage() {
                       <FileText size={28} />
                     </div>
                     <div style={styles.attachmentPreviewMeta}>
-                      <div style={styles.attachmentPreviewTitle}>PDF listo para Claude</div>
+                      <div style={styles.attachmentPreviewTitle}>PDF listo para IA</div>
                       <div style={styles.attachmentPreviewText}>
                         {attachment.fileName ?? "Sin nombre"} · {attachment.mimeType}
                       </div>
@@ -1716,23 +3466,6 @@ export default function IaChatPage() {
               <div style={styles.composerActionRow}>
                 <button
                   type="button"
-                  onClick={() => {
-                    const executiveDraft = question.trim().length > 0 ? question : "formato ejecutivo";
-                    void sendQuestion("executive", executiveDraft);
-                  }}
-                  disabled={!isEnabled || loading}
-                  style={{
-                    ...styles.modeButton,
-                    ...(presentationMode === "executive" ? styles.modeButtonActive : {}),
-                    ...((!isEnabled || loading) ? styles.modeButtonDisabled : {}),
-                  }}
-                >
-                  <WandSparkles size={16} />
-                  Formato ejecutivo
-                </button>
-
-                <button
-                  type="button"
                   onClick={() => void sendQuestion()}
                   disabled={!canSend}
                   style={{
@@ -1753,31 +3486,6 @@ export default function IaChatPage() {
                   )}
                 </button>
               </div>
-            </div>
-          </AppCard>
-
-          <AppCard style={styles.footerCard}>
-            <div style={styles.footerHeader}>
-              <div style={styles.footerTitle}>
-                <Table2 size={16} />
-                Palabras clave sugeridas
-              </div>
-              <div style={styles.footerSubtitle}>
-                {selectedModule.enabled ? "Usalas como guia para consultas frecuentes." : "Disponibles como referencia para la siguiente fase."}
-              </div>
-            </div>
-
-            <div style={styles.keywordWrap}>
-              {selectedModule.keywords.map((keyword) => (
-                <button
-                  key={keyword}
-                  type="button"
-                  onClick={() => handleKeywordClick(keyword)}
-                  style={styles.keywordChip}
-                >
-                  {keyword}
-                </button>
-              ))}
             </div>
           </AppCard>
         </div>
@@ -1948,6 +3656,13 @@ const styles: Record<string, CSSProperties> = {
     alignItems: "center",
     gap: 10,
   },
+  responseQuickActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+    marginTop: 10,
+  },
   moduleChip: {
     display: "inline-flex",
     alignItems: "center",
@@ -2037,6 +3752,28 @@ const styles: Record<string, CSSProperties> = {
     color: "inherit",
     fontSize: 14,
   },
+  assistantNarrativeCard: {
+    borderRadius: 16,
+    border: "1px solid #D1FAE5",
+    background: "linear-gradient(180deg, #F0FDF4 0%, #FFFFFF 100%)",
+    padding: "12px 14px",
+    marginBottom: 12,
+    boxShadow: "0 8px 18px rgba(15,118,110,0.08)",
+  },
+  assistantNarrativeLabel: {
+    fontSize: 11,
+    fontWeight: 800,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    color: "#0F766E",
+    marginBottom: 6,
+  },
+  assistantNarrativeText: {
+    whiteSpace: "pre-wrap",
+    lineHeight: 1.7,
+    color: "#0F172A",
+    fontSize: 14,
+  },
   responseStack: {
     marginTop: 14,
     display: "grid",
@@ -2054,6 +3791,10 @@ const styles: Record<string, CSSProperties> = {
     alignItems: "center",
     gap: 8,
     flexWrap: "wrap",
+  },
+  exportActions: {
+    display: "inline-flex",
+    alignItems: "center",
   },
   metaChip: {
     padding: "6px 10px",
@@ -2083,6 +3824,79 @@ const styles: Record<string, CSSProperties> = {
     opacity: 0.55,
     cursor: "not-allowed",
     boxShadow: "none",
+  },
+  executiveFormatButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "8px 12px",
+    borderRadius: 12,
+    border: "1px solid #0F766E",
+    background: "#FFFFFF",
+    color: "#0F766E",
+    fontSize: 12,
+    fontWeight: 800,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  executiveFormatButtonDisabled: {
+    opacity: 0.55,
+    cursor: "not-allowed",
+  },
+  exportFormatPanel: {
+    borderRadius: 16,
+    border: "1px solid #DBEAFE",
+    background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 100%)",
+    padding: 14,
+    display: "grid",
+    gap: 12,
+  },
+  exportFormatPanelTitle: {
+    fontSize: 13,
+    fontWeight: 800,
+    color: "#1E3A8A",
+  },
+  exportFormatGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: 10,
+  },
+  exportFormatCard: {
+    textAlign: "left",
+    borderRadius: 14,
+    border: "1px solid #BFDBFE",
+    background: "#FFFFFF",
+    padding: 12,
+    cursor: "pointer",
+    display: "grid",
+    gap: 8,
+  },
+  exportFormatCardActive: {
+    borderColor: "#0F766E",
+    boxShadow: "0 10px 18px rgba(15,118,110,0.10)",
+  },
+  exportFormatCardTitle: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    justifyContent: "space-between",
+    fontWeight: 800,
+    color: "#0F172A",
+    fontSize: 13,
+  },
+  exportFormatRecommended: {
+    padding: "3px 8px",
+    borderRadius: 999,
+    background: "#ECFDF5",
+    border: "1px solid #A7F3D0",
+    color: "#166534",
+    fontSize: 10,
+    fontWeight: 800,
+  },
+  exportFormatCardText: {
+    fontSize: 12,
+    lineHeight: 1.5,
+    color: "#475569",
   },
   sectionBox: {
     borderRadius: 18,
@@ -2158,6 +3972,66 @@ const styles: Record<string, CSSProperties> = {
     gridTemplateRows: "auto minmax(0, 1fr)",
     gap: 10,
   },
+  detailGridWrapper: {
+    display: "grid",
+    gap: 8,
+  },
+  detailGridHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    flexWrap: "wrap",
+  },
+  reportPreviewWrapper: {
+    display: "grid",
+    gap: 10,
+    borderRadius: 18,
+    border: "1px solid #C7E9FF",
+    background: "linear-gradient(180deg, #F8FCFF 0%, #FFFFFF 100%)",
+    padding: 14,
+    boxShadow: "0 10px 24px rgba(15, 118, 110, 0.06)",
+  },
+  reportPreviewHeader: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+    flexWrap: "wrap",
+  },
+  reportPreviewSubtitle: {
+    fontSize: 12,
+    color: "#64748B",
+    fontWeight: 700,
+    marginTop: 4,
+  },
+  reportPreviewCloseButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "8px 12px",
+    borderRadius: 12,
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    color: "#0F172A",
+    fontSize: 12,
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  reportPreviewFrameShell: {
+    borderRadius: 16,
+    border: "1px solid #D6EAF8",
+    overflow: "hidden",
+    background: "#FFFFFF",
+    minHeight: "72vh",
+  },
+  reportPreviewFrame: {
+    width: "100%",
+    height: "72vh",
+    border: "0",
+    display: "block",
+    background: "#FFFFFF",
+  },
   executiveCard: {
     borderRadius: 18,
     border: "1px solid #E2E8F0",
@@ -2230,57 +4104,133 @@ const styles: Record<string, CSSProperties> = {
   },
   executiveCardsGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(290px, 1fr))",
     gap: 12,
+    maxHeight: "34vh",
+    overflow: "auto",
+    paddingRight: 4,
   },
-  executiveRowCard: {
+  siteExecutiveCard: {
     borderRadius: 14,
     border: "1px solid #E2E8F0",
     background: "linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%)",
-    padding: 12,
+    padding: 14,
     boxShadow: "0 4px 18px rgba(15, 23, 42, 0.04)",
-    minHeight: 108,
+    display: "grid",
+    gap: 12,
+    minHeight: 240,
   },
-  executiveRowTop: {
+  siteExecutiveHeader: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+  },
+  siteExecutiveField: {
+    display: "grid",
+    gap: 2,
+  },
+  siteExecutiveFieldLabel: {
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: "0.08em",
+    color: "#64748B",
+    fontWeight: 800,
+  },
+  siteExecutiveFieldValue: {
+    fontSize: 16,
+    fontWeight: 900,
+    color: "#0F172A",
+    lineHeight: 1.15,
+    wordBreak: "break-word",
+  },
+  siteExecutiveMetrics: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+    gap: 12,
+  },
+  siteExecutiveMetric: {
+    borderRadius: 12,
+    border: "1px solid #E2E8F0",
+    background: "#FFFFFF",
+    padding: 12,
+  },
+  siteExecutiveMetricLabel: {
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+    color: "#64748B",
+    marginBottom: 6,
+    fontWeight: 800,
+  },
+  siteExecutiveMetricValue: {
+    fontSize: 20,
+    fontWeight: 900,
+    color: "#0F172A",
+    lineHeight: 1.1,
+  },
+  siteExecutiveProgressBlock: {
+    display: "grid",
+    gap: 8,
+  },
+  siteExecutiveProgressTrack: {
+    width: "100%",
+    height: 10,
+    borderRadius: 999,
+    background: "#E2E8F0",
+    overflow: "hidden",
+  },
+  siteExecutiveProgressFill: {
+    height: "100%",
+    borderRadius: 999,
+    background: "linear-gradient(90deg, #22C55E 0%, #16A34A 100%)",
+  },
+  siteExecutiveProgressRow: {
     display: "flex",
     alignItems: "center",
-    gap: 8,
-    marginBottom: 8,
+    justifyContent: "space-between",
+    gap: 12,
+    fontSize: 12,
+    fontWeight: 800,
+    color: "#334155",
   },
-  executiveRowIndex: {
+  siteExecutiveProgressPercent: {
+    color: "#0F172A",
+  },
+  siteExecutiveProgressState: {
+    color: "#475569",
+    textAlign: "right",
+  },
+  siteExecutiveBadge: {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    width: 28,
-    height: 28,
+    width: "fit-content",
+    minWidth: 140,
+    padding: "10px 14px",
     borderRadius: 999,
-    background: "#0F766E",
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: 800,
-    flexShrink: 0,
-  },
-  executiveRowLabel: {
+    background: "#D1FAE5",
+    color: "#166534",
     fontSize: 13,
-    fontWeight: 800,
-    color: "#1E293B",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    fontWeight: 900,
   },
-  executiveRowValue: {
-    fontSize: 18,
+  siteExecutiveSaldoBlock: {
+    borderRadius: 12,
+    background: "#F1F5F9",
+    border: "1px solid #E2E8F0",
+    padding: 12,
+  },
+  siteExecutiveSaldoLabel: {
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+    color: "#64748B",
+    marginBottom: 6,
+    fontWeight: 800,
+  },
+  siteExecutiveSaldoValue: {
+    fontSize: 22,
     fontWeight: 900,
     color: "#0F172A",
-    lineHeight: 1.2,
-    marginBottom: 4,
-  },
-  executiveRowSecondary: {
-    fontSize: 12,
-    color: "#475569",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
   },
   tableScroll: {
     overflow: "auto",
@@ -2394,41 +4344,6 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 12,
     fontWeight: 800,
     cursor: "pointer",
-  },
-  footerCard: {
-    border: "1px solid #E2E8F0",
-    background: "linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%)",
-  },
-  footerHeader: {
-    display: "grid",
-    gap: 6,
-    marginBottom: 14,
-  },
-  footerTitle: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 8,
-    fontWeight: 800,
-    color: "#0F172A",
-  },
-  footerSubtitle: {
-    color: "#64748B",
-    fontSize: 13,
-  },
-  keywordWrap: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  keywordChip: {
-    padding: "10px 14px",
-    borderRadius: 999,
-    border: "1px solid #CBD5E1",
-    background: "#FFFFFF",
-    color: "#0F172A",
-    fontWeight: 700,
-    cursor: "pointer",
-    transition: "transform 120ms ease, box-shadow 120ms ease",
   },
   composer: {
     display: "grid",
@@ -2627,3 +4542,120 @@ const styles: Record<string, CSSProperties> = {
     lineHeight: 1.55,
   },
 };
+
+function parseFrontendGastosQuestionForPreview(question: string) {
+  const normalized = normalizeQuestion(question);
+  const currentYear = new Date().getFullYear();
+
+  const quarterMatch = normalized.match(
+    /\b(?:(primer|segundo|tercer|cuarto|1er|2do|3er|4to)\s+)?trimestre(?:\s+(?:de\s+)?)?(20\d{2}|19\d{2})?\b/,
+  );
+
+  const monthMatch = normalized.match(
+    /\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|setiembre|septiembre|octubre|noviembre|diciembre)\s+(?:de\s+)?(19\d{2}|20\d{2})?\b/,
+  );
+
+  let start: Date | null = null;
+  let end: Date | null = null;
+
+  if (quarterMatch) {
+    const quarterLabel = quarterMatch[1];
+    const year = Number(quarterMatch[2] || currentYear);
+    const quarterMap: Record<string, number> = {
+      primer: 1,
+      "1er": 1,
+      segundo: 2,
+      "2do": 2,
+      tercer: 3,
+      "3er": 3,
+      cuarto: 4,
+      "4to": 4,
+    };
+    const quarter = quarterMap[quarterLabel ?? ""] ?? 0;
+    if (quarter > 0) {
+      const firstMonth = (quarter - 1) * 3;
+      start = new Date(year, firstMonth, 1);
+      end = new Date(year, firstMonth + 3, 0);
+    }
+  } else if (monthMatch) {
+    const monthMap: Record<string, number> = {
+      enero: 0,
+      febrero: 1,
+      marzo: 2,
+      abril: 3,
+      mayo: 4,
+      junio: 5,
+      julio: 6,
+      agosto: 7,
+      setiembre: 8,
+      septiembre: 8,
+      octubre: 9,
+      noviembre: 10,
+      diciembre: 11,
+    };
+
+    const year = Number(monthMatch[2] || currentYear);
+    const monthIndex = monthMap[monthMatch[1]];
+    start = new Date(year, monthIndex, 1);
+    end = new Date(year, monthIndex + 1, 0);
+  } else {
+    const yearMatch = normalized.match(/\b(19\d{2}|20\d{2})\b/);
+    const year = Number(yearMatch?.[1] || currentYear);
+    start = new Date(year, 0, 1);
+    end = new Date(year, 11, 31);
+  }
+
+  const workingText = normalized;
+
+  const projectMatch = workingText.match(
+    /\bproyecto\s+(?<value>.+?)(?=\b(?:para|durante|desde|hasta|de fecha|en fecha|en el periodo|periodo|mes|ano|anio|de|del|en)\b|$)/i,
+  );
+
+  const project = projectMatch?.groups?.value
+    ? projectMatch.groups.value
+        .replace(/\b(de fecha|en fecha|en el periodo|durante|desde|hasta|para|periodo|mes|ano|anio)\b.*$/i, "")
+        .trim()
+        .replace(/\s{2,}/g, " ")
+        .toUpperCase() || null
+    : null;
+
+  const cliente = extractNamedFilterPreview(workingText, "cliente");
+  const solicitante = extractNamedFilterPreview(workingText, "solicitante");
+  const responsable = extractNamedFilterPreview(workingText, "responsable");
+  const site = extractNamedFilterPreview(workingText, "site") ?? extractNamedFilterPreview(workingText, "sitio");
+  const ot = extractNamedFilterPreview(workingText, "ot");
+  const estados = extractStateFilters(workingText);
+  const removableFilters = [project, cliente, solicitante, responsable, site, ot, ...estados].filter(
+    (value): value is string => Boolean(value && value.trim()),
+  );
+
+  const searchSource = removableFilters.reduce((current, filterValue) => {
+    return current.replace(new RegExp(`\\b${escapeRegExp(normalizeFilterValue(filterValue))}\\b`, "gi"), " ");
+  }, workingText);
+
+  const searchText = searchSource
+    .replace(/\b(proyecto|cliente|responsable|solicitante|site|sitio|ot|orden|ordenes|gasto|gastos|planilla|registro|registros|cuanto|cuantos|cuanta|cuantas|quiero|saber|mostrar|consultar|buscar|de|del|para|por|con|en|el|la|los|las|periodo|mes|ano|anio|tiene|tengo|hay|aprobado|aprobada|aprobados|aprobadas|pendiente|pendientes|observado|observada|observados|observadas|rechazado|rechazada|rechazados|rechazadas|pagado|pagada|pagados|pagadas)\b/g, " ")
+    .replace(/\b(en el periodo|durante|desde|hasta|de fecha|en fecha)\b/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+    .split(/\b(?:en el periodo|durante|desde|hasta|de fecha|en fecha|para|en)\b/i)[0]
+    .trim()
+    .split(" ")
+    .filter((token) => token.length > 1)
+    .slice(0, 4)
+    .join(" ");
+
+  return {
+    start,
+    end,
+    project,
+    cliente,
+    solicitante,
+    responsable,
+    site,
+    ot,
+    estados: estados.length > 0 ? estados.join(", ") : null,
+    searchText: searchText || null,
+    coincideTodas: /\b(coincidencia exacta|coincidir todas|todos los terminos|terminos exactos)\b/i.test(normalized),
+  };
+}

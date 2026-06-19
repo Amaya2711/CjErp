@@ -1,7 +1,8 @@
-using System.Data;
+﻿using System.Data;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -19,12 +20,10 @@ public sealed class IaChatService : IIaChatService
 {
     private const string ModuleGastos = "GASTOS";
     private const string ToolBuscarPlanilla = "buscar_planilla";
-    private const string ToolResumirPlanilla = "resumir_planilla";
     private const string StoredProcedureBuscar = "dbo.sp_IA_Planilla_Buscar";
-    private const string StoredProcedureResumen = "dbo.sp_IA_Planilla_Resumen";
     private const string StoredProcedureAuditoria = "dbo.sp_IaChatAuditoria_Insertar";
     private const int MaxIterations = 3;
-    private const int MaxPageSize = 200;
+    private const int MaxPageSize = 20000;
     private const int MaxTop = 100;
     private const int MaxLocalAggregationRows = 4000;
     private static readonly TimeSpan PeruOffset = TimeSpan.FromHours(-5);
@@ -55,17 +54,20 @@ public sealed class IaChatService : IIaChatService
 
     private readonly HttpClient _httpClient;
     private readonly ISqlCommandFactory _sqlCommandFactory;
+    private readonly OpenAiSettings _openAiSettings;
     private readonly AnthropicSettings _anthropicSettings;
     private readonly ILogger<IaChatService> _logger;
 
     public IaChatService(
         HttpClient httpClient,
         ISqlCommandFactory sqlCommandFactory,
+        IOptions<OpenAiSettings> openAiSettings,
         IOptions<AnthropicSettings> anthropicSettings,
         ILogger<IaChatService> logger)
     {
         _httpClient = httpClient;
         _sqlCommandFactory = sqlCommandFactory;
+        _openAiSettings = openAiSettings.Value;
         _anthropicSettings = anthropicSettings.Value;
         _logger = logger;
     }
@@ -125,14 +127,14 @@ public sealed class IaChatService : IIaChatService
             };
 
             conversationState.AppendTurn("user", question);
-            conversationState.AppendAssistant(reformattedAnswer, reformattedResponse, ToolResumirPlanilla, conversationState.LastToolParameters);
+            conversationState.AppendAssistant(reformattedAnswer, reformattedResponse, ToolBuscarPlanilla, conversationState.LastToolParameters);
 
             stopwatch.Stop();
             await RegistrarAuditoriaAsync(
                 idUsuario,
                 module,
                 question,
-                ToolResumirPlanilla,
+                ToolBuscarPlanilla,
                 conversationState.LastToolParameters ?? new Dictionary<string, object?>(),
                 (int)Math.Min(int.MaxValue, stopwatch.ElapsedMilliseconds),
                 reformattedChartResponse?.Rows.Count ?? 0,
@@ -141,6 +143,232 @@ public sealed class IaChatService : IIaChatService
                 cancellationToken);
 
             return reformattedResponse;
+        }
+
+        if (TryReuseLastResponseForFollowUp(question, conversationState, out var reusedResponse, out var reusedAnswer, out var followUpIntent)
+            && reusedResponse is not null)
+        {
+            reusedResponse.InterpretedFilters ??= new Dictionary<string, object?>();
+            reusedResponse.InterpretedFilters["provider"] = "openai";
+            reusedResponse.InterpretedFilters["routingMode"] = "conversation";
+            reusedResponse.InterpretedFilters["followUpIntent"] = followUpIntent;
+            reusedResponse.InterpretedFilters["reusedLastResult"] = true;
+
+            if (!string.IsNullOrWhiteSpace(conversationState.LastToolName))
+            {
+                reusedResponse.InterpretedFilters["toolName"] = conversationState.LastToolName;
+            }
+
+            if (conversationState.LastToolParameters is not null && conversationState.LastToolParameters.Count > 0)
+            {
+                reusedResponse.InterpretedFilters["toolParameters"] = conversationState.LastToolParameters;
+            }
+
+            stopwatch.Stop();
+            conversationState.AppendTurn("user", question);
+            conversationState.AppendAssistant(
+                reusedAnswer,
+                reusedResponse,
+                conversationState.LastToolName,
+                conversationState.LastToolParameters);
+
+            await RegistrarAuditoriaAsync(
+                idUsuario,
+                module,
+                question,
+                conversationState.LastToolName,
+                conversationState.LastToolParameters ?? new Dictionary<string, object?>(),
+                (int)Math.Min(int.MaxValue, stopwatch.ElapsedMilliseconds),
+                reusedResponse.TotalRows ?? 0,
+                true,
+                null,
+                cancellationToken);
+
+            return reusedResponse;
+        }
+
+        if (TryListMatchesFromLastResult(question, conversationState, out var listResponse, out var listAnswer)
+            && listResponse is not null)
+        {
+            listResponse.InterpretedFilters ??= new Dictionary<string, object?>();
+            listResponse.InterpretedFilters["provider"] = "openai";
+            listResponse.InterpretedFilters["routingMode"] = "conversation";
+            listResponse.InterpretedFilters["followUpIntent"] = "list_matches";
+            listResponse.InterpretedFilters["reusedLastResult"] = true;
+
+            stopwatch.Stop();
+            conversationState.AppendTurn("user", question);
+            conversationState.AppendAssistant(
+                listAnswer,
+                listResponse,
+                conversationState.LastToolName,
+                conversationState.LastToolParameters);
+
+            await RegistrarAuditoriaAsync(
+                idUsuario,
+                module,
+                question,
+                conversationState.LastToolName,
+                conversationState.LastToolParameters ?? new Dictionary<string, object?>(),
+                (int)Math.Min(int.MaxValue, stopwatch.ElapsedMilliseconds),
+                listResponse.TotalRows ?? 0,
+                true,
+                null,
+                cancellationToken);
+
+            return listResponse;
+        }
+
+        if (TryBuildContextualRefinementArgs(question, conversationState, out var contextualFollowUpArgs))
+        {
+            try
+            {
+                var contextualInterpretedFilters = new Dictionary<string, object?>
+                {
+                    ["module"] = module,
+                    ["conversationId"] = conversationId,
+                    ["question"] = question,
+                    ["routingMode"] = "conversation_refinement",
+                    ["followUpIntent"] = "contextual_refinement",
+                    ["provider"] = "openai",
+                    ["toolName"] = ToolBuscarPlanilla,
+                    ["toolParameters"] = contextualFollowUpArgs.AsDictionary(),
+                    ["responseType"] = "detail",
+                    ["reusedConversationContext"] = true
+                };
+
+                var contextualFollowUpResult = await EjecutarBuscarPlanillaAsync(contextualFollowUpArgs, cancellationToken, fetchAllPages: true);
+                var contextualFollowUpPayload = BuildOpenAiAnalysisPayload(
+                    question,
+                    contextualFollowUpArgs,
+                    contextualFollowUpResult.Rows,
+                    contextualFollowUpResult.TotalRows,
+                    contextualFollowUpArgs.AsDictionary(),
+                    contextualInterpretedFilters);
+
+                var contextualFollowUpAnswer = await GenerateOpenAiFinalAnswerAsync(
+                    question,
+                    conversationContext,
+                    module,
+                    ToolBuscarPlanilla,
+                    "detail",
+                    contextualFollowUpArgs,
+                    contextualFollowUpPayload,
+                    cancellationToken);
+
+                if (string.IsNullOrWhiteSpace(contextualFollowUpAnswer))
+                {
+                    contextualFollowUpAnswer = BuildDetailAnswer(
+                        contextualFollowUpResult.Rows,
+                        contextualFollowUpResult.TotalRows,
+                        contextualFollowUpArgs);
+                }
+
+                var contextualFollowUpResponse = new IaChatResponseDto
+                {
+                    Success = true,
+                    Module = module,
+                    Answer = contextualFollowUpAnswer,
+                    ResponseType = "detail",
+                    InterpretedFilters = contextualInterpretedFilters,
+                    DetailRows = contextualFollowUpResult.Rows.Count > 0 ? contextualFollowUpResult.Rows : null,
+                    TotalRows = contextualFollowUpResult.TotalRows
+                };
+
+                stopwatch.Stop();
+                conversationState.AppendTurn("user", question);
+                conversationState.AppendAssistant(
+                    contextualFollowUpAnswer,
+                    contextualFollowUpResponse,
+                    ToolBuscarPlanilla,
+                    contextualFollowUpArgs.AsDictionary());
+
+                await RegistrarAuditoriaAsync(
+                    idUsuario,
+                    module,
+                    question,
+                    ToolBuscarPlanilla,
+                    contextualFollowUpArgs.AsDictionary(),
+                    (int)Math.Min(int.MaxValue, stopwatch.ElapsedMilliseconds),
+                    contextualFollowUpResult.TotalRows,
+                    true,
+                    null,
+                    cancellationToken);
+
+                return contextualFollowUpResponse;
+            }
+            catch (Exception ex)
+            {
+                stopwatch.Stop();
+                _logger.LogError(ex, "Error en refinement conversacional IA Chat. Usuario={Usuario} Module={Module}", idUsuario, module);
+                var friendlyMessage = BuildFriendlyErrorMessage(ex);
+                conversationState.AppendTurn("user", question);
+                conversationState.AppendAssistant(friendlyMessage, Failure(module, friendlyMessage), null, null);
+                return Failure(module, friendlyMessage);
+            }
+        }
+
+        if (TryBuildAmbiguousRoleFollowUpArgs(question, conversationState, out var roleFollowUpArgs))
+        {
+            try
+            {
+                var roleFollowUpResult = await EjecutarBuscarPlanillaAsync(roleFollowUpArgs, cancellationToken, fetchAllPages: true);
+                var roleFollowUpAnswer = BuildDetailAnswer(roleFollowUpResult.Rows, roleFollowUpResult.TotalRows, roleFollowUpArgs);
+
+                var roleFollowUpResponse = new IaChatResponseDto
+                {
+                    Success = true,
+                    Module = module,
+                    Answer = roleFollowUpAnswer,
+                    ResponseType = "detail",
+                    InterpretedFilters = new Dictionary<string, object?>
+                    {
+                        ["module"] = module,
+                        ["conversationId"] = conversationId,
+                        ["question"] = question,
+                        ["routingMode"] = "conversation_followup_roles",
+                        ["followUpIntent"] = "ambos_roles",
+                        ["provider"] = "openai",
+                        ["toolName"] = ToolBuscarPlanilla,
+                        ["toolParameters"] = roleFollowUpArgs.AsDictionary(),
+                        ["responseType"] = "detail",
+                        ["reusedConversationContext"] = true
+                    },
+                    DetailRows = roleFollowUpResult.Rows.Count > 0 ? roleFollowUpResult.Rows : null,
+                    TotalRows = roleFollowUpResult.TotalRows
+                };
+
+                stopwatch.Stop();
+                conversationState.AppendTurn("user", question);
+                conversationState.AppendAssistant(
+                    roleFollowUpAnswer,
+                    roleFollowUpResponse,
+                    ToolBuscarPlanilla,
+                    roleFollowUpArgs.AsDictionary());
+
+                await RegistrarAuditoriaAsync(
+                    idUsuario,
+                    module,
+                    question,
+                    ToolBuscarPlanilla,
+                    roleFollowUpArgs.AsDictionary(),
+                    (int)Math.Min(int.MaxValue, stopwatch.ElapsedMilliseconds),
+                    roleFollowUpResult.TotalRows,
+                    true,
+                    null,
+                    cancellationToken);
+
+                return roleFollowUpResponse;
+            }
+            catch (Exception ex)
+            {
+                stopwatch.Stop();
+                _logger.LogError(ex, "Error en follow-up de roles IA Chat. Usuario={Usuario} Module={Module}", idUsuario, module);
+                var friendlyMessage = BuildFriendlyErrorMessage(ex);
+                conversationState.AppendTurn("user", question);
+                conversationState.AppendAssistant(friendlyMessage, Failure(module, friendlyMessage), null, null);
+                return Failure(module, friendlyMessage);
+            }
         }
 
         if (NeedsClarification(question))
@@ -180,7 +408,9 @@ public sealed class IaChatService : IIaChatService
             }
         }
 
-        if (!hasAttachment && TryBuildLocalExecutiveAggregationRequest(question, out var localExecutiveRequest))
+        // La analisis de negocio ya no se resuelve con rutas deterministicas locales;
+        // se consulta el store solo por rango de fechas y OpenAI interpreta el resultado.
+        if (false && !hasAttachment && TryBuildLocalExecutiveAggregationRequest(question, out var localExecutiveRequest))
         {
             try
             {
@@ -251,82 +481,7 @@ public sealed class IaChatService : IIaChatService
             }
         }
 
-        if (!hasAttachment && TryBuildDeterministicResumenArgs(question, out var deterministicResumenArgs))
-        {
-            try
-            {
-                var deterministicResult = await EjecutarResumenPlanillaAsync(deterministicResumenArgs, question, cancellationToken);
-                var deterministicAnswer = BuildSummaryAnswer(
-                    "summary",
-                    deterministicResult.Summary,
-                    null,
-                    deterministicResult.TotalRows,
-                    deterministicResumenArgs);
-
-                interpretedFilters["toolName"] = ToolResumirPlanilla;
-                interpretedFilters["toolParameters"] = deterministicResumenArgs.AsDictionary();
-                interpretedFilters["responseType"] = "summary";
-                interpretedFilters["routingMode"] = "deterministic";
-
-                stopwatch.Stop();
-                conversationState.AppendTurn("user", question);
-                conversationState.AppendAssistant(
-                    deterministicAnswer,
-                    new IaChatResponseDto
-                    {
-                        Success = true,
-                        Module = module,
-                        Answer = deterministicAnswer,
-                        ResponseType = "summary",
-                        InterpretedFilters = interpretedFilters,
-                        DetailRows = deterministicResult.GroupedRows.Count > 0 ? deterministicResult.GroupedRows : null,
-                        Summary = deterministicResult.Summary,
-                        Chart = null,
-                        TotalRows = deterministicResult.TotalRows
-                    },
-                    ToolResumirPlanilla,
-                    deterministicResumenArgs.AsDictionary());
-
-                await RegistrarAuditoriaAsync(
-                    idUsuario,
-                    module,
-                    question,
-                    ToolResumirPlanilla,
-                    deterministicResumenArgs.AsDictionary(),
-                    (int)Math.Min(int.MaxValue, stopwatch.ElapsedMilliseconds),
-                    deterministicResult.TotalRows,
-                    true,
-                    null,
-                    cancellationToken);
-
-                return new IaChatResponseDto
-                {
-                    Success = true,
-                    Module = module,
-                    Answer = deterministicAnswer,
-                    ResponseType = "summary",
-                    InterpretedFilters = interpretedFilters,
-                    DetailRows = deterministicResult.GroupedRows.Count > 0 ? deterministicResult.GroupedRows : null,
-                    Summary = deterministicResult.Summary,
-                    Chart = null,
-                    TotalRows = deterministicResult.TotalRows
-                };
-            }
-            catch (Exception ex)
-            {
-                stopwatch.Stop();
-                _logger.LogError(ex, "Error en ruta deterministica de resumen IA Chat. Usuario={Usuario} Module={Module}", idUsuario, module);
-                conversationState.AppendTurn("user", question);
-                conversationState.AppendAssistant(
-                    BuildFriendlyErrorMessage(ex),
-                    Failure(module, BuildFriendlyErrorMessage(ex)),
-                    ToolResumirPlanilla,
-                    deterministicResumenArgs.AsDictionary());
-                return Failure(module, BuildFriendlyErrorMessage(ex));
-            }
-        }
-
-        if (!hasAttachment && TryBuildDeterministicBuscarArgs(question, out var deterministicBuscarArgs))
+        if (false && !hasAttachment && TryBuildDeterministicBuscarArgs(question, out var deterministicBuscarArgs))
         {
             try
             {
@@ -395,40 +550,9 @@ public sealed class IaChatService : IIaChatService
             }
         }
 
-        if (!HasAnthropicConfiguration(out var configurationError))
+        if (!HasOpenAiConfiguration(out var configurationError))
         {
             return Failure(module, configurationError);
-        }
-
-        var systemPrompt = BuildSystemPrompt(presentationMode, isPdfAttachment, prefersStructuredAttachmentResponse);
-        var messages = new List<AnthropicMessageRequest>
-        {
-            new()
-            {
-                Role = "user",
-                Content =
-                [
-                    new AnthropicContentBlock
-                    {
-                        Type = "text",
-                        Text = BuildUserContext(question, conversationId, conversationContext, hasAttachment, presentationMode, isPdfAttachment, prefersStructuredAttachmentResponse)
-                    }
-                ]
-            }
-        };
-
-        if (hasAttachment && attachment is not null)
-        {
-            messages[0].Content.Add(new AnthropicContentBlock
-            {
-                Type = isPdfAttachment ? "document" : "image",
-                Source = new AnthropicMediaSource
-                {
-                    Type = "base64",
-                    MediaType = attachment.MimeType!,
-                    Data = attachment.Base64Data!
-                }
-            });
         }
 
         var lastToolName = string.Empty;
@@ -444,147 +568,86 @@ public sealed class IaChatService : IIaChatService
 
         try
         {
-            var anthropicResponse = await SendMessageAsync(systemPrompt, messages, cancellationToken, includeTools: !prefersStructuredAttachmentResponse);
-            var assistantContent = anthropicResponse.Content.ToList();
-            var toolUses = assistantContent
-                .Where(block => string.Equals(block.Type, "tool_use", StringComparison.OrdinalIgnoreCase))
-                .ToList();
+            var plannerDecision = await GetOpenAiPlannerDecisionAsync(
+                module,
+                question,
+                conversationId,
+                conversationContext,
+                presentationMode,
+                hasAttachment,
+                isPdfAttachment,
+                prefersStructuredAttachmentResponse,
+                cancellationToken);
 
-            messages.Add(new AnthropicMessageRequest
+            var plannerRoute = NormalizePlannerValue(plannerDecision.Route) ?? "conversation";
+
+            responseType = plannerDecision.ResponseType ?? "conversation";
+            answer = plannerDecision.Answer ?? string.Empty;
+
+            if (string.Equals(plannerRoute, "conversation", StringComparison.OrdinalIgnoreCase))
             {
-                Role = "assistant",
-                Content = assistantContent
-            });
-
-            if (toolUses.Count == 0)
+                answer = string.IsNullOrWhiteSpace(answer)
+                    ? "Consulta procesada correctamente."
+                    : answer;
+                interpretedFilters["provider"] = "openai";
+                interpretedFilters["routingMode"] = "conversation";
+                completed = true;
+            }
+            else if (string.Equals(plannerRoute, "buscar_planilla", StringComparison.OrdinalIgnoreCase))
             {
-                answer = ExtractAssistantText(assistantContent);
+                var args = plannerDecision.BuscarArgs.HasValue
+                    ? ParseBuscarPlanillaArgs(plannerDecision.BuscarArgs)
+                    : BuildSearchArgsFromQuestion(question);
 
-                if (prefersStructuredAttachmentResponse &&
-                    TryParseStructuredAssistantResponse(answer, module, out var structuredAttachmentResponse))
+                args = ApplyExplicitStructuredFilters(question, args);
+
+                args.TamanoPagina = MaxPageSize;
+                args.Pagina = 1;
+
+                lastToolName = ToolBuscarPlanilla;
+                lastToolInput = args.AsDictionary();
+
+                var result = await EjecutarBuscarPlanillaAsync(args, cancellationToken, fetchAllPages: true);
+                detailRows = result.Rows;
+                totalRows = result.TotalRows;
+                responseType = "detail";
+
+                var payload = BuildOpenAiAnalysisPayload(
+                    question,
+                    args,
+                    detailRows,
+                    totalRows,
+                    lastToolInput,
+                    interpretedFilters);
+
+                answer = await GenerateOpenAiFinalAnswerAsync(
+                    question,
+                    conversationContext,
+                    module,
+                    plannerRoute,
+                    responseType,
+                    args,
+                    payload,
+                    cancellationToken);
+
+                if (string.IsNullOrWhiteSpace(answer))
                 {
-                    structuredAttachmentResponse.InterpretedFilters ??= interpretedFilters;
-                    structuredAttachmentResponse.Module = module;
-                    structuredAttachmentResponse.Success = true;
-                    structuredAttachmentResponse.ResponseType = NormalizeResponseType(structuredAttachmentResponse, "summary");
-                    structuredAttachmentResponse.Answer = NormalizeText(structuredAttachmentResponse.Answer) ?? "Reporte ejecutivo generado a partir del documento adjunto.";
-                    structuredAttachmentResponse.TotalRows ??= structuredAttachmentResponse.DetailRows?.Count ?? structuredAttachmentResponse.Chart?.Rows.Count;
-
-                    conversationState.AppendTurn("user", question);
-                    conversationState.AppendAssistant(structuredAttachmentResponse.Answer, structuredAttachmentResponse, null, null);
-
-                    stopwatch.Stop();
-                    await RegistrarAuditoriaAsync(
-                        idUsuario,
-                        module,
-                        question,
-                        null,
-                        new Dictionary<string, object?>(),
-                        (int)Math.Min(int.MaxValue, stopwatch.ElapsedMilliseconds),
-                        structuredAttachmentResponse.TotalRows ?? 0,
-                        true,
-                        null,
-                        cancellationToken);
-
-                    return structuredAttachmentResponse;
+                    answer = BuildDetailAnswer(detailRows, totalRows, args);
                 }
 
-                if (prefersStructuredAttachmentResponse)
-                {
-                    var fallbackRows = BuildAttachmentFallbackRows(answer);
-                    if (fallbackRows.Count > 0)
-                    {
-                        var fallbackResponse = new IaChatResponseDto
-                        {
-                            Success = true,
-                            Module = module,
-                            Answer = string.IsNullOrWhiteSpace(answer)
-                                ? "Reporte ejecutivo generado a partir del documento adjunto."
-                                : answer,
-                            ResponseType = "summary",
-                            InterpretedFilters = interpretedFilters,
-                            DetailRows = fallbackRows,
-                            Summary = new Dictionary<string, object?>
-                            {
-                                ["resumen"] = answer,
-                                ["tipoAdjunto"] = isPdfAttachment ? "pdf" : "image"
-                            },
-                            TotalRows = fallbackRows.Count
-                        };
-
-                        conversationState.AppendTurn("user", question);
-                        conversationState.AppendAssistant(fallbackResponse.Answer, fallbackResponse, null, null);
-
-                        stopwatch.Stop();
-                        await RegistrarAuditoriaAsync(
-                            idUsuario,
-                            module,
-                            question,
-                            null,
-                            new Dictionary<string, object?>(),
-                            (int)Math.Min(int.MaxValue, stopwatch.ElapsedMilliseconds),
-                            fallbackResponse.TotalRows ?? 0,
-                            true,
-                            null,
-                            cancellationToken);
-
-                        return fallbackResponse;
-                    }
-                }
-
+                interpretedFilters["provider"] = "openai";
+                interpretedFilters["toolName"] = lastToolName;
+                interpretedFilters["toolParameters"] = lastToolInput;
+                interpretedFilters["responseType"] = responseType;
                 completed = true;
             }
             else
             {
-                foreach (var toolUse in toolUses)
-                {
-                    var toolName = NormalizeText(toolUse.Name);
-                    lastToolName = toolName ?? string.Empty;
-
-                    if (string.Equals(toolName, ToolBuscarPlanilla, StringComparison.OrdinalIgnoreCase))
-                    {
-                        var args = ParseBuscarPlanillaArgs(toolUse.Input);
-                        lastToolInput = args.AsDictionary();
-
-                        var result = await EjecutarBuscarPlanillaAsync(args, cancellationToken);
-                        detailRows = result.Rows;
-                        totalRows = result.TotalRows;
-                        responseType = "detail";
-                        answer = BuildDetailAnswer(detailRows, totalRows, args);
-                        continue;
-                    }
-
-                    if (string.Equals(toolName, ToolResumirPlanilla, StringComparison.OrdinalIgnoreCase))
-                    {
-                        var args = ParseResumenPlanillaArgs(toolUse.Input);
-                        lastToolInput = args.AsDictionary();
-
-                        var result = await EjecutarResumenPlanillaAsync(args, question, cancellationToken);
-                        summary = result.Summary;
-                        chart = result.Chart;
-                        groupedRows = result.GroupedRows;
-                        totalRows = result.TotalRows;
-                        if (WantsTabularSummary(question))
-                        {
-                            responseType = "summary";
-                            detailRows = result.GroupedRows;
-                            chart = null;
-                            answer = BuildSummaryAnswer(responseType, summary, null, totalRows, args);
-                        }
-                        else
-                        {
-                            responseType = chart is not null ? "chart" : "summary";
-                            answer = BuildSummaryAnswer(responseType, summary, chart, totalRows, args);
-                        }
-                        continue;
-                    }
-
-                    throw new InvalidOperationException($"Herramienta no autorizada: {toolName}.");
-                }
-
-                interpretedFilters["toolName"] = lastToolName;
-                interpretedFilters["toolParameters"] = lastToolInput;
-                interpretedFilters["responseType"] = responseType;
+                answer = string.IsNullOrWhiteSpace(answer)
+                    ? "Consulta procesada correctamente."
+                    : answer;
+                interpretedFilters["provider"] = "openai";
+                interpretedFilters["routingMode"] = "conversation";
                 completed = true;
             }
 
@@ -684,6 +747,157 @@ public sealed class IaChatService : IIaChatService
         }
     }
 
+    public async Task<IaChatDashboardExportResponseDto> GenerarDashboardReporteAsync(
+        IaChatDashboardExportRequestDto request,
+        string? idUsuario,
+        CancellationToken cancellationToken = default)
+    {
+        var module = NormalizeModule(request?.Module);
+        var question = NormalizeText(request?.Question);
+        var contextualSummary = NormalizeText(request?.ContextualSummary);
+        var structuredDataJson = NormalizeText(request?.StructuredDataJson);
+
+        if (!AllowedModules.Contains(module))
+        {
+            return FailureDashboard(module, "Por ahora solo el modulo GASTOS esta habilitado en IA Chat Administrativo.");
+        }
+
+        if (string.IsNullOrWhiteSpace(question))
+        {
+            return FailureDashboard(module, "Falta la consulta base para generar el reporte.");
+        }
+
+        if (string.IsNullOrWhiteSpace(contextualSummary))
+        {
+            return FailureDashboard(module, "Falta el resumen contextual actual para generar el reporte.");
+        }
+
+        if (!HasAnthropicConfiguration(out var configurationError))
+        {
+            return FailureDashboard(module, configurationError);
+        }
+
+        try
+        {
+            var systemPrompt = """
+Eres un analista de datos senior especializado en visualizaciones ejecutivas.
+
+Debes responder exclusivamente con un documento HTML completo y valido, listo para renderizar en navegador.
+
+Reglas obligatorias:
+- Devuelve unicamente HTML valido. No devuelvas Markdown, JSON, comentarios ni explicaciones fuera del HTML.
+- Usa Chart.js para los graficos e incluyelo mediante CDN.
+- Inserta la carga de Chart.js antes de inicializar cualquier grafico y ejecuta la creacion de graficos al final del body o en DOMContentLoaded/window.onload, nunca antes de que la libreria este disponible.
+- El dashboard debe verse como un informe gerencial profesional, no como texto plano.
+- El formato final debe ser decidido por Claude segun el analisis de la respuesta recibida.
+- No uses una plantilla fija ni una distribucion rigida; deja que el analisis determine la composicion final.
+- Construye siempre un unico contenedor raiz principal, preferiblemente <main id="report-root">, centrado y con ancho maximo.
+- La visualizacion debe usar solo estos recursos ejecutivos: tarjetas KPI, barras verticales, barras horizontales, tortas/donas y tablas compactas de apoyo.
+- Elige dinamicamente el tipo de grafico segun la lectura de la data: temporal -> barras verticales, concentracion/ranking -> barras horizontales, participacion -> torta/dona, indicadores clave -> KPI.
+- Si la data muestra fuerte concentracion, resalta ese patron visualmente; si la data es dispersa, prioriza comparativos y rankings.
+- Incluye solo las secciones que aporten valor segun el analisis, pero evita que el resultado sea solo un bloque de texto.
+- Usa fondo transparente y componentes limpios compatibles con modo claro y oscuro.
+- Usa formato de moneda en soles peruanos (S/) con abreviatura K/M segun escala cuando aplique.
+- Todos los valores numericos deben incluir separador de miles.
+- No incluyas titulos principales gigantes; usa etiquetas pequenas de seccion.
+- Asegura que el HTML se renderice correctamente sin dependencias adicionales aparte de Chart.js.
+""";
+
+            var userPrompt = $$"""
+A partir del siguiente resumen de datos, genera un dashboard gerencial interactivo en HTML usando Chart.js.
+
+Objetivo:
+- La composicion visual debe surgir del analisis de la data.
+- No generes un reporte textual plano.
+- No uses una plantilla fija; deja que el analisis decida la estructura final.
+
+Lineamientos de composicion:
+- Usa un unico contenedor raiz identificado como <main id="report-root">.
+- Mantén el contenido centrado y limpio, con estilo de dashboard gerencial.
+- La salida debe apoyarse solamente en estas piezas visuales: KPI, barras verticales, barras horizontales, tortas/donas y tablas compactas.
+- Si la data es temporal, usa barras verticales.
+- Si la data concentra montos por categoria, usa barras horizontales.
+- Si la data representa participacion porcentual, usa torta o dona.
+- Si la data resume resultados principales, usa KPI.
+- Si algun bloque no aporta valor segun el analisis, omitelo.
+- Si hay fuerte concentracion, resalta el patron visualmente.
+- Si la data es dispersa, prioriza comparativos y rankings.
+- No dejes contenedores graficos vacios: cada bloque de grafico debe mostrar un canvas/render visible o, si no es posible por falta de data, una tabla de respaldo compacta en su lugar.
+- Si incluyes un bloque de "comportamiento mensual", debe renderizar al menos un grafico visible y, debajo o al costado, una mini tabla con los valores usados.
+
+Reglas de diseño:
+- Usa una composicion ejecutiva y clara.
+- Resalta visualmente la concentracion, riesgos y hallazgos mas relevantes.
+- Usa paleta de colores coherente y profesional.
+- Fondo transparente, compatible con modo claro y oscuro.
+- Usa formato de moneda en soles peruanos (S/) con abreviatura K/M segun escala.
+- Todos los numeros redondeados y formateados con separador de miles.
+- Si existe informacion por moneda o el JSON incluye hasMultipleCurrencies = true, muéstrala claramente en paneles separados y no consolides importes de distintas monedas en una sola cifra.
+- Evita bloques largos de texto; privilegia tarjetas, tablas compactas y graficos.
+- Si existe informacion por moneda, acompaña el desglose con un grafico claro por moneda o una tabla compacta de apoyo para que la zona no quede visualmente vacia.
+
+Consulta original:
+{{question}}
+
+RESUMEN CONTEXTUAL:
+{{contextualSummary}}
+
+BASE ESTRUCTURADA EXACTA (JSON):
+{{structuredDataJson ?? "{}"}}
+
+Reglas adicionales:
+- Usa la base estructurada exacta como fuente principal para tablas, KPIs y graficos.
+- No recalcules ni inventes totales fuera de esa base estructurada.
+- Si el resumen textual y el JSON difieren, prioriza siempre el JSON estructurado.
+- La salida final debe ser HTML completo y valido, listo para renderizar en pantalla.
+- Debes decidir tu propio layout final segun la data, siempre dentro de las visualizaciones permitidas.
+
+Devuelve solo un HTML completo y valido.
+""";
+
+            var messages = new List<AnthropicMessageRequest>
+            {
+                new()
+                {
+                    Role = "user",
+                    Content =
+                    [
+                        new AnthropicContentBlock
+                        {
+                            Type = "text",
+                            Text = userPrompt
+                        }
+                    ]
+                }
+            };
+
+            var anthropicResponse = await SendMessageAsync(
+                systemPrompt,
+                messages,
+                cancellationToken,
+                includeTools: false);
+
+            var htmlContent = NormalizeDashboardHtml(ExtractAssistantText(anthropicResponse.Content));
+            if (string.IsNullOrWhiteSpace(htmlContent))
+            {
+                throw new InvalidOperationException("La IA no devolvio HTML util para el reporte.");
+            }
+
+            return new IaChatDashboardExportResponseDto
+            {
+                Success = true,
+                Module = module,
+                HtmlContent = htmlContent,
+                FileName = $"gastos-reporte-dashboard-{DateTimeOffset.UtcNow.ToOffset(PeruOffset):yyyyMMddHHmmss}.html"
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error generando dashboard IA. Usuario={Usuario} Module={Module}", idUsuario, module);
+            return FailureDashboard(module, BuildFriendlyErrorMessage(ex));
+        }
+    }
+
     private async Task<AnthropicMessagesResponse> SendMessageAsync(
         string systemPrompt,
         List<AnthropicMessageRequest> messages,
@@ -756,6 +970,7 @@ public sealed class IaChatService : IIaChatService
                     Cliente = args.Cliente,
                     Proyecto = args.Proyecto,
                     Responsable = args.Responsable,
+                    Solicitante = args.Solicitante,
                     Ot = args.Ot,
                     CoincidirTodas = args.CoincidirTodas,
                     IncluirEstado99 = args.IncluirEstado99,
@@ -782,10 +997,9 @@ public sealed class IaChatService : IIaChatService
             rows = accumulatedRows;
         }
 
-        if (!string.IsNullOrWhiteSpace(args.Responsable))
-        {
-            rows = FilterRowsByText(rows, args.Responsable, "Responsable", "RESPONSABLE", "NombreResponsable", "nombreResponsable");
-        }
+        // El store dbo.sp_IA_Planilla_Buscar es la fuente canónica del filtro.
+        // No se aplica un refiltro local por contains sobre Responsable/Solicitante
+        // para no alterar el universo real devuelto por SQL.
 
         return new PlanillaBuscarExecutionResult
         {
@@ -803,17 +1017,16 @@ public sealed class IaChatService : IIaChatService
         var parameters = new DynamicParameters();
         parameters.Add("@TextoBusqueda", args.TextoBusqueda, DbType.String, size: 500);
         parameters.Add("@Estados", args.Estados, DbType.String, size: 100);
-        parameters.Add("@FechaInicio", args.FechaInicio?.ToDateTime(TimeOnly.MinValue), DbType.Date);
-        parameters.Add("@FechaFin", args.FechaFin?.ToDateTime(TimeOnly.MinValue), DbType.Date);
-        parameters.Add("@IdSolicitante", args.IdSolicitante, DbType.Int32);
-        parameters.Add("@IdValidador", args.IdValidador, DbType.Int32);
-        parameters.Add("@IdCliente", args.IdCliente, DbType.Int32);
-        parameters.Add("@IdProyecto", args.IdProyecto, DbType.Int32);
+        // El store se valida en SQL con el formato compacto yyyyMMdd, igual que en los EXEC manuales.
+        parameters.Add("@FechaInicio", args.FechaInicio?.ToString("yyyyMMdd", CultureInfo.InvariantCulture), DbType.String, size: 8);
+        parameters.Add("@FechaFin", args.FechaFin?.ToString("yyyyMMdd", CultureInfo.InvariantCulture), DbType.String, size: 8);
         parameters.Add("@IdSite", args.IdSite, DbType.String, size: 50);
+        parameters.Add("@Site", args.Site, DbType.String, size: 150);
         parameters.Add("@CorreSite", args.CorreSite, DbType.Int32);
         parameters.Add("@Cliente", args.Cliente, DbType.String, size: 150);
         parameters.Add("@Proyecto", args.Proyecto, DbType.String, size: 150);
         parameters.Add("@Responsable", args.Responsable, DbType.String, size: 150);
+        parameters.Add("@Solicitante", args.Solicitante, DbType.String, size: 150);
         parameters.Add("@Ot", args.Ot, DbType.String, size: 100);
         parameters.Add("@CoincidirTodas", args.CoincidirTodas, DbType.Boolean);
         parameters.Add("@IncluirEstado99", args.IncluirEstado99, DbType.Boolean);
@@ -821,7 +1034,12 @@ public sealed class IaChatService : IIaChatService
         parameters.Add("@TamanoPagina", args.TamanoPagina, DbType.Int32);
         parameters.Add("@TipoCambio", args.TipoCambio, DbType.Decimal);
 
-        return (await connection.QueryAsync(
+        _logger.LogInformation(
+            "IA Chat ejecutando {StoredProcedure} con parametros: {Parametros}",
+            StoredProcedureBuscar,
+            BuildCompactDictionaryPreview(args.AsDictionary()));
+
+        var rows = (await connection.QueryAsync(
                 _sqlCommandFactory.Create(
                     StoredProcedureBuscar,
                     parameters,
@@ -830,54 +1048,15 @@ public sealed class IaChatService : IIaChatService
                     commandTimeout: 120)))
             .Select(MapRow)
             .ToList();
-    }
 
-    private async Task<PlanillaResumenExecutionResult> EjecutarResumenPlanillaAsync(
-        ResumenPlanillaArgs args,
-        string question,
-        CancellationToken cancellationToken)
-    {
-        await using var connection = _sqlCommandFactory.CreateConnection();
+        _logger.LogInformation(
+            "IA Chat ejecuto {StoredProcedure} en {DataSource}/{Database} y obtuvo {RowCount} filas.",
+            StoredProcedureBuscar,
+            connection.DataSource,
+            connection.Database,
+            rows.Count);
 
-        var parameters = new DynamicParameters();
-        parameters.Add("@AgruparPor", args.AgruparPor, DbType.String, size: 30);
-        parameters.Add("@TextoBusqueda", args.TextoBusqueda, DbType.String, size: 500);
-        parameters.Add("@Estados", args.Estados, DbType.String, size: 100);
-        parameters.Add("@FechaInicio", args.FechaInicio?.ToDateTime(TimeOnly.MinValue), DbType.Date);
-        parameters.Add("@FechaFin", args.FechaFin?.ToDateTime(TimeOnly.MinValue), DbType.Date);
-        parameters.Add("@IdCliente", args.IdCliente, DbType.Int32);
-        parameters.Add("@IdProyecto", args.IdProyecto, DbType.Int32);
-        parameters.Add("@IdSite", args.IdSite, DbType.String, size: 50);
-        parameters.Add("@CorreSite", args.CorreSite, DbType.Int32);
-        parameters.Add("@Cliente", args.Cliente, DbType.String, size: 150);
-        parameters.Add("@Proyecto", args.Proyecto, DbType.String, size: 150);
-        parameters.Add("@Responsable", args.Responsable, DbType.String, size: 150);
-        parameters.Add("@Ot", args.Ot, DbType.String, size: 100);
-        parameters.Add("@CoincidirTodas", args.CoincidirTodas, DbType.Boolean);
-        parameters.Add("@IncluirEstado99", args.IncluirEstado99, DbType.Boolean);
-        parameters.Add("@Top", args.Top, DbType.Int32);
-        parameters.Add("@TipoCambio", args.TipoCambio, DbType.Decimal);
-
-        using var grid = await connection.QueryMultipleAsync(
-            _sqlCommandFactory.Create(
-                StoredProcedureResumen,
-                parameters,
-                CommandType.StoredProcedure,
-                cancellationToken,
-                commandTimeout: 120));
-
-        var summaryRows = (await grid.ReadAsync()).Select(MapRow).ToList();
-        var groupedRows = (await grid.ReadAsync()).Select(MapRow).ToList();
-        var summary = summaryRows.Count > 0 ? summaryRows[0] : new Dictionary<string, object?>();
-        var chart = BuildChart(args.AgruparPor, question, groupedRows);
-
-        return new PlanillaResumenExecutionResult
-        {
-            Summary = summary,
-            GroupedRows = groupedRows,
-            Chart = chart,
-            TotalRows = groupedRows.Count > 0 ? groupedRows.Count : summaryRows.Count
-        };
+        return rows;
     }
 
     private IaChatChartResponseDto BuildChart(
@@ -943,28 +1122,6 @@ public sealed class IaChatService : IIaChatService
         return string.IsNullOrWhiteSpace(preview)
             ? $"Se encontraron {totalRows} registros de detalle{scope}."
             : $"Se encontraron {totalRows} registros de detalle{scope}. Vista previa: {preview}.";
-    }
-
-    private static string BuildSummaryAnswer(
-        string responseType,
-        Dictionary<string, object?>? summary,
-        IaChatChartResponseDto? chart,
-        int totalRows,
-        ResumenPlanillaArgs args)
-    {
-        if (totalRows <= 0)
-        {
-            return "No se encontraron resultados para el resumen solicitado.";
-        }
-
-        var scope = BuildScopeText(args);
-        var chartText = chart is null
-            ? string.Empty
-            : $" Se genero un grafico {chart.ChartType} por {chart.CategoryField}.";
-
-        return responseType == "chart"
-            ? $"Se generaron {totalRows} filas agrupadas{scope}.{chartText}"
-            : $"Se genero el resumen solicitado{scope}.{chartText}";
     }
 
     private static string BuildLocalExecutiveAnswer(
@@ -1068,6 +1225,7 @@ public sealed class IaChatService : IIaChatService
     {
         var preferred = new[]
         {
+            "Ventas",
             "MontoOc2",
             "MontoOc",
             "ConPagadoSoles",
@@ -1167,9 +1325,11 @@ public sealed class IaChatService : IIaChatService
             "Cliente",
             "Proyecto",
             "Responsable",
+            "Solicitante",
             "Site",
             "Ot",
             "Estado",
+            "Ventas",
             "MontoOc",
             "MontoOc2",
             "ConPagado",
@@ -1200,16 +1360,23 @@ public sealed class IaChatService : IIaChatService
             parts.Add($"para '{args.TextoBusqueda}'");
         }
 
+        if (!string.IsNullOrWhiteSpace(args.Solicitante))
+        {
+            parts.Add($"con solicitante '{args.Solicitante}'");
+        }
+
         if (!string.IsNullOrWhiteSpace(args.Estados))
         {
-            parts.Add($"con estados {args.Estados}");
+            parts.Add(args.EstadosAplicadosPorDefecto
+                ? $"con estados {args.Estados} (aplicado por defecto)"
+                : $"con estados {args.Estados}");
         }
 
         if (args.FechaInicio.HasValue || args.FechaFin.HasValue)
         {
             var start = args.FechaInicio?.ToString("yyyy-MM-dd") ?? "inicio";
             var end = args.FechaFin?.ToString("yyyy-MM-dd") ?? "fin";
-            parts.Add($"entre {start} y {end}");
+            parts.Add($"periodo consultado: {start} a {end}");
         }
 
         if (parts.Count == 0)
@@ -1220,33 +1387,634 @@ public sealed class IaChatService : IIaChatService
         return $" ({string.Join(", ", parts)})";
     }
 
-    private static string BuildScopeText(ResumenPlanillaArgs args)
+    private static string BuildPeriodText(BuscarPlanillaArgs args)
     {
-        var parts = new List<string>();
-
-        if (!string.IsNullOrWhiteSpace(args.TextoBusqueda))
+        if (!args.FechaInicio.HasValue && !args.FechaFin.HasValue)
         {
-            parts.Add($"para '{args.TextoBusqueda}'");
+            return "Periodo consultado: no especificado.";
         }
 
-        if (!string.IsNullOrWhiteSpace(args.Estados))
+        var start = args.FechaInicio?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "inicio";
+        var end = args.FechaFin?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "fin";
+        return args.FechasAplicadasPorDefecto
+            ? $"Periodo consultado: {start} a {end} (aplicado por defecto)."
+            : $"Periodo consultado: {start} a {end}.";
+    }
+
+    private static object BuildOpenAiAnalysisPayload(
+        string question,
+        BuscarPlanillaArgs args,
+        List<Dictionary<string, object?>> detailRows,
+        int totalRows,
+        Dictionary<string, object?> toolParameters,
+        Dictionary<string, object?> interpretedFilters)
+    {
+        var compareVentasAndGastos = ShouldCompareVentasAndGastos(question, detailRows);
+        var amountField = ResolveAnalysisValueField(question, detailRows);
+        var analysisRows = ApplyBusinessAnalysisRules(question, detailRows, amountField, out var analysisRuleSummary);
+        var totalAmount = analysisRows.Sum(row => NormalizeDecimalValue(GetRowValue(row, amountField)));
+        var statusBreakdown = BuildSingleFieldBreakdown(analysisRows, "Estado", amountField);
+        var currencyBreakdown = BuildSingleFieldBreakdown(analysisRows, "Moneda", amountField);
+        var currencyTotals = currencyBreakdown
+            .Select(item => new
+            {
+                Moneda = GetRowText(item, "Moneda"),
+                Registros = (int)Math.Round(NormalizeDecimalValue(GetRowValue(item, "Registros"))),
+                Monto = NormalizeDecimalValue(GetRowValue(item, amountField ?? "Monto"))
+            })
+            .ToList();
+        var hasMultipleCurrencies = currencyBreakdown.Count > 1;
+        decimal? consolidatedTotalAmount = hasMultipleCurrencies ? null : totalAmount;
+        var clientProjectBreakdown = BuildClientProjectBreakdown(analysisRows, amountField);
+        var monthBreakdown = BuildMonthBreakdown(analysisRows, amountField);
+        var siteBreakdown = BuildSingleFieldBreakdown(analysisRows, "Site", amountField, "IdSite", "Site");
+        var responsibleBreakdown = BuildSingleFieldBreakdown(analysisRows, "Responsable", amountField);
+        var solicitanteBreakdown = BuildSingleFieldBreakdown(analysisRows, "Solicitante", amountField);
+        var topRecords = BuildTopRecords(analysisRows, amountField, 10);
+        var availableFields = BuildAvailableFields(detailRows);
+        var detailSample = BuildDetailSample(analysisRows, amountField, question);
+        var comparisonPayload = compareVentasAndGastos
+            ? BuildVentasVsGastosComparisonPayload(question, detailRows)
+            : null;
+
+        return new
         {
-            parts.Add($"con estados {args.Estados}");
+            question,
+            period = BuildPeriodText(args),
+            assumptions = new
+            {
+                defaultStateApplied = args.EstadosAplicadosPorDefecto,
+                defaultState = args.EstadosAplicadosPorDefecto ? args.Estados : null,
+                defaultPeriodApplied = args.FechasAplicadasPorDefecto,
+                analysisRule = analysisRuleSummary,
+                analysisMode = compareVentasAndGastos ? "comparison_ventas_vs_gastos" : "single_metric",
+                multipleCurrencies = hasMultipleCurrencies
+            },
+            totalRows,
+            analysisRows = analysisRows.Count,
+            amountField,
+            totalAmount = consolidatedTotalAmount,
+            hasMultipleCurrencies,
+            currencyTotals,
+            sourceCoverage = "Los agregados y totales se calcularon sobre el 100% de las filas devueltas por SQL.",
+            availableFields,
+            toolParameters,
+            interpretedFilters,
+            breakdowns = new
+            {
+                currency = TrimBreakdown(currencyBreakdown, 20),
+                status = TrimBreakdown(statusBreakdown, 20),
+                clientProject = TrimBreakdown(clientProjectBreakdown, 80),
+                month = monthBreakdown,
+                site = TrimBreakdown(siteBreakdown, 50),
+                responsable = TrimBreakdown(responsibleBreakdown, 50),
+                solicitante = TrimBreakdown(solicitanteBreakdown, 50)
+            },
+            topRecords,
+            detailSample,
+            comparison = comparisonPayload
+        };
+    }
+
+    private static List<Dictionary<string, object?>> ApplyBusinessAnalysisRules(
+        string question,
+        List<Dictionary<string, object?>> rows,
+        string? amountField,
+        out string? analysisRuleSummary)
+    {
+        analysisRuleSummary = null;
+
+        if (!ShouldDeduplicateVentas(question, amountField))
+        {
+            return rows;
         }
 
-        if (args.FechaInicio.HasValue || args.FechaFin.HasValue)
+        var grouped = new Dictionary<string, (Dictionary<string, object?> Row, int Count)>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var row in rows)
         {
-            var start = args.FechaInicio?.ToString("yyyy-MM-dd") ?? "inicio";
-            var end = args.FechaFin?.ToString("yyyy-MM-dd") ?? "fin";
-            parts.Add($"entre {start} y {end}");
+            var ot = NormalizeAggregationLabel(GetRowValue(row, "Ot", "OT"));
+            var site = NormalizeAggregationLabel(GetRowValue(row, "Site", "SITE", "IdSite"));
+            var key = $"{ot}||{site}";
+
+            if (grouped.TryGetValue(key, out var existing))
+            {
+                grouped[key] = (existing.Row, existing.Count + 1);
+                continue;
+            }
+
+            var clone = CloneRow(row);
+            clone["CoincidenciasVentasOtSite"] = 1;
+            grouped[key] = (clone, 1);
         }
 
-        if (parts.Count == 0)
+        var result = grouped.Values
+            .Select(item =>
+            {
+                item.Row["CoincidenciasVentasOtSite"] = item.Count;
+                return item.Row;
+            })
+            .ToList();
+
+        analysisRuleSummary = "Cuando la consulta pide ventas, el campo Ventas se calcula una sola vez por cada combinacion OT + SITE; no se suman filas repetidas del mismo cruce.";
+        return result;
+    }
+
+    private static bool ShouldDeduplicateVentas(string question, string? amountField)
+    {
+        if (string.IsNullOrWhiteSpace(amountField) ||
+            !string.Equals(amountField, "Ventas", StringComparison.OrdinalIgnoreCase))
         {
-            return string.Empty;
+            return false;
         }
 
-        return $" ({string.Join(", ", parts)})";
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            question,
+            @"\bventa\b|\bventas\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    }
+
+    private static bool ShouldCompareVentasAndGastos(string question, List<Dictionary<string, object?>> rows)
+    {
+        if (string.IsNullOrWhiteSpace(question))
+        {
+            return false;
+        }
+
+        var hasVentasField = rows.Any(row => row.Keys.Any(key => string.Equals(key, "Ventas", StringComparison.OrdinalIgnoreCase)));
+        var hasExpenseField = !string.IsNullOrWhiteSpace(ResolveExpenseField(rows));
+
+        if (!hasVentasField || !hasExpenseField)
+        {
+            return false;
+        }
+
+        var mentionsVentas = System.Text.RegularExpressions.Regex.IsMatch(
+            question,
+            @"\bventa\b|\bventas\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+        var mentionsGastos = System.Text.RegularExpressions.Regex.IsMatch(
+            question,
+            @"\bgasto\b|\bgastos\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+        var mentionsComparison = System.Text.RegularExpressions.Regex.IsMatch(
+            question,
+            @"\bcomparacion\b|\bcomparativa\b|\bcomparativo\b|\bcomparar\b|\bcontra\b|\bversus\b|\bvs\b|\bfrente\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+        return mentionsVentas && mentionsGastos && mentionsComparison;
+    }
+
+    private static object BuildVentasVsGastosComparisonPayload(
+        string question,
+        List<Dictionary<string, object?>> detailRows)
+    {
+        const string ventasField = "Ventas";
+        const string gastosField = "Subtotal";
+
+        var gastosRows = detailRows;
+        var ventasRows = ApplyBusinessAnalysisRules(question, detailRows, ventasField, out var ventasRuleSummary);
+
+        var totalGastos = gastosRows.Sum(row => NormalizeDecimalValue(GetRowValue(row, gastosField)));
+        var totalVentas = ventasRows.Sum(row => NormalizeDecimalValue(GetRowValue(row, ventasField)));
+        var diferencia = totalVentas - totalGastos;
+        var porcentajeGastosSobreVentas = totalVentas == 0m ? 0m : Math.Round((totalGastos / totalVentas) * 100m, 2);
+
+        return new
+        {
+            enabled = true,
+            gastosField,
+            ventasField,
+            rules = new
+            {
+                ventas = ventasRuleSummary,
+                gastos = "Para gastos se suman las filas del periodo filtrado usando siempre el campo Subtotal."
+            },
+            totals = new
+            {
+                registrosGastos = gastosRows.Count,
+                registrosVentas = ventasRows.Count,
+                gastos = totalGastos,
+                ventas = totalVentas,
+                diferenciaVentasMenosGastos = diferencia,
+                porcentajeGastosSobreVentas = porcentajeGastosSobreVentas
+            },
+            breakdowns = new
+            {
+                currency = TrimBreakdown(BuildDualMetricFieldBreakdown(gastosRows, ventasRows, "Moneda", gastosField, ventasField), 20),
+                month = BuildDualMetricMonthBreakdown(gastosRows, ventasRows, gastosField, ventasField),
+                clientProject = TrimBreakdown(BuildDualMetricClientProjectBreakdown(gastosRows, ventasRows, gastosField, ventasField), 80),
+                site = TrimBreakdown(BuildDualMetricFieldBreakdown(gastosRows, ventasRows, "Site", gastosField, ventasField, "IdSite"), 50)
+            },
+            topRecords = new
+            {
+                gastos = BuildTopRecords(gastosRows, gastosField, 10),
+                ventas = BuildTopRecords(ventasRows, ventasField, 10)
+            }
+        };
+    }
+
+    private static List<string> BuildAvailableFields(List<Dictionary<string, object?>> rows)
+    {
+        return rows
+            .SelectMany(row => row.Keys)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static List<Dictionary<string, object?>> TrimBreakdown(List<Dictionary<string, object?>> rows, int limit)
+    {
+        return rows.Count <= limit ? rows : rows.Take(limit).ToList();
+    }
+
+    private static List<Dictionary<string, object?>> BuildDetailSample(
+        List<Dictionary<string, object?>> rows,
+        string? amountField,
+        string question)
+    {
+        var wantsOnlyTotals = question.Contains("solamente totales", StringComparison.OrdinalIgnoreCase) ||
+                              question.Contains("solo totales", StringComparison.OrdinalIgnoreCase) ||
+                              question.Contains("sin detalle", StringComparison.OrdinalIgnoreCase) ||
+                              question.Contains("no detalle", StringComparison.OrdinalIgnoreCase);
+
+        var limit = wantsOnlyTotals ? 5 : 20;
+
+        var amountOutputKey = ResolveAnalysisAmountOutputKey(amountField);
+
+        return rows
+            .Take(limit)
+            .Select(row => new Dictionary<string, object?>
+            {
+                ["IdPlanilla"] = GetRowValue(row, "IdPlanilla", "IDPLANILLA"),
+                ["Fecha"] = GetRowText(row, "Fecha", "FECHA", "FechaIngresoTexto"),
+                ["Cliente"] = GetRowText(row, "Cliente"),
+                ["Proyecto"] = GetRowText(row, "Proyecto"),
+                ["Site"] = GetRowText(row, "Site", "IdSite"),
+                ["Responsable"] = GetRowText(row, "Responsable"),
+                ["Solicitante"] = GetRowText(row, "Solicitante"),
+                ["Estado"] = GetRowText(row, "Estado"),
+                [amountOutputKey] = NormalizeDecimalValue(GetRowValue(row, amountField))
+            })
+            .ToList();
+    }
+
+    private static List<Dictionary<string, object?>> BuildSingleFieldBreakdown(
+        List<Dictionary<string, object?>> rows,
+        string primaryField,
+        string? amountField,
+        params string[] fallbackFields)
+    {
+        var groups = new Dictionary<string, (int Count, decimal Amount)>(StringComparer.OrdinalIgnoreCase);
+        var amountOutputKey = ResolveAnalysisAmountOutputKey(amountField);
+
+        foreach (var row in rows)
+        {
+            var rawValue = GetRowValue(row, primaryField, fallbackFields);
+            var label = NormalizeAggregationLabel(rawValue);
+            (int Count, decimal Amount) current = groups.TryGetValue(label, out var existing) ? existing : (0, 0m);
+
+            current.Count += 1;
+            if (!string.IsNullOrWhiteSpace(amountField))
+            {
+                current.Amount += NormalizeDecimalValue(GetRowValue(row, amountField));
+            }
+
+            groups[label] = current;
+        }
+
+        return groups
+            .OrderByDescending(item => item.Value.Amount)
+            .ThenBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(item => new Dictionary<string, object?>
+            {
+                [primaryField] = item.Key,
+                ["Registros"] = item.Value.Count,
+                [amountOutputKey] = item.Value.Amount
+            })
+            .ToList();
+    }
+
+    private static List<Dictionary<string, object?>> BuildClientProjectBreakdown(
+        List<Dictionary<string, object?>> rows,
+        string? amountField)
+    {
+        var groups = new Dictionary<(string Cliente, string Proyecto), (int Count, decimal Amount)>();
+        var amountOutputKey = ResolveAnalysisAmountOutputKey(amountField);
+
+        foreach (var row in rows)
+        {
+            var cliente = NormalizeAggregationLabel(GetRowValue(row, "Cliente"));
+            var proyecto = NormalizeAggregationLabel(GetRowValue(row, "Proyecto"));
+            var key = (cliente, proyecto);
+            (int Count, decimal Amount) current = groups.TryGetValue(key, out var existing) ? existing : (0, 0m);
+
+            current.Count += 1;
+            if (!string.IsNullOrWhiteSpace(amountField))
+            {
+                current.Amount += NormalizeDecimalValue(GetRowValue(row, amountField));
+            }
+
+            groups[key] = current;
+        }
+
+        return groups
+            .OrderByDescending(item => item.Value.Amount)
+            .ThenBy(item => item.Key.Cliente, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item => item.Key.Proyecto, StringComparer.OrdinalIgnoreCase)
+            .Select(item => new Dictionary<string, object?>
+            {
+                ["Cliente"] = item.Key.Cliente,
+                ["Proyecto"] = item.Key.Proyecto,
+                ["Registros"] = item.Value.Count,
+                [amountOutputKey] = item.Value.Amount
+            })
+            .ToList();
+    }
+
+    private static List<Dictionary<string, object?>> BuildMonthBreakdown(
+        List<Dictionary<string, object?>> rows,
+        string? amountField)
+    {
+        var groups = new Dictionary<(int Year, int Month), (int Count, decimal Amount)>();
+        var amountOutputKey = ResolveAnalysisAmountOutputKey(amountField);
+
+        foreach (var row in rows)
+        {
+            if (!TryGetRowDate(row, out var date))
+            {
+                continue;
+            }
+
+            var key = (date.Year, date.Month);
+            (int Count, decimal Amount) current = groups.TryGetValue(key, out var existing) ? existing : (0, 0m);
+
+            current.Count += 1;
+            if (!string.IsNullOrWhiteSpace(amountField))
+            {
+                current.Amount += NormalizeDecimalValue(GetRowValue(row, amountField));
+            }
+
+            groups[key] = current;
+        }
+
+        return groups
+            .OrderByDescending(item => item.Key.Year)
+            .ThenBy(item => item.Key.Month)
+            .Select(item => new Dictionary<string, object?>
+            {
+                ["Mes"] = new DateTime(item.Key.Year, item.Key.Month, 1).ToString("MMMM yyyy", CultureInfo.GetCultureInfo("es-PE")),
+                ["Registros"] = item.Value.Count,
+                [amountOutputKey] = item.Value.Amount
+            })
+            .ToList();
+    }
+
+    private static List<Dictionary<string, object?>> BuildDualMetricFieldBreakdown(
+        List<Dictionary<string, object?>> gastosRows,
+        List<Dictionary<string, object?>> ventasRows,
+        string primaryField,
+        string gastosField,
+        string ventasField,
+        params string[] fallbackFields)
+    {
+        var groups = new Dictionary<string, (int GastoCount, decimal Gastos, int VentaCount, decimal Ventas)>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var row in gastosRows)
+        {
+            var label = NormalizeAggregationLabel(GetRowValue(row, primaryField, fallbackFields));
+            var current = groups.TryGetValue(label, out var existing) ? existing : (GastoCount: 0, Gastos: 0m, VentaCount: 0, Ventas: 0m);
+            current.GastoCount += 1;
+            current.Gastos += NormalizeDecimalValue(GetRowValue(row, gastosField));
+            groups[label] = current;
+        }
+
+        foreach (var row in ventasRows)
+        {
+            var label = NormalizeAggregationLabel(GetRowValue(row, primaryField, fallbackFields));
+            var current = groups.TryGetValue(label, out var existing) ? existing : (GastoCount: 0, Gastos: 0m, VentaCount: 0, Ventas: 0m);
+            current.VentaCount += 1;
+            current.Ventas += NormalizeDecimalValue(GetRowValue(row, ventasField));
+            groups[label] = current;
+        }
+
+        return groups
+            .OrderByDescending(item => item.Value.Ventas)
+            .ThenByDescending(item => item.Value.Gastos)
+            .ThenBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(item => new Dictionary<string, object?>
+            {
+                [primaryField] = item.Key,
+                ["RegistrosGastos"] = item.Value.GastoCount,
+                ["Gastos"] = item.Value.Gastos,
+                ["RegistrosVentas"] = item.Value.VentaCount,
+                ["Ventas"] = item.Value.Ventas,
+                ["DiferenciaVentasMenosGastos"] = item.Value.Ventas - item.Value.Gastos
+            })
+            .ToList();
+    }
+
+    private static List<Dictionary<string, object?>> BuildDualMetricClientProjectBreakdown(
+        List<Dictionary<string, object?>> gastosRows,
+        List<Dictionary<string, object?>> ventasRows,
+        string gastosField,
+        string ventasField)
+    {
+        var groups = new Dictionary<(string Cliente, string Proyecto), (int GastoCount, decimal Gastos, int VentaCount, decimal Ventas)>();
+
+        foreach (var row in gastosRows)
+        {
+            var key = (
+                NormalizeAggregationLabel(GetRowValue(row, "Cliente")),
+                NormalizeAggregationLabel(GetRowValue(row, "Proyecto")));
+            var current = groups.TryGetValue(key, out var existing) ? existing : (GastoCount: 0, Gastos: 0m, VentaCount: 0, Ventas: 0m);
+            current.GastoCount += 1;
+            current.Gastos += NormalizeDecimalValue(GetRowValue(row, gastosField));
+            groups[key] = current;
+        }
+
+        foreach (var row in ventasRows)
+        {
+            var key = (
+                NormalizeAggregationLabel(GetRowValue(row, "Cliente")),
+                NormalizeAggregationLabel(GetRowValue(row, "Proyecto")));
+            var current = groups.TryGetValue(key, out var existing) ? existing : (GastoCount: 0, Gastos: 0m, VentaCount: 0, Ventas: 0m);
+            current.VentaCount += 1;
+            current.Ventas += NormalizeDecimalValue(GetRowValue(row, ventasField));
+            groups[key] = current;
+        }
+
+        return groups
+            .OrderByDescending(item => item.Value.Ventas)
+            .ThenByDescending(item => item.Value.Gastos)
+            .ThenBy(item => item.Key.Cliente, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item => item.Key.Proyecto, StringComparer.OrdinalIgnoreCase)
+            .Select(item => new Dictionary<string, object?>
+            {
+                ["Cliente"] = item.Key.Cliente,
+                ["Proyecto"] = item.Key.Proyecto,
+                ["RegistrosGastos"] = item.Value.GastoCount,
+                ["Gastos"] = item.Value.Gastos,
+                ["RegistrosVentas"] = item.Value.VentaCount,
+                ["Ventas"] = item.Value.Ventas,
+                ["DiferenciaVentasMenosGastos"] = item.Value.Ventas - item.Value.Gastos
+            })
+            .ToList();
+    }
+
+    private static List<Dictionary<string, object?>> BuildDualMetricMonthBreakdown(
+        List<Dictionary<string, object?>> gastosRows,
+        List<Dictionary<string, object?>> ventasRows,
+        string gastosField,
+        string ventasField)
+    {
+        var groups = new Dictionary<(int Year, int Month), (int GastoCount, decimal Gastos, int VentaCount, decimal Ventas)>();
+
+        foreach (var row in gastosRows)
+        {
+            if (!TryGetRowDate(row, out var date))
+            {
+                continue;
+            }
+
+            var key = (date.Year, date.Month);
+            var current = groups.TryGetValue(key, out var existing) ? existing : (GastoCount: 0, Gastos: 0m, VentaCount: 0, Ventas: 0m);
+            current.GastoCount += 1;
+            current.Gastos += NormalizeDecimalValue(GetRowValue(row, gastosField));
+            groups[key] = current;
+        }
+
+        foreach (var row in ventasRows)
+        {
+            if (!TryGetRowDate(row, out var date))
+            {
+                continue;
+            }
+
+            var key = (date.Year, date.Month);
+            var current = groups.TryGetValue(key, out var existing) ? existing : (GastoCount: 0, Gastos: 0m, VentaCount: 0, Ventas: 0m);
+            current.VentaCount += 1;
+            current.Ventas += NormalizeDecimalValue(GetRowValue(row, ventasField));
+            groups[key] = current;
+        }
+
+        return groups
+            .OrderByDescending(item => item.Key.Year)
+            .ThenBy(item => item.Key.Month)
+            .Select(item => new Dictionary<string, object?>
+            {
+                ["Mes"] = new DateTime(item.Key.Year, item.Key.Month, 1).ToString("MMMM yyyy", CultureInfo.GetCultureInfo("es-PE")),
+                ["RegistrosGastos"] = item.Value.GastoCount,
+                ["Gastos"] = item.Value.Gastos,
+                ["RegistrosVentas"] = item.Value.VentaCount,
+                ["Ventas"] = item.Value.Ventas,
+                ["DiferenciaVentasMenosGastos"] = item.Value.Ventas - item.Value.Gastos
+            })
+            .ToList();
+    }
+
+    private static List<Dictionary<string, object?>> BuildTopRecords(
+        List<Dictionary<string, object?>> rows,
+        string? amountField,
+        int limit = 5)
+    {
+        var amountOutputKey = ResolveAnalysisAmountOutputKey(amountField);
+
+        return rows
+            .OrderByDescending(row => NormalizeDecimalValue(GetRowValue(row, amountField)))
+            .ThenBy(row => NormalizeText(GetRowText(row, "Cliente", "Proyecto", "Responsable", "Solicitante", "Site", "Estado")) ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .Take(limit)
+            .Select(row => new Dictionary<string, object?>
+            {
+                ["IdPlanilla"] = GetRowValue(row, "IdPlanilla") ?? GetRowValue(row, "IDPLANILLA"),
+                ["Fecha"] = GetRowText(row, "Fecha", "FECHA", "FechaIngresoTexto"),
+                ["Cliente"] = GetRowText(row, "Cliente"),
+                ["Proyecto"] = GetRowText(row, "Proyecto"),
+                ["Site"] = GetRowText(row, "Site", "IdSite"),
+                ["Responsable"] = GetRowText(row, "Responsable"),
+                ["Solicitante"] = GetRowText(row, "Solicitante"),
+                ["Estado"] = GetRowText(row, "Estado"),
+                [amountOutputKey] = NormalizeDecimalValue(GetRowValue(row, amountField))
+            })
+            .ToList();
+    }
+
+    private static string ResolveAnalysisAmountOutputKey(string? amountField)
+    {
+        return string.IsNullOrWhiteSpace(amountField) ? "Monto" : amountField;
+    }
+
+    private static string? ResolveExpenseField(List<Dictionary<string, object?>> rows)
+    {
+        var preferred = new[] { "Subtotal", "SubTotal" };
+
+        foreach (var candidate in preferred)
+        {
+            if (rows.Any(row => row.Keys.Any(key => string.Equals(key, candidate, StringComparison.OrdinalIgnoreCase))))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static object? GetRowValue(Dictionary<string, object?> row, string? key, params string[] additionalKeys)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return null;
+        }
+
+        var keys = new List<string> { key };
+        keys.AddRange(additionalKeys ?? []);
+
+        foreach (var candidate in keys)
+        {
+            foreach (var entry in row)
+            {
+                if (string.Equals(entry.Key, candidate, StringComparison.OrdinalIgnoreCase))
+                {
+                    return entry.Value;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string? GetRowText(Dictionary<string, object?> row, params string[] keys)
+    {
+        var value = GetRowValue(row, keys.FirstOrDefault(), keys.Skip(1).ToArray());
+        return NormalizeText(value?.ToString());
+    }
+
+    private static bool TryGetRowDate(Dictionary<string, object?> row, out DateTime date)
+    {
+        var candidate = GetRowValue(row, "Fecha", "FECHA", "FechaIngresoTexto", "FechaDeposito", "FechaDepositoTexto");
+        switch (candidate)
+        {
+            case DateTime dateTime:
+                date = dateTime;
+                return true;
+            case DateTimeOffset dateTimeOffset:
+                date = dateTimeOffset.DateTime;
+                return true;
+            case string text when DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var parsedInvariant):
+                date = parsedInvariant;
+                return true;
+            case string text when DateTime.TryParse(text, CultureInfo.GetCultureInfo("es-PE"), DateTimeStyles.AllowWhiteSpaces, out var parsedPe):
+                date = parsedPe;
+                return true;
+            case string text when DateTime.TryParse(text, CultureInfo.GetCultureInfo("en-US"), DateTimeStyles.AllowWhiteSpaces, out var parsedUs):
+                date = parsedUs;
+                return true;
+            default:
+                date = default;
+                return false;
+        }
     }
 
     private static string FormatPreviewValue(object? value)
@@ -1286,25 +2054,28 @@ public sealed class IaChatService : IIaChatService
     {
         var preferred = new[]
         {
-            "Total",
+            "SubTotalSoles",
+            "SubtotalSoles",
+            "SubTotal",
+            "Subtotal",
+            "ConPagadoSoles",
+            "ConPagado",
+            "Ventas",
+            "MontoOc2",
+            "MontoOc",
+            "SubOc",
+            "SubPlanilla",
+            "DiferenciaFic",
             "TotalSoles",
             "TotalMonto",
             "MontoTotal",
-            "TotalRegistros",
-            "Cantidad",
-            "CantidadRegistros",
+            "Total",
             "Valor",
             "Importe",
             "Saldo",
-            "SubTotal",
-            "SubTotalSoles",
-            "ConPagado",
-            "ConPagadoSoles",
-            "MontoOc",
-            "MontoOc2",
-            "SubOc",
-            "SubPlanilla",
-            "DiferenciaFic"
+            "Cantidad",
+            "CantidadRegistros",
+            "TotalRegistros"
         };
 
         foreach (var candidate in preferred)
@@ -1322,6 +2093,25 @@ public sealed class IaChatService : IIaChatService
         return inferredField ?? "Total";
     }
 
+    private static string ResolveAnalysisValueField(string question, List<Dictionary<string, object?>> rows)
+    {
+        if (ShouldPrioritizeVentasMetric(question) &&
+            rows.Any(row => row.Keys.Any(key => string.Equals(key, "Ventas", StringComparison.OrdinalIgnoreCase))))
+        {
+            return "Ventas";
+        }
+
+        return ResolveExpenseField(rows) ?? "Subtotal";
+    }
+
+    private static bool ShouldPrioritizeVentasMetric(string question)
+    {
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            question,
+            @"\bventa\b|\bventas\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    }
+
     private static bool IsNumericField(string key)
     {
         return string.Equals(key, "Total", StringComparison.OrdinalIgnoreCase) ||
@@ -1330,6 +2120,7 @@ public sealed class IaChatService : IIaChatService
                string.Equals(key, "MontoTotal", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(key, "TotalRegistros", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(key, "Monto", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(key, "Ventas", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(key, "MontoOc", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(key, "MontoOc2", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(key, "Cantidad", StringComparison.OrdinalIgnoreCase) ||
@@ -1382,16 +2173,6 @@ public sealed class IaChatService : IIaChatService
             return "(sin historial previo)";
         }
 
-        if (recentTurns.Count > 0)
-        {
-            builder.AppendLine("Turnos recientes:");
-
-            foreach (var turn in recentTurns)
-            {
-                builder.AppendLine($"- {turn.Role}: {turn.Text}");
-            }
-        }
-
         if (state.LastResponse is not null)
         {
             builder.AppendLine("Ultimo resultado estructurado:");
@@ -1424,6 +2205,16 @@ public sealed class IaChatService : IIaChatService
                         builder.AppendLine($"  - {previewRow}");
                     }
                 }
+            }
+        }
+
+        if (recentTurns.Count > 0)
+        {
+            builder.AppendLine("Turnos recientes:");
+
+            foreach (var turn in recentTurns)
+            {
+                builder.AppendLine($"- {turn.Role}: {turn.Text}");
             }
         }
 
@@ -1462,6 +2253,478 @@ public sealed class IaChatService : IIaChatService
 
         answer = $"Se actualizo el grafico a formato {requestedChartType} usando el ultimo resultado de la conversacion.";
         return true;
+    }
+
+    private static bool TryReuseLastResponseForFollowUp(
+        string question,
+        ConversationState state,
+        out IaChatResponseDto? response,
+        out string answer,
+        out string followUpIntent)
+    {
+        response = null;
+        answer = string.Empty;
+        followUpIntent = string.Empty;
+
+        var lastResponse = state.LastResponse;
+        if (lastResponse is null)
+        {
+            return false;
+        }
+
+        var normalized = NormalizeText(question)?.ToLowerInvariant() ?? string.Empty;
+        var wantsExport = normalized.Contains("export", StringComparison.OrdinalIgnoreCase) ||
+                          normalized.Contains("pdf", StringComparison.OrdinalIgnoreCase) ||
+                          normalized.Contains("reporte", StringComparison.OrdinalIgnoreCase) ||
+                          normalized.Contains("descargar", StringComparison.OrdinalIgnoreCase);
+        var wantsExecutiveView = normalized.Contains("formato ejecutivo", StringComparison.OrdinalIgnoreCase) ||
+                                 normalized.Contains("vista ejecutiva", StringComparison.OrdinalIgnoreCase) ||
+                                 normalized.Contains("cuadro ejecutivo", StringComparison.OrdinalIgnoreCase);
+        var referencesCurrentResult = normalized.Contains("ese resultado", StringComparison.OrdinalIgnoreCase) ||
+                                      normalized.Contains("este resultado", StringComparison.OrdinalIgnoreCase) ||
+                                      normalized.Contains("resultado actual", StringComparison.OrdinalIgnoreCase) ||
+                                      normalized.Contains("usar resultado actual", StringComparison.OrdinalIgnoreCase) ||
+                                      normalized.Contains("mostrar ese resultado", StringComparison.OrdinalIgnoreCase) ||
+                                      normalized.Contains("volver al resultado", StringComparison.OrdinalIgnoreCase) ||
+                                      normalized.Contains("reutiliza el resultado", StringComparison.OrdinalIgnoreCase) ||
+                                      normalized.Contains("reutilizar el resultado", StringComparison.OrdinalIgnoreCase);
+
+        if (!wantsExport && !wantsExecutiveView && !referencesCurrentResult)
+        {
+            return false;
+        }
+
+        followUpIntent = wantsExport ? "export_report" : "view_executive";
+        response = CloneResponse(lastResponse);
+        response.Answer = wantsExport
+            ? "Se reutiliza el ultimo resultado para generar el reporte solicitado."
+            : "Se reutiliza el ultimo resultado para mostrarlo en formato ejecutivo.";
+        response.ResponseType = NormalizeResponseType(response, lastResponse.ResponseType);
+
+        if (response.InterpretedFilters is null)
+        {
+            response.InterpretedFilters = new Dictionary<string, object?>();
+        }
+
+        response.InterpretedFilters["followUpIntent"] = followUpIntent;
+        response.InterpretedFilters["reusedLastResult"] = true;
+        response.InterpretedFilters["routingMode"] = "conversation";
+
+        return true;
+    }
+
+    private static bool TryListMatchesFromLastResult(
+        string question,
+        ConversationState state,
+        out IaChatResponseDto? response,
+        out string answer)
+    {
+        response = null;
+        answer = string.Empty;
+
+        var lastResponse = state.LastResponse;
+        if (lastResponse?.DetailRows is null || lastResponse.DetailRows.Count == 0)
+        {
+            return false;
+        }
+
+        var normalized = NormalizeText(question)?.ToLowerInvariant() ?? string.Empty;
+        var wantsListing = normalized.Contains("cuales son", StringComparison.OrdinalIgnoreCase) ||
+                           normalized.Contains("cuáles son", StringComparison.OrdinalIgnoreCase) ||
+                           normalized.Contains("muestra", StringComparison.OrdinalIgnoreCase) ||
+                           normalized.Contains("lista", StringComparison.OrdinalIgnoreCase) ||
+                           normalized.Contains("encuentras", StringComparison.OrdinalIgnoreCase) ||
+                           normalized.Contains("existen", StringComparison.OrdinalIgnoreCase) ||
+                           normalized.Contains("buscar", StringComparison.OrdinalIgnoreCase);
+
+        if (!wantsListing)
+        {
+            return false;
+        }
+
+        var targetToken = ExtractFollowUpToken(question);
+        if (string.IsNullOrWhiteSpace(targetToken))
+        {
+            return false;
+        }
+
+        var matches = FindMatchingNames(lastResponse.DetailRows, targetToken);
+        if (matches.Count == 0)
+        {
+            return false;
+        }
+
+        response = new IaChatResponseDto
+        {
+            Success = true,
+            Module = lastResponse.Module,
+            Answer = BuildListMatchesAnswer(targetToken, matches, lastResponse.TotalRows ?? lastResponse.DetailRows.Count),
+            ResponseType = "summary",
+            InterpretedFilters = new Dictionary<string, object?>
+            {
+                ["module"] = lastResponse.Module,
+                ["routingMode"] = "conversation",
+                ["followUpIntent"] = "list_matches",
+                ["targetToken"] = targetToken,
+                ["reusedLastResult"] = true
+            },
+            DetailRows = matches.Select(item => new Dictionary<string, object?>
+            {
+                ["Coincidencia"] = item.Name,
+                ["Campo"] = item.Field,
+                ["Registros"] = item.Count,
+                ["Ejemplo"] = item.Example
+            }).ToList(),
+            Summary = new Dictionary<string, object?>
+            {
+                ["cantidadCoincidencias"] = matches.Count,
+                ["totalRegistrosBase"] = lastResponse.TotalRows ?? lastResponse.DetailRows.Count
+            },
+            TotalRows = matches.Count
+        };
+
+        answer = response.Answer;
+        return true;
+    }
+
+    private static bool TryBuildAmbiguousRoleFollowUpArgs(string question, ConversationState state, out BuscarPlanillaArgs args)
+    {
+        args = new BuscarPlanillaArgs();
+
+        var normalized = NormalizeText(question)?.ToLowerInvariant() ?? string.Empty;
+        var wantsAmbos = normalized == "ambos" ||
+                         normalized == "ambos casos" ||
+                         normalized == "ambos casos." ||
+                         normalized.Contains("ambos", StringComparison.OrdinalIgnoreCase);
+        var wantsResponsable = normalized.Contains("responsable", StringComparison.OrdinalIgnoreCase);
+        var wantsSolicitante = normalized.Contains("solicitante", StringComparison.OrdinalIgnoreCase);
+        var wantsConfirmation = normalized == "ok" ||
+                                 normalized == "si" ||
+                                 normalized == "sí" ||
+                                 normalized == "dale" ||
+                                 normalized == "listo" ||
+                                 normalized == "perfecto" ||
+                                 normalized == "correcto";
+
+        if (!wantsAmbos && !wantsResponsable && !wantsSolicitante && !wantsConfirmation)
+        {
+            return false;
+        }
+
+        var priorUserQuestion = state.GetRecentTurns(12)
+            .AsEnumerable()
+            .Reverse()
+            .FirstOrDefault(turn => string.Equals(turn.Role, "user", StringComparison.OrdinalIgnoreCase) &&
+                                    !string.Equals(turn.Text, NormalizeText(question) ?? string.Empty, StringComparison.OrdinalIgnoreCase));
+
+        if (priorUserQuestion is null)
+        {
+            return false;
+        }
+
+        var baseArgs = BuildSearchArgsFromQuestion(priorUserQuestion.Text);
+        var person = ExtractPersonFilter(priorUserQuestion.Text);
+
+        if (string.IsNullOrWhiteSpace(person))
+        {
+            person = ExtractNamedFilter(priorUserQuestion.Text, "solicitante");
+        }
+
+        if (string.IsNullOrWhiteSpace(person))
+        {
+            person = ExtractNamedFilter(priorUserQuestion.Text, "responsable");
+        }
+
+        if (string.IsNullOrWhiteSpace(person))
+        {
+            person = ExtractClarifiedTokenFromLastAssistant(state);
+        }
+
+        if (string.IsNullOrWhiteSpace(person))
+        {
+            return false;
+        }
+
+        if (wantsConfirmation && !wantsAmbos && !wantsResponsable && !wantsSolicitante)
+        {
+            wantsAmbos = true;
+        }
+
+        if (wantsAmbos)
+        {
+            baseArgs.Responsable = person;
+            baseArgs.Solicitante = person;
+        }
+        else if (wantsResponsable && !wantsSolicitante)
+        {
+            baseArgs.Responsable = person;
+            baseArgs.Solicitante = null;
+        }
+        else if (wantsSolicitante && !wantsResponsable)
+        {
+            baseArgs.Solicitante = person;
+            baseArgs.Responsable = null;
+        }
+        else
+        {
+            baseArgs.Responsable = person;
+            baseArgs.Solicitante = person;
+        }
+
+        baseArgs.TextoBusqueda = ExtractLooseSearchText(
+            priorUserQuestion.Text,
+            baseArgs.Cliente,
+            baseArgs.Proyecto,
+            baseArgs.Solicitante,
+            baseArgs.Responsable,
+            baseArgs.IdSite);
+
+        args = baseArgs.Normalize();
+        return true;
+    }
+
+    private static bool TryBuildContextualRefinementArgs(string question, ConversationState state, out BuscarPlanillaArgs args)
+    {
+        args = new BuscarPlanillaArgs();
+
+        var normalized = NormalizeText(question)?.ToLowerInvariant() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        var wantsContextualRefinement =
+            HasExplicitStructuredFilters(question) ||
+            normalized.Contains("solo quiero", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("solo deseo", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("mostrar solo", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("muestra solo", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("visualizar solo", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("solo visualizar", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("filtrar", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("filtra", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("que sean", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("que son", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("únicamente", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("unicamente", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("solamente", StringComparison.OrdinalIgnoreCase);
+
+        if (!wantsContextualRefinement)
+        {
+            return false;
+        }
+
+        if (!string.Equals(state.LastToolName, ToolBuscarPlanilla, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var baseArgs = BuildArgsFromToolParameters(state.LastToolParameters);
+        if (baseArgs is null)
+        {
+            return false;
+        }
+
+        if (TryExtractDateRange(question, out var start, out var end))
+        {
+            baseArgs.FechaInicio = start;
+            baseArgs.FechaFin = end;
+        }
+
+        var estados = ExtractEstadosFilter(question);
+        if (!string.IsNullOrWhiteSpace(estados))
+        {
+            baseArgs.Estados = estados;
+        }
+
+        baseArgs = ApplyExplicitStructuredFilters(question, baseArgs);
+
+        var refinedSearchText = ExtractLooseSearchText(
+            question,
+            baseArgs.Cliente,
+            baseArgs.Proyecto,
+            baseArgs.Solicitante,
+            baseArgs.Responsable,
+            baseArgs.IdSite,
+            baseArgs.Ot);
+
+        if (!string.IsNullOrWhiteSpace(refinedSearchText))
+        {
+            baseArgs.TextoBusqueda = refinedSearchText;
+        }
+        else if (HasExplicitStructuredFilters(question))
+        {
+            baseArgs.TextoBusqueda = null;
+        }
+
+        baseArgs.CoincidirTodas = ShouldCoincidirTodas(question);
+        args = baseArgs.Normalize();
+        return true;
+    }
+
+    private static string? ExtractClarifiedTokenFromLastAssistant(ConversationState state)
+    {
+        var answer = state.LastResponse?.Answer;
+        if (string.IsNullOrWhiteSpace(answer))
+        {
+            return null;
+        }
+
+        var patterns = new[]
+        {
+            @"(?:solamente|solo|únicamente|unicamente|visualizar|buscar|mostrar|filtrar)\s+(?:de|del|a|al)\s+""(?<value>[^""]{3,120})""",
+            @"(?:solamente|solo|únicamente|unicamente|visualizar|buscar|mostrar|filtrar)\s+(?:de|del|a|al)\s+\*\*(?<value>[^*]{3,120})\*\*",
+            @"""(?<value>[^""]{3,120})""",
+            @"\*\*(?<value>[^*]{3,120})\*\*"
+        };
+
+        foreach (var pattern in patterns)
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(
+                answer,
+                pattern,
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            if (match.Success)
+            {
+                var value = NormalizeText(match.Groups["value"].Value);
+                if (!string.IsNullOrWhiteSpace(value) &&
+                    value.Length >= 3 &&
+                    !value.Equals("responsable", StringComparison.OrdinalIgnoreCase) &&
+                    !value.Equals("solicitante", StringComparison.OrdinalIgnoreCase) &&
+                    !value.Equals("ambos", StringComparison.OrdinalIgnoreCase))
+                {
+                    return value;
+                }
+            }
+        }
+
+        var fallbackMatch = System.Text.RegularExpressions.Regex.Match(
+            answer,
+            @"\b([A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9\s\-_]{5,120})\b",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+        if (fallbackMatch.Success)
+        {
+            var value = NormalizeText(fallbackMatch.Groups[1].Value);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    private static string ExtractFollowUpToken(string question)
+    {
+        var normalized = NormalizeText(question)?.ToLowerInvariant() ?? string.Empty;
+        var tokenCandidates = new[]
+        {
+            "tafur",
+            "alexis",
+            "francesco",
+            "saba"
+        };
+
+        foreach (var candidate in tokenCandidates)
+        {
+            if (normalized.Contains(candidate, StringComparison.OrdinalIgnoreCase))
+            {
+                return candidate.ToUpperInvariant();
+            }
+        }
+
+        var match = System.Text.RegularExpressions.Regex.Match(normalized, @"\b([a-z]{4,})\b");
+        return match.Success ? match.Groups[1].Value.ToUpperInvariant() : string.Empty;
+    }
+
+    private static List<(string Name, string Field, int Count, string Example)> FindMatchingNames(
+        List<Dictionary<string, object?>> detailRows,
+        string token)
+    {
+        var preferredFields = new[] { "Responsable", "Solicitante", "Usuario", "NombreEmpleado", "Empleado" };
+        var grouped = new Dictionary<(string Name, string Field), (int Count, string Example)>();
+
+        foreach (var row in detailRows)
+        {
+            foreach (var field in preferredFields)
+            {
+                if (!row.TryGetValue(field, out var value) || value is null)
+                {
+                    continue;
+                }
+
+                var text = Convert.ToString(value, CultureInfo.InvariantCulture)?.Trim();
+                if (string.IsNullOrWhiteSpace(text) || !text.Contains(token, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var key = (text.ToUpperInvariant(), field);
+                if (grouped.TryGetValue(key, out var existing))
+                {
+                    grouped[key] = (existing.Count + 1, existing.Example);
+                }
+                else
+                {
+                    grouped[key] = (1, BuildRowPreview(row));
+                }
+            }
+        }
+
+        return grouped
+            .Select(item => (item.Key.Name, item.Key.Field, item.Value.Count, item.Value.Example))
+            .OrderByDescending(item => item.Count)
+            .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+    }
+
+    private static string BuildListMatchesAnswer(string token, List<(string Name, string Field, int Count, string Example)> matches, int baseRowCount)
+    {
+        var lines = matches
+            .Select((match, index) => $"{index + 1}. {match.Name} ({match.Field}, {match.Count} registros)")
+            .ToList();
+
+        var preview = string.Join(Environment.NewLine, lines.Take(10));
+        return $"En la búsqueda anterior encontré estas coincidencias con {token} sobre {baseRowCount} registros base:{Environment.NewLine}{preview}{Environment.NewLine}{Environment.NewLine}Si quieres, puedo usar uno de esos nombres para refinar la consulta.";
+    }
+
+    private static IaChatResponseDto CloneResponse(IaChatResponseDto response)
+    {
+        var cloned = JsonSerializer.Deserialize<IaChatResponseDto>(
+            JsonSerializer.Serialize(response, JsonOptions),
+            JsonOptions);
+
+        return cloned ?? new IaChatResponseDto
+        {
+            Success = response.Success,
+            Module = response.Module,
+            Answer = response.Answer,
+            ResponseType = response.ResponseType,
+            InterpretedFilters = response.InterpretedFilters is null
+                ? null
+                : new Dictionary<string, object?>(response.InterpretedFilters),
+            DetailRows = response.DetailRows is null
+                ? null
+                : response.DetailRows.Select(row => new Dictionary<string, object?>(row)).ToList(),
+            Summary = response.Summary is null
+                ? null
+                : new Dictionary<string, object?>(response.Summary),
+            Chart = response.Chart is null
+                ? null
+                : new IaChatChartResponseDto
+                {
+                    ChartType = response.Chart.ChartType,
+                    Title = response.Chart.Title,
+                    CategoryField = response.Chart.CategoryField,
+                    ValueField = response.Chart.ValueField,
+                    Rows = response.Chart.Rows.Select(CloneRow).ToList()
+                },
+            TotalRows = response.TotalRows,
+            ErrorMessage = response.ErrorMessage
+        };
     }
 
     private static string? ResolveRequestedChartType(string question)
@@ -1750,17 +3013,423 @@ public sealed class IaChatService : IIaChatService
         }
     }
 
+    private bool HasOpenAiConfiguration(out string errorMessage)
+    {
+        if (string.IsNullOrWhiteSpace(_openAiSettings.ApiKey))
+        {
+            errorMessage = "Falta configurar la clave privada de OpenAI.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(_openAiSettings.Model))
+        {
+            errorMessage = "Falta configurar el modelo de OpenAI.";
+            return false;
+        }
+
+        errorMessage = string.Empty;
+        return true;
+    }
+
+    private async Task<OpenAiPlannerDecision> GetOpenAiPlannerDecisionAsync(
+        string module,
+        string question,
+        string? conversationId,
+        string conversationContext,
+        string? presentationMode,
+        bool hasAttachment,
+        bool isPdfAttachment,
+        bool prefersStructuredAttachmentResponse,
+        CancellationToken cancellationToken)
+    {
+        var systemPrompt = """
+Eres un planificador de consultas para IA Chat Administrativo.
+Devuelve exclusivamente JSON valido, sin markdown ni texto adicional.
+Tu tarea es decidir si la consulta debe:
+- usar buscar_planilla para detalle,
+- o responder como conversation si es un seguimiento, una accion de presentacion o una consulta que no necesita SQL nuevo.
+
+Reglas:
+- No inventes filtros ni datos.
+- No conviertas un nombre de persona en responsable o solicitante solo por detectarlo. Usa responsable o solicitante unicamente si el usuario lo indica de forma explicita.
+- Si el usuario menciona nombres, clientes, proyectos, sites u otras palabras de negocio sin etiqueta explicita, mantenlos en textoBusqueda.
+- Si el usuario escribe una etiqueta explicita como "responsable X", "solicitante Y", "cliente Z", "proyecto P", "site S" u "ot N", eso ya no es ambiguo: llena ese campo y usa route buscar_planilla.
+- No respondas pidiendo confirmacion si la etiqueta del filtro ya fue escrita de forma explicita por el usuario.
+- Frases como "separado por cliente y proyecto" o "agrupado por cliente y proyecto" son instrucciones de presentacion, no filtros adicionales.
+- Si menciona cliente, proyecto, site, OT, estado o fechas, llena los campos adecuados.
+- Si detectas mes y año, convierte a fechaInicio y fechaFin.
+- Si detectas solo un anio, usa el anio completo.
+- Si la consulta es un seguimiento como "mostrar ese resultado", "exportarlo", "en pdf", "cambiar formato" o "ver formato ejecutivo", no generes una nueva consulta SQL; usa route conversation.
+- Devuelve un objeto con estas claves: route, responseType, answer, buscarArgs.
+- route solo puede ser: buscar_planilla, conversation.
+- responseType solo puede ser: detail, summary, chart, conversation.
+- buscarArgs debe ser un objeto JSON cuando corresponda.
+""";
+
+        var userPrompt = BuildUserContext(
+            question,
+            conversationId,
+            conversationContext,
+            hasAttachment,
+            presentationMode,
+            isPdfAttachment,
+            prefersStructuredAttachmentResponse);
+
+        var rawResponse = await SendOpenAiChatCompletionAsync(
+            [
+                new OpenAiChatMessage
+                {
+                    Role = "system",
+                    Content = systemPrompt
+                },
+                new OpenAiChatMessage
+                {
+                    Role = "user",
+                    Content = userPrompt
+                }
+            ],
+            cancellationToken,
+            responseFormatJson: true);
+
+        var candidate = ExtractJsonCandidate(rawResponse) ?? rawResponse;
+        var decision = JsonSerializer.Deserialize<OpenAiPlannerDecision>(candidate, JsonOptions) ?? new OpenAiPlannerDecision();
+        return NormalizeOpenAiPlannerDecision(decision, question);
+    }
+
+    private async Task<string> GenerateOpenAiFinalAnswerAsync(
+        string question,
+        string conversationContext,
+        string module,
+        string route,
+        string responseType,
+        BuscarPlanillaArgs searchArgs,
+        object payload,
+        CancellationToken cancellationToken)
+    {
+        var systemPrompt = """
+Actua como un analista senior de gastos empresariales especializado en control presupuestal, rendiciones, ordenes de compra y seguimiento operativo.
+
+Responde siempre en espanol claro, ejecutivo y orientado a negocio.
+Basa tu respuesta unicamente en la informacion entregada en la conversacion y en el resultado de la consulta actual.
+La conversacion previa es la fuente principal para entender la intencion del usuario. Si el mensaje actual es una continuacion, no reinicies el tema ni pierdas el contexto.
+Si el mensaje actual es una continuidad o confirmacion breve, la prioridad de interpretacion debe ser el historial conversacional por encima del resultado nuevo.
+No inventes datos, montos, clientes, responsables, solicitantes, proyectos, sites ni estados.
+Si no hay datos suficientes, indicalo claramente y sugiere validar la consulta.
+Redacta una respuesta natural, como si fuera una respuesta directa de chat.
+Si la metrica principal del resultado actual es Ventas, analiza y describe la respuesta como ventas; no la presentes como gasto, subtotal o consumo salvo que el usuario lo pida explicitamente o exista una comparacion entre ambos conceptos.
+Si el payload incluye comparison.enabled = true, la respuesta debe tratarse como una comparativa entre dos metricas distintas:
+- Ventas = comparison.ventasField
+- Gastos = comparison.gastosField
+- Usa comparison.totals y comparison.breakdowns como fuente principal para tablas, diferencias, porcentajes y conclusiones.
+- No mezcles ventas y gastos en una sola suma ni digas que el resultado corresponde solo a gastos si el usuario pidio compararlos.
+Adapta el formato a la necesidad que se desprende del historial:
+- si la conversacion esta pidiendo analisis, explica el resultado de forma ejecutiva;
+- si esta pidiendo desglose, separa por las dimensiones relevantes;
+- si esta pidiendo comparacion, usa diferencias y porcentajes;
+- si esta pidiendo continuidad sobre un resultado previo, conserva el hilo y responde sobre ese mismo resultado.
+No respondas con una plantilla rigida si el historial indica otra necesidad.
+Menciona siempre el periodo o rango de fechas analizado cuando exista.
+            Separa siempre los resultados por moneda cuando existan una o varias monedas en la data. Todo resumen, total, comparacion o detalle debe indicar la moneda correspondiente.
+            Si el payload indica que multipleCurrencies = true o hasMultipleCurrencies = true, la respuesta debe considerar moneda separada como regla obligatoria:
+            - no presentes un unico total analizado sin moneda;
+            - no asumas que todo esta en soles;
+            - usa currencyTotals y breakdowns.currency para mostrar cada moneda por separado;
+            - si necesitas un total, debe ir rotulado por moneda (por ejemplo: "Soles", "Dolares");
+            - si el dato mezcla monedas, el resumen principal debe iniciar por el desglose por moneda y no por una cifra consolidada.
+            Si existe mas de una moneda, no mezcles importes en un solo total sin separarlos primero por moneda.
+            Si el payload incluye breakdowns.currency, currencyTotals o comparison.breakdowns.currency, usalos de forma explicita dentro de la respuesta.
+            Regla de moneda obligatoria:
+            - Si hasMultipleCurrencies = true, no redactes un total consolidado.
+            - No sumes monedas distintas bajo una sola cifra, ni siquiera como texto descriptivo.
+            - No uses frases como "por un total de X considerando ambas monedas" ni equivalentes.
+            - Si hay varias monedas, la respuesta debe comenzar con el desglose por moneda y luego, si corresponde, el detalle ejecutivo.
+Si hay suficiente informacion para un analisis ejecutivo, desarrolla conclusiones claras y naturales sin limitarte a un resumen corto.
+""";
+
+        var prioritiseHistory = QuestionLooksLikeConversation(question);
+
+        var userPrompt = $"""
+Consulta actual:
+{question}
+
+Modulo:
+{module}
+
+Historial de conversacion:
+{conversationContext}
+
+Prioridad de interpretacion:
+{(prioritiseHistory ? "HISTORIAL_CONVERSACIONAL" : "RESULTADO_ACTUAL")}
+
+Periodo consultado:
+{BuildPeriodText(searchArgs)}
+
+Resultado estructurado de la consulta actual:
+{JsonSerializer.Serialize(payload, JsonOptions)}
+
+Genera una respuesta final que respete el hilo de la conversacion y analice los datos disponibles sin forzar una plantilla fija.
+""";
+
+        var answer = await SendOpenAiChatCompletionAsync(
+            [
+                new OpenAiChatMessage
+                {
+                    Role = "system",
+                    Content = systemPrompt
+                },
+                new OpenAiChatMessage
+                {
+                    Role = "user",
+                    Content = userPrompt
+                }
+            ],
+            cancellationToken,
+            responseFormatJson: false);
+
+        return NormalizeCurrencyResponseIfNeeded(answer, payload);
+    }
+
+    private async Task<string> SendOpenAiChatCompletionAsync(
+        List<OpenAiChatMessage> messages,
+        CancellationToken cancellationToken,
+        bool responseFormatJson)
+    {
+        var requestPayload = new OpenAiChatCompletionRequest
+        {
+            Model = _openAiSettings.Model.Trim(),
+            MaxCompletionTokens = _openAiSettings.MaxTokens > 0 ? _openAiSettings.MaxTokens : 1500,
+            Temperature = 0,
+            Messages = messages,
+            ResponseFormat = responseFormatJson ? new OpenAiResponseFormat { Type = "json_object" } : null
+        };
+
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions");
+        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _openAiSettings.ApiKey.Trim());
+        httpRequest.Content = new StringContent(
+            JsonSerializer.Serialize(requestPayload, JsonOptions),
+            Encoding.UTF8,
+            "application/json");
+
+        using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
+        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"OpenAI devolvio un error {(int)response.StatusCode}: {Truncate(payload, 500)}");
+        }
+
+        var openAiResponse = JsonSerializer.Deserialize<OpenAiChatCompletionResponse>(payload, JsonOptions);
+        var content = openAiResponse?.Choices.FirstOrDefault()?.Message?.Content;
+
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            throw new InvalidOperationException("OpenAI no devolvio contenido util.");
+        }
+
+        return content.Trim();
+    }
+
+    private static OpenAiPlannerDecision NormalizeOpenAiPlannerDecision(OpenAiPlannerDecision decision, string question)
+    {
+        decision.Route = NormalizePlannerValue(decision.Route);
+        decision.ResponseType = NormalizePlannerValue(decision.ResponseType);
+        decision.Answer = NormalizeText(decision.Answer);
+
+        if (string.IsNullOrWhiteSpace(decision.Route))
+        {
+            decision.Route = QuestionLooksLikeConversation(question) ? "conversation" : "buscar_planilla";
+        }
+
+        if (decision.Route is not ("buscar_planilla" or "conversation"))
+        {
+            decision.Route = "buscar_planilla";
+        }
+
+        if (!QuestionLooksLikeConversation(question) &&
+            HasExplicitStructuredFilters(question))
+        {
+            decision.Route = "buscar_planilla";
+            if (string.IsNullOrWhiteSpace(decision.ResponseType) || decision.ResponseType == "conversation")
+            {
+                decision.ResponseType = "detail";
+            }
+
+            if (string.Equals(decision.Answer, "Consulta procesada correctamente.", StringComparison.OrdinalIgnoreCase))
+            {
+                decision.Answer = null;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(decision.ResponseType))
+        {
+            decision.ResponseType = decision.Route switch
+            {
+                "buscar_planilla" => "detail",
+                _ => "conversation"
+            };
+        }
+
+        return decision;
+    }
+
+    private static string? NormalizePlannerValue(string? value)
+    {
+        var normalized = NormalizeText(value);
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized.ToLowerInvariant();
+    }
+
+    private static bool HasExplicitStructuredFilters(string question)
+    {
+        return !string.IsNullOrWhiteSpace(ExtractResponsibleFilter(question)) ||
+               !string.IsNullOrWhiteSpace(ExtractNamedFilter(question, "responsable")) ||
+               !string.IsNullOrWhiteSpace(ExtractNamedFilter(question, "solicitante")) ||
+               !string.IsNullOrWhiteSpace(ExtractNamedFilter(question, "cliente")) ||
+               !string.IsNullOrWhiteSpace(ExtractNamedFilter(question, "proyecto")) ||
+               !string.IsNullOrWhiteSpace(ExtractNamedFilter(question, "site")) ||
+               !string.IsNullOrWhiteSpace(ExtractNamedFilter(question, "sitio")) ||
+               !string.IsNullOrWhiteSpace(ExtractNamedFilter(question, "ot"));
+    }
+
+    private static BuscarPlanillaArgs ApplyExplicitStructuredFilters(string question, BuscarPlanillaArgs args)
+    {
+        var normalized = NormalizeText(question)?.ToLowerInvariant() ?? string.Empty;
+        var mentionsResponsable = normalized.Contains("responsable", StringComparison.OrdinalIgnoreCase);
+        var mentionsSolicitante = normalized.Contains("solicitante", StringComparison.OrdinalIgnoreCase);
+
+        var responsable = ExtractResponsibleFilter(question) ?? ExtractNamedFilter(question, "responsable") ?? ExtractPersonFilter(question);
+        if (!string.IsNullOrWhiteSpace(responsable))
+        {
+            args.Responsable = responsable;
+            if (mentionsResponsable && !mentionsSolicitante)
+            {
+                args.Solicitante = null;
+            }
+        }
+
+        var solicitante = ExtractNamedFilter(question, "solicitante");
+        if (!string.IsNullOrWhiteSpace(solicitante))
+        {
+            args.Solicitante = solicitante;
+            if (mentionsSolicitante && !mentionsResponsable)
+            {
+                args.Responsable = null;
+            }
+        }
+
+        var cliente = ExtractNamedFilter(question, "cliente");
+        if (!string.IsNullOrWhiteSpace(cliente))
+        {
+            args.Cliente = cliente;
+        }
+
+        var proyecto = ExtractNamedFilter(question, "proyecto");
+        if (!string.IsNullOrWhiteSpace(proyecto))
+        {
+            args.Proyecto = proyecto;
+        }
+
+        var site = ExtractNamedFilter(question, "site") ?? ExtractNamedFilter(question, "sitio");
+        if (!string.IsNullOrWhiteSpace(site))
+        {
+            if (LooksLikeSiteIdentifier(site))
+            {
+                args.IdSite = site;
+                args.Site = null;
+            }
+            else
+            {
+                args.IdSite = null;
+                args.Site = site;
+            }
+        }
+
+        var ot = ExtractNamedFilter(question, "ot");
+        if (!string.IsNullOrWhiteSpace(ot))
+        {
+            args.Ot = ot;
+        }
+
+        if (IsMetricOnlySearchText(args.TextoBusqueda))
+        {
+            args.TextoBusqueda = null;
+        }
+
+        return args.Normalize();
+    }
+
+    private static bool QuestionLooksLikeConversation(string question)
+    {
+        var normalized = question.ToLowerInvariant();
+        return normalized.Contains("mostrar ese resultado", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Contains("exportar", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Contains("pdf", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Contains("formato", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Contains("reporte", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Contains("volver", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Contains("continuar", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed class OpenAiChatCompletionRequest
+    {
+        public string Model { get; set; } = string.Empty;
+
+        public List<OpenAiChatMessage> Messages { get; set; } = [];
+
+        [JsonPropertyName("max_completion_tokens")]
+        public int? MaxCompletionTokens { get; set; }
+
+        public decimal? Temperature { get; set; }
+
+        [JsonPropertyName("response_format")]
+        public OpenAiResponseFormat? ResponseFormat { get; set; }
+    }
+
+    private sealed class OpenAiChatCompletionResponse
+    {
+        public List<OpenAiChoice> Choices { get; set; } = [];
+    }
+
+    private sealed class OpenAiChoice
+    {
+        public OpenAiChatMessage? Message { get; set; }
+    }
+
+    private sealed class OpenAiChatMessage
+    {
+        public string Role { get; set; } = string.Empty;
+
+        public string? Content { get; set; }
+    }
+
+    private sealed class OpenAiResponseFormat
+    {
+        public string Type { get; set; } = "json_object";
+    }
+
+    private sealed class OpenAiPlannerDecision
+    {
+        public string? Route { get; set; }
+
+        public string? ResponseType { get; set; }
+
+        public string? Answer { get; set; }
+
+        public JsonElement? BuscarArgs { get; set; }
+
+        public JsonElement? ResumenArgs { get; set; }
+    }
+
     private bool HasAnthropicConfiguration(out string errorMessage)
     {
         if (string.IsNullOrWhiteSpace(_anthropicSettings.ApiKey))
         {
-            errorMessage = "Falta configurar la clave privada de Anthropic.";
+            errorMessage = "Falta configurar la clave privada de la IA.";
             return false;
         }
 
         if (string.IsNullOrWhiteSpace(_anthropicSettings.Model))
         {
-            errorMessage = "Falta configurar el modelo de Anthropic.";
+            errorMessage = "Falta configurar el modelo de la IA.";
             return false;
         }
 
@@ -1791,9 +3460,8 @@ Reglas:
 - Nunca inventes codigos de cliente, proyecto, sitio, OT o empleado.
 - Utiliza herramientas unicamente cuando la pregunta requiera datos reales.
 - Si la pregunta es conversacional, responde sin llamar herramientas.
-- Para listados y detalles, utiliza buscar_planilla.
-- Para totales, indicadores, comparativas, rankings y graficos, utiliza resumir_planilla.
-- Si el usuario pide un cuadro, tabla, grid o resumen tabular, utiliza resumir_planilla y devuelve el resultado en formato tabular, no solo grafico.
+ - Para listados, detalles, totales, indicadores, comparativas, rankings y graficos, utiliza buscar_planilla y luego analiza el resultado en memoria.
+ - Si el usuario pide un cuadro, tabla, grid o resumen tabular, usa buscar_planilla y devuelve el resultado en formato tabular o ejecutivo a partir de ese mismo resultado.
 - Cuando el usuario pida cambiar la presentacion de un grafico ya mostrado, reutiliza el ultimo resultado estructurado de la conversacion y ajusta solo el formato si el conjunto de datos no cambio.
 - Si el usuario pide "cambiar de grafico", "darle formato ejecutivo", "hacerlo mas visual" o expresiones equivalentes, interpreta la intencion a partir del ultimo grafico y de los datos ya obtenidos. No pidas SQL nuevo si el dato ya existe.
 - Si el usuario adjunta una imagen, usala como referencia visual para mejorar o reinterpretar el formato del reporte. En ese caso, responde sin usar herramientas SQL salvo que la pregunta pida datos reales adicionales.
@@ -1809,8 +3477,11 @@ Reglas:
 - Si la capa superior indica presentationMode = executive, entrega la respuesta en formato ejecutivo aunque la pregunta sea ambigua: usa resumen compacto, top 5, cards KPI y un grafico limpio; no devuelvas un listado bruto salvo que el usuario pida detalle.
 - Si faltan datos indispensables, solicita una aclaracion breve.
 - Explica montos y saldos claramente.
+- Para calculos monetarios usa siempre la regla del modulo y del tipo de consulta:
+  - si la consulta es de GASTOS, el campo base de calculo es Subtotal;
+  - si la consulta es de VENTAS, el campo base de calculo es Ventas.
 - Diferencia entre:
-  - MontoOc: valor total de la OC por sitio;
+  - Ventas: valor total de la OC por sitio (si el dataset antiguo usa MontoOc o MontoOc2, tratalo como el mismo concepto);
   - ConPagado: monto pagado o comprometido en el sitio;
   - SubOc: valor de la OC creada por el empleado;
   - SubPlanilla: monto pagado contra la OC creada por el empleado;
@@ -1885,14 +3556,6 @@ Instruccion de visualizacion:
                 Strict = true,
                 InputSchema = BuildBuscarPlanillaSchema()
             },
-            new AnthropicToolDefinition
-            {
-                Name = ToolResumirPlanilla,
-                Description =
-                    "Genera resumentes, indicadores, totales, rankings, comparativas y datos agrupados para graficos del modulo Gastos y Planilla. Utilizala cuando el usuario pregunta cuanto, cual tiene mayor o menor valor, solicita comparar, resumir, consolidar o graficar. Elige agruparPor entre CLIENTE, PROYECTO, RESPONSABLE, SITE, ESTADO o MES.",
-                Strict = true,
-                InputSchema = BuildResumenPlanillaSchema()
-            }
         ];
     }
 
@@ -1942,6 +3605,12 @@ Instruccion de visualizacion:
                 {
                     ["type"] = "integer"
                 },
+                ["solicitante"] = new Dictionary<string, object?>
+                {
+                    ["type"] = "string",
+                    ["description"] = "Nombre del solicitante o persona asociada.",
+                    ["maxLength"] = 150
+                },
                 ["idSite"] = new Dictionary<string, object?>
                 {
                     ["type"] = "string",
@@ -1960,79 +3629,152 @@ Instruccion de visualizacion:
         };
     }
 
-    private static Dictionary<string, object?> BuildResumenPlanillaSchema()
-    {
-        return new Dictionary<string, object?>
-        {
-            ["type"] = "object",
-            ["additionalProperties"] = false,
-            ["properties"] = new Dictionary<string, object?>
-            {
-                ["agruparPor"] = new Dictionary<string, object?>
-                {
-                    ["type"] = "string",
-                    ["enum"] = new[] { "CLIENTE", "PROYECTO", "RESPONSABLE", "SITE", "ESTADO", "MES" }
-                },
-                ["textoBusqueda"] = new Dictionary<string, object?>
-                {
-                    ["type"] = "string",
-                    ["description"] = "Palabras clave libres presentes en detalles o comentarios.",
-                    ["maxLength"] = 500
-                },
-                ["estados"] = new Dictionary<string, object?>
-                {
-                    ["type"] = "string",
-                    ["maxLength"] = 100
-                },
-                ["fechaInicio"] = new Dictionary<string, object?>
-                {
-                    ["type"] = "string",
-                    ["format"] = "date"
-                },
-                ["fechaFin"] = new Dictionary<string, object?>
-                {
-                    ["type"] = "string",
-                    ["format"] = "date"
-                },
-                ["idCliente"] = new Dictionary<string, object?>
-                {
-                    ["type"] = "integer"
-                },
-                ["idProyecto"] = new Dictionary<string, object?>
-                {
-                    ["type"] = "integer"
-                },
-                ["idSite"] = new Dictionary<string, object?>
-                {
-                    ["type"] = "string",
-                    ["maxLength"] = 50
-                },
-                ["top"] = new Dictionary<string, object?>
-                {
-                    ["type"] = "integer"
-                }
-            },
-            ["required"] = Array.Empty<string>()
-        };
-    }
-
     private static BuscarPlanillaArgs ParseBuscarPlanillaArgs(JsonElement? input)
     {
-        var rawInput = input?.GetRawText() ?? "{}";
-        var args = JsonSerializer.Deserialize<BuscarPlanillaArgs>(rawInput, JsonOptions) ?? new BuscarPlanillaArgs();
+        var args = ParseBuscarPlanillaArgsManually(input);
         args.TamanoPagina = Math.Clamp(args.TamanoPagina <= 0 ? 50 : args.TamanoPagina, 1, MaxPageSize);
         args.Pagina = Math.Max(args.Pagina, 1);
         args.TipoCambio = args.TipoCambio <= 0 ? 3.8m : args.TipoCambio;
         return args.Normalize();
     }
 
-    private static ResumenPlanillaArgs ParseResumenPlanillaArgs(JsonElement? input)
+    private static BuscarPlanillaArgs ParseBuscarPlanillaArgsManually(JsonElement? input)
     {
-        var rawInput = input?.GetRawText() ?? "{}";
-        var args = JsonSerializer.Deserialize<ResumenPlanillaArgs>(rawInput, JsonOptions) ?? new ResumenPlanillaArgs();
-        args.Top = Math.Clamp(args.Top <= 0 ? 20 : args.Top, 1, MaxTop);
-        args.TipoCambio = args.TipoCambio <= 0 ? 3.8m : args.TipoCambio;
-        return args.Normalize();
+        var args = new BuscarPlanillaArgs();
+        if (input is null || input.Value.ValueKind != JsonValueKind.Object)
+        {
+            return args;
+        }
+
+        var value = input.Value;
+
+        args.TextoBusqueda = GetJsonStringLikeValue(value, "textoBusqueda");
+        args.Estados = GetJsonStringLikeValue(value, "estados");
+        args.FechaInicio = GetJsonDateOnlyValue(value, "fechaInicio");
+        args.FechaFin = GetJsonDateOnlyValue(value, "fechaFin");
+        args.IdSolicitante = GetJsonIntValue(value, "idSolicitante");
+        args.IdValidador = GetJsonIntValue(value, "idValidador");
+        args.IdCliente = GetJsonIntValue(value, "idCliente");
+        args.IdProyecto = GetJsonIntValue(value, "idProyecto");
+        args.IdSite = GetJsonStringLikeValue(value, "idSite");
+        args.CorreSite = GetJsonIntValue(value, "correSite");
+        args.Cliente = GetJsonStringLikeValue(value, "cliente");
+        args.Proyecto = GetJsonStringLikeValue(value, "proyecto");
+        args.Responsable = GetJsonStringLikeValue(value, "responsable");
+        args.Solicitante = GetJsonStringLikeValue(value, "solicitante");
+        args.Ot = GetJsonStringLikeValue(value, "ot");
+        args.CoincidirTodas = GetJsonBoolValue(value, "coincidirTodas") ?? args.CoincidirTodas;
+        args.IncluirEstado99 = GetJsonBoolValue(value, "incluirEstado99") ?? args.IncluirEstado99;
+        args.Pagina = GetJsonIntValue(value, "pagina") ?? args.Pagina;
+        args.TamanoPagina = GetJsonIntValue(value, "tamanoPagina") ?? args.TamanoPagina;
+        args.TipoCambio = GetJsonDecimalValue(value, "tipoCambio") ?? args.TipoCambio;
+
+        return args;
+    }
+
+    private static string? GetJsonStringLikeValue(JsonElement source, string propertyName)
+    {
+        if (!source.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        return property.ValueKind switch
+        {
+            JsonValueKind.String => property.GetString(),
+            JsonValueKind.Number => property.ToString(),
+            JsonValueKind.True => bool.TrueString,
+            JsonValueKind.False => bool.FalseString,
+            JsonValueKind.Array => string.Join(",",
+                property.EnumerateArray()
+                    .Select(item => item.ValueKind == JsonValueKind.String ? item.GetString() : item.ToString())
+                    .Where(item => !string.IsNullOrWhiteSpace(item))),
+            _ => null
+        };
+    }
+
+    private static int? GetJsonIntValue(JsonElement source, string propertyName)
+    {
+        if (!source.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        if (property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out var numericValue))
+        {
+            return numericValue;
+        }
+
+        if (property.ValueKind == JsonValueKind.String &&
+            int.TryParse(property.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var stringValue))
+        {
+            return stringValue;
+        }
+
+        return null;
+    }
+
+    private static decimal? GetJsonDecimalValue(JsonElement source, string propertyName)
+    {
+        if (!source.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        if (property.ValueKind == JsonValueKind.Number && property.TryGetDecimal(out var numericValue))
+        {
+            return numericValue;
+        }
+
+        if (property.ValueKind == JsonValueKind.String &&
+            decimal.TryParse(property.GetString(), NumberStyles.Number, CultureInfo.InvariantCulture, out var stringValue))
+        {
+            return stringValue;
+        }
+
+        return null;
+    }
+
+    private static bool? GetJsonBoolValue(JsonElement source, string propertyName)
+    {
+        if (!source.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        if (property.ValueKind == JsonValueKind.True)
+        {
+            return true;
+        }
+
+        if (property.ValueKind == JsonValueKind.False)
+        {
+            return false;
+        }
+
+        if (property.ValueKind == JsonValueKind.String &&
+            bool.TryParse(property.GetString(), out var stringValue))
+        {
+            return stringValue;
+        }
+
+        return null;
+    }
+
+    private static DateOnly? GetJsonDateOnlyValue(JsonElement source, string propertyName)
+    {
+        if (!source.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        if (property.ValueKind == JsonValueKind.String &&
+            DateOnly.TryParse(property.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var dateValue))
+        {
+            return dateValue;
+        }
+
+        return null;
     }
 
     private static AnthropicContentBlock CreateToolResultBlock(string toolUseId, object result)
@@ -2188,7 +3930,7 @@ Instruccion de visualizacion:
         var searchArgs = BuildSearchArgsFromQuestion(question);
         searchArgs.TamanoPagina = MaxPageSize;
         searchArgs.Pagina = 1;
-        searchArgs.CoincidirTodas = true;
+        searchArgs.CoincidirTodas = ShouldCoincidirTodas(question);
 
         request = new LocalExecutiveAggregationRequest
         {
@@ -2202,185 +3944,63 @@ Instruccion de visualizacion:
 
     private static BuscarPlanillaArgs BuildSearchArgsFromQuestion(string question)
     {
-        var normalized = question.ToLowerInvariant();
         var args = new BuscarPlanillaArgs();
-
-        if (TryExtractYearRange(question, out var yearStart, out var yearEnd))
+        if (TryExtractDateRange(question, out var start, out var end))
         {
-            args.FechaInicio = yearStart;
-            args.FechaFin = yearEnd;
+            args.FechaInicio = start;
+            args.FechaFin = end;
         }
-        else if (normalized.Contains("este año", StringComparison.OrdinalIgnoreCase) ||
-                 normalized.Contains("este aÃ±o", StringComparison.OrdinalIgnoreCase))
+        else
         {
             var peruNow = DateTimeOffset.UtcNow.ToOffset(PeruOffset);
             args.FechaInicio = new DateOnly(peruNow.Year, 1, 1);
             args.FechaFin = new DateOnly(peruNow.Year, 12, 31);
         }
-        else if (normalized.Contains("este mes", StringComparison.OrdinalIgnoreCase))
-        {
-            var peruNow = DateTimeOffset.UtcNow.ToOffset(PeruOffset);
-            args.FechaInicio = new DateOnly(peruNow.Year, peruNow.Month, 1);
-            args.FechaFin = new DateOnly(peruNow.Year, peruNow.Month, DateTime.DaysInMonth(peruNow.Year, peruNow.Month));
-        }
-        else if (normalized.Contains("mes pasado", StringComparison.OrdinalIgnoreCase))
-        {
-            var peruNow = DateTimeOffset.UtcNow.ToOffset(PeruOffset).AddMonths(-1);
-            args.FechaInicio = new DateOnly(peruNow.Year, peruNow.Month, 1);
-            args.FechaFin = new DateOnly(peruNow.Year, peruNow.Month, DateTime.DaysInMonth(peruNow.Year, peruNow.Month));
-        }
 
-        var estados = ExtractEstadosFilter(question);
-        if (!string.IsNullOrWhiteSpace(estados))
-        {
-            args.Estados = estados;
-        }
+        args.Estados = ExtractEstadosFilter(question);
+        args.Solicitante = ExtractNamedFilter(question, "solicitante");
+        args.Responsable = ExtractResponsibleFilter(question) ?? ExtractPersonFilter(question);
+        args.Cliente = ExtractNamedFilter(question, "cliente");
+        args.Proyecto = ExtractNamedFilter(question, "proyecto");
+        args.IdSite = ExtractSiteCode(question);
+        args.Site = ExtractNamedFilter(question, "site") ?? ExtractNamedFilter(question, "sitio");
 
-        var responsable = ExtractPersonFilter(question);
-        if (!string.IsNullOrWhiteSpace(responsable))
+        if (string.IsNullOrWhiteSpace(args.TextoBusqueda))
         {
-            args.Responsable = responsable;
+            args.TextoBusqueda = ExtractLooseSearchText(
+                question,
+                args.Cliente,
+                args.Proyecto,
+                args.Solicitante,
+                args.Responsable,
+                args.IdSite);
         }
 
-        var cliente = ExtractNamedFilter(question, "cliente");
-        if (!string.IsNullOrWhiteSpace(cliente))
+        args.CoincidirTodas = ShouldCoincidirTodas(question);
+
+        args.TamanoPagina = MaxPageSize;
+        args = args.Normalize();
+
+        if (IsMetricOnlySearchText(args.TextoBusqueda))
         {
-            args.Cliente = cliente;
+            args.TextoBusqueda = null;
         }
 
-        var proyecto = ExtractNamedFilter(question, "proyecto");
-        if (!string.IsNullOrWhiteSpace(proyecto))
-        {
-            args.Proyecto = proyecto;
-        }
-
-        var siteCode = ExtractSiteCode(question);
-        if (!string.IsNullOrWhiteSpace(siteCode))
-        {
-            args.IdSite = siteCode;
-        }
-
-        args.CoincidirTodas =
-            args.FechaInicio.HasValue ||
-            args.FechaFin.HasValue ||
-            args.Estados is not null ||
-            args.TextoBusqueda is not null ||
-            args.Responsable is not null ||
-            args.Cliente is not null ||
-            args.Proyecto is not null ||
-            args.IdSite is not null;
-
-        return args.Normalize();
+        return args;
     }
 
-    private static bool TryBuildDeterministicResumenArgs(string question, out ResumenPlanillaArgs args)
+    private static bool ShouldCoincidirTodas(string question)
     {
-        args = new ResumenPlanillaArgs();
-        var normalized = question.ToLowerInvariant();
+        var normalized = NormalizeText(question)?.ToLowerInvariant() ?? string.Empty;
 
-        var groupBy = ResolveDeterministicGroupBy(normalized);
-        if (groupBy is null)
-        {
-            return false;
-        }
-
-        var wantsSummary =
-            normalized.Contains("resumen", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("cuadro", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("tabla", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("top", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("mayor", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("menor", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("ranking", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("graf", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("cuantos", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("cuantas", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("cuánto", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("cuanto", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("cuántos", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("cuántas", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("cantidad", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("total", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("numero", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("número", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("gastos por", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("consumo por", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("agrupa", StringComparison.OrdinalIgnoreCase);
-
-        if (!wantsSummary)
-        {
-            return false;
-        }
-
-        args.AgruparPor = groupBy;
-        args.Top = ExtractTop(question) ?? 20;
-
-        if (TryExtractYearRange(question, out var yearStart, out var yearEnd))
-        {
-            args.FechaInicio = yearStart;
-            args.FechaFin = yearEnd;
-        }
-        else if (normalized.Contains("este año", StringComparison.OrdinalIgnoreCase))
-        {
-            var peruNow = DateTimeOffset.UtcNow.ToOffset(PeruOffset);
-            args.FechaInicio = new DateOnly(peruNow.Year, 1, 1);
-            args.FechaFin = new DateOnly(peruNow.Year, 12, 31);
-        }
-        else if (normalized.Contains("este mes", StringComparison.OrdinalIgnoreCase))
-        {
-            var peruNow = DateTimeOffset.UtcNow.ToOffset(PeruOffset);
-            args.FechaInicio = new DateOnly(peruNow.Year, peruNow.Month, 1);
-            args.FechaFin = new DateOnly(peruNow.Year, peruNow.Month, DateTime.DaysInMonth(peruNow.Year, peruNow.Month));
-        }
-        else if (normalized.Contains("mes pasado", StringComparison.OrdinalIgnoreCase))
-        {
-            var peruNow = DateTimeOffset.UtcNow.ToOffset(PeruOffset).AddMonths(-1);
-            args.FechaInicio = new DateOnly(peruNow.Year, peruNow.Month, 1);
-            args.FechaFin = new DateOnly(peruNow.Year, peruNow.Month, DateTime.DaysInMonth(peruNow.Year, peruNow.Month));
-        }
-
-        var estados = ExtractEstadosFilter(question);
-        if (!string.IsNullOrWhiteSpace(estados))
-        {
-            args.Estados = estados;
-        }
-
-        var responsable = ExtractPersonFilter(question);
-        if (!string.IsNullOrWhiteSpace(responsable))
-        {
-            args.Responsable = responsable;
-        }
-
-        var cliente = ExtractNamedFilter(question, "cliente");
-        if (!string.IsNullOrWhiteSpace(cliente))
-        {
-            args.Cliente = cliente;
-        }
-
-        var proyecto = ExtractNamedFilter(question, "proyecto");
-        if (!string.IsNullOrWhiteSpace(proyecto))
-        {
-            args.Proyecto = proyecto;
-        }
-
-        var siteCode = ExtractSiteCode(question);
-        if (!string.IsNullOrWhiteSpace(siteCode))
-        {
-            args.IdSite = siteCode;
-        }
-
-        args.CoincidirTodas =
-            args.FechaInicio.HasValue ||
-            args.FechaFin.HasValue ||
-            args.Estados is not null ||
-            args.TextoBusqueda is not null ||
-            args.Responsable is not null ||
-            args.Cliente is not null ||
-            args.Proyecto is not null ||
-            args.IdSite is not null;
-
-        args = args.Normalize();
-        return true;
+        return normalized.Contains("coincidir todas", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Contains("coincidencia exacta", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Contains("coincidencia total", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Contains("todos los terminos", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Contains("todos los términos", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Contains("todos los filtros", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Contains("exactamente", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Contains("exacto", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool TryBuildDeterministicBuscarArgs(string question, out BuscarPlanillaArgs args)
@@ -2478,6 +4098,12 @@ Instruccion de visualizacion:
             args.Estados = estados;
         }
 
+        var solicitante = ExtractNamedFilter(question, "solicitante");
+        if (!string.IsNullOrWhiteSpace(solicitante))
+        {
+            args.Solicitante = solicitante;
+        }
+
         var responsable = ExtractPersonFilter(question);
         if (!string.IsNullOrWhiteSpace(responsable))
         {
@@ -2502,21 +4128,25 @@ Instruccion de visualizacion:
             args.IdSite = siteCode;
         }
 
-        args.CoincidirTodas =
-            args.FechaInicio.HasValue ||
-            args.FechaFin.HasValue ||
-            args.Estados is not null ||
-            args.TextoBusqueda is not null ||
-            args.Responsable is not null ||
-            args.Cliente is not null ||
-            args.Proyecto is not null ||
-            args.IdSite is not null;
+        if (string.IsNullOrWhiteSpace(args.TextoBusqueda))
+        {
+            args.TextoBusqueda = ExtractLooseSearchText(
+                question,
+                args.Cliente,
+                args.Proyecto,
+                args.Solicitante,
+                args.Responsable,
+                args.IdSite);
+        }
+
+        args.CoincidirTodas = ShouldCoincidirTodas(question);
 
         args = args.Normalize();
         return args.Estados is not null ||
                args.TextoBusqueda is not null ||
                args.FechaInicio.HasValue ||
                args.FechaFin.HasValue ||
+               args.Solicitante is not null ||
                args.Responsable is not null ||
                args.Cliente is not null ||
                args.Proyecto is not null ||
@@ -2667,6 +4297,7 @@ Instruccion de visualizacion:
         }
 
         var value = match.Groups["value"].Value.Trim();
+        value = TrimAtStructuralSeparator(value);
         value = System.Text.RegularExpressions.Regex.Replace(
             value,
             @"\b(de este mes|del este mes|de este año|del este año|de 20\d{2}|del 20\d{2}|este mes|este año|mes pasado|hoy|ayer)\b.*$",
@@ -2674,6 +4305,82 @@ Instruccion de visualizacion:
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
         return NormalizeText(value);
+    }
+
+    private static string? ExtractLooseSearchText(string question, params string?[] explicitFilters)
+    {
+        var normalized = NormalizeText(question)?.ToLowerInvariant() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        foreach (var filter in explicitFilters)
+        {
+            var normalizedFilter = NormalizeText(filter)?.ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(normalizedFilter))
+            {
+                continue;
+            }
+
+            normalized = System.Text.RegularExpressions.Regex.Replace(
+                normalized,
+                $@"(?<!\w){System.Text.RegularExpressions.Regex.Escape(normalizedFilter).Replace("\\ ", "\\s+")}(?!\w)",
+                " ",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        }
+
+        normalized = System.Text.RegularExpressions.Regex.Replace(
+            normalized,
+            @"\b(comparacion|comparar|comparando|comparativa|comparativo|contra|vs|versus|frente|frentea|montooc2|montooc|monto|oc2|conpagado|conpagadosoles|subtotalesoles|subtotalsoles|saldoocsitio|suboc|subplanilla|adelafic|diferenciafic|venta|ventas|quiero|saber|mostrar|consultar|buscar|registros|registro|planilla|detalle|detalles|total|suma|sumado|gasto|gastos|cliente|clientes|proyecto|proyectos|site|sitio|sitios|responsable|responsables|solicitante|solicitantes|estado|estados|considerando|considera|considerar|pagado|pagada|pagados|pagadas|aprobado|aprobada|aprobados|aprobadas|pendiente|pendientes|observado|observada|observados|observadas|rechazado|rechazada|rechazados|rechazadas|separado|separada|separados|separadas|agrupado|agrupada|agrupados|agrupadas|de|del|para|por|con|en|el|la|los|las|periodo|periodo|mes|ano|año)\\b",
+            " ",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+        var tokens = System.Text.RegularExpressions.Regex.Matches(normalized, @"[\p{L}0-9\-_]+")
+            .Select(match => match.Value.Trim())
+            .Where(token => token.Length > 1)
+            .Take(4)
+            .ToList();
+
+        return tokens.Count == 0 ? null : NormalizeText(string.Join(" ", tokens));
+    }
+
+    private static bool IsMetricOnlySearchText(string? value)
+    {
+        var normalized = NormalizeText(value)?.ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        var tokens = System.Text.RegularExpressions.Regex.Matches(normalized, @"[\p{L}0-9\-_]+")
+            .Select(match => match.Value.Trim())
+            .Where(token => token.Length > 0)
+            .ToList();
+
+        if (tokens.Count == 0)
+        {
+            return false;
+        }
+
+        return tokens.All(token =>
+            token is "venta" or "ventas" or "gasto" or "gastos" or "montooc" or "montooc2" or "ventasvsgastos");
+    }
+
+    private static string TrimAtStructuralSeparator(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var separatorIndex = value.IndexOfAny(new[] { ',', ';', ':', ')' });
+        if (separatorIndex >= 0)
+        {
+            value = value[..separatorIndex];
+        }
+
+        return value.Trim().TrimEnd('.', ',', ';', ':');
     }
 
     private static string? ExtractResponsibleFilter(string question)
@@ -2697,6 +4404,7 @@ Instruccion de visualizacion:
             }
 
             var value = match.Groups["value"].Value.Trim();
+            value = TrimAtStructuralSeparator(value);
             value = System.Text.RegularExpressions.Regex.Replace(
                 value,
                 @"\b(de este mes|del este mes|de este aÃ±o|del este aÃ±o|de 20\d{2}|del 20\d{2}|este mes|este aÃ±o|mes pasado|hoy|ayer)\b.*$",
@@ -2718,8 +4426,7 @@ Instruccion de visualizacion:
         var patterns = new[]
         {
             @"\b(?:para\s+el\s+|para\s+la\s+|del\s+|de\s+el\s+|de\s+la\s+)?(?:responsable|empleado|trabajador|colaborador|usuario|asesor)(?:\s+de)?\s+(?<value>[A-Za-zÁÉÍÓÚáéíóúÑñ0-9\.\-_ ]{3,80})",
-            @"\b(?:responsable|empleado|trabajador|colaborador|usuario|asesor)(?:\s+de)?\s+(?<value>[A-Za-zÁÉÍÓÚáéíóúÑñ0-9\.\-_ ]{3,80})",
-            @"\b(?:de|para|del|para\s+el|para\s+la)\s+(?<value>[A-Za-zÁÉÍÓÚáéíóúÑñ]{2,}(?:\s+[A-Za-zÁÉÍÓÚáéíóúÑñ0-9\.\-_]{2,}){1,3})"
+            @"\b(?:responsable|empleado|trabajador|colaborador|usuario|asesor)(?:\s+de)?\s+(?<value>[A-Za-zÁÉÍÓÚáéíóúÑñ0-9\.\-_ ]{3,80})"
         };
 
         foreach (var pattern in patterns)
@@ -2735,6 +4442,7 @@ Instruccion de visualizacion:
             }
 
             var value = match.Groups["value"].Value.Trim();
+            value = TrimAtStructuralSeparator(value);
             value = System.Text.RegularExpressions.Regex.Replace(
                 value,
                 @"\b(de este mes|del este mes|de este año|del este año|de 20\d{2}|del 20\d{2}|este mes|este año|mes pasado|hoy|ayer)\b.*$",
@@ -2749,6 +4457,125 @@ Instruccion de visualizacion:
         }
 
         return null;
+    }
+
+    private static BuscarPlanillaArgs? BuildArgsFromToolParameters(Dictionary<string, object?>? toolParameters)
+    {
+        if (toolParameters is null || toolParameters.Count == 0)
+        {
+            return null;
+        }
+
+        var args = new BuscarPlanillaArgs
+        {
+            TextoBusqueda = GetDictionaryString(toolParameters, "textoBusqueda"),
+            Estados = GetDictionaryString(toolParameters, "estados"),
+            FechaInicio = GetDictionaryDateOnly(toolParameters, "fechaInicio"),
+            FechaFin = GetDictionaryDateOnly(toolParameters, "fechaFin"),
+            IdSolicitante = GetDictionaryInt(toolParameters, "idSolicitante"),
+            IdValidador = GetDictionaryInt(toolParameters, "idValidador"),
+            IdCliente = GetDictionaryInt(toolParameters, "idCliente"),
+            IdProyecto = GetDictionaryInt(toolParameters, "idProyecto"),
+            IdSite = GetDictionaryString(toolParameters, "idSite"),
+            Site = GetDictionaryString(toolParameters, "site"),
+            CorreSite = GetDictionaryInt(toolParameters, "correSite"),
+            Cliente = GetDictionaryString(toolParameters, "cliente"),
+            Proyecto = GetDictionaryString(toolParameters, "proyecto"),
+            Responsable = GetDictionaryString(toolParameters, "responsable"),
+            Solicitante = GetDictionaryString(toolParameters, "solicitante"),
+            Ot = GetDictionaryString(toolParameters, "ot"),
+            CoincidirTodas = GetDictionaryBool(toolParameters, "coincidirTodas") ?? false,
+            IncluirEstado99 = GetDictionaryBool(toolParameters, "incluirEstado99") ?? true,
+            Pagina = GetDictionaryInt(toolParameters, "pagina") ?? 1,
+            TamanoPagina = GetDictionaryInt(toolParameters, "tamanoPagina") ?? 50,
+            TipoCambio = GetDictionaryDecimal(toolParameters, "tipoCambio") ?? 3.8m
+        };
+
+        return args.Normalize();
+    }
+
+    private static string? GetDictionaryString(Dictionary<string, object?> source, string key)
+    {
+        if (!source.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return NormalizeText(Convert.ToString(value, CultureInfo.InvariantCulture));
+    }
+
+    private static int? GetDictionaryInt(Dictionary<string, object?> source, string key)
+    {
+        if (!source.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            int intValue => intValue,
+            long longValue when longValue <= int.MaxValue && longValue >= int.MinValue => (int)longValue,
+            decimal decimalValue when decimalValue <= int.MaxValue && decimalValue >= int.MinValue => (int)decimalValue,
+            string stringValue when int.TryParse(stringValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) => parsed,
+            _ => null
+        };
+    }
+
+    private static bool? GetDictionaryBool(Dictionary<string, object?> source, string key)
+    {
+        if (!source.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            bool boolValue => boolValue,
+            string stringValue when bool.TryParse(stringValue, out var parsed) => parsed,
+            _ => null
+        };
+    }
+
+    private static decimal? GetDictionaryDecimal(Dictionary<string, object?> source, string key)
+    {
+        if (!source.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            decimal decimalValue => decimalValue,
+            double doubleValue => Convert.ToDecimal(doubleValue, CultureInfo.InvariantCulture),
+            float floatValue => Convert.ToDecimal(floatValue, CultureInfo.InvariantCulture),
+            int intValue => intValue,
+            long longValue => longValue,
+            string stringValue when decimal.TryParse(stringValue, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed) => parsed,
+            _ => null
+        };
+    }
+
+    private static DateOnly? GetDictionaryDateOnly(Dictionary<string, object?> source, string key)
+    {
+        if (!source.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        if (value is DateOnly dateOnlyValue)
+        {
+            return dateOnlyValue;
+        }
+
+        if (value is DateTime dateTimeValue)
+        {
+            return DateOnly.FromDateTime(dateTimeValue);
+        }
+
+        var text = Convert.ToString(value, CultureInfo.InvariantCulture);
+        return DateOnly.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
+            ? parsed
+            : null;
     }
 
     private static bool LooksLikePersonName(string value)
@@ -2870,6 +4697,20 @@ Instruccion de visualizacion:
         return match.Success ? NormalizeText(match.Groups[1].Value) : null;
     }
 
+    private static bool LooksLikeSiteIdentifier(string value)
+    {
+        var normalized = NormalizeText(value)?.ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            normalized,
+            @"^[A-Z]{2,}\d+[A-Z0-9_]*$",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    }
+
     private static bool TryExtractYearRange(string question, out DateOnly start, out DateOnly end)
     {
         var match = System.Text.RegularExpressions.Regex.Match(
@@ -2889,62 +4730,149 @@ Instruccion de visualizacion:
         return false;
     }
 
-    private static bool NeedsClarification(string question)
+    private static bool TryExtractDateRange(string question, out DateOnly start, out DateOnly end)
     {
         var normalized = question.ToLowerInvariant();
-        var hasTimeContext =
-            normalized.Contains("hoy", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("ayer", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("este mes", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("este año", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("mes pasado", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("ultima semana", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("última semana", StringComparison.OrdinalIgnoreCase) ||
-            System.Text.RegularExpressions.Regex.IsMatch(normalized, @"\b(202[0-9]|19[0-9]{2})\b", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        var peruYear = DateTimeOffset.UtcNow.ToOffset(PeruOffset).Year;
 
-        if (hasTimeContext)
+        if (TryExtractQuarterRange(normalized, peruYear, out start, out end))
         {
+            return true;
+        }
+
+        if (TryExtractMonthRange(normalized, peruYear, out start, out end))
+        {
+            return true;
+        }
+
+        if (TryExtractYearRange(question, out start, out end))
+        {
+            return true;
+        }
+
+        start = new DateOnly(peruYear, 1, 1);
+        end = new DateOnly(peruYear, 12, 31);
+        return true;
+    }
+
+    private static bool TryExtractQuarterRange(string normalizedQuestion, int fallbackYear, out DateOnly start, out DateOnly end)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(
+            normalizedQuestion,
+            @"\b(?:(?<ord>primer|segundo|tercer|cuarto|1er|2do|3er|4to)\s+)?trimestre(?:\s+(?:de\s+)?)?(?<year>20\d{2}|19\d{2})?\b",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        if (!match.Success)
+        {
+            start = default;
+            end = default;
             return false;
         }
 
-        var broadListingTokens = new[]
+        var year = fallbackYear;
+        if (match.Groups["year"].Success &&
+            int.TryParse(match.Groups["year"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedYear))
         {
-            "lista",
-            "listar",
-            "listado",
-            "muestreme",
-            "muéstrame",
-            "muestre",
-            "buscar",
-            "busca",
-            "detalle",
-            "detalla",
-            "resumen",
-            "agrupa"
+            year = parsedYear;
+        }
+
+        var ordinal = NormalizeText(match.Groups["ord"].Value)?.ToLowerInvariant();
+        var quarter = ordinal switch
+        {
+            "primer" or "1er" => 1,
+            "segundo" or "2do" => 2,
+            "tercer" or "3er" => 3,
+            "cuarto" or "4to" => 4,
+            _ => 0
         };
 
-        var entityTokens = new[]
+        if (quarter == 0)
         {
-            "cliente",
-            "clientes",
-            "proyecto",
-            "proyectos",
-            "site",
-            "sitio",
-            "sitios",
-            "responsable",
-            "responsables",
-            "gasto",
-            "gastos",
-            "orden de compra",
-            "oc"
+            if (normalizedQuestion.Contains("primero", StringComparison.OrdinalIgnoreCase))
+            {
+                quarter = 1;
+            }
+            else if (normalizedQuestion.Contains("segundo", StringComparison.OrdinalIgnoreCase))
+            {
+                quarter = 2;
+            }
+            else if (normalizedQuestion.Contains("tercero", StringComparison.OrdinalIgnoreCase))
+            {
+                quarter = 3;
+            }
+            else if (normalizedQuestion.Contains("cuarto", StringComparison.OrdinalIgnoreCase))
+            {
+                quarter = 4;
+            }
+        }
+
+        if (quarter == 0)
+        {
+            start = default;
+            end = default;
+            return false;
+        }
+
+        var firstMonth = (quarter - 1) * 3 + 1;
+        start = new DateOnly(year, firstMonth, 1);
+        end = new DateOnly(year, firstMonth + 2, DateTime.DaysInMonth(year, firstMonth + 2));
+        return true;
+    }
+
+    private static bool TryExtractMonthRange(string normalizedQuestion, int fallbackYear, out DateOnly start, out DateOnly end)
+    {
+        var monthMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["enero"] = 1,
+            ["febrero"] = 2,
+            ["marzo"] = 3,
+            ["abril"] = 4,
+            ["mayo"] = 5,
+            ["junio"] = 6,
+            ["julio"] = 7,
+            ["agosto"] = 8,
+            ["setiembre"] = 9,
+            ["septiembre"] = 9,
+            ["octubre"] = 10,
+            ["noviembre"] = 11,
+            ["diciembre"] = 12
         };
 
-        return broadListingTokens.Any(token => normalized.Contains(token, StringComparison.OrdinalIgnoreCase))
-               && entityTokens.Any(token => normalized.Contains(token, StringComparison.OrdinalIgnoreCase))
-               && !normalized.Contains("pendiente", StringComparison.OrdinalIgnoreCase)
-               && !normalized.Contains("combustible", StringComparison.OrdinalIgnoreCase)
-               && !normalized.Contains("lim001", StringComparison.OrdinalIgnoreCase);
+        var match = System.Text.RegularExpressions.Regex.Match(
+            normalizedQuestion,
+            @"\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|setiembre|septiembre|octubre|noviembre|diciembre)\b(?:\s+(?:de\s+)?)?(?<year>20\d{2}|19\d{2})?\b",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        if (!match.Success)
+        {
+            start = default;
+            end = default;
+            return false;
+        }
+
+        var monthName = match.Groups[1].Value;
+        if (!monthMap.TryGetValue(monthName, out var month))
+        {
+            start = default;
+            end = default;
+            return false;
+        }
+
+        var year = fallbackYear;
+        if (match.Groups["year"].Success &&
+            int.TryParse(match.Groups["year"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedYear))
+        {
+            year = parsedYear;
+        }
+
+        start = new DateOnly(year, month, 1);
+        end = new DateOnly(year, month, DateTime.DaysInMonth(year, month));
+        return true;
+    }
+
+    private static bool NeedsClarification(string question)
+    {
+        return false;
     }
 
     private static IaChatResponseDto Failure(string module, string errorMessage)
@@ -2957,6 +4885,63 @@ Instruccion de visualizacion:
             Answer = string.Empty,
             ResponseType = "conversation"
         };
+    }
+
+    private static IaChatDashboardExportResponseDto FailureDashboard(string module, string errorMessage)
+    {
+        return new IaChatDashboardExportResponseDto
+        {
+            Success = false,
+            Module = string.IsNullOrWhiteSpace(module) ? ModuleGastos : module,
+            HtmlContent = string.Empty,
+            ErrorMessage = errorMessage
+        };
+    }
+
+    private static string NormalizeDashboardHtml(string? rawHtml)
+    {
+        var html = NormalizeText(rawHtml) ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(html))
+        {
+            return string.Empty;
+        }
+
+        html = html.Trim();
+
+        if (html.StartsWith("```", StringComparison.Ordinal))
+        {
+            var firstBreak = html.IndexOf('\n');
+            if (firstBreak >= 0)
+            {
+                html = html[(firstBreak + 1)..];
+            }
+
+            if (html.EndsWith("```", StringComparison.Ordinal))
+            {
+                html = html[..^3];
+            }
+
+            html = html.Trim();
+        }
+
+        if (!html.Contains("<html", StringComparison.OrdinalIgnoreCase))
+        {
+            html = $$"""
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Reporte ejecutivo</title>
+</head>
+<body>
+{{html}}
+</body>
+</html>
+""";
+        }
+
+        return html;
     }
 
     private static string BuildFriendlyErrorMessage(Exception ex)
@@ -2974,20 +4959,49 @@ Instruccion de visualizacion:
         {
             var message = NormalizeText(invalidOperationException.Message) ?? string.Empty;
 
-            if (message.Contains("Falta configurar la clave privada de Anthropic.", StringComparison.OrdinalIgnoreCase) ||
-                message.Contains("Falta configurar el modelo de Anthropic.", StringComparison.OrdinalIgnoreCase))
+            if (message.Contains("Falta configurar la clave privada de OpenAI.", StringComparison.OrdinalIgnoreCase) ||
+                message.Contains("Falta configurar el modelo de OpenAI.", StringComparison.OrdinalIgnoreCase))
             {
                 return message;
             }
 
+            if (message.Contains("OpenAI devolvio un error", StringComparison.OrdinalIgnoreCase))
+            {
+                if (message.Contains("rate_limit_exceeded", StringComparison.OrdinalIgnoreCase) ||
+                    message.Contains("Request too large", StringComparison.OrdinalIgnoreCase) ||
+                    message.Contains("tokens per min", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "La consulta devolvio demasiada informacion para ser enviada completa a OpenAI en una sola solicitud. El sistema debe resumir y compactar el resultado antes del analisis.";
+                }
+
+                return "OpenAI devolvio un error al procesar la consulta. Revisa la configuracion de OPENAI_API_KEY y OPENAI_MODEL, o prueba con una pregunta mas especifica.";
+            }
+
+            if (message.Contains("OpenAI no devolvio contenido util.", StringComparison.OrdinalIgnoreCase))
+            {
+                return "OpenAI respondió con un formato inesperado. Intenta nuevamente con una consulta más precisa.";
+            }
+
+            if (message.Contains("Falta configurar la clave privada de Anthropic.", StringComparison.OrdinalIgnoreCase) ||
+                message.Contains("Falta configurar el modelo de Anthropic.", StringComparison.OrdinalIgnoreCase))
+            {
+                return message
+                    .Replace("Anthropic", "la IA", StringComparison.OrdinalIgnoreCase);
+            }
+
             if (message.Contains("Anthropic devolvio un error", StringComparison.OrdinalIgnoreCase))
             {
-                return "Claude devolvio un error al procesar la consulta. Revisa la configuracion de ANTHROPIC_API_KEY y ANTHROPIC_MODEL, o prueba con una pregunta mas especifica.";
+                return "La IA devolvio un error al procesar la consulta. Revisa la configuracion de la API y el modelo, o prueba con una pregunta mas especifica.";
             }
 
             if (message.Contains("No se pudo interpretar la respuesta de Anthropic.", StringComparison.OrdinalIgnoreCase))
             {
-                return "Claude respondió con un formato inesperado. Intenta nuevamente con una consulta mas precisa.";
+                return "La IA respondió con un formato inesperado. Intenta nuevamente con una consulta mas precisa.";
+            }
+
+            if (message.Contains("La IA no devolvio HTML util para el reporte.", StringComparison.OrdinalIgnoreCase))
+            {
+                return "La IA no devolvio un dashboard HTML valido para exportar el reporte.";
             }
 
             if (message.Contains("Consulta excedio el limite de iteraciones", StringComparison.OrdinalIgnoreCase))
@@ -2998,7 +5012,7 @@ Instruccion de visualizacion:
 
         if (ex is HttpRequestException)
         {
-            return "No se pudo conectar con Claude. Verifica la red y vuelve a intentarlo.";
+            return "No se pudo conectar con OpenAI. Verifica la red y vuelve a intentarlo.";
         }
 
         return "No fue posible completar la consulta. Intenta nuevamente con una pregunta mas especifica.";
@@ -3202,6 +5216,185 @@ Instruccion de visualizacion:
         return value[..maxLength];
     }
 
+    private static string NormalizeCurrencyResponseIfNeeded(string answer, object payload)
+    {
+        if (!TryGetHasMultipleCurrencies(payload, out var hasMultipleCurrencies) || !hasMultipleCurrencies)
+        {
+            return answer;
+        }
+
+        var currencySummary = BuildCurrencySummaryFromPayload(payload);
+        if (string.IsNullOrWhiteSpace(currencySummary))
+        {
+            return answer;
+        }
+
+        var lines = NormalizeText(answer)
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .ToList();
+
+        var sanitizedLines = new List<string>();
+        foreach (var line in lines)
+        {
+            var lower = line.ToLowerInvariant();
+            if (lower.Contains("considerando ambas monedas") ||
+                lower.Contains("total consolidado") ||
+                (lower.Contains("por un total de") && lower.Contains("moneda")) ||
+                (lower.Contains("total analizado") && !lower.Contains("soles") && !lower.Contains("dolares") && !lower.Contains("usd")))
+            {
+                continue;
+            }
+
+            sanitizedLines.Add(line);
+        }
+
+        var sanitizedAnswer = string.Join(Environment.NewLine, sanitizedLines).Trim();
+        if (string.IsNullOrWhiteSpace(sanitizedAnswer))
+        {
+            sanitizedAnswer = answer.Trim();
+        }
+
+        return $"{currencySummary}{Environment.NewLine}{Environment.NewLine}{sanitizedAnswer}";
+    }
+
+    private static bool TryGetHasMultipleCurrencies(object payload, out bool hasMultipleCurrencies)
+    {
+        hasMultipleCurrencies = false;
+
+        try
+        {
+            using var document = JsonDocument.Parse(JsonSerializer.Serialize(payload, JsonOptions));
+            var root = document.RootElement;
+
+            if (root.TryGetProperty("hasMultipleCurrencies", out var directHasMultiple) &&
+                directHasMultiple.ValueKind == JsonValueKind.True)
+            {
+                hasMultipleCurrencies = true;
+                return true;
+            }
+
+            if (root.TryGetProperty("assumptions", out var assumptions) &&
+                assumptions.ValueKind == JsonValueKind.Object &&
+                assumptions.TryGetProperty("multipleCurrencies", out var assumptionMultiple) &&
+                assumptionMultiple.ValueKind == JsonValueKind.True)
+            {
+                hasMultipleCurrencies = true;
+                return true;
+            }
+
+            if (root.TryGetProperty("currencyTotals", out var currencyTotals) &&
+                currencyTotals.ValueKind == JsonValueKind.Array &&
+                currencyTotals.GetArrayLength() > 1)
+            {
+                hasMultipleCurrencies = true;
+                return true;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static string BuildCurrencySummaryFromPayload(object payload)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(JsonSerializer.Serialize(payload, JsonOptions));
+            var root = document.RootElement;
+            if (!root.TryGetProperty("currencyTotals", out var currencyTotals) || currencyTotals.ValueKind != JsonValueKind.Array)
+            {
+                return string.Empty;
+            }
+
+            var parts = new List<string>();
+            foreach (var item in currencyTotals.EnumerateArray())
+            {
+                var moneda = TryGetJsonString(item, "moneda") ?? TryGetJsonString(item, "Moneda") ?? string.Empty;
+                var registros = TryGetJsonInt32(item, "registros") ?? TryGetJsonInt32(item, "Registros") ?? 0;
+                var monto = TryGetJsonDecimal(item, "monto") ?? TryGetJsonDecimal(item, "Monto") ?? 0m;
+
+                if (monto <= 0m)
+                {
+                    continue;
+                }
+
+                parts.Add($"- {FormatCurrencySummaryLabel(moneda)}: {FormatCurrencySummaryAmount(moneda, monto)} en {registros} registros");
+            }
+
+            if (parts.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            return $"Resumen por moneda:{Environment.NewLine}{string.Join(Environment.NewLine, parts)}{Environment.NewLine}- No se muestra total consolidado porque la data mezcla monedas.";
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static string FormatCurrencySummaryLabel(string moneda)
+    {
+        var normalized = NormalizeText(moneda)?.ToUpperInvariant() ?? string.Empty;
+        return normalized switch
+        {
+            "USD" or "US$" or "DOLARES" or "DOLÁRES" => "Dólares",
+            _ => "Soles"
+        };
+    }
+
+    private static string FormatCurrencySummaryAmount(string moneda, decimal monto)
+    {
+        var normalized = NormalizeText(moneda)?.ToUpperInvariant() ?? string.Empty;
+        var formatted = monto.ToString("N2", CultureInfo.InvariantCulture);
+        return normalized switch
+        {
+            "USD" or "US$" or "DOLARES" or "DOLÁRES" => $"US$ {formatted}",
+            _ => $"S/ {formatted}"
+        };
+    }
+
+    private static string? TryGetJsonString(JsonElement element, string propertyName)
+    {
+        return element.TryGetProperty(propertyName, out var property) && property.ValueKind is JsonValueKind.String or JsonValueKind.Number
+            ? property.ToString()
+            : null;
+    }
+
+    private static int? TryGetJsonInt32(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        return property.ValueKind switch
+        {
+            JsonValueKind.Number when property.TryGetInt32(out var value) => value,
+            JsonValueKind.String when int.TryParse(property.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed) => parsed,
+            _ => null
+        };
+    }
+
+    private static decimal? TryGetJsonDecimal(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        return property.ValueKind switch
+        {
+            JsonValueKind.Number when property.TryGetDecimal(out var value) => value,
+            JsonValueKind.String when decimal.TryParse(property.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed) => parsed,
+            _ => null
+        };
+    }
+
     private sealed class AnthropicMessagesRequest
     {
         public string Model { get; set; } = string.Empty;
@@ -3297,6 +5490,8 @@ Instruccion de visualizacion:
 
         public string? IdSite { get; set; }
 
+        public string? Site { get; set; }
+
         public int? CorreSite { get; set; }
 
         public string? Cliente { get; set; }
@@ -3304,6 +5499,8 @@ Instruccion de visualizacion:
         public string? Proyecto { get; set; }
 
         public string? Responsable { get; set; }
+
+        public string? Solicitante { get; set; }
 
         public string? Ot { get; set; }
 
@@ -3317,15 +5514,44 @@ Instruccion de visualizacion:
 
         public decimal TipoCambio { get; set; } = 3.8m;
 
+        public bool EstadosAplicadosPorDefecto { get; set; }
+
+        public bool FechasAplicadasPorDefecto { get; set; }
+
         public BuscarPlanillaArgs Normalize()
         {
             TextoBusqueda = NormalizeText(TextoBusqueda);
             Estados = NormalizeText(Estados);
             IdSite = NormalizeText(IdSite);
+            Site = NormalizeText(Site);
             Cliente = NormalizeText(Cliente);
             Proyecto = NormalizeText(Proyecto);
             Responsable = NormalizeText(Responsable);
+            Solicitante = NormalizeText(Solicitante);
             Ot = NormalizeText(Ot);
+
+            if (string.IsNullOrWhiteSpace(Estados))
+            {
+                Estados = "PAGADO";
+                EstadosAplicadosPorDefecto = true;
+            }
+            else
+            {
+                EstadosAplicadosPorDefecto = false;
+            }
+
+            if (!FechaInicio.HasValue && !FechaFin.HasValue)
+            {
+                var peruNow = DateTimeOffset.UtcNow.ToOffset(PeruOffset);
+                FechaInicio = new DateOnly(peruNow.Year, 1, 1);
+                FechaFin = new DateOnly(peruNow.Year, 12, 31);
+                FechasAplicadasPorDefecto = true;
+            }
+            else
+            {
+                FechasAplicadasPorDefecto = false;
+            }
+
             return this;
         }
 
@@ -3342,96 +5568,20 @@ Instruccion de visualizacion:
                 ["idCliente"] = IdCliente,
                 ["idProyecto"] = IdProyecto,
                 ["idSite"] = IdSite,
+                ["site"] = Site,
                 ["correSite"] = CorreSite,
                 ["cliente"] = Cliente,
                 ["proyecto"] = Proyecto,
                 ["responsable"] = Responsable,
+                ["solicitante"] = Solicitante,
                 ["ot"] = Ot,
                 ["coincidirTodas"] = CoincidirTodas,
                 ["incluirEstado99"] = IncluirEstado99,
                 ["pagina"] = Pagina,
                 ["tamanoPagina"] = TamanoPagina,
-                ["tipoCambio"] = TipoCambio
-            };
-        }
-    }
-
-    private sealed class ResumenPlanillaArgs
-    {
-        public string AgruparPor { get; set; } = "CLIENTE";
-
-        public string? TextoBusqueda { get; set; }
-
-        public string? Estados { get; set; }
-
-        public DateOnly? FechaInicio { get; set; }
-
-        public DateOnly? FechaFin { get; set; }
-
-        public int? IdCliente { get; set; }
-
-        public int? IdProyecto { get; set; }
-
-        public string? IdSite { get; set; }
-
-        public int? CorreSite { get; set; }
-
-        public string? Cliente { get; set; }
-
-        public string? Proyecto { get; set; }
-
-        public string? Responsable { get; set; }
-
-        public string? Ot { get; set; }
-
-        public bool CoincidirTodas { get; set; }
-
-        public bool IncluirEstado99 { get; set; } = true;
-
-        public int Top { get; set; } = 20;
-
-        public decimal TipoCambio { get; set; } = 3.8m;
-
-        public ResumenPlanillaArgs Normalize()
-        {
-            AgruparPor = NormalizeText(AgruparPor)?.ToUpperInvariant() ?? "CLIENTE";
-            TextoBusqueda = NormalizeText(TextoBusqueda);
-            Estados = NormalizeText(Estados);
-            IdSite = NormalizeText(IdSite);
-            Cliente = NormalizeText(Cliente);
-            Proyecto = NormalizeText(Proyecto);
-            Responsable = NormalizeText(Responsable);
-            Ot = NormalizeText(Ot);
-
-            if (!AllowedGroupBy.Contains(AgruparPor))
-            {
-                AgruparPor = "CLIENTE";
-            }
-
-            return this;
-        }
-
-        public Dictionary<string, object?> AsDictionary()
-        {
-            return new Dictionary<string, object?>
-            {
-                ["agruparPor"] = AgruparPor,
-                ["textoBusqueda"] = TextoBusqueda,
-                ["estados"] = Estados,
-                ["fechaInicio"] = FechaInicio?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                ["fechaFin"] = FechaFin?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                ["idCliente"] = IdCliente,
-                ["idProyecto"] = IdProyecto,
-                ["idSite"] = IdSite,
-                ["correSite"] = CorreSite,
-                ["cliente"] = Cliente,
-                ["proyecto"] = Proyecto,
-                ["responsable"] = Responsable,
-                ["ot"] = Ot,
-                ["coincidirTodas"] = CoincidirTodas,
-                ["incluirEstado99"] = IncluirEstado99,
-                ["top"] = Top,
-                ["tipoCambio"] = TipoCambio
+                ["tipoCambio"] = TipoCambio,
+                ["estadoAplicadoPorDefecto"] = EstadosAplicadosPorDefecto,
+                ["fechasAplicadasPorDefecto"] = FechasAplicadasPorDefecto
             };
         }
     }
@@ -3443,24 +5593,13 @@ Instruccion de visualizacion:
         public int TotalRows { get; set; }
     }
 
-    private sealed class PlanillaResumenExecutionResult
-    {
-        public Dictionary<string, object?> Summary { get; set; } = [];
-
-        public List<Dictionary<string, object?>> GroupedRows { get; set; } = [];
-
-        public IaChatChartResponseDto? Chart { get; set; }
-
-        public int TotalRows { get; set; }
-    }
-
     private sealed class LocalExecutiveAggregationRequest
     {
         public BuscarPlanillaArgs SearchArgs { get; set; } = new();
 
         public string GroupBy { get; set; } = string.Empty;
 
-        public string ResponseType { get; set; } = "summary";
+        public string ResponseType { get; set; } = "detail";
     }
 
     private sealed class LocalAggregationBucket
@@ -3488,3 +5627,5 @@ Instruccion de visualizacion:
         public int TotalRows { get; set; }
     }
 }
+
+

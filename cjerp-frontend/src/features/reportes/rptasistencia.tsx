@@ -4,6 +4,7 @@ import {
   matchesCrudToolbarSearch,
   type CrudToolbarSearchField,
 } from "../../components/base/CrudToolbar";
+import { actualizarAprobarCampo } from "../../api/aprobarCampoService";
 import { actualizarEstadoMarcacionAsistencia, buscarAsistencia, exportarAsistenciaEmpleadoPdf } from "../../api/asistenciaService";
 import { useConstantesPorCampo } from "../../hooks/useConstantesPorCampo";
 import type { AsistenciaReporteItem, AsistenciaReportePdfItem } from "../../models/asistencia";
@@ -310,6 +311,29 @@ function toApiDate(value: string) {
   if (!value) return "";
   const [year, month, day] = value.split("-");
   return `${day}/${month}/${year}`;
+}
+
+function toTimeInputValue(value: string) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  const match = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(normalized);
+  if (!match) {
+    return "";
+  }
+
+  return `${match[1].padStart(2, "0")}:${match[2]}`;
+}
+
+function buildAsistenciaDateTimeValue(fechaAsistencia: string, hora: string) {
+  const normalizedHora = toTimeInputValue(hora);
+  if (!fechaAsistencia || !normalizedHora) {
+    return "";
+  }
+
+  return `${fechaAsistencia}T${normalizedHora}:00`;
 }
 
 function normalizeText(value?: string | null) {
@@ -639,6 +663,9 @@ export default function RptAsistenciaPage() {
   });
   const [detalleEstadoEdits, setDetalleEstadoEdits] = useState<Record<string, string>>({});
   const [detalleEstadoSaving, setDetalleEstadoSaving] = useState<Record<string, boolean>>({});
+  const [detalleHoraEdits, setDetalleHoraEdits] = useState<Record<string, string>>({});
+  const [detalleHoraSaving, setDetalleHoraSaving] = useState<Record<string, boolean>>({});
+  const [detalleHoraErrors, setDetalleHoraErrors] = useState<Record<string, string>>({});
   const [employeeGridFilters, setEmployeeGridFilters] = useState<EmployeeGridFilters>({
     employee: "",
     responsable: "",
@@ -689,6 +716,9 @@ export default function RptAsistenciaPage() {
         fechaFin: toApiDate(fechaFin),
       });
       setRows(Array.isArray(data) ? data : []);
+      setDetalleHoraEdits({});
+      setDetalleHoraSaving({});
+      setDetalleHoraErrors({});
     } catch (err) {
       setError(getHttpErrorMessage(err, "No se pudo cargar el reporte de asistencia."));
       setRows([]);
@@ -1160,6 +1190,144 @@ export default function RptAsistenciaPage() {
     } finally {
       setDetalleEstadoSaving((prev) => ({ ...prev, [item.key]: false }));
     }
+  };
+
+  const handleDetalleHoraInputChange = (itemKey: string, field: "hora" | "salida", value: string) => {
+    setDetalleHoraEdits((prev) => ({
+      ...prev,
+      [`${itemKey}:${field}`]: value,
+    }));
+    setDetalleHoraErrors((prev) => {
+      const next = { ...prev };
+      delete next[`${itemKey}:${field}`];
+      return next;
+    });
+  };
+
+  const handleDetalleHoraSave = async (
+    item: {
+      key: string;
+      idEmpleado: number | null;
+      fechaAsistenciaRaw: string;
+      fecha: string;
+      nombreEmpleado: string;
+      hora: string;
+      salida: string;
+      estadoMarcacionTexto: string;
+      estado?: string;
+    },
+    field: "hora" | "salida"
+  ) => {
+    const rowKey = `${item.key}:${field}`;
+    if (!item.idEmpleado || !item.fechaAsistenciaRaw) {
+      setDetalleHoraErrors((prev) => ({
+        ...prev,
+        [rowKey]: "No se pudo resolver la clave del registro.",
+      }));
+      return;
+    }
+
+    const currentValue = field === "hora" ? item.hora : item.salida;
+    const nextValue = detalleHoraEdits[rowKey] ?? toTimeInputValue(currentValue);
+    const normalizedValue = toTimeInputValue(nextValue);
+
+    if (!normalizedValue) {
+      setDetalleHoraErrors((prev) => ({
+        ...prev,
+        [rowKey]: "Ingresa una hora valida en formato HH:mm.",
+      }));
+      return;
+    }
+
+    const fechaAsistencia = item.fechaAsistenciaRaw.trim();
+    const payload = {
+      idEmpleado: item.idEmpleado,
+      fechaAsistencia,
+      ingreso: field === "hora" ? buildAsistenciaDateTimeValue(fechaAsistencia, normalizedValue) : undefined,
+      salida: field === "salida" ? buildAsistenciaDateTimeValue(fechaAsistencia, normalizedValue) : undefined,
+    };
+
+    setDetalleHoraSaving((prev) => ({ ...prev, [rowKey]: true }));
+    setError("");
+
+    try {
+      await actualizarAprobarCampo(payload);
+      const storedValue = `${normalizedValue}:00`;
+
+      setRows((prev) =>
+        prev.map((row) =>
+          row.idEmpleado === item.idEmpleado && row.fecha.trim() === item.fechaAsistenciaRaw.trim()
+            ? {
+                ...row,
+                [field]: storedValue,
+              }
+            : row
+        )
+      );
+
+      setDetalleHoraEdits((prev) => {
+        const next = { ...prev };
+        delete next[rowKey];
+        return next;
+      });
+    } catch (err: unknown) {
+      setDetalleHoraErrors((prev) => ({
+        ...prev,
+        [rowKey]: getHttpErrorMessage(err, "No se pudo actualizar la hora seleccionada."),
+      }));
+    } finally {
+      setDetalleHoraSaving((prev) => ({ ...prev, [rowKey]: false }));
+    }
+  };
+
+  const renderEditableTimeCell = (
+    item: {
+      key: string;
+      idEmpleado: number | null;
+      fechaAsistenciaRaw: string;
+      fecha: string;
+      nombreEmpleado: string;
+      hora: string;
+      salida: string;
+      estadoMarcacionTexto: string;
+      estado?: string;
+    },
+    field: "hora" | "salida"
+  ) => {
+    const value = field === "hora" ? item.hora : item.salida;
+    const normalizedValue = String(value ?? "").trim();
+    const canEdit = !normalizedValue || normalizedValue === "-";
+    const rowKey = `${item.key}:${field}`;
+    const editValue = detalleHoraEdits[rowKey] ?? "";
+    const saving = Boolean(detalleHoraSaving[rowKey]);
+    const error = detalleHoraErrors[rowKey];
+
+    if (!canEdit) {
+      return <td style={{ ...styles.td, textAlign: "center" }}>{normalizedValue || "-"}</td>;
+    }
+
+    return (
+      <td style={{ ...styles.td, textAlign: "center" }}>
+        <div style={styles.timeEditorStack}>
+          <input
+            type="time"
+            value={editValue}
+            onChange={(event) => handleDetalleHoraInputChange(item.key, field, event.target.value)}
+            style={styles.timeEditorInput}
+            disabled={saving}
+          />
+          <button
+            type="button"
+            style={styles.timeEditorButton}
+            onClick={() => void handleDetalleHoraSave(item, field)}
+            disabled={saving}
+          >
+            {saving ? "Guardando..." : "Guardar"}
+          </button>
+          {error ? <span style={styles.timeEditorError}>{error}</span> : null}
+        </div>
+      </td>
+    );
   };
 
   const gerencialAreaSummaryRows = useMemo(() => {
@@ -2550,15 +2718,20 @@ export default function RptAsistenciaPage() {
                     ) : null}
                     <SimpleCuadrosDetailGrid
                       data={cuadroDetalleRows}
-                      sortKey={cuadrosDetailSort.key}
-                      sortDirection={cuadrosDetailSort.direction}
-                      estadoMarcacionOptions={estadoAsistenciaOptions}
-                      estadoMarcacionValues={detalleEstadoEdits}
-                      estadoMarcacionSaving={detalleEstadoSaving}
-                      onEstadoMarcacionChange={handleDetalleEstadoMarcacionChange}
-                      showExtendedColumns
-                      extendedColumnFilters={gerencialDetailFilters}
-                      extendedColumnOptions={gerencialDetailFilterOptions}
+                    sortKey={cuadrosDetailSort.key}
+                    sortDirection={cuadrosDetailSort.direction}
+                    estadoMarcacionOptions={estadoAsistenciaOptions}
+                    estadoMarcacionValues={detalleEstadoEdits}
+                    estadoMarcacionSaving={detalleEstadoSaving}
+                    horaValues={detalleHoraEdits}
+                    horaSaving={detalleHoraSaving}
+                    horaErrors={detalleHoraErrors}
+                    onEstadoMarcacionChange={handleDetalleEstadoMarcacionChange}
+                    onHoraInputChange={handleDetalleHoraInputChange}
+                    onHoraSave={handleDetalleHoraSave}
+                    showExtendedColumns
+                    extendedColumnFilters={gerencialDetailFilters}
+                    extendedColumnOptions={gerencialDetailFilterOptions}
                       onExtendedColumnFilterChange={(key, value) =>
                         setGerencialDetailFilters((prev) => ({ ...prev, [key]: value }))
                       }
@@ -2776,25 +2949,39 @@ export default function RptAsistenciaPage() {
                       {rows.length === 0 ? "No hay datos para el rango seleccionado." : "No hay registros que coincidan con los filtros actuales o la seleccion de cuadros."}
                     </td>
                   </tr>
-                ) : (
-                  detailRows.map((item, index) => (
-                    <tr key={`${item.idEmpleado ?? item.nombreEmpleado}-${item.fecha}-${index}`} style={{ ...styles.tr, background: getRowTone(item) }}>
-                      <td style={styles.td}>{formatDateLabel(item.fecha)}</td>
-                      <td style={styles.td}>{item.nombreEmpleado}</td>
-                      <td style={styles.td}>{item.tipoAprobacion}</td>
-                      <td style={styles.td}>{item.responsable}</td>
-                      <td style={styles.td}>{item.estadoMarcacionTexto}</td>
-                      <td style={{ ...styles.td, textAlign: "center" }}>{item.hora}</td>
-                      <td style={{ ...styles.td, textAlign: "center" }}>{item.salida}</td>
-                      <td style={{ ...styles.td, textAlign: "right" }}>{formatDecimal(item.totalHoras, 2)}</td>
-                      <td style={styles.td}>{item.empresa}</td>
-                      <td style={styles.td}>{item.cliente}</td>
-                      <td style={styles.td}>{item.area}</td>
-                      <td style={styles.td}>{item.ubicacion}</td>
-                      <td style={styles.td}>{item.estadoAct}</td>
-                      <td style={styles.td}>{item.comentario}</td>
-                    </tr>
-                  ))
+                  ) : (
+                    detailRows.map((item, index) => {
+                      const editableItem = {
+                        key: `${item.idEmpleado ?? item.nombreEmpleado}-${item.fecha}-${index}`,
+                        idEmpleado: item.idEmpleado ?? null,
+                        fechaAsistenciaRaw: item.fecha,
+                        fecha: formatDateLabel(item.fecha),
+                        nombreEmpleado: item.nombreEmpleado,
+                        hora: item.hora,
+                        salida: item.salida,
+                        estadoMarcacionTexto: item.estadoMarcacionTexto || item.estado || "Sin clasificar",
+                        estado: item.estado,
+                      };
+
+                      return (
+                        <tr key={editableItem.key} style={{ ...styles.tr, background: getRowTone(item) }}>
+                          <td style={styles.td}>{editableItem.fecha}</td>
+                          <td style={styles.td}>{editableItem.nombreEmpleado}</td>
+                          <td style={styles.td}>{item.tipoAprobacion}</td>
+                          <td style={styles.td}>{item.responsable}</td>
+                          <td style={styles.td}>{editableItem.estadoMarcacionTexto}</td>
+                          {renderEditableTimeCell(editableItem, "hora")}
+                          {renderEditableTimeCell(editableItem, "salida")}
+                          <td style={{ ...styles.td, textAlign: "right" }}>{formatDecimal(item.totalHoras, 2)}</td>
+                          <td style={styles.td}>{item.empresa}</td>
+                          <td style={styles.td}>{item.cliente}</td>
+                          <td style={styles.td}>{item.area}</td>
+                          <td style={styles.td}>{item.ubicacion}</td>
+                          <td style={styles.td}>{item.estadoAct}</td>
+                          <td style={styles.td}>{item.comentario}</td>
+                        </tr>
+                      );
+                    })
                 )}
               </tbody>
             </table>
@@ -3032,6 +3219,11 @@ export default function RptAsistenciaPage() {
                     estadoMarcacionValues={detalleEstadoEdits}
                     estadoMarcacionSaving={detalleEstadoSaving}
                     onEstadoMarcacionChange={handleDetalleEstadoMarcacionChange}
+                    horaValues={detalleHoraEdits}
+                    horaSaving={detalleHoraSaving}
+                    horaErrors={detalleHoraErrors}
+                    onHoraInputChange={handleDetalleHoraInputChange}
+                    onHoraSave={handleDetalleHoraSave}
                     showExtendedColumns
                     extendedColumnFilters={gerencialDetailFilters}
                     extendedColumnOptions={gerencialDetailFilterOptions}
@@ -4663,7 +4855,12 @@ function SimpleCuadrosDetailGrid({
   estadoMarcacionOptions,
   estadoMarcacionValues,
   estadoMarcacionSaving,
+  horaValues,
+  horaSaving,
+  horaErrors,
   onEstadoMarcacionChange,
+  onHoraInputChange,
+  onHoraSave,
   showExtendedColumns,
   extendedColumnFilters,
   extendedColumnOptions,
@@ -4693,9 +4890,27 @@ function SimpleCuadrosDetailGrid({
   estadoMarcacionOptions: Array<{ idEstado: number; value: string; label: string }>;
   estadoMarcacionValues: Record<string, string>;
   estadoMarcacionSaving: Record<string, boolean>;
+  horaValues: Record<string, string>;
+  horaSaving: Record<string, boolean>;
+  horaErrors: Record<string, string>;
   onEstadoMarcacionChange: (
     item: { key: string; idEmpleado: number | null; fechaAsistenciaRaw: string; fecha: string; estadoMarcacionTexto: string },
     value: string
+  ) => void;
+  onHoraInputChange: (itemKey: string, field: "hora" | "salida", value: string) => void;
+  onHoraSave: (
+    item: {
+      key: string;
+      idEmpleado: number | null;
+      fechaAsistenciaRaw: string;
+      fecha: string;
+      nombreEmpleado: string;
+      hora: string;
+      salida: string;
+      estadoMarcacionTexto: string;
+      estado?: string;
+    },
+    field: "hora" | "salida"
   ) => void;
   showExtendedColumns?: boolean;
   extendedColumnFilters?: GerencialDetailFilters;
@@ -4851,8 +5066,72 @@ function SimpleCuadrosDetailGrid({
                   {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.proyecto}</td> : null}
                   {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.site}</td> : null}
                   <td style={styles.cuadrosDetailTd}>{item.ubicacion}</td>
-                  <td style={{ ...styles.cuadrosDetailTd, textAlign: "center" }}>{item.hora || "-"}</td>
-                  <td style={{ ...styles.cuadrosDetailTd, textAlign: "center" }}>{item.salida || "-"}</td>
+                  {(() => {
+                    const rowKey = `${item.key}:hora`;
+                    const value = String(item.hora ?? "").trim();
+                    const canEdit = !value || value === "-";
+                    const editValue = horaValues[rowKey] ?? "";
+                    const saving = Boolean(horaSaving[rowKey]);
+                    const error = horaErrors[rowKey];
+
+                    return canEdit ? (
+                      <td style={{ ...styles.cuadrosDetailTd, textAlign: "center" }}>
+                        <div style={styles.timeEditorStack}>
+                          <input
+                            type="time"
+                            value={editValue}
+                            onChange={(event) => onHoraInputChange(item.key, "hora", event.target.value)}
+                            style={styles.timeEditorInput}
+                            disabled={saving}
+                          />
+                          <button
+                            type="button"
+                            style={styles.timeEditorButton}
+                            onClick={() => void onHoraSave(item, "hora")}
+                            disabled={saving}
+                          >
+                            {saving ? "Guardando..." : "Guardar"}
+                          </button>
+                          {error ? <span style={styles.timeEditorError}>{error}</span> : null}
+                        </div>
+                      </td>
+                    ) : (
+                      <td style={{ ...styles.cuadrosDetailTd, textAlign: "center" }}>{value}</td>
+                    );
+                  })()}
+                  {(() => {
+                    const rowKey = `${item.key}:salida`;
+                    const value = String(item.salida ?? "").trim();
+                    const canEdit = !value || value === "-";
+                    const editValue = horaValues[rowKey] ?? "";
+                    const saving = Boolean(horaSaving[rowKey]);
+                    const error = horaErrors[rowKey];
+
+                    return canEdit ? (
+                      <td style={{ ...styles.cuadrosDetailTd, textAlign: "center" }}>
+                        <div style={styles.timeEditorStack}>
+                          <input
+                            type="time"
+                            value={editValue}
+                            onChange={(event) => onHoraInputChange(item.key, "salida", event.target.value)}
+                            style={styles.timeEditorInput}
+                            disabled={saving}
+                          />
+                          <button
+                            type="button"
+                            style={styles.timeEditorButton}
+                            onClick={() => void onHoraSave(item, "salida")}
+                            disabled={saving}
+                          >
+                            {saving ? "Guardando..." : "Guardar"}
+                          </button>
+                          {error ? <span style={styles.timeEditorError}>{error}</span> : null}
+                        </div>
+                      </td>
+                    ) : (
+                      <td style={{ ...styles.cuadrosDetailTd, textAlign: "center" }}>{value}</td>
+                    );
+                  })()}
                   <td style={styles.cuadrosDetailTd}>{item.area}</td>
                   <td style={styles.cuadrosDetailTd}>
                     {(() => {
@@ -5988,6 +6267,41 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#0F172A",
     background: "#FFFFFF",
     outline: "none",
+  },
+  timeEditorStack: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    alignItems: "stretch",
+    minWidth: 96,
+  },
+  timeEditorInput: {
+    width: "100%",
+    minWidth: 0,
+    border: "1px solid #CBD5E1",
+    borderRadius: 8,
+    padding: "5px 8px",
+    fontSize: 11,
+    color: "#0F172A",
+    background: "#FFFFFF",
+    outline: "none",
+  },
+  timeEditorButton: {
+    border: "1px solid #0F766E",
+    background: "#ECFEFF",
+    color: "#0F766E",
+    borderRadius: 8,
+    padding: "5px 8px",
+    fontSize: 11,
+    fontWeight: 700,
+    cursor: "pointer",
+    width: "100%",
+  },
+  timeEditorError: {
+    fontSize: 10,
+    lineHeight: 1.2,
+    color: "#B91C1C",
+    textAlign: "left",
   },
   cuadrosDetailFilterTh: {
     position: "sticky",

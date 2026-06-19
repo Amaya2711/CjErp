@@ -69,7 +69,7 @@ export const menuDashboard: DashboardGroup[] = [
     subtitulo: "Reportes y analitica",
     color: "#38BDF8",
     tiles: [
-      { label: "Claudeia", path: "/reportes/administrativo/claudeia" },
+      { label: "IA Chat", path: "/reportes/administrativo/claudeia" },
       { label: "IA Chat", path: "/reportes/administrativo/iachat" },
       { label: "Reporte asistencia", path: "/reportes/rptasistencia" },
     ],
