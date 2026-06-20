@@ -4,9 +4,6 @@ export type VacacionesGuardarRequest = {
   idEmpleadoCj: number;
   fechaInicio: string;
   fechaFin: string;
-  idResponsableCj?: number;
-  idSegundoVacaciones?: number;
-  idTerceroVacaciones?: number;
   idEstado?: number;
 };
 

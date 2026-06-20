@@ -5,9 +5,6 @@ public sealed class VacacionesGrabarRequestDto
     public int IdEmpleadoCj { get; set; }
     public DateTime FechaInicio { get; set; }
     public DateTime FechaFin { get; set; }
-    public int? IdResponsableCj { get; set; }
-    public int? IdSegundoVacaciones { get; set; }
-    public int? IdTerceroVacaciones { get; set; }
     public int? IdEstado { get; set; }
 }
 

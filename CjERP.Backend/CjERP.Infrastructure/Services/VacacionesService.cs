@@ -60,9 +60,6 @@ public sealed class VacacionesService : IVacacionesService
         parameters.Add("@IdEmpleadoCj", request.IdEmpleadoCj, DbType.Int32);
         parameters.Add("@FechaInicio", request.FechaInicio.Date, DbType.Date);
         parameters.Add("@FechaFin", request.FechaFin.Date, DbType.Date);
-        parameters.Add("@IdResponsableCj", request.IdResponsableCj, DbType.Int32);
-        parameters.Add("@IdSegundoVacaciones", request.IdSegundoVacaciones, DbType.Int32);
-        parameters.Add("@IdTerceroVacaciones", request.IdTerceroVacaciones, DbType.Int32);
         parameters.Add("@IdEstado", request.IdEstado ?? 97, DbType.Int32);
         parameters.Add("@Usuario", string.IsNullOrWhiteSpace(usuarioAccion) ? "sistema" : usuarioAccion.Trim(), DbType.String);
         return parameters;
