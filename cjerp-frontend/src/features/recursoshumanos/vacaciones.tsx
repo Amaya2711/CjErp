@@ -3208,13 +3208,6 @@ export default function RecursosHumanosVacacionesPage() {
             onClick: abrirNuevo,
           },
           {
-            key: "recargar",
-            label: "Recargar",
-            onClick: () => {
-              void cargarGastos();
-            },
-          },
-          {
             key: "exportar",
             label: "Exportar",
             title: "Exportar",
