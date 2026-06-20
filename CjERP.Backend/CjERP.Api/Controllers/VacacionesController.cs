@@ -28,6 +28,16 @@ public class VacacionesController : ControllerBase
             var result = await _vacacionesService.GrabarAsync(request, ResolveUsuarioAccion(), cancellationToken);
 
             var exito = result.Exito ?? result.Resultado ?? 1;
+            if (exito == 0)
+            {
+                return Ok(new
+                {
+                    success = true,
+                    message = $"No se ingresaron fechas solicitadas para el rango {request.FechaInicio:dd/MM/yyyy} al {request.FechaFin:dd/MM/yyyy}. Verificar si ya existen.",
+                    data = result
+                });
+            }
+
             if (exito != 1)
             {
                 return BadRequest(new { success = false, message = result.Mensaje ?? "No se pudo registrar las vacaciones.", data = result });
