@@ -17,15 +17,10 @@ import {
   RotateCcw,
 } from "lucide-react";
 import httpClient from "../../api/httpClient";
-import { crearVacacion } from "../../api/vacacionesService";
-import {
-  buildPlanillaConsultaEstadosRequest,
-  consultarPlanillaEstados,
-} from "../../api/planillaConsultaService";
-import type { PlanillaConsultaParametro } from "../../models/planillaConsulta";
+import { aprobarVacacion, crearVacacion, listarVacaciones, rechazarVacacion } from "../../api/vacacionesService";
 import CrudToolbar, { matchesCrudToolbarSearch, type CrudToolbarSearchField } from "../../components/base/CrudToolbar";
 import { FiltroOperativoLookup } from "../../components/lookups/FiltroOperativoLookup";
-import { listarEmpleadosCta } from "../../api/empleadoService";
+import { listarEmpleadosWup } from "../../api/empleadoService";
 import { getTareas, getValoresGasto } from "../../api/filtroOperativoService";
 import { listarGestorOptions } from "../../api/gestorService";
 import { listarSolicitanteOptions } from "../../api/solicitanteService";
@@ -38,8 +33,6 @@ import type { ValoresGastoRequest, ValoresGastoResponse } from "../../models/val
 import { getAuthUser } from "../../utils/authStorage";
 import { compressImageForUpload } from "../../utils/imageCompression";
 import { SHAREPOINT_BASE_URL } from "../../utils/sharepoint";
-import { DatosOcFloatingCard, type OcDetalle } from "../finanzas/tesoreria/components/DatosOcFloatingCard";
-import { DatosOcDrawer } from "../finanzas/tesoreria/components/DatosOcDrawer";
 import "../finanzas/tesoreria/gastosaprobar.css";
 
 type GastoDto = {
@@ -287,7 +280,7 @@ type GastosHeaderFilters = {
   proyecto: string[];
   site: string[];
   tipoTrabajo: string[];
-  solicitante: string[];
+  empleado: string;
   responsable: string[];
   validador: string[];
 };
@@ -305,7 +298,7 @@ const GASTOS_HEADER_FILTERS_INITIAL: GastosHeaderFilters = {
   proyecto: [],
   site: [],
   tipoTrabajo: [],
-  solicitante: [],
+  empleado: "",
   responsable: [],
   validador: [],
 };
@@ -317,6 +310,12 @@ const GASTOS_ESTADO_PRESETS = {
   observado: ["10"],
   hormiga: ["6"],
   todos: ["0", "2", "10", "6"],
+} as const;
+
+const VACACIONES_ESTADO_VALIDADORES = {
+  primer: 97,
+  segundo: 98,
+  tercero: 99,
 } as const;
 
 type GastosEstadoPresetKey = keyof typeof GASTOS_ESTADO_PRESETS;
@@ -337,14 +336,23 @@ type GastosHeaderMultiFilterKey =
   | "proyecto"
   | "site"
   | "tipoTrabajo"
-  | "solicitante"
   | "responsable"
   | "validador";
 
-type GastosHeaderSearchableFilterKey = "solicitante" | "responsable" | "validador" | "site";
+type GastosHeaderSearchableFilterKey = "empleado" | "responsable" | "validador" | "site";
+
+type GastosHeaderFilterConfig = {
+  key: keyof GastosHeaderFilters;
+  label: string;
+  section: "basic" | "advanced";
+  type?: "date" | "text" | "lookup";
+  options?: { value: string; label: string }[];
+  selectedValue?: string;
+  selectedValues?: string[];
+};
 
 const GASTOS_HEADER_FILTER_SEARCH_INITIAL: Record<GastosHeaderSearchableFilterKey, string> = {
-  solicitante: "",
+  empleado: "",
   responsable: "",
   validador: "",
   site: "",
@@ -631,8 +639,8 @@ function getEstadoLabel(
 
     if (match?.label) {
       return match.label;
-    }
   }
+}
 
   return normalizedValue;
 }
@@ -728,7 +736,7 @@ function matchesFlexibleSearch(label: string, query: string): boolean {
 }
 
 function isSearchableHeaderFilterKey(key: string): key is GastosHeaderSearchableFilterKey {
-  return key === "solicitante" || key === "responsable" || key === "validador" || key === "site";
+  return key === "empleado" || key === "responsable" || key === "validador" || key === "site";
 }
 
 function toNumberOrZero(value: unknown): number {
@@ -925,6 +933,22 @@ function buildCuentaMetadata(empleado: EmpleadoCta) {
   };
 }
 
+function getEmpleadoLabel(empleado?: EmpleadoCta | null): string {
+  return (
+    empleado?.nombreEmpleadoCJ?.trim() ||
+    empleado?.nombreEmpleado?.trim() ||
+    (empleado?.idEmpleado != null ? String(empleado.idEmpleado) : "")
+  );
+}
+
+function getEmpleadoVacacionLabel(empleado?: EmpleadoCta | null): string {
+  return (
+    empleado?.nombreEmpleadoCJ?.trim() ||
+    empleado?.nombreEmpleado?.trim() ||
+    (empleado?.idEmpleado != null ? String(empleado.idEmpleado) : "")
+  );
+}
+
 function extractCuentaResumenParts(cuentaResumen?: string) {
   const match = /Tipo Cta:\s*(.*?),\s*Cta\.\s*(.*?),\s*CI:\s*(.*?),\s*Nro Doc:\s*(.*)$/i.exec(
     cuentaResumen ?? ""
@@ -982,6 +1006,50 @@ function normalizeDateForInput(dateStr?: string | null): string {
   const month = String(parsed.getMonth() + 1).padStart(2, "0");
   const day = String(parsed.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function formatDateForRequest(dateValue?: string): string {
+  const normalized = normalizeDateForInput(dateValue ?? "");
+  return normalized || "";
+}
+
+function buildVacacionesAprobacionSqlScript(params: {
+  IdEmpleadoCj: number;
+  IdEstadoActual: number;
+  FechaInicio: string;
+  FechaFin: string;
+}) {
+  return [
+    "EXEC dbo.sp_EmpleadoOtros_ActualizaarVacaciones",
+    `  @IdEmpleadoCj = ${params.IdEmpleadoCj},`,
+    `  @IdEstadoActual = ${params.IdEstadoActual},`,
+    `  @FechaInicio = '${params.FechaInicio}',`,
+    `  @FechaFin = '${params.FechaFin}',`,
+    "  -- @IdUsuarioAprueba se resuelve en el backend desde el usuario autenticado;",
+  ].join("\n");
+}
+
+function logVacacionesAprobacionDebug(entry: {
+  idEmpleadoCj: number;
+  nombreEmpleado?: string;
+  idEstadoActual: number;
+  fechaInicio: string;
+  fechaFin: string;
+}) {
+  const payload = {
+    IdEmpleadoCj: entry.idEmpleadoCj,
+    NombreEmpleado: entry.nombreEmpleado ?? "",
+    IdEstadoActual: entry.idEstadoActual,
+    FechaInicio: entry.fechaInicio,
+    FechaFin: entry.fechaFin,
+  };
+
+  console.groupCollapsed(
+    `[Vacaciones] SP aprobar -> ${entry.nombreEmpleado ?? entry.idEmpleadoCj}`
+  );
+  console.table(payload);
+  console.log(buildVacacionesAprobacionSqlScript(payload));
+  console.groupEnd();
 }
 
 function normalizeFecIngresoFromStore(dateStr?: string | null): string {
@@ -1095,6 +1163,8 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     idEmpleadoCj: getRecordNumber(row, "IdEmpleadoCj", "idEmpleadoCj") ?? undefined,
     idActivo: getRecordString(row, "IdActivo", "idActivo"),
     nombreEmpleado: getRecordString(row, "NombreEmpleado", "nombreEmpleado"),
+    solicitante: getRecordString(row, "IdEmpleadoCj", "idEmpleadoCj"),
+    solicitanteLabel: getRecordString(row, "NombreEmpleado", "nombreEmpleado"),
     estado: getRecordNumber(row, "IdEstado", "idEstado", "Estado", "estado") ?? 0,
     estadoLabel: getRecordString(row, "Estado", "estado"),
     fechaInicio: getRecordString(row, "FechaInicio", "fechaInicio"),
@@ -1143,8 +1213,6 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     fechaVencimiento: "",
     fecIngreso: getRecordString(row, "FechaInicio", "fechaInicio"),
     fechaEmision: getRecordString(row, "FechaInicio", "fechaInicio"),
-    solicitante: "",
-    solicitanteLabel: "",
     gestor: "",
     gestorLabel: "",
     validador: "",
@@ -1357,8 +1425,6 @@ export default function RecursosHumanosVacacionesPage() {
   const [empleadoVacacionInput, setEmpleadoVacacionInput] = useState("");
   const [showEmpleadoVacacionDropdown, setShowEmpleadoVacacionDropdown] = useState(false);
   const [highlightedEmpleadoVacacionIdx, setHighlightedEmpleadoVacacionIdx] = useState(-1);
-  const [resumenOcMinimizado, setResumenOcMinimizado] = useState(false);
-  const [drawerOcAbierto, setDrawerOcAbierto] = useState(false);
   const [actualizacionBloqueada, setActualizacionBloqueada] = useState(false);
   const selectAllCheckboxRef = useRef<HTMLInputElement | null>(null);
   const [filtrosCabecera, setFiltrosCabecera] = useState<GastosHeaderFilters>(GASTOS_HEADER_FILTERS_INITIAL);
@@ -1368,6 +1434,7 @@ export default function RecursosHumanosVacacionesPage() {
   const [mostrarFiltrosAdicionales, setMostrarFiltrosAdicionales] = useState(false);
   const [cabeceraFiltroAbierto, setCabeceraFiltroAbierto] = useState<string | null>(null);
   const [mensajeFiltroCabecera, setMensajeFiltroCabecera] = useState<string | null>(null);
+  const [consultaVacacionesSinParametros, setConsultaVacacionesSinParametros] = useState(false);
   const [limiteConsultaServidor, setLimiteConsultaServidor] = useState<{
     totalRows: number;
     maxRowsAllowed: number;
@@ -1392,14 +1459,14 @@ export default function RecursosHumanosVacacionesPage() {
   const [empleados, setEmpleados] = useState<EmpleadoCta[]>([]);
   const [empleadosLoading, setEmpleadosLoading] = useState(false);
   const [empleadosError, setEmpleadosError] = useState<string | null>(null);
+  const [solicitanteOptions, setSolicitanteOptions] = useState<ConstanteOption[]>([]);
+  const [solicitanteLoading, setSolicitanteLoading] = useState(false);
+  const [solicitanteError, setSolicitanteError] = useState<string | null>(null);
   const [tareasCatalogo, setTareasCatalogo] = useState<TareaOption[]>([]);
   const [tareasCatalogoError, setTareasCatalogoError] = useState<string | null>(null);
   const [suministrosVigentes, setSuministrosVigentes] = useState<SuministroProvisionalVigenteOption[]>([]);
   const [suministrosVigentesLoading, setSuministrosVigentesLoading] = useState(false);
   const [suministrosVigentesError, setSuministrosVigentesError] = useState<string | null>(null);
-  const [solicitanteOptions, setSolicitanteOptions] = useState<ConstanteOption[]>([]);
-  const [solicitanteLoading, setSolicitanteLoading] = useState(false);
-  const [solicitanteError, setSolicitanteError] = useState<string | null>(null);
   const [solicitanteInput, setSolicitanteInput] = useState("");
   const [showSolicitanteDropdown, setShowSolicitanteDropdown] = useState(false);
   const [highlightedSolicitanteIdx, setHighlightedSolicitanteIdx] = useState(-1);
@@ -1505,9 +1572,9 @@ export default function RecursosHumanosVacacionesPage() {
       comentario: form.comentario,
       fechaVencimiento: formatDateToMMDDYYYYPeru(form.fechaVencimiento),
       fechaEmision: formatDateToMMDDYYYYPeru(form.fechaEmision),
-      solicitante: normalizeConstanteValue(solicitanteOptions, form.solicitante) || undefined,
+      solicitante: normalizeConstanteValue(empleadoOptions, form.solicitante) || undefined,
       solicitanteLabel:
-        getConstanteLabelOrFallback(solicitanteOptions, form.solicitante, form.solicitanteLabel) ||
+        getConstanteLabelOrFallback(empleadoOptions, form.solicitante, form.solicitanteLabel) ||
         undefined,
       gestor: normalizeConstanteValue(gestorOptions, form.gestor) || undefined,
       gestorLabel: getConstanteLabel(gestorOptions, form.gestor) || undefined,
@@ -1543,14 +1610,31 @@ export default function RecursosHumanosVacacionesPage() {
 
   const gastosApi = {
     list: async () => {
+      if (consultaVacacionesSinParametros) {
+        setConsultaVacacionesSinParametros(false);
+        setMensajeFiltroCabecera(null);
+        setLimiteConsultaServidor(null);
+
+        const estadoSeleccionado =
+          filtrosCabecera.estado.length === 1 && [97, 98, 99].includes(Number(filtrosCabecera.estado[0]))
+            ? Number(filtrosCabecera.estado[0])
+            : undefined;
+
+        const response = await listarVacaciones({
+          idEstado: estadoSeleccionado,
+        });
+
+        return extraerArray<Record<string, unknown>>(response.rows).map((row, index) =>
+          mapGastoDtoToView(mapPlanillaConsultaRowToGastoDto(row, index))
+        );
+      }
+
       const fechaInicio = filtrosCabecera.fechaInicio.trim();
       const fechaFin = filtrosCabecera.fechaFin.trim();
       const estadoSeleccionado =
         filtrosCabecera.estado.length === 1
           ? Number(filtrosCabecera.estado[0])
           : null;
-      const fechaInicioParametro = formatInputDateForPlanillaParametro(fechaInicio);
-      const fechaFinParametro = formatInputDateForPlanillaParametro(fechaFin);
 
       if (!isInputDateRangeValid(fechaInicio, fechaFin)) {
         setMensajeFiltroCabecera("La fecha inicio no puede ser mayor que la fecha fin.");
@@ -1560,40 +1644,13 @@ export default function RecursosHumanosVacacionesPage() {
 
       setMensajeFiltroCabecera(null);
       setLimiteConsultaServidor(null);
-
-    const parametros: PlanillaConsultaParametro[] = [];
-
-      if (fechaInicio) {
-        parametros.push({
-          nombre: "FechaInicial",
-          valor: fechaInicioParametro,
-          tipo: "date",
-        });
-      }
-
-      if (fechaFin) {
-        parametros.push({
-          nombre: "FechaFinal",
-          valor: fechaFinParametro,
-          tipo: "date",
-        });
-      }
-
-      if (estadoSeleccionado != null && Number.isFinite(estadoSeleccionado)) {
-        parametros.push({
-          nombre: "IdEstado",
-          valor: String(estadoSeleccionado),
-          tipo: "int",
-        });
-      }
-
-      const response = await consultarPlanillaEstados(
-        {
-          ...buildPlanillaConsultaEstadosRequest(parametros),
-          maxRows: MAX_GASTOS_PARA_MOSTRAR,
-          consulta: "vacaciones",
-        }
-      );
+      const response = await listarVacaciones({
+        idEstado: estadoSeleccionado != null && Number.isFinite(estadoSeleccionado) ? estadoSeleccionado : undefined,
+        fechaInicio: fechaInicio ? formatInputDateForPlanillaParametro(fechaInicio) : undefined,
+        fechaFin: fechaFin ? formatInputDateForPlanillaParametro(fechaFin) : undefined,
+        nombreEmpleado: getConstanteLabelOrFallback(empleadoOptions, filtrosCabecera.empleado, filtrosCabecera.empleado) || undefined,
+        maxRows: MAX_GASTOS_PARA_MOSTRAR,
+      });
 
       if (response.limitExceeded) {
         setLimiteConsultaServidor({
@@ -1718,15 +1775,40 @@ export default function RecursosHumanosVacacionesPage() {
   const esSoles = monedaSeleccionada && (monedaSeleccionada.label?.toUpperCase() === "SOLES" || monedaSeleccionada.value === "SOLES" || monedaSeleccionada.codigo === "SOLES");
 
   useEffect(() => {
+    let activo = true;
+
     setEmpleadosLoading(true);
     setEmpleadosError(null);
 
-    listarEmpleadosCta()
+    listarEmpleadosWup()
       .then((data) => {
-        setEmpleados(Array.isArray(data) ? data : []);
+        if (!activo) return;
+
+        const normalizados = Array.isArray(data)
+          ? data.filter((item) => item && item.idEmpleado > 0)
+          : [];
+
+        setEmpleados(
+          normalizados.sort((a, b) =>
+            (a.nombreEmpleadoCJ || a.nombreEmpleado || "").localeCompare(
+              b.nombreEmpleadoCJ || b.nombreEmpleado || ""
+            )
+          )
+        );
       })
-      .catch(() => setEmpleadosError("Error al cargar responsables"))
-      .finally(() => setEmpleadosLoading(false));
+      .catch(() => {
+        if (!activo) return;
+        setEmpleados([]);
+        setEmpleadosError("Error al cargar empleados.");
+      })
+      .finally(() => {
+        if (!activo) return;
+        setEmpleadosLoading(false);
+      });
+
+    return () => {
+      activo = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -1833,12 +1915,24 @@ export default function RecursosHumanosVacacionesPage() {
 
   const empleadosSafe = Array.isArray(empleados) ? empleados : [];
   const gastosSafe = Array.isArray(gastos) ? gastos : [];
+  const empleadoOptions = useMemo(
+    () =>
+      empleadosSafe.map((empleado, index) => ({
+        value: String(empleado.idEmpleado),
+        label: getEmpleadoVacacionLabel(empleado),
+        codigo: String(empleado.idEmpleado),
+        valor: getEmpleadoVacacionLabel(empleado),
+        campo: "empleado",
+        orden: index,
+      })),
+    [empleadosSafe]
+  );
 
   const filteredResponsables =
     responsableInput.trim() === ""
       ? empleadosSafe
       : empleadosSafe.filter((emp) =>
-          emp.nombreEmpleado.toLowerCase().includes(responsableInput.toLowerCase())
+          matchesFlexibleSearch(getEmpleadoLabel(emp), responsableInput)
         );
 
   const filteredSolicitantes =
@@ -1848,9 +1942,9 @@ export default function RecursosHumanosVacacionesPage() {
 
   const filteredEmpleadosVacacion =
     empleadoVacacionInput.trim() === ""
-      ? solicitanteOptions
-      : solicitanteOptions.filter((option) => matchesFlexibleSearch(option.label, empleadoVacacionInput));
-  const empleadoVacacionSeleccionado = findConstanteOption(solicitanteOptions, vacacionForm.idEmpleadoCj);
+      ? empleadoOptions
+      : empleadoOptions.filter((option) => matchesFlexibleSearch(option.label, empleadoVacacionInput));
+  const empleadoVacacionSeleccionado = findConstanteOption(empleadoOptions, vacacionForm.idEmpleadoCj);
 
   const filteredGestores =
     gestorInput.trim() === ""
@@ -2252,16 +2346,108 @@ export default function RecursosHumanosVacacionesPage() {
       cerrarVacacionPanel();
       void cargarGastos();
     } catch (error) {
+      const responseData = (error as { response?: { data?: { message?: string; detail?: string; data?: { message?: string } } } }).response?.data;
       const errorMessage: string =
-        typeof error === "object" &&
-        error !== null &&
-        "response" in error &&
-        typeof (error as { response?: { data?: { message?: string } } }).response?.data?.message === "string"
-          ? ((error as { response?: { data?: { message?: string } } }).response?.data?.message as string)
-          : "No se pudo registrar las vacaciones.";
+        responseData?.message ||
+        responseData?.detail ||
+        responseData?.data?.message ||
+        "No se pudo registrar las vacaciones.";
       setVacacionError(errorMessage);
     } finally {
       setVacacionGuardando(false);
+    }
+  };
+
+  const aprobarVacacionSeleccionada = async () => {
+    if (!idEstadoActualValidador) {
+      window.alert("Seleccione 1er, 2do o 3er validador antes de aprobar.");
+      return;
+    }
+
+    const clavesSeleccionadas = Array.from(
+      new Set([selectedRowKey, ...selectedRowKeys].filter((key): key is string => Boolean(key)))
+    );
+
+    const registrosSeleccionados = gastosFiltrados.filter((gasto, rowIndex) =>
+      clavesSeleccionadas.includes(getGastoRowKey(gasto, rowIndex))
+    );
+
+    if (registrosSeleccionados.length === 0) {
+      window.alert("Seleccione al menos un registro para aprobar.");
+      return;
+    }
+
+    setVacacionGuardando(true);
+    setVacacionError(null);
+
+    try {
+      for (const gasto of registrosSeleccionados) {
+        const fechaInicio = formatDateForRequest(gasto.fechaInicio);
+        const fechaFin = formatDateForRequest(gasto.fechaFin);
+
+        if (!gasto.idEmpleadoCj || !fechaInicio || !fechaFin) {
+          throw new Error("No se pudo identificar un registro seleccionado para aprobar.");
+        }
+
+        logVacacionesAprobacionDebug({
+          idEmpleadoCj: Number(gasto.idEmpleadoCj),
+          nombreEmpleado: gasto.nombreEmpleado,
+          idEstadoActual: idEstadoActualValidador,
+          fechaInicio,
+          fechaFin,
+        });
+
+        await aprobarVacacion({
+          idEmpleadoCj: Number(gasto.idEmpleadoCj),
+          fechaInicio,
+          fechaFin,
+          idEstadoActual: idEstadoActualValidador,
+        });
+      }
+
+      await cargarGastos();
+      window.alert("Vacaciones actualizadas correctamente.");
+    } catch (error) {
+      const responseData = (error as { response?: { data?: { message?: string; detail?: string; data?: { message?: string } } } }).response?.data;
+      const errorMessage: string =
+        responseData?.message ||
+        responseData?.detail ||
+        responseData?.data?.message ||
+        (error instanceof Error ? error.message : "No se pudieron actualizar las vacaciones.");
+      window.alert(errorMessage);
+    } finally {
+      setVacacionGuardando(false);
+    }
+  };
+
+  const rechazarVacacionRegistro = async (gasto: GastoForm) => {
+    const fechaInicio = formatDateForRequest(gasto.fechaInicio);
+    const fechaFin = formatDateForRequest(gasto.fechaFin);
+
+    if (!gasto.idEmpleadoCj || !fechaInicio || !fechaFin) {
+      window.alert("No se pudo identificar el registro de vacaciones para rechazar.");
+      return;
+    }
+
+    const confirmado = window.confirm(
+      `¿Desea rechazar las vacaciones del empleado ${gasto.nombreEmpleado || gasto.idEmpleadoCj} del ${formatInputDateForDisplay(fechaInicio)} al ${formatInputDateForDisplay(fechaFin)}?`
+    );
+
+    if (!confirmado) {
+      return;
+    }
+
+    try {
+      await rechazarVacacion({
+        idEmpleadoCj: Number(gasto.idEmpleadoCj),
+        fechaInicio,
+        fechaFin,
+      });
+
+      await cargarGastos();
+      window.alert("Vacaciones rechazadas correctamente.");
+    } catch (error) {
+      window.alert(getHttpMessage(error, "No se pudo rechazar el registro de vacaciones."));
     }
   };
 
@@ -2338,11 +2524,9 @@ export default function RecursosHumanosVacacionesPage() {
     setShowValidadorDropdown(false);
     setHighlightedValidadorIdx(-1);
     setSolicitanteInput(
-      getConstanteLabelOrFallback(
-        solicitanteOptions,
-        gastoEditable.solicitante,
-        gastoEditable.solicitanteLabel
-      )
+      getEmpleadoLabel(empleadosSafe.find((emp) => String(emp.idEmpleado) === gastoEditable.solicitante)) ||
+        gastoEditable.solicitanteLabel ||
+        ""
     );
     setShowSolicitanteDropdown(false);
     setHighlightedSolicitanteIdx(-1);
@@ -2453,8 +2637,8 @@ export default function RecursosHumanosVacacionesPage() {
       nuevosErrores.moneda = "Seleccione una moneda valida.";
     }
 
-    if (form.solicitante && !esConstanteValida(solicitanteOptions, form.solicitante)) {
-      nuevosErrores.solicitante = "Seleccione un solicitante valido.";
+    if (form.solicitante && !esConstanteValida(empleadoOptions, form.solicitante)) {
+      nuevosErrores.solicitante = "Seleccione un empleado valido.";
     }
 
     if (form.gestor && !esConstanteValida(gestorOptions, form.gestor)) {
@@ -2643,11 +2827,7 @@ export default function RecursosHumanosVacacionesPage() {
       tipoTrabajo: buildUniqueFilterOptions(
         gastosSafe.map((gasto) => gasto.filtroOperativo.filtro?.tipoTrabajo ?? gasto.filtroOperativo.tipoTrabajo?.tipoTrabajo)
       ),
-      solicitante: buildUniqueFilterOptions(
-        gastosSafe.map((gasto) =>
-          getConstanteLabelOrFallback(solicitanteOptions, gasto.solicitante, gasto.solicitanteLabel)
-        )
-      ),
+      empleado: solicitanteOptions.map((option) => getConstanteStoredValue(option)),
       responsable: buildUniqueFilterOptions(gastosSafe.map((gasto) => gasto.responsableLabel || gasto.responsable)),
       validador: buildUniqueFilterOptions(
         gastosSafe.map((gasto) =>
@@ -2655,8 +2835,36 @@ export default function RecursosHumanosVacacionesPage() {
         )
       ),
     }),
-    [comprobanteOptions, gastosSafe, monedaOptions, solicitanteOptions, validadorOptions]
+    [comprobanteOptions, monedaOptions, solicitanteOptions, validadorOptions, gastosSafe]
   );
+
+  const cabeceraFilterConfigs: GastosHeaderFilterConfig[] = [
+    {
+      key: "fechaInicio",
+      label: "Fecha inicio",
+      section: "basic",
+      type: "date",
+      selectedValue: filtrosCabecera.fechaInicio,
+    },
+    {
+      key: "fechaFin",
+      label: "Fecha fin",
+      section: "basic",
+      type: "date",
+      selectedValue: filtrosCabecera.fechaFin,
+    },
+    {
+      key: "empleado",
+      label: "Empleado",
+      section: "basic",
+      type: "lookup",
+      options: empleadoOptions.map((option) => ({
+        value: getConstanteStoredValue(option),
+        label: option.label,
+      })),
+      selectedValue: filtrosCabecera.empleado,
+    },
+  ];
 
   const toggleMultiHeaderFilter = React.useCallback((
     key: GastosHeaderMultiFilterKey,
@@ -2677,6 +2885,18 @@ export default function RecursosHumanosVacacionesPage() {
     }));
   }, []);
 
+  const setEstadoVacacionesValidador = React.useCallback((estado: number) => {
+    setConsultaVacacionesSinParametros(true);
+    setMensajeFiltroCabecera(null);
+    setLimiteConsultaServidor(null);
+    setFiltrosCabecera((prev) => ({
+      ...prev,
+      fechaInicio: "",
+      fechaFin: "",
+      estado: [String(estado)],
+    }));
+  }, []);
+
   const limpiarFiltrosCabecera = React.useCallback(() => {
     setFiltrosCabecera(GASTOS_HEADER_FILTERS_INITIAL);
     setHeaderFilterSearch(GASTOS_HEADER_FILTER_SEARCH_INITIAL);
@@ -2694,6 +2914,11 @@ export default function RecursosHumanosVacacionesPage() {
         expected.every((estado) => current.includes(estado))
       );
     },
+    [filtrosCabecera.estado]
+  );
+
+  const isEstadoVacacionesValidadorActivo = React.useCallback(
+    (estado: number) => filtrosCabecera.estado.length === 1 && filtrosCabecera.estado[0] === String(estado),
     [filtrosCabecera.estado]
   );
 
@@ -2748,9 +2973,7 @@ export default function RecursosHumanosVacacionesPage() {
         const tipoTrabajoGasto = String(
           gasto.filtroOperativo.filtro?.tipoTrabajo ?? gasto.filtroOperativo.tipoTrabajo?.tipoTrabajo ?? ""
         ).trim();
-        const solicitanteGasto = String(
-          getConstanteLabelOrFallback(solicitanteOptions, gasto.solicitante, gasto.solicitanteLabel)
-        ).trim();
+        const empleadoGasto = String(gasto.solicitante ?? gasto.solicitanteLabel ?? "").trim();
         const responsableGasto = String(gasto.responsableLabel || gasto.responsable || "").trim();
         const validadorGasto = String(
           getConstanteLabelOrFallback(validadorOptions, gasto.validador, gasto.validadorLabel)
@@ -2767,7 +2990,7 @@ export default function RecursosHumanosVacacionesPage() {
           (filtrosCabecera.proyecto.length === 0 || filtrosCabecera.proyecto.includes(proyectoGasto)) &&
           (filtrosCabecera.site.length === 0 || filtrosCabecera.site.includes(siteGasto)) &&
           (filtrosCabecera.tipoTrabajo.length === 0 || filtrosCabecera.tipoTrabajo.includes(tipoTrabajoGasto)) &&
-          (filtrosCabecera.solicitante.length === 0 || filtrosCabecera.solicitante.includes(solicitanteGasto)) &&
+          (!filtrosCabecera.empleado || filtrosCabecera.empleado === empleadoGasto) &&
           (filtrosCabecera.responsable.length === 0 || filtrosCabecera.responsable.includes(responsableGasto)) &&
           (filtrosCabecera.validador.length === 0 || filtrosCabecera.validador.includes(validadorGasto))
         );
@@ -2792,6 +3015,18 @@ export default function RecursosHumanosVacacionesPage() {
   const gastosFiltradosKeys = useMemo(
     () => gastosFiltrados.map((gasto, rowIndex) => getGastoRowKey(gasto, rowIndex)),
     [gastosFiltrados]
+  );
+  const idEstadoActualValidador = useMemo(() => {
+    const estado = Number(filtrosCabecera.estado[0]);
+    return [97, 98, 99].includes(estado) ? estado : null;
+  }, [filtrosCabecera.estado]);
+  const haySeleccionActiva = useMemo(
+    () => Boolean(selectedRowKey) || selectedRowKeys.length > 0,
+    [selectedRowKey, selectedRowKeys.length]
+  );
+  const puedeSeleccionarRegistros = useMemo(
+    () => idEstadoActualValidador !== null,
+    [idEstadoActualValidador]
   );
   const todosLosVisiblesSeleccionados = useMemo(
     () => gastosFiltradosKeys.length > 0 && gastosFiltradosKeys.every((key) => selectedRowKeys.includes(key)),
@@ -2851,21 +3086,21 @@ export default function RecursosHumanosVacacionesPage() {
     { key: "nombreEmpleado", label: "Empleado", width: "300px", align: "left" as const, fixed: "left" },
     { key: "idEstado", label: "Id Estado", width: "90px", align: "left" as const, visible: false },
     { key: "estado", label: "Estado", width: "130px", align: "left" as const },
-    { key: "idActivo", label: "Activo", width: "100px", align: "left" as const },
+    { key: "idActivo", label: "Activo", width: "100px", align: "left" as const, visible: false },
     { key: "fechaInicio", label: "Fecha inicio", width: "120px", align: "left" as const },
     { key: "fechaFin", label: "Fecha fin", width: "120px", align: "left" as const },
     { key: "usuario", label: "Usuario", width: "120px", align: "left" as const, visible: false },
-    { key: "fechaCreacion", label: "Fecha creación", width: "130px", align: "left" as const },
+    { key: "fechaCreacion", label: "Fecha creación", width: "130px", align: "left" as const, visible: false },
     { key: "idResponsableCj", label: "Id responsable", width: "120px", align: "left" as const, visible: false },
     { key: "idSegundoVacaciones", label: "Id segundo", width: "120px", align: "left" as const, visible: false },
     { key: "idTerceroVacaciones", label: "Id tercero", width: "120px", align: "left" as const, visible: false },
     { key: "primerValidador", label: "Primer validador", width: "180px", align: "left" as const },
     { key: "segundoValidador", label: "Segundo validador", width: "180px", align: "left" as const },
     { key: "tercerValidador", label: "Tercer validador", width: "180px", align: "left" as const },
-    { key: "responsableVacaciones", label: "Responsable", width: "180px", align: "left" as const },
-    { key: "fechaAprob", label: "Fecha aprobación", width: "130px", align: "left" as const },
+    { key: "responsableVacaciones", label: "Responsable", width: "180px", align: "left" as const, visible: false },
+    { key: "fechaAprob", label: "Fecha aprobación", width: "130px", align: "left" as const, visible: false },
     { key: "saldoVacaciones", label: "Saldo vacaciones", width: "140px", align: "right" as const },
-    { key: "acciones", label: "Acciones", width: "120px", align: "center" as const },
+    { key: "acciones", label: "Acciones", width: "80px", align: "center" as const, visible: true },
   ];
   const columnasGridGastosVisibles = columnasGridGastos.filter((columna) => columna.visible !== false);
   const gridMinWidth = useMemo(() => {
@@ -2923,34 +3158,6 @@ export default function RecursosHumanosVacacionesPage() {
       fontWeight: 400,
     };
   }, []);
-  const mapearDatosOc = React.useCallback(
-    (row: GastoForm): OcDetalle => {
-      const montoOcTexto = row.montoOc2 || "";
-      const montoOc = parseDisplayNumber(montoOcTexto) ?? Number(row.montoOc ?? 0);
-      const conPagadoTexto = row.conPagadoDisplay?.trim() || formatDecimalValue(Number(row.conPagado ?? 0));
-      const conPagado = parseDisplayNumber(conPagadoTexto) ?? Number(row.conPagado ?? 0);
-      const montoOcAdelanto = Number(row.adelaFic ?? 0);
-
-      return {
-        idRegistro: Number(row.id ?? row.idOc ?? 0),
-        idOc: Number(row.idOc ?? 0),
-        cliente: row.filtroOperativo.filtro?.nombreCliente ?? row.clienteNombre ?? "",
-        proyecto: row.filtroOperativo.filtro?.nombreProyecto ?? row.nombreProyecto ?? "",
-        site: row.filtroOperativo.filtro?.nombreSite ?? row.siteNombre ?? "",
-        montoOc,
-        conPagado,
-        conPagadoDisplay: conPagadoTexto,
-        montoOcDisplay: montoOcTexto,
-        subOc: Number(row.subOc ?? 0),
-        adelaFic: Number(row.adelaFic ?? 0),
-        porcentajeFic: Number(row.porcentajeFic ?? 0),
-        montoOcAdelanto,
-        porcentajeOcAdelanto: montoOc > 0 ? (montoOcAdelanto / montoOc) * 100 : 0,
-      };
-    },
-    []
-  );
-  const detalleOcActiva = useMemo(() => (filaActiva ? mapearDatosOc(filaActiva) : null), [filaActiva, mapearDatosOc]);
   const filaActivaIndex = useMemo(() => {
     if (!filaActivaKey) {
       return -1;
@@ -2962,34 +3169,17 @@ export default function RecursosHumanosVacacionesPage() {
     () => filaActiva?.estado === 0 || filaActiva?.estado === 2,
     [filaActiva]
   );
-  useEffect(() => {
-    if (detalleOcActiva) {
-      console.log("[GastosAprobar] Detalle OC calculado", JSON.stringify(detalleOcActiva, null, 2));
-    }
-  }, [detalleOcActiva]);
   const handleRowClick = React.useCallback((gasto: GastoForm, rowKey: string) => {
+    if (!puedeSeleccionarRegistros) {
+      window.alert("Seleccione 1er, 2do o 3er validador antes de seleccionar un registro.");
+      return;
+    }
+
     setSelectedRowKey(rowKey);
     setFilaActiva(gasto);
     setFilaActivaKey(rowKey);
-    setResumenOcMinimizado(false);
     console.log("[GastosAprobar] Registro seleccionado", JSON.stringify(gasto, null, 2));
-  }, []);
-  const abrirDrawerOc = React.useCallback((gasto: GastoForm, rowKey: string) => {
-    setFilaActiva(gasto);
-    setFilaActivaKey(rowKey);
-    setResumenOcMinimizado(false);
-    setDrawerOcAbierto(true);
-    console.log("[GastosAprobar] Detalle OC abierto", JSON.stringify(mapearDatosOc(gasto), null, 2));
-  }, []);
-  const cerrarResumenOc = React.useCallback(() => {
-    setDrawerOcAbierto(false);
-    setFilaActiva(null);
-    setFilaActivaKey(null);
-    setResumenOcMinimizado(false);
-  }, []);
-  const verDetalleCompleto = React.useCallback(() => {
-    setDrawerOcAbierto(true);
-  }, []);
+  }, [puedeSeleccionarRegistros]);
   const editarFilaActiva = React.useCallback(() => {
     if (!filaActiva) {
       return;
@@ -3076,15 +3266,15 @@ export default function RecursosHumanosVacacionesPage() {
           >
             <button
               type="button"
-              title="1er aprobador"
-              aria-label="1er aprobador"
-              onClick={() => setEstadoPreset("aprobar")}
+              title="1er validador"
+              aria-label="1er validador"
+              onClick={() => setEstadoVacacionesValidador(VACACIONES_ESTADO_VALIDADORES.primer)}
               style={{
                 minWidth: 118,
                 height: 36,
                 borderRadius: 10,
-                border: `1px solid ${isEstadoPresetActive("aprobar") ? "#86EFAC" : "#D1D5DB"}`,
-                background: isEstadoPresetActive("aprobar") ? "#F0FDF4" : "#FFFFFF",
+                border: `1px solid ${isEstadoVacacionesValidadorActivo(VACACIONES_ESTADO_VALIDADORES.primer) ? "#86EFAC" : "#D1D5DB"}`,
+                background: isEstadoVacacionesValidadorActivo(VACACIONES_ESTADO_VALIDADORES.primer) ? "#F0FDF4" : "#FFFFFF",
                 color: "#15803D",
                 display: "inline-flex",
                 alignItems: "center",
@@ -3092,26 +3282,26 @@ export default function RecursosHumanosVacacionesPage() {
                 gap: 8,
                 padding: "0 12px",
                 cursor: "pointer",
-                boxShadow: isEstadoPresetActive("aprobar") ? "0 0 0 2px rgba(34,197,94,0.10)" : "none",
+                boxShadow: isEstadoVacacionesValidadorActivo(VACACIONES_ESTADO_VALIDADORES.primer) ? "0 0 0 2px rgba(34,197,94,0.10)" : "none",
               }}
             >
               <CheckCircle2 size={18} />
-              <span style={{ fontSize: 12, fontWeight: 700 }}>1er aprobador</span>
+              <span style={{ fontSize: 12, fontWeight: 700 }}>1er validador</span>
             </button>
 
             
 
             <button
               type="button"
-              title="2do aprobador"
-              aria-label="2do aprobador"
-              onClick={() => setEstadoPreset("observado")}
+              title="2do validador"
+              aria-label="2do validador"
+              onClick={() => setEstadoVacacionesValidador(VACACIONES_ESTADO_VALIDADORES.segundo)}
               style={{
                 minWidth: 118,
                 height: 36,
                 borderRadius: 10,
-                border: `1px solid ${isEstadoPresetActive("observado") ? "#93C5FD" : "#D1D5DB"}`,
-                background: isEstadoPresetActive("observado") ? "#EFF6FF" : "#FFFFFF",
+                border: `1px solid ${isEstadoVacacionesValidadorActivo(VACACIONES_ESTADO_VALIDADORES.segundo) ? "#93C5FD" : "#D1D5DB"}`,
+                background: isEstadoVacacionesValidadorActivo(VACACIONES_ESTADO_VALIDADORES.segundo) ? "#EFF6FF" : "#FFFFFF",
                 color: "#1D4ED8",
                 display: "inline-flex",
                 alignItems: "center",
@@ -3119,24 +3309,24 @@ export default function RecursosHumanosVacacionesPage() {
                 gap: 8,
                 padding: "0 12px",
                 cursor: "pointer",
-                boxShadow: isEstadoPresetActive("observado") ? "0 0 0 2px rgba(59,130,246,0.10)" : "none",
+                boxShadow: isEstadoVacacionesValidadorActivo(VACACIONES_ESTADO_VALIDADORES.segundo) ? "0 0 0 2px rgba(59,130,246,0.10)" : "none",
               }}
             >
               <RotateCcw size={18} />
-              <span style={{ fontSize: 12, fontWeight: 700 }}>2do aprobador</span>
+              <span style={{ fontSize: 12, fontWeight: 700 }}>2do validador</span>
             </button>
 
             <button
               type="button"
-              title="3er aprobador"
-              aria-label="3er aprobador"
-              onClick={() => setEstadoPreset("hormiga")}
+              title="3er validador"
+              aria-label="3er validador"
+              onClick={() => setEstadoVacacionesValidador(VACACIONES_ESTADO_VALIDADORES.tercero)}
               style={{
                 minWidth: 128,
                 height: 36,
                 borderRadius: 10,
-                border: `1px solid ${isEstadoPresetActive("hormiga") ? "#FCD34D" : "#D1D5DB"}`,
-                background: isEstadoPresetActive("hormiga") ? "#FFFBEB" : "#FFFFFF",
+                border: `1px solid ${isEstadoVacacionesValidadorActivo(VACACIONES_ESTADO_VALIDADORES.tercero) ? "#FCD34D" : "#D1D5DB"}`,
+                background: isEstadoVacacionesValidadorActivo(VACACIONES_ESTADO_VALIDADORES.tercero) ? "#FFFBEB" : "#FFFFFF",
                 color: "#B45309",
                 display: "inline-flex",
                 alignItems: "center",
@@ -3144,24 +3334,37 @@ export default function RecursosHumanosVacacionesPage() {
                 gap: 8,
                 padding: "0 12px",
                 cursor: "pointer",
-                boxShadow: isEstadoPresetActive("hormiga") ? "0 0 0 2px rgba(245,158,11,0.10)" : "none",
+                boxShadow: isEstadoVacacionesValidadorActivo(VACACIONES_ESTADO_VALIDADORES.tercero) ? "0 0 0 2px rgba(245,158,11,0.10)" : "none",
               }}
             >
               <AlertTriangle size={18} />
-              <span style={{ fontSize: 12, fontWeight: 700 }}>3er aprobador</span>
+              <span style={{ fontSize: 12, fontWeight: 700 }}>3er validador</span>
             </button>
 
             <button
               type="button"
-              title="Pendientes"
-              aria-label="Pendientes"
-              onClick={() => setEstadoPreset("reaprobar")}
+              title="Todos"
+              aria-label="Todos"
+              onClick={() => {
+                setConsultaVacacionesSinParametros(true);
+                setFiltrosCabecera({
+                  ...GASTOS_HEADER_FILTERS_INITIAL,
+                  fechaInicio: "",
+                  fechaFin: "",
+                  estado: [],
+                });
+                setHeaderFilterSearch(GASTOS_HEADER_FILTER_SEARCH_INITIAL);
+                setCabeceraFiltroAbierto(null);
+                setMostrarFiltrosAdicionales(false);
+                setMensajeFiltroCabecera(null);
+                setLimiteConsultaServidor(null);
+              }}
               style={{
                 minWidth: 132,
                 height: 36,
                 borderRadius: 10,
-                border: `1px solid ${isEstadoPresetActive("reaprobar") ? "#FCA5A5" : "#D1D5DB"}`,
-                background: isEstadoPresetActive("reaprobar") ? "#FEF2F2" : "#FFFFFF",
+                border: "1px solid #D1D5DB",
+                background: "#FFFFFF",
                 color: "#DC2626",
                 display: "inline-flex",
                 alignItems: "center",
@@ -3169,11 +3372,11 @@ export default function RecursosHumanosVacacionesPage() {
                 gap: 8,
                 padding: "0 12px",
                 cursor: "pointer",
-                boxShadow: isEstadoPresetActive("reaprobar") ? "0 0 0 2px rgba(239,68,68,0.10)" : "none",
+                boxShadow: "none",
               }}
             >
               <Bug size={18} />
-              <span style={{ fontSize: 12, fontWeight: 700 }}>Pendientes</span>
+              <span style={{ fontSize: 12, fontWeight: 700 }}>Todos</span>
             </button>
 
             <button
@@ -3206,6 +3409,15 @@ export default function RecursosHumanosVacacionesPage() {
             key: "nuevo",
             label: "Nuevo",
             onClick: abrirNuevo,
+          },
+          {
+            key: "grabar",
+            label: "Aprobar",
+            variant: "secondary",
+            disabled: !haySeleccionActiva || !puedeSeleccionarRegistros || vacacionGuardando,
+            onClick: () => {
+              void aprobarVacacionSeleccionada();
+            },
           },
           {
             key: "exportar",
@@ -3255,330 +3467,289 @@ export default function RecursosHumanosVacacionesPage() {
           gap: 12,
         }}
       >
-        {[
-          {
-            key: "id",
-            label: "Id",
-            section: "basic" as const,
-            type: "text" as const,
-            selectedValue: filtrosCabecera.id,
-          },
-          {
-            key: "porcentajeFic",
-            label: "Porcentaje Fic",
-            section: "basic" as const,
-            type: "text" as const,
-            selectedValue: filtrosCabecera.porcentajeFic,
-          },
-          {
-            key: "estado",
-            label: "Estado",
-            section: "advanced" as const,
-            options: headerFilterOptions.estado.map((option) => ({
-              value: option,
-              label: getEstadoLabel(estadoOptions, option),
-            })),
-            selectedValues: filtrosCabecera.estado,
-          },
-          {
-            key: "fechaInicio",
-            label: "Fecha inicio",
-            section: "basic" as const,
-            type: "date" as const,
-            selectedValue: filtrosCabecera.fechaInicio,
-          },
-          {
-            key: "fechaFin",
-            label: "Fecha fin",
-            section: "basic" as const,
-            type: "date" as const,
-            selectedValue: filtrosCabecera.fechaFin,
-          },
-          {
-            key: "cliente",
-            label: "Cliente",
-            section: "basic" as const,
-            options: headerFilterOptions.cliente.map((option) => ({ value: option, label: option })),
-            selectedValues: filtrosCabecera.cliente,
-          },
-          {
-            key: "solicitante",
-            label: "Solicitante",
-            section: "basic" as const,
-            options: headerFilterOptions.solicitante.map((option) => ({ value: option, label: option })),
-            selectedValues: filtrosCabecera.solicitante,
-          },
-          {
-            key: "idOc",
-            label: "Id OC",
-            section: "advanced" as const,
-            type: "text" as const,
-            selectedValue: filtrosCabecera.idOc,
-          },
-          {
-            key: "proyecto",
-            label: "Proyecto",
-            section: "advanced" as const,
-            options: headerFilterOptions.proyecto.map((option) => ({ value: option, label: option })),
-            selectedValues: filtrosCabecera.proyecto,
-          },
-          {
-            key: "site",
-            label: "Site",
-            section: "advanced" as const,
-            options: headerFilterOptions.site.map((option) => ({ value: option, label: option })),
-            selectedValues: filtrosCabecera.site,
-          },
-          {
-            key: "comprobante",
-            label: "Comprobante",
-            section: "advanced" as const,
-            options: headerFilterOptions.comprobante.map((option) => ({ value: option, label: option })),
-            selectedValues: filtrosCabecera.comprobante,
-          },
-          {
-            key: "moneda",
-            label: "Moneda",
-            section: "advanced" as const,
-            options: headerFilterOptions.moneda.map((option) => ({ value: option, label: option })),
-            selectedValues: filtrosCabecera.moneda,
-          },
-          {
-            key: "tipoTrabajo",
-            label: "Tipo de trabajo",
-            section: "advanced" as const,
-            options: headerFilterOptions.tipoTrabajo.map((option) => ({ value: option, label: option })),
-            selectedValues: filtrosCabecera.tipoTrabajo,
-          },
-          {
-            key: "responsable",
-            label: "Responsable",
-            section: "advanced" as const,
-            options: headerFilterOptions.responsable.map((option) => ({ value: option, label: option })),
-            selectedValues: filtrosCabecera.responsable,
-          },
-          {
-            key: "validador",
-            label: "Validador",
-            section: "advanced" as const,
-            options: headerFilterOptions.validador.map((option) => ({ value: option, label: option })),
-            selectedValues: filtrosCabecera.validador,
-          },
-        ]
+        {cabeceraFilterConfigs
           .filter((filter) => filter.section === "basic" || mostrarFiltrosAdicionales)
           .map((filter) => {
-          const isOpen = cabeceraFiltroAbierto === filter.key;
-          const searchTerm = isSearchableHeaderFilterKey(filter.key) ? headerFilterSearch[filter.key] : "";
-          const visibleOptions =
-            filter.type === "date" || filter.type === "text"
-              ? filter.options ?? []
-              : (filter.options ?? []).filter((option) =>
-                  !searchTerm ? true : matchesFlexibleSearch(option.label, searchTerm)
-                );
-          const summary =
-            filter.type === "date"
-              ? formatInputDateForDisplay(filter.selectedValue) || "Seleccionar fecha"
-              : filter.type === "text"
-                ? filter.selectedValue?.trim() || "Todos"
-              : buildHeaderFilterSummary(
-                  (filter.options ?? [])
-                    .filter((option) => filter.selectedValues?.includes(option.value))
-                    .map((option) => option.label)
-                );
+            const isOpen = cabeceraFiltroAbierto === filter.key;
+            const searchTerm = isSearchableHeaderFilterKey(filter.key) ? headerFilterSearch[filter.key] : "";
+            const visibleOptions =
+              filter.type === "date" || filter.type === "text"
+                ? filter.options ?? []
+                : (filter.options ?? []).filter((option) =>
+                    !searchTerm ? true : matchesFlexibleSearch(option.label, searchTerm)
+                  );
+            const lookupSelectedLabel =
+              filter.type === "lookup"
+                ? (filter.options ?? []).find((option) => option.value === (filter.selectedValue ?? ""))?.label ?? ""
+                : "";
+            const summary =
+              filter.type === "date"
+                ? formatInputDateForDisplay(filter.selectedValue) || "Seleccionar fecha"
+                : filter.type === "text"
+                  ? filter.selectedValue?.trim() || "Todos"
+                  : filter.type === "lookup"
+                    ? lookupSelectedLabel || "Todos"
+                  : buildHeaderFilterSummary(
+                      (filter.options ?? [])
+                        .filter((option) => filter.selectedValues?.includes(option.value))
+                        .map((option) => option.label)
+                    );
 
-          return (
-            <div
-              key={filter.key}
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 6,
-                fontSize: 11,
-                color: "#374151",
-                fontWeight: 600,
-                position: "relative",
-              }}
-            >
-              <span>{filter.label}</span>
-              <button
-                type="button"
-                disabled={filter.key === "estado"}
-                onClick={() =>
-                  filter.key === "estado"
-                    ? undefined
-                    : setCabeceraFiltroAbierto((prev) => {
-                        const nextValue = prev === filter.key ? null : filter.key;
-
-                        if (!nextValue && isSearchableHeaderFilterKey(filter.key)) {
-                          setHeaderFilterSearch((prevSearch) => ({
-                            ...prevSearch,
-                            [filter.key]: "",
-                          }));
-                        }
-
-                        return nextValue;
-                      })
-                }
+            return (
+              <div
+                key={filter.key}
                 style={{
-                  height: 36,
-                  borderRadius: 10,
-                  border: "1px solid #D1D5DB",
-                  padding: "0 10px",
-                  fontSize: 11,
-                  color: "#111827",
-                  background: "#FFFFFF",
                   display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 8,
-                  cursor: filter.key === "estado" ? "not-allowed" : "pointer",
-                  textAlign: "left",
-                  opacity: filter.key === "estado" ? 0.65 : 1,
+                  flexDirection: "column",
+                  gap: 6,
+                  fontSize: 11,
+                  color: "#374151",
+                  fontWeight: 600,
+                  position: "relative",
                 }}
               >
-                <span
-                  style={{
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    flex: 1,
-                  }}
-                >
-                  {summary}
-                </span>
-                <span style={{ color: "#6B7280", fontSize: 10 }}>{isOpen ? "â–²" : "â–¼"}</span>
-              </button>
+                <span>{filter.label}</span>
+                <button
+                  type="button"
+                  disabled={filter.key === "estado"}
+                  onClick={() =>
+                    filter.key === "estado"
+                      ? undefined
+                      : setCabeceraFiltroAbierto((prev) => {
+                          const nextValue = prev === filter.key ? null : filter.key;
 
-              {isOpen && (
-                <div
-                  ref={cabeceraFiltroMenuRef}
+                          if (!nextValue && isSearchableHeaderFilterKey(filter.key)) {
+                            setHeaderFilterSearch((prevSearch) => ({
+                              ...prevSearch,
+                              [filter.key]: "",
+                            }));
+                          }
+
+                          return nextValue;
+                        })
+                  }
                   style={{
-                    position: "absolute",
-                    top: "calc(100% + 6px)",
-                    left: 0,
-                    width: "100%",
-                    minWidth: 180,
-                    maxHeight: 320,
-                    overflow: "auto",
-                    borderRadius: 12,
+                    height: 36,
+                    borderRadius: 10,
                     border: "1px solid #D1D5DB",
+                    padding: "0 10px",
+                    fontSize: 11,
+                    color: "#111827",
                     background: "#FFFFFF",
-                    boxShadow: "0 12px 28px rgba(15,23,42,0.12)",
-                    padding: 10,
-                    zIndex: 20,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    cursor: filter.key === "estado" ? "not-allowed" : "pointer",
+                    textAlign: "left",
+                    opacity: filter.key === "estado" ? 0.65 : 1,
                   }}
                 >
-                  {filter.type === "date" ? (
-                    <input
-                      type="date"
-                      value={filter.selectedValue}
-                      onChange={(event) =>
-                        setFiltrosCabecera((prev) => ({
-                          ...prev,
-                          [filter.key]: event.target.value,
-                        }))
-                      }
-                      style={{
-                        width: "100%",
-                        height: 36,
-                        borderRadius: 10,
-                        border: "1px solid #D1D5DB",
-                        padding: "0 10px",
-                        fontSize: 11,
-                        color: "#111827",
-                        background: "#FFFFFF",
-                      }}
-                    />
-                  ) : filter.type === "text" ? (
-                    <input
-                      type="text"
-                      value={filter.selectedValue ?? ""}
-                      onChange={(event) =>
-                        setFiltrosCabecera((prev) => ({
-                          ...prev,
-                          [filter.key]: event.target.value.replace(/\D/g, ""),
-                        }))
-                      }
-                      placeholder="Ingrese Id"
-                      style={{
-                        width: "100%",
-                        height: 36,
-                        borderRadius: 10,
-                        border: "1px solid #D1D5DB",
-                        padding: "0 10px",
-                        fontSize: 11,
-                        color: "#111827",
-                        background: "#FFFFFF",
-                      }}
-                    />
-                  ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {isSearchableHeaderFilterKey(filter.key) && (
-                        <input
-                          type="text"
-                          value={searchTerm}
-                          onChange={(event) =>
-                            setHeaderFilterSearch((prev) => ({
-                              ...prev,
-                              [filter.key]: event.target.value,
-                            }))
-                          }
-                          placeholder={`Buscar ${filter.label.toLowerCase()}...`}
-                          style={{
-                            width: "100%",
-                            height: 36,
-                            borderRadius: 10,
-                            border: "1px solid #D1D5DB",
-                            padding: "0 10px",
-                            fontSize: 11,
-                            color: "#111827",
-                            background: "#FFFFFF",
-                          }}
-                        />
-                      )}
-                      {visibleOptions.length === 0 && (
-                        <div
-                          style={{
-                            fontSize: 11,
-                            color: "#6B7280",
-                            fontWeight: 500,
-                            padding: "4px 2px",
-                          }}
-                        >
-                          No se encontraron opciones.
-                        </div>
-                      )}
-                      {visibleOptions.map((option) => (
-                        <label
-                          key={`${filter.key}-${option.value}`}
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 6,
-                            fontSize: 11,
-                            color: "#111827",
-                            fontWeight: 500,
-                            cursor: "pointer",
-                          }}
-                        >
+                  <span
+                    style={{
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      flex: 1,
+                    }}
+                  >
+                    {summary}
+                  </span>
+                  <span style={{ color: "#6B7280", fontSize: 10 }}>{isOpen ? "â–²" : "â–¼"}</span>
+                </button>
+
+                {isOpen && (
+                  <div
+                    ref={cabeceraFiltroMenuRef}
+                    style={{
+                      position: "absolute",
+                      top: "calc(100% + 6px)",
+                      left: 0,
+                      width: "100%",
+                      minWidth: 180,
+                      maxHeight: 320,
+                      overflow: "auto",
+                      borderRadius: 12,
+                      border: "1px solid #D1D5DB",
+                      background: "#FFFFFF",
+                      boxShadow: "0 12px 28px rgba(15,23,42,0.12)",
+                      padding: 10,
+                      zIndex: 20,
+                    }}
+                  >
+                    {filter.type === "date" ? (
+                      <input
+                        type="date"
+                        value={filter.selectedValue}
+                        onChange={(event) =>
+                          setFiltrosCabecera((prev) => ({
+                            ...prev,
+                            [filter.key]: event.target.value,
+                          }))
+                        }
+                        style={{
+                          width: "100%",
+                          height: 36,
+                          borderRadius: 10,
+                          border: "1px solid #D1D5DB",
+                          padding: "0 10px",
+                          fontSize: 11,
+                          color: "#111827",
+                          background: "#FFFFFF",
+                        }}
+                      />
+                    ) : filter.type === "text" ? (
+                      <input
+                        type="text"
+                        value={filter.selectedValue ?? ""}
+                        onChange={(event) =>
+                          setFiltrosCabecera((prev) => ({
+                            ...prev,
+                            [filter.key]: event.target.value.replace(/\D/g, ""),
+                          }))
+                        }
+                        placeholder="Ingrese Id"
+                        style={{
+                          width: "100%",
+                          height: 36,
+                          borderRadius: 10,
+                          border: "1px solid #D1D5DB",
+                          padding: "0 10px",
+                          fontSize: 11,
+                          color: "#111827",
+                          background: "#FFFFFF",
+                        }}
+                      />
+                    ) : filter.type === "lookup" ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {isSearchableHeaderFilterKey(filter.key) && (
                           <input
-                            type="checkbox"
-                            checked={filter.selectedValues?.includes(option.value) ?? false}
-                            onChange={() =>
-                              toggleMultiHeaderFilter(
-                                filter.key as GastosHeaderMultiFilterKey,
-                                option.value
-                              )
+                            type="text"
+                            value={searchTerm}
+                            onChange={(event) =>
+                              setHeaderFilterSearch((prev) => ({
+                                ...prev,
+                                [filter.key]: event.target.value,
+                              }))
                             }
+                            placeholder={`Buscar ${filter.label.toLowerCase()}...`}
+                            style={{
+                              width: "100%",
+                              height: 36,
+                              borderRadius: 10,
+                              border: "1px solid #D1D5DB",
+                              padding: "0 10px",
+                              fontSize: 11,
+                              color: "#111827",
+                              background: "#FFFFFF",
+                            }}
                           />
-                          <span>{option.label}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+                        )}
+                        {visibleOptions.length === 0 && (
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color: "#6B7280",
+                              fontWeight: 500,
+                              padding: "4px 2px",
+                            }}
+                          >
+                            No se encontraron opciones.
+                          </div>
+                        )}
+                        {visibleOptions.map((option) => (
+                          <label
+                            key={`${filter.key}-${option.value}`}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              fontSize: 11,
+                              color: "#111827",
+                              fontWeight: 500,
+                              cursor: "pointer",
+                            }}
+                          >
+                            <input
+                              type="radio"
+                              name={`lookup-${filter.key}`}
+                              checked={(filter.selectedValue ?? "") === option.value}
+                              onChange={() =>
+                                setFiltrosCabecera((prev) => ({
+                                  ...prev,
+                                  [filter.key]: option.value,
+                                }))
+                              }
+                            />
+                            <span>{option.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {isSearchableHeaderFilterKey(filter.key) && (
+                          <input
+                            type="text"
+                            value={searchTerm}
+                            onChange={(event) =>
+                              setHeaderFilterSearch((prev) => ({
+                                ...prev,
+                                [filter.key]: event.target.value,
+                              }))
+                            }
+                            placeholder={`Buscar ${filter.label.toLowerCase()}...`}
+                            style={{
+                              width: "100%",
+                              height: 36,
+                              borderRadius: 10,
+                              border: "1px solid #D1D5DB",
+                              padding: "0 10px",
+                              fontSize: 11,
+                              color: "#111827",
+                              background: "#FFFFFF",
+                            }}
+                          />
+                        )}
+                        {visibleOptions.length === 0 && (
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color: "#6B7280",
+                              fontWeight: 500,
+                              padding: "4px 2px",
+                            }}
+                          >
+                            No se encontraron opciones.
+                          </div>
+                        )}
+                        {visibleOptions.map((option) => (
+                          <label
+                            key={`${filter.key}-${option.value}`}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              fontSize: 11,
+                              color: "#111827",
+                              fontWeight: 500,
+                              cursor: "pointer",
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={filter.selectedValues?.includes(option.value) ?? false}
+                              onChange={() =>
+                                toggleMultiHeaderFilter(filter.key as GastosHeaderMultiFilterKey, option.value)
+                              }
+                            />
+                            <span>{option.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
           );
         })}
         <div
@@ -3593,41 +3764,6 @@ export default function RecursosHumanosVacacionesPage() {
         >
           <span>Más opciones</span>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button
-              type="button"
-              title={mostrarFiltrosAdicionales ? "Ocultar filtros" : "Filtros adicionales"}
-              aria-label={mostrarFiltrosAdicionales ? "Ocultar filtros" : "Filtros adicionales"}
-              onClick={() => {
-                setMostrarFiltrosAdicionales((prev) => {
-                  const nextValue = !prev;
-                  if (
-                    !nextValue &&
-                    cabeceraFiltroAbierto &&
-                    ["idOc", "estado", "proyecto", "site", "comprobante", "moneda", "tipoTrabajo", "responsable", "validador"].includes(
-                      cabeceraFiltroAbierto
-                    )
-                  ) {
-                    setCabeceraFiltroAbierto(null);
-                  }
-                  return nextValue;
-                });
-              }}
-              style={{
-                width: 36,
-                height: 36,
-                borderRadius: 10,
-                border: "1px solid #C7D2FE",
-                background: "#EEF2FF",
-                color: "#3730A3",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-                boxShadow: "0 1px 2px rgba(55,48,163,0.10)",
-              }}
-            >
-              <ListFilter size={18} strokeWidth={2.2} />
-            </button>
             <button
               type="button"
               title="Limpiar filtros"
@@ -3784,21 +3920,25 @@ export default function RecursosHumanosVacacionesPage() {
                       }}
                     >
                       {esColumnaSeleccion ? (
-                        <input
+                          <input
                           ref={selectAllCheckboxRef}
                           type="checkbox"
                           aria-label="Seleccionar o deseleccionar todos los registros visibles"
                           checked={todosLosVisiblesSeleccionados}
-                          disabled={gastosFiltradosKeys.length === 0}
+                          disabled={gastosFiltradosKeys.length === 0 || !puedeSeleccionarRegistros}
                           onClick={(e) => e.stopPropagation()}
                           onChange={(e) => {
                             e.stopPropagation();
+                            if (!puedeSeleccionarRegistros) {
+                              window.alert("Seleccione 1er, 2do o 3er validador antes de seleccionar registros.");
+                              return;
+                            }
                             alternarSeleccionVisible(e.currentTarget.checked);
                           }}
                           style={{
                             width: 16,
                             height: 16,
-                            cursor: gastosFiltradosKeys.length > 0 ? "pointer" : "not-allowed",
+                            cursor: gastosFiltradosKeys.length > 0 && puedeSeleccionarRegistros ? "pointer" : "not-allowed",
                             accentColor: "#6E4CCB",
                           }}
                         />
@@ -3961,12 +4101,14 @@ export default function RecursosHumanosVacacionesPage() {
                                       color: "#3730A3",
                                       borderRadius: 8,
                                       fontWeight: 700,
-                                      cursor: "pointer",
+                                      cursor: puedeSeleccionarRegistros ? "pointer" : "not-allowed",
                                       display: "flex",
                                       alignItems: "center",
                                       justifyContent: "center",
                                       fontSize: 15,
+                                      opacity: puedeSeleccionarRegistros ? 1 : 0.55,
                                     }}
+                                    disabled={!puedeSeleccionarRegistros}
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       handleRowClick(gasto, rowKey);
@@ -3982,9 +4124,14 @@ export default function RecursosHumanosVacacionesPage() {
                                   type="checkbox"
                                   aria-label={`Seleccionar registro ${gasto.id}`}
                                   checked={selectedRowKeys.includes(rowKey)}
+                                  disabled={!puedeSeleccionarRegistros}
                                   onClick={(e) => e.stopPropagation()}
                                   onChange={(e) => {
                                     e.stopPropagation();
+                                    if (!puedeSeleccionarRegistros) {
+                                      window.alert("Seleccione 1er, 2do o 3er validador antes de seleccionar un registro.");
+                                      return;
+                                    }
                                     const checked = e.currentTarget.checked;
                                     setSelectedRowKeys((prev) => {
                                       if (checked) {
@@ -4002,7 +4149,7 @@ export default function RecursosHumanosVacacionesPage() {
                                   style={{
                                     width: 16,
                                     height: 16,
-                                    cursor: "pointer",
+                                    cursor: puedeSeleccionarRegistros ? "pointer" : "not-allowed",
                                     accentColor: "#6E4CCB",
                                   }}
                                 />
@@ -4022,13 +4169,9 @@ export default function RecursosHumanosVacacionesPage() {
                               return renderGridCellText(gasto.idOc);
                             case "site":
                               return renderGridCellText(gasto.filtroOperativo.filtro?.nombreSite);
-                            case "solicitante":
+                            case "empleado":
                               return renderGridCellText(
-                                getConstanteLabelOrFallback(
-                                  solicitanteOptions,
-                                  gasto.solicitante,
-                                  gasto.solicitanteLabel
-                                )
+                                getConstanteLabelOrFallback(empleadoOptions, gasto.solicitante, gasto.solicitanteLabel)
                               );
                             case "responsable":
                               return renderGridCellText(gasto.responsableLabel || gasto.responsable || "");
@@ -4135,61 +4278,9 @@ export default function RecursosHumanosVacacionesPage() {
                                 formatInputDateForDisplay(gasto.fecIngreso)
                               );
                             case "acciones":
-                              const accionesHabilitadas = gasto.estado === 0 || gasto.estado === 2;
+                              const accionesHabilitadas = gasto.estado === 97 || gasto.estado === 98 || gasto.estado === 99;
                               return (
-                                <div style={{ display: "flex", justifyContent: "center", gap: 8 }}>
-                                  <button
-                                    title="Visualizar"
-                                    aria-label="Visualizar"
-                                    style={{
-                                      width: 34,
-                                      height: 34,
-                                      border: "1px solid #BFDBFE",
-                                      background: "#EFF6FF",
-                                      color: "#1D4ED8",
-                                      borderRadius: 8,
-                                      fontWeight: 700,
-                                      cursor: "pointer",
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      fontSize: 15,
-                                    }}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      abrirDrawerOc(gasto, rowKey);
-                                    }}
-                                  >
-                                    <Eye size={17} strokeWidth={2.2} />
-                                  </button>
-                                  <button
-                                    title="Editar"
-                                    aria-label="Editar"
-                                    style={{
-                                      width: 34,
-                                      height: 34,
-                                      border: `1px solid ${accionesHabilitadas ? "#C7D2FE" : "#E5E7EB"}`,
-                                      background: accionesHabilitadas ? "#EEF2FF" : "#F3F4F6",
-                                      color: accionesHabilitadas ? "#3730A3" : "#9CA3AF",
-                                      borderRadius: 8,
-                                      fontWeight: 700,
-                                      cursor: accionesHabilitadas ? "pointer" : "not-allowed",
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      fontSize: 15,
-                                      opacity: accionesHabilitadas ? 1 : 0.65,
-                                    }}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      if (!accionesHabilitadas) return;
-                                      abrirEditar(gasto);
-                                    }}
-                                    disabled={!accionesHabilitadas}
-                                  >
-                                    <PencilLine size={17} strokeWidth={2.2} />
-                                  </button>
-
+                                <div style={{ display: "flex", justifyContent: "center" }}>
                                   <button
                                     title="Rechazar"
                                     aria-label="Rechazar"
@@ -4211,7 +4302,7 @@ export default function RecursosHumanosVacacionesPage() {
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       if (!accionesHabilitadas) return;
-                                      confirmarEliminar(gasto, rowIndex);
+                                      void rechazarVacacionRegistro(gasto);
                                     }}
                                     disabled={!accionesHabilitadas}
                                   >
@@ -4249,7 +4340,7 @@ export default function RecursosHumanosVacacionesPage() {
               ? `Registros encontrados: ${cantidadRegistrosFiltrados} | MÃ¡ximo permitido para mostrar: ${MAX_GASTOS_PARA_MOSTRAR}`
               : `Registros encontrados: ${gastosFiltrados.length}`}
           </span>
-          <span>Fuente: sp_EmpleadoOtros_ListarVacaciones</span>
+          <span>:</span>
         </div>
       </div>
 
@@ -4422,9 +4513,9 @@ export default function RecursosHumanosVacacionesPage() {
                 </div>
               ) : null}
 
-              {solicitanteError ? (
+              {empleadosError ? (
                 <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>
-                  {solicitanteError}
+                  {empleadosError}
                 </div>
               ) : null}
 
@@ -5072,7 +5163,7 @@ export default function RecursosHumanosVacacionesPage() {
   )}
 
   <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 4" }}>
-    <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>Solicitante</label>
+    <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>Empleado</label>
     <div style={{ position: "relative", width: "100%" }}>
       <input
         type="text"
@@ -5713,7 +5804,7 @@ export default function RecursosHumanosVacacionesPage() {
                           highlightedEmpleadoVacacionIdx < filteredEmpleadosVacacion.length
                         ) {
                           const empleado = filteredEmpleadosVacacion[highlightedEmpleadoVacacionIdx];
-                          setVacacionForm((prev) => ({ ...prev, idEmpleadoCj: empleado.value }));
+                          setVacacionForm((prev) => ({ ...prev, idEmpleadoCj: getConstanteStoredValue(empleado) }));
                           setEmpleadoVacacionInput(empleado.label);
                           setShowEmpleadoVacacionDropdown(false);
                           setHighlightedEmpleadoVacacionIdx(-1);
@@ -5730,9 +5821,9 @@ export default function RecursosHumanosVacacionesPage() {
                       padding: "0 12px",
                       fontSize: 12,
                       boxSizing: "border-box",
-                      background: empleadosLoading ? "#F3F4F6" : "#FFFFFF",
-                    }}
-                    disabled={vacacionGuardando || solicitanteLoading || solicitanteOptions.length === 0}
+                    background: empleadosLoading ? "#F3F4F6" : "#FFFFFF",
+                  }}
+                    disabled={vacacionGuardando || empleadosLoading || empleadoOptions.length === 0}
                   />
                   {showEmpleadoVacacionDropdown && filteredEmpleadosVacacion.length > 0 && (
                     <div
@@ -5750,7 +5841,7 @@ export default function RecursosHumanosVacacionesPage() {
                     >
                       {filteredEmpleadosVacacion.map((empleado, idx) => (
                         <div
-                        key={`vacacion-empleado-${empleado.value}-${idx}`}
+                          key={`vacacion-empleado-${getConstanteStoredValue(empleado)}-${idx}`}
                           style={{
                             padding: 6,
                             cursor: "pointer",
@@ -5759,7 +5850,7 @@ export default function RecursosHumanosVacacionesPage() {
                             lineHeight: 1.1,
                           }}
                           onMouseDown={() => {
-                            setVacacionForm((prev) => ({ ...prev, idEmpleadoCj: empleado.value }));
+                            setVacacionForm((prev) => ({ ...prev, idEmpleadoCj: getConstanteStoredValue(empleado) }));
                             setEmpleadoVacacionInput(empleado.label);
                             setShowEmpleadoVacacionDropdown(false);
                             setHighlightedEmpleadoVacacionIdx(-1);
@@ -5999,28 +6090,8 @@ export default function RecursosHumanosVacacionesPage() {
           </div>
         </div>
       )}
-      {detalleOcActiva && (
-        <DatosOcFloatingCard
-          detalle={detalleOcActiva}
-          minimized={resumenOcMinimizado}
-          onMinimize={() => setResumenOcMinimizado(true)}
-          onRestore={() => setResumenOcMinimizado(false)}
-          onClose={cerrarResumenOc}
-          onVisualize={visualizarFilaActiva}
-          onViewDetails={verDetalleCompleto}
-          onEdit={editarFilaActiva}
-          onReject={rechazarFilaActiva}
-          accionesHabilitadas={accionesHabilitadasFilaActiva}
-        />
-      )}
-
-      <DatosOcDrawer
-        open={drawerOcAbierto}
-        detalle={detalleOcActiva}
-        onClose={() => setDrawerOcAbierto(false)}
-                                  />
-                                </div>
-                              );
+      </div>
+    );
 }
 const getGastoRowKey = (gasto: GastoForm, rowIndex: number) => {
   const id = Number(gasto.id ?? 0);
