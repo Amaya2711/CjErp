@@ -4332,13 +4332,17 @@ Instruccion de visualizacion:
 
         normalized = System.Text.RegularExpressions.Regex.Replace(
             normalized,
-            @"\b(comparacion|comparar|comparando|comparativa|comparativo|contra|vs|versus|frente|frentea|montooc2|montooc|monto|oc2|conpagado|conpagadosoles|subtotalesoles|subtotalsoles|saldoocsitio|suboc|subplanilla|adelafic|diferenciafic|venta|ventas|quiero|saber|mostrar|consultar|buscar|registros|registro|planilla|detalle|detalles|total|suma|sumado|gasto|gastos|cliente|clientes|proyecto|proyectos|site|sitio|sitios|responsable|responsables|solicitante|solicitantes|estado|estados|considerando|considera|considerar|pagado|pagada|pagados|pagadas|aprobado|aprobada|aprobados|aprobadas|pendiente|pendientes|observado|observada|observados|observadas|rechazado|rechazada|rechazados|rechazadas|separado|separada|separados|separadas|agrupado|agrupada|agrupados|agrupadas|de|del|para|por|con|en|el|la|los|las|periodo|periodo|mes|ano|año)\\b",
+            @"\b(comparacion|comparar|comparando|comparativa|comparativo|contra|vs|versus|frente|frentea|montooc2|montooc|monto|oc2|conpagado|conpagadosoles|subtotalesoles|subtotalsoles|saldoocsitio|suboc|subplanilla|adelafic|diferenciafic|venta|ventas|quiero|saber|mostrar|consultar|buscar|registros|registro|planilla|detalle|detalles|total|suma|sumado|gasto|gastos|cliente|clientes|proyecto|proyectos|site|sitio|sitios|responsable|responsables|solicitante|solicitantes|estado|estados|considerando|considera|considerar|pagado|pagada|pagados|pagadas|aprobado|aprobada|aprobados|aprobadas|pendiente|pendientes|observado|observada|observados|observadas|rechazado|rechazada|rechazados|rechazadas|separado|separada|separados|separadas|agrupado|agrupada|agrupados|agrupadas|de|del|para|por|con|en|el|la|los|las|periodo|periodo|mes|ano|año|inicio|fin|desde|hasta|ejecuta|ejecutar|store|sp|ia|modulo|módulo|texto|busqueda|general|coincidir|todas)\b",
             " ",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
         var tokens = System.Text.RegularExpressions.Regex.Matches(normalized, @"[\p{L}0-9\-_]+")
             .Select(match => match.Value.Trim())
-            .Where(token => token.Length > 1)
+            .Where(token =>
+                token.Length > 1 &&
+                !System.Text.RegularExpressions.Regex.IsMatch(token, @"^\d+$") &&
+                !System.Text.RegularExpressions.Regex.IsMatch(token, @"^\d{4}-\d{2}-\d{2}$") &&
+                !System.Text.RegularExpressions.Regex.IsMatch(token, @"^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$"))
             .Take(4)
             .ToList();
 
@@ -4735,6 +4739,11 @@ Instruccion de visualizacion:
         var normalized = question.ToLowerInvariant();
         var peruYear = DateTimeOffset.UtcNow.ToOffset(PeruOffset).Year;
 
+        if (TryExtractExplicitDateRange(question, out start, out end))
+        {
+            return true;
+        }
+
         if (TryExtractQuarterRange(normalized, peruYear, out start, out end))
         {
             return true;
@@ -4753,6 +4762,82 @@ Instruccion de visualizacion:
         start = new DateOnly(peruYear, 1, 1);
         end = new DateOnly(peruYear, 12, 31);
         return true;
+    }
+
+    private static bool TryExtractExplicitDateRange(string question, out DateOnly start, out DateOnly end)
+    {
+        start = default;
+        end = default;
+
+        var startText = ExtractExplicitDateToken(question, @"(?:fecha\s+inicio|desde)\s*(?:[:=]\s*)?(?<value>\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2})");
+        var endText = ExtractExplicitDateToken(question, @"(?:fecha\s+fin|hasta)\s*(?:[:=]\s*)?(?<value>\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2})");
+
+        var hasStart = TryParseQuestionDate(startText, out var parsedStart);
+        var hasEnd = TryParseQuestionDate(endText, out var parsedEnd);
+
+        if (hasStart && hasEnd)
+        {
+            start = parsedStart;
+            end = parsedEnd;
+            return true;
+        }
+
+        if (hasStart)
+        {
+            start = parsedStart;
+            end = parsedStart;
+            return true;
+        }
+
+        if (hasEnd)
+        {
+            start = parsedEnd;
+            end = parsedEnd;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string? ExtractExplicitDateToken(string question, string pattern)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(
+            question,
+            pattern,
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        return match.Groups["value"].Value.Trim();
+    }
+
+    private static bool TryParseQuestionDate(string? value, out DateOnly date)
+    {
+        date = default;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var formats = new[]
+        {
+            "yyyy-MM-dd",
+            "yyyy/M/d",
+            "yyyy/MM/dd",
+            "dd/MM/yyyy",
+            "d/M/yyyy",
+            "MM/dd/yyyy",
+            "M/d/yyyy",
+            "dd-MM-yyyy",
+            "d-M-yyyy",
+            "MM-dd-yyyy",
+            "M-d-yyyy"
+        };
+
+        return DateOnly.TryParseExact(value.Trim(), formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
     }
 
     private static bool TryExtractQuarterRange(string normalizedQuestion, int fallbackYear, out DateOnly start, out DateOnly end)

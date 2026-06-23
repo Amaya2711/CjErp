@@ -84,6 +84,7 @@ type GastoDto = {
   idUsuarioFactura?: number | null;
   estado?: number;
   estadoLabel?: string;
+  fechaDeposito?: string;
 };
 
 type GastoForm = {
@@ -128,6 +129,7 @@ type GastoForm = {
   rutaFacturaEnviada?: string;
   estado: number;
   estadoLabel?: string;
+  fechaDeposito: string;
 };
 
 type GastoPayload = {
@@ -213,7 +215,6 @@ const GASTOS_HEADER_FILTERS_INITIAL: GastosHeaderFilters = {
   validador: [],
 };
 
-const GASTOS_ESTADOS_DISPONIBLES = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "99"];
 type GastosHeaderMultiFilterKey =
   | "estado"
   | "comprobante"
@@ -331,8 +332,23 @@ function normalizeDateFilterValue(dateValue?: string): string {
   const slashMatch = normalized.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
 
   if (slashMatch) {
-    const [, day, month, year] = slashMatch;
-    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+    const [, firstPart, secondPart, year] = slashMatch;
+    const firstNumber = Number(firstPart);
+    const secondNumber = Number(secondPart);
+
+    if (Number.isFinite(firstNumber) && Number.isFinite(secondNumber)) {
+      if (firstNumber > 12 && secondNumber <= 12) {
+        return `${year}-${secondPart.padStart(2, "0")}-${firstPart.padStart(2, "0")}`;
+      }
+
+      if (secondNumber > 12 && firstNumber <= 12) {
+        return `${year}-${firstPart.padStart(2, "0")}-${secondPart.padStart(2, "0")}`;
+      }
+
+      // Cuando ambos valores son <= 12 priorizamos mm/dd/yyyy porque es el formato
+      // en el que suele llegar la fecha desde el store.
+      return `${year}-${firstPart.padStart(2, "0")}-${secondPart.padStart(2, "0")}`;
+    }
   }
 
   const parsed = new Date(normalized);
@@ -957,6 +973,7 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     idRendicion: getRecordNumber(row, "IdRendicion", "idRendicion") ?? undefined,
     detalle: getRecordString(row, "Detalle", "detalle"),
     comentario: getRecordString(row, "Observacion", "observacion", "Comentario", "comentario"),
+    fechaDeposito: getRecordString(row, "FechaDeposito", "fechaDeposito"),
     fechaVencimiento: getRecordString(row, "FechaDeposito", "fechaDeposito", "FechaVencimiento", "fechaVencimiento"),
     fecIngreso: getRecordString(
       row,
@@ -1077,6 +1094,7 @@ function mapGastoDtoToView(item: GastoDto): GastoForm {
     monto: subtotalValue != null ? subtotalValue.toString() : "",
     detalle: item.detalle,
     comentario: item.comentario ?? (item as any).observacion ?? "",
+    fechaDeposito: item.fechaDeposito ?? "",
     fechaVencimiento: normalizeDateForInput(item.fechaVencimiento),
     fecIngreso: normalizeFecIngresoFromStore(item.fecIngreso || item.fechaEmision),
     fechaEmision: normalizeDateForInput(item.fechaEmision),
@@ -1122,6 +1140,7 @@ const formularioInicial: GastoForm = {
   monto: "",
   detalle: "",
   comentario: "",
+  fechaDeposito: "",
   fechaVencimiento: "",
   fecIngreso: "",
   fechaEmision: "",
@@ -1328,7 +1347,14 @@ export default function GastosPage() {
 
   const gastosApi = {
     list: async () => {
-      const estadosSeleccionados = filtrosCabecera.estado;
+      const estadosSeleccionados = Array.from(
+        new Set(
+          filtrosCabecera.estado
+            .map((estado) => normalizeConstanteValue(estadoOptions, estado))
+            .map((estado) => estado.trim())
+            .filter(Boolean)
+        )
+      );
       const fechaInicio = filtrosCabecera.fechaInicio.trim();
       const fechaFin = filtrosCabecera.fechaFin.trim();
       const fechaInicioParametro = formatInputDateForPlanillaParametro(fechaInicio);
@@ -1349,33 +1375,33 @@ export default function GastosPage() {
       setMensajeFiltroCabecera(null);
       setLimiteConsultaServidor(null);
 
-      const parametros: PlanillaConsultaParametro[] = [
-        {
-          nombre: "Estados",
-          valor: estadosSeleccionados.join(","),
-          tipo: "string",
-        },
-      ];
-
-      if (fechaInicio) {
-        parametros.push({
-          nombre: "FechaInicio",
-          valor: fechaInicioParametro,
-          tipo: "string",
-        });
-      }
-
-      if (fechaFin) {
-        parametros.push({
-          nombre: "FechaFin",
-          valor: fechaFinParametro,
-          tipo: "string",
-        });
-      }
-
       const response = await consultarPlanillaEstados(
         {
-          ...buildPlanillaConsultaEstadosRequest(parametros),
+          ...buildPlanillaConsultaEstadosRequest([
+            {
+              nombre: "Estados",
+              valor: estadosSeleccionados.join(","),
+              tipo: "string",
+            },
+            ...(fechaInicioParametro
+              ? [
+                  {
+                    nombre: "FechaInicio",
+                    valor: fechaInicioParametro,
+                    tipo: "date",
+                  } satisfies PlanillaConsultaParametro,
+                ]
+              : []),
+            ...(fechaFinParametro
+              ? [
+                  {
+                    nombre: "FechaFin",
+                    valor: fechaFinParametro,
+                    tipo: "date",
+                  } satisfies PlanillaConsultaParametro,
+                ]
+              : []),
+          ]),
           maxRows: MAX_GASTOS_PARA_MOSTRAR,
         }
       );
@@ -2345,7 +2371,7 @@ export default function GastosPage() {
 
   const headerFilterOptions = useMemo(
     () => ({
-      estado: GASTOS_ESTADOS_DISPONIBLES,
+      estado: buildUniqueFilterOptions(estadoOptions.map((option) => getConstanteStoredValue(option))),
       comprobante: buildUniqueFilterOptions(
         gastosSafe.map((gasto) =>
           getConstanteLabel(comprobanteOptions, gasto.comprobante) || gasto.comprobanteLabel || gasto.comprobante
@@ -2372,7 +2398,7 @@ export default function GastosPage() {
         )
       ),
     }),
-    [comprobanteOptions, gastosSafe, monedaOptions, solicitanteOptions, validadorOptions]
+    [comprobanteOptions, estadoOptions, gastosSafe, monedaOptions, solicitanteOptions, validadorOptions]
   );
 
   const toggleMultiHeaderFilter = React.useCallback((
@@ -2413,7 +2439,6 @@ export default function GastosPage() {
     return sorted
       .filter((gasto) => matchesCrudToolbarSearch(gasto, busqueda, camposBusquedaGastos))
       .filter((gasto) => {
-        const fechaGasto = normalizeDateFilterValue(gasto.fecIngreso);
         const idGasto = String(gasto.id ?? "").trim();
         const estadoGasto = String(gasto.estado ?? "").trim();
         const comprobanteGasto = String(
@@ -2438,8 +2463,6 @@ export default function GastosPage() {
 
         return (
           (!filtrosCabecera.id || idGasto.includes(filtrosCabecera.id.trim())) &&
-          (!filtrosCabecera.fechaInicio || (fechaGasto && fechaGasto >= filtrosCabecera.fechaInicio)) &&
-          (!filtrosCabecera.fechaFin || (fechaGasto && fechaGasto <= filtrosCabecera.fechaFin)) &&
           (filtrosCabecera.estado.length === 0 || filtrosCabecera.estado.includes(estadoGasto)) &&
           (filtrosCabecera.comprobante.length === 0 || filtrosCabecera.comprobante.includes(comprobanteGasto)) &&
           (filtrosCabecera.moneda.length === 0 || filtrosCabecera.moneda.includes(monedaGasto)) &&
@@ -2491,6 +2514,7 @@ export default function GastosPage() {
     { key: "comprobante", label: "Comprobante", width: "140px", align: "left" as const },
     { key: "monto", label: "Monto", width: "100px", align: "left" as const },
     { key: "moneda", label: "Moneda", width: "80px", align: "left" as const },
+    { key: "fechaDeposito", label: "FechaDeposito", width: "130px", align: "left" as const },
     { key: "fecIngreso", label: "FecIngreso", width: "130px", align: "left" as const },
     { key: "ot", label: "OT", width: "70px", align: "left" as const },
     { key: "solicitante", label: "Solicitante", width: "160px", align: "left" as const },
@@ -2597,6 +2621,8 @@ export default function GastosPage() {
                       return getConstanteLabel(comprobanteOptions, gasto.comprobante);
                     case "moneda":
                       return getConstanteLabel(monedaOptions, gasto.moneda);
+                    case "fechaDeposito":
+                      return formatInputDateForDisplay(gasto.fechaDeposito);
                     case "monto":
                       return gasto.monto !== undefined && gasto.monto !== null && gasto.monto !== ""
                         ? Number(gasto.monto).toLocaleString("es-PE", { minimumFractionDigits: 2 })
@@ -3266,6 +3292,8 @@ export default function GastosPage() {
                               return renderGridCellText(getConstanteLabel(comprobanteOptions, gasto.comprobante));
                             case "moneda":
                               return renderGridCellText(getConstanteLabel(monedaOptions, gasto.moneda));
+                            case "fechaDeposito":
+                              return renderGridCellText(formatInputDateForDisplay(gasto.fechaDeposito));
                             case "monto":
                               return renderGridCellText(
                                 gasto.monto !== undefined && gasto.monto !== null && gasto.monto !== ""

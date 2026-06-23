@@ -74,6 +74,7 @@ import EppsPage from "../../features/planta/epps";
 import OperativoPage from "../../pages/reporte/operativo";
 import FinancieroPage from "../../pages/reporte/financiero";
 import GerencialPage from "../../pages/reporte/gerencial";
+import DashboardCjPage from "../../features/reportes/gerencial/dashboardcj";
 import RptAsistenciaPage from "../../features/reportes/rptasistencia";
 import RptAsistenciaEmpleadoPage from "../../features/reportes/rptasistenciaempleado";
 import ClaudeiaPage from "../../features/reportes/administrativo/claudeia";
@@ -177,6 +178,7 @@ export default function AppRouter() {
             />
             <Route path="/reporte/financiero" element={<FinancieroPage />} />
             <Route path="/reporte/gerencial" element={<GerencialPage />} />
+            <Route path="/reportes/gerencial/dashboardcj" element={<DashboardCjPage />} />
             <Route path="/reportes/rptasistencia" element={<RptAsistenciaPage />} />
             <Route path="/reportes/rptasistenciaempleado" element={<RptAsistenciaEmpleadoPage />} />
 

@@ -1,0 +1,219 @@
+ALTER PROCEDURE [dbo].[sp_Planilla_Consulta_Estados]
+(
+    @IdCargo        INT,
+    @IdEmpleado     INT,
+    @IdValidador    INT = NULL,
+    @Estados        VARCHAR(50),
+    @FechaInicio    DATE = NULL,
+    @FechaFin       DATE = NULL,
+    @FechaDeposito  DATE = NULL
+)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @FiltrarPorSolicitante BIT = 1;
+    DECLARE @IdEmpleado2 VARCHAR(MAX) = '0';
+
+    SELECT @IdEmpleado2 =
+        ISNULL(
+            STRING_AGG(CONVERT(VARCHAR(20), b.IdEmpleado), ','),
+            '0'
+        )
+    FROM EmpleadoCj a
+    LEFT JOIN Empleado b
+        ON a.IdEmpleado = b.IdEmpleadoCj
+    WHERE a.IdEmpleado = @IdEmpleado
+      AND b.IdEmpleado IS NOT NULL;
+
+    IF EXISTS (
+        SELECT 1
+        FROM dbo.Constante
+        WHERE Campo = 'PERMISOS'
+          AND (
+                TRY_CONVERT(INT, Correlativo) = @IdCargo
+             OR TRY_CONVERT(INT, ValorIni) = @IdCargo
+          )
+    )
+    BEGIN
+        SET @FiltrarPorSolicitante = 0;
+    END;
+
+    SELECT DISTINCT
+        CONVERT(VARCHAR(10), a.FecIngreso, 103) AS FecIngreso,
+        CAST(a.Detalle AS VARCHAR(MAX)) AS Detalle,
+        h.ValorIni AS Bien,
+        i.ValorIni AS Comprobante,
+        f_emp.NroDocumento AS RUC,
+        k.ValorIni AS Moneda,
+        CASE
+            WHEN a.TipoMoneda = 1 THEN a.Subtotal
+            ELSE a.Subtotal * 3.8
+        END AS Subtotal,
+        CASE
+            WHEN a.TipoMoneda = 1 THEN a.Igv
+            ELSE a.Igv * 3.8
+        END AS IGV,
+        CASE
+            WHEN a.TipoMoneda = 1 THEN a.Total
+            ELSE a.Total * 3.8
+        END AS Total,
+        a.Comentario,
+        CASE
+            WHEN ISNULL(a.IdWeb, 0) = 1 THEN m_cj.NombreEmpleado
+            ELSE m_emp.NombreEmpleado
+        END AS Solicitante,
+        CASE
+            WHEN ISNULL(a.IdWeb, 0) = 1 THEN p_cj.NombreEmpleado
+            ELSE p_emp.NombreEmpleado
+        END AS GEstor,
+        CASE
+            WHEN ISNULL(a.IdWeb, 0) = 1 THEN o_cj.NombreEmpleado
+            ELSE o_emp.NombreEmpleado
+        END AS Validador,
+        CONVERT(VARCHAR(10), a.FechaDeposito, 103) AS FechaDeposito,
+        a.Estado,
+        a.Correlativo AS Corre,
+        a.IdProyecto,
+        w.Correlativo,
+        a.IdResponsable,
+        a.IdSite,
+        a.Usuario,
+        a.Ot,
+        a.IdCliente,
+        a.IdBien,
+        a.IdComprobante,
+        a.IdTipoPago,
+        a.TipoMoneda,
+        a.IdRendicion,
+        a.IdSolicitante,
+        a.IdValidador,
+        a.HoraCreacion,
+        a.Responsable AS NomResponsable,
+        a.IdTipoDoc,
+        a.Fila,
+        a.IdTransferencia,
+        b.NombreProyecto,
+        c.NombreSite AS Site,
+        CASE
+            WHEN c.Correlativo IS NULL THEN 1
+            ELSE c.Correlativo
+        END AS CorSite,
+        a.Tipo_Trabajo,
+        f_emp.NombreEmpleado AS Responsable,
+        g.NombreCliente AS Cliente,
+        a.IdOc,
+        a.TotalPagar,
+        a.IdTarea,
+        a.imgFactura,
+        a.idprovisional,
+        s1.fechaInicio,
+        w.ValorIni AS NombreEstado,
+        a.serie
+    FROM Planilla a
+    LEFT JOIN CuentaEmpleado a4
+        ON a4.IdEmpleado = a.IdResponsable
+    LEFT JOIN Constante e
+        ON e.Sociedad = 'PE01'
+       AND e.Programa = 'PLANTILLA'
+       AND e.Campo = 'TAREA'
+       AND a.IdTarea = e.Correlativo
+    LEFT JOIN Empleado f_emp
+        ON f_emp.IdEmpleado = a.IdResponsable
+       AND f_emp.IdCargo IN (10, 11, 83)
+    LEFT JOIN Cliente g
+        ON g.IdCliente = a.IdCliente
+    LEFT JOIN Constante h
+        ON h.Sociedad = 'PE01'
+       AND h.Programa = 'PLANTILLA'
+       AND h.Campo = 'TIPO_BIEN'
+       AND a.IdBien = h.Correlativo
+    LEFT JOIN Constante i
+        ON i.Sociedad = 'PE01'
+       AND i.Programa = 'PLANTILLA'
+       AND i.Campo = 'TIPO_COMPROBANTE'
+       AND a.IdComprobante = i.Correlativo
+    LEFT JOIN Constante j
+        ON j.Sociedad = 'PE01'
+       AND j.Programa = 'PLANTILLA'
+       AND j.Campo = 'TIPO_PAGO'
+       AND a.IdTipoPago = j.Correlativo
+    LEFT JOIN Constante k
+        ON k.Sociedad = 'PE01'
+       AND k.Programa = 'PLANTILLA'
+       AND k.Campo = 'TIPO_MONEDA'
+       AND a.TipoMoneda = k.Correlativo
+    LEFT JOIN Constante l
+        ON l.Sociedad = 'PE01'
+       AND l.Programa = 'PLANTILLA'
+       AND l.Campo = 'RENDICION'
+       AND a.IdRendicion = l.Correlativo
+    LEFT JOIN Empleado m_emp
+        ON m_emp.IdEmpleado = a.IdSolicitante
+       AND ISNULL(a.IdWeb, 0) <> 1
+    LEFT JOIN EmpleadoCj m_cj
+        ON m_cj.IdEmpleado = a.IdSolicitante
+       AND ISNULL(a.IdWeb, 0) = 1
+    LEFT JOIN Empleado o_emp
+        ON o_emp.IdEmpleado = a.IdValidador
+       AND ISNULL(a.IdWeb, 0) <> 1
+    LEFT JOIN EmpleadoCj o_cj
+        ON o_cj.IdEmpleado = a.IdValidador
+       AND ISNULL(a.IdWeb, 0) = 1
+    LEFT JOIN Empleado p_emp
+        ON p_emp.IdEmpleado = a.IdGestor
+       AND ISNULL(a.IdWeb, 0) <> 1
+    LEFT JOIN EmpleadoCj p_cj
+        ON p_cj.IdEmpleado = a.IdGestor
+       AND ISNULL(a.IdWeb, 0) = 1
+    LEFT JOIN Constante w
+        ON w.Sociedad = 'PE01'
+       AND w.Programa = 'MAESTRO'
+       AND w.Campo = 'ESTADO'
+       AND a.Estado = w.Correlativo
+    LEFT JOIN Site c
+        ON a.IdSite = c.IdSite
+       AND a.CorreSite = c.Correlativo
+    LEFT JOIN EmpleadoCj z
+        ON a.IdSolicitante = z.IdEmpleado
+    LEFT JOIN Empleado z1
+        ON a.IdSolicitante = z1.IdEmpleado
+    LEFT JOIN Suministro_provisional s1
+        ON a.idprovisional = s1.idprovisional
+    INNER JOIN Proyecto b
+        ON a.IdProyecto = b.IdProyecto
+    WHERE a.Estado IN (
+        SELECT TRY_CAST(LTRIM(RTRIM(value)) AS INT)
+        FROM STRING_SPLIT(@Estados, ',')
+        WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) IS NOT NULL
+    )
+    AND (@IdValidador IS NULL OR a.IdValidador = @IdValidador)
+    AND (
+        @FechaInicio IS NULL
+        OR CONVERT(DATE, a.FecIngreso) >= @FechaInicio
+    )
+    AND (
+        @FechaFin IS NULL
+        OR CONVERT(DATE, a.FecIngreso) <= @FechaFin
+    )
+    AND (
+        @FechaDeposito IS NULL
+        OR CONVERT(DATE, a.FechaDeposito) = @FechaDeposito
+    )
+    AND (
+        @FiltrarPorSolicitante = 0
+        OR (
+            ISNULL(a.IdWeb, 0) = 1
+            AND z.IdEmpleado = @IdEmpleado
+        )
+        OR (
+            ISNULL(a.IdWeb, 0) <> 1
+            AND z1.IdEmpleado IN (
+                SELECT TRY_CAST(LTRIM(RTRIM(value)) AS INT)
+                FROM STRING_SPLIT(@IdEmpleado2, ',')
+                WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) IS NOT NULL
+            )
+        )
+    )
+    ORDER BY a.Correlativo DESC;
+END;

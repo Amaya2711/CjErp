@@ -344,20 +344,75 @@ function normalizeText(value?: string | null) {
     .trim();
 }
 
-function formatDateLabel(value: string) {
-  if (!value) return "";
-  if (value.includes("/")) return value;
-
-  const dateOnlyMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
-  if (dateOnlyMatch) {
-    const [, year, month, day] = dateOnlyMatch;
-    return `${day}/${month}/${year}`;
+function buildDateFromParts(year: number, month: number, day: number) {
+  if (![year, month, day].every(Number.isFinite)) {
+    return null;
   }
 
-  // Forzar zona horaria de Perú
-  const parsed = new Date(new Date(value).toLocaleString("en-US", { timeZone: "America/Lima" }));
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleDateString("es-PE");
+  const parsed = new Date(year, month - 1, day);
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function parseDatabaseDate(value: string) {
+  if (!value) return null;
+
+  const trimmed = value.trim();
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/.exec(trimmed);
+  if (isoMatch) {
+    return buildDateFromParts(Number(isoMatch[1]), Number(isoMatch[2]), Number(isoMatch[3]));
+  }
+
+  const slashMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[T\s].*)?$/.exec(trimmed);
+  if (slashMatch) {
+    const monthFirst = buildDateFromParts(Number(slashMatch[3]), Number(slashMatch[1]), Number(slashMatch[2]));
+    if (monthFirst) {
+      return monthFirst;
+    }
+
+    return buildDateFromParts(Number(slashMatch[3]), Number(slashMatch[2]), Number(slashMatch[1]));
+  }
+
+  const dashMatch = /^(\d{1,2})-(\d{1,2})-(\d{4})(?:[T\s].*)?$/.exec(trimmed);
+  if (dashMatch) {
+    const monthFirst = buildDateFromParts(Number(dashMatch[3]), Number(dashMatch[1]), Number(dashMatch[2]));
+    if (monthFirst) {
+      return monthFirst;
+    }
+
+    return buildDateFromParts(Number(dashMatch[3]), Number(dashMatch[2]), Number(dashMatch[1]));
+  }
+
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+}
+
+function formatDateParts(date: Date) {
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
+function formatDateLabel(value: string) {
+  if (!value) return "";
+  const parsed = parseDatabaseDate(value);
+  if (parsed) {
+    return formatDateParts(parsed);
+  }
+
+  return value.trim();
 }
 
 function formatShortDateLabel(value: string) {
@@ -6867,3 +6922,4 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
   },
 };
+

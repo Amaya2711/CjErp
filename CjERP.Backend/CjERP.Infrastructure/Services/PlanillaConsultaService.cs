@@ -48,14 +48,6 @@ namespace CjERP.Infrastructure.Services
                 .Select(MapRow)
                 .ToList();
 
-            if (!string.Equals(storedProcedureName, StoredProcedureVacaciones, StringComparison.OrdinalIgnoreCase))
-            {
-                var fechaInicioFiltro = GetDateParameterValue(parametrosList, "FechaInicio");
-                var fechaFinFiltro = GetDateParameterValue(parametrosList, "FechaFin");
-
-                rows = ApplyFecIngresoFilter(rows, fechaInicioFiltro, fechaFinFiltro);
-            }
-
             var totalRows = rows.Count;
             var limitExceeded = maxRows.HasValue && maxRows.Value > 0 && totalRows > maxRows.Value;
 
@@ -326,13 +318,16 @@ WHERE Correlativo IN @Correlativos";
 
             var allowedParameters = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
+                "IdCargo",
+                "IdEmpleado",
                 "IdSolicitante",
                 "IdValidador",
                 "Estados",
-                "IncluirEstado99",
-                "TipoCambio",
                 "FechaInicio",
-                "FechaFin"
+                "FechaFin",
+                "FechaDeposito",
+                "IncluirEstado99",
+                "TipoCambio"
             };
 
             return parametros.Where(parametro =>
