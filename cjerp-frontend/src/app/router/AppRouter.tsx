@@ -53,6 +53,7 @@ import CobranzasPage from "../../features/comercial/cobranzas";
 import SolicitudesPage from "../../features/compras/solicitudes";
 import OrdenCompraPage from "../../features/compras/ordencompra";
 import PersonalPage from "../../features/recursoshumanos/personal";
+import FichaPage from "../../features/recursoshumanos/ficha";
 import RecursosHumanosAsistenciaPage from "../../features/recursoshumanos/asistencia";
 import CompensacionRealPage from "../../features/recursoshumanos/compensacionreal";
 import ImportarPlanillaXmlPage from "../../features/recursoshumanos/planillas";
@@ -113,6 +114,7 @@ export default function AppRouter() {
             <Route path="/compras/ordencompra" element={<OrdenCompraPage />} />
 
             <Route path="/recursoshumanos/personal" element={<PersonalPage />} />
+            <Route path="/recursoshumanos/ficha" element={<FichaPage />} />
             <Route
               path="/recursoshumanos/asistencia"
               element={<RecursosHumanosAsistenciaPage />}
