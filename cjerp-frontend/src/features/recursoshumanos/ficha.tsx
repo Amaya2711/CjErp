@@ -446,13 +446,12 @@ export default function FichaPage() {
           <div style={styles.breadcrumb}>Recursos Humanos / Ficha</div>
           <h1 style={styles.title}>Ficha de empleado</h1>
           <p style={styles.subtitle}>
-            Consulta la informacion del store <code>sp_EmpleadoCj_Ficha</code> y muestra la foto
-            del empleado desde SharePoint usando el nombre exacto <code>{`{NombreEmpleado}`}</code>.
+            
           </p>
 
           <form onSubmit={handleSubmit} style={styles.searchRow}>
             <label style={styles.searchField}>
-              <span style={styles.searchLabel}>NombreEmpleado</span>
+              <span style={styles.searchLabel}>Empleado</span>
               <div style={styles.autocompleteWrap}>
                 <input
                   value={employeeNameInput}
@@ -578,18 +577,12 @@ export default function FichaPage() {
         <div style={styles.profileHeader}>
           <EmployeePhoto idEmpleado={selectedEmployeeId} nombreEmpleado={nombreEmpleado} />
 
-          <div style={styles.profileMain}>
-            <div style={styles.profileBadge}>Ficha de empleado</div>
-            <h2 style={styles.profileName}>{nombreEmpleado || `Empleado ${selectedEmployeeId ?? "-"}`}</h2>
-            <p style={styles.profileMeta}>
-              {cargoEmpleado || "Sin cargo"} {areaEmpleado ? `| ${areaEmpleado}` : ""}
-            </p>
+            <div style={styles.profileMain}>
+              <div style={styles.profileBadge}>Ficha de empleado</div>
+              <h2 style={styles.profileName}>{nombreEmpleado || `Empleado ${selectedEmployeeId ?? "-"}`}</h2>
+              <p style={styles.profileMeta}>{cargoEmpleado || "Sin cargo"}</p>
 
-            <div style={styles.quickFacts}>
-              <div style={styles.quickFact}>
-                <span style={styles.quickFactLabel}>Documento</span>
-                <strong style={styles.quickFactValue}>{documentoEmpleado}</strong>
-              </div>
+              <div style={styles.quickFacts}>
               <div style={styles.quickFact}>
                 <span style={styles.quickFactLabel}>Correo</span>
                 <strong style={styles.quickFactValue}>{correoEmpleado}</strong>
