@@ -414,10 +414,16 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
                     commandTimeout: 300)))
             .Select(MapDynamicRow)
             .Select(MapPlanillaRow)
+            .Select((item, index) =>
+            {
+                item.RowKey = item.Corre.HasValue
+                    ? $"CORRE:{item.Corre.Value.ToString(CultureInfo.InvariantCulture)}"
+                    : $"ROW:{index.ToString(CultureInfo.InvariantCulture)}";
+                return item;
+            })
             .ToList();
 
-        var registros = movimientos
-            .Select(movimiento => BuildConciliacionRegistro(movimiento, planilla))
+        var registros = BuildConciliacionRegistros(movimientos, planilla)
             .OrderByDescending(item => item.Fecha)
             .ThenBy(item => item.Empresa)
             .ThenBy(item => item.Moneda)
@@ -594,26 +600,75 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
         };
     }
 
-    private static ConciliacionBcpConciliarPlanillaRegistroDto BuildConciliacionRegistro(
-        MovimientoBcpBusquedaRow movimiento,
+    private static List<ConciliacionBcpConciliarPlanillaRegistroDto> BuildConciliacionRegistros(
+        IReadOnlyList<MovimientoBcpBusquedaRow> movimientos,
         IReadOnlyList<PlanillaConciliacionRow> planillaRows)
     {
-        var nroOperacionNormalizado = NormalizeText(movimiento.NroOperacion)?.Trim() ?? string.Empty;
-        var descripcionNumerica = ExtractDigits(movimiento.DescripcionOperacion);
+        var contexts = movimientos
+            .Select(movimiento =>
+            {
+                var nroOperacionNormalizado = NormalizeText(movimiento.NroOperacion)?.Trim() ?? string.Empty;
+                var descripcionNumerica = ExtractDigits(movimiento.DescripcionOperacion);
+                var candidates = planillaRows
+                    .Select(planilla => BuildConciliacionCandidate(movimiento, nroOperacionNormalizado, descripcionNumerica, planilla))
+                    .Where(candidate => candidate is not null)
+                    .Select(candidate => candidate!)
+                    .ToList();
 
-        var candidates = planillaRows
-            .Select(planilla => BuildConciliacionCandidate(nroOperacionNormalizado, descripcionNumerica, planilla))
-            .Where(candidate => candidate is not null)
-            .Select(candidate => candidate!)
+                return new MovimientoConciliacionContext
+                {
+                    Movimiento = movimiento,
+                    Candidates = candidates
+                };
+            })
             .ToList();
 
-        var candidate = candidates
-            .OrderBy(candidate => candidate.Prioridad)
-            .ThenBy(candidate => candidate.OrdenPlanilla)
+        var assignments = contexts
+            .SelectMany(context => context.Candidates.Select(candidate => new ConciliacionAssignment
+            {
+                Movimiento = context.Movimiento,
+                Candidate = candidate
+            }))
+            .GroupBy(item => item.Candidate.Planilla.RowKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group
+                .OrderBy(item => item.Candidate.Prioridad)
+                .ThenBy(item => item.Candidate.DiferenciaMontoAbs ?? decimal.MaxValue)
+                .ThenBy(item => item.Candidate.DiferenciaFechaDias ?? int.MaxValue)
+                .ThenBy(item => item.Candidate.OrdenPlanilla)
+                .ThenBy(item => item.Movimiento.IdMovimientoBanco)
+                .First())
+            .ToList();
+
+        var assignmentsByMovimiento = assignments
+            .GroupBy(item => item.Movimiento.IdMovimientoBanco)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(item => item.Candidate).ToList());
+
+        return contexts
+            .Select(context => BuildConciliacionRegistro(
+                context.Movimiento,
+                assignmentsByMovimiento.TryGetValue(context.Movimiento.IdMovimientoBanco, out var assignedCandidates)
+                    ? assignedCandidates
+                    : [],
+                context.Candidates.Count > 0))
+            .ToList();
+    }
+
+    private static ConciliacionBcpConciliarPlanillaRegistroDto BuildConciliacionRegistro(
+        MovimientoBcpBusquedaRow movimiento,
+        IReadOnlyList<ConciliacionCandidate> assignedCandidates,
+        bool hadUnassignedCandidates)
+    {
+        var candidate = assignedCandidates
+            .OrderBy(item => item.Prioridad)
+            .ThenBy(item => item.DiferenciaMontoAbs ?? decimal.MaxValue)
+            .ThenBy(item => item.DiferenciaFechaDias ?? int.MaxValue)
+            .ThenBy(item => item.OrdenPlanilla)
             .FirstOrDefault();
 
-        var totalPagar = candidates.Count > 0
-            ? candidates.Sum(item => item.Planilla.TotalPagar ?? 0m)
+        var totalPagar = assignedCandidates.Count > 0
+            ? assignedCandidates.Sum(item => item.Planilla.TotalPagar ?? 0m)
             : (decimal?)null;
 
         return new ConciliacionBcpConciliarPlanillaRegistroDto
@@ -639,10 +694,12 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
             TotalPagar = totalPagar,
             Comentario = movimiento.Comentario,
             ObservacionConciliacion = candidate is not null
-                ? candidates.Count > 1
-                    ? $"Se encontraron {candidates.Count} coincidencias. TotalPagar acumulado: {totalPagar:0.##}."
+                ? assignedCandidates.Count > 1
+                    ? $"Se encontraron {assignedCandidates.Count} coincidencias. TotalPagar acumulado: {totalPagar:0.##}."
                     : candidate.ObservacionConciliacion
-                : "No se encontro coincidencia con planilla."
+                : hadUnassignedCandidates
+                    ? "Las coincidencias detectadas ya fueron asignadas a otros movimientos para evitar duplicados."
+                    : "No se encontro coincidencia con planilla."
         };
     }
 
@@ -670,6 +727,7 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
     }
 
     private static ConciliacionCandidate? BuildConciliacionCandidate(
+        MovimientoBcpBusquedaRow movimiento,
         string nroOperacionNormalizado,
         string descripcionNumerica,
         PlanillaConciliacionRow planilla)
@@ -684,7 +742,9 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
                 TipoCoincidencia = "NRO OPERACION",
                 Planilla = planilla,
                 ObservacionConciliacion = $"Coincidencia exacta por NroOperacion: {planilla.NroOperacion}",
-                OrdenPlanilla = planilla.Corre ?? 0
+                OrdenPlanilla = planilla.Corre ?? 0,
+                DiferenciaMontoAbs = CalculateAmountDifferenceAbsolute(movimiento.Monto, planilla.TotalPagar),
+                DiferenciaFechaDias = CalculateDateDifferenceDays(movimiento.Fecha, planilla.FechaDeposito)
             };
         }
 
@@ -700,7 +760,9 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
                 TipoCoincidencia = "CUENTA",
                 Planilla = planilla,
                 ObservacionConciliacion = $"Coincidencia por Cuenta dentro de DescripcionOperacion: {planilla.Cuenta}",
-                OrdenPlanilla = planilla.Corre ?? 0
+                OrdenPlanilla = planilla.Corre ?? 0,
+                DiferenciaMontoAbs = CalculateAmountDifferenceAbsolute(movimiento.Monto, planilla.TotalPagar),
+                DiferenciaFechaDias = CalculateDateDifferenceDays(movimiento.Fecha, planilla.FechaDeposito)
             };
         }
 
@@ -716,11 +778,33 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
                 TipoCoincidencia = "CUENTA INTER",
                 Planilla = planilla,
                 ObservacionConciliacion = $"Coincidencia por CuentaInter dentro de DescripcionOperacion: {planilla.CuentaInter}",
-                OrdenPlanilla = planilla.Corre ?? 0
+                OrdenPlanilla = planilla.Corre ?? 0,
+                DiferenciaMontoAbs = CalculateAmountDifferenceAbsolute(movimiento.Monto, planilla.TotalPagar),
+                DiferenciaFechaDias = CalculateDateDifferenceDays(movimiento.Fecha, planilla.FechaDeposito)
             };
         }
 
         return null;
+    }
+
+    private static decimal? CalculateAmountDifferenceAbsolute(decimal? montoMovimiento, decimal? totalPagar)
+    {
+        if (!montoMovimiento.HasValue || !totalPagar.HasValue)
+        {
+            return null;
+        }
+
+        return Math.Abs(Math.Abs(montoMovimiento.Value) - Math.Abs(totalPagar.Value));
+    }
+
+    private static int? CalculateDateDifferenceDays(DateTime? fechaMovimiento, DateTime? fechaPlanilla)
+    {
+        if (!fechaMovimiento.HasValue || !fechaPlanilla.HasValue)
+        {
+            return null;
+        }
+
+        return Math.Abs((fechaMovimiento.Value.Date - fechaPlanilla.Value.Date).Days);
     }
 
     private static string ExtractDigits(string? value)
@@ -3923,6 +4007,7 @@ ORDER BY p.parameter_id;";
 
     private sealed class PlanillaConciliacionRow
     {
+        public string RowKey { get; set; } = string.Empty;
         public string? NroOperacion { get; set; }
         public string NroOperacionNormalizado { get; set; } = string.Empty;
         public string? Cuenta { get; set; }
@@ -3944,5 +4029,19 @@ ORDER BY p.parameter_id;";
         public PlanillaConciliacionRow Planilla { get; set; } = new();
         public string ObservacionConciliacion { get; set; } = string.Empty;
         public int OrdenPlanilla { get; set; }
+        public decimal? DiferenciaMontoAbs { get; set; }
+        public int? DiferenciaFechaDias { get; set; }
+    }
+
+    private sealed class MovimientoConciliacionContext
+    {
+        public MovimientoBcpBusquedaRow Movimiento { get; set; } = new();
+        public List<ConciliacionCandidate> Candidates { get; set; } = [];
+    }
+
+    private sealed class ConciliacionAssignment
+    {
+        public MovimientoBcpBusquedaRow Movimiento { get; set; } = new();
+        public ConciliacionCandidate Candidate { get; set; } = new();
     }
 }

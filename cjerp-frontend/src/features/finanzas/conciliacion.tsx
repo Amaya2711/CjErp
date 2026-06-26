@@ -442,6 +442,7 @@ export default function ConciliacionBcpPage() {
   const [dragActive, setDragActive] = useState(false);
   const [isAnalysisExpanded, setIsAnalysisExpanded] = useState(false);
   const [isConciliacionExpanded, setIsConciliacionExpanded] = useState(false);
+  const [isFilesExpanded, setIsFilesExpanded] = useState(false);
   const [conciliacionSort, setConciliacionSort] = useState<ConciliacionSortState | null>(null);
   const [conciliacionFiltros, setConciliacionFiltros] = useState({
     idCargo: "5",
@@ -699,6 +700,26 @@ export default function ConciliacionBcpPage() {
     }
   };
 
+  const executeInsert = async (sourceAnalysis: ConciliacionBcpAnalizarResponse) => {
+    const filas = getAnalysisRows(sourceAnalysis.archivos);
+
+    if (filas.length === 0) {
+      throw new Error("No se generaron filas normalizadas para insertar.");
+    }
+
+    const response = await insertarConciliacionBcp({ filas });
+    const advertencias = response.advertencias?.length
+      ? ` ${response.advertencias.join(" ")}`
+      : "";
+    const inserted = response.filasInsertadas ?? 0;
+    const received = response.filasRecibidas ?? 0;
+    const omitted = response.filasOmitidasDuplicadas ?? 0;
+
+    return inserted === 0 && omitted > 0
+      ? `Carga no aplicada: los ${received} registro(s) fueron omitidos por control de duplicados.${advertencias}`
+      : `Resultado de carga: ${inserted} de ${received} registro(s) insertados. ${omitted} omitido(s) por control de duplicados.${advertencias}`;
+  };
+
   const handleAnalyze = async () => {
     if (files.length === 0 || hasClientInvalidFiles) {
       setError("Selecciona archivos validos antes de analizar.");
@@ -735,7 +756,17 @@ export default function ConciliacionBcpPage() {
       const response = await analizarConciliacionBcp(request);
       setAnalysis(response);
       setConciliacionPlanilla(null);
-      setMessage(response.resumen || "Analisis de conciliacion completado.");
+
+      if (response.puedeInsertar) {
+        try {
+          const insertMessage = await executeInsert(response);
+          setMessage(insertMessage);
+        } catch (insertError) {
+          setError(getHttpErrorMessage(insertError, "No se pudo insertar la conciliacion BCP."));
+        }
+      } else {
+        setMessage(response.resumen || "Analisis de conciliacion completado.");
+      }
     } catch (analysisError) {
       setAnalysis(null);
       setError(getHttpErrorMessage(analysisError, "No se pudo analizar la conciliacion BCP."));
@@ -829,27 +860,7 @@ export default function ConciliacionBcpPage() {
     setMessage("");
 
     try {
-      const filas = getAnalysisRows(analysis.archivos);
-
-      if (filas.length === 0) {
-        setError("No se generaron filas normalizadas para insertar.");
-        return;
-      }
-
-      const response = await insertarConciliacionBcp({ filas });
-      const advertencias = response.advertencias?.length
-        ? ` ${response.advertencias.join(" ")}`
-        : "";
-      const inserted = response.filasInsertadas ?? 0;
-      const received = response.filasRecibidas ?? 0;
-      const omitted = response.filasOmitidasDuplicadas ?? 0;
-      const messageText =
-        inserted === 0 && omitted > 0
-          ? `Carga no aplicada: los ${received} registro(s) fueron omitidos por control de duplicados.${advertencias}`
-          : `Resultado de carga: ${inserted} de ${received} registro(s) insertados. ${omitted} omitido(s) por control de duplicados.${advertencias}`;
-      setMessage(
-        messageText
-      );
+      setMessage(await executeInsert(analysis));
     } catch (insertError) {
       setError(getHttpErrorMessage(insertError, "No se pudo insertar la conciliacion BCP."));
     } finally {
@@ -992,17 +1003,6 @@ export default function ConciliacionBcpPage() {
           <button type="button" style={styles.secondaryButton} onClick={() => void handleAnalyze()} disabled={!canAnalyze}>
             {loadingParse || loadingAnalysis ? "Analizando..." : "Analizar estructura"}
           </button>
-          <button
-            type="button"
-            style={styles.secondaryButton}
-            onClick={() => void handleExportAnalysis()}
-            disabled={!analysis?.archivos?.length || loadingAnalysis || loadingInsert}
-          >
-            Exportar analisis
-          </button>
-          <button type="button" style={styles.primaryButton} onClick={() => void handleInsert()} disabled={!canAttemptInsert}>
-            {loadingInsert ? "Insertando..." : "Insertar en Movimientos Bcp"}
-          </button>
           <button type="button" style={styles.secondaryButton} onClick={() => void handleConciliarPlanilla()} disabled={!canConciliar}>
             {loadingConciliacion ? "Conciliando..." : "CONCILIACION"}
           </button>
@@ -1073,11 +1073,32 @@ export default function ConciliacionBcpPage() {
         {error ? <div style={styles.errorBanner}>{error}</div> : null}
         {message ? <div style={styles.successBanner}>{message}</div> : null}
 
-        <div style={styles.fileList}>
-          {files.length === 0 ? (
-            <div style={styles.emptyBanner}>No hay archivos seleccionados.</div>
-          ) : (
-            files.map((file) => {
+        {files.length === 0 ? (
+          <div style={styles.emptyBanner}>No hay archivos seleccionados.</div>
+        ) : (
+          <div style={styles.cardSectionCompact}>
+            <div style={styles.sectionHeaderCompact}>
+              <div>
+                <div style={styles.sectionTitleCompact}>Archivos adjuntos</div>
+                <div style={styles.sectionTextCompact}>
+                  {files.length} archivo(s) cargado(s). Expande este bloque para revisar el detalle de cada Excel.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsFilesExpanded((current) => !current)}
+                style={styles.collapseToggleButton}
+                title={isFilesExpanded ? "Contraer archivos adjuntos" : "Expandir archivos adjuntos"}
+                aria-label={isFilesExpanded ? "Contraer archivos adjuntos" : "Expandir archivos adjuntos"}
+              >
+                {isFilesExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                {isFilesExpanded ? "Contraer" : "Expandir"}
+              </button>
+            </div>
+
+            {isFilesExpanded ? (
+              <div style={styles.fileList}>
+                {files.map((file) => {
               const analysisFile = analysis?.archivos.find((item) => item.nombreArchivo === file.nombreArchivo);
               const hasWarnings = Boolean(analysisFile?.advertencias?.length);
 
@@ -1202,9 +1223,15 @@ export default function ConciliacionBcpPage() {
                   )}
                 </div>
               );
-            })
-          )}
-        </div>
+                })}
+              </div>
+            ) : (
+              <div style={styles.helperText}>
+                El detalle de los Excel esta contraido. Usa <strong>Expandir</strong> para revisarlo.
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {analysis ? (
@@ -1531,6 +1558,30 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 16,
     padding: 18,
     boxShadow: "0 10px 24px rgba(15, 23, 42, 0.08)",
+  },
+  cardSectionCompact: {
+    marginTop: 12,
+    border: "1px solid #E2E8F0",
+    borderRadius: 14,
+    padding: 14,
+    background: "#FFFFFF",
+  },
+  sectionHeaderCompact: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  sectionTitleCompact: {
+    fontSize: 14,
+    fontWeight: 900,
+    color: "#0F172A",
+  },
+  sectionTextCompact: {
+    marginTop: 4,
+    fontSize: 12,
+    color: "#64748B",
+    lineHeight: 1.5,
   },
   toolbarRow: {
     display: "flex",
