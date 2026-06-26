@@ -680,6 +680,16 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
         var totalPagar = assignedCandidates.Count > 0
             ? assignedCandidates.Sum(item => item.Planilla.TotalPagar ?? 0m)
             : (decimal?)null;
+        var correlativoPlanilla = assignedCandidates.Count > 0
+            ? string.Join(", ",
+                assignedCandidates
+                    .Select(item => item.Planilla.Corre)
+                    .Where(value => value.HasValue)
+                    .Select(value => value!.Value)
+                    .Distinct()
+                    .OrderBy(value => value)
+                    .Select(value => value.ToString(CultureInfo.InvariantCulture)))
+            : null;
 
         return new ConciliacionBcpConciliarPlanillaRegistroDto
         {
@@ -705,6 +715,7 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
             SitePlanilla = candidate?.Planilla.Site,
             TipoTrabajoPlanilla = candidate?.Planilla.TipoTrabajo,
             TareaPlanilla = candidate?.Planilla.Tarea,
+            CorrelativoPlanilla = correlativoPlanilla,
             IdRegistroPlanilla = candidate?.Planilla.Corre,
             TotalPagar = totalPagar,
             Comentario = movimiento.Comentario,

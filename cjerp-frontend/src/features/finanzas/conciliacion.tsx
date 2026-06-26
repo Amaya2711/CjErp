@@ -39,7 +39,8 @@ type ConciliacionSortKey =
   | "proyectoPlanilla"
   | "sitePlanilla"
   | "tipoTrabajoPlanilla"
-  | "tareaPlanilla";
+  | "tareaPlanilla"
+  | "correlativoPlanilla";
 
 type ConciliacionSortDirection = "asc" | "desc";
 type ConciliacionSortState = {
@@ -71,6 +72,7 @@ const DEFAULT_CONCILIACION_FILTERS: ConciliacionFilterState = {
   sitePlanilla: "",
   tipoTrabajoPlanilla: "",
   tareaPlanilla: "",
+  correlativoPlanilla: "",
 };
 const EMPTY_CONCILIACION_FILTER_VALUE = "__EMPTY__";
 
@@ -215,6 +217,8 @@ function getConciliacionDisplayValue(row: ConciliacionBcpConciliarPlanillaRegist
       return row.tipoTrabajoPlanilla || "";
     case "tareaPlanilla":
       return row.tareaPlanilla || "";
+    case "correlativoPlanilla":
+      return row.correlativoPlanilla || "";
     default:
       return "";
   }
@@ -303,6 +307,8 @@ function getConciliacionSortValue(row: ConciliacionBcpConciliarPlanillaRegistro,
       return row.tipoTrabajoPlanilla?.trim().toLowerCase() ?? "";
     case "tareaPlanilla":
       return row.tareaPlanilla?.trim().toLowerCase() ?? "";
+    case "correlativoPlanilla":
+      return row.correlativoPlanilla?.trim().toLowerCase() ?? "";
     default:
       return "";
   }
@@ -621,6 +627,7 @@ export default function ConciliacionBcpPage() {
       "sitePlanilla",
       "tipoTrabajoPlanilla",
       "tareaPlanilla",
+      "correlativoPlanilla",
     ];
 
     return keys.reduce((accumulator, key) => {
@@ -1052,6 +1059,7 @@ export default function ConciliacionBcpPage() {
       Site: row.sitePlanilla || "",
       Tipo_Trabajo: row.tipoTrabajoPlanilla || "",
       Tarea: row.tareaPlanilla || "",
+      Correlativo: row.correlativoPlanilla || "",
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportRows);
@@ -1551,6 +1559,7 @@ export default function ConciliacionBcpPage() {
                   <th style={styles.th}>{renderSortHeader("Site", "sitePlanilla")}</th>
                   <th style={styles.th}>{renderSortHeader("Tipo_Trabajo", "tipoTrabajoPlanilla")}</th>
                   <th style={styles.th}>{renderSortHeader("Tarea", "tareaPlanilla")}</th>
+                  <th style={styles.th}>{renderSortHeader("Correlativo", "correlativoPlanilla")}</th>
                 </tr>
                 <tr>
                   {(
@@ -1575,6 +1584,7 @@ export default function ConciliacionBcpPage() {
                       "sitePlanilla",
                       "tipoTrabajoPlanilla",
                       "tareaPlanilla",
+                      "correlativoPlanilla",
                     ] as ConciliacionSortKey[]
                   ).map((key) => (
                     <th key={`filter-${key}`} style={styles.filterTh}>
@@ -1667,11 +1677,12 @@ export default function ConciliacionBcpPage() {
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "sitePlanilla")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "tipoTrabajoPlanilla")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "tareaPlanilla")}</td>
+                      <td style={styles.td}>{getConciliacionDisplayValue(row, "correlativoPlanilla")}</td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td style={styles.td} colSpan={20}>
+                    <td style={styles.td} colSpan={21}>
                       No se encontraron movimientos para los filtros ingresados.
                     </td>
                   </tr>

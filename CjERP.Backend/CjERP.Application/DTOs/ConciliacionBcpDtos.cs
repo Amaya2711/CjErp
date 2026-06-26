@@ -228,6 +228,8 @@ public sealed class ConciliacionBcpConciliarPlanillaRegistroDto
 
     public string? TareaPlanilla { get; set; }
 
+    public string? CorrelativoPlanilla { get; set; }
+
     public int? IdRegistroPlanilla { get; set; }
 
     public decimal? TotalPagar { get; set; }
