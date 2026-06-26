@@ -218,6 +218,16 @@ public sealed class ConciliacionBcpConciliarPlanillaRegistroDto
 
     public string? CuentaInterPlanilla { get; set; }
 
+    public string? ClientePlanilla { get; set; }
+
+    public string? ProyectoPlanilla { get; set; }
+
+    public string? SitePlanilla { get; set; }
+
+    public string? TipoTrabajoPlanilla { get; set; }
+
+    public string? TareaPlanilla { get; set; }
+
     public int? IdRegistroPlanilla { get; set; }
 
     public decimal? TotalPagar { get; set; }

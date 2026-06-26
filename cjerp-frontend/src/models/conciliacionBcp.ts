@@ -103,6 +103,11 @@ export type ConciliacionBcpConciliarPlanillaRegistro = {
   nroOperacionPlanilla?: string | null;
   cuentaPlanilla?: string | null;
   cuentaInterPlanilla?: string | null;
+  clientePlanilla?: string | null;
+  proyectoPlanilla?: string | null;
+  sitePlanilla?: string | null;
+  tipoTrabajoPlanilla?: string | null;
+  tareaPlanilla?: string | null;
   idRegistroPlanilla?: number | null;
   totalPagar?: number | null;
   comentario?: string | null;

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { API_BASE_URL } from "../../api/httpClient";
 import {
   actualizarComentarioMovimientoConciliacionBcp,
@@ -23,6 +23,7 @@ type ConciliacionSortKey =
   | "fecha"
   | "empresa"
   | "cuenta"
+  | "moneda"
   | "monto"
   | "totalPagar"
   | "diferencia"
@@ -33,7 +34,12 @@ type ConciliacionSortKey =
   | "tipoCoincidencia"
   | "nroOperacionPlanilla"
   | "cuentaPlanilla"
-  | "cuentaInterPlanilla";
+  | "cuentaInterPlanilla"
+  | "clientePlanilla"
+  | "proyectoPlanilla"
+  | "sitePlanilla"
+  | "tipoTrabajoPlanilla"
+  | "tareaPlanilla";
 
 type ConciliacionSortDirection = "asc" | "desc";
 type ConciliacionSortState = {
@@ -41,23 +47,30 @@ type ConciliacionSortState = {
   direction: ConciliacionSortDirection;
 };
 
-type ConciliacionFilterState = Record<ConciliacionSortKey, string>;
+type ConciliacionFilterValue = string | string[];
+type ConciliacionFilterState = Record<ConciliacionSortKey, ConciliacionFilterValue>;
 
 const DEFAULT_CONCILIACION_FILTERS: ConciliacionFilterState = {
   fecha: "",
   empresa: "",
   cuenta: "",
+  moneda: "",
   monto: "",
   totalPagar: "",
   diferencia: "",
   nroOperacion: "",
   descripcionOperacion: "",
   comentario: "",
-  resultadoConciliacion: "",
+  resultadoConciliacion: [],
   tipoCoincidencia: "",
   nroOperacionPlanilla: "",
   cuentaPlanilla: "",
   cuentaInterPlanilla: "",
+  clientePlanilla: "",
+  proyectoPlanilla: "",
+  sitePlanilla: "",
+  tipoTrabajoPlanilla: "",
+  tareaPlanilla: "",
 };
 const EMPTY_CONCILIACION_FILTER_VALUE = "__EMPTY__";
 
@@ -163,6 +176,8 @@ function getConciliacionDisplayValue(row: ConciliacionBcpConciliarPlanillaRegist
       return row.empresa || "";
     case "cuenta":
       return row.cuenta || "";
+    case "moneda":
+      return row.moneda || "";
     case "monto":
       return row.monto != null ? formatNumber(row.monto) : "";
     case "totalPagar": {
@@ -190,6 +205,16 @@ function getConciliacionDisplayValue(row: ConciliacionBcpConciliarPlanillaRegist
       return row.cuentaPlanilla || "";
     case "cuentaInterPlanilla":
       return row.cuentaInterPlanilla || "";
+    case "clientePlanilla":
+      return row.clientePlanilla || "";
+    case "proyectoPlanilla":
+      return row.proyectoPlanilla || "";
+    case "sitePlanilla":
+      return row.sitePlanilla || "";
+    case "tipoTrabajoPlanilla":
+      return row.tipoTrabajoPlanilla || "";
+    case "tareaPlanilla":
+      return row.tareaPlanilla || "";
     default:
       return "";
   }
@@ -200,12 +225,28 @@ function matchesConciliacionFilter(
   filters: ConciliacionFilterState
 ) {
   return (Object.keys(filters) as ConciliacionSortKey[]).every((key) => {
+    const displayValue = getConciliacionDisplayValue(row, key).trim().toLowerCase();
+
+    if (Array.isArray(filters[key])) {
+      const selectedValues = filters[key].map((item) => item.trim().toLowerCase()).filter(Boolean);
+      if (selectedValues.length === 0) {
+        return true;
+      }
+
+      return selectedValues.some((selectedValue) => {
+        if (selectedValue === EMPTY_CONCILIACION_FILTER_VALUE.toLowerCase()) {
+          return displayValue === "";
+        }
+
+        return displayValue === selectedValue;
+      });
+    }
+
     const filterValue = filters[key].trim().toLowerCase();
     if (!filterValue) {
       return true;
     }
 
-    const displayValue = getConciliacionDisplayValue(row, key).trim().toLowerCase();
     if (filterValue === EMPTY_CONCILIACION_FILTER_VALUE.toLowerCase()) {
       return displayValue === "";
     }
@@ -234,6 +275,8 @@ function getConciliacionSortValue(row: ConciliacionBcpConciliarPlanillaRegistro,
       return row.empresa?.trim().toLowerCase() ?? "";
     case "cuenta":
       return row.cuenta?.trim().toLowerCase() ?? "";
+    case "moneda":
+      return row.moneda?.trim().toLowerCase() ?? "";
     case "nroOperacion":
       return row.nroOperacion?.trim().toLowerCase() ?? "";
     case "descripcionOperacion":
@@ -250,6 +293,16 @@ function getConciliacionSortValue(row: ConciliacionBcpConciliarPlanillaRegistro,
       return row.cuentaPlanilla?.trim().toLowerCase() ?? "";
     case "cuentaInterPlanilla":
       return row.cuentaInterPlanilla?.trim().toLowerCase() ?? "";
+    case "clientePlanilla":
+      return row.clientePlanilla?.trim().toLowerCase() ?? "";
+    case "proyectoPlanilla":
+      return row.proyectoPlanilla?.trim().toLowerCase() ?? "";
+    case "sitePlanilla":
+      return row.sitePlanilla?.trim().toLowerCase() ?? "";
+    case "tipoTrabajoPlanilla":
+      return row.tipoTrabajoPlanilla?.trim().toLowerCase() ?? "";
+    case "tareaPlanilla":
+      return row.tareaPlanilla?.trim().toLowerCase() ?? "";
     default:
       return "";
   }
@@ -431,6 +484,9 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
 
 export default function ConciliacionBcpPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const selectExcelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const analyzeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const resultadoFilterDropdownRef = useRef<HTMLDivElement | null>(null);
   const [files, setFiles] = useState<ParsedConciliacionExcelFile[]>([]);
   const [analysis, setAnalysis] = useState<ConciliacionBcpAnalizarResponse | null>(null);
   const [loadingParse, setLoadingParse] = useState(false);
@@ -458,12 +514,28 @@ export default function ConciliacionBcpPage() {
   const [conciliacionPlanilla, setConciliacionPlanilla] = useState<ConciliacionBcpConciliarPlanillaResponse | null>(null);
   const [comentarioDrafts, setComentarioDrafts] = useState<Record<number, string>>({});
   const [comentarioSavingIds, setComentarioSavingIds] = useState<Record<number, boolean>>({});
+  const [isResultadoFilterOpen, setIsResultadoFilterOpen] = useState(false);
 
   useEffect(() => {
     return () => {
       setDragActive(false);
     };
   }, []);
+
+  useEffect(() => {
+    if (!isResultadoFilterOpen) {
+      return;
+    }
+
+    const handleDocumentClick = (event: MouseEvent) => {
+      if (!resultadoFilterDropdownRef.current?.contains(event.target as Node)) {
+        setIsResultadoFilterOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleDocumentClick);
+    return () => document.removeEventListener("mousedown", handleDocumentClick);
+  }, [isResultadoFilterOpen]);
 
   const hasClientInvalidFiles = useMemo(
     () => files.some((item) => Boolean(item.clientError)),
@@ -486,6 +558,20 @@ export default function ConciliacionBcpPage() {
   const tieneRangoFechasConciliacion =
     conciliacionFiltros.fechaInicio.trim().length > 0 && conciliacionFiltros.fechaFin.trim().length > 0;
   const canConciliar = !loadingConciliacion && !loadingAnalysis && !loadingInsert;
+
+  useLayoutEffect(() => {
+    const frameId = window.requestAnimationFrame(() => {
+      if (canAnalyze) {
+        analyzeButtonRef.current?.focus();
+        return;
+      }
+
+      selectExcelButtonRef.current?.focus();
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [canAnalyze]);
+
   const sortedConciliacionRegistros = useMemo(() => {
     const registros = [...(conciliacionPlanilla?.registros ?? [])];
 
@@ -511,12 +597,14 @@ export default function ConciliacionBcpPage() {
   const filteredConciliacionRegistros = useMemo(() => {
     return sortedConciliacionRegistros.filter((row) => matchesConciliacionFilter(row, conciliacionGridFilters));
   }, [sortedConciliacionRegistros, conciliacionGridFilters]);
+  const totalConciliacionRegistros = conciliacionPlanilla?.registros.length ?? 0;
 
   const conciliacionFilterOptions = useMemo(() => {
     const keys: ConciliacionSortKey[] = [
       "fecha",
       "empresa",
       "cuenta",
+      "moneda",
       "monto",
       "totalPagar",
       "diferencia",
@@ -528,6 +616,11 @@ export default function ConciliacionBcpPage() {
       "nroOperacionPlanilla",
       "cuentaPlanilla",
       "cuentaInterPlanilla",
+      "clientePlanilla",
+      "proyectoPlanilla",
+      "sitePlanilla",
+      "tipoTrabajoPlanilla",
+      "tareaPlanilla",
     ];
 
     return keys.reduce((accumulator, key) => {
@@ -553,6 +646,17 @@ export default function ConciliacionBcpPage() {
       return accumulator;
     }, {} as Record<ConciliacionSortKey, string[]>);
   }, [sortedConciliacionRegistros]);
+  const resultadoConciliacionSelectedFilters = Array.isArray(conciliacionGridFilters.resultadoConciliacion)
+    ? conciliacionGridFilters.resultadoConciliacion
+    : [];
+  const resultadoConciliacionFilterLabel =
+    resultadoConciliacionSelectedFilters.length === 0
+      ? "Todos"
+      : resultadoConciliacionSelectedFilters.length === 1
+        ? resultadoConciliacionSelectedFilters[0] === EMPTY_CONCILIACION_FILTER_VALUE
+          ? "(Vacío)"
+          : resultadoConciliacionSelectedFilters[0]
+        : `${resultadoConciliacionSelectedFilters.length} seleccionados`;
 
   const handleSortConciliacion = (key: ConciliacionSortKey) => {
     setConciliacionSort((current) => {
@@ -577,8 +681,23 @@ export default function ConciliacionBcpPage() {
     }));
   };
 
+  const handleResultadoConciliacionFilterToggle = (value: string) => {
+    setConciliacionGridFilters((current) => {
+      const currentValues = Array.isArray(current.resultadoConciliacion) ? current.resultadoConciliacion : [];
+      const exists = currentValues.includes(value);
+
+      return {
+        ...current,
+        resultadoConciliacion: exists
+          ? currentValues.filter((item) => item !== value)
+          : [...currentValues, value],
+      };
+    });
+  };
+
   const handleClearConciliacionFilters = () => {
     setConciliacionGridFilters(DEFAULT_CONCILIACION_FILTERS);
+    setIsResultadoFilterOpen(false);
   };
 
   const handleComentarioDraftChange = (idMovimientoBanco: number, value: string) => {
@@ -997,17 +1116,25 @@ export default function ConciliacionBcpPage() {
 
       <div style={styles.card}>
         <div style={styles.toolbarRow}>
-          <button type="button" style={styles.primaryButton} onClick={() => fileInputRef.current?.click()}>
+          <button
+            ref={selectExcelButtonRef}
+            type="button"
+            style={styles.primaryButton}
+            onClick={() => fileInputRef.current?.click()}
+          >
             Seleccionar Excel
           </button>
-          <button type="button" style={styles.secondaryButton} onClick={() => void handleAnalyze()} disabled={!canAnalyze}>
+          <button
+            ref={analyzeButtonRef}
+            type="button"
+            style={!canAnalyze ? { ...styles.secondaryButton, ...styles.secondaryButtonDisabled } : styles.secondaryButton}
+            onClick={() => void handleAnalyze()}
+            disabled={!canAnalyze}
+          >
             {loadingParse || loadingAnalysis ? "Analizando..." : "Analizar estructura"}
           </button>
           <button type="button" style={styles.secondaryButton} onClick={() => void handleConciliarPlanilla()} disabled={!canConciliar}>
-            {loadingConciliacion ? "Conciliando..." : "CONCILIACION"}
-          </button>
-          <button type="button" style={styles.secondaryButton} onClick={handleClear}>
-            Limpiar
+            {loadingConciliacion ? "Conciliando..." : "Conciliacion"}
           </button>
 
           <input
@@ -1384,21 +1511,27 @@ export default function ConciliacionBcpPage() {
             <SummaryCard label="Sin coincid." value={String(conciliacionPlanilla.sinCoincidencia)} />
           </div>
 
-          <div style={styles.mappingTableWrap}>
-            <div style={styles.gridToolbar}>
-              <div style={styles.gridToolbarText}>
-                Filtra por cualquier valor visible en la tabla principal.
+            <div style={styles.mappingTableWrap}>
+              <div style={styles.gridToolbar}>
+                <div style={styles.gridToolbarInfo}>
+                  <div style={styles.gridToolbarText}>
+                    Filtra por cualquier valor visible en la tabla principal.
+                  </div>
+                  <div style={styles.gridToolbarCount}>
+                    Registros: {filteredConciliacionRegistros.length} de {totalConciliacionRegistros}
+                  </div>
+                </div>
+                <button type="button" style={styles.gridToolbarButton} onClick={handleClearConciliacionFilters}>
+                  Limpiar filtros
+                </button>
               </div>
-              <button type="button" style={styles.gridToolbarButton} onClick={handleClearConciliacionFilters}>
-                Limpiar filtros
-              </button>
-            </div>
             <table style={styles.mappingTable}>
               <thead>
                 <tr>
                   <th style={styles.th}>{renderSortHeader("Fecha", "fecha")}</th>
                   <th style={styles.th}>{renderSortHeader("Empresa", "empresa")}</th>
                   <th style={styles.th}>{renderSortHeader("Cuenta", "cuenta")}</th>
+                  <th style={styles.th}>{renderSortHeader("Moneda", "moneda")}</th>
                   <th style={styles.th}>{renderSortHeader("Monto", "monto")}</th>
                   <th style={styles.th}>{renderSortHeader("TotalPagar", "totalPagar")}</th>
                   <th style={styles.th}>{renderSortHeader("Diferencia", "diferencia")}</th>
@@ -1410,6 +1543,11 @@ export default function ConciliacionBcpPage() {
                   <th style={styles.th}>{renderSortHeader("NroOperacionPlanilla", "nroOperacionPlanilla")}</th>
                   <th style={styles.th}>{renderSortHeader("CuentaPlanilla", "cuentaPlanilla")}</th>
                   <th style={styles.th}>{renderSortHeader("CuentaInterPlanilla", "cuentaInterPlanilla")}</th>
+                  <th style={styles.th}>{renderSortHeader("Cliente", "clientePlanilla")}</th>
+                  <th style={styles.th}>{renderSortHeader("Proyecto", "proyectoPlanilla")}</th>
+                  <th style={styles.th}>{renderSortHeader("Site", "sitePlanilla")}</th>
+                  <th style={styles.th}>{renderSortHeader("Tipo_Trabajo", "tipoTrabajoPlanilla")}</th>
+                  <th style={styles.th}>{renderSortHeader("Tarea", "tareaPlanilla")}</th>
                 </tr>
                 <tr>
                   {(
@@ -1417,6 +1555,7 @@ export default function ConciliacionBcpPage() {
                       "fecha",
                       "empresa",
                       "cuenta",
+                      "moneda",
                       "monto",
                       "totalPagar",
                       "diferencia",
@@ -1428,22 +1567,58 @@ export default function ConciliacionBcpPage() {
                       "nroOperacionPlanilla",
                       "cuentaPlanilla",
                       "cuentaInterPlanilla",
+                      "clientePlanilla",
+                      "proyectoPlanilla",
+                      "sitePlanilla",
+                      "tipoTrabajoPlanilla",
+                      "tareaPlanilla",
                     ] as ConciliacionSortKey[]
                   ).map((key) => (
                     <th key={`filter-${key}`} style={styles.filterTh}>
-                      <select
-                        value={conciliacionGridFilters[key]}
-                        onChange={(event) => handleConciliacionFilterChange(key, event.target.value)}
-                        style={styles.filterSelect}
-                        aria-label={`Filtrar por ${key}`}
-                      >
-                        <option value="">Todos</option>
-                        {conciliacionFilterOptions[key].map((optionValue) => (
-                          <option key={`${key}-${optionValue}`} value={optionValue}>
-                            {optionValue === EMPTY_CONCILIACION_FILTER_VALUE ? "(Vacío)" : optionValue}
-                          </option>
-                        ))}
-                      </select>
+                      {key === "resultadoConciliacion" ? (
+                        <div ref={resultadoFilterDropdownRef} style={styles.multiFilterWrap}>
+                          <button
+                            type="button"
+                            style={styles.multiFilterButton}
+                            onClick={() => setIsResultadoFilterOpen((current) => !current)}
+                            aria-label="Filtrar por resultado"
+                          >
+                            <span style={styles.multiFilterButtonText}>{resultadoConciliacionFilterLabel}</span>
+                            <ChevronDown size={14} />
+                          </button>
+                          {isResultadoFilterOpen ? (
+                            <div style={styles.multiFilterDropdown}>
+                              {conciliacionFilterOptions[key].map((optionValue) => {
+                                const checked = resultadoConciliacionSelectedFilters.includes(optionValue);
+                                return (
+                                  <label key={`${key}-${optionValue}`} style={styles.multiFilterOption}>
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={() => handleResultadoConciliacionFilterToggle(optionValue)}
+                                    />
+                                    <span>{optionValue === EMPTY_CONCILIACION_FILTER_VALUE ? "(Vacío)" : optionValue}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <select
+                          value={Array.isArray(conciliacionGridFilters[key]) ? "" : conciliacionGridFilters[key]}
+                          onChange={(event) => handleConciliacionFilterChange(key, event.target.value)}
+                          style={styles.filterSelect}
+                          aria-label={`Filtrar por ${key}`}
+                        >
+                          <option value="">Todos</option>
+                          {conciliacionFilterOptions[key].map((optionValue) => (
+                            <option key={`${key}-${optionValue}`} value={optionValue}>
+                              {optionValue === EMPTY_CONCILIACION_FILTER_VALUE ? "(Vacío)" : optionValue}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </th>
                   ))}
                 </tr>
@@ -1455,6 +1630,7 @@ export default function ConciliacionBcpPage() {
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "fecha")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "empresa")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "cuenta")}</td>
+                      <td style={styles.td}>{getConciliacionDisplayValue(row, "moneda")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "monto")}</td>
                       <td style={styles.td}>
                         {getConciliacionDisplayValue(row, "totalPagar")}
@@ -1483,6 +1659,11 @@ export default function ConciliacionBcpPage() {
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "nroOperacionPlanilla")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "cuentaPlanilla")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "cuentaInterPlanilla")}</td>
+                      <td style={styles.td}>{getConciliacionDisplayValue(row, "clientePlanilla")}</td>
+                      <td style={styles.td}>{getConciliacionDisplayValue(row, "proyectoPlanilla")}</td>
+                      <td style={styles.td}>{getConciliacionDisplayValue(row, "sitePlanilla")}</td>
+                      <td style={styles.td}>{getConciliacionDisplayValue(row, "tipoTrabajoPlanilla")}</td>
+                      <td style={styles.td}>{getConciliacionDisplayValue(row, "tareaPlanilla")}</td>
                     </tr>
                   ))
                 ) : (
@@ -1634,6 +1815,14 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
     fontWeight: 800,
     cursor: "pointer",
+  },
+  secondaryButtonDisabled: {
+    background: "#E5E7EB",
+    color: "#94A3B8",
+    border: "1px solid #D1D5DB",
+    cursor: "not-allowed",
+    opacity: 0.85,
+    boxShadow: "none",
   },
   iconActionButton: {
     border: "1px solid #CBD5E1",
@@ -1906,10 +2095,20 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 12,
     padding: "10px 12px 0",
   },
+  gridToolbarInfo: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+  },
   gridToolbarText: {
     fontSize: 12,
     color: "#64748B",
     fontWeight: 600,
+  },
+  gridToolbarCount: {
+    fontSize: 12,
+    color: "#0F766E",
+    fontWeight: 800,
   },
   gridToolbarButton: {
     border: "1px solid #CBD5E1",
@@ -1983,6 +2182,53 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
     color: "#0F172A",
     outline: "none",
+    cursor: "pointer",
+  },
+  multiFilterWrap: {
+    position: "relative",
+  },
+  multiFilterButton: {
+    width: "100%",
+    boxSizing: "border-box",
+    borderRadius: 8,
+    border: "1px solid #CBD5E1",
+    background: "#F8FAFC",
+    padding: "6px 8px",
+    fontSize: 12,
+    color: "#0F172A",
+    outline: "none",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  multiFilterButtonText: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  multiFilterDropdown: {
+    position: "absolute",
+    top: "calc(100% + 6px)",
+    left: 0,
+    minWidth: "100%",
+    maxHeight: 220,
+    overflowY: "auto",
+    background: "#FFFFFF",
+    border: "1px solid #CBD5E1",
+    borderRadius: 10,
+    boxShadow: "0 10px 30px rgba(15, 23, 42, 0.14)",
+    padding: 8,
+    zIndex: 20,
+  },
+  multiFilterOption: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "6px 4px",
+    fontSize: 12,
+    color: "#0F172A",
     cursor: "pointer",
   },
   td: {

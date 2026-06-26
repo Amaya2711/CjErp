@@ -585,6 +585,11 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
         var nroOperacion = NormalizeText(GetDictionaryString(row, "NroOperacion"));
         var cuenta = NormalizeText(GetDictionaryString(row, "Cuenta"));
         var cuentaInter = NormalizeText(GetDictionaryString(row, "CuentaInter"));
+        var cliente = NormalizeText(GetDictionaryString(row, "Cliente"));
+        var proyecto = NormalizeText(GetDictionaryString(row, "NombreProyecto"));
+        var site = NormalizeText(GetDictionaryString(row, "Site"));
+        var tipoTrabajo = NormalizeText(GetDictionaryString(row, "Tipo_Trabajo"));
+        var tarea = NormalizeText(GetDictionaryString(row, "tarea"));
 
         return new PlanillaConciliacionRow
         {
@@ -592,6 +597,11 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
             NroOperacionNormalizado = nroOperacion?.Trim() ?? string.Empty,
             Cuenta = cuenta,
             CuentaInter = cuentaInter,
+            Cliente = cliente,
+            Proyecto = proyecto,
+            Site = site,
+            TipoTrabajo = tipoTrabajo,
+            Tarea = tarea,
             CuentaNumerica = ExtractDigits(cuenta),
             CuentaInterNumerica = ExtractDigits(cuentaInter),
             Corre = GetDictionaryInt(row, "Corre"),
@@ -690,6 +700,11 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
             NroOperacionPlanilla = candidate?.Planilla.NroOperacion,
             CuentaPlanilla = candidate?.Planilla.Cuenta,
             CuentaInterPlanilla = candidate?.Planilla.CuentaInter,
+            ClientePlanilla = candidate?.Planilla.Cliente,
+            ProyectoPlanilla = candidate?.Planilla.Proyecto,
+            SitePlanilla = candidate?.Planilla.Site,
+            TipoTrabajoPlanilla = candidate?.Planilla.TipoTrabajo,
+            TareaPlanilla = candidate?.Planilla.Tarea,
             IdRegistroPlanilla = candidate?.Planilla.Corre,
             TotalPagar = totalPagar,
             Comentario = movimiento.Comentario,
@@ -4012,6 +4027,11 @@ ORDER BY p.parameter_id;";
         public string NroOperacionNormalizado { get; set; } = string.Empty;
         public string? Cuenta { get; set; }
         public string? CuentaInter { get; set; }
+        public string? Cliente { get; set; }
+        public string? Proyecto { get; set; }
+        public string? Site { get; set; }
+        public string? TipoTrabajo { get; set; }
+        public string? Tarea { get; set; }
         public string CuentaNumerica { get; set; } = string.Empty;
         public string CuentaInterNumerica { get; set; } = string.Empty;
         public int? Corre { get; set; }
