@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { API_BASE_URL } from "../../api/httpClient";
 import {
+  actualizarComentarioMovimientoConciliacionBcp,
   analizarConciliacionBcp,
   conciliarPlanillaConciliacionBcp,
   exportarAnalisisConciliacionBcp,
@@ -27,6 +28,7 @@ type ConciliacionSortKey =
   | "diferencia"
   | "nroOperacion"
   | "descripcionOperacion"
+  | "comentario"
   | "resultadoConciliacion"
   | "tipoCoincidencia"
   | "nroOperacionPlanilla"
@@ -50,6 +52,7 @@ const DEFAULT_CONCILIACION_FILTERS: ConciliacionFilterState = {
   diferencia: "",
   nroOperacion: "",
   descripcionOperacion: "",
+  comentario: "",
   resultadoConciliacion: "",
   tipoCoincidencia: "",
   nroOperacionPlanilla: "",
@@ -148,6 +151,10 @@ function calculateMontoDiferencia(monto?: number | null, totalPagar?: number | n
   return monto - totalPagar;
 }
 
+function normalizeComentarioValue(value?: string | null): string {
+  return value?.trim() ?? "";
+}
+
 function getConciliacionDisplayValue(row: ConciliacionBcpConciliarPlanillaRegistro, key: ConciliacionSortKey): string {
   switch (key) {
     case "fecha":
@@ -171,6 +178,8 @@ function getConciliacionDisplayValue(row: ConciliacionBcpConciliarPlanillaRegist
       return row.nroOperacion || "";
     case "descripcionOperacion":
       return row.descripcionOperacion || "";
+    case "comentario":
+      return row.comentario || "";
     case "resultadoConciliacion":
       return row.resultadoConciliacion || "";
     case "tipoCoincidencia":
@@ -229,6 +238,8 @@ function getConciliacionSortValue(row: ConciliacionBcpConciliarPlanillaRegistro,
       return row.nroOperacion?.trim().toLowerCase() ?? "";
     case "descripcionOperacion":
       return row.descripcionOperacion?.trim().toLowerCase() ?? "";
+    case "comentario":
+      return row.comentario?.trim().toLowerCase() ?? "";
     case "resultadoConciliacion":
       return row.resultadoConciliacion?.trim().toLowerCase() ?? "";
     case "tipoCoincidencia":
@@ -444,6 +455,8 @@ export default function ConciliacionBcpPage() {
     DEFAULT_CONCILIACION_FILTERS
   );
   const [conciliacionPlanilla, setConciliacionPlanilla] = useState<ConciliacionBcpConciliarPlanillaResponse | null>(null);
+  const [comentarioDrafts, setComentarioDrafts] = useState<Record<number, string>>({});
+  const [comentarioSavingIds, setComentarioSavingIds] = useState<Record<number, boolean>>({});
 
   useEffect(() => {
     return () => {
@@ -508,6 +521,7 @@ export default function ConciliacionBcpPage() {
       "diferencia",
       "nroOperacion",
       "descripcionOperacion",
+      "comentario",
       "resultadoConciliacion",
       "tipoCoincidencia",
       "nroOperacionPlanilla",
@@ -564,6 +578,77 @@ export default function ConciliacionBcpPage() {
 
   const handleClearConciliacionFilters = () => {
     setConciliacionGridFilters(DEFAULT_CONCILIACION_FILTERS);
+  };
+
+  const handleComentarioDraftChange = (idMovimientoBanco: number, value: string) => {
+    setComentarioDrafts((current) => ({
+      ...current,
+      [idMovimientoBanco]: value,
+    }));
+  };
+
+  const handleComentarioBlur = async (row: ConciliacionBcpConciliarPlanillaRegistro) => {
+    const draftValue = comentarioDrafts[row.idMovimientoBanco] ?? row.comentario ?? "";
+    const comentarioAnterior = normalizeComentarioValue(row.comentario);
+    const comentarioNuevo = normalizeComentarioValue(draftValue);
+
+    if (comentarioAnterior === comentarioNuevo) {
+      if (draftValue !== (row.comentario ?? "")) {
+        setComentarioDrafts((current) => ({
+          ...current,
+          [row.idMovimientoBanco]: row.comentario ?? "",
+        }));
+      }
+      return;
+    }
+
+    setComentarioSavingIds((current) => ({
+      ...current,
+      [row.idMovimientoBanco]: true,
+    }));
+
+    try {
+      const updated = await actualizarComentarioMovimientoConciliacionBcp(row.idMovimientoBanco, {
+        comentario: comentarioNuevo || null,
+      });
+
+      setConciliacionPlanilla((current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          ...current,
+          registros: current.registros.map((item) =>
+            item.idMovimientoBanco === row.idMovimientoBanco
+              ? {
+                  ...item,
+                  comentario: updated.comentario ?? null,
+                }
+              : item
+          ),
+        };
+      });
+
+      setComentarioDrafts((current) => ({
+        ...current,
+        [row.idMovimientoBanco]: updated.comentario ?? "",
+      }));
+      setMessage("Comentario actualizado correctamente.");
+      setError("");
+    } catch (updateError) {
+      setError(getHttpErrorMessage(updateError, "No se pudo actualizar el comentario del movimiento."));
+      setMessage("");
+      setComentarioDrafts((current) => ({
+        ...current,
+        [row.idMovimientoBanco]: row.comentario ?? "",
+      }));
+    } finally {
+      setComentarioSavingIds((current) => ({
+        ...current,
+        [row.idMovimientoBanco]: false,
+      }));
+    }
   };
 
   const handleReplaceFiles = async (incomingFiles: FileList | File[]) => {
@@ -1292,6 +1377,7 @@ export default function ConciliacionBcpPage() {
                   <th style={styles.th}>{renderSortHeader("Diferencia", "diferencia")}</th>
                   <th style={styles.th}>{renderSortHeader("NroOperacion", "nroOperacion")}</th>
                   <th style={styles.th}>{renderSortHeader("DescripcionOperacion", "descripcionOperacion")}</th>
+                  <th style={styles.th}>{renderSortHeader("Comentario", "comentario")}</th>
                   <th style={styles.th}>{renderSortHeader("Resultado", "resultadoConciliacion")}</th>
                   <th style={styles.th}>{renderSortHeader("Tipo", "tipoCoincidencia")}</th>
                   <th style={styles.th}>{renderSortHeader("NroOperacionPlanilla", "nroOperacionPlanilla")}</th>
@@ -1309,6 +1395,7 @@ export default function ConciliacionBcpPage() {
                       "diferencia",
                       "nroOperacion",
                       "descripcionOperacion",
+                      "comentario",
                       "resultadoConciliacion",
                       "tipoCoincidencia",
                       "nroOperacionPlanilla",
@@ -1348,6 +1435,22 @@ export default function ConciliacionBcpPage() {
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "diferencia")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "nroOperacion")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "descripcionOperacion")}</td>
+                      <td style={styles.td}>
+                        <div style={styles.commentCellWrap}>
+                          <textarea
+                            value={comentarioDrafts[row.idMovimientoBanco] ?? row.comentario ?? ""}
+                            onChange={(event) => handleComentarioDraftChange(row.idMovimientoBanco, event.target.value)}
+                            onBlur={() => void handleComentarioBlur(row)}
+                            style={styles.commentCellTextarea}
+                            rows={2}
+                            placeholder="Agregar comentario"
+                            disabled={Boolean(comentarioSavingIds[row.idMovimientoBanco])}
+                          />
+                          {comentarioSavingIds[row.idMovimientoBanco] ? (
+                            <span style={styles.commentCellStatus}>Guardando...</span>
+                          ) : null}
+                        </div>
+                      </td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "resultadoConciliacion")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "tipoCoincidencia")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "nroOperacionPlanilla")}</td>
@@ -1357,7 +1460,7 @@ export default function ConciliacionBcpPage() {
                   ))
                 ) : (
                   <tr>
-                    <td style={styles.td} colSpan={13}>
+                    <td style={styles.td} colSpan={14}>
                       No se encontraron movimientos para los filtros ingresados.
                     </td>
                   </tr>
@@ -1837,6 +1940,30 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
     color: "#0F172A",
     verticalAlign: "top",
+  },
+  commentCellWrap: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    minWidth: 220,
+  },
+  commentCellTextarea: {
+    width: "100%",
+    boxSizing: "border-box",
+    borderRadius: 8,
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    padding: "8px 10px",
+    fontSize: 12,
+    color: "#0F172A",
+    resize: "vertical",
+    outline: "none",
+    fontFamily: "inherit",
+  },
+  commentCellStatus: {
+    fontSize: 11,
+    color: "#0F766E",
+    fontWeight: 700,
   },
   summaryCard: {
     background: "#F8FAFC",

@@ -105,7 +105,12 @@ export type ConciliacionBcpConciliarPlanillaRegistro = {
   cuentaInterPlanilla?: string | null;
   idRegistroPlanilla?: number | null;
   totalPagar?: number | null;
+  comentario?: string | null;
   observacionConciliacion?: string | null;
+};
+
+export type ConciliacionBcpActualizarComentarioRequest = {
+  comentario?: string | null;
 };
 
 export type ConciliacionBcpConciliarPlanillaResponse = {

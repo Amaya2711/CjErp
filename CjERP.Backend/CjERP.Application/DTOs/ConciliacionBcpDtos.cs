@@ -177,6 +177,11 @@ public sealed class ConciliacionBcpConciliarPlanillaResponseDto
     public List<ConciliacionBcpConciliarPlanillaRegistroDto> Registros { get; set; } = [];
 }
 
+public sealed class ConciliacionBcpActualizarComentarioRequestDto
+{
+    public string? Comentario { get; set; }
+}
+
 public sealed class ConciliacionBcpConciliarPlanillaRegistroDto
 {
     public int IdMovimientoBanco { get; set; }
@@ -216,6 +221,8 @@ public sealed class ConciliacionBcpConciliarPlanillaRegistroDto
     public int? IdRegistroPlanilla { get; set; }
 
     public decimal? TotalPagar { get; set; }
+
+    public string? Comentario { get; set; }
 
     public string? ObservacionConciliacion { get; set; }
 }

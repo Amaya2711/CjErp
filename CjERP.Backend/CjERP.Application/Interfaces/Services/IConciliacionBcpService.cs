@@ -23,4 +23,10 @@ public interface IConciliacionBcpService
         ConciliacionBcpConciliarPlanillaRequestDto request,
         string? usuario,
         CancellationToken cancellationToken = default);
+
+    Task<ConciliacionBcpConciliarPlanillaRegistroDto> ActualizarComentarioMovimientoAsync(
+        int idMovimientoBanco,
+        ConciliacionBcpActualizarComentarioRequestDto request,
+        string? usuario,
+        CancellationToken cancellationToken = default);
 }

@@ -2,8 +2,10 @@ import httpClient from "./httpClient";
 import type {
   ConciliacionBcpAnalizarRequest,
   ConciliacionBcpAnalizarResponse,
+  ConciliacionBcpActualizarComentarioRequest,
   ConciliacionBcpConciliarPlanillaRequest,
   ConciliacionBcpConciliarPlanillaResponse,
+  ConciliacionBcpConciliarPlanillaRegistro,
   ConciliacionBcpExportRequest,
   ConciliacionBcpExportResponse,
   ConciliacionBcpInsertRequest,
@@ -42,4 +44,17 @@ export async function conciliarPlanillaConciliacionBcp(
   return await httpClient.post<ConciliacionBcpConciliarPlanillaResponse>(`${BASE_URL}/conciliar-planilla`, request, {
     timeout: 120000,
   });
+}
+
+export async function actualizarComentarioMovimientoConciliacionBcp(
+  idMovimientoBanco: number,
+  request: ConciliacionBcpActualizarComentarioRequest
+): Promise<ConciliacionBcpConciliarPlanillaRegistro> {
+  return await httpClient.put<ConciliacionBcpConciliarPlanillaRegistro>(
+    `${BASE_URL}/movimientos/${idMovimientoBanco}/comentario`,
+    request,
+    {
+      timeout: 30000,
+    }
+  );
 }

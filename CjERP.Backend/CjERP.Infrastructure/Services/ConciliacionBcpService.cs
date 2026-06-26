@@ -72,17 +72,20 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
     private readonly ISqlCommandFactory _sqlCommandFactory;
     private readonly OpenAiSettings _openAiSettings;
     private readonly ILogger<ConciliacionBcpService> _logger;
+    private readonly IAuditoriaCambiosService _auditoriaCambiosService;
 
     public ConciliacionBcpService(
         HttpClient httpClient,
         ISqlCommandFactory sqlCommandFactory,
         IOptions<OpenAiSettings> openAiSettings,
-        ILogger<ConciliacionBcpService> logger)
+        ILogger<ConciliacionBcpService> logger,
+        IAuditoriaCambiosService auditoriaCambiosService)
     {
         _httpClient = httpClient;
         _sqlCommandFactory = sqlCommandFactory;
         _openAiSettings = openAiSettings.Value;
         _logger = logger;
+        _auditoriaCambiosService = auditoriaCambiosService;
     }
 
     public async Task<ConciliacionBcpAnalizarResponseDto> AnalizarAsync(
@@ -448,6 +451,102 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
         };
     }
 
+    public async Task<ConciliacionBcpConciliarPlanillaRegistroDto> ActualizarComentarioMovimientoAsync(
+        int idMovimientoBanco,
+        ConciliacionBcpActualizarComentarioRequestDto request,
+        string? usuario,
+        CancellationToken cancellationToken = default)
+    {
+        if (idMovimientoBanco <= 0)
+        {
+            throw new InvalidOperationException("El IdMovimientoBanco es invalido.");
+        }
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        var movimiento = await connection.QuerySingleOrDefaultAsync<MovimientoBcpBusquedaRow>(
+            _sqlCommandFactory.Create(
+                """
+                SELECT
+                    IdMovimientoBanco,
+                    Empresa,
+                    Cuenta,
+                    Moneda,
+                    Fecha,
+                    FechaValuta,
+                    Proveedor,
+                    ItemSistema,
+                    DescripcionOperacion,
+                    Monto,
+                    SucursalAgencia,
+                    NroOperacion,
+                    Usuario,
+                    ArchivoOrigen,
+                    FechaImportacion,
+                    UsuarioImportacion,
+                    IdActivo,
+                    EsNroOperacionValido,
+                    TipoMovimientoBanco,
+                    EstadoConciliacion,
+                    Comentario
+                FROM dbo.MovimientosBcp
+                WHERE IdMovimientoBanco = @IdMovimientoBanco
+                """,
+                new { IdMovimientoBanco = idMovimientoBanco },
+                CommandType.Text,
+                cancellationToken));
+
+        if (movimiento is null)
+        {
+            throw new InvalidOperationException("No se encontro el movimiento BCP solicitado.");
+        }
+
+        var comentarioAnterior = NullIfWhiteSpace(movimiento.Comentario);
+        var comentarioNuevo = NullIfWhiteSpace(request.Comentario);
+
+        if (string.Equals(comentarioAnterior, comentarioNuevo, StringComparison.Ordinal))
+        {
+            return BuildConciliacionRegistroActualizado(movimiento, comentarioAnterior);
+        }
+
+        await connection.ExecuteAsync(
+            _sqlCommandFactory.Create(
+                """
+                UPDATE dbo.MovimientosBcp
+                SET Comentario = @Comentario
+                WHERE IdMovimientoBanco = @IdMovimientoBanco
+                """,
+                new
+                {
+                    IdMovimientoBanco = idMovimientoBanco,
+                    Comentario = comentarioNuevo
+                },
+                CommandType.Text,
+                cancellationToken));
+
+        await _auditoriaCambiosService.RegistrarLoteAsync(
+            [
+                new AuditoriaCambioDto
+                {
+                    Modulo = "Finanzas",
+                    Entidad = "MovimientosBcp",
+                    IdRegistro = idMovimientoBanco.ToString(CultureInfo.InvariantCulture),
+                    Accion = "UPDATE",
+                    Seccion = "Conciliacion Planilla",
+                    Campo = "Comentario",
+                    ValorAnterior = comentarioAnterior,
+                    ValorNuevo = comentarioNuevo,
+                    UsuarioAccion = usuario ?? "sistema",
+                    Observacion = "Actualizacion manual del comentario desde conciliacion planilla."
+                }
+            ],
+            cancellationToken);
+
+        movimiento.Comentario = comentarioNuevo;
+        return BuildConciliacionRegistroActualizado(movimiento, comentarioNuevo);
+    }
+
     private static Dictionary<string, object?> MapDynamicRow(dynamic row)
     {
         if (row is IDictionary<string, object?> typedDictionary)
@@ -538,11 +637,35 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
             CuentaInterPlanilla = candidate?.Planilla.CuentaInter,
             IdRegistroPlanilla = candidate?.Planilla.Corre,
             TotalPagar = totalPagar,
+            Comentario = movimiento.Comentario,
             ObservacionConciliacion = candidate is not null
                 ? candidates.Count > 1
                     ? $"Se encontraron {candidates.Count} coincidencias. TotalPagar acumulado: {totalPagar:0.##}."
                     : candidate.ObservacionConciliacion
                 : "No se encontro coincidencia con planilla."
+        };
+    }
+
+    private static ConciliacionBcpConciliarPlanillaRegistroDto BuildConciliacionRegistroActualizado(
+        MovimientoBcpBusquedaRow movimiento,
+        string? comentario)
+    {
+        return new ConciliacionBcpConciliarPlanillaRegistroDto
+        {
+            IdMovimientoBanco = movimiento.IdMovimientoBanco,
+            Empresa = movimiento.Empresa,
+            Cuenta = movimiento.Cuenta,
+            Moneda = movimiento.Moneda,
+            Fecha = movimiento.Fecha,
+            DescripcionOperacion = movimiento.DescripcionOperacion,
+            Monto = movimiento.Monto,
+            NroOperacion = movimiento.NroOperacion,
+            SucursalAgencia = movimiento.SucursalAgencia,
+            EstadoConciliacion = movimiento.EstadoConciliacion,
+            TipoMovimientoBanco = movimiento.TipoMovimientoBanco,
+            IdActivo = movimiento.IdActivo,
+            Comentario = comentario,
+            ResultadoConciliacion = "ACTUALIZADO"
         };
     }
 
@@ -3588,6 +3711,11 @@ ORDER BY p.parameter_id;";
         return value.Trim().TrimStart('@');
     }
 
+    private static string? NullIfWhiteSpace(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
     private static string Truncate(string? value, int maxLength)
     {
         if (string.IsNullOrEmpty(value))
@@ -3790,6 +3918,7 @@ ORDER BY p.parameter_id;";
         public bool? EsNroOperacionValido { get; set; }
         public string? TipoMovimientoBanco { get; set; }
         public string? EstadoConciliacion { get; set; }
+        public string? Comentario { get; set; }
     }
 
     private sealed class PlanillaConciliacionRow
