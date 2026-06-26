@@ -430,6 +430,7 @@ export default function ConciliacionBcpPage() {
   const [message, setMessage] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const [isAnalysisExpanded, setIsAnalysisExpanded] = useState(false);
+  const [isConciliacionExpanded, setIsConciliacionExpanded] = useState(false);
   const [conciliacionSort, setConciliacionSort] = useState<ConciliacionSortState | null>(null);
   const [conciliacionFiltros, setConciliacionFiltros] = useState({
     idCargo: "5",
@@ -797,6 +798,7 @@ export default function ConciliacionBcpPage() {
       });
 
       setConciliacionPlanilla(response);
+      setIsConciliacionExpanded(false);
       setConciliacionSort(null);
       setConciliacionGridFilters(DEFAULT_CONCILIACION_FILTERS);
       setMessage(response.resumen || "Conciliacion ejecutada correctamente.");
@@ -847,6 +849,7 @@ export default function ConciliacionBcpPage() {
     setFiles([]);
     setAnalysis(null);
     setConciliacionPlanilla(null);
+    setIsConciliacionExpanded(false);
     setConciliacionSort(null);
     setConciliacionGridFilters(DEFAULT_CONCILIACION_FILTERS);
     setError("");
@@ -1278,18 +1281,32 @@ export default function ConciliacionBcpPage() {
                 Comparacion entre `MovimientosBcp` y `sp_Planilla_Consulta_Estados`, manteniendo la base bancaria como origen principal.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={handleExportConciliacionPlanilla}
-              style={styles.iconActionButton}
-              title="Exportar conciliacion planilla a Excel"
-              aria-label="Exportar conciliacion planilla a Excel"
-            >
-              <FileDown size={18} strokeWidth={2.25} />
-            </button>
+            <div style={styles.sectionActions}>
+              <button
+                type="button"
+                onClick={() => setIsConciliacionExpanded((current) => !current)}
+                style={styles.collapseToggleButton}
+                title={isConciliacionExpanded ? "Contraer conciliacion planilla" : "Expandir conciliacion planilla"}
+                aria-label={isConciliacionExpanded ? "Contraer conciliacion planilla" : "Expandir conciliacion planilla"}
+              >
+                {isConciliacionExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                {isConciliacionExpanded ? "Contraer" : "Expandir"}
+              </button>
+              <button
+                type="button"
+                onClick={handleExportConciliacionPlanilla}
+                style={styles.iconActionButton}
+                title="Exportar conciliacion planilla a Excel"
+                aria-label="Exportar conciliacion planilla a Excel"
+              >
+                <FileDown size={18} strokeWidth={2.25} />
+              </button>
+            </div>
           </div>
 
-          <div style={styles.conciliacionSummaryBoard}>
+          {isConciliacionExpanded ? (
+            <>
+              <div style={styles.conciliacionSummaryBoard}>
             <SummaryCard label="Movimientos" value={String(conciliacionPlanilla.totalMovimientos)} />
             <SummaryCard label="Por Nro Op." value={String(conciliacionPlanilla.coincidenciasPorNroOperacion)} />
             <SummaryCard label="Por Cuenta" value={String(conciliacionPlanilla.coincidenciasPorCuenta)} />
@@ -1390,6 +1407,12 @@ export default function ConciliacionBcpPage() {
               </tbody>
             </table>
           </div>
+            </>
+          ) : (
+            <div style={styles.helperText}>
+              La conciliacion planilla esta contraida. Usa <strong>Expandir</strong> para ver el detalle.
+            </div>
+          )}
         </div>
       ) : null}
     </div>
@@ -1697,6 +1720,12 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#475569",
     lineHeight: 1.5,
   },
+  sectionActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    flexShrink: 0,
+  },
   collapseToggleButton: {
     border: "1px solid #CBD5E1",
     background: "#F8FAFC",
@@ -1742,6 +1771,15 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#92400E",
     fontSize: 12,
     lineHeight: 1.5,
+  },
+  helperText: {
+    marginTop: 8,
+    padding: "12px 14px",
+    borderRadius: 12,
+    background: "#F8FAFC",
+    border: "1px dashed #CBD5E1",
+    color: "#475569",
+    fontSize: 13,
   },
   mappingTableWrap: {
     marginTop: 12,
@@ -1841,11 +1879,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
     color: "#0F172A",
     verticalAlign: "top",
-  },
-  helperText: {
-    marginTop: 12,
-    fontSize: 12,
-    color: "#64748B",
   },
   summaryCard: {
     background: "#F8FAFC",
