@@ -941,36 +941,6 @@ export default function ConciliacionBcpPage() {
 
         <div style={styles.filterGrid}>
           <label style={styles.fieldGroup}>
-            <span style={styles.fieldLabel}>IdCargo</span>
-            <input
-              type="number"
-              value={conciliacionFiltros.idCargo}
-              onChange={(event) => setConciliacionFiltros((current) => ({ ...current, idCargo: event.target.value }))}
-              style={styles.input}
-              placeholder="5"
-            />
-          </label>
-          <label style={styles.fieldGroup}>
-            <span style={styles.fieldLabel}>IdEmpleado</span>
-            <input
-              type="number"
-              value={conciliacionFiltros.idEmpleado}
-              onChange={(event) => setConciliacionFiltros((current) => ({ ...current, idEmpleado: event.target.value }))}
-              style={styles.input}
-              placeholder="1160"
-            />
-          </label>
-          <label style={styles.fieldGroup}>
-            <span style={styles.fieldLabel}>Estados</span>
-            <input
-              type="text"
-              value={conciliacionFiltros.estados}
-              onChange={(event) => setConciliacionFiltros((current) => ({ ...current, estados: event.target.value }))}
-              style={styles.input}
-              placeholder="4"
-            />
-          </label>
-          <label style={styles.fieldGroup}>
             <span style={styles.fieldLabel}>Fecha inicio</span>
             <input
               type="date"
@@ -987,18 +957,6 @@ export default function ConciliacionBcpPage() {
               onChange={(event) => setConciliacionFiltros((current) => ({ ...current, fechaFin: event.target.value }))}
               style={styles.input}
             />
-          </label>
-          <label style={styles.fieldGroup}>
-            <span style={styles.fieldLabel}>IdActivo</span>
-            <select
-              value={conciliacionFiltros.idActivo}
-              onChange={(event) => setConciliacionFiltros((current) => ({ ...current, idActivo: event.target.value }))}
-              style={styles.input}
-            >
-              <option value="1">1</option>
-              <option value="0">0</option>
-              <option value="">Todos</option>
-            </select>
           </label>
         </div>
 
