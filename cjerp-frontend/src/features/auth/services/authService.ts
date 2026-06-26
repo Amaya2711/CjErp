@@ -1,4 +1,4 @@
-import httpClient from "../../../api/httpClient";
+import httpClient, { API_BASE_URL } from "../../../api/httpClient";
 
 export interface LoginRequest {
   idUsuario: string;
@@ -30,11 +30,7 @@ export async function logout(): Promise<void> {
 }
 
 export function sendLogoutBeacon(token: string) {
-  const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
-  const apiBaseUrl =
-    configuredApiUrl || (import.meta.env.DEV ? "http://localhost:5015/api" : "/api");
-
-  const beaconUrl = `${apiBaseUrl}/auth/logout-beacon`;
+  const beaconUrl = `${API_BASE_URL}/auth/logout-beacon`;
   const payload = JSON.stringify({ token });
   const blob = new Blob([payload], { type: "application/json" });
 

@@ -46,6 +46,7 @@ type GastoDto = {
   ruc?: string;
   tipoPago: string;
   monto: number;
+  totalPagar?: number;
   subtotal?: number;
   total?: number;
   igv?: number;
@@ -85,6 +86,8 @@ type GastoDto = {
   estado?: number;
   estadoLabel?: string;
   fechaDeposito?: string;
+  nroOperacion?: string;
+  banco?: string;
 };
 
 type GastoForm = {
@@ -103,6 +106,7 @@ type GastoForm = {
   rendicion: boolean;
   tipoPago: string;
   monto: string;
+  totalPagar: string;
   detalle: string;
   comentario: string;
   fechaVencimiento: string;
@@ -130,6 +134,8 @@ type GastoForm = {
   estado: number;
   estadoLabel?: string;
   fechaDeposito: string;
+  nroOperacion: string;
+  banco: string;
 };
 
 type GastoPayload = {
@@ -149,6 +155,7 @@ type GastoPayload = {
   ruc?: string;
   tipoPago: string;
   monto: number;
+  totalPagar?: number;
   subtotal?: number;
   total?: number;
   igv?: number;
@@ -961,12 +968,13 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     tareaLabel: getRecordString(row, "Tarea", "tarea", "NomTarea", "nomTarea", "DescTarea", "descTarea"),
     idCliente: getRecordNumber(row, "IdCliente", "idCliente"),
     cuenta: getRecordString(row, "Cuenta", "cuenta"),
-    cuentaNumero: getRecordString(row, "CuentaNumero", "cuentaNumero"),
-    cuentaInter: getRecordString(row, "CuentaInter", "cuentaInter"),
+    cuentaNumero: getRecordString(row, "CuentaNumero", "cuentaNumero", "Cuenta", "cuenta"),
+    cuentaInter: getRecordString(row, "CuentaInter", "cuentaInter", "cuentainter"),
     nombreCta: getRecordString(row, "NombreCta", "nombreCta"),
     ruc: getRecordString(row, "RUC", "Ruc", "ruc"),
     tipoPago: getRecordString(row, "IdTipoPago", "idTipoPago", "TipoPago", "tipoPago"),
     monto: getRecordNumber(row, "Total", "total", "Totalb", "totalb", "TotalPagar", "totalPagar") ?? 0,
+    totalPagar: getRecordNumber(row, "TotalPagar", "totalPagar", "Total", "total") ?? undefined,
     subtotal: getRecordNumber(row, "Subtotal", "subtotal", "Subtotalb", "subtotalb") ?? undefined,
     total: getRecordNumber(row, "Total", "total", "Totalb", "totalb", "TotalPagar", "totalPagar") ?? undefined,
     igv: getRecordNumber(row, "IGV", "Igv", "igv", "Igvb", "igvb") ?? undefined,
@@ -1030,6 +1038,8 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     tipoTrabajo: getRecordString(row, "Tipo_Trabajo", "tipo_Trabajo", "TipoTrabajo", "tipoTrabajo"),
     siteNombre: getRecordString(row, "Site", "site", "SiteNombre", "siteNombre", "NombreSite", "nombreSite"),
     ot: getRecordString(row, "Ot", "ot", "OT"),
+    nroOperacion: getRecordString(row, "NroOperacion", "nroOperacion"),
+    banco: getRecordString(row, "Banco", "banco"),
     tipoCambio: getRecordNumber(row, "TipoCambio", "tipoCambio") ?? undefined,
     idUsuarioFactura: getRecordNumber(row, "IdUsuarioFactura", "idUsuarioFactura"),
     estado: getRecordNumber(row, "Estado", "estado") ?? 0,
@@ -1092,6 +1102,7 @@ function mapGastoDtoToView(item: GastoDto): GastoForm {
     rendicion: Number(item.idRendicion ?? 0) === 1,
     tipoPago: item.tipoPago || item.tipoPagoLabel || "",
     monto: subtotalValue != null ? subtotalValue.toString() : "",
+    totalPagar: item.totalPagar != null ? item.totalPagar.toString() : "",
     detalle: item.detalle,
     comentario: item.comentario ?? (item as any).observacion ?? "",
     fechaDeposito: item.fechaDeposito ?? "",
@@ -1119,6 +1130,8 @@ function mapGastoDtoToView(item: GastoDto): GastoForm {
     rutaFacturaEnviada: item.rutaFacturaEnviada || "",
     estado: item.estado ?? 0,
     estadoLabel: item.estadoLabel || "",
+    nroOperacion: item.nroOperacion ?? "",
+    banco: item.banco ?? "",
     };
 }
 
@@ -1138,6 +1151,7 @@ const formularioInicial: GastoForm = {
   rendicion: false,
   tipoPago: "",
   monto: "",
+  totalPagar: "",
   detalle: "",
   comentario: "",
   fechaDeposito: "",
@@ -1160,6 +1174,8 @@ const formularioInicial: GastoForm = {
   facturaUrl: "",
   facturaPath: "",
   estado: 0,
+  nroOperacion: "",
+  banco: "",
 };
 
 export default function GastosPage() {
@@ -1301,6 +1317,7 @@ export default function GastosPage() {
       tipoPago: normalizeConstanteValue(tipoPagoOptions, form.tipoPago),
       tipoPagoLabel: getConstanteLabel(tipoPagoOptions, form.tipoPago) || undefined,
       monto: Number(form.monto),
+      totalPagar: form.totalPagar ? Number(form.totalPagar) : undefined,
       subtotal: subtotalAmount,
       total: totalAmount,
       igv: igvAmount,
@@ -2303,7 +2320,10 @@ export default function GastosPage() {
       { key: "bien", label: "Bien", getValue: (gasto) => getConstanteLabel(bienOptions, gasto.bien) },
       { key: "comprobante", label: "Comprobante", getValue: (gasto) => getConstanteLabel(comprobanteOptions, gasto.comprobante) },
       { key: "monto", label: "Monto", getValue: (gasto) => gasto.monto },
+      { key: "totalPagar", label: "Total Pagar", getValue: (gasto) => gasto.totalPagar ?? "" },
       { key: "moneda", label: "Moneda", getValue: (gasto) => gasto.monedaLabel || getConstanteLabel(monedaOptions, gasto.moneda) },
+      { key: "banco", label: "Banco", getValue: (gasto) => gasto.banco },
+      { key: "nroOperacion", label: "NroOperacion", getValue: (gasto) => gasto.nroOperacion },
       { key: "fecIngreso", label: "FecIngreso", getValue: (gasto) => gasto.fecIngreso },
       { key: "ot", label: "OT", getValue: (gasto) => gasto.filtroOperativo.ot?.ot },
       { key: "solicitante", label: "Solicitante", getValue: (gasto) => getConstanteLabelOrFallback(solicitanteOptions, gasto.solicitante, gasto.solicitanteLabel) },
@@ -2341,8 +2361,16 @@ export default function GastosPage() {
           return gasto.monto !== undefined && gasto.monto !== null && gasto.monto !== ""
             ? Number(gasto.monto).toLocaleString("es-PE", { minimumFractionDigits: 2 })
             : "";
+        case "totalPagar":
+          return gasto.totalPagar !== undefined && gasto.totalPagar !== null && gasto.totalPagar !== ""
+            ? Number(gasto.totalPagar).toLocaleString("es-PE", { minimumFractionDigits: 2 })
+            : "";
         case "moneda":
           return gasto.monedaLabel || getConstanteLabel(monedaOptions, gasto.moneda);
+        case "banco":
+          return gasto.banco ?? "";
+        case "nroOperacion":
+          return gasto.nroOperacion ?? "";
         case "fecIngreso":
           return formatInputDateForDisplay(gasto.fecIngreso);
           //return gasto.fechaEmision
@@ -2513,12 +2541,17 @@ export default function GastosPage() {
     { key: "bien", label: "Bien", width: "80px", align: "left" as const },
     { key: "comprobante", label: "Comprobante", width: "140px", align: "left" as const },
     { key: "monto", label: "Monto", width: "100px", align: "left" as const },
+    { key: "totalPagar", label: "Total Pagar", width: "110px", align: "left" as const },
     { key: "moneda", label: "Moneda", width: "80px", align: "left" as const },
+    { key: "banco", label: "Banco", width: "140px", align: "left" as const },
+    { key: "nroOperacion", label: "NroOperacion", width: "140px", align: "left" as const },
     { key: "fechaDeposito", label: "FechaDeposito", width: "130px", align: "left" as const },
     { key: "fecIngreso", label: "FecIngreso", width: "130px", align: "left" as const },
     { key: "ot", label: "OT", width: "70px", align: "left" as const },
     { key: "solicitante", label: "Solicitante", width: "160px", align: "left" as const },
     { key: "responsable", label: "Responsable", width: "180px", align: "left" as const },
+    { key: "cuentaNumero", label: "Cuenta", width: "140px", align: "left" as const },
+    { key: "cuentaInter", label: "Cuenta Inter", width: "160px", align: "left" as const },
     { key: "validador", label: "Validador", width: "140px", align: "left" as const },   
     { key: "estado", label: "Estado", width: "80px", align: "left" as const },
     { key: "detalle", label: "Detalle", width: "320px", align: "left" as const },
@@ -2608,6 +2641,10 @@ export default function GastosPage() {
                       return getConstanteLabelOrFallback(solicitanteOptions, gasto.solicitante, gasto.solicitanteLabel);
                     case "responsable":
                       return gasto.responsableLabel || gasto.responsable || "";
+                    case "cuentaNumero":
+                      return gasto.cuentaNumero || gasto.cuenta || "";
+                    case "cuentaInter":
+                      return gasto.cuentaInter || "";
                     case "validador":
                       return getConstanteLabelOrFallback(validadorOptions, gasto.validador, gasto.validadorLabel);
                     case "tarea":
@@ -2621,11 +2658,19 @@ export default function GastosPage() {
                       return getConstanteLabel(comprobanteOptions, gasto.comprobante);
                     case "moneda":
                       return getConstanteLabel(monedaOptions, gasto.moneda);
+                    case "banco":
+                      return gasto.banco ?? "";
+                    case "nroOperacion":
+                      return gasto.nroOperacion ?? "";
                     case "fechaDeposito":
                       return formatInputDateForDisplay(gasto.fechaDeposito);
                     case "monto":
                       return gasto.monto !== undefined && gasto.monto !== null && gasto.monto !== ""
                         ? Number(gasto.monto).toLocaleString("es-PE", { minimumFractionDigits: 2 })
+                        : "";
+                    case "totalPagar":
+                      return gasto.totalPagar !== undefined && gasto.totalPagar !== null && gasto.totalPagar !== ""
+                        ? Number(gasto.totalPagar).toLocaleString("es-PE", { minimumFractionDigits: 2 })
                         : "";
                     case "ot":
                       return gasto.filtroOperativo.ot?.ot ?? "";
@@ -3264,6 +3309,10 @@ export default function GastosPage() {
                               );
                             case "responsable":
                               return renderGridCellText(gasto.responsableLabel || gasto.responsable || "");
+                            case "cuentaNumero":
+                              return renderGridCellText(gasto.cuentaNumero || gasto.cuenta || "");
+                            case "cuentaInter":
+                              return renderGridCellText(gasto.cuentaInter || "");
                             case "validador":
                               return renderGridCellText(
                                 getConstanteLabelOrFallback(
@@ -3292,12 +3341,24 @@ export default function GastosPage() {
                               return renderGridCellText(getConstanteLabel(comprobanteOptions, gasto.comprobante));
                             case "moneda":
                               return renderGridCellText(getConstanteLabel(monedaOptions, gasto.moneda));
+                            case "banco":
+                              return renderGridCellText(gasto.banco ?? "");
+                            case "nroOperacion":
+                              return renderGridCellText(gasto.nroOperacion ?? "");
                             case "fechaDeposito":
                               return renderGridCellText(formatInputDateForDisplay(gasto.fechaDeposito));
                             case "monto":
                               return renderGridCellText(
                                 gasto.monto !== undefined && gasto.monto !== null && gasto.monto !== ""
                                   ? Number(gasto.monto).toLocaleString("es-PE", {
+                                      minimumFractionDigits: 2,
+                                    })
+                                  : ""
+                              );
+                            case "totalPagar":
+                              return renderGridCellText(
+                                gasto.totalPagar !== undefined && gasto.totalPagar !== null && gasto.totalPagar !== ""
+                                  ? Number(gasto.totalPagar).toLocaleString("es-PE", {
                                       minimumFractionDigits: 2,
                                     })
                                   : ""

@@ -14,6 +14,7 @@ BEGIN
 
     DECLARE @FiltrarPorSolicitante BIT = 1;
     DECLARE @IdEmpleado2 VARCHAR(MAX) = '0';
+    DECLARE @IncluyeEstado4 BIT = 0;
 
     SELECT @IdEmpleado2 =
         ISNULL(
@@ -39,11 +40,23 @@ BEGIN
         SET @FiltrarPorSolicitante = 0;
     END;
 
+    IF EXISTS (
+        SELECT 1
+        FROM STRING_SPLIT(@Estados, ',')
+        WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) = 4
+    )
+    BEGIN
+        SET @IncluyeEstado4 = 1;
+    END;
+
     SELECT DISTINCT
         CONVERT(VARCHAR(10), a.FecIngreso, 103) AS FecIngreso,
         CAST(a.Detalle AS VARCHAR(MAX)) AS Detalle,
+        a4.cuenta AS Cuenta,
+        a4.cuentainter AS CuentaInter,
         h.ValorIni AS Bien,
         i.ValorIni AS Comprobante,
+        ban.ValorIni AS Banco,
         f_emp.NroDocumento AS RUC,
         k.ValorIni AS Moneda,
         CASE
@@ -109,7 +122,8 @@ BEGIN
         a.idprovisional,
         s1.fechaInicio,
         w.ValorIni AS NombreEstado,
-        a.serie
+        a.serie,
+        a.NroOperacion
     FROM Planilla a
     LEFT JOIN CuentaEmpleado a4
         ON a4.IdEmpleado = a.IdResponsable
@@ -133,6 +147,11 @@ BEGIN
        AND i.Programa = 'PLANTILLA'
        AND i.Campo = 'TIPO_COMPROBANTE'
        AND a.IdComprobante = i.Correlativo
+    LEFT JOIN Constante ban
+        ON ban.Sociedad = 'PE01'
+       AND ban.Programa = 'PLANTILLA'
+       AND ban.Campo = 'BANCO'
+       AND a.IdBanco = ban.Correlativo
     LEFT JOIN Constante j
         ON j.Sociedad = 'PE01'
        AND j.Programa = 'PLANTILLA'
@@ -190,15 +209,34 @@ BEGIN
     AND (@IdValidador IS NULL OR a.IdValidador = @IdValidador)
     AND (
         @FechaInicio IS NULL
-        OR CONVERT(DATE, a.FecIngreso) >= @FechaInicio
+        OR (
+            @IncluyeEstado4 = 1
+            AND a.FechaDeposito IS NOT NULL
+            AND CONVERT(DATE, a.FechaDeposito) >= @FechaInicio
+        )
+        OR (
+            @IncluyeEstado4 = 0
+            AND CONVERT(DATE, a.FecIngreso) >= @FechaInicio
+        )
     )
     AND (
         @FechaFin IS NULL
-        OR CONVERT(DATE, a.FecIngreso) <= @FechaFin
+        OR (
+            @IncluyeEstado4 = 1
+            AND a.FechaDeposito IS NOT NULL
+            AND CONVERT(DATE, a.FechaDeposito) <= @FechaFin
+        )
+        OR (
+            @IncluyeEstado4 = 0
+            AND CONVERT(DATE, a.FecIngreso) <= @FechaFin
+        )
     )
     AND (
         @FechaDeposito IS NULL
-        OR CONVERT(DATE, a.FechaDeposito) = @FechaDeposito
+        OR (
+            a.FechaDeposito IS NOT NULL
+            AND CONVERT(DATE, a.FechaDeposito) = @FechaDeposito
+        )
     )
     AND (
         @FiltrarPorSolicitante = 0

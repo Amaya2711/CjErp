@@ -10,10 +10,14 @@ type HttpClient = {
 };
 
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
-const apiBaseUrl = configuredApiUrl || "https://cjerp-production.up.railway.app/api";
+
+export const API_BASE_URL =
+  configuredApiUrl ||
+  (import.meta.env.DEV ? "https://localhost:7130/api" : "http://localhost:5015/api");
+
 
 const axiosClient: AxiosInstance = axios.create({
-  baseURL: apiBaseUrl,
+  baseURL: API_BASE_URL,
   timeout: 30000,
 });
 

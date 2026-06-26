@@ -197,6 +197,11 @@ builder.Services.AddScoped<IPlanillaService, PlanillaService>();
 builder.Services.AddScoped<IPlanillaBoletaService, PlanillaBoletaService>();
 builder.Services.AddScoped<PlanillaBoletaPdfGenerator>();
 builder.Services.AddScoped<IPlanillaConsultaService, PlanillaConsultaService>();
+builder.Services.AddHttpClient<IConciliacionBcpService, ConciliacionBcpService>(client =>
+{
+    client.BaseAddress = new Uri("https://api.openai.com");
+    client.Timeout = TimeSpan.FromSeconds(120);
+});
 builder.Services.AddScoped<IVacacionesService, VacacionesService>();
 builder.Services.AddScoped<IOrdenCompraService, OrdenCompraService>();
 builder.Services.AddScoped<IEmpleadoPendienteService, EmpleadoPendienteService>();
