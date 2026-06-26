@@ -1041,14 +1041,17 @@ export default function ConciliacionBcpPage() {
       Diferencia: calculateMontoDiferencia(row.monto, normalizeTotalPagarForComparison(row.totalPagar)) ?? "",
       NroOperacion: row.nroOperacion || "",
       DescripcionOperacion: row.descripcionOperacion || "",
+      Comentario: row.comentario || "",
       ResultadoConciliacion: row.resultadoConciliacion || "",
       TipoCoincidencia: row.tipoCoincidencia || "",
       NroOperacionPlanilla: row.nroOperacionPlanilla || "",
       CuentaPlanilla: row.cuentaPlanilla || "",
       CuentaInterPlanilla: row.cuentaInterPlanilla || "",
-      EstadoConciliacion: row.estadoConciliacion || "",
-      TipoMovimientoBanco: row.tipoMovimientoBanco || "",
-      ObservacionConciliacion: row.observacionConciliacion || "",
+      Cliente: row.clientePlanilla || "",
+      Proyecto: row.proyectoPlanilla || "",
+      Site: row.sitePlanilla || "",
+      Tipo_Trabajo: row.tipoTrabajoPlanilla || "",
+      Tarea: row.tareaPlanilla || "",
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportRows);
@@ -1668,7 +1671,7 @@ export default function ConciliacionBcpPage() {
                   ))
                 ) : (
                   <tr>
-                    <td style={styles.td} colSpan={14}>
+                    <td style={styles.td} colSpan={20}>
                       No se encontraron movimientos para los filtros ingresados.
                     </td>
                   </tr>
