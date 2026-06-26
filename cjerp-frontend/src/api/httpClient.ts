@@ -10,7 +10,7 @@ type HttpClient = {
 };
 
 export const API_BASE_URL =
-  import.meta.env.DEV ? "https://localhost:7130/api" : "https://cj-erp.vercel.app/";
+  import.meta.env.DEV ? "https://localhost:7130/api" : "https://cjerp-production.up.railway.app/api";
 
 
 const axiosClient: AxiosInstance = axios.create({
