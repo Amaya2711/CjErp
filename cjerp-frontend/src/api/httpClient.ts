@@ -9,11 +9,8 @@ type HttpClient = {
   delete<T>(url: string, config?: AxiosRequestConfig): Promise<T>;
 };
 
-const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
-
 export const API_BASE_URL =
-  configuredApiUrl ||
-  (import.meta.env.DEV ? "https://localhost:7130/api" : "http://localhost:5015/api");
+  import.meta.env.DEV ? "https://localhost:7130/api" : "https://cj-erp.vercel.app/";
 
 
 const axiosClient: AxiosInstance = axios.create({
