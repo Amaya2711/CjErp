@@ -666,7 +666,7 @@ export default function RptAsistenciaPage() {
   const location = useLocation();
   const authUser = getAuthUser();
   const currentRoleCode = Number(authUser?.idrol ?? (authUser as Record<string, unknown> | null)?.IdRol ?? 0);
-  const isAdminRole = currentRoleCode === 5;
+  const isAdminRole = currentRoleCode === 4 || currentRoleCode === 5;
   const today = new Date();
   const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
