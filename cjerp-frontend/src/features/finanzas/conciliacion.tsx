@@ -40,6 +40,9 @@ type ConciliacionSortKey =
   | "sitePlanilla"
   | "tipoTrabajoPlanilla"
   | "tareaPlanilla"
+  | "responsablePlanilla"
+  | "comprobantePlanilla"
+  | "detallePlanilla"
   | "correlativoPlanilla";
 
 type ConciliacionSortDirection = "asc" | "desc";
@@ -50,6 +53,21 @@ type ConciliacionSortState = {
 
 type ConciliacionFilterValue = string | string[];
 type ConciliacionFilterState = Record<ConciliacionSortKey, ConciliacionFilterValue>;
+type ConciliacionResultadoResumen = {
+  resultado: string;
+  totalPagar: number;
+  cantidad: number;
+};
+type ConciliacionMonedaResumen = {
+  moneda: string;
+  totalPagar: number;
+  cantidad: number;
+  resultados: ConciliacionResultadoResumen[];
+};
+type ConciliacionExecutiveSelection = {
+  moneda: string | null;
+  resultado: string | null;
+};
 
 const DEFAULT_CONCILIACION_FILTERS: ConciliacionFilterState = {
   fecha: "",
@@ -72,6 +90,9 @@ const DEFAULT_CONCILIACION_FILTERS: ConciliacionFilterState = {
   sitePlanilla: "",
   tipoTrabajoPlanilla: "",
   tareaPlanilla: "",
+  responsablePlanilla: "",
+  comprobantePlanilla: "",
+  detallePlanilla: "",
   correlativoPlanilla: "",
 };
 const EMPTY_CONCILIACION_FILTER_VALUE = "__EMPTY__";
@@ -170,6 +191,32 @@ function normalizeComentarioValue(value?: string | null): string {
   return value?.trim() ?? "";
 }
 
+function getResultadoChartColor(resultado: string): string {
+  const normalized = resultado.trim().toUpperCase();
+
+  if (normalized.includes("NRO OPERACION")) {
+    return "#0F766E";
+  }
+
+  if (normalized.includes("CUENTA INTER")) {
+    return "#0369A1";
+  }
+
+  if (normalized.includes("CUENTA")) {
+    return "#7C3AED";
+  }
+
+  if (normalized.includes("SIN COINCIDENCIA")) {
+    return "#DC2626";
+  }
+
+  if (normalized.includes("ACTUALIZADO")) {
+    return "#4F46E5";
+  }
+
+  return "#475569";
+}
+
 function getConciliacionDisplayValue(row: ConciliacionBcpConciliarPlanillaRegistro, key: ConciliacionSortKey): string {
   switch (key) {
     case "fecha":
@@ -217,6 +264,12 @@ function getConciliacionDisplayValue(row: ConciliacionBcpConciliarPlanillaRegist
       return row.tipoTrabajoPlanilla || "";
     case "tareaPlanilla":
       return row.tareaPlanilla || "";
+    case "responsablePlanilla":
+      return row.responsablePlanilla || "";
+    case "comprobantePlanilla":
+      return row.comprobantePlanilla || "";
+    case "detallePlanilla":
+      return row.detallePlanilla || "";
     case "correlativoPlanilla":
       return row.correlativoPlanilla || "";
     default:
@@ -307,6 +360,12 @@ function getConciliacionSortValue(row: ConciliacionBcpConciliarPlanillaRegistro,
       return row.tipoTrabajoPlanilla?.trim().toLowerCase() ?? "";
     case "tareaPlanilla":
       return row.tareaPlanilla?.trim().toLowerCase() ?? "";
+    case "responsablePlanilla":
+      return row.responsablePlanilla?.trim().toLowerCase() ?? "";
+    case "comprobantePlanilla":
+      return row.comprobantePlanilla?.trim().toLowerCase() ?? "";
+    case "detallePlanilla":
+      return row.detallePlanilla?.trim().toLowerCase() ?? "";
     case "correlativoPlanilla":
       return row.correlativoPlanilla?.trim().toLowerCase() ?? "";
     default:
@@ -517,6 +576,10 @@ export default function ConciliacionBcpPage() {
   const [conciliacionGridFilters, setConciliacionGridFilters] = useState<ConciliacionFilterState>(
     DEFAULT_CONCILIACION_FILTERS
   );
+  const [conciliacionExecutiveSelection, setConciliacionExecutiveSelection] = useState<ConciliacionExecutiveSelection>({
+    moneda: null,
+    resultado: null,
+  });
   const [conciliacionPlanilla, setConciliacionPlanilla] = useState<ConciliacionBcpConciliarPlanillaResponse | null>(null);
   const [comentarioDrafts, setComentarioDrafts] = useState<Record<number, string>>({});
   const [comentarioSavingIds, setComentarioSavingIds] = useState<Record<number, boolean>>({});
@@ -603,7 +666,85 @@ export default function ConciliacionBcpPage() {
   const filteredConciliacionRegistros = useMemo(() => {
     return sortedConciliacionRegistros.filter((row) => matchesConciliacionFilter(row, conciliacionGridFilters));
   }, [sortedConciliacionRegistros, conciliacionGridFilters]);
+  const executiveFilteredConciliacionRegistros = useMemo(() => {
+    return filteredConciliacionRegistros.filter((row) => {
+      if (conciliacionExecutiveSelection.moneda) {
+        const moneda = row.moneda?.trim() || "Sin moneda";
+        if (moneda !== conciliacionExecutiveSelection.moneda) {
+          return false;
+        }
+      }
+
+      if (conciliacionExecutiveSelection.resultado) {
+        const resultado = row.resultadoConciliacion?.trim() || "Sin resultado";
+        if (resultado !== conciliacionExecutiveSelection.resultado) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [filteredConciliacionRegistros, conciliacionExecutiveSelection]);
   const totalConciliacionRegistros = conciliacionPlanilla?.registros.length ?? 0;
+  const conciliacionResumenEjecutivo = useMemo(() => {
+    const byMoneda = new Map<string, { totalPagar: number; cantidad: number; resultados: Map<string, ConciliacionResultadoResumen> }>();
+    let registrosConTotalPagar = 0;
+    let registrosSinTotalPagar = 0;
+
+    filteredConciliacionRegistros.forEach((row) => {
+      const totalPagar = normalizeTotalPagarForComparison(row.totalPagar);
+      if (totalPagar == null) {
+        registrosSinTotalPagar += 1;
+        return;
+      }
+
+      registrosConTotalPagar += 1;
+      const moneda = row.moneda?.trim() || "Sin moneda";
+      const resultado = row.resultadoConciliacion?.trim() || "Sin resultado";
+      const monedaEntry =
+        byMoneda.get(moneda) ??
+        {
+          totalPagar: 0,
+          cantidad: 0,
+          resultados: new Map<string, ConciliacionResultadoResumen>(),
+        };
+
+      monedaEntry.totalPagar += totalPagar;
+      monedaEntry.cantidad += 1;
+
+      const resultadoEntry =
+        monedaEntry.resultados.get(resultado) ??
+        {
+          resultado,
+          totalPagar: 0,
+          cantidad: 0,
+        };
+
+      resultadoEntry.totalPagar += totalPagar;
+      resultadoEntry.cantidad += 1;
+
+      monedaEntry.resultados.set(resultado, resultadoEntry);
+      byMoneda.set(moneda, monedaEntry);
+    });
+
+    const monedas = Array.from(byMoneda.entries())
+      .map(([moneda, value]): ConciliacionMonedaResumen => ({
+        moneda,
+        totalPagar: value.totalPagar,
+        cantidad: value.cantidad,
+        resultados: Array.from(value.resultados.values()).sort((left, right) => Math.abs(right.totalPagar) - Math.abs(left.totalPagar)),
+      }))
+      .sort((left, right) => left.moneda.localeCompare(right.moneda, "es", { sensitivity: "base" }));
+
+    return {
+      monedas,
+      registrosConTotalPagar,
+      registrosSinTotalPagar,
+    };
+  }, [filteredConciliacionRegistros]);
+  const executiveSelectionLabel = conciliacionExecutiveSelection.resultado
+    ? `${conciliacionExecutiveSelection.moneda ?? "Sin moneda"} | ${conciliacionExecutiveSelection.resultado}`
+    : conciliacionExecutiveSelection.moneda;
 
   const conciliacionFilterOptions = useMemo(() => {
     const keys: ConciliacionSortKey[] = [
@@ -627,6 +768,9 @@ export default function ConciliacionBcpPage() {
       "sitePlanilla",
       "tipoTrabajoPlanilla",
       "tareaPlanilla",
+      "responsablePlanilla",
+      "comprobantePlanilla",
+      "detallePlanilla",
       "correlativoPlanilla",
     ];
 
@@ -704,7 +848,24 @@ export default function ConciliacionBcpPage() {
 
   const handleClearConciliacionFilters = () => {
     setConciliacionGridFilters(DEFAULT_CONCILIACION_FILTERS);
+    setConciliacionExecutiveSelection({ moneda: null, resultado: null });
     setIsResultadoFilterOpen(false);
+  };
+
+  const handleExecutiveCurrencyClick = (moneda: string) => {
+    setConciliacionExecutiveSelection((current) =>
+      current.moneda === moneda && current.resultado === null
+        ? { moneda: null, resultado: null }
+        : { moneda, resultado: null }
+    );
+  };
+
+  const handleExecutiveResultClick = (moneda: string, resultado: string) => {
+    setConciliacionExecutiveSelection((current) =>
+      current.moneda === moneda && current.resultado === resultado
+        ? { moneda: null, resultado: null }
+        : { moneda, resultado }
+    );
   };
 
   const handleComentarioDraftChange = (idMovimientoBanco: number, value: string) => {
@@ -1059,6 +1220,9 @@ export default function ConciliacionBcpPage() {
       Site: row.sitePlanilla || "",
       Tipo_Trabajo: row.tipoTrabajoPlanilla || "",
       Tarea: row.tareaPlanilla || "",
+      Responsable: row.responsablePlanilla || "",
+      Comprobante: row.comprobantePlanilla || "",
+      Detalle: row.detallePlanilla || "",
       Correlativo: row.correlativoPlanilla || "",
     }));
 
@@ -1111,10 +1275,9 @@ export default function ConciliacionBcpPage() {
       <div style={styles.hero}>
         <div>
           <p style={styles.kicker}>Finanzas / Conciliacion BCP</p>
-          <h1 style={styles.title}>Carga, analiza y graba movimientos bancarios desde Excel</h1>
+          <h1 style={styles.title}>Carga, analiza y graba movimientos bancarios</h1>
           <p style={styles.subtitle}>
-            Sube uno o varios archivos Excel, deja que ChatGPT reconozca la estructura y confirma
-            la insercion en `sp_MovimientosBcp_Insertar`.
+            Sube uno o varios archivos Excel, deja que ChatGPT reconozca la estructura.
           </p>
         </div>
         <div style={styles.heroStats}>
@@ -1147,7 +1310,6 @@ export default function ConciliacionBcpPage() {
           <button type="button" style={styles.secondaryButton} onClick={() => void handleConciliarPlanilla()} disabled={!canConciliar}>
             {loadingConciliacion ? "Conciliando..." : "Conciliacion"}
           </button>
-
           <input
             ref={fileInputRef}
             type="file"
@@ -1160,52 +1322,50 @@ export default function ConciliacionBcpPage() {
               }
             }}
           />
-        </div>
-
-        <div style={styles.filterGrid}>
-          <label style={styles.fieldGroup}>
-            <span style={styles.fieldLabel}>Fecha inicio</span>
-            <input
-              type="date"
-              value={conciliacionFiltros.fechaInicio}
-              onChange={(event) => setConciliacionFiltros((current) => ({ ...current, fechaInicio: event.target.value }))}
-              style={styles.input}
-            />
-          </label>
-          <label style={styles.fieldGroup}>
-            <span style={styles.fieldLabel}>Fecha fin</span>
-            <input
-              type="date"
-              value={conciliacionFiltros.fechaFin}
-              onChange={(event) => setConciliacionFiltros((current) => ({ ...current, fechaFin: event.target.value }))}
-              style={styles.input}
-            />
-          </label>
-        </div>
-
-        <div
-          style={{ ...styles.dropZone, ...(dragActive ? styles.dropZoneActive : {}) }}
-          onDragOver={(event) => {
-            event.preventDefault();
-            setDragActive(true);
-          }}
-          onDragLeave={(event) => {
-            event.preventDefault();
-            setDragActive(false);
-          }}
-          onDrop={(event) => {
-            event.preventDefault();
-            setDragActive(false);
-            if (event.dataTransfer.files?.length) {
-              void handleReplaceFiles(event.dataTransfer.files);
-            }
-          }}
-        >
-          <strong style={{ color: "#0F172A" }}>Arrastra tus archivos aqui</strong>
-          <span style={styles.dropHint}>
-            ChatGPT analizara la hoja preferida del archivo, identificara la estructura y generara
-            un consolidado estilo `Movimientos ordenados`.
-          </span>
+          <div style={styles.toolbarDates}>
+            <label style={styles.fieldGroup}>
+              <span style={styles.fieldLabel}>Fecha inicio</span>
+              <input
+                type="date"
+                value={conciliacionFiltros.fechaInicio}
+                onChange={(event) => setConciliacionFiltros((current) => ({ ...current, fechaInicio: event.target.value }))}
+                style={styles.input}
+              />
+            </label>
+            <label style={styles.fieldGroup}>
+              <span style={styles.fieldLabel}>Fecha fin</span>
+              <input
+                type="date"
+                value={conciliacionFiltros.fechaFin}
+                onChange={(event) => setConciliacionFiltros((current) => ({ ...current, fechaFin: event.target.value }))}
+                style={styles.input}
+              />
+            </label>
+          </div>
+          <div
+            style={{ ...styles.dropZoneInline, ...(dragActive ? styles.dropZoneActive : {}) }}
+            onDragOver={(event) => {
+              event.preventDefault();
+              setDragActive(true);
+            }}
+            onDragLeave={(event) => {
+              event.preventDefault();
+              setDragActive(false);
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              setDragActive(false);
+              if (event.dataTransfer.files?.length) {
+                void handleReplaceFiles(event.dataTransfer.files);
+              }
+            }}
+          >
+            <strong style={{ color: "#0F172A" }}>Arrastra tus archivos aqui</strong>
+            <span style={styles.dropHint}>
+              ChatGPT analizara la hoja preferida del archivo, identificara la estructura y generara
+              un consolidado estilo `Movimientos ordenados`.
+            </span>
+          </div>
         </div>
 
         {error ? <div style={styles.errorBanner}>{error}</div> : null}
@@ -1522,6 +1682,100 @@ export default function ConciliacionBcpPage() {
             <SummaryCard label="Sin coincid." value={String(conciliacionPlanilla.sinCoincidencia)} />
           </div>
 
+            <div style={styles.executiveBoard}>
+              <div style={styles.executiveBoardHeader}>
+                <div>
+                  <div style={styles.executiveBoardTitle}>Resumen grafico ejecutivo</div>
+                  <div style={styles.executiveBoardText}>
+                    TotalPagar agrupado por moneda y resultado sobre los registros visibles en la tabla.
+                  </div>
+                </div>
+                <div style={styles.executiveBoardMeta}>
+                  Con TotalPagar: {conciliacionResumenEjecutivo.registrosConTotalPagar} | Sin TotalPagar:{" "}
+                  {conciliacionResumenEjecutivo.registrosSinTotalPagar}
+                </div>
+              </div>
+
+              {conciliacionResumenEjecutivo.monedas.length > 0 ? (
+                <div style={styles.executiveCurrencyGrid}>
+                  {conciliacionResumenEjecutivo.monedas.map((monedaResumen) => {
+                    const maxAbs = Math.max(...monedaResumen.resultados.map((item) => Math.abs(item.totalPagar)), 1);
+
+                    return (
+                      <div
+                        key={monedaResumen.moneda}
+                        onClick={() => handleExecutiveCurrencyClick(monedaResumen.moneda)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            handleExecutiveCurrencyClick(monedaResumen.moneda);
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
+                        style={{
+                          ...styles.executiveCurrencyCard,
+                          ...(conciliacionExecutiveSelection.moneda === monedaResumen.moneda &&
+                          conciliacionExecutiveSelection.resultado === null
+                            ? styles.executiveCurrencyCardActive
+                            : null),
+                        }}
+                      >
+                        <div style={styles.executiveCurrencyHeader}>
+                          <div>
+                            <div style={styles.executiveCurrencyBadge}>{monedaResumen.moneda}</div>
+                            <div style={styles.executiveCurrencyTotal}>{formatNumber(monedaResumen.totalPagar)}</div>
+                          </div>
+                          <div style={styles.executiveCurrencyCount}>{monedaResumen.cantidad} registro(s)</div>
+                        </div>
+
+                        <div style={styles.executiveBars}>
+                          {monedaResumen.resultados.map((resultadoResumen) => (
+                            <button
+                              key={`${monedaResumen.moneda}-${resultadoResumen.resultado}`}
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleExecutiveResultClick(monedaResumen.moneda, resultadoResumen.resultado);
+                              }}
+                              style={{
+                                ...styles.executiveBarButton,
+                                ...(conciliacionExecutiveSelection.moneda === monedaResumen.moneda &&
+                                conciliacionExecutiveSelection.resultado === resultadoResumen.resultado
+                                  ? styles.executiveBarButtonActive
+                                  : null),
+                              }}
+                            >
+                              <div style={styles.executiveBarRow}>
+                                <div style={styles.executiveBarHeader}>
+                                  <span style={styles.executiveBarLabel}>{resultadoResumen.resultado}</span>
+                                  <span style={styles.executiveBarValue}>{formatNumber(resultadoResumen.totalPagar)}</span>
+                                </div>
+                                <div style={styles.executiveBarTrack}>
+                                  <div
+                                    style={{
+                                      ...styles.executiveBarFill,
+                                      width: `${Math.max((Math.abs(resultadoResumen.totalPagar) / maxAbs) * 100, 6)}%`,
+                                      background: getResultadoChartColor(resultadoResumen.resultado),
+                                    }}
+                                  />
+                                </div>
+                                <div style={styles.executiveBarFoot}>{resultadoResumen.cantidad} registro(s)</div>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={styles.helperText}>
+                  No hay registros visibles con `TotalPagar` para construir el resumen grafico.
+                </div>
+              )}
+            </div>
+
             <div style={styles.mappingTableWrap}>
               <div style={styles.gridToolbar}>
                 <div style={styles.gridToolbarInfo}>
@@ -1529,7 +1783,8 @@ export default function ConciliacionBcpPage() {
                     Filtra por cualquier valor visible en la tabla principal.
                   </div>
                   <div style={styles.gridToolbarCount}>
-                    Registros: {filteredConciliacionRegistros.length} de {totalConciliacionRegistros}
+                    Registros: {executiveFilteredConciliacionRegistros.length} de {totalConciliacionRegistros}
+                    {executiveSelectionLabel ? ` | Ejecutivo: ${executiveSelectionLabel}` : ""}
                   </div>
                 </div>
                 <button type="button" style={styles.gridToolbarButton} onClick={handleClearConciliacionFilters}>
@@ -1559,6 +1814,9 @@ export default function ConciliacionBcpPage() {
                   <th style={styles.th}>{renderSortHeader("Site", "sitePlanilla")}</th>
                   <th style={styles.th}>{renderSortHeader("Tipo_Trabajo", "tipoTrabajoPlanilla")}</th>
                   <th style={styles.th}>{renderSortHeader("Tarea", "tareaPlanilla")}</th>
+                  <th style={styles.th}>{renderSortHeader("Responsable", "responsablePlanilla")}</th>
+                  <th style={styles.th}>{renderSortHeader("Comprobante", "comprobantePlanilla")}</th>
+                  <th style={styles.th}>{renderSortHeader("Detalle", "detallePlanilla")}</th>
                   <th style={styles.th}>{renderSortHeader("Correlativo", "correlativoPlanilla")}</th>
                 </tr>
                 <tr>
@@ -1584,6 +1842,9 @@ export default function ConciliacionBcpPage() {
                       "sitePlanilla",
                       "tipoTrabajoPlanilla",
                       "tareaPlanilla",
+                      "responsablePlanilla",
+                      "comprobantePlanilla",
+                      "detallePlanilla",
                       "correlativoPlanilla",
                     ] as ConciliacionSortKey[]
                   ).map((key) => (
@@ -1637,8 +1898,8 @@ export default function ConciliacionBcpPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredConciliacionRegistros.length > 0 ? (
-                  filteredConciliacionRegistros.map((row) => (
+                {executiveFilteredConciliacionRegistros.length > 0 ? (
+                  executiveFilteredConciliacionRegistros.map((row) => (
                     <tr key={`conciliacion-${row.idMovimientoBanco}`}>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "fecha")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "empresa")}</td>
@@ -1677,12 +1938,15 @@ export default function ConciliacionBcpPage() {
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "sitePlanilla")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "tipoTrabajoPlanilla")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "tareaPlanilla")}</td>
+                      <td style={styles.td}>{getConciliacionDisplayValue(row, "responsablePlanilla")}</td>
+                      <td style={styles.td}>{getConciliacionDisplayValue(row, "comprobantePlanilla")}</td>
+                      <td style={styles.td}>{getConciliacionDisplayValue(row, "detallePlanilla")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "correlativoPlanilla")}</td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td style={styles.td} colSpan={21}>
+                    <td style={styles.td} colSpan={24}>
                       No se encontraron movimientos para los filtros ingresados.
                     </td>
                   </tr>
@@ -1743,9 +2007,9 @@ const styles: Record<string, React.CSSProperties> = {
     maxWidth: 760,
   },
   heroStats: {
-    minWidth: 320,
+    minWidth: 520,
     display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
     gap: 10,
   },
   card: {
@@ -1785,10 +2049,17 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     marginBottom: 14,
   },
-  filterGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+  toolbarDates: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "flex-end",
     gap: 10,
+  },
+  dropRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "stretch",
+    gap: 14,
     marginBottom: 14,
   },
   fieldGroup: {
@@ -1864,6 +2135,19 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 8,
     minHeight: 120,
     marginBottom: 14,
+  },
+  dropZoneInline: {
+    flex: "1 1 420px",
+    border: "1.5px dashed #94A3B8",
+    borderRadius: 16,
+    padding: 20,
+    background: "#F8FAFC",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    minHeight: 120,
   },
   dropZoneActive: {
     border: "1.5px dashed #0F766E",
@@ -2066,6 +2350,145 @@ const styles: Record<string, React.CSSProperties> = {
     gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
     gap: 10,
     marginBottom: 12,
+  },
+  executiveBoard: {
+    marginBottom: 12,
+    border: "1px solid #E2E8F0",
+    borderRadius: 14,
+    padding: 14,
+    background: "linear-gradient(180deg, #F8FAFC 0%, #FFFFFF 100%)",
+  },
+  executiveBoardHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+    marginBottom: 12,
+    flexWrap: "wrap",
+  },
+  executiveBoardTitle: {
+    fontSize: 14,
+    fontWeight: 900,
+    color: "#0F172A",
+  },
+  executiveBoardText: {
+    marginTop: 4,
+    fontSize: 12,
+    color: "#64748B",
+    lineHeight: 1.5,
+  },
+  executiveBoardMeta: {
+    fontSize: 12,
+    color: "#0F766E",
+    fontWeight: 800,
+  },
+  executiveCurrencyGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+    gap: 12,
+  },
+  executiveCurrencyCard: {
+    border: "1px solid #E2E8F0",
+    borderRadius: 12,
+    padding: 12,
+    background: "#FFFFFF",
+    boxShadow: "0 8px 20px rgba(15, 23, 42, 0.05)",
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    width: "100%",
+    textAlign: "left",
+    cursor: "pointer",
+  },
+  executiveCurrencyCardActive: {
+    border: "1px solid #0F766E",
+    boxShadow: "0 10px 24px rgba(15, 118, 110, 0.18)",
+    background: "#F0FDFA",
+  },
+  executiveCurrencyHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  executiveCurrencyBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "4px 10px",
+    borderRadius: 999,
+    background: "#DBEAFE",
+    color: "#1D4ED8",
+    fontSize: 11,
+    fontWeight: 800,
+    marginBottom: 8,
+  },
+  executiveCurrencyTotal: {
+    fontSize: 20,
+    fontWeight: 900,
+    color: "#0F172A",
+  },
+  executiveCurrencyCount: {
+    fontSize: 12,
+    color: "#64748B",
+    fontWeight: 700,
+  },
+  executiveBars: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+  },
+  executiveBarRow: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 5,
+  },
+  executiveBarButton: {
+    border: "1px solid transparent",
+    borderRadius: 10,
+    background: "#F8FAFC",
+    padding: 8,
+    cursor: "pointer",
+    textAlign: "left",
+  },
+  executiveBarButtonActive: {
+    border: "1px solid #0F766E",
+    background: "#ECFDF5",
+  },
+  executiveBarHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 10,
+    alignItems: "baseline",
+  },
+  executiveBarLabel: {
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#334155",
+    lineHeight: 1.4,
+  },
+  executiveBarValue: {
+    fontSize: 12,
+    fontWeight: 900,
+    color: "#0F172A",
+    whiteSpace: "nowrap",
+  },
+  executiveBarTrack: {
+    width: "100%",
+    height: 10,
+    borderRadius: 999,
+    background: "#E2E8F0",
+    overflow: "hidden",
+  },
+  executiveBarFill: {
+    height: "100%",
+    borderRadius: 999,
+    minWidth: 6,
+  },
+  executiveBarFoot: {
+    fontSize: 11,
+    color: "#64748B",
+    fontWeight: 700,
   },
   debugPre: {
     margin: 0,

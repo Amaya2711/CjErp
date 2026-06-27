@@ -590,6 +590,9 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
         var site = NormalizeText(GetDictionaryString(row, "Site"));
         var tipoTrabajo = NormalizeText(GetDictionaryString(row, "Tipo_Trabajo"));
         var tarea = NormalizeText(GetDictionaryString(row, "tarea"));
+        var responsable = NormalizeText(GetDictionaryString(row, "Responsable"));
+        var comprobante = NormalizeText(GetDictionaryString(row, "Comprobante"));
+        var detalle = NormalizeText(GetDictionaryString(row, "Detalle"));
 
         return new PlanillaConciliacionRow
         {
@@ -602,6 +605,9 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
             Site = site,
             TipoTrabajo = tipoTrabajo,
             Tarea = tarea,
+            Responsable = responsable,
+            Comprobante = comprobante,
+            Detalle = detalle,
             CuentaNumerica = ExtractDigits(cuenta),
             CuentaInterNumerica = ExtractDigits(cuentaInter),
             Corre = GetDictionaryInt(row, "Corre"),
@@ -715,6 +721,9 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
             SitePlanilla = candidate?.Planilla.Site,
             TipoTrabajoPlanilla = candidate?.Planilla.TipoTrabajo,
             TareaPlanilla = candidate?.Planilla.Tarea,
+            ResponsablePlanilla = candidate?.Planilla.Responsable,
+            ComprobantePlanilla = candidate?.Planilla.Comprobante,
+            DetallePlanilla = candidate?.Planilla.Detalle,
             CorrelativoPlanilla = correlativoPlanilla,
             IdRegistroPlanilla = candidate?.Planilla.Corre,
             TotalPagar = totalPagar,
@@ -4043,6 +4052,9 @@ ORDER BY p.parameter_id;";
         public string? Site { get; set; }
         public string? TipoTrabajo { get; set; }
         public string? Tarea { get; set; }
+        public string? Responsable { get; set; }
+        public string? Comprobante { get; set; }
+        public string? Detalle { get; set; }
         public string CuentaNumerica { get; set; } = string.Empty;
         public string CuentaInterNumerica { get; set; } = string.Empty;
         public int? Corre { get; set; }

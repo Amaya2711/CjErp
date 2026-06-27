@@ -228,6 +228,12 @@ public sealed class ConciliacionBcpConciliarPlanillaRegistroDto
 
     public string? TareaPlanilla { get; set; }
 
+    public string? ResponsablePlanilla { get; set; }
+
+    public string? ComprobantePlanilla { get; set; }
+
+    public string? DetallePlanilla { get; set; }
+
     public string? CorrelativoPlanilla { get; set; }
 
     public int? IdRegistroPlanilla { get; set; }

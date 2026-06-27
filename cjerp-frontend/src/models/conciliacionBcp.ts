@@ -108,6 +108,9 @@ export type ConciliacionBcpConciliarPlanillaRegistro = {
   sitePlanilla?: string | null;
   tipoTrabajoPlanilla?: string | null;
   tareaPlanilla?: string | null;
+  responsablePlanilla?: string | null;
+  comprobantePlanilla?: string | null;
+  detallePlanilla?: string | null;
   correlativoPlanilla?: string | null;
   idRegistroPlanilla?: number | null;
   totalPagar?: number | null;

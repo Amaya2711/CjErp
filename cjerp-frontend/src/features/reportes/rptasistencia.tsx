@@ -9,6 +9,7 @@ import { actualizarEstadoMarcacionAsistencia, buscarAsistencia, exportarAsistenc
 import { useConstantesPorCampo } from "../../hooks/useConstantesPorCampo";
 import type { AsistenciaReporteItem, AsistenciaReportePdfItem } from "../../models/asistencia";
 import type { AprobarCampoRow } from "../../models/aprobarCampo";
+import { getAuthUser } from "../../utils/authStorage.ts";
 import { getHttpErrorMessage } from "../../utils/httpError.ts";
 
 type SelectFilterKey =
@@ -663,6 +664,9 @@ function mapAsistenciaRowToAprobarCampoRow(item: AsistenciaReporteItem): Aprobar
 export default function RptAsistenciaPage() {
   const navigate = useNavigate();
   const location = useLocation();
+  const authUser = getAuthUser();
+  const currentRoleCode = Number(authUser?.idrol ?? (authUser as Record<string, unknown> | null)?.IdRol ?? 0);
+  const isAdminRole = currentRoleCode === 5;
   const today = new Date();
   const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
@@ -2784,6 +2788,7 @@ export default function RptAsistenciaPage() {
                     onEstadoMarcacionChange={handleDetalleEstadoMarcacionChange}
                     onHoraInputChange={handleDetalleHoraInputChange}
                     onHoraSave={handleDetalleHoraSave}
+                    allowTimeEditing={isAdminRole}
                     showExtendedColumns
                     extendedColumnFilters={gerencialDetailFilters}
                     extendedColumnOptions={gerencialDetailFilterOptions}
@@ -3279,6 +3284,7 @@ export default function RptAsistenciaPage() {
                     horaErrors={detalleHoraErrors}
                     onHoraInputChange={handleDetalleHoraInputChange}
                     onHoraSave={handleDetalleHoraSave}
+                    allowTimeEditing={isAdminRole}
                     showExtendedColumns
                     extendedColumnFilters={gerencialDetailFilters}
                     extendedColumnOptions={gerencialDetailFilterOptions}
@@ -4916,6 +4922,7 @@ function SimpleCuadrosDetailGrid({
   onEstadoMarcacionChange,
   onHoraInputChange,
   onHoraSave,
+  allowTimeEditing = false,
   showExtendedColumns,
   extendedColumnFilters,
   extendedColumnOptions,
@@ -4967,6 +4974,7 @@ function SimpleCuadrosDetailGrid({
     },
     field: "hora" | "salida"
   ) => void;
+  allowTimeEditing?: boolean;
   showExtendedColumns?: boolean;
   extendedColumnFilters?: GerencialDetailFilters;
   extendedColumnOptions?: Record<keyof GerencialDetailFilters, string[]>;
@@ -5124,67 +5132,71 @@ function SimpleCuadrosDetailGrid({
                   {(() => {
                     const rowKey = `${item.key}:hora`;
                     const value = String(item.hora ?? "").trim();
-                    const canEdit = !value || value === "-";
-                    const editValue = horaValues[rowKey] ?? "";
+                    const canEdit = allowTimeEditing;
+                    const editValue = horaValues[rowKey] ?? toTimeInputValue(value);
                     const saving = Boolean(horaSaving[rowKey]);
                     const error = horaErrors[rowKey];
 
-                    return canEdit ? (
+                    return (
                       <td style={{ ...styles.cuadrosDetailTd, textAlign: "center" }}>
-                        <div style={styles.timeEditorStack}>
-                          <input
-                            type="time"
-                            value={editValue}
-                            onChange={(event) => onHoraInputChange(item.key, "hora", event.target.value)}
-                            style={styles.timeEditorInput}
-                            disabled={saving}
-                          />
-                          <button
-                            type="button"
-                            style={styles.timeEditorButton}
-                            onClick={() => void onHoraSave(item, "hora")}
-                            disabled={saving}
-                          >
-                            {saving ? "Guardando..." : "Guardar"}
-                          </button>
-                          {error ? <span style={styles.timeEditorError}>{error}</span> : null}
-                        </div>
+                        {canEdit ? (
+                          <div style={styles.timeEditorStack}>
+                            <input
+                              type="time"
+                              value={editValue}
+                              onChange={(event) => onHoraInputChange(item.key, "hora", event.target.value)}
+                              style={styles.timeEditorInput}
+                              disabled={saving}
+                            />
+                            <button
+                              type="button"
+                              style={styles.timeEditorButton}
+                              onClick={() => void onHoraSave(item, "hora")}
+                              disabled={saving}
+                            >
+                              {saving ? "Guardando..." : "Guardar"}
+                            </button>
+                            {error ? <span style={styles.timeEditorError}>{error}</span> : null}
+                          </div>
+                        ) : (
+                          value
+                        )}
                       </td>
-                    ) : (
-                      <td style={{ ...styles.cuadrosDetailTd, textAlign: "center" }}>{value}</td>
                     );
                   })()}
                   {(() => {
                     const rowKey = `${item.key}:salida`;
                     const value = String(item.salida ?? "").trim();
-                    const canEdit = !value || value === "-";
-                    const editValue = horaValues[rowKey] ?? "";
+                    const canEdit = allowTimeEditing;
+                    const editValue = horaValues[rowKey] ?? toTimeInputValue(value);
                     const saving = Boolean(horaSaving[rowKey]);
                     const error = horaErrors[rowKey];
 
-                    return canEdit ? (
+                    return (
                       <td style={{ ...styles.cuadrosDetailTd, textAlign: "center" }}>
-                        <div style={styles.timeEditorStack}>
-                          <input
-                            type="time"
-                            value={editValue}
-                            onChange={(event) => onHoraInputChange(item.key, "salida", event.target.value)}
-                            style={styles.timeEditorInput}
-                            disabled={saving}
-                          />
-                          <button
-                            type="button"
-                            style={styles.timeEditorButton}
-                            onClick={() => void onHoraSave(item, "salida")}
-                            disabled={saving}
-                          >
-                            {saving ? "Guardando..." : "Guardar"}
-                          </button>
-                          {error ? <span style={styles.timeEditorError}>{error}</span> : null}
-                        </div>
+                        {canEdit ? (
+                          <div style={styles.timeEditorStack}>
+                            <input
+                              type="time"
+                              value={editValue}
+                              onChange={(event) => onHoraInputChange(item.key, "salida", event.target.value)}
+                              style={styles.timeEditorInput}
+                              disabled={saving}
+                            />
+                            <button
+                              type="button"
+                              style={styles.timeEditorButton}
+                              onClick={() => void onHoraSave(item, "salida")}
+                              disabled={saving}
+                            >
+                              {saving ? "Guardando..." : "Guardar"}
+                            </button>
+                            {error ? <span style={styles.timeEditorError}>{error}</span> : null}
+                          </div>
+                        ) : (
+                          value
+                        )}
                       </td>
-                    ) : (
-                      <td style={{ ...styles.cuadrosDetailTd, textAlign: "center" }}>{value}</td>
                     );
                   })()}
                   <td style={styles.cuadrosDetailTd}>{item.area}</td>
