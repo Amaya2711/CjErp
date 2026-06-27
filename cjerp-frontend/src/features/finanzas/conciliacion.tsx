@@ -1,18 +1,22 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { API_BASE_URL } from "../../api/httpClient";
 import {
+  actualizarClasificacionMovimientoConciliacionBcp,
   actualizarComentarioMovimientoConciliacionBcp,
   analizarConciliacionBcp,
   conciliarPlanillaConciliacionBcp,
   exportarAnalisisConciliacionBcp,
   insertarConciliacionBcp,
+  obtenerCombosClasificacionConciliacionBcp,
 } from "../../api/conciliacionService";
 import type {
   ConciliacionBcpAnalizarResponse,
   ConciliacionBcpArchivoAnalisis,
+  ConciliacionBcpClasificacionCombosResponse,
   ConciliacionBcpConciliarPlanillaResponse,
   ConciliacionBcpConciliarPlanillaRegistro,
   ConciliacionBcpExportResponse,
+  ConciliacionReglaContableOption,
   ParsedConciliacionExcelFile,
 } from "../../models/conciliacionBcp";
 import { getHttpErrorMessage } from "../../utils/httpError";
@@ -42,6 +46,17 @@ type ConciliacionSortKey =
   | "tareaPlanilla"
   | "responsablePlanilla"
   | "comprobantePlanilla"
+  | "areaFlujo"
+  | "referencia"
+  | "cuentaContable"
+  | "conciliado"
+  | "estadoConciliacionTexto"
+  | "estadoOperativoConciliacion"
+  | "fechaConciliacion"
+  | "usuarioConciliacion"
+  | "observacionConciliacionMovimiento"
+  | "bancoPlanilla"
+  | "seriePlanilla"
   | "detallePlanilla"
   | "correlativoPlanilla";
 
@@ -69,6 +84,15 @@ type ConciliacionExecutiveSelection = {
   resultado: string | null;
 };
 
+type ConciliacionClasificacionForm = {
+  idMovimientoBanco: number;
+  idAreaFlujo: string;
+  idReferencia: string;
+  idCuentaContable: string;
+  idReglaContable: string;
+  observacionConciliacion: string;
+};
+
 const DEFAULT_CONCILIACION_FILTERS: ConciliacionFilterState = {
   fecha: "",
   empresa: "",
@@ -92,6 +116,17 @@ const DEFAULT_CONCILIACION_FILTERS: ConciliacionFilterState = {
   tareaPlanilla: "",
   responsablePlanilla: "",
   comprobantePlanilla: "",
+  areaFlujo: "",
+  referencia: "",
+  cuentaContable: "",
+  conciliado: "",
+  estadoConciliacionTexto: "",
+  estadoOperativoConciliacion: "",
+  fechaConciliacion: "",
+  usuarioConciliacion: "",
+  observacionConciliacionMovimiento: "",
+  bancoPlanilla: "",
+  seriePlanilla: "",
   detallePlanilla: "",
   correlativoPlanilla: "",
 };
@@ -217,6 +252,57 @@ function getResultadoChartColor(resultado: string): string {
   return "#475569";
 }
 
+function getReferenciaLabel(row: ConciliacionBcpConciliarPlanillaRegistro): string {
+  return row.codigoReferencia?.trim() || row.nombreReferencia?.trim() || "";
+}
+
+function getConciliadoLabel(row: ConciliacionBcpConciliarPlanillaRegistro): string {
+  if (row.estadoOperativoConciliacion?.trim()) {
+    return row.estadoOperativoConciliacion.trim();
+  }
+
+  if ((row.nombreAreaFlujo ?? "").trim().toUpperCase() === "NO CONSIDERAR") {
+    return "NO CONSIDERAR";
+  }
+
+  if (row.aplicaConciliacion === false) {
+    return "NO APLICA";
+  }
+
+  return row.esConciliado ? "CONCILIADO" : "PENDIENTE";
+}
+
+function getClasificacionBadgeStyle(status: string): React.CSSProperties {
+  const normalized = status.trim().toUpperCase();
+
+  if (normalized === "CONCILIADO") {
+    return styles.statusBadgeSuccess;
+  }
+
+  if (normalized === "NO CONSIDERAR") {
+    return styles.statusBadgeMuted;
+  }
+
+  if (normalized === "NO APLICA") {
+    return styles.statusBadgeInfo;
+  }
+
+  return styles.statusBadgePending;
+}
+
+function getReglaContableLabel(rule: ConciliacionReglaContableOption): string {
+  const chunks = [
+    `Regla ${rule.idReglaContable}`,
+    typeof rule.orden === "number" ? `Orden ${rule.orden}` : "",
+    rule.esPrincipal ? "Principal" : "",
+    rule.requiereComprobante ? "Req. comp." : "",
+    rule.aplicaConciliacion === false ? "No aplica" : "",
+    rule.observacion?.trim() ?? "",
+  ].filter(Boolean);
+
+  return chunks.join(" | ");
+}
+
 function getConciliacionDisplayValue(row: ConciliacionBcpConciliarPlanillaRegistro, key: ConciliacionSortKey): string {
   switch (key) {
     case "fecha":
@@ -268,6 +354,28 @@ function getConciliacionDisplayValue(row: ConciliacionBcpConciliarPlanillaRegist
       return row.responsablePlanilla || "";
     case "comprobantePlanilla":
       return row.comprobantePlanilla || "";
+    case "areaFlujo":
+      return row.nombreAreaFlujo || (row.esConciliado ? "" : "PENDIENTE");
+    case "referencia":
+      return getReferenciaLabel(row) || (row.esConciliado ? "" : "PENDIENTE");
+    case "cuentaContable":
+      return row.cuentaContableTexto || (row.esConciliado ? "" : "PENDIENTE");
+    case "conciliado":
+      return getConciliadoLabel(row);
+    case "estadoConciliacionTexto":
+      return row.estadoConciliacionTexto || getConciliadoLabel(row);
+    case "estadoOperativoConciliacion":
+      return row.estadoOperativoConciliacion || getConciliadoLabel(row);
+    case "fechaConciliacion":
+      return formatDateValue(row.fechaConciliacion);
+    case "usuarioConciliacion":
+      return row.usuarioConciliacion || "";
+    case "observacionConciliacionMovimiento":
+      return row.observacionConciliacionMovimiento || "";
+    case "bancoPlanilla":
+      return row.bancoPlanilla || "";
+    case "seriePlanilla":
+      return row.seriePlanilla || "";
     case "detallePlanilla":
       return row.detallePlanilla || "";
     case "correlativoPlanilla":
@@ -306,6 +414,10 @@ function matchesConciliacionFilter(
 
     if (filterValue === EMPTY_CONCILIACION_FILTER_VALUE.toLowerCase()) {
       return displayValue === "";
+    }
+
+    if (key === "descripcionOperacion") {
+      return displayValue.includes(filterValue);
     }
 
     return displayValue === filterValue;
@@ -364,6 +476,30 @@ function getConciliacionSortValue(row: ConciliacionBcpConciliarPlanillaRegistro,
       return row.responsablePlanilla?.trim().toLowerCase() ?? "";
     case "comprobantePlanilla":
       return row.comprobantePlanilla?.trim().toLowerCase() ?? "";
+    case "areaFlujo":
+      return row.nombreAreaFlujo?.trim().toLowerCase() ?? "";
+    case "referencia":
+      return getReferenciaLabel(row).trim().toLowerCase();
+    case "cuentaContable":
+      return row.cuentaContableTexto?.trim().toLowerCase() ?? "";
+    case "conciliado":
+      return getConciliadoLabel(row).trim().toLowerCase();
+    case "estadoConciliacionTexto":
+      return (row.estadoConciliacionTexto ?? getConciliadoLabel(row)).trim().toLowerCase();
+    case "estadoOperativoConciliacion":
+      return (row.estadoOperativoConciliacion ?? getConciliadoLabel(row)).trim().toLowerCase();
+    case "fechaConciliacion": {
+      const date = row.fechaConciliacion ? new Date(row.fechaConciliacion) : null;
+      return date && !Number.isNaN(date.getTime()) ? date.getTime() : null;
+    }
+    case "usuarioConciliacion":
+      return row.usuarioConciliacion?.trim().toLowerCase() ?? "";
+    case "observacionConciliacionMovimiento":
+      return row.observacionConciliacionMovimiento?.trim().toLowerCase() ?? "";
+    case "bancoPlanilla":
+      return row.bancoPlanilla?.trim().toLowerCase() ?? "";
+    case "seriePlanilla":
+      return row.seriePlanilla?.trim().toLowerCase() ?? "";
     case "detallePlanilla":
       return row.detallePlanilla?.trim().toLowerCase() ?? "";
     case "correlativoPlanilla":
@@ -572,6 +708,10 @@ export default function ConciliacionBcpPage() {
     fechaInicio: "",
     fechaFin: "",
     idActivo: "1",
+    idAreaFlujo: "",
+    idReferencia: "",
+    idCuentaContable: "",
+    esConciliado: "",
   });
   const [conciliacionGridFilters, setConciliacionGridFilters] = useState<ConciliacionFilterState>(
     DEFAULT_CONCILIACION_FILTERS
@@ -584,6 +724,10 @@ export default function ConciliacionBcpPage() {
   const [comentarioDrafts, setComentarioDrafts] = useState<Record<number, string>>({});
   const [comentarioSavingIds, setComentarioSavingIds] = useState<Record<number, boolean>>({});
   const [isResultadoFilterOpen, setIsResultadoFilterOpen] = useState(false);
+  const [clasificacionCombos, setClasificacionCombos] = useState<ConciliacionBcpClasificacionCombosResponse | null>(null);
+  const [clasificacionCombosLoading, setClasificacionCombosLoading] = useState(false);
+  const [clasificacionModal, setClasificacionModal] = useState<ConciliacionClasificacionForm | null>(null);
+  const [clasificacionSaving, setClasificacionSaving] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -605,6 +749,35 @@ export default function ConciliacionBcpPage() {
     document.addEventListener("mousedown", handleDocumentClick);
     return () => document.removeEventListener("mousedown", handleDocumentClick);
   }, [isResultadoFilterOpen]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadCombos = async () => {
+      setClasificacionCombosLoading(true);
+
+      try {
+        const response = await obtenerCombosClasificacionConciliacionBcp();
+        if (!cancelled) {
+          setClasificacionCombos(response);
+        }
+      } catch (comboError) {
+        if (!cancelled) {
+          setError((current) => current || getHttpErrorMessage(comboError, "No se pudieron cargar los combos de clasificacion."));
+        }
+      } finally {
+        if (!cancelled) {
+          setClasificacionCombosLoading(false);
+        }
+      }
+    };
+
+    void loadCombos();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const hasClientInvalidFiles = useMemo(
     () => files.some((item) => Boolean(item.clientError)),
@@ -770,6 +943,17 @@ export default function ConciliacionBcpPage() {
       "tareaPlanilla",
       "responsablePlanilla",
       "comprobantePlanilla",
+      "areaFlujo",
+      "referencia",
+      "cuentaContable",
+      "conciliado",
+      "estadoConciliacionTexto",
+      "estadoOperativoConciliacion",
+      "fechaConciliacion",
+      "usuarioConciliacion",
+      "observacionConciliacionMovimiento",
+      "bancoPlanilla",
+      "seriePlanilla",
       "detallePlanilla",
       "correlativoPlanilla",
     ];
@@ -808,6 +992,111 @@ export default function ConciliacionBcpPage() {
           ? "(Vacío)"
           : resultadoConciliacionSelectedFilters[0]
         : `${resultadoConciliacionSelectedFilters.length} seleccionados`;
+
+  const referenciasClasificacionDisponibles = useMemo(() => {
+    const referencias = clasificacionCombos?.referencias ?? [];
+
+    if (!clasificacionModal?.idAreaFlujo) {
+      return referencias;
+    }
+
+    const referenciasValidas = new Set(
+      (clasificacionCombos?.reglasContables ?? [])
+        .filter((rule) => String(rule.idAreaFlujo) === clasificacionModal.idAreaFlujo)
+        .map((rule) => rule.idReferencia)
+    );
+
+    return referencias.filter((item) => referenciasValidas.has(item.idReferencia));
+  }, [clasificacionCombos?.referencias, clasificacionCombos?.reglasContables, clasificacionModal?.idAreaFlujo]);
+
+  const cuentasClasificacionDisponibles = useMemo(() => {
+    const cuentas = clasificacionCombos?.cuentasContables ?? [];
+    const reglas = clasificacionCombos?.reglasContables ?? [];
+
+    if (!clasificacionModal?.idAreaFlujo && !clasificacionModal?.idReferencia) {
+      return cuentas;
+    }
+
+    const cuentasValidas = new Set(
+      reglas
+        .filter((rule) => {
+          if (clasificacionModal?.idAreaFlujo && String(rule.idAreaFlujo) !== clasificacionModal.idAreaFlujo) {
+            return false;
+          }
+
+          if (clasificacionModal?.idReferencia && String(rule.idReferencia) !== clasificacionModal.idReferencia) {
+            return false;
+          }
+
+          return true;
+        })
+        .map((rule) => rule.idCuentaContable)
+    );
+
+    return cuentas.filter((item) => cuentasValidas.has(item.idCuentaContable));
+  }, [
+    clasificacionCombos?.cuentasContables,
+    clasificacionCombos?.reglasContables,
+    clasificacionModal?.idAreaFlujo,
+    clasificacionModal?.idReferencia,
+  ]);
+
+  const reglasClasificacionDisponibles = useMemo(() => {
+    if (!clasificacionModal) {
+      return [] as ConciliacionReglaContableOption[];
+    }
+
+    return (clasificacionCombos?.reglasContables ?? []).filter((rule) => {
+      if (clasificacionModal.idAreaFlujo && String(rule.idAreaFlujo) !== clasificacionModal.idAreaFlujo) {
+        return false;
+      }
+
+      if (clasificacionModal.idReferencia && String(rule.idReferencia) !== clasificacionModal.idReferencia) {
+        return false;
+      }
+
+      if (clasificacionModal.idCuentaContable && String(rule.idCuentaContable) !== clasificacionModal.idCuentaContable) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [clasificacionCombos?.reglasContables, clasificacionModal]);
+
+  useEffect(() => {
+    if (!clasificacionModal) {
+      return;
+    }
+
+    if (reglasClasificacionDisponibles.length === 1) {
+      const unicaRegla = String(reglasClasificacionDisponibles[0].idReglaContable);
+      if (clasificacionModal.idReglaContable !== unicaRegla) {
+        setClasificacionModal((current) =>
+          current
+            ? {
+                ...current,
+                idReglaContable: unicaRegla,
+              }
+            : current
+        );
+      }
+      return;
+    }
+
+    if (
+      clasificacionModal.idReglaContable &&
+      !reglasClasificacionDisponibles.some((rule) => String(rule.idReglaContable) === clasificacionModal.idReglaContable)
+    ) {
+      setClasificacionModal((current) =>
+        current
+          ? {
+              ...current,
+              idReglaContable: "",
+            }
+          : current
+      );
+    }
+  }, [clasificacionModal, reglasClasificacionDisponibles]);
 
   const handleSortConciliacion = (key: ConciliacionSortKey) => {
     setConciliacionSort((current) => {
@@ -850,6 +1139,133 @@ export default function ConciliacionBcpPage() {
     setConciliacionGridFilters(DEFAULT_CONCILIACION_FILTERS);
     setConciliacionExecutiveSelection({ moneda: null, resultado: null });
     setIsResultadoFilterOpen(false);
+  };
+
+  const openClasificacionModal = (row: ConciliacionBcpConciliarPlanillaRegistro) => {
+    setClasificacionModal({
+      idMovimientoBanco: row.idMovimientoBanco,
+      idAreaFlujo: row.idAreaFlujo ? String(row.idAreaFlujo) : "",
+      idReferencia: row.idReferencia ? String(row.idReferencia) : "",
+      idCuentaContable: row.idCuentaContable ? String(row.idCuentaContable) : "",
+      idReglaContable: row.idReglaContable ? String(row.idReglaContable) : "",
+      observacionConciliacion: row.observacionConciliacionMovimiento ?? "",
+    });
+  };
+
+  const closeClasificacionModal = () => {
+    if (!clasificacionSaving) {
+      setClasificacionModal(null);
+    }
+  };
+
+  const handleClasificacionFieldChange = (
+    key: keyof Omit<ConciliacionClasificacionForm, "idMovimientoBanco">,
+    value: string
+  ) => {
+    setClasificacionModal((current) => {
+      if (!current) {
+        return current;
+      }
+
+      if (key === "idAreaFlujo") {
+        return { ...current, idAreaFlujo: value, idReferencia: "", idCuentaContable: "", idReglaContable: "" };
+      }
+
+      if (key === "idReferencia") {
+        return { ...current, idReferencia: value, idCuentaContable: "", idReglaContable: "" };
+      }
+
+      if (key === "idCuentaContable") {
+        return { ...current, idCuentaContable: value, idReglaContable: "" };
+      }
+
+      return { ...current, [key]: value };
+    });
+  };
+
+  const loadConciliacionPlanilla = async (options?: { preserveMessage?: boolean }) => {
+    const response = await conciliarPlanillaConciliacionBcp({
+      idCargo: Number(conciliacionFiltros.idCargo),
+      idEmpleado: Number(conciliacionFiltros.idEmpleado),
+      estados: conciliacionFiltros.estados,
+      fechaInicio: conciliacionFiltros.fechaInicio || null,
+      fechaFin: conciliacionFiltros.fechaFin || null,
+      idActivo: conciliacionFiltros.idActivo ? Number(conciliacionFiltros.idActivo) : null,
+      idAreaFlujo: conciliacionFiltros.idAreaFlujo ? Number(conciliacionFiltros.idAreaFlujo) : null,
+      idReferencia: conciliacionFiltros.idReferencia ? Number(conciliacionFiltros.idReferencia) : null,
+      idCuentaContable: conciliacionFiltros.idCuentaContable ? Number(conciliacionFiltros.idCuentaContable) : null,
+      esConciliado:
+        conciliacionFiltros.esConciliado === ""
+          ? null
+          : conciliacionFiltros.esConciliado === "1"
+            ? true
+            : false,
+    });
+
+    setConciliacionPlanilla(response);
+    setIsConciliacionExpanded(false);
+    setConciliacionSort(null);
+    setConciliacionGridFilters(DEFAULT_CONCILIACION_FILTERS);
+
+    if (!options?.preserveMessage) {
+      setMessage(response.resumen || "Conciliacion ejecutada correctamente.");
+    }
+
+    return response;
+  };
+
+  const handleGuardarClasificacion = async () => {
+    if (!clasificacionModal) {
+      return;
+    }
+
+    if (
+      !clasificacionModal.idAreaFlujo ||
+      !clasificacionModal.idReferencia ||
+      !clasificacionModal.idCuentaContable ||
+      !clasificacionModal.idReglaContable
+    ) {
+      setError("Completa Area Flujo, Referencia, Cuenta Contable y Regla Contable antes de guardar.");
+      setMessage("");
+      return;
+    }
+
+    setClasificacionSaving(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const updated = await actualizarClasificacionMovimientoConciliacionBcp({
+        idMovimientoBanco: clasificacionModal.idMovimientoBanco,
+        idAreaFlujo: Number(clasificacionModal.idAreaFlujo),
+        idReferencia: Number(clasificacionModal.idReferencia),
+        idCuentaContable: Number(clasificacionModal.idCuentaContable),
+        idReglaContable: Number(clasificacionModal.idReglaContable),
+        observacionConciliacion: clasificacionModal.observacionConciliacion.trim() || null,
+      });
+
+      await loadConciliacionPlanilla({ preserveMessage: true });
+
+      setConciliacionPlanilla((current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          ...current,
+          registros: current.registros.map((item) =>
+            item.idMovimientoBanco === updated.idMovimientoBanco ? { ...item, ...updated } : item
+          ),
+        };
+      });
+
+      setClasificacionModal(null);
+      setMessage("Clasificacion contable actualizada correctamente.");
+    } catch (updateError) {
+      setError(getHttpErrorMessage(updateError, "No se pudo actualizar la clasificacion contable del movimiento."));
+    } finally {
+      setClasificacionSaving(false);
+    }
   };
 
   const handleExecutiveCurrencyClick = (moneda: string) => {
@@ -1171,20 +1587,7 @@ export default function ConciliacionBcpPage() {
     setMessage("");
 
     try {
-      const response = await conciliarPlanillaConciliacionBcp({
-        idCargo: Number(conciliacionFiltros.idCargo),
-        idEmpleado: Number(conciliacionFiltros.idEmpleado),
-        estados: conciliacionFiltros.estados,
-        fechaInicio: conciliacionFiltros.fechaInicio || null,
-        fechaFin: conciliacionFiltros.fechaFin || null,
-        idActivo: conciliacionFiltros.idActivo ? Number(conciliacionFiltros.idActivo) : null,
-      });
-
-      setConciliacionPlanilla(response);
-      setIsConciliacionExpanded(false);
-      setConciliacionSort(null);
-      setConciliacionGridFilters(DEFAULT_CONCILIACION_FILTERS);
-      setMessage(response.resumen || "Conciliacion ejecutada correctamente.");
+      await loadConciliacionPlanilla();
     } catch (conciliacionError) {
       setConciliacionPlanilla(null);
       setError(getHttpErrorMessage(conciliacionError, "No se pudo ejecutar la conciliacion con planilla."));
@@ -1221,7 +1624,18 @@ export default function ConciliacionBcpPage() {
       Tipo_Trabajo: row.tipoTrabajoPlanilla || "",
       Tarea: row.tareaPlanilla || "",
       Responsable: row.responsablePlanilla || "",
+      AreaFlujo: row.nombreAreaFlujo || "",
+      Referencia: getReferenciaLabel(row),
+      CuentaContable: row.cuentaContableTexto || "",
+      Conciliado: getConciliadoLabel(row),
+      EstadoConciliacionTexto: row.estadoConciliacionTexto || "",
+      EstadoOperativoConciliacion: row.estadoOperativoConciliacion || "",
+      FechaConciliacion: formatDateValue(row.fechaConciliacion),
+      UsuarioConciliacion: row.usuarioConciliacion || "",
+      ObservacionConciliacionMovimiento: row.observacionConciliacionMovimiento || "",
       Comprobante: row.comprobantePlanilla || "",
+      Banco: row.bancoPlanilla || "",
+      Serie: row.seriePlanilla || "",
       Detalle: row.detallePlanilla || "",
       Correlativo: row.correlativoPlanilla || "",
     }));
@@ -1288,85 +1702,175 @@ export default function ConciliacionBcpPage() {
         </div>
       </div>
 
-      <div style={styles.card}>
-        <div style={styles.toolbarRow}>
-          <button
-            ref={selectExcelButtonRef}
-            type="button"
-            style={styles.primaryButton}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            Seleccionar Excel
-          </button>
-          <button
-            ref={analyzeButtonRef}
-            type="button"
-            style={!canAnalyze ? { ...styles.secondaryButton, ...styles.secondaryButtonDisabled } : styles.secondaryButton}
-            onClick={() => void handleAnalyze()}
-            disabled={!canAnalyze}
-          >
-            {loadingParse || loadingAnalysis ? "Analizando..." : "Analizar estructura"}
-          </button>
-          <button type="button" style={styles.secondaryButton} onClick={() => void handleConciliarPlanilla()} disabled={!canConciliar}>
-            {loadingConciliacion ? "Conciliando..." : "Conciliacion"}
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx,.xls,.csv"
-            multiple
-            style={{ display: "none" }}
-            onChange={(event) => {
-              if (event.target.files?.length) {
-                void handleReplaceFiles(event.target.files);
-              }
-            }}
-          />
-          <div style={styles.toolbarDates}>
+        <div style={styles.card}>
+          <div style={styles.toolbarRow}>
+            <div style={styles.toolbarActionsGroup}>
+              <button
+                ref={selectExcelButtonRef}
+                type="button"
+                style={styles.primaryButton}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Seleccionar Excel
+              </button>
+              <button
+                ref={analyzeButtonRef}
+                type="button"
+                style={!canAnalyze ? { ...styles.secondaryButton, ...styles.secondaryButtonDisabled } : styles.secondaryButton}
+                onClick={() => void handleAnalyze()}
+                disabled={!canAnalyze}
+              >
+                {loadingParse || loadingAnalysis ? "Analizando..." : "Analizar estructura"}
+              </button>
+              <button
+                type="button"
+                style={styles.secondaryButton}
+                onClick={() => void handleConciliarPlanilla()}
+                disabled={!canConciliar}
+              >
+                {loadingConciliacion ? "Conciliando..." : "Conciliacion"}
+              </button>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              multiple
+              style={{ display: "none" }}
+              onChange={(event) => {
+                if (event.target.files?.length) {
+                  void handleReplaceFiles(event.target.files);
+                }
+              }}
+            />
+            <div style={styles.toolbarDates}>
+              <label style={styles.fieldGroup}>
+                <span style={styles.fieldLabel}>Fecha inicio</span>
+                <input
+                  type="date"
+                  value={conciliacionFiltros.fechaInicio}
+                  onChange={(event) => setConciliacionFiltros((current) => ({ ...current, fechaInicio: event.target.value }))}
+                  style={styles.input}
+                />
+              </label>
+              <label style={styles.fieldGroup}>
+                <span style={styles.fieldLabel}>Fecha fin</span>
+                <input
+                  type="date"
+                  value={conciliacionFiltros.fechaFin}
+                  onChange={(event) => setConciliacionFiltros((current) => ({ ...current, fechaFin: event.target.value }))}
+                  style={styles.input}
+                />
+              </label>
+            </div>
+            <div
+              style={{ ...styles.dropZoneInline, ...(dragActive ? styles.dropZoneActive : {}) }}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDragActive(true);
+              }}
+              onDragLeave={(event) => {
+                event.preventDefault();
+                setDragActive(false);
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                setDragActive(false);
+                if (event.dataTransfer.files?.length) {
+                  void handleReplaceFiles(event.dataTransfer.files);
+                }
+              }}
+            >
+              <strong style={{ color: "#0F172A" }}>Arrastra tus archivos aqui</strong>
+              <span style={styles.dropHint}>
+                ChatGPT analizara la hoja preferida del archivo, identificara la estructura y generara
+                un consolidado estilo `Movimientos ordenados`.
+              </span>
+            </div>
+          </div>
+
+          <div style={styles.filterPanel}>
             <label style={styles.fieldGroup}>
-              <span style={styles.fieldLabel}>Fecha inicio</span>
-              <input
-                type="date"
-                value={conciliacionFiltros.fechaInicio}
-                onChange={(event) => setConciliacionFiltros((current) => ({ ...current, fechaInicio: event.target.value }))}
+              <span style={styles.fieldLabel}>Area Flujo</span>
+              <select
+                value={conciliacionFiltros.idAreaFlujo}
+                onChange={(event) =>
+                  setConciliacionFiltros((current) => ({
+                    ...current,
+                    idAreaFlujo: event.target.value,
+                  }))
+                }
                 style={styles.input}
-              />
+                disabled={clasificacionCombosLoading}
+              >
+                <option value="">Todos</option>
+                {(clasificacionCombos?.areasFlujo ?? []).map((option) => (
+                  <option key={option.idAreaFlujo} value={String(option.idAreaFlujo)}>
+                    {option.nombreAreaFlujo}
+                  </option>
+                ))}
+              </select>
             </label>
             <label style={styles.fieldGroup}>
-              <span style={styles.fieldLabel}>Fecha fin</span>
-              <input
-                type="date"
-                value={conciliacionFiltros.fechaFin}
-                onChange={(event) => setConciliacionFiltros((current) => ({ ...current, fechaFin: event.target.value }))}
+              <span style={styles.fieldLabel}>Referencia</span>
+              <select
+                value={conciliacionFiltros.idReferencia}
+                onChange={(event) =>
+                  setConciliacionFiltros((current) => ({
+                    ...current,
+                    idReferencia: event.target.value,
+                  }))
+                }
                 style={styles.input}
-              />
+                disabled={clasificacionCombosLoading}
+              >
+                <option value="">Todas</option>
+                {(clasificacionCombos?.referencias ?? []).map((option) => (
+                  <option key={option.idReferencia} value={String(option.idReferencia)}>
+                    {option.codigoReferencia} - {option.nombreReferencia}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={styles.fieldGroup}>
+              <span style={styles.fieldLabel}>Cuenta Contable</span>
+              <select
+                value={conciliacionFiltros.idCuentaContable}
+                onChange={(event) =>
+                  setConciliacionFiltros((current) => ({
+                    ...current,
+                    idCuentaContable: event.target.value,
+                  }))
+                }
+                style={styles.input}
+                disabled={clasificacionCombosLoading}
+              >
+                <option value="">Todas</option>
+                {(clasificacionCombos?.cuentasContables ?? []).map((option) => (
+                  <option key={option.idCuentaContable} value={String(option.idCuentaContable)}>
+                    {option.cuentaContableTexto}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={styles.fieldGroup}>
+              <span style={styles.fieldLabel}>Conciliado</span>
+              <select
+                value={conciliacionFiltros.esConciliado}
+                onChange={(event) =>
+                  setConciliacionFiltros((current) => ({
+                    ...current,
+                    esConciliado: event.target.value,
+                  }))
+                }
+                style={styles.input}
+              >
+                <option value="">Todos</option>
+                <option value="1">Conciliado</option>
+                <option value="0">Pendiente</option>
+              </select>
             </label>
           </div>
-          <div
-            style={{ ...styles.dropZoneInline, ...(dragActive ? styles.dropZoneActive : {}) }}
-            onDragOver={(event) => {
-              event.preventDefault();
-              setDragActive(true);
-            }}
-            onDragLeave={(event) => {
-              event.preventDefault();
-              setDragActive(false);
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              setDragActive(false);
-              if (event.dataTransfer.files?.length) {
-                void handleReplaceFiles(event.dataTransfer.files);
-              }
-            }}
-          >
-            <strong style={{ color: "#0F172A" }}>Arrastra tus archivos aqui</strong>
-            <span style={styles.dropHint}>
-              ChatGPT analizara la hoja preferida del archivo, identificara la estructura y generara
-              un consolidado estilo `Movimientos ordenados`.
-            </span>
-          </div>
-        </div>
 
         {error ? <div style={styles.errorBanner}>{error}</div> : null}
         {message ? <div style={styles.successBanner}>{message}</div> : null}
@@ -1816,8 +2320,20 @@ export default function ConciliacionBcpPage() {
                   <th style={styles.th}>{renderSortHeader("Tarea", "tareaPlanilla")}</th>
                   <th style={styles.th}>{renderSortHeader("Responsable", "responsablePlanilla")}</th>
                   <th style={styles.th}>{renderSortHeader("Comprobante", "comprobantePlanilla")}</th>
+                  <th style={styles.th}>{renderSortHeader("Area Flujo", "areaFlujo")}</th>
+                  <th style={styles.th}>{renderSortHeader("Referencia", "referencia")}</th>
+                  <th style={styles.th}>{renderSortHeader("Cuenta Contable", "cuentaContable")}</th>
+                  <th style={styles.th}>{renderSortHeader("Conciliado", "conciliado")}</th>
+                  <th style={styles.th}>{renderSortHeader("Estado Conciliacion", "estadoConciliacionTexto")}</th>
+                  <th style={styles.th}>{renderSortHeader("Estado Operativo", "estadoOperativoConciliacion")}</th>
+                  <th style={styles.th}>{renderSortHeader("Fecha Conciliacion", "fechaConciliacion")}</th>
+                  <th style={styles.th}>{renderSortHeader("Usuario Conciliacion", "usuarioConciliacion")}</th>
+                  <th style={styles.th}>{renderSortHeader("Obs. Conciliacion", "observacionConciliacionMovimiento")}</th>
+                  <th style={styles.th}>{renderSortHeader("Banco", "bancoPlanilla")}</th>
+                  <th style={styles.th}>{renderSortHeader("Serie", "seriePlanilla")}</th>
                   <th style={styles.th}>{renderSortHeader("Detalle", "detallePlanilla")}</th>
                   <th style={styles.th}>{renderSortHeader("Correlativo", "correlativoPlanilla")}</th>
+                  <th style={styles.th}>Accion</th>
                 </tr>
                 <tr>
                   {(
@@ -1844,6 +2360,17 @@ export default function ConciliacionBcpPage() {
                       "tareaPlanilla",
                       "responsablePlanilla",
                       "comprobantePlanilla",
+                      "areaFlujo",
+                      "referencia",
+                      "cuentaContable",
+                      "conciliado",
+                      "estadoConciliacionTexto",
+                      "estadoOperativoConciliacion",
+                      "fechaConciliacion",
+                      "usuarioConciliacion",
+                      "observacionConciliacionMovimiento",
+                      "bancoPlanilla",
+                      "seriePlanilla",
                       "detallePlanilla",
                       "correlativoPlanilla",
                     ] as ConciliacionSortKey[]
@@ -1878,6 +2405,15 @@ export default function ConciliacionBcpPage() {
                             </div>
                           ) : null}
                         </div>
+                      ) : key === "descripcionOperacion" ? (
+                        <input
+                          type="text"
+                          value={Array.isArray(conciliacionGridFilters[key]) ? "" : conciliacionGridFilters[key]}
+                          onChange={(event) => handleConciliacionFilterChange(key, event.target.value)}
+                          style={styles.filterInput}
+                          placeholder="Buscar..."
+                          aria-label="Filtrar por descripcion operacion"
+                        />
                       ) : (
                         <select
                           value={Array.isArray(conciliacionGridFilters[key]) ? "" : conciliacionGridFilters[key]}
@@ -1895,6 +2431,7 @@ export default function ConciliacionBcpPage() {
                       )}
                     </th>
                   ))}
+                  <th style={styles.filterTh} />
                 </tr>
               </thead>
               <tbody>
@@ -1940,13 +2477,46 @@ export default function ConciliacionBcpPage() {
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "tareaPlanilla")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "responsablePlanilla")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "comprobantePlanilla")}</td>
+                      <td style={styles.td}>{getConciliacionDisplayValue(row, "areaFlujo") || "PENDIENTE"}</td>
+                      <td style={styles.td}>{getConciliacionDisplayValue(row, "referencia") || "PENDIENTE"}</td>
+                      <td style={styles.td}>{getConciliacionDisplayValue(row, "cuentaContable") || "PENDIENTE"}</td>
+                      <td style={styles.td}>
+                        <span style={{ ...styles.statusBadge, ...getClasificacionBadgeStyle(getConciliadoLabel(row)) }}>
+                          {getConciliadoLabel(row)}
+                        </span>
+                      </td>
+                      <td style={styles.td}>{getConciliacionDisplayValue(row, "estadoConciliacionTexto") || "PENDIENTE"}</td>
+                      <td style={styles.td}>
+                        {getConciliacionDisplayValue(row, "estadoOperativoConciliacion") ? (
+                          <span
+                            style={{
+                              ...styles.statusBadge,
+                              ...getClasificacionBadgeStyle(getConciliacionDisplayValue(row, "estadoOperativoConciliacion")),
+                            }}
+                          >
+                            {getConciliacionDisplayValue(row, "estadoOperativoConciliacion")}
+                          </span>
+                        ) : (
+                          "PENDIENTE"
+                        )}
+                      </td>
+                      <td style={styles.td}>{getConciliacionDisplayValue(row, "fechaConciliacion")}</td>
+                      <td style={styles.td}>{getConciliacionDisplayValue(row, "usuarioConciliacion")}</td>
+                      <td style={styles.td}>{getConciliacionDisplayValue(row, "observacionConciliacionMovimiento")}</td>
+                      <td style={styles.td}>{getConciliacionDisplayValue(row, "bancoPlanilla")}</td>
+                      <td style={styles.td}>{getConciliacionDisplayValue(row, "seriePlanilla")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "detallePlanilla")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "correlativoPlanilla")}</td>
+                      <td style={styles.td}>
+                        <button type="button" style={styles.gridActionButton} onClick={() => openClasificacionModal(row)}>
+                          Clasificar
+                        </button>
+                      </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td style={styles.td} colSpan={24}>
+                    <td style={styles.td} colSpan={36}>
                       No se encontraron movimientos para los filtros ingresados.
                     </td>
                   </tr>
@@ -1960,6 +2530,122 @@ export default function ConciliacionBcpPage() {
               La conciliacion planilla esta contraida. Usa <strong>Expandir</strong> para ver el detalle.
             </div>
           )}
+        </div>
+      ) : null}
+
+      {clasificacionModal ? (
+        <div style={styles.modalOverlay} onClick={closeClasificacionModal}>
+          <div style={styles.modalCard} onClick={(event) => event.stopPropagation()}>
+            <div style={styles.modalHeader}>
+              <div>
+                <h3 style={styles.modalTitle}>Clasificacion contable</h3>
+                <p style={styles.modalText}>Movimiento BCP #{clasificacionModal.idMovimientoBanco}</p>
+              </div>
+              <button type="button" style={styles.modalCloseButton} onClick={closeClasificacionModal} disabled={clasificacionSaving}>
+                Cerrar
+              </button>
+            </div>
+
+            <div style={styles.modalFormGrid}>
+              <label style={styles.fieldGroup}>
+                <span style={styles.fieldLabel}>Area Flujo</span>
+                <select
+                  value={clasificacionModal.idAreaFlujo}
+                  onChange={(event) => handleClasificacionFieldChange("idAreaFlujo", event.target.value)}
+                  style={styles.input}
+                  disabled={clasificacionSaving || clasificacionCombosLoading}
+                >
+                  <option value="">Selecciona</option>
+                  {(clasificacionCombos?.areasFlujo ?? []).map((option) => (
+                    <option key={option.idAreaFlujo} value={String(option.idAreaFlujo)}>
+                      {option.nombreAreaFlujo}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={styles.fieldGroup}>
+                <span style={styles.fieldLabel}>Referencia</span>
+                <select
+                  value={clasificacionModal.idReferencia}
+                  onChange={(event) => handleClasificacionFieldChange("idReferencia", event.target.value)}
+                  style={styles.input}
+                  disabled={clasificacionSaving || clasificacionCombosLoading}
+                >
+                  <option value="">Selecciona</option>
+                  {referenciasClasificacionDisponibles.map((option) => (
+                    <option key={option.idReferencia} value={String(option.idReferencia)}>
+                      {option.codigoReferencia} - {option.nombreReferencia}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={styles.fieldGroup}>
+                <span style={styles.fieldLabel}>Cuenta Contable</span>
+                <select
+                  value={clasificacionModal.idCuentaContable}
+                  onChange={(event) => handleClasificacionFieldChange("idCuentaContable", event.target.value)}
+                  style={styles.input}
+                  disabled={clasificacionSaving || clasificacionCombosLoading}
+                >
+                  <option value="">Selecciona</option>
+                  {cuentasClasificacionDisponibles.map((option) => (
+                    <option key={option.idCuentaContable} value={String(option.idCuentaContable)}>
+                      {option.cuentaContableTexto}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={styles.fieldGroup}>
+                <span style={styles.fieldLabel}>Regla Contable</span>
+                <select
+                  value={clasificacionModal.idReglaContable}
+                  onChange={(event) => handleClasificacionFieldChange("idReglaContable", event.target.value)}
+                  style={styles.input}
+                  disabled={clasificacionSaving || clasificacionCombosLoading}
+                >
+                  <option value="">Selecciona</option>
+                  {reglasClasificacionDisponibles.map((rule) => (
+                    <option key={rule.idReglaContable} value={String(rule.idReglaContable)}>
+                      {getReglaContableLabel(rule)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <label style={styles.fieldGroup}>
+              <span style={styles.fieldLabel}>Observacion Conciliacion</span>
+              <textarea
+                value={clasificacionModal.observacionConciliacion}
+                onChange={(event) => handleClasificacionFieldChange("observacionConciliacion", event.target.value)}
+                style={styles.modalTextarea}
+                rows={4}
+                placeholder="Comentario interno de clasificacion"
+                disabled={clasificacionSaving}
+              />
+            </label>
+
+            <div style={styles.modalHelperRow}>
+              <span style={styles.modalHelperText}>
+                Reglas disponibles: {reglasClasificacionDisponibles.length}
+              </span>
+              <span style={styles.modalHelperText}>
+                {clasificacionCombosLoading ? "Cargando combos..." : "La regla se autoselecciona si solo existe una opcion valida."}
+              </span>
+            </div>
+
+            <div style={styles.modalActions}>
+              <button type="button" style={styles.secondaryButton} onClick={closeClasificacionModal} disabled={clasificacionSaving}>
+                Cancelar
+              </button>
+              <button type="button" style={styles.primaryButton} onClick={() => void handleGuardarClasificacion()} disabled={clasificacionSaving}>
+                {clasificacionSaving ? "Guardando..." : "Guardar clasificacion"}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>
@@ -2049,11 +2735,23 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     marginBottom: 14,
   },
-  toolbarDates: {
+  toolbarActionsGroup: {
     display: "flex",
     flexWrap: "wrap",
-    alignItems: "flex-end",
+    alignItems: "center",
     gap: 10,
+  },
+  toolbarDates: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: 10,
+  },
+  filterPanel: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: 12,
+    marginBottom: 14,
   },
   dropRow: {
     display: "flex",
@@ -2558,6 +3256,17 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 800,
     flexShrink: 0,
   },
+  gridActionButton: {
+    border: "1px solid #0F766E",
+    background: "#ECFDF5",
+    color: "#0F766E",
+    borderRadius: 10,
+    padding: "8px 10px",
+    cursor: "pointer",
+    fontSize: 12,
+    fontWeight: 800,
+    whiteSpace: "nowrap",
+  },
   mappingTable: {
     width: "100%",
     borderCollapse: "collapse",
@@ -2699,6 +3408,32 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#0F766E",
     fontWeight: 700,
   },
+  statusBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "4px 10px",
+    borderRadius: 999,
+    fontSize: 11,
+    fontWeight: 800,
+    whiteSpace: "nowrap",
+  },
+  statusBadgeSuccess: {
+    background: "#DCFCE7",
+    color: "#166534",
+  },
+  statusBadgePending: {
+    background: "#FEF3C7",
+    color: "#92400E",
+  },
+  statusBadgeMuted: {
+    background: "#E2E8F0",
+    color: "#334155",
+  },
+  statusBadgeInfo: {
+    background: "#DBEAFE",
+    color: "#1D4ED8",
+  },
   summaryCard: {
     background: "#F8FAFC",
     border: "1px solid #E2E8F0",
@@ -2718,5 +3453,87 @@ const styles: Record<string, React.CSSProperties> = {
   summaryValue: {
     fontSize: 18,
     color: "#0F172A",
+  },
+  modalOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(15, 23, 42, 0.52)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+    zIndex: 100,
+  },
+  modalCard: {
+    width: "min(860px, 100%)",
+    background: "#FFFFFF",
+    borderRadius: 18,
+    padding: 20,
+    boxShadow: "0 20px 50px rgba(15, 23, 42, 0.25)",
+    display: "flex",
+    flexDirection: "column",
+    gap: 16,
+  },
+  modalHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  modalTitle: {
+    margin: 0,
+    fontSize: 20,
+    fontWeight: 900,
+    color: "#0F172A",
+  },
+  modalText: {
+    margin: "6px 0 0",
+    fontSize: 13,
+    color: "#64748B",
+  },
+  modalCloseButton: {
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    color: "#0F172A",
+    borderRadius: 10,
+    padding: "8px 12px",
+    cursor: "pointer",
+    fontSize: 12,
+    fontWeight: 800,
+  },
+  modalFormGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: 12,
+  },
+  modalTextarea: {
+    width: "100%",
+    boxSizing: "border-box",
+    borderRadius: 10,
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    padding: "10px 12px",
+    fontSize: 13,
+    color: "#0F172A",
+    resize: "vertical",
+    outline: "none",
+    fontFamily: "inherit",
+  },
+  modalHelperRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  modalHelperText: {
+    fontSize: 12,
+    color: "#64748B",
+    fontWeight: 700,
+  },
+  modalActions: {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: 10,
+    flexWrap: "wrap",
   },
 };

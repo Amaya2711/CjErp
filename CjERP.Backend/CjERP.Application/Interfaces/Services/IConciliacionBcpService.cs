@@ -29,4 +29,12 @@ public interface IConciliacionBcpService
         ConciliacionBcpActualizarComentarioRequestDto request,
         string? usuario,
         CancellationToken cancellationToken = default);
+
+    Task<ConciliacionBcpClasificacionCombosResponseDto> ObtenerCombosClasificacionAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<ConciliacionBcpConciliarPlanillaRegistroDto> ActualizarClasificacionContableAsync(
+        ConciliacionBcpActualizarClasificacionRequestDto request,
+        string? usuario,
+        CancellationToken cancellationToken = default);
 }

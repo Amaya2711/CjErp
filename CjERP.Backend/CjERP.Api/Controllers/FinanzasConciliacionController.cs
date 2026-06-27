@@ -265,6 +265,88 @@ public sealed class FinanzasConciliacionController : ControllerBase
         }
     }
 
+    [HttpGet("clasificacion/combos")]
+    public async Task<IActionResult> ObtenerCombosClasificacion(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await _conciliacionBcpService.ObtenerCombosClasificacionAsync(cancellationToken);
+
+            return Ok(new
+            {
+                success = true,
+                message = "Combos de clasificacion cargados correctamente.",
+                data = response
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[FinanzasConciliacionController] Error al cargar combos de clasificacion contable.");
+            return StatusCode(500, new
+            {
+                success = false,
+                message = "Ocurrio un error al cargar los combos de clasificacion."
+            });
+        }
+    }
+
+    [HttpPut("movimientos/clasificacion")]
+    public async Task<IActionResult> ActualizarClasificacionContable(
+        [FromBody] ConciliacionBcpActualizarClasificacionRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = "La solicitud no puede venir vacia."
+            });
+        }
+
+        try
+        {
+            var usuario = ResolveUsuarioAccion();
+            var response = await _conciliacionBcpService.ActualizarClasificacionContableAsync(request, usuario, cancellationToken);
+
+            return Ok(new
+            {
+                success = true,
+                message = "Clasificacion contable actualizada correctamente.",
+                data = response
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "[FinanzasConciliacionController] No se pudo actualizar la clasificacion contable del movimiento BCP.");
+            return BadRequest(new
+            {
+                success = false,
+                message = ex.Message
+            });
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogError(ex, "[FinanzasConciliacionController] Error SQL al actualizar la clasificacion contable del movimiento BCP.");
+            return StatusCode(500, new
+            {
+                success = false,
+                message = "Ocurrio un error SQL al actualizar la clasificacion contable.",
+                detail = ex.Message
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[FinanzasConciliacionController] Error no controlado al actualizar la clasificacion contable del movimiento BCP.");
+            return StatusCode(500, new
+            {
+                success = false,
+                message = "Ocurrio un error al actualizar la clasificacion contable.",
+                detail = ex.Message
+            });
+        }
+    }
+
     private string ResolveUsuarioAccion()
     {
         return User.FindFirstValue("IdUsuario")

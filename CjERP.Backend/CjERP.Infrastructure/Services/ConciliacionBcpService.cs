@@ -21,6 +21,7 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
     private const string StoredProcedureInsert = "dbo.sp_MovimientosBcp_Insertar";
     private const string StoredProcedureBuscarMovimientos = "dbo.sp_MovimientosBcp_Buscar";
     private const string StoredProcedurePlanillaEstados = "dbo.sp_Planilla_Consulta_Estados";
+    private const string StoredProcedureActualizarClasificacionContable = "dbo.sp_MovimientosBcp_ActualizarClasificacionContable";
     private const string MovimientosTableName = "dbo.MovimientosBcp";
     private const string MovimientosUniqueIndexName = "UX_MovimientosBancarios_Unico";
     private const int MaxSampleRows = 8;
@@ -366,6 +367,10 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
         parametrosMovimientos.Add("FechaInicio", request.FechaInicio?.Date, DbType.Date);
         parametrosMovimientos.Add("FechaFin", request.FechaFin?.Date, DbType.Date);
         parametrosMovimientos.Add("IdActivo", request.IdActivo, DbType.Int32);
+        parametrosMovimientos.Add("IdAreaFlujo", request.IdAreaFlujo, DbType.Int32);
+        parametrosMovimientos.Add("IdReferencia", request.IdReferencia, DbType.Int32);
+        parametrosMovimientos.Add("IdCuentaContable", request.IdCuentaContable, DbType.Int32);
+        parametrosMovimientos.Add("EsConciliado", request.EsConciliado, DbType.Boolean);
 
         _logger.LogInformation(
             "[ConciliacionBcpService] Ejecutando conciliacion con banco={StoredProcedureMovimientos} y planilla={StoredProcedurePlanilla}. IdCargo={IdCargo}, IdEmpleado={IdEmpleado}, Estados={Estados}, FechaInicioFiltro={FechaInicioFiltro}, FechaFinFiltro={FechaFinFiltro}, IdActivo={IdActivo}, Usuario={Usuario}",
@@ -471,37 +476,7 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
         await using var connection = _sqlCommandFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        var movimiento = await connection.QuerySingleOrDefaultAsync<MovimientoBcpBusquedaRow>(
-            _sqlCommandFactory.Create(
-                """
-                SELECT
-                    IdMovimientoBanco,
-                    Empresa,
-                    Cuenta,
-                    Moneda,
-                    Fecha,
-                    FechaValuta,
-                    Proveedor,
-                    ItemSistema,
-                    DescripcionOperacion,
-                    Monto,
-                    SucursalAgencia,
-                    NroOperacion,
-                    Usuario,
-                    ArchivoOrigen,
-                    FechaImportacion,
-                    UsuarioImportacion,
-                    IdActivo,
-                    EsNroOperacionValido,
-                    TipoMovimientoBanco,
-                    EstadoConciliacion,
-                    Comentario
-                FROM dbo.MovimientosBcp
-                WHERE IdMovimientoBanco = @IdMovimientoBanco
-                """,
-                new { IdMovimientoBanco = idMovimientoBanco },
-                CommandType.Text,
-                cancellationToken));
+        var movimiento = await GetMovimientoByIdAsync(connection, idMovimientoBanco, cancellationToken);
 
         if (movimiento is null)
         {
@@ -553,6 +528,208 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
         return BuildConciliacionRegistroActualizado(movimiento, comentarioNuevo);
     }
 
+    public async Task<ConciliacionBcpClasificacionCombosResponseDto> ObtenerCombosClasificacionAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        var areasFlujo = (await connection.QueryAsync<ConciliacionAreaFlujoOptionDto>(
+            _sqlCommandFactory.Create(
+                """
+                SELECT
+                    IdAreaFlujo,
+                    NombreAreaFlujo
+                FROM dbo.ConciliacionAreaFlujo
+                WHERE IdActivo = 1
+                ORDER BY NombreAreaFlujo
+                """,
+                commandType: CommandType.Text,
+                cancellationToken: cancellationToken))).ToList();
+
+        var referencias = (await connection.QueryAsync<ConciliacionReferenciaOptionDto>(
+            _sqlCommandFactory.Create(
+                """
+                SELECT
+                    IdReferencia,
+                    CodigoReferencia,
+                    NombreReferencia
+                FROM dbo.ConciliacionReferencia
+                WHERE IdActivo = 1
+                ORDER BY CodigoReferencia, NombreReferencia
+                """,
+                commandType: CommandType.Text,
+                cancellationToken: cancellationToken))).ToList();
+
+        var cuentasContables = (await connection.QueryAsync<ConciliacionCuentaContableOptionDto>(
+            _sqlCommandFactory.Create(
+                """
+                SELECT
+                    IdCuentaContable,
+                    CodigoCuenta,
+                    NombreCuenta,
+                    CONCAT(ISNULL(CodigoCuenta, ''), ' - ', ISNULL(NombreCuenta, '')) AS CuentaContableTexto
+                FROM dbo.PlanCuentaContable
+                WHERE IdActivo = 1
+                ORDER BY CodigoCuenta, NombreCuenta
+                """,
+                commandType: CommandType.Text,
+                cancellationToken: cancellationToken))).ToList();
+
+        var reglasContables = (await connection.QueryAsync<ConciliacionReglaContableOptionDto>(
+            _sqlCommandFactory.Create(
+                """
+                SELECT
+                    IdReglaContable,
+                    IdAreaFlujo,
+                    IdReferencia,
+                    IdCuentaContable,
+                    Orden,
+                    EsPrincipal,
+                    RequiereComprobante,
+                    AplicaConciliacion,
+                    Observacion
+                FROM dbo.ConciliacionReglaContable
+                WHERE IdActivo = 1
+                ORDER BY IdAreaFlujo, IdReferencia, IdCuentaContable, Orden, IdReglaContable
+                """,
+                commandType: CommandType.Text,
+                cancellationToken: cancellationToken))).ToList();
+
+        return new ConciliacionBcpClasificacionCombosResponseDto
+        {
+            AreasFlujo = areasFlujo,
+            Referencias = referencias,
+            CuentasContables = cuentasContables,
+            ReglasContables = reglasContables
+        };
+    }
+
+    public async Task<ConciliacionBcpConciliarPlanillaRegistroDto> ActualizarClasificacionContableAsync(
+        ConciliacionBcpActualizarClasificacionRequestDto request,
+        string? usuario,
+        CancellationToken cancellationToken = default)
+    {
+        if (request.IdMovimientoBanco <= 0)
+        {
+            throw new InvalidOperationException("El IdMovimientoBanco es invalido.");
+        }
+
+        if (request.IdAreaFlujo <= 0 || request.IdReferencia <= 0 || request.IdCuentaContable <= 0 || request.IdReglaContable <= 0)
+        {
+            throw new InvalidOperationException("La clasificacion contable requiere Area Flujo, Referencia, Cuenta Contable y Regla.");
+        }
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        var parametros = new DynamicParameters();
+        parametros.Add("IdMovimientoBanco", request.IdMovimientoBanco, DbType.Int32);
+        parametros.Add("IdAreaFlujo", request.IdAreaFlujo, DbType.Int32);
+        parametros.Add("IdReferencia", request.IdReferencia, DbType.Int32);
+        parametros.Add("IdCuentaContable", request.IdCuentaContable, DbType.Int32);
+        parametros.Add("IdReglaContable", request.IdReglaContable, DbType.Int32);
+        parametros.Add("ObservacionConciliacion", NullIfWhiteSpace(request.ObservacionConciliacion), DbType.String);
+        parametros.Add("UsuarioConciliacion", string.IsNullOrWhiteSpace(usuario) ? "sistema" : usuario.Trim(), DbType.String);
+
+        await connection.ExecuteAsync(
+            _sqlCommandFactory.Create(
+                StoredProcedureActualizarClasificacionContable,
+                parametros,
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120));
+
+        var movimientoActualizado = await GetMovimientoByIdAsync(connection, request.IdMovimientoBanco, cancellationToken);
+        if (movimientoActualizado is null)
+        {
+            throw new InvalidOperationException("No se pudo recuperar el movimiento actualizado.");
+        }
+
+        return BuildConciliacionRegistroActualizado(
+            movimientoActualizado,
+            movimientoActualizado.Comentario);
+    }
+
+    private async Task<MovimientoBcpBusquedaRow?> GetMovimientoByIdAsync(
+        IDbConnection connection,
+        int idMovimientoBanco,
+        CancellationToken cancellationToken)
+    {
+        return await connection.QuerySingleOrDefaultAsync<MovimientoBcpBusquedaRow>(
+            _sqlCommandFactory.Create(
+                """
+                SELECT
+                    mov.IdMovimientoBanco,
+                    mov.Empresa,
+                    mov.Cuenta,
+                    mov.Moneda,
+                    mov.Fecha,
+                    mov.FechaValuta,
+                    mov.Proveedor,
+                    mov.ItemSistema,
+                    mov.DescripcionOperacion,
+                    mov.Monto,
+                    mov.SucursalAgencia,
+                    mov.NroOperacion,
+                    mov.Usuario,
+                    mov.ArchivoOrigen,
+                    mov.FechaImportacion,
+                    mov.UsuarioImportacion,
+                    mov.IdActivo,
+                    mov.EsNroOperacionValido,
+                    mov.TipoMovimientoBanco,
+                    mov.EstadoConciliacion,
+                    mov.Comentario,
+                    mov.IdAreaFlujo,
+                    mov.IdReferencia,
+                    mov.IdCuentaContable,
+                    mov.IdReglaContable,
+                    mov.EsConciliado,
+                    mov.FechaConciliacion,
+                    mov.UsuarioConciliacion,
+                    mov.ObservacionConciliacion,
+                    af.NombreAreaFlujo,
+                    af.Descripcion AS DescripcionAreaFlujo,
+                    cref.CodigoReferencia,
+                    cref.NombreReferencia,
+                    cref.Descripcion AS DescripcionReferencia,
+                    pcc.CodigoCuenta,
+                    pcc.NombreCuenta,
+                    CONCAT(ISNULL(pcc.CodigoCuenta, ''), CASE WHEN pcc.CodigoCuenta IS NOT NULL AND pcc.NombreCuenta IS NOT NULL THEN ' - ' ELSE '' END, ISNULL(pcc.NombreCuenta, '')) AS CuentaContableTexto,
+                    rcon.Orden,
+                    rcon.EsPrincipal,
+                    rcon.RequiereComprobante,
+                    rcon.AplicaConciliacion,
+                    rcon.Observacion AS ObservacionReglaContable,
+                    CASE
+                        WHEN mov.EsConciliado = 1 THEN 'CONCILIADO'
+                        WHEN UPPER(ISNULL(af.NombreAreaFlujo, '')) = 'NO CONSIDERAR' THEN 'NO CONSIDERAR'
+                        WHEN ISNULL(rcon.AplicaConciliacion, 1) = 0 THEN 'NO APLICA'
+                        ELSE 'PENDIENTE'
+                    END AS EstadoConciliacionTexto,
+                    CASE
+                        WHEN UPPER(ISNULL(af.NombreAreaFlujo, '')) = 'NO CONSIDERAR' THEN 'NO CONSIDERAR'
+                        WHEN ISNULL(rcon.AplicaConciliacion, 1) = 0 THEN 'NO APLICA'
+                        WHEN mov.EsConciliado = 1 THEN 'CONCILIADO'
+                        ELSE 'PENDIENTE'
+                    END AS EstadoOperativoConciliacion
+                FROM dbo.MovimientosBcp mov
+                LEFT JOIN dbo.ConciliacionAreaFlujo af
+                    ON af.IdAreaFlujo = mov.IdAreaFlujo
+                LEFT JOIN dbo.ConciliacionReferencia cref
+                    ON cref.IdReferencia = mov.IdReferencia
+                LEFT JOIN dbo.PlanCuentaContable pcc
+                    ON pcc.IdCuentaContable = mov.IdCuentaContable
+                LEFT JOIN dbo.ConciliacionReglaContable rcon
+                    ON rcon.IdReglaContable = mov.IdReglaContable
+                WHERE mov.IdMovimientoBanco = @IdMovimientoBanco
+                """,
+                new { IdMovimientoBanco = idMovimientoBanco },
+                CommandType.Text,
+                cancellationToken));
+    }
+
     private static Dictionary<string, object?> MapDynamicRow(dynamic row)
     {
         if (row is IDictionary<string, object?> typedDictionary)
@@ -592,6 +769,8 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
         var tarea = NormalizeText(GetDictionaryString(row, "tarea"));
         var responsable = NormalizeText(GetDictionaryString(row, "Responsable"));
         var comprobante = NormalizeText(GetDictionaryString(row, "Comprobante"));
+        var banco = NormalizeText(GetDictionaryString(row, "Banco"));
+        var serie = NormalizeText(GetDictionaryString(row, "Serie"));
         var detalle = NormalizeText(GetDictionaryString(row, "Detalle"));
 
         return new PlanillaConciliacionRow
@@ -607,6 +786,8 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
             Tarea = tarea,
             Responsable = responsable,
             Comprobante = comprobante,
+            Banco = banco,
+            Serie = serie,
             Detalle = detalle,
             CuentaNumerica = ExtractDigits(cuenta),
             CuentaInterNumerica = ExtractDigits(cuentaInter),
@@ -711,6 +892,29 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
             EstadoConciliacion = movimiento.EstadoConciliacion,
             TipoMovimientoBanco = movimiento.TipoMovimientoBanco,
             IdActivo = movimiento.IdActivo,
+            IdAreaFlujo = movimiento.IdAreaFlujo,
+            IdReferencia = movimiento.IdReferencia,
+            IdCuentaContable = movimiento.IdCuentaContable,
+            IdReglaContable = movimiento.IdReglaContable,
+            EsConciliado = movimiento.EsConciliado,
+            FechaConciliacion = movimiento.FechaConciliacion,
+            UsuarioConciliacion = movimiento.UsuarioConciliacion,
+            ObservacionConciliacionMovimiento = movimiento.ObservacionConciliacion,
+            NombreAreaFlujo = movimiento.NombreAreaFlujo,
+            DescripcionAreaFlujo = movimiento.DescripcionAreaFlujo,
+            CodigoReferencia = movimiento.CodigoReferencia,
+            NombreReferencia = movimiento.NombreReferencia,
+            DescripcionReferencia = movimiento.DescripcionReferencia,
+            CodigoCuenta = movimiento.CodigoCuenta,
+            NombreCuenta = movimiento.NombreCuenta,
+            CuentaContableTexto = movimiento.CuentaContableTexto,
+            Orden = movimiento.Orden,
+            EsPrincipal = movimiento.EsPrincipal,
+            RequiereComprobante = movimiento.RequiereComprobante,
+            AplicaConciliacion = movimiento.AplicaConciliacion,
+            ObservacionReglaContable = movimiento.ObservacionReglaContable,
+            EstadoConciliacionTexto = movimiento.EstadoConciliacionTexto,
+            EstadoOperativoConciliacion = movimiento.EstadoOperativoConciliacion,
             ResultadoConciliacion = candidate?.ResultadoConciliacion ?? "SIN COINCIDENCIA",
             TipoCoincidencia = candidate?.TipoCoincidencia,
             NroOperacionPlanilla = candidate?.Planilla.NroOperacion,
@@ -723,6 +927,8 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
             TareaPlanilla = candidate?.Planilla.Tarea,
             ResponsablePlanilla = candidate?.Planilla.Responsable,
             ComprobantePlanilla = candidate?.Planilla.Comprobante,
+            BancoPlanilla = candidate?.Planilla.Banco,
+            SeriePlanilla = candidate?.Planilla.Serie,
             DetallePlanilla = candidate?.Planilla.Detalle,
             CorrelativoPlanilla = correlativoPlanilla,
             IdRegistroPlanilla = candidate?.Planilla.Corre,
@@ -756,8 +962,31 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
             EstadoConciliacion = movimiento.EstadoConciliacion,
             TipoMovimientoBanco = movimiento.TipoMovimientoBanco,
             IdActivo = movimiento.IdActivo,
+            IdAreaFlujo = movimiento.IdAreaFlujo,
+            IdReferencia = movimiento.IdReferencia,
+            IdCuentaContable = movimiento.IdCuentaContable,
+            IdReglaContable = movimiento.IdReglaContable,
+            EsConciliado = movimiento.EsConciliado,
+            FechaConciliacion = movimiento.FechaConciliacion,
+            UsuarioConciliacion = movimiento.UsuarioConciliacion,
+            ObservacionConciliacionMovimiento = movimiento.ObservacionConciliacion,
+            NombreAreaFlujo = movimiento.NombreAreaFlujo,
+            DescripcionAreaFlujo = movimiento.DescripcionAreaFlujo,
+            CodigoReferencia = movimiento.CodigoReferencia,
+            NombreReferencia = movimiento.NombreReferencia,
+            DescripcionReferencia = movimiento.DescripcionReferencia,
+            CodigoCuenta = movimiento.CodigoCuenta,
+            NombreCuenta = movimiento.NombreCuenta,
+            CuentaContableTexto = movimiento.CuentaContableTexto,
+            Orden = movimiento.Orden,
+            EsPrincipal = movimiento.EsPrincipal,
+            RequiereComprobante = movimiento.RequiereComprobante,
+            AplicaConciliacion = movimiento.AplicaConciliacion,
+            ObservacionReglaContable = movimiento.ObservacionReglaContable,
+            EstadoConciliacionTexto = movimiento.EstadoConciliacionTexto,
+            EstadoOperativoConciliacion = movimiento.EstadoOperativoConciliacion,
             Comentario = comentario,
-            ResultadoConciliacion = "ACTUALIZADO"
+            ResultadoConciliacion = movimiento.EsConciliado == true ? "CONCILIADO" : "ACTUALIZADO"
         };
     }
 
@@ -4038,6 +4267,29 @@ ORDER BY p.parameter_id;";
         public string? TipoMovimientoBanco { get; set; }
         public string? EstadoConciliacion { get; set; }
         public string? Comentario { get; set; }
+        public int? IdAreaFlujo { get; set; }
+        public int? IdReferencia { get; set; }
+        public int? IdCuentaContable { get; set; }
+        public int? IdReglaContable { get; set; }
+        public bool? EsConciliado { get; set; }
+        public DateTime? FechaConciliacion { get; set; }
+        public string? UsuarioConciliacion { get; set; }
+        public string? ObservacionConciliacion { get; set; }
+        public string? NombreAreaFlujo { get; set; }
+        public string? DescripcionAreaFlujo { get; set; }
+        public string? CodigoReferencia { get; set; }
+        public string? NombreReferencia { get; set; }
+        public string? DescripcionReferencia { get; set; }
+        public string? CodigoCuenta { get; set; }
+        public string? NombreCuenta { get; set; }
+        public string? CuentaContableTexto { get; set; }
+        public int? Orden { get; set; }
+        public bool? EsPrincipal { get; set; }
+        public bool? RequiereComprobante { get; set; }
+        public bool? AplicaConciliacion { get; set; }
+        public string? ObservacionReglaContable { get; set; }
+        public string? EstadoConciliacionTexto { get; set; }
+        public string? EstadoOperativoConciliacion { get; set; }
     }
 
     private sealed class PlanillaConciliacionRow
@@ -4054,6 +4306,8 @@ ORDER BY p.parameter_id;";
         public string? Tarea { get; set; }
         public string? Responsable { get; set; }
         public string? Comprobante { get; set; }
+        public string? Banco { get; set; }
+        public string? Serie { get; set; }
         public string? Detalle { get; set; }
         public string CuentaNumerica { get; set; } = string.Empty;
         public string CuentaInterNumerica { get; set; } = string.Empty;

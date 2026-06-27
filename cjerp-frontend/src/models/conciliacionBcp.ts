@@ -83,6 +83,10 @@ export type ConciliacionBcpConciliarPlanillaRequest = {
   fechaInicio?: string | null;
   fechaFin?: string | null;
   idActivo?: number | null;
+  idAreaFlujo?: number | null;
+  idReferencia?: number | null;
+  idCuentaContable?: number | null;
+  esConciliado?: boolean | null;
 };
 
 export type ConciliacionBcpConciliarPlanillaRegistro = {
@@ -98,6 +102,29 @@ export type ConciliacionBcpConciliarPlanillaRegistro = {
   estadoConciliacion?: string | null;
   tipoMovimientoBanco?: string | null;
   idActivo?: boolean | null;
+  idAreaFlujo?: number | null;
+  idReferencia?: number | null;
+  idCuentaContable?: number | null;
+  idReglaContable?: number | null;
+  esConciliado?: boolean | null;
+  fechaConciliacion?: string | null;
+  usuarioConciliacion?: string | null;
+  observacionConciliacionMovimiento?: string | null;
+  nombreAreaFlujo?: string | null;
+  descripcionAreaFlujo?: string | null;
+  codigoReferencia?: string | null;
+  nombreReferencia?: string | null;
+  descripcionReferencia?: string | null;
+  codigoCuenta?: string | null;
+  nombreCuenta?: string | null;
+  cuentaContableTexto?: string | null;
+  orden?: number | null;
+  esPrincipal?: boolean | null;
+  requiereComprobante?: boolean | null;
+  aplicaConciliacion?: boolean | null;
+  observacionReglaContable?: string | null;
+  estadoConciliacionTexto?: string | null;
+  estadoOperativoConciliacion?: string | null;
   resultadoConciliacion: string;
   tipoCoincidencia?: string | null;
   nroOperacionPlanilla?: string | null;
@@ -110,6 +137,8 @@ export type ConciliacionBcpConciliarPlanillaRegistro = {
   tareaPlanilla?: string | null;
   responsablePlanilla?: string | null;
   comprobantePlanilla?: string | null;
+  bancoPlanilla?: string | null;
+  seriePlanilla?: string | null;
   detallePlanilla?: string | null;
   correlativoPlanilla?: string | null;
   idRegistroPlanilla?: number | null;
@@ -120,6 +149,52 @@ export type ConciliacionBcpConciliarPlanillaRegistro = {
 
 export type ConciliacionBcpActualizarComentarioRequest = {
   comentario?: string | null;
+};
+
+export type ConciliacionBcpActualizarClasificacionRequest = {
+  idMovimientoBanco: number;
+  idAreaFlujo: number;
+  idReferencia: number;
+  idCuentaContable: number;
+  idReglaContable: number;
+  observacionConciliacion?: string | null;
+};
+
+export type ConciliacionAreaFlujoOption = {
+  idAreaFlujo: number;
+  nombreAreaFlujo: string;
+};
+
+export type ConciliacionReferenciaOption = {
+  idReferencia: number;
+  codigoReferencia: string;
+  nombreReferencia: string;
+};
+
+export type ConciliacionCuentaContableOption = {
+  idCuentaContable: number;
+  codigoCuenta: string;
+  nombreCuenta: string;
+  cuentaContableTexto: string;
+};
+
+export type ConciliacionReglaContableOption = {
+  idReglaContable: number;
+  idAreaFlujo: number;
+  idReferencia: number;
+  idCuentaContable: number;
+  orden?: number | null;
+  esPrincipal?: boolean | null;
+  requiereComprobante?: boolean | null;
+  aplicaConciliacion?: boolean | null;
+  observacion?: string | null;
+};
+
+export type ConciliacionBcpClasificacionCombosResponse = {
+  areasFlujo: ConciliacionAreaFlujoOption[];
+  referencias: ConciliacionReferenciaOption[];
+  cuentasContables: ConciliacionCuentaContableOption[];
+  reglasContables: ConciliacionReglaContableOption[];
 };
 
 export type ConciliacionBcpConciliarPlanillaResponse = {

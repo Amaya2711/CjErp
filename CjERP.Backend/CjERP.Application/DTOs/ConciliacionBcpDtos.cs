@@ -158,6 +158,14 @@ public sealed class ConciliacionBcpConciliarPlanillaRequestDto
     public DateTime? FechaFin { get; set; }
 
     public int? IdActivo { get; set; }
+
+    public int? IdAreaFlujo { get; set; }
+
+    public int? IdReferencia { get; set; }
+
+    public int? IdCuentaContable { get; set; }
+
+    public bool? EsConciliado { get; set; }
 }
 
 public sealed class ConciliacionBcpConciliarPlanillaResponseDto
@@ -208,6 +216,52 @@ public sealed class ConciliacionBcpConciliarPlanillaRegistroDto
 
     public bool? IdActivo { get; set; }
 
+    public int? IdAreaFlujo { get; set; }
+
+    public int? IdReferencia { get; set; }
+
+    public int? IdCuentaContable { get; set; }
+
+    public int? IdReglaContable { get; set; }
+
+    public bool? EsConciliado { get; set; }
+
+    public DateTime? FechaConciliacion { get; set; }
+
+    public string? UsuarioConciliacion { get; set; }
+
+    public string? ObservacionConciliacionMovimiento { get; set; }
+
+    public string? NombreAreaFlujo { get; set; }
+
+    public string? DescripcionAreaFlujo { get; set; }
+
+    public string? CodigoReferencia { get; set; }
+
+    public string? NombreReferencia { get; set; }
+
+    public string? DescripcionReferencia { get; set; }
+
+    public string? CodigoCuenta { get; set; }
+
+    public string? NombreCuenta { get; set; }
+
+    public string? CuentaContableTexto { get; set; }
+
+    public int? Orden { get; set; }
+
+    public bool? EsPrincipal { get; set; }
+
+    public bool? RequiereComprobante { get; set; }
+
+    public bool? AplicaConciliacion { get; set; }
+
+    public string? ObservacionReglaContable { get; set; }
+
+    public string? EstadoConciliacionTexto { get; set; }
+
+    public string? EstadoOperativoConciliacion { get; set; }
+
     public string ResultadoConciliacion { get; set; } = "SIN COINCIDENCIA";
 
     public string? TipoCoincidencia { get; set; }
@@ -232,6 +286,10 @@ public sealed class ConciliacionBcpConciliarPlanillaRegistroDto
 
     public string? ComprobantePlanilla { get; set; }
 
+    public string? BancoPlanilla { get; set; }
+
+    public string? SeriePlanilla { get; set; }
+
     public string? DetallePlanilla { get; set; }
 
     public string? CorrelativoPlanilla { get; set; }
@@ -243,6 +301,80 @@ public sealed class ConciliacionBcpConciliarPlanillaRegistroDto
     public string? Comentario { get; set; }
 
     public string? ObservacionConciliacion { get; set; }
+}
+
+public sealed class ConciliacionBcpActualizarClasificacionRequestDto
+{
+    public int IdMovimientoBanco { get; set; }
+
+    public int IdAreaFlujo { get; set; }
+
+    public int IdReferencia { get; set; }
+
+    public int IdCuentaContable { get; set; }
+
+    public int IdReglaContable { get; set; }
+
+    public string? ObservacionConciliacion { get; set; }
+}
+
+public sealed class ConciliacionBcpClasificacionCombosResponseDto
+{
+    public List<ConciliacionAreaFlujoOptionDto> AreasFlujo { get; set; } = [];
+
+    public List<ConciliacionReferenciaOptionDto> Referencias { get; set; } = [];
+
+    public List<ConciliacionCuentaContableOptionDto> CuentasContables { get; set; } = [];
+
+    public List<ConciliacionReglaContableOptionDto> ReglasContables { get; set; } = [];
+}
+
+public sealed class ConciliacionAreaFlujoOptionDto
+{
+    public int IdAreaFlujo { get; set; }
+
+    public string NombreAreaFlujo { get; set; } = string.Empty;
+}
+
+public sealed class ConciliacionReferenciaOptionDto
+{
+    public int IdReferencia { get; set; }
+
+    public string CodigoReferencia { get; set; } = string.Empty;
+
+    public string NombreReferencia { get; set; } = string.Empty;
+}
+
+public sealed class ConciliacionCuentaContableOptionDto
+{
+    public int IdCuentaContable { get; set; }
+
+    public string CodigoCuenta { get; set; } = string.Empty;
+
+    public string NombreCuenta { get; set; } = string.Empty;
+
+    public string CuentaContableTexto { get; set; } = string.Empty;
+}
+
+public sealed class ConciliacionReglaContableOptionDto
+{
+    public int IdReglaContable { get; set; }
+
+    public int IdAreaFlujo { get; set; }
+
+    public int IdReferencia { get; set; }
+
+    public int IdCuentaContable { get; set; }
+
+    public int? Orden { get; set; }
+
+    public bool? EsPrincipal { get; set; }
+
+    public bool? RequiereComprobante { get; set; }
+
+    public bool? AplicaConciliacion { get; set; }
+
+    public string? Observacion { get; set; }
 }
 
 public sealed class ConciliacionBcpExportResponseDto

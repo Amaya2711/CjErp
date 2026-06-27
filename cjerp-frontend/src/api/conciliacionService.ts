@@ -2,7 +2,9 @@ import httpClient from "./httpClient";
 import type {
   ConciliacionBcpAnalizarRequest,
   ConciliacionBcpAnalizarResponse,
+  ConciliacionBcpActualizarClasificacionRequest,
   ConciliacionBcpActualizarComentarioRequest,
+  ConciliacionBcpClasificacionCombosResponse,
   ConciliacionBcpConciliarPlanillaRequest,
   ConciliacionBcpConciliarPlanillaResponse,
   ConciliacionBcpConciliarPlanillaRegistro,
@@ -52,6 +54,24 @@ export async function actualizarComentarioMovimientoConciliacionBcp(
 ): Promise<ConciliacionBcpConciliarPlanillaRegistro> {
   return await httpClient.put<ConciliacionBcpConciliarPlanillaRegistro>(
     `${BASE_URL}/movimientos/${idMovimientoBanco}/comentario`,
+    request,
+    {
+      timeout: 30000,
+    }
+  );
+}
+
+export async function obtenerCombosClasificacionConciliacionBcp(): Promise<ConciliacionBcpClasificacionCombosResponse> {
+  return await httpClient.get<ConciliacionBcpClasificacionCombosResponse>(`${BASE_URL}/clasificacion/combos`, {
+    timeout: 30000,
+  });
+}
+
+export async function actualizarClasificacionMovimientoConciliacionBcp(
+  request: ConciliacionBcpActualizarClasificacionRequest
+): Promise<ConciliacionBcpConciliarPlanillaRegistro> {
+  return await httpClient.put<ConciliacionBcpConciliarPlanillaRegistro>(
+    `${BASE_URL}/movimientos/clasificacion`,
     request,
     {
       timeout: 30000,
