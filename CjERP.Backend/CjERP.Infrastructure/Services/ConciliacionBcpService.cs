@@ -21,7 +21,47 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
     private const string StoredProcedureInsert = "dbo.sp_MovimientosBcp_Insertar";
     private const string StoredProcedureBuscarMovimientos = "dbo.sp_MovimientosBcp_Buscar";
     private const string StoredProcedurePlanillaEstados = "dbo.sp_Planilla_Consulta_Estados";
+    private const string StoredProcedureCombosClasificacionContable = "dbo.sp_MovimientosBcp_ObtenerCombosClasificacionContable";
     private const string StoredProcedureActualizarClasificacionContable = "dbo.sp_MovimientosBcp_ActualizarClasificacionContable";
+    private const string SqlCombosClasificacionContableFallback = """
+SELECT
+    af.IdAreaFlujo,
+    af.NombreAreaFlujo
+FROM dbo.ConciliacionAreaFlujo af
+WHERE af.IdActivo = 1
+ORDER BY af.NombreAreaFlujo;
+
+SELECT
+    r.IdReferencia,
+    r.CodigoReferencia,
+    r.NombreReferencia
+FROM dbo.ConciliacionReferencia r
+WHERE r.IdActivo = 1
+ORDER BY r.CodigoReferencia, r.NombreReferencia;
+
+SELECT
+    p.IdCuentaContable,
+    p.CodigoCuenta,
+    p.NombreCuenta,
+    CONCAT(ISNULL(p.CodigoCuenta, ''), ' - ', ISNULL(p.NombreCuenta, '')) AS CuentaContableTexto
+FROM dbo.PlanCuentaContable p
+WHERE p.IdActivo = 1
+ORDER BY p.CodigoCuenta, p.NombreCuenta;
+
+SELECT
+    rc.IdReglaContable,
+    rc.IdAreaFlujo,
+    rc.IdReferencia,
+    rc.IdCuentaContable,
+    rc.Orden,
+    rc.EsPrincipal,
+    rc.RequiereComprobante,
+    rc.AplicaConciliacion,
+    rc.Observacion
+FROM dbo.ConciliacionReglaContable rc
+WHERE rc.IdActivo = 1
+ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdReglaContable;
+""";
     private const string MovimientosTableName = "dbo.MovimientosBcp";
     private const string MovimientosUniqueIndexName = "UX_MovimientosBancarios_Unico";
     private const int MaxSampleRows = 8;
@@ -531,70 +571,63 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
     public async Task<ConciliacionBcpClasificacionCombosResponseDto> ObtenerCombosClasificacionAsync(
         CancellationToken cancellationToken = default)
     {
+        try
+        {
+            return await ObtenerCombosClasificacionDesdeStoredProcedureAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException)
+        {
+            _logger.LogWarning(
+                ex,
+                "[ConciliacionBcp] Fallo el SP {StoredProcedure}. Se usara un fallback directo a tablas para cargar combos de clasificacion.",
+                StoredProcedureCombosClasificacionContable);
+
+            return await ObtenerCombosClasificacionDesdeTablasAsync(cancellationToken);
+        }
+    }
+
+    private async Task<ConciliacionBcpClasificacionCombosResponseDto> ObtenerCombosClasificacionDesdeStoredProcedureAsync(
+        CancellationToken cancellationToken)
+    {
         await using var connection = _sqlCommandFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        var areasFlujo = (await connection.QueryAsync<ConciliacionAreaFlujoOptionDto>(
+        using var grid = await connection.QueryMultipleAsync(
             _sqlCommandFactory.Create(
-                """
-                SELECT
-                    IdAreaFlujo,
-                    NombreAreaFlujo
-                FROM dbo.ConciliacionAreaFlujo
-                WHERE IdActivo = 1
-                ORDER BY NombreAreaFlujo
-                """,
-                commandType: CommandType.Text,
-                cancellationToken: cancellationToken))).ToList();
+                StoredProcedureCombosClasificacionContable,
+                commandType: CommandType.StoredProcedure,
+                cancellationToken: cancellationToken));
 
-        var referencias = (await connection.QueryAsync<ConciliacionReferenciaOptionDto>(
-            _sqlCommandFactory.Create(
-                """
-                SELECT
-                    IdReferencia,
-                    CodigoReferencia,
-                    NombreReferencia
-                FROM dbo.ConciliacionReferencia
-                WHERE IdActivo = 1
-                ORDER BY CodigoReferencia, NombreReferencia
-                """,
-                commandType: CommandType.Text,
-                cancellationToken: cancellationToken))).ToList();
+        var areasFlujo = (await grid.ReadAsync<ConciliacionAreaFlujoOptionDto>()).ToList();
+        var referencias = (await grid.ReadAsync<ConciliacionReferenciaOptionDto>()).ToList();
+        var cuentasContables = (await grid.ReadAsync<ConciliacionCuentaContableOptionDto>()).ToList();
+        var reglasContables = (await grid.ReadAsync<ConciliacionReglaContableOptionDto>()).ToList();
 
-        var cuentasContables = (await connection.QueryAsync<ConciliacionCuentaContableOptionDto>(
-            _sqlCommandFactory.Create(
-                """
-                SELECT
-                    IdCuentaContable,
-                    CodigoCuenta,
-                    NombreCuenta,
-                    CONCAT(ISNULL(CodigoCuenta, ''), ' - ', ISNULL(NombreCuenta, '')) AS CuentaContableTexto
-                FROM dbo.PlanCuentaContable
-                WHERE IdActivo = 1
-                ORDER BY CodigoCuenta, NombreCuenta
-                """,
-                commandType: CommandType.Text,
-                cancellationToken: cancellationToken))).ToList();
+        return new ConciliacionBcpClasificacionCombosResponseDto
+        {
+            AreasFlujo = areasFlujo,
+            Referencias = referencias,
+            CuentasContables = cuentasContables,
+            ReglasContables = reglasContables
+        };
+    }
 
-        var reglasContables = (await connection.QueryAsync<ConciliacionReglaContableOptionDto>(
+    private async Task<ConciliacionBcpClasificacionCombosResponseDto> ObtenerCombosClasificacionDesdeTablasAsync(
+        CancellationToken cancellationToken)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        using var grid = await connection.QueryMultipleAsync(
             _sqlCommandFactory.Create(
-                """
-                SELECT
-                    IdReglaContable,
-                    IdAreaFlujo,
-                    IdReferencia,
-                    IdCuentaContable,
-                    Orden,
-                    EsPrincipal,
-                    RequiereComprobante,
-                    AplicaConciliacion,
-                    Observacion
-                FROM dbo.ConciliacionReglaContable
-                WHERE IdActivo = 1
-                ORDER BY IdAreaFlujo, IdReferencia, IdCuentaContable, Orden, IdReglaContable
-                """,
+                SqlCombosClasificacionContableFallback,
                 commandType: CommandType.Text,
-                cancellationToken: cancellationToken))).ToList();
+                cancellationToken: cancellationToken));
+
+        var areasFlujo = (await grid.ReadAsync<ConciliacionAreaFlujoOptionDto>()).ToList();
+        var referencias = (await grid.ReadAsync<ConciliacionReferenciaOptionDto>()).ToList();
+        var cuentasContables = (await grid.ReadAsync<ConciliacionCuentaContableOptionDto>()).ToList();
+        var reglasContables = (await grid.ReadAsync<ConciliacionReglaContableOptionDto>()).ToList();
 
         return new ConciliacionBcpClasificacionCombosResponseDto
         {
@@ -632,13 +665,29 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
         parametros.Add("ObservacionConciliacion", NullIfWhiteSpace(request.ObservacionConciliacion), DbType.String);
         parametros.Add("UsuarioConciliacion", string.IsNullOrWhiteSpace(usuario) ? "sistema" : usuario.Trim(), DbType.String);
 
-        await connection.ExecuteAsync(
-            _sqlCommandFactory.Create(
-                StoredProcedureActualizarClasificacionContable,
-                parametros,
-                CommandType.StoredProcedure,
-                cancellationToken,
-                commandTimeout: 120));
+        try
+        {
+            await connection.ExecuteAsync(
+                _sqlCommandFactory.Create(
+                    StoredProcedureActualizarClasificacionContable,
+                    parametros,
+                    CommandType.StoredProcedure,
+                    cancellationToken,
+                    commandTimeout: 120));
+        }
+        catch (SqlException sqlException) when (IsMissingStoredProcedure(sqlException))
+        {
+            _logger.LogWarning(
+                sqlException,
+                "[ConciliacionBcp] No existe el SP {StoredProcedure}. Se usara un update directo como fallback.",
+                StoredProcedureActualizarClasificacionContable);
+
+            await ActualizarClasificacionContableDirectamenteAsync(
+                connection,
+                request,
+                usuario,
+                cancellationToken);
+        }
 
         var movimientoActualizado = await GetMovimientoByIdAsync(connection, request.IdMovimientoBanco, cancellationToken);
         if (movimientoActualizado is null)
@@ -649,6 +698,122 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
         return BuildConciliacionRegistroActualizado(
             movimientoActualizado,
             movimientoActualizado.Comentario);
+    }
+
+    private async Task ActualizarClasificacionContableDirectamenteAsync(
+        IDbConnection connection,
+        ConciliacionBcpActualizarClasificacionRequestDto request,
+        string? usuario,
+        CancellationToken cancellationToken)
+    {
+        using var transaction = connection.BeginTransaction();
+
+        var movimientoExiste = await connection.ExecuteScalarAsync<int>(
+            new CommandDefinition(
+                """
+                SELECT CASE WHEN EXISTS (
+                    SELECT 1
+                    FROM dbo.MovimientosBcp WITH (UPDLOCK, HOLDLOCK)
+                    WHERE IdMovimientoBanco = @IdMovimientoBanco
+                      AND IdActivo = 1
+                ) THEN 1 ELSE 0 END;
+                """,
+                new { request.IdMovimientoBanco },
+                transaction: transaction,
+                commandType: CommandType.Text,
+                cancellationToken: cancellationToken));
+
+        if (movimientoExiste == 0)
+        {
+            throw new InvalidOperationException("El movimiento bancario no existe o no se encuentra activo.");
+        }
+
+        var reglaExiste = await connection.ExecuteScalarAsync<int>(
+            new CommandDefinition(
+                """
+                SELECT CASE WHEN EXISTS (
+                    SELECT 1
+                    FROM dbo.ConciliacionReglaContable
+                    WHERE IdReglaContable = @IdReglaContable
+                      AND IdActivo = 1
+                ) THEN 1 ELSE 0 END;
+                """,
+                new { request.IdReglaContable },
+                transaction: transaction,
+                commandType: CommandType.Text,
+                cancellationToken: cancellationToken));
+
+        if (reglaExiste == 0)
+        {
+            throw new InvalidOperationException("La regla contable no existe o no se encuentra activa.");
+        }
+
+        var reglaCoincide = await connection.ExecuteScalarAsync<int>(
+            new CommandDefinition(
+                """
+                SELECT CASE WHEN EXISTS (
+                    SELECT 1
+                    FROM dbo.ConciliacionReglaContable
+                    WHERE IdReglaContable = @IdReglaContable
+                      AND IdAreaFlujo = @IdAreaFlujo
+                      AND IdReferencia = @IdReferencia
+                      AND IdCuentaContable = @IdCuentaContable
+                      AND IdActivo = 1
+                ) THEN 1 ELSE 0 END;
+                """,
+                new
+                {
+                    request.IdReglaContable,
+                    request.IdAreaFlujo,
+                    request.IdReferencia,
+                    request.IdCuentaContable
+                },
+                transaction: transaction,
+                commandType: CommandType.Text,
+                cancellationToken: cancellationToken));
+
+        if (reglaCoincide == 0)
+        {
+            throw new InvalidOperationException("La regla contable no corresponde a la combinacion Area Flujo + Referencia + Cuenta Contable.");
+        }
+
+        await connection.ExecuteAsync(
+            new CommandDefinition(
+                """
+                UPDATE dbo.MovimientosBcp
+                SET IdAreaFlujo = @IdAreaFlujo,
+                    IdReferencia = @IdReferencia,
+                    IdCuentaContable = @IdCuentaContable,
+                    IdReglaContable = @IdReglaContable,
+                    EsConciliado = 1,
+                    EstadoConciliacion = 'CONCILIADO',
+                    FechaConciliacion = GETDATE(),
+                    UsuarioConciliacion = LTRIM(RTRIM(ISNULL(@UsuarioConciliacion, ''))),
+                    ObservacionConciliacion = NULLIF(LTRIM(RTRIM(@ObservacionConciliacion)), '')
+                WHERE IdMovimientoBanco = @IdMovimientoBanco
+                  AND IdActivo = 1;
+                """,
+                new
+                {
+                    request.IdMovimientoBanco,
+                    request.IdAreaFlujo,
+                    request.IdReferencia,
+                    request.IdCuentaContable,
+                    request.IdReglaContable,
+                    UsuarioConciliacion = string.IsNullOrWhiteSpace(usuario) ? "sistema" : usuario.Trim(),
+                    ObservacionConciliacion = NullIfWhiteSpace(request.ObservacionConciliacion)
+                },
+                transaction: transaction,
+                commandType: CommandType.Text,
+                commandTimeout: 120,
+                cancellationToken: cancellationToken));
+
+        transaction.Commit();
+    }
+
+    private static bool IsMissingStoredProcedure(SqlException exception)
+    {
+        return exception.Number == 2812;
     }
 
     private async Task<MovimientoBcpBusquedaRow?> GetMovimientoByIdAsync(

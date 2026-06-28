@@ -16,6 +16,8 @@ import type {
   ConciliacionBcpConciliarPlanillaResponse,
   ConciliacionBcpConciliarPlanillaRegistro,
   ConciliacionBcpExportResponse,
+  ConciliacionCuentaContableOption,
+  ConciliacionReferenciaOption,
   ConciliacionReglaContableOption,
   ParsedConciliacionExcelFile,
 } from "../../models/conciliacionBcp";
@@ -83,6 +85,22 @@ type ConciliacionExecutiveSelection = {
   moneda: string | null;
   resultado: string | null;
 };
+type ConciliacionPlanillaTab = "revision" | "ejecutivo" | "detalle";
+type ConciliacionRevisionFilters = {
+  areaFlujo: string;
+  referencia: string;
+  empresa: string;
+  banco: string;
+  system: string;
+  cliente: string;
+  periodo: string;
+};
+type ConciliacionRevisionResumen = {
+  resumen: string;
+  saldoMn: number;
+  saldoMe: number;
+  totalMn: number;
+};
 
 type ConciliacionClasificacionForm = {
   idMovimientoBanco: number;
@@ -131,6 +149,15 @@ const DEFAULT_CONCILIACION_FILTERS: ConciliacionFilterState = {
   correlativoPlanilla: "",
 };
 const EMPTY_CONCILIACION_FILTER_VALUE = "__EMPTY__";
+const DEFAULT_CONCILIACION_REVISION_FILTERS: ConciliacionRevisionFilters = {
+  areaFlujo: "",
+  referencia: "",
+  empresa: "",
+  banco: "",
+  system: "",
+  cliente: "",
+  periodo: "",
+};
 
 const MOVIMIENTOS_ORDENADOS_COLUMNS = [
   "Empresa",
@@ -611,6 +638,42 @@ function formatDateValue(value?: string | null): string {
   return `${day}/${month}/${year}`;
 }
 
+function isMonedaMn(value?: string | null): boolean {
+  const moneda = (value ?? "").trim().toUpperCase();
+  return moneda === "MN" || moneda === "PEN" || moneda === "SOLES" || moneda === "SOL";
+}
+
+function getRevisionSystemLabel(row: ConciliacionBcpConciliarPlanillaRegistro): string {
+  return row.idRegistroPlanilla || row.tipoCoincidencia ? "SISTEMA" : "NO CARGADO";
+}
+
+function getRevisionPeriodoLabel(value?: string | null): string {
+  if (!value) {
+    return "";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function getRevisionResumenLabel(row: ConciliacionBcpConciliarPlanillaRegistro): string {
+  if (row.cuentaContableTexto?.trim()) {
+    return row.cuentaContableTexto.trim();
+  }
+
+  return "SIN CUENTA CONTABLE";
+}
+
+function getDistinctSortedValues(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean))).sort((left, right) =>
+    left.localeCompare(right, "es", { sensitivity: "base", numeric: true })
+  );
+}
+
 async function fileToBase64(file: File): Promise<string> {
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
@@ -723,6 +786,16 @@ export default function ConciliacionBcpPage() {
   const [conciliacionPlanilla, setConciliacionPlanilla] = useState<ConciliacionBcpConciliarPlanillaResponse | null>(null);
   const [comentarioDrafts, setComentarioDrafts] = useState<Record<number, string>>({});
   const [comentarioSavingIds, setComentarioSavingIds] = useState<Record<number, boolean>>({});
+  const [areaFlujoDrafts, setAreaFlujoDrafts] = useState<Record<number, string>>({});
+  const [areaFlujoSavingIds, setAreaFlujoSavingIds] = useState<Record<number, boolean>>({});
+  const [referenciaDrafts, setReferenciaDrafts] = useState<Record<number, string>>({});
+  const [referenciaSavingIds, setReferenciaSavingIds] = useState<Record<number, boolean>>({});
+  const [cuentaContableDrafts, setCuentaContableDrafts] = useState<Record<number, string>>({});
+  const [cuentaContableSavingIds, setCuentaContableSavingIds] = useState<Record<number, boolean>>({});
+  const [revisionFilters, setRevisionFilters] = useState<ConciliacionRevisionFilters>(
+    DEFAULT_CONCILIACION_REVISION_FILTERS
+  );
+  const [conciliacionPlanillaTab, setConciliacionPlanillaTab] = useState<ConciliacionPlanillaTab>("revision");
   const [isResultadoFilterOpen, setIsResultadoFilterOpen] = useState(false);
   const [clasificacionCombos, setClasificacionCombos] = useState<ConciliacionBcpClasificacionCombosResponse | null>(null);
   const [clasificacionCombosLoading, setClasificacionCombosLoading] = useState(false);
@@ -915,6 +988,83 @@ export default function ConciliacionBcpPage() {
       registrosSinTotalPagar,
     };
   }, [filteredConciliacionRegistros]);
+  const revisionFilterOptions = useMemo(() => {
+    const registros = conciliacionPlanilla?.registros ?? [];
+
+    return {
+      areaFlujo: getDistinctSortedValues(registros.map((row) => row.nombreAreaFlujo?.trim() ?? "")),
+      referencia: getDistinctSortedValues(registros.map((row) => getReferenciaLabel(row).trim())),
+      empresa: getDistinctSortedValues(registros.map((row) => row.empresa?.trim() ?? "")),
+      banco: getDistinctSortedValues(registros.map((row) => row.bancoPlanilla?.trim() ?? "")),
+      system: getDistinctSortedValues(registros.map((row) => getRevisionSystemLabel(row))),
+      cliente: getDistinctSortedValues(registros.map((row) => row.clientePlanilla?.trim() ?? "")),
+      periodo: getDistinctSortedValues(registros.map((row) => getRevisionPeriodoLabel(row.fecha))),
+    };
+  }, [conciliacionPlanilla?.registros]);
+  const revisionFilteredRows = useMemo(() => {
+    const registros = conciliacionPlanilla?.registros ?? [];
+
+    return registros.filter((row) => {
+      const matchesAreaFlujo =
+        !revisionFilters.areaFlujo || (row.nombreAreaFlujo?.trim() ?? "") === revisionFilters.areaFlujo;
+      const matchesReferencia =
+        !revisionFilters.referencia || getReferenciaLabel(row).trim() === revisionFilters.referencia;
+      const matchesEmpresa = !revisionFilters.empresa || (row.empresa?.trim() ?? "") === revisionFilters.empresa;
+      const matchesBanco = !revisionFilters.banco || (row.bancoPlanilla?.trim() ?? "") === revisionFilters.banco;
+      const matchesSystem = !revisionFilters.system || getRevisionSystemLabel(row) === revisionFilters.system;
+      const matchesCliente = !revisionFilters.cliente || (row.clientePlanilla?.trim() ?? "") === revisionFilters.cliente;
+      const matchesPeriodo = !revisionFilters.periodo || getRevisionPeriodoLabel(row.fecha) === revisionFilters.periodo;
+
+      return (
+        matchesAreaFlujo &&
+        matchesReferencia &&
+        matchesEmpresa &&
+        matchesBanco &&
+        matchesSystem &&
+        matchesCliente &&
+        matchesPeriodo
+      );
+    });
+  }, [conciliacionPlanilla?.registros, revisionFilters]);
+  const revisionResumenRows = useMemo(() => {
+    const grouped = new Map<string, ConciliacionRevisionResumen>();
+
+    revisionFilteredRows.forEach((row) => {
+      const resumen = getRevisionResumenLabel(row);
+      const current =
+        grouped.get(resumen) ??
+        {
+          resumen,
+          saldoMn: 0,
+          saldoMe: 0,
+          totalMn: 0,
+        };
+      const monto = row.monto ?? 0;
+
+      if (isMonedaMn(row.moneda)) {
+        current.saldoMn += monto;
+      } else {
+        current.saldoMe += monto;
+      }
+
+      current.totalMn += monto;
+      grouped.set(resumen, current);
+    });
+
+    return Array.from(grouped.values()).sort((left, right) =>
+      left.resumen.localeCompare(right.resumen, "es", { sensitivity: "base", numeric: true })
+    );
+  }, [revisionFilteredRows]);
+  const revisionResumenTotals = useMemo(() => {
+    return revisionResumenRows.reduce(
+      (accumulator, item) => ({
+        saldoMn: accumulator.saldoMn + item.saldoMn,
+        saldoMe: accumulator.saldoMe + item.saldoMe,
+        totalMn: accumulator.totalMn + item.totalMn,
+      }),
+      { saldoMn: 0, saldoMe: 0, totalMn: 0 }
+    );
+  }, [revisionResumenRows]);
   const executiveSelectionLabel = conciliacionExecutiveSelection.resultado
     ? `${conciliacionExecutiveSelection.moneda ?? "Sin moneda"} | ${conciliacionExecutiveSelection.resultado}`
     : conciliacionExecutiveSelection.moneda;
@@ -1141,15 +1291,452 @@ export default function ConciliacionBcpPage() {
     setIsResultadoFilterOpen(false);
   };
 
-  const openClasificacionModal = (row: ConciliacionBcpConciliarPlanillaRegistro) => {
-    setClasificacionModal({
-      idMovimientoBanco: row.idMovimientoBanco,
-      idAreaFlujo: row.idAreaFlujo ? String(row.idAreaFlujo) : "",
-      idReferencia: row.idReferencia ? String(row.idReferencia) : "",
-      idCuentaContable: row.idCuentaContable ? String(row.idCuentaContable) : "",
-      idReglaContable: row.idReglaContable ? String(row.idReglaContable) : "",
-      observacionConciliacion: row.observacionConciliacionMovimiento ?? "",
-    });
+  const resolveClasificacionInlineSelection = (
+    row: ConciliacionBcpConciliarPlanillaRegistro,
+    nextIdAreaFlujo: number,
+    nextIdReferencia?: number | null
+  ) => {
+    const areasFlujo = clasificacionCombos?.areasFlujo ?? [];
+    const referencias = clasificacionCombos?.referencias ?? [];
+    const cuentasContables = clasificacionCombos?.cuentasContables ?? [];
+    const reglasContables = clasificacionCombos?.reglasContables ?? [];
+
+    if (areasFlujo.length === 0 || referencias.length === 0 || cuentasContables.length === 0 || reglasContables.length === 0) {
+      return null;
+    }
+
+    const reglasPorArea = reglasContables.filter((rule) => rule.idAreaFlujo === nextIdAreaFlujo);
+    if (reglasPorArea.length === 0) {
+      return null;
+    }
+
+    const referenciasValidas = new Set(reglasPorArea.map((rule) => rule.idReferencia));
+    const referenciaSeleccionada = nextIdReferencia && referenciasValidas.has(nextIdReferencia)
+      ? nextIdReferencia
+      : row.idReferencia && referenciasValidas.has(row.idReferencia)
+        ? row.idReferencia
+        : referencias.find((item) => referenciasValidas.has(item.idReferencia))?.idReferencia ?? null;
+
+    if (!referenciaSeleccionada) {
+      return null;
+    }
+
+    const reglasPorAreaYReferencia = reglasPorArea.filter((rule) => rule.idReferencia === referenciaSeleccionada);
+    if (reglasPorAreaYReferencia.length === 0) {
+      return null;
+    }
+
+    const cuentasValidas = new Set(reglasPorAreaYReferencia.map((rule) => rule.idCuentaContable));
+    const cuentaSeleccionada =
+      row.idCuentaContable && reglasPorAreaYReferencia.some((rule) => rule.idCuentaContable === row.idCuentaContable)
+        ? row.idCuentaContable
+        : cuentasContables.find((item) => cuentasValidas.has(item.idCuentaContable))?.idCuentaContable ?? null;
+
+    if (!cuentaSeleccionada) {
+      return null;
+    }
+
+    const reglasFinales = reglasPorAreaYReferencia.filter((rule) => rule.idCuentaContable === cuentaSeleccionada);
+    const reglaSeleccionada =
+      row.idReglaContable && reglasFinales.some((rule) => rule.idReglaContable === row.idReglaContable)
+        ? row.idReglaContable
+        : reglasFinales[0]?.idReglaContable ?? null;
+
+    if (!reglaSeleccionada) {
+      return null;
+    }
+
+    return {
+      idAreaFlujo: nextIdAreaFlujo,
+      idReferencia: referenciaSeleccionada,
+      idCuentaContable: cuentaSeleccionada,
+      idReglaContable: reglaSeleccionada,
+    };
+  };
+
+  const getReferenciasClasificacionInlineDisponibles = (idAreaFlujo?: number | null) => {
+    if (!idAreaFlujo) {
+      return [] as ConciliacionReferenciaOption[];
+    }
+
+    const referencias = clasificacionCombos?.referencias ?? [];
+    const reglas = clasificacionCombos?.reglasContables ?? [];
+    const referenciasValidas = new Set(
+      reglas.filter((rule) => rule.idAreaFlujo === idAreaFlujo).map((rule) => rule.idReferencia)
+    );
+
+    return referencias.filter((item) => referenciasValidas.has(item.idReferencia));
+  };
+
+  const getCuentasClasificacionInlineDisponibles = (
+    idAreaFlujo?: number | null,
+    idReferencia?: number | null
+  ) => {
+    if (!idAreaFlujo || !idReferencia) {
+      return [] as ConciliacionCuentaContableOption[];
+    }
+
+    const cuentas = clasificacionCombos?.cuentasContables ?? [];
+    const reglas = clasificacionCombos?.reglasContables ?? [];
+    const cuentasValidas = new Set(
+      reglas
+        .filter((rule) => rule.idAreaFlujo === idAreaFlujo && rule.idReferencia === idReferencia)
+        .map((rule) => rule.idCuentaContable)
+    );
+
+    return cuentas.filter((item) => cuentasValidas.has(item.idCuentaContable));
+  };
+
+  const handleAreaFlujoInlineChange = async (row: ConciliacionBcpConciliarPlanillaRegistro, value: string) => {
+    const nextIdAreaFlujo = Number(value);
+    const currentValue = row.idAreaFlujo ? String(row.idAreaFlujo) : "";
+
+    if (!value || value === currentValue || Number.isNaN(nextIdAreaFlujo) || nextIdAreaFlujo <= 0) {
+      setAreaFlujoDrafts((current) => {
+        if (!current[row.idMovimientoBanco]) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[row.idMovimientoBanco];
+        return next;
+      });
+      return;
+    }
+
+    const resolvedSelection = resolveClasificacionInlineSelection(row, nextIdAreaFlujo);
+    if (!resolvedSelection) {
+      setError("No se pudo resolver una clasificacion valida para el Area Flujo seleccionado.");
+      return;
+    }
+
+    setAreaFlujoDrafts((current) => ({
+      ...current,
+      [row.idMovimientoBanco]: value,
+    }));
+    setAreaFlujoSavingIds((current) => ({
+      ...current,
+      [row.idMovimientoBanco]: true,
+    }));
+    setError("");
+    setMessage("");
+
+    try {
+      const updated = await actualizarClasificacionMovimientoConciliacionBcp({
+        idMovimientoBanco: row.idMovimientoBanco,
+        idAreaFlujo: resolvedSelection.idAreaFlujo,
+        idReferencia: resolvedSelection.idReferencia,
+        idCuentaContable: resolvedSelection.idCuentaContable,
+        idReglaContable: resolvedSelection.idReglaContable,
+        observacionConciliacion: row.observacionConciliacionMovimiento?.trim() || null,
+      });
+
+      setConciliacionPlanilla((current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          ...current,
+          registros: current.registros.map((item) =>
+            item.idMovimientoBanco === updated.idMovimientoBanco ? { ...item, ...updated } : item
+          ),
+        };
+      });
+
+      setMessage("Area Flujo actualizada correctamente.");
+    } catch (updateError) {
+      setError(getHttpErrorMessage(updateError, "No se pudo actualizar el Area Flujo del movimiento."));
+    } finally {
+      setAreaFlujoDrafts((current) => {
+        if (!current[row.idMovimientoBanco]) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[row.idMovimientoBanco];
+        return next;
+      });
+
+      setAreaFlujoSavingIds((current) => ({
+        ...current,
+        [row.idMovimientoBanco]: false,
+      }));
+
+      setReferenciaDrafts((current) => {
+        if (!current[row.idMovimientoBanco]) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[row.idMovimientoBanco];
+        return next;
+      });
+
+      setCuentaContableDrafts((current) => {
+        if (!current[row.idMovimientoBanco]) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[row.idMovimientoBanco];
+        return next;
+      });
+    }
+  };
+
+  const handleReferenciaInlineChange = async (row: ConciliacionBcpConciliarPlanillaRegistro, value: string) => {
+    const nextIdReferencia = Number(value);
+    const currentValue = row.idReferencia ? String(row.idReferencia) : "";
+
+    if (!row.idAreaFlujo || !value || value === currentValue || Number.isNaN(nextIdReferencia) || nextIdReferencia <= 0) {
+      setReferenciaDrafts((current) => {
+        if (!current[row.idMovimientoBanco]) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[row.idMovimientoBanco];
+        return next;
+      });
+      return;
+    }
+
+    const resolvedSelection = resolveClasificacionInlineSelection(row, row.idAreaFlujo, nextIdReferencia);
+    if (!resolvedSelection) {
+      setError("No se pudo resolver una clasificacion valida para la Referencia seleccionada.");
+      return;
+    }
+
+    setReferenciaDrafts((current) => ({
+      ...current,
+      [row.idMovimientoBanco]: value,
+    }));
+    setReferenciaSavingIds((current) => ({
+      ...current,
+      [row.idMovimientoBanco]: true,
+    }));
+    setError("");
+    setMessage("");
+
+    try {
+      const updated = await actualizarClasificacionMovimientoConciliacionBcp({
+        idMovimientoBanco: row.idMovimientoBanco,
+        idAreaFlujo: resolvedSelection.idAreaFlujo,
+        idReferencia: resolvedSelection.idReferencia,
+        idCuentaContable: resolvedSelection.idCuentaContable,
+        idReglaContable: resolvedSelection.idReglaContable,
+        observacionConciliacion: row.observacionConciliacionMovimiento?.trim() || null,
+      });
+
+      setConciliacionPlanilla((current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          ...current,
+          registros: current.registros.map((item) =>
+            item.idMovimientoBanco === updated.idMovimientoBanco ? { ...item, ...updated } : item
+          ),
+        };
+      });
+
+      setMessage("Referencia actualizada correctamente.");
+    } catch (updateError) {
+      setError(getHttpErrorMessage(updateError, "No se pudo actualizar la Referencia del movimiento."));
+    } finally {
+      setReferenciaDrafts((current) => {
+        if (!current[row.idMovimientoBanco]) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[row.idMovimientoBanco];
+        return next;
+      });
+
+      setReferenciaSavingIds((current) => ({
+        ...current,
+        [row.idMovimientoBanco]: false,
+      }));
+
+      setCuentaContableDrafts((current) => {
+        if (!current[row.idMovimientoBanco]) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[row.idMovimientoBanco];
+        return next;
+      });
+    }
+  };
+
+  const handleCuentaContableInlineChange = async (row: ConciliacionBcpConciliarPlanillaRegistro, value: string) => {
+    const nextIdCuentaContable = Number(value);
+    const currentValue = row.idCuentaContable ? String(row.idCuentaContable) : "";
+
+    if (
+      !row.idAreaFlujo ||
+      !row.idReferencia ||
+      !value ||
+      value === currentValue ||
+      Number.isNaN(nextIdCuentaContable) ||
+      nextIdCuentaContable <= 0
+    ) {
+      setCuentaContableDrafts((current) => {
+        if (!current[row.idMovimientoBanco]) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[row.idMovimientoBanco];
+        return next;
+      });
+      return;
+    }
+
+    const resolvedSelection = resolveClasificacionInlineSelection(row, row.idAreaFlujo, row.idReferencia);
+    if (!resolvedSelection || resolvedSelection.idCuentaContable !== nextIdCuentaContable) {
+      const reglasContables = clasificacionCombos?.reglasContables ?? [];
+      const reglasPermitidas = reglasContables.filter(
+        (rule) =>
+          rule.idAreaFlujo === row.idAreaFlujo &&
+          rule.idReferencia === row.idReferencia &&
+          rule.idCuentaContable === nextIdCuentaContable
+      );
+
+      if (reglasPermitidas.length === 0) {
+        setError("No se pudo resolver una clasificacion valida para la Cuenta Contable seleccionada.");
+        return;
+      }
+
+      const resolvedByCuenta = resolveClasificacionInlineSelection(row, row.idAreaFlujo, row.idReferencia);
+      if (!resolvedByCuenta || resolvedByCuenta.idCuentaContable !== nextIdCuentaContable) {
+        const reglaSeleccionada = reglasPermitidas[0];
+        const finalSelection = {
+          idAreaFlujo: row.idAreaFlujo,
+          idReferencia: row.idReferencia,
+          idCuentaContable: nextIdCuentaContable,
+          idReglaContable: reglaSeleccionada.idReglaContable,
+        };
+
+        setCuentaContableDrafts((current) => ({
+          ...current,
+          [row.idMovimientoBanco]: value,
+        }));
+        setCuentaContableSavingIds((current) => ({
+          ...current,
+          [row.idMovimientoBanco]: true,
+        }));
+        setError("");
+        setMessage("");
+
+        try {
+          const updated = await actualizarClasificacionMovimientoConciliacionBcp({
+            idMovimientoBanco: row.idMovimientoBanco,
+            idAreaFlujo: finalSelection.idAreaFlujo,
+            idReferencia: finalSelection.idReferencia,
+            idCuentaContable: finalSelection.idCuentaContable,
+            idReglaContable: finalSelection.idReglaContable,
+            observacionConciliacion: row.observacionConciliacionMovimiento?.trim() || null,
+          });
+
+          setConciliacionPlanilla((current) => {
+            if (!current) {
+              return current;
+            }
+
+            return {
+              ...current,
+              registros: current.registros.map((item) =>
+                item.idMovimientoBanco === updated.idMovimientoBanco ? { ...item, ...updated } : item
+              ),
+            };
+          });
+
+          setMessage("Cuenta Contable actualizada correctamente.");
+        } catch (updateError) {
+          setError(getHttpErrorMessage(updateError, "No se pudo actualizar la Cuenta Contable del movimiento."));
+        } finally {
+          setCuentaContableDrafts((current) => {
+            if (!current[row.idMovimientoBanco]) {
+              return current;
+            }
+
+            const next = { ...current };
+            delete next[row.idMovimientoBanco];
+            return next;
+          });
+
+          setCuentaContableSavingIds((current) => ({
+            ...current,
+            [row.idMovimientoBanco]: false,
+          }));
+        }
+
+        return;
+      }
+    }
+
+    if (!resolvedSelection) {
+      return;
+    }
+
+    setCuentaContableDrafts((current) => ({
+      ...current,
+      [row.idMovimientoBanco]: value,
+    }));
+    setCuentaContableSavingIds((current) => ({
+      ...current,
+      [row.idMovimientoBanco]: true,
+    }));
+    setError("");
+    setMessage("");
+
+    try {
+      const updated = await actualizarClasificacionMovimientoConciliacionBcp({
+        idMovimientoBanco: row.idMovimientoBanco,
+        idAreaFlujo: row.idAreaFlujo,
+        idReferencia: row.idReferencia,
+        idCuentaContable: nextIdCuentaContable,
+        idReglaContable: resolvedSelection.idReglaContable,
+        observacionConciliacion: row.observacionConciliacionMovimiento?.trim() || null,
+      });
+
+      setConciliacionPlanilla((current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          ...current,
+          registros: current.registros.map((item) =>
+            item.idMovimientoBanco === updated.idMovimientoBanco ? { ...item, ...updated } : item
+          ),
+        };
+      });
+
+      setMessage("Cuenta Contable actualizada correctamente.");
+    } catch (updateError) {
+      setError(getHttpErrorMessage(updateError, "No se pudo actualizar la Cuenta Contable del movimiento."));
+    } finally {
+      setCuentaContableDrafts((current) => {
+        if (!current[row.idMovimientoBanco]) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[row.idMovimientoBanco];
+        return next;
+      });
+
+      setCuentaContableSavingIds((current) => ({
+        ...current,
+        [row.idMovimientoBanco]: false,
+      }));
+    }
   };
 
   const closeClasificacionModal = () => {
@@ -1204,8 +1791,10 @@ export default function ConciliacionBcpPage() {
 
     setConciliacionPlanilla(response);
     setIsConciliacionExpanded(false);
+    setConciliacionPlanillaTab("revision");
     setConciliacionSort(null);
     setConciliacionGridFilters(DEFAULT_CONCILIACION_FILTERS);
+    setRevisionFilters(DEFAULT_CONCILIACION_REVISION_FILTERS);
 
     if (!options?.preserveMessage) {
       setMessage(response.resumen || "Conciliacion ejecutada correctamente.");
@@ -1654,8 +2243,10 @@ export default function ConciliacionBcpPage() {
     setAnalysis(null);
     setConciliacionPlanilla(null);
     setIsConciliacionExpanded(false);
+    setConciliacionPlanillaTab("revision");
     setConciliacionSort(null);
     setConciliacionGridFilters(DEFAULT_CONCILIACION_FILTERS);
+    setRevisionFilters(DEFAULT_CONCILIACION_REVISION_FILTERS);
     setError("");
     setMessage("");
     setDragActive(false);
@@ -2186,115 +2777,238 @@ export default function ConciliacionBcpPage() {
             <SummaryCard label="Sin coincid." value={String(conciliacionPlanilla.sinCoincidencia)} />
           </div>
 
-            <div style={styles.executiveBoard}>
-              <div style={styles.executiveBoardHeader}>
-                <div>
-                  <div style={styles.executiveBoardTitle}>Resumen grafico ejecutivo</div>
-                  <div style={styles.executiveBoardText}>
-                    TotalPagar agrupado por moneda y resultado sobre los registros visibles en la tabla.
-                  </div>
-                </div>
-                <div style={styles.executiveBoardMeta}>
-                  Con TotalPagar: {conciliacionResumenEjecutivo.registrosConTotalPagar} | Sin TotalPagar:{" "}
-                  {conciliacionResumenEjecutivo.registrosSinTotalPagar}
-                </div>
-              </div>
-
-              {conciliacionResumenEjecutivo.monedas.length > 0 ? (
-                <div style={styles.executiveCurrencyGrid}>
-                  {conciliacionResumenEjecutivo.monedas.map((monedaResumen) => {
-                    const maxAbs = Math.max(...monedaResumen.resultados.map((item) => Math.abs(item.totalPagar)), 1);
-
-                    return (
-                      <div
-                        key={monedaResumen.moneda}
-                        onClick={() => handleExecutiveCurrencyClick(monedaResumen.moneda)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            handleExecutiveCurrencyClick(monedaResumen.moneda);
-                          }
-                        }}
-                        role="button"
-                        tabIndex={0}
-                        style={{
-                          ...styles.executiveCurrencyCard,
-                          ...(conciliacionExecutiveSelection.moneda === monedaResumen.moneda &&
-                          conciliacionExecutiveSelection.resultado === null
-                            ? styles.executiveCurrencyCardActive
-                            : null),
-                        }}
-                      >
-                        <div style={styles.executiveCurrencyHeader}>
-                          <div>
-                            <div style={styles.executiveCurrencyBadge}>{monedaResumen.moneda}</div>
-                            <div style={styles.executiveCurrencyTotal}>{formatNumber(monedaResumen.totalPagar)}</div>
-                          </div>
-                          <div style={styles.executiveCurrencyCount}>{monedaResumen.cantidad} registro(s)</div>
-                        </div>
-
-                        <div style={styles.executiveBars}>
-                          {monedaResumen.resultados.map((resultadoResumen) => (
-                            <button
-                              key={`${monedaResumen.moneda}-${resultadoResumen.resultado}`}
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                handleExecutiveResultClick(monedaResumen.moneda, resultadoResumen.resultado);
-                              }}
-                              style={{
-                                ...styles.executiveBarButton,
-                                ...(conciliacionExecutiveSelection.moneda === monedaResumen.moneda &&
-                                conciliacionExecutiveSelection.resultado === resultadoResumen.resultado
-                                  ? styles.executiveBarButtonActive
-                                  : null),
-                              }}
-                            >
-                              <div style={styles.executiveBarRow}>
-                                <div style={styles.executiveBarHeader}>
-                                  <span style={styles.executiveBarLabel}>{resultadoResumen.resultado}</span>
-                                  <span style={styles.executiveBarValue}>{formatNumber(resultadoResumen.totalPagar)}</span>
-                                </div>
-                                <div style={styles.executiveBarTrack}>
-                                  <div
-                                    style={{
-                                      ...styles.executiveBarFill,
-                                      width: `${Math.max((Math.abs(resultadoResumen.totalPagar) / maxAbs) * 100, 6)}%`,
-                                      background: getResultadoChartColor(resultadoResumen.resultado),
-                                    }}
-                                  />
-                                </div>
-                                <div style={styles.executiveBarFoot}>{resultadoResumen.cantidad} registro(s)</div>
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div style={styles.helperText}>
-                  No hay registros visibles con `TotalPagar` para construir el resumen grafico.
-                </div>
-              )}
-            </div>
-
-            <div style={styles.mappingTableWrap}>
-              <div style={styles.gridToolbar}>
-                <div style={styles.gridToolbarInfo}>
-                  <div style={styles.gridToolbarText}>
-                    Filtra por cualquier valor visible en la tabla principal.
-                  </div>
-                  <div style={styles.gridToolbarCount}>
-                    Registros: {executiveFilteredConciliacionRegistros.length} de {totalConciliacionRegistros}
-                    {executiveSelectionLabel ? ` | Ejecutivo: ${executiveSelectionLabel}` : ""}
-                  </div>
-                </div>
-                <button type="button" style={styles.gridToolbarButton} onClick={handleClearConciliacionFilters}>
-                  Limpiar filtros
+              <div style={styles.planillaTabs}>
+                <button
+                  type="button"
+                  style={{
+                    ...styles.planillaTabButton,
+                    ...(conciliacionPlanillaTab === "revision" ? styles.planillaTabButtonActive : null),
+                  }}
+                  onClick={() => setConciliacionPlanillaTab("revision")}
+                >
+                  Reporte revision
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    ...styles.planillaTabButton,
+                    ...(conciliacionPlanillaTab === "ejecutivo" ? styles.planillaTabButtonActive : null),
+                  }}
+                  onClick={() => setConciliacionPlanillaTab("ejecutivo")}
+                >
+                  Resumen grafico ejecutivo
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    ...styles.planillaTabButton,
+                    ...(conciliacionPlanillaTab === "detalle" ? styles.planillaTabButtonActive : null),
+                  }}
+                  onClick={() => setConciliacionPlanillaTab("detalle")}
+                >
+                  Detalle
                 </button>
               </div>
+
+              {conciliacionPlanillaTab === "revision" ? (
+                <div style={styles.revisionBoard}>
+                  <div style={styles.revisionHeader}>
+                    <div>
+                      <div style={styles.revisionTitle}>Reporte revision</div>
+                      <div style={styles.revisionText}>
+                        Resumen relacionado con conciliacion planilla, agrupado por cuenta contable y filtrable por las dimensiones principales.
+                      </div>
+                    </div>
+                    <div style={styles.revisionMeta}>
+                      Registros visibles: {revisionFilteredRows.length} | Resumenes: {revisionResumenRows.length}
+                    </div>
+                  </div>
+
+                  <div style={styles.revisionFilterGrid}>
+                    {(
+                      [
+                        ["areaFlujo", "AREA_FLUJO"],
+                        ["referencia", "REFERENCIA"],
+                        ["empresa", "EMPRESA"],
+                        ["banco", "BANCO"],
+                        ["system", "SYSTEM"],
+                        ["cliente", "CLIENTE"],
+                        ["periodo", "FECHA"],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <div key={key} style={styles.revisionFilterCard}>
+                        <div style={styles.revisionFilterLabel}>{label}</div>
+                        <select
+                          value={revisionFilters[key]}
+                          onChange={(event) =>
+                            setRevisionFilters((current) => ({
+                              ...current,
+                              [key]: event.target.value,
+                            }))
+                          }
+                          style={styles.revisionFilterSelect}
+                        >
+                          <option value="">Todos</option>
+                          {revisionFilterOptions[key].map((option) => (
+                            <option key={`${key}-${option}`} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={styles.revisionTableWrap}>
+                    <table style={styles.mappingTable}>
+                      <thead>
+                        <tr>
+                          <th style={styles.th}>RESUMEN</th>
+                          <th style={styles.th}>SALDO MN</th>
+                          <th style={styles.th}>SALDO ME</th>
+                          <th style={styles.th}>TOTAL MN</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {revisionResumenRows.length > 0 ? (
+                          <>
+                            {revisionResumenRows.map((item) => (
+                              <tr key={item.resumen}>
+                                <td style={styles.td}>{item.resumen}</td>
+                                <td style={styles.tdNumeric}>{formatNumber(item.saldoMn)}</td>
+                                <td style={styles.tdNumeric}>{formatNumber(item.saldoMe)}</td>
+                                <td style={styles.tdNumericStrong}>{formatNumber(item.totalMn)}</td>
+                              </tr>
+                            ))}
+                            <tr style={styles.revisionTotalRow}>
+                              <td style={styles.tdStrong}>TOTAL</td>
+                              <td style={styles.tdNumericStrong}>{formatNumber(revisionResumenTotals.saldoMn)}</td>
+                              <td style={styles.tdNumericStrong}>{formatNumber(revisionResumenTotals.saldoMe)}</td>
+                              <td style={styles.tdNumericStrong}>{formatNumber(revisionResumenTotals.totalMn)}</td>
+                            </tr>
+                          </>
+                        ) : (
+                          <tr>
+                            <td style={styles.td} colSpan={4}>
+                              No hay datos para el reporte con los filtros actuales.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : conciliacionPlanillaTab === "ejecutivo" ? (
+                <div style={styles.executiveBoard}>
+                  <div style={styles.executiveBoardHeader}>
+                    <div>
+                      <div style={styles.executiveBoardTitle}>Resumen grafico ejecutivo</div>
+                      <div style={styles.executiveBoardText}>
+                        TotalPagar agrupado por moneda y resultado sobre los registros visibles en la tabla.
+                      </div>
+                    </div>
+                    <div style={styles.executiveBoardMeta}>
+                      Con TotalPagar: {conciliacionResumenEjecutivo.registrosConTotalPagar} | Sin TotalPagar:{" "}
+                      {conciliacionResumenEjecutivo.registrosSinTotalPagar}
+                    </div>
+                  </div>
+
+                  {conciliacionResumenEjecutivo.monedas.length > 0 ? (
+                    <div style={styles.executiveCurrencyGrid}>
+                      {conciliacionResumenEjecutivo.monedas.map((monedaResumen) => {
+                        const maxAbs = Math.max(...monedaResumen.resultados.map((item) => Math.abs(item.totalPagar)), 1);
+
+                        return (
+                          <div
+                            key={monedaResumen.moneda}
+                            onClick={() => handleExecutiveCurrencyClick(monedaResumen.moneda)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                handleExecutiveCurrencyClick(monedaResumen.moneda);
+                              }
+                            }}
+                            role="button"
+                            tabIndex={0}
+                            style={{
+                              ...styles.executiveCurrencyCard,
+                              ...(conciliacionExecutiveSelection.moneda === monedaResumen.moneda &&
+                              conciliacionExecutiveSelection.resultado === null
+                                ? styles.executiveCurrencyCardActive
+                                : null),
+                            }}
+                          >
+                            <div style={styles.executiveCurrencyHeader}>
+                              <div>
+                                <div style={styles.executiveCurrencyBadge}>{monedaResumen.moneda}</div>
+                                <div style={styles.executiveCurrencyTotal}>{formatNumber(monedaResumen.totalPagar)}</div>
+                              </div>
+                              <div style={styles.executiveCurrencyCount}>{monedaResumen.cantidad} registro(s)</div>
+                            </div>
+
+                            <div style={styles.executiveBars}>
+                              {monedaResumen.resultados.map((resultadoResumen) => (
+                                <button
+                                  key={`${monedaResumen.moneda}-${resultadoResumen.resultado}`}
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    handleExecutiveResultClick(monedaResumen.moneda, resultadoResumen.resultado);
+                                  }}
+                                  style={{
+                                    ...styles.executiveBarButton,
+                                    ...(conciliacionExecutiveSelection.moneda === monedaResumen.moneda &&
+                                    conciliacionExecutiveSelection.resultado === resultadoResumen.resultado
+                                      ? styles.executiveBarButtonActive
+                                      : null),
+                                  }}
+                                >
+                                  <div style={styles.executiveBarRow}>
+                                    <div style={styles.executiveBarHeader}>
+                                      <span style={styles.executiveBarLabel}>{resultadoResumen.resultado}</span>
+                                      <span style={styles.executiveBarValue}>{formatNumber(resultadoResumen.totalPagar)}</span>
+                                    </div>
+                                    <div style={styles.executiveBarTrack}>
+                                      <div
+                                        style={{
+                                          ...styles.executiveBarFill,
+                                          width: `${Math.max((Math.abs(resultadoResumen.totalPagar) / maxAbs) * 100, 6)}%`,
+                                          background: getResultadoChartColor(resultadoResumen.resultado),
+                                        }}
+                                      />
+                                    </div>
+                                    <div style={styles.executiveBarFoot}>{resultadoResumen.cantidad} registro(s)</div>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div style={styles.helperText}>
+                      No hay registros visibles con `TotalPagar` para construir el resumen grafico.
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div style={styles.mappingTableWrap}>
+                    <div style={styles.gridToolbar}>
+                      <div style={styles.gridToolbarInfo}>
+                        <div style={styles.gridToolbarText}>
+                          Filtra por cualquier valor visible en la tabla principal.
+                        </div>
+                        <div style={styles.gridToolbarCount}>
+                          Registros: {executiveFilteredConciliacionRegistros.length} de {totalConciliacionRegistros}
+                          {executiveSelectionLabel ? ` | Ejecutivo: ${executiveSelectionLabel}` : ""}
+                        </div>
+                      </div>
+                      <button type="button" style={styles.gridToolbarButton} onClick={handleClearConciliacionFilters}>
+                        Limpiar filtros
+                      </button>
+                    </div>
             <table style={styles.mappingTable}>
               <thead>
                 <tr>
@@ -2333,7 +3047,6 @@ export default function ConciliacionBcpPage() {
                   <th style={styles.th}>{renderSortHeader("Serie", "seriePlanilla")}</th>
                   <th style={styles.th}>{renderSortHeader("Detalle", "detallePlanilla")}</th>
                   <th style={styles.th}>{renderSortHeader("Correlativo", "correlativoPlanilla")}</th>
-                  <th style={styles.th}>Accion</th>
                 </tr>
                 <tr>
                   {(
@@ -2477,9 +3190,87 @@ export default function ConciliacionBcpPage() {
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "tareaPlanilla")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "responsablePlanilla")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "comprobantePlanilla")}</td>
-                      <td style={styles.td}>{getConciliacionDisplayValue(row, "areaFlujo") || "PENDIENTE"}</td>
-                      <td style={styles.td}>{getConciliacionDisplayValue(row, "referencia") || "PENDIENTE"}</td>
-                      <td style={styles.td}>{getConciliacionDisplayValue(row, "cuentaContable") || "PENDIENTE"}</td>
+                      <td style={styles.td}>
+                        <div style={styles.inlineEditableCellWrap}>
+                          <select
+                            value={areaFlujoDrafts[row.idMovimientoBanco] ?? (row.idAreaFlujo ? String(row.idAreaFlujo) : "")}
+                            onChange={(event) => void handleAreaFlujoInlineChange(row, event.target.value)}
+                            style={styles.inlineEditableSelect}
+                            disabled={clasificacionCombosLoading || Boolean(areaFlujoSavingIds[row.idMovimientoBanco])}
+                            aria-label={`Editar Area Flujo del movimiento ${row.idMovimientoBanco}`}
+                          >
+                            <option value="">{row.nombreAreaFlujo || "PENDIENTE"}</option>
+                            {(clasificacionCombos?.areasFlujo ?? []).map((option) => (
+                              <option key={option.idAreaFlujo} value={String(option.idAreaFlujo)}>
+                                {option.nombreAreaFlujo}
+                              </option>
+                            ))}
+                          </select>
+                            {areaFlujoSavingIds[row.idMovimientoBanco] ? (
+                              <span style={styles.inlineEditableStatus}>Guardando...</span>
+                            ) : null}
+                        </div>
+                      </td>
+                      <td style={styles.td}>
+                        <div style={styles.inlineEditableCellWrap}>
+                          <select
+                            value={referenciaDrafts[row.idMovimientoBanco] ?? (row.idReferencia ? String(row.idReferencia) : "")}
+                            onChange={(event) => void handleReferenciaInlineChange(row, event.target.value)}
+                            style={styles.inlineEditableSelect}
+                            disabled={
+                              clasificacionCombosLoading ||
+                              Boolean(referenciaSavingIds[row.idMovimientoBanco]) ||
+                              !row.idAreaFlujo ||
+                              getReferenciasClasificacionInlineDisponibles(row.idAreaFlujo).length === 0
+                            }
+                            aria-label={`Editar Referencia del movimiento ${row.idMovimientoBanco}`}
+                          >
+                            <option value="">{getReferenciaLabel(row) || "PENDIENTE"}</option>
+                            {getReferenciasClasificacionInlineDisponibles(row.idAreaFlujo).map((option) => (
+                              <option key={option.idReferencia} value={String(option.idReferencia)}>
+                                {option.codigoReferencia} - {option.nombreReferencia}
+                              </option>
+                            ))}
+                          </select>
+                          {referenciaSavingIds[row.idMovimientoBanco] ? (
+                            <span style={styles.inlineEditableStatus}>Guardando...</span>
+                          ) : !row.idAreaFlujo ? (
+                            <span style={styles.inlineEditableStatus}>Depende de Area Flujo</span>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td style={styles.td}>
+                        <div style={styles.inlineEditableCellWrap}>
+                          <select
+                            value={
+                              cuentaContableDrafts[row.idMovimientoBanco] ??
+                              (row.idCuentaContable ? String(row.idCuentaContable) : "")
+                            }
+                            onChange={(event) => void handleCuentaContableInlineChange(row, event.target.value)}
+                            style={styles.inlineEditableSelect}
+                            disabled={
+                              clasificacionCombosLoading ||
+                              Boolean(cuentaContableSavingIds[row.idMovimientoBanco]) ||
+                              !row.idAreaFlujo ||
+                              !row.idReferencia ||
+                              getCuentasClasificacionInlineDisponibles(row.idAreaFlujo, row.idReferencia).length === 0
+                            }
+                            aria-label={`Editar Cuenta Contable del movimiento ${row.idMovimientoBanco}`}
+                          >
+                            <option value="">{row.cuentaContableTexto || "PENDIENTE"}</option>
+                            {getCuentasClasificacionInlineDisponibles(row.idAreaFlujo, row.idReferencia).map((option) => (
+                              <option key={option.idCuentaContable} value={String(option.idCuentaContable)}>
+                                {option.cuentaContableTexto}
+                              </option>
+                            ))}
+                          </select>
+                          {cuentaContableSavingIds[row.idMovimientoBanco] ? (
+                            <span style={styles.inlineEditableStatus}>Guardando...</span>
+                          ) : !row.idAreaFlujo || !row.idReferencia ? (
+                            <span style={styles.inlineEditableStatus}>Depende de Area Flujo y Referencia</span>
+                          ) : null}
+                        </div>
+                      </td>
                       <td style={styles.td}>
                         <span style={{ ...styles.statusBadge, ...getClasificacionBadgeStyle(getConciliadoLabel(row)) }}>
                           {getConciliadoLabel(row)}
@@ -2507,16 +3298,11 @@ export default function ConciliacionBcpPage() {
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "seriePlanilla")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "detallePlanilla")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "correlativoPlanilla")}</td>
-                      <td style={styles.td}>
-                        <button type="button" style={styles.gridActionButton} onClick={() => openClasificacionModal(row)}>
-                          Clasificar
-                        </button>
-                      </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td style={styles.td} colSpan={36}>
+                    <td style={styles.td} colSpan={35}>
                       No se encontraron movimientos para los filtros ingresados.
                     </td>
                   </tr>
@@ -2524,6 +3310,8 @@ export default function ConciliacionBcpPage() {
               </tbody>
             </table>
           </div>
+                </>
+              )}
             </>
           ) : (
             <div style={styles.helperText}>
@@ -3384,7 +4172,143 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#0F172A",
     verticalAlign: "top",
   },
+  tdStrong: {
+    padding: "10px 12px",
+    borderBottom: "1px solid #F1F5F9",
+    fontSize: 12,
+    color: "#0F172A",
+    fontWeight: 800,
+    verticalAlign: "top",
+  },
+  tdNumeric: {
+    padding: "10px 12px",
+    borderBottom: "1px solid #F1F5F9",
+    fontSize: 12,
+    color: "#0F172A",
+    verticalAlign: "top",
+    textAlign: "right",
+    fontVariantNumeric: "tabular-nums",
+  },
+  tdNumericStrong: {
+    padding: "10px 12px",
+    borderBottom: "1px solid #F1F5F9",
+    fontSize: 12,
+    color: "#0F172A",
+    verticalAlign: "top",
+    textAlign: "right",
+    fontVariantNumeric: "tabular-nums",
+    fontWeight: 800,
+  },
+  revisionBoard: {
+    marginTop: 18,
+    marginBottom: 18,
+    background: "linear-gradient(180deg, #F8FCFF 0%, #FFFFFF 100%)",
+    border: "1px solid #D9EAF5",
+    borderRadius: 18,
+    padding: 18,
+    display: "flex",
+    flexDirection: "column",
+    gap: 16,
+  },
+  planillaTabs: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 18,
+    marginBottom: 14,
+    padding: 6,
+    borderRadius: 14,
+    background: "#E2E8F0",
+  },
+  planillaTabButton: {
+    border: "1px solid transparent",
+    background: "transparent",
+    color: "#334155",
+    borderRadius: 10,
+    padding: "8px 14px",
+    fontSize: 12,
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  planillaTabButtonActive: {
+    background: "#FFFFFF",
+    color: "#0F172A",
+    border: "1px solid #CBD5E1",
+    boxShadow: "0 6px 16px rgba(15, 23, 42, 0.08)",
+  },
+  revisionHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+    flexWrap: "wrap",
+  },
+  revisionTitle: {
+    fontSize: 18,
+    fontWeight: 900,
+    color: "#0F172A",
+  },
+  revisionText: {
+    marginTop: 4,
+    fontSize: 12,
+    color: "#475569",
+    lineHeight: 1.5,
+  },
+  revisionMeta: {
+    fontSize: 12,
+    fontWeight: 800,
+    color: "#0F766E",
+  },
+  revisionFilterGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+    gap: 12,
+  },
+  revisionFilterCard: {
+    border: "1px solid #C8E1F0",
+    borderRadius: 14,
+    background: "#FFFFFF",
+    padding: 12,
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.05)",
+  },
+  revisionFilterLabel: {
+    fontSize: 11,
+    fontWeight: 900,
+    color: "#0F172A",
+    letterSpacing: "0.04em",
+  },
+  revisionFilterSelect: {
+    width: "100%",
+    boxSizing: "border-box",
+    borderRadius: 10,
+    border: "1px solid #93C5DD",
+    background: "#E0F2FE",
+    padding: "8px 10px",
+    fontSize: 12,
+    color: "#0F172A",
+    outline: "none",
+    cursor: "pointer",
+    fontFamily: "inherit",
+  },
+  revisionTableWrap: {
+    overflowX: "auto",
+    borderRadius: 14,
+    border: "1px solid #D9EAF5",
+    background: "#FFFFFF",
+  },
+  revisionTotalRow: {
+    background: "#E0F2FE",
+  },
   commentCellWrap: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    minWidth: 220,
+  },
+  inlineEditableCellWrap: {
     display: "flex",
     flexDirection: "column",
     gap: 6,
@@ -3402,6 +4326,24 @@ const styles: Record<string, React.CSSProperties> = {
     resize: "vertical",
     outline: "none",
     fontFamily: "inherit",
+  },
+  inlineEditableSelect: {
+    width: "100%",
+    boxSizing: "border-box",
+    borderRadius: 8,
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    padding: "8px 10px",
+    fontSize: 12,
+    color: "#0F172A",
+    outline: "none",
+    cursor: "pointer",
+    fontFamily: "inherit",
+  },
+  inlineEditableStatus: {
+    fontSize: 11,
+    color: "#0F766E",
+    fontWeight: 700,
   },
   commentCellStatus: {
     fontSize: 11,

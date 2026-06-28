@@ -72,7 +72,11 @@ axiosClient.interceptors.response.use(
   },
   (error) => {
     if (error?.response?.data) {
-      console.error("[httpClient] Error response", error.response.data);
+      const responseData = error.response.data;
+      console.error(
+        "[httpClient] Error response",
+        typeof responseData === "string" ? responseData : JSON.stringify(responseData, null, 2)
+      );
     }
 
     if (error?.response?.status === 401) {

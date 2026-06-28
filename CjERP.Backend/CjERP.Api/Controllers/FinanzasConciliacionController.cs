@@ -285,7 +285,8 @@ public sealed class FinanzasConciliacionController : ControllerBase
             return StatusCode(500, new
             {
                 success = false,
-                message = "Ocurrio un error al cargar los combos de clasificacion."
+                message = "Ocurrio un error al cargar los combos de clasificacion.",
+                detail = ex.Message
             });
         }
     }
