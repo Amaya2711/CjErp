@@ -305,6 +305,18 @@ public sealed class ReporteRepository : IReporteRepository
         return rows.ToList();
     }
 
+    public async Task<ReporteWhatsappEmpleadoDto?> ObtenerEmpleadoPorTelefonoAsync(string telefono, CancellationToken cancellationToken = default)
+    {
+        var telefonoNormalizado = NormalizePhone(telefono);
+        if (string.IsNullOrWhiteSpace(telefonoNormalizado))
+        {
+            return null;
+        }
+
+        var empleados = await ObtenerEmpleadosDestinoAsync(ReporteWhatsappTipos.Operativo, cancellationToken);
+        return empleados.FirstOrDefault(x => string.Equals(NormalizePhone(x.Telefono), telefonoNormalizado, StringComparison.Ordinal));
+    }
+
     public async Task<IReadOnlyList<ReporteWhatsappBoletaDestinoDto>> ObtenerBoletasDestinoAsync(string periodo, CancellationToken cancellationToken = default)
     {
         await using var connection = CreateConnection();
@@ -956,6 +968,27 @@ public sealed class ReporteRepository : IReporteRepository
         }
 
         return tokens.ToArray();
+    }
+
+    private static string? NormalizePhone(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var digits = new string(value.Where(char.IsDigit).ToArray());
+        if (digits.Length == 9 && digits.StartsWith('9'))
+        {
+            return $"51{digits}";
+        }
+
+        if (digits.Length == 11 && digits.StartsWith("51", StringComparison.Ordinal))
+        {
+            return digits;
+        }
+
+        return null;
     }
 
     private static IDictionary<string, object?> ToDictionary(dynamic row) => (IDictionary<string, object?>)row;

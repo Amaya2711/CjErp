@@ -5,6 +5,7 @@ using CjERP.Api.Health;
 using CjERP.Api.Middleware;
 using CjERP.Api.Services;
 using CjERP.Application.DTOs.ReportesWhatsapp;
+using CjERP.Application.DTOs.WhatsappInbound;
 using CjERP.Application.Interfaces;
 using CjERP.Application.Interfaces.Repositories;
 using CjERP.Application.Interfaces.Services;
@@ -35,6 +36,8 @@ builder.Services.Configure<PlanillaXmlOptions>(
     builder.Configuration.GetSection(PlanillaXmlOptions.SectionName));
 builder.Services.Configure<WupSettings>(
     builder.Configuration.GetSection("WupSettings"));
+builder.Services.Configure<WhatsappInboundSettings>(
+    builder.Configuration.GetSection("WhatsappInboundSettings"));
 builder.Services.Configure<ReporteWhatsappJobDefaultsOptions>(
     builder.Configuration.GetSection("ReporteWhatsAppJobDefaults"));
 builder.Services.Configure<OpenAiSettings>(
@@ -217,6 +220,7 @@ builder.Services.AddScoped<IPlanillaBoletaRepository, PlanillaBoletaRepository>(
 builder.Services.AddScoped<IReportePdfService, ReportePdfService>();
 builder.Services.AddScoped<IReporteAutomaticoService, ReporteAutomaticoService>();
 builder.Services.AddScoped<IReporteWhatsappJobScheduler, ReporteWhatsappJobScheduler>();
+builder.Services.AddScoped<IWhatsappInboundService, WhatsappInboundService>();
 builder.Services.AddSingleton<IReporteWhatsappRuntimeMonitor, ReporteWhatsappRuntimeMonitor>();
 builder.Services.AddHttpClient<IIaChatService, IaChatService>(client =>
 {
