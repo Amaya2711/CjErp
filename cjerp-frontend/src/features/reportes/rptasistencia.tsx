@@ -640,6 +640,10 @@ function buildEmployeeDateCellDisplay(cell?: EmployeeDateCell) {
   return `${hours} | ${cell.estadoMarcacionTexto}`;
 }
 
+function buildEmployeeStateCellDisplay(cell?: EmployeeDateCell) {
+  return cell?.estadoMarcacionTexto?.trim() || "-";
+}
+
 function mapAsistenciaRowToAprobarCampoRow(item: AsistenciaReporteItem): AprobarCampoRow {
   return {
     idEmpleado: item.idEmpleado ?? undefined,
@@ -1851,7 +1855,7 @@ export default function RptAsistenciaPage() {
         "Diferencia",
         "Estado valid."
       ];
-      const headers = [...staticHeaders, ...employeeStateGridStates.map((state) => `${state} (registros)`)];
+      const headers = [...staticHeaders, ...employeeStateGridStates.map((state) => state)];
       const data = filteredEmployeeGridRows.map((item) => [
         item.employee,
         item.responsable || "Sin responsable",
@@ -1865,6 +1869,29 @@ export default function RptAsistenciaPage() {
       ]);
       const worksheet = XLSX.utils.aoa_to_sheet([headers, ...data]);
       XLSX.utils.book_append_sheet(workbook, worksheet, "Cuadro");
+
+      const employeeDetailHeaders = [
+        "Empleado",
+        "Responsable",
+        "Ubicacion",
+        "Estado validacion",
+        ...chartEmpleadoPorDia.fechas,
+      ];
+      const employeeDetailData = filteredEmployeeGridRows.map((filteredItem) => {
+        const detailItem = chartEmpleadoPorDia.rows.find((item) => item.employee === filteredItem.employee);
+        return [
+          filteredItem.employee,
+          filteredItem.responsable || detailItem?.responsable || "Sin responsable",
+          filteredItem.ubicacion || detailItem?.ubicacion || "Sin ubicacion",
+          filteredItem.estadoValidacionHoras || detailItem?.estadoValidacionHoras || "Sin validacion",
+          ...chartEmpleadoPorDia.fechas.map((fecha) => {
+            const cell = detailItem?.fechas.find((entry) => entry.fecha === fecha);
+            return buildEmployeeStateCellDisplay(cell);
+          }),
+        ];
+      });
+      const employeeDetailWorksheet = XLSX.utils.aoa_to_sheet([employeeDetailHeaders, ...employeeDetailData]);
+      XLSX.utils.book_append_sheet(workbook, employeeDetailWorksheet, "x empleado");
     } else if (activeTab === "empleado") {
       // Dynamic headers: static + all fechas
       const staticHeaders = [
