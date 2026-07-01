@@ -7,11 +7,30 @@ public sealed class WhatsappInboundSettings
     public bool Enabled { get; set; } = true;
     public string VerifyToken { get; set; } = "SET_VIA_ENVIRONMENT_OR_LOCAL_SETTINGS";
     public string ResponseMode { get; set; } = "wsp";
+    public string ResponseProvider { get; set; } = "wup";
     public int DefaultRangeDays { get; set; } = 30;
 
     public bool HasVerifyTokenConfigured() =>
         !string.IsNullOrWhiteSpace(VerifyToken) &&
         !VerifyToken.Contains("SET_VIA_ENVIRONMENT_OR_LOCAL_SETTINGS", StringComparison.OrdinalIgnoreCase);
+}
+
+public sealed class MetaWhatsAppSettings
+{
+    public bool Enabled { get; set; }
+    public string AccessToken { get; set; } = string.Empty;
+    public string PhoneNumberId { get; set; } = string.Empty;
+    public string GraphVersion { get; set; } = "v23.0";
+
+    public bool HasConfiguredAccessToken() =>
+        !string.IsNullOrWhiteSpace(AccessToken) &&
+        !AccessToken.Contains("SET_VIA_ENVIRONMENT_OR_LOCAL_SETTINGS", StringComparison.OrdinalIgnoreCase);
+
+    public bool HasConfiguredPhoneNumberId() =>
+        !string.IsNullOrWhiteSpace(PhoneNumberId) &&
+        !PhoneNumberId.Contains("SET_VIA_ENVIRONMENT_OR_LOCAL_SETTINGS", StringComparison.OrdinalIgnoreCase);
+
+    public bool IsReady() => Enabled && HasConfiguredAccessToken() && HasConfiguredPhoneNumberId();
 }
 
 public sealed class WhatsappWebhookPayloadDto
@@ -158,4 +177,29 @@ public sealed class WhatsappInboundProcessResultDto
     public int MessagesDetected { get; set; }
     public int ResponsesSent { get; set; }
     public IReadOnlyList<string> Actions { get; set; } = Array.Empty<string>();
+}
+
+public sealed class MetaWhatsAppSendTextRequestDto
+{
+    public string To { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+    public string? PhoneNumberId { get; set; }
+}
+
+public sealed class MetaWhatsAppSendDocumentRequestDto
+{
+    public string To { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public string Caption { get; set; } = string.Empty;
+    public byte[] FileBytes { get; set; } = Array.Empty<byte>();
+    public string ContentType { get; set; } = "application/pdf";
+    public string? PhoneNumberId { get; set; }
+}
+
+public sealed class MetaWhatsAppSendResponseDto
+{
+    public bool Success { get; set; }
+    public int StatusCode { get; set; }
+    public string ResponseBody { get; set; } = string.Empty;
+    public string ErrorMessage { get; set; } = string.Empty;
 }

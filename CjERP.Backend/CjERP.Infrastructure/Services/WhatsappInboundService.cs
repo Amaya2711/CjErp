@@ -16,6 +16,7 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
     private readonly IReporteRepository _reporteRepository;
     private readonly IReportePdfService _reportePdfService;
     private readonly IWupService _wupService;
+    private readonly IMetaWhatsAppService _metaWhatsAppService;
     private readonly WhatsappInboundSettings _settings;
     private readonly ILogger<WhatsappInboundService> _logger;
 
@@ -23,12 +24,14 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
         IReporteRepository reporteRepository,
         IReportePdfService reportePdfService,
         IWupService wupService,
+        IMetaWhatsAppService metaWhatsAppService,
         IOptions<WhatsappInboundSettings> settings,
         ILogger<WhatsappInboundService> logger)
     {
         _reporteRepository = reporteRepository;
         _reportePdfService = reportePdfService;
         _wupService = wupService;
+        _metaWhatsAppService = metaWhatsAppService;
         _settings = settings.Value;
         _logger = logger;
     }
@@ -73,7 +76,7 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
                 continue;
             }
 
-            var sendResponse = await _wupService.EnviarAdjuntoAsync(response, cancellationToken);
+            var sendResponse = await SendResponseAsync(item, response, cancellationToken);
             if (sendResponse.Success)
             {
                 responsesSent++;
@@ -169,6 +172,48 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
         };
     }
 
+    private async Task<MetaWhatsAppSendResponseDto> SendResponseAsync(
+        InboundMessage item,
+        ReporteWhatsappSendRequestDto response,
+        CancellationToken cancellationToken)
+    {
+        if (UseMetaProvider())
+        {
+            if (string.IsNullOrWhiteSpace(response.Contenido))
+            {
+                return await _metaWhatsAppService.SendTextAsync(
+                    new MetaWhatsAppSendTextRequestDto
+                    {
+                        To = response.Telefono,
+                        Message = response.Mensaje,
+                        PhoneNumberId = item.PhoneNumberId
+                    },
+                    cancellationToken);
+            }
+
+            var fileBytes = Convert.FromBase64String(response.Contenido);
+            return await _metaWhatsAppService.SendDocumentAsync(
+                new MetaWhatsAppSendDocumentRequestDto
+                {
+                    To = response.Telefono,
+                    FileName = response.NombreArchivo,
+                    Caption = response.Mensaje,
+                    FileBytes = fileBytes,
+                    PhoneNumberId = item.PhoneNumberId
+                },
+                cancellationToken);
+        }
+
+        var wupResponse = await _wupService.EnviarAdjuntoAsync(response, cancellationToken);
+        return new MetaWhatsAppSendResponseDto
+        {
+            Success = wupResponse.Success,
+            StatusCode = wupResponse.StatusCode,
+            ResponseBody = wupResponse.ResponseBody,
+            ErrorMessage = wupResponse.ErrorMessage
+        };
+    }
+
     private static List<InboundMessage> ExtractMessages(WhatsappWebhookPayloadDto? payload)
     {
         var result = new List<InboundMessage>();
@@ -203,7 +248,8 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
                     {
                         Phone = message.From,
                         Body = body,
-                        ContactName = contactName
+                        ContactName = contactName,
+                        PhoneNumberId = value.Metadata?.PhoneNumberId?.Trim() ?? string.Empty
                     });
                 }
             }
@@ -243,6 +289,9 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
 
     private static bool IsAsistenciaRequest(string message) =>
         message.Contains("asistencia", StringComparison.OrdinalIgnoreCase);
+
+    private bool UseMetaProvider() =>
+        string.Equals(_settings.ResponseProvider?.Trim(), "meta", StringComparison.OrdinalIgnoreCase);
 
     private (string FechaInicio, string FechaFin) ResolveDateRange(string message)
     {
@@ -325,5 +374,6 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
         public string Phone { get; set; } = string.Empty;
         public string Body { get; set; } = string.Empty;
         public string ContactName { get; set; } = string.Empty;
+        public string PhoneNumberId { get; set; } = string.Empty;
     }
 }

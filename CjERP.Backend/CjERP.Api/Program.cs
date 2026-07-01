@@ -38,6 +38,8 @@ builder.Services.Configure<WupSettings>(
     builder.Configuration.GetSection("WupSettings"));
 builder.Services.Configure<WhatsappInboundSettings>(
     builder.Configuration.GetSection("WhatsappInboundSettings"));
+builder.Services.Configure<MetaWhatsAppSettings>(
+    builder.Configuration.GetSection("MetaWhatsAppSettings"));
 builder.Services.Configure<ReporteWhatsappJobDefaultsOptions>(
     builder.Configuration.GetSection("ReporteWhatsAppJobDefaults"));
 builder.Services.Configure<OpenAiSettings>(
@@ -221,6 +223,11 @@ builder.Services.AddScoped<IReportePdfService, ReportePdfService>();
 builder.Services.AddScoped<IReporteAutomaticoService, ReporteAutomaticoService>();
 builder.Services.AddScoped<IReporteWhatsappJobScheduler, ReporteWhatsappJobScheduler>();
 builder.Services.AddScoped<IWhatsappInboundService, WhatsappInboundService>();
+builder.Services.AddHttpClient<IMetaWhatsAppService, MetaWhatsAppService>(client =>
+{
+    client.BaseAddress = new Uri("https://graph.facebook.com/");
+    client.Timeout = TimeSpan.FromSeconds(60);
+});
 builder.Services.AddSingleton<IReporteWhatsappRuntimeMonitor, ReporteWhatsappRuntimeMonitor>();
 builder.Services.AddHttpClient<IIaChatService, IaChatService>(client =>
 {
