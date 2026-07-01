@@ -11,6 +11,9 @@ namespace CjERP.Infrastructure.Services;
 
 public sealed class WhatsappInboundService : IWhatsappInboundService
 {
+    private const string MenuAsistencia = "menu_asistencia";
+    private const string MenuBoleta = "menu_boleta";
+    private const string MenuEncuesta = "menu_encuesta";
     private static readonly Regex DateRegex = new(@"(?<!\d)(\d{2}/\d{2}/\d{4})(?!\d)", RegexOptions.Compiled);
     private static readonly Dictionary<string, int> MonthMap = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -85,7 +88,7 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
                 continue;
             }
 
-            var response = await BuildResponseAsync(item.Phone, item.Body, item.ContactName, cancellationToken);
+            var response = await BuildResponseAsync(item, cancellationToken);
             if (response is null)
             {
                 actions.Add($"Sin accion para {item.Phone}");
@@ -118,12 +121,13 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
         };
     }
 
-    private async Task<ReporteWhatsappSendRequestDto?> BuildResponseAsync(
-        string phone,
-        string messageBody,
-        string contactName,
+    private async Task<OutboundResponse?> BuildResponseAsync(
+        InboundMessage item,
         CancellationToken cancellationToken)
     {
+        var phone = item.Phone;
+        var messageBody = item.Body;
+        var contactName = item.ContactName;
         var normalizedPhone = NormalizePhone(phone);
         if (string.IsNullOrWhiteSpace(normalizedPhone))
         {
@@ -133,16 +137,27 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
         var normalizedMessage = (messageBody ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(normalizedMessage))
         {
-            return BuildTextReply(
-                normalizedPhone,
-                "Recibimos tu mensaje. Para enviarte tu asistencia en PDF escribe: ASISTENCIA o ASISTENCIA 01/06/2026 30/06/2026.");
+            return BuildMenuReply(normalizedPhone);
         }
 
-        if (!IsAsistenciaRequest(normalizedMessage))
+        if (string.Equals(item.ActionId, MenuBoleta, StringComparison.OrdinalIgnoreCase))
         {
             return BuildTextReply(
                 normalizedPhone,
-                $"Hola{BuildNameSuffix(contactName)}. Por ahora este canal piloto responde consultas de asistencia en PDF. Escribe: ASISTENCIA o ASISTENCIA 01/06/2026 30/06/2026.");
+                "La opcion Boleta de pago ya fue registrada. En el siguiente paso conectaremos ese flujo para enviarte la boleta segun el periodo que indiques.");
+        }
+
+        if (string.Equals(item.ActionId, MenuEncuesta, StringComparison.OrdinalIgnoreCase))
+        {
+            return BuildTextReply(
+                normalizedPhone,
+                "La opcion Encuesta ya fue registrada. En el siguiente paso conectaremos este flujo para responder la encuesta desde WhatsApp.");
+        }
+
+        if (!IsAsistenciaRequest(normalizedMessage) &&
+            !string.Equals(item.ActionId, MenuAsistencia, StringComparison.OrdinalIgnoreCase))
+        {
+            return BuildMenuReply(normalizedPhone);
         }
 
         var empleado = await _reporteRepository.ObtenerEmpleadoPorTelefonoAsync(normalizedPhone, cancellationToken);
@@ -178,49 +193,87 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
             cancellationToken);
 
         var fileName = $"Asistencia_{fechaInicio.Replace("/", string.Empty)}_{fechaFin.Replace("/", string.Empty)}_{empleado.IdEmpleado}.pdf";
-        return new ReporteWhatsappSendRequestDto
+        return new OutboundResponse
         {
-            NombreArchivo = fileName,
-            Mensaje = $"Hola{BuildNameSuffix(contactName)}. Adjuntamos tu reporte de asistencia del periodo {fechaInicio} - {fechaFin}.",
-            Modo = string.IsNullOrWhiteSpace(_settings.ResponseMode) ? "wsp" : _settings.ResponseMode.Trim(),
-            Telefono = normalizedPhone,
-            Contenido = Convert.ToBase64String(pdfBytes)
+            Kind = OutboundResponseKind.Document,
+            Phone = normalizedPhone,
+            FileName = fileName,
+            Message = $"Hola{BuildNameSuffix(contactName)}. Adjuntamos tu reporte de asistencia del periodo {fechaInicio} - {fechaFin}.",
+            FileContentBase64 = Convert.ToBase64String(pdfBytes)
         };
     }
 
     private async Task<MetaWhatsAppSendResponseDto> SendResponseAsync(
         InboundMessage item,
-        ReporteWhatsappSendRequestDto response,
+        OutboundResponse response,
         CancellationToken cancellationToken)
     {
         if (UseMetaProvider())
         {
-            if (string.IsNullOrWhiteSpace(response.Contenido))
+            if (response.Kind == OutboundResponseKind.Menu)
+            {
+                return await _metaWhatsAppService.SendReplyButtonsAsync(
+                    new MetaWhatsAppSendReplyButtonsRequestDto
+                    {
+                        To = response.Phone,
+                        Header = "Menu principal",
+                        Body = response.Message,
+                        Footer = "Selecciona una opcion",
+                        PhoneNumberId = item.PhoneNumberId,
+                        Buttons =
+                        [
+                            new MetaWhatsAppReplyButtonOptionDto { Id = MenuAsistencia, Title = "Asistencia" },
+                            new MetaWhatsAppReplyButtonOptionDto { Id = MenuBoleta, Title = "Boleta" },
+                            new MetaWhatsAppReplyButtonOptionDto { Id = MenuEncuesta, Title = "Encuesta" }
+                        ]
+                    },
+                    cancellationToken);
+            }
+
+            if (response.Kind == OutboundResponseKind.Text)
             {
                 return await _metaWhatsAppService.SendTextAsync(
                     new MetaWhatsAppSendTextRequestDto
                     {
-                        To = response.Telefono,
-                        Message = response.Mensaje,
+                        To = response.Phone,
+                        Message = response.Message,
                         PhoneNumberId = item.PhoneNumberId
                     },
                     cancellationToken);
             }
 
-            var fileBytes = Convert.FromBase64String(response.Contenido);
+            var fileBytes = Convert.FromBase64String(response.FileContentBase64);
             return await _metaWhatsAppService.SendDocumentAsync(
                 new MetaWhatsAppSendDocumentRequestDto
                 {
-                    To = response.Telefono,
-                    FileName = response.NombreArchivo,
-                    Caption = response.Mensaje,
+                    To = response.Phone,
+                    FileName = response.FileName,
+                    Caption = response.Message,
                     FileBytes = fileBytes,
                     PhoneNumberId = item.PhoneNumberId
                 },
                 cancellationToken);
         }
 
-        var wupResponse = await _wupService.EnviarAdjuntoAsync(response, cancellationToken);
+        var wupRequest = response.Kind == OutboundResponseKind.Document
+            ? new ReporteWhatsappSendRequestDto
+            {
+                NombreArchivo = response.FileName,
+                Mensaje = response.Message,
+                Modo = string.IsNullOrWhiteSpace(_settings.ResponseMode) ? "wsp" : _settings.ResponseMode.Trim(),
+                Telefono = response.Phone,
+                Contenido = response.FileContentBase64
+            }
+            : new ReporteWhatsappSendRequestDto
+            {
+                NombreArchivo = string.Empty,
+                Mensaje = BuildFallbackMenuText(response),
+                Modo = string.IsNullOrWhiteSpace(_settings.ResponseMode) ? "wsp" : _settings.ResponseMode.Trim(),
+                Telefono = response.Phone,
+                Contenido = string.Empty
+            };
+
+        var wupResponse = await _wupService.EnviarAdjuntoAsync(wupRequest, cancellationToken);
         return new MetaWhatsAppSendResponseDto
         {
             Success = wupResponse.Success,
@@ -265,13 +318,39 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
                         Phone = message.From,
                         Body = body,
                         ContactName = contactName,
-                        PhoneNumberId = value.Metadata?.PhoneNumberId?.Trim() ?? string.Empty
+                        PhoneNumberId = value.Metadata?.PhoneNumberId?.Trim() ?? string.Empty,
+                        ActionId = ExtractActionId(message)
                     });
                 }
             }
         }
 
         return result;
+    }
+
+    private static string ExtractActionId(WhatsappWebhookMessageDto message)
+    {
+        if (message is null)
+        {
+            return string.Empty;
+        }
+
+        if (string.Equals(message.Type, "button", StringComparison.OrdinalIgnoreCase))
+        {
+            return message.Button?.Payload?.Trim() ?? string.Empty;
+        }
+
+        if (!string.Equals(message.Type, "interactive", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(message.Interactive?.ButtonReply?.Id))
+        {
+            return message.Interactive.ButtonReply.Id.Trim();
+        }
+
+        return message.Interactive?.ListReply?.Id?.Trim() ?? string.Empty;
     }
 
     private static string ExtractBody(WhatsappWebhookMessageDto message)
@@ -396,16 +475,34 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
         return null;
     }
 
-    private static ReporteWhatsappSendRequestDto BuildTextReply(string phone, string message)
+    private static OutboundResponse BuildTextReply(string phone, string message)
     {
-        return new ReporteWhatsappSendRequestDto
+        return new OutboundResponse
         {
-            NombreArchivo = string.Empty,
-            Mensaje = message.Trim(),
-            Modo = "wsp",
-            Telefono = phone,
-            Contenido = string.Empty
+            Kind = OutboundResponseKind.Text,
+            Phone = phone,
+            Message = message.Trim()
         };
+    }
+
+    private static OutboundResponse BuildMenuReply(string phone)
+    {
+        return new OutboundResponse
+        {
+            Kind = OutboundResponseKind.Menu,
+            Phone = phone,
+            Message = "Hola. Selecciona la opcion que deseas consultar."
+        };
+    }
+
+    private static string BuildFallbackMenuText(OutboundResponse response)
+    {
+        if (response.Kind != OutboundResponseKind.Menu)
+        {
+            return response.Message;
+        }
+
+        return "Hola. Responde con una opcion:\n1. Asistencia\n2. Boleta\n3. Encuesta";
     }
 
     private static string BuildNameSuffix(string? name) =>
@@ -458,5 +555,22 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
         public string Body { get; set; } = string.Empty;
         public string ContactName { get; set; } = string.Empty;
         public string PhoneNumberId { get; set; } = string.Empty;
+        public string ActionId { get; set; } = string.Empty;
+    }
+
+    private sealed class OutboundResponse
+    {
+        public OutboundResponseKind Kind { get; set; }
+        public string Phone { get; set; } = string.Empty;
+        public string Message { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string FileContentBase64 { get; set; } = string.Empty;
+    }
+
+    private enum OutboundResponseKind
+    {
+        Text = 1,
+        Document = 2,
+        Menu = 3
     }
 }

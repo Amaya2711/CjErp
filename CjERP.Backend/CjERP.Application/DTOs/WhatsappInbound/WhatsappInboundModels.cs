@@ -196,6 +196,22 @@ public sealed class MetaWhatsAppSendDocumentRequestDto
     public string? PhoneNumberId { get; set; }
 }
 
+public sealed class MetaWhatsAppReplyButtonOptionDto
+{
+    public string Id { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+}
+
+public sealed class MetaWhatsAppSendReplyButtonsRequestDto
+{
+    public string To { get; set; } = string.Empty;
+    public string Body { get; set; } = string.Empty;
+    public string? Header { get; set; }
+    public string? Footer { get; set; }
+    public IReadOnlyList<MetaWhatsAppReplyButtonOptionDto> Buttons { get; set; } = Array.Empty<MetaWhatsAppReplyButtonOptionDto>();
+    public string? PhoneNumberId { get; set; }
+}
+
 public sealed class MetaWhatsAppSendResponseDto
 {
     public bool Success { get; set; }

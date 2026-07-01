@@ -12,4 +12,5 @@ public interface IMetaWhatsAppService
 {
     Task<MetaWhatsAppSendResponseDto> SendTextAsync(MetaWhatsAppSendTextRequestDto request, CancellationToken cancellationToken = default);
     Task<MetaWhatsAppSendResponseDto> SendDocumentAsync(MetaWhatsAppSendDocumentRequestDto request, CancellationToken cancellationToken = default);
+    Task<MetaWhatsAppSendResponseDto> SendReplyButtonsAsync(MetaWhatsAppSendReplyButtonsRequestDto request, CancellationToken cancellationToken = default);
 }

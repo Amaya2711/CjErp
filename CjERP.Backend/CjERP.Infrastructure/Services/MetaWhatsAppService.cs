@@ -94,6 +94,69 @@ public sealed class MetaWhatsAppService : IMetaWhatsAppService
         return await SendMessageAsync(phoneNumberId, payload, cancellationToken);
     }
 
+    public async Task<MetaWhatsAppSendResponseDto> SendReplyButtonsAsync(MetaWhatsAppSendReplyButtonsRequestDto request, CancellationToken cancellationToken = default)
+    {
+        if (!TryResolvePhoneNumberId(request.PhoneNumberId, out var phoneNumberId, out var error))
+        {
+            return ErrorResponse(0, string.Empty, error);
+        }
+
+        var buttons = (request.Buttons ?? Array.Empty<MetaWhatsAppReplyButtonOptionDto>())
+            .Where(x => x is not null)
+            .Where(x => !string.IsNullOrWhiteSpace(x.Id) && !string.IsNullOrWhiteSpace(x.Title))
+            .Take(3)
+            .Select(x => new
+            {
+                type = "reply",
+                reply = new
+                {
+                    id = x.Id.Trim(),
+                    title = x.Title.Trim()
+                }
+            })
+            .ToArray();
+
+        if (buttons.Length == 0)
+        {
+            return ErrorResponse(0, string.Empty, "MetaWhatsApp: no se definieron botones de menu.");
+        }
+
+        var payload = new
+        {
+            messaging_product = "whatsapp",
+            recipient_type = "individual",
+            to = request.To.Trim(),
+            type = "interactive",
+            interactive = new
+            {
+                type = "button",
+                header = string.IsNullOrWhiteSpace(request.Header)
+                    ? null
+                    : new
+                    {
+                        type = "text",
+                        text = request.Header.Trim()
+                    },
+                body = new
+                {
+                    text = request.Body.Trim()
+                },
+                footer = string.IsNullOrWhiteSpace(request.Footer)
+                    ? null
+                    : new
+                    {
+                        text = request.Footer.Trim()
+                    },
+                action = new
+                {
+                    buttons
+                }
+            }
+        };
+
+        return await SendMessageAsync(phoneNumberId, payload, cancellationToken);
+    }
+
     private async Task<MetaWhatsAppSendResponseDto> UploadMediaAsync(
         string phoneNumberId,
         MetaWhatsAppSendDocumentRequestDto request,
