@@ -354,7 +354,6 @@ public sealed class ReportePdfService : IReportePdfService
             .OrderBy(item => ParseDisplayDate(item.Fecha) ?? DateTime.MaxValue)
             .ThenBy(item => item.Hora)
             .ToList();
-
         var primaryItem = items.FirstOrDefault();
         var diferenciaHoras = primaryItem?.DiferenciaHoras ?? 0m;
         var horasLaborales = primaryItem?.TotalHorasLaborales ?? 0m;
@@ -452,7 +451,8 @@ public sealed class ReportePdfService : IReportePdfService
 
                             foreach (var item in items)
                             {
-                                table.Cell().Element(CellBody).Text(EmptyIfMissing(item.Fecha));
+                                var fechaConDia = BuildFechaConDiaLabel(item.Fecha);
+                                table.Cell().Element(CellBody).Text(EmptyIfMissing(fechaConDia));
                                 table.Cell().Element(CellBody).AlignRight().Text($"{item.TotalHoras:0.00} h");
                                 table.Cell().Element(CellBody).Text(EmptyIfMissing(item.EstadoMarcacionTexto));
                                 table.Cell().Element(CellBody).Text(EmptyIfMissing(item.Hora));
@@ -756,6 +756,19 @@ public sealed class ReportePdfService : IReportePdfService
         }
 
         return null;
+    }
+
+    private static string BuildFechaConDiaLabel(string? value)
+    {
+        var parsed = ParseDisplayDate(value);
+        if (!parsed.HasValue)
+        {
+            return value?.Trim() ?? string.Empty;
+        }
+
+        var culture = new CultureInfo("es-PE");
+        var dayName = culture.TextInfo.ToTitleCase(parsed.Value.ToString("dddd", culture));
+        return $"{parsed.Value:dd/MM/yyyy} - {dayName}";
     }
 
     private static IContainer CellHeader(IContainer container) =>
