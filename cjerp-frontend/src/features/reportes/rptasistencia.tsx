@@ -6450,6 +6450,9 @@ const styles: Record<string, React.CSSProperties> = {
   summaryOverlayCard: {
     width: "min(1280px, 96vw)",
     height: "min(820px, 92vh)",
+    minWidth: 960,
+    minHeight: 620,
+    resize: "both",
     background: "#FFFFFF",
     borderRadius: 18,
     boxShadow: "0 24px 64px rgba(15, 23, 42, 0.22)",
