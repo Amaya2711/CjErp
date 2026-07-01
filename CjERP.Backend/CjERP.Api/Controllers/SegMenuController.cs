@@ -3,7 +3,6 @@ using CjERP.Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
-using System.Text.Json;
 
 namespace CjERP.Api.Controllers;
 
@@ -81,8 +80,13 @@ public class SegMenuController : ControllerBase
         if (idRol != null)
             _logger.LogInformation($"[MenuDinamico] idRol={idRol}");
 
-        var result = await _segMenuService.ListarMenuDinamicoAsync(idUsuario, idPerfil, idRol);
-        _logger.LogObject(LogLevel.Information, "[MenuDinamico] Resultado devuelto", result);
+        var result = (await _segMenuService.ListarMenuDinamicoAsync(idUsuario, idPerfil, idRol)).ToList();
+        _logger.LogInformation(
+            "[MenuDinamico] Resultado resumido. idUsuario={IdUsuario} idPerfil={IdPerfil} idRol={IdRol} totalMenus={TotalMenus}",
+            idUsuario,
+            idPerfil,
+            idRol,
+            result.Count);
         return Ok(result);
     }
 
