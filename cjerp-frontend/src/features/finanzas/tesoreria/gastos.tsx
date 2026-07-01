@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
   // Estado para fila seleccionada
   
 import { useCrudForm } from "../../../hooks/useCrudForm";
-import { ArrowDown, ArrowUp } from "lucide-react";
+import { ArrowDown, ArrowUp, Eye, Pencil, Trash2 } from "lucide-react";
 import httpClient from "../../../api/httpClient";
 import {
   buildPlanillaConsultaEstadosRequest,
@@ -208,8 +208,8 @@ type GastosHeaderFilters = {
 
 const GASTOS_HEADER_FILTERS_INITIAL: GastosHeaderFilters = {
   id: "",
-  fechaInicio: "",
-  fechaFin: "",
+  fechaInicio: obtenerPrimerDiaMesActual(),
+  fechaFin: obtenerFechaActual(),
   estado: ["0", "2"],
   comprobante: [],
   moneda: [],
@@ -234,9 +234,13 @@ type GastosHeaderMultiFilterKey =
   | "responsable"
   | "validador";
 
-type GastosHeaderSearchableFilterKey = "solicitante" | "responsable" | "validador";
+type GastosHeaderSearchableFilterKey = "cliente" | "proyecto" | "site" | "tipoTrabajo" | "solicitante" | "responsable" | "validador";
 
 const GASTOS_HEADER_FILTER_SEARCH_INITIAL: Record<GastosHeaderSearchableFilterKey, string> = {
+  cliente: "",
+  proyecto: "",
+  site: "",
+  tipoTrabajo: "",
   solicitante: "",
   responsable: "",
   validador: "",
@@ -268,6 +272,7 @@ const GASTOS_API_URL = "/tesoreria/gastos";
 const FACTURA_UPLOAD_API_URL = `${GASTOS_API_URL}/upload-factura`;
 const TIPO_CAMBIO_GASTO = 3.8;
 const MAX_GASTOS_PARA_MOSTRAR = 500;
+const UMBRAL_CONSULTA_MASIVA = 2000;
 const TAREAS_CON_SUMINISTRO_VIGENTE = new Set([52, 53]);
 const VALORES_GASTO_INICIALES: ValoresGastoResponse = {
   porcentaje: 0,
@@ -289,6 +294,13 @@ function extraerObjeto<T>(value: T): T {
 
 function obtenerFechaActual(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+function obtenerPrimerDiaMesActual(): string {
+  const hoy = new Date();
+  const year = hoy.getFullYear();
+  const month = String(hoy.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}-01`;
 }
 
 function toPositiveNumber(...values: Array<string | number | null | undefined>): number {
@@ -622,7 +634,7 @@ function matchesFlexibleSearch(label: string, query: string): boolean {
 }
 
 function isSearchableHeaderFilterKey(key: string): key is GastosHeaderSearchableFilterKey {
-  return key === "solicitante" || key === "responsable" || key === "validador";
+  return key === "cliente" || key === "proyecto" || key === "site" || key === "tipoTrabajo" || key === "solicitante" || key === "responsable" || key === "validador";
 }
 
 function toNumberOrZero(value: unknown): number {
@@ -1193,6 +1205,13 @@ export default function GastosPage() {
     maxRowsAllowed: number;
     message: string;
   } | null>(null);
+  const [confirmacionConsultaMasiva, setConfirmacionConsultaMasiva] = useState<{
+    totalRows: number;
+    threshold: number;
+    message: string;
+  } | null>(null);
+  const usarLimiteCargaInicialRef = useRef(true);
+  const forzarConsultaCompletaRef = useRef(false);
     // Estado para ordenamiento
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
 
@@ -1380,17 +1399,30 @@ export default function GastosPage() {
       if (estadosSeleccionados.length === 0) {
         setMensajeFiltroCabecera("Seleccione al menos un estado para realizar la búsqueda.");
         setLimiteConsultaServidor(null);
+        setConfirmacionConsultaMasiva(null);
+        forzarConsultaCompletaRef.current = false;
         return [];
       }
 
       if (!isInputDateRangeValid(fechaInicio, fechaFin)) {
         setMensajeFiltroCabecera("La fecha inicio no puede ser mayor que la fecha fin.");
         setLimiteConsultaServidor(null);
+        setConfirmacionConsultaMasiva(null);
+        forzarConsultaCompletaRef.current = false;
         return [];
       }
 
       setMensajeFiltroCabecera(null);
       setLimiteConsultaServidor(null);
+      setConfirmacionConsultaMasiva(null);
+
+      const esCargaInicial = usarLimiteCargaInicialRef.current;
+      const esConsultaForzada = forzarConsultaCompletaRef.current;
+      const maxRowsConsulta = esCargaInicial
+        ? MAX_GASTOS_PARA_MOSTRAR
+        : esConsultaForzada
+          ? undefined
+          : UMBRAL_CONSULTA_MASIVA;
 
       const response = await consultarPlanillaEstados(
         {
@@ -1419,20 +1451,39 @@ export default function GastosPage() {
                 ]
               : []),
           ]),
-          maxRows: MAX_GASTOS_PARA_MOSTRAR,
+          ...(typeof maxRowsConsulta === "number" ? { maxRows: maxRowsConsulta } : {}),
         }
       );
 
+      usarLimiteCargaInicialRef.current = false;
+
       if (response.limitExceeded) {
+        const totalRows = Number(response.totalRows ?? 0);
+        const maxRowsAllowed = Number(
+          response.maxRowsAllowed ?? maxRowsConsulta ?? UMBRAL_CONSULTA_MASIVA
+        );
+
+        if (!esCargaInicial && !esConsultaForzada && maxRowsAllowed >= UMBRAL_CONSULTA_MASIVA) {
+          setConfirmacionConsultaMasiva({
+            totalRows,
+            threshold: maxRowsAllowed,
+            message: `Se encontraron ${totalRows} registros. Recomendamos aplicar mas filtros para reducir la cantidad de coincidencias. Si decide continuar sin mas filtros, el sistema puede generar demoras en la busqueda por el volumen de informacion.`,
+          });
+          return [];
+        }
+
         setLimiteConsultaServidor({
-          totalRows: Number(response.totalRows ?? 0),
-          maxRowsAllowed: Number(response.maxRowsAllowed ?? MAX_GASTOS_PARA_MOSTRAR),
+          totalRows,
+          maxRowsAllowed,
           message:
             response.message?.trim() ||
-            `Se encontraron ${response.totalRows ?? 0} registros. Aplique más filtros antes de mostrar la información.`,
+            `Se encontraron ${totalRows} registros. Aplique mas filtros antes de mostrar la informacion.`,
         });
+        forzarConsultaCompletaRef.current = false;
         return [];
       }
+
+      forzarConsultaCompletaRef.current = false;
 
       return extraerArray<Record<string, unknown>>(response.rows).map((row, index) =>
         mapGastoDtoToView(mapPlanillaConsultaRowToGastoDto(row, index))
@@ -1490,6 +1541,8 @@ export default function GastosPage() {
       return;
     }
 
+    forzarConsultaCompletaRef.current = false;
+    setConfirmacionConsultaMasiva(null);
     void cargarGastos();
   }, [filtrosConsultaKey]);
 
@@ -2252,6 +2305,16 @@ export default function GastosPage() {
     setMostrarConfirmacionRechazo(true);
   };
 
+  const abrirEditarRef = useRef(abrirEditar);
+  const abrirVisualizarRef = useRef(abrirVisualizar);
+  const confirmarEliminarRef = useRef(confirmarEliminar);
+
+  useEffect(() => {
+    abrirEditarRef.current = abrirEditar;
+    abrirVisualizarRef.current = abrirVisualizar;
+    confirmarEliminarRef.current = confirmarEliminar;
+  }, [abrirEditar, abrirVisualizar, confirmarEliminar]);
+
   const cancelarRechazo = () => {
     setMostrarConfirmacionRechazo(false);
     setMostrarMotivoRechazo(false);
@@ -2515,11 +2578,7 @@ export default function GastosPage() {
     validadorOptions,
   ]);
   const cantidadRegistrosFiltrados = gastosFiltradosBase.length;
-  const excedeLimiteRegistros = cantidadRegistrosFiltrados > MAX_GASTOS_PARA_MOSTRAR;
-  const gastosFiltrados = useMemo(
-    () => (excedeLimiteRegistros ? [] : gastosFiltradosBase),
-    [excedeLimiteRegistros, gastosFiltradosBase]
-  );
+  const gastosFiltrados = gastosFiltradosBase;
   const handleFiltroOperativoChange = React.useCallback(
     (val: FiltroOperativoValue) => {
       setForm((prev) =>
@@ -2530,40 +2589,47 @@ export default function GastosPage() {
     },
     [setForm]
   );
-  const columnasGridGastos = [
-    { key: "id", label: "Id", width: "60px", align: "left" as const },
-    { key: "acciones", label: "Acciones", width: "140px", align: "center" as const },
-    { key: "cliente", label: "Cliente", width: "90px", align: "left" as const },
-    { key: "nombreProyecto", label: "Proyecto", width: "100px", align: "left" as const },
-    { key: "site", label: "Site", width: "180px", align: "left" as const },
-    { key: "tipoTrabajo", label: "Tipo Trabajo", width: "100px", align: "left" as const },
-    { key: "tarea", label: "Tarea", width: "140px", align: "left" as const },
-    { key: "bien", label: "Bien", width: "80px", align: "left" as const },
-    { key: "comprobante", label: "Comprobante", width: "140px", align: "left" as const },
-    { key: "monto", label: "Monto", width: "100px", align: "left" as const },
-    { key: "totalPagar", label: "Total Pagar", width: "110px", align: "left" as const },
-    { key: "moneda", label: "Moneda", width: "80px", align: "left" as const },
-    { key: "banco", label: "Banco", width: "140px", align: "left" as const },
-    { key: "nroOperacion", label: "NroOperacion", width: "140px", align: "left" as const },
-    { key: "fechaDeposito", label: "FechaDeposito", width: "130px", align: "left" as const },
-    { key: "fecIngreso", label: "FecIngreso", width: "130px", align: "left" as const },
-    { key: "ot", label: "OT", width: "70px", align: "left" as const },
-    { key: "solicitante", label: "Solicitante", width: "160px", align: "left" as const },
-    { key: "responsable", label: "Responsable", width: "180px", align: "left" as const },
-    { key: "cuentaNumero", label: "Cuenta", width: "140px", align: "left" as const },
-    { key: "cuentaInter", label: "Cuenta Inter", width: "160px", align: "left" as const },
-    { key: "validador", label: "Validador", width: "140px", align: "left" as const },   
-    { key: "estado", label: "Estado", width: "80px", align: "left" as const },
-    { key: "detalle", label: "Detalle", width: "320px", align: "left" as const },
-  ];
-  const columnasCongeladasGrid = new Set([
-    "id",
-    "acciones",
-    "cliente",
-    "nombreProyecto",
-    "site",
-    "tipoTrabajo",
-  ]);
+  const columnasGridGastos = useMemo(
+    () => [
+      { key: "id", label: "Id", width: "60px", align: "left" as const },
+      { key: "acciones", label: "Acciones", width: "140px", align: "center" as const },
+      { key: "cliente", label: "Cliente", width: "90px", align: "left" as const },
+      { key: "nombreProyecto", label: "Proyecto", width: "100px", align: "left" as const },
+      { key: "site", label: "Site", width: "180px", align: "left" as const },
+      { key: "tipoTrabajo", label: "Tipo Trabajo", width: "100px", align: "left" as const },
+      { key: "tarea", label: "Tarea", width: "140px", align: "left" as const },
+      { key: "bien", label: "Bien", width: "80px", align: "left" as const },
+      { key: "comprobante", label: "Comprobante", width: "140px", align: "left" as const },
+      { key: "monto", label: "Monto", width: "100px", align: "left" as const },
+      { key: "totalPagar", label: "Total Pagar", width: "110px", align: "left" as const },
+      { key: "moneda", label: "Moneda", width: "80px", align: "left" as const },
+      { key: "banco", label: "Banco", width: "140px", align: "left" as const },
+      { key: "nroOperacion", label: "NroOperacion", width: "140px", align: "left" as const },
+      { key: "fechaDeposito", label: "FechaDeposito", width: "130px", align: "left" as const },
+      { key: "fecIngreso", label: "FecIngreso", width: "130px", align: "left" as const },
+      { key: "ot", label: "OT", width: "70px", align: "left" as const },
+      { key: "solicitante", label: "Solicitante", width: "160px", align: "left" as const },
+      { key: "responsable", label: "Responsable", width: "180px", align: "left" as const },
+      { key: "cuentaNumero", label: "Cuenta", width: "140px", align: "left" as const },
+      { key: "cuentaInter", label: "Cuenta Inter", width: "160px", align: "left" as const },
+      { key: "validador", label: "Validador", width: "140px", align: "left" as const },
+      { key: "estado", label: "Estado", width: "80px", align: "left" as const },
+      { key: "detalle", label: "Detalle", width: "320px", align: "left" as const },
+    ],
+    []
+  );
+  const columnasCongeladasGrid = useMemo(
+    () =>
+      new Set([
+        "id",
+        "acciones",
+        "cliente",
+        "nombreProyecto",
+        "site",
+        "tipoTrabajo",
+      ]),
+    []
+  );
   const stickyLeftByColumn = useMemo(() => {
     let left = 0;
     const offsets: Record<string, number> = {};
@@ -2598,6 +2664,251 @@ export default function GastosPage() {
     document.addEventListener("mousedown", handlePointerDown);
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [cabeceraFiltroAbierto]);
+
+  const renderedGastoRows = useMemo(
+    () =>
+      gastosFiltrados.map((gasto, rowIndex) => {
+        const rowKey = getGastoRowKey(gasto, rowIndex);
+
+        return (
+          <tr
+            key={rowKey}
+            style={{
+              background: selectedRowKey === rowKey ? "#E0E7FF" : "transparent",
+              transition: "background 0.1s",
+            }}
+            onClick={() => {
+              setSelectedRowKey(rowKey);
+              if (rechazoError) {
+                setRechazoError(null);
+              }
+            }}
+          >
+            {columnasGridGastos.map((col) => (
+              <td
+                key={col.key}
+                style={{
+                  padding: "13px 11px",
+                  borderBottom: "1px solid #F3F4F6",
+                  color: col.key === "responsable" ? "#17143A" : "#374151",
+                  fontSize: 11,
+                  fontWeight: col.key === "responsable" ? 700 : undefined,
+                  overflow: "hidden",
+                  whiteSpace: "nowrap",
+                  textOverflow: "ellipsis",
+                  maxWidth: "100%",
+                  position: columnasCongeladasGrid.has(col.key) ? "sticky" : undefined,
+                  left: columnasCongeladasGrid.has(col.key)
+                    ? stickyLeftByColumn[col.key]
+                    : undefined,
+                  zIndex: columnasCongeladasGrid.has(col.key) ? 2 : 1,
+                  background: columnasCongeladasGrid.has(col.key)
+                    ? selectedRowKey === rowKey
+                      ? "#E0E7FF"
+                      : "#FFFFFF"
+                    : undefined,
+                  borderRight: columnasCongeladasGrid.has(col.key)
+                    ? "1px solid #E5E7EB"
+                    : undefined,
+                }}
+              >
+                {(() => {
+                  switch (col.key) {
+                    case "cliente":
+                      return renderGridCellText(gasto.filtroOperativo.filtro?.nombreCliente);
+                    case "nombreProyecto":
+                      return renderGridCellText(gasto.filtroOperativo.filtro?.nombreProyecto);
+                    case "tipoTrabajo":
+                      return renderGridCellText(
+                        gasto.filtroOperativo.filtro?.tipoTrabajo ??
+                          gasto.filtroOperativo.tipoTrabajo?.tipoTrabajo
+                      );
+                    case "id":
+                      return renderGridCellText(gasto.id);
+                    case "site":
+                      return renderGridCellText(gasto.filtroOperativo.filtro?.nombreSite);
+                    case "solicitante":
+                      return renderGridCellText(
+                        getConstanteLabelOrFallback(
+                          solicitanteOptions,
+                          gasto.solicitante,
+                          gasto.solicitanteLabel
+                        )
+                      );
+                    case "responsable":
+                      return renderGridCellText(gasto.responsableLabel || gasto.responsable || "");
+                    case "cuentaNumero":
+                      return renderGridCellText(gasto.cuentaNumero || gasto.cuenta || "");
+                    case "cuentaInter":
+                      return renderGridCellText(gasto.cuentaInter || "");
+                    case "validador":
+                      return renderGridCellText(
+                        getConstanteLabelOrFallback(
+                          validadorOptions,
+                          gasto.validador,
+                          gasto.validadorLabel
+                        )
+                      );
+                    case "tarea":
+                      return renderGridCellText(
+                        getTareaLabelOrFallback(
+                          tareasCatalogo,
+                          gasto.filtroOperativo.tarea?.correlativo,
+                          gasto.filtroOperativo.tarea?.tarea
+                        )
+                      );
+                    case "detalle":
+                      return renderGridCellText(gasto.detalle);
+                    case "comentario":
+                      return renderGridCellText(
+                        gasto.comentario
+                          ? String(gasto.comentario).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim()
+                          : ""
+                      );
+                    case "bien":
+                      return renderGridCellText(getConstanteLabel(bienOptions, gasto.bien));
+                    case "comprobante":
+                      return renderGridCellText(getConstanteLabel(comprobanteOptions, gasto.comprobante));
+                    case "moneda":
+                      return renderGridCellText(getConstanteLabel(monedaOptions, gasto.moneda));
+                    case "banco":
+                      return renderGridCellText(gasto.banco ?? "");
+                    case "nroOperacion":
+                      return renderGridCellText(gasto.nroOperacion ?? "");
+                    case "fechaDeposito":
+                      return renderGridCellText(formatInputDateForDisplay(gasto.fechaDeposito));
+                    case "monto":
+                      return renderGridCellText(
+                        gasto.monto !== undefined && gasto.monto !== null && gasto.monto !== ""
+                          ? Number(gasto.monto).toLocaleString("es-PE", {
+                              minimumFractionDigits: 2,
+                            })
+                          : ""
+                      );
+                    case "totalPagar":
+                      return renderGridCellText(
+                        gasto.totalPagar !== undefined && gasto.totalPagar !== null && gasto.totalPagar !== ""
+                          ? Number(gasto.totalPagar).toLocaleString("es-PE", {
+                              minimumFractionDigits: 2,
+                            })
+                          : ""
+                      );
+                    case "ot":
+                      return renderGridCellText(gasto.filtroOperativo.ot?.ot);
+                    case "estado":
+                      return renderGridCellText(getEstadoLabel(estadoOptions, gasto.estado, gasto.estadoLabel));
+                    case "fecIngreso":
+                      return renderGridCellText(formatInputDateForDisplay(gasto.fecIngreso));
+                    case "acciones": {
+                      const accionesHabilitadas = gasto.estado === 0 || gasto.estado === 2;
+                      return (
+                        <div style={{ display: "flex", justifyContent: "center", gap: 8 }}>
+                          <button
+                            title="Visualizar"
+                            aria-label="Visualizar"
+                            style={{
+                              width: 34,
+                              height: 34,
+                              border: "1px solid #BFDBFE",
+                              background: "#EFF6FF",
+                              color: "#1D4ED8",
+                              borderRadius: 8,
+                              fontWeight: 700,
+                              cursor: "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: 15,
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              abrirVisualizarRef.current(gasto);
+                            }}
+                          >
+                            <Eye size={16} strokeWidth={2.2} />
+                          </button>
+                          <button
+                            title="Editar"
+                            aria-label="Editar"
+                            style={{
+                              width: 34,
+                              height: 34,
+                              border: `1px solid ${accionesHabilitadas ? "#C7D2FE" : "#E5E7EB"}`,
+                              background: accionesHabilitadas ? "#EEF2FF" : "#F3F4F6",
+                              color: accionesHabilitadas ? "#3730A3" : "#9CA3AF",
+                              borderRadius: 8,
+                              fontWeight: 700,
+                              cursor: accionesHabilitadas ? "pointer" : "not-allowed",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: 15,
+                              opacity: accionesHabilitadas ? 1 : 0.65,
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!accionesHabilitadas) return;
+                              abrirEditarRef.current(gasto);
+                            }}
+                            disabled={!accionesHabilitadas}
+                          >
+                            <Pencil size={16} strokeWidth={2.2} />
+                          </button>
+                          <button
+                            title="Rechazar"
+                            aria-label="Rechazar"
+                            style={{
+                              width: 34,
+                              height: 34,
+                              border: `1px solid ${accionesHabilitadas ? "#FECACA" : "#E5E7EB"}`,
+                              background: accionesHabilitadas ? "#FEF2F2" : "#F3F4F6",
+                              color: accionesHabilitadas ? "#B91C1C" : "#9CA3AF",
+                              borderRadius: 8,
+                              fontWeight: 700,
+                              cursor: accionesHabilitadas ? "pointer" : "not-allowed",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: 15,
+                              opacity: accionesHabilitadas ? 1 : 0.65,
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!accionesHabilitadas) return;
+                              confirmarEliminarRef.current(gasto, rowIndex);
+                            }}
+                            disabled={!accionesHabilitadas}
+                          >
+                            <Trash2 size={16} strokeWidth={2.2} />
+                          </button>
+                        </div>
+                      );
+                    }
+                    default:
+                      return null;
+                  }
+                })()}
+              </td>
+            ))}
+          </tr>
+        );
+      }),
+    [
+      gastosFiltrados,
+      selectedRowKey,
+      rechazoError,
+      columnasGridGastos,
+      columnasCongeladasGrid,
+      stickyLeftByColumn,
+      solicitanteOptions,
+      validadorOptions,
+      tareasCatalogo,
+      bienOptions,
+      comprobanteOptions,
+      monedaOptions,
+      estadoOptions,
+    ]
+  );
 
   return (
     <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 5 }}>
@@ -2979,6 +3290,52 @@ export default function GastosPage() {
                           }}
                         />
                       )}
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setFiltrosCabecera((prev) => ({
+                              ...prev,
+                              [filter.key]: (filter.options ?? []).map((option) => option.value),
+                            }))
+                          }
+                          style={{
+                            border: "1px solid #C7D2FE",
+                            background: "#EEF2FF",
+                            color: "#3730A3",
+                            borderRadius: 10,
+                            padding: "6px 10px",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            cursor: "pointer",
+                          }}
+                          disabled={(filter.options ?? []).length === 0}
+                        >
+                          Aplicar a todos
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setFiltrosCabecera((prev) => ({
+                              ...prev,
+                              [filter.key]: [],
+                            }))
+                          }
+                          style={{
+                            border: "1px solid #FCA5A5",
+                            background: "#FEF2F2",
+                            color: "#B91C1C",
+                            borderRadius: 10,
+                            padding: "6px 10px",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            cursor: "pointer",
+                          }}
+                          disabled={(filter.selectedValues ?? []).length === 0}
+                        >
+                          Quitar a todos
+                        </button>
+                      </div>
                       {visibleOptions.length === 0 && (
                         <div
                           style={{
@@ -3119,20 +3476,45 @@ export default function GastosPage() {
         </div>
       )}
 
-      {excedeLimiteRegistros && (
+      {confirmacionConsultaMasiva && (
         <div
           style={{
             marginTop: 12,
             borderRadius: 12,
             border: "1px solid #F59E0B",
-            background: "#FFFBEB",
-            color: "#92400E",
+            background: "#FFF7ED",
+            color: "#9A3412",
             padding: 14,
             fontSize: 11,
             fontWeight: 600,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 16,
+            flexWrap: "wrap",
           }}
         >
-          {`Se encontraron ${cantidadRegistrosFiltrados} registros. Por rendimiento solo se permite mostrar hasta ${MAX_GASTOS_PARA_MOSTRAR}. Aplique más filtros, preferiblemente por fecha, cliente, proyecto, site o estado.`}
+          <span>{confirmacionConsultaMasiva.message}</span>
+          <button
+            type="button"
+            onClick={() => {
+              forzarConsultaCompletaRef.current = true;
+              setConfirmacionConsultaMasiva(null);
+              void cargarGastos();
+            }}
+            style={{
+              border: "1px solid #C2410C",
+              background: "#EA580C",
+              color: "#FFFFFF",
+              borderRadius: 10,
+              padding: "10px 14px",
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            Continuar de todos modos
+          </button>
         </div>
       )}
 
@@ -3230,241 +3612,13 @@ export default function GastosPage() {
                       ? mensajeFiltroCabecera
                       : limiteConsultaServidor
                         ? limiteConsultaServidor.message
-                        : excedeLimiteRegistros
-                      ? `Se encontraron ${cantidadRegistrosFiltrados} registros y el máximo permitido para mostrar es ${MAX_GASTOS_PARA_MOSTRAR}. Aplique más filtros.`
-                      : "No se encontraron gastos."}
+                        : confirmacionConsultaMasiva
+                          ? confirmacionConsultaMasiva.message
+                          : "No se encontraron gastos."}
                   </td>
                 </tr>
               ) : (
-                  gastosFiltrados.map((gasto, rowIndex) => {
-                    const rowKey = getGastoRowKey(gasto, rowIndex);
-
-                    return (
-                    <tr
-                      key={rowKey}
-                      style={{
-                        background: selectedRowKey === rowKey ? "#E0E7FF" : "transparent",
-                      transition: "background 0.1s"
-                    }}
-                    onClick={() => {
-                      setSelectedRowKey(rowKey);
-                      if (rechazoError) {
-                        setRechazoError(null);
-                      }
-                    }}
-                    >
-                      {columnasGridGastos.map((col) => (
-                      <td
-                        key={col.key}
-                        style={{
-                          padding: "13px 11px",
-                          borderBottom: "1px solid #F3F4F6",
-                          color: col.key === "responsable" ? "#17143A" : "#374151",
-                          fontSize: 11,
-                          fontWeight: col.key === "responsable" ? 700 : undefined,
-                          overflow: "hidden",
-                          whiteSpace: "nowrap",
-                          textOverflow: "ellipsis",
-                          maxWidth: "100%",
-                          position: columnasCongeladasGrid.has(col.key) ? "sticky" : undefined,
-                          left: columnasCongeladasGrid.has(col.key)
-                            ? stickyLeftByColumn[col.key]
-                            : undefined,
-                          zIndex: columnasCongeladasGrid.has(col.key) ? 2 : 1,
-                          background: columnasCongeladasGrid.has(col.key)
-                            ? selectedRowKey === rowKey
-                              ? "#E0E7FF"
-                              : "#FFFFFF"
-                            : undefined,
-                          borderRight: columnasCongeladasGrid.has(col.key)
-                            ? "1px solid #E5E7EB"
-                            : undefined,
-                        }}
-                      >
-
-                        
-                        {/* Renderizado de cada celda */}
-                        {(() => {
-                          switch (col.key) {
-                            case "cliente":
-                              return renderGridCellText(gasto.filtroOperativo.filtro?.nombreCliente);
-                            case "nombreProyecto":
-                              return renderGridCellText(gasto.filtroOperativo.filtro?.nombreProyecto);
-                            case "tipoTrabajo":
-                              return renderGridCellText(
-                                gasto.filtroOperativo.filtro?.tipoTrabajo ??
-                                  gasto.filtroOperativo.tipoTrabajo?.tipoTrabajo
-                              );
-                            case "id":
-                              return renderGridCellText(gasto.id);
-                            case "site":
-                              return renderGridCellText(gasto.filtroOperativo.filtro?.nombreSite);
-                            case "solicitante":
-                              return renderGridCellText(
-                                getConstanteLabelOrFallback(
-                                  solicitanteOptions,
-                                  gasto.solicitante,
-                                  gasto.solicitanteLabel
-                                )
-                              );
-                            case "responsable":
-                              return renderGridCellText(gasto.responsableLabel || gasto.responsable || "");
-                            case "cuentaNumero":
-                              return renderGridCellText(gasto.cuentaNumero || gasto.cuenta || "");
-                            case "cuentaInter":
-                              return renderGridCellText(gasto.cuentaInter || "");
-                            case "validador":
-                              return renderGridCellText(
-                                getConstanteLabelOrFallback(
-                                  validadorOptions,
-                                  gasto.validador,
-                                  gasto.validadorLabel
-                                )
-                              );
-                            case "tarea":
-                              return renderGridCellText(
-                                getTareaLabelOrFallback(
-                                  tareasCatalogo,
-                                  gasto.filtroOperativo.tarea?.correlativo,
-                                  gasto.filtroOperativo.tarea?.tarea
-                                )
-                              );
-                            case "detalle":
-                              return renderGridCellText(gasto.detalle);
-                            case "comentario":
-                                return renderGridCellText(
-                                  gasto.comentario ? String(gasto.comentario).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim() : ""
-                                );
-                            case "bien":
-                              return renderGridCellText(getConstanteLabel(bienOptions, gasto.bien));
-                            case "comprobante":
-                              return renderGridCellText(getConstanteLabel(comprobanteOptions, gasto.comprobante));
-                            case "moneda":
-                              return renderGridCellText(getConstanteLabel(monedaOptions, gasto.moneda));
-                            case "banco":
-                              return renderGridCellText(gasto.banco ?? "");
-                            case "nroOperacion":
-                              return renderGridCellText(gasto.nroOperacion ?? "");
-                            case "fechaDeposito":
-                              return renderGridCellText(formatInputDateForDisplay(gasto.fechaDeposito));
-                            case "monto":
-                              return renderGridCellText(
-                                gasto.monto !== undefined && gasto.monto !== null && gasto.monto !== ""
-                                  ? Number(gasto.monto).toLocaleString("es-PE", {
-                                      minimumFractionDigits: 2,
-                                    })
-                                  : ""
-                              );
-                            case "totalPagar":
-                              return renderGridCellText(
-                                gasto.totalPagar !== undefined && gasto.totalPagar !== null && gasto.totalPagar !== ""
-                                  ? Number(gasto.totalPagar).toLocaleString("es-PE", {
-                                      minimumFractionDigits: 2,
-                                    })
-                                  : ""
-                              );
-                            case "ot":
-                              return renderGridCellText(gasto.filtroOperativo.ot?.ot);
-                            case "estado":
-                              return renderGridCellText(getEstadoLabel(estadoOptions, gasto.estado, gasto.estadoLabel));
-                            case "fecIngreso":
-                              return renderGridCellText(
-                                formatInputDateForDisplay(gasto.fecIngreso)
-                              );
-                            case "acciones":
-                              const accionesHabilitadas = gasto.estado === 0 || gasto.estado === 2;
-                              return (
-                                <div style={{ display: "flex", justifyContent: "center", gap: 8 }}>
-                                  <button
-                                    title="Visualizar"
-                                    aria-label="Visualizar"
-                                    style={{
-                                      width: 34,
-                                      height: 34,
-                                      border: "1px solid #BFDBFE",
-                                      background: "#EFF6FF",
-                                      color: "#1D4ED8",
-                                      borderRadius: 8,
-                                      fontWeight: 700,
-                                      cursor: "pointer",
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      fontSize: 15,
-                                    }}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      abrirVisualizar(gasto);
-                                    }}
-                                  >
-                                    👁
-                                  </button>
-                                  <button
-                                    title="Editar"
-                                    aria-label="Editar"
-                                    style={{
-                                      width: 34,
-                                      height: 34,
-                                      border: `1px solid ${accionesHabilitadas ? "#C7D2FE" : "#E5E7EB"}`,
-                                      background: accionesHabilitadas ? "#EEF2FF" : "#F3F4F6",
-                                      color: accionesHabilitadas ? "#3730A3" : "#9CA3AF",
-                                      borderRadius: 8,
-                                      fontWeight: 700,
-                                      cursor: accionesHabilitadas ? "pointer" : "not-allowed",
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      fontSize: 15,
-                                      opacity: accionesHabilitadas ? 1 : 0.65,
-                                    }}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      if (!accionesHabilitadas) return;
-                                      abrirEditar(gasto);
-                                    }}
-                                    disabled={!accionesHabilitadas}
-                                  >
-                                    ✎
-                                  </button>
-
-                                  <button
-                                    title="Rechazar"
-                                    aria-label="Rechazar"
-                                    style={{
-                                      width: 34,
-                                      height: 34,
-                                      border: `1px solid ${accionesHabilitadas ? "#FECACA" : "#E5E7EB"}`,
-                                      background: accionesHabilitadas ? "#FEF2F2" : "#F3F4F6",
-                                      color: accionesHabilitadas ? "#B91C1C" : "#9CA3AF",
-                                      borderRadius: 8,
-                                      fontWeight: 700,
-                                      cursor: accionesHabilitadas ? "pointer" : "not-allowed",
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      fontSize: 15,
-                                      opacity: accionesHabilitadas ? 1 : 0.65,
-                                    }}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      if (!accionesHabilitadas) return;
-                                      confirmarEliminar(gasto, rowIndex);
-                                    }}
-                                    disabled={!accionesHabilitadas}
-                                  >
-                                    🗑
-                                  </button>
-                                </div>
-                              );
-                            default:
-                              return null;
-                          }
-                        })()}
-                      </td>
-                    ))}
-                    </tr>
-                  );
-                })
+                <>{renderedGastoRows}</>
               )}
             </tbody>
           </table>
@@ -3482,8 +3636,6 @@ export default function GastosPage() {
           <span>
             {limiteConsultaServidor
               ? `Registros encontrados: ${limiteConsultaServidor.totalRows} | Máximo permitido para mostrar: ${limiteConsultaServidor.maxRowsAllowed}`
-              : excedeLimiteRegistros
-              ? `Registros encontrados: ${cantidadRegistrosFiltrados} | Máximo permitido para mostrar: ${MAX_GASTOS_PARA_MOSTRAR}`
               : `Registros encontrados: ${gastosFiltrados.length}`}
           </span>
           <span>

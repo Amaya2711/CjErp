@@ -9,6 +9,7 @@ import {
   actualizarEstadoMarcacionAsistencia,
   buscarAsistencia,
   exportarAsistenciaEmpleadoPdf,
+  exportarAsistenciaEmpleadoPdfLlamadaAtencion,
   exportarAsistenciaEmpleadoPdfValidacion,
 } from "../../api/asistenciaService";
 import { useConstantesPorCampo } from "../../hooks/useConstantesPorCampo";
@@ -136,6 +137,7 @@ type CuadrosDetailSortKey =
   | "fecha"
   | "nombreEmpleado"
   | "responsable"
+  | "empresa"
   | "cliente"
   | "proyecto"
   | "site"
@@ -1094,6 +1096,7 @@ export default function RptAsistenciaPage() {
         fecha: formatDateLabel(item.fecha),
         nombreEmpleado: item.nombreEmpleado,
         responsable: item.responsable || "Sin responsable",
+        empresa: item.empresa || "Sin empresa",
         cliente: item.cliente || "Sin cliente",
         proyecto: item.proyecto || "Sin proyecto",
         site: item.site || "Sin site",
@@ -1921,6 +1924,9 @@ export default function RptAsistenciaPage() {
       const employeeDetailHeaders = [
         "Empleado",
         "Responsable",
+        "Empresa",
+        "Cliente",
+        "Area",
         "Ubicacion",
         "Estado validacion",
         ...chartEmpleadoPorDia.fechas,
@@ -1930,6 +1936,9 @@ export default function RptAsistenciaPage() {
         return [
           filteredItem.employee,
           filteredItem.responsable || detailItem?.responsable || "Sin responsable",
+          filteredItem.empresa || detailItem?.empresa || "Sin empresa",
+          filteredItem.cliente || detailItem?.cliente || "Sin cliente",
+          filteredItem.area || detailItem?.area || "Sin area",
           filteredItem.ubicacion || detailItem?.ubicacion || "Sin ubicacion",
           filteredItem.estadoValidacionHoras || detailItem?.estadoValidacionHoras || "Sin validacion",
           ...chartEmpleadoPorDia.fechas.map((fecha) => {
@@ -1945,6 +1954,9 @@ export default function RptAsistenciaPage() {
       const staticHeaders = [
         "Empleado",
         "Responsable",
+        "Empresa",
+        "Cliente",
+        "Area",
         "Ubicacion",
         "Total horas",
         "Falta aprobar (hrs)",
@@ -1955,6 +1967,9 @@ export default function RptAsistenciaPage() {
       const data = filteredEmployeeGridRows.map((item) => [
         item.employee,
         item.responsable || "Sin responsable",
+        item.empresa || "Sin empresa",
+        item.cliente || "Sin cliente",
+        item.area || "Sin area",
         item.ubicacion || "Sin ubicacion",
         Number(formatDecimal(item.total, 2).replace(/,/g, "")),
         Number(formatDecimal(item.totalHorasFaltaAprobar, 2).replace(/,/g, "")),
@@ -2015,14 +2030,15 @@ export default function RptAsistenciaPage() {
       Fecha: item.fecha,
       NombreEmpleado: item.nombreEmpleado,
       Responsable: item.responsable,
-      Cliente: item.cliente,
-      Proyecto: item.proyecto,
-      Site: item.site,
-      Ubicacion: item.ubicacion,
       HoraEntrada: item.hora,
       Salida: item.salida,
-      Area: item.area,
       EstadoMarcacion: item.estadoMarcacionTexto,
+      Cliente: item.cliente,
+      Empresa: item.empresa,
+      Area: item.area,
+      Ubicacion: item.ubicacion,
+      Proyecto: item.proyecto,
+      Site: item.site,
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(detailExportRows);
@@ -2124,13 +2140,25 @@ export default function RptAsistenciaPage() {
     return getHttpErrorMessage(err, fallback);
   };
 
-  const buildEmpleadoPdfItems = (): AsistenciaReportePdfItem[] => {
+  const downloadBlobAsFile = (blob: Blob, fileName: string) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const buildEmpleadoPdfItems = (employeeName?: string): AsistenciaReportePdfItem[] => {
     const employeeSummaryByEmployee = new Map(
       filteredEmployeeGridRows.map((row) => [row.employee, row] as const)
     );
 
     return filteredRows
       .filter((item) => item.nombreEmpleado)
+      .filter((item) => !employeeName || item.nombreEmpleado.trim() === employeeName.trim())
       .map((item) => {
         const summary = employeeSummaryByEmployee.get(item.nombreEmpleado);
 
@@ -2139,11 +2167,14 @@ export default function RptAsistenciaPage() {
           hora: item.hora ?? "",
           nombreEmpleado: item.nombreEmpleado,
           responsable: item.responsable ?? summary?.responsable ?? "",
+          empresa: item.empresa || summary?.empresa || "",
+          cliente: item.cliente || summary?.cliente || "",
+          area: item.area || summary?.area || "",
           ubicacion: item.ubicacion || summary?.ubicacion || "",
           idEmpleado: item.idEmpleado ?? null,
           salida: item.salida ?? "",
           estadoMarcacionTexto: item.estadoMarcacionTexto || item.estado || "Sin clasificar",
-          totalHoras: summary?.total ?? item.totalHoras,
+          totalHoras: item.totalHoras,
           totalHorasFaltaIncompleto: summary?.totalHorasFaltaIncompleto ?? 0,
           totalHorasEmpleado: summary?.total ?? item.totalHorasEmpleado,
           totalHorasLaborales: summary?.totalHorasLaborales ?? item.totalHorasLaborales,
@@ -2154,6 +2185,42 @@ export default function RptAsistenciaPage() {
           observacion: item.observacion ?? "",
         };
       });
+  };
+
+  const exportPdfLlamadaAtencion = async (employeeRow: EmployeeDateRow) => {
+    const employeeName = employeeRow.employee.trim();
+    if (!employeeName) {
+      setError("No se pudo identificar el empleado para generar la llamada de atencion.");
+      return;
+    }
+
+    if (normalizeText(employeeRow.estadoValidacionHoras) !== "REVISAR") {
+      setError("La llamada de atencion solo se puede generar cuando el estado de validacion es REVISAR.");
+      return;
+    }
+
+    const pdfItems = buildEmpleadoPdfItems(employeeName);
+    if (pdfItems.length === 0) {
+      setError("No se encontraron registros del empleado seleccionado para generar la llamada de atencion.");
+      return;
+    }
+
+    setError("");
+    try {
+      const pdfBlob = await exportarAsistenciaEmpleadoPdfLlamadaAtencion({
+        fechaInicio: toApiDate(fechaInicio),
+        fechaFin: toApiDate(fechaFin),
+        destinatario: employeeName || "Llamada de atencion",
+        items: pdfItems,
+      });
+
+      downloadBlobAsFile(
+        pdfBlob,
+        `llamada_atencion_asistencia_${employeeName.replace(/\s+/g, "_").toLowerCase()}_${toApiDate(fechaInicio).replaceAll("/", "")}_${toApiDate(fechaFin).replaceAll("/", "")}.pdf`
+      );
+    } catch (err) {
+      setError(await getValidationPdfErrorMessage(err));
+    }
   };
 
   const exportPdfValidacion = async () => {
@@ -2167,7 +2234,7 @@ export default function RptAsistenciaPage() {
     }
 
     const employeeName = filteredEmployeeGridRows[0]?.employee?.trim();
-    const pdfItems = buildEmpleadoPdfItems().filter((item) => item.nombreEmpleado.trim() === employeeName);
+    const pdfItems = buildEmpleadoPdfItems(employeeName);
     if (pdfItems.length === 0) {
       setError("No se encontraron registros del empleado filtrado para generar el PDF de prueba.");
       return;
@@ -2182,14 +2249,10 @@ export default function RptAsistenciaPage() {
         items: pdfItems,
       });
 
-      const url = URL.createObjectURL(pdfBlob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `reporte_asistencia_validacion_${toApiDate(fechaInicio).replaceAll("/", "")}_${toApiDate(fechaFin).replaceAll("/", "")}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      downloadBlobAsFile(
+        pdfBlob,
+        `reporte_asistencia_validacion_${toApiDate(fechaInicio).replaceAll("/", "")}_${toApiDate(fechaFin).replaceAll("/", "")}.pdf`
+      );
     } catch (err) {
       setError(await getValidationPdfErrorMessage(err));
     }
@@ -2205,14 +2268,10 @@ export default function RptAsistenciaPage() {
         items: pdfItems,
       });
 
-      const url = URL.createObjectURL(pdfBlob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `reporte_asistencia_${toApiDate(fechaInicio).replaceAll("/", "")}_${toApiDate(fechaFin).replaceAll("/", "")}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      downloadBlobAsFile(
+        pdfBlob,
+        `reporte_asistencia_${toApiDate(fechaInicio).replaceAll("/", "")}_${toApiDate(fechaFin).replaceAll("/", "")}.pdf`
+      );
       return;
     }
 
@@ -3237,6 +3296,7 @@ export default function RptAsistenciaPage() {
                 }))
               }
               onCellSelect={handleEmployeeDateCellClick}
+              onExportLlamadaAtencion={exportPdfLlamadaAtencion}
             />
           </ChartCard>
           <div style={styles.gerencialSummaryToolbar}>
@@ -4007,6 +4067,7 @@ function SimpleEmployeeDateGrid({
   sortDirection,
   onToggleSort,
   onCellSelect,
+  onExportLlamadaAtencion,
 }: {
   data: EmployeeDateRow[];
   fechas: string[];
@@ -4025,6 +4086,7 @@ function SimpleEmployeeDateGrid({
   sortDirection: "asc" | "desc";
   onToggleSort: (key: EmployeeGridSortKey) => void;
   onCellSelect?: (nombreEmpleado: string, fecha: string) => void;
+  onExportLlamadaAtencion?: (item: EmployeeDateRow) => void;
 }) {
   const max = Math.max(
     ...data.flatMap((item) => item.fechas.map((fecha) => fecha.totalHoras)),
@@ -4097,7 +4159,7 @@ function SimpleEmployeeDateGrid({
             <div
               style={{
                 ...styles.stateDateGrid,
-                gridTemplateColumns: `220px 180px 110px 110px 100px 140px 150px 150px repeat(${fechas.length}, minmax(88px, 1fr))`,
+                gridTemplateColumns: `220px 180px 170px 180px 150px 160px 110px 110px 100px 140px 150px 160px 150px repeat(${fechas.length}, minmax(88px, 1fr))`,
               }}
             >
             <div style={{ ...styles.stateDateGridHeader, ...styles.stateDateGridCorner }}>
@@ -4141,6 +4203,18 @@ function SimpleEmployeeDateGrid({
                   style={styles.employeeGridHeaderInput}
                 />
               </div>
+            </div>
+            <div style={styles.stateDateGridHeader}>
+              Empresa
+            </div>
+            <div style={styles.stateDateGridHeader}>
+              Cliente
+            </div>
+            <div style={styles.stateDateGridHeader}>
+              Area
+            </div>
+            <div style={styles.stateDateGridHeader}>
+              Ubicacion
             </div>
             <div style={styles.stateDateGridHeader}>
               <button
@@ -4235,6 +4309,9 @@ function SimpleEmployeeDateGrid({
                 </select>
               </div>
             </div>
+            <div style={styles.stateDateGridHeader}>
+              Llamada de atencion
+            </div>
             {fechas.map((fecha) => (
               <div key={`head-employee-${fecha}`} style={styles.stateDateGridHeader}>
                 <div style={styles.employeeGridDateHeader}>
@@ -4274,6 +4351,58 @@ function SimpleEmployeeDateGrid({
                 >
                   <span style={styles.employeeGridValidationText}>
                     {item.responsable || "Sin responsable"}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    ...styles.stateDateGridCell,
+                    ...styles.employeeGridValidationCell,
+                    background: differenceTone.rowBackground,
+                    color: differenceTone.rowText,
+                  }}
+                  title={`${item.employee}: ${item.empresa || "Sin empresa"}`}
+                >
+                  <span style={styles.employeeGridValidationText}>
+                    {item.empresa || "Sin empresa"}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    ...styles.stateDateGridCell,
+                    ...styles.employeeGridValidationCell,
+                    background: differenceTone.rowBackground,
+                    color: differenceTone.rowText,
+                  }}
+                  title={`${item.employee}: ${item.cliente || "Sin cliente"}`}
+                >
+                  <span style={styles.employeeGridValidationText}>
+                    {item.cliente || "Sin cliente"}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    ...styles.stateDateGridCell,
+                    ...styles.employeeGridValidationCell,
+                    background: differenceTone.rowBackground,
+                    color: differenceTone.rowText,
+                  }}
+                  title={`${item.employee}: ${item.area || "Sin area"}`}
+                >
+                  <span style={styles.employeeGridValidationText}>
+                    {item.area || "Sin area"}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    ...styles.stateDateGridCell,
+                    ...styles.employeeGridValidationCell,
+                    background: differenceTone.rowBackground,
+                    color: differenceTone.rowText,
+                  }}
+                  title={`${item.employee}: ${item.ubicacion || "Sin ubicacion"}`}
+                >
+                  <span style={styles.employeeGridValidationText}>
+                    {item.ubicacion || "Sin ubicacion"}
                   </span>
                 </div>
                 <div
@@ -4358,6 +4487,35 @@ function SimpleEmployeeDateGrid({
                   <span style={styles.employeeGridValidationText}>
                     {item.estadoValidacionHoras || "Sin validacion"}
                   </span>
+                </div>
+                <div
+                  style={{
+                    ...styles.stateDateGridCell,
+                    ...styles.employeeGridValidationCell,
+                    background: differenceTone.rowBackground,
+                    color: differenceTone.rowText,
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => onExportLlamadaAtencion?.(item)}
+                    disabled={normalizeText(item.estadoValidacionHoras) !== "REVISAR" || !onExportLlamadaAtencion}
+                    style={{
+                      ...styles.employeeGridActionButton,
+                      opacity: normalizeText(item.estadoValidacionHoras) === "REVISAR" ? 1 : 0.45,
+                      cursor:
+                        normalizeText(item.estadoValidacionHoras) === "REVISAR" && onExportLlamadaAtencion
+                          ? "pointer"
+                          : "not-allowed",
+                    }}
+                    title={
+                      normalizeText(item.estadoValidacionHoras) === "REVISAR"
+                        ? `Generar llamada de atencion para ${item.employee}`
+                        : "Disponible solo cuando el estado de validacion es REVISAR"
+                    }
+                  >
+                    PDF atencion
+                  </button>
                 </div>
                 {item.fechas.map((cell) => {
                   const value = cell.totalHoras;
@@ -5140,6 +5298,7 @@ function SimpleCuadrosDetailGrid({
     fecha: string;
     nombreEmpleado: string;
     responsable: string;
+    empresa: string;
     cliente: string;
     proyecto: string;
     site: string;
@@ -5214,15 +5373,25 @@ function SimpleCuadrosDetailGrid({
                 <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("salida")}>
                   <div style={styles.cuadrosDetailThContent}><span>Salida</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("salida")}</span></div>
                 </th>
-                <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("area")}>
-                  <div style={styles.cuadrosDetailThContent}><span>Area</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("area")}</span></div>
-                </th>
                 <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("estadoMarcacionTexto")}>
                   <div style={styles.cuadrosDetailThContent}><span>Estado marcacion</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("estadoMarcacionTexto")}</span></div>
                 </th>
                 {showExtendedColumns ? (
                   <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("cliente")}>
                     <div style={styles.cuadrosDetailThContent}><span>Cliente</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("cliente")}</span></div>
+                  </th>
+                ) : null}
+                {showExtendedColumns ? (
+                  <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("empresa")}>
+                    <div style={styles.cuadrosDetailThContent}><span>Empresa</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("empresa")}</span></div>
+                  </th>
+                ) : null}
+                <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("area")}>
+                  <div style={styles.cuadrosDetailThContent}><span>Area</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("area")}</span></div>
+                </th>
+                {showExtendedColumns ? (
+                  <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("ubicacion")}>
+                    <div style={styles.cuadrosDetailThContent}><span>Ubicacion</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("ubicacion")}</span></div>
                   </th>
                 ) : null}
                 {showExtendedColumns ? (
@@ -5233,11 +5402,6 @@ function SimpleCuadrosDetailGrid({
                 {showExtendedColumns ? (
                   <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("site")}>
                     <div style={styles.cuadrosDetailThContent}><span>Site</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("site")}</span></div>
-                  </th>
-                ) : null}
-                {showExtendedColumns ? (
-                  <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("ubicacion")}>
-                    <div style={styles.cuadrosDetailThContent}><span>Ubicacion</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("ubicacion")}</span></div>
                   </th>
                 ) : null}
               </tr>
@@ -5261,7 +5425,6 @@ function SimpleCuadrosDetailGrid({
                   <th style={styles.cuadrosDetailFilterTh} />
                   <th style={styles.cuadrosDetailFilterTh} />
                   <th style={styles.cuadrosDetailFilterTh} />
-                  <th style={styles.cuadrosDetailFilterTh} />
                   <th style={styles.cuadrosDetailFilterTh}>
                     <HeaderCheckboxFilter
                       values={extendedColumnFilters.cliente}
@@ -5269,6 +5432,9 @@ function SimpleCuadrosDetailGrid({
                       onChange={(value) => onExtendedColumnFilterChange("cliente", value)}
                     />
                   </th>
+                  <th style={styles.cuadrosDetailFilterTh} />
+                  <th style={styles.cuadrosDetailFilterTh} />
+                  <th style={styles.cuadrosDetailFilterTh} />
                   <th style={styles.cuadrosDetailFilterTh}>
                     <HeaderCheckboxFilter
                       values={extendedColumnFilters.proyecto}
@@ -5399,7 +5565,6 @@ function SimpleCuadrosDetailGrid({
                       </td>
                     );
                   })()}
-                  <td style={styles.cuadrosDetailTd}>{item.area}</td>
                   <td style={styles.cuadrosDetailTd}>
                     {(() => {
                       const matchedOption = estadoMarcacionOptions.find((option) =>
@@ -5432,9 +5597,11 @@ function SimpleCuadrosDetailGrid({
                     })()}
                   </td>
                   {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.cliente}</td> : null}
+                  {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.empresa}</td> : null}
+                  <td style={styles.cuadrosDetailTd}>{item.area}</td>
+                  <td style={styles.cuadrosDetailTd}>{item.ubicacion}</td>
                   {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.proyecto}</td> : null}
                   {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.site}</td> : null}
-                  <td style={styles.cuadrosDetailTd}>{item.ubicacion}</td>
                 </tr>
               ))}
             </tbody>
@@ -6898,6 +7065,18 @@ const styles: Record<string, React.CSSProperties> = {
     color: "inherit",
     lineHeight: 1.2,
     wordBreak: "break-word",
+  },
+  employeeGridActionButton: {
+    width: "100%",
+    minHeight: 30,
+    borderRadius: 9,
+    border: "1px solid #C7D2FE",
+    background: "#EEF2FF",
+    color: "#3730A3",
+    fontSize: 10,
+    fontWeight: 800,
+    padding: "6px 8px",
+    transition: "all 0.2s ease",
   },
   employeeGridHeaderStack: {
     display: "flex",

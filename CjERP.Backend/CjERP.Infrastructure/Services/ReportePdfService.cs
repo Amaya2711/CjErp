@@ -43,6 +43,15 @@ public sealed class ReportePdfService : IReportePdfService
         return Task.FromResult(document.GeneratePdf());
     }
 
+    public Task<byte[]> GenerarReporteEmpleadoLlamadaAtencionPdfAsync(
+        AsistenciaReportePdfRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var document = BuildOperativoLlamadaAtencionDocument(request);
+        return Task.FromResult(document.GeneratePdf());
+    }
+
     public Task<byte[]> GenerarReporteGerencialEjecutivoPdfAsync(
         AsistenciaGerencialPdfDto reporte,
         CancellationToken cancellationToken = default)
@@ -338,6 +347,138 @@ public sealed class ReportePdfService : IReportePdfService
         });
     }
 
+    private static Document BuildOperativoLlamadaAtencionDocument(AsistenciaReportePdfRequestDto request)
+    {
+        var items = request.Items
+            .Where(item => item is not null)
+            .OrderBy(item => ParseDisplayDate(item.Fecha) ?? DateTime.MaxValue)
+            .ThenBy(item => item.Hora)
+            .ToList();
+
+        var primaryItem = items.FirstOrDefault();
+        var diferenciaHoras = primaryItem?.DiferenciaHoras ?? 0m;
+        var horasLaborales = primaryItem?.TotalHorasLaborales ?? 0m;
+        var empleadoNombre = EmptyIfMissing(primaryItem?.NombreEmpleado);
+        var responsable = EmptyIfMissing(primaryItem?.Responsable);
+        var empresa = EmptyIfMissing(primaryItem?.Empresa);
+        var cliente = EmptyIfMissing(primaryItem?.Cliente);
+        var area = EmptyIfMissing(primaryItem?.Area);
+        var ubicacion = EmptyIfMissing(primaryItem?.Ubicacion);
+
+        return Document.Create(container =>
+        {
+            container.Page(page =>
+            {
+                page.Margin(24);
+                page.Size(PageSizes.A4);
+                page.DefaultTextStyle(x => x.FontSize(10).FontColor(Colors.BlueGrey.Darken4));
+
+                page.Header().Column(header =>
+                {
+                    header.Spacing(12);
+
+                    header.Item().Row(row =>
+                    {
+                        row.RelativeItem().Column(info =>
+                        {
+                            info.Item().Text("Llamada de atencion").Bold().FontSize(22).FontColor("#B42318");
+                            info.Item().Text("Incumplimiento de jornada laboral").SemiBold().FontColor("#7A271A");
+                            info.Item().Text($"Periodo evaluado: {request.FechaInicio} - {request.FechaFin}").FontColor(Colors.Grey.Darken2);
+                        });
+
+                        row.ConstantItem(170).AlignRight().Column(meta =>
+                        {
+                            meta.Item().Text($"Emitido: {DateTime.Now:dd/MM/yyyy HH:mm}");
+                            meta.Item().Text($"Empleado ID: {primaryItem?.IdEmpleado?.ToString(CultureInfo.InvariantCulture) ?? "-"}");
+                        });
+                    });
+
+                    header.Item().Background("#FFF1F3").Border(1).BorderColor("#FECDD3").Padding(12).Column(info =>
+                    {
+                        info.Spacing(4);
+                        info.Item().Text($"Empleado: {empleadoNombre}").SemiBold();
+                        info.Item().Text($"Responsable: {responsable}");
+                        info.Item().Text($"Empresa: {empresa}");
+                        info.Item().Text($"Cliente: {cliente}");
+                        info.Item().Text($"Area: {area}");
+                        info.Item().Text($"Ubicacion: {ubicacion}");
+                    });
+                });
+
+                page.Content().Column(column =>
+                {
+                    column.Spacing(14);
+
+                    column.Item().Background("#FEF3F2").Border(1).BorderColor("#F04438").Padding(12).Column(card =>
+                    {
+                        card.Spacing(5);
+                        card.Item().Text("Se comunica la presente llamada de atencion debido a que no se viene cumpliendo con las horas laborales establecidas para el periodo evaluado.")
+                            .FontColor("#7A271A")
+                            .SemiBold();
+                        card.Item().Text($"Diferencia acumulada del periodo: {diferenciaHoras:0.00} h | Horas laborales del periodo: {horasLaborales:0.00} h")
+                            .FontColor("#912018");
+                    });
+
+                    column.Item().Background(Colors.White).Border(1).BorderColor(Colors.Grey.Lighten2).Padding(12).Column(card =>
+                    {
+                        card.Spacing(10);
+                        card.Item().Text("Detalle diario observado").Bold().FontSize(12);
+
+                        if (items.Count == 0)
+                        {
+                            card.Item().Background("#F8FAFC").Border(1).BorderColor("#CBD5E1").Padding(10).Text("No existen registros diarios para mostrar.");
+                            return;
+                        }
+
+                        card.Item().Table(table =>
+                        {
+                            table.ColumnsDefinition(columns =>
+                            {
+                                columns.RelativeColumn(1.1f);
+                                columns.RelativeColumn(1f);
+                                columns.RelativeColumn(1.4f);
+                                columns.RelativeColumn(0.8f);
+                                columns.RelativeColumn(0.8f);
+                            });
+
+                            table.Header(header =>
+                            {
+                                header.Cell().Element(CellHeader).Text("Fecha");
+                                header.Cell().Element(CellHeader).AlignRight().Text("Horas trabajadas");
+                                header.Cell().Element(CellHeader).Text("Estado asistencia");
+                                header.Cell().Element(CellHeader).Text("Entrada");
+                                header.Cell().Element(CellHeader).Text("Salida");
+                            });
+
+                            foreach (var item in items)
+                            {
+                                table.Cell().Element(CellBody).Text(EmptyIfMissing(item.Fecha));
+                                table.Cell().Element(CellBody).AlignRight().Text($"{item.TotalHoras:0.00} h");
+                                table.Cell().Element(CellBody).Text(EmptyIfMissing(item.EstadoMarcacionTexto));
+                                table.Cell().Element(CellBody).Text(EmptyIfMissing(item.Hora));
+                                table.Cell().Element(CellBody).Text(EmptyIfMissing(item.Salida));
+                            }
+                        });
+                    });
+
+                    column.Item().Background("#F8FAFC").Border(1).BorderColor("#D0D5DD").Padding(12).Text(text =>
+                    {
+                        text.Span("Observacion: ").SemiBold();
+                        text.Span("Se solicita regularizar la jornada laboral y coordinar con su responsable inmediato las acciones correctivas correspondientes.");
+                    });
+                });
+
+                page.Footer().AlignCenter().Text(text =>
+                {
+                    text.Span("Cj Telecom - Llamada de atencion por asistencia | ");
+                    text.CurrentPageNumber();
+                    text.Span(" / ");
+                    text.TotalPages();
+                });
+            });
+        });
+    }
+
     private static Document BuildGerencialDocument(
         ReporteWhatsappEmpleadoDto empleadoDestino,
         ReporteWhatsappPeriodoDto periodo,
@@ -601,6 +742,21 @@ public sealed class ReportePdfService : IReportePdfService
             Comentario = item.Comentario,
             Observacion = item.Observacion
         };
+
+    private static DateTime? ParseDisplayDate(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        if (DateTime.TryParseExact(value.Trim(), "dd/MM/yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+        {
+            return parsed;
+        }
+
+        return null;
+    }
 
     private static IContainer CellHeader(IContainer container) =>
         container.Background(Colors.Blue.Lighten4).BorderBottom(1).BorderColor(Colors.Grey.Lighten2).Padding(6);

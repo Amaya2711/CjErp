@@ -37,6 +37,10 @@ public interface IReportePdfService
         AsistenciaReportePdfRequestDto request,
         CancellationToken cancellationToken = default);
 
+    Task<byte[]> GenerarReporteEmpleadoLlamadaAtencionPdfAsync(
+        AsistenciaReportePdfRequestDto request,
+        CancellationToken cancellationToken = default);
+
     Task<byte[]> GenerarReporteGerencialEjecutivoPdfAsync(
         AsistenciaGerencialPdfDto reporte,
         CancellationToken cancellationToken = default);

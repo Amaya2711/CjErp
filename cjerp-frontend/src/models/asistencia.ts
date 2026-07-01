@@ -40,6 +40,9 @@ export type AsistenciaReportePdfItem = {
   hora: string;
   nombreEmpleado: string;
   responsable: string;
+  empresa?: string;
+  cliente?: string;
+  area?: string;
   ubicacion: string;
   idEmpleado: number | null;
   salida: string;

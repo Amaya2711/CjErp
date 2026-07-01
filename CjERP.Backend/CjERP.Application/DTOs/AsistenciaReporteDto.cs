@@ -37,6 +37,9 @@ public class AsistenciaReportePdfItemDto
     public string Hora { get; set; } = string.Empty;
     public string NombreEmpleado { get; set; } = string.Empty;
     public string Responsable { get; set; } = string.Empty;
+    public string Empresa { get; set; } = string.Empty;
+    public string Cliente { get; set; } = string.Empty;
+    public string Area { get; set; } = string.Empty;
     public string Ubicacion { get; set; } = string.Empty;
     public int? IdEmpleado { get; set; }
     public string Salida { get; set; } = string.Empty;

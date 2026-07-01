@@ -85,6 +85,39 @@ public class AsistenciaReporteController : ControllerBase
         }
     }
 
+    [HttpPost("pdf-empleado-llamada-atencion")]
+    public async Task<IActionResult> ExportarPdfEmpleadoLlamadaAtencion(
+        [FromBody] AsistenciaReportePdfRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.FechaInicio) || string.IsNullOrWhiteSpace(request.FechaFin))
+        {
+            return BadRequest(new { success = false, message = "FechaInicio y FechaFin son obligatorias." });
+        }
+
+        if (request.Items is null || request.Items.Count == 0)
+        {
+            return BadRequest(new { success = false, message = "No existen registros filtrados para generar la llamada de atencion." });
+        }
+
+        try
+        {
+            var pdfBytes = await _asistenciaReporteService.GenerarPdfEmpleadoLlamadaAtencionAsync(request, cancellationToken);
+            var fileName = $"llamada_atencion_asistencia_{request.FechaInicio.Replace("/", string.Empty)}_{request.FechaFin.Replace("/", string.Empty)}.pdf";
+            return File(pdfBytes, "application/pdf", fileName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error generando el PDF de llamada de atencion de asistencia.");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                success = false,
+                message = "No se pudo generar el PDF de llamada de atencion.",
+                detail = ex.ToString()
+            });
+        }
+    }
+
     [HttpPost("pdf-gerencial")]
     public async Task<IActionResult> ExportarPdfGerencial(
         [FromBody] AsistenciaGerencialPdfRequestDto request,
