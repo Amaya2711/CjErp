@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using System.Collections.Concurrent;
 using CjERP.Application.DTOs.ReportesWhatsapp;
 using CjERP.Application.DTOs.WhatsappInbound;
 using CjERP.Application.Interfaces.Repositories;
@@ -14,7 +15,12 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
     private const string MenuAsistencia = "menu_asistencia";
     private const string MenuBoleta = "menu_boleta";
     private const string MenuEncuesta = "menu_encuesta";
+    private const string AsistenciaMesActual = "asistencia_mes_actual";
+    private const string AsistenciaOtroMes = "asistencia_otro_mes";
+    private const string BoletaMesActual = "boleta_mes_actual";
+    private const string BoletaOtroMes = "boleta_otro_mes";
     private static readonly Regex DateRegex = new(@"(?<!\d)(\d{2}/\d{2}/\d{4})(?!\d)", RegexOptions.Compiled);
+    private static readonly Regex MonthYearSlashRegex = new(@"(?<!\d)(0?[1-9]|1[0-2])[\/\-](20\d{2})(?!\d)", RegexOptions.Compiled);
     private static readonly Dictionary<string, int> MonthMap = new(StringComparer.OrdinalIgnoreCase)
     {
         ["enero"] = 1,
@@ -31,6 +37,7 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
         ["noviembre"] = 11,
         ["diciembre"] = 12
     };
+    private static readonly ConcurrentDictionary<string, ConversationState> ConversationStates = new(StringComparer.Ordinal);
 
     private readonly IReporteRepository _reporteRepository;
     private readonly IReportePdfService _reportePdfService;
@@ -135,30 +142,56 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
         }
 
         var normalizedMessage = (messageBody ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(normalizedMessage))
+        if (ShouldResetConversation(normalizedMessage))
         {
-            return BuildMenuReply(normalizedPhone);
+            ConversationStates.TryRemove(normalizedPhone, out _);
+            return BuildMainMenuReply(normalizedPhone);
         }
 
-        if (string.Equals(item.ActionId, MenuBoleta, StringComparison.OrdinalIgnoreCase))
+        var activeState = GetConversationState(normalizedPhone);
+        if (string.IsNullOrWhiteSpace(normalizedMessage))
         {
-            return BuildTextReply(
-                normalizedPhone,
-                "La opcion Boleta de pago ya fue registrada. En el siguiente paso conectaremos ese flujo para enviarte la boleta segun el periodo que indiques.");
+            return BuildMainMenuReply(normalizedPhone);
+        }
+
+        var stateResponse = await TryHandleStatefulFlowAsync(
+            item,
+            normalizedPhone,
+            normalizedMessage,
+            activeState,
+            cancellationToken);
+
+        if (stateResponse is not null)
+        {
+            return stateResponse;
+        }
+
+        if (IsAsistenciaMenuSelection(item, normalizedMessage))
+        {
+            SetConversationState(normalizedPhone, ConversationStep.AwaitingAsistenciaPeriodChoice);
+            return BuildPeriodMenuReply(normalizedPhone, MenuFlow.Asistencia);
+        }
+
+        if (IsBoletaMenuSelection(item, normalizedMessage))
+        {
+            SetConversationState(normalizedPhone, ConversationStep.AwaitingBoletaPeriodChoice);
+            return BuildPeriodMenuReply(normalizedPhone, MenuFlow.Boleta);
         }
 
         if (string.Equals(item.ActionId, MenuEncuesta, StringComparison.OrdinalIgnoreCase))
         {
+            ConversationStates.TryRemove(normalizedPhone, out _);
             return BuildTextReply(
                 normalizedPhone,
                 "La opcion Encuesta ya fue registrada. En el siguiente paso conectaremos este flujo para responder la encuesta desde WhatsApp.");
         }
 
-        if (!IsAsistenciaRequest(normalizedMessage) &&
-            !string.Equals(item.ActionId, MenuAsistencia, StringComparison.OrdinalIgnoreCase))
+        if (!IsAsistenciaRequest(normalizedMessage))
         {
-            return BuildMenuReply(normalizedPhone);
+            return BuildMainMenuReply(normalizedPhone);
         }
+
+        ConversationStates.TryRemove(normalizedPhone, out _);
 
         var empleado = await _reporteRepository.ObtenerEmpleadoPorTelefonoAsync(normalizedPhone, cancellationToken);
         if (empleado is null || empleado.IdEmpleado <= 0)
@@ -216,16 +249,11 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
                     new MetaWhatsAppSendReplyButtonsRequestDto
                     {
                         To = response.Phone,
-                        Header = "Menu principal",
+                        Header = response.Header,
                         Body = response.Message,
-                        Footer = "Selecciona una opcion",
+                        Footer = response.Footer,
                         PhoneNumberId = item.PhoneNumberId,
-                        Buttons =
-                        [
-                            new MetaWhatsAppReplyButtonOptionDto { Id = MenuAsistencia, Title = "Asistencia" },
-                            new MetaWhatsAppReplyButtonOptionDto { Id = MenuBoleta, Title = "Boleta" },
-                            new MetaWhatsAppReplyButtonOptionDto { Id = MenuEncuesta, Title = "Encuesta" }
-                        ]
+                        Buttons = response.Buttons
                     },
                     cancellationToken);
             }
@@ -267,7 +295,7 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
             : new ReporteWhatsappSendRequestDto
             {
                 NombreArchivo = string.Empty,
-                Mensaje = BuildFallbackMenuText(response),
+                Mensaje = BuildFallbackText(response),
                 Modo = string.IsNullOrWhiteSpace(_settings.ResponseMode) ? "wsp" : _settings.ResponseMode.Trim(),
                 Telefono = response.Phone,
                 Contenido = string.Empty
@@ -385,6 +413,22 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
     private static bool IsAsistenciaRequest(string message) =>
         message.Contains("asistencia", StringComparison.OrdinalIgnoreCase);
 
+    private static bool ShouldResetConversation(string message) =>
+        string.Equals(message, "menu", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(message, "inicio", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(message, "hola", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsAsistenciaMenuSelection(InboundMessage item, string message) =>
+        string.Equals(item.ActionId, MenuAsistencia, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(message, "1", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(message, "asistencia", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsBoletaMenuSelection(InboundMessage item, string message) =>
+        string.Equals(item.ActionId, MenuBoleta, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(message, "2", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(message, "boleta", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(message, "boleta de pago", StringComparison.OrdinalIgnoreCase);
+
     private bool UseMetaProvider() =>
         string.Equals(_settings.ResponseProvider?.Trim(), "meta", StringComparison.OrdinalIgnoreCase);
 
@@ -413,6 +457,191 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
         var rangeDays = Math.Max(1, _settings.DefaultRangeDays);
         var start = today.AddDays(-(rangeDays - 1));
         return (start.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture), today.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture));
+    }
+
+    private async Task<OutboundResponse?> TryHandleStatefulFlowAsync(
+        InboundMessage item,
+        string normalizedPhone,
+        string normalizedMessage,
+        ConversationState? activeState,
+        CancellationToken cancellationToken)
+    {
+        if (activeState is null)
+        {
+            return null;
+        }
+
+        switch (activeState.Step)
+        {
+            case ConversationStep.AwaitingAsistenciaPeriodChoice:
+                if (IsCurrentMonthSelection(item, normalizedMessage))
+                {
+                    ConversationStates.TryRemove(normalizedPhone, out _);
+                    var (start, end) = ResolveCurrentMonthDateRange();
+                    return await BuildAsistenciaDocumentReplyAsync(item.ContactName, normalizedPhone, start, end, cancellationToken);
+                }
+
+                if (IsOtherMonthSelection(item, normalizedMessage))
+                {
+                    SetConversationState(normalizedPhone, ConversationStep.AwaitingAsistenciaCustomMonth);
+                    return BuildTextReply(
+                        normalizedPhone,
+                        "Indica el mes y anio que deseas consultar. Ejemplos: mayo 2026 o 05/2026.");
+                }
+
+                return BuildPeriodMenuReply(normalizedPhone, MenuFlow.Asistencia);
+
+            case ConversationStep.AwaitingBoletaPeriodChoice:
+                if (IsCurrentMonthSelection(item, normalizedMessage))
+                {
+                    ConversationStates.TryRemove(normalizedPhone, out _);
+                    var (start, end) = ResolveCurrentMonthDateRange();
+                    return BuildTextReply(
+                        normalizedPhone,
+                        $"La opcion Boleta fue registrada para el periodo {start} - {end}. El envio automatico de boletas se conectara en el siguiente paso.");
+                }
+
+                if (IsOtherMonthSelection(item, normalizedMessage))
+                {
+                    SetConversationState(normalizedPhone, ConversationStep.AwaitingBoletaCustomMonth);
+                    return BuildTextReply(
+                        normalizedPhone,
+                        "Indica el mes y anio de la boleta. Ejemplos: mayo 2026 o 05/2026.");
+                }
+
+                return BuildTextReply(normalizedPhone, BuildPeriodMenuFallbackText(MenuFlow.Boleta));
+
+            case ConversationStep.AwaitingAsistenciaCustomMonth:
+                if (TryResolveSingleMonthPeriod(normalizedMessage, out var asistenciaStart, out var asistenciaEnd))
+                {
+                    ConversationStates.TryRemove(normalizedPhone, out _);
+                    return await BuildAsistenciaDocumentReplyAsync(
+                        item.ContactName,
+                        normalizedPhone,
+                        asistenciaStart.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture),
+                        asistenciaEnd.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture),
+                        cancellationToken);
+                }
+
+                return BuildTextReply(
+                    normalizedPhone,
+                    "No pude reconocer el periodo. Escribe el mes y anio como mayo 2026 o 05/2026.");
+
+            case ConversationStep.AwaitingBoletaCustomMonth:
+                if (TryResolveSingleMonthPeriod(normalizedMessage, out var boletaStart, out var boletaEnd))
+                {
+                    ConversationStates.TryRemove(normalizedPhone, out _);
+                    return BuildTextReply(
+                        normalizedPhone,
+                        $"La opcion Boleta fue registrada para el periodo {boletaStart:dd/MM/yyyy} - {boletaEnd:dd/MM/yyyy}. El envio automatico de boletas se conectara en el siguiente paso.");
+                }
+
+                return BuildTextReply(
+                    normalizedPhone,
+                    "No pude reconocer el periodo de boleta. Escribe el mes y anio como mayo 2026 o 05/2026.");
+
+            default:
+                return null;
+        }
+    }
+
+    private async Task<OutboundResponse> BuildAsistenciaDocumentReplyAsync(
+        string contactName,
+        string normalizedPhone,
+        string fechaInicio,
+        string fechaFin,
+        CancellationToken cancellationToken)
+    {
+        var empleado = await _reporteRepository.ObtenerEmpleadoPorTelefonoAsync(normalizedPhone, cancellationToken);
+        if (empleado is null || empleado.IdEmpleado <= 0)
+        {
+            return BuildTextReply(
+                normalizedPhone,
+                "No pudimos vincular tu numero con un empleado registrado. Por favor valida tu telefono en el ERP o contacta a Sistemas.");
+        }
+
+        var detalle = await _reporteRepository.ObtenerReporteAsistenciaAsync(fechaInicio, fechaFin, empleado.IdEmpleado, cancellationToken);
+        if (detalle.Count == 0)
+        {
+            return BuildTextReply(
+                normalizedPhone,
+                $"No encontramos registros de asistencia para el periodo {fechaInicio} - {fechaFin}.");
+        }
+
+        var periodo = new ReporteWhatsappPeriodoDto
+        {
+            FechaInicio = fechaInicio,
+            FechaFin = fechaFin,
+            FechaProceso = ParseFecha(fechaFin),
+            EtiquetaPeriodo = $"{fechaInicio} - {fechaFin}"
+        };
+
+        var pdfBytes = await _reportePdfService.GenerarReportePdfAsync(
+            ReporteWhatsappTipos.Operativo,
+            empleado,
+            periodo,
+            detalle,
+            cancellationToken);
+
+        var fileName = $"Asistencia_{fechaInicio.Replace("/", string.Empty)}_{fechaFin.Replace("/", string.Empty)}_{empleado.IdEmpleado}.pdf";
+        return new OutboundResponse
+        {
+            Kind = OutboundResponseKind.Document,
+            Phone = normalizedPhone,
+            FileName = fileName,
+            Message = $"Hola{BuildNameSuffix(contactName)}. Adjuntamos tu reporte de asistencia del periodo {fechaInicio} - {fechaFin}.",
+            FileContentBase64 = Convert.ToBase64String(pdfBytes)
+        };
+    }
+
+    private static bool IsCurrentMonthSelection(InboundMessage item, string message) =>
+        string.Equals(item.ActionId, AsistenciaMesActual, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(item.ActionId, BoletaMesActual, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(message, "1", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(message, "mes actual", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsOtherMonthSelection(InboundMessage item, string message) =>
+        string.Equals(item.ActionId, AsistenciaOtroMes, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(item.ActionId, BoletaOtroMes, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(message, "2", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(message, "otro mes", StringComparison.OrdinalIgnoreCase);
+
+    private static (string FechaInicio, string FechaFin) ResolveCurrentMonthDateRange()
+    {
+        var today = GetPeruNow().Date;
+        var start = new DateTime(today.Year, today.Month, 1);
+        var end = start.AddMonths(1).AddDays(-1);
+        return (
+            start.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture),
+            end.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture));
+    }
+
+    private static bool TryResolveSingleMonthPeriod(string? message, out DateTime start, out DateTime end)
+    {
+        start = default;
+        end = default;
+
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return false;
+        }
+
+        var slashMatch = MonthYearSlashRegex.Match(message);
+        if (slashMatch.Success &&
+            int.TryParse(slashMatch.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var monthNumber) &&
+            int.TryParse(slashMatch.Groups[2].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var yearNumber))
+        {
+            start = new DateTime(yearNumber, monthNumber, 1);
+            end = start.AddMonths(1).AddDays(-1);
+            return true;
+        }
+
+        if (TryResolveMonthPeriod(message, out start, out end))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static bool TryResolveMonthPeriod(string? message, out DateTime start, out DateTime end)
@@ -485,24 +714,80 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
         };
     }
 
-    private static OutboundResponse BuildMenuReply(string phone)
+    private static OutboundResponse BuildMainMenuReply(string phone)
     {
         return new OutboundResponse
         {
             Kind = OutboundResponseKind.Menu,
             Phone = phone,
-            Message = "Hola. Selecciona la opcion que deseas consultar."
+            Header = "Menu principal",
+            Footer = "Selecciona una opcion",
+            Message = "Hola. Selecciona la opcion que deseas consultar.",
+            Buttons =
+            [
+                new MetaWhatsAppReplyButtonOptionDto { Id = MenuAsistencia, Title = "Asistencia" },
+                new MetaWhatsAppReplyButtonOptionDto { Id = MenuBoleta, Title = "Boleta" },
+                new MetaWhatsAppReplyButtonOptionDto { Id = MenuEncuesta, Title = "Encuesta" }
+            ]
         };
     }
 
-    private static string BuildFallbackMenuText(OutboundResponse response)
+    private static OutboundResponse BuildPeriodMenuReply(string phone, MenuFlow flow)
+    {
+        var (header, body, currentMonthId, otherMonthId) = flow switch
+        {
+            MenuFlow.Asistencia => ("Asistencia", "Selecciona el periodo que deseas consultar.", AsistenciaMesActual, AsistenciaOtroMes),
+            _ => ("Boleta", "Selecciona el periodo que deseas consultar.", BoletaMesActual, BoletaOtroMes)
+        };
+
+        return new OutboundResponse
+        {
+            Kind = OutboundResponseKind.Menu,
+            Phone = phone,
+            Header = header,
+            Footer = "Selecciona una opcion",
+            Message = body,
+            Buttons =
+            [
+                new MetaWhatsAppReplyButtonOptionDto { Id = currentMonthId, Title = "Mes actual" },
+                new MetaWhatsAppReplyButtonOptionDto { Id = otherMonthId, Title = "Otro mes" }
+            ]
+        };
+    }
+
+    private static string BuildFallbackText(OutboundResponse response)
     {
         if (response.Kind != OutboundResponseKind.Menu)
         {
             return response.Message;
         }
 
+        if (response.Buttons.Count == 2)
+        {
+            return $"{response.Message}\n1. {response.Buttons[0].Title}\n2. {response.Buttons[1].Title}";
+        }
+
         return "Hola. Responde con una opcion:\n1. Asistencia\n2. Boleta\n3. Encuesta";
+    }
+
+    private static string BuildPeriodMenuFallbackText(MenuFlow flow)
+    {
+        var label = flow == MenuFlow.Asistencia ? "asistencia" : "boleta";
+        return $"Selecciona el periodo de {label}:\n1. Mes actual\n2. Otro mes";
+    }
+
+    private static ConversationState? GetConversationState(string phone)
+    {
+        return ConversationStates.TryGetValue(phone, out var state) ? state : null;
+    }
+
+    private static void SetConversationState(string phone, ConversationStep step)
+    {
+        ConversationStates[phone] = new ConversationState
+        {
+            Step = step,
+            UpdatedAtUtc = DateTime.UtcNow
+        };
     }
 
     private static string BuildNameSuffix(string? name) =>
@@ -562,9 +847,12 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
     {
         public OutboundResponseKind Kind { get; set; }
         public string Phone { get; set; } = string.Empty;
+        public string Header { get; set; } = string.Empty;
+        public string Footer { get; set; } = string.Empty;
         public string Message { get; set; } = string.Empty;
         public string FileName { get; set; } = string.Empty;
         public string FileContentBase64 { get; set; } = string.Empty;
+        public IReadOnlyList<MetaWhatsAppReplyButtonOptionDto> Buttons { get; set; } = Array.Empty<MetaWhatsAppReplyButtonOptionDto>();
     }
 
     private enum OutboundResponseKind
@@ -572,5 +860,25 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
         Text = 1,
         Document = 2,
         Menu = 3
+    }
+
+    private enum ConversationStep
+    {
+        AwaitingAsistenciaPeriodChoice = 1,
+        AwaitingAsistenciaCustomMonth = 2,
+        AwaitingBoletaPeriodChoice = 3,
+        AwaitingBoletaCustomMonth = 4
+    }
+
+    private enum MenuFlow
+    {
+        Asistencia = 1,
+        Boleta = 2
+    }
+
+    private sealed class ConversationState
+    {
+        public ConversationStep Step { get; set; }
+        public DateTime UpdatedAtUtc { get; set; }
     }
 }
