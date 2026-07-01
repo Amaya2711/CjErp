@@ -5060,7 +5060,6 @@ function SimpleCuadrosDetailGrid({
                   <th style={styles.cuadrosDetailFilterTh} />
                   <th style={styles.cuadrosDetailFilterTh} />
                   <th style={styles.cuadrosDetailFilterTh} />
-                  <th style={styles.cuadrosDetailFilterTh} />
                   <th style={styles.cuadrosDetailFilterTh}>
                     <HeaderCheckboxFilter
                       values={extendedColumnFilters.cliente}
@@ -5128,10 +5127,6 @@ function SimpleCuadrosDetailGrid({
                       {item.responsable}
                     </td>
                   ) : null}
-                  {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.cliente}</td> : null}
-                  {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.proyecto}</td> : null}
-                  {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.site}</td> : null}
-                  <td style={styles.cuadrosDetailTd}>{item.ubicacion}</td>
                   {(() => {
                     const rowKey = `${item.key}:hora`;
                     const value = String(item.hora ?? "").trim();
