@@ -113,6 +113,12 @@ export async function exportarAsistenciaEmpleadoPdf(payload: AsistenciaReportePd
   });
 }
 
+export async function exportarAsistenciaEmpleadoPdfValidacion(payload: AsistenciaReportePdfRequest) {
+  return await httpClient.post<Blob>("/asistencia/reporte/pdf-empleado-validacion", payload, {
+    responseType: "blob",
+  });
+}
+
 export async function exportarAsistenciaGerencialPdf(payload: AsistenciaGerencialPdfRequest = {}) {
   return await httpClient.post<Blob>("/asistencia/reporte/pdf-gerencial", payload, {
     responseType: "blob",

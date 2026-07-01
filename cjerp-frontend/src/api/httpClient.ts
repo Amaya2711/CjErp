@@ -71,12 +71,31 @@ axiosClient.interceptors.response.use(
     return data;
   },
   (error) => {
-    if (error?.response?.data) {
-      const responseData = error.response.data;
-      console.error(
-        "[httpClient] Error response",
-        typeof responseData === "string" ? responseData : JSON.stringify(responseData, null, 2)
-      );
+    const responseData = error?.response?.data;
+    if (responseData) {
+      if (typeof responseData === "string") {
+        console.error("[httpClient] Error response", responseData);
+      } else if (responseData instanceof Blob) {
+        console.error("[httpClient] Error response", `[Blob ${responseData.type || "unknown"}]`);
+        void responseData
+          .text()
+          .then((text) => {
+            if (text.trim()) {
+              try {
+                console.error("[httpClient] Error response body", JSON.parse(text));
+              } catch {
+                console.error("[httpClient] Error response body", text);
+              }
+            }
+          })
+          .catch(() => {
+            console.error("[httpClient] No se pudo leer el blob de error");
+          });
+      } else if (responseData instanceof ArrayBuffer) {
+        console.error("[httpClient] Error response", `[ArrayBuffer ${responseData.byteLength}]`);
+      } else {
+        console.error("[httpClient] Error response", JSON.stringify(responseData, null, 2));
+      }
     }
 
     if (error?.response?.status === 401) {

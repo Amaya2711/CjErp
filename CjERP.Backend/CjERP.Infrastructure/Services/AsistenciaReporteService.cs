@@ -84,6 +84,14 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             cancellationToken);
     }
 
+    public Task<byte[]> GenerarPdfEmpleadoValidacionAsync(
+        AsistenciaReportePdfRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return _reportePdfService.GenerarReporteEmpleadoValidacionPdfAsync(request, cancellationToken);
+    }
+
     public async Task<AsistenciaGerencialPdfDto> ObtenerReporteGerencialAsync(
         AsistenciaGerencialPdfRequestDto request,
         CancellationToken cancellationToken = default)

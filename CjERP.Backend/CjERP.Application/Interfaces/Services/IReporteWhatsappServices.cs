@@ -33,6 +33,10 @@ public interface IReportePdfService
         IReadOnlyList<ReporteWhatsappAsistenciaItemDto> detalle,
         CancellationToken cancellationToken = default);
 
+    Task<byte[]> GenerarReporteEmpleadoValidacionPdfAsync(
+        AsistenciaReportePdfRequestDto request,
+        CancellationToken cancellationToken = default);
+
     Task<byte[]> GenerarReporteGerencialEjecutivoPdfAsync(
         AsistenciaGerencialPdfDto reporte,
         CancellationToken cancellationToken = default);

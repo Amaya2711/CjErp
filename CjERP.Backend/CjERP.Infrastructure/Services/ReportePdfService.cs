@@ -12,6 +12,10 @@ namespace CjERP.Infrastructure.Services;
 public sealed class ReportePdfService : IReportePdfService
 {
     private const decimal MissingOrIncompleteHours = 9.6m;
+    private static readonly HashSet<string> PresentStates = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "PRESENTE", "ASISTIO", "OK", "ASISTENCIA"
+    };
 
     public Task<byte[]> GenerarReportePdfAsync(
         string tipoReporte,
@@ -27,6 +31,15 @@ public sealed class ReportePdfService : IReportePdfService
             ? BuildGerencialDocument(empleadoDestino, periodo, detalle)
             : BuildOperativoDocument(empleadoDestino, periodo, detalle);
 
+        return Task.FromResult(document.GeneratePdf());
+    }
+
+    public Task<byte[]> GenerarReporteEmpleadoValidacionPdfAsync(
+        AsistenciaReportePdfRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var document = BuildOperativoValidationDocument(request);
         return Task.FromResult(document.GeneratePdf());
     }
 
@@ -178,6 +191,145 @@ public sealed class ReportePdfService : IReportePdfService
                 page.Footer().AlignCenter().Text(text =>
                 {
                     text.Span("Cj Telecom - Reporte Automatico | ");
+                    text.CurrentPageNumber();
+                    text.Span(" / ");
+                    text.TotalPages();
+                });
+            });
+        });
+    }
+
+    private static Document BuildOperativoValidationDocument(AsistenciaReportePdfRequestDto request)
+    {
+        var items = request.Items
+            .Where(item => item is not null)
+            .ToList();
+        var primaryItem = items.FirstOrDefault();
+        var resumen = BuildSummary(items.Select(MapValidationItemToReporte).ToList());
+        var incidencias = items
+            .Where(item => !IsOnlyPresentState(item.EstadoMarcacionTexto))
+            .Where(item => !IsWeekendState(item.EstadoMarcacionTexto))
+            .Where(item => !IsHolidayState(item.EstadoMarcacionTexto))
+            .OrderBy(item => item.Fecha)
+            .ThenBy(item => item.Hora)
+            .ToList();
+        var diferenciaHoras = primaryItem?.DiferenciaHoras ?? 0m;
+        var estadoValidacionHoras = primaryItem?.EstadoValidacionHoras ?? string.Empty;
+        var warning = diferenciaHoras < 0;
+        var validationTitle = warning
+            ? "ADVERTENCIA: No esta cumpliendo con las horas laborales asignadas"
+            : "Horas laborales cumplidas";
+        var validationAccent = warning ? "#B42318" : "#027A48";
+        var validationBackground = warning ? "#FEF3F2" : "#ECFDF3";
+
+        return Document.Create(container =>
+        {
+            container.Page(page =>
+            {
+                page.Margin(24);
+                page.Size(PageSizes.A4);
+                page.DefaultTextStyle(x => x.FontSize(10).FontColor(Colors.BlueGrey.Darken4));
+
+                page.Header().Column(header =>
+                {
+                    header.Spacing(12);
+
+                    header.Item().Row(row =>
+                    {
+                        row.RelativeItem().Column(info =>
+                        {
+                            info.Item().Text("Reporte de Asistencia").Bold().FontSize(22).FontColor(Colors.Blue.Darken2);
+                            info.Item().Text("Formato de validacion").SemiBold().FontColor("#475467");
+                            info.Item().Text($"Periodo: {request.FechaInicio} - {request.FechaFin}").FontColor(Colors.Grey.Darken2);
+                        });
+
+                        row.ConstantItem(170).AlignRight().Column(meta =>
+                        {
+                            meta.Item().Text($"Emitido: {DateTime.Now:dd/MM/yyyy HH:mm}");
+                            meta.Item().Text($"Empleado ID: {primaryItem?.IdEmpleado?.ToString(CultureInfo.InvariantCulture) ?? "-"}");
+                        });
+                    });
+
+                    header.Item().Background(Colors.Grey.Lighten4).Border(1).BorderColor(Colors.Grey.Lighten2).Padding(12).Row(row =>
+                    {
+                        row.RelativeItem().Column(info =>
+                        {
+                            info.Item().Text($"Empleado: {EmptyIfMissing(primaryItem?.NombreEmpleado)}").SemiBold();
+                            info.Item().Text($"Responsable: {EmptyIfMissing(primaryItem?.Responsable)}");
+                            info.Item().Text($"Ubicacion: {EmptyIfMissing(primaryItem?.Ubicacion)}");
+                        });
+                    });
+                });
+
+                page.Content().Column(column =>
+                {
+                    column.Spacing(14);
+
+                    column.Item().Background(validationBackground).Border(1).BorderColor(validationAccent).Padding(12).Column(card =>
+                    {
+                        card.Spacing(4);
+                        card.Item().Text(validationTitle).SemiBold().FontColor(validationAccent);
+                    });
+
+                    column.Item().Background(Colors.White).Border(1).BorderColor(Colors.Grey.Lighten2).Padding(12).Column(card =>
+                    {
+                        card.Spacing(10);
+                        card.Item().Text("KPIs por estado").Bold().FontSize(12);
+                        card.Item().Element(c => RenderEstadoKpiCards(c, resumen));
+                    });
+
+                    column.Item().Background(Colors.White).Border(1).BorderColor(Colors.Grey.Lighten2).Padding(12).Column(card =>
+                    {
+                        card.Spacing(10);
+                        card.Item().Text("Detalle de incidencias").Bold().FontSize(12);
+
+                        if (incidencias.Count == 0)
+                        {
+                            card.Item().Background("#F6FEF9").Border(1).BorderColor("#ABEFC6").Padding(10).Text("No existen registros diferentes a PRESENTE para el periodo evaluado.");
+                            return;
+                        }
+
+                        card.Item().Table(table =>
+                        {
+                            table.ColumnsDefinition(columns =>
+                            {
+                                columns.RelativeColumn(1.1f);
+                                columns.RelativeColumn(0.8f);
+                                columns.RelativeColumn(1f);
+                                columns.RelativeColumn(2f);
+                                columns.RelativeColumn(2.2f);
+                            });
+
+                            table.Header(header =>
+                            {
+                                header.Cell().Element(CellHeader).Text("Fecha");
+                                header.Cell().Element(CellHeader).Text("Entrada");
+                                header.Cell().Element(CellHeader).Text("Salida");
+                                header.Cell().Element(CellHeader).Text("Estado");
+                                header.Cell().Element(CellHeader).Text("Observacion");
+                            });
+
+                            foreach (var item in incidencias)
+                            {
+                                var detalleObservacion = string.Join(" | ", new[]
+                                {
+                                    item.Observacion?.Trim(),
+                                    item.Comentario?.Trim()
+                                }.Where(value => !string.IsNullOrWhiteSpace(value)));
+
+                                table.Cell().Element(CellBody).Text(EmptyIfMissing(item.Fecha));
+                                table.Cell().Element(CellBody).Text(EmptyIfMissing(item.Hora));
+                                table.Cell().Element(CellBody).Text(EmptyIfMissing(item.Salida));
+                                table.Cell().Element(CellBody).Text(EmptyIfMissing(item.EstadoMarcacionTexto));
+                                table.Cell().Element(CellBody).Text(EmptyIfMissing(detalleObservacion));
+                            }
+                        });
+                    });
+                });
+
+                page.Footer().AlignCenter().Text(text =>
+                {
+                    text.Span("Cj Telecom - Reporte de validacion de asistencia | ");
                     text.CurrentPageNumber();
                     text.Span(" / ");
                     text.TotalPages();
@@ -428,6 +580,28 @@ public sealed class ReportePdfService : IReportePdfService
 
     private static string EmptyIfMissing(string? value) => string.IsNullOrWhiteSpace(value) ? "-" : value.Trim();
 
+    private static ReporteWhatsappAsistenciaItemDto MapValidationItemToReporte(AsistenciaReportePdfItemDto item) =>
+        new()
+        {
+            IdEmpleado = item.IdEmpleado ?? 0,
+            Fecha = item.Fecha,
+            NombreEmpleado = item.NombreEmpleado,
+            Responsable = item.Responsable,
+            Ubicacion = item.Ubicacion,
+            HoraEntrada = item.Hora,
+            HoraSalida = item.Salida,
+            EstadoMarcacionTexto = item.EstadoMarcacionTexto,
+            TotalHoras = item.TotalHoras,
+            TotalHorasFaltaIncompleto = item.TotalHorasFaltaIncompleto,
+            TotalHorasEmpleado = item.TotalHorasEmpleado,
+            TotalHorasLaborales = item.TotalHorasLaborales,
+            TotalHorasFaltaAprobar = item.TotalHorasFaltaAprobar,
+            DiferenciaHoras = item.DiferenciaHoras,
+            EstadoValidacionHoras = item.EstadoValidacionHoras,
+            Comentario = item.Comentario,
+            Observacion = item.Observacion
+        };
+
     private static IContainer CellHeader(IContainer container) =>
         container.Background(Colors.Blue.Lighten4).BorderBottom(1).BorderColor(Colors.Grey.Lighten2).Padding(6);
 
@@ -538,6 +712,74 @@ public sealed class ReportePdfService : IReportePdfService
             card.Spacing(4);
             card.Item().Text(title).SemiBold().FontSize(9).FontColor(accentColor);
             card.Item().Text(value).Bold().FontSize(18).FontColor("#0F172A");
+        });
+    }
+
+    private static void RenderEstadoKpiCards(IContainer container, ReporteWhatsappPdfResumenDto resumen)
+    {
+        var items = resumen.Resumen
+            .OrderByDescending(item => item.Cantidad)
+            .ThenBy(item => item.EstadoMarcacionTexto, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (items.Count == 0)
+        {
+            container.Background("#F8FAFC").Border(1).BorderColor(Colors.Grey.Lighten2).Padding(10).Text("No hay estados para mostrar.");
+            return;
+        }
+
+        var max = Math.Max(1, items.First().Cantidad);
+
+        container.Border(1).BorderColor(Colors.Grey.Lighten2).Padding(14).Column(column =>
+        {
+            column.Spacing(8);
+
+            foreach (var item in items)
+            {
+                var (accent, background) = GetDynamicEstadoMarcacionCardColors(item.EstadoMarcacionTexto);
+                var fillPercent = (float)item.Cantidad / max;
+                var fillUnits = Math.Max(1, (int)Math.Round(fillPercent * 100));
+                var emptyUnits = Math.Max(1, 100 - fillUnits);
+
+                column.Item().Background("#F8FAFC").Border(1).BorderColor("#D9E2EC").PaddingVertical(10).PaddingHorizontal(10).Column(card =>
+                {
+                    card.Spacing(6);
+
+                    card.Item().Row(row =>
+                    {
+                        row.Spacing(10);
+                        row.ConstantItem(6).Height(28).Background(accent);
+                        row.ConstantItem(150).Column(label =>
+                        {
+                            label.Spacing(1);
+                            label.Item().Text(item.EstadoMarcacionTexto).SemiBold().FontSize(10).FontColor("#0F172A");
+                            label.Item().Text("Estado").FontSize(7).FontColor("#64748B");
+                        });
+
+                        row.RelativeItem().Column(barColumn =>
+                        {
+                            barColumn.Spacing(4);
+                            barColumn.Item().Height(16).Element(bar =>
+                            {
+                                bar.Border(1).BorderColor(background).Background("#E5E7EB").Padding(1).Row(inner =>
+                                {
+                                    inner.RelativeItem(fillUnits).Background(accent);
+                                    inner.RelativeItem(emptyUnits).Background("#E5E7EB");
+                                });
+                            });
+
+                            barColumn.Item().Text($"{item.Porcentaje:0.00}% del total").FontSize(7.5f).FontColor("#667085");
+                        });
+
+                        row.ConstantItem(68).AlignRight().Column(metric =>
+                        {
+                            metric.Spacing(1);
+                            metric.Item().Text(item.Cantidad.ToString(CultureInfo.InvariantCulture)).Bold().FontSize(13).FontColor(accent);
+                            metric.Item().Text("registros").FontSize(7).FontColor("#667085");
+                        });
+                    });
+                });
+            }
         });
     }
 
@@ -1124,22 +1366,22 @@ public sealed class ReportePdfService : IReportePdfService
         var normalized = string.IsNullOrWhiteSpace(estado)
             ? "SIN CLASIFICAR"
             : estado.Trim().ToUpperInvariant();
-        var palette = new (string Accent, string Background)[]
+        return normalized switch
         {
-            ("#B42318", "#FEE4E2"),
-            ("#B54708", "#FEF0C7"),
-            ("#027A48", "#D1FADF"),
-            ("#155EEF", "#DBEAFE"),
-            ("#0F766E", "#CCFBF1"),
-            ("#854D0E", "#FEF9C3"),
-            ("#0C4A6E", "#CFFAFE"),
-            ("#7C2D12", "#FED7AA"),
-            ("#4C1D95", "#EDE9FE"),
-            ("#334155", "#E2E8F0")
+            "PRESENTE" or "ASISTIO" or "OK" or "ASISTENCIA" => ("#1D4ED8", "#DBEAFE"),
+            "FALTA" => ("#DC2626", "#FEE2E2"),
+            "VACACIONES" => ("#0F766E", "#CCFBF1"),
+            "COMPENSACION" => ("#7C3AED", "#EDE9FE"),
+            "DOMINGO" => ("#16A34A", "#DCFCE7"),
+            "SABADO" or "SÁBADO" => ("#F59E0B", "#FEF3C7"),
+            "FERIADO" => ("#0284C7", "#E0F2FE"),
+            "SIN MARCAR" => ("#E11D48", "#FFE4E6"),
+            "SIN SALIDA" or "SIN ENTRADA" => ("#EA580C", "#FFEDD5"),
+            "INCOMPLETO" => ("#0891B2", "#CFFAFE"),
+            "FALTA APROBAR" => ("#B45309", "#FEF3C7"),
+            "RECHAZADO" => ("#4B5563", "#E2E8F0"),
+            _ => ("#4F46E5", "#E0E7FF")
         };
-
-        var index = Math.Abs(StringComparer.Ordinal.GetHashCode(normalized)) % palette.Length;
-        return palette[index];
     }
 
     private static IReadOnlyList<string> SplitEstadoMarcacion(string? estadoMarcacionTexto)
@@ -1156,6 +1398,24 @@ public sealed class ReportePdfService : IReportePdfService
             .ToArray();
 
         return estados.Length == 0 ? ["SIN CLASIFICAR"] : estados;
+    }
+
+    private static bool IsOnlyPresentState(string? estadoMarcacionTexto)
+    {
+        var estados = SplitEstadoMarcacion(estadoMarcacionTexto);
+        return estados.Count > 0 && estados.All(state => PresentStates.Contains(state));
+    }
+
+    private static bool IsWeekendState(string? estadoMarcacionTexto)
+    {
+        var estados = SplitEstadoMarcacion(estadoMarcacionTexto);
+        return estados.Count > 0 && estados.All(state => state is "SABADO" or "SÁBADO" or "DOMINGO");
+    }
+
+    private static bool IsHolidayState(string? estadoMarcacionTexto)
+    {
+        var estados = SplitEstadoMarcacion(estadoMarcacionTexto);
+        return estados.Count > 0 && estados.All(state => state == "FERIADO");
     }
 
     private static string ResolveGerencialEstadoMarcacion(ReporteWhatsappAsistenciaItemDto item)

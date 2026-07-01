@@ -2,6 +2,7 @@ using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using System.Security.Claims;
 
 namespace CjERP.Api.Controllers;
@@ -12,10 +13,14 @@ namespace CjERP.Api.Controllers;
 public class AsistenciaReporteController : ControllerBase
 {
     private readonly IAsistenciaReporteService _asistenciaReporteService;
+    private readonly ILogger<AsistenciaReporteController> _logger;
 
-    public AsistenciaReporteController(IAsistenciaReporteService asistenciaReporteService)
+    public AsistenciaReporteController(
+        IAsistenciaReporteService asistenciaReporteService,
+        ILogger<AsistenciaReporteController> logger)
     {
         _asistenciaReporteService = asistenciaReporteService;
+        _logger = logger;
     }
 
     [HttpGet]
@@ -45,6 +50,39 @@ public class AsistenciaReporteController : ControllerBase
         var pdfBytes = await _asistenciaReporteService.GenerarPdfGerencialAsync(request, cancellationToken);
         var fileName = $"reporte_asistencia_{request.FechaInicio.Replace("/", string.Empty)}_{request.FechaFin.Replace("/", string.Empty)}.pdf";
         return File(pdfBytes, "application/pdf", fileName);
+    }
+
+    [HttpPost("pdf-empleado-validacion")]
+    public async Task<IActionResult> ExportarPdfEmpleadoValidacion(
+        [FromBody] AsistenciaReportePdfRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.FechaInicio) || string.IsNullOrWhiteSpace(request.FechaFin))
+        {
+            return BadRequest(new { success = false, message = "FechaInicio y FechaFin son obligatorias." });
+        }
+
+        if (request.Items is null || request.Items.Count == 0)
+        {
+            return BadRequest(new { success = false, message = "No existen registros filtrados para generar el PDF de validacion." });
+        }
+
+        try
+        {
+            var pdfBytes = await _asistenciaReporteService.GenerarPdfEmpleadoValidacionAsync(request, cancellationToken);
+            var fileName = $"reporte_asistencia_validacion_{request.FechaInicio.Replace("/", string.Empty)}_{request.FechaFin.Replace("/", string.Empty)}.pdf";
+            return File(pdfBytes, "application/pdf", fileName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error generando el PDF de validacion de asistencia.");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                success = false,
+                message = "No se pudo generar el PDF de validacion.",
+                detail = ex.ToString()
+            });
+        }
     }
 
     [HttpPost("pdf-gerencial")]

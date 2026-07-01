@@ -5,7 +5,12 @@ import {
   type CrudToolbarSearchField,
 } from "../../components/base/CrudToolbar";
 import { actualizarAprobarCampo } from "../../api/aprobarCampoService";
-import { actualizarEstadoMarcacionAsistencia, buscarAsistencia, exportarAsistenciaEmpleadoPdf } from "../../api/asistenciaService";
+import {
+  actualizarEstadoMarcacionAsistencia,
+  buscarAsistencia,
+  exportarAsistenciaEmpleadoPdf,
+  exportarAsistenciaEmpleadoPdfValidacion,
+} from "../../api/asistenciaService";
 import { useConstantesPorCampo } from "../../hooks/useConstantesPorCampo";
 import type { AsistenciaReporteItem, AsistenciaReportePdfItem } from "../../models/asistencia";
 import type { AprobarCampoRow } from "../../models/aprobarCampo";
@@ -83,6 +88,9 @@ type EmployeeDateCell = {
 type EmployeeDateRow = {
   employee: string;
   responsable: string;
+  empresa: string;
+  cliente: string;
+  area: string;
   ubicacion: string;
   total: number;
   totalHorasFaltaIncompleto: number;
@@ -1483,6 +1491,9 @@ export default function RptAsistenciaPage() {
     const groupedStates = new Map<string, Map<string, Set<string>>>();
     const employeeLocations = new Map<string, Set<string>>();
     const employeeResponsables = new Map<string, Set<string>>();
+    const employeeEmpresas = new Map<string, Set<string>>();
+    const employeeClientes = new Map<string, Set<string>>();
+    const employeeAreas = new Map<string, Set<string>>();
     const employeeApprovedHours = new Map<string, number>();
     const employeeLaborHours = new Map<string, number>();
     const employeePendingApprovalHours = new Map<string, number>();
@@ -1494,6 +1505,9 @@ export default function RptAsistenciaPage() {
       groupedStates.set(employee, new Map<string, Set<string>>());
       employeeLocations.set(employee, new Set<string>());
       employeeResponsables.set(employee, new Set<string>());
+      employeeEmpresas.set(employee, new Set<string>());
+      employeeClientes.set(employee, new Set<string>());
+      employeeAreas.set(employee, new Set<string>());
       employeeApprovedHours.set(employee, 0);
       employeeLaborHours.set(employee, 0);
       employeePendingApprovalHours.set(employee, 0);
@@ -1543,6 +1557,24 @@ export default function RptAsistenciaPage() {
       if (item.responsable) {
         employeeResponsables.get(employee)!.add(item.responsable);
       }
+      if (!employeeEmpresas.has(employee)) {
+        employeeEmpresas.set(employee, new Set<string>());
+      }
+      if (item.empresa) {
+        employeeEmpresas.get(employee)!.add(item.empresa);
+      }
+      if (!employeeClientes.has(employee)) {
+        employeeClientes.set(employee, new Set<string>());
+      }
+      if (item.cliente) {
+        employeeClientes.get(employee)!.add(item.cliente);
+      }
+      if (!employeeAreas.has(employee)) {
+        employeeAreas.set(employee, new Set<string>());
+      }
+      if (item.area) {
+        employeeAreas.get(employee)!.add(item.area);
+      }
       employeeApprovedHours.set(employee, Math.max(employeeApprovedHours.get(employee) ?? 0, item.totalHorasEmpleado));
       employeeLaborHours.set(employee, Math.max(employeeLaborHours.get(employee) ?? 0, item.totalHorasLaborales));
       employeePendingApprovalHours.set(employee, Math.max(employeePendingApprovalHours.get(employee) ?? 0, item.totalHorasFaltaAprobar));
@@ -1559,6 +1591,9 @@ export default function RptAsistenciaPage() {
       const stateValues = groupedStates.get(employee) ?? new Map<string, Set<string>>();
       const ubicaciones = Array.from(employeeLocations.get(employee) ?? []).sort((a, b) => a.localeCompare(b, "es"));
       const responsables = Array.from(employeeResponsables.get(employee) ?? []).sort((a, b) => a.localeCompare(b, "es"));
+      const empresas = Array.from(employeeEmpresas.get(employee) ?? []).sort((a, b) => a.localeCompare(b, "es"));
+      const clientes = Array.from(employeeClientes.get(employee) ?? []).sort((a, b) => a.localeCompare(b, "es"));
+      const areas = Array.from(employeeAreas.get(employee) ?? []).sort((a, b) => a.localeCompare(b, "es"));
       const validationStates = Array.from(employeeValidationStates.get(employee) ?? []).sort((a, b) => a.localeCompare(b, "es"));
       const stateCountMap = employeeStateCounts.get(employee) ?? new Map<string, number>();
       const fechasDetalle = fechas.map((fecha) => ({
@@ -1584,6 +1619,9 @@ export default function RptAsistenciaPage() {
       return {
         employee,
         responsable: responsables.join(", "),
+        empresa: empresas.join(", "),
+        cliente: clientes.join(", "),
+        area: areas.join(", "),
         ubicacion: ubicaciones.join(", "),
         total: totalHorasAprobadas,
         totalHorasFaltaIncompleto,
@@ -1708,6 +1746,8 @@ export default function RptAsistenciaPage() {
     }
     return true;
   }, [activeTab, chartEstadoPorDia.rows.length, chartEstadoPorDia.states.length, detailRows.length, filteredEmployeeGridRows.length]);
+
+  const isValidationPdfExportDisabled = isPdfExportDisabled || activeTab !== "empleado";
 
   const resetFrontendFilters = () => {
     setFrontendFilters({
@@ -1848,6 +1888,10 @@ export default function RptAsistenciaPage() {
       const staticHeaders = [
         "Empleado",
         "Responsable",
+        "Empresa",
+        "Cliente",
+        "Area",
+        "Ubicacion",
         "Total horas",
         "Hrs Otros",
         "Falta aprobar (hrs)",
@@ -1859,6 +1903,10 @@ export default function RptAsistenciaPage() {
       const data = filteredEmployeeGridRows.map((item) => [
         item.employee,
         item.responsable || "Sin responsable",
+        item.empresa || "Sin empresa",
+        item.cliente || "Sin cliente",
+        item.area || "Sin area",
+        item.ubicacion || "Sin ubicacion",
         Number(formatDecimal(item.total, 2).replace(/,/g, "")),
         Number(formatDecimal(item.totalHorasFaltaIncompleto, 2).replace(/,/g, "")),
         Number(formatDecimal(item.totalHorasFaltaAprobar, 2).replace(/,/g, "")),
@@ -2053,38 +2101,103 @@ export default function RptAsistenciaPage() {
     toggleGerencialTopResponsableFilter(value, "empleado");
   };
 
+  const getValidationPdfErrorMessage = async (err: unknown) => {
+    const fallback = "No se pudo generar el PDF de prueba.";
+    const responseData = (err as { response?: { data?: unknown } })?.response?.data;
+
+    if (responseData instanceof Blob) {
+      try {
+        const text = await responseData.text();
+        if (text.trim()) {
+          try {
+            const parsed = JSON.parse(text) as { message?: string; detail?: string; mensaje?: string; error?: string };
+            return parsed.message || parsed.detail || parsed.mensaje || parsed.error || text;
+          } catch {
+            return text;
+          }
+        }
+      } catch {
+        return fallback;
+      }
+    }
+
+    return getHttpErrorMessage(err, fallback);
+  };
+
+  const buildEmpleadoPdfItems = (): AsistenciaReportePdfItem[] => {
+    const employeeSummaryByEmployee = new Map(
+      filteredEmployeeGridRows.map((row) => [row.employee, row] as const)
+    );
+
+    return filteredRows
+      .filter((item) => item.nombreEmpleado)
+      .map((item) => {
+        const summary = employeeSummaryByEmployee.get(item.nombreEmpleado);
+
+        return {
+          fecha: formatDateLabel(item.fecha),
+          hora: item.hora ?? "",
+          nombreEmpleado: item.nombreEmpleado,
+          responsable: item.responsable ?? summary?.responsable ?? "",
+          ubicacion: item.ubicacion || summary?.ubicacion || "",
+          idEmpleado: item.idEmpleado ?? null,
+          salida: item.salida ?? "",
+          estadoMarcacionTexto: item.estadoMarcacionTexto || item.estado || "Sin clasificar",
+          totalHoras: summary?.total ?? item.totalHoras,
+          totalHorasFaltaIncompleto: summary?.totalHorasFaltaIncompleto ?? 0,
+          totalHorasEmpleado: summary?.total ?? item.totalHorasEmpleado,
+          totalHorasLaborales: summary?.totalHorasLaborales ?? item.totalHorasLaborales,
+          totalHorasFaltaAprobar: summary?.totalHorasFaltaAprobar ?? item.totalHorasFaltaAprobar,
+          diferenciaHoras: summary?.diferenciaHoras ?? 0,
+          estadoValidacionHoras: summary?.estadoValidacionHoras ?? item.estadoValidacionHoras,
+          comentario: item.comentario ?? "",
+          observacion: item.observacion ?? "",
+        };
+      });
+  };
+
+  const exportPdfValidacion = async () => {
+    if (activeTab !== "empleado") {
+      return;
+    }
+
+    if (filteredEmployeeGridRows.length !== 1) {
+      setError("Para exportar el PDF de prueba debes filtrar un solo empleado en la pestaña x Empleado.");
+      return;
+    }
+
+    const employeeName = filteredEmployeeGridRows[0]?.employee?.trim();
+    const pdfItems = buildEmpleadoPdfItems().filter((item) => item.nombreEmpleado.trim() === employeeName);
+    if (pdfItems.length === 0) {
+      setError("No se encontraron registros del empleado filtrado para generar el PDF de prueba.");
+      return;
+    }
+
+    setError("");
+    try {
+      const pdfBlob = await exportarAsistenciaEmpleadoPdfValidacion({
+        fechaInicio: toApiDate(fechaInicio),
+        fechaFin: toApiDate(fechaFin),
+        destinatario: employeeName || "Reporte x Empleado Validacion",
+        items: pdfItems,
+      });
+
+      const url = URL.createObjectURL(pdfBlob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `reporte_asistencia_validacion_${toApiDate(fechaInicio).replaceAll("/", "")}_${toApiDate(fechaFin).replaceAll("/", "")}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(await getValidationPdfErrorMessage(err));
+    }
+  };
+
   const exportPdf = async () => {
     if (activeTab === "empleado") {
-      const employeeSummaryByEmployee = new Map(
-        filteredEmployeeGridRows.map((row) => [row.employee, row] as const)
-      );
-
-      const pdfItems: AsistenciaReportePdfItem[] = filteredRows
-        .filter((item) => item.nombreEmpleado)
-        .map((item) => {
-          const summary = employeeSummaryByEmployee.get(item.nombreEmpleado);
-
-          return {
-            fecha: formatDateLabel(item.fecha),
-            hora: item.hora ?? "",
-            nombreEmpleado: item.nombreEmpleado,
-            responsable: item.responsable ?? summary?.responsable ?? "",
-            ubicacion: item.ubicacion || summary?.ubicacion || "",
-            idEmpleado: item.idEmpleado ?? null,
-            salida: item.salida ?? "",
-            estadoMarcacionTexto: item.estadoMarcacionTexto || item.estado || "Sin clasificar",
-            totalHoras: summary?.total ?? item.totalHoras,
-            totalHorasFaltaIncompleto: summary?.totalHorasFaltaIncompleto ?? 0,
-            totalHorasEmpleado: summary?.total ?? item.totalHorasEmpleado,
-            totalHorasLaborales: summary?.totalHorasLaborales ?? item.totalHorasLaborales,
-            totalHorasFaltaAprobar: summary?.totalHorasFaltaAprobar ?? item.totalHorasFaltaAprobar,
-            diferenciaHoras: summary?.diferenciaHoras ?? 0,
-            estadoValidacionHoras: summary?.estadoValidacionHoras ?? item.estadoValidacionHoras,
-            comentario: item.comentario ?? "",
-            observacion: item.observacion ?? "",
-          };
-        });
-
+      const pdfItems = buildEmpleadoPdfItems();
       const pdfBlob = await exportarAsistenciaEmpleadoPdf({
         fechaInicio: toApiDate(fechaInicio),
         fechaFin: toApiDate(fechaFin),
@@ -2145,6 +2258,10 @@ export default function RptAsistenciaPage() {
         head: [[
           "Empleado",
           "Responsable",
+          "Empresa",
+          "Cliente",
+          "Area",
+          "Ubicacion",
           "Total horas",
           "Hrs Otros",
           "Falta aprobar (hrs)",
@@ -2156,6 +2273,10 @@ export default function RptAsistenciaPage() {
         body: filteredEmployeeGridRows.map((item) => [
           item.employee,
           item.responsable || "Sin responsable",
+          item.empresa || "Sin empresa",
+          item.cliente || "Sin cliente",
+          item.area || "Sin area",
+          item.ubicacion || "Sin ubicacion",
           formatDecimal(item.total, 2),
           formatDecimal(item.totalHorasFaltaIncompleto, 2),
           formatDecimal(item.totalHorasFaltaAprobar, 2),
@@ -2423,6 +2544,9 @@ export default function RptAsistenciaPage() {
           </button>
           <button type="button" style={styles.headerSecondaryButton} onClick={() => void exportPdf()} disabled={isPdfExportDisabled}>
             Exportar PDF
+          </button>
+          <button type="button" style={styles.headerSecondaryButton} onClick={() => void exportPdfValidacion()} disabled={isValidationPdfExportDisabled}>
+            Exportar PDF prueba
           </button>
         </div>
       </section>
@@ -4331,12 +4455,12 @@ function SimpleEmployeeStateGrid({
   return (
     <div style={styles.stateDateGridWrap}>
       <div style={styles.stateDateGridScroller}>
-        <div
-          style={{
-            ...styles.stateDateGrid,
-            gridTemplateColumns: `220px 180px 110px 110px 100px 110px 140px 150px repeat(${states.length}, minmax(88px, 1fr))`,
-          }}
-        >
+          <div
+            style={{
+              ...styles.stateDateGrid,
+              gridTemplateColumns: `220px 180px 160px 170px 150px 170px 110px 110px 100px 110px 140px 150px repeat(${states.length}, minmax(88px, 1fr))`,
+            }}
+          >
           <div style={{ ...styles.stateDateGridHeader, ...styles.stateDateGridCorner }}>
             <div style={styles.employeeGridHeaderStack}>
               <button
@@ -4376,13 +4500,17 @@ function SimpleEmployeeStateGrid({
                 onChange={(event) => onResponsableFilterChange(event.target.value)}
                 placeholder="Filtrar responsable"
                 style={styles.employeeGridHeaderInput}
-              />
+                />
+              </div>
             </div>
-          </div>
-          <div style={styles.stateDateGridHeader}>
-            <button
-              type="button"
-              style={styles.employeeGridSortButton}
+            <div style={styles.stateDateGridHeader}>Empresa</div>
+            <div style={styles.stateDateGridHeader}>Cliente</div>
+            <div style={styles.stateDateGridHeader}>Area</div>
+            <div style={styles.stateDateGridHeader}>Ubicacion</div>
+            <div style={styles.stateDateGridHeader}>
+              <button
+                type="button"
+                style={styles.employeeGridSortButton}
               onClick={() => onToggleSort("total")}
             >
               <span>Total horas</span>
@@ -4516,7 +4644,54 @@ function SimpleEmployeeStateGrid({
                   {...rowSelectProps}
                 >
                   <span style={styles.employeeGridRowName}>{item.employee}</span>
-                  <span style={styles.employeeGridRowMeta}>{item.ubicacion || "Sin ubicacion"}</span>
+                </div>
+                <div
+                  style={{
+                    ...styles.stateDateGridCell,
+                    ...styles.employeeGridValidationCell,
+                    background: differenceTone.rowBackground,
+                    color: differenceTone.rowText,
+                    cursor: onRowSelect ? "pointer" : "default",
+                  }}
+                  {...rowSelectProps}
+                >
+                  <span style={styles.employeeGridValidationText}>{item.empresa || "Sin empresa"}</span>
+                </div>
+                <div
+                  style={{
+                    ...styles.stateDateGridCell,
+                    ...styles.employeeGridValidationCell,
+                    background: differenceTone.rowBackground,
+                    color: differenceTone.rowText,
+                    cursor: onRowSelect ? "pointer" : "default",
+                  }}
+                  {...rowSelectProps}
+                >
+                  <span style={styles.employeeGridValidationText}>{item.cliente || "Sin cliente"}</span>
+                </div>
+                <div
+                  style={{
+                    ...styles.stateDateGridCell,
+                    ...styles.employeeGridValidationCell,
+                    background: differenceTone.rowBackground,
+                    color: differenceTone.rowText,
+                    cursor: onRowSelect ? "pointer" : "default",
+                  }}
+                  {...rowSelectProps}
+                >
+                  <span style={styles.employeeGridValidationText}>{item.area || "Sin area"}</span>
+                </div>
+                <div
+                  style={{
+                    ...styles.stateDateGridCell,
+                    ...styles.employeeGridValidationCell,
+                    background: differenceTone.rowBackground,
+                    color: differenceTone.rowText,
+                    cursor: onRowSelect ? "pointer" : "default",
+                  }}
+                  {...rowSelectProps}
+                >
+                  <span style={styles.employeeGridValidationText}>{item.ubicacion || "Sin ubicacion"}</span>
                 </div>
                 <div
                   style={{
