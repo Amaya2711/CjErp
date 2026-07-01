@@ -198,7 +198,7 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
         {
             return BuildTextReply(
                 normalizedPhone,
-                "No pudimos vincular tu numero con un empleado registrado. Por favor valida tu telefono en el ERP o contacta a Sistemas.");
+                "No pudimos vincular tu numero con un empleado registrado.. Por favor valida tu telefono en el ERP o contacta a Sistemas.");
         }
 
         var (fechaInicio, fechaFin) = ResolveDateRange(normalizedMessage);
