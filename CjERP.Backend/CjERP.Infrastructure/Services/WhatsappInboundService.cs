@@ -12,6 +12,22 @@ namespace CjERP.Infrastructure.Services;
 public sealed class WhatsappInboundService : IWhatsappInboundService
 {
     private static readonly Regex DateRegex = new(@"(?<!\d)(\d{2}/\d{2}/\d{4})(?!\d)", RegexOptions.Compiled);
+    private static readonly Dictionary<string, int> MonthMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["enero"] = 1,
+        ["febrero"] = 2,
+        ["marzo"] = 3,
+        ["abril"] = 4,
+        ["mayo"] = 5,
+        ["junio"] = 6,
+        ["julio"] = 7,
+        ["agosto"] = 8,
+        ["septiembre"] = 9,
+        ["setiembre"] = 9,
+        ["octubre"] = 10,
+        ["noviembre"] = 11,
+        ["diciembre"] = 12
+    };
 
     private readonly IReporteRepository _reporteRepository;
     private readonly IReportePdfService _reportePdfService;
@@ -307,10 +323,77 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
             return (from.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture), to.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture));
         }
 
+        if (TryResolveMonthPeriod(message, out var monthStart, out var monthEnd))
+        {
+            return (
+                monthStart.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture),
+                monthEnd.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture));
+        }
+
         var today = GetPeruNow().Date;
         var rangeDays = Math.Max(1, _settings.DefaultRangeDays);
         var start = today.AddDays(-(rangeDays - 1));
         return (start.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture), today.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture));
+    }
+
+    private static bool TryResolveMonthPeriod(string? message, out DateTime start, out DateTime end)
+    {
+        start = default;
+        end = default;
+
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return false;
+        }
+
+        var normalized = message.ToLowerInvariant();
+        foreach (var month in MonthMap)
+        {
+            if (!normalized.Contains(month.Key, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var year = ExtractYearNearMonth(normalized, month.Key) ?? GetPeruNow().Year;
+            if (year < 2000 || year > 2100)
+            {
+                return false;
+            }
+
+            start = new DateTime(year, month.Value, 1);
+            end = start.AddMonths(1).AddDays(-1);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static int? ExtractYearNearMonth(string normalizedMessage, string month)
+    {
+        var tokens = normalizedMessage
+            .Split([' ', ',', '.', ';', ':', '-', '_', '/', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+
+        for (var i = 0; i < tokens.Length; i++)
+        {
+            if (!string.Equals(tokens[i], month, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (i + 1 < tokens.Length &&
+                int.TryParse(tokens[i + 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var nextYear))
+            {
+                return nextYear;
+            }
+
+            if (i > 0 &&
+                int.TryParse(tokens[i - 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var previousYear))
+            {
+                return previousYear;
+            }
+        }
+
+        return null;
     }
 
     private static ReporteWhatsappSendRequestDto BuildTextReply(string phone, string message)
