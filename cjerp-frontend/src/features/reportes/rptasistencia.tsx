@@ -5006,6 +5006,18 @@ function SimpleCuadrosDetailGrid({
                     <div style={styles.cuadrosDetailThContent}><span>Responsable</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("responsable")}</span></div>
                   </th>
                 ) : null}
+                <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("hora")}>
+                  <div style={styles.cuadrosDetailThContent}><span>Hora entrada</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("hora")}</span></div>
+                </th>
+                <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("salida")}>
+                  <div style={styles.cuadrosDetailThContent}><span>Salida</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("salida")}</span></div>
+                </th>
+                <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("area")}>
+                  <div style={styles.cuadrosDetailThContent}><span>Area</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("area")}</span></div>
+                </th>
+                <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("estadoMarcacionTexto")}>
+                  <div style={styles.cuadrosDetailThContent}><span>Estado marcacion</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("estadoMarcacionTexto")}</span></div>
+                </th>
                 {showExtendedColumns ? (
                   <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("cliente")}>
                     <div style={styles.cuadrosDetailThContent}><span>Cliente</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("cliente")}</span></div>
@@ -5021,21 +5033,11 @@ function SimpleCuadrosDetailGrid({
                     <div style={styles.cuadrosDetailThContent}><span>Site</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("site")}</span></div>
                   </th>
                 ) : null}
-                <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("ubicacion")}>
-                  <div style={styles.cuadrosDetailThContent}><span>Ubicacion</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("ubicacion")}</span></div>
-                </th>
-                <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("hora")}>
-                  <div style={styles.cuadrosDetailThContent}><span>Hora entrada</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("hora")}</span></div>
-                </th>
-                <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("salida")}>
-                  <div style={styles.cuadrosDetailThContent}><span>Salida</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("salida")}</span></div>
-                </th>
-                <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("area")}>
-                  <div style={styles.cuadrosDetailThContent}><span>Area</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("area")}</span></div>
-                </th>
-                <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("estadoMarcacionTexto")}>
-                  <div style={styles.cuadrosDetailThContent}><span>Estado marcacion</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("estadoMarcacionTexto")}</span></div>
-                </th>
+                {showExtendedColumns ? (
+                  <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("ubicacion")}>
+                    <div style={styles.cuadrosDetailThContent}><span>Ubicacion</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("ubicacion")}</span></div>
+                  </th>
+                ) : null}
               </tr>
               {showExtendedColumns && extendedColumnFilters && extendedColumnOptions && onExtendedColumnFilterChange ? (
                 <tr>
@@ -5054,6 +5056,11 @@ function SimpleCuadrosDetailGrid({
                       onChange={(value) => onExtendedColumnFilterChange("responsable", value)}
                     />
                   </th>
+                  <th style={styles.cuadrosDetailFilterTh} />
+                  <th style={styles.cuadrosDetailFilterTh} />
+                  <th style={styles.cuadrosDetailFilterTh} />
+                  <th style={styles.cuadrosDetailFilterTh} />
+                  <th style={styles.cuadrosDetailFilterTh} />
                   <th style={styles.cuadrosDetailFilterTh}>
                     <HeaderCheckboxFilter
                       values={extendedColumnFilters.cliente}
@@ -5075,10 +5082,6 @@ function SimpleCuadrosDetailGrid({
                       onChange={(value) => onExtendedColumnFilterChange("site", value)}
                     />
                   </th>
-                  <th style={styles.cuadrosDetailFilterTh} />
-                  <th style={styles.cuadrosDetailFilterTh} />
-                  <th style={styles.cuadrosDetailFilterTh} />
-                  <th style={styles.cuadrosDetailFilterTh} />
                   <th style={styles.cuadrosDetailFilterTh} />
                 </tr>
               ) : null}
@@ -5231,6 +5234,10 @@ function SimpleCuadrosDetailGrid({
                       );
                     })()}
                   </td>
+                  {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.cliente}</td> : null}
+                  {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.proyecto}</td> : null}
+                  {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.site}</td> : null}
+                  <td style={styles.cuadrosDetailTd}>{item.ubicacion}</td>
                 </tr>
               ))}
             </tbody>
