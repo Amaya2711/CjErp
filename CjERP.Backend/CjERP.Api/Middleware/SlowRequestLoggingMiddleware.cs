@@ -21,12 +21,15 @@ public sealed class SlowRequestLoggingMiddleware
     public async Task Invoke(HttpContext context)
     {
         var stopwatch = Stopwatch.StartNew();
+
+        context.Response.OnStarting(() =>
+        {
+            context.Response.Headers["Server-Timing"] = $"app;dur={stopwatch.Elapsed.TotalMilliseconds:F1}";
+            return Task.CompletedTask;
+        });
+
         await _next(context);
         stopwatch.Stop();
-
-        context.Response.Headers.Append(
-            "Server-Timing",
-            $"app;dur={stopwatch.Elapsed.TotalMilliseconds:F1}");
 
         if (stopwatch.ElapsedMilliseconds < _thresholdMs)
         {
