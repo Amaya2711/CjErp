@@ -9,9 +9,15 @@ type HttpClient = {
   delete<T>(url: string, config?: AxiosRequestConfig): Promise<T>;
 };
 
-export const API_BASE_URL =
+const configuredApiBaseUrl =
   import.meta.env.VITE_API_BASE_URL?.trim() ||
-  (import.meta.env.DEV ? "https://localhost:7130/api" : "/api");
+  import.meta.env.VITE_API_URL?.trim() ||
+  "";
+
+export const API_BASE_URL =
+  import.meta.env.DEV
+    ? "/api"
+    : configuredApiBaseUrl || "/api";
 
 
 const axiosClient: AxiosInstance = axios.create({
