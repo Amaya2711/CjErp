@@ -15,6 +15,13 @@ BEGIN
     DECLARE @FiltrarPorSolicitante BIT = 1;
     DECLARE @IdEmpleado2 VARCHAR(MAX) = '0';
     DECLARE @IncluyeEstado4 BIT = 0;
+    DECLARE @EstadosFiltro TABLE (Estado INT PRIMARY KEY);
+    DECLARE @EmpleadosFiltro TABLE (IdEmpleado INT PRIMARY KEY);
+
+    INSERT INTO @EstadosFiltro (Estado)
+    SELECT DISTINCT TRY_CAST(LTRIM(RTRIM(value)) AS INT)
+    FROM STRING_SPLIT(@Estados, ',')
+    WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) IS NOT NULL;
 
     SELECT @IdEmpleado2 =
         ISNULL(
@@ -42,12 +49,17 @@ BEGIN
 
     IF EXISTS (
         SELECT 1
-        FROM STRING_SPLIT(@Estados, ',')
-        WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) = 4
+        FROM @EstadosFiltro
+        WHERE Estado = 4
     )
     BEGIN
         SET @IncluyeEstado4 = 1;
     END;
+
+    INSERT INTO @EmpleadosFiltro (IdEmpleado)
+    SELECT DISTINCT TRY_CAST(LTRIM(RTRIM(value)) AS INT)
+    FROM STRING_SPLIT(@IdEmpleado2, ',')
+    WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) IS NOT NULL;
 
     SELECT DISTINCT
         CONVERT(VARCHAR(10), a.FecIngreso, 103) AS FecIngreso,
@@ -201,10 +213,10 @@ BEGIN
         ON a.idprovisional = s1.idprovisional
     INNER JOIN Proyecto b
         ON a.IdProyecto = b.IdProyecto
-    WHERE a.Estado IN (
-        SELECT TRY_CAST(LTRIM(RTRIM(value)) AS INT)
-        FROM STRING_SPLIT(@Estados, ',')
-        WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) IS NOT NULL
+    WHERE EXISTS (
+        SELECT 1
+        FROM @EstadosFiltro estadoFiltro
+        WHERE estadoFiltro.Estado = a.Estado
     )
     AND (@IdValidador IS NULL OR a.IdValidador = @IdValidador)
     AND (
@@ -212,11 +224,11 @@ BEGIN
         OR (
             @IncluyeEstado4 = 1
             AND a.FechaDeposito IS NOT NULL
-            AND CONVERT(DATE, a.FechaDeposito) >= @FechaInicio
+            AND a.FechaDeposito >= @FechaInicio
         )
         OR (
             @IncluyeEstado4 = 0
-            AND CONVERT(DATE, a.FecIngreso) >= @FechaInicio
+            AND a.FecIngreso >= @FechaInicio
         )
     )
     AND (
@@ -224,18 +236,19 @@ BEGIN
         OR (
             @IncluyeEstado4 = 1
             AND a.FechaDeposito IS NOT NULL
-            AND CONVERT(DATE, a.FechaDeposito) <= @FechaFin
+            AND a.FechaDeposito < DATEADD(DAY, 1, @FechaFin)
         )
         OR (
             @IncluyeEstado4 = 0
-            AND CONVERT(DATE, a.FecIngreso) <= @FechaFin
+            AND a.FecIngreso < DATEADD(DAY, 1, @FechaFin)
         )
     )
     AND (
         @FechaDeposito IS NULL
         OR (
             a.FechaDeposito IS NOT NULL
-            AND CONVERT(DATE, a.FechaDeposito) = @FechaDeposito
+            AND a.FechaDeposito >= @FechaDeposito
+            AND a.FechaDeposito < DATEADD(DAY, 1, @FechaDeposito)
         )
     )
     AND (
@@ -246,10 +259,10 @@ BEGIN
         )
         OR (
             ISNULL(a.IdWeb, 0) <> 1
-            AND z1.IdEmpleado IN (
-                SELECT TRY_CAST(LTRIM(RTRIM(value)) AS INT)
-                FROM STRING_SPLIT(@IdEmpleado2, ',')
-                WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) IS NOT NULL
+            AND EXISTS (
+                SELECT 1
+                FROM @EmpleadosFiltro empleadoFiltro
+                WHERE empleadoFiltro.IdEmpleado = z1.IdEmpleado
             )
         )
     )

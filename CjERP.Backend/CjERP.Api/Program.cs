@@ -1,5 +1,6 @@
 using System.Text;
 using System.Threading.RateLimiting;
+using System.IO.Compression;
 using CjERP.Api.Configuration;
 using CjERP.Api.Health;
 using CjERP.Api.Middleware;
@@ -19,6 +20,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.IdentityModel.Tokens;
 using QuestPDF.Infrastructure;
 
@@ -123,6 +125,20 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
         options.JsonSerializerOptions.DictionaryKeyPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
     });
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options =>
+{
+    options.Level = CompressionLevel.Fastest;
+});
+builder.Services.Configure<GzipCompressionProviderOptions>(options =>
+{
+    options.Level = CompressionLevel.Fastest;
+});
 builder.Services.AddEndpointsApiExplorer();
 var sqlSettings = builder.Configuration
     .GetSection("SqlSettings")
@@ -189,6 +205,7 @@ builder.Services.AddInfrastructure(builder.Configuration);
 
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddSingleton<IActiveUserSessionService, ActiveUserSessionService>();
+builder.Services.AddHostedService<ActiveUserSessionCleanupHostedService>();
 builder.Services.AddScoped<IJwtService, JwtService>();
 builder.Services.AddScoped<ISegPerfilService, SegPerfilService>();
 builder.Services.AddScoped<ISegRolService, SegRolService>();
@@ -366,6 +383,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseResponseCompression();
 app.UseMiddleware<SlowRequestLoggingMiddleware>();
 app.UseCors("ReactPolicy");
 app.UseRateLimiter();

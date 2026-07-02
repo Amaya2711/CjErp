@@ -8,6 +8,7 @@ using CjERP.Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.Mvc;
+using System.Diagnostics;
 
 namespace CjERP.Api.Controllers
 {
@@ -95,11 +96,21 @@ namespace CjERP.Api.Controllers
 
             try
             {
+                var stopwatch = Stopwatch.StartNew();
                 var result = await _planillaConsultaService.ConsultarEstadosAsync(
                     parametros,
                     consulta,
                     request?.MaxRows,
                     cancellationToken);
+                stopwatch.Stop();
+
+                _logger.LogInformation(
+                    "[PlanillaConsulta] consulta={Consulta} rows={Rows} limitExceeded={LimitExceeded} maxRows={MaxRows} elapsedMs={ElapsedMs}",
+                    GetStoredProcedureLabel(consulta),
+                    result.TotalRows,
+                    result.LimitExceeded,
+                    request?.MaxRows,
+                    stopwatch.Elapsed.TotalMilliseconds);
 
                 return Ok(new
                 {

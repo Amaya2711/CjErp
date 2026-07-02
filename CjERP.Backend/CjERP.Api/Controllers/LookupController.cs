@@ -1,7 +1,10 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using CjERP.Application.DTOs;
+using System.Linq;
 using System.Threading.Tasks;
 using CjERP.Application.Interfaces;
+using CjERP.Application.Interfaces.Services;
 
 namespace CjERP.Api.Controllers
 {
@@ -11,13 +14,18 @@ namespace CjERP.Api.Controllers
     public class LookupController : ControllerBase
     {
         private readonly ILookupService _lookupService;
+        private readonly IEmpleadoCtaService _empleadoCtaService;
 
-        public LookupController(ILookupService lookupService)
+        public LookupController(
+            ILookupService lookupService,
+            IEmpleadoCtaService empleadoCtaService)
         {
             _lookupService = lookupService;
+            _empleadoCtaService = empleadoCtaService;
         }
 
         [HttpGet("filtros")]
+        [ResponseCache(Duration = 300, Location = ResponseCacheLocation.Client)]
         public async Task<IActionResult> GetFiltros(CancellationToken cancellationToken)
         {
             var result = await _lookupService.ListarFiltrosOperativosAsync(cancellationToken);
@@ -25,6 +33,7 @@ namespace CjERP.Api.Controllers
         }
 
         [HttpGet("tipotrabajo")]
+        [ResponseCache(Duration = 300, Location = ResponseCacheLocation.Client, VaryByQueryKeys = new[] { "filtroKey" })]
         public async Task<IActionResult> GetTipoTrabajo([FromQuery] string filtroKey, CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(filtroKey))
@@ -34,6 +43,7 @@ namespace CjERP.Api.Controllers
         }
 
         [HttpGet("ot")]
+        [ResponseCache(Duration = 300, Location = ResponseCacheLocation.Client, VaryByQueryKeys = new[] { "filtroKey" })]
         public async Task<IActionResult> GetOT([FromQuery] string filtroKey, CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(filtroKey))
@@ -43,6 +53,7 @@ namespace CjERP.Api.Controllers
         }
 
         [HttpGet("tareas")]
+        [ResponseCache(Duration = 600, Location = ResponseCacheLocation.Client)]
         public async Task<IActionResult> GetTareas(CancellationToken cancellationToken)
         {
             var result = await _lookupService.ListarTareasAsync(cancellationToken);
@@ -88,6 +99,7 @@ namespace CjERP.Api.Controllers
         }
 
         [HttpGet("~/api/lookup/constantes")]
+        [ResponseCache(Duration = 600, Location = ResponseCacheLocation.Client, VaryByQueryKeys = new[] { "campo" })]
         public async Task<IActionResult> GetConstantes([FromQuery] string campo, CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(campo))
@@ -98,6 +110,7 @@ namespace CjERP.Api.Controllers
         }
 
         [HttpGet("~/api/lookup/solicitantes")]
+        [ResponseCache(Duration = 180, Location = ResponseCacheLocation.Client, VaryByQueryKeys = new[] { "idCargo", "idEmpleado" })]
         public async Task<IActionResult> GetSolicitantes([FromQuery] int? idCargo, [FromQuery] int? idEmpleado, CancellationToken cancellationToken)
         {
             var result = await _lookupService.ListarSolicitantesAsync(
@@ -110,6 +123,7 @@ namespace CjERP.Api.Controllers
         }
 
         [HttpGet("~/api/lookup/gestores")]
+        [ResponseCache(Duration = 300, Location = ResponseCacheLocation.Client)]
         public async Task<IActionResult> GetGestores(CancellationToken cancellationToken)
         {
             var result = await _lookupService.ListarGestoresAsync(cancellationToken);
@@ -117,6 +131,7 @@ namespace CjERP.Api.Controllers
         }
 
         [HttpGet("~/api/lookup/validador")]
+        [ResponseCache(Duration = 300, Location = ResponseCacheLocation.Client)]
         public async Task<IActionResult> GetValidador(CancellationToken cancellationToken)
         {
             var result = await _lookupService.ListarValidadoresAsync(cancellationToken);
@@ -124,10 +139,47 @@ namespace CjERP.Api.Controllers
         }
 
         [HttpGet("~/api/lookup/ubigeos")]
+        [ResponseCache(Duration = 1800, Location = ResponseCacheLocation.Client)]
         public async Task<IActionResult> GetUbigeos(CancellationToken cancellationToken)
         {
             var result = await _lookupService.ListarUbigeosAsync(cancellationToken);
             return Ok(result);
+        }
+
+        [HttpGet("~/api/lookup/gastos/bootstrap")]
+        [ResponseCache(
+            Duration = 180,
+            Location = ResponseCacheLocation.Client,
+            VaryByQueryKeys = new[] { "idCargo", "idEmpleado" })]
+        public async Task<IActionResult> GetGastosBootstrap(
+            [FromQuery] int? idCargo,
+            [FromQuery] int? idEmpleado,
+            CancellationToken cancellationToken)
+        {
+            var empleadosTask = _empleadoCtaService.ListarAsync();
+            var solicitantesTask = _lookupService.ListarSolicitantesAsync(
+                idCargo.GetValueOrDefault() <= 0 ? null : idCargo,
+                idEmpleado.GetValueOrDefault() <= 0 ? null : idEmpleado,
+                cancellationToken);
+            var gestoresTask = _lookupService.ListarGestoresAsync(cancellationToken);
+            var validadoresTask = _lookupService.ListarValidadoresAsync(cancellationToken);
+            var tareasTask = _lookupService.ListarTareasAsync(cancellationToken);
+
+            await Task.WhenAll(
+                empleadosTask,
+                solicitantesTask,
+                gestoresTask,
+                validadoresTask,
+                tareasTask);
+
+            return Ok(new GastosBootstrapResponseDto
+            {
+                Empleados = await empleadosTask,
+                Solicitantes = (await solicitantesTask).ToList(),
+                Gestores = (await gestoresTask).ToList(),
+                Validadores = (await validadoresTask).ToList(),
+                Tareas = (await tareasTask).ToList()
+            });
         }
     }
 }

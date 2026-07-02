@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
   // Estado para fila seleccionada
   
 import { useCrudForm } from "../../../hooks/useCrudForm";
@@ -11,11 +11,8 @@ import {
 import type { PlanillaConsultaParametro } from "../../../models/planillaConsulta";
 import CrudToolbar, { matchesCrudToolbarSearch, type CrudToolbarSearchField } from "../../../components/base/CrudToolbar";
 import { FiltroOperativoLookup } from "../../../components/lookups/FiltroOperativoLookup";
-import { listarEmpleadosCta } from "../../../api/empleadoService";
-import { getTareas, getValoresGasto } from "../../../api/filtroOperativoService";
-import { listarGestorOptions } from "../../../api/gestorService";
-import { listarSolicitanteOptions } from "../../../api/solicitanteService";
-import { listarValidadorOptions } from "../../../api/validadorService";
+import { getValoresGasto } from "../../../api/filtroOperativoService";
+import { getGastosBootstrap } from "../../../api/gastosBootstrapService";
 import { useConstantesPorCampo } from "../../../hooks/useConstantesPorCampo";
 import type { ConstanteOption } from "../../../models/constante";
 import type { FiltroOperativoValue, TareaOption } from "../../../models/filtroOperativo";
@@ -245,6 +242,9 @@ const GASTOS_HEADER_FILTER_SEARCH_INITIAL: Record<GastosHeaderSearchableFilterKe
   responsable: "",
   validador: "",
 };
+
+const GASTOS_GRID_ROW_HEIGHT = 46;
+const GASTOS_GRID_OVERSCAN_ROWS = 14;
 
 type FacturaUploadResponse = {
   fileName: string;
@@ -1576,39 +1576,58 @@ export default function GastosPage() {
   const esSoles = monedaSeleccionada && (monedaSeleccionada.label?.toUpperCase() === "SOLES" || monedaSeleccionada.value === "SOLES" || monedaSeleccionada.codigo === "SOLES");
 
   useEffect(() => {
-    setEmpleadosLoading(true);
-    setEmpleadosError(null);
-
-    listarEmpleadosCta()
-      .then((data) => {
-        setEmpleados(Array.isArray(data) ? data : []);
-      })
-      .catch(() => setEmpleadosError("Error al cargar responsables"))
-      .finally(() => setEmpleadosLoading(false));
-  }, []);
-
-  useEffect(() => {
     let activo = true;
 
+    setEmpleadosLoading(true);
+    setEmpleadosError(null);
     setSolicitanteLoading(true);
     setSolicitanteError(null);
+    setGestorLoading(true);
+    setGestorError(null);
+    setValidadorLoading(true);
+    setValidadorError(null);
+    setTareasCatalogoError(null);
 
-    listarSolicitanteOptions({
+    void getGastosBootstrap({
       idCargo: idCargo > 0 ? idCargo : null,
       idEmpleado: idEmpleado > 0 ? idEmpleado : null,
     })
       .then((data) => {
-        if (!activo) return;
-        setSolicitanteOptions(Array.isArray(data) ? data : []);
+        if (!activo) {
+          return;
+        }
+
+        setEmpleados(Array.isArray(data.empleados) ? data.empleados : []);
+        setSolicitanteOptions(Array.isArray(data.solicitantes) ? data.solicitantes : []);
+        setGestorOptions(Array.isArray(data.gestores) ? data.gestores : []);
+        setValidadorOptions(Array.isArray(data.validadores) ? data.validadores : []);
+        setTareasCatalogo(Array.isArray(data.tareas) ? data.tareas : []);
       })
       .catch(() => {
-        if (!activo) return;
-        setSolicitanteError("Error al cargar solicitantes");
+        if (!activo) {
+          return;
+        }
+
+        setEmpleados([]);
+        setEmpleadosError("Error al cargar responsables");
         setSolicitanteOptions([]);
+        setSolicitanteError("Error al cargar solicitantes");
+        setGestorOptions([]);
+        setGestorError("Error al cargar gestores");
+        setValidadorOptions([]);
+        setValidadorError("Error al cargar validadores");
+        setTareasCatalogo([]);
+        setTareasCatalogoError("Error al cargar tareas.");
       })
       .finally(() => {
-        if (!activo) return;
+        if (!activo) {
+          return;
+        }
+
+        setEmpleadosLoading(false);
         setSolicitanteLoading(false);
+        setGestorLoading(false);
+        setValidadorLoading(false);
       });
 
     return () => {
@@ -1616,81 +1635,11 @@ export default function GastosPage() {
     };
   }, [idCargo, idEmpleado]);
 
-  useEffect(() => {
-    let activo = true;
-
-    setGestorLoading(true);
-    setGestorError(null);
-
-    listarGestorOptions()
-      .then((data) => {
-        if (!activo) return;
-        setGestorOptions(Array.isArray(data) ? data : []);
-      })
-      .catch(() => {
-        if (!activo) return;
-        setGestorError("Error al cargar gestores");
-        setGestorOptions([]);
-      })
-      .finally(() => {
-        if (!activo) return;
-        setGestorLoading(false);
-      });
-
-    return () => {
-      activo = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    let activo = true;
-
-    setValidadorLoading(true);
-    setValidadorError(null);
-
-    listarValidadorOptions()
-      .then((data) => {
-        if (!activo) return;
-        setValidadorOptions(Array.isArray(data) ? data : []);
-      })
-      .catch(() => {
-        if (!activo) return;
-        setValidadorError("Error al cargar validadores");
-        setValidadorOptions([]);
-      })
-      .finally(() => {
-        if (!activo) return;
-        setValidadorLoading(false);
-      });
-
-    return () => {
-      activo = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    let activo = true;
-
-    setTareasCatalogoError(null);
-
-    getTareas()
-      .then((data) => {
-        if (!activo) return;
-        setTareasCatalogo(Array.isArray(data) ? data : []);
-      })
-      .catch(() => {
-        if (!activo) return;
-        setTareasCatalogo([]);
-        setTareasCatalogoError("Error al cargar tareas.");
-      });
-
-    return () => {
-      activo = false;
-    };
-  }, []);
-
   const empleadosSafe = Array.isArray(empleados) ? empleados : [];
   const gastosSafe = Array.isArray(gastos) ? gastos : [];
+  const gastosGridScrollRef = useRef<HTMLDivElement | null>(null);
+  const [gastosGridScrollTop, setGastosGridScrollTop] = useState(0);
+  const [gastosGridViewportHeight, setGastosGridViewportHeight] = useState(520);
 
   const filteredResponsables =
     responsableInput.trim() === ""
@@ -2579,6 +2528,7 @@ export default function GastosPage() {
   ]);
   const cantidadRegistrosFiltrados = gastosFiltradosBase.length;
   const gastosFiltrados = gastosFiltradosBase;
+  const gastosFiltradosDiferidos = useDeferredValue(gastosFiltrados);
   const handleFiltroOperativoChange = React.useCallback(
     (val: FiltroOperativoValue) => {
       setForm((prev) =>
@@ -2665,9 +2615,40 @@ export default function GastosPage() {
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [cabeceraFiltroAbierto]);
 
+  const gastosGridVirtualWindow = useMemo(() => {
+    const totalRows = gastosFiltradosDiferidos.length;
+
+    if (totalRows === 0) {
+      return {
+        startIndex: 0,
+        topSpacerHeight: 0,
+        bottomSpacerHeight: 0,
+        rows: [] as GastoForm[],
+      };
+    }
+
+    const visibleCount = Math.max(
+      Math.ceil(gastosGridViewportHeight / GASTOS_GRID_ROW_HEIGHT) + GASTOS_GRID_OVERSCAN_ROWS,
+      GASTOS_GRID_OVERSCAN_ROWS * 2
+    );
+    const startIndex = Math.max(
+      Math.floor(gastosGridScrollTop / GASTOS_GRID_ROW_HEIGHT) - GASTOS_GRID_OVERSCAN_ROWS,
+      0
+    );
+    const endIndex = Math.min(startIndex + visibleCount, totalRows);
+
+    return {
+      startIndex,
+      topSpacerHeight: startIndex * GASTOS_GRID_ROW_HEIGHT,
+      bottomSpacerHeight: Math.max((totalRows - endIndex) * GASTOS_GRID_ROW_HEIGHT, 0),
+      rows: gastosFiltradosDiferidos.slice(startIndex, endIndex),
+    };
+  }, [gastosFiltradosDiferidos, gastosGridScrollTop, gastosGridViewportHeight]);
+
   const renderedGastoRows = useMemo(
     () =>
-      gastosFiltrados.map((gasto, rowIndex) => {
+      gastosGridVirtualWindow.rows.map((gasto, visibleIndex) => {
+        const rowIndex = gastosGridVirtualWindow.startIndex + visibleIndex;
         const rowKey = getGastoRowKey(gasto, rowIndex);
 
         return (
@@ -2676,6 +2657,7 @@ export default function GastosPage() {
             style={{
               background: selectedRowKey === rowKey ? "#E0E7FF" : "transparent",
               transition: "background 0.1s",
+              height: GASTOS_GRID_ROW_HEIGHT,
             }}
             onClick={() => {
               setSelectedRowKey(rowKey);
@@ -2894,7 +2876,7 @@ export default function GastosPage() {
         );
       }),
     [
-      gastosFiltrados,
+      gastosGridVirtualWindow,
       selectedRowKey,
       rechazoError,
       columnasGridGastos,
@@ -2909,6 +2891,43 @@ export default function GastosPage() {
       estadoOptions,
     ]
   );
+
+  useEffect(() => {
+    const container = gastosGridScrollRef.current;
+
+    if (!container || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const updateViewportHeight = () => {
+      setGastosGridViewportHeight(container.clientHeight || 520);
+    };
+
+    updateViewportHeight();
+
+    const observer = new ResizeObserver(() => {
+      updateViewportHeight();
+    });
+
+    observer.observe(container);
+
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (gastosGridScrollTop === 0) {
+      return;
+    }
+
+    const maxScrollTop = Math.max(
+      gastosFiltradosDiferidos.length * GASTOS_GRID_ROW_HEIGHT - gastosGridViewportHeight,
+      0
+    );
+
+    if (gastosGridScrollTop > maxScrollTop) {
+      setGastosGridScrollTop(maxScrollTop);
+    }
+  }, [gastosFiltradosDiferidos.length, gastosGridScrollTop, gastosGridViewportHeight]);
 
   return (
     <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 5 }}>
@@ -3527,11 +3546,18 @@ export default function GastosPage() {
         }}
       >
         <div
+          ref={gastosGridScrollRef}
           style={{
             width: "100%",
             maxHeight: "70vh",
             overflow: "auto",
             position: "relative",
+          }}
+          onScroll={(event) => {
+            const nextScrollTop = event.currentTarget.scrollTop;
+            startTransition(() => {
+              setGastosGridScrollTop(nextScrollTop);
+            });
           }}
         >
           <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
@@ -3618,7 +3644,35 @@ export default function GastosPage() {
                   </td>
                 </tr>
               ) : (
-                <>{renderedGastoRows}</>
+                <>
+                  {gastosGridVirtualWindow.topSpacerHeight > 0 && (
+                    <tr aria-hidden="true">
+                      <td
+                        colSpan={columnasGridGastos.length}
+                        style={{
+                          padding: 0,
+                          border: 0,
+                          height: gastosGridVirtualWindow.topSpacerHeight,
+                          background: "transparent",
+                        }}
+                      />
+                    </tr>
+                  )}
+                  {renderedGastoRows}
+                  {gastosGridVirtualWindow.bottomSpacerHeight > 0 && (
+                    <tr aria-hidden="true">
+                      <td
+                        colSpan={columnasGridGastos.length}
+                        style={{
+                          padding: 0,
+                          border: 0,
+                          height: gastosGridVirtualWindow.bottomSpacerHeight,
+                          background: "transparent",
+                        }}
+                      />
+                    </tr>
+                  )}
+                </>
               )}
             </tbody>
           </table>

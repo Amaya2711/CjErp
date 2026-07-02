@@ -482,6 +482,7 @@ export function RptWupModulePage({
   const [success, setSuccess] = useState("");
   const lastErrorLogSignatureRef = useRef("");
   const dashboardRequestInFlightRef = useRef(false);
+  const dashboardBurstTimeoutsRef = useRef<number[]>([]);
   const tipoApi = tipo === "gerencial" ? "gerencial" : tipo === "boleta" ? "boleta" : "operativo";
   const periodoBoletaApi = tipoApi === "boleta" ? formatPeriodoBoleta(periodoBoleta) : undefined;
 
@@ -559,12 +560,18 @@ export function RptWupModulePage({
   });
 
   const refreshDashboardBurst = useEffectEvent(() => {
+    for (const timeoutId of dashboardBurstTimeoutsRef.current) {
+      window.clearTimeout(timeoutId);
+    }
+    dashboardBurstTimeoutsRef.current = [];
+
     void loadDashboard(true);
 
     for (const delayMs of [1000, 2500, 5000]) {
-      window.setTimeout(() => {
+      const timeoutId = window.setTimeout(() => {
         void loadDashboard(true);
       }, delayMs);
+      dashboardBurstTimeoutsRef.current.push(timeoutId);
     }
   });
 
@@ -576,6 +583,10 @@ export function RptWupModulePage({
 
   useEffect(() => {
     const interval = window.setInterval(() => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
       void loadDashboard(true);
     }, dashboard?.runtime.isRunning ? POLLING_RUNNING_MS : POLLING_IDLE_MS);
 
@@ -601,6 +612,15 @@ export function RptWupModulePage({
       return next;
     });
   }, [destinatariosBoleta, selectedDestinatarioIds.length, tipoApi]);
+
+  useEffect(() => {
+    return () => {
+      for (const timeoutId of dashboardBurstTimeoutsRef.current) {
+        window.clearTimeout(timeoutId);
+      }
+      dashboardBurstTimeoutsRef.current = [];
+    };
+  }, []);
 
   useEffect(() => {
     const failedLogs = (dashboard?.logs ?? [])

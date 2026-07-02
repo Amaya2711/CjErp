@@ -24,6 +24,10 @@ public sealed class SlowRequestLoggingMiddleware
         await _next(context);
         stopwatch.Stop();
 
+        context.Response.Headers.Append(
+            "Server-Timing",
+            $"app;dur={stopwatch.Elapsed.TotalMilliseconds:F1}");
+
         if (stopwatch.ElapsedMilliseconds < _thresholdMs)
         {
             return;

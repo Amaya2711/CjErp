@@ -10,7 +10,8 @@ type HttpClient = {
 };
 
 export const API_BASE_URL =
-  import.meta.env.DEV ? "https://localhost:7130/api" : "https://cjerp-production.up.railway.app/api";
+  import.meta.env.VITE_API_BASE_URL?.trim() ||
+  (import.meta.env.DEV ? "https://localhost:7130/api" : "/api");
 
 
 const axiosClient: AxiosInstance = axios.create({

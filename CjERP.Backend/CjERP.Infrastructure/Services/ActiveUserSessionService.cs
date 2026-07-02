@@ -9,6 +9,7 @@ public class ActiveUserSessionService : IActiveUserSessionService
 {
     private readonly ConcurrentDictionary<string, SessionState> _activeSessions = new(StringComparer.OrdinalIgnoreCase);
     private readonly TimeSpan _idleTimeout;
+    private static readonly TimeSpan RefreshWriteThreshold = TimeSpan.FromMinutes(1);
 
     public ActiveUserSessionService(IOptions<SessionSettings> sessionSettings)
     {
@@ -51,7 +52,11 @@ public class ActiveUserSessionService : IActiveUserSessionService
             return false;
         }
 
-        _activeSessions[trimmedUserId] = activeSession with { LastActivityUtc = utcNow };
+        if (utcNow - activeSession.LastActivityUtc >= RefreshWriteThreshold)
+        {
+            _activeSessions[trimmedUserId] = activeSession with { LastActivityUtc = utcNow };
+        }
+
         return true;
     }
 
@@ -63,6 +68,32 @@ public class ActiveUserSessionService : IActiveUserSessionService
         }
 
         _activeSessions.TryRemove(userId.Trim(), out _);
+    }
+
+    public int PruneExpiredSessions()
+    {
+        if (_activeSessions.IsEmpty)
+        {
+            return 0;
+        }
+
+        var utcNow = DateTimeOffset.UtcNow;
+        var removed = 0;
+
+        foreach (var entry in _activeSessions)
+        {
+            if (utcNow - entry.Value.LastActivityUtc <= _idleTimeout)
+            {
+                continue;
+            }
+
+            if (_activeSessions.TryRemove(entry.Key, out _))
+            {
+                removed++;
+            }
+        }
+
+        return removed;
     }
 
     private sealed record SessionState(string SessionId, DateTimeOffset LastActivityUtc);

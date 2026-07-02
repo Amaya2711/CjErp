@@ -6,90 +6,86 @@ import SessionManager from "../session/SessionManager";
 import MainLayout from "../../layouts/MainLayout";
 
 import LoginPage from "../../features/auth/pages/LoginPage";
-import DashboardPage from "../../features/admin/DashboardPage";
-import DynamicMenuRoutePage from "../../pages/DynamicMenuRoutePage";
-
-//import SeguridadPage from "../../features/seguridad/pages/seguridad";
-import SeguridadUsuariosPage from "../../features/seguridad/pages/usuarios";
-//import SeguridadUsuarioPerfilPage from "../../features/seguridad/pages/usuario-perfil";
-import SeguridadPerfilesPage from "../../features/seguridad/pages/perfiles";
-import SeguridadRolesPage from "../../features/seguridad/pages/roles";
-
-import SeguridadMenuPage from "../../features/seguridad/pages/menu";
-import SeguridadPermisosPage from "../../features/seguridad/pages/permisos";
-import PerfilRolMenuPage from "../../features/seguridad/pages/perfil-rol-menu";
-import UsuarioPerfilRolMenu from "../../features/seguridad/pages/usuario-perfil-rol-menu";
-
-import AsistenciaPage from "../../features/administracion/AsistenciaPage";
-import MarcacionPage from "../../features/administracion/MarcacionPage";
-import PendientesPage from "../../features/administracion/pendientes";
-import SolicitudAdministracionPage from "../../features/administracion/solicitudadministracion";
-import VacacionesPage from "../../features/administracion/VacacionesPage";
-import AlmacenPage from "../../features/logistica/almacen/almacen";
-import InventarioPage from "../../features/logistica/almacen/inventario";
-import CrucePage from "../../features/logistica/gestionequipos/cruce";
-import DesmontadoPage from "../../features/logistica/gestionequipos/desmontado";
-import RecojoPage from "../../features/logistica/gestionequipos/recojo";
-import SolicitudEquipoPage from "../../features/logistica/gestionequipos/solicitudequipo";
-import TesoreriaDepositoPage from "../../features/finanzas/tesoreria/deposito";
-import TesoreriaChequesPage from "../../features/finanzas/tesoreria/cheques";
-import TesoreriaGastosPage from "../../features/finanzas/tesoreria/gastos";
-import TesoreriaGastosAprobarPage from "../../features/finanzas/tesoreria/gastosaprobar";
-import ConciliacionBcpPage from "../../features/finanzas/conciliacion";
-import ActFacturaPage from "../../features/finanzas/facturacionfinanciera/actfactura";
-import OcPage from "../../features/finanzas/facturacionfinanciera/oc";
-import AsientosPage from "../../features/finanzas/contabilidad/asientos";
-import CierreContablePage from "../../features/finanzas/contabilidad/cierrecontable";
-import LibroDiarioPage from "../../features/finanzas/contabilidad/librodiario";
-import LibroMayorPage from "../../features/finanzas/contabilidad/libromayor";
-import CapitalizacionPage from "../../features/operaciones/capitalizacion";
-import OperacionPage from "../../features/operaciones/operacion";
-import AsignacionPage from "../../features/operaciones/asignacion";
-import ReembolsoPage from "../../features/operaciones/operacion/reembolso";
-import SuministroPage from "../../features/operaciones/operacion/suministro";
-import AprobarCampoPage from "../../features/operaciones/operacion/aprobarcampo";
-import ClientePage from "../../features/comercial/cliente";
-import FacturacionPage from "../../features/comercial/facturacion";
-import CobranzasPage from "../../features/comercial/cobranzas";
-import SolicitudesPage from "../../features/compras/solicitudes";
-import OrdenCompraPage from "../../features/compras/ordencompra";
-import PersonalPage from "../../features/recursoshumanos/personal";
-import FichaPage from "../../features/recursoshumanos/ficha";
-import RecursosHumanosAsistenciaPage from "../../features/recursoshumanos/asistencia";
-import CompensacionRealPage from "../../features/recursoshumanos/compensacionreal";
-import ImportarPlanillaXmlPage from "../../features/recursoshumanos/planillas";
-import RecursosHumanosVacacionesPage from "../../features/recursoshumanos/vacaciones";
-import ConsultaPage from "../../features/mantenimiento/consulta/consulta";
-import ModificacionesPage from "../../features/mantenimiento/consulta/modificaciones";
-import MigracionPage from "../../features/mantenimiento/migracion";
-import MantenimientoPage from "../../features/mantenimiento/mantenimiento";
-import RptWupPage from "../../features/mantenimiento/sistemas/rptwup";
-import RptWupGerencialPage from "../../features/mantenimiento/sistemas/rptwupgerencial";
-import RptBoletaPage from "../../features/mantenimiento/sistemas/rptboleta";
-import IndicadoresGerencialesPage from "../../features/inicio/indicadoresgerenciales";
-import PanelPrincipalPage from "../../features/inicio/panelprincipal";
-import AlertasPage from "../../features/inicio/alertas";
-import EnvioMensajesPage from "../../features/inicio/enviomensajes";
-import PlantaPrincipalPage from "../../features/planta/principal";
-import EppsPage from "../../features/planta/epps";
-import OperativoPage from "../../pages/reporte/operativo";
-import FinancieroPage from "../../pages/reporte/financiero";
-import GerencialPage from "../../pages/reporte/gerencial";
-import DashboardCjPage from "../../features/reportes/gerencial/dashboardcj";
-import RptAsistenciaPage from "../../features/reportes/rptasistencia";
-import RptAsistenciaEmpleadoPage from "../../features/reportes/rptasistenciaempleado";
-import ClaudeiaPage from "../../features/reportes/administrativo/claudeia";
+const DashboardPage = lazy(() => import("../../features/admin/DashboardPage"));
+const DynamicMenuRoutePage = lazy(() => import("../../pages/DynamicMenuRoutePage"));
+const SeguridadUsuariosPage = lazy(() => import("../../features/seguridad/pages/usuarios"));
+const SeguridadPerfilesPage = lazy(() => import("../../features/seguridad/pages/perfiles"));
+const SeguridadRolesPage = lazy(() => import("../../features/seguridad/pages/roles"));
+const SeguridadMenuPage = lazy(() => import("../../features/seguridad/pages/menu"));
+const SeguridadPermisosPage = lazy(() => import("../../features/seguridad/pages/permisos"));
+const PerfilRolMenuPage = lazy(() => import("../../features/seguridad/pages/perfil-rol-menu"));
+const UsuarioPerfilRolMenu = lazy(() => import("../../features/seguridad/pages/usuario-perfil-rol-menu"));
+const AsistenciaPage = lazy(() => import("../../features/administracion/AsistenciaPage"));
+const MarcacionPage = lazy(() => import("../../features/administracion/MarcacionPage"));
+const PendientesPage = lazy(() => import("../../features/administracion/pendientes"));
+const SolicitudAdministracionPage = lazy(() => import("../../features/administracion/solicitudadministracion"));
+const VacacionesPage = lazy(() => import("../../features/administracion/VacacionesPage"));
+const AlmacenPage = lazy(() => import("../../features/logistica/almacen/almacen"));
+const InventarioPage = lazy(() => import("../../features/logistica/almacen/inventario"));
+const CrucePage = lazy(() => import("../../features/logistica/gestionequipos/cruce"));
+const DesmontadoPage = lazy(() => import("../../features/logistica/gestionequipos/desmontado"));
+const RecojoPage = lazy(() => import("../../features/logistica/gestionequipos/recojo"));
+const SolicitudEquipoPage = lazy(() => import("../../features/logistica/gestionequipos/solicitudequipo"));
+const TesoreriaDepositoPage = lazy(() => import("../../features/finanzas/tesoreria/deposito"));
+const TesoreriaChequesPage = lazy(() => import("../../features/finanzas/tesoreria/cheques"));
+const TesoreriaGastosPage = lazy(() => import("../../features/finanzas/tesoreria/gastos"));
+const TesoreriaGastosAprobarPage = lazy(() => import("../../features/finanzas/tesoreria/gastosaprobar"));
+const ConciliacionBcpPage = lazy(() => import("../../features/finanzas/conciliacion"));
+const ActFacturaPage = lazy(() => import("../../features/finanzas/facturacionfinanciera/actfactura"));
+const OcPage = lazy(() => import("../../features/finanzas/facturacionfinanciera/oc"));
+const AsientosPage = lazy(() => import("../../features/finanzas/contabilidad/asientos"));
+const CierreContablePage = lazy(() => import("../../features/finanzas/contabilidad/cierrecontable"));
+const LibroDiarioPage = lazy(() => import("../../features/finanzas/contabilidad/librodiario"));
+const LibroMayorPage = lazy(() => import("../../features/finanzas/contabilidad/libromayor"));
+const CapitalizacionPage = lazy(() => import("../../features/operaciones/capitalizacion"));
+const OperacionPage = lazy(() => import("../../features/operaciones/operacion"));
+const AsignacionPage = lazy(() => import("../../features/operaciones/asignacion"));
+const ReembolsoPage = lazy(() => import("../../features/operaciones/operacion/reembolso"));
+const SuministroPage = lazy(() => import("../../features/operaciones/operacion/suministro"));
+const AprobarCampoPage = lazy(() => import("../../features/operaciones/operacion/aprobarcampo"));
+const ClientePage = lazy(() => import("../../features/comercial/cliente"));
+const FacturacionPage = lazy(() => import("../../features/comercial/facturacion"));
+const CobranzasPage = lazy(() => import("../../features/comercial/cobranzas"));
+const SolicitudesPage = lazy(() => import("../../features/compras/solicitudes"));
+const OrdenCompraPage = lazy(() => import("../../features/compras/ordencompra"));
+const PersonalPage = lazy(() => import("../../features/recursoshumanos/personal"));
+const FichaPage = lazy(() => import("../../features/recursoshumanos/ficha"));
+const RecursosHumanosAsistenciaPage = lazy(() => import("../../features/recursoshumanos/asistencia"));
+const CompensacionRealPage = lazy(() => import("../../features/recursoshumanos/compensacionreal"));
+const ImportarPlanillaXmlPage = lazy(() => import("../../features/recursoshumanos/planillas"));
+const RecursosHumanosVacacionesPage = lazy(() => import("../../features/recursoshumanos/vacaciones"));
+const ConsultaPage = lazy(() => import("../../features/mantenimiento/consulta/consulta"));
+const ModificacionesPage = lazy(() => import("../../features/mantenimiento/consulta/modificaciones"));
+const MigracionPage = lazy(() => import("../../features/mantenimiento/migracion"));
+const MantenimientoPage = lazy(() => import("../../features/mantenimiento/mantenimiento"));
+const RptWupPage = lazy(() => import("../../features/mantenimiento/sistemas/rptwup"));
+const RptWupGerencialPage = lazy(() => import("../../features/mantenimiento/sistemas/rptwupgerencial"));
+const RptBoletaPage = lazy(() => import("../../features/mantenimiento/sistemas/rptboleta"));
+const IndicadoresGerencialesPage = lazy(() => import("../../features/inicio/indicadoresgerenciales"));
+const PanelPrincipalPage = lazy(() => import("../../features/inicio/panelprincipal"));
+const AlertasPage = lazy(() => import("../../features/inicio/alertas"));
+const EnvioMensajesPage = lazy(() => import("../../features/inicio/enviomensajes"));
+const PlantaPrincipalPage = lazy(() => import("../../features/planta/principal"));
+const EppsPage = lazy(() => import("../../features/planta/epps"));
+const OperativoPage = lazy(() => import("../../pages/reporte/operativo"));
+const FinancieroPage = lazy(() => import("../../pages/reporte/financiero"));
+const GerencialPage = lazy(() => import("../../pages/reporte/gerencial"));
+const DashboardCjPage = lazy(() => import("../../features/reportes/gerencial/dashboardcj"));
+const RptAsistenciaPage = lazy(() => import("../../features/reportes/rptasistencia"));
+const RptAsistenciaEmpleadoPage = lazy(() => import("../../features/reportes/rptasistenciaempleado"));
+const ClaudeiaPage = lazy(() => import("../../features/reportes/administrativo/claudeia"));
 const IaChatPage = lazy(() => import("../../features/reportes/administrativo/iachat"));
 
 export default function AppRouter() {
   return (
     <BrowserRouter>
       <SessionManager />
-      <Routes>
-        <Route path="/" element={<LoginPage />} />
+      <Suspense fallback={<div style={{ padding: 24 }}>Cargando modulo...</div>}>
+        <Routes>
+          <Route path="/" element={<LoginPage />} />
 
-        <Route element={<PrivateRoute />}>
-          <Route element={<MainLayout />}>
+          <Route element={<PrivateRoute />}>
+            <Route element={<MainLayout />}>
             <Route path="/admin/DashboardPage" element={<DashboardPage />} />
 
             <Route path="/administracion/asistencia" element={<AsistenciaPage />} />
@@ -161,22 +157,8 @@ export default function AppRouter() {
             <Route path="/reporte/operativo" element={<OperativoPage />} />
             <Route path="/reporte/administrativo/claudeia" element={<ClaudeiaPage />} />
             <Route path="/reportes/administrativo/claudeia" element={<ClaudeiaPage />} />
-            <Route
-              path="/reporte/administrativo/iachat"
-              element={
-                <Suspense fallback={<div style={{ padding: 24 }}>Cargando IA Chat...</div>}>
-                  <IaChatPage />
-                </Suspense>
-              }
-            />
-            <Route
-              path="/reportes/administrativo/iachat"
-              element={
-                <Suspense fallback={<div style={{ padding: 24 }}>Cargando IA Chat...</div>}>
-                  <IaChatPage />
-                </Suspense>
-              }
-            />
+            <Route path="/reporte/administrativo/iachat" element={<IaChatPage />} />
+            <Route path="/reportes/administrativo/iachat" element={<IaChatPage />} />
             <Route path="/reporte/financiero" element={<FinancieroPage />} />
             <Route path="/reporte/gerencial" element={<GerencialPage />} />
             <Route path="/reportes/gerencial/dashboardcj" element={<DashboardCjPage />} />
@@ -253,9 +235,10 @@ export default function AppRouter() {
             <Route path="/seguridad/:autoPage" element={<AutoSecurityRoute />} />
 
             <Route path="*" element={<DynamicMenuRoutePage />} />
+            </Route>
           </Route>
-        </Route>
-      </Routes>
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

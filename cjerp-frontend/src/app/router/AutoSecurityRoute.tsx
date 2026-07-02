@@ -1,9 +1,9 @@
 import { Suspense, lazy, useMemo } from "react";
 import { useParams } from "react-router-dom";
-import DynamicMenuRoutePage from "../../pages/DynamicMenuRoutePage";
 
 type ModuleLoader = () => Promise<unknown>;
 
+const DynamicMenuRoutePage = lazy(() => import("../../pages/DynamicMenuRoutePage"));
 const securityPageModules = import.meta.glob("../../pages/seguridad/*.tsx") as Record<
   string,
   ModuleLoader
@@ -27,11 +27,15 @@ export default function AutoSecurityRoute() {
   }, [loader]);
 
   if (!LazyPage) {
-    return <DynamicMenuRoutePage />;
+    return (
+      <Suspense fallback={<div>Cargando modulo...</div>}>
+        <DynamicMenuRoutePage />
+      </Suspense>
+    );
   }
 
   return (
-    <Suspense fallback={<div>Cargando módulo...</div>}>
+    <Suspense fallback={<div>Cargando modulo...</div>}>
       <LazyPage />
     </Suspense>
   );

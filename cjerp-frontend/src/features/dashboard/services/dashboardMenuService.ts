@@ -90,7 +90,7 @@ function mapNodeToTile(node: MenuNode): DashboardTile | null {
 }
 
 export async function loadDashboardMenus(idUsuario: string): Promise<DashboardGroup[]> {
-  const menus = await menuService.obtenerMenuDinamicoPorUsuario(idUsuario, true);
+  const menus = await menuService.obtenerMenuDinamicoPorUsuario(idUsuario);
 
   //console.log("[dashboardMenuService] menus planos:", menus);
 
