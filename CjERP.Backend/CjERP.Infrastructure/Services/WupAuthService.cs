@@ -60,6 +60,12 @@ public sealed class WupAuthService : IWupAuthService
 
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
+            _logger.LogInformation(
+                "[WUP] Respuesta login. Url={Url}, Codigo={StatusCode}, Body={Body}",
+                loginUri,
+                (int)response.StatusCode,
+                body);
+
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("[WUP] Login fallo. Url={Url}, Codigo={StatusCode}, Body={Body}", loginUri, (int)response.StatusCode, body);
@@ -75,6 +81,11 @@ public sealed class WupAuthService : IWupAuthService
 
             _cachedToken = token;
             _tokenExpiresAt = DateTimeOffset.UtcNow.AddMinutes(20);
+            _logger.LogInformation(
+                "[WUP] Token obtenido correctamente. Url={Url}, TokenLength={TokenLength}, ExpiraAproxUtc={ExpiraAproxUtc}",
+                loginUri,
+                token.Length,
+                _tokenExpiresAt);
             return _cachedToken;
         }
         finally

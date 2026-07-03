@@ -100,10 +100,32 @@ public class AsistenciaReporteController : ControllerBase
             return BadRequest(new { success = false, message = "No existen registros filtrados para generar la llamada de atencion." });
         }
 
+        var empleadoId = request.Items
+            .Select(item => item.IdEmpleado)
+            .FirstOrDefault(id => id.HasValue && id.Value > 0);
+
+        if (empleadoId is not int idEmpleadoValido)
+        {
+            return BadRequest(new { success = false, message = "No se pudo identificar el empleado para validar la llamada de atencion." });
+        }
+
+        if (await _asistenciaReporteService.ExistePdfLlamadaAtencionEnviadoHoyAsync(idEmpleadoValido, cancellationToken))
+        {
+            return Conflict(new { success = false, message = "La llamada de atencion ya fue generada o enviada hoy para este empleado." });
+        }
+
         try
         {
-            var pdfBytes = await _asistenciaReporteService.GenerarPdfEmpleadoLlamadaAtencionAsync(request, cancellationToken);
-            var fileName = $"llamada_atencion_asistencia_{request.FechaInicio.Replace("/", string.Empty)}_{request.FechaFin.Replace("/", string.Empty)}.pdf";
+            var usuarioEjecucion =
+                User.FindFirstValue("Usuario")
+                ?? User.FindFirstValue("usuario")
+                ?? User.FindFirstValue(ClaimTypes.Name)
+                ?? User.FindFirstValue("unique_name")
+                ?? User.Identity?.Name
+                ?? "SISTEMA";
+
+            var pdfBytes = await _asistenciaReporteService.GenerarPdfEmpleadoLlamadaAtencionAsync(request, usuarioEjecucion, cancellationToken);
+            var fileName = $"notificacion_asistencia_{request.FechaInicio.Replace("/", string.Empty)}_{request.FechaFin.Replace("/", string.Empty)}.pdf";
             return File(pdfBytes, "application/pdf", fileName);
         }
         catch (Exception ex)
@@ -116,6 +138,137 @@ public class AsistenciaReporteController : ControllerBase
                 detail = ex.ToString()
             });
         }
+    }
+
+    [HttpPost("pdf-empleado-llamada-atencion/enviar")]
+    public async Task<IActionResult> EnviarPdfEmpleadoLlamadaAtencion(
+        [FromBody] AsistenciaReportePdfRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.FechaInicio) || string.IsNullOrWhiteSpace(request.FechaFin))
+        {
+            return BadRequest(new { success = false, message = "FechaInicio y FechaFin son obligatorias." });
+        }
+
+        if (request.Items is null || request.Items.Count == 0)
+        {
+            return BadRequest(new { success = false, message = "No existen registros filtrados para enviar la llamada de atencion." });
+        }
+
+        var empleadoId = request.Items
+            .Select(item => item.IdEmpleado)
+            .FirstOrDefault(id => id.HasValue && id.Value > 0);
+
+        if (empleadoId is not int idEmpleadoValido)
+        {
+            return BadRequest(new { success = false, message = "No se pudo identificar el empleado para enviar la llamada de atencion." });
+        }
+
+        if (await _asistenciaReporteService.ExistePdfLlamadaAtencionEnviadoHoyAsync(idEmpleadoValido, cancellationToken))
+        {
+            return Conflict(new { success = false, message = "La llamada de atencion ya fue generada o enviada hoy para este empleado." });
+        }
+
+        try
+        {
+            var usuarioEjecucion =
+                User.FindFirstValue("Usuario")
+                ?? User.FindFirstValue("usuario")
+                ?? User.FindFirstValue(ClaimTypes.Name)
+                ?? User.FindFirstValue("unique_name")
+                ?? User.Identity?.Name
+                ?? "SISTEMA";
+
+            var result = await _asistenciaReporteService.EnviarPdfEmpleadoLlamadaAtencionAsync(request, usuarioEjecucion, cancellationToken);
+            var httpStatus = result.Success
+                ? StatusCodes.Status200OK
+                : (result.StatusCode >= StatusCodes.Status400BadRequest ? result.StatusCode : StatusCodes.Status502BadGateway);
+
+            return StatusCode(httpStatus, new
+            {
+                success = result.Success,
+                message = result.Success
+                    ? "PDF enviado correctamente por WUP."
+                    : "No se pudo enviar el PDF por WUP.",
+                data = result
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error enviando el PDF de llamada de atencion de asistencia.");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                success = false,
+                message = "No se pudo enviar el PDF de llamada de atencion.",
+                detail = ex.ToString()
+            });
+        }
+    }
+
+    [HttpPost("pdf-empleado-llamada-atencion/preview")]
+    public async Task<IActionResult> PrevisualizarPdfEmpleadoLlamadaAtencion(
+        [FromBody] AsistenciaReportePdfRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.FechaInicio) || string.IsNullOrWhiteSpace(request.FechaFin))
+        {
+            return BadRequest(new { success = false, message = "FechaInicio y FechaFin son obligatorias." });
+        }
+
+        if (request.Items is null || request.Items.Count == 0)
+        {
+            return BadRequest(new { success = false, message = "No existen registros filtrados para generar la llamada de atencion." });
+        }
+
+        try
+        {
+            var pdfBytes = await _asistenciaReporteService.GenerarPdfEmpleadoLlamadaAtencionVistaPreviaAsync(request, cancellationToken);
+            var fileName = $"notificacion_asistencia_{request.FechaInicio.Replace("/", string.Empty)}_{request.FechaFin.Replace("/", string.Empty)}.pdf";
+            return File(pdfBytes, "application/pdf", fileName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error generando la vista previa del PDF de llamada de atencion de asistencia.");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                success = false,
+                message = "No se pudo generar la vista previa de la llamada de atencion.",
+                detail = ex.ToString()
+            });
+        }
+    }
+
+    [HttpGet("llamada-atencion/enviada-hoy/{idEmpleado:int}")]
+    public async Task<IActionResult> ValidarLlamadaAtencionEnviadaHoy(
+        [FromRoute] int idEmpleado,
+        CancellationToken cancellationToken)
+    {
+        if (idEmpleado <= 0)
+        {
+            return BadRequest(new { success = false, message = "El IdEmpleado no es valido." });
+        }
+
+        var enviadaHoy = await _asistenciaReporteService.ExistePdfLlamadaAtencionEnviadoHoyAsync(idEmpleado, cancellationToken);
+        return Ok(new { success = true, data = new { enviadaHoy } });
+    }
+
+    [HttpPost("llamada-atencion/enviada-hoy")]
+    public async Task<IActionResult> ValidarLlamadaAtencionEnviadaHoyEnLote(
+        [FromBody] AsistenciaLlamadaAtencionEstadoRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var ids = request.IdsEmpleado?
+            .Where(id => id > 0)
+            .Distinct()
+            .ToArray() ?? Array.Empty<int>();
+
+        if (ids.Length == 0)
+        {
+            return Ok(new { success = true, data = new { enviadosHoyIds = Array.Empty<int>() } });
+        }
+
+        var enviadosHoyIds = await _asistenciaReporteService.ObtenerPdfLlamadaAtencionEnviadosHoyAsync(ids, cancellationToken);
+        return Ok(new { success = true, data = new { enviadosHoyIds } });
     }
 
     [HttpPost("pdf-gerencial")]

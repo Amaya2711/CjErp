@@ -2,11 +2,15 @@ import axios, { type AxiosInstance, type AxiosRequestConfig } from "axios";
 import { getAuthUser, clearAuthUser } from "../utils/authStorage";
 import { isJwtExpired } from "../utils/jwt";
 
+type AppAxiosRequestConfig = AxiosRequestConfig & {
+  skipAuthRedirect?: boolean;
+};
+
 type HttpClient = {
-  get<T>(url: string, config?: AxiosRequestConfig): Promise<T>;
-  post<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T>;
-  put<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T>;
-  delete<T>(url: string, config?: AxiosRequestConfig): Promise<T>;
+  get<T>(url: string, config?: AppAxiosRequestConfig): Promise<T>;
+  post<T>(url: string, data?: unknown, config?: AppAxiosRequestConfig): Promise<T>;
+  put<T>(url: string, data?: unknown, config?: AppAxiosRequestConfig): Promise<T>;
+  delete<T>(url: string, config?: AppAxiosRequestConfig): Promise<T>;
 };
 
 const configuredApiBaseUrl =
@@ -27,6 +31,7 @@ const axiosClient: AxiosInstance = axios.create({
 
 axiosClient.interceptors.request.use((config) => {
   const requestUrl = config.url?.toLowerCase() ?? "";
+  const skipAuthRedirect = Boolean((config as AppAxiosRequestConfig | undefined)?.skipAuthRedirect);
 
   if (requestUrl.includes("/auth/login")) {
     return config;
@@ -35,7 +40,7 @@ axiosClient.interceptors.request.use((config) => {
   const authUser = getAuthUser();
 
   if (authUser?.token) {
-    if (isJwtExpired(authUser.token)) {
+    if (!skipAuthRedirect && isJwtExpired(authUser.token)) {
       clearAuthUser();
       window.location.replace("/");
       return Promise.reject(new axios.CanceledError("JWT expirado."));
@@ -78,6 +83,7 @@ axiosClient.interceptors.response.use(
     return data;
   },
   (error) => {
+    const skipAuthRedirect = Boolean((error?.config as AppAxiosRequestConfig | undefined)?.skipAuthRedirect);
     const responseData = error?.response?.data;
     if (responseData) {
       if (typeof responseData === "string") {
@@ -105,7 +111,7 @@ axiosClient.interceptors.response.use(
       }
     }
 
-    if (error?.response?.status === 401) {
+    if (error?.response?.status === 401 && !skipAuthRedirect) {
       clearAuthUser();
       window.location.replace("/");
     }
@@ -115,16 +121,16 @@ axiosClient.interceptors.response.use(
 );
 
 const httpClient: HttpClient = {
-  get<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
+  get<T>(url: string, config?: AppAxiosRequestConfig): Promise<T> {
     return axiosClient.get(url, config) as unknown as Promise<T>;
   },
-  post<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
+  post<T>(url: string, data?: unknown, config?: AppAxiosRequestConfig): Promise<T> {
     return axiosClient.post(url, data, config) as unknown as Promise<T>;
   },
-  put<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
+  put<T>(url: string, data?: unknown, config?: AppAxiosRequestConfig): Promise<T> {
     return axiosClient.put(url, data, config) as unknown as Promise<T>;
   },
-  delete<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
+  delete<T>(url: string, config?: AppAxiosRequestConfig): Promise<T> {
     return axiosClient.delete(url, config) as unknown as Promise<T>;
   },
 };

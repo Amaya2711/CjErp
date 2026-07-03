@@ -1,5 +1,6 @@
 import React, { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { Eye } from "lucide-react";
 import {
   matchesCrudToolbarSearch,
   type CrudToolbarSearchField,
@@ -11,6 +12,10 @@ import {
   exportarAsistenciaEmpleadoPdf,
   exportarAsistenciaEmpleadoPdfLlamadaAtencion,
   exportarAsistenciaEmpleadoPdfValidacion,
+  enviarAsistenciaEmpleadoPdfLlamadaAtencion,
+  verificarLlamadaAtencionEnviadaHoy,
+  verificarLlamadaAtencionEnviadaHoyEnLote,
+  previsualizarAsistenciaEmpleadoPdfLlamadaAtencion,
 } from "../../api/asistenciaService";
 import { useConstantesPorCampo } from "../../hooks/useConstantesPorCampo";
 import type { AsistenciaReporteItem, AsistenciaReportePdfItem } from "../../models/asistencia";
@@ -87,7 +92,9 @@ type EmployeeDateCell = {
 };
 
 type EmployeeDateRow = {
+  idEmpleado: number | null;
   employee: string;
+  telefono: string;
   responsable: string;
   empresa: string;
   cliente: string;
@@ -106,6 +113,10 @@ type EmployeeDateRow = {
 type EmployeeGridFilters = {
   employee: string;
   responsable: string;
+  empresa: string;
+  cliente: string;
+  area: string;
+  ubicacion: string;
   estadoValidacionHoras: string;
   diferenciaOperator: "" | "lt" | "gt" | "eq";
   diferenciaValue: string;
@@ -151,7 +162,7 @@ type RptAsistenciaReturnState = {
   returnFromAprobarCampo?: boolean;
   fechaInicio?: string;
   fechaFin?: string;
-  activeTab?: "cuadros" | "gerencial" | "detalle" | "empleado";
+  activeTab?: "cuadros" | "gerencial" | "detalle" | "empleado" | "tiempos";
   selectedEstadoMarcacion?: string[];
   selectedAreas?: string[];
   selectedEstados?: string[];
@@ -623,6 +634,7 @@ function getExportRows(rows: AsistenciaReporteItem[]) {
   return rows.map((item) => ({
     Fecha: formatDateLabel(item.fecha),
     NombreEmpleado: item.nombreEmpleado,
+    Telefono: item.telefono,
     TipoAprobacion: item.tipoAprobacion,
     Responsable: item.responsable,
     Estado: item.estado,
@@ -684,13 +696,15 @@ export default function RptAsistenciaPage() {
   const today = new Date();
   const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
-  const [fechaInicio, setFechaInicio] = useState(toInputDate(startOfMonth));
-  const [fechaFin, setFechaFin] = useState(toInputDate(today));
-  const [rows, setRows] = useState<AsistenciaReporteItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [busqueda, setBusqueda] = useState("");
-  const [activeTab, setActiveTab] = useState<"cuadros" | "gerencial" | "detalle" | "empleado">("gerencial");
+const [fechaInicio, setFechaInicio] = useState(toInputDate(startOfMonth));
+const [fechaFin, setFechaFin] = useState(toInputDate(today));
+const [rows, setRows] = useState<AsistenciaReporteItem[]>([]);
+const [loading, setLoading] = useState(false);
+const [error, setError] = useState("");
+const [success, setSuccess] = useState("");
+const [busqueda, setBusqueda] = useState("");
+const [activeTab, setActiveTab] = useState<"cuadros" | "gerencial" | "detalle" | "empleado" | "tiempos">("gerencial");
+const [tiemposEstado, setTiemposEstado] = useState("TARDANZA");
   const [detailDrilldown, setDetailDrilldown] = useState<DetailDrilldown>({
     fecha: null,
     estadoMarcacion: null,
@@ -742,6 +756,10 @@ export default function RptAsistenciaPage() {
   const [employeeGridFilters, setEmployeeGridFilters] = useState<EmployeeGridFilters>({
     employee: "",
     responsable: "",
+    empresa: "",
+    cliente: "",
+    area: "",
+    ubicacion: "",
     estadoValidacionHoras: ALL_OPTION,
     diferenciaOperator: "",
     diferenciaValue: "",
@@ -765,6 +783,7 @@ export default function RptAsistenciaPage() {
   const searchFields = useMemo<CrudToolbarSearchField<AsistenciaReporteItem>[]>(
     () => [
       { key: "nombreEmpleado", label: "Nombre empleado", getValue: (item) => item.nombreEmpleado },
+      { key: "telefono", label: "Telefono", getValue: (item) => item.telefono },
       { key: "tipoAprobacion", label: "Tipo aprobacion", getValue: (item) => item.tipoAprobacion },
       { key: "responsable", label: "Responsable", getValue: (item) => item.responsable },
       { key: "estado", label: "Estado", getValue: (item) => item.estado },
@@ -875,6 +894,22 @@ export default function RptAsistenciaPage() {
     [rows]
   );
 
+  const tiemposEstadoOptions = useMemo(() => {
+    const estadosBase = buildValueOptions(rows.map((item) => item.estado || item.estadoMarcacionTexto || ""));
+    const estadosOrdenados = Array.from(
+      new Set([
+        "TARDANZA",
+        ...estadosBase.filter((estado) => estado !== ALL_OPTION),
+      ])
+    ).sort((left, right) => {
+      if (normalizeText(left) === "TARDANZA") return -1;
+      if (normalizeText(right) === "TARDANZA") return 1;
+      return left.localeCompare(right, "es");
+    });
+
+    return [ALL_OPTION, ...estadosOrdenados];
+  }, [rows]);
+
   const filteredRows = useMemo(() => {
     const base = rows
       .filter((item) => matchesCrudToolbarSearch(item, deferredSearch, searchFields))
@@ -896,6 +931,103 @@ export default function RptAsistenciaPage() {
       return sortState.direction === "asc" ? compared : -compared;
     });
   }, [deferredSearch, fechaFin, fechaInicio, frontendFilters, rows, searchFields, selectedAreas, selectedEstados, selectedEstadoMarcacion, sortState]);
+
+  const tiemposFilteredRows = useMemo(() => {
+    const selectedState = normalizeText(tiemposEstado);
+
+    const base = rows
+      .filter((item) => isWithinSelectedRange(item.fecha, fechaInicio, fechaFin))
+      .filter((item) => (
+        tiemposEstado === ALL_OPTION ||
+        normalizeText(item.estado || item.estadoMarcacionTexto) === selectedState
+      ));
+
+    return [...base].sort((left, right) => {
+      const compared = compareValues(
+        parseDisplayDate(right.fecha)?.getTime() ?? 0,
+        parseDisplayDate(left.fecha)?.getTime() ?? 0
+      );
+      if (compared !== 0) {
+        return compared;
+      }
+
+      return compareValues(left.nombreEmpleado, right.nombreEmpleado);
+    });
+  }, [fechaFin, fechaInicio, rows, tiemposEstado]);
+
+  const tiemposDailySeries = useMemo(() => {
+    const byDate = new Map<string, number>();
+    tiemposFilteredRows.forEach((item) => {
+      const key = formatDateLabel(item.fecha);
+      byDate.set(key, (byDate.get(key) ?? 0) + 1);
+    });
+
+    return getDateRangeLabels(fechaInicio, fechaFin).map((fecha) => ({
+      name: formatShortDateLabel(fecha),
+      value: byDate.get(fecha) ?? 0,
+    }));
+  }, [fechaFin, fechaInicio, tiemposFilteredRows]);
+
+  const tiemposTrendSeries = useMemo(
+    () =>
+      tiemposDailySeries.map((item) => ({
+        fecha: item.name,
+        total: item.value,
+      })),
+    [tiemposDailySeries]
+  );
+
+  const tiemposTotals = useMemo(() => {
+    const totalRegistros = tiemposFilteredRows.length;
+    const empleados = new Set(tiemposFilteredRows.map((item) => item.idEmpleado ?? item.nombreEmpleado).filter(Boolean)).size;
+    const totalHoras = tiemposFilteredRows.reduce((sum, item) => sum + item.totalHoras, 0);
+    const promedioHoras = totalRegistros > 0 ? totalHoras / totalRegistros : 0;
+    const totalRango = rows.filter((item) => isWithinSelectedRange(item.fecha, fechaInicio, fechaFin)).length;
+    const participacion = totalRango > 0 ? (totalRegistros / totalRango) * 100 : 0;
+    const diasConRegistros = tiemposDailySeries.filter((item) => item.value > 0).length;
+
+    return {
+      totalRegistros,
+      empleados,
+      totalHoras,
+      promedioHoras,
+      participacion,
+      diasConRegistros,
+    };
+  }, [fechaFin, fechaInicio, rows, tiemposDailySeries, tiemposFilteredRows]);
+
+  const tiemposKpis: KPI[] = useMemo(
+    () => [
+      { label: `Registros ${tiemposEstado === ALL_OPTION ? "" : tiemposEstado}`, value: String(tiemposTotals.totalRegistros), tone: "blue" },
+      { label: "Empleados distintos", value: String(tiemposTotals.empleados), tone: "green" },
+      { label: "Total horas", value: formatDecimal(tiemposTotals.totalHoras, 2), tone: "amber" },
+      { label: "Promedio horas/registro", value: formatDecimal(tiemposTotals.promedioHoras, 2), tone: "slate" },
+      { label: "% del rango", value: `${formatDecimal(tiemposTotals.participacion, 2)}%`, tone: "red" },
+    ],
+    [tiemposEstado, tiemposTotals]
+  );
+
+  type TiemposDetailColumn = {
+    key: keyof Pick<AsistenciaReporteItem, "fecha" | "nombreEmpleado" | "responsable" | "empresa" | "cliente" | "area" | "ubicacion" | "hora" | "salida" | "estado" | "estadoMarcacionTexto" | "totalHoras">;
+    label: string;
+    width: string;
+    align?: "left" | "center" | "right";
+  };
+
+  const tiemposDetailColumns: TiemposDetailColumn[] = [
+    { key: "fecha", label: "Fecha", width: "110px" },
+    { key: "nombreEmpleado", label: "Empleado", width: "220px" },
+    { key: "responsable", label: "Responsable", width: "200px" },
+    { key: "empresa", label: "Empresa", width: "170px" },
+    { key: "cliente", label: "Cliente", width: "170px" },
+    { key: "area", label: "Area", width: "150px" },
+    { key: "ubicacion", label: "Ubicacion", width: "160px" },
+    { key: "hora", label: "Hora entrada", width: "105px", align: "center" as const },
+    { key: "salida", label: "Salida", width: "105px", align: "center" as const },
+    { key: "estado", label: "Estado", width: "150px" },
+    { key: "estadoMarcacionTexto", label: "Estado marcacion", width: "170px" },
+    { key: "totalHoras", label: "Total horas", width: "110px", align: "right" as const },
+  ] as const;
 
   const detailRows = useMemo(() => {
     const base = filteredRows.filter((item) => (
@@ -1492,6 +1624,7 @@ export default function RptAsistenciaPage() {
 
     const grouped = new Map<string, Map<string, number>>();
     const groupedStates = new Map<string, Map<string, Set<string>>>();
+    const employeeIds = new Map<string, number | null>();
     const employeeLocations = new Map<string, Set<string>>();
     const employeeResponsables = new Map<string, Set<string>>();
     const employeeEmpresas = new Map<string, Set<string>>();
@@ -1502,10 +1635,12 @@ export default function RptAsistenciaPage() {
     const employeePendingApprovalHours = new Map<string, number>();
     const employeeValidationStates = new Map<string, Set<string>>();
     const employeeStateCounts = new Map<string, Map<string, number>>();
+    const employeePhones = new Map<string, Set<string>>();
     const stateLabels = new Map<string, string>();
     employees.forEach((employee) => {
       grouped.set(employee, new Map<string, number>());
       groupedStates.set(employee, new Map<string, Set<string>>());
+      employeeIds.set(employee, null);
       employeeLocations.set(employee, new Set<string>());
       employeeResponsables.set(employee, new Set<string>());
       employeeEmpresas.set(employee, new Set<string>());
@@ -1516,11 +1651,17 @@ export default function RptAsistenciaPage() {
       employeePendingApprovalHours.set(employee, 0);
       employeeValidationStates.set(employee, new Set<string>());
       employeeStateCounts.set(employee, new Map<string, number>());
+      employeePhones.set(employee, new Set<string>());
     });
 
     filteredRows.forEach((item) => {
       const employee = item.nombreEmpleado || "Sin empleado";
       const fecha = formatDateLabel(item.fecha);
+      if (!employeeIds.has(employee)) {
+        employeeIds.set(employee, item.idEmpleado ?? null);
+      } else if ((employeeIds.get(employee) ?? 0) <= 0 && item.idEmpleado) {
+        employeeIds.set(employee, item.idEmpleado);
+      }
       if (!grouped.has(employee)) {
         grouped.set(employee, new Map<string, number>());
       }
@@ -1578,6 +1719,12 @@ export default function RptAsistenciaPage() {
       if (item.area) {
         employeeAreas.get(employee)!.add(item.area);
       }
+      if (!employeePhones.has(employee)) {
+        employeePhones.set(employee, new Set<string>());
+      }
+      if (item.telefono) {
+        employeePhones.get(employee)!.add(item.telefono);
+      }
       employeeApprovedHours.set(employee, Math.max(employeeApprovedHours.get(employee) ?? 0, item.totalHorasEmpleado));
       employeeLaborHours.set(employee, Math.max(employeeLaborHours.get(employee) ?? 0, item.totalHorasLaborales));
       employeePendingApprovalHours.set(employee, Math.max(employeePendingApprovalHours.get(employee) ?? 0, item.totalHorasFaltaAprobar));
@@ -1597,6 +1744,7 @@ export default function RptAsistenciaPage() {
       const empresas = Array.from(employeeEmpresas.get(employee) ?? []).sort((a, b) => a.localeCompare(b, "es"));
       const clientes = Array.from(employeeClientes.get(employee) ?? []).sort((a, b) => a.localeCompare(b, "es"));
       const areas = Array.from(employeeAreas.get(employee) ?? []).sort((a, b) => a.localeCompare(b, "es"));
+      const telefonos = Array.from(employeePhones.get(employee) ?? []).sort((a, b) => a.localeCompare(b, "es"));
       const validationStates = Array.from(employeeValidationStates.get(employee) ?? []).sort((a, b) => a.localeCompare(b, "es"));
       const stateCountMap = employeeStateCounts.get(employee) ?? new Map<string, number>();
       const fechasDetalle = fechas.map((fecha) => ({
@@ -1620,7 +1768,9 @@ export default function RptAsistenciaPage() {
       const totalHorasLaborales = employeeLaborHours.get(employee) ?? 0;
 
       return {
+        idEmpleado: employeeIds.get(employee) ?? null,
         employee,
+        telefono: telefonos.join(", "),
         responsable: responsables.join(", "),
         empresa: empresas.join(", "),
         cliente: clientes.join(", "),
@@ -1652,6 +1802,10 @@ export default function RptAsistenciaPage() {
   const filteredEmployeeGridRows = useMemo(() => {
     const employeeQuery = employeeGridFilters.employee;
     const responsableQuery = employeeGridFilters.responsable;
+    const empresaQuery = employeeGridFilters.empresa;
+    const clienteQuery = employeeGridFilters.cliente;
+    const areaQuery = employeeGridFilters.area;
+    const ubicacionQuery = employeeGridFilters.ubicacion;
     const differenceFilterValue = Number(employeeGridFilters.diferenciaValue);
 
     return [...chartEmpleadoPorDia.rows.filter((item) => {
@@ -1660,6 +1814,10 @@ export default function RptAsistenciaPage() {
         matchesKeywordFilter(item.ubicacion, employeeQuery);
       const matchesResponsable = !responsableQuery.trim() ||
         matchesKeywordFilter(item.responsable, responsableQuery);
+      const matchesEmpresa = !empresaQuery.trim() || matchesKeywordFilter(item.empresa, empresaQuery);
+      const matchesCliente = !clienteQuery.trim() || matchesKeywordFilter(item.cliente, clienteQuery);
+      const matchesArea = !areaQuery.trim() || matchesKeywordFilter(item.area, areaQuery);
+      const matchesUbicacion = !ubicacionQuery.trim() || matchesKeywordFilter(item.ubicacion, ubicacionQuery);
       const matchesValidation =
         employeeGridFilters.estadoValidacionHoras === ALL_OPTION ||
         item.estadoValidacionHoras === employeeGridFilters.estadoValidacionHoras;
@@ -1674,7 +1832,7 @@ export default function RptAsistenciaPage() {
               ? item.diferenciaHoras > differenceFilterValue
               : item.diferenciaHoras === differenceFilterValue;
 
-      return matchesEmployee && matchesResponsable && matchesValidation && matchesDifference;
+      return matchesEmployee && matchesResponsable && matchesEmpresa && matchesCliente && matchesArea && matchesUbicacion && matchesValidation && matchesDifference;
     })].sort((left, right) => {
       const compared = employeeGridSort.key.startsWith("state:")
         ? (left.stateCounts[employeeGridSort.key.slice(6)] ?? 0) - (right.stateCounts[employeeGridSort.key.slice(6)] ?? 0)
@@ -1711,9 +1869,14 @@ export default function RptAsistenciaPage() {
       (selectedAreas.length > 0 ? 1 : 0) +
       (selectedEstados.length > 0 ? 1 : 0) +
       (selectedEstadoMarcacion.length > 0 ? 1 : 0) +
+      (tiemposEstado !== ALL_OPTION ? 1 : 0) +
       (employeeGridFilters.responsable.trim() ? 1 : 0) +
+      (employeeGridFilters.empresa.trim() ? 1 : 0) +
+      (employeeGridFilters.cliente.trim() ? 1 : 0) +
+      (employeeGridFilters.area.trim() ? 1 : 0) +
+      (employeeGridFilters.ubicacion.trim() ? 1 : 0) +
       ((employeeGridFilters.diferenciaOperator && employeeGridFilters.diferenciaValue.trim()) ? 1 : 0),
-    [frontendFilters, selectedAreas, selectedEstados, selectedEstadoMarcacion, employeeGridFilters.responsable, employeeGridFilters.diferenciaOperator, employeeGridFilters.diferenciaValue]
+    [frontendFilters, selectedAreas, selectedEstados, selectedEstadoMarcacion, tiemposEstado, employeeGridFilters.responsable, employeeGridFilters.empresa, employeeGridFilters.cliente, employeeGridFilters.area, employeeGridFilters.ubicacion, employeeGridFilters.diferenciaOperator, employeeGridFilters.diferenciaValue]
   );
 
   const primaryFilterCount = 5;
@@ -1731,8 +1894,11 @@ export default function RptAsistenciaPage() {
     if (activeTab === "empleado") {
       return filteredEmployeeGridRows.length === 0;
     }
+    if (activeTab === "tiempos") {
+      return tiemposFilteredRows.length === 0;
+    }
     return true;
-  }, [activeTab, chartEstadoPorDia.rows.length, chartEstadoPorDia.states.length, detailRows.length, filteredEmployeeGridRows.length]);
+  }, [activeTab, chartEstadoPorDia.rows.length, chartEstadoPorDia.states.length, detailRows.length, filteredEmployeeGridRows.length, tiemposFilteredRows.length]);
 
   const isPdfExportDisabled = useMemo(() => {
     if (activeTab === "gerencial") {
@@ -1747,8 +1913,11 @@ export default function RptAsistenciaPage() {
     if (activeTab === "empleado") {
       return filteredEmployeeGridRows.length === 0;
     }
+    if (activeTab === "tiempos") {
+      return tiemposFilteredRows.length === 0;
+    }
     return true;
-  }, [activeTab, chartEstadoPorDia.rows.length, chartEstadoPorDia.states.length, detailRows.length, filteredEmployeeGridRows.length]);
+  }, [activeTab, chartEstadoPorDia.rows.length, chartEstadoPorDia.states.length, detailRows.length, filteredEmployeeGridRows.length, tiemposFilteredRows.length]);
 
   const isValidationPdfExportDisabled = isPdfExportDisabled || activeTab !== "empleado";
 
@@ -1782,13 +1951,18 @@ export default function RptAsistenciaPage() {
     });
     setBusqueda("");
     setShowAdvancedFilters(false);
-    setEmployeeGridFilters({
-      employee: "",
-      responsable: "",
-      estadoValidacionHoras: ALL_OPTION,
-      diferenciaOperator: "",
-      diferenciaValue: "",
-    });
+      setEmployeeGridFilters({
+        employee: "",
+        responsable: "",
+        empresa: "",
+        cliente: "",
+        area: "",
+        ubicacion: "",
+        estadoValidacionHoras: ALL_OPTION,
+        diferenciaOperator: "",
+        diferenciaValue: "",
+      });
+    setTiemposEstado("TARDANZA");
     setEmployeeGridSort({ key: "total", direction: "desc" });
     setDetailDrilldown({
       fecha: null,
@@ -1949,6 +2123,18 @@ export default function RptAsistenciaPage() {
       });
       const employeeDetailWorksheet = XLSX.utils.aoa_to_sheet([employeeDetailHeaders, ...employeeDetailData]);
       XLSX.utils.book_append_sheet(workbook, employeeDetailWorksheet, "x empleado");
+    } else if (activeTab === "tiempos") {
+      const headers = tiemposDetailColumns.map((col) => col.label);
+      const data = tiemposFilteredRows.map((item) =>
+        tiemposDetailColumns.map((col) => {
+          const value = item[col.key];
+          if (col.key === "fecha") return formatDateLabel(String(value));
+          if (col.key === "totalHoras") return formatDecimal(Number(value), 2);
+          return value ?? "";
+        })
+      );
+      const worksheet = XLSX.utils.aoa_to_sheet([headers, ...data]);
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Tiempos");
     } else if (activeTab === "empleado") {
       // Dynamic headers: static + all fechas
       const staticHeaders = [
@@ -2117,8 +2303,7 @@ export default function RptAsistenciaPage() {
     toggleGerencialTopResponsableFilter(value, "empleado");
   };
 
-  const getValidationPdfErrorMessage = async (err: unknown) => {
-    const fallback = "No se pudo generar el PDF de prueba.";
+  const getValidationPdfErrorMessage = async (err: unknown, fallback = "No se pudo generar el PDF de prueba.") => {
     const responseData = (err as { response?: { data?: unknown } })?.response?.data;
 
     if (responseData instanceof Blob) {
@@ -2151,6 +2336,26 @@ export default function RptAsistenciaPage() {
     URL.revokeObjectURL(url);
   };
 
+  const openBlobPreview = (blob: Blob, title: string) => {
+    const url = URL.createObjectURL(blob);
+    const previewWindow = window.open("", "_blank");
+
+    if (!previewWindow) {
+      URL.revokeObjectURL(url);
+      throw new Error("No se pudo abrir la vista previa del PDF. Permite ventanas emergentes e intenta nuevamente.");
+    }
+
+    previewWindow.document.title = title;
+    previewWindow.document.body.innerHTML = `
+      <div style="font-family: Arial, sans-serif; padding: 16px; color: #334155;">
+        Abriendo vista previa del documento...
+      </div>
+    `;
+    previewWindow.location.href = url;
+    previewWindow.focus();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  };
+
   const buildEmpleadoPdfItems = (employeeName?: string): AsistenciaReportePdfItem[] => {
     const employeeSummaryByEmployee = new Map(
       filteredEmployeeGridRows.map((row) => [row.employee, row] as const)
@@ -2166,6 +2371,7 @@ export default function RptAsistenciaPage() {
           fecha: formatDateLabel(item.fecha),
           hora: item.hora ?? "",
           nombreEmpleado: item.nombreEmpleado,
+          telefono: item.telefono || summary?.telefono || "",
           responsable: item.responsable ?? summary?.responsable ?? "",
           empresa: item.empresa || summary?.empresa || "",
           cliente: item.cliente || summary?.cliente || "",
@@ -2194,8 +2400,24 @@ export default function RptAsistenciaPage() {
       return;
     }
 
+    if (!employeeRow.idEmpleado || employeeRow.idEmpleado <= 0) {
+      setError("No se pudo identificar el Id del empleado para validar la llamada de atencion.");
+      return;
+    }
+
     if (normalizeText(employeeRow.estadoValidacionHoras) !== "REVISAR") {
       setError("La llamada de atencion solo se puede generar cuando el estado de validacion es REVISAR.");
+      return;
+    }
+
+    try {
+      const envioHoy = await verificarLlamadaAtencionEnviadaHoy(employeeRow.idEmpleado);
+      if (envioHoy?.enviadaHoy) {
+        setError("La llamada de atencion ya fue generada o enviada hoy para este empleado.");
+        return;
+      }
+    } catch (err) {
+      setError(await getValidationPdfErrorMessage(err));
       return;
     }
 
@@ -2216,7 +2438,119 @@ export default function RptAsistenciaPage() {
 
       downloadBlobAsFile(
         pdfBlob,
-        `llamada_atencion_asistencia_${employeeName.replace(/\s+/g, "_").toLowerCase()}_${toApiDate(fechaInicio).replaceAll("/", "")}_${toApiDate(fechaFin).replaceAll("/", "")}.pdf`
+        `notificacion_asistencia_${employeeName.replace(/\s+/g, "_").toLowerCase()}_${toApiDate(fechaInicio).replaceAll("/", "")}_${toApiDate(fechaFin).replaceAll("/", "")}.pdf`
+      );
+    } catch (err) {
+      setError(await getValidationPdfErrorMessage(err));
+    }
+  };
+
+  const sendPdfLlamadaAtencion = async (employeeRow: EmployeeDateRow) => {
+    const employeeName = employeeRow.employee.trim();
+    if (!employeeName) {
+      setSuccess("");
+      setError("No se pudo identificar el empleado para enviar la llamada de atencion.");
+      return;
+    }
+
+    if (!employeeRow.idEmpleado || employeeRow.idEmpleado <= 0) {
+      setSuccess("");
+      setError("No se pudo identificar el Id del empleado para enviar la llamada de atencion.");
+      return;
+    }
+
+    if (normalizeText(employeeRow.estadoValidacionHoras) !== "REVISAR") {
+      setSuccess("");
+      setError("La llamada de atencion solo se puede enviar cuando el estado de validacion es REVISAR.");
+      return;
+    }
+
+    try {
+      const envioHoy = await verificarLlamadaAtencionEnviadaHoy(employeeRow.idEmpleado);
+      if (envioHoy?.enviadaHoy) {
+        setSuccess("");
+        setError("La llamada de atencion ya fue generada o enviada hoy para este empleado.");
+        return;
+      }
+    } catch (err) {
+      setSuccess("");
+      setError(await getValidationPdfErrorMessage(err));
+      return;
+    }
+
+    const pdfItems = buildEmpleadoPdfItems(employeeName);
+    if (pdfItems.length === 0) {
+      setSuccess("");
+      setError("No se encontraron registros del empleado seleccionado para enviar la llamada de atencion.");
+      return;
+    }
+
+    setError("");
+    setSuccess("");
+    try {
+      const payload = {
+        fechaInicio: toApiDate(fechaInicio),
+        fechaFin: toApiDate(fechaFin),
+        destinatario: employeeName || "Llamada de atencion",
+        items: pdfItems,
+      };
+
+      console.info("[RptAsistencia] Payload envio llamada de atencion", payload);
+
+      const response = await enviarAsistenciaEmpleadoPdfLlamadaAtencion(payload);
+      console.info("[RptAsistencia] Respuesta envio llamada de atencion", response);
+      if (response?.debugPayloadJson) {
+        try {
+          console.info(
+            "[RptAsistencia] Payload WUP post-token",
+            JSON.parse(response.debugPayloadJson as string)
+          );
+        } catch {
+          console.info("[RptAsistencia] Payload WUP post-token", response.debugPayloadJson);
+        }
+      }
+      setSuccess(`El PDF de llamada de atencion fue enviado correctamente por WUP a ${employeeName}.`);
+    } catch (err) {
+      setSuccess("");
+      setError(await getValidationPdfErrorMessage(err, "No se pudo enviar el PDF de llamada de atencion."));
+    }
+  };
+
+  const previewPdfLlamadaAtencion = async (employeeRow: EmployeeDateRow) => {
+    const employeeName = employeeRow.employee.trim();
+    if (!employeeName) {
+      setError("No se pudo identificar el empleado para previsualizar la llamada de atencion.");
+      return;
+    }
+
+    if (!employeeRow.idEmpleado || employeeRow.idEmpleado <= 0) {
+      setError("No se pudo identificar el Id del empleado para previsualizar la llamada de atencion.");
+      return;
+    }
+
+    if (normalizeText(employeeRow.estadoValidacionHoras) !== "REVISAR") {
+      setError("La llamada de atencion solo se puede previsualizar cuando el estado de validacion es REVISAR.");
+      return;
+    }
+
+    const pdfItems = buildEmpleadoPdfItems(employeeName);
+    if (pdfItems.length === 0) {
+      setError("No se encontraron registros del empleado seleccionado para previsualizar la llamada de atencion.");
+      return;
+    }
+
+    setError("");
+    try {
+      const pdfBlob = await previsualizarAsistenciaEmpleadoPdfLlamadaAtencion({
+        fechaInicio: toApiDate(fechaInicio),
+        fechaFin: toApiDate(fechaFin),
+        destinatario: employeeName || "Llamada de atencion",
+        items: pdfItems,
+      });
+
+      openBlobPreview(
+        pdfBlob,
+        `notificacion_asistencia_${employeeName.replace(/\s+/g, "_").toLowerCase()}_${toApiDate(fechaInicio).replaceAll("/", "")}_${toApiDate(fechaFin).replaceAll("/", "")}.pdf`
       );
     } catch (err) {
       setError(await getValidationPdfErrorMessage(err));
@@ -2343,6 +2677,46 @@ export default function RptAsistenciaPage() {
           formatDecimal(item.diferenciaHoras, 2),
           item.estadoValidacionHoras || "Sin validacion",
           ...employeeStateGridStates.map((state) => String(item.stateCounts[state] ?? 0)),
+        ]),
+        styles: {
+          fontSize: 7,
+          cellPadding: 2,
+          overflow: "linebreak",
+        },
+        headStyles: {
+          fillColor: [37, 99, 235],
+        },
+      });
+    } else if (activeTab === "tiempos") {
+      autoTableModule.default(doc, {
+        startY: 30,
+        head: [[
+          "Fecha",
+          "Empleado",
+          "Responsable",
+          "Empresa",
+          "Cliente",
+          "Area",
+          "Ubicacion",
+          "Hora entrada",
+          "Salida",
+          "Estado",
+          "Estado marcacion",
+          "Total horas",
+        ]],
+        body: tiemposFilteredRows.map((item) => [
+          formatDateLabel(item.fecha),
+          item.nombreEmpleado || "Sin empleado",
+          item.responsable || "Sin responsable",
+          item.empresa || "Sin empresa",
+          item.cliente || "Sin cliente",
+          item.area || "Sin area",
+          item.ubicacion || "Sin ubicacion",
+          item.hora || "",
+          item.salida || "",
+          item.estado || "",
+          item.estadoMarcacionTexto || "",
+          formatDecimal(item.totalHoras, 2),
         ]),
         styles: {
           fontSize: 7,
@@ -2639,6 +3013,13 @@ export default function RptAsistenciaPage() {
         >
           x Empleado
         </button>
+        <button
+          type="button"
+          style={activeTab === "tiempos" ? { ...styles.segmentedTabButton, ...styles.segmentedTabButtonActive } : styles.segmentedTabButton}
+          onClick={() => setActiveTab("tiempos")}
+        >
+          Tiempos
+        </button>
       </section>
 
       <section style={styles.filterCardCompact}>
@@ -2718,6 +3099,7 @@ export default function RptAsistenciaPage() {
       </section>
 
       {error ? <div style={styles.errorBanner}>{error}</div> : null}
+      {success ? <div style={styles.successBanner}>{success}</div> : null}
 
       {activeTab === "gerencial" ? (
         <>
@@ -3130,6 +3512,129 @@ export default function RptAsistenciaPage() {
         </section>
       ) : null}
 
+      {false && (
+        <section style={styles.tableCard}>
+          <div style={styles.filterHeader}>
+            <div>
+              <h2 style={styles.sectionTitle}>Tiempos</h2>
+              <p style={styles.sectionText}>
+                Vista por estado de asistencia usando el campo <strong>estado</strong> del resultado del store RptAsistenciaFechas.
+              </p>
+            </div>
+            <div style={styles.counterPill}>{tiemposFilteredRows.length} filas</div>
+          </div>
+
+          <section style={styles.filterCardCompact}>
+            <div style={styles.filterGridCompact}>
+              <Field label="Fecha inicio">
+                <input type="date" value={fechaInicio} onChange={(event) => setFechaInicio(event.target.value)} style={styles.input} />
+              </Field>
+              <Field label="Fecha fin">
+                <input type="date" value={fechaFin} onChange={(event) => setFechaFin(event.target.value)} style={styles.input} />
+              </Field>
+              <SelectField
+                label="Estado"
+                value={tiemposEstado}
+                options={tiemposEstadoOptions}
+                onChange={(value) => setTiemposEstado(value)}
+              />
+              <div style={styles.filterToggleWrap}>
+                <span style={styles.filterMetaText}>
+                  Estado seleccionado: {tiemposEstado === ALL_OPTION ? "Todos" : tiemposEstado}
+                </span>
+              </div>
+            </div>
+          </section>
+
+          <section style={styles.kpiGrid}>
+            {tiemposKpis.map((kpi) => (
+              <div key={kpi.label} style={{ ...styles.kpiCard, ...kpiToneStyles[kpi.tone] }}>
+                <span style={styles.kpiLabel}>{kpi.label}</span>
+                <strong style={styles.kpiValue}>{kpi.value}</strong>
+              </div>
+            ))}
+          </section>
+
+          <div style={styles.chartGrid}>
+            <ChartCard
+              title="Distribucion por dia"
+              subtitle="Cantidad de registros del estado seleccionado en el rango actual"
+            >
+              <SimpleHorizontalBars data={tiemposDailySeries} colorMode="palette" />
+            </ChartCard>
+            <ChartCard
+              title="Resumen del estado"
+              subtitle="Métricas principales del filtro actual"
+            >
+              <div style={styles.gerencialSummaryToolbar}>
+                <div style={styles.gerencialSummaryToolbarMetrics}>
+                  <div style={styles.counterPill}>{tiemposTotals.diasConRegistros} día{tiemposTotals.diasConRegistros === 1 ? "" : "s"} con registros</div>
+                  <div style={styles.counterPill}>{tiemposTotals.empleados} empleado{tiemposTotals.empleados === 1 ? "" : "s"}</div>
+                </div>
+              </div>
+              <div style={{ marginTop: 8 }}>
+                <SimpleTrendBars data={tiemposTrendSeries} />
+              </div>
+            </ChartCard>
+          </div>
+
+          <div style={styles.tableWrap}>
+            <table style={styles.table}>
+              <colgroup>
+                {tiemposDetailColumns.map((column) => (
+                  <col key={String(column.key)} style={{ width: column.width }} />
+                ))}
+              </colgroup>
+              <thead>
+                <tr>
+                  {tiemposDetailColumns.map((column) => (
+                    <th key={String(column.key)} style={{ ...styles.th, textAlign: column.align ?? "left" }}>
+                      <div style={styles.thContent}>
+                        <span>{column.label}</span>
+                      </div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr>
+                    <td style={styles.emptyCell} colSpan={tiemposDetailColumns.length}>Cargando tiempos...</td>
+                  </tr>
+                ) : tiemposFilteredRows.length === 0 ? (
+                  <tr>
+                    <td style={styles.emptyCell} colSpan={tiemposDetailColumns.length}>
+                      No hay registros para el estado y rango seleccionados.
+                    </td>
+                  </tr>
+                ) : (
+                  tiemposFilteredRows.map((item, index) => (
+                    <tr key={`${item.idEmpleado ?? item.nombreEmpleado}-${item.fecha}-${index}`} style={{ ...styles.tr, background: getRowTone(item) }}>
+                      {tiemposDetailColumns.map((column) => {
+                        const rawValue = item[column.key as keyof AsistenciaReporteItem];
+                        let displayValue = rawValue ?? "";
+
+                        if (column.key === "fecha") {
+                          displayValue = formatDateLabel(String(rawValue ?? ""));
+                        } else if (column.key === "totalHoras") {
+                          displayValue = formatDecimal(Number(rawValue ?? 0), 2);
+                        }
+
+                        return (
+                          <td key={`${String(column.key)}-${index}`} style={{ ...styles.td, textAlign: column.align ?? "left" }}>
+                            {String(displayValue || "")}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       {activeTab === "detalle" ? (
         <section style={styles.tableCard}>
           <div style={styles.filterHeader}>
@@ -3259,6 +3764,129 @@ export default function RptAsistenciaPage() {
         </section>
       ) : null}
 
+      {activeTab === "tiempos" ? (
+        <section style={styles.tableCard}>
+          <div style={styles.filterHeader}>
+            <div>
+              <h2 style={styles.sectionTitle}>Tiempos</h2>
+              <p style={styles.sectionText}>
+                Vista por estado de asistencia usando el campo <strong>estado</strong> del resultado del store RptAsistenciaFechas.
+              </p>
+            </div>
+            <div style={styles.counterPill}>{tiemposFilteredRows.length} filas</div>
+          </div>
+
+          <section style={styles.filterCardCompact}>
+            <div style={styles.filterGridCompact}>
+              <Field label="Fecha inicio">
+                <input type="date" value={fechaInicio} onChange={(event) => setFechaInicio(event.target.value)} style={styles.input} />
+              </Field>
+              <Field label="Fecha fin">
+                <input type="date" value={fechaFin} onChange={(event) => setFechaFin(event.target.value)} style={styles.input} />
+              </Field>
+              <SelectField
+                label="Estado"
+                value={tiemposEstado}
+                options={tiemposEstadoOptions}
+                onChange={(value) => setTiemposEstado(value)}
+              />
+              <div style={styles.filterToggleWrap}>
+                <span style={styles.filterMetaText}>
+                  Estado seleccionado: {tiemposEstado === ALL_OPTION ? "Todos" : tiemposEstado}
+                </span>
+              </div>
+            </div>
+          </section>
+
+          <section style={styles.kpiGrid}>
+            {tiemposKpis.map((kpi) => (
+              <div key={kpi.label} style={{ ...styles.kpiCard, ...kpiToneStyles[kpi.tone] }}>
+                <span style={styles.kpiLabel}>{kpi.label}</span>
+                <strong style={styles.kpiValue}>{kpi.value}</strong>
+              </div>
+            ))}
+          </section>
+
+          <div style={styles.chartGrid}>
+            <ChartCard
+              title="Distribucion por dia"
+              subtitle="Cantidad de registros del estado seleccionado en el rango actual"
+            >
+              <SimpleHorizontalBars data={tiemposDailySeries} colorMode="palette" />
+            </ChartCard>
+            <ChartCard
+              title="Resumen del estado"
+              subtitle="Métricas principales del filtro actual"
+            >
+              <div style={styles.gerencialSummaryToolbar}>
+                <div style={styles.gerencialSummaryToolbarMetrics}>
+                  <div style={styles.counterPill}>{tiemposTotals.diasConRegistros} día{tiemposTotals.diasConRegistros === 1 ? "" : "s"} con registros</div>
+                  <div style={styles.counterPill}>{tiemposTotals.empleados} empleado{tiemposTotals.empleados === 1 ? "" : "s"}</div>
+                </div>
+              </div>
+              <div style={{ marginTop: 8 }}>
+                <SimpleTrendBars data={tiemposTrendSeries} />
+              </div>
+            </ChartCard>
+          </div>
+
+          <div style={styles.tableWrap}>
+            <table style={styles.table}>
+              <colgroup>
+                {tiemposDetailColumns.map((column) => (
+                  <col key={String(column.key)} style={{ width: column.width }} />
+                ))}
+              </colgroup>
+              <thead>
+                <tr>
+                  {tiemposDetailColumns.map((column) => (
+                    <th key={String(column.key)} style={{ ...styles.th, textAlign: column.align ?? "left" }}>
+                      <div style={styles.thContent}>
+                        <span>{column.label}</span>
+                      </div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr>
+                    <td style={styles.emptyCell} colSpan={tiemposDetailColumns.length}>Cargando tiempos...</td>
+                  </tr>
+                ) : tiemposFilteredRows.length === 0 ? (
+                  <tr>
+                    <td style={styles.emptyCell} colSpan={tiemposDetailColumns.length}>
+                      No hay registros para el estado y rango seleccionados.
+                    </td>
+                  </tr>
+                ) : (
+                  tiemposFilteredRows.map((item, index) => (
+                    <tr key={`${item.idEmpleado ?? item.nombreEmpleado}-${item.fecha}-${index}`} style={{ ...styles.tr, background: getRowTone(item) }}>
+                      {tiemposDetailColumns.map((column) => {
+                        const rawValue = item[column.key as keyof AsistenciaReporteItem];
+                        let displayValue = rawValue ?? "";
+
+                        if (column.key === "fecha") {
+                          displayValue = formatDateLabel(String(rawValue ?? ""));
+                        } else if (column.key === "totalHoras") {
+                          displayValue = formatDecimal(Number(rawValue ?? 0), 2);
+                        }
+
+                        return (
+                          <td key={`${String(column.key)}-${index}`} style={{ ...styles.td, textAlign: column.align ?? "left" }}>
+                            {String(displayValue || "")}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
       {activeTab === "empleado" && (
         <section style={{ ...styles.tableCard, ...styles.employeeGridSection }}>
           <div style={styles.filterHeader}>
@@ -3273,16 +3901,24 @@ export default function RptAsistenciaPage() {
             subtitle=""
             style={styles.employeeGridChartCard}
           >
-            <SimpleEmployeeDateGrid
-              data={filteredEmployeeGridRows}
-              fechas={chartEmpleadoPorDia.fechas}
-              employeeFilter={employeeGridFilters.employee}
-              onEmployeeFilterChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, employee: value }))}
-              responsableFilter={employeeGridFilters.responsable}
-              onResponsableFilterChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, responsable: value }))}
-              validationFilter={employeeGridFilters.estadoValidacionHoras}
-              validationOptions={employeeGridValidationOptions}
-              onValidationFilterChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, estadoValidacionHoras: value }))}
+              <SimpleEmployeeDateGrid
+                data={filteredEmployeeGridRows}
+                fechas={chartEmpleadoPorDia.fechas}
+                employeeFilter={employeeGridFilters.employee}
+                onEmployeeFilterChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, employee: value }))}
+                responsableFilter={employeeGridFilters.responsable}
+                onResponsableFilterChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, responsable: value }))}
+                empresaFilter={employeeGridFilters.empresa}
+                onEmpresaFilterChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, empresa: value }))}
+                clienteFilter={employeeGridFilters.cliente}
+                onClienteFilterChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, cliente: value }))}
+                areaFilter={employeeGridFilters.area}
+                onAreaFilterChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, area: value }))}
+                ubicacionFilter={employeeGridFilters.ubicacion}
+                onUbicacionFilterChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, ubicacion: value }))}
+                validationFilter={employeeGridFilters.estadoValidacionHoras}
+                validationOptions={employeeGridValidationOptions}
+                onValidationFilterChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, estadoValidacionHoras: value }))}
               differenceOperator={employeeGridFilters.diferenciaOperator}
               differenceValue={employeeGridFilters.diferenciaValue}
               onDifferenceOperatorChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, diferenciaOperator: value }))}
@@ -3297,6 +3933,8 @@ export default function RptAsistenciaPage() {
               }
               onCellSelect={handleEmployeeDateCellClick}
               onExportLlamadaAtencion={exportPdfLlamadaAtencion}
+              onSendLlamadaAtencion={sendPdfLlamadaAtencion}
+              onPreviewLlamadaAtencion={previewPdfLlamadaAtencion}
             />
           </ChartCard>
           <div style={styles.gerencialSummaryToolbar}>
@@ -3697,6 +4335,70 @@ function SimpleVerticalBars({
   );
 }
 
+function SimpleHorizontalBars({
+  data,
+  colorMode,
+  maxHeight = 320,
+}: {
+  data: Array<{ name: string; value: number }>;
+  colorMode?: "palette";
+  maxHeight?: number;
+}) {
+  const max = Math.max(...data.map((item) => item.value), 1);
+
+  return (
+    <div style={styles.simpleChartWrap}>
+      {data.length === 0 ? (
+        <div style={styles.emptyMiniState}>Sin datos para graficar.</div>
+      ) : (
+        <div style={{ ...styles.responsibleRankingList, maxHeight }}>
+          <div style={{ ...styles.responsibleRankingHeader, gridTemplateColumns: "160px minmax(260px, 1fr) 88px" }}>
+            <div style={styles.responsibleRankingHeaderName}>Fecha</div>
+            <div style={styles.responsibleRankingHeaderBar} />
+            <div style={styles.responsibleRankingHeaderValue}>Registros</div>
+          </div>
+          {data.map((item, index) => {
+            const width = `${Math.max((item.value / max) * 100, item.value > 0 ? 6 : 0)}%`;
+
+            return (
+              <div
+                key={item.name}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "160px minmax(260px, 1fr) 88px",
+                  gap: 14,
+                  alignItems: "center",
+                  width: "100%",
+                  padding: "6px 6px",
+                }}
+              >
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", whiteSpace: "normal", wordBreak: "break-word" }}>
+                  {item.name}
+                </div>
+                <div style={styles.responsibleRankingBarCell}>
+                  <div style={styles.responsibleRankingBarTrack}>
+                    <div
+                      style={{
+                        ...styles.responsibleRankingBarFill,
+                        width,
+                        background: colorMode === "palette" ? chartPalette[index % chartPalette.length] : "#2563EB",
+                        boxShadow: "0 0 0 1px rgba(59, 130, 246, 0.15) inset",
+                      }}
+                    />
+                  </div>
+                </div>
+                <div style={{ textAlign: "right", fontSize: 18, fontWeight: 800, color: "#111827" }}>
+                  {item.value}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function getResponsableRankingVisual(value: number) {
   if (!Number.isFinite(value) || value <= 0) {
     return {
@@ -4056,6 +4758,14 @@ function SimpleEmployeeDateGrid({
   onEmployeeFilterChange,
   responsableFilter,
   onResponsableFilterChange,
+  empresaFilter,
+  onEmpresaFilterChange,
+  clienteFilter,
+  onClienteFilterChange,
+  areaFilter,
+  onAreaFilterChange,
+  ubicacionFilter,
+  onUbicacionFilterChange,
   validationFilter,
   validationOptions,
   onValidationFilterChange,
@@ -4068,6 +4778,8 @@ function SimpleEmployeeDateGrid({
   onToggleSort,
   onCellSelect,
   onExportLlamadaAtencion,
+  onSendLlamadaAtencion,
+  onPreviewLlamadaAtencion,
 }: {
   data: EmployeeDateRow[];
   fechas: string[];
@@ -4075,6 +4787,14 @@ function SimpleEmployeeDateGrid({
   onEmployeeFilterChange: (value: string) => void;
   responsableFilter: string;
   onResponsableFilterChange: (value: string) => void;
+  empresaFilter: string;
+  onEmpresaFilterChange: (value: string) => void;
+  clienteFilter: string;
+  onClienteFilterChange: (value: string) => void;
+  areaFilter: string;
+  onAreaFilterChange: (value: string) => void;
+  ubicacionFilter: string;
+  onUbicacionFilterChange: (value: string) => void;
   validationFilter: string;
   validationOptions: string[];
   onValidationFilterChange: (value: string) => void;
@@ -4087,7 +4807,127 @@ function SimpleEmployeeDateGrid({
   onToggleSort: (key: EmployeeGridSortKey) => void;
   onCellSelect?: (nombreEmpleado: string, fecha: string) => void;
   onExportLlamadaAtencion?: (item: EmployeeDateRow) => void;
+  onSendLlamadaAtencion?: (item: EmployeeDateRow) => void;
+  onPreviewLlamadaAtencion?: (item: EmployeeDateRow) => void;
 }) {
+  const [llamadaAtencionStatusById, setLlamadaAtencionStatusById] = useState<Record<number, boolean | null>>({});
+  const [selectedLlamadaAtencionIds, setSelectedLlamadaAtencionIds] = useState<number[]>([]);
+  const selectedLlamadaAtencionCount = selectedLlamadaAtencionIds.length;
+  const canSelectLlamadaAtencion = (item: EmployeeDateRow) => {
+    const idEmpleado = item.idEmpleado ?? null;
+    if (!idEmpleado) {
+      return false;
+    }
+
+    return normalizeText(item.estadoValidacionHoras) === "REVISAR"
+      && Boolean(item.telefono?.trim())
+      && llamadaAtencionStatusById[idEmpleado] === false;
+  };
+
+  const employeeById = useMemo(() => {
+    const map = new Map<number, EmployeeDateRow>();
+    data.forEach((item) => {
+      if (typeof item.idEmpleado === "number" && item.idEmpleado > 0 && !map.has(item.idEmpleado)) {
+        map.set(item.idEmpleado, item);
+      }
+    });
+    return map;
+  }, [data]);
+
+  const selectedRowsForLlamadaAtencion = useMemo(
+    () =>
+      data.filter(
+        (item) =>
+          item.idEmpleado &&
+          selectedLlamadaAtencionIds.includes(item.idEmpleado) &&
+          canSelectLlamadaAtencion(item)
+      ),
+    [data, llamadaAtencionStatusById, selectedLlamadaAtencionIds]
+  );
+
+  const eligibleLlamadaAtencionIds = useMemo(
+    () =>
+      data
+        .map((item) => item.idEmpleado)
+        .filter((id): id is number => typeof id === "number" && id > 0)
+        .filter((id) => {
+          const row = employeeById.get(id);
+          return Boolean(row && normalizeText(row.estadoValidacionHoras) === "REVISAR" && llamadaAtencionStatusById[id] === false);
+        }),
+    [employeeById, data, llamadaAtencionStatusById]
+  );
+
+  const allEligibleSelected =
+    eligibleLlamadaAtencionIds.length > 0 &&
+    eligibleLlamadaAtencionIds.every((id) => selectedLlamadaAtencionIds.includes(id));
+  const someEligibleSelected =
+    eligibleLlamadaAtencionIds.some((id) => selectedLlamadaAtencionIds.includes(id)) && !allEligibleSelected;
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someEligibleSelected;
+    }
+  }, [someEligibleSelected, allEligibleSelected]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const ids = Array.from(
+      new Set(
+        data
+          .map((item) => item.idEmpleado)
+          .filter((id): id is number => typeof id === "number" && id > 0)
+      )
+    );
+
+    if (ids.length === 0) {
+      setSelectedLlamadaAtencionIds([]);
+      setLlamadaAtencionStatusById({});
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void (async () => {
+      try {
+        const response = await verificarLlamadaAtencionEnviadaHoyEnLote(ids);
+        if (cancelled) {
+          return;
+        }
+
+        const enviadosHoyIds = new Set(response?.enviadosHoyIds ?? []);
+        setLlamadaAtencionStatusById(
+          Object.fromEntries(ids.map((id) => [id, enviadosHoyIds.has(id)])) as Record<number, boolean | null>
+        );
+      } catch {
+        if (cancelled) {
+          return;
+        }
+
+        setLlamadaAtencionStatusById(
+          Object.fromEntries(ids.map((id) => [id, null])) as Record<number, boolean | null>
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [data]);
+
+  useEffect(() => {
+    setSelectedLlamadaAtencionIds((prev) => prev.filter((id) => llamadaAtencionStatusById[id] === false));
+  }, [llamadaAtencionStatusById]);
+
+  useEffect(() => {
+    setSelectedLlamadaAtencionIds((prev) =>
+      prev.filter((id) => {
+        const row = data.find((item) => item.idEmpleado === id);
+        return Boolean(row && normalizeText(row.estadoValidacionHoras) === "REVISAR" && llamadaAtencionStatusById[id] === false);
+      })
+    );
+  }, [data, llamadaAtencionStatusById]);
+
   const max = Math.max(
     ...data.flatMap((item) => item.fechas.map((fecha) => fecha.totalHoras)),
     1
@@ -4152,6 +4992,55 @@ function SimpleEmployeeDateGrid({
 
   return (
     <div style={styles.stateDateGridWrap}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+        <div style={styles.counterPill}>
+          {selectedLlamadaAtencionCount} seleccionado{selectedLlamadaAtencionCount === 1 ? "" : "s"} para llamada de atencion
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            type="button"
+            style={{
+              ...styles.employeeGridActionButton,
+              opacity: selectedRowsForLlamadaAtencion.length > 0 && onExportLlamadaAtencion ? 1 : 0.45,
+              cursor: selectedRowsForLlamadaAtencion.length > 0 && onExportLlamadaAtencion ? "pointer" : "not-allowed",
+            }}
+            disabled={selectedRowsForLlamadaAtencion.length === 0 || !onExportLlamadaAtencion}
+            onClick={async () => {
+              if (!onExportLlamadaAtencion || selectedRowsForLlamadaAtencion.length === 0) {
+                return;
+              }
+
+              for (const row of selectedRowsForLlamadaAtencion) {
+                await onExportLlamadaAtencion(row);
+              }
+            }}
+            title="Generar PDF de llamada de atencion para los registros seleccionados"
+          >
+            Generar PDF atencion
+          </button>
+          <button
+            type="button"
+            style={{
+              ...styles.employeeGridActionButton,
+              opacity: selectedRowsForLlamadaAtencion.length > 0 && onSendLlamadaAtencion ? 1 : 0.45,
+              cursor: selectedRowsForLlamadaAtencion.length > 0 && onSendLlamadaAtencion ? "pointer" : "not-allowed",
+            }}
+            disabled={selectedRowsForLlamadaAtencion.length === 0 || !onSendLlamadaAtencion}
+            onClick={async () => {
+              if (!onSendLlamadaAtencion || selectedRowsForLlamadaAtencion.length === 0) {
+                return;
+              }
+
+              for (const row of selectedRowsForLlamadaAtencion) {
+                await onSendLlamadaAtencion(row);
+              }
+            }}
+            title="Enviar PDF de llamada de atencion para los registros seleccionados"
+          >
+            Enviar pdf
+          </button>
+        </div>
+      </div>
       {fechas.length === 0 ? (
         <div style={styles.emptyMiniState}>Sin datos para graficar.</div>
       ) : (
@@ -4159,7 +5048,7 @@ function SimpleEmployeeDateGrid({
             <div
               style={{
                 ...styles.stateDateGrid,
-                gridTemplateColumns: `220px 180px 170px 180px 150px 160px 110px 110px 100px 140px 150px 160px 150px repeat(${fechas.length}, minmax(88px, 1fr))`,
+                gridTemplateColumns: `220px 180px 150px 170px 180px 150px 160px 110px 110px 100px 140px 150px 160px 120px 120px repeat(${fechas.length}, minmax(88px, 1fr))`,
               }}
             >
             <div style={{ ...styles.stateDateGridHeader, ...styles.stateDateGridCorner }}>
@@ -4205,16 +5094,55 @@ function SimpleEmployeeDateGrid({
               </div>
             </div>
             <div style={styles.stateDateGridHeader}>
-              Empresa
+              Telefono
             </div>
             <div style={styles.stateDateGridHeader}>
-              Cliente
+              <div style={styles.employeeGridHeaderStack}>
+                <span>Empresa</span>
+                <input
+                  type="text"
+                  value={empresaFilter}
+                  onChange={(event) => onEmpresaFilterChange(event.target.value)}
+                  placeholder="Filtrar empresa"
+                  style={styles.employeeGridHeaderInput}
+                />
+              </div>
             </div>
             <div style={styles.stateDateGridHeader}>
-              Area
+              <div style={styles.employeeGridHeaderStack}>
+                <span>Cliente</span>
+                <input
+                  type="text"
+                  value={clienteFilter}
+                  onChange={(event) => onClienteFilterChange(event.target.value)}
+                  placeholder="Filtrar cliente"
+                  style={styles.employeeGridHeaderInput}
+                />
+              </div>
             </div>
             <div style={styles.stateDateGridHeader}>
-              Ubicacion
+              <div style={styles.employeeGridHeaderStack}>
+                <span>Area</span>
+                <input
+                  type="text"
+                  value={areaFilter}
+                  onChange={(event) => onAreaFilterChange(event.target.value)}
+                  placeholder="Filtrar area"
+                  style={styles.employeeGridHeaderInput}
+                />
+              </div>
+            </div>
+            <div style={styles.stateDateGridHeader}>
+              <div style={styles.employeeGridHeaderStack}>
+                <span>Ubicacion</span>
+                <input
+                  type="text"
+                  value={ubicacionFilter}
+                  onChange={(event) => onUbicacionFilterChange(event.target.value)}
+                  placeholder="Filtrar ubicacion"
+                  style={styles.employeeGridHeaderInput}
+                />
+              </div>
             </div>
             <div style={styles.stateDateGridHeader}>
               <button
@@ -4310,7 +5238,48 @@ function SimpleEmployeeDateGrid({
               </div>
             </div>
             <div style={styles.stateDateGridHeader}>
-              Llamada de atencion
+              <div style={styles.employeeGridHeaderStack}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                  <input
+                    ref={selectAllRef}
+                    type="checkbox"
+                    checked={allEligibleSelected}
+                    disabled={eligibleLlamadaAtencionIds.length === 0}
+                    onChange={() => {
+                      if (eligibleLlamadaAtencionIds.length === 0) {
+                        return;
+                      }
+
+                      setSelectedLlamadaAtencionIds((prev) =>
+                        allEligibleSelected
+                          ? prev.filter((id) => !eligibleLlamadaAtencionIds.includes(id))
+                          : Array.from(new Set([...prev, ...eligibleLlamadaAtencionIds]))
+                      );
+                    }}
+                    style={{
+                      width: 16,
+                      height: 16,
+                      cursor: eligibleLlamadaAtencionIds.length === 0 ? "not-allowed" : "pointer",
+                    }}
+                    title={
+                      eligibleLlamadaAtencionIds.length === 0
+                        ? "No hay registros disponibles para seleccionar"
+                        : allEligibleSelected
+                          ? "Desmarcar todos los registros disponibles"
+                          : "Marcar todos los registros disponibles"
+                    }
+                  />
+                  <span>Llamada de atencion</span>
+                </div>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "#64748B" }}>
+                  {eligibleLlamadaAtencionIds.length > 0
+                    ? `${selectedLlamadaAtencionCount}/${eligibleLlamadaAtencionIds.length}`
+                    : "Sin disponibles"}
+                </span>
+              </div>
+            </div>
+            <div style={styles.stateDateGridHeader}>
+              Documento
             </div>
             {fechas.map((fecha) => (
               <div key={`head-employee-${fecha}`} style={styles.stateDateGridHeader}>
@@ -4351,6 +5320,19 @@ function SimpleEmployeeDateGrid({
                 >
                   <span style={styles.employeeGridValidationText}>
                     {item.responsable || "Sin responsable"}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    ...styles.stateDateGridCell,
+                    ...styles.employeeGridValidationCell,
+                    background: differenceTone.rowBackground,
+                    color: differenceTone.rowText,
+                  }}
+                  title={`${item.employee}: ${item.telefono || "Sin telefono"}`}
+                >
+                  <span style={styles.employeeGridValidationText}>
+                    {item.telefono || "Sin telefono"}
                   </span>
                 </div>
                 <div
@@ -4488,33 +5470,91 @@ function SimpleEmployeeDateGrid({
                     {item.estadoValidacionHoras || "Sin validacion"}
                   </span>
                 </div>
+
                 <div
                   style={{
                     ...styles.stateDateGridCell,
                     ...styles.employeeGridValidationCell,
+                    justifyContent: "center",
                     background: differenceTone.rowBackground,
                     color: differenceTone.rowText,
                   }}
+                  title={
+                    item.idEmpleado && llamadaAtencionStatusById[item.idEmpleado] === false
+                      ? `Seleccionar registro de ${item.employee} para llamada de atencion`
+                      : item.idEmpleado && llamadaAtencionStatusById[item.idEmpleado] === true
+                        ? "La llamada de atencion ya fue enviada hoy para este empleado"
+                        : "No se pudo validar el estado de envio"
+                  }
+                >
+                  {(() => {
+                    const idEmpleado = item.idEmpleado ?? null;
+                    const estaSeleccionado = Boolean(idEmpleado && selectedLlamadaAtencionIds.includes(idEmpleado));
+                    const habilitado = canSelectLlamadaAtencion(item);
+
+                    return (
+                  <input
+                    type="checkbox"
+                    checked={estaSeleccionado}
+                    disabled={!habilitado}
+                    onChange={() => {
+                      if (!idEmpleado || !habilitado) {
+                        return;
+                      }
+
+                      setSelectedLlamadaAtencionIds((prev) =>
+                        prev.includes(idEmpleado)
+                          ? prev.filter((id) => id !== idEmpleado)
+                          : [...prev, idEmpleado]
+                      );
+                    }}
+                    style={{
+                      width: 18,
+                      height: 18,
+                      cursor: !habilitado ? "not-allowed" : "pointer",
+                    }}
+                  />
+                    );
+                  })()}
+                </div>
+                <div
+                  style={{
+                    ...styles.stateDateGridCell,
+                    ...styles.employeeGridValidationCell,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: differenceTone.rowBackground,
+                    color: differenceTone.rowText,
+                  }}
+                  title={
+                    canSelectLlamadaAtencion(item)
+                      ? `Previsualizar documento de llamada de atencion de ${item.employee}`
+                      : "La vista previa solo estÃ¡ disponible cuando el estado de validaciÃ³n es REVISAR y no fue enviada hoy"
+                  }
                 >
                   <button
                     type="button"
-                    onClick={() => onExportLlamadaAtencion?.(item)}
-                    disabled={normalizeText(item.estadoValidacionHoras) !== "REVISAR" || !onExportLlamadaAtencion}
                     style={{
                       ...styles.employeeGridActionButton,
-                      opacity: normalizeText(item.estadoValidacionHoras) === "REVISAR" ? 1 : 0.45,
-                      cursor:
-                        normalizeText(item.estadoValidacionHoras) === "REVISAR" && onExportLlamadaAtencion
-                          ? "pointer"
-                          : "not-allowed",
+                      width: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 6,
+                      opacity: canSelectLlamadaAtencion(item) ? 1 : 0.45,
+                      cursor: canSelectLlamadaAtencion(item) ? "pointer" : "not-allowed",
                     }}
-                    title={
-                      normalizeText(item.estadoValidacionHoras) === "REVISAR"
-                        ? `Generar llamada de atencion para ${item.employee}`
-                        : "Disponible solo cuando el estado de validacion es REVISAR"
-                    }
+                    disabled={!canSelectLlamadaAtencion(item) || !onPreviewLlamadaAtencion}
+                    onClick={() => {
+                      if (!onPreviewLlamadaAtencion || !canSelectLlamadaAtencion(item)) {
+                        return;
+                      }
+
+                      void onPreviewLlamadaAtencion(item);
+                    }}
                   >
-                    PDF atencion
+                    <Eye size={15} strokeWidth={2.2} />
+                    <span>Ver PDF</span>
                   </button>
                 </div>
                 {item.fechas.map((cell) => {
@@ -4616,7 +5656,7 @@ function SimpleEmployeeStateGrid({
           <div
             style={{
               ...styles.stateDateGrid,
-              gridTemplateColumns: `220px 180px 160px 170px 150px 170px 110px 110px 100px 110px 140px 150px repeat(${states.length}, minmax(88px, 1fr))`,
+              gridTemplateColumns: `220px 150px 180px 160px 170px 150px 170px 110px 110px 100px 110px 140px 150px repeat(${states.length}, minmax(88px, 1fr))`,
             }}
           >
           <div style={{ ...styles.stateDateGridHeader, ...styles.stateDateGridCorner }}>
@@ -4639,6 +5679,9 @@ function SimpleEmployeeStateGrid({
                 style={styles.employeeGridHeaderInput}
               />
             </div>
+          </div>
+          <div style={styles.stateDateGridHeader}>
+            Telefono
           </div>
           <div style={styles.stateDateGridHeader}>
             <div style={styles.employeeGridHeaderStack}>
@@ -4813,6 +5856,30 @@ function SimpleEmployeeStateGrid({
                   }}
                   {...rowSelectProps}
                 >
+                  <span style={styles.employeeGridValidationText}>{item.telefono || "Sin telefono"}</span>
+                </div>
+                <div
+                  style={{
+                    ...styles.stateDateGridCell,
+                    ...styles.employeeGridValidationCell,
+                    background: differenceTone.rowBackground,
+                    color: differenceTone.rowText,
+                    cursor: onRowSelect ? "pointer" : "default",
+                  }}
+                  {...rowSelectProps}
+                >
+                  <span style={styles.employeeGridValidationText}>{item.responsable || "Sin responsable"}</span>
+                </div>
+                <div
+                  style={{
+                    ...styles.stateDateGridCell,
+                    ...styles.employeeGridValidationCell,
+                    background: differenceTone.rowBackground,
+                    color: differenceTone.rowText,
+                    cursor: onRowSelect ? "pointer" : "default",
+                  }}
+                  {...rowSelectProps}
+                >
                   <span style={styles.employeeGridValidationText}>{item.empresa || "Sin empresa"}</span>
                 </div>
                 <div
@@ -4850,18 +5917,6 @@ function SimpleEmployeeStateGrid({
                   {...rowSelectProps}
                 >
                   <span style={styles.employeeGridValidationText}>{item.ubicacion || "Sin ubicacion"}</span>
-                </div>
-                <div
-                  style={{
-                    ...styles.stateDateGridCell,
-                    ...styles.employeeGridValidationCell,
-                    background: differenceTone.rowBackground,
-                    color: differenceTone.rowText,
-                    cursor: onRowSelect ? "pointer" : "default",
-                  }}
-                  {...rowSelectProps}
-                >
-                  <span style={styles.employeeGridValidationText}>{item.responsable || "Sin responsable"}</span>
                 </div>
                 <div
                   style={{
@@ -6003,6 +7058,15 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#FEF2F2",
     border: "1px solid #FECACA",
     color: "#B91C1C",
+    borderRadius: 16,
+    padding: 14,
+    fontSize: 13,
+    fontWeight: 700,
+  },
+  successBanner: {
+    background: "#ECFDF5",
+    border: "1px solid #A7F3D0",
+    color: "#166534",
     borderRadius: 16,
     padding: 14,
     fontSize: 13,
@@ -7320,4 +8384,3 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
   },
 };
-

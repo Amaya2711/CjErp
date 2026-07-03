@@ -1,4 +1,5 @@
 using CjERP.Application.DTOs;
+using CjERP.Application.DTOs.ReportesWhatsapp;
 
 namespace CjERP.Application.Interfaces.Services;
 
@@ -18,6 +19,24 @@ public interface IAsistenciaReporteService
 
     Task<byte[]> GenerarPdfEmpleadoLlamadaAtencionAsync(
         AsistenciaReportePdfRequestDto request,
+        string usuarioEjecucion,
+        CancellationToken cancellationToken = default);
+
+    Task<ReporteWhatsappSendResponseDto> EnviarPdfEmpleadoLlamadaAtencionAsync(
+        AsistenciaReportePdfRequestDto request,
+        string usuarioEjecucion,
+        CancellationToken cancellationToken = default);
+
+    Task<byte[]> GenerarPdfEmpleadoLlamadaAtencionVistaPreviaAsync(
+        AsistenciaReportePdfRequestDto request,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> ExistePdfLlamadaAtencionEnviadoHoyAsync(
+        int idEmpleado,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<int>> ObtenerPdfLlamadaAtencionEnviadosHoyAsync(
+        IReadOnlyList<int> idsEmpleado,
         CancellationToken cancellationToken = default);
 
     Task<AsistenciaGerencialPdfDto> ObtenerReporteGerencialAsync(

@@ -5,6 +5,7 @@ import type {
   AsistenciaReporteItem,
   AsistenciaReportePdfRequest,
   AsistenciaReporteQueryParams,
+  AsistenciaEnviarPdfLlamadaAtencionResponse,
 } from "../models/asistencia";
 
 type AsistenciaReporteApiRow = Record<string, unknown>;
@@ -72,6 +73,7 @@ function normalizeAsistenciaRow(row: AsistenciaReporteApiRow): AsistenciaReporte
     fecha: getString(row, "Fecha", "fecha"),
     hora: getString(row, "Hora", "hora"),
     nombreEmpleado: getString(row, "nombreempleado", "nombreEmpleado", "NombreEmpleado"),
+    telefono: getString(row, "Telefono", "telefono", "Celular", "celular", "TelefonoWup", "telefonoWup"),
     tipoAprobacion: getString(row, "TipoAprobacion", "tipoAprobacion", "tipo_aprobacion"),
     responsable: getString(row, "Responsable", "responsable"),
     estado: getString(row, "Estado", "estado"),
@@ -123,6 +125,36 @@ export async function exportarAsistenciaEmpleadoPdfLlamadaAtencion(payload: Asis
   return await httpClient.post<Blob>("/asistencia/reporte/pdf-empleado-llamada-atencion", payload, {
     responseType: "blob",
   });
+}
+
+export async function enviarAsistenciaEmpleadoPdfLlamadaAtencion(payload: AsistenciaReportePdfRequest) {
+  return await httpClient.post<AsistenciaEnviarPdfLlamadaAtencionResponse>("/asistencia/reporte/pdf-empleado-llamada-atencion/enviar", payload, {
+    skipAuthRedirect: true,
+  });
+}
+
+export async function previsualizarAsistenciaEmpleadoPdfLlamadaAtencion(payload: AsistenciaReportePdfRequest) {
+  return await httpClient.post<Blob>("/asistencia/reporte/pdf-empleado-llamada-atencion/preview", payload, {
+    responseType: "blob",
+  });
+}
+
+export async function verificarLlamadaAtencionEnviadaHoy(idEmpleado: number) {
+  return await httpClient.get<{ enviadaHoy: boolean }>(`/asistencia/reporte/llamada-atencion/enviada-hoy/${idEmpleado}`, {
+    skipAuthRedirect: true,
+  });
+}
+
+export async function verificarLlamadaAtencionEnviadaHoyEnLote(idsEmpleado: number[]) {
+  return await httpClient.post<{ enviadosHoyIds: number[] }>(
+    "/asistencia/reporte/llamada-atencion/enviada-hoy",
+    {
+      idsEmpleado,
+    },
+    {
+      skipAuthRedirect: true,
+    }
+  );
 }
 
 export async function exportarAsistenciaGerencialPdf(payload: AsistenciaGerencialPdfRequest = {}) {

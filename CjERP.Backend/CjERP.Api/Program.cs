@@ -131,6 +131,7 @@ builder.Services.AddResponseCompression(options =>
     options.Providers.Add<BrotliCompressionProvider>();
     options.Providers.Add<GzipCompressionProvider>();
 });
+builder.Services.AddResponseCaching();
 builder.Services.Configure<BrotliCompressionProviderOptions>(options =>
 {
     options.Level = CompressionLevel.Fastest;
@@ -391,6 +392,7 @@ app.UseResponseCompression();
 app.UseMiddleware<SlowRequestLoggingMiddleware>();
 app.UseCors("ReactPolicy");
 app.UseRateLimiter();
+app.UseResponseCaching();
 app.UseAuthentication();
 app.UseAuthorization();
 

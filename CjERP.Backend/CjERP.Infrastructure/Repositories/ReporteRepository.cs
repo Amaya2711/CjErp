@@ -485,6 +485,81 @@ public sealed class ReporteRepository : IReporteRepository
         return result.HasValue;
     }
 
+    public async Task<bool> ExisteEnvioHoyAsync(int idEmpleado, DateTime fechaReferencia, string tipoReporte, CancellationToken cancellationToken = default)
+    {
+        var logTable = GetLogTableName(tipoReporte);
+        if (!await ExisteTablaLogAsync(tipoReporte, cancellationToken))
+        {
+            return false;
+        }
+
+        var sql = $"""
+        SELECT TOP 1 1
+        FROM {logTable}
+        WHERE IdEmpleado = @IdEmpleado
+          AND CAST(FechaEnvio AS date) = @FechaReferencia
+          AND TipoReporte = @TipoReporte
+          AND EstadoEnvio = 'ENVIADO';
+        """;
+
+        await using var connection = CreateConnection();
+        var result = await connection.QueryFirstOrDefaultAsync<int?>(
+            new CommandDefinition(
+                sql,
+                new
+                {
+                    IdEmpleado = idEmpleado,
+                    FechaReferencia = fechaReferencia.Date,
+                    TipoReporte = ReporteWhatsappTipos.Normalize(tipoReporte)
+                },
+                cancellationToken: cancellationToken));
+
+        return result.HasValue;
+    }
+
+    public async Task<IReadOnlyList<int>> ObtenerEnviosHoyAsync(IReadOnlyList<int> idsEmpleado, DateTime fechaReferencia, string tipoReporte, CancellationToken cancellationToken = default)
+    {
+        if (idsEmpleado is null || idsEmpleado.Count == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        var idsValidos = idsEmpleado.Where(id => id > 0).Distinct().ToArray();
+        if (idsValidos.Length == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        var logTable = GetLogTableName(tipoReporte);
+        if (!await ExisteTablaLogAsync(tipoReporte, cancellationToken))
+        {
+            return Array.Empty<int>();
+        }
+
+        var sql = $"""
+        SELECT DISTINCT IdEmpleado
+        FROM {logTable}
+        WHERE IdEmpleado IN @IdsEmpleado
+          AND CAST(FechaEnvio AS date) = @FechaReferencia
+          AND TipoReporte = @TipoReporte
+          AND EstadoEnvio = 'ENVIADO';
+        """;
+
+        await using var connection = CreateConnection();
+        var rows = await connection.QueryAsync<int>(
+            new CommandDefinition(
+                sql,
+                new
+                {
+                    IdsEmpleado = idsValidos,
+                    FechaReferencia = fechaReferencia.Date,
+                    TipoReporte = ReporteWhatsappTipos.Normalize(tipoReporte)
+                },
+                cancellationToken: cancellationToken));
+
+        return rows.Distinct().ToList();
+    }
+
     public async Task InsertarLogAsync(ReporteWhatsappLogDto log, CancellationToken cancellationToken = default)
     {
         var logTable = GetLogTableName(log.TipoReporte);

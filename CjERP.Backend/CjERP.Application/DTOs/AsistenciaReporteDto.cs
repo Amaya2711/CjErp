@@ -31,11 +31,17 @@ public sealed class AsistenciaActualizarEstadoMarcacionRequestDto
     public string EstadoMarcacionNuevo { get; set; } = string.Empty;
 }
 
+public sealed class AsistenciaLlamadaAtencionEstadoRequestDto
+{
+    public IReadOnlyList<int> IdsEmpleado { get; set; } = Array.Empty<int>();
+}
+
 public class AsistenciaReportePdfItemDto
 {
     public string Fecha { get; set; } = string.Empty;
     public string Hora { get; set; } = string.Empty;
     public string NombreEmpleado { get; set; } = string.Empty;
+    public string Telefono { get; set; } = string.Empty;
     public string Responsable { get; set; } = string.Empty;
     public string Empresa { get; set; } = string.Empty;
     public string Cliente { get; set; } = string.Empty;
@@ -60,6 +66,7 @@ public class AsistenciaReporteDto
     public string Fecha { get; set; } = string.Empty;
     public string Hora { get; set; } = string.Empty;
     public string NombreEmpleado { get; set; } = string.Empty;
+    public string Telefono { get; set; } = string.Empty;
     public string TipoAprobacion { get; set; } = string.Empty;
     public string Responsable { get; set; } = string.Empty;
     public string Estado { get; set; } = string.Empty;

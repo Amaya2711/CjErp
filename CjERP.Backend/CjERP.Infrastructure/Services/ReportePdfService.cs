@@ -357,6 +357,10 @@ public sealed class ReportePdfService : IReportePdfService
         var primaryItem = items.FirstOrDefault();
         var diferenciaHoras = primaryItem?.DiferenciaHoras ?? 0m;
         var horasLaborales = primaryItem?.TotalHorasLaborales ?? 0m;
+        var horasRegistradas = items.Sum(item => item.TotalHoras);
+        var cumplimiento = horasLaborales <= 0m
+            ? 0m
+            : Math.Round((horasRegistradas * 100m) / horasLaborales, 2);
         var empleadoNombre = EmptyIfMissing(primaryItem?.NombreEmpleado);
         var responsable = EmptyIfMissing(primaryItem?.Responsable);
         var empresa = EmptyIfMissing(primaryItem?.Empresa);
@@ -374,92 +378,109 @@ public sealed class ReportePdfService : IReportePdfService
 
                 page.Header().Column(header =>
                 {
-                    header.Spacing(12);
+                    header.Spacing(10);
 
                     header.Item().Row(row =>
                     {
                         row.RelativeItem().Column(info =>
                         {
-                            info.Item().Text("Llamada de atencion").Bold().FontSize(22).FontColor("#B42318");
-                            info.Item().Text("Incumplimiento de jornada laboral").SemiBold().FontColor("#7A271A");
-                            info.Item().Text($"Periodo evaluado: {request.FechaInicio} - {request.FechaFin}").FontColor(Colors.Grey.Darken2);
+                            info.Item().Text("NOTIFICACION").Bold().FontSize(22).FontColor("#111827");
+                            info.Item().Text("Incumplimiento de Horario de Trabajo").SemiBold().FontSize(11).FontColor("#7A271A");
                         });
 
-                        row.ConstantItem(170).AlignRight().Column(meta =>
+                        row.ConstantItem(180).AlignRight().Column(meta =>
                         {
-                            meta.Item().Text($"Emitido: {DateTime.Now:dd/MM/yyyy HH:mm}");
-                            meta.Item().Text($"Empleado ID: {primaryItem?.IdEmpleado?.ToString(CultureInfo.InvariantCulture) ?? "-"}");
+                            meta.Item().Text(text =>
+                            {
+                                text.Span("Emitido: ").FontSize(9).FontColor("#667085");
+                                text.Span(DateTime.Now.ToString("dd/MM/yyyy HH:mm")).Bold().FontSize(10).FontColor("#111827");
+                            });
+                            meta.Item().Text(text =>
+                            {
+                                text.Span("Empleado ID: ").FontSize(9).FontColor("#667085");
+                                text.Span(primaryItem?.IdEmpleado?.ToString(CultureInfo.InvariantCulture) ?? "-").Bold().FontSize(10).FontColor("#111827");
+                            });
+                            meta.Item().Text(text =>
+                            {
+                                text.Span("Período: ").FontSize(9).FontColor("#667085");
+                                text.Span($"{request.FechaInicio} - {request.FechaFin}").Bold().FontSize(10).FontColor("#111827");
+                            });
                         });
                     });
 
-                    header.Item().Background("#FFF1F3").Border(1).BorderColor("#FECDD3").Padding(12).Column(info =>
-                    {
-                        info.Spacing(4);
-                        info.Item().Text($"Empleado: {empleadoNombre}").SemiBold();
-                        info.Item().Text($"Responsable: {responsable}");
-                        info.Item().Text($"Empresa: {empresa}");
-                        info.Item().Text($"Cliente: {cliente}");
-                        info.Item().Text($"Area: {area}");
-                        info.Item().Text($"Ubicacion: {ubicacion}");
-                    });
                 });
 
                 page.Content().Column(column =>
                 {
-                    column.Spacing(14);
+                    column.Spacing(12);
+
+                    column.Item().Background(Colors.White).Border(1).BorderColor(Colors.Grey.Lighten2).Padding(12).Column(card =>
+                    {
+                        card.Spacing(8);
+                        card.Item().Text("Datos generales").Bold().FontSize(12).FontColor("#123B5D");
+
+                        card.Item().Row(row =>
+                        {
+                            row.RelativeItem().Column(left =>
+                            {
+                                left.Spacing(3);
+                                left.Item().Text(text =>
+                                {
+                                    text.Span("Empleado: ").FontSize(9).Bold().FontColor("#344054");
+                                    text.Span(empleadoNombre).FontSize(10).FontColor("#111827");
+                                });
+                                left.Item().Text(text =>
+                                {
+                                    text.Span("Responsable: ").FontSize(9).Bold().FontColor("#344054");
+                                    text.Span(responsable).FontSize(10).FontColor("#111827");
+                                });
+                                left.Item().Text(text =>
+                                {
+                                    text.Span("Empresa: ").FontSize(9).Bold().FontColor("#344054");
+                                    text.Span(empresa).FontSize(10).FontColor("#111827");
+                                });
+                            });
+
+                            row.RelativeItem().Column(right =>
+                            {
+                                right.Spacing(3);
+                                right.Item().Text(text =>
+                                {
+                                    text.Span("Cliente: ").FontSize(9).Bold().FontColor("#344054");
+                                    text.Span(cliente).FontSize(10).FontColor("#111827");
+                                });
+                                right.Item().Text(text =>
+                                {
+                                    text.Span("Área: ").FontSize(9).Bold().FontColor("#344054");
+                                    text.Span(area).FontSize(10).FontColor("#111827");
+                                });
+                                right.Item().Text(text =>
+                                {
+                                    text.Span("Ubicación: ").FontSize(9).Bold().FontColor("#344054");
+                                    text.Span(ubicacion).FontSize(10).FontColor("#111827");
+                                });
+                            });
+                        });
+                    });
 
                     column.Item().Background("#FEF3F2").Border(1).BorderColor("#F04438").Padding(12).Column(card =>
                     {
                         card.Spacing(5);
-                        card.Item().Text("Se comunica la presente llamada de atencion debido a que no se viene cumpliendo con las horas laborales establecidas para el periodo evaluado.")
+                        card.Item().Text("Se comunica la presente llamada de atención debido a que no se viene cumpliendo con las horas laborales establecidas para el período evaluado.")
                             .FontColor("#7A271A")
                             .SemiBold();
-                        card.Item().Text($"Diferencia acumulada del periodo: {diferenciaHoras:0.00} h | Horas laborales del periodo: {horasLaborales:0.00} h")
-                            .FontColor("#912018");
                     });
 
-                    column.Item().Background(Colors.White).Border(1).BorderColor(Colors.Grey.Lighten2).Padding(12).Column(card =>
+                    column.Item().Row(row =>
                     {
-                        card.Spacing(10);
-                        card.Item().Text("Detalle diario observado").Bold().FontSize(12);
-
-                        if (items.Count == 0)
-                        {
-                            card.Item().Background("#F8FAFC").Border(1).BorderColor("#CBD5E1").Padding(10).Text("No existen registros diarios para mostrar.");
-                            return;
-                        }
-
-                        card.Item().Table(table =>
-                        {
-                            table.ColumnsDefinition(columns =>
-                            {
-                                columns.RelativeColumn(1.1f);
-                                columns.RelativeColumn(1f);
-                                columns.RelativeColumn(1.4f);
-                                columns.RelativeColumn(0.8f);
-                                columns.RelativeColumn(0.8f);
-                            });
-
-                            table.Header(header =>
-                            {
-                                header.Cell().Element(CellHeader).Text("Fecha");
-                                header.Cell().Element(CellHeader).AlignRight().Text("Horas trabajadas");
-                                header.Cell().Element(CellHeader).Text("Estado asistencia");
-                                header.Cell().Element(CellHeader).Text("Entrada");
-                                header.Cell().Element(CellHeader).Text("Salida");
-                            });
-
-                            foreach (var item in items)
-                            {
-                                var fechaConDia = BuildFechaConDiaLabel(item.Fecha);
-                                table.Cell().Element(CellBody).Text(EmptyIfMissing(fechaConDia));
-                                table.Cell().Element(CellBody).AlignRight().Text($"{item.TotalHoras:0.00} h");
-                                table.Cell().Element(CellBody).Text(EmptyIfMissing(item.EstadoMarcacionTexto));
-                                table.Cell().Element(CellBody).Text(EmptyIfMissing(item.Hora));
-                                table.Cell().Element(CellBody).Text(EmptyIfMissing(item.Salida));
-                            }
-                        });
+                        row.Spacing(8);
+                        row.RelativeItem().Element(c => RenderCallAttentionMetricCard(c, "HORAS REQUERIDAS", $"{horasLaborales:0.00} h", "#2563EB", "#FFFFFF", centerValue: true));
+                        row.RelativeItem().Element(c => RenderCallAttentionMetricCard(c, "HORAS REGISTRADAS", $"{horasRegistradas:0.00} h", "#027A48", "#FFFFFF", centerValue: true));
+                        row.RelativeItem().Element(c => RenderCallAttentionMetricCard(c, "DIFERENCIA", $"{diferenciaHoras:0.00} h", "#B42318", "#FFFFFF", centerValue: true));
+                        row.RelativeItem().Element(c => RenderCallAttentionMetricCard(c, "CUMPLIMIENTO", $"{cumplimiento:0.00} %", "#B42318", "#FFFFFF", centerValue: true));
                     });
+
+                    column.Item().Element(c => RenderDetalleDiarioObservadoSemanal(c, request, items));
 
                     column.Item().Background("#F8FAFC").Border(1).BorderColor("#D0D5DD").Padding(12).Text(text =>
                     {
@@ -478,6 +499,248 @@ public sealed class ReportePdfService : IReportePdfService
             });
         });
     }
+
+    private static void RenderCallAttentionMetricCard(IContainer container, string title, string value, string accentColor, string backgroundColor, bool centerValue = false)
+    {
+        container.Background(backgroundColor).Border(1).BorderColor("#D9E2EC").Padding(10).Column(card =>
+        {
+            card.Spacing(4);
+            card.Item().AlignCenter().Text(title).SemiBold().FontSize(9).FontColor("#475467");
+            card.Item().AlignCenter().Text(value).Bold().FontSize(18).FontColor(accentColor);
+        });
+    }
+
+    private static void RenderDetalleDiarioObservadoSemanal(
+        IContainer container,
+        AsistenciaReportePdfRequestDto request,
+        IReadOnlyList<AsistenciaReportePdfItemDto> items)
+    {
+        var cultureEsPe = new CultureInfo("es-PE");
+
+        container.Background(Colors.White).Border(1).BorderColor(Colors.Grey.Lighten2).Padding(12).Column(card =>
+        {
+            card.Spacing(10);
+            card.Item().Text("DETALLE DIARIO OBSERVADO").Bold().FontSize(12).FontColor("#0F172A");
+
+            card.Item().Row(legend =>
+            {
+                legend.Spacing(18);
+                legend.ConstantItem(110).Row(item =>
+                {
+                    item.ConstantItem(6).Height(6).Background("#16A34A").AlignMiddle();
+                    item.ConstantItem(5);
+                    item.RelativeItem().Text("PRESENTE").FontSize(8).FontColor("#166534").SemiBold();
+                });
+
+                legend.ConstantItem(145).Row(item =>
+                {
+                    item.ConstantItem(6).Height(6).Background("#2563EB").AlignMiddle();
+                    item.ConstantItem(5);
+                    item.RelativeItem().Text("DESCANSO MÉDICO").FontSize(8).FontColor("#1D4ED8").SemiBold();
+                });
+
+                legend.RelativeItem().Row(item =>
+                {
+                    item.ConstantItem(6).Height(6).Background("#64748B").AlignMiddle();
+                    item.ConstantItem(5);
+                    item.RelativeItem().Text("SÁBADO / DOMINGO / FERIADO").FontSize(8).FontColor("#64748B").SemiBold();
+                });
+            });
+
+            if (items.Count == 0)
+            {
+                card.Item().Background("#F8FAFC").Border(1).BorderColor("#CBD5E1").Padding(10).Text("No existen registros diarios para mostrar.");
+                return;
+            }
+
+            var groups = BuildDetalleSemanalGroups(request, items);
+            foreach (var group in groups)
+            {
+                card.Item().Background("#F8FAFC").Border(1).BorderColor("#D0D5DD").Column(weekCard =>
+                {
+                    weekCard.Item().Background("#EEF2FF").PaddingVertical(6).PaddingHorizontal(10).Row(weekHeader =>
+                    {
+                        weekHeader.RelativeItem().Text(group.Label).Bold().FontSize(9).FontColor("#1E293B");
+                        weekHeader.ConstantItem(120).AlignRight().Text($"Subtotal semana: {group.SubtotalHoras:0.00} h").Bold().FontSize(9).FontColor("#1E293B");
+                    });
+
+                    weekCard.Item().Table(table =>
+                    {
+                        table.ColumnsDefinition(columns =>
+                        {
+                            columns.RelativeColumn(1.15f);
+                            columns.RelativeColumn(1.0f);
+                            columns.RelativeColumn(0.9f);
+                            columns.RelativeColumn(1.5f);
+                            columns.RelativeColumn(1.2f);
+                            columns.RelativeColumn(1.2f);
+                        });
+
+                        table.Header(header =>
+                        {
+                            header.Cell().Element(CallAttentionTableHeader).Text("FECHA");
+                            header.Cell().Element(CallAttentionTableHeader).Text("DÍA");
+                            header.Cell().Element(CallAttentionTableHeader).AlignRight().Text("HORAS");
+                            header.Cell().Element(CallAttentionTableHeader).Text("ESTADO");
+                            header.Cell().Element(CallAttentionTableHeader).AlignCenter().Text("ENTRADA");
+                            header.Cell().Element(CallAttentionTableHeader).AlignCenter().Text("SALIDA");
+                        });
+
+                        foreach (var item in group.Items)
+                        {
+                            var fecha = ParseDisplayDate(item.Fecha);
+                            var fechaTexto = fecha.HasValue ? fecha.Value.ToString("dd/MM/yyyy") : EmptyIfMissing(item.Fecha);
+                            var diaTexto = fecha.HasValue
+                                ? cultureEsPe.TextInfo.ToTitleCase(fecha.Value.ToString("dddd", cultureEsPe))
+                                : BuildDayNameLabel(item.Fecha);
+                            var (estadoColor, estadoBackground) = GetCallAttentionStateStyle(item.EstadoMarcacionTexto);
+                            var estadoTexto = NormalizeCallAttentionState(item.EstadoMarcacionTexto);
+
+                            table.Cell().Element(CallAttentionTableBody).Text(fechaTexto);
+                            table.Cell().Element(CallAttentionTableBody).Text(diaTexto);
+                            table.Cell().Element(CallAttentionTableBody).AlignRight().Text($"{item.TotalHoras:0.00} h").SemiBold();
+                            table.Cell().Element(c => CallAttentionStateCell(c, estadoColor, estadoBackground)).AlignCenter().Text(estadoTexto).SemiBold();
+                            table.Cell().Element(CallAttentionTableBody).AlignCenter().Text(EmptyIfMissing(item.Hora));
+                            table.Cell().Element(CallAttentionTableBody).AlignCenter().Text(EmptyIfMissing(item.Salida));
+                        }
+                    });
+                });
+            }
+        });
+    }
+
+    private static IReadOnlyList<WeeklyCallAttentionGroup> BuildDetalleSemanalGroups(
+        AsistenciaReportePdfRequestDto request,
+        IReadOnlyList<AsistenciaReportePdfItemDto> items)
+    {
+        var culture = new CultureInfo("es-PE");
+        var firstParsedDate = items
+            .Select(x => ParseDisplayDate(x.Fecha))
+            .FirstOrDefault(x => x.HasValue);
+        var startDate = ParseDisplayDate(request.FechaInicio)
+            ?? firstParsedDate.GetValueOrDefault(DateTime.Today);
+        var endParsedDate = items
+            .Select(x => ParseDisplayDate(x.Fecha))
+            .Where(x => x.HasValue)
+            .Select(x => x.GetValueOrDefault())
+            .DefaultIfEmpty(startDate)
+            .Max();
+        var endDate = ParseDisplayDate(request.FechaFin) ?? endParsedDate;
+
+        return items
+            .Select(item =>
+            {
+                var parsedDate = ParseDisplayDate(item.Fecha) ?? startDate;
+                var weekIndex = Math.Max(0, (int)Math.Floor((parsedDate.Date - startDate.Date).TotalDays / 7d));
+                var weekStart = startDate.Date.AddDays(weekIndex * 7);
+                var weekEnd = weekStart.AddDays(6);
+                if (weekEnd > endDate.Date)
+                {
+                    weekEnd = endDate.Date;
+                }
+
+                return new
+                {
+                    Item = item,
+                    WeekIndex = weekIndex,
+                    ParsedDate = parsedDate,
+                    WeekStart = weekStart,
+                    WeekEnd = weekEnd
+                };
+            })
+            .OrderBy(x => x.ParsedDate)
+            .ThenBy(x => x.Item.Hora)
+            .GroupBy(x => x.WeekIndex)
+            .Select(group =>
+            {
+                var first = group.First();
+                return new WeeklyCallAttentionGroup(
+                    WeekNumber: group.Key + 1,
+                    Label: BuildWeekLabel(group.Key + 1, first.WeekStart, first.WeekEnd, culture),
+                    SubtotalHoras: group.Sum(x => x.Item.TotalHoras),
+                    Items: group.Select(x => x.Item)
+                        .OrderBy(x => ParseDisplayDate(x.Fecha) ?? DateTime.MaxValue)
+                        .ThenBy(x => x.Hora)
+                        .ToList());
+            })
+            .ToList();
+    }
+
+    private static string BuildWeekLabel(int weekNumber, DateTime weekStart, DateTime weekEnd, CultureInfo culture)
+    {
+        var startMonth = culture.DateTimeFormat.GetAbbreviatedMonthName(weekStart.Month).Replace(".", string.Empty).ToLowerInvariant();
+        var endMonth = culture.DateTimeFormat.GetAbbreviatedMonthName(weekEnd.Month).Replace(".", string.Empty).ToLowerInvariant();
+        var range = weekStart.Month == weekEnd.Month
+            ? $"{weekStart:dd}–{weekEnd:dd} {startMonth}"
+            : $"{weekStart:dd} {startMonth}–{weekEnd:dd} {endMonth}";
+
+        return $"Semana {weekNumber} | {range}";
+    }
+
+    private static string BuildDayNameLabel(string? value)
+    {
+        var parsed = ParseDisplayDate(value);
+        if (!parsed.HasValue)
+        {
+            return "-";
+        }
+
+        var culture = new CultureInfo("es-PE");
+        return culture.TextInfo.ToTitleCase(parsed.Value.ToString("dddd", culture));
+    }
+
+    private static (string Color, string Background) GetCallAttentionStateStyle(string? state)
+    {
+        var normalized = NormalizeCallAttentionState(state);
+
+        if (normalized.StartsWith("PRESENTE", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("#166534", "#EAF7EE");
+        }
+
+        if (normalized.Contains("DESCANSO", StringComparison.OrdinalIgnoreCase) || normalized.Contains("MEDICO", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("#1D4ED8", "#EAF1FF");
+        }
+
+        if (normalized is "SABADO" or "DOMINGO" or "FERIADO")
+        {
+            return ("#475467", "#F2F4F7");
+        }
+
+        if (normalized.Contains("FALTA", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("#B42318", "#FEF3F2");
+        }
+
+        return ("#0F172A", "#F8FAFC");
+    }
+
+    private static string NormalizeCallAttentionState(string? state)
+    {
+        var text = EmptyIfMissing(state).ToUpperInvariant();
+        text = text.Replace('Á', 'A').Replace('É', 'E').Replace('Í', 'I').Replace('Ó', 'O').Replace('Ú', 'U');
+        text = text.Replace("  ", " ").Trim();
+        return text;
+    }
+
+    private static IContainer CallAttentionTableHeader(IContainer container) =>
+        container.Background("#1F2A44").BorderBottom(1).BorderColor("#D0D5DD").PaddingVertical(7).PaddingHorizontal(6)
+            .DefaultTextStyle(x => x.FontColor(Colors.White).Bold().FontSize(8));
+
+    private static IContainer CallAttentionTableBody(IContainer container) =>
+        container.BorderBottom(1).BorderColor("#E5E7EB").PaddingVertical(6).PaddingHorizontal(6)
+            .DefaultTextStyle(x => x.FontSize(8).FontColor("#111827"));
+
+    private static IContainer CallAttentionStateCell(IContainer container, string color, string background) =>
+        container.Background(background).BorderBottom(1).BorderColor("#E5E7EB").PaddingVertical(6).PaddingHorizontal(6)
+            .DefaultTextStyle(x => x.FontSize(8).FontColor(color));
+
+    private sealed record WeeklyCallAttentionGroup(
+        int WeekNumber,
+        string Label,
+        decimal SubtotalHoras,
+        IReadOnlyList<AsistenciaReportePdfItemDto> Items);
 
     private static Document BuildGerencialDocument(
         ReporteWhatsappEmpleadoDto empleadoDestino,

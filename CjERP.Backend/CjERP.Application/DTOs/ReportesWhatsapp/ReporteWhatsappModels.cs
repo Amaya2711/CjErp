@@ -7,6 +7,7 @@ public static class ReporteWhatsappTipos
     public const string Operativo = "ASISTENCIA_WUP";
     public const string Gerencial = "ASISTENCIA_WUP_GERENCIAL";
     public const string Boleta = "PLANILLA_BOLETA_WUP";
+    public const string LlamadaAtencionAsistencia = "ASISTENCIA_LLAMADA_ATENCION";
 
     public static string Normalize(string? value)
     {
@@ -20,6 +21,14 @@ public static class ReporteWhatsappTipos
             string.Equals(value?.Trim(), Gerencial, StringComparison.OrdinalIgnoreCase))
         {
             return Gerencial;
+        }
+
+        if (string.Equals(value?.Trim(), "llamada_atencion", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value?.Trim(), "llamada-atencion", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value?.Trim(), "llamada atencion", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value?.Trim(), LlamadaAtencionAsistencia, StringComparison.OrdinalIgnoreCase))
+        {
+            return LlamadaAtencionAsistencia;
         }
 
         return Operativo;
@@ -204,6 +213,7 @@ public sealed class ReporteWhatsappAsistenciaItemDto
     public int? IdEstado { get; set; }
     public string Fecha { get; set; } = string.Empty;
     public string NombreEmpleado { get; set; } = string.Empty;
+    public string Telefono { get; set; } = string.Empty;
     public string Responsable { get; set; } = string.Empty;
     public string Cliente { get; set; } = string.Empty;
     public string Area { get; set; } = string.Empty;
@@ -272,6 +282,7 @@ public sealed class ReporteWhatsappSendResponseDto
     public int StatusCode { get; set; }
     public string ResponseBody { get; set; } = string.Empty;
     public string ErrorMessage { get; set; } = string.Empty;
+    public string DebugPayloadJson { get; set; } = string.Empty;
 }
 
 public sealed class ReporteWhatsappManualDestinatarioDto

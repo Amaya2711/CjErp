@@ -34,6 +34,7 @@ public sealed class WupService : IWupService
         var token = await _wupAuthService.ObtenerTokenAsync(cancellationToken);
         var requestJson = JsonSerializer.Serialize(request);
         var sendUri = _settings.BuildRequestUri(_settings.EnviarAdjuntoEndpoint);
+        var visualizationPayloadJson = JsonSerializer.Serialize(BuildVisualizationPayload(request, sendUri));
 
         if (string.IsNullOrWhiteSpace(token))
         {
@@ -48,7 +49,8 @@ public sealed class WupService : IWupService
                 Success = false,
                 StatusCode = 401,
                 ResponseBody = string.Empty,
-                ErrorMessage = "No se pudo autenticar contra WUP antes del envio. Revise WupSettings:LoginEndpoint, WupSettings:Usuario, WupSettings:Password y la respuesta del endpoint de login."
+                ErrorMessage = "No se pudo autenticar contra WUP antes del envio. Revise WupSettings:LoginEndpoint, WupSettings:Usuario, WupSettings:Password y la respuesta del endpoint de login.",
+                DebugPayloadJson = visualizationPayloadJson
             };
         }
 
@@ -59,20 +61,35 @@ public sealed class WupService : IWupService
 
         httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
+        _logger.LogInformation(
+            "[WUP] Payload post-token para envio. Payload={Payload}",
+            visualizationPayloadJson);
+
         try
         {
             var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
             var success = response.IsSuccessStatusCode && IsProviderDeliveryConfirmed(request, body);
 
+            _logger.LogInformation(
+                "[WUP] Respuesta envio adjunto. Url={Url}, Codigo={StatusCode}, Telefono={Telefono}, Archivo={Archivo}, Modo={Modo}, Success={Success}, Body={Body}",
+                sendUri,
+                (int)response.StatusCode,
+                request.Telefono,
+                request.NombreArchivo,
+                request.Modo,
+                success,
+                body);
+
             if (!success)
             {
                 _logger.LogWarning(
-                    "[WUP] Envio fallido. Url={Url}, Codigo={StatusCode}, Telefono={Telefono}, Archivo={Archivo}, ContenidoLength={ContenidoLength}, Body={Body}",
+                    "[WUP] Envio fallido. Url={Url}, Codigo={StatusCode}, Telefono={Telefono}, Archivo={Archivo}, Modo={Modo}, ContenidoLength={ContenidoLength}, Body={Body}",
                     sendUri,
                     (int)response.StatusCode,
                     request.Telefono,
                     request.NombreArchivo,
+                    request.Modo,
                     request.Contenido?.Length ?? 0,
                     body);
             }
@@ -82,6 +99,7 @@ public sealed class WupService : IWupService
                 Success = success,
                 StatusCode = (int)response.StatusCode,
                 ResponseBody = body,
+                DebugPayloadJson = visualizationPayloadJson,
                 ErrorMessage = success
                     ? string.Empty
                     : BuildErrorMessage((int)response.StatusCode, sendUri, body)
@@ -95,9 +113,28 @@ public sealed class WupService : IWupService
                 Success = false,
                 StatusCode = 0,
                 ResponseBody = string.Empty,
+                DebugPayloadJson = visualizationPayloadJson,
                 ErrorMessage = $"Error llamando WUP en {sendUri}: {ex.Message}"
             };
         }
+    }
+
+    private static object BuildVisualizationPayload(ReporteWhatsappSendRequestDto request, Uri sendUri)
+    {
+        var tipo = string.IsNullOrWhiteSpace(request.Contenido) && string.IsNullOrWhiteSpace(request.NombreArchivo)
+            ? "mensaje"
+            : "adjunto";
+
+        return new
+        {
+            endpoint = sendUri.ToString(),
+            numero = request.Telefono,
+            mensaje = request.Mensaje,
+            tipo,
+            modo = request.Modo,
+            nombreArchivo = request.NombreArchivo,
+            contenidoLength = request.Contenido?.Length ?? 0
+        };
     }
 
     private static bool IsProviderDeliveryConfirmed(ReporteWhatsappSendRequestDto request, string responseBody)

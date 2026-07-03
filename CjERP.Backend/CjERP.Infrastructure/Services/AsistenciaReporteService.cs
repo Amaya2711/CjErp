@@ -1,20 +1,27 @@
 using System.Data;
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using CjERP.Application.DTOs;
 using CjERP.Application.DTOs.ReportesWhatsapp;
+using CjERP.Application.Interfaces.Repositories;
 using CjERP.Application.Interfaces.Services;
 using Dapper;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace CjERP.Infrastructure.Services;
 
 public class AsistenciaReporteService : IAsistenciaReporteService
 {
+    private const string NotificacionAsistenciaFilePrefix = "notificacion_asistencia";
     private const string ReporteSp = "dbo.RptAsistenciaFechas";
     private const string UpdateEstadoMarcacionSp = "dbo.sp_Asistencia_ActualizarEstadoEmpleado";
     private const decimal MissingOrIncompleteHours = 9.6m;
+    private static readonly TimeSpan WupSendTimeout = TimeSpan.FromSeconds(30);
+    private const int WupMaxAttempts = 2;
+    private const int WupRetryDelaySeconds = 2;
 
     private static readonly HashSet<string> PresentStates = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -33,16 +40,25 @@ public class AsistenciaReporteService : IAsistenciaReporteService
 
     private readonly IConfiguration _configuration;
     private readonly IReportePdfService _reportePdfService;
+    private readonly IReporteRepository _reporteRepository;
     private readonly IAuditoriaCambiosService _auditoriaCambiosService;
+    private readonly IWupService _wupService;
+    private readonly ILogger<AsistenciaReporteService> _logger;
 
     public AsistenciaReporteService(
         IConfiguration configuration,
         IReportePdfService reportePdfService,
-        IAuditoriaCambiosService auditoriaCambiosService)
+        IReporteRepository reporteRepository,
+        IAuditoriaCambiosService auditoriaCambiosService,
+        IWupService wupService,
+        ILogger<AsistenciaReporteService> logger)
     {
         _configuration = configuration;
         _reportePdfService = reportePdfService;
+        _reporteRepository = reporteRepository;
         _auditoriaCambiosService = auditoriaCambiosService;
+        _wupService = wupService;
+        _logger = logger;
     }
 
     public async Task<IEnumerable<AsistenciaReporteDto>> BuscarAsync(
@@ -50,7 +66,9 @@ public class AsistenciaReporteService : IAsistenciaReporteService
         CancellationToken cancellationToken = default)
     {
         var rows = await QueryReporteRowsAsync(request.FechaInicio, request.FechaFin, cancellationToken);
-        return rows.Select(MapRow).ToList();
+        var mapped = rows.Select(MapRow).ToList();
+        await EnrichPhonesAsync(mapped, item => item.IdEmpleado, (item, phone) => item.Telefono = phone, cancellationToken);
+        return mapped;
     }
 
     public async Task<byte[]> GenerarPdfGerencialAsync(
@@ -61,6 +79,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
 
         var rows = await QueryReporteRowsAsync(request.FechaInicio, request.FechaFin, cancellationToken);
         var detalle = rows.Select(MapPdfRow).ToList();
+        await EnrichPhonesAsync(detalle, item => item.IdEmpleado, (item, phone) => item.Telefono = phone, cancellationToken);
 
         var periodo = new ReporteWhatsappPeriodoDto
         {
@@ -94,10 +113,207 @@ public class AsistenciaReporteService : IAsistenciaReporteService
 
     public Task<byte[]> GenerarPdfEmpleadoLlamadaAtencionAsync(
         AsistenciaReportePdfRequestDto request,
+        string usuarioEjecucion,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        return GenerarPdfEmpleadoLlamadaAtencionInternoAsync(request, usuarioEjecucion, cancellationToken);
+    }
+
+    public async Task<ReporteWhatsappSendResponseDto> EnviarPdfEmpleadoLlamadaAtencionAsync(
+        AsistenciaReportePdfRequestDto request,
+        string usuarioEjecucion,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var itemPrincipal = request.Items.FirstOrDefault();
+
+        if (itemPrincipal is null)
+        {
+            throw new InvalidOperationException("No se pudo identificar el empleado para enviar la llamada de atencion.");
+        }
+
+        var telefonoNormalizado = NormalizePhone(itemPrincipal.Telefono);
+        if (string.IsNullOrWhiteSpace(telefonoNormalizado))
+        {
+            throw new InvalidOperationException("El empleado seleccionado no tiene un telefono valido para enviar por WUP.");
+        }
+
+        var pdfBytes = await GenerarPdfEmpleadoLlamadaAtencionInternoAsync(request, usuarioEjecucion, cancellationToken);
+
+        var nombreArchivo = $"{NotificacionAsistenciaFilePrefix}_{request.FechaInicio.Replace("/", string.Empty)}_{request.FechaFin.Replace("/", string.Empty)}.pdf";
+        var contenidoBase64 = Convert.ToBase64String(pdfBytes);
+        if (string.IsNullOrWhiteSpace(contenidoBase64))
+        {
+            throw new InvalidOperationException("No se pudo convertir el PDF a Base64 para enviar por WUP.");
+        }
+
+        var sendRequest = new ReporteWhatsappSendRequestDto
+        {
+            NombreArchivo = nombreArchivo,
+            Mensaje = "Adjuntamos su reporte de llamada de atencion por asistencia.",
+            Modo = "wsp",
+            Telefono = telefonoNormalizado,
+            Contenido = contenidoBase64
+        };
+
+        _logger.LogInformation(
+            "[AsistenciaWUP] Payload WUP generado para llamada de atencion. Payload={Payload}",
+            JsonSerializer.Serialize(sendRequest));
+
+        var response = await ExecuteWithRetryAsync(
+            async sendToken =>
+            {
+                using var attemptTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(sendToken);
+                attemptTimeoutCts.CancelAfter(WupSendTimeout);
+                return await _wupService.EnviarAdjuntoAsync(sendRequest, attemptTimeoutCts.Token);
+            },
+            WupMaxAttempts,
+            cancellationToken);
+
+        _logger.LogInformation(
+            "[AsistenciaWUP] Resultado envio llamada de atencion. Empleado={Empleado}, Telefono={Telefono}, Success={Success}, StatusCode={StatusCode}, Error={Error}, ResponseBody={ResponseBody}",
+            itemPrincipal.NombreEmpleado?.Trim() ?? string.Empty,
+            telefonoNormalizado,
+            response.Success,
+            response.StatusCode,
+            response.ErrorMessage,
+            response.ResponseBody);
+
+        var log = new ReporteWhatsappLogDto
+        {
+            IdEmpleado = itemPrincipal.IdEmpleado ?? 0,
+            Usuario = itemPrincipal.NombreEmpleado?.Trim() ?? request.Destinatario?.Trim() ?? string.Empty,
+            Telefono = telefonoNormalizado,
+            FechaProceso = ResolveFechaProceso(request.FechaFin),
+            TipoReporte = ReporteWhatsappTipos.LlamadaAtencionAsistencia,
+            EstadoEnvio = response.Success ? "ENVIADO" : "ERROR_ENDPOINT_WUP",
+            MensajeError = response.Success ? string.Empty : (string.IsNullOrWhiteSpace(response.ErrorMessage) ? $"El endpoint WUP respondio {response.StatusCode}." : response.ErrorMessage),
+            FechaEnvio = response.Success ? GetPeruNow() : null,
+            RequestJson = JsonSerializer.Serialize(new
+            {
+                sendRequest.NombreArchivo,
+                sendRequest.Mensaje,
+                sendRequest.Modo,
+                sendRequest.Telefono,
+                contenidoLength = sendRequest.Contenido.Length,
+                pdfBytesLength = pdfBytes.Length
+            }),
+            ResponseJson = response.ResponseBody,
+            NumeroBloque = null,
+            OrdenEnvio = null,
+            TiempoEsperaEntreBloques = null,
+            DuracionEnvioSegundos = null,
+            OrigenEjecucion = "MANUAL",
+            UsuarioEjecucion = string.IsNullOrWhiteSpace(usuarioEjecucion) ? "SISTEMA" : usuarioEjecucion.Trim()
+        };
+
+        await _reporteRepository.InsertarLogAsync(log, cancellationToken);
+        return response;
+    }
+
+    public Task<byte[]> GenerarPdfEmpleadoLlamadaAtencionVistaPreviaAsync(
+        AsistenciaReportePdfRequestDto request,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         return _reportePdfService.GenerarReporteEmpleadoLlamadaAtencionPdfAsync(request, cancellationToken);
+    }
+
+    public Task<bool> ExistePdfLlamadaAtencionEnviadoHoyAsync(
+        int idEmpleado,
+        CancellationToken cancellationToken = default)
+    {
+        if (idEmpleado <= 0)
+        {
+            return Task.FromResult(false);
+        }
+
+        return _reporteRepository.ExisteEnvioHoyAsync(
+            idEmpleado,
+            GetPeruNow().Date,
+            ReporteWhatsappTipos.LlamadaAtencionAsistencia,
+            cancellationToken);
+    }
+
+    public Task<IReadOnlyList<int>> ObtenerPdfLlamadaAtencionEnviadosHoyAsync(
+        IReadOnlyList<int> idsEmpleado,
+        CancellationToken cancellationToken = default)
+    {
+        return _reporteRepository.ObtenerEnviosHoyAsync(
+            idsEmpleado,
+            GetPeruNow().Date,
+            ReporteWhatsappTipos.LlamadaAtencionAsistencia,
+            cancellationToken);
+    }
+
+    private async Task<byte[]> GenerarPdfEmpleadoLlamadaAtencionInternoAsync(
+        AsistenciaReportePdfRequestDto request,
+        string usuarioEjecucion,
+        CancellationToken cancellationToken)
+    {
+        var pdfBytes = await _reportePdfService.GenerarReporteEmpleadoLlamadaAtencionPdfAsync(request, cancellationToken);
+        var itemPrincipal = request.Items.FirstOrDefault();
+
+        if (itemPrincipal is null)
+        {
+            throw new InvalidOperationException("No se pudo identificar el empleado para registrar la llamada de atencion.");
+        }
+
+        var log = new ReporteWhatsappLogDto
+        {
+            IdEmpleado = itemPrincipal.IdEmpleado ?? 0,
+            Usuario = itemPrincipal.NombreEmpleado?.Trim() ?? request.Destinatario?.Trim() ?? string.Empty,
+            Telefono = itemPrincipal.Telefono?.Trim() ?? string.Empty,
+            FechaProceso = ResolveFechaProceso(request.FechaFin),
+            TipoReporte = ReporteWhatsappTipos.LlamadaAtencionAsistencia,
+            EstadoEnvio = "GENERADO",
+            MensajeError = string.Empty,
+            FechaEnvio = null,
+            RequestJson = JsonSerializer.Serialize(request),
+            ResponseJson = JsonSerializer.Serialize(new
+            {
+                pdfGenerado = true,
+                nombreArchivo = $"{NotificacionAsistenciaFilePrefix}_{request.FechaInicio.Replace("/", string.Empty)}_{request.FechaFin.Replace("/", string.Empty)}.pdf"
+            }),
+            NumeroBloque = null,
+            OrdenEnvio = null,
+            TiempoEsperaEntreBloques = null,
+            DuracionEnvioSegundos = null,
+            OrigenEjecucion = "MANUAL",
+            UsuarioEjecucion = string.IsNullOrWhiteSpace(usuarioEjecucion) ? "SISTEMA" : usuarioEjecucion.Trim()
+        };
+
+        await _reporteRepository.InsertarLogAsync(log, cancellationToken);
+        return pdfBytes;
+    }
+
+    private static string? NormalizePhone(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var digits = new string(value.Where(char.IsDigit).ToArray());
+        if (digits.Length == 0)
+        {
+            return null;
+        }
+
+        if (digits.StartsWith("51", StringComparison.Ordinal) && digits.Length == 11)
+        {
+            return digits;
+        }
+
+        if (digits.Length == 9)
+        {
+            return $"51{digits}";
+        }
+
+        return digits;
     }
 
     public async Task<AsistenciaGerencialPdfDto> ObtenerReporteGerencialAsync(
@@ -109,6 +325,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
         var periodo = ResolveExecutivePeriod(request);
         var rows = await QueryReporteRowsAsync(periodo.FechaInicioTexto, periodo.FechaFinTexto, cancellationToken);
         var detalle = rows.Select(MapPdfRow).ToList();
+        await EnrichPhonesAsync(detalle, item => item.IdEmpleado, (item, phone) => item.Telefono = phone, cancellationToken);
 
         if (detalle.Count == 0)
         {
@@ -936,6 +1153,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             Fecha = GetDateString(values, "Fecha", "fecha"),
             Hora = GetTimeString(values, "Hora", "hora", "Fecha", "fecha", "HoraEntrada", "horaEntrada"),
             NombreEmpleado = GetString(values, "nombreempleado", "NombreEmpleado", "nombreEmpleado"),
+            Telefono = GetString(values, "Telefono", "telefono", "Celular", "celular", "TelefonoWup", "telefonoWup"),
             TipoAprobacion = GetString(values, "TipoAprobacion", "tipoAprobacion", "tipo_aprobacion"),
             Responsable = GetString(values, "Responsable", "responsable"),
             Estado = GetString(values, "Estado", "estado"),
@@ -975,6 +1193,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             IdEstado = GetInt(values, "IdEstado", "idEstado", "Id_Estado", "id_estado"),
             Fecha = GetDateDisplayString(values, "Fecha", "fecha"),
             NombreEmpleado = GetString(values, "nombreempleado", "NombreEmpleado", "nombreEmpleado"),
+            Telefono = GetString(values, "Telefono", "telefono", "Celular", "celular", "TelefonoWup", "telefonoWup"),
             Responsable = GetString(values, "Responsable", "responsable"),
             Cliente = GetString(values, "Cliente", "cliente"),
             Area = GetString(values, "Area", "area"),
@@ -996,6 +1215,46 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             Comentario = GetString(values, "Comentario", "comentario"),
             Observacion = GetString(values, "Observacion", "observacion")
         };
+    }
+
+    private async Task EnrichPhonesAsync<T>(
+        List<T> items,
+        Func<T, int?> getIdEmpleado,
+        Action<T, string> setTelefono,
+        CancellationToken cancellationToken)
+    {
+        var idsEmpleado = items
+            .Select(getIdEmpleado)
+            .Where(id => id.HasValue && id.Value > 0)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToArray();
+
+        if (idsEmpleado.Length == 0)
+        {
+            return;
+        }
+
+        var empleados = await _reporteRepository.ObtenerEmpleadosDestinoAsync(ReporteWhatsappTipos.Operativo, cancellationToken);
+        var telefonosPorEmpleado = empleados
+            .Where(item => item.IdEmpleado > 0 && !string.IsNullOrWhiteSpace(item.Telefono))
+            .GroupBy(item => item.IdEmpleado)
+            .ToDictionary(group => group.Key, group => group.First().Telefono.Trim());
+
+        foreach (var item in items)
+        {
+            var idEmpleado = getIdEmpleado(item);
+            if (!idEmpleado.HasValue || idEmpleado.Value <= 0)
+            {
+                continue;
+            }
+
+            if (telefonosPorEmpleado.TryGetValue(idEmpleado.Value, out var telefono) &&
+                !string.IsNullOrWhiteSpace(telefono))
+            {
+                setTelefono(item, telefono);
+            }
+        }
     }
 
     private static string GetDateString(IDictionary<string, object?> values, params string[] keys)
@@ -1209,6 +1468,50 @@ public class AsistenciaReporteService : IAsistenciaReporteService
         }
 
         return 0m;
+    }
+
+    private static async Task<ReporteWhatsappSendResponseDto> ExecuteWithRetryAsync(
+        Func<CancellationToken, Task<ReporteWhatsappSendResponseDto>> action,
+        int maxAttempts,
+        CancellationToken cancellationToken)
+    {
+        ReporteWhatsappSendResponseDto? last = null;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                last = await action(cancellationToken);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                last = new ReporteWhatsappSendResponseDto
+                {
+                    Success = false,
+                    StatusCode = 408,
+                    ResponseBody = string.Empty,
+                    ErrorMessage = $"El envio a WUP supero el tiempo maximo permitido de {WupSendTimeout.TotalSeconds:0} segundos."
+                };
+            }
+
+            if (last.Success)
+            {
+                return last;
+            }
+
+            if (attempt < maxAttempts)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(WupRetryDelaySeconds), cancellationToken);
+            }
+        }
+
+        return last ?? new ReporteWhatsappSendResponseDto
+        {
+            Success = false,
+            ErrorMessage = "No se obtuvo respuesta del servicio WUP."
+        };
     }
 
     private static bool TryGetValue(IDictionary<string, object?> values, string key, out object? value)

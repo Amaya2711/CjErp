@@ -7,6 +7,7 @@ export type AsistenciaReporteItem = {
   fecha: string;
   hora: string;
   nombreEmpleado: string;
+  telefono: string;
   tipoAprobacion: string;
   responsable: string;
   estado: string;
@@ -39,6 +40,7 @@ export type AsistenciaReportePdfItem = {
   fecha: string;
   hora: string;
   nombreEmpleado: string;
+  telefono: string;
   responsable: string;
   empresa?: string;
   cliente?: string;
@@ -70,6 +72,14 @@ export type AsistenciaGerencialPdfRequest = {
   fechaFin?: string;
   usarPeriodoAutomatico?: boolean;
   destinatario?: string;
+};
+
+export type AsistenciaEnviarPdfLlamadaAtencionResponse = {
+  success: boolean;
+  statusCode: number;
+  responseBody: string;
+  errorMessage: string;
+  debugPayloadJson: string;
 };
 
 export type AsistenciaActualizarEstadoMarcacionRequest = {
