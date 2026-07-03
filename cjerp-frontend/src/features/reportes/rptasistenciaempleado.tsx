@@ -1750,6 +1750,7 @@ export default function RptAsistenciaPage() {
             fecha: formatDateLabel(item.fecha),
             hora: item.hora ?? "",
             nombreEmpleado: item.nombreEmpleado,
+            telefono: item.telefono ?? "",
             responsable: item.responsable ?? summary?.responsable ?? "",
             ubicacion: item.ubicacion || summary?.ubicacion || "",
             idEmpleado: item.idEmpleado ?? null,
