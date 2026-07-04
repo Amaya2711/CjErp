@@ -1,4 +1,4 @@
-import React, { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Eye } from "lucide-react";
 import {
@@ -178,7 +178,7 @@ const MISSING_OR_INCOMPLETE_HOURS = 9.6;
 const PRESENT_STATES = new Set(["PRESENTE", "ASISTIO", "OK"]);
 const TARDINESS_STATES = new Set(["TARDANZA", "TARDE"]);
 const CRITICAL_STATES = new Set(["SIN MARCAR", "SIN SALIDA", "SIN ENTRADA", "FALTA"]);
-const SOFT_STATES = new Set(["VACACIONES", "DOMINGO", "SABADO", "SÁBADO"]);
+const SOFT_STATES = new Set(["VACACIONES", "DOMINGO", "SABADO", "SÃBADO"]);
 
 const tableColumns: TableColumn[] = [
   { key: "fecha", label: "Fecha", width: "110px" },
@@ -321,7 +321,7 @@ function getStateVisual(state: string, index = 0): StateVisual {
 }
 
 function toInputDate(date: Date) {
-  // Devuelve la fecha en formato YYYY-MM-DD en zona horaria de Perú
+  // Devuelve la fecha en formato YYYY-MM-DD en zona horaria de PerÃº
   const lima = new Date(date.toLocaleString("en-US", { timeZone: "America/Lima" }));
   const year = lima.getFullYear();
   const month = String(lima.getMonth() + 1).padStart(2, "0");
@@ -704,7 +704,28 @@ const [error, setError] = useState("");
 const [success, setSuccess] = useState("");
 const [busqueda, setBusqueda] = useState("");
 const [activeTab, setActiveTab] = useState<"cuadros" | "gerencial" | "detalle" | "empleado" | "tiempos">("gerencial");
-const [tiemposEstado, setTiemposEstado] = useState("TARDANZA");
+const [tiemposEstado, setTiemposEstado] = useState("FUERA DE HORARIO");
+const [tiemposEmpleadoFiltro, setTiemposEmpleadoFiltro] = useState<string | null>(null);
+const [tiemposResponsableFiltro, setTiemposResponsableFiltro] = useState<string | null>(null);
+const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
+  const [tiemposSort, setTiemposSort] = useState<{
+    key:
+      | "fecha"
+      | "nombreEmpleado"
+      | "responsable"
+      | "hora"
+      | "salida"
+      | "estadoMarcacionTexto"
+      | "totalHoras"
+      | "empresa"
+      | "cliente"
+      | "area"
+      | "ubicacion";
+    direction: "asc" | "desc";
+  }>({
+    key: "fecha",
+    direction: "desc",
+  });
   const [detailDrilldown, setDetailDrilldown] = useState<DetailDrilldown>({
     fecha: null,
     estadoMarcacion: null,
@@ -798,14 +819,17 @@ const [tiemposEstado, setTiemposEstado] = useState("TARDANZA");
     []
   );
 
-  const loadData = async () => {
+  const loadData = async (params?: { fechaInicio?: string; fechaFin?: string }) => {
     setLoading(true);
     setError("");
 
     try {
+      const fechaInicioValue = params?.fechaInicio ?? fechaInicio;
+      const fechaFinValue = params?.fechaFin ?? fechaFin;
+
       const data = await buscarAsistencia({
-        fechaInicio: toApiDate(fechaInicio),
-        fechaFin: toApiDate(fechaFin),
+        fechaInicio: toApiDate(fechaInicioValue),
+        fechaFin: toApiDate(fechaFinValue),
       });
       setRows(Array.isArray(data) ? data : []);
       setDetalleHoraEdits({});
@@ -821,7 +845,7 @@ const [tiemposEstado, setTiemposEstado] = useState("TARDANZA");
 
   useEffect(() => {
     void loadData();
-  }, [fechaFin, fechaInicio]);
+  }, []);
 
   useEffect(() => {
     const navigationState = (location.state as RptAsistenciaReturnState | null) ?? null;
@@ -837,6 +861,11 @@ const [tiemposEstado, setTiemposEstado] = useState("TARDANZA");
     if (navigationState.fechaFin) {
       setFechaFin(navigationState.fechaFin);
     }
+
+    void loadData({
+      fechaInicio: navigationState.fechaInicio ?? fechaInicio,
+      fechaFin: navigationState.fechaFin ?? fechaFin,
+    });
 
     setActiveTab(navigationState.activeTab ?? "gerencial");
     setSelectedEstadoMarcacion(
@@ -898,12 +927,12 @@ const [tiemposEstado, setTiemposEstado] = useState("TARDANZA");
     const estadosBase = buildValueOptions(rows.map((item) => item.estado || item.estadoMarcacionTexto || ""));
     const estadosOrdenados = Array.from(
       new Set([
-        "TARDANZA",
+        "FUERA DE HORARIO",
         ...estadosBase.filter((estado) => estado !== ALL_OPTION),
       ])
     ).sort((left, right) => {
-      if (normalizeText(left) === "TARDANZA") return -1;
-      if (normalizeText(right) === "TARDANZA") return 1;
+      if (normalizeText(left) === "FUERA DE HORARIO") return -1;
+      if (normalizeText(right) === "FUERA DE HORARIO") return 1;
       return left.localeCompare(right, "es");
     });
 
@@ -955,6 +984,33 @@ const [tiemposEstado, setTiemposEstado] = useState("TARDANZA");
     });
   }, [fechaFin, fechaInicio, rows, tiemposEstado]);
 
+  const tiemposDetailRows = useMemo(() => {
+    const filtered = tiemposFilteredRows.filter((item) => {
+      const matchesEmpleado =
+        !tiemposEmpleadoFiltro || normalizeText(item.nombreEmpleado) === normalizeText(tiemposEmpleadoFiltro);
+      const matchesResponsable =
+        !tiemposResponsableFiltro || normalizeText(item.responsable) === normalizeText(tiemposResponsableFiltro);
+
+      return matchesEmpleado && matchesResponsable;
+    });
+
+    return [...filtered].sort((left, right) => {
+      let compared: number;
+      if (tiemposSort.key === "fecha") {
+        compared = compareValues(
+          parseDisplayDate(left.fecha)?.getTime() ?? 0,
+          parseDisplayDate(right.fecha)?.getTime() ?? 0
+        );
+      } else if (tiemposSort.key === "totalHoras") {
+        compared = compareValues(Number(left.totalHoras ?? 0), Number(right.totalHoras ?? 0));
+      } else {
+        compared = compareValues(left[tiemposSort.key], right[tiemposSort.key]);
+      }
+
+      return tiemposSort.direction === "asc" ? compared : -compared;
+    });
+  }, [tiemposEmpleadoFiltro, tiemposFilteredRows, tiemposResponsableFiltro, tiemposSort]);
+
   const tiemposDailySeries = useMemo(() => {
     const byDate = new Map<string, number>();
     tiemposFilteredRows.forEach((item) => {
@@ -968,6 +1024,42 @@ const [tiemposEstado, setTiemposEstado] = useState("TARDANZA");
     }));
   }, [fechaFin, fechaInicio, tiemposFilteredRows]);
 
+  const tiemposEmployeeSeries = useMemo(() => {
+    const byEmployee = new Map<string, { value: number; responsable: string }>();
+
+    tiemposFilteredRows.forEach((item) => {
+      const employeeName = normalizeText(item.nombreEmpleado) || "Sin empleado";
+      const responsable = normalizeText(item.responsable) || "Sin responsable";
+      const current = byEmployee.get(employeeName);
+
+      byEmployee.set(employeeName, {
+        value: (current?.value ?? 0) + 1,
+        responsable: current?.responsable || responsable,
+      });
+    });
+
+    return [...byEmployee.entries()]
+      .map(([name, info]) => ({
+        name,
+        responsable: info.responsable,
+        value: info.value,
+        employeeName: name,
+      }))
+      .sort((left, right) => {
+        const compared = compareValues(right.value, left.value);
+        if (compared !== 0) {
+          return compared;
+        }
+        return compareValues(left.name, right.name);
+      });
+  }, [tiemposFilteredRows]);
+
+  const tiemposViewportHeight = Math.max(
+    420,
+    Math.round((typeof window !== "undefined" ? window.innerHeight : 900) * 0.54)
+  );
+  const tiemposChartPanelHeight = Math.max(180, Math.floor((tiemposViewportHeight - 16) / 2));
+
   const tiemposTrendSeries = useMemo(
     () =>
       tiemposDailySeries.map((item) => ({
@@ -977,38 +1069,8 @@ const [tiemposEstado, setTiemposEstado] = useState("TARDANZA");
     [tiemposDailySeries]
   );
 
-  const tiemposTotals = useMemo(() => {
-    const totalRegistros = tiemposFilteredRows.length;
-    const empleados = new Set(tiemposFilteredRows.map((item) => item.idEmpleado ?? item.nombreEmpleado).filter(Boolean)).size;
-    const totalHoras = tiemposFilteredRows.reduce((sum, item) => sum + item.totalHoras, 0);
-    const promedioHoras = totalRegistros > 0 ? totalHoras / totalRegistros : 0;
-    const totalRango = rows.filter((item) => isWithinSelectedRange(item.fecha, fechaInicio, fechaFin)).length;
-    const participacion = totalRango > 0 ? (totalRegistros / totalRango) * 100 : 0;
-    const diasConRegistros = tiemposDailySeries.filter((item) => item.value > 0).length;
-
-    return {
-      totalRegistros,
-      empleados,
-      totalHoras,
-      promedioHoras,
-      participacion,
-      diasConRegistros,
-    };
-  }, [fechaFin, fechaInicio, rows, tiemposDailySeries, tiemposFilteredRows]);
-
-  const tiemposKpis: KPI[] = useMemo(
-    () => [
-      { label: `Registros ${tiemposEstado === ALL_OPTION ? "" : tiemposEstado}`, value: String(tiemposTotals.totalRegistros), tone: "blue" },
-      { label: "Empleados distintos", value: String(tiemposTotals.empleados), tone: "green" },
-      { label: "Total horas", value: formatDecimal(tiemposTotals.totalHoras, 2), tone: "amber" },
-      { label: "Promedio horas/registro", value: formatDecimal(tiemposTotals.promedioHoras, 2), tone: "slate" },
-      { label: "% del rango", value: `${formatDecimal(tiemposTotals.participacion, 2)}%`, tone: "red" },
-    ],
-    [tiemposEstado, tiemposTotals]
-  );
-
   type TiemposDetailColumn = {
-    key: keyof Pick<AsistenciaReporteItem, "fecha" | "nombreEmpleado" | "responsable" | "empresa" | "cliente" | "area" | "ubicacion" | "hora" | "salida" | "estado" | "estadoMarcacionTexto" | "totalHoras">;
+    key: typeof tiemposSort.key;
     label: string;
     width: string;
     align?: "left" | "center" | "right";
@@ -1018,16 +1080,28 @@ const [tiemposEstado, setTiemposEstado] = useState("TARDANZA");
     { key: "fecha", label: "Fecha", width: "110px" },
     { key: "nombreEmpleado", label: "Empleado", width: "220px" },
     { key: "responsable", label: "Responsable", width: "200px" },
+    { key: "hora", label: "Hora entrada", width: "105px", align: "center" as const },
+    { key: "salida", label: "Salida", width: "105px", align: "center" as const },
+    { key: "totalHoras", label: "Total horas", width: "110px", align: "right" as const },
     { key: "empresa", label: "Empresa", width: "170px" },
     { key: "cliente", label: "Cliente", width: "170px" },
     { key: "area", label: "Area", width: "150px" },
     { key: "ubicacion", label: "Ubicacion", width: "160px" },
-    { key: "hora", label: "Hora entrada", width: "105px", align: "center" as const },
-    { key: "salida", label: "Salida", width: "105px", align: "center" as const },
-    { key: "estado", label: "Estado", width: "150px" },
-    { key: "estadoMarcacionTexto", label: "Estado marcacion", width: "170px" },
-    { key: "totalHoras", label: "Total horas", width: "110px", align: "right" as const },
   ] as const;
+  const tiemposStickyOffsets: Record<(typeof tiemposDetailColumns)[number]["key"], number | null> = {
+    fecha: 0,
+    nombreEmpleado: 110,
+    responsable: 330,
+    hora: 530,
+    salida: null,
+    estadoMarcacionTexto: null,
+    totalHoras: null,
+    empresa: null,
+    cliente: null,
+    area: null,
+    ubicacion: null,
+  };
+  const tiemposStickyLeftKeys = new Set<keyof AsistenciaReporteItem>(["fecha", "nombreEmpleado", "responsable", "hora"]);
 
   const detailRows = useMemo(() => {
     const base = filteredRows.filter((item) => (
@@ -1166,7 +1240,7 @@ const [tiemposEstado, setTiemposEstado] = useState("TARDANZA");
 
     return { states, rows };
   }, [filteredRows]);
-  // <-- Coma agregada aquí si es necesario
+  // <-- Coma agregada aquÃ­ si es necesario
 
   const chartAreaPorEstado = useMemo(() => {
     const states = Array.from(
@@ -1962,7 +2036,7 @@ const [tiemposEstado, setTiemposEstado] = useState("TARDANZA");
         diferenciaOperator: "",
         diferenciaValue: "",
       });
-    setTiemposEstado("TARDANZA");
+    setTiemposEstado("FUERA DE HORARIO");
     setEmployeeGridSort({ key: "total", direction: "desc" });
     setDetailDrilldown({
       fecha: null,
@@ -2125,7 +2199,7 @@ const [tiemposEstado, setTiemposEstado] = useState("TARDANZA");
       XLSX.utils.book_append_sheet(workbook, employeeDetailWorksheet, "x empleado");
     } else if (activeTab === "tiempos") {
       const headers = tiemposDetailColumns.map((col) => col.label);
-      const data = tiemposFilteredRows.map((item) =>
+      const data = tiemposDetailRows.map((item) =>
         tiemposDetailColumns.map((col) => {
           const value = item[col.key];
           if (col.key === "fecha") return formatDateLabel(String(value));
@@ -2260,8 +2334,8 @@ const [tiemposEstado, setTiemposEstado] = useState("TARDANZA");
     });
   };
 
-  // Permite filtrar por responsable o por empleado (para ambos gráficos)
-  // Permite filtrar por responsable o por empleado (para ambos gráficos)
+  // Permite filtrar por responsable o por empleado (para ambos grÃ¡ficos)
+  // Permite filtrar por responsable o por empleado (para ambos grÃ¡ficos)
   const toggleGerencialTopResponsableFilter = (value: string, type: 'responsable' | 'empleado' = 'responsable') => {
     if (type === 'responsable') {
       setGerencialQuickFilters((prev) => ({
@@ -2563,7 +2637,7 @@ const [tiemposEstado, setTiemposEstado] = useState("TARDANZA");
     }
 
     if (filteredEmployeeGridRows.length !== 1) {
-      setError("Para exportar el PDF de prueba debes filtrar un solo empleado en la pestaña x Empleado.");
+      setError("Para exportar el PDF de prueba debes filtrar un solo empleado en la pestaÃ±a x Empleado.");
       return;
     }
 
@@ -3022,81 +3096,83 @@ const [tiemposEstado, setTiemposEstado] = useState("TARDANZA");
         </button>
       </section>
 
-      <section style={styles.filterCardCompact}>
-        <div style={styles.filterGridCompact}>
-          <Field label="Fecha inicio">
-            <input type="date" value={fechaInicio} onChange={(event) => setFechaInicio(event.target.value)} style={styles.input} />
-          </Field>
-          <Field label="Fecha fin">
-            <input type="date" value={fechaFin} onChange={(event) => setFechaFin(event.target.value)} style={styles.input} />
-          </Field>
-          <SelectField
-            label="Nombre empleado"
-            value={frontendFilters.nombreEmpleado}
-            options={filterOptions.nombreEmpleado}
-            onChange={(value) => setFrontendFilters((prev) => ({ ...prev, nombreEmpleado: value }))}
-          />
-          <SelectField
-            label="Ubicacion"
-            value={frontendFilters.ubicacion}
-            options={filterOptions.ubicacion}
-            onChange={(value) => setFrontendFilters((prev) => ({ ...prev, ubicacion: value }))}
-          />
-          <SelectField
-            label="Estado activo"
-            value={frontendFilters.estadoAct}
-            options={filterOptions.estadoAct}
-            onChange={(value) => setFrontendFilters((prev) => ({ ...prev, estadoAct: value }))}
-          />
-          <div style={styles.filterToggleWrap}>
-            <span style={styles.filterMetaText}>
-              {showAdvancedFilters ? `${Math.max(activeFilterCount - primaryFilterCount, 0)} filtros avanzados activos` : `${activeFilterCount} filtros activos`}
-            </span>
-            <button
-              type="button"
-              style={styles.moreFiltersButton}
-              onClick={() => setShowAdvancedFilters((prev) => !prev)}
-            >
-              {showAdvancedFilters ? "Menos filtros" : "Mas filtros"}
-            </button>
+      {activeTab !== "tiempos" ? (
+        <section style={styles.filterCardCompact}>
+          <div style={styles.filterGridCompact}>
+            <Field label="Fecha inicio">
+              <input type="date" value={fechaInicio} onChange={(event) => setFechaInicio(event.target.value)} style={styles.input} />
+            </Field>
+            <Field label="Fecha fin">
+              <input type="date" value={fechaFin} onChange={(event) => setFechaFin(event.target.value)} style={styles.input} />
+            </Field>
+            <SelectField
+              label="Nombre empleado"
+              value={frontendFilters.nombreEmpleado}
+              options={filterOptions.nombreEmpleado}
+              onChange={(value) => setFrontendFilters((prev) => ({ ...prev, nombreEmpleado: value }))}
+            />
+            <SelectField
+              label="Ubicacion"
+              value={frontendFilters.ubicacion}
+              options={filterOptions.ubicacion}
+              onChange={(value) => setFrontendFilters((prev) => ({ ...prev, ubicacion: value }))}
+            />
+            <SelectField
+              label="Estado activo"
+              value={frontendFilters.estadoAct}
+              options={filterOptions.estadoAct}
+              onChange={(value) => setFrontendFilters((prev) => ({ ...prev, estadoAct: value }))}
+            />
+            <div style={styles.filterToggleWrap}>
+              <span style={styles.filterMetaText}>
+                {showAdvancedFilters ? `${Math.max(activeFilterCount - primaryFilterCount, 0)} filtros avanzados activos` : `${activeFilterCount} filtros activos`}
+              </span>
+              <button
+                type="button"
+                style={styles.moreFiltersButton}
+                onClick={() => setShowAdvancedFilters((prev) => !prev)}
+              >
+                {showAdvancedFilters ? "Menos filtros" : "Mas filtros"}
+              </button>
+            </div>
           </div>
-        </div>
 
-        {showAdvancedFilters ? (
-          <div style={styles.filterGridAdvanced}>
-            <SelectField
-              label="Empresa"
-              value={frontendFilters.empresa}
-              options={filterOptions.empresa}
-              onChange={(value) => setFrontendFilters((prev) => ({ ...prev, empresa: value }))}
-            />
-            <SelectField
-              label="Cliente"
-              value={frontendFilters.cliente}
-              options={filterOptions.cliente}
-              onChange={(value) => setFrontendFilters((prev) => ({ ...prev, cliente: value }))}
-            />
-            <MultiSelectField
-              label="Area"
-              values={selectedAreas}
-              options={filterOptions.area.filter((option) => option !== ALL_OPTION)}
-              onChange={setSelectedAreas}
-            />
-            <MultiSelectField
-              label="Estado marcacion"
-              values={selectedEstadoMarcacion}
-              options={filterOptions.estadoMarcacionTexto.filter((option) => option !== ALL_OPTION)}
-              onChange={setSelectedEstadoMarcacion}
-            />
-            <SelectField
-              label="Origen marcacion"
-              value={frontendFilters.origenMarcacion}
-              options={filterOptions.origenMarcacion}
-              onChange={(value) => setFrontendFilters((prev) => ({ ...prev, origenMarcacion: value }))}
-            />
-          </div>
-        ) : null}
-      </section>
+          {showAdvancedFilters ? (
+            <div style={styles.filterGridAdvanced}>
+              <SelectField
+                label="Empresa"
+                value={frontendFilters.empresa}
+                options={filterOptions.empresa}
+                onChange={(value) => setFrontendFilters((prev) => ({ ...prev, empresa: value }))}
+              />
+              <SelectField
+                label="Cliente"
+                value={frontendFilters.cliente}
+                options={filterOptions.cliente}
+                onChange={(value) => setFrontendFilters((prev) => ({ ...prev, cliente: value }))}
+              />
+              <MultiSelectField
+                label="Area"
+                values={selectedAreas}
+                options={filterOptions.area.filter((option) => option !== ALL_OPTION)}
+                onChange={setSelectedAreas}
+              />
+              <MultiSelectField
+                label="Estado marcacion"
+                values={selectedEstadoMarcacion}
+                options={filterOptions.estadoMarcacionTexto.filter((option) => option !== ALL_OPTION)}
+                onChange={setSelectedEstadoMarcacion}
+              />
+              <SelectField
+                label="Origen marcacion"
+                value={frontendFilters.origenMarcacion}
+                options={filterOptions.origenMarcacion}
+                onChange={(value) => setFrontendFilters((prev) => ({ ...prev, origenMarcacion: value }))}
+              />
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       {error ? <div style={styles.errorBanner}>{error}</div> : null}
       {success ? <div style={styles.successBanner}>{success}</div> : null}
@@ -3202,7 +3278,7 @@ const [tiemposEstado, setTiemposEstado] = useState("TARDANZA");
                 {activeTab === "gerencial" ? (false ? (
                   <ChartCard
                     title="Resumen por empleado"
-                    subtitle="Cantidad de registros por empleado según el filtro seleccionado"
+                    subtitle="Cantidad de registros por empleado segÃºn el filtro seleccionado"
                   >
                     <div style={styles.gerencialSummaryToolbar}>
                       <div style={styles.counterPill}>
@@ -3544,15 +3620,28 @@ const [tiemposEstado, setTiemposEstado] = useState("TARDANZA");
                 </span>
               </div>
             </div>
-          </section>
-
-          <section style={styles.kpiGrid}>
-            {tiemposKpis.map((kpi) => (
-              <div key={kpi.label} style={{ ...styles.kpiCard, ...kpiToneStyles[kpi.tone] }}>
-                <span style={styles.kpiLabel}>{kpi.label}</span>
-                <strong style={styles.kpiValue}>{kpi.value}</strong>
+            {tiemposEmpleadoFiltro ? (
+              <div style={{ marginTop: 10 }}>
+                <button
+                  type="button"
+                  style={styles.moreFiltersButton}
+                  onClick={() => setTiemposEmpleadoFiltro(null)}
+                >
+                  Empleado: {tiemposEmpleadoFiltro} x
+                </button>
               </div>
-            ))}
+            ) : null}
+            {tiemposResponsableFiltro ? (
+              <div style={{ marginTop: 10 }}>
+                <button
+                  type="button"
+                  style={styles.moreFiltersButton}
+                  onClick={() => setTiemposResponsableFiltro(null)}
+                >
+                  Responsable: {tiemposResponsableFiltro} x
+                </button>
+              </div>
+            ) : null}
           </section>
 
           <div style={styles.chartGrid}>
@@ -3560,21 +3649,7 @@ const [tiemposEstado, setTiemposEstado] = useState("TARDANZA");
               title="Distribucion por dia"
               subtitle="Cantidad de registros del estado seleccionado en el rango actual"
             >
-              <SimpleHorizontalBars data={tiemposDailySeries} colorMode="palette" />
-            </ChartCard>
-            <ChartCard
-              title="Resumen del estado"
-              subtitle="Métricas principales del filtro actual"
-            >
-              <div style={styles.gerencialSummaryToolbar}>
-                <div style={styles.gerencialSummaryToolbarMetrics}>
-                  <div style={styles.counterPill}>{tiemposTotals.diasConRegistros} día{tiemposTotals.diasConRegistros === 1 ? "" : "s"} con registros</div>
-                  <div style={styles.counterPill}>{tiemposTotals.empleados} empleado{tiemposTotals.empleados === 1 ? "" : "s"}</div>
-                </div>
-              </div>
-              <div style={{ marginTop: 8 }}>
-                <SimpleTrendBars data={tiemposTrendSeries} />
-              </div>
+              <SimpleHorizontalBars data={tiemposDailySeries} colorMode="palette" density="compact" />
             </ChartCard>
           </div>
 
@@ -3798,93 +3873,308 @@ const [tiemposEstado, setTiemposEstado] = useState("TARDANZA");
             </div>
           </section>
 
-          <section style={styles.kpiGrid}>
-            {tiemposKpis.map((kpi) => (
-              <div key={kpi.label} style={{ ...styles.kpiCard, ...kpiToneStyles[kpi.tone] }}>
-                <span style={styles.kpiLabel}>{kpi.label}</span>
-                <strong style={styles.kpiValue}>{kpi.value}</strong>
-              </div>
-            ))}
-          </section>
-
-          <div style={styles.chartGrid}>
-            <ChartCard
-              title="Distribucion por dia"
-              subtitle="Cantidad de registros del estado seleccionado en el rango actual"
-            >
-              <SimpleHorizontalBars data={tiemposDailySeries} colorMode="palette" />
-            </ChartCard>
-            <ChartCard
-              title="Resumen del estado"
-              subtitle="Métricas principales del filtro actual"
-            >
-              <div style={styles.gerencialSummaryToolbar}>
-                <div style={styles.gerencialSummaryToolbarMetrics}>
-                  <div style={styles.counterPill}>{tiemposTotals.diasConRegistros} día{tiemposTotals.diasConRegistros === 1 ? "" : "s"} con registros</div>
-                  <div style={styles.counterPill}>{tiemposTotals.empleados} empleado{tiemposTotals.empleados === 1 ? "" : "s"}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(340px, 0.95fr) minmax(0, 1.55fr)", gap: 16, alignItems: "stretch" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
+              <ChartCard
+                title="Distribucion por empleado"
+                subtitle="Cantidad de registros agrupados por empleado, ordenados de mayor a menor"
+                style={{ height: tiemposViewportHeight, display: "flex", flexDirection: "column" }}
+              >
+                <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+                  <button
+                    type="button"
+                    aria-label="Limpiar filtros de distribución por empleado"
+                    title="Limpiar filtros"
+                    onClick={() => {
+                      setTiemposEmpleadoFiltro(null);
+                      setTiemposResponsableFiltro(null);
+                    }}
+                    style={{
+                      appearance: "none",
+                      border: "1px solid #C4B5FD",
+                      background: "#FFFFFF",
+                      color: "#6D28D9",
+                      width: 34,
+                      height: 34,
+                      borderRadius: 10,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: "pointer",
+                      boxShadow: "0 2px 8px rgba(15, 23, 42, 0.06)",
+                    }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                      <path
+                        d="M6 6L14 14M14 6L6 14"
+                        stroke="currentColor"
+                        strokeWidth="1.9"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </button>
                 </div>
+                <SimpleHorizontalBars
+                  data={tiemposEmployeeSeries}
+                  colorMode="palette"
+                  density="default"
+                  labelWidth={260}
+                  valueWidth={64}
+                  maxHeight={tiemposViewportHeight - 110}
+                  onEmployeeClick={(name) =>
+                    setTiemposEmpleadoFiltro((prev) => (normalizeText(prev ?? "") === normalizeText(name) ? null : name))
+                  }
+                  onResponsibleClick={(name) =>
+                    setTiemposResponsableFiltro((prev) => (normalizeText(prev ?? "") === normalizeText(name) ? null : name))
+                  }
+                  activeEmployeeName={tiemposEmpleadoFiltro}
+                  activeResponsibleName={tiemposResponsableFiltro}
+                />
+              </ChartCard>
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 8 }}>
+                <button
+                  type="button"
+                  style={styles.gerencialSummaryExportButton}
+                  onClick={() => setTiemposOverlayOpen(true)}
+                  title="Ampliar resultado"
+                  aria-label="Ampliar resultado"
+                  disabled={tiemposDetailRows.length === 0}
+                >
+                  <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M7 3H3V7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M13 3H17V7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M17 13V17H13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M3 13V17H7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+                <span style={styles.counterPill}>{tiemposDetailRows.length} registros visibles</span>
               </div>
-              <div style={{ marginTop: 8 }}>
-                <SimpleTrendBars data={tiemposTrendSeries} />
-              </div>
-            </ChartCard>
-          </div>
-
-          <div style={styles.tableWrap}>
-            <table style={styles.table}>
-              <colgroup>
-                {tiemposDetailColumns.map((column) => (
-                  <col key={String(column.key)} style={{ width: column.width }} />
-                ))}
-              </colgroup>
-              <thead>
-                <tr>
-                  {tiemposDetailColumns.map((column) => (
-                    <th key={String(column.key)} style={{ ...styles.th, textAlign: column.align ?? "left" }}>
-                      <div style={styles.thContent}>
-                        <span>{column.label}</span>
-                      </div>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr>
-                    <td style={styles.emptyCell} colSpan={tiemposDetailColumns.length}>Cargando tiempos...</td>
-                  </tr>
-                ) : tiemposFilteredRows.length === 0 ? (
-                  <tr>
-                    <td style={styles.emptyCell} colSpan={tiemposDetailColumns.length}>
-                      No hay registros para el estado y rango seleccionados.
-                    </td>
-                  </tr>
-                ) : (
-                  tiemposFilteredRows.map((item, index) => (
-                    <tr key={`${item.idEmpleado ?? item.nombreEmpleado}-${item.fecha}-${index}`} style={{ ...styles.tr, background: getRowTone(item) }}>
-                      {tiemposDetailColumns.map((column) => {
-                        const rawValue = item[column.key as keyof AsistenciaReporteItem];
-                        let displayValue = rawValue ?? "";
-
-                        if (column.key === "fecha") {
-                          displayValue = formatDateLabel(String(rawValue ?? ""));
-                        } else if (column.key === "totalHoras") {
-                          displayValue = formatDecimal(Number(rawValue ?? 0), 2);
-                        }
-
-                        return (
-                          <td key={`${String(column.key)}-${index}`} style={{ ...styles.td, textAlign: column.align ?? "left" }}>
-                            {String(displayValue || "")}
-                          </td>
-                        );
-                      })}
+              <div style={{ ...styles.tableWrap, height: tiemposViewportHeight }}>
+                <table style={styles.table}>
+                  <colgroup>
+                    {tiemposDetailColumns.map((column) => (
+                      <col key={String(column.key)} style={{ width: column.width }} />
+                    ))}
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      {tiemposDetailColumns.map((column) => (
+                        <th
+                          key={String(column.key)}
+                          style={{
+                            ...styles.th,
+                            textAlign: column.align ?? "left",
+                            cursor: "pointer",
+                            ...(tiemposStickyOffsets[column.key] !== null
+                              ? {
+                                  position: "sticky",
+                                  left: tiemposStickyOffsets[column.key] ?? 0,
+                                  zIndex: 3,
+                                  background: "#F8FAFC",
+                                }
+                              : {}),
+                          }}
+                          onClick={() =>
+                            setTiemposSort((prev) => ({
+                              key: column.key,
+                              direction: prev.key === column.key ? (prev.direction === "asc" ? "desc" : "asc") : "asc",
+                            }))
+                          }
+                        >
+                          <div style={styles.thContent}>
+                            <span>{column.label}</span>
+                            <span style={styles.sortPill}>
+                              {tiemposSort.key === column.key ? (tiemposSort.direction === "asc" ? "ASC" : "DESC") : "ORD"}
+                            </span>
+                          </div>
+                        </th>
+                      ))}
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody>
+                    {loading ? (
+                      <tr>
+                        <td style={styles.emptyCell} colSpan={tiemposDetailColumns.length}>Cargando tiempos...</td>
+                      </tr>
+                    ) : tiemposDetailRows.length === 0 ? (
+                      <tr>
+                        <td style={styles.emptyCell} colSpan={tiemposDetailColumns.length}>
+                          No hay registros para el estado y rango seleccionados.
+                        </td>
+                      </tr>
+                    ) : (
+                      tiemposDetailRows.map((item, index) => (
+                        <tr key={`${item.idEmpleado ?? item.nombreEmpleado}-${item.fecha}-${index}`} style={{ ...styles.tr, background: getRowTone(item) }}>
+                          {tiemposDetailColumns.map((column) => {
+                            const rawValue = item[column.key as keyof AsistenciaReporteItem];
+                            let displayValue = rawValue ?? "";
+
+                            if (column.key === "fecha") {
+                              displayValue = formatDateLabel(String(rawValue ?? ""));
+                            } else if (column.key === "totalHoras") {
+                              displayValue = formatDecimal(Number(rawValue ?? 0), 2);
+                            }
+
+                            return (
+                              <td
+                                key={`${String(column.key)}-${index}`}
+                                style={{
+                                  ...styles.td,
+                                  textAlign: column.align ?? "left",
+                                  ...(tiemposStickyLeftKeys.has(column.key as keyof AsistenciaReporteItem)
+                                    ? {
+                                        position: "sticky",
+                                        left: tiemposStickyOffsets[column.key] ?? 0,
+                                        zIndex: 2,
+                                        background: getRowTone(item),
+                                      }
+                                    : {}),
+                                }}
+                              >
+                                {String(displayValue || "")}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </section>
+      ) : null}
+
+      {tiemposOverlayOpen ? (
+        <div style={styles.summaryOverlay} onClick={() => setTiemposOverlayOpen(false)}>
+          <div
+            style={{
+              ...styles.summaryOverlayCard,
+              width: "min(1560px, 98vw)",
+              height: "min(920px, 94vh)",
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div style={styles.summaryOverlayHeader}>
+              <div>
+                <h2 style={styles.summaryOverlayTitle}>Tiempos</h2>
+                <p style={styles.summaryOverlayText}>Vista ampliada temporal del resultado filtrado.</p>
+              </div>
+              <div style={styles.summaryOverlayActions}>
+                <div style={styles.counterPill}>{tiemposDetailRows.length} registros visibles</div>
+                <button
+                  type="button"
+                  style={styles.summaryOverlayCloseButton}
+                  onClick={() => setTiemposOverlayOpen(false)}
+                >
+                  Cerrar
+                </button>
+              </div>
+            </div>
+            <div style={styles.summaryOverlayBody}>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+                <span style={styles.filterMetaText}>
+                  Estado seleccionado: {tiemposEstado === ALL_OPTION ? "Todos" : tiemposEstado}
+                </span>
+              </div>
+              <div style={{ ...styles.tableWrap, height: "100%", flex: 1, minHeight: 0 }}>
+                <table style={styles.table}>
+                  <colgroup>
+                    {tiemposDetailColumns.map((column) => (
+                      <col key={String(column.key)} style={{ width: column.width }} />
+                    ))}
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      {tiemposDetailColumns.map((column) => (
+                        <th
+                          key={String(column.key)}
+                          style={{
+                            ...styles.th,
+                            textAlign: column.align ?? "left",
+                            cursor: "pointer",
+                            ...(tiemposStickyOffsets[column.key] !== null
+                              ? {
+                                  position: "sticky",
+                                  left: tiemposStickyOffsets[column.key] ?? 0,
+                                  zIndex: 3,
+                                  background: "#F8FAFC",
+                                }
+                              : {}),
+                          }}
+                          onClick={() =>
+                            setTiemposSort((prev) => ({
+                              key: column.key,
+                              direction: prev.key === column.key ? (prev.direction === "asc" ? "desc" : "asc") : "asc",
+                            }))
+                          }
+                        >
+                          <div style={styles.thContent}>
+                            <span>{column.label}</span>
+                            <span style={styles.sortPill}>
+                              {tiemposSort.key === column.key ? (tiemposSort.direction === "asc" ? "ASC" : "DESC") : "ORD"}
+                            </span>
+                          </div>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loading ? (
+                      <tr>
+                        <td style={styles.emptyCell} colSpan={tiemposDetailColumns.length}>Cargando tiempos...</td>
+                      </tr>
+                    ) : tiemposDetailRows.length === 0 ? (
+                      <tr>
+                        <td style={styles.emptyCell} colSpan={tiemposDetailColumns.length}>
+                          No hay registros para el estado y rango seleccionados.
+                        </td>
+                      </tr>
+                    ) : (
+                      tiemposDetailRows.map((item, index) => (
+                        <tr key={`${item.idEmpleado ?? item.nombreEmpleado}-${item.fecha}-${index}`} style={{ ...styles.tr, background: getRowTone(item) }}>
+                          {tiemposDetailColumns.map((column) => {
+                            const rawValue = item[column.key as keyof AsistenciaReporteItem];
+                            let displayValue = rawValue ?? "";
+
+                            if (column.key === "fecha") {
+                              displayValue = formatDateLabel(String(rawValue ?? ""));
+                            } else if (column.key === "totalHoras") {
+                              displayValue = formatDecimal(Number(rawValue ?? 0), 2);
+                            }
+
+                            return (
+                              <td
+                                key={`${String(column.key)}-${index}`}
+                                style={{
+                                  ...styles.td,
+                                  textAlign: column.align ?? "left",
+                                  ...(tiemposStickyLeftKeys.has(column.key as keyof AsistenciaReporteItem)
+                                    ? {
+                                        position: "sticky",
+                                        left: tiemposStickyOffsets[column.key] ?? 0,
+                                        zIndex: 2,
+                                        background: getRowTone(item),
+                                      }
+                                    : {}),
+                                }}
+                              >
+                                {String(displayValue || "")}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {activeTab === "empleado" && (
@@ -4034,7 +4324,7 @@ const [tiemposEstado, setTiemposEstado] = useState("TARDANZA");
                     style={styles.headerPrimaryButton}
                     disabled={selectedEstadoMarcacion.length !== 1 || selectedEstadoMarcacion[0].toUpperCase() !== "FALTA APROBAR"}
                     onClick={() => {
-                      // Acción de envío de reporte aquí
+                      // AcciÃ³n de envÃ­o de reporte aquÃ­
                       alert('Reporte enviado');
                     }}
                   >
@@ -4339,43 +4629,137 @@ function SimpleHorizontalBars({
   data,
   colorMode,
   maxHeight = 320,
+  density = "default",
+  labelWidth,
+  valueWidth,
+  onEmployeeClick,
+  onResponsibleClick,
+  activeEmployeeName,
+  activeResponsibleName,
 }: {
-  data: Array<{ name: string; value: number }>;
+  data: Array<{ name: string; value: number; employeeName?: string; responsable?: string }>;
   colorMode?: "palette";
   maxHeight?: number;
+  density?: "default" | "compact";
+  labelWidth?: number;
+  valueWidth?: number;
+  onEmployeeClick?: (name: string) => void;
+  onResponsibleClick?: (name: string) => void;
+  activeEmployeeName?: string | null;
+  activeResponsibleName?: string | null;
 }) {
   const max = Math.max(...data.map((item) => item.value), 1);
+  const resolvedLabelWidth = labelWidth ?? (density === "compact" ? 74 : 160);
+  const resolvedValueWidth = valueWidth ?? (density === "compact" ? 42 : 88);
+  const gridTemplateColumns = `${resolvedLabelWidth}px minmax(0, 1fr) ${resolvedValueWidth}px`;
+  const itemGap = density === "compact" ? 10 : 14;
+  const nameFontSize = density === "compact" ? 13 : 14;
+  const valueFontSize = density === "compact" ? 16 : 18;
 
   return (
-    <div style={styles.simpleChartWrap}>
+    <div style={{ ...styles.simpleChartWrap, width: "100%", minWidth: 0, overflowX: "hidden" }}>
       {data.length === 0 ? (
         <div style={styles.emptyMiniState}>Sin datos para graficar.</div>
       ) : (
-        <div style={{ ...styles.responsibleRankingList, maxHeight }}>
-          <div style={{ ...styles.responsibleRankingHeader, gridTemplateColumns: "160px minmax(260px, 1fr) 88px" }}>
+        <div style={{ ...styles.responsibleRankingList, maxHeight, overflowX: "hidden" }}>
+          <div style={{ ...styles.responsibleRankingHeader, gridTemplateColumns, gap: itemGap, minWidth: 0 }}>
             <div style={styles.responsibleRankingHeaderName}>Fecha</div>
             <div style={styles.responsibleRankingHeaderBar} />
             <div style={styles.responsibleRankingHeaderValue}>Registros</div>
           </div>
           {data.map((item, index) => {
             const width = `${Math.max((item.value / max) * 100, item.value > 0 ? 6 : 0)}%`;
+            const filterKey = item.employeeName ?? item.name;
+            const responsableKey = item.responsable ?? "";
+            const isEmployeeActive = activeEmployeeName === filterKey;
+            const isResponsibleActive = Boolean(responsableKey) && activeResponsibleName === responsableKey;
+            const isActive = isEmployeeActive || isResponsibleActive;
 
             return (
               <div
                 key={item.name}
                 style={{
+                  appearance: "none",
+                  border: "none",
+                  background: isActive ? "#F8FAFC" : "transparent",
                   display: "grid",
-                  gridTemplateColumns: "160px minmax(260px, 1fr) 88px",
-                  gap: 14,
+                  gridTemplateColumns,
+                  gap: itemGap,
                   alignItems: "center",
                   width: "100%",
-                  padding: "6px 6px",
+                  padding: "8px 8px",
+                  minWidth: 0,
+                  borderRadius: 12,
+                  cursor: onEmployeeClick || onResponsibleClick ? "default" : "default",
+                  textAlign: "left",
+                  boxShadow: isActive ? "inset 0 0 0 1px #BFDBFE" : "none",
                 }}
               >
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", whiteSpace: "normal", wordBreak: "break-word" }}>
-                  {item.name}
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    gap: 4,
+                    minWidth: 0,
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => onEmployeeClick?.(filterKey)}
+                    title={`Filtrar por empleado: ${filterKey}`}
+                    style={{
+                      appearance: "none",
+                      border: "none",
+                      background: isEmployeeActive ? "#E0E7FF" : "transparent",
+                      padding: 0,
+                      borderRadius: 0,
+                      cursor: onEmployeeClick ? "pointer" : "default",
+                      textAlign: "left",
+                      fontSize: density === "compact" ? 13 : 14,
+                      fontWeight: 800,
+                      color: "#111827",
+                      whiteSpace: "normal",
+                      wordBreak: "break-word",
+                      overflowWrap: "anywhere",
+                      minWidth: 0,
+                      lineHeight: 1.2,
+                    }}
+                  >
+                    {item.name}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!responsableKey) {
+                        return;
+                      }
+                      onResponsibleClick?.(responsableKey);
+                    }}
+                    title={responsableKey ? `Filtrar por responsable: ${responsableKey}` : "Sin responsable"}
+                    style={{
+                      appearance: "none",
+                      border: "none",
+                      background: "transparent",
+                      padding: 0,
+                      borderRadius: 0,
+                      cursor: responsableKey && onResponsibleClick ? "pointer" : "default",
+                      fontSize: density === "compact" ? 11 : 12,
+                      fontWeight: 600,
+                      color: isResponsibleActive ? "#1D4ED8" : "#6B7280",
+                      whiteSpace: "normal",
+                      wordBreak: "break-word",
+                      overflowWrap: "anywhere",
+                      minWidth: 0,
+                      textAlign: "left",
+                      lineHeight: 1.15,
+                      marginTop: 1,
+                    }}
+                  >
+                    {responsableKey ? `Responsable: ${responsableKey}` : "Sin responsable"}
+                  </button>
                 </div>
-                <div style={styles.responsibleRankingBarCell}>
+                <div style={{ ...styles.responsibleRankingBarCell, minWidth: 0 }}>
                   <div style={styles.responsibleRankingBarTrack}>
                     <div
                       style={{
@@ -4387,7 +4771,7 @@ function SimpleHorizontalBars({
                     />
                   </div>
                 </div>
-                <div style={{ textAlign: "right", fontSize: 18, fontWeight: 800, color: "#111827" }}>
+                <div style={{ textAlign: "right", fontSize: valueFontSize, fontWeight: 800, color: "#111827", minWidth: 0 }}>
                   {item.value}
                 </div>
               </div>
@@ -4524,7 +4908,7 @@ function SimpleResponsableRankingBars({
             <div style={styles.responsibleRankingLegend}>
               <div style={styles.responsibleRankingLegendItem}>
                 <span style={{ ...styles.responsibleRankingLegendSwatch, background: "#EF4444" }} />
-                <span style={styles.responsibleRankingLegendText}>10 o más pendientes</span>
+                <span style={styles.responsibleRankingLegendText}>10 o mÃ¡s pendientes</span>
               </div>
               <div style={styles.responsibleRankingLegendItem}>
                 <span style={{ ...styles.responsibleRankingLegendSwatch, background: "#F97316" }} />
@@ -5529,7 +5913,7 @@ function SimpleEmployeeDateGrid({
                   title={
                     canSelectLlamadaAtencion(item)
                       ? `Previsualizar documento de llamada de atencion de ${item.employee}`
-                      : "La vista previa solo estÃ¡ disponible cuando el estado de validaciÃ³n es REVISAR y no fue enviada hoy"
+                      : "La vista previa solo estÃƒÂ¡ disponible cuando el estado de validaciÃƒÂ³n es REVISAR y no fue enviada hoy"
                   }
                 >
                   <button
@@ -8311,7 +8695,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     gap: 10,
-    height: "calc(100vh - 240px)", // Ajusta este valor según el alto de header, filtros, etc.
+    height: "calc(100vh - 240px)", // Ajusta este valor segÃºn el alto de header, filtros, etc.
     minHeight: 320,
     maxHeight: "100vh",
   },
@@ -8384,3 +8768,4 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
   },
 };
+

@@ -336,12 +336,41 @@ public sealed class ReportePdfService : IReportePdfService
                     });
                 });
 
-                page.Footer().AlignCenter().Text(text =>
+                page.Footer().PaddingTop(6).Column(footer =>
                 {
-                    text.Span("Cj Telecom - Reporte de validacion de asistencia | ");
-                    text.CurrentPageNumber();
-                    text.Span(" / ");
-                    text.TotalPages();
+                    footer.Item()
+                        .Border(1)
+                        .BorderColor("#CBD5E1")
+                        .Background("#F8FAFC")
+                        .PaddingVertical(8)
+                        .PaddingHorizontal(10)
+                        .Column(box =>
+                        {
+                            box.Spacing(4);
+
+                            box.Item().AlignCenter().Text(text =>
+                            {
+                                text.DefaultTextStyle(TextStyle.Default.FontSize(9).FontColor("#334155").SemiBold());
+                                text.Span("Cj Telecom - Reporte de validacion de asistencia | ");
+                                text.CurrentPageNumber();
+                                text.Span(" / ");
+                                text.TotalPages();
+                            });
+
+                            box.Item().AlignCenter().Text(text =>
+                            {
+                                text.DefaultTextStyle(TextStyle.Default.FontSize(8).FontColor("#667085"));
+                                text.Span("Si existen estados FALTA APROBAR, se consideran como FALTA y no suma horas laboradas. ");
+                                text.Span("Validarlo con su responsable de aprobacion de asistencia");
+                            });
+
+                            box.Item().AlignCenter().Text(text =>
+                            {
+                                text.DefaultTextStyle(TextStyle.Default.FontSize(8).FontColor("#667085"));
+                                text.Span("Las horas laboradas son 48 semanales y consideran la suma de todos los estados: ");
+                                text.Span("PRESENTE, FALTA, DESCANSO MEDICO y otros.");
+                            });
+                        });
                 });
             });
         });
