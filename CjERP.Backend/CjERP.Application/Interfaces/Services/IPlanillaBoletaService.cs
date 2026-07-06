@@ -18,6 +18,11 @@ public interface IPlanillaBoletaService
 
     Task<string> ObtenerPdfBase64Async(int idBoleta, CancellationToken cancellationToken = default);
 
+    Task<int?> ObtenerIdBoletaPorPeriodoYNroDocumentoAsync(
+        string periodo,
+        string numeroDocumento,
+        CancellationToken cancellationToken = default);
+
     Task<byte[]> GenerarZipPeriodoAsync(string periodo, CancellationToken cancellationToken = default);
 
     Task EnviarBoletaPreparadaAsync(int idBoleta, string medioEnvio, string destino, CancellationToken cancellationToken = default);

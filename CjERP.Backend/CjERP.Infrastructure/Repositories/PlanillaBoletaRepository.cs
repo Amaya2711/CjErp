@@ -196,6 +196,68 @@ public sealed class PlanillaBoletaRepository : IPlanillaBoletaRepository
         };
     }
 
+    public async Task<int?> ObtenerIdBoletaPorPeriodoYNroDocumentoAsync(
+        string periodo,
+        string numeroDocumento,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        var tableColumns = await GetPlanillaBoletaCabeceraColumnsAsync(connection, cancellationToken);
+
+        if (tableColumns.Count == 0)
+        {
+            return null;
+        }
+
+        var hasIdActivoColumn = tableColumns.Contains("IdActivo");
+        var hasNumeroDocumentoColumn = tableColumns.Contains("NumeroDocumento");
+        var hasNroDocumentoColumn = !hasNumeroDocumentoColumn && tableColumns.Contains("NroDocumento");
+
+        var numeroDocumentoSelect = hasNumeroDocumentoColumn
+            ? "cab.NumeroDocumento"
+            : hasNroDocumentoColumn
+                ? "cab.NroDocumento"
+                : null;
+
+        if (numeroDocumentoSelect is null)
+        {
+            return null;
+        }
+
+        var idActivoFilter = hasIdActivoColumn
+            ? "AND ISNULL(cab.IdActivo, 1) = 1"
+            : string.Empty;
+
+        var periodoTokens = BuildPeriodoTokens(periodo);
+        if (periodoTokens.Length == 0)
+        {
+            return null;
+        }
+
+        var sql = $"""
+            SELECT TOP 1 cab.IdBoleta
+            FROM dbo.PlanillaBoletaCabecera cab
+            WHERE REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(cab.Periodo, ''))), '-', ''), '/', '') IN @PeriodoTokens
+              AND LTRIM(RTRIM(ISNULL({numeroDocumentoSelect}, ''))) = LTRIM(RTRIM(@NumeroDocumento))
+              {idActivoFilter}
+            ORDER BY cab.IdBoleta
+            """;
+
+        var idBoleta = await connection.QueryFirstOrDefaultAsync<int?>(
+            _sqlCommandFactory.Create(
+                sql,
+                new
+                {
+                    PeriodoTokens = periodoTokens,
+                    NumeroDocumento = numeroDocumento
+                },
+                CommandType.Text,
+                cancellationToken,
+                commandTimeout: 120));
+
+        return idBoleta;
+    }
+
     public async Task<PlanillaBoletaPdfEntity?> ObtenerPdfExistenteAsync(int idBoleta, CancellationToken cancellationToken = default)
     {
         await using var connection = _sqlCommandFactory.CreateConnection();
@@ -415,6 +477,36 @@ public sealed class PlanillaBoletaRepository : IPlanillaBoletaRepository
                 cancellationToken: cancellationToken));
 
         return columns.ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string[] BuildPeriodoTokens(string? periodo)
+    {
+        var normalized = (periodo ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return Array.Empty<string>();
+        }
+
+        var compact = normalized.Replace("-", string.Empty).Replace("/", string.Empty).Trim();
+        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(compact))
+        {
+            tokens.Add(compact);
+        }
+
+        if (DateTime.TryParseExact(
+                normalized.Replace("-", "/"),
+                new[] { "MM/yyyy", "M/yyyy", "yyyy/MM", "yyyy/M", "yyyyMM" },
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var parsed))
+        {
+            tokens.Add(parsed.ToString("MMyyyy", CultureInfo.InvariantCulture));
+            tokens.Add(parsed.ToString("yyyyMM", CultureInfo.InvariantCulture));
+        }
+
+        return tokens.ToArray();
     }
 
     private static void AddParameterIfExists(

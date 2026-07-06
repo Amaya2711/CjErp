@@ -302,7 +302,7 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
                 Modo = string.IsNullOrWhiteSpace(_settings.ResponseMode) ? "wsp" : _settings.ResponseMode.Trim(),
                 Telefono = response.Phone,
                 Contenido = string.Empty
-            };
+        };
 
         var wupResponse = await _wupService.EnviarAdjuntoAsync(wupRequest, cancellationToken);
         return new MetaWhatsAppSendResponseDto
@@ -313,6 +313,9 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
             ErrorMessage = wupResponse.ErrorMessage
         };
     }
+
+    private bool UseMetaProvider() =>
+        string.Equals(_settings.ResponseProvider?.Trim(), "meta", StringComparison.OrdinalIgnoreCase);
 
     private static List<InboundMessage> ExtractMessages(WhatsappWebhookPayloadDto? payload)
     {
@@ -431,9 +434,6 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
         string.Equals(message, "2", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(message, "boleta", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(message, "boleta de pago", StringComparison.OrdinalIgnoreCase);
-
-    private bool UseMetaProvider() =>
-        string.Equals(_settings.ResponseProvider?.Trim(), "meta", StringComparison.OrdinalIgnoreCase);
 
     private (string FechaInicio, string FechaFin) ResolveDateRange(string message)
     {
@@ -618,13 +618,14 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
                 "No pudimos vincular tu numero con un empleado registrado. Por favor valida tu telefono en el ERP o contacta a Sistemas.");
         }
 
-        var periodo = NormalizeBoletaPeriodToken(fechaInicio, fechaFin);
-        var boletas = await _reporteRepository.ObtenerBoletasDestinoAsync(periodo, cancellationToken);
         var documento = NormalizeDocument(empleado.NumeroDocumento);
-        var boleta = boletas.FirstOrDefault(item =>
-            string.Equals(NormalizeDocument(item.NumeroDocumento), documento, StringComparison.OrdinalIgnoreCase));
+        var periodo = NormalizeBoletaPeriodToken(fechaInicio, fechaFin);
+        var idBoleta = await _planillaBoletaService.ObtenerIdBoletaPorPeriodoYNroDocumentoAsync(
+            periodo,
+            documento,
+            cancellationToken);
 
-        if (boleta is null || !boleta.IdBoleta.HasValue)
+        if (!idBoleta.HasValue)
         {
             return BuildTextReply(
                 normalizedPhone,
@@ -634,7 +635,7 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
         string base64;
         try
         {
-            base64 = await _planillaBoletaService.ObtenerPdfBase64Async(boleta.IdBoleta.Value, cancellationToken);
+            base64 = await _planillaBoletaService.ObtenerPdfBase64Async(idBoleta.Value, cancellationToken);
             if (string.IsNullOrWhiteSpace(base64))
             {
                 throw new InvalidOperationException("No se obtuvo el PDF Base64 de la boleta.");

@@ -18,6 +18,11 @@ public interface IPlanillaBoletaRepository
 
     Task<PlanillaBoletaPdfDto?> ObtenerBoletaPdfAsync(int idBoleta, CancellationToken cancellationToken = default);
 
+    Task<int?> ObtenerIdBoletaPorPeriodoYNroDocumentoAsync(
+        string periodo,
+        string numeroDocumento,
+        CancellationToken cancellationToken = default);
+
     Task<PlanillaBoletaPdfEntity?> ObtenerPdfExistenteAsync(int idBoleta, CancellationToken cancellationToken = default);
 
     Task RegistrarPdfAsync(PlanillaBoletaPdfEntity pdf, CancellationToken cancellationToken = default);

@@ -213,6 +213,14 @@ public sealed class PlanillaBoletaService : IPlanillaBoletaService
         return Convert.ToBase64String(pdfBytes);
     }
 
+    public Task<int?> ObtenerIdBoletaPorPeriodoYNroDocumentoAsync(
+        string periodo,
+        string numeroDocumento,
+        CancellationToken cancellationToken = default)
+    {
+        return _planillaBoletaRepository.ObtenerIdBoletaPorPeriodoYNroDocumentoAsync(periodo, numeroDocumento, cancellationToken);
+    }
+
     public async Task<byte[]> GenerarZipPeriodoAsync(string periodo, CancellationToken cancellationToken = default)
     {
         var boletas = await _planillaBoletaRepository.ListarBoletasPorPeriodoAsync(periodo, cancellationToken);
