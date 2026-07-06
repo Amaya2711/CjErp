@@ -41,6 +41,7 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
 
     private readonly IReporteRepository _reporteRepository;
     private readonly IReportePdfService _reportePdfService;
+    private readonly IPlanillaBoletaService _planillaBoletaService;
     private readonly IWupService _wupService;
     private readonly IMetaWhatsAppService _metaWhatsAppService;
     private readonly WhatsappInboundSettings _settings;
@@ -49,6 +50,7 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
     public WhatsappInboundService(
         IReporteRepository reporteRepository,
         IReportePdfService reportePdfService,
+        IPlanillaBoletaService planillaBoletaService,
         IWupService wupService,
         IMetaWhatsAppService metaWhatsAppService,
         IOptions<WhatsappInboundSettings> settings,
@@ -56,6 +58,7 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
     {
         _reporteRepository = reporteRepository;
         _reportePdfService = reportePdfService;
+        _planillaBoletaService = planillaBoletaService;
         _wupService = wupService;
         _metaWhatsAppService = metaWhatsAppService;
         _settings = settings.Value;
@@ -496,9 +499,12 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
                 {
                     ConversationStates.TryRemove(normalizedPhone, out _);
                     var (start, end) = ResolveCurrentMonthDateRange();
-                    return BuildTextReply(
+                    return await BuildBoletaDocumentReplyAsync(
+                        item.ContactName,
                         normalizedPhone,
-                        $"La opcion Boleta fue registrada para el periodo {start} - {end}. El envio automatico de boletas se conectara en el siguiente paso.");
+                        start,
+                        end,
+                        cancellationToken);
                 }
 
                 if (IsOtherMonthSelection(item, normalizedMessage))
@@ -531,9 +537,12 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
                 if (TryResolveSingleMonthPeriod(normalizedMessage, out var boletaStart, out var boletaEnd))
                 {
                     ConversationStates.TryRemove(normalizedPhone, out _);
-                    return BuildTextReply(
+                    return await BuildBoletaDocumentReplyAsync(
+                        item.ContactName,
                         normalizedPhone,
-                        $"La opcion Boleta fue registrada para el periodo {boletaStart:dd/MM/yyyy} - {boletaEnd:dd/MM/yyyy}. El envio automatico de boletas se conectara en el siguiente paso.");
+                        boletaStart.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture),
+                        boletaEnd.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture),
+                        cancellationToken);
                 }
 
                 return BuildTextReply(
@@ -591,6 +600,62 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
             FileName = fileName,
             Message = $"Hola{BuildNameSuffix(contactName)}. Adjuntamos tu reporte de asistencia del periodo {fechaInicio} - {fechaFin}.",
             FileContentBase64 = Convert.ToBase64String(pdfBytes)
+        };
+    }
+
+    private async Task<OutboundResponse> BuildBoletaDocumentReplyAsync(
+        string contactName,
+        string normalizedPhone,
+        string fechaInicio,
+        string fechaFin,
+        CancellationToken cancellationToken)
+    {
+        var empleado = await _reporteRepository.ObtenerEmpleadoPorTelefonoAsync(normalizedPhone, cancellationToken);
+        if (empleado is null || empleado.IdEmpleado <= 0)
+        {
+            return BuildTextReply(
+                normalizedPhone,
+                "No pudimos vincular tu numero con un empleado registrado. Por favor valida tu telefono en el ERP o contacta a Sistemas.");
+        }
+
+        var periodo = NormalizeBoletaPeriodToken(fechaInicio, fechaFin);
+        var boletas = await _reporteRepository.ObtenerBoletasDestinoAsync(periodo, cancellationToken);
+        var documento = NormalizeDocument(empleado.NumeroDocumento);
+        var boleta = boletas.FirstOrDefault(item =>
+            string.Equals(NormalizeDocument(item.NumeroDocumento), documento, StringComparison.OrdinalIgnoreCase));
+
+        if (boleta is null || !boleta.IdBoleta.HasValue)
+        {
+            return BuildTextReply(
+                normalizedPhone,
+                $"No encontramos una boleta disponible para el periodo {fechaInicio} - {fechaFin}.");
+        }
+
+        string base64;
+        try
+        {
+            base64 = await _planillaBoletaService.ObtenerPdfBase64Async(boleta.IdBoleta.Value, cancellationToken);
+            if (string.IsNullOrWhiteSpace(base64))
+            {
+                throw new InvalidOperationException("No se obtuvo el PDF Base64 de la boleta.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[WhatsappInbound] Error generando boleta para {Phone} y periodo {Periodo}.", normalizedPhone, periodo);
+            return BuildTextReply(
+                normalizedPhone,
+                $"No pudimos generar tu boleta del periodo {fechaInicio} - {fechaFin} en este momento.");
+        }
+
+        var fileName = $"Boleta_{NormalizePeriodoToken(periodo)}_{documento}.pdf";
+        return new OutboundResponse
+        {
+            Kind = OutboundResponseKind.Document,
+            Phone = normalizedPhone,
+            FileName = fileName,
+            Message = $"Hola{BuildNameSuffix(contactName)}. Adjuntamos tu boleta de pago del periodo {fechaInicio} - {fechaFin}.",
+            FileContentBase64 = base64
         };
     }
 
@@ -792,6 +857,22 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
 
     private static string BuildNameSuffix(string? name) =>
         string.IsNullOrWhiteSpace(name) ? string.Empty : $", {name.Trim()}";
+
+    private static string NormalizeBoletaPeriodToken(string fechaInicio, string fechaFin)
+    {
+        var start = ParseFecha(fechaInicio);
+        var end = ParseFecha(fechaFin);
+        var reference = start != default ? start : end;
+        return reference == default
+            ? NormalizePeriodoToken(fechaInicio)
+            : reference.ToString("MM/yyyy", CultureInfo.InvariantCulture);
+    }
+
+    private static string NormalizePeriodoToken(string? value) =>
+        new string((value ?? string.Empty).Where(char.IsLetterOrDigit).ToArray());
+
+    private static string NormalizeDocument(string? value) =>
+        new string((value ?? string.Empty).Where(char.IsLetterOrDigit).ToArray()).Trim();
 
     private static DateTime ParseFecha(string value)
     {
