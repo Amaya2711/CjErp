@@ -676,7 +676,7 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
     {
         var today = GetPeruNow().Date;
         var start = new DateTime(today.Year, today.Month, 1);
-        var end = start.AddMonths(1).AddDays(-1);
+        var end = ResolveMonthEndForRequest(start);
         return (
             start.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture),
             end.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture));
@@ -698,7 +698,7 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
             int.TryParse(slashMatch.Groups[2].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var yearNumber))
         {
             start = new DateTime(yearNumber, monthNumber, 1);
-            end = start.AddMonths(1).AddDays(-1);
+            end = ResolveMonthEndForRequest(start);
             return true;
         }
 
@@ -735,7 +735,7 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
             }
 
             start = new DateTime(year, month.Value, 1);
-            end = start.AddMonths(1).AddDays(-1);
+            end = ResolveMonthEndForRequest(start);
             return true;
         }
 
@@ -768,6 +768,20 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
         }
 
         return null;
+    }
+
+    private static DateTime ResolveMonthEndForRequest(DateTime monthStart)
+    {
+        var monthEnd = monthStart.AddMonths(1).AddDays(-1);
+        var today = GetPeruNow().Date;
+
+        if (monthStart.Year != today.Year || monthStart.Month != today.Month)
+        {
+            return monthEnd;
+        }
+
+        var previousDay = today.AddDays(-1);
+        return previousDay < monthStart ? monthStart : previousDay;
     }
 
     private static OutboundResponse BuildTextReply(string phone, string message)
