@@ -480,15 +480,25 @@ function getDateRangeLabels(startValue: string, endValue: string) {
 function parseDisplayDate(value: string) {
   if (!value) return null;
 
-  const normalized = formatDateLabel(value);
+  const trimmed = value.trim();
+  const slashMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(trimmed);
+  if (slashMatch) {
+    return buildDateFromParts(Number(slashMatch[3]), Number(slashMatch[2]), Number(slashMatch[1]));
+  }
+
+  const dashMatch = /^(\d{1,2})-(\d{1,2})-(\d{4})$/.exec(trimmed);
+  if (dashMatch) {
+    return buildDateFromParts(Number(dashMatch[3]), Number(dashMatch[2]), Number(dashMatch[1]));
+  }
+
+  const normalized = formatDateLabel(trimmed);
   const parts = normalized.split("/");
   if (parts.length !== 3) {
     return null;
   }
 
   const [day, month, year] = parts;
-  const parsed = new Date(Number(year), Number(month) - 1, Number(day));
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  return buildDateFromParts(Number(year), Number(month), Number(day));
 }
 
 function getDayNameLabel(value: string) {

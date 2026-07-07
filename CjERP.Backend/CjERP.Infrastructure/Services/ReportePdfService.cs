@@ -12,6 +12,7 @@ namespace CjERP.Infrastructure.Services;
 public sealed class ReportePdfService : IReportePdfService
 {
     private const decimal MissingOrIncompleteHours = 9.6m;
+    private const bool UseLegacyOperativoAsistenciaPdf = false;
     private static readonly HashSet<string> PresentStates = new(StringComparer.OrdinalIgnoreCase)
     {
         "PRESENTE", "ASISTIO", "OK", "ASISTENCIA"
@@ -29,7 +30,9 @@ public sealed class ReportePdfService : IReportePdfService
         var normalizedType = ReporteWhatsappTipos.Normalize(tipoReporte);
         var document = ReporteWhatsappTipos.IsGerencial(normalizedType)
             ? BuildGerencialDocument(empleadoDestino, periodo, detalle)
-            : BuildOperativoDocument(empleadoDestino, periodo, detalle);
+            : UseLegacyOperativoAsistenciaPdf
+                ? BuildOperativoDocument(empleadoDestino, periodo, detalle)
+                : BuildOperativoValidationDocument(BuildValidationRequestFromReporte(empleadoDestino, periodo, detalle));
 
         return Task.FromResult(document.GeneratePdf());
     }
@@ -215,18 +218,11 @@ public sealed class ReportePdfService : IReportePdfService
             .ToList();
         var primaryItem = items.FirstOrDefault();
         var resumen = BuildSummary(items.Select(MapValidationItemToReporte).ToList());
-        var incidencias = items
-            .Where(item => !IsOnlyPresentState(item.EstadoMarcacionTexto))
-            .Where(item => !IsWeekendState(item.EstadoMarcacionTexto))
-            .Where(item => !IsHolidayState(item.EstadoMarcacionTexto))
-            .OrderBy(item => item.Fecha)
-            .ThenBy(item => item.Hora)
-            .ToList();
         var diferenciaHoras = primaryItem?.DiferenciaHoras ?? 0m;
         var estadoValidacionHoras = primaryItem?.EstadoValidacionHoras ?? string.Empty;
         var warning = diferenciaHoras < 0;
         var validationTitle = warning
-            ? "ADVERTENCIA: No esta cumpliendo con las horas laborales asignadas"
+            ? "ADVERTENCIA: Presenta observaciones en la marcacion. Consultar con el encargado"
             : "Horas laborales cumplidas";
         var validationAccent = warning ? "#B42318" : "#027A48";
         var validationBackground = warning ? "#FEF3F2" : "#ECFDF3";
@@ -287,53 +283,6 @@ public sealed class ReportePdfService : IReportePdfService
                         card.Item().Element(c => RenderEstadoKpiCards(c, resumen));
                     });
 
-                    column.Item().Background(Colors.White).Border(1).BorderColor(Colors.Grey.Lighten2).Padding(12).Column(card =>
-                    {
-                        card.Spacing(10);
-                        card.Item().Text("Detalle de incidencias").Bold().FontSize(12);
-
-                        if (incidencias.Count == 0)
-                        {
-                            card.Item().Background("#F6FEF9").Border(1).BorderColor("#ABEFC6").Padding(10).Text("No existen registros diferentes a PRESENTE para el periodo evaluado.");
-                            return;
-                        }
-
-                        card.Item().Table(table =>
-                        {
-                            table.ColumnsDefinition(columns =>
-                            {
-                                columns.RelativeColumn(1.1f);
-                                columns.RelativeColumn(0.8f);
-                                columns.RelativeColumn(1f);
-                                columns.RelativeColumn(2f);
-                                columns.RelativeColumn(2.2f);
-                            });
-
-                            table.Header(header =>
-                            {
-                                header.Cell().Element(CellHeader).Text("Fecha");
-                                header.Cell().Element(CellHeader).Text("Entrada");
-                                header.Cell().Element(CellHeader).Text("Salida");
-                                header.Cell().Element(CellHeader).Text("Estado");
-                                header.Cell().Element(CellHeader).Text("Observacion");
-                            });
-
-                            foreach (var item in incidencias)
-                            {
-                                var detalleObservacion = string.Join(" | ", new[]
-                                {
-                                    item.Observacion?.Trim(),
-                                    item.Comentario?.Trim()
-                                }.Where(value => !string.IsNullOrWhiteSpace(value)));
-
-                                table.Cell().Element(CellBody).Text(EmptyIfMissing(item.Fecha));
-                                table.Cell().Element(CellBody).Text(EmptyIfMissing(item.Hora));
-                                table.Cell().Element(CellBody).Text(EmptyIfMissing(item.Salida));
-                                table.Cell().Element(CellBody).Text(EmptyIfMissing(item.EstadoMarcacionTexto));
-                                table.Cell().Element(CellBody).Text(EmptyIfMissing(detalleObservacion));
-                            }
-                        });
-                    });
                 });
 
                 page.Footer().PaddingTop(6).Column(footer =>
@@ -1023,6 +972,47 @@ public sealed class ReportePdfService : IReportePdfService
             Ubicacion = item.Ubicacion,
             HoraEntrada = item.Hora,
             HoraSalida = item.Salida,
+            EstadoMarcacionTexto = item.EstadoMarcacionTexto,
+            TotalHoras = item.TotalHoras,
+            TotalHorasFaltaIncompleto = item.TotalHorasFaltaIncompleto,
+            TotalHorasEmpleado = item.TotalHorasEmpleado,
+            TotalHorasLaborales = item.TotalHorasLaborales,
+            TotalHorasFaltaAprobar = item.TotalHorasFaltaAprobar,
+            DiferenciaHoras = item.DiferenciaHoras,
+            EstadoValidacionHoras = item.EstadoValidacionHoras,
+            Comentario = item.Comentario,
+            Observacion = item.Observacion
+        };
+
+    private static AsistenciaReportePdfRequestDto BuildValidationRequestFromReporte(
+        ReporteWhatsappEmpleadoDto empleadoDestino,
+        ReporteWhatsappPeriodoDto periodo,
+        IReadOnlyList<ReporteWhatsappAsistenciaItemDto> detalle)
+    {
+        return new AsistenciaReportePdfRequestDto
+        {
+            FechaInicio = periodo.FechaInicio,
+            FechaFin = periodo.FechaFin,
+            Destinatario = string.IsNullOrWhiteSpace(empleadoDestino.NombreEmpleado)
+                ? "Reporte x Empleado"
+                : empleadoDestino.NombreEmpleado,
+            Items = detalle.Select(MapReporteWhatsappItemToValidationItem).ToList()
+        };
+    }
+
+    private static AsistenciaReportePdfItemDto MapReporteWhatsappItemToValidationItem(ReporteWhatsappAsistenciaItemDto item) =>
+        new()
+        {
+            Fecha = item.Fecha,
+            Hora = item.HoraEntrada,
+            NombreEmpleado = item.NombreEmpleado,
+            Telefono = item.Telefono,
+            Responsable = item.Responsable,
+            Cliente = item.Cliente,
+            Area = item.Area,
+            Ubicacion = item.Ubicacion,
+            IdEmpleado = item.IdEmpleado,
+            Salida = item.HoraSalida,
             EstadoMarcacionTexto = item.EstadoMarcacionTexto,
             TotalHoras = item.TotalHoras,
             TotalHorasFaltaIncompleto = item.TotalHorasFaltaIncompleto,
