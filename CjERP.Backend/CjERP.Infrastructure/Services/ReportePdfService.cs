@@ -213,7 +213,7 @@ public sealed class ReportePdfService : IReportePdfService
 
     private static Document BuildOperativoValidationDocument(AsistenciaReportePdfRequestDto request)
     {
-        var items = request.Items
+        var items = FilterValidationItemsByPeriodo(request)
             .Where(item => item is not null)
             .ToList();
         var primaryItem = items.FirstOrDefault();
@@ -989,6 +989,12 @@ public sealed class ReportePdfService : IReportePdfService
         ReporteWhatsappPeriodoDto periodo,
         IReadOnlyList<ReporteWhatsappAsistenciaItemDto> detalle)
     {
+        var startDate = ParseDisplayDate(periodo.FechaInicio);
+        var endDate = ParseDisplayDate(periodo.FechaFin);
+        var filteredDetalle = detalle
+            .Where(item => IsDateWithinPeriod(ParseDisplayDate(item.Fecha), startDate, endDate))
+            .ToList();
+
         return new AsistenciaReportePdfRequestDto
         {
             FechaInicio = periodo.FechaInicio,
@@ -996,8 +1002,19 @@ public sealed class ReportePdfService : IReportePdfService
             Destinatario = string.IsNullOrWhiteSpace(empleadoDestino.NombreEmpleado)
                 ? "Reporte x Empleado"
                 : empleadoDestino.NombreEmpleado,
-            Items = detalle.Select(MapReporteWhatsappItemToValidationItem).ToList()
+            Items = filteredDetalle.Select(MapReporteWhatsappItemToValidationItem).ToList()
         };
+    }
+
+    private static IReadOnlyList<AsistenciaReportePdfItemDto> FilterValidationItemsByPeriodo(AsistenciaReportePdfRequestDto request)
+    {
+        var startDate = ParseDisplayDate(request.FechaInicio);
+        var endDate = ParseDisplayDate(request.FechaFin);
+
+        return request.Items
+            .Where(item => item is not null)
+            .Where(item => IsDateWithinPeriod(ParseDisplayDate(item.Fecha), startDate, endDate))
+            .ToList();
     }
 
     private static AsistenciaReportePdfItemDto MapReporteWhatsappItemToValidationItem(ReporteWhatsappAsistenciaItemDto item) =>
@@ -1038,6 +1055,26 @@ public sealed class ReportePdfService : IReportePdfService
         }
 
         return null;
+    }
+
+    private static bool IsDateWithinPeriod(DateTime? value, DateTime? startDate, DateTime? endDate)
+    {
+        if (!value.HasValue)
+        {
+            return true;
+        }
+
+        if (startDate.HasValue && value.Value.Date < startDate.Value.Date)
+        {
+            return false;
+        }
+
+        if (endDate.HasValue && value.Value.Date > endDate.Value.Date)
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static string BuildFechaConDiaLabel(string? value)
