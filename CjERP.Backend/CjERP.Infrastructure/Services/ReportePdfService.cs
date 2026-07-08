@@ -473,13 +473,16 @@ public sealed class ReportePdfService : IReportePdfService
                     {
                         card.Spacing(10);
                         card.Item().Text("Detalle estado PRESENTE").Bold().FontSize(12).FontColor("#123B5D");
-                        card.Item().Element(c => RenderEstadoKpiCards(c, resumenPresentes, BuildPresentStateSectionId()));
+                        card.Item().Text($"Los porcentajes se calculan sobre {resumenPresentes.TotalRegistros} registros presentes.")
+                            .FontSize(8)
+                            .FontColor("#667085");
+                        card.Item().Element(c => RenderEstadoKpiCards(c, resumenPresentes, BuildPresentStateSectionId(), "Cada porcentaje refleja la participación dentro del conjunto PRESENTE."));
                     });
 
                     column.Item().Background("#F8FAFC").Border(1).BorderColor("#D0D5DD").Padding(12).Text(text =>
                     {
                         text.Span("Observacion: ").SemiBold();
-                        text.Span("Se solicita regularizar la jornada laboral y coordinar con su responsable inmediato las acciones correctivas correspondientes.");
+                        text.Span("Se solicita cumplir con la jornada laboral y coordinar con su responsable inmediato las acciones correctivas correspondientes.");
                     });
                 });
 
@@ -540,10 +543,10 @@ public sealed class ReportePdfService : IReportePdfService
                             columns.RelativeColumn(1.15f);
                             columns.RelativeColumn(1.0f);
                             columns.RelativeColumn(1.45f);
-                            columns.RelativeColumn(0.9f);
-                            columns.RelativeColumn(1.5f);
-                            columns.RelativeColumn(1.2f);
-                            columns.RelativeColumn(1.2f);
+                            columns.RelativeColumn(2.15f);
+                            columns.RelativeColumn(1.05f);
+                            columns.RelativeColumn(1.05f);
+                            columns.RelativeColumn(0.95f);
                         });
 
                         table.Header(header =>
@@ -552,9 +555,9 @@ public sealed class ReportePdfService : IReportePdfService
                             header.Cell().Element(CallAttentionTableHeader).Text("DÍA");
                             header.Cell().Element(CallAttentionTableHeader).Text("EST.PRINC");
                             header.Cell().Element(CallAttentionTableHeader).Text("ESTADO");
-                            header.Cell().Element(CallAttentionTableHeader).AlignRight().Text("HORAS");
                             header.Cell().Element(CallAttentionTableHeader).AlignCenter().Text("ENTRADA");
                             header.Cell().Element(CallAttentionTableHeader).AlignCenter().Text("SALIDA");
+                            header.Cell().Element(CallAttentionTableHeader).AlignRight().Text("HORAS");
                         });
 
                         foreach (var item in group.Items)
@@ -567,16 +570,15 @@ public sealed class ReportePdfService : IReportePdfService
                             var estadoTexto = ResolveNotificationEstado(item.Estado);
                             var estadoMarcacionTexto = ResolveNotificationEstado(item.EstadoMarcacionTexto);
                             var (estadoColor, estadoBackground) = GetCallAttentionStateStyle(estadoTexto);
-                            var estadoPrincipalCoincide = string.Equals(estadoTexto, estadoMarcacionTexto, StringComparison.OrdinalIgnoreCase);
-                            var estadoCellBackground = estadoPrincipalCoincide ? estadoBackground : "#FEE4E2";
+                            var estadoCellBackground = estadoBackground;
 
                             table.Cell().Element(CallAttentionTableBody).Text(fechaTexto);
                             table.Cell().Element(CallAttentionTableBody).Text(diaTexto);
                             table.Cell().Element(CallAttentionTableBody).Text(estadoMarcacionTexto);
-                            table.Cell().Element(c => CallAttentionStateCell(c, estadoColor, estadoCellBackground)).AlignCenter().Text(estadoTexto).SemiBold();
-                            table.Cell().Element(CallAttentionTableBody).AlignRight().Text($"{item.TotalHoras:0.00} h").SemiBold();
+                            table.Cell().Element(c => CallAttentionStateCell(c, estadoColor, estadoCellBackground)).Text(estadoTexto).SemiBold();
                             table.Cell().Element(CallAttentionTableBody).AlignCenter().Text(EmptyIfMissing(item.Hora));
                             table.Cell().Element(CallAttentionTableBody).AlignCenter().Text(EmptyIfMissing(item.Salida));
+                            table.Cell().Element(CallAttentionTableBody).AlignRight().Text($"{item.TotalHoras:0.00} h").SemiBold();
                         }
                     });
                 });
@@ -664,32 +666,8 @@ public sealed class ReportePdfService : IReportePdfService
         return culture.TextInfo.ToTitleCase(parsed.Value.ToString("dddd", culture));
     }
 
-    private static (string Color, string Background) GetCallAttentionStateStyle(string? state)
-    {
-        var normalized = NormalizeCallAttentionState(state);
-
-        if (normalized.StartsWith("PRESENTE", StringComparison.OrdinalIgnoreCase))
-        {
-            return ("#166534", "#EAF7EE");
-        }
-
-        if (normalized.Contains("DESCANSO", StringComparison.OrdinalIgnoreCase) || normalized.Contains("MEDICO", StringComparison.OrdinalIgnoreCase))
-        {
-            return ("#1D4ED8", "#EAF1FF");
-        }
-
-        if (normalized is "SABADO" or "DOMINGO" or "FERIADO")
-        {
-            return ("#475467", "#F2F4F7");
-        }
-
-        if (normalized.Contains("FALTA", StringComparison.OrdinalIgnoreCase))
-        {
-            return ("#B42318", "#FEF3F2");
-        }
-
-        return ("#0F172A", "#F8FAFC");
-    }
+    private static (string Color, string Background) GetCallAttentionStateStyle(string? state) =>
+        GetStateTone(state);
 
     private static string NormalizeCallAttentionState(string? state)
     {
@@ -1229,7 +1207,11 @@ public sealed class ReportePdfService : IReportePdfService
         });
     }
 
-    private static void RenderEstadoKpiCards(IContainer container, ReporteWhatsappPdfResumenDto resumen, string? sectionLinkId = null)
+    private static void RenderEstadoKpiCards(
+        IContainer container,
+        ReporteWhatsappPdfResumenDto resumen,
+        string? sectionLinkId = null,
+        string? subtitle = null)
     {
         var items = resumen.Resumen
             .OrderByDescending(item => item.Cantidad)
@@ -1248,17 +1230,22 @@ public sealed class ReportePdfService : IReportePdfService
         {
             column.Spacing(8);
 
+            if (!string.IsNullOrWhiteSpace(subtitle))
+            {
+                column.Item().Text(subtitle).FontSize(8).FontColor("#667085");
+            }
+
             foreach (var item in items)
             {
-            var (accent, background) = GetDynamicEstadoMarcacionCardColors(item.EstadoMarcacionTexto);
-            var sectionId = sectionLinkId is not null && string.Equals(item.EstadoMarcacionTexto, "PRESENTE", StringComparison.OrdinalIgnoreCase)
-                ? sectionLinkId
-                : null;
-            var fillPercent = (float)item.Cantidad / max;
-            var fillUnits = Math.Max(1, (int)Math.Round(fillPercent * 100));
-            var emptyUnits = Math.Max(1, 100 - fillUnits);
+                var (accent, background) = GetDynamicEstadoMarcacionCardColors(item.EstadoMarcacionTexto);
+                var sectionId = sectionLinkId is not null && string.Equals(item.EstadoMarcacionTexto, "PRESENTE", StringComparison.OrdinalIgnoreCase)
+                    ? sectionLinkId
+                    : null;
+                var fillPercent = (float)item.Cantidad / max;
+                var fillUnits = Math.Max(1, (int)Math.Round(fillPercent * 100));
+                var emptyUnits = Math.Max(1, 100 - fillUnits);
 
-                column.Item().Background("#F8FAFC").Border(1).BorderColor("#D9E2EC").PaddingVertical(10).PaddingHorizontal(10).Column(card =>
+                column.Item().Background(background).Border(1).BorderColor("#D9E2EC").PaddingVertical(10).PaddingHorizontal(10).Column(card =>
                 {
                     card.Spacing(6);
 
@@ -1915,27 +1902,102 @@ public sealed class ReportePdfService : IReportePdfService
         return palette[index % palette.Length];
     }
 
-    private static (string Accent, string Background) GetDynamicEstadoMarcacionCardColors(string? estado)
+    private static (string Accent, string Background) GetDynamicEstadoMarcacionCardColors(string? estado) =>
+        GetStateTone(estado);
+
+    private static (string Accent, string Background) GetStateTone(string? state)
     {
-        var normalized = string.IsNullOrWhiteSpace(estado)
-            ? "SIN CLASIFICAR"
-            : estado.Trim().ToUpperInvariant();
-        return normalized switch
+        var normalized = NormalizeCallAttentionState(state);
+
+        if (string.IsNullOrWhiteSpace(normalized))
         {
-            "PRESENTE" or "ASISTIO" or "OK" or "ASISTENCIA" => ("#1D4ED8", "#DBEAFE"),
-            "FALTA" => ("#DC2626", "#FEE2E2"),
-            "VACACIONES" => ("#0F766E", "#CCFBF1"),
-            "COMPENSACION" => ("#7C3AED", "#EDE9FE"),
-            "DOMINGO" => ("#16A34A", "#DCFCE7"),
-            "SABADO" or "SÁBADO" => ("#F59E0B", "#FEF3C7"),
-            "FERIADO" => ("#0284C7", "#E0F2FE"),
-            "SIN MARCAR" => ("#E11D48", "#FFE4E6"),
-            "SIN SALIDA" or "SIN ENTRADA" => ("#EA580C", "#FFEDD5"),
-            "INCOMPLETO" => ("#0891B2", "#CFFAFE"),
-            "FALTA APROBAR" => ("#B45309", "#FEF3C7"),
-            "RECHAZADO" => ("#4B5563", "#E2E8F0"),
-            _ => ("#4F46E5", "#E0E7FF")
-        };
+            return ("#475467", "#F2F4F7");
+        }
+
+        if (normalized.StartsWith("PRESENTE", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("ASISTIO", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("ASISTENCIA", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("OK", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("#166534", "#EAF7EE");
+        }
+
+        if (normalized.Contains("FALTA APROBAR", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("#B45309", "#FEF3C7");
+        }
+
+        if (normalized.Contains("FUERA DE HORARIO", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("#C1121F", "#FEE4E2");
+        }
+
+        if (normalized.Contains("TOLERANCIA", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("#B54708", "#FEF3C7");
+        }
+
+        if (normalized.Contains("FALTA", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("#B42318", "#FEF3F2");
+        }
+
+        if (normalized.Contains("VACACIONES", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("#0F766E", "#CCFBF1");
+        }
+
+        if (normalized.Contains("COMPENSACION", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("#7C3AED", "#EDE9FE");
+        }
+
+        if (normalized.Contains("DOMINGO", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("#16A34A", "#DCFCE7");
+        }
+
+        if (normalized.Contains("SABADO", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("#F59E0B", "#FEF3C7");
+        }
+
+        if (normalized.Contains("FERIADO", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("#0284C7", "#E0F2FE");
+        }
+
+        if (normalized.Contains("SIN MARCAR", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("#E11D48", "#FFE4E6");
+        }
+
+        if (normalized.Contains("SIN SALIDA", StringComparison.OrdinalIgnoreCase) || normalized.Contains("SIN ENTRADA", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("#EA580C", "#FFEDD5");
+        }
+
+        if (normalized.Contains("INCOMPLETO", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("#0891B2", "#CFFAFE");
+        }
+
+        if (normalized.Contains("RECHAZADO", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("#4B5563", "#E2E8F0");
+        }
+
+        if (normalized.Contains("DESCANSO", StringComparison.OrdinalIgnoreCase) || normalized.Contains("MEDICO", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("#1D4ED8", "#EAF1FF");
+        }
+
+        if (normalized.Contains("CLASIFIC", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("#475467", "#F2F4F7");
+        }
+
+        return ("#4F46E5", "#E0E7FF");
     }
 
     private static IReadOnlyList<string> SplitEstadoMarcacion(string? estadoMarcacionTexto)
