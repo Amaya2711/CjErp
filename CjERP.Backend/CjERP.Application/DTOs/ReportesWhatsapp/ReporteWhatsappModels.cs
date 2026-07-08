@@ -214,6 +214,8 @@ public sealed class ReporteWhatsappAsistenciaItemDto
     public string Fecha { get; set; } = string.Empty;
     public string NombreEmpleado { get; set; } = string.Empty;
     public string Telefono { get; set; } = string.Empty;
+    public string CorreoEmpleado { get; set; } = string.Empty;
+    public string CorreoResponsable { get; set; } = string.Empty;
     public string Responsable { get; set; } = string.Empty;
     public string Cliente { get; set; } = string.Empty;
     public string Area { get; set; } = string.Empty;

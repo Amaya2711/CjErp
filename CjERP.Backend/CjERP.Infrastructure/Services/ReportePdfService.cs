@@ -333,6 +333,8 @@ public sealed class ReportePdfService : IReportePdfService
             .ThenBy(item => item.Hora)
             .ToList();
         var primaryItem = items.FirstOrDefault();
+        var resumen = BuildSummary(items.Select(MapValidationItemToReporte).ToList());
+        var resumenPresentes = BuildPresentStateSummary(items.Select(MapValidationItemToReporte).ToList());
         var diferenciaHoras = primaryItem?.DiferenciaHoras ?? 0m;
         var horasLaborales = primaryItem?.TotalHorasLaborales ?? 0m;
         var horasRegistradas = items.Sum(item => item.TotalHoras);
@@ -449,6 +451,13 @@ public sealed class ReportePdfService : IReportePdfService
                             .SemiBold();
                     });
 
+                    column.Item().Background(Colors.White).Border(1).BorderColor(Colors.Grey.Lighten2).Padding(12).Column(card =>
+                    {
+                        card.Spacing(10);
+                        card.Item().Text("KPIs por estado").Bold().FontSize(12).FontColor("#123B5D");
+                        card.Item().Element(c => RenderEstadoKpiCards(c, resumen));
+                    });
+
                     column.Item().Row(row =>
                     {
                         row.Spacing(8);
@@ -459,6 +468,13 @@ public sealed class ReportePdfService : IReportePdfService
                     });
 
                     column.Item().Element(c => RenderDetalleDiarioObservadoSemanal(c, request, items));
+
+                    column.Item().Section(BuildPresentStateSectionId()).Background(Colors.White).Border(1).BorderColor(Colors.Grey.Lighten2).Padding(12).Column(card =>
+                    {
+                        card.Spacing(10);
+                        card.Item().Text("Detalle estado PRESENTE").Bold().FontSize(12).FontColor("#123B5D");
+                        card.Item().Element(c => RenderEstadoKpiCards(c, resumenPresentes, BuildPresentStateSectionId()));
+                    });
 
                     column.Item().Background("#F8FAFC").Border(1).BorderColor("#D0D5DD").Padding(12).Text(text =>
                     {
@@ -500,31 +516,6 @@ public sealed class ReportePdfService : IReportePdfService
             card.Spacing(10);
             card.Item().Text("DETALLE DIARIO OBSERVADO").Bold().FontSize(12).FontColor("#0F172A");
 
-            card.Item().Row(legend =>
-            {
-                legend.Spacing(18);
-                legend.ConstantItem(110).Row(item =>
-                {
-                    item.ConstantItem(6).Height(6).Background("#16A34A").AlignMiddle();
-                    item.ConstantItem(5);
-                    item.RelativeItem().Text("PRESENTE").FontSize(8).FontColor("#166534").SemiBold();
-                });
-
-                legend.ConstantItem(145).Row(item =>
-                {
-                    item.ConstantItem(6).Height(6).Background("#2563EB").AlignMiddle();
-                    item.ConstantItem(5);
-                    item.RelativeItem().Text("DESCANSO MÉDICO").FontSize(8).FontColor("#1D4ED8").SemiBold();
-                });
-
-                legend.RelativeItem().Row(item =>
-                {
-                    item.ConstantItem(6).Height(6).Background("#64748B").AlignMiddle();
-                    item.ConstantItem(5);
-                    item.RelativeItem().Text("SÁBADO / DOMINGO / FERIADO").FontSize(8).FontColor("#64748B").SemiBold();
-                });
-            });
-
             if (items.Count == 0)
             {
                 card.Item().Background("#F8FAFC").Border(1).BorderColor("#CBD5E1").Padding(10).Text("No existen registros diarios para mostrar.");
@@ -548,6 +539,7 @@ public sealed class ReportePdfService : IReportePdfService
                         {
                             columns.RelativeColumn(1.15f);
                             columns.RelativeColumn(1.0f);
+                            columns.RelativeColumn(1.45f);
                             columns.RelativeColumn(0.9f);
                             columns.RelativeColumn(1.5f);
                             columns.RelativeColumn(1.2f);
@@ -558,8 +550,9 @@ public sealed class ReportePdfService : IReportePdfService
                         {
                             header.Cell().Element(CallAttentionTableHeader).Text("FECHA");
                             header.Cell().Element(CallAttentionTableHeader).Text("DÍA");
-                            header.Cell().Element(CallAttentionTableHeader).AlignRight().Text("HORAS");
+                            header.Cell().Element(CallAttentionTableHeader).Text("EST.PRINC");
                             header.Cell().Element(CallAttentionTableHeader).Text("ESTADO");
+                            header.Cell().Element(CallAttentionTableHeader).AlignRight().Text("HORAS");
                             header.Cell().Element(CallAttentionTableHeader).AlignCenter().Text("ENTRADA");
                             header.Cell().Element(CallAttentionTableHeader).AlignCenter().Text("SALIDA");
                         });
@@ -571,13 +564,17 @@ public sealed class ReportePdfService : IReportePdfService
                             var diaTexto = fecha.HasValue
                                 ? cultureEsPe.TextInfo.ToTitleCase(fecha.Value.ToString("dddd", cultureEsPe))
                                 : BuildDayNameLabel(item.Fecha);
-                            var (estadoColor, estadoBackground) = GetCallAttentionStateStyle(item.EstadoMarcacionTexto);
-                            var estadoTexto = NormalizeCallAttentionState(item.EstadoMarcacionTexto);
+                            var estadoTexto = ResolveNotificationEstado(item.Estado);
+                            var estadoMarcacionTexto = ResolveNotificationEstado(item.EstadoMarcacionTexto);
+                            var (estadoColor, estadoBackground) = GetCallAttentionStateStyle(estadoTexto);
+                            var estadoPrincipalCoincide = string.Equals(estadoTexto, estadoMarcacionTexto, StringComparison.OrdinalIgnoreCase);
+                            var estadoCellBackground = estadoPrincipalCoincide ? estadoBackground : "#FEE4E2";
 
                             table.Cell().Element(CallAttentionTableBody).Text(fechaTexto);
                             table.Cell().Element(CallAttentionTableBody).Text(diaTexto);
+                            table.Cell().Element(CallAttentionTableBody).Text(estadoMarcacionTexto);
+                            table.Cell().Element(c => CallAttentionStateCell(c, estadoColor, estadoCellBackground)).AlignCenter().Text(estadoTexto).SemiBold();
                             table.Cell().Element(CallAttentionTableBody).AlignRight().Text($"{item.TotalHoras:0.00} h").SemiBold();
-                            table.Cell().Element(c => CallAttentionStateCell(c, estadoColor, estadoBackground)).AlignCenter().Text(estadoTexto).SemiBold();
                             table.Cell().Element(CallAttentionTableBody).AlignCenter().Text(EmptyIfMissing(item.Hora));
                             table.Cell().Element(CallAttentionTableBody).AlignCenter().Text(EmptyIfMissing(item.Salida));
                         }
@@ -700,6 +697,11 @@ public sealed class ReportePdfService : IReportePdfService
         text = text.Replace('Á', 'A').Replace('É', 'E').Replace('Í', 'I').Replace('Ó', 'O').Replace('Ú', 'U');
         text = text.Replace("  ", " ").Trim();
         return text;
+    }
+
+    private static string ResolveNotificationEstado(string? estado)
+    {
+        return NormalizeCallAttentionState(estado);
     }
 
     private static IContainer CallAttentionTableHeader(IContainer container) =>
@@ -972,6 +974,7 @@ public sealed class ReportePdfService : IReportePdfService
             Ubicacion = item.Ubicacion,
             HoraEntrada = item.Hora,
             HoraSalida = item.Salida,
+            Estado = item.Estado,
             EstadoMarcacionTexto = item.EstadoMarcacionTexto,
             TotalHoras = item.TotalHoras,
             TotalHorasFaltaIncompleto = item.TotalHorasFaltaIncompleto,
@@ -1030,6 +1033,7 @@ public sealed class ReportePdfService : IReportePdfService
             Ubicacion = item.Ubicacion,
             IdEmpleado = item.IdEmpleado,
             Salida = item.HoraSalida,
+            Estado = item.Estado,
             EstadoMarcacionTexto = item.EstadoMarcacionTexto,
             TotalHoras = item.TotalHoras,
             TotalHorasFaltaIncompleto = item.TotalHorasFaltaIncompleto,
@@ -1049,9 +1053,31 @@ public sealed class ReportePdfService : IReportePdfService
             return null;
         }
 
-        if (DateTime.TryParseExact(value.Trim(), "dd/MM/yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+        var trimmed = value.Trim();
+        var formats = new[]
         {
-            return parsed;
+            "dd/MM/yyyy",
+            "d/M/yyyy",
+            "dd-MM-yyyy",
+            "d-M-yyyy",
+            "yyyy-MM-dd",
+            "yyyy/MM/dd",
+            "dd/MM/yyyy HH:mm:ss",
+            "d/M/yyyy HH:mm:ss",
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-ddTHH:mm:ss",
+            "yyyy-MM-ddTHH:mm:ss.fff",
+            "yyyy-MM-ddTHH:mm:ss.FFFFFFF"
+        };
+
+        if (DateTime.TryParseExact(trimmed, formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+        {
+            return parsed.Date;
+        }
+
+        if (DateTime.TryParse(trimmed, CultureInfo.InvariantCulture, DateTimeStyles.None, out parsed))
+        {
+            return parsed.Date;
         }
 
         return null;
@@ -1061,7 +1087,7 @@ public sealed class ReportePdfService : IReportePdfService
     {
         if (!value.HasValue)
         {
-            return true;
+            return !startDate.HasValue && !endDate.HasValue;
         }
 
         if (startDate.HasValue && value.Value.Date < startDate.Value.Date)
@@ -1203,7 +1229,7 @@ public sealed class ReportePdfService : IReportePdfService
         });
     }
 
-    private static void RenderEstadoKpiCards(IContainer container, ReporteWhatsappPdfResumenDto resumen)
+    private static void RenderEstadoKpiCards(IContainer container, ReporteWhatsappPdfResumenDto resumen, string? sectionLinkId = null)
     {
         var items = resumen.Resumen
             .OrderByDescending(item => item.Cantidad)
@@ -1224,10 +1250,13 @@ public sealed class ReportePdfService : IReportePdfService
 
             foreach (var item in items)
             {
-                var (accent, background) = GetDynamicEstadoMarcacionCardColors(item.EstadoMarcacionTexto);
-                var fillPercent = (float)item.Cantidad / max;
-                var fillUnits = Math.Max(1, (int)Math.Round(fillPercent * 100));
-                var emptyUnits = Math.Max(1, 100 - fillUnits);
+            var (accent, background) = GetDynamicEstadoMarcacionCardColors(item.EstadoMarcacionTexto);
+            var sectionId = sectionLinkId is not null && string.Equals(item.EstadoMarcacionTexto, "PRESENTE", StringComparison.OrdinalIgnoreCase)
+                ? sectionLinkId
+                : null;
+            var fillPercent = (float)item.Cantidad / max;
+            var fillUnits = Math.Max(1, (int)Math.Round(fillPercent * 100));
+            var emptyUnits = Math.Max(1, 100 - fillUnits);
 
                 column.Item().Background("#F8FAFC").Border(1).BorderColor("#D9E2EC").PaddingVertical(10).PaddingHorizontal(10).Column(card =>
                 {
@@ -1240,7 +1269,13 @@ public sealed class ReportePdfService : IReportePdfService
                         row.ConstantItem(150).Column(label =>
                         {
                             label.Spacing(1);
-                            label.Item().Text(item.EstadoMarcacionTexto).SemiBold().FontSize(10).FontColor("#0F172A");
+                            var stateText = label.Item();
+                            if (!string.IsNullOrWhiteSpace(sectionId))
+                            {
+                                stateText = stateText.SectionLink(sectionId);
+                            }
+
+                            stateText.Text(item.EstadoMarcacionTexto).SemiBold().FontSize(10).FontColor("#0F172A");
                             label.Item().Text("Estado").FontSize(7).FontColor("#64748B");
                         });
 
@@ -1421,7 +1456,36 @@ public sealed class ReportePdfService : IReportePdfService
     private static ReporteWhatsappPdfResumenDto BuildGerencialSummary(IReadOnlyList<ReporteWhatsappAsistenciaItemDto> detalle)
     {
         var estados = detalle
-            .Select(ResolveGerencialEstadoMarcacion)
+            .Select(item => ResolveNotificationEstado(item.Estado))
+            .ToList();
+        var total = estados.Count;
+        var resumen = estados
+            .GroupBy(x => x)
+            .Select(group => new ReporteWhatsappResumenEstadoDto
+            {
+                EstadoMarcacionTexto = group.Key,
+                Cantidad = group.Count(),
+                Porcentaje = total == 0 ? 0 : Math.Round(group.Count() * 100m / total, 2)
+            })
+            .OrderByDescending(x => x.Cantidad)
+            .ThenBy(x => x.EstadoMarcacionTexto)
+            .ToList();
+
+        return new ReporteWhatsappPdfResumenDto
+        {
+            Resumen = resumen,
+            TotalRegistros = total
+        };
+    }
+
+    private static ReporteWhatsappPdfResumenDto BuildPresentStateSummary(IReadOnlyList<ReporteWhatsappAsistenciaItemDto> detalle)
+    {
+        var presentes = detalle
+            .Where(item => IsOnlyPresentState(item.EstadoMarcacionTexto) || string.Equals(ResolveNotificationEstado(item.EstadoMarcacionTexto), "PRESENTE", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var estados = presentes
+            .Select(item => ResolveNotificationEstado(item.Estado))
+            .Where(estado => !string.IsNullOrWhiteSpace(estado))
             .ToList();
         var total = estados.Count;
         var resumen = estados
@@ -1758,6 +1822,8 @@ public sealed class ReportePdfService : IReportePdfService
 
     private static string BuildEstadoSectionId(string estado) =>
         $"estado-{NormalizeAnchorValue(estado)}";
+
+    private static string BuildPresentStateSectionId() => "kpi-presente-principal";
 
     private static string NormalizeAnchorValue(string? value)
     {

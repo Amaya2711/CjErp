@@ -188,8 +188,8 @@ public class AsistenciaReporteController : ControllerBase
             {
                 success = result.Success,
                 message = result.Success
-                    ? "PDF enviado correctamente por WUP."
-                    : "No se pudo enviar el PDF por WUP.",
+                    ? "PDF enviado correctamente por correo."
+                    : "No se pudo enviar el PDF por correo.",
                 data = result
             });
         }
@@ -199,7 +199,7 @@ public class AsistenciaReporteController : ControllerBase
             return StatusCode(StatusCodes.Status500InternalServerError, new
             {
                 success = false,
-                message = "No se pudo enviar el PDF de llamada de atencion.",
+                message = "No se pudo enviar el PDF de llamada de atencion por correo.",
                 detail = ex.ToString()
             });
         }

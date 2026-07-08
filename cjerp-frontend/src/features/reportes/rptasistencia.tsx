@@ -95,6 +95,8 @@ type EmployeeDateRow = {
   idEmpleado: number | null;
   employee: string;
   telefono: string;
+  correoEmpleado: string;
+  correoResponsable: string;
   responsable: string;
   empresa: string;
   cliente: string;
@@ -185,6 +187,7 @@ const tableColumns: TableColumn[] = [
   { key: "nombreEmpleado", label: "Nombre empleado", width: "250px" },
   { key: "tipoAprobacion", label: "Tipo aprobacion", width: "180px" },
   { key: "responsable", label: "Responsable", width: "220px" },
+  { key: "estado", label: "Estado", width: "150px" },
   { key: "estadoMarcacionTexto", label: "Estado marcacion", width: "170px" },
   { key: "hora", label: "Hora entrada", width: "110px", align: "center" },
   { key: "salida", label: "Hora salida", width: "110px", align: "center" },
@@ -510,6 +513,25 @@ function getDayNameLabel(value: string) {
   return parsed.toLocaleDateString("es-PE", { weekday: "long" });
 }
 
+async function runWithConcurrency<T>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>
+) {
+  const safeConcurrency = Math.max(1, Math.min(concurrency, items.length || 1));
+  let currentIndex = 0;
+
+  const runners = Array.from({ length: safeConcurrency }, async () => {
+    while (currentIndex < items.length) {
+      const item = items[currentIndex];
+      currentIndex += 1;
+      await worker(item);
+    }
+  });
+
+  await Promise.all(runners);
+}
+
 function isWithinSelectedRange(value: string, startValue: string, endValue: string) {
   const current = parseDisplayDate(value);
   const start = parseInputDate(startValue);
@@ -784,6 +806,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
   const [detalleHoraEdits, setDetalleHoraEdits] = useState<Record<string, string>>({});
   const [detalleHoraSaving, setDetalleHoraSaving] = useState<Record<string, boolean>>({});
   const [detalleHoraErrors, setDetalleHoraErrors] = useState<Record<string, string>>({});
+  const [sendingLlamadaAtencionIds, setSendingLlamadaAtencionIds] = useState<number[]>([]);
   const [employeeGridFilters, setEmployeeGridFilters] = useState<EmployeeGridFilters>({
     employee: "",
     responsable: "",
@@ -1720,6 +1743,8 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
     const employeeValidationStates = new Map<string, Set<string>>();
     const employeeStateCounts = new Map<string, Map<string, number>>();
     const employeePhones = new Map<string, Set<string>>();
+    const employeeEmails = new Map<string, Set<string>>();
+    const employeeResponsibleEmails = new Map<string, Set<string>>();
     const stateLabels = new Map<string, string>();
     employees.forEach((employee) => {
       grouped.set(employee, new Map<string, number>());
@@ -1736,6 +1761,8 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
       employeeValidationStates.set(employee, new Set<string>());
       employeeStateCounts.set(employee, new Map<string, number>());
       employeePhones.set(employee, new Set<string>());
+      employeeEmails.set(employee, new Set<string>());
+      employeeResponsibleEmails.set(employee, new Set<string>());
     });
 
     filteredRows.forEach((item) => {
@@ -1809,6 +1836,18 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
       if (item.telefono) {
         employeePhones.get(employee)!.add(item.telefono);
       }
+      if (!employeeEmails.has(employee)) {
+        employeeEmails.set(employee, new Set<string>());
+      }
+      if (item.correoEmpleado) {
+        employeeEmails.get(employee)!.add(item.correoEmpleado);
+      }
+      if (!employeeResponsibleEmails.has(employee)) {
+        employeeResponsibleEmails.set(employee, new Set<string>());
+      }
+      if (item.correoResponsable) {
+        employeeResponsibleEmails.get(employee)!.add(item.correoResponsable);
+      }
       employeeApprovedHours.set(employee, Math.max(employeeApprovedHours.get(employee) ?? 0, item.totalHorasEmpleado));
       employeeLaborHours.set(employee, Math.max(employeeLaborHours.get(employee) ?? 0, item.totalHorasLaborales));
       employeePendingApprovalHours.set(employee, Math.max(employeePendingApprovalHours.get(employee) ?? 0, item.totalHorasFaltaAprobar));
@@ -1829,6 +1868,8 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
       const clientes = Array.from(employeeClientes.get(employee) ?? []).sort((a, b) => a.localeCompare(b, "es"));
       const areas = Array.from(employeeAreas.get(employee) ?? []).sort((a, b) => a.localeCompare(b, "es"));
       const telefonos = Array.from(employeePhones.get(employee) ?? []).sort((a, b) => a.localeCompare(b, "es"));
+      const correosEmpleado = Array.from(employeeEmails.get(employee) ?? []).sort((a, b) => a.localeCompare(b, "es"));
+      const correosResponsable = Array.from(employeeResponsibleEmails.get(employee) ?? []).sort((a, b) => a.localeCompare(b, "es"));
       const validationStates = Array.from(employeeValidationStates.get(employee) ?? []).sort((a, b) => a.localeCompare(b, "es"));
       const stateCountMap = employeeStateCounts.get(employee) ?? new Map<string, number>();
       const fechasDetalle = fechas.map((fecha) => ({
@@ -1855,6 +1896,8 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
         idEmpleado: employeeIds.get(employee) ?? null,
         employee,
         telefono: telefonos.join(", "),
+        correoEmpleado: correosEmpleado.join(", "),
+        correoResponsable: correosResponsable.join(", "),
         responsable: responsables.join(", "),
         empresa: empresas.join(", "),
         cliente: clientes.join(", "),
@@ -2095,6 +2138,27 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
       origenMarcacion: prev.origenMarcacion === origenMarcacion ? null : origenMarcacion,
     }));
     setActiveTab("detalle");
+  };
+
+  const handleEstadoMarcacionSummaryClick = (estadoMarcacion: string) => {
+    if (PRESENT_STATES.has(normalizeText(estadoMarcacion))) {
+      setSelectedEstadoMarcacion([estadoMarcacion]);
+      setDetailDrilldown({
+        fecha: null,
+        estadoMarcacion,
+        origenMarcacion: null,
+        nombreEmpleado: null,
+        area: null,
+      });
+      setActiveTab("detalle");
+      return;
+    }
+
+    setSelectedEstadoMarcacion((prev) =>
+      prev.includes(estadoMarcacion)
+        ? prev.filter((value) => value !== estadoMarcacion)
+        : [...prev, estadoMarcacion]
+    );
   };
 
   const handleAreaStateClick = (area: string, estadoMarcacion: string) => {
@@ -2456,6 +2520,8 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
           hora: item.hora ?? "",
           nombreEmpleado: item.nombreEmpleado,
           telefono: item.telefono || summary?.telefono || "",
+          correoEmpleado: item.correoEmpleado || summary?.correoEmpleado || "",
+          correoResponsable: item.correoResponsable || summary?.correoResponsable || "",
           responsable: item.responsable ?? summary?.responsable ?? "",
           empresa: item.empresa || summary?.empresa || "",
           cliente: item.cliente || summary?.cliente || "",
@@ -2463,6 +2529,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
           ubicacion: item.ubicacion || summary?.ubicacion || "",
           idEmpleado: item.idEmpleado ?? null,
           salida: item.salida ?? "",
+          estado: item.estado || "Sin clasificar",
           estadoMarcacionTexto: item.estadoMarcacionTexto || item.estado || "Sin clasificar",
           totalHoras: item.totalHoras,
           totalHorasFaltaIncompleto: summary?.totalHorasFaltaIncompleto ?? 0,
@@ -2571,6 +2638,11 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
 
     setError("");
     setSuccess("");
+    setSendingLlamadaAtencionIds((prev) => (
+      prev.includes(employeeRow.idEmpleado!)
+        ? prev
+        : [...prev, employeeRow.idEmpleado!]
+    ));
     try {
       const payload = {
         fechaInicio: toApiDate(fechaInicio),
@@ -2579,24 +2651,17 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
         items: pdfItems,
       };
 
-      console.info("[RptAsistencia] Payload envio llamada de atencion", payload);
-
       const response = await enviarAsistenciaEmpleadoPdfLlamadaAtencion(payload);
-      console.info("[RptAsistencia] Respuesta envio llamada de atencion", response);
-      if (response?.debugPayloadJson) {
-        try {
-          console.info(
-            "[RptAsistencia] Payload WUP post-token",
-            JSON.parse(response.debugPayloadJson as string)
-          );
-        } catch {
-          console.info("[RptAsistencia] Payload WUP post-token", response.debugPayloadJson);
-        }
-      }
-      setSuccess(`El PDF de llamada de atencion fue enviado correctamente por WUP a ${employeeName}.`);
+      const destinatarios = [employeeRow.correoEmpleado, employeeRow.correoResponsable]
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .join(", ");
+      setSuccess(`El PDF de llamada de atencion fue enviado por correo a ${destinatarios || employeeName}.`);
     } catch (err) {
       setSuccess("");
       setError(await getValidationPdfErrorMessage(err, "No se pudo enviar el PDF de llamada de atencion."));
+    } finally {
+      setSendingLlamadaAtencionIds((prev) => prev.filter((id) => id !== employeeRow.idEmpleado));
     }
   };
 
@@ -3201,15 +3266,9 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
                     ...styles.stateSummaryButton,
                     background: stateVisual.gradient,
                     color: stateVisual.text,
-                    ...(isActive ? styles.stateSummaryButtonActive : null),
+                  ...(isActive ? styles.stateSummaryButtonActive : null),
                   }}
-                  onClick={() =>
-                    setSelectedEstadoMarcacion((prev) =>
-                      prev.includes(item.name)
-                        ? prev.filter((value) => value !== item.name)
-                        : [...prev, item.name]
-                    )
-                  }
+                  onClick={() => handleEstadoMarcacionSummaryClick(item.name)}
                   title={`Filtrar por estado de marcacion: ${item.name}`}
                 >
                   <span style={styles.stateSummaryLabel}>{item.name}</span>
@@ -4235,6 +4294,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
               onExportLlamadaAtencion={exportPdfLlamadaAtencion}
               onSendLlamadaAtencion={sendPdfLlamadaAtencion}
               onPreviewLlamadaAtencion={previewPdfLlamadaAtencion}
+              sendingLlamadaAtencionIds={sendingLlamadaAtencionIds}
             />
           </ChartCard>
           <div style={styles.gerencialSummaryToolbar}>
@@ -5174,6 +5234,7 @@ function SimpleEmployeeDateGrid({
   onExportLlamadaAtencion,
   onSendLlamadaAtencion,
   onPreviewLlamadaAtencion,
+  sendingLlamadaAtencionIds,
 }: {
   data: EmployeeDateRow[];
   fechas: string[];
@@ -5200,12 +5261,18 @@ function SimpleEmployeeDateGrid({
   sortDirection: "asc" | "desc";
   onToggleSort: (key: EmployeeGridSortKey) => void;
   onCellSelect?: (nombreEmpleado: string, fecha: string) => void;
-  onExportLlamadaAtencion?: (item: EmployeeDateRow) => void;
-  onSendLlamadaAtencion?: (item: EmployeeDateRow) => void;
-  onPreviewLlamadaAtencion?: (item: EmployeeDateRow) => void;
+  onExportLlamadaAtencion?: (item: EmployeeDateRow) => void | Promise<void>;
+  onSendLlamadaAtencion?: (item: EmployeeDateRow) => void | Promise<void>;
+  onPreviewLlamadaAtencion?: (item: EmployeeDateRow) => void | Promise<void>;
+  sendingLlamadaAtencionIds?: number[];
 }) {
   const [llamadaAtencionStatusById, setLlamadaAtencionStatusById] = useState<Record<number, boolean | null>>({});
   const [selectedLlamadaAtencionIds, setSelectedLlamadaAtencionIds] = useState<number[]>([]);
+  const sendingIdSet = useMemo(
+    () => new Set(sendingLlamadaAtencionIds ?? []),
+    [sendingLlamadaAtencionIds]
+  );
+  const isSendingLlamadaAtencion = sendingIdSet.size > 0;
   const selectedLlamadaAtencionCount = selectedLlamadaAtencionIds.length;
   const canSelectLlamadaAtencion = (item: EmployeeDateRow) => {
     const idEmpleado = item.idEmpleado ?? null;
@@ -5416,22 +5483,22 @@ function SimpleEmployeeDateGrid({
             type="button"
             style={{
               ...styles.employeeGridActionButton,
-              opacity: selectedRowsForLlamadaAtencion.length > 0 && onSendLlamadaAtencion ? 1 : 0.45,
-              cursor: selectedRowsForLlamadaAtencion.length > 0 && onSendLlamadaAtencion ? "pointer" : "not-allowed",
+              opacity: selectedRowsForLlamadaAtencion.length > 0 && onSendLlamadaAtencion && !isSendingLlamadaAtencion ? 1 : 0.45,
+              cursor: selectedRowsForLlamadaAtencion.length > 0 && onSendLlamadaAtencion && !isSendingLlamadaAtencion ? "pointer" : "not-allowed",
             }}
-            disabled={selectedRowsForLlamadaAtencion.length === 0 || !onSendLlamadaAtencion}
+            disabled={selectedRowsForLlamadaAtencion.length === 0 || !onSendLlamadaAtencion || isSendingLlamadaAtencion}
             onClick={async () => {
-              if (!onSendLlamadaAtencion || selectedRowsForLlamadaAtencion.length === 0) {
+              if (!onSendLlamadaAtencion || selectedRowsForLlamadaAtencion.length === 0 || isSendingLlamadaAtencion) {
                 return;
               }
 
-              for (const row of selectedRowsForLlamadaAtencion) {
+              await runWithConcurrency(selectedRowsForLlamadaAtencion, 4, async (row) => {
                 await onSendLlamadaAtencion(row);
-              }
+              });
             }}
             title="Enviar PDF de llamada de atencion para los registros seleccionados"
           >
-            Enviar pdf
+            {isSendingLlamadaAtencion ? "Enviando..." : "Enviar pdf"}
           </button>
         </div>
       </div>
@@ -5442,7 +5509,7 @@ function SimpleEmployeeDateGrid({
             <div
               style={{
                 ...styles.stateDateGrid,
-                gridTemplateColumns: `220px 180px 150px 170px 180px 150px 160px 110px 110px 100px 140px 150px 160px 120px 120px repeat(${fechas.length}, minmax(88px, 1fr))`,
+                gridTemplateColumns: `220px 180px 150px 170px 180px 150px 160px 110px 110px 100px 140px 150px 160px 120px 120px repeat(${fechas.length}, minmax(88px, 1fr)) 220px 220px`,
               }}
             >
             <div style={{ ...styles.stateDateGridHeader, ...styles.stateDateGridCorner }}>
@@ -5683,6 +5750,12 @@ function SimpleEmployeeDateGrid({
                 </div>
               </div>
             ))}
+            <div style={styles.stateDateGridHeader}>
+              Correo empleado
+            </div>
+            <div style={styles.stateDateGridHeader}>
+              Correo responsable
+            </div>
 
             {data.length === 0 ? (
               <div style={styles.employeeGridEmptyRow}>
@@ -5977,6 +6050,32 @@ function SimpleEmployeeDateGrid({
                     </button>
                   );
                 })}
+                <div
+                  style={{
+                    ...styles.stateDateGridCell,
+                    ...styles.employeeGridValidationCell,
+                    background: differenceTone.rowBackground,
+                    color: differenceTone.rowText,
+                  }}
+                  title={`${item.employee}: ${item.correoEmpleado || "Sin correo empleado"}`}
+                >
+                  <span style={styles.employeeGridValidationText}>
+                    {item.correoEmpleado || "Sin correo empleado"}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    ...styles.stateDateGridCell,
+                    ...styles.employeeGridValidationCell,
+                    background: differenceTone.rowBackground,
+                    color: differenceTone.rowText,
+                  }}
+                  title={`${item.employee}: ${item.correoResponsable || "Sin correo responsable"}`}
+                >
+                  <span style={styles.employeeGridValidationText}>
+                    {item.correoResponsable || "Sin correo responsable"}
+                  </span>
+                </div>
                     </>
                   );
                 })()}

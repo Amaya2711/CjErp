@@ -42,6 +42,8 @@ public class AsistenciaReportePdfItemDto
     public string Hora { get; set; } = string.Empty;
     public string NombreEmpleado { get; set; } = string.Empty;
     public string Telefono { get; set; } = string.Empty;
+    public string CorreoEmpleado { get; set; } = string.Empty;
+    public string CorreoResponsable { get; set; } = string.Empty;
     public string Responsable { get; set; } = string.Empty;
     public string Empresa { get; set; } = string.Empty;
     public string Cliente { get; set; } = string.Empty;
@@ -49,6 +51,7 @@ public class AsistenciaReportePdfItemDto
     public string Ubicacion { get; set; } = string.Empty;
     public int? IdEmpleado { get; set; }
     public string Salida { get; set; } = string.Empty;
+    public string Estado { get; set; } = string.Empty;
     public string EstadoMarcacionTexto { get; set; } = string.Empty;
     public decimal TotalHoras { get; set; }
     public decimal TotalHorasFaltaIncompleto { get; set; }
@@ -67,6 +70,8 @@ public class AsistenciaReporteDto
     public string Hora { get; set; } = string.Empty;
     public string NombreEmpleado { get; set; } = string.Empty;
     public string Telefono { get; set; } = string.Empty;
+    public string CorreoEmpleado { get; set; } = string.Empty;
+    public string CorreoResponsable { get; set; } = string.Empty;
     public string TipoAprobacion { get; set; } = string.Empty;
     public string Responsable { get; set; } = string.Empty;
     public string Estado { get; set; } = string.Empty;

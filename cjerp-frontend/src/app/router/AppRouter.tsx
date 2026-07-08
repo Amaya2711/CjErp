@@ -50,6 +50,7 @@ const SolicitudesPage = lazy(() => import("../../features/compras/solicitudes"))
 const OrdenCompraPage = lazy(() => import("../../features/compras/ordencompra"));
 const PersonalPage = lazy(() => import("../../features/recursoshumanos/personal"));
 const FichaPage = lazy(() => import("../../features/recursoshumanos/ficha"));
+const ContratosPage = lazy(() => import("../../features/recursoshumanos/contratos"));
 const RecursosHumanosAsistenciaPage = lazy(() => import("../../features/recursoshumanos/asistencia"));
 const CompensacionRealPage = lazy(() => import("../../features/recursoshumanos/compensacionreal"));
 const ImportarPlanillaXmlPage = lazy(() => import("../../features/recursoshumanos/planillas"));
@@ -113,6 +114,7 @@ export default function AppRouter() {
 
             <Route path="/recursoshumanos/personal" element={<PersonalPage />} />
             <Route path="/recursoshumanos/ficha" element={<FichaPage />} />
+            <Route path="/recursoshumanos/contratos" element={<ContratosPage />} />
             <Route
               path="/recursoshumanos/asistencia"
               element={<RecursosHumanosAsistenciaPage />}

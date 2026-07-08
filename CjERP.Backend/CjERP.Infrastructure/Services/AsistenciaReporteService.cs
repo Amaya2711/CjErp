@@ -1,5 +1,6 @@
 using System.Data;
 using System.Globalization;
+using System.Net.Mail;
 using System.Text;
 using System.Text.Json;
 using CjERP.Application.DTOs;
@@ -7,15 +8,30 @@ using CjERP.Application.DTOs.ReportesWhatsapp;
 using CjERP.Application.Interfaces.Repositories;
 using CjERP.Application.Interfaces.Services;
 using Dapper;
+using MailKit.Security;
+using MailKitSmtpClient = MailKit.Net.Smtp.SmtpClient;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using MimeKit;
+using MimeKit.Utils;
+using CjERP.Shared.Configuration;
 
 namespace CjERP.Infrastructure.Services;
 
 public class AsistenciaReporteService : IAsistenciaReporteService
 {
+    private sealed record SmtpAttempt(string Host, int Port, SecureSocketOptions SocketOptions, bool AllowInvalidCertificate);
+    private sealed record MailRecipients(IReadOnlyList<string> To, IReadOnlyList<string> Cc);
+
     private const string NotificacionAsistenciaFilePrefix = "notificacion_asistencia";
+    private static readonly string[] AttendanceAuditCcEmails =
+    {
+        "juan.manuel.amaya.suarez@gmail.com",
+        "PTORRES@CJ-TELECOM.COM",
+        "CJIBERICO@CJ-TELECOM.COM"
+    };
     private const string ReporteSp = "dbo.RptAsistenciaFechas";
     private const string UpdateEstadoMarcacionSp = "dbo.sp_Asistencia_ActualizarEstadoEmpleado";
     private const decimal MissingOrIncompleteHours = 9.6m;
@@ -39,6 +55,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
     };
 
     private readonly IConfiguration _configuration;
+    private readonly SmtpSettings _smtpSettings;
     private readonly IReportePdfService _reportePdfService;
     private readonly IReporteRepository _reporteRepository;
     private readonly IAuditoriaCambiosService _auditoriaCambiosService;
@@ -47,6 +64,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
 
     public AsistenciaReporteService(
         IConfiguration configuration,
+        IOptions<SmtpSettings> smtpSettings,
         IReportePdfService reportePdfService,
         IReporteRepository reporteRepository,
         IAuditoriaCambiosService auditoriaCambiosService,
@@ -54,6 +72,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
         ILogger<AsistenciaReporteService> logger)
     {
         _configuration = configuration;
+        _smtpSettings = smtpSettings.Value;
         _reportePdfService = reportePdfService;
         _reporteRepository = reporteRepository;
         _auditoriaCambiosService = auditoriaCambiosService;
@@ -135,48 +154,27 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             throw new InvalidOperationException("No se pudo identificar el empleado para enviar la llamada de atencion.");
         }
 
-        var telefonoNormalizado = NormalizePhone(itemPrincipal.Telefono);
-        if (string.IsNullOrWhiteSpace(telefonoNormalizado))
+        var recipients = BuildEmailRecipients(request.Items);
+        if (recipients.To.Count == 0)
         {
-            throw new InvalidOperationException("El empleado seleccionado no tiene un telefono valido para enviar por WUP.");
+            throw new InvalidOperationException("El empleado seleccionado no tiene un correo valido para enviar el PDF.");
         }
 
         var pdfBytes = await GenerarPdfEmpleadoLlamadaAtencionInternoAsync(request, usuarioEjecucion, cancellationToken);
 
         var nombreArchivo = $"{NotificacionAsistenciaFilePrefix}_{request.FechaInicio.Replace("/", string.Empty)}_{request.FechaFin.Replace("/", string.Empty)}.pdf";
-        var contenidoBase64 = Convert.ToBase64String(pdfBytes);
-        if (string.IsNullOrWhiteSpace(contenidoBase64))
-        {
-            throw new InvalidOperationException("No se pudo convertir el PDF a Base64 para enviar por WUP.");
-        }
-
-        var sendRequest = new ReporteWhatsappSendRequestDto
-        {
-            NombreArchivo = nombreArchivo,
-            Mensaje = "Adjuntamos su reporte de llamada de atencion por asistencia.",
-            Modo = "wsp",
-            Telefono = telefonoNormalizado,
-            Contenido = contenidoBase64
-        };
-
-        _logger.LogInformation(
-            "[AsistenciaWUP] Payload WUP generado para llamada de atencion. Payload={Payload}",
-            JsonSerializer.Serialize(sendRequest));
-
-        var response = await ExecuteWithRetryAsync(
-            async sendToken =>
-            {
-                using var attemptTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(sendToken);
-                attemptTimeoutCts.CancelAfter(WupSendTimeout);
-                return await _wupService.EnviarAdjuntoAsync(sendRequest, attemptTimeoutCts.Token);
-            },
-            WupMaxAttempts,
+        var response = await SendMailWithAttachmentAsync(
+            recipients,
+            BuildAttendanceMailSubject(itemPrincipal, request),
+            BuildAttendanceMailBody(itemPrincipal, request),
+            nombreArchivo,
+            pdfBytes,
             cancellationToken);
 
         _logger.LogInformation(
-            "[AsistenciaWUP] Resultado envio llamada de atencion. Empleado={Empleado}, Telefono={Telefono}, Success={Success}, StatusCode={StatusCode}, Error={Error}, ResponseBody={ResponseBody}",
+            "[AsistenciaMail] Resultado envio llamada de atencion. Empleado={Empleado}, Recipients={Recipients}, Success={Success}, StatusCode={StatusCode}, Error={Error}, ResponseBody={ResponseBody}",
             itemPrincipal.NombreEmpleado?.Trim() ?? string.Empty,
-            telefonoNormalizado,
+            $"To: {string.Join(", ", recipients.To)} | Cc: {string.Join(", ", recipients.Cc)}",
             response.Success,
             response.StatusCode,
             response.ErrorMessage,
@@ -186,19 +184,17 @@ public class AsistenciaReporteService : IAsistenciaReporteService
         {
             IdEmpleado = itemPrincipal.IdEmpleado ?? 0,
             Usuario = itemPrincipal.NombreEmpleado?.Trim() ?? request.Destinatario?.Trim() ?? string.Empty,
-            Telefono = telefonoNormalizado,
+            Telefono = BuildShortLogRecipientValue(itemPrincipal, recipients),
             FechaProceso = ResolveFechaProceso(request.FechaFin),
             TipoReporte = ReporteWhatsappTipos.LlamadaAtencionAsistencia,
-            EstadoEnvio = response.Success ? "ENVIADO" : "ERROR_ENDPOINT_WUP",
-            MensajeError = response.Success ? string.Empty : (string.IsNullOrWhiteSpace(response.ErrorMessage) ? $"El endpoint WUP respondio {response.StatusCode}." : response.ErrorMessage),
+            EstadoEnvio = response.Success ? "ENVIADO_EMAIL" : "ERROR_SMTP",
+            MensajeError = response.Success ? string.Empty : (string.IsNullOrWhiteSpace(response.ErrorMessage) ? "El envio SMTP no devolvio detalle adicional." : response.ErrorMessage),
             FechaEnvio = response.Success ? GetPeruNow() : null,
             RequestJson = JsonSerializer.Serialize(new
             {
-                sendRequest.NombreArchivo,
-                sendRequest.Mensaje,
-                sendRequest.Modo,
-                sendRequest.Telefono,
-                contenidoLength = sendRequest.Contenido.Length,
+                to = recipients.To,
+                cc = recipients.Cc,
+                nombreArchivo,
                 pdfBytesLength = pdfBytes.Length
             }),
             ResponseJson = response.ResponseBody,
@@ -210,7 +206,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             UsuarioEjecucion = string.IsNullOrWhiteSpace(usuarioEjecucion) ? "SISTEMA" : usuarioEjecucion.Trim()
         };
 
-        await _reporteRepository.InsertarLogAsync(log, cancellationToken);
+        await TryInsertarLogAsync(log, cancellationToken);
         return response;
     }
 
@@ -286,7 +282,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             UsuarioEjecucion = string.IsNullOrWhiteSpace(usuarioEjecucion) ? "SISTEMA" : usuarioEjecucion.Trim()
         };
 
-        await _reporteRepository.InsertarLogAsync(log, cancellationToken);
+        await TryInsertarLogAsync(log, cancellationToken);
         return pdfBytes;
     }
 
@@ -1154,6 +1150,8 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             Hora = GetTimeString(values, "Hora", "hora", "Fecha", "fecha", "HoraEntrada", "horaEntrada"),
             NombreEmpleado = GetString(values, "nombreempleado", "NombreEmpleado", "nombreEmpleado"),
             Telefono = GetString(values, "Telefono", "telefono", "Celular", "celular", "TelefonoWup", "telefonoWup"),
+            CorreoEmpleado = GetString(values, "CorreoEmpleado", "correoEmpleado", "correoempleado"),
+            CorreoResponsable = GetString(values, "CorreoResponsable", "correoResponsable", "correoresponsable"),
             TipoAprobacion = GetString(values, "TipoAprobacion", "tipoAprobacion", "tipo_aprobacion"),
             Responsable = GetString(values, "Responsable", "responsable"),
             Estado = GetString(values, "Estado", "estado"),
@@ -1194,6 +1192,8 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             Fecha = GetDateDisplayString(values, "Fecha", "fecha"),
             NombreEmpleado = GetString(values, "nombreempleado", "NombreEmpleado", "nombreEmpleado"),
             Telefono = GetString(values, "Telefono", "telefono", "Celular", "celular", "TelefonoWup", "telefonoWup"),
+            CorreoEmpleado = GetString(values, "CorreoEmpleado", "correoEmpleado", "correoempleado"),
+            CorreoResponsable = GetString(values, "CorreoResponsable", "correoResponsable", "correoresponsable"),
             Responsable = GetString(values, "Responsable", "responsable"),
             Cliente = GetString(values, "Cliente", "cliente"),
             Area = GetString(values, "Area", "area"),
@@ -1215,6 +1215,269 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             Comentario = GetString(values, "Comentario", "comentario"),
             Observacion = GetString(values, "Observacion", "observacion")
         };
+    }
+
+    private MailRecipients BuildEmailRecipients(IReadOnlyList<AsistenciaReportePdfItemDto> items)
+    {
+        var itemPrincipal = items.FirstOrDefault();
+
+        var toRecipients = new[] { itemPrincipal?.CorreoEmpleado }
+            .Where(IsValidEmail)
+            .Select(item => item!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var ccRecipients = (new[] { itemPrincipal?.CorreoResponsable })
+            .Concat(AttendanceAuditCcEmails)
+            .Where(IsValidEmail)
+            .Select(item => item!.Trim())
+            .Where(item => !toRecipients.Contains(item, StringComparer.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return new MailRecipients(toRecipients, ccRecipients);
+    }
+
+    private async Task<ReporteWhatsappSendResponseDto> SendMailWithAttachmentAsync(
+        MailRecipients recipients,
+        string subject,
+        string body,
+        string attachmentName,
+        byte[] attachmentContent,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ValidateSmtpSettings();
+
+        var attempts = BuildSmtpAttempts();
+        var failures = new List<object>();
+
+        foreach (var attempt in attempts)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                using var smtp = new MailKitSmtpClient
+                {
+                    Timeout = Math.Max(1, _smtpSettings.TimeoutSeconds) * 1000
+                };
+
+                if (attempt.AllowInvalidCertificate)
+                {
+                    smtp.ServerCertificateValidationCallback = static (_, _, _, _) => true;
+                }
+
+                var message = new MimeMessage();
+                message.From.Add(MailboxAddress.Parse(_smtpSettings.From));
+
+                foreach (var recipient in recipients.To)
+                {
+                    message.To.Add(MailboxAddress.Parse(recipient));
+                }
+
+                foreach (var recipient in recipients.Cc)
+                {
+                    message.Cc.Add(MailboxAddress.Parse(recipient));
+                }
+
+                message.Subject = subject;
+
+                var bodyBuilder = new BodyBuilder
+                {
+                    TextBody = body
+                };
+                bodyBuilder.Attachments.Add(attachmentName, attachmentContent, ContentType.Parse("application/pdf"));
+                message.Body = bodyBuilder.ToMessageBody();
+
+                await smtp.ConnectAsync(attempt.Host, attempt.Port, attempt.SocketOptions, cancellationToken);
+                await smtp.AuthenticateAsync(_smtpSettings.UserName, _smtpSettings.Password, cancellationToken);
+                await smtp.SendAsync(message, cancellationToken);
+                await smtp.DisconnectAsync(true, cancellationToken);
+
+                return new ReporteWhatsappSendResponseDto
+                {
+                    Success = true,
+                    StatusCode = 200,
+                    ResponseBody = $"Correo enviado a: {string.Join(", ", recipients.To)} | Copia: {string.Join(", ", recipients.Cc)}",
+                    ErrorMessage = string.Empty,
+                    DebugPayloadJson = JsonSerializer.Serialize(new
+                    {
+                        to = recipients.To,
+                        cc = recipients.Cc,
+                        subject,
+                        attachmentName,
+                        smtpAttempt = attempt
+                    })
+                };
+            }
+            catch (Exception ex)
+            {
+                failures.Add(new
+                {
+                    attempt.Host,
+                    attempt.Port,
+                    SocketOptions = attempt.SocketOptions.ToString(),
+                    attempt.AllowInvalidCertificate,
+                    Error = ex.Message
+                });
+
+                _logger.LogWarning(
+                    ex,
+                    "Fallo intento SMTP enviando PDF de asistencia. Host={Host}, Port={Port}, SocketOptions={SocketOptions}, AllowInvalidCertificate={AllowInvalidCertificate}, Recipients={Recipients}",
+                    attempt.Host,
+                    attempt.Port,
+                    attempt.SocketOptions,
+                    attempt.AllowInvalidCertificate,
+                    $"To: {string.Join(", ", recipients.To)} | Cc: {string.Join(", ", recipients.Cc)}");
+            }
+        }
+
+        var lastError = failures.LastOrDefault();
+        var errorMessage = lastError is null
+            ? "No se pudo enviar el correo y no se registraron detalles del intento SMTP."
+            : JsonSerializer.Serialize(lastError);
+
+        _logger.LogError(
+            "Error enviando PDF de asistencia por correo a {Recipients}. Attempts={Attempts}",
+            $"To: {string.Join(", ", recipients.To)} | Cc: {string.Join(", ", recipients.Cc)}",
+            JsonSerializer.Serialize(failures));
+
+        return new ReporteWhatsappSendResponseDto
+        {
+            Success = false,
+            StatusCode = 500,
+            ResponseBody = string.Empty,
+            ErrorMessage = errorMessage,
+            DebugPayloadJson = JsonSerializer.Serialize(new
+            {
+                to = recipients.To,
+                cc = recipients.Cc,
+                subject,
+                attachmentName,
+                smtpAttempts = failures
+            })
+        };
+    }
+
+    private void ValidateSmtpSettings()
+    {
+        if (string.IsNullOrWhiteSpace(_smtpSettings.Host) ||
+            string.IsNullOrWhiteSpace(_smtpSettings.UserName) ||
+            string.IsNullOrWhiteSpace(_smtpSettings.Password) ||
+            string.IsNullOrWhiteSpace(_smtpSettings.From))
+        {
+            throw new InvalidOperationException("La configuracion SMTP no esta completa. Revise SmtpSettings en appsettings o variables de entorno.");
+        }
+    }
+
+    private IReadOnlyList<SmtpAttempt> BuildSmtpAttempts()
+    {
+        var attempts = new List<SmtpAttempt>();
+
+        void AddAttempt(string host, int port, SecureSocketOptions socketOptions, bool allowInvalidCertificate)
+        {
+            if (attempts.Any(item =>
+                    item.Host.Equals(host, StringComparison.OrdinalIgnoreCase) &&
+                    item.Port == port &&
+                    item.SocketOptions == socketOptions &&
+                    item.AllowInvalidCertificate == allowInvalidCertificate))
+            {
+                return;
+            }
+
+            attempts.Add(new SmtpAttempt(host, port, socketOptions, allowInvalidCertificate));
+        }
+
+        if (_smtpSettings.EnableSsl)
+        {
+            AddAttempt(_smtpSettings.Host, _smtpSettings.Port, SecureSocketOptions.StartTls, _smtpSettings.AllowInvalidCertificate);
+            AddAttempt(_smtpSettings.Host, _smtpSettings.Port, SecureSocketOptions.Auto, _smtpSettings.AllowInvalidCertificate);
+        }
+        else
+        {
+            AddAttempt(_smtpSettings.Host, _smtpSettings.Port, SecureSocketOptions.None, _smtpSettings.AllowInvalidCertificate);
+            AddAttempt(_smtpSettings.Host, _smtpSettings.Port, SecureSocketOptions.Auto, _smtpSettings.AllowInvalidCertificate);
+        }
+
+        if (_smtpSettings.AllowInsecureFallback)
+        {
+            AddAttempt(_smtpSettings.Host, _smtpSettings.Port, SecureSocketOptions.None, _smtpSettings.AllowInvalidCertificate);
+        }
+
+        return attempts;
+    }
+
+    private static bool IsValidEmail(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        try
+        {
+            _ = new MailAddress(value.Trim());
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private string BuildShortLogRecipientValue(AsistenciaReportePdfItemDto itemPrincipal, MailRecipients recipients)
+    {
+        var candidates = new[]
+        {
+            itemPrincipal.Telefono?.Trim(),
+            recipients.To.FirstOrDefault(),
+            recipients.Cc.FirstOrDefault(),
+            itemPrincipal.CorreoEmpleado?.Trim(),
+            itemPrincipal.CorreoResponsable?.Trim()
+        };
+
+        var value = candidates.FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate)) ?? string.Empty;
+        const int maxLength = 40;
+        return value.Length <= maxLength ? value : value[..maxLength];
+    }
+
+    private async Task TryInsertarLogAsync(ReporteWhatsappLogDto log, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _reporteRepository.InsertarLogAsync(log, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "No se pudo registrar el log de ReporteWhatsApp. IdEmpleado={IdEmpleado}, TipoReporte={TipoReporte}, EstadoEnvio={EstadoEnvio}",
+                log.IdEmpleado,
+                log.TipoReporte,
+                log.EstadoEnvio);
+        }
+    }
+
+    private static string BuildAttendanceMailSubject(AsistenciaReportePdfItemDto itemPrincipal, AsistenciaReportePdfRequestDto request)
+    {
+        var employeeName = string.IsNullOrWhiteSpace(itemPrincipal.NombreEmpleado) ? "Empleado" : itemPrincipal.NombreEmpleado.Trim();
+        return $"Notificacion de asistencia - {employeeName} - Periodo {request.FechaInicio} al {request.FechaFin}";
+    }
+
+    private static string BuildAttendanceMailBody(AsistenciaReportePdfItemDto itemPrincipal, AsistenciaReportePdfRequestDto request)
+    {
+        var employeeName = string.IsNullOrWhiteSpace(itemPrincipal.NombreEmpleado) ? "Colaborador" : itemPrincipal.NombreEmpleado.Trim();
+        return
+            $"Estimado {employeeName},{Environment.NewLine}{Environment.NewLine}" +
+            $"Por medio del presente, se remite la notificacion de asistencia correspondiente al periodo comprendido entre el {request.FechaInicio} y el {request.FechaFin}.{Environment.NewLine}{Environment.NewLine}" +
+            "El documento adjunto contiene el detalle de las incidencias registradas durante el periodo evaluado, asi como el resumen de horas y observaciones relacionadas al cumplimiento de la jornada laboral establecida." +
+            $"{Environment.NewLine}{Environment.NewLine}" +
+            "Agradecemos confirmar la recepcion del presente correo." +
+            $"{Environment.NewLine}{Environment.NewLine}" +
+            "Saludos cordiales," +
+            $"{Environment.NewLine}Administracion" +
+            $"{Environment.NewLine}CJ Telecom S.A.C.";
     }
 
     private async Task EnrichPhonesAsync<T>(

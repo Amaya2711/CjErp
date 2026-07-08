@@ -32,6 +32,8 @@ builder.Services.Configure<SessionSettings>(
     builder.Configuration.GetSection("SessionSettings"));
 builder.Services.Configure<SqlSettings>(
     builder.Configuration.GetSection("SqlSettings"));
+builder.Services.Configure<SmtpSettings>(
+    builder.Configuration.GetSection("SmtpSettings"));
 builder.Services.Configure<SharePointOptions>(
     builder.Configuration.GetSection(SharePointOptions.SectionName));
 builder.Services.Configure<PlanillaXmlOptions>(

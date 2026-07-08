@@ -8,6 +8,8 @@ export type AsistenciaReporteItem = {
   hora: string;
   nombreEmpleado: string;
   telefono: string;
+  correoEmpleado: string;
+  correoResponsable: string;
   tipoAprobacion: string;
   responsable: string;
   estado: string;
@@ -41,6 +43,8 @@ export type AsistenciaReportePdfItem = {
   hora: string;
   nombreEmpleado: string;
   telefono: string;
+  correoEmpleado: string;
+  correoResponsable: string;
   responsable: string;
   empresa?: string;
   cliente?: string;
@@ -48,6 +52,7 @@ export type AsistenciaReportePdfItem = {
   ubicacion: string;
   idEmpleado: number | null;
   salida: string;
+  estado: string;
   estadoMarcacionTexto: string;
   totalHoras: number;
   totalHorasFaltaIncompleto: number;
