@@ -218,6 +218,7 @@ public sealed class ReportePdfService : IReportePdfService
             .ToList();
         var primaryItem = items.FirstOrDefault();
         var resumen = BuildSummary(items.Select(MapValidationItemToReporte).ToList());
+        var resumenPresentes = BuildPresentStateSummary(items.Select(MapValidationItemToReporte).ToList());
         var diferenciaHoras = primaryItem?.DiferenciaHoras ?? 0m;
         var estadoValidacionHoras = primaryItem?.EstadoValidacionHoras ?? string.Empty;
         var warning = diferenciaHoras < 0;
@@ -281,6 +282,16 @@ public sealed class ReportePdfService : IReportePdfService
                         card.Spacing(10);
                         card.Item().Text("KPIs por estado").Bold().FontSize(12);
                         card.Item().Element(c => RenderEstadoKpiCards(c, resumen));
+                    });
+
+                    column.Item().Section(BuildPresentStateSectionId()).Background(Colors.White).Border(1).BorderColor(Colors.Grey.Lighten2).Padding(12).Column(card =>
+                    {
+                        card.Spacing(10);
+                        card.Item().Text("Detalle estado PRESENTE").Bold().FontSize(12).FontColor("#123B5D");
+                        card.Item().Text($"Los porcentajes se calculan sobre {resumenPresentes.TotalRegistros} registros presentes.")
+                            .FontSize(8)
+                            .FontColor("#667085");
+                        card.Item().Element(c => RenderEstadoKpiCards(c, resumenPresentes, BuildPresentStateSectionId(), "Cada porcentaje refleja la participación dentro del conjunto PRESENTE."));
                     });
 
                 });
@@ -1468,7 +1479,7 @@ public sealed class ReportePdfService : IReportePdfService
     private static ReporteWhatsappPdfResumenDto BuildPresentStateSummary(IReadOnlyList<ReporteWhatsappAsistenciaItemDto> detalle)
     {
         var presentes = detalle
-            .Where(item => ContainsPresentState(item.EstadoMarcacionTexto))
+            .Where(item => IsOnlyPresentState(item.EstadoMarcacionTexto) || string.Equals(ResolveNotificationEstado(item.EstadoMarcacionTexto), "PRESENTE", StringComparison.OrdinalIgnoreCase))
             .ToList();
         var estados = presentes
             .Select(item => ResolveNotificationEstado(item.Estado))
@@ -2021,10 +2032,10 @@ public sealed class ReportePdfService : IReportePdfService
         return estados.Length == 0 ? ["SIN CLASIFICAR"] : estados;
     }
 
-    private static bool ContainsPresentState(string? estadoMarcacionTexto)
+    private static bool IsOnlyPresentState(string? estadoMarcacionTexto)
     {
         var estados = SplitEstadoMarcacion(estadoMarcacionTexto);
-        return estados.Count > 0 && estados.Any(state => PresentStates.Contains(state) || state.StartsWith("PRESENTE", StringComparison.OrdinalIgnoreCase));
+        return estados.Count > 0 && estados.All(state => PresentStates.Contains(state));
     }
 
     private static bool IsWeekendState(string? estadoMarcacionTexto)

@@ -2544,6 +2544,83 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
       });
   };
 
+  const buildEmpleadoValidationPdfItems = (employeeRow: EmployeeDateRow): AsistenciaReportePdfItem[] => {
+    const employeeName = employeeRow.employee.trim();
+    if (!employeeName) {
+      return [];
+    }
+
+    const items: AsistenciaReportePdfItem[] = [];
+
+    employeeRow.fechas.forEach((dayCell) => {
+        const sourceRows = filteredRows
+          .filter((item) => item.nombreEmpleado?.trim() === employeeName)
+          .filter((item) => formatDateLabel(item.fecha) === dayCell.fecha);
+
+        if (sourceRows.length === 0) {
+          return;
+        }
+
+        const estados = Array.from(
+          new Set(
+            sourceRows
+              .map((item) => item.estado?.trim())
+              .filter((value): value is string => Boolean(value))
+          )
+        );
+
+        const estadosMarcacion = Array.from(
+          new Set(
+            sourceRows
+              .flatMap((item) => String(item.estadoMarcacionTexto || item.estado || "")
+                .split(",")
+                .map((value) => value.trim())
+                .filter(Boolean))
+          )
+        );
+
+        const horaEntrada = sourceRows
+          .map((item) => item.hora?.trim())
+          .filter((value): value is string => Boolean(value))
+          .sort((a, b) => a.localeCompare(b, "es"))[0] ?? "";
+
+        const horaSalida = sourceRows
+          .map((item) => item.salida?.trim())
+          .filter((value): value is string => Boolean(value))
+          .sort((a, b) => a.localeCompare(b, "es"))
+          .at(-1) ?? "";
+
+        items.push({
+          fecha: dayCell.fecha,
+          hora: horaEntrada,
+          nombreEmpleado: employeeRow.employee,
+          telefono: employeeRow.telefono || "",
+          correoEmpleado: employeeRow.correoEmpleado || "",
+          correoResponsable: employeeRow.correoResponsable || "",
+          responsable: employeeRow.responsable || "",
+          empresa: employeeRow.empresa || "",
+          cliente: employeeRow.cliente || "",
+          area: employeeRow.area || "",
+          ubicacion: employeeRow.ubicacion || "",
+          idEmpleado: employeeRow.idEmpleado ?? null,
+          salida: horaSalida,
+          estado: estados.join(", ") || "Sin clasificar",
+          estadoMarcacionTexto: estadosMarcacion.join(", ") || "Sin clasificar",
+          totalHoras: dayCell.totalHoras,
+          totalHorasFaltaIncompleto: employeeRow.totalHorasFaltaIncompleto,
+          totalHorasEmpleado: employeeRow.total,
+          totalHorasLaborales: employeeRow.totalHorasLaborales,
+          totalHorasFaltaAprobar: employeeRow.totalHorasFaltaAprobar,
+          diferenciaHoras: employeeRow.diferenciaHoras,
+          estadoValidacionHoras: employeeRow.estadoValidacionHoras,
+          comentario: "",
+          observacion: "",
+        });
+      });
+
+    return items;
+  };
+
   const exportPdfLlamadaAtencion = async (employeeRow: EmployeeDateRow) => {
     const employeeName = employeeRow.employee.trim();
     if (!employeeName) {
@@ -2716,8 +2793,9 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
       return;
     }
 
-    const employeeName = filteredEmployeeGridRows[0]?.employee?.trim();
-    const pdfItems = buildEmpleadoPdfItems(employeeName);
+    const employeeRow = filteredEmployeeGridRows[0];
+    const employeeName = employeeRow?.employee?.trim();
+    const pdfItems = employeeRow ? buildEmpleadoValidationPdfItems(employeeRow) : [];
     if (pdfItems.length === 0) {
       setError("No se encontraron registros del empleado filtrado para generar el PDF de prueba.");
       return;
@@ -2743,17 +2821,29 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
 
   const exportPdf = async () => {
     if (activeTab === "empleado") {
-      const pdfItems = buildEmpleadoPdfItems();
-      const pdfBlob = await exportarAsistenciaEmpleadoPdf({
+      if (filteredEmployeeGridRows.length !== 1) {
+        setError("Para exportar el PDF debes filtrar un solo empleado en la pestaña x Empleado.");
+        return;
+      }
+
+      const employeeRow = filteredEmployeeGridRows[0];
+      const employeeName = employeeRow?.employee?.trim();
+      const pdfItems = employeeRow ? buildEmpleadoValidationPdfItems(employeeRow) : [];
+      if (pdfItems.length === 0) {
+        setError("No se encontraron registros del empleado filtrado para generar el PDF.");
+        return;
+      }
+
+      const pdfBlob = await exportarAsistenciaEmpleadoPdfValidacion({
         fechaInicio: toApiDate(fechaInicio),
         fechaFin: toApiDate(fechaFin),
-        destinatario: "Reporte x Empleado",
+        destinatario: employeeName || "Reporte x Empleado Validacion",
         items: pdfItems,
       });
 
       downloadBlobAsFile(
         pdfBlob,
-        `reporte_asistencia_${toApiDate(fechaInicio).replaceAll("/", "")}_${toApiDate(fechaFin).replaceAll("/", "")}.pdf`
+        `reporte_asistencia_validacion_${toApiDate(fechaInicio).replaceAll("/", "")}_${toApiDate(fechaFin).replaceAll("/", "")}.pdf`
       );
       return;
     }
