@@ -1468,7 +1468,7 @@ public sealed class ReportePdfService : IReportePdfService
     private static ReporteWhatsappPdfResumenDto BuildPresentStateSummary(IReadOnlyList<ReporteWhatsappAsistenciaItemDto> detalle)
     {
         var presentes = detalle
-            .Where(item => IsOnlyPresentState(item.EstadoMarcacionTexto) || string.Equals(ResolveNotificationEstado(item.EstadoMarcacionTexto), "PRESENTE", StringComparison.OrdinalIgnoreCase))
+            .Where(item => ContainsPresentState(item.EstadoMarcacionTexto))
             .ToList();
         var estados = presentes
             .Select(item => ResolveNotificationEstado(item.Estado))
@@ -2021,10 +2021,10 @@ public sealed class ReportePdfService : IReportePdfService
         return estados.Length == 0 ? ["SIN CLASIFICAR"] : estados;
     }
 
-    private static bool IsOnlyPresentState(string? estadoMarcacionTexto)
+    private static bool ContainsPresentState(string? estadoMarcacionTexto)
     {
         var estados = SplitEstadoMarcacion(estadoMarcacionTexto);
-        return estados.Count > 0 && estados.All(state => PresentStates.Contains(state));
+        return estados.Count > 0 && estados.Any(state => PresentStates.Contains(state) || state.StartsWith("PRESENTE", StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool IsWeekendState(string? estadoMarcacionTexto)
