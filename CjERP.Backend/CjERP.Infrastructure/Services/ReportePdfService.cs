@@ -1911,7 +1911,7 @@ public sealed class ReportePdfService : IReportePdfService
 
         if (string.IsNullOrWhiteSpace(normalized))
         {
-            return ("#475467", "#F2F4F7");
+            return ("#64748B", "#F1F5F9");
         }
 
         if (normalized.StartsWith("PRESENTE", StringComparison.OrdinalIgnoreCase)
@@ -1924,22 +1924,22 @@ public sealed class ReportePdfService : IReportePdfService
 
         if (normalized.Contains("FALTA APROBAR", StringComparison.OrdinalIgnoreCase))
         {
-            return ("#B45309", "#FEF3C7");
+            return ("#9A3412", "#FFF7ED");
         }
 
         if (normalized.Contains("FUERA DE HORARIO", StringComparison.OrdinalIgnoreCase))
         {
-            return ("#C1121F", "#FEE4E2");
+            return ("#B91C1C", "#FEE2E2");
         }
 
         if (normalized.Contains("TOLERANCIA", StringComparison.OrdinalIgnoreCase))
         {
-            return ("#B54708", "#FEF3C7");
+            return ("#A16207", "#FEF9C3");
         }
 
         if (normalized.Contains("FALTA", StringComparison.OrdinalIgnoreCase))
         {
-            return ("#B42318", "#FEF3F2");
+            return ("#991B1B", "#FEF2F2");
         }
 
         if (normalized.Contains("VACACIONES", StringComparison.OrdinalIgnoreCase))
@@ -1949,47 +1949,52 @@ public sealed class ReportePdfService : IReportePdfService
 
         if (normalized.Contains("COMPENSACION", StringComparison.OrdinalIgnoreCase))
         {
-            return ("#7C3AED", "#EDE9FE");
+            return ("#6D28D9", "#EDE9FE");
         }
 
         if (normalized.Contains("DOMINGO", StringComparison.OrdinalIgnoreCase))
         {
-            return ("#16A34A", "#DCFCE7");
+            return ("#15803D", "#DCFCE7");
         }
 
         if (normalized.Contains("SABADO", StringComparison.OrdinalIgnoreCase))
         {
-            return ("#F59E0B", "#FEF3C7");
+            return ("#CA8A04", "#FFFBEB");
         }
 
         if (normalized.Contains("FERIADO", StringComparison.OrdinalIgnoreCase))
         {
-            return ("#0284C7", "#E0F2FE");
+            return ("#0369A1", "#E0F2FE");
         }
 
         if (normalized.Contains("SIN MARCAR", StringComparison.OrdinalIgnoreCase))
         {
-            return ("#E11D48", "#FFE4E6");
+            return ("#BE123C", "#FFE4E6");
         }
 
-        if (normalized.Contains("SIN SALIDA", StringComparison.OrdinalIgnoreCase) || normalized.Contains("SIN ENTRADA", StringComparison.OrdinalIgnoreCase))
+        if (normalized.Contains("SIN SALIDA", StringComparison.OrdinalIgnoreCase))
         {
-            return ("#EA580C", "#FFEDD5");
+            return ("#C2410C", "#FFEDD5");
+        }
+
+        if (normalized.Contains("SIN ENTRADA", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("#D97706", "#FEF3C7");
         }
 
         if (normalized.Contains("INCOMPLETO", StringComparison.OrdinalIgnoreCase))
         {
-            return ("#0891B2", "#CFFAFE");
+            return ("#0E7490", "#CFFAFE");
         }
 
         if (normalized.Contains("RECHAZADO", StringComparison.OrdinalIgnoreCase))
         {
-            return ("#4B5563", "#E2E8F0");
+            return ("#4B5563", "#E5E7EB");
         }
 
         if (normalized.Contains("DESCANSO", StringComparison.OrdinalIgnoreCase) || normalized.Contains("MEDICO", StringComparison.OrdinalIgnoreCase))
         {
-            return ("#1D4ED8", "#EAF1FF");
+            return ("#1D4ED8", "#DBEAFE");
         }
 
         if (normalized.Contains("CLASIFIC", StringComparison.OrdinalIgnoreCase))
