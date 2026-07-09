@@ -845,7 +845,7 @@ export default function ContratosPage() {
                                 onClick={() => void handleApproveVigencia(item.idEmpleado ?? 0, 2)}
                               >
                                 <Save size={14} />
-                                2da aprobacion
+                                2da
                               </button>
                               <button
                                 type="button"
@@ -854,7 +854,7 @@ export default function ContratosPage() {
                                 onClick={() => void handleApproveVigencia(item.idEmpleado ?? 0, 3)}
                               >
                                 <Save size={14} />
-                                3ra aprobacion
+                                3era
                               </button>
                             </div>
                           </td>
