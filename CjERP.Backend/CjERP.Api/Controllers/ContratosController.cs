@@ -14,6 +14,7 @@ namespace CjERP.Api.Controllers;
 public class ContratosController : ControllerBase
 {
     private const string HistoryTableName = "dbo.EmpleadoCjHistorialLaboral";
+    private const string RequestTableName = "dbo.EmpleadoCjSolicitudVigencia";
     private const string FichaStoredProcedureName = "dbo.sp_EmpleadoCj_Ficha";
     private static readonly string[] FichaCandidateParameterNames =
     [
@@ -105,7 +106,8 @@ public class ContratosController : ControllerBase
             data = new ContratoEmpleadoResponseDto
             {
                 Empleado = employee,
-                Historial = history
+                Historial = history,
+                SolicitudVigencia = await ObtenerSolicitudVigenciaAsync(connection, idEmpleado, cancellationToken)
             }
         });
     }
@@ -142,11 +144,27 @@ public class ContratosController : ControllerBase
         try
         {
             var current = await ObtenerFichaContratoEmpleadoAsync(connection, request.IdEmpleado, cancellationToken, transaction);
-
             if (current is null)
             {
                 await transaction.RollbackAsync(cancellationToken);
                 return NotFound(new { success = false, message = "No se encontro el empleado solicitado." });
+            }
+
+            var tableExists = await connection.ExecuteScalarAsync<int>(
+                new CommandDefinition(
+                    "SELECT COUNT(1) FROM sys.objects WHERE object_id = OBJECT_ID(@TableName) AND type = 'U';",
+                    new { TableName = RequestTableName },
+                    transaction: transaction,
+                    cancellationToken: cancellationToken));
+
+            if (tableExists <= 0)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return BadRequest(new
+                {
+                    success = false,
+                    message = $"No existe la tabla de solicitudes {RequestTableName}."
+                });
             }
 
             if (!string.IsNullOrWhiteSpace(current.FechaIniLaboral) &&
@@ -161,117 +179,125 @@ public class ContratosController : ControllerBase
                 });
             }
 
-            var historyExists = await connection.ExecuteScalarAsync<int>(
-                new CommandDefinition(
-                    "SELECT COUNT(1) FROM sys.objects WHERE object_id = OBJECT_ID(@TableName) AND type = 'U';",
-                    new { TableName = HistoryTableName },
-                    transaction: transaction,
-                    cancellationToken: cancellationToken));
+            var usuario = ResolveUsuarioActual();
+            var solicitudExistente = await ObtenerSolicitudVigenciaAsync(connection, request.IdEmpleado, cancellationToken, transaction);
+            var fechaFinActual = ParseNullableDate(current.FechaFinLaboral);
+            var nuevaFechaFin = nuevaFechaFinLaboral.Date;
+            var observacion = string.IsNullOrWhiteSpace(request.Observacion)
+                ? $"Solicitud de renovacion hasta {nuevaFechaFin:yyyy-MM-dd}"
+                : request.Observacion.Trim();
 
-            if (historyExists <= 0)
+            if (solicitudExistente is null)
             {
-                await transaction.RollbackAsync(cancellationToken);
-                return BadRequest(new
-                {
-                    success = false,
-                    message = $"No existe la tabla de historial {HistoryTableName}."
-                });
+                await connection.ExecuteAsync(
+                    new CommandDefinition(
+                        $"""
+                        INSERT INTO {RequestTableName}
+                        (
+                            IdEmpleado,
+                            FechaFinActual,
+                            NuevaFechaFinLaboral,
+                            EstadoSolicitud,
+                            Aprobacion1IdEmpleado,
+                            Aprobacion1Usuario,
+                            Aprobacion1Fecha,
+                            Aprobacion1Observacion,
+                            Aprobacion2IdEmpleado,
+                            Aprobacion2Usuario,
+                            Aprobacion2Fecha,
+                            Aprobacion2Observacion,
+                            Aprobacion3IdEmpleado,
+                            Aprobacion3Usuario,
+                            Aprobacion3Fecha,
+                            Aprobacion3Observacion,
+                            UsuarioCre,
+                            FechaCreacion,
+                            UsuarioMod,
+                            FechaMod
+                        )
+                        VALUES
+                        (
+                            @IdEmpleado,
+                            @FechaFinActual,
+                            @NuevaFechaFinLaboral,
+                            'PENDIENTE',
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            @UsuarioCre,
+                            GETDATE(),
+                            @UsuarioMod,
+                            GETDATE()
+                        )
+                        """,
+                        new
+                        {
+                            request.IdEmpleado,
+                            FechaFinActual = fechaFinActual,
+                            NuevaFechaFinLaboral = nuevaFechaFin,
+                            UsuarioCre = usuario,
+                            UsuarioMod = usuario
+                        },
+                        transaction: transaction,
+                        cancellationToken: cancellationToken));
             }
-
-            var usuario = User.FindFirstValue("Usuario")
-                ?? User.FindFirstValue("usuario")
-                ?? User.FindFirstValue(ClaimTypes.Name)
-                ?? User.Identity?.Name
-                ?? "SISTEMA";
-
-            await connection.ExecuteAsync(
-                new CommandDefinition(
-                    $"""
-                    INSERT INTO {HistoryTableName}
-                    (
-                        IdEmpleado,
-                        FechaIniLaboral,
-                        FechaFinLaboral,
-                        FechaBaja,
-                        IdEstado,
-                        IdActivo,
-                        IdTipoEmpleado,
-                        IdCargo,
-                        IdEmpRel,
-                        MotivoMovimiento,
-                        TipoMovimiento,
-                        Observacion,
-                        UsuarioCre,
-                        FechaCreacion
-                    )
-                    VALUES
-                    (
-                        @IdEmpleado,
-                        @FechaIniLaboral,
-                        @FechaFinLaboral,
-                        @FechaBaja,
-                        @IdEstado,
-                        @IdActivo,
-                        @IdTipoEmpleado,
-                        @IdCargo,
-                        @IdEmpRel,
-                        @MotivoMovimiento,
-                        @TipoMovimiento,
-                        @Observacion,
-                        @UsuarioCre,
-                        GETDATE()
-                    )
-                    """,
-                    new
-                    {
-                        current.IdEmpleado,
-                        FechaIniLaboral = ParseNullableDate(current.FechaIniLaboral),
-                        FechaFinLaboral = nuevaFechaFinLaboral.Date,
-                        FechaBaja = ParseNullableDate(current.FechaBaja),
-                        current.IdEstado,
-                        IdActivo = current.IdActivo ?? true,
-                        current.IdTipoEmpleado,
-                        current.IdCargo,
-                        current.IdEmpRel,
-                        MotivoMovimiento = string.IsNullOrWhiteSpace(request.MotivoMovimiento) ? "RENOVACION" : request.MotivoMovimiento.Trim(),
-                        TipoMovimiento = "RENOVACION",
-                        Observacion = string.IsNullOrWhiteSpace(request.Observacion) ? $"Renovacion hasta {nuevaFechaFinLaboral:yyyy-MM-dd}" : request.Observacion.Trim(),
-                        UsuarioCre = usuario
-                    },
-                    transaction: transaction,
-                    cancellationToken: cancellationToken));
-
-            await connection.ExecuteAsync(
-                new CommandDefinition(
-                    """
-                    ;WITH Target AS
-                    (
-                        SELECT TOP (1) *
-                        FROM dbo.EmpleadoCj
-                        WHERE IdEmpleado = @IdEmpleado
-                        ORDER BY ISNULL(FechaCreacion, '19000101') DESC, ISNULL(FechaIniLaboral, '19000101') DESC
-                    )
-                    UPDATE Target
-                    SET FechaFinLaboral = @NuevaFechaFinLaboral
-                    """,
-                    new
-                    {
-                        request.IdEmpleado,
-                        NuevaFechaFinLaboral = nuevaFechaFinLaboral.Date
-                    },
-                    transaction: transaction,
-                    cancellationToken: cancellationToken));
+            else
+            {
+                await connection.ExecuteAsync(
+                    new CommandDefinition(
+                        $"""
+                        UPDATE {RequestTableName}
+                        SET FechaFinActual = @FechaFinActual,
+                            NuevaFechaFinLaboral = @NuevaFechaFinLaboral,
+                            EstadoSolicitud = 'PENDIENTE',
+                            Aprobacion1IdEmpleado = NULL,
+                            Aprobacion1Usuario = NULL,
+                            Aprobacion1Fecha = NULL,
+                            Aprobacion1Observacion = NULL,
+                            Aprobacion2IdEmpleado = NULL,
+                            Aprobacion2Usuario = NULL,
+                            Aprobacion2Fecha = NULL,
+                            Aprobacion2Observacion = NULL,
+                            Aprobacion3IdEmpleado = NULL,
+                            Aprobacion3Usuario = NULL,
+                            Aprobacion3Fecha = NULL,
+                            Aprobacion3Observacion = NULL,
+                            UsuarioMod = @UsuarioMod,
+                            FechaMod = GETDATE()
+                        WHERE IdSolicitudVigencia = @IdSolicitudVigencia
+                        """,
+                        new
+                        {
+                            solicitudExistente.IdSolicitudVigencia,
+                            FechaFinActual = fechaFinActual,
+                            NuevaFechaFinLaboral = nuevaFechaFin,
+                            UsuarioMod = usuario
+                        },
+                        transaction: transaction,
+                        cancellationToken: cancellationToken));
+            }
 
             await transaction.CommitAsync(cancellationToken);
 
             return Ok(new
             {
                 success = true,
-                message = "La vigencia del contrato fue actualizada correctamente.",
+                message = "La solicitud de vigencia fue registrada correctamente y quedo pendiente de 3 aprobaciones.",
                 data = new
                 {
                     request.IdEmpleado,
-                    nuevaFechaFinLaboral = nuevaFechaFinLaboral.ToString("yyyy-MM-dd")
+                    nuevaFechaFinLaboral = nuevaFechaFin.ToString("yyyy-MM-dd"),
+                    estadoSolicitud = "PENDIENTE",
+                    observacion
                 }
             });
         }
@@ -282,6 +308,334 @@ public class ContratosController : ControllerBase
             {
                 success = false,
                 message = "No se pudo renovar la vigencia del contrato.",
+                detail = ex.ToString()
+            });
+        }
+    }
+
+    [HttpPost("{idEmpleado:int}/aprobar-vigencia")]
+    public async Task<IActionResult> AprobarVigencia(
+        int idEmpleado,
+        [FromBody] ContratoEmpleadoAprobarVigenciaRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (idEmpleado <= 0)
+        {
+            return BadRequest(new { success = false, message = "IdEmpleado es obligatorio." });
+        }
+
+        var connectionString = _configuration.GetConnectionString("DefaultConnection");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                success = false,
+                message = "La cadena de conexion no esta configurada."
+            });
+        }
+
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        try
+        {
+            var requestExists = await connection.ExecuteScalarAsync<int>(
+                new CommandDefinition(
+                    "SELECT COUNT(1) FROM sys.objects WHERE object_id = OBJECT_ID(@TableName) AND type = 'U';",
+                    new { TableName = RequestTableName },
+                    transaction: transaction,
+                    cancellationToken: cancellationToken));
+
+            if (requestExists <= 0)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return BadRequest(new
+                {
+                    success = false,
+                    message = $"No existe la tabla de solicitudes {RequestTableName}."
+                });
+            }
+
+            var solicitud = await ObtenerSolicitudVigenciaAsync(connection, idEmpleado, cancellationToken, transaction);
+            if (solicitud is null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return NotFound(new
+                {
+                    success = false,
+                    message = "No existe una solicitud de vigencia pendiente para este empleado."
+                });
+            }
+
+            if (!string.Equals(solicitud.EstadoSolicitud, "PENDIENTE", StringComparison.OrdinalIgnoreCase))
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "La solicitud ya no se encuentra pendiente de aprobacion."
+                });
+            }
+
+            var aprobadorId = ResolveIdAprobador();
+            if (aprobadorId is null or <= 0)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "No se pudo resolver el aprobador actual."
+                });
+            }
+
+            var usuario = ResolveUsuarioActual();
+            if (aprobadorId == solicitud.Aprobacion1IdEmpleado ||
+                aprobadorId == solicitud.Aprobacion2IdEmpleado ||
+                aprobadorId == solicitud.Aprobacion3IdEmpleado)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "El aprobador actual ya registro una validacion en esta solicitud."
+                });
+            }
+
+            var current = await ObtenerFichaContratoEmpleadoAsync(connection, idEmpleado, cancellationToken, transaction);
+            if (current is null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return NotFound(new { success = false, message = "No se encontro el empleado solicitado." });
+            }
+
+            if (!string.IsNullOrWhiteSpace(current.FechaIniLaboral) &&
+                DateTime.TryParse(current.FechaIniLaboral, out var fechaInicioLaboral) &&
+                DateTime.TryParse(solicitud.NuevaFechaFinLaboral, out var nuevaFechaFinLaboral) &&
+                nuevaFechaFinLaboral.Date < fechaInicioLaboral.Date)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "La nueva fecha fin no puede ser menor que la fecha de inicio laboral vigente."
+                });
+            }
+
+            var aprobacionesRealizadas = solicitud.AprobacionesRealizadas;
+            var observacion = string.IsNullOrWhiteSpace(request.Observacion)
+                ? $"Aprobacion registrada por {usuario}"
+                : request.Observacion.Trim();
+            var siguienteAprobacion = aprobacionesRealizadas + 1;
+
+            if (siguienteAprobacion > solicitud.AprobacionesRequeridas)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "La solicitud ya completo la cantidad requerida de aprobaciones."
+                });
+            }
+
+            var estadoFinal = siguienteAprobacion >= solicitud.AprobacionesRequeridas ? "APROBADO" : "PENDIENTE";
+            var updateSql = siguienteAprobacion switch
+            {
+                1 => $"""
+                     UPDATE {RequestTableName}
+                     SET Aprobacion1IdEmpleado = @AprobadorId,
+                         Aprobacion1Usuario = @AprobadorUsuario,
+                         Aprobacion1Fecha = GETDATE(),
+                         Aprobacion1Observacion = @Observacion,
+                         EstadoSolicitud = @EstadoSolicitud,
+                         UsuarioMod = @UsuarioMod,
+                         FechaMod = GETDATE()
+                     WHERE IdSolicitudVigencia = @IdSolicitudVigencia
+                     """,
+                2 => $"""
+                     UPDATE {RequestTableName}
+                     SET Aprobacion2IdEmpleado = @AprobadorId,
+                         Aprobacion2Usuario = @AprobadorUsuario,
+                         Aprobacion2Fecha = GETDATE(),
+                         Aprobacion2Observacion = @Observacion,
+                         EstadoSolicitud = @EstadoSolicitud,
+                         UsuarioMod = @UsuarioMod,
+                         FechaMod = GETDATE()
+                     WHERE IdSolicitudVigencia = @IdSolicitudVigencia
+                     """,
+                _ => $"""
+                     UPDATE {RequestTableName}
+                     SET Aprobacion3IdEmpleado = @AprobadorId,
+                         Aprobacion3Usuario = @AprobadorUsuario,
+                         Aprobacion3Fecha = GETDATE(),
+                         Aprobacion3Observacion = @Observacion,
+                         EstadoSolicitud = @EstadoSolicitud,
+                         UsuarioMod = @UsuarioMod,
+                         FechaMod = GETDATE(),
+                         FechaAplicacion = GETDATE()
+                     WHERE IdSolicitudVigencia = @IdSolicitudVigencia
+                     """
+            };
+
+            await connection.ExecuteAsync(
+                new CommandDefinition(
+                    updateSql,
+                    new
+                    {
+                        solicitud.IdSolicitudVigencia,
+                        AprobadorId = aprobadorId,
+                        AprobadorUsuario = usuario,
+                        Observacion = observacion,
+                        EstadoSolicitud = estadoFinal,
+                        UsuarioMod = usuario
+                    },
+                    transaction: transaction,
+                    cancellationToken: cancellationToken));
+
+            if (estadoFinal == "APROBADO")
+            {
+                if (!DateTime.TryParse(solicitud.NuevaFechaFinLaboral, out var solicitudNuevaFechaFinLaboral))
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "La nueva fecha fin de la solicitud es invalida."
+                    });
+                }
+
+                if (solicitudNuevaFechaFinLaboral.Date < DateTime.Today.AddYears(-10))
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "La nueva fecha fin de la solicitud es invalida."
+                    });
+                }
+
+                var historyExists = await connection.ExecuteScalarAsync<int>(
+                    new CommandDefinition(
+                        "SELECT COUNT(1) FROM sys.objects WHERE object_id = OBJECT_ID(@TableName) AND type = 'U';",
+                        new { TableName = HistoryTableName },
+                        transaction: transaction,
+                        cancellationToken: cancellationToken));
+
+                if (historyExists <= 0)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = $"No existe la tabla de historial {HistoryTableName}."
+                    });
+                }
+
+                await connection.ExecuteAsync(
+                    new CommandDefinition(
+                        $"""
+                        INSERT INTO {HistoryTableName}
+                        (
+                            IdEmpleado,
+                            FechaIniLaboral,
+                            FechaFinLaboral,
+                            FechaBaja,
+                            IdEstado,
+                            IdActivo,
+                            IdTipoEmpleado,
+                            IdCargo,
+                            IdEmpRel,
+                            MotivoMovimiento,
+                            TipoMovimiento,
+                            Observacion,
+                            UsuarioCre,
+                            FechaCreacion
+                        )
+                        VALUES
+                        (
+                            @IdEmpleado,
+                            @FechaIniLaboral,
+                            @FechaFinLaboral,
+                            @FechaBaja,
+                            @IdEstado,
+                            @IdActivo,
+                            @IdTipoEmpleado,
+                            @IdCargo,
+                            @IdEmpRel,
+                            @MotivoMovimiento,
+                            @TipoMovimiento,
+                            @Observacion,
+                            @UsuarioCre,
+                            GETDATE()
+                        )
+                        """,
+                        new
+                        {
+                            current.IdEmpleado,
+                            FechaIniLaboral = ParseNullableDate(current.FechaIniLaboral),
+                            FechaFinLaboral = solicitudNuevaFechaFinLaboral.Date,
+                            FechaBaja = ParseNullableDate(current.FechaBaja),
+                            current.IdEstado,
+                            IdActivo = current.IdActivo ?? true,
+                            current.IdTipoEmpleado,
+                            current.IdCargo,
+                            current.IdEmpRel,
+                            MotivoMovimiento = "RENOVACION",
+                            TipoMovimiento = "RENOVACION",
+                            Observacion = observacion,
+                            UsuarioCre = usuario
+                        },
+                        transaction: transaction,
+                        cancellationToken: cancellationToken));
+
+                await connection.ExecuteAsync(
+                    new CommandDefinition(
+                        """
+                        ;WITH Target AS
+                        (
+                            SELECT TOP (1) *
+                            FROM dbo.EmpleadoCj
+                            WHERE IdEmpleado = @IdEmpleado
+                            ORDER BY ISNULL(FechaCreacion, '19000101') DESC, ISNULL(FechaIniLaboral, '19000101') DESC
+                        )
+                        UPDATE Target
+                        SET FechaFinLaboral = @NuevaFechaFinLaboral
+                        """,
+                        new
+                        {
+                            solicitud.IdEmpleado,
+                            NuevaFechaFinLaboral = solicitudNuevaFechaFinLaboral.Date
+                        },
+                        transaction: transaction,
+                        cancellationToken: cancellationToken));
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+
+            return Ok(new
+            {
+                success = true,
+                message = estadoFinal == "APROBADO"
+                    ? "La vigencia del contrato fue aprobada y aplicada correctamente."
+                    : "La aprobacion fue registrada correctamente. La solicitud continua pendiente de validaciones.",
+                data = new
+                {
+                    solicitud.IdSolicitudVigencia,
+                    solicitud.IdEmpleado,
+                    nuevaFechaFinLaboral = solicitud.NuevaFechaFinLaboral,
+                    estadoSolicitud = estadoFinal,
+                    aprobacionesRealizadas = siguienteAprobacion,
+                    aprobacionesRequeridas = solicitud.AprobacionesRequeridas
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                success = false,
+                message = "No se pudo registrar la aprobacion de la vigencia del contrato.",
                 detail = ex.ToString()
             });
         }
@@ -442,6 +796,115 @@ public class ContratosController : ControllerBase
     private static DateTime? ParseNullableDate(string? value)
     {
         return DateTime.TryParse(value, out var parsed) ? parsed : null;
+    }
+
+    private string ResolveUsuarioActual()
+    {
+        return User.FindFirstValue("Usuario")
+            ?? User.FindFirstValue("IdUsuario")
+            ?? User.FindFirstValue(ClaimTypes.Name)
+            ?? User.Identity?.Name
+            ?? "SISTEMA";
+    }
+
+    private int? ResolveIdAprobador()
+    {
+        var aprobadorClaim = User.FindFirstValue("IdEmpleado")
+            ?? User.FindFirstValue("CodEmp")
+            ?? User.FindFirstValue("CodEmpleadoMostrar");
+
+        return int.TryParse(aprobadorClaim, out var idAprobador) && idAprobador > 0
+            ? idAprobador
+            : null;
+    }
+
+    private async Task<ContratoEmpleadoSolicitudVigenciaDto?> ObtenerSolicitudVigenciaAsync(
+        SqlConnection connection,
+        int idEmpleado,
+        CancellationToken cancellationToken,
+        IDbTransaction? transaction = null)
+    {
+        var requestExists = await connection.ExecuteScalarAsync<int>(
+            new CommandDefinition(
+                "SELECT COUNT(1) FROM sys.objects WHERE object_id = OBJECT_ID(@TableName) AND type = 'U';",
+                new { TableName = RequestTableName },
+                transaction: transaction,
+                cancellationToken: cancellationToken));
+
+        if (requestExists <= 0)
+        {
+            return null;
+        }
+
+        var request = await connection.QueryFirstOrDefaultAsync(
+            new CommandDefinition(
+                $"""
+                SELECT TOP (1)
+                    IdSolicitudVigencia,
+                    IdEmpleado,
+                    CONVERT(varchar(10), FechaFinActual, 23) AS FechaFinActual,
+                    CONVERT(varchar(10), NuevaFechaFinLaboral, 23) AS NuevaFechaFinLaboral,
+                    ISNULL(EstadoSolicitud, '') AS EstadoSolicitud,
+                    Aprobacion1IdEmpleado,
+                    Aprobacion2IdEmpleado,
+                    Aprobacion3IdEmpleado,
+                    ISNULL(Aprobacion1Usuario, '') AS Aprobacion1Usuario,
+                    ISNULL(Aprobacion2Usuario, '') AS Aprobacion2Usuario,
+                    ISNULL(Aprobacion3Usuario, '') AS Aprobacion3Usuario,
+                    ISNULL(Aprobacion1Observacion, '') AS Aprobacion1Observacion,
+                    ISNULL(Aprobacion2Observacion, '') AS Aprobacion2Observacion,
+                    ISNULL(Aprobacion3Observacion, '') AS Aprobacion3Observacion,
+                    CONVERT(varchar(19), Aprobacion1Fecha, 120) AS Aprobacion1Fecha,
+                    CONVERT(varchar(19), Aprobacion2Fecha, 120) AS Aprobacion2Fecha,
+                    CONVERT(varchar(19), Aprobacion3Fecha, 120) AS Aprobacion3Fecha,
+                    ISNULL(UsuarioCre, '') AS UsuarioCre,
+                    CONVERT(varchar(19), FechaCreacion, 120) AS FechaCreacion,
+                    ISNULL(UsuarioMod, '') AS UsuarioMod,
+                    CONVERT(varchar(19), FechaMod, 120) AS FechaMod,
+                    CASE WHEN Aprobacion1IdEmpleado IS NULL THEN 0 ELSE 1 END
+                      + CASE WHEN Aprobacion2IdEmpleado IS NULL THEN 0 ELSE 1 END
+                      + CASE WHEN Aprobacion3IdEmpleado IS NULL THEN 0 ELSE 1 END AS AprobacionesRealizadas
+                FROM {RequestTableName}
+                WHERE IdEmpleado = @IdEmpleado
+                ORDER BY CASE WHEN EstadoSolicitud = 'PENDIENTE' THEN 0 ELSE 1 END,
+                         ISNULL(FechaCreacion, '19000101') DESC,
+                         IdSolicitudVigencia DESC
+                """,
+                new { IdEmpleado = idEmpleado },
+                transaction: transaction,
+                cancellationToken: cancellationToken));
+
+        if (request is null)
+        {
+            return null;
+        }
+
+        var values = (IDictionary<string, object?>)request;
+        return new ContratoEmpleadoSolicitudVigenciaDto
+        {
+            IdSolicitudVigencia = GetInt(values, "IdSolicitudVigencia", "idSolicitudVigencia") ?? 0,
+            IdEmpleado = GetInt(values, "IdEmpleado", "idEmpleado") ?? idEmpleado,
+            FechaFinActual = GetDateString(values, "FechaFinActual", "fechaFinActual"),
+            NuevaFechaFinLaboral = GetDateString(values, "NuevaFechaFinLaboral", "nuevaFechaFinLaboral"),
+            EstadoSolicitud = GetString(values, "EstadoSolicitud", "estadoSolicitud"),
+            Aprobacion1IdEmpleado = GetInt(values, "Aprobacion1IdEmpleado", "aprobacion1IdEmpleado"),
+            Aprobacion2IdEmpleado = GetInt(values, "Aprobacion2IdEmpleado", "aprobacion2IdEmpleado"),
+            Aprobacion3IdEmpleado = GetInt(values, "Aprobacion3IdEmpleado", "aprobacion3IdEmpleado"),
+            Aprobacion1Usuario = GetString(values, "Aprobacion1Usuario", "aprobacion1Usuario"),
+            Aprobacion2Usuario = GetString(values, "Aprobacion2Usuario", "aprobacion2Usuario"),
+            Aprobacion3Usuario = GetString(values, "Aprobacion3Usuario", "aprobacion3Usuario"),
+            Aprobacion1Observacion = GetString(values, "Aprobacion1Observacion", "aprobacion1Observacion"),
+            Aprobacion2Observacion = GetString(values, "Aprobacion2Observacion", "aprobacion2Observacion"),
+            Aprobacion3Observacion = GetString(values, "Aprobacion3Observacion", "aprobacion3Observacion"),
+            Aprobacion1Fecha = GetDateString(values, "Aprobacion1Fecha", "aprobacion1Fecha"),
+            Aprobacion2Fecha = GetDateString(values, "Aprobacion2Fecha", "aprobacion2Fecha"),
+            Aprobacion3Fecha = GetDateString(values, "Aprobacion3Fecha", "aprobacion3Fecha"),
+            UsuarioCre = GetString(values, "UsuarioCre", "usuarioCre"),
+            FechaCreacion = GetDateString(values, "FechaCreacion", "fechaCreacion"),
+            UsuarioMod = GetString(values, "UsuarioMod", "usuarioMod"),
+            FechaMod = GetDateString(values, "FechaMod", "fechaMod"),
+            AprobacionesRealizadas = GetInt(values, "AprobacionesRealizadas", "aprobacionesRealizadas") ?? 0
+        };
     }
 
     private static async Task<ContratoEmpleadoDetalleDto?> ObtenerFichaContratoEmpleadoAsync(

@@ -44,6 +44,7 @@ public sealed class ContratoEmpleadoResponseDto
 {
     public ContratoEmpleadoDetalleDto? Empleado { get; set; }
     public IReadOnlyList<ContratoEmpleadoHistorialDto> Historial { get; set; } = Array.Empty<ContratoEmpleadoHistorialDto>();
+    public ContratoEmpleadoSolicitudVigenciaDto? SolicitudVigencia { get; set; }
 }
 
 public sealed class ContratoEmpleadoRenovarRequestDto
@@ -52,4 +53,36 @@ public sealed class ContratoEmpleadoRenovarRequestDto
     public string NuevaFechaFinLaboral { get; set; } = string.Empty;
     public string MotivoMovimiento { get; set; } = "RENOVACION";
     public string Observacion { get; set; } = string.Empty;
+}
+
+public sealed class ContratoEmpleadoAprobarVigenciaRequestDto
+{
+    public string Observacion { get; set; } = string.Empty;
+}
+
+public sealed class ContratoEmpleadoSolicitudVigenciaDto
+{
+    public int IdSolicitudVigencia { get; set; }
+    public int IdEmpleado { get; set; }
+    public string FechaFinActual { get; set; } = string.Empty;
+    public string NuevaFechaFinLaboral { get; set; } = string.Empty;
+    public string EstadoSolicitud { get; set; } = string.Empty;
+    public int AprobacionesRealizadas { get; set; }
+    public int AprobacionesRequeridas { get; set; } = 3;
+    public int? Aprobacion1IdEmpleado { get; set; }
+    public int? Aprobacion2IdEmpleado { get; set; }
+    public int? Aprobacion3IdEmpleado { get; set; }
+    public string? Aprobacion1Usuario { get; set; }
+    public string? Aprobacion2Usuario { get; set; }
+    public string? Aprobacion3Usuario { get; set; }
+    public string? Aprobacion1Observacion { get; set; }
+    public string? Aprobacion2Observacion { get; set; }
+    public string? Aprobacion3Observacion { get; set; }
+    public string? Aprobacion1Fecha { get; set; }
+    public string? Aprobacion2Fecha { get; set; }
+    public string? Aprobacion3Fecha { get; set; }
+    public string? UsuarioCre { get; set; }
+    public string? FechaCreacion { get; set; }
+    public string? UsuarioMod { get; set; }
+    public string? FechaMod { get; set; }
 }

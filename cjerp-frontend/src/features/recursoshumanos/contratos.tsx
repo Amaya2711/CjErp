@@ -4,6 +4,7 @@ import { Ban, CalendarClock, ChevronRight, RefreshCw, Save, Search, UserRound } 
 import { listarEmpleadosWup } from "../../api/empleadoService";
 import {
   desactivarHistorialContrato,
+  aprobarVigenciaContratoEmpleado,
   obtenerContratoEmpleado,
   renovarContratoEmpleado,
   type ContratoEmpleadoHistorial,
@@ -270,10 +271,10 @@ export default function ContratosPage() {
         const response = await obtenerContratoEmpleado(selectedEmployeeId);
         if (!active) return;
         setDetail(response);
-        const currentEndDate = toInputDate(response.empleado?.fechaFinLaboral);
+        const currentEndDate = toInputDate(response.solicitudVigencia?.nuevaFechaFinLaboral ?? response.empleado?.fechaFinLaboral);
         setNewEndDate(currentEndDate);
         setNewEndDateOriginal(currentEndDate);
-        setObservation("");
+        setObservation(response.solicitudVigencia?.aprobacion1Observacion ?? "");
       } catch (err) {
         if (!active) return;
         setError(getHttpErrorMessage(err, "No se pudo cargar el contrato del empleado."));
@@ -299,6 +300,8 @@ export default function ContratosPage() {
 
   const employee = detail?.empleado ?? null;
   const history = detail?.historial ?? [];
+  const pendingRequest = detail?.solicitudVigencia ?? null;
+  const hasPendingRequest = pendingRequest?.estadoSolicitud?.toUpperCase() === "PENDIENTE";
 
   useEffect(() => {
     let active = true;
@@ -348,6 +351,11 @@ export default function ContratosPage() {
 
   const getRelationEditableEndDate = (item: { key: string; idEmpleado: number | null; fechaFin: string }) =>
     relationNewEndDates[getRelationRowKey(item)] ?? toInputDate(item.fechaFin);
+
+  const canEditRelationEndDate = (status: string) => {
+    const normalized = normalizeText(status);
+    return normalized === "vencido" || normalized === "x vencer";
+  };
 
   const relationFilterOptions = useMemo(() => {
     const collect = (key: "empresa" | "area" | "cliente" | "ubicacion" | "estadoContrato") => (
@@ -435,36 +443,51 @@ export default function ContratosPage() {
         observacion: (observationText ?? observation).trim(),
       });
 
-      setRelationRows((currentRows) =>
-        currentRows.map((row) => {
-          const rowId = getFichaNumber(row, "IdEmpleado", "idEmpleado", "IdEmpleadoCj", "idEmpleadoCj");
-          if (rowId !== idEmpleado) {
-            return row;
-          }
-
-          return {
-            ...row,
-            FechaFinLaboral: nextEndDate,
-            fechaFinLaboral: nextEndDate,
-          };
-        })
-      );
-
-      if (selectedEmployeeId === idEmpleado || employee?.idEmpleado === idEmpleado) {
-        const refreshed = await obtenerContratoEmpleado(idEmpleado);
-        const refreshedEndDate = toInputDate(refreshed.empleado?.fechaFinLaboral);
-        setDetail(refreshed);
-        setNewEndDate(refreshedEndDate);
-        setNewEndDateOriginal(refreshedEndDate);
-        setObservation("");
-      }
-
-      setSuccess("La vigencia del contrato fue actualizada y el historial se registro correctamente.");
+      const refreshed = await obtenerContratoEmpleado(idEmpleado);
+      const refreshedEndDate = toInputDate(refreshed.solicitudVigencia?.nuevaFechaFinLaboral ?? refreshed.empleado?.fechaFinLaboral);
+      setDetail(refreshed);
+      setNewEndDate(refreshedEndDate);
+      setNewEndDateOriginal(refreshedEndDate);
+      setObservation("");
+      setSuccess("La solicitud de vigencia fue registrada y quedo pendiente de 3 aprobaciones.");
       return true;
     } catch (err) {
-      setError(getHttpErrorMessage(err, "No se pudo actualizar la vigencia del contrato."));
+      setError(getHttpErrorMessage(err, "No se pudo registrar la solicitud de vigencia."));
       setSuccess("");
       return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleApproveVigencia = async () => {
+    if (!employee || employee.idEmpleado <= 0 || saving || !hasPendingRequest) {
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const response = await aprobarVigenciaContratoEmpleado(employee.idEmpleado, {
+        observacion: observation.trim(),
+      });
+
+      const refreshed = await obtenerContratoEmpleado(employee.idEmpleado);
+      const refreshedEndDate = toInputDate(refreshed.solicitudVigencia?.nuevaFechaFinLaboral ?? refreshed.empleado?.fechaFinLaboral);
+      setDetail(refreshed);
+      setNewEndDate(refreshedEndDate);
+      setNewEndDateOriginal(refreshedEndDate);
+      setObservation("");
+      setSuccess(
+        response.estadoSolicitud === "APROBADO"
+          ? "La vigencia del contrato fue aprobada y aplicada correctamente."
+          : `Aprobacion registrada. Quedan ${Math.max((response.aprobacionesRequeridas ?? 3) - (response.aprobacionesRealizadas ?? 0), 0)} validacion(es) pendiente(s).`
+      );
+    } catch (err) {
+      setError(getHttpErrorMessage(err, "No se pudo registrar la aprobacion de la vigencia."));
+      setSuccess("");
     } finally {
       setSaving(false);
     }
@@ -554,6 +577,7 @@ export default function ContratosPage() {
     idEmpleado: number | null;
     fechaInicio: string;
     fechaFin: string;
+    estadoContrato: string;
   }) => {
     if (savingRelationEmployeeId !== null) {
       return;
@@ -565,6 +589,15 @@ export default function ContratosPage() {
     }
 
     const rowKey = getRelationRowKey(item);
+    if (!canEditRelationEndDate(item.estadoContrato)) {
+      setRelationNewEndDates((current) => {
+        const next = { ...current };
+        delete next[rowKey];
+        return next;
+      });
+      return;
+    }
+
     const currentValue = (relationNewEndDates[rowKey] ?? "").trim();
     const originalValue = toInputDate(item.fechaFin);
 
@@ -664,19 +697,20 @@ export default function ContratosPage() {
                       <tr>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("nombreEmpleado")}>Empleado{renderSortIndicator(relationSort, "nombreEmpleado")}</button></th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("nroDocumento")}>Documento{renderSortIndicator(relationSort, "nroDocumento")}</button></th>
+                        <th style={styles.th}>Nueva fecha fin</th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("empresa")}>Empresa{renderSortIndicator(relationSort, "empresa")}</button></th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("cliente")}>Cliente{renderSortIndicator(relationSort, "cliente")}</button></th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("area")}>Area{renderSortIndicator(relationSort, "area")}</button></th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("ubicacion")}>Ubicacion{renderSortIndicator(relationSort, "ubicacion")}</button></th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("fechaInicio")}>Inicio{renderSortIndicator(relationSort, "fechaInicio")}</button></th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("fechaFin")}>Fin{renderSortIndicator(relationSort, "fechaFin")}</button></th>
-                        <th style={styles.th}>Nueva fecha fin</th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("estadoContrato")}>Estado contrato{renderSortIndicator(relationSort, "estadoContrato")}</button></th>
                         <th style={styles.th}>Accion</th>
                       </tr>
                       <tr>
                         <th style={styles.thFilter}><input value={relationFilters.nombreEmpleado} onChange={(event) => setRelationFilters((current) => ({ ...current, nombreEmpleado: event.target.value }))} style={styles.filterInput} placeholder="Filtrar" /></th>
                         <th style={styles.thFilter}><input value={relationFilters.nroDocumento} onChange={(event) => setRelationFilters((current) => ({ ...current, nroDocumento: event.target.value }))} style={styles.filterInput} placeholder="Filtrar" /></th>
+                        <th style={styles.thFilter}></th>
                         <th style={styles.thFilter}>
                           <FilterCombo
                             label="Empresa"
@@ -711,7 +745,6 @@ export default function ContratosPage() {
                         </th>
                         <th style={styles.thFilter}><input value={relationFilters.fechaInicio} onChange={(event) => setRelationFilters((current) => ({ ...current, fechaInicio: event.target.value }))} style={styles.filterInput} placeholder="dd/mm/aaaa" /></th>
                         <th style={styles.thFilter}><input value={relationFilters.fechaFin} onChange={(event) => setRelationFilters((current) => ({ ...current, fechaFin: event.target.value }))} style={styles.filterInput} placeholder="dd/mm/aaaa" /></th>
-                        <th style={styles.thFilter}></th>
                         <th style={styles.thFilter}>
                           <FilterCombo
                             label="Estado contrato"
@@ -728,13 +761,13 @@ export default function ContratosPage() {
                         <tr key={item.key}>
                           <td style={styles.td}>{item.nombreEmpleado}</td>
                           <td style={styles.td}>{item.nroDocumento}</td>
-                          <td style={styles.td}>{item.empresa}</td>
-                          <td style={styles.td}>{item.cliente}</td>
-                          <td style={styles.td}>{item.area}</td>
-                          <td style={styles.td}>{item.ubicacion}</td>
-                          <td style={styles.td}>{formatDateLabel(item.fechaInicio)}</td>
-                          <td style={styles.td}>{formatDateLabel(item.fechaFin)}</td>
-                          <td style={styles.td}>
+                          <td
+                            style={
+                              canEditRelationEndDate(item.estadoContrato)
+                                ? styles.relationDateCellActive
+                                : styles.relationDateCellInactive
+                            }
+                          >
                             <input
                               type="date"
                               value={getRelationEditableEndDate(item)}
@@ -745,10 +778,20 @@ export default function ContratosPage() {
                                 }))
                               }
                               onBlur={() => void handleRelationEndDateBlur(item)}
-                              style={styles.relationInputDate}
-                              disabled={savingRelationEmployeeId === item.idEmpleado}
+                              style={
+                                canEditRelationEndDate(item.estadoContrato)
+                                  ? styles.relationInputDateActive
+                                  : styles.relationInputDateInactive
+                              }
+                              disabled={!canEditRelationEndDate(item.estadoContrato) || savingRelationEmployeeId === item.idEmpleado}
                             />
                           </td>
+                          <td style={styles.td}>{item.empresa}</td>
+                          <td style={styles.td}>{item.cliente}</td>
+                          <td style={styles.td}>{item.area}</td>
+                          <td style={styles.td}>{item.ubicacion}</td>
+                          <td style={styles.td}>{formatDateLabel(item.fechaInicio)}</td>
+                          <td style={styles.td}>{formatDateLabel(item.fechaFin)}</td>
                           <td style={styles.td}>
                             <span style={getContractStatusBadgeStyle(item.estadoContrato)}>{item.estadoContrato}</span>
                           </td>
@@ -859,6 +902,18 @@ export default function ContratosPage() {
 
               <form onSubmit={handleSubmit} style={styles.formCard}>
                 <div style={styles.formStack}>
+                  {pendingRequest ? (
+                    <div style={styles.pendingBox}>
+                      <div style={styles.pendingBoxTitle}>Solicitud de vigencia</div>
+                      <div style={styles.pendingBoxText}>
+                        Estado: {pendingRequest.estadoSolicitud || "-"} | Aprobaciones: {pendingRequest.aprobacionesRealizadas}/{pendingRequest.aprobacionesRequeridas}
+                      </div>
+                      <div style={styles.pendingBoxText}>
+                        Nueva fecha fin solicitada: {formatDateLabel(pendingRequest.nuevaFechaFinLaboral)}
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div style={styles.datePairRow}>
                     <label style={styles.fieldBlock}>
                       <span style={styles.label}>Fecha inicio laboral</span>
@@ -898,7 +953,16 @@ export default function ContratosPage() {
                 <div style={styles.formActions}>
                   <button type="submit" style={styles.primaryButton} disabled={saving}>
                     <Save size={16} />
-                    {saving ? "Guardando..." : "Actualizar vigencia"}
+                    {saving ? "Guardando..." : "Registrar solicitud"}
+                  </button>
+                  <button
+                    type="button"
+                    style={styles.secondaryButton}
+                    onClick={() => void handleApproveVigencia()}
+                    disabled={saving || !hasPendingRequest}
+                  >
+                    <Save size={16} />
+                    Aprobar vigencia
                   </button>
                 </div>
               </form>
@@ -1378,6 +1442,25 @@ const styles: Record<string, CSSProperties> = {
     padding: "12px 14px",
     marginBottom: 16,
   },
+  pendingBox: {
+    borderRadius: 12,
+    border: "1px solid #f59e0b",
+    background: "#fffbeb",
+    padding: "12px 14px",
+    display: "grid",
+    gap: 4,
+  },
+  pendingBoxTitle: {
+    fontSize: 13,
+    fontWeight: 800,
+    color: "#92400e",
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.3,
+  },
+  pendingBoxText: {
+    fontSize: 13,
+    color: "#78350f",
+  },
   emptyState: {
     borderRadius: 12,
     border: "1px dashed #cbd5e1",
@@ -1540,7 +1623,24 @@ const styles: Record<string, CSSProperties> = {
     color: "#0f172a",
     background: "#ffffff",
   },
-  relationInputDate: {
+  relationDateCellActive: {
+    background: "#ecfdf5",
+  },
+  relationDateCellInactive: {
+    background: "#f8fafc",
+  },
+  relationInputDateActive: {
+    width: "100%",
+    minWidth: 132,
+    height: 34,
+    borderRadius: 8,
+    border: "1px solid #86efac",
+    padding: "0 10px",
+    fontSize: 12,
+    color: "#166534",
+    background: "#f0fdf4",
+  },
+  relationInputDateInactive: {
     width: "100%",
     minWidth: 132,
     height: 34,
@@ -1548,8 +1648,8 @@ const styles: Record<string, CSSProperties> = {
     border: "1px solid #cbd5e1",
     padding: "0 10px",
     fontSize: 12,
-    color: "#0f172a",
-    background: "#ffffff",
+    color: "#64748b",
+    background: "#f8fafc",
   },
   filterComboWrap: {
     position: "relative",
