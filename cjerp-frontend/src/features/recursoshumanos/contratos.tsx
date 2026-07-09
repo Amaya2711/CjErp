@@ -820,6 +820,8 @@ export default function ContratosPage() {
                               <button
                                 type="button"
                                 style={styles.secondaryButton}
+                                title="Ver detalle"
+                                aria-label="Ver detalle"
                                 disabled={!item.idEmpleado || item.idEmpleado <= 0}
                                 onClick={() => {
                                   if (!item.idEmpleado || item.idEmpleado <= 0) {
@@ -834,7 +836,6 @@ export default function ContratosPage() {
                                 }}
                               >
                                 <ChevronRight size={14} />
-                                Ver detalle
                               </button>
                               <button
                                 type="button"
