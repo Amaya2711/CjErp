@@ -301,7 +301,25 @@ export default function ContratosPage() {
   const employee = detail?.empleado ?? null;
   const history = detail?.historial ?? [];
   const pendingRequest = detail?.solicitudVigencia ?? null;
-  const hasPendingRequest = pendingRequest?.estadoSolicitud?.toUpperCase() === "PENDIENTE";
+  const canApproveRelationStep = (itemId: number | null, step: 2 | 3) => {
+    if (!itemId || itemId <= 0) {
+      return false;
+    }
+
+    if (!pendingRequest || pendingRequest.idEmpleado !== itemId) {
+      return false;
+    }
+
+    if (selectedEmployeeId !== itemId) {
+      return false;
+    }
+
+    if (pendingRequest.estadoSolicitud?.toUpperCase() !== "PENDIENTE") {
+      return false;
+    }
+
+    return (pendingRequest.aprobacionesRealizadas ?? 0) === step - 1;
+  };
 
   useEffect(() => {
     let active = true;
@@ -449,7 +467,7 @@ export default function ContratosPage() {
       setNewEndDate(refreshedEndDate);
       setNewEndDateOriginal(refreshedEndDate);
       setObservation("");
-      setSuccess("La solicitud de vigencia fue registrada y quedo pendiente de 3 aprobaciones.");
+      setSuccess("La fecha fue registrada con 1ra aprobacion y quedo pendiente de 2 validaciones.");
       return true;
     } catch (err) {
       setError(getHttpErrorMessage(err, "No se pudo registrar la solicitud de vigencia."));
@@ -460,8 +478,12 @@ export default function ContratosPage() {
     }
   };
 
-  const handleApproveVigencia = async () => {
-    if (!employee || employee.idEmpleado <= 0 || saving || !hasPendingRequest) {
+  const handleApproveVigencia = async (idEmpleado: number, nivelAprobacion: number) => {
+    if (!idEmpleado || idEmpleado <= 0 || saving) {
+      return;
+    }
+
+    if (!pendingRequest || pendingRequest.idEmpleado !== idEmpleado || pendingRequest.estadoSolicitud?.toUpperCase() !== "PENDIENTE") {
       return;
     }
 
@@ -470,11 +492,11 @@ export default function ContratosPage() {
     setSuccess("");
 
     try {
-      const response = await aprobarVigenciaContratoEmpleado(employee.idEmpleado, {
-        observacion: observation.trim(),
+      const response = await aprobarVigenciaContratoEmpleado(idEmpleado, {
+        nivelAprobacion,
       });
 
-      const refreshed = await obtenerContratoEmpleado(employee.idEmpleado);
+      const refreshed = await obtenerContratoEmpleado(idEmpleado);
       const refreshedEndDate = toInputDate(refreshed.solicitudVigencia?.nuevaFechaFinLaboral ?? refreshed.empleado?.fechaFinLaboral);
       setDetail(refreshed);
       setNewEndDate(refreshedEndDate);
@@ -796,25 +818,45 @@ export default function ContratosPage() {
                             <span style={getContractStatusBadgeStyle(item.estadoContrato)}>{item.estadoContrato}</span>
                           </td>
                           <td style={styles.td}>
-                            <button
-                              type="button"
-                              style={styles.secondaryButton}
-                              disabled={!item.idEmpleado || item.idEmpleado <= 0}
-                              onClick={() => {
-                                if (!item.idEmpleado || item.idEmpleado <= 0) {
-                                  return;
-                                }
+                            <div style={styles.relationActionGroup}>
+                              <button
+                                type="button"
+                                style={styles.secondaryButton}
+                                disabled={!item.idEmpleado || item.idEmpleado <= 0}
+                                onClick={() => {
+                                  if (!item.idEmpleado || item.idEmpleado <= 0) {
+                                    return;
+                                  }
 
-                                setSelectedEmployeeId(item.idEmpleado);
-                                setEmployeeSearch(item.nombreEmpleado);
-                                setActiveTab("detalle");
-                                setError("");
-                                setSuccess("");
-                              }}
-                            >
-                              <ChevronRight size={14} />
-                              Ver detalle
-                            </button>
+                                  setSelectedEmployeeId(item.idEmpleado);
+                                  setEmployeeSearch(item.nombreEmpleado);
+                                  setActiveTab("detalle");
+                                  setError("");
+                                  setSuccess("");
+                                }}
+                              >
+                                <ChevronRight size={14} />
+                                Ver detalle
+                              </button>
+                              <button
+                                type="button"
+                                style={styles.approvalButton}
+                                disabled={!canApproveRelationStep(item.idEmpleado, 2)}
+                                onClick={() => void handleApproveVigencia(item.idEmpleado ?? 0, 2)}
+                              >
+                                <Save size={14} />
+                                2da aprobacion
+                              </button>
+                              <button
+                                type="button"
+                                style={styles.approvalButtonAlt}
+                                disabled={!canApproveRelationStep(item.idEmpleado, 3)}
+                                onClick={() => void handleApproveVigencia(item.idEmpleado ?? 0, 3)}
+                              >
+                                <Save size={14} />
+                                3ra aprobacion
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -911,6 +953,9 @@ export default function ContratosPage() {
                       <div style={styles.pendingBoxText}>
                         Nueva fecha fin solicitada: {formatDateLabel(pendingRequest.nuevaFechaFinLaboral)}
                       </div>
+                      <div style={styles.pendingBoxText}>
+                        La 1ra aprobacion se registra automaticamente al guardar la nueva fecha.
+                      </div>
                     </div>
                   ) : null}
 
@@ -953,16 +998,7 @@ export default function ContratosPage() {
                 <div style={styles.formActions}>
                   <button type="submit" style={styles.primaryButton} disabled={saving}>
                     <Save size={16} />
-                    {saving ? "Guardando..." : "Registrar solicitud"}
-                  </button>
-                  <button
-                    type="button"
-                    style={styles.secondaryButton}
-                    onClick={() => void handleApproveVigencia()}
-                    disabled={saving || !hasPendingRequest}
-                  >
-                    <Save size={16} />
-                    Aprobar vigencia
+                    {saving ? "Guardando..." : "Registrar 1ra aprobacion"}
                   </button>
                 </div>
               </form>
@@ -1544,6 +1580,37 @@ const styles: Record<string, CSSProperties> = {
     border: "1px solid #bfdbfe",
     background: "#eff6ff",
     color: "#1d4ed8",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "0 12px",
+    cursor: "pointer",
+    fontWeight: 700,
+  },
+  relationActionGroup: {
+    display: "grid",
+    gap: 8,
+    minWidth: 170,
+  },
+  approvalButton: {
+    minHeight: 34,
+    borderRadius: 10,
+    border: "1px solid #fde68a",
+    background: "#fffbeb",
+    color: "#92400e",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "0 12px",
+    cursor: "pointer",
+    fontWeight: 700,
+  },
+  approvalButtonAlt: {
+    minHeight: 34,
+    borderRadius: 10,
+    border: "1px solid #c4b5fd",
+    background: "#f5f3ff",
+    color: "#6d28d9",
     display: "inline-flex",
     alignItems: "center",
     gap: 6,

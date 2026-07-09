@@ -79,6 +79,7 @@ export type ContratoEmpleadoSolicitudVigencia = {
 
 export type AprobarVigenciaRequest = {
   observacion?: string;
+  nivelAprobacion?: number;
 };
 
 export async function obtenerContratoEmpleado(idEmpleado: number): Promise<ContratoEmpleadoResponse> {

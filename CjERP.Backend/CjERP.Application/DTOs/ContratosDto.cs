@@ -58,6 +58,7 @@ public sealed class ContratoEmpleadoRenovarRequestDto
 public sealed class ContratoEmpleadoAprobarVigenciaRequestDto
 {
     public string Observacion { get; set; } = string.Empty;
+    public int NivelAprobacion { get; set; }
 }
 
 public sealed class ContratoEmpleadoSolicitudVigenciaDto

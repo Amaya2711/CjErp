@@ -180,6 +180,17 @@ public class ContratosController : ControllerBase
             }
 
             var usuario = ResolveUsuarioActual();
+            var aprobadorId = ResolveIdAprobador();
+            if (aprobadorId is null or <= 0)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "No se pudo resolver el aprobador actual para registrar la primera validacion."
+                });
+            }
+
             var solicitudExistente = await ObtenerSolicitudVigenciaAsync(connection, request.IdEmpleado, cancellationToken, transaction);
             var fechaFinActual = ParseNullableDate(current.FechaFinLaboral);
             var nuevaFechaFin = nuevaFechaFinLaboral.Date;
@@ -187,90 +198,13 @@ public class ContratosController : ControllerBase
                 ? $"Solicitud de renovacion hasta {nuevaFechaFin:yyyy-MM-dd}"
                 : request.Observacion.Trim();
 
-            if (solicitudExistente is null)
-            {
-                await connection.ExecuteAsync(
-                    new CommandDefinition(
-                        $"""
-                        INSERT INTO {RequestTableName}
-                        (
-                            IdEmpleado,
-                            FechaFinActual,
-                            NuevaFechaFinLaboral,
-                            EstadoSolicitud,
-                            Aprobacion1IdEmpleado,
-                            Aprobacion1Usuario,
-                            Aprobacion1Fecha,
-                            Aprobacion1Observacion,
-                            Aprobacion2IdEmpleado,
-                            Aprobacion2Usuario,
-                            Aprobacion2Fecha,
-                            Aprobacion2Observacion,
-                            Aprobacion3IdEmpleado,
-                            Aprobacion3Usuario,
-                            Aprobacion3Fecha,
-                            Aprobacion3Observacion,
-                            UsuarioCre,
-                            FechaCreacion,
-                            UsuarioMod,
-                            FechaMod
-                        )
-                        VALUES
-                        (
-                            @IdEmpleado,
-                            @FechaFinActual,
-                            @NuevaFechaFinLaboral,
-                            'PENDIENTE',
-                            NULL,
-                            NULL,
-                            NULL,
-                            NULL,
-                            NULL,
-                            NULL,
-                            NULL,
-                            NULL,
-                            NULL,
-                            NULL,
-                            NULL,
-                            NULL,
-                            @UsuarioCre,
-                            GETDATE(),
-                            @UsuarioMod,
-                            GETDATE()
-                        )
-                        """,
-                        new
-                        {
-                            request.IdEmpleado,
-                            FechaFinActual = fechaFinActual,
-                            NuevaFechaFinLaboral = nuevaFechaFin,
-                            UsuarioCre = usuario,
-                            UsuarioMod = usuario
-                        },
-                        transaction: transaction,
-                        cancellationToken: cancellationToken));
-            }
-            else
+            if (solicitudExistente is not null && string.Equals(solicitudExistente.EstadoSolicitud, "PENDIENTE", StringComparison.OrdinalIgnoreCase))
             {
                 await connection.ExecuteAsync(
                     new CommandDefinition(
                         $"""
                         UPDATE {RequestTableName}
-                        SET FechaFinActual = @FechaFinActual,
-                            NuevaFechaFinLaboral = @NuevaFechaFinLaboral,
-                            EstadoSolicitud = 'PENDIENTE',
-                            Aprobacion1IdEmpleado = NULL,
-                            Aprobacion1Usuario = NULL,
-                            Aprobacion1Fecha = NULL,
-                            Aprobacion1Observacion = NULL,
-                            Aprobacion2IdEmpleado = NULL,
-                            Aprobacion2Usuario = NULL,
-                            Aprobacion2Fecha = NULL,
-                            Aprobacion2Observacion = NULL,
-                            Aprobacion3IdEmpleado = NULL,
-                            Aprobacion3Usuario = NULL,
-                            Aprobacion3Fecha = NULL,
-                            Aprobacion3Observacion = NULL,
+                        SET EstadoSolicitud = 'ANULADO',
                             UsuarioMod = @UsuarioMod,
                             FechaMod = GETDATE()
                         WHERE IdSolicitudVigencia = @IdSolicitudVigencia
@@ -278,20 +212,82 @@ public class ContratosController : ControllerBase
                         new
                         {
                             solicitudExistente.IdSolicitudVigencia,
-                            FechaFinActual = fechaFinActual,
-                            NuevaFechaFinLaboral = nuevaFechaFin,
                             UsuarioMod = usuario
                         },
                         transaction: transaction,
                         cancellationToken: cancellationToken));
             }
 
+            await connection.ExecuteAsync(
+                new CommandDefinition(
+                    $"""
+                    INSERT INTO {RequestTableName}
+                    (
+                        IdEmpleado,
+                        FechaFinActual,
+                        NuevaFechaFinLaboral,
+                        EstadoSolicitud,
+                        Aprobacion1IdEmpleado,
+                        Aprobacion1Usuario,
+                        Aprobacion1Fecha,
+                        Aprobacion1Observacion,
+                        Aprobacion2IdEmpleado,
+                        Aprobacion2Usuario,
+                        Aprobacion2Fecha,
+                        Aprobacion2Observacion,
+                        Aprobacion3IdEmpleado,
+                        Aprobacion3Usuario,
+                        Aprobacion3Fecha,
+                        Aprobacion3Observacion,
+                        UsuarioCre,
+                        FechaCreacion,
+                        UsuarioMod,
+                        FechaMod
+                    )
+                    VALUES
+                    (
+                        @IdEmpleado,
+                        @FechaFinActual,
+                        @NuevaFechaFinLaboral,
+                        'PENDIENTE',
+                        @AprobadorId,
+                        @AprobadorUsuario,
+                        GETDATE(),
+                        @Aprobacion1Observacion,
+                        NULL,
+                        NULL,
+                        NULL,
+                        NULL,
+                        NULL,
+                        NULL,
+                        NULL,
+                        NULL,
+                        @UsuarioCre,
+                        GETDATE(),
+                        @UsuarioMod,
+                        GETDATE()
+                    )
+                    """,
+                    new
+                    {
+                        request.IdEmpleado,
+                        FechaFinActual = fechaFinActual,
+                        NuevaFechaFinLaboral = nuevaFechaFin,
+                        AprobadorId = aprobadorId,
+                        AprobadorUsuario = usuario,
+                        Aprobacion1Observacion = observacion,
+                        UsuarioCre = usuario,
+                        UsuarioMod = usuario
+                    },
+                    transaction: transaction,
+                    cancellationToken: cancellationToken));
+
             await transaction.CommitAsync(cancellationToken);
 
             return Ok(new
             {
                 success = true,
-                message = "La solicitud de vigencia fue registrada correctamente y quedo pendiente de 3 aprobaciones.",
+                message = "La fecha fue registrada con 1ra aprobacion y quedo pendiente de 2 validaciones.",
                 data = new
                 {
                     request.IdEmpleado,
@@ -423,10 +419,22 @@ public class ContratosController : ControllerBase
             }
 
             var aprobacionesRealizadas = solicitud.AprobacionesRealizadas;
-            var observacion = string.IsNullOrWhiteSpace(request.Observacion)
-                ? $"Aprobacion registrada por {usuario}"
-                : request.Observacion.Trim();
             var siguienteAprobacion = aprobacionesRealizadas + 1;
+            var nivelAprobacionSolicitado = request.NivelAprobacion <= 0 ? siguienteAprobacion : request.NivelAprobacion;
+
+            if (nivelAprobacionSolicitado != siguienteAprobacion)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return BadRequest(new
+                {
+                    success = false,
+                    message = $"La siguiente aprobacion pendiente es la #{siguienteAprobacion}."
+                });
+            }
+
+            var observacion = string.IsNullOrWhiteSpace(request.Observacion)
+                ? $"Aprobacion #{nivelAprobacionSolicitado} registrada por {usuario}"
+                : request.Observacion.Trim();
 
             if (siguienteAprobacion > solicitud.AprobacionesRequeridas)
             {
@@ -439,7 +447,7 @@ public class ContratosController : ControllerBase
             }
 
             var estadoFinal = siguienteAprobacion >= solicitud.AprobacionesRequeridas ? "APROBADO" : "PENDIENTE";
-            var updateSql = siguienteAprobacion switch
+            var updateSql = nivelAprobacionSolicitado switch
             {
                 1 => $"""
                      UPDATE {RequestTableName}
@@ -624,7 +632,7 @@ public class ContratosController : ControllerBase
                     solicitud.IdEmpleado,
                     nuevaFechaFinLaboral = solicitud.NuevaFechaFinLaboral,
                     estadoSolicitud = estadoFinal,
-                    aprobacionesRealizadas = siguienteAprobacion,
+                    aprobacionesRealizadas = nivelAprobacionSolicitado,
                     aprobacionesRequeridas = solicitud.AprobacionesRequeridas
                 }
             });
