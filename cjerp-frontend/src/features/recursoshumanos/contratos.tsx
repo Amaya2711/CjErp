@@ -310,15 +310,19 @@ export default function ContratosPage() {
       return false;
     }
 
-    if (selectedEmployeeId !== itemId) {
+    const estadoSolicitud = pendingRequest.estadoSolicitud?.toUpperCase();
+    if (estadoSolicitud !== "PENDIENTE") {
       return false;
     }
 
-    if (pendingRequest.estadoSolicitud?.toUpperCase() !== "PENDIENTE") {
+    const aprobacionesRealizadas = pendingRequest.aprobacionesRealizadas ?? 0;
+    const aprobacionesRequeridas = pendingRequest.aprobacionesRequeridas ?? 3;
+
+    if (step > aprobacionesRequeridas) {
       return false;
     }
 
-    return (pendingRequest.aprobacionesRealizadas ?? 0) === step - 1;
+    return aprobacionesRealizadas === step - 1;
   };
 
   useEffect(() => {
