@@ -725,9 +725,9 @@ export default function ContratosPage() {
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("ubicacion")}>Ubicacion{renderSortIndicator(relationSort, "ubicacion")}</button></th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("estadoContrato")}>Estado contrato{renderSortIndicator(relationSort, "estadoContrato")}</button></th>
                         <th style={styles.th}>Nueva fecha fin</th>
+                        <th style={styles.th}>Accion</th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("fechaInicio")}>Inicio{renderSortIndicator(relationSort, "fechaInicio")}</button></th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("fechaFin")}>Fin{renderSortIndicator(relationSort, "fechaFin")}</button></th>
-                        <th style={styles.th}>Accion</th>
                       </tr>
                       <tr>
                         <th style={styles.thFilter}><input value={relationFilters.nombreEmpleado} onChange={(event) => setRelationFilters((current) => ({ ...current, nombreEmpleado: event.target.value }))} style={styles.filterInput} placeholder="Filtrar" /></th>
@@ -773,9 +773,9 @@ export default function ContratosPage() {
                           />
                         </th>
                         <th style={styles.thFilter}></th>
+                        <th style={styles.thFilter}></th>
                         <th style={styles.thFilter}><input value={relationFilters.fechaInicio} onChange={(event) => setRelationFilters((current) => ({ ...current, fechaInicio: event.target.value }))} style={styles.filterInput} placeholder="dd/mm/aaaa" /></th>
                         <th style={styles.thFilter}><input value={relationFilters.fechaFin} onChange={(event) => setRelationFilters((current) => ({ ...current, fechaFin: event.target.value }))} style={styles.filterInput} placeholder="dd/mm/aaaa" /></th>
-                        <th style={styles.thFilter}></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -815,8 +815,6 @@ export default function ContratosPage() {
                               disabled={!canEditRelationEndDate(item.estadoContrato) || savingRelationEmployeeId === item.idEmpleado}
                             />
                           </td>
-                          <td style={styles.td}>{formatDateLabel(item.fechaInicio)}</td>
-                          <td style={styles.td}>{formatDateLabel(item.fechaFin)}</td>
                           <td style={styles.td}>
                             <div style={styles.relationActionGroup}>
                               <button
@@ -858,6 +856,8 @@ export default function ContratosPage() {
                               </button>
                             </div>
                           </td>
+                          <td style={styles.td}>{formatDateLabel(item.fechaInicio)}</td>
+                          <td style={styles.td}>{formatDateLabel(item.fechaFin)}</td>
                         </tr>
                       ))}
                     </tbody>
