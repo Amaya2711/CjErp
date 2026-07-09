@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, FormEvent } from "react";
-import { Ban, CalendarClock, RefreshCw, Save, Search, UserRound } from "lucide-react";
+import { Ban, CalendarClock, ChevronRight, RefreshCw, Save, Search, UserRound } from "lucide-react";
 import { listarEmpleadosWup } from "../../api/empleadoService";
 import {
   desactivarHistorialContrato,
@@ -8,6 +8,7 @@ import {
   renovarContratoEmpleado,
   type ContratoEmpleadoHistorial,
 } from "../../api/contratosService";
+import { listarFichaEmpleados, type FichaEmpleadoRow } from "../../api/fichaService";
 import type { EmpleadoCta } from "../../models/empleadoCta";
 import { getHttpErrorMessage } from "../../utils/httpError";
 import { SHAREPOINT_BASE_URL } from "../../utils/sharepoint";
@@ -44,9 +45,92 @@ function toInputDate(value?: string | null) {
   return /^\d{4}-\d{2}-\d{2}$/.test(datePart) ? datePart : "";
 }
 
+function parseContractDate(value?: string | null): Date | null {
+  const normalized = toInputDate(value);
+  if (!normalized) {
+    return null;
+  }
+
+  const date = new Date(`${normalized}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function resolveContractStatus(value?: string | null) {
+  const endDate = parseContractDate(value);
+  if (!endDate) {
+    return "SIN FECHA";
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const diffMs = endDate.getTime() - today.getTime();
+  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffDays <= 0) {
+    return "VENCIDO";
+  }
+
+  if (diffDays <= 30) {
+    return "X VENCER";
+  }
+
+  return "VIGENTE";
+}
+
 function buildPhotoCandidates(idEmpleado: number): string[] {
   const baseName = encodeURIComponent(String(idEmpleado));
   return PHOTO_EXTENSIONS.map((extension) => `${PHOTO_BASE_URL}/${baseName}${extension}`);
+}
+
+function toText(value: unknown): string {
+  if (value == null) {
+    return "";
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => toText(item)).filter(Boolean).join(", ");
+  }
+
+  if (typeof value === "boolean") {
+    return value ? "Si" : "No";
+  }
+
+  return String(value).trim();
+}
+
+function getFichaValue(row: FichaEmpleadoRow, ...keys: string[]): string {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(row, key)) {
+      const value = toText(row[key]);
+      if (value) {
+        return value;
+      }
+    }
+  }
+
+  const normalizedEntries = Object.entries(row).map(([key, value]) => [key.toLowerCase(), value] as const);
+  for (const key of keys) {
+    const found = normalizedEntries.find(([entryKey]) => entryKey === key.toLowerCase());
+    if (found) {
+      const value = toText(found[1]);
+      if (value) {
+        return value;
+      }
+    }
+  }
+
+  return "";
+}
+
+function getFichaNumber(row: FichaEmpleadoRow, ...keys: string[]): number | null {
+  const value = getFichaValue(row, ...keys);
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function EmployeePhoto({
@@ -92,17 +176,51 @@ function EmployeePhoto({
 }
 
 export default function ContratosPage() {
+  const [relationFilters, setRelationFilters] = useState({
+    nombreEmpleado: "",
+    nroDocumento: "",
+    empresa: [] as string[],
+    area: [] as string[],
+    cliente: [] as string[],
+    ubicacion: [] as string[],
+    fechaInicio: "",
+    fechaFin: "",
+    estadoContrato: [] as string[],
+  });
+  const [relationSort, setRelationSort] = useState<{
+    key:
+      | "nombreEmpleado"
+      | "nroDocumento"
+      | "empresa"
+      | "area"
+      | "cliente"
+      | "ubicacion"
+      | "fechaInicio"
+      | "fechaFin"
+      | "estadoContrato";
+    direction: "asc" | "desc";
+  }>({
+    key: "nombreEmpleado",
+    direction: "asc",
+  });
+  const [activeTab, setActiveTab] = useState<"relacion" | "detalle">("relacion");
   const [employees, setEmployees] = useState<EmpleadoCta[]>([]);
   const [employeeSearch, setEmployeeSearch] = useState("");
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number>(0);
+  const [relationRows, setRelationRows] = useState<FichaEmpleadoRow[]>([]);
+  const [loadingRelation, setLoadingRelation] = useState(false);
   const [loadingEmployees, setLoadingEmployees] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [saving, setSaving] = useState(false);
+  const autoSaveInProgressRef = useRef(false);
+  const [savingRelationEmployeeId, setSavingRelationEmployeeId] = useState<number | null>(null);
+  const [relationNewEndDates, setRelationNewEndDates] = useState<Record<string, string>>({});
   const [deactivatingId, setDeactivatingId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [detail, setDetail] = useState<Awaited<ReturnType<typeof obtenerContratoEmpleado>> | null>(null);
   const [newEndDate, setNewEndDate] = useState("");
+  const [newEndDateOriginal, setNewEndDateOriginal] = useState("");
   const [observation, setObservation] = useState("");
 
   useEffect(() => {
@@ -136,6 +254,7 @@ export default function ContratosPage() {
     if (selectedEmployeeId <= 0) {
       setDetail(null);
       setNewEndDate("");
+      setNewEndDateOriginal("");
       setObservation("");
       return;
     }
@@ -151,7 +270,9 @@ export default function ContratosPage() {
         const response = await obtenerContratoEmpleado(selectedEmployeeId);
         if (!active) return;
         setDetail(response);
-        setNewEndDate(toInputDate(response.empleado?.fechaFinLaboral));
+        const currentEndDate = toInputDate(response.empleado?.fechaFinLaboral);
+        setNewEndDate(currentEndDate);
+        setNewEndDateOriginal(currentEndDate);
         setObservation("");
       } catch (err) {
         if (!active) return;
@@ -179,25 +300,127 @@ export default function ContratosPage() {
   const employee = detail?.empleado ?? null;
   const history = detail?.historial ?? [];
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  useEffect(() => {
+    let active = true;
 
-    if (!employee || employee.idEmpleado <= 0) {
+    const loadRelation = async () => {
+      setLoadingRelation(true);
+
+      try {
+        const response = await listarFichaEmpleados();
+        if (!active) return;
+        setRelationRows(response.rows);
+      } catch (err) {
+        if (!active) return;
+        setRelationRows([]);
+        setError(getHttpErrorMessage(err, "No se pudo cargar la relacion de empleados."));
+      } finally {
+        if (active) {
+          setLoadingRelation(false);
+        }
+      }
+    };
+
+    void loadRelation();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const relationTableRows = useMemo(() => {
+    return relationRows.map((row, index) => ({
+      key: `${getFichaValue(row, "IdEmpleado", "idEmpleado", "IdEmpleadoCj", "idEmpleadoCj") || index}`,
+      idEmpleado: getFichaNumber(row, "IdEmpleado", "idEmpleado", "IdEmpleadoCj", "idEmpleadoCj"),
+      nombreEmpleado: getFichaValue(row, "NombreEmpleado", "nombreEmpleado", "Nombre", "nombre") || "-",
+      nroDocumento: getFichaValue(row, "NroDocumento", "nroDocumento", "Documento", "documento") || "-",
+      empresa: getFichaValue(row, "Empresa", "empresa") || "-",
+      area: getFichaValue(row, "Area", "area", "Departamento", "departamento") || "-",
+      cliente: getFichaValue(row, "Cliente", "cliente") || "-",
+      ubicacion: getFichaValue(row, "Ubicacion", "ubicacion") || "-",
+      fechaInicio: getFichaValue(row, "FechaIniLaboral", "fechaIniLaboral") || "-",
+      fechaFin: getFichaValue(row, "FechaFinLaboral", "fechaFinLaboral") || "-",
+      estadoContrato: resolveContractStatus(getFichaValue(row, "FechaFinLaboral", "fechaFinLaboral")),
+    }));
+  }, [relationRows]);
+
+  const getRelationRowKey = (item: { key: string; idEmpleado: number | null }) =>
+    item.idEmpleado && item.idEmpleado > 0 ? String(item.idEmpleado) : item.key;
+
+  const getRelationEditableEndDate = (item: { key: string; idEmpleado: number | null; fechaFin: string }) =>
+    relationNewEndDates[getRelationRowKey(item)] ?? toInputDate(item.fechaFin);
+
+  const relationFilterOptions = useMemo(() => {
+    const collect = (key: "empresa" | "area" | "cliente" | "ubicacion" | "estadoContrato") => (
+      [...new Set(relationTableRows.map((item) => String(item[key] ?? "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }))
+    );
+
+    return {
+      empresa: collect("empresa"),
+      area: collect("area"),
+      cliente: collect("cliente"),
+      ubicacion: collect("ubicacion"),
+      estadoContrato: collect("estadoContrato"),
+    };
+  }, [relationTableRows]);
+
+  const filteredAndSortedRelationRows = useMemo(() => {
+    const filtered = relationTableRows.filter((item) => (
+      (!relationFilters.nombreEmpleado || normalizeText(item.nombreEmpleado).includes(normalizeText(relationFilters.nombreEmpleado))) &&
+      (!relationFilters.nroDocumento || normalizeText(item.nroDocumento).includes(normalizeText(relationFilters.nroDocumento))) &&
+      (relationFilters.empresa.length === 0 || relationFilters.empresa.includes(item.empresa)) &&
+      (relationFilters.area.length === 0 || relationFilters.area.includes(item.area)) &&
+      (relationFilters.cliente.length === 0 || relationFilters.cliente.includes(item.cliente)) &&
+      (relationFilters.ubicacion.length === 0 || relationFilters.ubicacion.includes(item.ubicacion)) &&
+      (!relationFilters.fechaInicio || normalizeText(formatDateLabel(item.fechaInicio)).includes(normalizeText(relationFilters.fechaInicio))) &&
+      (!relationFilters.fechaFin || normalizeText(formatDateLabel(item.fechaFin)).includes(normalizeText(relationFilters.fechaFin))) &&
+      (relationFilters.estadoContrato.length === 0 || relationFilters.estadoContrato.includes(item.estadoContrato))
+    ));
+
+    return [...filtered].sort((a, b) => {
+      const left = String(a[relationSort.key] ?? "");
+      const right = String(b[relationSort.key] ?? "");
+      const comparison = left.localeCompare(right, "es", { numeric: true, sensitivity: "base" });
+      return relationSort.direction === "asc" ? comparison : -comparison;
+    });
+  }, [relationFilters, relationSort, relationTableRows]);
+
+  const toggleRelationSort = (
+    key: "nombreEmpleado" | "nroDocumento" | "empresa" | "area" | "cliente" | "ubicacion" | "fechaInicio" | "fechaFin" | "estadoContrato"
+  ) => {
+    setRelationSort((current) => (
+      current.key === key
+        ? { key, direction: current.direction === "asc" ? "desc" : "asc" }
+        : { key, direction: "asc" }
+    ));
+  };
+
+  const saveContractChange = async ({
+    idEmpleado,
+    nextEndDate,
+    fechaIniLaboral,
+    observationText,
+  }: {
+    idEmpleado: number;
+    nextEndDate: string;
+    fechaIniLaboral?: string;
+    observationText?: string;
+  }) => {
+    if (!idEmpleado || idEmpleado <= 0) {
       setError("Debe seleccionar un empleado.");
       setSuccess("");
-      return;
+      return false;
     }
 
-    if (!newEndDate) {
+    if (!nextEndDate) {
       setError("Debe ingresar la nueva fecha fin de contrato.");
       setSuccess("");
-      return;
+      return false;
     }
 
-    if (employee.fechaIniLaboral && newEndDate < toInputDate(employee.fechaIniLaboral)) {
+    if (fechaIniLaboral && nextEndDate < toInputDate(fechaIniLaboral)) {
       setError("La nueva fecha fin no puede ser menor que la fecha de inicio laboral.");
       setSuccess("");
-      return;
+      return false;
     }
 
     setSaving(true);
@@ -206,23 +429,97 @@ export default function ContratosPage() {
 
     try {
       await renovarContratoEmpleado({
-        idEmpleado: employee.idEmpleado,
-        nuevaFechaFinLaboral: newEndDate,
+        idEmpleado,
+        nuevaFechaFinLaboral: nextEndDate,
         motivoMovimiento: "RENOVACION",
-        observacion: observation.trim(),
+        observacion: (observationText ?? observation).trim(),
       });
 
-      const refreshed = await obtenerContratoEmpleado(employee.idEmpleado);
-      setDetail(refreshed);
-      setNewEndDate(toInputDate(refreshed.empleado?.fechaFinLaboral));
-      setObservation("");
+      setRelationRows((currentRows) =>
+        currentRows.map((row) => {
+          const rowId = getFichaNumber(row, "IdEmpleado", "idEmpleado", "IdEmpleadoCj", "idEmpleadoCj");
+          if (rowId !== idEmpleado) {
+            return row;
+          }
+
+          return {
+            ...row,
+            FechaFinLaboral: nextEndDate,
+            fechaFinLaboral: nextEndDate,
+          };
+        })
+      );
+
+      if (selectedEmployeeId === idEmpleado || employee?.idEmpleado === idEmpleado) {
+        const refreshed = await obtenerContratoEmpleado(idEmpleado);
+        const refreshedEndDate = toInputDate(refreshed.empleado?.fechaFinLaboral);
+        setDetail(refreshed);
+        setNewEndDate(refreshedEndDate);
+        setNewEndDateOriginal(refreshedEndDate);
+        setObservation("");
+      }
+
       setSuccess("La vigencia del contrato fue actualizada y el historial se registro correctamente.");
+      return true;
     } catch (err) {
       setError(getHttpErrorMessage(err, "No se pudo actualizar la vigencia del contrato."));
       setSuccess("");
+      return false;
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (autoSaveInProgressRef.current) {
+      return;
+    }
+
+    if (newEndDate.trim() === newEndDateOriginal.trim()) {
+      return;
+    }
+
+    if (!employee) {
+      return;
+    }
+
+    const currentEmployee = employee;
+    await saveContractChange({
+      idEmpleado: currentEmployee.idEmpleado,
+      nextEndDate: newEndDate,
+      fechaIniLaboral: currentEmployee.fechaIniLaboral,
+    });
+  };
+
+  const handleNewEndDateBlur = async () => {
+    if (saving || !employee || employee.idEmpleado <= 0) {
+      return;
+    }
+
+    const currentValue = newEndDate.trim();
+    const originalValue = newEndDateOriginal.trim();
+
+    if (!currentValue || currentValue === originalValue) {
+      return;
+    }
+
+    const shouldSave = window.confirm("La fecha fin fue modificada. Desea grabar los cambios?");
+    if (shouldSave) {
+      autoSaveInProgressRef.current = true;
+      try {
+        await saveContractChange({
+          idEmpleado: employee.idEmpleado,
+          nextEndDate: currentValue,
+          fechaIniLaboral: employee.fechaIniLaboral,
+        });
+      } finally {
+        autoSaveInProgressRef.current = false;
+      }
+      return;
+    }
+
+    setNewEndDate(originalValue);
   };
 
   const handleDeactivateHistory = async (item: ContratoEmpleadoHistorial) => {
@@ -252,15 +549,66 @@ export default function ContratosPage() {
     }
   };
 
+  const handleRelationEndDateBlur = async (item: {
+    key: string;
+    idEmpleado: number | null;
+    fechaInicio: string;
+    fechaFin: string;
+  }) => {
+    if (savingRelationEmployeeId !== null) {
+      return;
+    }
+
+    const idEmpleado = item.idEmpleado ?? 0;
+    if (idEmpleado <= 0) {
+      return;
+    }
+
+    const rowKey = getRelationRowKey(item);
+    const currentValue = (relationNewEndDates[rowKey] ?? "").trim();
+    const originalValue = toInputDate(item.fechaFin);
+
+    if (!currentValue || currentValue === originalValue) {
+      return;
+    }
+
+    const shouldSave = window.confirm("La fecha fin fue modificada. Desea grabar los cambios?");
+    if (!shouldSave) {
+      setRelationNewEndDates((current) => {
+        const next = { ...current };
+        delete next[rowKey];
+        return next;
+      });
+      return;
+    }
+
+    setSavingRelationEmployeeId(idEmpleado);
+    try {
+      const saved = await saveContractChange({
+        idEmpleado,
+        nextEndDate: currentValue,
+        fechaIniLaboral: item.fechaInicio,
+        observationText: "",
+      });
+
+      if (saved) {
+        setRelationNewEndDates((current) => ({
+          ...current,
+          [rowKey]: currentValue,
+        }));
+      }
+    } finally {
+      setSavingRelationEmployeeId(null);
+    }
+  };
+
   return (
     <div style={styles.page}>
       <div style={styles.header}>
         <div>
           <div style={styles.breadcrumb}>Recursos Humanos / Contratos</div>
           <h1 style={styles.title}>Renovacion de contratos</h1>
-          <p style={styles.subtitle}>
-            Actualiza la fecha de vigencia en <code>EmpleadoCj</code> y registra el historial de renovaciones.
-          </p>
+          
         </div>
         <div style={styles.headerIconWrap}>
           <CalendarClock size={28} />
@@ -268,61 +616,225 @@ export default function ContratosPage() {
       </div>
 
       <section style={styles.panel}>
-        <div style={styles.searchRow}>
-          <label style={styles.fieldBlock}>
-            <span style={styles.label}>Buscar empleado</span>
-            <div style={styles.inputWithIcon}>
-              <Search size={16} />
-              <input
-                value={employeeSearch}
-                onChange={(event) => setEmployeeSearch(event.target.value)}
-                placeholder="Escriba el nombre del empleado"
-                style={styles.input}
-              />
-            </div>
-          </label>
-
-          <label style={styles.fieldBlock}>
-            <span style={styles.label}>Empleado</span>
-            <select
-              value={selectedEmployeeId || ""}
-              onChange={(event) => setSelectedEmployeeId(Number(event.target.value) || 0)}
-              style={styles.select}
-              disabled={loadingEmployees}
-            >
-              <option value="">Seleccione un empleado</option>
-              {filteredEmployees.map((item) => (
-                <option key={item.idEmpleado} value={item.idEmpleado}>
-                  {item.nombreEmpleado}
-                </option>
-              ))}
-            </select>
-          </label>
-
+        <div style={styles.tabsRow}>
           <button
             type="button"
-            style={styles.refreshButton}
-            onClick={() => {
-              if (employee?.idEmpleado) {
-                setSelectedEmployeeId(employee.idEmpleado);
-              }
-            }}
-            disabled={loadingDetail || selectedEmployeeId <= 0}
+            style={activeTab === "relacion" ? styles.tabButtonActive : styles.tabButton}
+            onClick={() => setActiveTab("relacion")}
           >
-            <RefreshCw size={16} />
-            Recargar
+            Relacion
+          </button>
+          <button
+            type="button"
+            style={activeTab === "detalle" ? styles.tabButtonActive : styles.tabButton}
+            onClick={() => setActiveTab("detalle")}
+          >
+            Detalle
           </button>
         </div>
 
         {error ? <div style={styles.errorBox}>{error}</div> : null}
         {success ? <div style={styles.successBox}>{success}</div> : null}
 
-        {loadingDetail ? (
-          <div style={styles.emptyState}>Cargando contrato del empleado...</div>
-        ) : !employee ? (
-          <div style={styles.emptyState}>Seleccione un empleado para consultar su vigencia contractual.</div>
+        {activeTab === "relacion" ? (
+          <>
+            <div style={styles.relationIntro}>
+              <div>
+                <h2 style={styles.sectionTitle}>Relacion de empleados</h2>
+                <p style={styles.sectionText}>
+                  Muestra toda la relacion devuelta por el store de ficha y permite abrir la renovacion contractual en detalle.
+                </p>
+              </div>
+            </div>
+
+            {loadingRelation ? (
+              <div style={styles.emptyState}>Cargando relacion de empleados...</div>
+            ) : filteredAndSortedRelationRows.length === 0 ? (
+              <div style={styles.emptyState}>No se encontraron empleados en la relacion del store.</div>
+            ) : (
+              <div style={styles.historyPanel}>
+                <div style={styles.historyHeader}>
+                  <h2 style={styles.historyTitle}>Resultado de ficha</h2>
+                  <span style={styles.historyCount}>{filteredAndSortedRelationRows.length} registro(s)</span>
+                </div>
+
+                <div style={styles.tableWrap}>
+                  <table style={styles.table}>
+                    <thead>
+                      <tr>
+                        <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("nombreEmpleado")}>Empleado{renderSortIndicator(relationSort, "nombreEmpleado")}</button></th>
+                        <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("nroDocumento")}>Documento{renderSortIndicator(relationSort, "nroDocumento")}</button></th>
+                        <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("empresa")}>Empresa{renderSortIndicator(relationSort, "empresa")}</button></th>
+                        <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("cliente")}>Cliente{renderSortIndicator(relationSort, "cliente")}</button></th>
+                        <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("area")}>Area{renderSortIndicator(relationSort, "area")}</button></th>
+                        <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("ubicacion")}>Ubicacion{renderSortIndicator(relationSort, "ubicacion")}</button></th>
+                        <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("fechaInicio")}>Inicio{renderSortIndicator(relationSort, "fechaInicio")}</button></th>
+                        <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("fechaFin")}>Fin{renderSortIndicator(relationSort, "fechaFin")}</button></th>
+                        <th style={styles.th}>Nueva fecha fin</th>
+                        <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("estadoContrato")}>Estado contrato{renderSortIndicator(relationSort, "estadoContrato")}</button></th>
+                        <th style={styles.th}>Accion</th>
+                      </tr>
+                      <tr>
+                        <th style={styles.thFilter}><input value={relationFilters.nombreEmpleado} onChange={(event) => setRelationFilters((current) => ({ ...current, nombreEmpleado: event.target.value }))} style={styles.filterInput} placeholder="Filtrar" /></th>
+                        <th style={styles.thFilter}><input value={relationFilters.nroDocumento} onChange={(event) => setRelationFilters((current) => ({ ...current, nroDocumento: event.target.value }))} style={styles.filterInput} placeholder="Filtrar" /></th>
+                        <th style={styles.thFilter}>
+                          <FilterCombo
+                            label="Empresa"
+                            options={relationFilterOptions.empresa}
+                            selectedValues={relationFilters.empresa}
+                            onChange={(values) => setRelationFilters((current) => ({ ...current, empresa: values }))}
+                          />
+                        </th>
+                        <th style={styles.thFilter}>
+                          <FilterCombo
+                            label="Cliente"
+                            options={relationFilterOptions.cliente}
+                            selectedValues={relationFilters.cliente}
+                            onChange={(values) => setRelationFilters((current) => ({ ...current, cliente: values }))}
+                          />
+                        </th>
+                        <th style={styles.thFilter}>
+                          <FilterCombo
+                            label="Area"
+                            options={relationFilterOptions.area}
+                            selectedValues={relationFilters.area}
+                            onChange={(values) => setRelationFilters((current) => ({ ...current, area: values }))}
+                          />
+                        </th>
+                        <th style={styles.thFilter}>
+                          <FilterCombo
+                            label="Ubicacion"
+                            options={relationFilterOptions.ubicacion}
+                            selectedValues={relationFilters.ubicacion}
+                            onChange={(values) => setRelationFilters((current) => ({ ...current, ubicacion: values }))}
+                          />
+                        </th>
+                        <th style={styles.thFilter}><input value={relationFilters.fechaInicio} onChange={(event) => setRelationFilters((current) => ({ ...current, fechaInicio: event.target.value }))} style={styles.filterInput} placeholder="dd/mm/aaaa" /></th>
+                        <th style={styles.thFilter}><input value={relationFilters.fechaFin} onChange={(event) => setRelationFilters((current) => ({ ...current, fechaFin: event.target.value }))} style={styles.filterInput} placeholder="dd/mm/aaaa" /></th>
+                        <th style={styles.thFilter}></th>
+                        <th style={styles.thFilter}>
+                          <FilterCombo
+                            label="Estado contrato"
+                            options={relationFilterOptions.estadoContrato}
+                            selectedValues={relationFilters.estadoContrato}
+                            onChange={(values) => setRelationFilters((current) => ({ ...current, estadoContrato: values }))}
+                          />
+                        </th>
+                        <th style={styles.thFilter}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredAndSortedRelationRows.map((item) => (
+                        <tr key={item.key}>
+                          <td style={styles.td}>{item.nombreEmpleado}</td>
+                          <td style={styles.td}>{item.nroDocumento}</td>
+                          <td style={styles.td}>{item.empresa}</td>
+                          <td style={styles.td}>{item.cliente}</td>
+                          <td style={styles.td}>{item.area}</td>
+                          <td style={styles.td}>{item.ubicacion}</td>
+                          <td style={styles.td}>{formatDateLabel(item.fechaInicio)}</td>
+                          <td style={styles.td}>{formatDateLabel(item.fechaFin)}</td>
+                          <td style={styles.td}>
+                            <input
+                              type="date"
+                              value={getRelationEditableEndDate(item)}
+                              onChange={(event) =>
+                                setRelationNewEndDates((current) => ({
+                                  ...current,
+                                  [getRelationRowKey(item)]: event.target.value,
+                                }))
+                              }
+                              onBlur={() => void handleRelationEndDateBlur(item)}
+                              style={styles.relationInputDate}
+                              disabled={savingRelationEmployeeId === item.idEmpleado}
+                            />
+                          </td>
+                          <td style={styles.td}>
+                            <span style={getContractStatusBadgeStyle(item.estadoContrato)}>{item.estadoContrato}</span>
+                          </td>
+                          <td style={styles.td}>
+                            <button
+                              type="button"
+                              style={styles.secondaryButton}
+                              disabled={!item.idEmpleado || item.idEmpleado <= 0}
+                              onClick={() => {
+                                if (!item.idEmpleado || item.idEmpleado <= 0) {
+                                  return;
+                                }
+
+                                setSelectedEmployeeId(item.idEmpleado);
+                                setEmployeeSearch(item.nombreEmpleado);
+                                setActiveTab("detalle");
+                                setError("");
+                                setSuccess("");
+                              }}
+                            >
+                              <ChevronRight size={14} />
+                              Ver detalle
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
         ) : (
           <>
+            <div style={styles.searchRow}>
+              <label style={styles.fieldBlock}>
+                <span style={styles.label}>Buscar empleado</span>
+                <div style={styles.inputWithIcon}>
+                  <Search size={16} />
+                  <input
+                    value={employeeSearch}
+                    onChange={(event) => setEmployeeSearch(event.target.value)}
+                    placeholder="Escriba el nombre del empleado"
+                    style={styles.input}
+                  />
+                </div>
+              </label>
+
+              <label style={styles.fieldBlock}>
+                <span style={styles.label}>Empleado</span>
+                <select
+                  value={selectedEmployeeId || ""}
+                  onChange={(event) => setSelectedEmployeeId(Number(event.target.value) || 0)}
+                  style={styles.select}
+                  disabled={loadingEmployees}
+                >
+                  <option value="">Seleccione un empleado</option>
+                  {filteredEmployees.map((item) => (
+                    <option key={item.idEmpleado} value={item.idEmpleado}>
+                      {item.nombreEmpleado}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <button
+                type="button"
+                style={styles.refreshButton}
+                onClick={() => {
+                  if (employee?.idEmpleado) {
+                    setSelectedEmployeeId(employee.idEmpleado);
+                  }
+                }}
+                disabled={loadingDetail || selectedEmployeeId <= 0}
+              >
+                <RefreshCw size={16} />
+                Recargar
+              </button>
+            </div>
+
+            {loadingDetail ? (
+              <div style={styles.emptyState}>Cargando contrato del empleado...</div>
+            ) : !employee ? (
+              <div style={styles.emptyState}>Seleccione un empleado para consultar su vigencia contractual.</div>
+            ) : (
+              <>
             <div style={styles.topSectionGrid}>
               <div style={styles.profileCard}>
                 <div style={styles.profileHeader}>
@@ -358,11 +870,12 @@ export default function ContratosPage() {
                       <input value={toInputDate(employee.fechaFinLaboral)} readOnly style={styles.inputReadOnly} />
                     </label>
                     <label style={styles.fieldBlock}>
-                      <span style={styles.label}>Nueva fecha fin</span>
+                      <span style={styles.label}>NUEVA</span>
                       <input
                         type="date"
                         value={newEndDate}
                         onChange={(event) => setNewEndDate(event.target.value)}
+                        onBlur={() => void handleNewEndDateBlur()}
                         style={styles.inputDate}
                         disabled={saving}
                       />
@@ -428,6 +941,8 @@ export default function ContratosPage() {
                 </div>
               )}
             </div>
+              </>
+            )}
           </>
         )}
       </section>
@@ -471,6 +986,137 @@ function HistoryRow({
       </td>
     </tr>
   );
+}
+
+function FilterCombo({
+  label,
+  options,
+  selectedValues,
+  onChange,
+}: {
+  label: string;
+  options: string[];
+  selectedValues: string[];
+  onChange: (values: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+    };
+  }, []);
+
+  const visibleOptions = useMemo(() => {
+    const query = normalizeText(search);
+    return options.filter((option) => !query || normalizeText(option).includes(query));
+  }, [options, search]);
+
+  const summary = selectedValues.length === 0 ? "Todos" : `${selectedValues.length} seleccionado(s)`;
+
+  return (
+    <div ref={containerRef} style={styles.filterComboWrap}>
+      <button
+        type="button"
+        style={styles.filterComboButton}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span style={styles.filterComboLabel}>{summary}</span>
+        <span style={styles.filterComboCaret}>{open ? "▲" : "▼"}</span>
+      </button>
+
+      {open ? (
+        <div style={styles.filterComboMenu}>
+          <div style={styles.filterComboTitle}>{label}</div>
+          <input
+            type="text"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder={`Buscar ${label.toLowerCase()}...`}
+            style={styles.filterComboSearch}
+          />
+          <div style={styles.filterComboActions}>
+            <button
+              type="button"
+              style={styles.filterComboActionButton}
+              onClick={() => onChange(options.slice())}
+              disabled={options.length === 0}
+            >
+              Seleccionar todo
+            </button>
+            <button
+              type="button"
+              style={styles.filterComboClearButton}
+              onClick={() => onChange([])}
+            >
+              Limpiar
+            </button>
+          </div>
+          <div style={styles.filterComboOptions}>
+            {visibleOptions.length === 0 ? (
+              <div style={styles.filterComboEmpty}>Sin resultados</div>
+            ) : (
+              visibleOptions.map((option) => {
+                const checked = selectedValues.includes(option);
+                return (
+                  <label key={option} style={styles.filterComboOption}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() =>
+                        onChange(
+                          checked
+                            ? selectedValues.filter((value) => value !== option)
+                            : [...selectedValues, option]
+                        )
+                      }
+                    />
+                    <span>{option}</span>
+                  </label>
+                );
+              })
+            )}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function getContractStatusBadgeStyle(status: string): CSSProperties {
+  switch (status) {
+    case "VENCIDO":
+      return styles.contractStatusExpired;
+    case "X VENCER":
+      return styles.contractStatusWarning;
+    case "SIN FECHA":
+      return styles.contractStatusNoDate;
+    default:
+      return styles.contractStatusActive;
+  }
+}
+
+function renderSortIndicator(
+  sort: {
+    key: "nombreEmpleado" | "nroDocumento" | "empresa" | "area" | "cliente" | "ubicacion" | "fechaInicio" | "fechaFin" | "estadoContrato";
+    direction: "asc" | "desc";
+  },
+  key: "nombreEmpleado" | "nroDocumento" | "empresa" | "area" | "cliente" | "ubicacion" | "fechaInicio" | "fechaFin" | "estadoContrato"
+) {
+  if (sort.key !== key) {
+    return "  ";
+  }
+
+  return sort.direction === "asc" ? " ↑" : " ↓";
 }
 
 const styles: Record<string, CSSProperties> = {
@@ -523,6 +1169,53 @@ const styles: Record<string, CSSProperties> = {
     border: "1px solid #e2e8f0",
     padding: 20,
     boxShadow: "0 16px 40px rgba(15, 23, 42, 0.06)",
+  },
+  tabsRow: {
+    display: "inline-flex",
+    gap: 8,
+    padding: 6,
+    borderRadius: 14,
+    background: "#eff6ff",
+    border: "1px solid #bfdbfe",
+    marginBottom: 18,
+  },
+  tabButton: {
+    minHeight: 40,
+    borderRadius: 10,
+    border: "none",
+    background: "transparent",
+    color: "#1e3a8a",
+    padding: "0 18px",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  tabButtonActive: {
+    minHeight: 40,
+    borderRadius: 10,
+    border: "none",
+    background: "#2563eb",
+    color: "#ffffff",
+    padding: "0 18px",
+    fontWeight: 800,
+    cursor: "pointer",
+    boxShadow: "0 10px 24px rgba(37, 99, 235, 0.22)",
+  },
+  relationIntro: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 16,
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    margin: 0,
+    fontSize: 20,
+    color: "#17143a",
+  },
+  sectionText: {
+    margin: "6px 0 0",
+    color: "#475569",
+    maxWidth: 760,
   },
   profileCard: {
     background: "#FFFFFF",
@@ -762,6 +1455,19 @@ const styles: Record<string, CSSProperties> = {
     cursor: "pointer",
     fontWeight: 700,
   },
+  secondaryButton: {
+    minHeight: 34,
+    borderRadius: 10,
+    border: "1px solid #bfdbfe",
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "0 12px",
+    cursor: "pointer",
+    fontWeight: 700,
+  },
   historyPanel: {
     borderRadius: 12,
     border: "1px solid #e2e8f0",
@@ -793,7 +1499,7 @@ const styles: Record<string, CSSProperties> = {
   table: {
     width: "100%",
     borderCollapse: "collapse",
-    minWidth: 880,
+    minWidth: 1020,
   },
   th: {
     textAlign: "left",
@@ -805,6 +1511,162 @@ const styles: Record<string, CSSProperties> = {
     padding: "12px 14px",
     borderBottom: "1px solid #e2e8f0",
     background: "#f8fafc",
+  },
+  thFilter: {
+    padding: "10px 14px",
+    borderBottom: "1px solid #e2e8f0",
+    background: "#f1f5f9",
+  },
+  sortButton: {
+    border: "none",
+    background: "transparent",
+    padding: 0,
+    margin: 0,
+    color: "#475569",
+    fontSize: 12,
+    fontWeight: 800,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.4,
+    cursor: "pointer",
+  },
+  filterInput: {
+    width: "100%",
+    minWidth: 90,
+    height: 34,
+    borderRadius: 8,
+    border: "1px solid #cbd5e1",
+    padding: "0 10px",
+    fontSize: 12,
+    color: "#0f172a",
+    background: "#ffffff",
+  },
+  relationInputDate: {
+    width: "100%",
+    minWidth: 132,
+    height: 34,
+    borderRadius: 8,
+    border: "1px solid #cbd5e1",
+    padding: "0 10px",
+    fontSize: 12,
+    color: "#0f172a",
+    background: "#ffffff",
+  },
+  filterComboWrap: {
+    position: "relative",
+    width: "100%",
+    minWidth: 130,
+  },
+  filterComboButton: {
+    width: "100%",
+    minHeight: 36,
+    borderRadius: 10,
+    border: "1px solid #cbd5e1",
+    background: "#ffffff",
+    color: "#0f172a",
+    padding: "0 10px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    cursor: "pointer",
+    fontSize: 12,
+    fontWeight: 700,
+  },
+  filterComboLabel: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  filterComboCaret: {
+    fontSize: 10,
+    color: "#64748b",
+  },
+  filterComboMenu: {
+    position: "absolute",
+    top: "calc(100% + 6px)",
+    left: 0,
+    zIndex: 30,
+    width: 280,
+    maxHeight: 320,
+    overflow: "auto",
+    borderRadius: 12,
+    border: "1px solid #dbeafe",
+    background: "#ffffff",
+    boxShadow: "0 18px 40px rgba(15, 23, 42, 0.12)",
+    padding: 10,
+  },
+  filterComboTitle: {
+    fontSize: 11,
+    fontWeight: 800,
+    color: "#334155",
+    marginBottom: 8,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  filterComboSearch: {
+    width: "100%",
+    height: 36,
+    borderRadius: 10,
+    border: "1px solid #cbd5e1",
+    padding: "0 10px",
+    fontSize: 12,
+    color: "#0f172a",
+    marginBottom: 8,
+  },
+  filterComboActions: {
+    display: "flex",
+    gap: 8,
+    marginBottom: 8,
+  },
+  filterComboActionButton: {
+    flex: 1,
+    height: 32,
+    borderRadius: 8,
+    border: "1px solid #c7d2fe",
+    background: "#eef2ff",
+    color: "#3730a3",
+    cursor: "pointer",
+    fontSize: 11,
+    fontWeight: 700,
+  },
+  filterComboClearButton: {
+    flex: 1,
+    height: 32,
+    borderRadius: 8,
+    border: "1px solid #fecaca",
+    background: "#fef2f2",
+    color: "#b91c1c",
+    cursor: "pointer",
+    fontSize: 11,
+    fontWeight: 700,
+  },
+  filterComboOptions: {
+    display: "grid",
+    gap: 6,
+  },
+  filterComboOption: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    fontSize: 12,
+    color: "#0f172a",
+    padding: "4px 2px",
+  },
+  filterComboEmpty: {
+    fontSize: 12,
+    color: "#64748b",
+    padding: "6px 2px",
+  },
+  filterMultiSelect: {
+    width: "100%",
+    minWidth: 120,
+    minHeight: 72,
+    borderRadius: 8,
+    border: "1px solid #cbd5e1",
+    padding: 6,
+    fontSize: 12,
+    color: "#0f172a",
+    background: "#ffffff",
   },
   td: {
     padding: "12px 14px",
@@ -832,6 +1694,50 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: 999,
     background: "#fee2e2",
     color: "#b91c1c",
+    fontSize: 12,
+    fontWeight: 800,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.3,
+  },
+  contractStatusExpired: {
+    display: "inline-flex",
+    padding: "4px 10px",
+    borderRadius: 999,
+    background: "#fee2e2",
+    color: "#b91c1c",
+    fontSize: 12,
+    fontWeight: 800,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.3,
+  },
+  contractStatusWarning: {
+    display: "inline-flex",
+    padding: "4px 10px",
+    borderRadius: 999,
+    background: "#fef3c7",
+    color: "#b45309",
+    fontSize: 12,
+    fontWeight: 800,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.3,
+  },
+  contractStatusNoDate: {
+    display: "inline-flex",
+    padding: "4px 10px",
+    borderRadius: 999,
+    background: "#e2e8f0",
+    color: "#475569",
+    fontSize: 12,
+    fontWeight: 800,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.3,
+  },
+  contractStatusActive: {
+    display: "inline-flex",
+    padding: "4px 10px",
+    borderRadius: 999,
+    background: "#dcfce7",
+    color: "#166534",
     fontSize: 12,
     fontWeight: 800,
     textTransform: "uppercase" as const,

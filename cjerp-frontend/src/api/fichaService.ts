@@ -20,6 +20,16 @@ export async function obtenerFichaEmpleado(idEmpleado: number): Promise<FichaEmp
   };
 }
 
+export async function listarFichaEmpleados(): Promise<FichaEmpleadoResponse> {
+  const response = await httpClient.get<FichaEmpleadoResponse>("/empleado/ficha");
+
+  return {
+    rows: Array.isArray(response.rows) ? response.rows : [],
+    columns: Array.isArray(response.columns) ? response.columns : [],
+    totalRows: Number(response.totalRows ?? 0) || 0,
+  };
+}
+
 export async function obtenerFichaEmpleadoByName(nombreEmpleado: string): Promise<FichaEmpleadoResponse> {
   const response = await httpClient.get<FichaEmpleadoResponse>("/empleado/ficha", {
     params: { nombreEmpleado },

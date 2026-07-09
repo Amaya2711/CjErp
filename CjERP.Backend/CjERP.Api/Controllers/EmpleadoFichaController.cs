@@ -41,11 +41,6 @@ public class EmpleadoFichaController : ControllerBase
             ? string.Empty
             : nombreEmpleado.Trim();
 
-        if ((idEmpleado is null or <= 0) && string.IsNullOrWhiteSpace(normalizedNombreEmpleado))
-        {
-            return BadRequest(new { success = false, message = "NombreEmpleado es obligatorio." });
-        }
-
         var connectionString = _configuration.GetConnectionString("DefaultConnection");
         if (string.IsNullOrWhiteSpace(connectionString))
         {
@@ -126,6 +121,11 @@ ORDER BY p.parameter_id
         var parameters = new DynamicParameters();
 
         if (parameterNames.Count == 0)
+        {
+            return parameters;
+        }
+
+        if ((idEmpleado is null or <= 0) && string.IsNullOrWhiteSpace(nombreEmpleado))
         {
             return parameters;
         }
