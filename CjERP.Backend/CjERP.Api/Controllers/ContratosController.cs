@@ -1,6 +1,8 @@
 using System.Data;
+using System.Globalization;
 using System.Security.Claims;
 using CjERP.Application.DTOs;
+using CjERP.Application.Interfaces.Services;
 using Dapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -28,10 +30,14 @@ public class ContratosController : ControllerBase
         "nombreEmpleado"
     ];
     private readonly IConfiguration _configuration;
+    private readonly IAuditoriaCambiosService _auditoriaCambiosService;
 
-    public ContratosController(IConfiguration configuration)
+    public ContratosController(
+        IConfiguration configuration,
+        IAuditoriaCambiosService auditoriaCambiosService)
     {
         _configuration = configuration;
+        _auditoriaCambiosService = auditoriaCambiosService;
     }
 
     [HttpGet("{idEmpleado:int}")]
@@ -198,6 +204,8 @@ public class ContratosController : ControllerBase
                 ? $"Solicitud de renovacion hasta {nuevaFechaFin:yyyy-MM-dd}"
                 : request.Observacion.Trim();
 
+            var auditoriaCambios = new List<AuditoriaCambioDto>();
+
             if (solicitudExistente is not null && string.Equals(solicitudExistente.EstadoSolicitud, "PENDIENTE", StringComparison.OrdinalIgnoreCase))
             {
                 await connection.ExecuteAsync(
@@ -216,9 +224,23 @@ public class ContratosController : ControllerBase
                         },
                         transaction: transaction,
                         cancellationToken: cancellationToken));
+
+                auditoriaCambios.Add(new AuditoriaCambioDto
+                {
+                    Modulo = "RecursosHumanos",
+                    Entidad = "EmpleadoCjSolicitudVigencia",
+                    IdRegistro = solicitudExistente.IdSolicitudVigencia.ToString(CultureInfo.InvariantCulture),
+                    Accion = "UPDATE",
+                    Seccion = "Solicitud",
+                    Campo = "EstadoSolicitud",
+                    ValorAnterior = solicitudExistente.EstadoSolicitud,
+                    ValorNuevo = "ANULADO",
+                    UsuarioAccion = usuario,
+                    Observacion = "Se anulo la solicitud pendiente anterior por cambio de fecha fin."
+                });
             }
 
-            await connection.ExecuteAsync(
+            var idNuevaSolicitud = await connection.QuerySingleAsync<int>(
                 new CommandDefinition(
                     $"""
                     INSERT INTO {RequestTableName}
@@ -266,7 +288,9 @@ public class ContratosController : ControllerBase
                         GETDATE(),
                         @UsuarioMod,
                         GETDATE()
-                    )
+                    );
+
+                    SELECT CAST(SCOPE_IDENTITY() AS int);
                     """,
                     new
                     {
@@ -282,7 +306,18 @@ public class ContratosController : ControllerBase
                     transaction: transaction,
                     cancellationToken: cancellationToken));
 
+            auditoriaCambios.AddRange(BuildSolicitudCreacionAuditEntries(
+                idNuevaSolicitud,
+                request.IdEmpleado,
+                fechaFinActual,
+                nuevaFechaFin,
+                aprobadorId.Value,
+                usuario,
+                observacion));
+
             await transaction.CommitAsync(cancellationToken);
+
+            await RegistrarAuditoriaAsync(auditoriaCambios, cancellationToken);
 
             return Ok(new
             {
@@ -436,6 +471,7 @@ public class ContratosController : ControllerBase
                 ? $"Aprobacion #{nivelAprobacionSolicitado} registrada por {usuario}"
                 : request.Observacion.Trim();
 
+            var auditoriaCambios = new List<AuditoriaCambioDto>();
             if (siguienteAprobacion > solicitud.AprobacionesRequeridas)
             {
                 await transaction.RollbackAsync(cancellationToken);
@@ -480,10 +516,12 @@ public class ContratosController : ControllerBase
                          EstadoSolicitud = @EstadoSolicitud,
                          UsuarioMod = @UsuarioMod,
                          FechaMod = GETDATE(),
-                         FechaAplicacion = GETDATE()
+                        FechaAplicacion = GETDATE()
                      WHERE IdSolicitudVigencia = @IdSolicitudVigencia
                      """
             };
+
+            var fechaAccion = DateTime.Now;
 
             await connection.ExecuteAsync(
                 new CommandDefinition(
@@ -499,6 +537,15 @@ public class ContratosController : ControllerBase
                     },
                     transaction: transaction,
                     cancellationToken: cancellationToken));
+
+            auditoriaCambios.AddRange(BuildAprobacionAuditEntries(
+                solicitud,
+                nivelAprobacionSolicitado,
+                aprobadorId.Value,
+                usuario,
+                observacion,
+                estadoFinal,
+                fechaAccion));
 
             if (estadoFinal == "APROBADO")
             {
@@ -616,9 +663,25 @@ public class ContratosController : ControllerBase
                         },
                         transaction: transaction,
                         cancellationToken: cancellationToken));
+
+                auditoriaCambios.Add(new AuditoriaCambioDto
+                {
+                    Modulo = "RecursosHumanos",
+                    Entidad = "EmpleadoCj",
+                    IdRegistro = solicitud.IdEmpleado.ToString(CultureInfo.InvariantCulture),
+                    Accion = "UPDATE",
+                    Seccion = "Contrato",
+                    Campo = "FechaFinLaboral",
+                    ValorAnterior = current.FechaFinLaboral,
+                    ValorNuevo = solicitud.NuevaFechaFinLaboral,
+                    UsuarioAccion = usuario,
+                    Observacion = "Aplicacion final de la renovacion aprobada."
+                });
             }
 
             await transaction.CommitAsync(cancellationToken);
+
+            await RegistrarAuditoriaAsync(auditoriaCambios, cancellationToken);
 
             return Ok(new
             {
@@ -804,6 +867,266 @@ public class ContratosController : ControllerBase
     private static DateTime? ParseNullableDate(string? value)
     {
         return DateTime.TryParse(value, out var parsed) ? parsed : null;
+    }
+
+    private static string? FormatAuditDate(DateTime? value)
+    {
+        return value?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    }
+
+    private static string FormatAuditDate(DateTime value)
+    {
+        return value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    }
+
+    private static IEnumerable<AuditoriaCambioDto> BuildSolicitudCreacionAuditEntries(
+        int idSolicitudVigencia,
+        int idEmpleado,
+        DateTime? fechaFinActual,
+        DateTime nuevaFechaFinLaboral,
+        int aprobadorId,
+        string usuario,
+        string observacion)
+    {
+        var idRegistro = idSolicitudVigencia.ToString(CultureInfo.InvariantCulture);
+        var fechaActualTexto = FormatAuditDate(fechaFinActual);
+        var nuevaFechaTexto = FormatAuditDate(nuevaFechaFinLaboral);
+        var fechaAprobacionTexto = FormatAuditDate(DateTime.Now);
+
+        yield return new AuditoriaCambioDto
+        {
+            Modulo = "RecursosHumanos",
+            Entidad = "EmpleadoCjSolicitudVigencia",
+            IdRegistro = idRegistro,
+            Accion = "INSERT",
+            Seccion = "Solicitud",
+            Campo = "EstadoSolicitud",
+            ValorAnterior = null,
+            ValorNuevo = "PENDIENTE",
+            UsuarioAccion = usuario,
+            Observacion = observacion
+        };
+
+        yield return new AuditoriaCambioDto
+        {
+            Modulo = "RecursosHumanos",
+            Entidad = "EmpleadoCjSolicitudVigencia",
+            IdRegistro = idRegistro,
+            Accion = "INSERT",
+            Seccion = "Solicitud",
+            Campo = "IdEmpleado",
+            ValorAnterior = null,
+            ValorNuevo = idEmpleado.ToString(CultureInfo.InvariantCulture),
+            UsuarioAccion = usuario,
+            Observacion = observacion
+        };
+
+        yield return new AuditoriaCambioDto
+        {
+            Modulo = "RecursosHumanos",
+            Entidad = "EmpleadoCjSolicitudVigencia",
+            IdRegistro = idRegistro,
+            Accion = "INSERT",
+            Seccion = "Solicitud",
+            Campo = "FechaFinActual",
+            ValorAnterior = null,
+            ValorNuevo = fechaActualTexto,
+            UsuarioAccion = usuario,
+            Observacion = observacion
+        };
+
+        yield return new AuditoriaCambioDto
+        {
+            Modulo = "RecursosHumanos",
+            Entidad = "EmpleadoCjSolicitudVigencia",
+            IdRegistro = idRegistro,
+            Accion = "INSERT",
+            Seccion = "Solicitud",
+            Campo = "NuevaFechaFinLaboral",
+            ValorAnterior = null,
+            ValorNuevo = nuevaFechaTexto,
+            UsuarioAccion = usuario,
+            Observacion = observacion
+        };
+
+        yield return new AuditoriaCambioDto
+        {
+            Modulo = "RecursosHumanos",
+            Entidad = "EmpleadoCjSolicitudVigencia",
+            IdRegistro = idRegistro,
+            Accion = "INSERT",
+            Seccion = "Aprobacion 1",
+            Campo = "Aprobacion1IdEmpleado",
+            ValorAnterior = null,
+            ValorNuevo = aprobadorId.ToString(CultureInfo.InvariantCulture),
+            UsuarioAccion = usuario,
+            Observacion = observacion
+        };
+
+        yield return new AuditoriaCambioDto
+        {
+            Modulo = "RecursosHumanos",
+            Entidad = "EmpleadoCjSolicitudVigencia",
+            IdRegistro = idRegistro,
+            Accion = "INSERT",
+            Seccion = "Aprobacion 1",
+            Campo = "Aprobacion1Usuario",
+            ValorAnterior = null,
+            ValorNuevo = usuario,
+            UsuarioAccion = usuario,
+            Observacion = observacion
+        };
+
+        yield return new AuditoriaCambioDto
+        {
+            Modulo = "RecursosHumanos",
+            Entidad = "EmpleadoCjSolicitudVigencia",
+            IdRegistro = idRegistro,
+            Accion = "INSERT",
+            Seccion = "Aprobacion 1",
+            Campo = "Aprobacion1Fecha",
+            ValorAnterior = null,
+            ValorNuevo = fechaAprobacionTexto,
+            UsuarioAccion = usuario,
+            Observacion = observacion
+        };
+
+        yield return new AuditoriaCambioDto
+        {
+            Modulo = "RecursosHumanos",
+            Entidad = "EmpleadoCjSolicitudVigencia",
+            IdRegistro = idRegistro,
+            Accion = "INSERT",
+            Seccion = "Aprobacion 1",
+            Campo = "Aprobacion1Observacion",
+            ValorAnterior = null,
+            ValorNuevo = observacion,
+            UsuarioAccion = usuario,
+            Observacion = observacion
+        };
+    }
+
+    private static IEnumerable<AuditoriaCambioDto> BuildAprobacionAuditEntries(
+        ContratoEmpleadoSolicitudVigenciaDto solicitud,
+        int nivelAprobacion,
+        int aprobadorId,
+        string usuario,
+        string observacion,
+        string estadoFinal,
+        DateTime fechaAccion)
+    {
+        var idRegistro = solicitud.IdSolicitudVigencia.ToString(CultureInfo.InvariantCulture);
+        var numeroAprobacion = nivelAprobacion.ToString(CultureInfo.InvariantCulture);
+        var fechaTexto = FormatAuditDate(fechaAccion);
+
+        yield return new AuditoriaCambioDto
+        {
+            Modulo = "RecursosHumanos",
+            Entidad = "EmpleadoCjSolicitudVigencia",
+            IdRegistro = idRegistro,
+            Accion = "UPDATE",
+            Seccion = $"Aprobacion {numeroAprobacion}",
+            Campo = $"Aprobacion{numeroAprobacion}IdEmpleado",
+            ValorAnterior = null,
+            ValorNuevo = aprobadorId.ToString(CultureInfo.InvariantCulture),
+            UsuarioAccion = usuario,
+            Observacion = observacion
+        };
+
+        yield return new AuditoriaCambioDto
+        {
+            Modulo = "RecursosHumanos",
+            Entidad = "EmpleadoCjSolicitudVigencia",
+            IdRegistro = idRegistro,
+            Accion = "UPDATE",
+            Seccion = $"Aprobacion {numeroAprobacion}",
+            Campo = $"Aprobacion{numeroAprobacion}Usuario",
+            ValorAnterior = null,
+            ValorNuevo = usuario,
+            UsuarioAccion = usuario,
+            Observacion = observacion
+        };
+
+        yield return new AuditoriaCambioDto
+        {
+            Modulo = "RecursosHumanos",
+            Entidad = "EmpleadoCjSolicitudVigencia",
+            IdRegistro = idRegistro,
+            Accion = "UPDATE",
+            Seccion = $"Aprobacion {numeroAprobacion}",
+            Campo = $"Aprobacion{numeroAprobacion}Fecha",
+            ValorAnterior = null,
+            ValorNuevo = fechaTexto,
+            UsuarioAccion = usuario,
+            Observacion = observacion
+        };
+
+        yield return new AuditoriaCambioDto
+        {
+            Modulo = "RecursosHumanos",
+            Entidad = "EmpleadoCjSolicitudVigencia",
+            IdRegistro = idRegistro,
+            Accion = "UPDATE",
+            Seccion = $"Aprobacion {numeroAprobacion}",
+            Campo = $"Aprobacion{numeroAprobacion}Observacion",
+            ValorAnterior = null,
+            ValorNuevo = observacion,
+            UsuarioAccion = usuario,
+            Observacion = observacion
+        };
+
+        yield return new AuditoriaCambioDto
+        {
+            Modulo = "RecursosHumanos",
+            Entidad = "EmpleadoCjSolicitudVigencia",
+            IdRegistro = idRegistro,
+            Accion = "UPDATE",
+            Seccion = "Solicitud",
+            Campo = "EstadoSolicitud",
+            ValorAnterior = solicitud.EstadoSolicitud,
+            ValorNuevo = estadoFinal,
+            UsuarioAccion = usuario,
+            Observacion = observacion
+        };
+
+        if (string.Equals(estadoFinal, "APROBADO", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return new AuditoriaCambioDto
+            {
+                Modulo = "RecursosHumanos",
+                Entidad = "EmpleadoCjSolicitudVigencia",
+                IdRegistro = idRegistro,
+                Accion = "UPDATE",
+                Seccion = "Solicitud",
+                Campo = "FechaAplicacion",
+                ValorAnterior = null,
+                ValorNuevo = fechaTexto,
+                UsuarioAccion = usuario,
+                Observacion = observacion
+            };
+        }
+    }
+
+    private async Task RegistrarAuditoriaAsync(
+        IEnumerable<AuditoriaCambioDto> cambios,
+        CancellationToken cancellationToken)
+    {
+        var lote = cambios
+            .Where(cambio =>
+                !string.IsNullOrWhiteSpace(cambio.Modulo) &&
+                !string.IsNullOrWhiteSpace(cambio.Entidad) &&
+                !string.IsNullOrWhiteSpace(cambio.IdRegistro) &&
+                !string.IsNullOrWhiteSpace(cambio.Accion) &&
+                !string.IsNullOrWhiteSpace(cambio.Campo) &&
+                !string.IsNullOrWhiteSpace(cambio.UsuarioAccion))
+            .ToList();
+
+        if (lote.Count == 0)
+        {
+            return;
+        }
+
+        await _auditoriaCambiosService.RegistrarLoteAsync(lote, cancellationToken);
     }
 
     private string ResolveUsuarioActual()
