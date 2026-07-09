@@ -719,20 +719,19 @@ export default function ContratosPage() {
                       <tr>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("nombreEmpleado")}>Empleado{renderSortIndicator(relationSort, "nombreEmpleado")}</button></th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("nroDocumento")}>Documento{renderSortIndicator(relationSort, "nroDocumento")}</button></th>
-                        <th style={styles.th}>Nueva fecha fin</th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("empresa")}>Empresa{renderSortIndicator(relationSort, "empresa")}</button></th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("cliente")}>Cliente{renderSortIndicator(relationSort, "cliente")}</button></th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("area")}>Area{renderSortIndicator(relationSort, "area")}</button></th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("ubicacion")}>Ubicacion{renderSortIndicator(relationSort, "ubicacion")}</button></th>
+                        <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("estadoContrato")}>Estado contrato{renderSortIndicator(relationSort, "estadoContrato")}</button></th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("fechaInicio")}>Inicio{renderSortIndicator(relationSort, "fechaInicio")}</button></th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("fechaFin")}>Fin{renderSortIndicator(relationSort, "fechaFin")}</button></th>
-                        <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("estadoContrato")}>Estado contrato{renderSortIndicator(relationSort, "estadoContrato")}</button></th>
+                        <th style={styles.th}>Nueva fecha fin</th>
                         <th style={styles.th}>Accion</th>
                       </tr>
                       <tr>
                         <th style={styles.thFilter}><input value={relationFilters.nombreEmpleado} onChange={(event) => setRelationFilters((current) => ({ ...current, nombreEmpleado: event.target.value }))} style={styles.filterInput} placeholder="Filtrar" /></th>
                         <th style={styles.thFilter}><input value={relationFilters.nroDocumento} onChange={(event) => setRelationFilters((current) => ({ ...current, nroDocumento: event.target.value }))} style={styles.filterInput} placeholder="Filtrar" /></th>
-                        <th style={styles.thFilter}></th>
                         <th style={styles.thFilter}>
                           <FilterCombo
                             label="Empresa"
@@ -765,8 +764,6 @@ export default function ContratosPage() {
                             onChange={(values) => setRelationFilters((current) => ({ ...current, ubicacion: values }))}
                           />
                         </th>
-                        <th style={styles.thFilter}><input value={relationFilters.fechaInicio} onChange={(event) => setRelationFilters((current) => ({ ...current, fechaInicio: event.target.value }))} style={styles.filterInput} placeholder="dd/mm/aaaa" /></th>
-                        <th style={styles.thFilter}><input value={relationFilters.fechaFin} onChange={(event) => setRelationFilters((current) => ({ ...current, fechaFin: event.target.value }))} style={styles.filterInput} placeholder="dd/mm/aaaa" /></th>
                         <th style={styles.thFilter}>
                           <FilterCombo
                             label="Estado contrato"
@@ -775,6 +772,9 @@ export default function ContratosPage() {
                             onChange={(values) => setRelationFilters((current) => ({ ...current, estadoContrato: values }))}
                           />
                         </th>
+                        <th style={styles.thFilter}><input value={relationFilters.fechaInicio} onChange={(event) => setRelationFilters((current) => ({ ...current, fechaInicio: event.target.value }))} style={styles.filterInput} placeholder="dd/mm/aaaa" /></th>
+                        <th style={styles.thFilter}><input value={relationFilters.fechaFin} onChange={(event) => setRelationFilters((current) => ({ ...current, fechaFin: event.target.value }))} style={styles.filterInput} placeholder="dd/mm/aaaa" /></th>
+                        <th style={styles.thFilter}></th>
                         <th style={styles.thFilter}></th>
                       </tr>
                     </thead>
@@ -783,6 +783,15 @@ export default function ContratosPage() {
                         <tr key={item.key}>
                           <td style={styles.td}>{item.nombreEmpleado}</td>
                           <td style={styles.td}>{item.nroDocumento}</td>
+                          <td style={styles.td}>{item.empresa}</td>
+                          <td style={styles.td}>{item.cliente}</td>
+                          <td style={styles.td}>{item.area}</td>
+                          <td style={styles.td}>{item.ubicacion}</td>
+                          <td style={styles.td}>
+                            <span style={getContractStatusBadgeStyle(item.estadoContrato)}>{item.estadoContrato}</span>
+                          </td>
+                          <td style={styles.td}>{formatDateLabel(item.fechaInicio)}</td>
+                          <td style={styles.td}>{formatDateLabel(item.fechaFin)}</td>
                           <td
                             style={
                               canEditRelationEndDate(item.estadoContrato)
@@ -808,15 +817,6 @@ export default function ContratosPage() {
                               disabled={!canEditRelationEndDate(item.estadoContrato) || savingRelationEmployeeId === item.idEmpleado}
                             />
                           </td>
-                          <td style={styles.td}>{item.empresa}</td>
-                          <td style={styles.td}>{item.cliente}</td>
-                          <td style={styles.td}>{item.area}</td>
-                          <td style={styles.td}>{item.ubicacion}</td>
-                          <td style={styles.td}>{formatDateLabel(item.fechaInicio)}</td>
-                          <td style={styles.td}>{formatDateLabel(item.fechaFin)}</td>
-                          <td style={styles.td}>
-                            <span style={getContractStatusBadgeStyle(item.estadoContrato)}>{item.estadoContrato}</span>
-                          </td>
                           <td style={styles.td}>
                             <div style={styles.relationActionGroup}>
                               <button
@@ -840,7 +840,7 @@ export default function ContratosPage() {
                               </button>
                               <button
                                 type="button"
-                                style={styles.approvalButton}
+                                style={styles.approvalButtonInline}
                                 disabled={!canApproveRelationStep(item.idEmpleado, 2)}
                                 onClick={() => void handleApproveVigencia(item.idEmpleado ?? 0, 2)}
                               >
@@ -849,7 +849,7 @@ export default function ContratosPage() {
                               </button>
                               <button
                                 type="button"
-                                style={styles.approvalButtonAlt}
+                                style={styles.approvalButtonInlineAlt}
                                 disabled={!canApproveRelationStep(item.idEmpleado, 3)}
                                 onClick={() => void handleApproveVigencia(item.idEmpleado ?? 0, 3)}
                               >
@@ -1588,11 +1588,13 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: 700,
   },
   relationActionGroup: {
-    display: "grid",
+    display: "flex",
+    alignItems: "center",
     gap: 8,
-    minWidth: 170,
+    flexWrap: "wrap",
+    minWidth: 260,
   },
-  approvalButton: {
+  approvalButtonInline: {
     minHeight: 34,
     borderRadius: 10,
     border: "1px solid #fde68a",
@@ -1605,7 +1607,7 @@ const styles: Record<string, CSSProperties> = {
     cursor: "pointer",
     fontWeight: 700,
   },
-  approvalButtonAlt: {
+  approvalButtonInlineAlt: {
     minHeight: 34,
     borderRadius: 10,
     border: "1px solid #c4b5fd",
