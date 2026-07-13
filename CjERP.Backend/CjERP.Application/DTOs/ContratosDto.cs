@@ -11,6 +11,7 @@ public sealed class ContratoEmpleadoDetalleDto
     public string Cliente { get; set; } = string.Empty;
     public string Area { get; set; } = string.Empty;
     public string Ubicacion { get; set; } = string.Empty;
+    public string Direccion { get; set; } = string.Empty;
     public int? IdCargo { get; set; }
     public int? IdTipoEmpleado { get; set; }
     public int? IdEmpRel { get; set; }
@@ -19,6 +20,10 @@ public sealed class ContratoEmpleadoDetalleDto
     public string FechaIniLaboral { get; set; } = string.Empty;
     public string FechaFinLaboral { get; set; } = string.Empty;
     public string FechaBaja { get; set; } = string.Empty;
+    public string? NuevaFechaFinLaboral { get; set; }
+    public string? Aprobacion1Fecha { get; set; }
+    public string? Aprobacion2Fecha { get; set; }
+    public string? Aprobacion3Fecha { get; set; }
 }
 
 public sealed class ContratoEmpleadoHistorialDto
@@ -59,6 +64,13 @@ public sealed class ContratoEmpleadoAprobarVigenciaRequestDto
 {
     public string Observacion { get; set; } = string.Empty;
     public int NivelAprobacion { get; set; }
+}
+
+public sealed class ContratoPlantillaGenerarRequestDto
+{
+    public string DocumentPath { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public Dictionary<string, string> Replacements { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed class ContratoEmpleadoSolicitudVigenciaDto

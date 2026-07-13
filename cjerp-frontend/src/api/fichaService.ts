@@ -1,6 +1,16 @@
 import httpClient from "./httpClient";
 
-export type FichaEmpleadoRow = Record<string, unknown>;
+export type FichaEmpleadoRow = {
+  NuevaFechaFinLaboral?: string | null;
+  nuevaFechaFinLaboral?: string | null;
+  Aprobacion1Fecha?: string | null;
+  aprobacion1Fecha?: string | null;
+  Aprobacion2Fecha?: string | null;
+  aprobacion2Fecha?: string | null;
+  Aprobacion3Fecha?: string | null;
+  aprobacion3Fecha?: string | null;
+  [key: string]: unknown;
+};
 
 export type FichaEmpleadoResponse = {
   rows: FichaEmpleadoRow[];

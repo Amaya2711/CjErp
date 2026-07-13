@@ -12,6 +12,14 @@ namespace CjERP.Api.Controllers;
 public class EmpleadoFichaController : ControllerBase
 {
     private const string StoredProcedureName = "dbo.sp_EmpleadoCj_Ficha";
+    private static readonly HashSet<string> HiddenColumnNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "NuevaFechaFinLaboral",
+        "Aprobacion1Fecha",
+        "Aprobacion2Fecha",
+        "Aprobacion3Fecha"
+    };
+
     private static readonly string[] CandidateParameterNames =
     [
         "IdEmpleado",
@@ -97,6 +105,7 @@ ORDER BY p.parameter_id
 
         var columns = rows
             .SelectMany(row => row.Keys)
+            .Where(key => !HiddenColumnNames.Contains(key))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 

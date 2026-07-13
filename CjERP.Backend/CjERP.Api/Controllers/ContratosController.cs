@@ -1,6 +1,10 @@
 using System.Data;
 using System.Globalization;
+using System.IO.Compression;
 using System.Security.Claims;
+using System.Security;
+using System.Text;
+using CjERP.Api.Services;
 using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces.Services;
 using Dapper;
@@ -31,13 +35,16 @@ public class ContratosController : ControllerBase
     ];
     private readonly IConfiguration _configuration;
     private readonly IAuditoriaCambiosService _auditoriaCambiosService;
+    private readonly ISharePointCommercialUploadService _sharePointCommercialUploadService;
 
     public ContratosController(
         IConfiguration configuration,
-        IAuditoriaCambiosService auditoriaCambiosService)
+        IAuditoriaCambiosService auditoriaCambiosService,
+        ISharePointCommercialUploadService sharePointCommercialUploadService)
     {
         _configuration = configuration;
         _auditoriaCambiosService = auditoriaCambiosService;
+        _sharePointCommercialUploadService = sharePointCommercialUploadService;
     }
 
     [HttpGet("{idEmpleado:int}")]
@@ -116,6 +123,42 @@ public class ContratosController : ControllerBase
                 SolicitudVigencia = await ObtenerSolicitudVigenciaAsync(connection, idEmpleado, cancellationToken)
             }
         });
+    }
+
+    [HttpPost("plantilla")]
+    public async Task<IActionResult> GenerarPlantilla(
+        [FromBody] ContratoPlantillaGenerarRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.DocumentPath))
+        {
+            return BadRequest(new { success = false, message = "La ruta del documento es obligatoria." });
+        }
+
+        if (!request.DocumentPath.Contains("FORMATOS_CONTRATOS", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { success = false, message = "La ruta del documento no es valida." });
+        }
+
+        var replacements = NormalizeReplacements(request.Replacements);
+        if (replacements.Count == 0)
+        {
+            return BadRequest(new { success = false, message = "Debe enviar al menos un campo para reemplazar." });
+        }
+
+        var templateBytes = await _sharePointCommercialUploadService.DownloadFileAsync(
+            request.DocumentPath,
+            cancellationToken);
+
+        var renderedBytes = ReplaceWordPlaceholders(templateBytes, replacements);
+        var fileName = string.IsNullOrWhiteSpace(request.FileName)
+            ? Path.GetFileName(request.DocumentPath)
+            : request.FileName.Trim();
+
+        return File(
+            renderedBytes,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            fileName);
     }
 
     [HttpPut("renovar")]
@@ -208,6 +251,68 @@ public class ContratosController : ControllerBase
 
             if (solicitudExistente is not null && string.Equals(solicitudExistente.EstadoSolicitud, "PENDIENTE", StringComparison.OrdinalIgnoreCase))
             {
+                if (solicitudExistente.AprobacionesRealizadas >= 1)
+                {
+                    var nuevaFechaTexto = nuevaFechaFin.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                    if (string.Equals(solicitudExistente.NuevaFechaFinLaboral, nuevaFechaTexto, StringComparison.OrdinalIgnoreCase))
+                    {
+                        await transaction.RollbackAsync(cancellationToken);
+                        return Ok(new
+                        {
+                            success = true,
+                            message = "La solicitud pendiente ya tiene registrada esa fecha fin.",
+                            data = new
+                            {
+                                request.IdEmpleado,
+                                nuevaFechaFinLaboral = nuevaFechaTexto,
+                                estadoSolicitud = solicitudExistente.EstadoSolicitud,
+                                observacion,
+                                actualizoSolicitudPendiente = true
+                            }
+                        });
+                    }
+
+                    await connection.ExecuteAsync(
+                        new CommandDefinition(
+                            $"""
+                            UPDATE {RequestTableName}
+                            SET NuevaFechaFinLaboral = @NuevaFechaFinLaboral,
+                                UsuarioMod = @UsuarioMod,
+                                FechaMod = GETDATE()
+                            WHERE IdSolicitudVigencia = @IdSolicitudVigencia
+                            """,
+                            new
+                            {
+                                solicitudExistente.IdSolicitudVigencia,
+                                NuevaFechaFinLaboral = nuevaFechaFin,
+                                UsuarioMod = usuario
+                            },
+                            transaction: transaction,
+                            cancellationToken: cancellationToken));
+
+                    auditoriaCambios.AddRange(BuildSolicitudActualizacionFechaAuditEntries(
+                        solicitudExistente,
+                        nuevaFechaFin,
+                        usuario));
+
+                    await transaction.CommitAsync(cancellationToken);
+                    await RegistrarAuditoriaAsync(auditoriaCambios, cancellationToken);
+
+                    return Ok(new
+                    {
+                        success = true,
+                        message = "La fecha fin propuesta fue actualizada en la solicitud pendiente.",
+                        data = new
+                        {
+                            request.IdEmpleado,
+                            nuevaFechaFinLaboral = nuevaFechaTexto,
+                            estadoSolicitud = solicitudExistente.EstadoSolicitud,
+                            observacion,
+                            actualizoSolicitudPendiente = true
+                        }
+                    });
+                }
+
                 await connection.ExecuteAsync(
                     new CommandDefinition(
                         $"""
@@ -328,7 +433,8 @@ public class ContratosController : ControllerBase
                     request.IdEmpleado,
                     nuevaFechaFinLaboral = nuevaFechaFin.ToString("yyyy-MM-dd"),
                     estadoSolicitud = "PENDIENTE",
-                    observacion
+                    observacion,
+                    actualizoSolicitudPendiente = false
                 }
             });
         }
@@ -421,18 +527,6 @@ public class ContratosController : ControllerBase
             }
 
             var usuario = ResolveUsuarioActual();
-            if (aprobadorId == solicitud.Aprobacion1IdEmpleado ||
-                aprobadorId == solicitud.Aprobacion2IdEmpleado ||
-                aprobadorId == solicitud.Aprobacion3IdEmpleado)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                return BadRequest(new
-                {
-                    success = false,
-                    message = "El aprobador actual ya registro una validacion en esta solicitud."
-                });
-            }
-
             var current = await ObtenerFichaContratoEmpleadoAsync(connection, idEmpleado, cancellationToken, transaction);
             if (current is null)
             {
@@ -1107,6 +1201,27 @@ public class ContratosController : ControllerBase
         }
     }
 
+    private static IEnumerable<AuditoriaCambioDto> BuildSolicitudActualizacionFechaAuditEntries(
+        ContratoEmpleadoSolicitudVigenciaDto solicitud,
+        DateTime nuevaFechaFinLaboral,
+        string usuario)
+    {
+        var observacion = $"Se actualizo la fecha fin propuesta durante el flujo de aprobacion.";
+        yield return new AuditoriaCambioDto
+        {
+            Modulo = "RecursosHumanos",
+            Entidad = "EmpleadoCjSolicitudVigencia",
+            IdRegistro = solicitud.IdSolicitudVigencia.ToString(CultureInfo.InvariantCulture),
+            Accion = "UPDATE",
+            Seccion = "Solicitud",
+            Campo = "NuevaFechaFinLaboral",
+            ValorAnterior = solicitud.NuevaFechaFinLaboral,
+            ValorNuevo = FormatAuditDate(nuevaFechaFinLaboral),
+            UsuarioAccion = usuario,
+            Observacion = observacion
+        };
+    }
+
     private async Task RegistrarAuditoriaAsync(
         IEnumerable<AuditoriaCambioDto> cambios,
         CancellationToken cancellationToken)
@@ -1266,6 +1381,7 @@ public class ContratosController : ControllerBase
                         ISNULL(d.ValorIni, '') AS Cliente,
                         ISNULL(e.ValorIni, '') AS Area,
                         ISNULL(f.ValorIni, '') AS Ubicacion,
+                        ISNULL(b.Direccion, '') AS Direccion,
                         IdCargo,
                         IdTipoEmpleado,
                         IdEmpRel,
@@ -1340,6 +1456,7 @@ public class ContratosController : ControllerBase
             Cliente = GetString(values, "Cliente", "cliente"),
             Area = GetString(values, "Area", "area"),
             Ubicacion = GetString(values, "Ubicacion", "ubicacion"),
+            Direccion = GetString(values, "Direccion", "direccion"),
             IdCargo = GetInt(values, "IdCargo", "idCargo"),
             IdTipoEmpleado = GetInt(values, "IdTipoEmpleado", "idTipoEmpleado"),
             IdEmpRel = GetInt(values, "IdEmpRel", "idEmpRel"),
@@ -1347,7 +1464,11 @@ public class ContratosController : ControllerBase
             IdActivo = GetBool(values, "IdActivo", "idActivo"),
             FechaIniLaboral = GetDateString(values, "FechaIniLaboral", "fechaIniLaboral"),
             FechaFinLaboral = GetDateString(values, "FechaFinLaboral", "FechaFinlaboral", "fechaFinLaboral"),
-            FechaBaja = GetDateString(values, "FechaBaja", "fechaBaja")
+            FechaBaja = GetDateString(values, "FechaBaja", "fechaBaja"),
+            NuevaFechaFinLaboral = GetDateString(values, "NuevaFechaFinLaboral", "nuevaFechaFinLaboral"),
+            Aprobacion1Fecha = GetDateString(values, "Aprobacion1Fecha", "aprobacion1Fecha"),
+            Aprobacion2Fecha = GetDateString(values, "Aprobacion2Fecha", "aprobacion2Fecha"),
+            Aprobacion3Fecha = GetDateString(values, "Aprobacion3Fecha", "aprobacion3Fecha")
         };
     }
 
@@ -1497,5 +1618,72 @@ public class ContratosController : ControllerBase
 
         value = values[matched];
         return true;
+    }
+
+    private static Dictionary<string, string> NormalizeReplacements(IReadOnlyDictionary<string, string>? replacements)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        if (replacements is null)
+        {
+            return result;
+        }
+
+        foreach (var pair in replacements)
+        {
+            var key = pair.Key?.Trim();
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                continue;
+            }
+
+            result[key] = pair.Value?.Trim() ?? string.Empty;
+        }
+
+        return result;
+    }
+
+    private static byte[] ReplaceWordPlaceholders(byte[] templateBytes, IReadOnlyDictionary<string, string> replacements)
+    {
+        using var inputStream = new MemoryStream(templateBytes);
+        using var inputArchive = new ZipArchive(inputStream, ZipArchiveMode.Read, leaveOpen: false);
+        using var outputStream = new MemoryStream();
+
+        using (var outputArchive = new ZipArchive(outputStream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var entry in inputArchive.Entries)
+            {
+                var newEntry = outputArchive.CreateEntry(entry.FullName, CompressionLevel.Optimal);
+                using var entryStream = entry.Open();
+                using var newEntryStream = newEntry.Open();
+
+                if (entry.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
+                {
+                    using var reader = new StreamReader(entryStream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+                    var content = reader.ReadToEnd();
+
+                    foreach (var replacement in replacements)
+                    {
+                        if (string.IsNullOrWhiteSpace(replacement.Key))
+                        {
+                            continue;
+                        }
+
+                        var escapedValue = SecurityElement.Escape(replacement.Value ?? string.Empty) ?? string.Empty;
+                        content = content.Replace(replacement.Key, escapedValue, StringComparison.OrdinalIgnoreCase);
+                    }
+
+                    using var writer = new StreamWriter(newEntryStream, new UTF8Encoding(false), leaveOpen: true);
+                    writer.Write(content);
+                    writer.Flush();
+                }
+                else
+                {
+                    entryStream.CopyTo(newEntryStream);
+                }
+            }
+        }
+
+        return outputStream.ToArray();
     }
 }

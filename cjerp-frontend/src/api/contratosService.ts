@@ -82,6 +82,12 @@ export type AprobarVigenciaRequest = {
   nivelAprobacion?: number;
 };
 
+export type GenerarPlantillaContratoRequest = {
+  documentPath: string;
+  fileName: string;
+  replacements: Record<string, string>;
+};
+
 export async function obtenerContratoEmpleado(idEmpleado: number): Promise<ContratoEmpleadoResponse> {
   const response = await httpClient.get<ContratoEmpleadoResponse>(`/recursoshumanos/contratos/${idEmpleado}`);
   return {
@@ -97,6 +103,7 @@ export async function renovarContratoEmpleado(payload: RenovarContratoRequest) {
     nuevaFechaFinLaboral: string;
     estadoSolicitud: string;
     observacion: string;
+    actualizoSolicitudPendiente?: boolean;
   }>(
     "/recursoshumanos/contratos/renovar",
     payload
@@ -117,5 +124,16 @@ export async function aprobarVigenciaContratoEmpleado(idEmpleado: number, payloa
 export async function desactivarHistorialContrato(idHistorialLaboral: number) {
   return await httpClient.put<{ idHistorialLaboral: number; usuario: string }>(
     `/recursoshumanos/contratos/historial/${idHistorialLaboral}/desactivar`
+  );
+}
+
+export async function generarPlantillaContrato(payload: GenerarPlantillaContratoRequest) {
+  return await httpClient.post<Blob>(
+    "/recursoshumanos/contratos/plantilla",
+    payload,
+    {
+      responseType: "blob",
+      skipAuthRedirect: false,
+    }
   );
 }

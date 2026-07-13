@@ -13,6 +13,8 @@ public interface ISharePointCommercialUploadService
         IFormFile file,
         ExpenseInvoiceUploadContext context,
         CancellationToken cancellationToken = default);
+
+    Task<byte[]> DownloadFileAsync(string filePath, CancellationToken cancellationToken = default);
 }
 
 public sealed record ExpenseInvoiceUploadContext(
@@ -102,6 +104,36 @@ public sealed class SharePointCommercialUploadService : ISharePointCommercialUpl
         var storagePath = BuildStoragePath(fileName, normalizedFolderPath);
 
         return new SharePointCommercialUploadResult(fileName, webUrl, storagePath);
+    }
+
+    public async Task<byte[]> DownloadFileAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        ValidateConfiguration();
+
+        var normalizedFilePath = NormalizeFolderPath(filePath);
+        if (string.IsNullOrWhiteSpace(normalizedFilePath))
+        {
+            throw new InvalidOperationException("La ruta de SharePoint es obligatoria.");
+        }
+
+        var accessToken = await GetAccessTokenAsync(cancellationToken);
+        var siteId = await GetSiteIdAsync(accessToken, cancellationToken);
+        var driveId = await GetDriveIdAsync(siteId, accessToken, cancellationToken);
+        var requestUrl = $"https://graph.microsoft.com/v1.0/drives/{driveId}/root:/{EncodePath(normalizedFilePath)}:/content";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUrl);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(
+                $"No se pudo descargar la plantilla desde SharePoint. Detalle: {response.StatusCode} {responseContent}");
+        }
+
+        return await response.Content.ReadAsByteArrayAsync(cancellationToken);
     }
 
     private void ValidateConfiguration()

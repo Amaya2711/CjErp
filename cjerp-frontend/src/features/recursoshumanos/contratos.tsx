@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, FormEvent } from "react";
-import { Ban, CalendarClock, ChevronRight, RefreshCw, Save, Search, UserRound } from "lucide-react";
+import { Ban, CalendarClock, ChevronRight, Eye, FileDown, RefreshCw, Save, Search, UserRound } from "lucide-react";
 import { listarEmpleadosWup } from "../../api/empleadoService";
 import {
   desactivarHistorialContrato,
   aprobarVigenciaContratoEmpleado,
+  generarPlantillaContrato,
   obtenerContratoEmpleado,
   renovarContratoEmpleado,
   type ContratoEmpleadoHistorial,
+  type ContratoEmpleadoSolicitudVigencia,
 } from "../../api/contratosService";
 import { listarFichaEmpleados, type FichaEmpleadoRow } from "../../api/fichaService";
 import type { EmpleadoCta } from "../../models/empleadoCta";
@@ -16,6 +18,375 @@ import { SHAREPOINT_BASE_URL } from "../../utils/sharepoint";
 
 const PHOTO_BASE_URL = `${SHAREPOINT_BASE_URL}APLICATIVOS%20EXTERNOS/FOTOS%5FEMPLEADO`;
 const PHOTO_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".bmp", ""];
+const CONTRACTS_LIBRARY_ROOT = "APLICATIVOS EXTERNOS/FORMATOS_CONTRATOS";
+const CONTRACTS_WORD_BASE_URL = "https://cjtelecom.sharepoint.com/:w:/r/sites/CJ-PROYECTOS/";
+type ContractTemplateFamilyKey = "NECESIDADES" | "EXTRANJERO" | "SERVICIO_ESPECIFICO";
+type ContractTemplateStageKey = "INICIAL" | "RENOVACION";
+type ContractTemplateSelection = {
+  family: ContractTemplateFamilyKey | "";
+  stage: ContractTemplateStageKey | "";
+};
+
+const CONTRACT_TEMPLATE_FAMILIES: Array<{
+  key: ContractTemplateFamilyKey;
+  label: string;
+  folder: string;
+}> = [
+  { key: "NECESIDADES", label: "Necesidades mercado", folder: "1_Form_Necesidades mercado" },
+  { key: "EXTRANJERO", label: "Extranjero", folder: "2_Form_Extranjero" },
+  { key: "SERVICIO_ESPECIFICO", label: "Servicio especifico", folder: "3_Form_Servicio Específico" },
+];
+
+const CONTRACT_TEMPLATE_STAGES: Array<{
+  key: ContractTemplateStageKey;
+  label: string;
+  folder: string;
+}> = [
+  { key: "INICIAL", label: "Inicial", folder: "1_Inicial" },
+  { key: "RENOVACION", label: "Renovacion", folder: "2_Renovacion" },
+];
+
+function getStageFolderForFamily(
+  companyFolder: string,
+  family: ContractTemplateFamilyKey,
+  stage: ContractTemplateStageKey
+): string {
+  if (companyFolder === "2_GROUP" && family === "NECESIDADES" && stage === "INICIAL") {
+    return "1_Inicial";
+  }
+
+  if (family === "SERVICIO_ESPECIFICO") {
+    return stage === "INICIAL" ? "1_Contrato_Inicial" : "2_Renovacion";
+  }
+
+  return CONTRACT_TEMPLATE_STAGES.find((option) => option.key === stage)?.folder ?? "";
+}
+
+const CONTRACT_PERIOD_MONTHS = ["En", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Set", "Oct", "Nov", "Dic"] as const;
+
+function buildSharePointWordUrl(path?: string | null): string {
+  const raw = String(path ?? "").trim();
+  if (!raw) {
+    return "";
+  }
+
+  if (/^https?:\/\//i.test(raw)) {
+    return raw;
+  }
+
+  return `${CONTRACTS_WORD_BASE_URL}${encodeSharePointPath(raw.replace(/^\/+/, ""))}?web=1`;
+}
+
+function encodeSharePointPath(path: string): string {
+  return path
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
+function normalizeSharePointFolderName(value?: string | null): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return "";
+  }
+
+  return raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function resolveCompanyFolderName(empresa?: string | null): string {
+  const normalized = normalizeText(empresa ?? "");
+
+  if (normalized.includes("telecom")) {
+    return "1_TELECOM";
+  }
+
+  if (normalized.includes("group")) {
+    return "2_GROUP";
+  }
+
+  if (normalized.includes("inmueble")) {
+    return "3_INMUEBLES";
+  }
+
+  if (normalized.includes("pydex")) {
+    return "4_PYDEX";
+  }
+
+  return normalizeSharePointFolderName(empresa);
+}
+
+function buildContratoDocumentPath(
+  item: Pick<RelationTableRow, "empresa" | "nombreEmpleado" | "fechaInicio" | "fechaFin">,
+  selection: ContractTemplateSelection
+): string {
+  const companyFolder = resolveCompanyFolderName(item.empresa);
+  const segments = [CONTRACTS_LIBRARY_ROOT, companyFolder];
+
+  const familyFolder = selection.family
+    ? CONTRACT_TEMPLATE_FAMILIES.find((option) => option.key === selection.family)?.folder ?? ""
+    : "";
+  const resolvedFamilyFolder =
+    companyFolder === "4_PYDEX" && selection.family === "SERVICIO_ESPECIFICO"
+      ? "3_Form_Servicio Específico"
+      : familyFolder;
+  if (!resolvedFamilyFolder) {
+    return "";
+  }
+  segments.push(resolvedFamilyFolder);
+
+  const stageFolder =
+    selection.family && selection.stage
+      ? getStageFolderForFamily(companyFolder, selection.family, selection.stage)
+      : "";
+  if (!stageFolder) {
+    return "";
+  }
+
+  segments.push(stageFolder);
+  const documentFileName = buildContratoDocumentFileName(item, selection);
+  if (!documentFileName) {
+    return "";
+  }
+  segments.push(documentFileName);
+
+  return segments.filter(Boolean).join("/");
+}
+
+function isTelecomCompany(empresa?: string | null): boolean {
+  return resolveCompanyFolderName(empresa) === "1_TELECOM";
+}
+
+function hasContractTemplatesLoaded(empresa?: string | null): boolean {
+  const companyFolder = resolveCompanyFolderName(empresa);
+  return (
+    companyFolder === "1_TELECOM" ||
+    companyFolder === "2_GROUP" ||
+    companyFolder === "3_INMUEBLES" ||
+    companyFolder === "4_PYDEX"
+  );
+}
+
+function resolveContractTemplateFamily(item: Pick<RelationTableRow, "cliente" | "area" | "ubicacion">): ContractTemplateFamilyKey {
+  const contextText = normalizeText([item.cliente, item.area, item.ubicacion].filter(Boolean).join(" "));
+
+  if (contextText.includes("extranjero")) {
+    return "EXTRANJERO";
+  }
+
+  if (contextText.includes("servicio especifico") || contextText.includes("serv especifico") || contextText.includes("especifico")) {
+    return "SERVICIO_ESPECIFICO";
+  }
+
+  return "NECESIDADES";
+}
+
+function getTemplateFamilyLabel(key: ContractTemplateFamilyKey): string {
+  return CONTRACT_TEMPLATE_FAMILIES.find((option) => option.key === key)?.label ?? key;
+}
+
+function getTemplateStageLabel(key: ContractTemplateStageKey): string {
+  return CONTRACT_TEMPLATE_STAGES.find((option) => option.key === key)?.label ?? key;
+}
+
+function getTemplateFamilyLabelOrEmpty(key: ContractTemplateFamilyKey | ""): string {
+  return key ? getTemplateFamilyLabel(key) : "";
+}
+
+function getTemplateStageLabelOrEmpty(key: ContractTemplateStageKey | ""): string {
+  return key ? getTemplateStageLabel(key) : "";
+}
+
+function getTemplateFamilyFolder(key: ContractTemplateFamilyKey): string {
+  return CONTRACT_TEMPLATE_FAMILIES.find((option) => option.key === key)?.folder ?? "";
+}
+
+function getTemplateStageFolder(key: ContractTemplateStageKey): string {
+  return CONTRACT_TEMPLATE_STAGES.find((option) => option.key === key)?.folder ?? "";
+}
+
+function getCompanyShortCode(empresa?: string | null): string {
+  const normalized = normalizeText(empresa ?? "");
+
+  if (normalized.includes("telecom")) {
+    return "TLC";
+  }
+
+  if (normalized.includes("group")) {
+    return "GRP";
+  }
+
+  if (normalized.includes("inmueble")) {
+    return "INM";
+  }
+
+  if (normalized.includes("pydex")) {
+    return "PDX";
+  }
+
+  return normalizeText(empresa ?? "").replace(/[^a-z0-9]+/g, "").slice(0, 4).toUpperCase() || "DOC";
+}
+
+function getFamilyShortCode(family: ContractTemplateFamilyKey): string {
+  switch (family) {
+    case "NECESIDADES":
+      return "NM";
+    case "EXTRANJERO":
+      return "EXT";
+    case "SERVICIO_ESPECIFICO":
+      return "SE";
+    default:
+      return family;
+  }
+}
+
+function getStageShortCode(stage: ContractTemplateStageKey): string {
+  return stage === "INICIAL" ? "1" : "2";
+}
+
+function formatContractPeriodToken(
+  family: ContractTemplateFamilyKey,
+  stage: ContractTemplateStageKey,
+  fechaInicio?: string | null,
+  fechaFin?: string | null
+): string {
+  const startDate = parseContractDate(fechaInicio);
+  const endDate = parseContractDate(fechaFin);
+
+  if (!startDate || !endDate) {
+    return "";
+  }
+
+  const formatPart = (date: Date) => {
+    const month = CONTRACT_PERIOD_MONTHS[date.getMonth()] ?? "Mes";
+    const year = String(date.getFullYear()).slice(-2);
+    return `${month}-${year}`;
+  };
+
+  const separator = family === "NECESIDADES" && stage === "INICIAL" ? "_a_" : "_";
+  return `${formatPart(startDate)}${separator}${formatPart(endDate)}`;
+}
+
+function getStageFileSlug(
+  family: ContractTemplateFamilyKey,
+  stage: ContractTemplateStageKey
+): string {
+  if (stage === "INICIAL") {
+    return "Contrato_Inicial";
+  }
+
+  return family === "NECESIDADES" ? "Renov_contrato" : "Renov_Contrato";
+}
+
+function getContractTemplateFileName(
+  empresa: string | null | undefined,
+  family: ContractTemplateFamilyKey,
+  stage: ContractTemplateStageKey
+): string {
+  const templateMap: Record<ContractTemplateFamilyKey, Record<ContractTemplateStageKey, string>> = {
+    NECESIDADES: {
+      INICIAL: "1_APELLIDOS Y NOMBRES_Contrato_Inicial_TLC_NM_En-26_a_Dic-26.docx",
+      RENOVACION: "1_APELLIDOS Y NOMBRES_Renov_contrato_TLC_NM_En-26_Dic-26.docx",
+    },
+    EXTRANJERO: {
+      INICIAL: "1_APELLIDOS Y NOMBRES_Contrato_Inicial_TLC_EXT_En-26_Dic-26.docx",
+      RENOVACION: "1_APELLIDOS Y NOMBRES_Renov_Contrato_TLC_EXT_En-26_Dic-26.docx",
+    },
+    SERVICIO_ESPECIFICO: {
+      INICIAL: "1_APELLIDOS Y NOMBRES_Contrato_Inicial_TLC_SE_En-26_Dic-26.docx",
+      RENOVACION: "1_APELLIDOS Y NOMBRES_Renov_Contrato_TLC_SE_En-26_Dic-26.docx",
+    },
+  };
+
+  const baseTemplate = templateMap[family]?.[stage] ?? "";
+  if (!baseTemplate) {
+    return "";
+  }
+
+  if (resolveCompanyFolderName(empresa) === "2_GROUP" && family === "NECESIDADES" && stage === "INICIAL") {
+    return "1_APELLIDOS Y NOMBRES_Contrato_Inicial_GRP_NM_En-26_Dic-26.docx";
+  }
+
+  if (resolveCompanyFolderName(empresa) === "4_PYDEX" && family === "NECESIDADES" && stage === "INICIAL") {
+    return "1_APELLIDOS Y NOMBRES_Contrato_Inicial_PDX_NM_En-26_Dic-26.docx";
+  }
+
+  if (resolveCompanyFolderName(empresa) === "4_PYDEX" && family === "NECESIDADES" && stage === "RENOVACION") {
+    return "1_APELLIDOS Y NOMBRES_Renov_Contrato_PDX_NM_En-26_Dic-26.docx";
+  }
+
+  if (resolveCompanyFolderName(empresa) === "4_PYDEX" && family === "EXTRANJERO" && stage === "INICIAL") {
+    return "1_APELLIDOS Y NOMBRES_Contrato_Inicial_PDX_EXT_En-26_Dic-26.docx";
+  }
+
+  if (resolveCompanyFolderName(empresa) === "4_PYDEX" && family === "EXTRANJERO" && stage === "RENOVACION") {
+    return "1_APELLIDOS Y NOMBRES_Renov_Contrato_PDX_EXT_En-26_Dic-26.docx";
+  }
+
+  if (resolveCompanyFolderName(empresa) === "4_PYDEX" && family === "SERVICIO_ESPECIFICO" && stage === "INICIAL") {
+    return "1_APELLIDOS Y NOMBRES_Contrato_Inicial_PDX_SE_En-26_Dic-26.docx";
+  }
+
+  if (resolveCompanyFolderName(empresa) === "4_PYDEX" && family === "SERVICIO_ESPECIFICO" && stage === "RENOVACION") {
+    return "1_APELLIDOS Y NOMBRES_Renov_Contrato_PDX_SE_En-26_Dic-26.docx";
+  }
+
+  if (resolveCompanyFolderName(empresa) === "3_INMUEBLES" && family === "NECESIDADES" && stage === "INICIAL") {
+    return "1_APELLIDOS Y NOMBRES_Contrato_Inicial_INM_NM_En-26_Dic-26.docx";
+  }
+
+  if (resolveCompanyFolderName(empresa) === "3_INMUEBLES" && family === "NECESIDADES" && stage === "RENOVACION") {
+    return "1_APELLIDOS Y NOMBRES_Renov_Contrato_INM_NM_En-26_Dic-26.docx";
+  }
+
+  if (resolveCompanyFolderName(empresa) === "3_INMUEBLES") {
+    return baseTemplate.replace(/_TLC_/g, "_INM_");
+  }
+
+  if (resolveCompanyFolderName(empresa) === "2_GROUP") {
+    return baseTemplate.replace(/_TLC_/g, "_GRP_").replace("Renov_contrato", "Renov_Contrato");
+  }
+
+  if (resolveCompanyFolderName(empresa) === "4_PYDEX") {
+    return baseTemplate.replace(/_TLC_/g, "_PDX_").replace("Renov_contrato", "Renov_Contrato");
+  }
+
+  return baseTemplate;
+}
+
+function buildContratoDocumentFileName(
+  item: Pick<RelationTableRow, "nombreEmpleado" | "fechaInicio" | "fechaFin" | "empresa">,
+  selection: ContractTemplateSelection
+): string {
+  if (!selection.family || !selection.stage) {
+    return "";
+  }
+
+  const templateName = getContractTemplateFileName(item.empresa, selection.family, selection.stage);
+  if (templateName) {
+    return templateName;
+  }
+
+  const employeeName = normalizeSharePointFolderName(item.nombreEmpleado).toUpperCase();
+  const stageLabel = getStageFileSlug(selection.family, selection.stage);
+  const companyCode = getCompanyShortCode(item.empresa);
+  const familyCode = getFamilyShortCode(selection.family);
+  const periodToken = formatContractPeriodToken(selection.family, selection.stage, item.fechaInicio, item.fechaFin);
+  const parts = [
+    `${getStageShortCode(selection.stage)}_${employeeName || "APELLIDOS Y NOMBRES"}`,
+    stageLabel,
+    companyCode,
+    familyCode,
+    periodToken,
+  ].filter(Boolean);
+
+  return `${parts.join("_")}.docx`;
+}
 
 function normalizeText(value: string) {
   return value
@@ -134,6 +505,49 @@ function getFichaNumber(row: FichaEmpleadoRow, ...keys: string[]): number | null
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+type RelationTableRow = {
+  key: string;
+  idEmpleado: number | null;
+  nombreEmpleado: string;
+  nroDocumento: string;
+  direccion: string;
+  empresa: string;
+  area: string;
+  cliente: string;
+  ubicacion: string;
+  fechaInicio: string;
+  fechaFin: string;
+  nuevaFechaFinLaboral: string;
+  aprobacion1Fecha: string;
+  aprobacion2Fecha: string;
+  aprobacion3Fecha: string;
+  estadoContrato: string;
+};
+
+function getRelationPendingApprovalStep(item: Pick<RelationTableRow, "nuevaFechaFinLaboral" | "aprobacion1Fecha" | "aprobacion2Fecha" | "aprobacion3Fecha">): 2 | 3 | null {
+  if (!toInputDate(item.nuevaFechaFinLaboral) || toInputDate(item.aprobacion3Fecha)) {
+    return null;
+  }
+
+  if (toInputDate(item.aprobacion2Fecha)) {
+    return 3;
+  }
+
+  if (toInputDate(item.aprobacion1Fecha)) {
+    return 2;
+  }
+
+  return null;
+}
+
+function canEditPendingApprovalStep(step: 2 | 3 | null): boolean {
+  return step === 2 || step === 3;
+}
+
+function getRelationProposalEndDate(item: Pick<RelationTableRow, "nuevaFechaFinLaboral" | "fechaFin">): string {
+  return toInputDate(item.nuevaFechaFinLaboral) || toInputDate(item.fechaFin);
+}
+
 function EmployeePhoto({
   idEmpleado,
   nombreEmpleado,
@@ -209,7 +623,9 @@ export default function ContratosPage() {
   const [employeeSearch, setEmployeeSearch] = useState("");
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number>(0);
   const [relationRows, setRelationRows] = useState<FichaEmpleadoRow[]>([]);
+  const [documentSelections, setDocumentSelections] = useState<Record<string, ContractTemplateSelection>>({});
   const [loadingRelation, setLoadingRelation] = useState(false);
+  const [openingTemplateKey, setOpeningTemplateKey] = useState<string | null>(null);
   const [loadingEmployees, setLoadingEmployees] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -301,28 +717,11 @@ export default function ContratosPage() {
   const employee = detail?.empleado ?? null;
   const history = detail?.historial ?? [];
   const pendingRequest = detail?.solicitudVigencia ?? null;
-  const canApproveRelationStep = (itemId: number | null, step: 2 | 3) => {
-    if (!itemId || itemId <= 0) {
-      return false;
-    }
+  const pendingApprovalStep = getPendingApprovalStep(pendingRequest);
 
-    if (!pendingRequest || pendingRequest.idEmpleado !== itemId) {
-      return false;
-    }
-
-    const estadoSolicitud = pendingRequest.estadoSolicitud?.toUpperCase();
-    if (estadoSolicitud !== "PENDIENTE") {
-      return false;
-    }
-
-    const aprobacionesRealizadas = pendingRequest.aprobacionesRealizadas ?? 0;
-    const aprobacionesRequeridas = pendingRequest.aprobacionesRequeridas ?? 3;
-
-    if (step > aprobacionesRequeridas) {
-      return false;
-    }
-
-    return aprobacionesRealizadas === step - 1;
+  const loadRelationRows = async () => {
+    const response = await listarFichaEmpleados();
+    setRelationRows(response.rows);
   };
 
   useEffect(() => {
@@ -358,25 +757,55 @@ export default function ContratosPage() {
       idEmpleado: getFichaNumber(row, "IdEmpleado", "idEmpleado", "IdEmpleadoCj", "idEmpleadoCj"),
       nombreEmpleado: getFichaValue(row, "NombreEmpleado", "nombreEmpleado", "Nombre", "nombre") || "-",
       nroDocumento: getFichaValue(row, "NroDocumento", "nroDocumento", "Documento", "documento") || "-",
+      direccion: getFichaValue(row, "Direccion", "direccion") || "",
       empresa: getFichaValue(row, "Empresa", "empresa") || "-",
       area: getFichaValue(row, "Area", "area", "Departamento", "departamento") || "-",
       cliente: getFichaValue(row, "Cliente", "cliente") || "-",
       ubicacion: getFichaValue(row, "Ubicacion", "ubicacion") || "-",
       fechaInicio: getFichaValue(row, "FechaIniLaboral", "fechaIniLaboral") || "-",
       fechaFin: getFichaValue(row, "FechaFinLaboral", "fechaFinLaboral") || "-",
+      nuevaFechaFinLaboral: getFichaValue(row, "NuevaFechaFinLaboral", "nuevaFechaFinLaboral"),
+      aprobacion1Fecha: getFichaValue(row, "Aprobacion1Fecha", "aprobacion1Fecha"),
+      aprobacion2Fecha: getFichaValue(row, "Aprobacion2Fecha", "aprobacion2Fecha"),
+      aprobacion3Fecha: getFichaValue(row, "Aprobacion3Fecha", "aprobacion3Fecha"),
       estadoContrato: resolveContractStatus(getFichaValue(row, "FechaFinLaboral", "fechaFinLaboral")),
-    }));
+    })) satisfies RelationTableRow[];
   }, [relationRows]);
+
+  useEffect(() => {
+    setDocumentSelections((current) => {
+      const activeKeys = new Set(relationTableRows.map((item) => item.key));
+      const nextEntries = Object.entries(current).filter(([key]) => activeKeys.has(key));
+      if (nextEntries.length === Object.keys(current).length) {
+        return current;
+      }
+
+      return Object.fromEntries(nextEntries) as Record<string, ContractTemplateSelection>;
+    });
+  }, [relationTableRows]);
 
   const getRelationRowKey = (item: { key: string; idEmpleado: number | null }) =>
     item.idEmpleado && item.idEmpleado > 0 ? String(item.idEmpleado) : item.key;
 
-  const getRelationEditableEndDate = (item: { key: string; idEmpleado: number | null; fechaFin: string }) =>
-    relationNewEndDates[getRelationRowKey(item)] ?? toInputDate(item.fechaFin);
+  const getRelationEditableEndDate = (item: RelationTableRow) =>
+    relationNewEndDates[getRelationRowKey(item)] ?? getRelationProposalEndDate(item);
 
-  const canEditRelationEndDate = (status: string) => {
+  const canEditRelationEndDate = (item: RelationTableRow) => {
+    if (canEditPendingApprovalStep(getRelationPendingApprovalStep(item))) {
+      return true;
+    }
+
+    const status = item.estadoContrato;
     const normalized = normalizeText(status);
     return normalized === "vencido" || normalized === "x vencer";
+  };
+
+  const canApproveRelationStep = (item: RelationTableRow, step: 2 | 3) => {
+    if (!item.idEmpleado || item.idEmpleado <= 0) {
+      return false;
+    }
+
+    return getRelationPendingApprovalStep(item) === step;
   };
 
   const relationFilterOptions = useMemo(() => {
@@ -415,13 +844,32 @@ export default function ContratosPage() {
   }, [relationFilters, relationSort, relationTableRows]);
 
   const toggleRelationSort = (
-    key: "nombreEmpleado" | "nroDocumento" | "empresa" | "area" | "cliente" | "ubicacion" | "fechaInicio" | "fechaFin" | "estadoContrato"
+    key:
+      | "nombreEmpleado"
+      | "nroDocumento"
+      | "empresa"
+      | "area"
+      | "cliente"
+      | "ubicacion"
+      | "fechaInicio"
+      | "fechaFin"
+      | "estadoContrato"
   ) => {
     setRelationSort((current) => (
-      current.key === key
+    current.key === key
         ? { key, direction: current.direction === "asc" ? "desc" : "asc" }
         : { key, direction: "asc" }
     ));
+  };
+
+  const updateDocumentSelection = (rowKey: string, patch: Partial<ContractTemplateSelection>) => {
+    setDocumentSelections((current) => {
+      const previous = current[rowKey] ?? { family: "", stage: "" };
+      return {
+        ...current,
+        [rowKey]: { ...previous, ...patch },
+      };
+    });
   };
 
   const saveContractChange = async ({
@@ -458,7 +906,7 @@ export default function ContratosPage() {
     setSuccess("");
 
     try {
-      await renovarContratoEmpleado({
+      const response = await renovarContratoEmpleado({
         idEmpleado,
         nuevaFechaFinLaboral: nextEndDate,
         motivoMovimiento: "RENOVACION",
@@ -471,7 +919,12 @@ export default function ContratosPage() {
       setNewEndDate(refreshedEndDate);
       setNewEndDateOriginal(refreshedEndDate);
       setObservation("");
-      setSuccess("La fecha fue registrada con 1ra aprobacion y quedo pendiente de 2 validaciones.");
+      await loadRelationRows();
+      setSuccess(
+        response.actualizoSolicitudPendiente
+          ? "La fecha fin propuesta fue actualizada en la solicitud pendiente."
+          : "La fecha fue registrada con 1ra aprobacion y quedo pendiente de 2 validaciones."
+      );
       return true;
     } catch (err) {
       setError(getHttpErrorMessage(err, "No se pudo registrar la solicitud de vigencia."));
@@ -487,10 +940,6 @@ export default function ContratosPage() {
       return;
     }
 
-    if (!pendingRequest || pendingRequest.idEmpleado !== idEmpleado || pendingRequest.estadoSolicitud?.toUpperCase() !== "PENDIENTE") {
-      return;
-    }
-
     setSaving(true);
     setError("");
     setSuccess("");
@@ -500,12 +949,17 @@ export default function ContratosPage() {
         nivelAprobacion,
       });
 
-      const refreshed = await obtenerContratoEmpleado(idEmpleado);
-      const refreshedEndDate = toInputDate(refreshed.solicitudVigencia?.nuevaFechaFinLaboral ?? refreshed.empleado?.fechaFinLaboral);
-      setDetail(refreshed);
-      setNewEndDate(refreshedEndDate);
-      setNewEndDateOriginal(refreshedEndDate);
-      setObservation("");
+      await loadRelationRows();
+
+      if (selectedEmployeeId === idEmpleado) {
+        const refreshed = await obtenerContratoEmpleado(idEmpleado);
+        const refreshedEndDate = toInputDate(refreshed.solicitudVigencia?.nuevaFechaFinLaboral ?? refreshed.empleado?.fechaFinLaboral);
+        setDetail(refreshed);
+        setNewEndDate(refreshedEndDate);
+        setNewEndDateOriginal(refreshedEndDate);
+        setObservation("");
+      }
+
       setSuccess(
         response.estadoSolicitud === "APROBADO"
           ? "La vigencia del contrato fue aprobada y aplicada correctamente."
@@ -517,6 +971,160 @@ export default function ContratosPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleRelationApprove = async (item: RelationTableRow, nivelAprobacion: 2 | 3) => {
+    const idEmpleado = item.idEmpleado ?? 0;
+    if (idEmpleado <= 0) {
+      return;
+    }
+
+    const rowKey = getRelationRowKey(item);
+    const currentValue = (relationNewEndDates[rowKey] ?? "").trim();
+    const originalValue = getRelationProposalEndDate(item);
+
+    if (currentValue && currentValue !== originalValue) {
+      const saved = await saveContractChange({
+        idEmpleado,
+        nextEndDate: currentValue,
+        fechaIniLaboral: item.fechaInicio,
+        observationText: "",
+      });
+
+      if (!saved) {
+        return;
+      }
+
+      setRelationNewEndDates((current) => ({
+        ...current,
+        [rowKey]: currentValue,
+      }));
+    }
+
+    await handleApproveVigencia(idEmpleado, nivelAprobacion);
+  };
+
+  const handleOpenTemplate = async (item: RelationTableRow) => {
+    const savedSelection = documentSelections[item.key];
+    const defaultFamily = resolveContractTemplateFamily(item);
+    const selection: ContractTemplateSelection = {
+      family: savedSelection?.family || defaultFamily,
+      stage: savedSelection?.stage || "",
+    };
+
+    if (!selection.family || !selection.stage) {
+      setError("Seleccione una etapa y una vigencia antes de abrir la plantilla.");
+      setSuccess("");
+      return;
+    }
+
+    const documentPath = buildContratoDocumentPath(
+      {
+        empresa: item.empresa,
+        nombreEmpleado: item.nombreEmpleado,
+        fechaInicio: item.fechaInicio,
+        fechaFin: item.fechaFin,
+      },
+      selection
+    );
+
+    if (!documentPath) {
+      setError("No se pudo resolver la ruta de la plantilla.");
+      setSuccess("");
+      return;
+    }
+
+    const outputFileName = buildContratoDocumentFileName(
+      {
+        empresa: item.empresa,
+        nombreEmpleado: item.nombreEmpleado,
+        fechaInicio: item.fechaInicio,
+        fechaFin: item.fechaFin,
+      },
+      selection
+    ).replace("APELLIDOS Y NOMBRES", normalizeSharePointFolderName(item.nombreEmpleado).toUpperCase() || "APELLIDOS Y NOMBRES");
+
+    const previewWindow = window.open("", "_blank");
+    if (previewWindow) {
+      previewWindow.document.write("<p style='font-family:Arial,sans-serif'>Generando plantilla...</p>");
+      previewWindow.document.close();
+    }
+
+    setOpeningTemplateKey(item.key);
+    setError("");
+    setSuccess("");
+
+    try {
+      const blob = await generarPlantillaContrato({
+        documentPath,
+        fileName: outputFileName,
+        replacements: {
+          NOMBREEMPLEADO: item.nombreEmpleado || "",
+          NRODOCUMENTO: item.nroDocumento || "",
+          DIRECCION: item.direccion || "",
+        },
+      });
+
+      const blobUrl = URL.createObjectURL(blob);
+      if (previewWindow) {
+        previewWindow.location.replace(blobUrl);
+      } else {
+        window.location.href = blobUrl;
+      }
+
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    } catch (err) {
+      if (previewWindow) {
+        previewWindow.close();
+      }
+
+      setError(getHttpErrorMessage(err, "No se pudo abrir la plantilla generada."));
+      setSuccess("");
+    } finally {
+      setOpeningTemplateKey(null);
+    }
+  };
+
+  const handleViewTemplate = (item: RelationTableRow) => {
+    const savedSelection = documentSelections[item.key];
+    const defaultFamily = resolveContractTemplateFamily(item);
+    const selection: ContractTemplateSelection = {
+      family: savedSelection?.family || defaultFamily,
+      stage: savedSelection?.stage || "",
+    };
+
+    if (!selection.family || !selection.stage) {
+      setError("Seleccione una etapa y una vigencia antes de ver la plantilla.");
+      setSuccess("");
+      return;
+    }
+
+    const documentPath = buildContratoDocumentPath(
+      {
+        empresa: item.empresa,
+        nombreEmpleado: item.nombreEmpleado,
+        fechaInicio: item.fechaInicio,
+        fechaFin: item.fechaFin,
+      },
+      selection
+    );
+
+    if (!documentPath) {
+      setError("No se pudo resolver la ruta de la plantilla.");
+      setSuccess("");
+      return;
+    }
+
+    const templateUrl = buildSharePointWordUrl(documentPath);
+    if (!templateUrl) {
+      setError("No se pudo construir la URL de SharePoint.");
+      setSuccess("");
+      return;
+    }
+
+    setError("");
+    setSuccess("");
+    window.open(templateUrl, "_blank", "noopener,noreferrer");
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -598,13 +1206,7 @@ export default function ContratosPage() {
     }
   };
 
-  const handleRelationEndDateBlur = async (item: {
-    key: string;
-    idEmpleado: number | null;
-    fechaInicio: string;
-    fechaFin: string;
-    estadoContrato: string;
-  }) => {
+  const handleRelationEndDateBlur = async (item: RelationTableRow) => {
     if (savingRelationEmployeeId !== null) {
       return;
     }
@@ -615,7 +1217,7 @@ export default function ContratosPage() {
     }
 
     const rowKey = getRelationRowKey(item);
-    if (!canEditRelationEndDate(item.estadoContrato)) {
+    if (!canEditRelationEndDate(item)) {
       setRelationNewEndDates((current) => {
         const next = { ...current };
         delete next[rowKey];
@@ -625,7 +1227,7 @@ export default function ContratosPage() {
     }
 
     const currentValue = (relationNewEndDates[rowKey] ?? "").trim();
-    const originalValue = toInputDate(item.fechaFin);
+    const originalValue = getRelationProposalEndDate(item);
 
     if (!currentValue || currentValue === originalValue) {
       return;
@@ -697,15 +1299,7 @@ export default function ContratosPage() {
 
         {activeTab === "relacion" ? (
           <>
-            <div style={styles.relationIntro}>
-              <div>
-                <h2 style={styles.sectionTitle}>Relacion de empleados</h2>
-                <p style={styles.sectionText}>
-                  Muestra toda la relacion devuelta por el store de ficha y permite abrir la renovacion contractual en detalle.
-                </p>
-              </div>
-            </div>
-
+           
             {loadingRelation ? (
               <div style={styles.emptyState}>Cargando relacion de empleados...</div>
             ) : filteredAndSortedRelationRows.length === 0 ? (
@@ -713,7 +1307,7 @@ export default function ContratosPage() {
             ) : (
               <div style={styles.historyPanel}>
                 <div style={styles.historyHeader}>
-                  <h2 style={styles.historyTitle}>Resultado de ficha</h2>
+                  <h2 style={styles.historyTitle}>Listado de empleados</h2>
                   <span style={styles.historyCount}>{filteredAndSortedRelationRows.length} registro(s)</span>
                 </div>
 
@@ -722,20 +1316,20 @@ export default function ContratosPage() {
                     <thead>
                       <tr>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("nombreEmpleado")}>Empleado{renderSortIndicator(relationSort, "nombreEmpleado")}</button></th>
-                        <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("nroDocumento")}>Documento{renderSortIndicator(relationSort, "nroDocumento")}</button></th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("empresa")}>Empresa{renderSortIndicator(relationSort, "empresa")}</button></th>
-                        <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("cliente")}>Cliente{renderSortIndicator(relationSort, "cliente")}</button></th>
-                        <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("area")}>Area{renderSortIndicator(relationSort, "area")}</button></th>
-                        <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("ubicacion")}>Ubicacion{renderSortIndicator(relationSort, "ubicacion")}</button></th>
+                        <th style={{ ...styles.th, ...styles.documentRouteHeader }}>ETAPA - VIGENCIA</th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("estadoContrato")}>Estado contrato{renderSortIndicator(relationSort, "estadoContrato")}</button></th>
                         <th style={styles.th}>Nueva fecha fin</th>
                         <th style={styles.th}>Accion</th>
+                        <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("nroDocumento")}>Documento{renderSortIndicator(relationSort, "nroDocumento")}</button></th>
+                        <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("cliente")}>Cliente{renderSortIndicator(relationSort, "cliente")}</button></th>
+                        <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("area")}>Area{renderSortIndicator(relationSort, "area")}</button></th>
+                        <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("ubicacion")}>Ubicacion{renderSortIndicator(relationSort, "ubicacion")}</button></th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("fechaInicio")}>Inicio{renderSortIndicator(relationSort, "fechaInicio")}</button></th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("fechaFin")}>Fin{renderSortIndicator(relationSort, "fechaFin")}</button></th>
                       </tr>
                       <tr>
                         <th style={styles.thFilter}><input value={relationFilters.nombreEmpleado} onChange={(event) => setRelationFilters((current) => ({ ...current, nombreEmpleado: event.target.value }))} style={styles.filterInput} placeholder="Filtrar" /></th>
-                        <th style={styles.thFilter}><input value={relationFilters.nroDocumento} onChange={(event) => setRelationFilters((current) => ({ ...current, nroDocumento: event.target.value }))} style={styles.filterInput} placeholder="Filtrar" /></th>
                         <th style={styles.thFilter}>
                           <FilterCombo
                             label="Empresa"
@@ -744,6 +1338,18 @@ export default function ContratosPage() {
                             onChange={(values) => setRelationFilters((current) => ({ ...current, empresa: values }))}
                           />
                         </th>
+                        <th style={styles.thFilter}></th>
+                        <th style={styles.thFilter}>
+                          <FilterCombo
+                            label="Estado contrato"
+                            options={relationFilterOptions.estadoContrato}
+                            selectedValues={relationFilters.estadoContrato}
+                            onChange={(values) => setRelationFilters((current) => ({ ...current, estadoContrato: values }))}
+                          />
+                        </th>
+                        <th style={styles.thFilter}></th>
+                        <th style={styles.thFilter}></th>
+                        <th style={styles.thFilter}><input value={relationFilters.nroDocumento} onChange={(event) => setRelationFilters((current) => ({ ...current, nroDocumento: event.target.value }))} style={styles.filterInput} placeholder="Filtrar" /></th>
                         <th style={styles.thFilter}>
                           <FilterCombo
                             label="Cliente"
@@ -768,16 +1374,6 @@ export default function ContratosPage() {
                             onChange={(values) => setRelationFilters((current) => ({ ...current, ubicacion: values }))}
                           />
                         </th>
-                        <th style={styles.thFilter}>
-                          <FilterCombo
-                            label="Estado contrato"
-                            options={relationFilterOptions.estadoContrato}
-                            selectedValues={relationFilters.estadoContrato}
-                            onChange={(values) => setRelationFilters((current) => ({ ...current, estadoContrato: values }))}
-                          />
-                        </th>
-                        <th style={styles.thFilter}></th>
-                        <th style={styles.thFilter}></th>
                         <th style={styles.thFilter}><input value={relationFilters.fechaInicio} onChange={(event) => setRelationFilters((current) => ({ ...current, fechaInicio: event.target.value }))} style={styles.filterInput} placeholder="dd/mm/aaaa" /></th>
                         <th style={styles.thFilter}><input value={relationFilters.fechaFin} onChange={(event) => setRelationFilters((current) => ({ ...current, fechaFin: event.target.value }))} style={styles.filterInput} placeholder="dd/mm/aaaa" /></th>
                       </tr>
@@ -785,18 +1381,115 @@ export default function ContratosPage() {
                     <tbody>
                       {filteredAndSortedRelationRows.map((item) => (
                         <tr key={item.key}>
-                          <td style={styles.td}>{item.nombreEmpleado}</td>
-                          <td style={styles.td}>{item.nroDocumento}</td>
+                          <td style={{ ...styles.td, ...styles.employeeNameCell }} title={item.nombreEmpleado}>
+                            {item.nombreEmpleado}
+                          </td>
                           <td style={styles.td}>{item.empresa}</td>
-                          <td style={styles.td}>{item.cliente}</td>
-                          <td style={styles.td}>{item.area}</td>
-                          <td style={styles.td}>{item.ubicacion}</td>
+                          <td style={{ ...styles.td, ...styles.documentRouteCell }}>
+                            {(() => {
+                              const hasTemplates = hasContractTemplatesLoaded(item.empresa);
+                              if (!hasTemplates) {
+                                return (
+                                  <div style={styles.documentHint}>
+                                    Sin formatos cargados para {item.empresa || "esta empresa"}
+                                  </div>
+                                );
+                              }
+
+                              const defaultFamily = resolveContractTemplateFamily(item);
+                              const savedSelection = documentSelections[item.key];
+                              const selection: ContractTemplateSelection = {
+                                family: savedSelection?.family || defaultFamily,
+                                stage: savedSelection?.stage || "",
+                              };
+                              const familyOptions = CONTRACT_TEMPLATE_FAMILIES;
+                              const canPickStage = !!selection.family;
+                              const isOpeningTemplate = openingTemplateKey === item.key;
+
+                              return (
+                                <div style={styles.documentCell}>
+                                  <div style={styles.documentControls}>
+                                    <label style={styles.documentControl}>
+                                      <select
+                                        value={selection.family}
+                                        onChange={(event) =>
+                                          updateDocumentSelection(item.key, {
+                                            family: event.target.value as ContractTemplateFamilyKey | "",
+                                            stage: "",
+                                          })
+                                        }
+                                        style={styles.documentSelect}
+                                      >
+                                        <option value="">Seleccione...</option>
+                                        {familyOptions.map((option) => (
+                                          <option key={option.key} value={option.key}>
+                                            {option.label}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </label>
+
+                                    <div style={styles.documentStageRow}>
+                                      <label style={styles.documentControl}>
+                                        <select
+                                          value={selection.stage}
+                                          onChange={(event) =>
+                                            updateDocumentSelection(item.key, {
+                                              stage: event.target.value as ContractTemplateStageKey | "",
+                                            })
+                                          }
+                                          style={styles.documentSelect}
+                                          disabled={!canPickStage}
+                                        >
+                                          <option value="">Seleccione...</option>
+                                          {CONTRACT_TEMPLATE_STAGES.map((option) => (
+                                            <option key={option.key} value={option.key}>
+                                              {option.label}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </label>
+
+                                      <div style={styles.documentActions}>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleViewTemplate(item)}
+                                          style={styles.templateIconButton}
+                                          title="Abrir plantilla original de SharePoint"
+                                          aria-label="Ver plantilla"
+                                        >
+                                          <Eye size={16} />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => void handleOpenTemplate(item)}
+                                          style={styles.templateIconButton}
+                                          disabled={isOpeningTemplate}
+                                          title={isOpeningTemplate ? "Generando plantilla..." : "Generar y abrir plantilla"}
+                                          aria-label="Abrir plantilla"
+                                        >
+                                          <FileDown size={16} />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div style={styles.documentHint}>
+                                    {selection.family
+                                      ? getTemplateFamilyLabelOrEmpty(selection.family)
+                                      : "Necesidades mercado, Extranjero o Servicio especifico"}
+                                    {selection.stage ? ` / ${getTemplateStageLabelOrEmpty(selection.stage)}` : ""}
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </td>
                           <td style={styles.td}>
                             <span style={getContractStatusBadgeStyle(item.estadoContrato)}>{item.estadoContrato}</span>
                           </td>
                           <td
                             style={
-                              canEditRelationEndDate(item.estadoContrato)
+                              canEditRelationEndDate(item)
                                 ? styles.relationDateCellActive
                                 : styles.relationDateCellInactive
                             }
@@ -812,11 +1505,11 @@ export default function ContratosPage() {
                               }
                               onBlur={() => void handleRelationEndDateBlur(item)}
                               style={
-                                canEditRelationEndDate(item.estadoContrato)
+                                canEditRelationEndDate(item)
                                   ? styles.relationInputDateActive
                                   : styles.relationInputDateInactive
                               }
-                              disabled={!canEditRelationEndDate(item.estadoContrato) || savingRelationEmployeeId === item.idEmpleado}
+                              disabled={!canEditRelationEndDate(item) || savingRelationEmployeeId === item.idEmpleado}
                             />
                           </td>
                           <td style={styles.td}>
@@ -843,24 +1536,36 @@ export default function ContratosPage() {
                               </button>
                               <button
                                 type="button"
-                                style={styles.approvalButtonInline}
-                                disabled={!canApproveRelationStep(item.idEmpleado, 2)}
-                                onClick={() => void handleApproveVigencia(item.idEmpleado ?? 0, 2)}
+                                onMouseDown={(event) => event.preventDefault()}
+                                style={getDisabledActionButtonStyle(
+                                  styles.approvalButtonInline,
+                                  !canApproveRelationStep(item, 2)
+                                )}
+                                disabled={!canApproveRelationStep(item, 2)}
+                                onClick={() => void handleRelationApprove(item, 2)}
                               >
                                 <Save size={14} />
                                 2da
                               </button>
                               <button
                                 type="button"
-                                style={styles.approvalButtonInlineAlt}
-                                disabled={!canApproveRelationStep(item.idEmpleado, 3)}
-                                onClick={() => void handleApproveVigencia(item.idEmpleado ?? 0, 3)}
+                                onMouseDown={(event) => event.preventDefault()}
+                                style={getDisabledActionButtonStyle(
+                                  styles.approvalButtonInlineAlt,
+                                  !canApproveRelationStep(item, 3)
+                                )}
+                                disabled={!canApproveRelationStep(item, 3)}
+                                onClick={() => void handleRelationApprove(item, 3)}
                               >
                                 <Save size={14} />
                                 3era
                               </button>
                             </div>
                           </td>
+                          <td style={styles.td}>{item.nroDocumento}</td>
+                          <td style={styles.td}>{item.cliente}</td>
+                          <td style={styles.td}>{item.area}</td>
+                          <td style={styles.td}>{item.ubicacion}</td>
                           <td style={styles.td}>{formatDateLabel(item.fechaInicio)}</td>
                           <td style={styles.td}>{formatDateLabel(item.fechaFin)}</td>
                         </tr>
@@ -975,13 +1680,19 @@ export default function ContratosPage() {
                       <input value={toInputDate(employee.fechaFinLaboral)} readOnly style={styles.inputReadOnly} />
                     </label>
                     <label style={styles.fieldBlock}>
-                      <span style={styles.label}>NUEVA</span>
+                      <span style={styles.label}>Nueva fecha fin</span>
                       <input
                         type="date"
                         value={newEndDate}
                         onChange={(event) => setNewEndDate(event.target.value)}
                         onBlur={() => void handleNewEndDateBlur()}
-                        style={styles.inputDate}
+                        style={
+                          canEditPendingApprovalStep(pendingApprovalStep)
+                            ? styles.inputDate
+                            : pendingApprovalStep !== null
+                              ? styles.inputReadOnly
+                              : styles.inputDate
+                        }
                         disabled={saving}
                       />
                     </label>
@@ -1222,6 +1933,46 @@ function renderSortIndicator(
   }
 
   return sort.direction === "asc" ? " ↑" : " ↓";
+}
+
+function getDisabledActionButtonStyle(baseStyle: CSSProperties, disabled: boolean): CSSProperties {
+  if (!disabled) {
+    return baseStyle;
+  }
+
+  return {
+    ...baseStyle,
+    opacity: 0.45,
+    cursor: "not-allowed",
+    boxShadow: "none",
+    filter: "grayscale(0.2)",
+  };
+}
+
+function getPendingApprovalStep(request: ContratoEmpleadoSolicitudVigencia | null): 2 | 3 | null {
+  if (!request || (request.estadoSolicitud ?? "").toUpperCase() !== "PENDIENTE") {
+    return null;
+  }
+
+  const aprobacionesRealizadas =
+    request.aprobacionesRealizadas ??
+    [
+      request.aprobacion1Fecha,
+      request.aprobacion2Fecha,
+      request.aprobacion3Fecha,
+      request.aprobacion1IdEmpleado,
+      request.aprobacion2IdEmpleado,
+      request.aprobacion3IdEmpleado,
+    ].filter((value) => value !== null && value !== undefined && value !== "").length;
+  if (aprobacionesRealizadas >= 2) {
+    return 3;
+  }
+
+  if (aprobacionesRealizadas >= 1) {
+    return 2;
+  }
+
+  return 2;
 }
 
 const styles: Record<string, CSSProperties> = {
@@ -1656,7 +2407,7 @@ const styles: Record<string, CSSProperties> = {
   table: {
     width: "100%",
     borderCollapse: "collapse",
-    minWidth: 1020,
+    minWidth: 1380,
   },
   th: {
     textAlign: "left",
@@ -1699,9 +2450,13 @@ const styles: Record<string, CSSProperties> = {
   },
   relationDateCellActive: {
     background: "#ecfdf5",
+    verticalAlign: "top",
+    paddingTop: 12,
   },
   relationDateCellInactive: {
     background: "#f8fafc",
+    verticalAlign: "top",
+    paddingTop: 12,
   },
   relationInputDateActive: {
     width: "100%",
@@ -1848,6 +2603,124 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 14,
     color: "#0f172a",
     verticalAlign: "top",
+  },
+  employeeNameCell: {
+    maxWidth: 180,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  sharePointLink: {
+    display: "inline-block",
+    width: "fit-content",
+    color: "#1d4ed8",
+    fontWeight: 700,
+    textDecoration: "underline",
+  },
+  sharePointButton: {
+    display: "inline-flex",
+    width: "fit-content",
+    color: "#1d4ed8",
+    fontWeight: 700,
+    textDecoration: "underline",
+    background: "transparent",
+    border: "none",
+    padding: 0,
+    cursor: "pointer",
+  },
+  sharePointButtonSecondary: {
+    display: "inline-flex",
+    width: "fit-content",
+    color: "#2563eb",
+    fontWeight: 700,
+    textDecoration: "underline",
+    background: "transparent",
+    border: "none",
+    padding: 0,
+    cursor: "pointer",
+    opacity: 0.9,
+  },
+  templateIconButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 28,
+    height: 28,
+    borderRadius: 999,
+    border: "1px solid #cbd5e1",
+    background: "#ffffff",
+    color: "#1d4ed8",
+    cursor: "pointer",
+    padding: 0,
+    flex: "0 0 auto",
+  },
+  documentCell: {
+    display: "grid",
+    gap: 8,
+    minWidth: 0,
+  },
+  documentRouteHeader: {
+    minWidth: 420,
+  },
+  documentRouteCell: {
+    minWidth: 420,
+  },
+  documentControls: {
+    display: "flex",
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "flex-start",
+    flexWrap: "nowrap",
+  },
+  documentStageRow: {
+    display: "flex",
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "flex-start",
+    flexWrap: "nowrap",
+  },
+  documentActions: {
+    display: "flex",
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "flex-start",
+    flexWrap: "wrap",
+  },
+  documentControl: {
+    display: "grid",
+    gap: 4,
+    flex: "1 1 0",
+    minWidth: 0,
+  },
+  documentControlLabel: {
+    fontSize: 11,
+    fontWeight: 800,
+    color: "#475569",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  documentSelect: {
+    width: "100%",
+    minWidth: 0,
+    height: 34,
+    borderRadius: 8,
+    border: "1px solid #cbd5e1",
+    padding: "0 10px",
+    fontSize: 12,
+    color: "#0f172a",
+    background: "#ffffff",
+  },
+  documentHint: {
+    fontSize: 12,
+    color: "#475569",
+    fontWeight: 600,
+    lineHeight: 1.35,
+  },
+  documentPathText: {
+    fontSize: 12,
+    color: "#475569",
+    wordBreak: "break-word",
+    lineHeight: 1.35,
   },
   dangerButton: {
     minHeight: 34,

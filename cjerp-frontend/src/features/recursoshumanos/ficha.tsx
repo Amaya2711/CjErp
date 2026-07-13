@@ -102,6 +102,16 @@ function matchesEmployeeSearch(label: string, query: string): boolean {
   return normalizedQuery.length === 0 || normalizedLabel.includes(normalizedQuery);
 }
 
+function isHiddenFichaField(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return (
+    normalized === "nuevafechafinlaboral" ||
+    normalized === "aprobacion1fecha" ||
+    normalized === "aprobacion2fecha" ||
+    normalized === "aprobacion3fecha"
+  );
+}
+
 function isSummaryKey(key: string): boolean {
   const lower = key.toLowerCase();
   return (
@@ -289,7 +299,11 @@ export default function FichaPage() {
       return [];
     }
 
-    return Object.entries(ficha).filter(([, value]) => {
+    return Object.entries(ficha).filter(([key, value]) => {
+      if (isHiddenFichaField(key)) {
+        return false;
+      }
+
       const text = toText(value);
       return text.length > 0;
     });
