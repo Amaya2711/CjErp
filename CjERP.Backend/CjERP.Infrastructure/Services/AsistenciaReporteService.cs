@@ -1470,7 +1470,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
         var employeeName = string.IsNullOrWhiteSpace(itemPrincipal.NombreEmpleado) ? "Colaborador" : itemPrincipal.NombreEmpleado.Trim();
         return
             $"Estimado {employeeName},{Environment.NewLine}{Environment.NewLine}" +
-            $"Como resultado de la revisión efectuada a los registros de asistencia correspondientes al período en referencia, se han identificado diferencias entre la jornada laboral programada y las horas efectivamente registradas en el sistema de control de asistencia de la empresa. Se comunica la presente comunicacion preventiva para su consideracion.{Environment.NewLine}{Environment.NewLine}" +
+            $"Como resultado de la revisión efectuada a los registros de asistencia correspondientes al período en referencia, se han identificado diferencias entre la jornada laboral programada y las horas efectivamente registradas en el sistema de control de asistencia de la empresa. Se informa la presente comunicacion preventiva para su consideracion.{Environment.NewLine}{Environment.NewLine}" +
             "El documento adjunto contiene el detalle de las incidencias registradas durante el periodo evaluado, asi como el resumen de horas y observaciones relacionadas al cumplimiento de la jornada laboral establecida." +
             $"{Environment.NewLine}{Environment.NewLine}" +
             "Agradecemos confirmar la recepcion del presente correo." +

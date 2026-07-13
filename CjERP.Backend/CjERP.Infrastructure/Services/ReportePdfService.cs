@@ -457,7 +457,7 @@ public sealed class ReportePdfService : IReportePdfService
                     column.Item().Background("#FEF3F2").Border(1).BorderColor("#F04438").Padding(12).Column(card =>
                     {
                         card.Spacing(5);
-                        card.Item().Text("Como resultado de la revisión efectuada a los registros de asistencia correspondientes al período en referencia, se han identificado diferencias entre la jornada laboral programada y las horas efectivamente registradas en el sistema de control de asistencia de la empresa. Se comunica la presente comunicacion preventiva para su consideracion")
+                        card.Item().Text("Como resultado de la revisión efectuada a los registros de asistencia correspondientes al período en referencia, se han identificado diferencias entre la jornada laboral programada y las horas efectivamente registradas en el sistema de control de asistencia de la empresa. Se informa la presente comunicacion preventiva para su consideracion")
                             .FontColor("#7A271A")
                             .SemiBold();
                     });
