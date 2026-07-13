@@ -86,7 +86,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
     {
         var rows = await QueryReporteRowsAsync(request.FechaInicio, request.FechaFin, cancellationToken);
         var mapped = rows.Select(MapRow).ToList();
-        await EnrichPhonesAsync(mapped, item => item.IdEmpleado, (item, phone) => item.Telefono = phone, cancellationToken);
+        await TryEnrichPhonesAsync(mapped, item => item.IdEmpleado, (item, phone) => item.Telefono = phone, cancellationToken);
         return mapped;
     }
 
@@ -98,7 +98,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
 
         var rows = await QueryReporteRowsAsync(request.FechaInicio, request.FechaFin, cancellationToken);
         var detalle = rows.Select(MapPdfRow).ToList();
-        await EnrichPhonesAsync(detalle, item => item.IdEmpleado, (item, phone) => item.Telefono = phone, cancellationToken);
+        await TryEnrichPhonesAsync(detalle, item => item.IdEmpleado, (item, phone) => item.Telefono = phone, cancellationToken);
 
         var periodo = new ReporteWhatsappPeriodoDto
         {
@@ -321,7 +321,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
         var periodo = ResolveExecutivePeriod(request);
         var rows = await QueryReporteRowsAsync(periodo.FechaInicioTexto, periodo.FechaFinTexto, cancellationToken);
         var detalle = rows.Select(MapPdfRow).ToList();
-        await EnrichPhonesAsync(detalle, item => item.IdEmpleado, (item, phone) => item.Telefono = phone, cancellationToken);
+        await TryEnrichPhonesAsync(detalle, item => item.IdEmpleado, (item, phone) => item.Telefono = phone, cancellationToken);
 
         if (detalle.Count == 0)
         {
@@ -1517,6 +1517,24 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             {
                 setTelefono(item, telefono);
             }
+        }
+    }
+
+    private async Task TryEnrichPhonesAsync<T>(
+        List<T> items,
+        Func<T, int?> getIdEmpleado,
+        Action<T, string> setTelefono,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await EnrichPhonesAsync(items, getIdEmpleado, setTelefono, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "[AsistenciaReporteService] No se pudo enriquecer la informacion de telefonos. Se continuara con el reporte base.");
         }
     }
 
