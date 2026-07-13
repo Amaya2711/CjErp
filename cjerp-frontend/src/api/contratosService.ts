@@ -1,3 +1,4 @@
+import axios from "axios";
 import httpClient from "./httpClient";
 
 export type ContratoEmpleadoDetalle = {
@@ -128,12 +129,34 @@ export async function desactivarHistorialContrato(idHistorialLaboral: number) {
 }
 
 export async function generarPlantillaContrato(payload: GenerarPlantillaContratoRequest) {
-  return await httpClient.post<Blob>(
-    "/recursoshumanos/contratos/plantilla",
-    payload,
-    {
-      responseType: "blob",
-      skipAuthRedirect: false,
+  try {
+    return await httpClient.post<Blob>(
+      "/recursoshumanos/contratos/plantilla",
+      payload,
+      {
+        responseType: "blob",
+        skipAuthRedirect: false,
+      }
+    );
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.data instanceof Blob) {
+      const responseText = await error.response.data.text();
+      if (responseText.trim()) {
+        try {
+          const parsed = JSON.parse(responseText) as {
+            message?: string;
+            detail?: string;
+          };
+          const message = [parsed.message, parsed.detail].filter(Boolean).join(" | ").trim();
+          if (message) {
+            throw new Error(message);
+          }
+        } catch {
+          throw new Error(responseText);
+        }
+      }
     }
-  );
+
+    throw error;
+  }
 }

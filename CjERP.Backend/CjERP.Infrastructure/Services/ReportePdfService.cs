@@ -457,7 +457,7 @@ public sealed class ReportePdfService : IReportePdfService
                     column.Item().Background("#FEF3F2").Border(1).BorderColor("#F04438").Padding(12).Column(card =>
                     {
                         card.Spacing(5);
-                        card.Item().Text("Se comunica la presente llamada de atención debido a que no se viene cumpliendo con las horas laborales establecidas para el período evaluado.")
+                        card.Item().Text("Como resultado de la revisión efectuada a los registros de asistencia correspondientes al período en referencia, se han identificado diferencias entre la jornada laboral programada y las horas efectivamente registradas en el sistema de control de asistencia de la empresa. Se comunica la presente comunicacion preventiva para su consideracion")
                             .FontColor("#7A271A")
                             .SemiBold();
                     });
@@ -490,10 +490,15 @@ public sealed class ReportePdfService : IReportePdfService
                         card.Item().Element(c => RenderEstadoKpiCards(c, resumenPresentes, BuildPresentStateSectionId(), "Cada porcentaje refleja la participación dentro del conjunto PRESENTE."));
                     });
 
-                    column.Item().Background("#F8FAFC").Border(1).BorderColor("#D0D5DD").Padding(12).Text(text =>
+                    column.Item().Background("#F8FAFC").Border(1).BorderColor("#D0D5DD").Padding(12).Column(card =>
                     {
-                        text.Span("Observacion: ").SemiBold();
-                        text.Span("Se solicita cumplir con la jornada laboral y coordinar con su responsable inmediato las acciones correctivas correspondientes.");
+                        card.Spacing(4);
+                        card.Item().Text(text =>
+                        {
+                            text.Span("Observacion: ").SemiBold();
+                            text.Span("Se otorga un plazo de seis (6) días naturales, contados desde el día siguiente de recibida la presente notificación, para presentar las aclaraciones y/o documentación que considere pertinente.");
+                        });
+                        card.Item().Text("Asimismo, se solicita confirmar la recepción del presente documento, sin que ello implique conformidad con su contenido.");
                     });
                 });
 

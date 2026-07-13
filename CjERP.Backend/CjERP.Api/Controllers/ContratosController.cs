@@ -4,6 +4,7 @@ using System.IO.Compression;
 using System.Security.Claims;
 using System.Security;
 using System.Text;
+using System.Xml.Linq;
 using CjERP.Api.Services;
 using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces.Services;
@@ -130,35 +131,55 @@ public class ContratosController : ControllerBase
         [FromBody] ContratoPlantillaGenerarRequestDto request,
         CancellationToken cancellationToken)
     {
-        if (request is null || string.IsNullOrWhiteSpace(request.DocumentPath))
+        try
         {
-            return BadRequest(new { success = false, message = "La ruta del documento es obligatoria." });
-        }
+            if (request is null || string.IsNullOrWhiteSpace(request.DocumentPath))
+            {
+                return BadRequest(new { success = false, message = "La ruta del documento es obligatoria." });
+            }
 
-        if (!request.DocumentPath.Contains("FORMATOS_CONTRATOS", StringComparison.OrdinalIgnoreCase))
+            if (!request.DocumentPath.Contains("FORMATOS_CONTRATOS", StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(new { success = false, message = "La ruta del documento no es valida." });
+            }
+
+            var replacements = NormalizeReplacements(request.Replacements);
+            if (replacements.Count == 0)
+            {
+                return BadRequest(new { success = false, message = "Debe enviar al menos un campo para reemplazar." });
+            }
+
+            var templateBytes = await _sharePointCommercialUploadService.DownloadFileAsync(
+                request.DocumentPath,
+                cancellationToken);
+
+            var renderedBytes = ReplaceWordPlaceholders(templateBytes, replacements);
+            var fileName = string.IsNullOrWhiteSpace(request.FileName)
+                ? Path.GetFileName(request.DocumentPath)
+                : request.FileName.Trim();
+
+            return File(
+                renderedBytes,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                fileName);
+        }
+        catch (InvalidOperationException ex)
         {
-            return BadRequest(new { success = false, message = "La ruta del documento no es valida." });
+            return BadRequest(new
+            {
+                success = false,
+                message = ex.Message
+            });
         }
-
-        var replacements = NormalizeReplacements(request.Replacements);
-        if (replacements.Count == 0)
+        catch (Exception ex)
         {
-            return BadRequest(new { success = false, message = "Debe enviar al menos un campo para reemplazar." });
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                success = false,
+                message = "No se pudo generar la plantilla del contrato.",
+                detail = ex.ToString()
+            });
         }
-
-        var templateBytes = await _sharePointCommercialUploadService.DownloadFileAsync(
-            request.DocumentPath,
-            cancellationToken);
-
-        var renderedBytes = ReplaceWordPlaceholders(templateBytes, replacements);
-        var fileName = string.IsNullOrWhiteSpace(request.FileName)
-            ? Path.GetFileName(request.DocumentPath)
-            : request.FileName.Trim();
-
-        return File(
-            renderedBytes,
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            fileName);
     }
 
     [HttpPut("renovar")]
@@ -1661,17 +1682,7 @@ public class ContratosController : ControllerBase
                 {
                     using var reader = new StreamReader(entryStream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
                     var content = reader.ReadToEnd();
-
-                    foreach (var replacement in replacements)
-                    {
-                        if (string.IsNullOrWhiteSpace(replacement.Key))
-                        {
-                            continue;
-                        }
-
-                        var escapedValue = SecurityElement.Escape(replacement.Value ?? string.Empty) ?? string.Empty;
-                        content = content.Replace(replacement.Key, escapedValue, StringComparison.OrdinalIgnoreCase);
-                    }
+                    content = ReplaceWordXmlPlaceholders(content, replacements);
 
                     using var writer = new StreamWriter(newEntryStream, new UTF8Encoding(false), leaveOpen: true);
                     writer.Write(content);
@@ -1685,5 +1696,150 @@ public class ContratosController : ControllerBase
         }
 
         return outputStream.ToArray();
+    }
+
+    private static string ReplaceWordXmlPlaceholders(string content, IReadOnlyDictionary<string, string> replacements)
+    {
+        if (string.IsNullOrWhiteSpace(content) || replacements.Count == 0)
+        {
+            return content;
+        }
+
+        try
+        {
+            var document = XDocument.Parse(content, LoadOptions.PreserveWhitespace);
+            var wordNamespace = XNamespace.Get("http://schemas.openxmlformats.org/wordprocessingml/2006/main");
+
+            foreach (var paragraph in document.Descendants(wordNamespace + "p"))
+            {
+                ReplaceInParagraph(paragraph, replacements, wordNamespace);
+            }
+
+            var serialized = document.Declaration is null
+                ? document.ToString(SaveOptions.DisableFormatting)
+                : $"{document.Declaration}{document.ToString(SaveOptions.DisableFormatting)}";
+
+            foreach (var replacement in replacements)
+            {
+                if (string.IsNullOrWhiteSpace(replacement.Key))
+                {
+                    continue;
+                }
+
+                var escapedValue = SecurityElement.Escape(replacement.Value ?? string.Empty) ?? string.Empty;
+                serialized = serialized.Replace(replacement.Key, escapedValue, StringComparison.OrdinalIgnoreCase);
+            }
+
+            return serialized;
+        }
+        catch
+        {
+            foreach (var replacement in replacements)
+            {
+                if (string.IsNullOrWhiteSpace(replacement.Key))
+                {
+                    continue;
+                }
+
+                var escapedValue = SecurityElement.Escape(replacement.Value ?? string.Empty) ?? string.Empty;
+                content = content.Replace(replacement.Key, escapedValue, StringComparison.OrdinalIgnoreCase);
+            }
+
+            return content;
+        }
+    }
+
+    private static void ReplaceInParagraph(
+        XElement paragraph,
+        IReadOnlyDictionary<string, string> replacements,
+        XNamespace wordNamespace)
+    {
+        var textNodes = paragraph.Descendants(wordNamespace + "t").ToList();
+        if (textNodes.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var replacement in replacements)
+        {
+            if (string.IsNullOrWhiteSpace(replacement.Key))
+            {
+                continue;
+            }
+
+            while (TryReplaceAcrossTextNodes(textNodes, replacement.Key, replacement.Value ?? string.Empty))
+            {
+            }
+        }
+    }
+
+    private static bool TryReplaceAcrossTextNodes(List<XElement> textNodes, string placeholder, string replacementValue)
+    {
+        var combinedText = string.Concat(textNodes.Select(node => node.Value));
+        if (string.IsNullOrEmpty(combinedText))
+        {
+            return false;
+        }
+
+        var matchIndex = combinedText.IndexOf(placeholder, StringComparison.OrdinalIgnoreCase);
+        if (matchIndex < 0)
+        {
+            return false;
+        }
+
+        var start = ResolveTextPosition(textNodes, matchIndex);
+        var end = ResolveTextPosition(textNodes, matchIndex + placeholder.Length);
+        if (start is null || end is null)
+        {
+            return false;
+        }
+
+        var startNode = textNodes[start.Value.NodeIndex];
+        var endNode = textNodes[end.Value.NodeIndex];
+        var startText = startNode.Value;
+        var endText = endNode.Value;
+
+        var prefix = start.Value.Offset > 0 ? startText[..start.Value.Offset] : string.Empty;
+        var suffix = end.Value.Offset < endText.Length ? endText[end.Value.Offset..] : string.Empty;
+
+        if (start.Value.NodeIndex == end.Value.NodeIndex)
+        {
+            startNode.Value = prefix + replacementValue + suffix;
+            return true;
+        }
+
+        startNode.Value = prefix + replacementValue;
+
+        for (var nodeIndex = start.Value.NodeIndex + 1; nodeIndex < end.Value.NodeIndex; nodeIndex++)
+        {
+            textNodes[nodeIndex].Value = string.Empty;
+        }
+
+        endNode.Value = suffix;
+        return true;
+    }
+
+    private static (int NodeIndex, int Offset)? ResolveTextPosition(List<XElement> textNodes, int charIndex)
+    {
+        var remaining = charIndex;
+
+        for (var index = 0; index < textNodes.Count; index++)
+        {
+            var value = textNodes[index].Value ?? string.Empty;
+            if (remaining <= value.Length)
+            {
+                return (index, remaining);
+            }
+
+            remaining -= value.Length;
+        }
+
+        if (charIndex == string.Concat(textNodes.Select(node => node.Value)).Length)
+        {
+            var lastIndex = textNodes.Count - 1;
+            return (lastIndex, textNodes[lastIndex].Value.Length);
+        }
+
+        return null;
     }
 }

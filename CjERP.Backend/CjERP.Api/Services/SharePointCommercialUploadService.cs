@@ -110,7 +110,7 @@ public sealed class SharePointCommercialUploadService : ISharePointCommercialUpl
     {
         ValidateConfiguration();
 
-        var normalizedFilePath = NormalizeFolderPath(filePath);
+        var normalizedFilePath = NormalizeDriveRelativePath(filePath);
         if (string.IsNullOrWhiteSpace(normalizedFilePath))
         {
             throw new InvalidOperationException("La ruta de SharePoint es obligatoria.");
@@ -318,6 +318,33 @@ public sealed class SharePointCommercialUploadService : ISharePointCommercialUpl
     private static string NormalizeFolderPath(string? folderPath)
     {
         return (folderPath ?? string.Empty).Trim().Trim('/');
+    }
+
+    private string NormalizeDriveRelativePath(string? filePath)
+    {
+        var normalizedPath = NormalizeFolderPath(filePath);
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+        {
+            return string.Empty;
+        }
+
+        var libraryPath = NormalizeFolderPath(_options.DocumentLibraryName);
+        if (string.IsNullOrWhiteSpace(libraryPath))
+        {
+            return normalizedPath;
+        }
+
+        if (normalizedPath.Equals(libraryPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        if (normalizedPath.StartsWith($"{libraryPath}/", StringComparison.OrdinalIgnoreCase))
+        {
+            return normalizedPath[(libraryPath.Length + 1)..];
+        }
+
+        return normalizedPath;
     }
 
     private string ResolveFolderPath(ExpenseInvoiceUploadContext context)

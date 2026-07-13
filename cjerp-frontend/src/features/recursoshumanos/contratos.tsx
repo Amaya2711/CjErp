@@ -427,6 +427,60 @@ function parseContractDate(value?: string | null): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function addDaysToDate(value?: string | null, days = 0): Date | null {
+  const baseDate = parseContractDate(value);
+  if (!baseDate) {
+    return null;
+  }
+
+  const nextDate = new Date(baseDate);
+  nextDate.setDate(nextDate.getDate() + days);
+  return Number.isNaN(nextDate.getTime()) ? null : nextDate;
+}
+
+function formatContractWordDate(value?: string | null): string {
+  const date = parseContractDate(value);
+  if (!date) {
+    return "";
+  }
+
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
+function formatContractWordDateFromDate(value?: Date | null): string {
+  if (!value) {
+    return "";
+  }
+
+  const day = String(value.getDate()).padStart(2, "0");
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const year = value.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
+function getMonthsDifference(startDate?: Date | null, endDate?: Date | null): string {
+  if (!startDate || !endDate) {
+    return "";
+  }
+
+  const diffYears = endDate.getFullYear() - startDate.getFullYear();
+  const diffMonths = endDate.getMonth() - startDate.getMonth();
+  const totalMonths = diffYears * 12 + diffMonths;
+
+  if (totalMonths < 0) {
+    return "";
+  }
+
+  if (endDate.getDate() < startDate.getDate()) {
+    return String(Math.max(totalMonths - 1, 0));
+  }
+
+  return String(totalMonths);
+}
+
 function resolveContractStatus(value?: string | null) {
   const endDate = parseContractDate(value);
   if (!endDate) {
@@ -1034,7 +1088,7 @@ export default function ContratosPage() {
       return;
     }
 
-    const outputFileName = buildContratoDocumentFileName(
+  const outputFileName = buildContratoDocumentFileName(
       {
         empresa: item.empresa,
         nombreEmpleado: item.nombreEmpleado,
@@ -1055,13 +1109,34 @@ export default function ContratosPage() {
     setSuccess("");
 
     try {
+      const contractEndDate = parseContractDate(item.fechaFin);
+      const nextStartDate = addDaysToDate(item.fechaFin, 1);
+      const proposalEndDate = parseContractDate(getRelationProposalEndDate(item));
+
       const blob = await generarPlantillaContrato({
         documentPath,
         fileName: outputFileName,
         replacements: {
           NOMBREEMPLEADO: item.nombreEmpleado || "",
+          NombreEmpleado: item.nombreEmpleado || "",
           NRODOCUMENTO: item.nroDocumento || "",
+          NroDocumento: item.nroDocumento || "",
           DIRECCION: item.direccion || "",
+          Direccion: item.direccion || "",
+          AREA: item.area || "",
+          Area: item.area || "",
+          CLIENTE: item.cliente || "",
+          Cliente: item.cliente || "",
+          UBICACION: item.ubicacion || "",
+          Ubicacion: item.ubicacion || "",
+          FECHAINILABORAL: formatContractWordDate(item.fechaInicio),
+          FechaIniLaboral: formatContractWordDate(item.fechaInicio),
+          N_FECHAINILABORAL: formatContractWordDateFromDate(nextStartDate),
+          N_FECHAFINLABORAL: formatContractWordDateFromDate(proposalEndDate),
+          N_FechaFinalLaboral: formatContractWordDateFromDate(proposalEndDate),
+          N_FechaIniLaboral: formatContractWordDateFromDate(nextStartDate),
+          MESES: getMonthsDifference(nextStartDate, proposalEndDate ?? contractEndDate),
+          Meses: getMonthsDifference(nextStartDate, proposalEndDate ?? contractEndDate),
         },
       });
 
