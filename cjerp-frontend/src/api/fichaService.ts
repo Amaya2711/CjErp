@@ -9,6 +9,10 @@ export type FichaEmpleadoRow = {
   aprobacion2Fecha?: string | null;
   Aprobacion3Fecha?: string | null;
   aprobacion3Fecha?: string | null;
+  Meses_N?: string | number | null;
+  meses_n?: string | number | null;
+  Meses?: string | number | null;
+  meses?: string | number | null;
   [key: string]: unknown;
 };
 

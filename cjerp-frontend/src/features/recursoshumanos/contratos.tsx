@@ -51,7 +51,15 @@ function getStageFolderForFamily(
   family: ContractTemplateFamilyKey,
   stage: ContractTemplateStageKey
 ): string {
+  if (companyFolder === "1_TELECOM" && family === "SERVICIO_ESPECIFICO") {
+    return stage === "INICIAL" ? "1_Inicial" : "2_Renovacion";
+  }
+
   if (companyFolder === "2_GROUP" && family === "NECESIDADES" && stage === "INICIAL") {
+    return "1_Inicial";
+  }
+
+  if (companyFolder === "4_PYDEX" && family === "SERVICIO_ESPECIFICO" && stage === "INICIAL") {
     return "1_Inicial";
   }
 
@@ -99,6 +107,11 @@ function normalizeSharePointFolderName(value?: string | null): string {
     .trim();
 }
 
+function normalizeContractPathSegment(value: string): string {
+  return value
+    .replace("EspecÃ­fico", "Específico");
+}
+
 function resolveCompanyFolderName(empresa?: string | null): string {
   const normalized = normalizeText(empresa ?? "");
 
@@ -121,6 +134,18 @@ function resolveCompanyFolderName(empresa?: string | null): string {
   return normalizeSharePointFolderName(empresa);
 }
 
+function getServiceSpecificFamilyFolder(companyFolder: string): string {
+  if (companyFolder === "1_TELECOM") {
+    return "3_Fom_Serv Especifico";
+  }
+
+  if (companyFolder === "4_PYDEX") {
+    return "3_Form_Servicio Específico";
+  }
+
+  return CONTRACT_TEMPLATE_FAMILIES.find((option) => option.key === "SERVICIO_ESPECIFICO")?.folder ?? "";
+}
+
 function buildContratoDocumentPath(
   item: Pick<RelationTableRow, "empresa" | "nombreEmpleado" | "fechaInicio" | "fechaFin">,
   selection: ContractTemplateSelection
@@ -128,11 +153,28 @@ function buildContratoDocumentPath(
   const companyFolder = resolveCompanyFolderName(item.empresa);
   const segments = [CONTRACTS_LIBRARY_ROOT, companyFolder];
 
+  if (selection.family === "SERVICIO_ESPECIFICO") {
+    const serviceFamilyFolder = getServiceSpecificFamilyFolder(companyFolder);
+    const serviceStageFolder = selection.stage
+      ? getStageFolderForFamily(companyFolder, selection.family, selection.stage)
+      : "";
+    const documentFileName = buildContratoDocumentFileName(item, selection);
+
+    if (!serviceFamilyFolder || !serviceStageFolder || !documentFileName) {
+      return "";
+    }
+
+    return [CONTRACTS_LIBRARY_ROOT, companyFolder, serviceFamilyFolder, serviceStageFolder, documentFileName]
+      .filter(Boolean)
+      .map((segment) => normalizeContractPathSegment(segment))
+      .join("/");
+  }
+
   const familyFolder = selection.family
     ? CONTRACT_TEMPLATE_FAMILIES.find((option) => option.key === selection.family)?.folder ?? ""
     : "";
   const resolvedFamilyFolder =
-    companyFolder === "4_PYDEX" && selection.family === "SERVICIO_ESPECIFICO"
+    companyFolder === "4_PYDEX" && String(selection.family) === "SERVICIO_ESPECIFICO"
       ? "3_Form_Servicio Específico"
       : familyFolder;
   if (!resolvedFamilyFolder) {
@@ -155,7 +197,7 @@ function buildContratoDocumentPath(
   }
   segments.push(documentFileName);
 
-  return segments.filter(Boolean).join("/");
+  return segments.filter(Boolean).map((segment) => normalizeContractPathSegment(segment)).join("/");
 }
 
 function isTelecomCompany(empresa?: string | null): boolean {
@@ -388,6 +430,15 @@ function buildContratoDocumentFileName(
   return `${parts.join("_")}.docx`;
 }
 
+function buildGeneratedContractFileName(
+  item: Pick<RelationTableRow, "nombreEmpleado">,
+  selection: ContractTemplateSelection
+): string {
+  const employeeName = normalizeSharePointFolderName(item.nombreEmpleado).toUpperCase() || "APELLIDOS Y NOMBRES";
+  const stageLabel = selection.stage === "RENOVACION" ? "RENOVACION" : "INICIAL";
+  return `CJERP-${stageLabel}-${employeeName}.docx`;
+}
+
 function normalizeText(value: string) {
   return value
     .normalize("NFD")
@@ -569,6 +620,10 @@ type RelationTableRow = {
   area: string;
   cliente: string;
   ubicacion: string;
+  fechaIniLaboral: string;
+  fechaFinLaboral: string;
+  nFechaIniLaboral: string;
+  mesesN: string;
   fechaInicio: string;
   fechaFin: string;
   nuevaFechaFinLaboral: string;
@@ -816,13 +871,17 @@ export default function ContratosPage() {
       area: getFichaValue(row, "Area", "area", "Departamento", "departamento") || "-",
       cliente: getFichaValue(row, "Cliente", "cliente") || "-",
       ubicacion: getFichaValue(row, "Ubicacion", "ubicacion") || "-",
-      fechaInicio: getFichaValue(row, "FechaIniLaboral", "fechaIniLaboral") || "-",
-      fechaFin: getFichaValue(row, "FechaFinLaboral", "fechaFinLaboral") || "-",
+      fechaIniLaboral: getFichaValue(row, "FechaIniLaboral", "fechaIniLaboral", "fechainilaboral") || "",
+      fechaFinLaboral: getFichaValue(row, "FechaFinLaboral", "FechaFinlaboral", "fechaFinLaboral", "fechafinlaboral", "fechfinlaboral") || "",
+      nFechaIniLaboral: getFichaValue(row, "n_FechaIniLaboral", "N_FechaIniLaboral", "n_fechainilaboral", "nfechainilaboral") || "",
+      mesesN: getFichaValue(row, "Meses_N", "MesesN", "meses_n", "Meses", "meses") || "",
+      fechaInicio: getFichaValue(row, "FechaIniLaboral", "fechaIniLaboral", "fechainilaboral") || "-",
+      fechaFin: getFichaValue(row, "FechaFinLaboral", "FechaFinlaboral", "fechaFinLaboral", "fechafinlaboral", "fechfinlaboral") || "-",
       nuevaFechaFinLaboral: getFichaValue(row, "NuevaFechaFinLaboral", "nuevaFechaFinLaboral"),
       aprobacion1Fecha: getFichaValue(row, "Aprobacion1Fecha", "aprobacion1Fecha"),
       aprobacion2Fecha: getFichaValue(row, "Aprobacion2Fecha", "aprobacion2Fecha"),
       aprobacion3Fecha: getFichaValue(row, "Aprobacion3Fecha", "aprobacion3Fecha"),
-      estadoContrato: resolveContractStatus(getFichaValue(row, "FechaFinLaboral", "fechaFinLaboral")),
+      estadoContrato: resolveContractStatus(getFichaValue(row, "FechaFinLaboral", "FechaFinlaboral", "fechaFinLaboral", "fechafinlaboral", "fechfinlaboral")),
     })) satisfies RelationTableRow[];
   }, [relationRows]);
 
@@ -831,6 +890,32 @@ export default function ContratosPage() {
       const activeKeys = new Set(relationTableRows.map((item) => item.key));
       const nextEntries = Object.entries(current).filter(([key]) => activeKeys.has(key));
       if (nextEntries.length === Object.keys(current).length) {
+        return current;
+      }
+
+      return Object.fromEntries(nextEntries) as Record<string, ContractTemplateSelection>;
+    });
+  }, [relationTableRows]);
+
+  useEffect(() => {
+    const vigenteKeys = new Set(
+      relationTableRows
+        .filter((item) => normalizeText(item.estadoContrato) === "vigente")
+        .map((item) => item.key)
+    );
+
+    setDocumentSelections((current) => {
+      let changed = false;
+      const nextEntries = Object.entries(current).map(([key, selection]) => {
+        if (!vigenteKeys.has(key) && selection.stage) {
+          changed = true;
+          return [key, { ...selection, stage: "" }] as const;
+        }
+
+        return [key, selection] as const;
+      });
+
+      if (!changed) {
         return current;
       }
 
@@ -1088,15 +1173,12 @@ export default function ContratosPage() {
       return;
     }
 
-  const outputFileName = buildContratoDocumentFileName(
+    const outputFileName = buildGeneratedContractFileName(
       {
-        empresa: item.empresa,
         nombreEmpleado: item.nombreEmpleado,
-        fechaInicio: item.fechaInicio,
-        fechaFin: item.fechaFin,
       },
       selection
-    ).replace("APELLIDOS Y NOMBRES", normalizeSharePointFolderName(item.nombreEmpleado).toUpperCase() || "APELLIDOS Y NOMBRES");
+    );
 
     const previewWindow = window.open("", "_blank");
     if (previewWindow) {
@@ -1110,8 +1192,9 @@ export default function ContratosPage() {
 
     try {
       const contractEndDate = parseContractDate(item.fechaFin);
-      const nextStartDate = addDaysToDate(item.fechaFin, 1);
+      const nextStartDate = parseContractDate(item.nFechaIniLaboral) ?? addDaysToDate(item.fechaFin, 1);
       const proposalEndDate = parseContractDate(getRelationProposalEndDate(item));
+      const mesesContrato = item.mesesN.trim() || getMonthsDifference(nextStartDate, proposalEndDate ?? contractEndDate);
 
       const blob = await generarPlantillaContrato({
         documentPath,
@@ -1129,22 +1212,32 @@ export default function ContratosPage() {
           Cliente: item.cliente || "",
           UBICACION: item.ubicacion || "",
           Ubicacion: item.ubicacion || "",
-          FECHAINILABORAL: formatContractWordDate(item.fechaInicio),
-          FechaIniLaboral: formatContractWordDate(item.fechaInicio),
+          FECHAINILABORAL: formatContractWordDate(item.fechaIniLaboral),
+          FechaIniLaboral: formatContractWordDate(item.fechaIniLaboral),
+          FECHAFINLABORAL: formatContractWordDate(item.fechaFinLaboral),
+          FechaFinLaboral: formatContractWordDate(item.fechaFinLaboral),
           N_FECHAINILABORAL: formatContractWordDateFromDate(nextStartDate),
-          N_FECHAFINLABORAL: formatContractWordDateFromDate(proposalEndDate),
-          N_FechaFinalLaboral: formatContractWordDateFromDate(proposalEndDate),
           N_FechaIniLaboral: formatContractWordDateFromDate(nextStartDate),
-          MESES: getMonthsDifference(nextStartDate, proposalEndDate ?? contractEndDate),
-          Meses: getMonthsDifference(nextStartDate, proposalEndDate ?? contractEndDate),
+          N_fechainilaboral: formatContractWordDateFromDate(nextStartDate),
+          N_FECHAFINLABORAL: formatContractWordDate(item.fechaFinLaboral),
+          N_FechaFinLaboral: formatContractWordDate(item.fechaFinLaboral),
+          N_FechaFinalLaboral: formatContractWordDate(item.fechaFinLaboral),
+          MESES_N: mesesContrato,
+          Meses_N: mesesContrato,
         },
       });
 
       const blobUrl = URL.createObjectURL(blob);
+      const downloadLink = document.createElement("a");
+      downloadLink.href = blobUrl;
+      downloadLink.download = outputFileName;
+      downloadLink.rel = "noopener";
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      downloadLink.remove();
+
       if (previewWindow) {
-        previewWindow.location.replace(blobUrl);
-      } else {
-        window.location.href = blobUrl;
+        previewWindow.close();
       }
 
       window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
@@ -1374,11 +1467,8 @@ export default function ContratosPage() {
 
         {activeTab === "relacion" ? (
           <>
-           
             {loadingRelation ? (
               <div style={styles.emptyState}>Cargando relacion de empleados...</div>
-            ) : filteredAndSortedRelationRows.length === 0 ? (
-              <div style={styles.emptyState}>No se encontraron empleados en la relacion del store.</div>
             ) : (
               <div style={styles.historyPanel}>
                 <div style={styles.historyHeader}>
@@ -1454,7 +1544,14 @@ export default function ContratosPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredAndSortedRelationRows.map((item) => (
+                      {filteredAndSortedRelationRows.length === 0 ? (
+                        <tr>
+                          <td style={styles.emptyTableCell} colSpan={12}>
+                            No se encontraron empleados en la relacion del store.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredAndSortedRelationRows.map((item) => (
                         <tr key={item.key}>
                           <td style={{ ...styles.td, ...styles.employeeNameCell }} title={item.nombreEmpleado}>
                             {item.nombreEmpleado}
@@ -1478,7 +1575,8 @@ export default function ContratosPage() {
                                 stage: savedSelection?.stage || "",
                               };
                               const familyOptions = CONTRACT_TEMPLATE_FAMILIES;
-                              const canPickStage = !!selection.family;
+                              const canPickTemplateControls = normalizeText(item.estadoContrato) === "vigente";
+                              const canPickStage = !!selection.family && canPickTemplateControls;
                               const isOpeningTemplate = openingTemplateKey === item.key;
 
                               return (
@@ -1493,7 +1591,11 @@ export default function ContratosPage() {
                                             stage: "",
                                           })
                                         }
-                                        style={styles.documentSelect}
+                                        style={{
+                                          ...styles.documentSelect,
+                                          ...(canPickTemplateControls ? {} : styles.documentSelectDisabled),
+                                        }}
+                                        disabled={!canPickTemplateControls}
                                       >
                                         <option value="">Seleccione...</option>
                                         {familyOptions.map((option) => (
@@ -1513,7 +1615,10 @@ export default function ContratosPage() {
                                               stage: event.target.value as ContractTemplateStageKey | "",
                                             })
                                           }
-                                          style={styles.documentSelect}
+                                          style={{
+                                            ...styles.documentSelect,
+                                            ...(canPickStage ? {} : styles.documentSelectDisabled),
+                                          }}
                                           disabled={!canPickStage}
                                         >
                                           <option value="">Seleccione...</option>
@@ -1529,7 +1634,11 @@ export default function ContratosPage() {
                                         <button
                                           type="button"
                                           onClick={() => handleViewTemplate(item)}
-                                          style={styles.templateIconButton}
+                                          style={{
+                                            ...styles.templateIconButton,
+                                            ...(canPickTemplateControls ? {} : styles.templateIconButtonDisabled),
+                                          }}
+                                          disabled={!canPickTemplateControls}
                                           title="Abrir plantilla original de SharePoint"
                                           aria-label="Ver plantilla"
                                         >
@@ -1538,8 +1647,11 @@ export default function ContratosPage() {
                                         <button
                                           type="button"
                                           onClick={() => void handleOpenTemplate(item)}
-                                          style={styles.templateIconButton}
-                                          disabled={isOpeningTemplate}
+                                          style={{
+                                            ...styles.templateIconButton,
+                                            ...(canPickTemplateControls && !isOpeningTemplate ? {} : styles.templateIconButtonDisabled),
+                                          }}
+                                          disabled={!canPickTemplateControls || isOpeningTemplate}
                                           title={isOpeningTemplate ? "Generando plantilla..." : "Generar y abrir plantilla"}
                                           aria-label="Abrir plantilla"
                                         >
@@ -1644,7 +1756,8 @@ export default function ContratosPage() {
                           <td style={styles.td}>{formatDateLabel(item.fechaInicio)}</td>
                           <td style={styles.td}>{formatDateLabel(item.fechaFin)}</td>
                         </tr>
-                      ))}
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -2336,6 +2449,13 @@ const styles: Record<string, CSSProperties> = {
     color: "#64748b",
     background: "#f8fafc",
   },
+  emptyTableCell: {
+    padding: "28px 14px",
+    textAlign: "center" as const,
+    color: "#64748b",
+    background: "#f8fafc",
+    fontWeight: 600,
+  },
   topSectionGrid: {
     display: "grid",
     gridTemplateColumns: "minmax(0, 1.6fr) minmax(320px, 0.9fr)",
@@ -2729,6 +2849,12 @@ const styles: Record<string, CSSProperties> = {
     padding: 0,
     flex: "0 0 auto",
   },
+  templateIconButtonDisabled: {
+    opacity: 0.38,
+    cursor: "not-allowed",
+    background: "#f8fafc",
+    color: "#94a3b8",
+  },
   documentCell: {
     display: "grid",
     gap: 8,
@@ -2784,6 +2910,12 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 12,
     color: "#0f172a",
     background: "#ffffff",
+  },
+  documentSelectDisabled: {
+    opacity: 0.55,
+    background: "#f8fafc",
+    color: "#94a3b8",
+    cursor: "not-allowed",
   },
   documentHint: {
     fontSize: 12,

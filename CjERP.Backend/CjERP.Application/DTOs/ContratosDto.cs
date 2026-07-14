@@ -20,6 +20,7 @@ public sealed class ContratoEmpleadoDetalleDto
     public string FechaIniLaboral { get; set; } = string.Empty;
     public string FechaFinLaboral { get; set; } = string.Empty;
     public string FechaBaja { get; set; } = string.Empty;
+    public string? MesesN { get; set; }
     public string? NuevaFechaFinLaboral { get; set; }
     public string? Aprobacion1Fecha { get; set; }
     public string? Aprobacion2Fecha { get; set; }

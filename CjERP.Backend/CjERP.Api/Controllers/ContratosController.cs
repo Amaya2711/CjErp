@@ -701,6 +701,8 @@ public class ContratosController : ControllerBase
                     });
                 }
 
+                var fechaIniHistorial = ParseNullableDate(current.FechaFinLaboral)?.Date.AddDays(1) ?? solicitudNuevaFechaFinLaboral.Date;
+
                 await connection.ExecuteAsync(
                     new CommandDefinition(
                         $"""
@@ -742,7 +744,7 @@ public class ContratosController : ControllerBase
                         new
                         {
                             current.IdEmpleado,
-                            FechaIniLaboral = ParseNullableDate(current.FechaIniLaboral),
+                            FechaIniLaboral = fechaIniHistorial,
                             FechaFinLaboral = solicitudNuevaFechaFinLaboral.Date,
                             FechaBaja = ParseNullableDate(current.FechaBaja),
                             current.IdEstado,
@@ -1483,9 +1485,10 @@ public class ContratosController : ControllerBase
             IdEmpRel = GetInt(values, "IdEmpRel", "idEmpRel"),
             IdEstado = GetInt(values, "IdEstado", "idEstado"),
             IdActivo = GetBool(values, "IdActivo", "idActivo"),
-            FechaIniLaboral = GetDateString(values, "FechaIniLaboral", "fechaIniLaboral"),
-            FechaFinLaboral = GetDateString(values, "FechaFinLaboral", "FechaFinlaboral", "fechaFinLaboral"),
+            FechaIniLaboral = GetDateString(values, "FechaIniLaboral", "fechaIniLaboral", "fechainilaboral"),
+            FechaFinLaboral = GetDateString(values, "FechaFinLaboral", "FechaFinlaboral", "fechaFinLaboral", "fechafinlaboral", "fechfinlaboral"),
             FechaBaja = GetDateString(values, "FechaBaja", "fechaBaja"),
+            MesesN = GetString(values, "Meses_N", "MesesN", "meses_n", "Meses", "meses"),
             NuevaFechaFinLaboral = GetDateString(values, "NuevaFechaFinLaboral", "nuevaFechaFinLaboral"),
             Aprobacion1Fecha = GetDateString(values, "Aprobacion1Fecha", "aprobacion1Fecha"),
             Aprobacion2Fecha = GetDateString(values, "Aprobacion2Fecha", "aprobacion2Fecha"),
@@ -1658,10 +1661,43 @@ public class ContratosController : ControllerBase
                 continue;
             }
 
-            result[key] = pair.Value?.Trim() ?? string.Empty;
+            var value = pair.Value?.Trim() ?? string.Empty;
+            foreach (var variant in ExpandReplacementKeyVariants(key))
+            {
+                result[variant] = value;
+            }
         }
 
-        return result;
+        return result
+            .OrderByDescending(pair => pair.Key.Length)
+            .ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<string> ExpandReplacementKeyVariants(string key)
+    {
+        var trimmed = key.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            yield break;
+        }
+
+        yield return trimmed;
+
+        if (IsWrappedPlaceholder(trimmed))
+        {
+            yield break;
+        }
+
+        yield return $"({trimmed})";
+    }
+
+    private static bool IsWrappedPlaceholder(string value)
+    {
+        return value.Length >= 2 &&
+               ((value[0] == '(' && value[^1] == ')') ||
+                (value[0] == '[' && value[^1] == ']') ||
+                (value[0] == '{' && value[^1] == '}'));
     }
 
     private static byte[] ReplaceWordPlaceholders(byte[] templateBytes, IReadOnlyDictionary<string, string> replacements)

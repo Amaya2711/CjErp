@@ -19,6 +19,7 @@ export type ContratoEmpleadoDetalle = {
   fechaIniLaboral: string;
   fechaFinLaboral: string;
   fechaBaja: string;
+  mesesN?: string | null;
 };
 
 export type ContratoEmpleadoHistorial = {
