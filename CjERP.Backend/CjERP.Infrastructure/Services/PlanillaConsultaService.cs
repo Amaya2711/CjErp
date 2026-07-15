@@ -318,8 +318,6 @@ WHERE Correlativo IN @Correlativos";
 
             var allowedParameters = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
-                "IdCargo",
-                "IdEmpleado",
                 "IdSolicitante",
                 "IdValidador",
                 "Estados",

@@ -8,7 +8,6 @@ import {
   CheckCircle2,
   CircleX,
   Eraser,
-  Eye,
   ArrowDown,
   ArrowUp,
   ListFilter,
@@ -39,6 +38,16 @@ import { compressImageForUpload } from "../../../utils/imageCompression";
 import { SHAREPOINT_BASE_URL } from "../../../utils/sharepoint";
 import { DatosOcFloatingCard, type OcDetalle } from "./components/DatosOcFloatingCard";
 import { DatosOcDrawer } from "./components/DatosOcDrawer";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import "./gastosaprobar.css";
 
 type GastoDto = {
@@ -287,6 +296,17 @@ const GASTOS_ESTADO_PRESET_LABELS: Record<GastosEstadoPresetKey, string> = {
   todos: "Todos",
 };
 
+const GASTOS_ESTADO_CHART_THEME: Record<
+  GastosEstadoPresetKey,
+  { title: string; accent: string; soft: string; border: string }
+> = {
+  aprobar: { title: "Aprobar", accent: "#15803D", soft: "#F0FDF4", border: "#86EFAC" },
+  observado: { title: "Hormiga", accent: "#1D4ED8", soft: "#EFF6FF", border: "#93C5FD" },
+  hormiga: { title: "ReAprobar", accent: "#B45309", soft: "#FFFBEB", border: "#FCD34D" },
+  reaprobar: { title: "Observadas", accent: "#DC2626", soft: "#FEF2F2", border: "#FCA5A5" },
+  todos: { title: "Todos", accent: "#6D28D9", soft: "#F5F3FF", border: "#C4B5FD" },
+};
+
 type GastosHeaderMultiFilterKey =
   | "estado"
   | "comprobante"
@@ -330,10 +350,23 @@ type SuministroProvisionalVigenteOption = {
   nombreSite?: string;
 };
 
+type SolicitantePieDatum = {
+  label: string;
+  count: number;
+  totalAmount: number;
+  amountsByCurrency: Map<string, number>;
+  members: string[];
+  value: number;
+  color: string;
+  currencySummary: string[];
+};
+
 const GASTOS_API_URL = "/tesoreria/gastos";
 const FACTURA_UPLOAD_API_URL = `${GASTOS_API_URL}/upload-factura`;
 const TIPO_CAMBIO_GASTO = 3.8;
-const MAX_GASTOS_PARA_MOSTRAR = 500;
+const GASTOS_PAGE_SIZE = 500;
+const GASTOS_CHART_COLORS = ["#2563EB", "#059669", "#F59E0B", "#DC2626", "#7C3AED", "#0EA5E9", "#EC4899", "#14B8A6"];
+const SOLICITANTE_OTROS_MONTO_MAXIMO = 2000;
 const TAREAS_CON_SUMINISTRO_VIGENTE = new Set([52, 53]);
 const VALORES_GASTO_INICIALES: ValoresGastoResponse = {
   porcentaje: 0,
@@ -1319,6 +1352,7 @@ export default function GastosAprobarPage() {
   // Estado para fila seleccionada
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
+  const [activeInsightTab, setActiveInsightTab] = useState<"chart" | "detail">("chart");
   const [filaActiva, setFilaActiva] = useState<GastoForm | null>(null);
   const [filaActivaKey, setFilaActivaKey] = useState<string | null>(null);
   const [resumenOcMinimizado, setResumenOcMinimizado] = useState(false);
@@ -1337,6 +1371,8 @@ export default function GastosAprobarPage() {
     maxRowsAllowed: number;
     message: string;
   } | null>(null);
+  const [pageSize] = useState<number>(GASTOS_PAGE_SIZE);
+  const [currentPage, setCurrentPage] = useState<number>(1);
     // Estado para ordenamiento
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
 
@@ -1570,7 +1606,6 @@ export default function GastosAprobarPage() {
       const response = await consultarPlanillaEstados(
         {
           ...buildPlanillaConsultaEstadosRequest(parametros),
-          maxRows: MAX_GASTOS_PARA_MOSTRAR,
           consulta: "aprobar",
         }
       );
@@ -1578,7 +1613,7 @@ export default function GastosAprobarPage() {
       if (response.limitExceeded) {
         setLimiteConsultaServidor({
           totalRows: Number(response.totalRows ?? 0),
-          maxRowsAllowed: Number(response.maxRowsAllowed ?? MAX_GASTOS_PARA_MOSTRAR),
+          maxRowsAllowed: Number(response.maxRowsAllowed ?? 0),
           message:
             response.message?.trim() ||
             `Se encontraron ${response.totalRows ?? 0} registros. Aplique mÃ¡s filtros antes de mostrar la informaciÃ³n.`,
@@ -2672,6 +2707,18 @@ export default function GastosAprobarPage() {
     [filtrosCabecera.estado]
   );
 
+  const handleEstadoPresetClick = React.useCallback(
+    (preset: GastosEstadoPresetKey) => {
+      if (isEstadoPresetActive(preset)) {
+        void cargarGastos();
+        return;
+      }
+
+      setEstadoPreset(preset);
+    },
+    [cargarGastos, isEstadoPresetActive, setEstadoPreset]
+  );
+
   const estadoPresetActivo = useMemo(() => {
     const preset = (Object.keys(GASTOS_ESTADO_PRESETS) as GastosEstadoPresetKey[]).find((key) =>
       isEstadoPresetActive(key)
@@ -2679,9 +2726,28 @@ export default function GastosAprobarPage() {
 
     return preset ? GASTOS_ESTADO_PRESET_LABELS[preset] : "";
   }, [isEstadoPresetActive]);
+  const estadoChartTheme = useMemo(() => {
+    const preset = (Object.keys(GASTOS_ESTADO_PRESETS) as GastosEstadoPresetKey[]).find((key) =>
+      isEstadoPresetActive(key)
+    );
 
-  // Ordenar y luego filtrar gastos: el ordenamiento se aplica a todos los registros cargados
-  const gastosFiltradosBase = useMemo(() => {
+    if (preset) {
+      return GASTOS_ESTADO_CHART_THEME[preset];
+    }
+
+    if (filtrosCabecera.estado.length > 0) {
+      return {
+        title: `Estados: ${filtrosCabecera.estado.join(", ")}`,
+        accent: "#334155",
+        soft: "#F8FAFC",
+        border: "#CBD5E1",
+      };
+    }
+
+    return GASTOS_ESTADO_CHART_THEME.todos;
+  }, [filtrosCabecera.estado, isEstadoPresetActive]);
+
+  const gastosFiltradosSinSolicitante = useMemo(() => {
     let sorted = [...gastosSafe];
     if (sortConfig) {
       const { key, direction } = sortConfig;
@@ -2742,7 +2808,6 @@ export default function GastosAprobarPage() {
           (filtrosCabecera.proyecto.length === 0 || filtrosCabecera.proyecto.includes(proyectoGasto)) &&
           (filtrosCabecera.site.length === 0 || filtrosCabecera.site.includes(siteGasto)) &&
           (filtrosCabecera.tipoTrabajo.length === 0 || filtrosCabecera.tipoTrabajo.includes(tipoTrabajoGasto)) &&
-          (filtrosCabecera.solicitante.length === 0 || filtrosCabecera.solicitante.includes(solicitanteGasto)) &&
           (filtrosCabecera.responsable.length === 0 || filtrosCabecera.responsable.includes(responsableGasto)) &&
           (filtrosCabecera.validador.length === 0 || filtrosCabecera.validador.includes(validadorGasto))
         );
@@ -2758,15 +2823,121 @@ export default function GastosAprobarPage() {
     sortConfig,
     validadorOptions,
   ]);
-  const cantidadRegistrosFiltrados = gastosFiltradosBase.length;
-  const excedeLimiteRegistros = cantidadRegistrosFiltrados > MAX_GASTOS_PARA_MOSTRAR;
+  const gastosFiltradosBase = useMemo(
+    () =>
+      gastosFiltradosSinSolicitante.filter((gasto) => {
+        const solicitanteGasto = String(
+          getConstanteLabelOrFallback(solicitanteOptions, gasto.solicitante, gasto.solicitanteLabel)
+        ).trim();
+
+        return filtrosCabecera.solicitante.length === 0 || filtrosCabecera.solicitante.includes(solicitanteGasto);
+      }),
+    [filtrosCabecera.solicitante, gastosFiltradosSinSolicitante, solicitanteOptions]
+  );
   const gastosFiltrados = useMemo(
-    () => (excedeLimiteRegistros ? [] : gastosFiltradosBase),
-    [excedeLimiteRegistros, gastosFiltradosBase]
+    () => gastosFiltradosBase,
+    [gastosFiltradosBase]
+  );
+  const solicitantePieData = useMemo<SolicitantePieDatum[]>(() => {
+    const grouped = new Map<string, Omit<SolicitantePieDatum, "value" | "color" | "currencySummary">>();
+
+    gastosFiltradosSinSolicitante.forEach((gasto) => {
+      const label = String(
+        getConstanteLabelOrFallback(solicitanteOptions, gasto.solicitante, gasto.solicitanteLabel) || "Sin solicitante"
+      ).trim() || "Sin solicitante";
+      const moneda = String(gasto.monedaLabel || getConstanteLabel(monedaOptions, gasto.moneda) || gasto.moneda || "Sin moneda").trim() || "Sin moneda";
+      const amount = Number(gasto.monto) || 0;
+      const current = grouped.get(label) ?? {
+        label,
+        count: 0,
+        totalAmount: 0,
+        amountsByCurrency: new Map<string, number>(),
+        members: [label],
+      };
+
+      current.count += 1;
+      current.totalAmount += amount;
+      current.amountsByCurrency.set(moneda, (current.amountsByCurrency.get(moneda) ?? 0) + amount);
+      grouped.set(label, current);
+    });
+
+    const rows = Array.from(grouped.values()).sort(
+      (left, right) => right.count - left.count || right.totalAmount - left.totalAmount
+    );
+    const principales = rows.filter((item) => item.totalAmount >= SOLICITANTE_OTROS_MONTO_MAXIMO);
+    const secundarios = rows.filter((item) => item.totalAmount < SOLICITANTE_OTROS_MONTO_MAXIMO);
+
+    if (secundarios.length > 0) {
+      const amountsByCurrency = new Map<string, number>();
+      secundarios.forEach((item) => {
+        item.amountsByCurrency.forEach((amount, currency) => {
+          amountsByCurrency.set(currency, (amountsByCurrency.get(currency) ?? 0) + amount);
+        });
+      });
+
+      principales.push({
+        label: "OTROS",
+        count: secundarios.reduce((sum, item) => sum + item.count, 0),
+        totalAmount: secundarios.reduce((sum, item) => sum + item.totalAmount, 0),
+        amountsByCurrency,
+        members: secundarios.map((item) => item.label),
+      });
+    }
+
+    return principales.map((item, index) => ({
+        ...item,
+        value: item.count,
+        color: GASTOS_CHART_COLORS[index % GASTOS_CHART_COLORS.length],
+        currencySummary: Array.from(item.amountsByCurrency.entries())
+          .sort((left, right) => right[1] - left[1])
+          .map(([currency, amount]) => `${currency}: ${amount.toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`),
+      }));
+  }, [gastosFiltradosSinSolicitante, monedaOptions, solicitanteOptions]);
+  const solicitanteFiltroActivo = useMemo(() => {
+    if (filtrosCabecera.solicitante.length === 1) {
+      return filtrosCabecera.solicitante[0];
+    }
+
+    const otros = solicitantePieData.find((item) => item.label === "OTROS");
+    if (
+      otros &&
+      otros.members.length > 0 &&
+      filtrosCabecera.solicitante.length === otros.members.length &&
+      otros.members.every((member) => filtrosCabecera.solicitante.includes(member))
+    ) {
+      return "OTROS";
+    }
+
+    return "";
+  }, [filtrosCabecera.solicitante, solicitantePieData]);
+  const totalPages = Math.max(1, Math.ceil(gastosFiltrados.length / pageSize));
+  const currentPageSafe = Math.min(currentPage, totalPages);
+  const visiblePageNumbers = useMemo(() => {
+    const maxVisiblePages = 7;
+    if (totalPages <= maxVisiblePages) {
+      return Array.from({ length: totalPages }, (_, index) => index + 1);
+    }
+
+    const start = Math.max(1, currentPageSafe - 3);
+    const end = Math.min(totalPages, start + maxVisiblePages - 1);
+    const adjustedStart = Math.max(1, end - maxVisiblePages + 1);
+
+    return Array.from({ length: end - adjustedStart + 1 }, (_, index) => adjustedStart + index);
+  }, [currentPageSafe, totalPages]);
+  const gastosPaginados = useMemo(
+    () =>
+      gastosFiltrados
+        .map((gasto, rowIndex) => ({
+          gasto,
+          rowIndex,
+          rowKey: getGastoRowKey(gasto, rowIndex),
+        }))
+        .slice((currentPageSafe - 1) * pageSize, currentPageSafe * pageSize),
+    [currentPageSafe, gastosFiltrados, pageSize]
   );
   const gastosFiltradosKeys = useMemo(
-    () => gastosFiltrados.map((gasto, rowIndex) => getGastoRowKey(gasto, rowIndex)),
-    [gastosFiltrados]
+    () => gastosPaginados.map((item) => item.rowKey),
+    [gastosPaginados]
   );
   const todosLosVisiblesSeleccionados = useMemo(
     () => gastosFiltradosKeys.length > 0 && gastosFiltradosKeys.every((key) => selectedRowKeys.includes(key)),
@@ -2781,6 +2952,22 @@ export default function GastosAprobarPage() {
     if (!selectAllCheckboxRef.current) return;
     selectAllCheckboxRef.current.indeterminate = algunosVisiblesSeleccionados && !todosLosVisiblesSeleccionados;
   }, [algunosVisiblesSeleccionados, todosLosVisiblesSeleccionados]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [busqueda, filtrosCabecera, pageSize]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  useEffect(() => {
+    if (activeInsightTab === "chart" && solicitantePieData.length === 0) {
+      setActiveInsightTab("detail");
+    }
+  }, [activeInsightTab, solicitantePieData.length]);
 
   const alternarSeleccionVisible = React.useCallback(
     (checked: boolean) => {
@@ -2800,6 +2987,19 @@ export default function GastosAprobarPage() {
     },
     [gastosFiltradosKeys]
   );
+  const handleSolicitanteChartClick = React.useCallback((label: string, members?: string[]) => {
+    const targetMembers = members && members.length > 0 ? members : [label];
+
+    setActiveInsightTab("detail");
+    setFiltrosCabecera((prev) => ({
+      ...prev,
+      solicitante:
+        prev.solicitante.length === targetMembers.length &&
+        targetMembers.every((member) => prev.solicitante.includes(member))
+          ? []
+          : [...targetMembers],
+    }));
+  }, []);
 
   const handleFiltroOperativoChange = React.useCallback(
     (val: FiltroOperativoValue) => {
@@ -3044,7 +3244,7 @@ export default function GastosAprobarPage() {
               type="button"
               title="Aprobar"
               aria-label="Aprobar"
-              onClick={() => setEstadoPreset("aprobar")}
+              onClick={() => handleEstadoPresetClick("aprobar")}
               style={{
                 minWidth: 118,
                 height: 36,
@@ -3071,7 +3271,7 @@ export default function GastosAprobarPage() {
               type="button"
               title="Hormiga"
               aria-label="Hormiga"
-              onClick={() => setEstadoPreset("observado")}
+              onClick={() => handleEstadoPresetClick("observado")}
               style={{
                 minWidth: 118,
                 height: 36,
@@ -3096,7 +3296,7 @@ export default function GastosAprobarPage() {
               type="button"
               title="ReAprobar"
               aria-label="ReAprobar"
-              onClick={() => setEstadoPreset("hormiga")}
+              onClick={() => handleEstadoPresetClick("hormiga")}
               style={{
                 minWidth: 128,
                 height: 36,
@@ -3121,7 +3321,7 @@ export default function GastosAprobarPage() {
               type="button"
               title="Observadas"
               aria-label="Observadas"
-              onClick={() => setEstadoPreset("reaprobar")}
+              onClick={() => handleEstadoPresetClick("reaprobar")}
               style={{
                 minWidth: 132,
                 height: 36,
@@ -3147,7 +3347,7 @@ export default function GastosAprobarPage() {
               title="Todos"
               aria-label="Mostrar todos"
               disabled
-              onClick={() => setEstadoPreset("todos")}
+              onClick={() => handleEstadoPresetClick("todos")}
               style={{
                 width: 36,
                 height: 36,
@@ -3744,25 +3944,228 @@ export default function GastosAprobarPage() {
         </div>
       )}
 
-      {excedeLimiteRegistros && (
+      <div
+        style={{
+          marginTop: 12,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          flexWrap: "wrap",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setActiveInsightTab("chart")}
+          disabled={solicitantePieData.length === 0}
+          style={{
+            borderRadius: 999,
+            padding: "9px 14px",
+            border: `1px solid ${activeInsightTab === "chart" ? estadoChartTheme.border : "#D1D5DB"}`,
+            background: activeInsightTab === "chart" ? estadoChartTheme.soft : "#FFFFFF",
+            color: activeInsightTab === "chart" ? estadoChartTheme.accent : "#4B5563",
+            fontSize: 12,
+            fontWeight: 800,
+            cursor: solicitantePieData.length === 0 ? "not-allowed" : "pointer",
+            opacity: solicitantePieData.length === 0 ? 0.6 : 1,
+          }}
+        >
+          Distribucion por solicitante
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveInsightTab("detail")}
+          style={{
+            borderRadius: 999,
+            padding: "9px 14px",
+            border: `1px solid ${activeInsightTab === "detail" ? "#C7D2FE" : "#D1D5DB"}`,
+            background: activeInsightTab === "detail" ? "#EEF2FF" : "#FFFFFF",
+            color: activeInsightTab === "detail" ? "#3730A3" : "#4B5563",
+            fontSize: 12,
+            fontWeight: 800,
+            cursor: "pointer",
+          }}
+        >
+          Detalle
+        </button>
+      </div>
+
+      {activeInsightTab === "chart" && solicitantePieData.length > 0 ? (
         <div
           style={{
             marginTop: 12,
-            borderRadius: 12,
-            border: "1px solid #F59E0B",
-            background: "#FFFBEB",
-            color: "#92400E",
-            padding: 14,
-            fontSize: 11,
-            fontWeight: 600,
+            background: `linear-gradient(135deg, #FFFFFF 0%, ${estadoChartTheme.soft} 100%)`,
+            borderRadius: 18,
+            padding: 18,
+            boxShadow: "0 8px 24px rgba(23,20,58,0.08)",
+            border: `1px solid ${estadoChartTheme.border}`,
           }}
         >
-          {`Se encontraron ${cantidadRegistrosFiltrados} registros. Por rendimiento solo se permite mostrar hasta ${MAX_GASTOS_PARA_MOSTRAR}. Aplique mÃ¡s filtros, preferiblemente por fecha, cliente, proyecto, site o estado.`}
-        </div>
-      )}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 15, fontWeight: 800, color: "#111827" }}>Distribucion por solicitante</div>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    borderRadius: 999,
+                    padding: "5px 10px",
+                    background: estadoChartTheme.soft,
+                    border: `1px solid ${estadoChartTheme.border}`,
+                    color: estadoChartTheme.accent,
+                    fontSize: 11,
+                    fontWeight: 800,
+                    letterSpacing: 0.3,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {estadoChartTheme.title}
+                </span>
+              </div>
+              <div style={{ fontSize: 12, color: "#6B7280" }}>
+                {`Estado analizado: ${estadoChartTheme.title}. Las barras muestran cantidad de registros; el tooltip detalla montos por moneda y el click filtra la grilla.`}
+              </div>
+            </div>
+            {solicitanteFiltroActivo ? (
+              <button
+                type="button"
+                onClick={() => handleSolicitanteChartClick(solicitanteFiltroActivo, solicitantePieData.find((item) => item.label === solicitanteFiltroActivo)?.members)}
+                style={{
+                  border: "1px solid #C7D2FE",
+                  background: "#EEF2FF",
+                  color: "#3730A3",
+                  borderRadius: 999,
+                  padding: "8px 12px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                Limpiar solicitante: {solicitanteFiltroActivo}
+              </button>
+            ) : null}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(640px, 1.7fr) minmax(220px, 0.7fr)", gap: 14, alignItems: "center" }}>
+            <div style={{ width: "100%", height: 420, minWidth: 0 }}>
+              <ResponsiveContainer>
+                <BarChart
+                  data={solicitantePieData}
+                  layout="vertical"
+                  margin={{ top: 10, right: 20, left: 30, bottom: 10 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" horizontal={false} />
+                  <XAxis
+                    type="number"
+                    tick={{ fontSize: 11, fill: "#6B7280" }}
+                    allowDecimals={false}
+                  />
+                    <YAxis
+                      type="category"
+                      dataKey="label"
+                      width={180}
+                      tick={{ fontSize: 11, fill: "#374151" }}
+                      tickFormatter={(value) => {
+                        const normalized = String(value ?? "").toUpperCase().trim();
+                        return normalized.length > 24 ? `${normalized.slice(0, 24)}...` : normalized;
+                      }}
+                    />
+                  <Tooltip
+                    formatter={(_value, _name, props) => {
+                      const payload = props.payload as {
+                        label: string;
+                        count: number;
+                        totalAmount: number;
+                        currencySummary: string[];
+                      };
 
+                      return [
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          <span>{`Registros: ${payload.count}`}</span>
+                          <span>{`Monto total: ${payload.totalAmount.toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}</span>
+                          {payload.currencySummary.map((item) => (
+                            <span key={item}>{item}</span>
+                          ))}
+                        </div>,
+                        payload.label,
+                      ];
+                    }}
+                  />
+                  <Bar
+                    dataKey="value"
+                    radius={[0, 8, 8, 0]}
+                    onClick={(_, index) => {
+                      const item = solicitantePieData[index ?? -1];
+                      if (item) {
+                        handleSolicitanteChartClick(item.label, item.members);
+                      }
+                    }}
+                  >
+                    {solicitantePieData.map((entry) => (
+                      <Cell
+                        key={entry.label}
+                        fill={entry.color}
+                        stroke={entry.label === solicitanteFiltroActivo ? "#111827" : entry.color}
+                        strokeWidth={entry.label === solicitanteFiltroActivo ? 2 : 0}
+                        style={{ cursor: "pointer" }}
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 420, overflowY: "auto", paddingRight: 2, minWidth: 0 }}>
+              {solicitantePieData.map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => handleSolicitanteChartClick(item.label, item.members)}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-end",
+                    gap: 3,
+                    width: "100%",
+                    textAlign: "right",
+                    borderRadius: 12,
+                    border: `1px solid ${item.label === solicitanteFiltroActivo ? "#93C5FD" : "#E5E7EB"}`,
+                    background: item.label === solicitanteFiltroActivo ? "#EFF6FF" : "#FFFFFF",
+                    padding: "9px 10px",
+                    cursor: "pointer",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", justifyContent: "flex-end" }}>
+                    <span style={{ fontSize: 11, color: "#4B5563" }}>{`${item.count} reg.`}</span>
+                    <span
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 800,
+                        color: "#111827",
+                        maxWidth: "100%",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        textTransform: "uppercase",
+                      }}
+                      title={item.label}
+                    >
+                      {item.label}
+                    </span>
+                    <span style={{ width: 12, height: 12, borderRadius: 999, background: item.color, flexShrink: 0 }} />
+                  </div>
+                  <div style={{ fontSize: 11, color: "#4B5563", lineHeight: 1.35 }}>
+                    {item.currencySummary.join(" | ")}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {activeInsightTab === "detail" ? (
       <div
         style={{
+          marginTop: 12,
           background: "#FFFFFF",
           borderRadius: 16,
           padding: 20,
@@ -3877,14 +4280,11 @@ export default function GastosAprobarPage() {
                       ? mensajeFiltroCabecera
                       : limiteConsultaServidor
                         ? limiteConsultaServidor.message
-                        : excedeLimiteRegistros
-                      ? `Se encontraron ${cantidadRegistrosFiltrados} registros y el mÃ¡ximo permitido para mostrar es ${MAX_GASTOS_PARA_MOSTRAR}. Aplique mÃ¡s filtros.`
                       : "No se encontraron gastos."}
                   </td>
                 </tr>
               ) : (
-                  gastosFiltrados.map((gasto, rowIndex) => {
-                    const rowKey = getGastoRowKey(gasto, rowIndex);
+                  gastosPaginados.map(({ gasto, rowIndex, rowKey }) => {
                     const highlightStyle = getRowHighlightByPorcentajeFic(gasto.porcentajeFic);
                     const isSelectedRow = selectedRowKeys.includes(rowKey) || selectedRowKey === rowKey;
                     const rowBackground = highlightStyle.background;
@@ -4105,30 +4505,6 @@ export default function GastosAprobarPage() {
                               return (
                                 <div style={{ display: "flex", justifyContent: "center", gap: 8 }}>
                                   <button
-                                    title="Visualizar"
-                                    aria-label="Visualizar"
-                                    style={{
-                                      width: 34,
-                                      height: 34,
-                                      border: "1px solid #BFDBFE",
-                                      background: "#EFF6FF",
-                                      color: "#1D4ED8",
-                                      borderRadius: 8,
-                                      fontWeight: 700,
-                                      cursor: "pointer",
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      fontSize: 15,
-                                    }}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      abrirDrawerOc(gasto, rowKey);
-                                    }}
-                                  >
-                                    <Eye size={17} strokeWidth={2.2} />
-                                  </button>
-                                  <button
                                     title="Editar"
                                     aria-label="Editar"
                                     style={{
@@ -4206,13 +4582,13 @@ export default function GastosAprobarPage() {
           color: "#374151",
           display: "flex",
           justifyContent: "space-between",
-          alignItems: "center"
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
         }}>
           <span>
             {limiteConsultaServidor
               ? `Registros encontrados: ${limiteConsultaServidor.totalRows} | MÃ¡ximo permitido para mostrar: ${limiteConsultaServidor.maxRowsAllowed}`
-              : excedeLimiteRegistros
-              ? `Registros encontrados: ${cantidadRegistrosFiltrados} | MÃ¡ximo permitido para mostrar: ${MAX_GASTOS_PARA_MOSTRAR}`
               : `Registros encontrados: ${gastosFiltrados.length}`}
           </span>
           <span>
@@ -4230,8 +4606,71 @@ export default function GastosAprobarPage() {
                 .join(" | ");
             })()}
           </span>
+          {!cargando && gastosFiltrados.length > 0 ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: "auto", flexWrap: "wrap" }}>
+              <span>{`${pageSize} por pagina`}</span>
+              <span>
+                {`${(currentPageSafe - 1) * pageSize + 1}-${Math.min(currentPageSafe * pageSize, gastosFiltrados.length)} de ${gastosFiltrados.length}`}
+              </span>
+              {currentPageSafe > 1 ? (
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                  style={{
+                    height: 28,
+                    minWidth: 72,
+                    borderRadius: 8,
+                    border: "1px solid #D1D5DB",
+                    background: "#FFFFFF",
+                    color: "#111827",
+                    cursor: "pointer",
+                  }}
+                >
+                  Anterior
+                </button>
+              ) : null}
+              {visiblePageNumbers.map((pageNumber) => (
+                <button
+                  key={pageNumber}
+                  type="button"
+                  onClick={() => setCurrentPage(pageNumber)}
+                  style={{
+                    height: 28,
+                    minWidth: 32,
+                    borderRadius: 8,
+                    border: `1px solid ${pageNumber === currentPageSafe ? "#6366F1" : "#D1D5DB"}`,
+                    background: pageNumber === currentPageSafe ? "#EEF2FF" : "#FFFFFF",
+                    color: pageNumber === currentPageSafe ? "#4338CA" : "#111827",
+                    cursor: pageNumber === currentPageSafe ? "default" : "pointer",
+                    fontWeight: pageNumber === currentPageSafe ? 700 : 500,
+                  }}
+                  disabled={pageNumber === currentPageSafe}
+                >
+                  {pageNumber}
+                </button>
+              ))}
+              {currentPageSafe < totalPages ? (
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                  style={{
+                    height: 28,
+                    minWidth: 72,
+                    borderRadius: 8,
+                    border: "1px solid #D1D5DB",
+                    background: "#FFFFFF",
+                    color: "#111827",
+                    cursor: "pointer",
+                  }}
+                >
+                  Siguiente
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
+      ) : null}
 
       {panelAbierto && (
         <div

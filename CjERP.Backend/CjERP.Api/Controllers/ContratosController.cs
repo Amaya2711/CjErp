@@ -2103,7 +2103,7 @@ public class ContratosController : ControllerBase
                 continue;
             }
 
-            while (TryReplaceAcrossTextNodes(textNodes, replacement.Key, replacement.Value ?? string.Empty))
+            while (TryReplaceAcrossTextNodes(textNodes, replacement.Key, replacement.Value ?? string.Empty, wordNamespace))
             {
             }
         }
@@ -2117,7 +2117,11 @@ public class ContratosController : ControllerBase
             .ToList();
     }
 
-    private static bool TryReplaceAcrossTextNodes(List<XElement> textNodes, string placeholder, string replacementValue)
+    private static bool TryReplaceAcrossTextNodes(
+        List<XElement> textNodes,
+        string placeholder,
+        string replacementValue,
+        XNamespace wordNamespace)
     {
         var combinedText = string.Concat(textNodes.Select(node => node.Value));
         if (string.IsNullOrEmpty(combinedText))
@@ -2149,10 +2153,12 @@ public class ContratosController : ControllerBase
         if (start.Value.NodeIndex == end.Value.NodeIndex)
         {
             startNode.Value = prefix + replacementValue + suffix;
+            EnsureRunBold(startNode, wordNamespace);
             return true;
         }
 
         startNode.Value = prefix + replacementValue;
+        EnsureRunBold(startNode, wordNamespace);
 
         for (var nodeIndex = start.Value.NodeIndex + 1; nodeIndex < end.Value.NodeIndex; nodeIndex++)
         {
@@ -2161,6 +2167,31 @@ public class ContratosController : ControllerBase
 
         endNode.Value = suffix;
         return true;
+    }
+
+    private static void EnsureRunBold(XElement? textNode, XNamespace wordNamespace)
+    {
+        var run = textNode?.Parent;
+        if (run is null || run.Name != wordNamespace + "r")
+        {
+            return;
+        }
+
+        var runProperties = run.Element(wordNamespace + "rPr");
+        if (runProperties is null)
+        {
+            runProperties = new XElement(wordNamespace + "rPr");
+            run.AddFirst(runProperties);
+        }
+
+        var boldElement = runProperties.Element(wordNamespace + "b");
+        if (boldElement is null)
+        {
+            runProperties.AddFirst(new XElement(wordNamespace + "b"));
+            return;
+        }
+
+        boldElement.SetAttributeValue(wordNamespace + "val", "true");
     }
 
     private static (int NodeIndex, int Offset)? ResolveTextPosition(List<XElement> textNodes, int charIndex)
