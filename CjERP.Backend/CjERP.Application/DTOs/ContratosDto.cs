@@ -12,6 +12,7 @@ public sealed class ContratoEmpleadoDetalleDto
     public string Area { get; set; } = string.Empty;
     public string Ubicacion { get; set; } = string.Empty;
     public string Direccion { get; set; } = string.Empty;
+    public string CargoPrint { get; set; } = string.Empty;
     public int? IdCargo { get; set; }
     public int? IdTipoEmpleado { get; set; }
     public int? IdEmpRel { get; set; }
@@ -65,6 +66,8 @@ public sealed class ContratoEmpleadoAprobarVigenciaRequestDto
 {
     public string Observacion { get; set; } = string.Empty;
     public int NivelAprobacion { get; set; }
+    public string? DocumentPath { get; set; }
+    public string? FileName { get; set; }
 }
 
 public sealed class ContratoPlantillaGenerarRequestDto

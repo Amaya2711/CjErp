@@ -436,7 +436,7 @@ function buildGeneratedContractFileName(
 ): string {
   const employeeName = normalizeSharePointFolderName(item.nombreEmpleado).toUpperCase() || "APELLIDOS Y NOMBRES";
   const stageLabel = selection.stage === "RENOVACION" ? "RENOVACION" : "INICIAL";
-  return `CJERP-${stageLabel}-${employeeName}.docx`;
+  return `${stageLabel}-${employeeName}.docx`;
 }
 
 function normalizeText(value: string) {
@@ -624,12 +624,15 @@ type RelationTableRow = {
   fechaFinLaboral: string;
   nFechaIniLaboral: string;
   mesesN: string;
+  cargoPrint: string;
   fechaInicio: string;
   fechaFin: string;
   nuevaFechaFinLaboral: string;
+  meses: string;
   aprobacion1Fecha: string;
   aprobacion2Fecha: string;
   aprobacion3Fecha: string;
+  aprobacionPendiente: string;
   estadoContrato: string;
 };
 
@@ -655,6 +658,20 @@ function canEditPendingApprovalStep(step: 2 | 3 | null): boolean {
 
 function getRelationProposalEndDate(item: Pick<RelationTableRow, "nuevaFechaFinLaboral" | "fechaFin">): string {
   return toInputDate(item.nuevaFechaFinLaboral) || toInputDate(item.fechaFin);
+}
+
+function getRelationMonthsValue(item: Pick<RelationTableRow, "fechaFin" | "nuevaFechaFinLaboral" | "estadoContrato">): string {
+  if (normalizeText(item.estadoContrato) === "vigente") {
+    return "";
+  }
+
+  const contractEndDate = parseContractDate(item.fechaFin);
+  const proposalEndDate = parseContractDate(getRelationProposalEndDate(item));
+  if (!contractEndDate || !proposalEndDate) {
+    return "";
+  }
+
+  return getMonthsDifference(contractEndDate, proposalEndDate);
 }
 
 function EmployeePhoto({
@@ -709,6 +726,7 @@ export default function ContratosPage() {
     ubicacion: [] as string[],
     fechaInicio: "",
     fechaFin: "",
+    aprobacionPendiente: [] as string[],
     estadoContrato: [] as string[],
   });
   const [relationSort, setRelationSort] = useState<{
@@ -721,6 +739,7 @@ export default function ContratosPage() {
       | "ubicacion"
       | "fechaInicio"
       | "fechaFin"
+      | "aprobacionPendiente"
       | "estadoContrato";
     direction: "asc" | "desc";
   }>({
@@ -740,6 +759,8 @@ export default function ContratosPage() {
   const [saving, setSaving] = useState(false);
   const autoSaveInProgressRef = useRef(false);
   const [savingRelationEmployeeId, setSavingRelationEmployeeId] = useState<number | null>(null);
+  const [processingRelationKey, setProcessingRelationKey] = useState<string | null>(null);
+  const [processingRelationMessage, setProcessingRelationMessage] = useState("");
   const [relationNewEndDates, setRelationNewEndDates] = useState<Record<string, string>>({});
   const [deactivatingId, setDeactivatingId] = useState<number | null>(null);
   const [error, setError] = useState("");
@@ -875,12 +896,20 @@ export default function ContratosPage() {
       fechaFinLaboral: getFichaValue(row, "FechaFinLaboral", "FechaFinlaboral", "fechaFinLaboral", "fechafinlaboral", "fechfinlaboral") || "",
       nFechaIniLaboral: getFichaValue(row, "n_FechaIniLaboral", "N_FechaIniLaboral", "n_fechainilaboral", "nfechainilaboral") || "",
       mesesN: getFichaValue(row, "Meses_N", "MesesN", "meses_n", "Meses", "meses") || "",
+      cargoPrint: getFichaValue(row, "CargoPrint", "cargoPrint", "Cargo", "cargo") || "",
       fechaInicio: getFichaValue(row, "FechaIniLaboral", "fechaIniLaboral", "fechainilaboral") || "-",
       fechaFin: getFichaValue(row, "FechaFinLaboral", "FechaFinlaboral", "fechaFinLaboral", "fechafinlaboral", "fechfinlaboral") || "-",
       nuevaFechaFinLaboral: getFichaValue(row, "NuevaFechaFinLaboral", "nuevaFechaFinLaboral"),
+      meses: "",
       aprobacion1Fecha: getFichaValue(row, "Aprobacion1Fecha", "aprobacion1Fecha"),
       aprobacion2Fecha: getFichaValue(row, "Aprobacion2Fecha", "aprobacion2Fecha"),
       aprobacion3Fecha: getFichaValue(row, "Aprobacion3Fecha", "aprobacion3Fecha"),
+      aprobacionPendiente: getRelationPendingApprovalLabel({
+        nuevaFechaFinLaboral: getFichaValue(row, "NuevaFechaFinLaboral", "nuevaFechaFinLaboral"),
+        aprobacion1Fecha: getFichaValue(row, "Aprobacion1Fecha", "aprobacion1Fecha"),
+        aprobacion2Fecha: getFichaValue(row, "Aprobacion2Fecha", "aprobacion2Fecha"),
+        aprobacion3Fecha: getFichaValue(row, "Aprobacion3Fecha", "aprobacion3Fecha"),
+      }),
       estadoContrato: resolveContractStatus(getFichaValue(row, "FechaFinLaboral", "FechaFinlaboral", "fechaFinLaboral", "fechafinlaboral", "fechfinlaboral")),
     })) satisfies RelationTableRow[];
   }, [relationRows]);
@@ -939,16 +968,32 @@ export default function ContratosPage() {
     return normalized === "vencido" || normalized === "x vencer";
   };
 
+  const getRelationDocumentSelection = (item: RelationTableRow): ContractTemplateSelection => {
+    const defaultFamily = resolveContractTemplateFamily(item);
+    const savedSelection = documentSelections[item.key];
+    return {
+      family: savedSelection?.family || defaultFamily,
+      stage: savedSelection?.stage || "",
+    };
+  };
+
   const canApproveRelationStep = (item: RelationTableRow, step: 2 | 3) => {
     if (!item.idEmpleado || item.idEmpleado <= 0) {
       return false;
+    }
+
+    if (step === 3) {
+      const selection = getRelationDocumentSelection(item);
+      if (!selection.family || !selection.stage) {
+        return false;
+      }
     }
 
     return getRelationPendingApprovalStep(item) === step;
   };
 
   const relationFilterOptions = useMemo(() => {
-    const collect = (key: "empresa" | "area" | "cliente" | "ubicacion" | "estadoContrato") => (
+    const collect = (key: "empresa" | "area" | "cliente" | "ubicacion" | "estadoContrato" | "aprobacionPendiente") => (
       [...new Set(relationTableRows.map((item) => String(item[key] ?? "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }))
     );
 
@@ -957,12 +1002,13 @@ export default function ContratosPage() {
       area: collect("area"),
       cliente: collect("cliente"),
       ubicacion: collect("ubicacion"),
+      aprobacionPendiente: ["2da aprobacion", "3era aprobacion"],
       estadoContrato: collect("estadoContrato"),
     };
   }, [relationTableRows]);
 
   const filteredAndSortedRelationRows = useMemo(() => {
-    const filtered = relationTableRows.filter((item) => (
+      const filtered = relationTableRows.filter((item) => (
       (!relationFilters.nombreEmpleado || normalizeText(item.nombreEmpleado).includes(normalizeText(relationFilters.nombreEmpleado))) &&
       (!relationFilters.nroDocumento || normalizeText(item.nroDocumento).includes(normalizeText(relationFilters.nroDocumento))) &&
       (relationFilters.empresa.length === 0 || relationFilters.empresa.includes(item.empresa)) &&
@@ -971,6 +1017,7 @@ export default function ContratosPage() {
       (relationFilters.ubicacion.length === 0 || relationFilters.ubicacion.includes(item.ubicacion)) &&
       (!relationFilters.fechaInicio || normalizeText(formatDateLabel(item.fechaInicio)).includes(normalizeText(relationFilters.fechaInicio))) &&
       (!relationFilters.fechaFin || normalizeText(formatDateLabel(item.fechaFin)).includes(normalizeText(relationFilters.fechaFin))) &&
+      (relationFilters.aprobacionPendiente.length === 0 || relationFilters.aprobacionPendiente.includes(item.aprobacionPendiente)) &&
       (relationFilters.estadoContrato.length === 0 || relationFilters.estadoContrato.includes(item.estadoContrato))
     ));
 
@@ -982,6 +1029,17 @@ export default function ContratosPage() {
     });
   }, [relationFilters, relationSort, relationTableRows]);
 
+  const relationTableRowsWithMonths = useMemo(() => {
+    return filteredAndSortedRelationRows.map((item) => ({
+      ...item,
+      meses: getRelationMonthsValue({
+        fechaFin: item.fechaFin,
+        nuevaFechaFinLaboral: getRelationEditableEndDate(item),
+        estadoContrato: item.estadoContrato,
+      }),
+    }));
+  }, [filteredAndSortedRelationRows, relationNewEndDates]);
+
   const toggleRelationSort = (
     key:
       | "nombreEmpleado"
@@ -992,6 +1050,7 @@ export default function ContratosPage() {
       | "ubicacion"
       | "fechaInicio"
       | "fechaFin"
+      | "aprobacionPendiente"
       | "estadoContrato"
   ) => {
     setRelationSort((current) => (
@@ -1074,7 +1133,11 @@ export default function ContratosPage() {
     }
   };
 
-  const handleApproveVigencia = async (idEmpleado: number, nivelAprobacion: number) => {
+  const handleApproveVigencia = async (
+    idEmpleado: number,
+    nivelAprobacion: number,
+    documentPayload?: { documentPath?: string; fileName?: string }
+  ) => {
     if (!idEmpleado || idEmpleado <= 0 || saving) {
       return;
     }
@@ -1086,6 +1149,8 @@ export default function ContratosPage() {
     try {
       const response = await aprobarVigenciaContratoEmpleado(idEmpleado, {
         nivelAprobacion,
+        ...(documentPayload?.documentPath ? { documentPath: documentPayload.documentPath } : {}),
+        ...(documentPayload?.fileName ? { fileName: documentPayload.fileName } : {}),
       });
 
       await loadRelationRows();
@@ -1118,29 +1183,88 @@ export default function ContratosPage() {
       return;
     }
 
+    if (nivelAprobacion === 3) {
+      const selection = getRelationDocumentSelection(item);
+      if (!selection.family || !selection.stage) {
+        setError("Debe seleccionar ETAPA y VIGENCIA antes de aprobar la 3era validacion.");
+        setSuccess("");
+        return;
+      }
+    }
+
+    const documentPayload =
+      nivelAprobacion === 3
+        ? (() => {
+            const selection = getRelationDocumentSelection(item);
+            const documentPath = buildContratoDocumentPath(
+              {
+                empresa: item.empresa,
+                nombreEmpleado: item.nombreEmpleado,
+                fechaInicio: item.fechaInicio,
+                fechaFin: item.fechaFin,
+              },
+              selection
+            );
+
+            if (!documentPath) {
+              setError("No se pudo resolver la ruta de la plantilla.");
+              setSuccess("");
+              return null;
+            }
+
+            return {
+              documentPath,
+              fileName: buildGeneratedContractFileName(
+                {
+                  nombreEmpleado: item.nombreEmpleado,
+                },
+                selection
+              ),
+            };
+          })()
+        : undefined;
+
+    if (nivelAprobacion === 3 && !documentPayload) {
+      return;
+    }
+
     const rowKey = getRelationRowKey(item);
+    const isThirdApproval = nivelAprobacion === 3;
+
+    if (isThirdApproval) {
+      setProcessingRelationKey(rowKey);
+      setProcessingRelationMessage("Procesando 3era aprobacion. Espere mientras finaliza todo el proceso...");
+    }
+
     const currentValue = (relationNewEndDates[rowKey] ?? "").trim();
     const originalValue = getRelationProposalEndDate(item);
 
-    if (currentValue && currentValue !== originalValue) {
-      const saved = await saveContractChange({
-        idEmpleado,
-        nextEndDate: currentValue,
-        fechaIniLaboral: item.fechaInicio,
-        observationText: "",
-      });
+    try {
+      if (currentValue && currentValue !== originalValue) {
+        const saved = await saveContractChange({
+          idEmpleado,
+          nextEndDate: currentValue,
+          fechaIniLaboral: item.fechaInicio,
+          observationText: "",
+        });
 
-      if (!saved) {
-        return;
+        if (!saved) {
+          return;
+        }
+
+        setRelationNewEndDates((current) => ({
+          ...current,
+          [rowKey]: currentValue,
+        }));
       }
 
-      setRelationNewEndDates((current) => ({
-        ...current,
-        [rowKey]: currentValue,
-      }));
+      await handleApproveVigencia(idEmpleado, nivelAprobacion, documentPayload ?? undefined);
+    } finally {
+      if (isThirdApproval) {
+        setProcessingRelationKey(null);
+        setProcessingRelationMessage("");
+      }
     }
-
-    await handleApproveVigencia(idEmpleado, nivelAprobacion);
   };
 
   const handleOpenTemplate = async (item: RelationTableRow) => {
@@ -1194,7 +1318,8 @@ export default function ContratosPage() {
       const contractEndDate = parseContractDate(item.fechaFin);
       const nextStartDate = parseContractDate(item.nFechaIniLaboral) ?? addDaysToDate(item.fechaFin, 1);
       const proposalEndDate = parseContractDate(getRelationProposalEndDate(item));
-      const mesesContrato = item.mesesN.trim() || getMonthsDifference(nextStartDate, proposalEndDate ?? contractEndDate);
+      const effectiveEndDate = proposalEndDate ?? contractEndDate;
+      const mesesContrato = item.mesesN.trim() || getMonthsDifference(nextStartDate, effectiveEndDate);
 
       const blob = await generarPlantillaContrato({
         documentPath,
@@ -1212,16 +1337,17 @@ export default function ContratosPage() {
           Cliente: item.cliente || "",
           UBICACION: item.ubicacion || "",
           Ubicacion: item.ubicacion || "",
+          CargoPrint: item.cargoPrint || "",
           FECHAINILABORAL: formatContractWordDate(item.fechaIniLaboral),
           FechaIniLaboral: formatContractWordDate(item.fechaIniLaboral),
-          FECHAFINLABORAL: formatContractWordDate(item.fechaFinLaboral),
-          FechaFinLaboral: formatContractWordDate(item.fechaFinLaboral),
+          FECHAFINLABORAL: formatContractWordDateFromDate(effectiveEndDate),
+          FechaFinLaboral: formatContractWordDateFromDate(effectiveEndDate),
           N_FECHAINILABORAL: formatContractWordDateFromDate(nextStartDate),
           N_FechaIniLaboral: formatContractWordDateFromDate(nextStartDate),
           N_fechainilaboral: formatContractWordDateFromDate(nextStartDate),
-          N_FECHAFINLABORAL: formatContractWordDate(item.fechaFinLaboral),
-          N_FechaFinLaboral: formatContractWordDate(item.fechaFinLaboral),
-          N_FechaFinalLaboral: formatContractWordDate(item.fechaFinLaboral),
+          N_FECHAFINLABORAL: formatContractWordDateFromDate(effectiveEndDate),
+          N_FechaFinLaboral: formatContractWordDateFromDate(effectiveEndDate),
+          N_FechaFinalLaboral: formatContractWordDateFromDate(effectiveEndDate),
           MESES_N: mesesContrato,
           Meses_N: mesesContrato,
         },
@@ -1464,6 +1590,15 @@ export default function ContratosPage() {
 
         {error ? <div style={styles.errorBox}>{error}</div> : null}
         {success ? <div style={styles.successBox}>{success}</div> : null}
+        {processingRelationMessage ? (
+          <div style={styles.pendingBox}>
+            <div style={styles.pendingBoxTitle}>En proceso</div>
+            <div style={styles.pendingBoxText}>
+              <RefreshCw size={14} style={{ animation: "spin 1s linear infinite", marginRight: 6, verticalAlign: "text-bottom" }} />
+              {processingRelationMessage}
+            </div>
+          </div>
+        ) : null}
 
         {activeTab === "relacion" ? (
           <>
@@ -1484,6 +1619,8 @@ export default function ContratosPage() {
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("empresa")}>Empresa{renderSortIndicator(relationSort, "empresa")}</button></th>
                         <th style={{ ...styles.th, ...styles.documentRouteHeader }}>ETAPA - VIGENCIA</th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("estadoContrato")}>Estado contrato{renderSortIndicator(relationSort, "estadoContrato")}</button></th>
+                        <th style={styles.th}>MESES</th>
+                        <th style={styles.th}>Aprob. pendiente</th>
                         <th style={styles.th}>Nueva fecha fin</th>
                         <th style={styles.th}>Accion</th>
                         <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => toggleRelationSort("nroDocumento")}>Documento{renderSortIndicator(relationSort, "nroDocumento")}</button></th>
@@ -1510,6 +1647,15 @@ export default function ContratosPage() {
                             options={relationFilterOptions.estadoContrato}
                             selectedValues={relationFilters.estadoContrato}
                             onChange={(values) => setRelationFilters((current) => ({ ...current, estadoContrato: values }))}
+                          />
+                        </th>
+                        <th style={styles.thFilter}></th>
+                        <th style={styles.thFilter}>
+                          <FilterCombo
+                            label="Aprob. pendiente"
+                            options={relationFilterOptions.aprobacionPendiente}
+                            selectedValues={relationFilters.aprobacionPendiente}
+                            onChange={(values) => setRelationFilters((current) => ({ ...current, aprobacionPendiente: values }))}
                           />
                         </th>
                         <th style={styles.thFilter}></th>
@@ -1546,12 +1692,15 @@ export default function ContratosPage() {
                     <tbody>
                       {filteredAndSortedRelationRows.length === 0 ? (
                         <tr>
-                          <td style={styles.emptyTableCell} colSpan={12}>
+                          <td style={styles.emptyTableCell} colSpan={14}>
                             No se encontraron empleados en la relacion del store.
                           </td>
                         </tr>
                       ) : (
-                        filteredAndSortedRelationRows.map((item) => (
+                        relationTableRowsWithMonths.map((item) => {
+                          const isProcessingThirdApproval = processingRelationKey === item.key && saving;
+
+                          return (
                         <tr key={item.key}>
                           <td style={{ ...styles.td, ...styles.employeeNameCell }} title={item.nombreEmpleado}>
                             {item.nombreEmpleado}
@@ -1575,7 +1724,9 @@ export default function ContratosPage() {
                                 stage: savedSelection?.stage || "",
                               };
                               const familyOptions = CONTRACT_TEMPLATE_FAMILIES;
-                              const canPickTemplateControls = normalizeText(item.estadoContrato) === "vigente";
+                              const canPickTemplateControls =
+                                normalizeText(item.estadoContrato) === "vigente" ||
+                                normalizeText(item.aprobacionPendiente) === "3era aprobacion";
                               const canPickStage = !!selection.family && canPickTemplateControls;
                               const isOpeningTemplate = openingTemplateKey === item.key;
 
@@ -1674,6 +1825,16 @@ export default function ContratosPage() {
                           <td style={styles.td}>
                             <span style={getContractStatusBadgeStyle(item.estadoContrato)}>{item.estadoContrato}</span>
                           </td>
+                          <td style={styles.td}>
+                            {item.estadoContrato === "VIGENTE" ? "-" : item.meses || "-"}
+                          </td>
+                          <td style={styles.td}>
+                            {item.aprobacionPendiente ? (
+                              <span style={getContractStatusBadgeStyle("X VENCER")}>{item.aprobacionPendiente}</span>
+                            ) : (
+                              "-"
+                            )}
+                          </td>
                           <td
                             style={
                               canEditRelationEndDate(item)
@@ -1726,9 +1887,9 @@ export default function ContratosPage() {
                                 onMouseDown={(event) => event.preventDefault()}
                                 style={getDisabledActionButtonStyle(
                                   styles.approvalButtonInline,
-                                  !canApproveRelationStep(item, 2)
+                                  !canApproveRelationStep(item, 2) || isProcessingThirdApproval
                                 )}
-                                disabled={!canApproveRelationStep(item, 2)}
+                                disabled={!canApproveRelationStep(item, 2) || isProcessingThirdApproval}
                                 onClick={() => void handleRelationApprove(item, 2)}
                               >
                                 <Save size={14} />
@@ -1739,13 +1900,17 @@ export default function ContratosPage() {
                                 onMouseDown={(event) => event.preventDefault()}
                                 style={getDisabledActionButtonStyle(
                                   styles.approvalButtonInlineAlt,
-                                  !canApproveRelationStep(item, 3)
+                                  !canApproveRelationStep(item, 3) || isProcessingThirdApproval
                                 )}
-                                disabled={!canApproveRelationStep(item, 3)}
+                                disabled={!canApproveRelationStep(item, 3) || isProcessingThirdApproval}
                                 onClick={() => void handleRelationApprove(item, 3)}
                               >
-                                <Save size={14} />
-                                3era
+                                {isProcessingThirdApproval ? (
+                                  <RefreshCw size={14} style={{ animation: "spin 1s linear infinite" }} />
+                                ) : (
+                                  <Save size={14} />
+                                )}
+                                {isProcessingThirdApproval ? "Procesando..." : "3era"}
                               </button>
                             </div>
                           </td>
@@ -1756,7 +1921,8 @@ export default function ContratosPage() {
                           <td style={styles.td}>{formatDateLabel(item.fechaInicio)}</td>
                           <td style={styles.td}>{formatDateLabel(item.fechaFin)}</td>
                         </tr>
-                        ))
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
@@ -2111,10 +2277,10 @@ function getContractStatusBadgeStyle(status: string): CSSProperties {
 
 function renderSortIndicator(
   sort: {
-    key: "nombreEmpleado" | "nroDocumento" | "empresa" | "area" | "cliente" | "ubicacion" | "fechaInicio" | "fechaFin" | "estadoContrato";
+    key: string;
     direction: "asc" | "desc";
   },
-  key: "nombreEmpleado" | "nroDocumento" | "empresa" | "area" | "cliente" | "ubicacion" | "fechaInicio" | "fechaFin" | "estadoContrato"
+  key: string
 ) {
   if (sort.key !== key) {
     return "  ";
@@ -2161,6 +2327,19 @@ function getPendingApprovalStep(request: ContratoEmpleadoSolicitudVigencia | nul
   }
 
   return 2;
+}
+
+function getRelationPendingApprovalLabel(item: Pick<RelationTableRow, "nuevaFechaFinLaboral" | "aprobacion1Fecha" | "aprobacion2Fecha" | "aprobacion3Fecha">): string {
+  const step = getRelationPendingApprovalStep(item);
+  if (step === 2) {
+    return "2da aprobacion";
+  }
+
+  if (step === 3) {
+    return "3era aprobacion";
+  }
+
+  return "";
 }
 
 const styles: Record<string, CSSProperties> = {

@@ -8,10 +8,15 @@ using System.Xml.Linq;
 using CjERP.Api.Services;
 using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces.Services;
+using CjERP.Shared.Configuration;
 using Dapper;
+using MailKit.Net.Smtp;
+using MailKit.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Options;
+using MimeKit;
 
 namespace CjERP.Api.Controllers;
 
@@ -23,6 +28,12 @@ public class ContratosController : ControllerBase
     private const string HistoryTableName = "dbo.EmpleadoCjHistorialLaboral";
     private const string RequestTableName = "dbo.EmpleadoCjSolicitudVigencia";
     private const string FichaStoredProcedureName = "dbo.sp_EmpleadoCj_Ficha";
+    private static readonly string[] ThirdApprovalNotificationEmails =
+    [
+        "juan.manuel.amaya.suarez@gmail.com",
+        "aortiz@cj-telecom.com",
+        "ptorres@cj-telecom.com"
+    ];
     private static readonly string[] FichaCandidateParameterNames =
     [
         "IdEmpleado",
@@ -37,15 +48,21 @@ public class ContratosController : ControllerBase
     private readonly IConfiguration _configuration;
     private readonly IAuditoriaCambiosService _auditoriaCambiosService;
     private readonly ISharePointCommercialUploadService _sharePointCommercialUploadService;
+    private readonly SmtpSettings _smtpSettings;
+    private readonly ILogger<ContratosController> _logger;
 
     public ContratosController(
         IConfiguration configuration,
         IAuditoriaCambiosService auditoriaCambiosService,
-        ISharePointCommercialUploadService sharePointCommercialUploadService)
+        ISharePointCommercialUploadService sharePointCommercialUploadService,
+        IOptions<SmtpSettings> smtpSettings,
+        ILogger<ContratosController> logger)
     {
         _configuration = configuration;
         _auditoriaCambiosService = auditoriaCambiosService;
         _sharePointCommercialUploadService = sharePointCommercialUploadService;
+        _smtpSettings = smtpSettings.Value;
+        _logger = logger;
     }
 
     [HttpGet("{idEmpleado:int}")]
@@ -586,6 +603,17 @@ public class ContratosController : ControllerBase
                 ? $"Aprobacion #{nivelAprobacionSolicitado} registrada por {usuario}"
                 : request.Observacion.Trim();
 
+            if (nivelAprobacionSolicitado == 3 &&
+                (string.IsNullOrWhiteSpace(request.DocumentPath) || string.IsNullOrWhiteSpace(request.FileName)))
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "La aprobacion de 3era validacion requiere la ruta y el nombre del documento Word seleccionado."
+                });
+            }
+
             var auditoriaCambios = new List<AuditoriaCambioDto>();
             if (siguienteAprobacion > solicitud.AprobacionesRequeridas)
             {
@@ -800,6 +828,16 @@ public class ContratosController : ControllerBase
 
             await RegistrarAuditoriaAsync(auditoriaCambios, cancellationToken);
 
+            if (estadoFinal == "APROBADO" && nivelAprobacionSolicitado == 3)
+            {
+                await TrySendThirdApprovalEmailAsync(
+                    request.DocumentPath!,
+                    request.FileName!,
+                    current,
+                    solicitud.NuevaFechaFinLaboral,
+                    cancellationToken);
+            }
+
             return Ok(new
             {
                 success = true,
@@ -827,6 +865,265 @@ public class ContratosController : ControllerBase
                 detail = ex.ToString()
             });
         }
+    }
+
+    private async Task TrySendThirdApprovalEmailAsync(
+        string documentPath,
+        string fileName,
+        ContratoEmpleadoDetalleDto current,
+        string newEndDate,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!IsSmtpConfigured())
+            {
+                _logger.LogWarning(
+                    "No se envio la notificacion de tercera aprobacion porque SMTP no esta configurado correctamente.");
+                return;
+            }
+
+            var subject = $"Aprobacion 3era vigencia contrato - {NormalizeMailSubjectValue(current.NombreEmpleado, "Empleado")}";
+            var body = BuildThirdApprovalMailBody(current.NombreEmpleado, current.NroDocumento, current.FechaFinLaboral, newEndDate);
+            var attachment = await BuildThirdApprovalAttachmentAsync(
+                documentPath,
+                fileName,
+                current,
+                newEndDate,
+                cancellationToken);
+
+            await SendMailWithAttachmentAsync(
+                ThirdApprovalNotificationEmails,
+                subject,
+                body,
+                attachment.FileName,
+                attachment.Bytes,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "No se pudo enviar la notificacion de tercera aprobacion del contrato a {Recipient}.",
+                string.Join(", ", ThirdApprovalNotificationEmails));
+        }
+    }
+
+    private async Task<(string FileName, byte[] Bytes)> BuildThirdApprovalAttachmentAsync(
+        string documentPath,
+        string fileName,
+        ContratoEmpleadoDetalleDto current,
+        string newEndDate,
+        CancellationToken cancellationToken)
+    {
+        if (!documentPath.Contains("FORMATOS_CONTRATOS", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("La ruta del documento no es valida.");
+        }
+
+        var templateBytes = await _sharePointCommercialUploadService.DownloadFileAsync(documentPath, cancellationToken);
+        var replacements = BuildContractReplacements(current, newEndDate);
+        var renderedBytes = ReplaceWordPlaceholders(templateBytes, replacements);
+        var normalizedFileName = NormalizeAttachmentFileName(fileName);
+        return (normalizedFileName, renderedBytes);
+    }
+
+    private async Task SendMailWithAttachmentAsync(
+        IEnumerable<string> recipients,
+        string subject,
+        string body,
+        string attachmentName,
+        byte[] attachmentContent,
+        string contentType,
+        CancellationToken cancellationToken)
+    {
+        using var smtp = new SmtpClient
+        {
+            Timeout = Math.Max(1, _smtpSettings.TimeoutSeconds) * 1000
+        };
+
+        if (_smtpSettings.AllowInvalidCertificate)
+        {
+            smtp.ServerCertificateValidationCallback = static (_, _, _, _) => true;
+        }
+
+        var message = new MimeMessage();
+        message.From.Add(MailboxAddress.Parse(_smtpSettings.From));
+        var normalizedRecipients = recipients
+            .Where(email => !string.IsNullOrWhiteSpace(email))
+            .Select(email => email.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (normalizedRecipients.Count == 0)
+        {
+            throw new InvalidOperationException("No hay destinatarios configurados para el correo de aprobacion.");
+        }
+
+        message.To.Add(MailboxAddress.Parse(normalizedRecipients[0]));
+        foreach (var recipient in normalizedRecipients.Skip(1))
+        {
+            message.Cc.Add(MailboxAddress.Parse(recipient));
+        }
+        message.Subject = subject;
+
+        var bodyBuilder = new BodyBuilder
+        {
+            TextBody = body
+        };
+        bodyBuilder.Attachments.Add(attachmentName, attachmentContent, ContentType.Parse(contentType));
+        message.Body = bodyBuilder.ToMessageBody();
+
+        var socketOptions = _smtpSettings.EnableSsl ? SecureSocketOptions.StartTls : SecureSocketOptions.None;
+        await smtp.ConnectAsync(_smtpSettings.Host, _smtpSettings.Port, socketOptions, cancellationToken);
+        await smtp.AuthenticateAsync(_smtpSettings.UserName, _smtpSettings.Password, cancellationToken);
+        await smtp.SendAsync(message, cancellationToken);
+        await smtp.DisconnectAsync(true, cancellationToken);
+    }
+
+    private bool IsSmtpConfigured()
+    {
+        return !string.IsNullOrWhiteSpace(_smtpSettings.Host) &&
+               !string.IsNullOrWhiteSpace(_smtpSettings.UserName) &&
+               !string.IsNullOrWhiteSpace(_smtpSettings.Password) &&
+               !string.IsNullOrWhiteSpace(_smtpSettings.From);
+    }
+
+    private static string NormalizeMailSubjectValue(string? value, string fallback)
+    {
+        var text = (value ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(text) ? fallback : text;
+    }
+
+    private static string BuildThirdApprovalMailBody(
+        string employeeName,
+        string nroDocumento,
+        string currentEndDate,
+        string newEndDate)
+    {
+        var nombre = NormalizeMailSubjectValue(employeeName, "Empleado");
+        var documento = string.IsNullOrWhiteSpace(nroDocumento) ? "N/D" : nroDocumento.Trim();
+        var fechaActual = string.IsNullOrWhiteSpace(currentEndDate) ? "N/D" : currentEndDate.Trim();
+        var fechaNueva = string.IsNullOrWhiteSpace(newEndDate) ? "N/D" : newEndDate.Trim();
+
+        return
+            $"Estimado(a),{Environment.NewLine}{Environment.NewLine}" +
+            $"Se ha completado la 3era validacion de la renovacion de contrato del colaborador {nombre}.{Environment.NewLine}" +
+            $"Documento: {documento}{Environment.NewLine}" +
+            $"Fecha fin actual: {fechaActual}{Environment.NewLine}" +
+            $"Nueva fecha fin: {fechaNueva}{Environment.NewLine}{Environment.NewLine}" +
+            $"La actualizacion ya fue registrada en el sistema.{Environment.NewLine}{Environment.NewLine}" +
+            $"Saludos cordiales,{Environment.NewLine}CJ ERP";
+    }
+
+    private static Dictionary<string, string> BuildContractReplacements(
+        ContratoEmpleadoDetalleDto current,
+        string newEndDate)
+    {
+        var contractEndDate = ParseContractWordDate(current.FechaFinLaboral);
+        var nextStartDate = contractEndDate?.Date.AddDays(1);
+        var proposalEndDate = ParseContractWordDate(newEndDate) ?? contractEndDate;
+        var months = GetMonthsDifference(nextStartDate, proposalEndDate);
+
+        return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["NOMBREEMPLEADO"] = current.NombreEmpleado ?? string.Empty,
+            ["NombreEmpleado"] = current.NombreEmpleado ?? string.Empty,
+            ["NRODOCUMENTO"] = current.NroDocumento ?? string.Empty,
+            ["NroDocumento"] = current.NroDocumento ?? string.Empty,
+            ["DIRECCION"] = current.Direccion ?? string.Empty,
+            ["Direccion"] = current.Direccion ?? string.Empty,
+            ["AREA"] = current.Area ?? string.Empty,
+            ["Area"] = current.Area ?? string.Empty,
+            ["CLIENTE"] = current.Cliente ?? string.Empty,
+            ["Cliente"] = current.Cliente ?? string.Empty,
+            ["UBICACION"] = current.Ubicacion ?? string.Empty,
+            ["Ubicacion"] = current.Ubicacion ?? string.Empty,
+            ["CargoPrint"] = current.CargoPrint ?? string.Empty,
+            ["FECHAINILABORAL"] = FormatContractWordDate(current.FechaIniLaboral),
+            ["FechaIniLaboral"] = FormatContractWordDate(current.FechaIniLaboral),
+            ["FECHAFINLABORAL"] = FormatContractWordDate(proposalEndDate),
+            ["FechaFinLaboral"] = FormatContractWordDate(proposalEndDate),
+            ["N_FECHAINILABORAL"] = FormatContractWordDate(nextStartDate),
+            ["N_FechaIniLaboral"] = FormatContractWordDate(nextStartDate),
+            ["N_fechainilaboral"] = FormatContractWordDate(nextStartDate),
+            ["N_FECHAFINLABORAL"] = FormatContractWordDate(proposalEndDate),
+            ["N_FechaFinLaboral"] = FormatContractWordDate(proposalEndDate),
+            ["N_FechaFinalLaboral"] = FormatContractWordDate(proposalEndDate),
+            ["MESES_N"] = months,
+            ["Meses_N"] = months
+        };
+    }
+
+    private static string NormalizeAttachmentFileName(string fileName)
+    {
+        var raw = (fileName ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return "Contrato.docx";
+        }
+
+        foreach (var invalidChar in Path.GetInvalidFileNameChars())
+        {
+            raw = raw.Replace(invalidChar, '_');
+        }
+
+        return raw.EndsWith(".docx", StringComparison.OrdinalIgnoreCase) ? raw : $"{raw}.docx";
+    }
+
+    private static DateTime? ParseContractWordDate(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
+            ? parsed
+            : DateTime.TryParse(value, out parsed)
+                ? parsed
+                : null;
+    }
+
+    private static string FormatContractWordDate(string? value)
+    {
+        var parsed = ParseContractWordDate(value);
+        return parsed.HasValue ? FormatContractWordDate(parsed.Value) : string.Empty;
+    }
+
+    private static string FormatContractWordDate(DateTime? value)
+    {
+        return value.HasValue ? FormatContractWordDate(value.Value) : string.Empty;
+    }
+
+    private static string FormatContractWordDate(DateTime value)
+    {
+        return value.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+    }
+
+    private static string GetMonthsDifference(DateTime? startDate, DateTime? endDate)
+    {
+        if (!startDate.HasValue || !endDate.HasValue)
+        {
+            return string.Empty;
+        }
+
+        var diffYears = endDate.Value.Year - startDate.Value.Year;
+        var diffMonths = endDate.Value.Month - startDate.Value.Month;
+        var totalMonths = diffYears * 12 + diffMonths;
+
+        if (totalMonths < 0)
+        {
+            return string.Empty;
+        }
+
+        if (endDate.Value.Date < startDate.Value.Date)
+        {
+            return Math.Max(totalMonths - 1, 0).ToString(CultureInfo.InvariantCulture);
+        }
+
+        return totalMonths.ToString(CultureInfo.InvariantCulture);
     }
 
     [HttpPut("historial/{idHistorialLaboral:int}/desactivar")]
@@ -1480,6 +1777,7 @@ public class ContratosController : ControllerBase
             Area = GetString(values, "Area", "area"),
             Ubicacion = GetString(values, "Ubicacion", "ubicacion"),
             Direccion = GetString(values, "Direccion", "direccion"),
+            CargoPrint = GetString(values, "CargoPrint", "cargoPrint", "Cargo", "cargo"),
             IdCargo = GetInt(values, "IdCargo", "idCargo"),
             IdTipoEmpleado = GetInt(values, "IdTipoEmpleado", "idTipoEmpleado"),
             IdEmpRel = GetInt(values, "IdEmpRel", "idEmpRel"),
@@ -1741,6 +2039,8 @@ public class ContratosController : ControllerBase
             return content;
         }
 
+        var orderedReplacements = OrderReplacementsForWord(replacements);
+
         try
         {
             var document = XDocument.Parse(content, LoadOptions.PreserveWhitespace);
@@ -1748,14 +2048,14 @@ public class ContratosController : ControllerBase
 
             foreach (var paragraph in document.Descendants(wordNamespace + "p"))
             {
-                ReplaceInParagraph(paragraph, replacements, wordNamespace);
+                ReplaceInParagraph(paragraph, orderedReplacements, wordNamespace);
             }
 
             var serialized = document.Declaration is null
                 ? document.ToString(SaveOptions.DisableFormatting)
                 : $"{document.Declaration}{document.ToString(SaveOptions.DisableFormatting)}";
 
-            foreach (var replacement in replacements)
+            foreach (var replacement in orderedReplacements)
             {
                 if (string.IsNullOrWhiteSpace(replacement.Key))
                 {
@@ -1770,7 +2070,7 @@ public class ContratosController : ControllerBase
         }
         catch
         {
-            foreach (var replacement in replacements)
+            foreach (var replacement in orderedReplacements)
             {
                 if (string.IsNullOrWhiteSpace(replacement.Key))
                 {
@@ -1787,7 +2087,7 @@ public class ContratosController : ControllerBase
 
     private static void ReplaceInParagraph(
         XElement paragraph,
-        IReadOnlyDictionary<string, string> replacements,
+        IReadOnlyList<KeyValuePair<string, string>> replacements,
         XNamespace wordNamespace)
     {
         var textNodes = paragraph.Descendants(wordNamespace + "t").ToList();
@@ -1807,6 +2107,14 @@ public class ContratosController : ControllerBase
             {
             }
         }
+    }
+
+    private static IReadOnlyList<KeyValuePair<string, string>> OrderReplacementsForWord(IReadOnlyDictionary<string, string> replacements)
+    {
+        return replacements
+            .OrderByDescending(pair => pair.Key.Length)
+            .ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static bool TryReplaceAcrossTextNodes(List<XElement> textNodes, string placeholder, string replacementValue)

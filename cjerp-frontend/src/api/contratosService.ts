@@ -11,6 +11,7 @@ export type ContratoEmpleadoDetalle = {
   cliente: string;
   area: string;
   ubicacion: string;
+  cargoPrint: string;
   idCargo: number | null;
   idTipoEmpleado: number | null;
   idEmpRel: number | null;
@@ -82,6 +83,8 @@ export type ContratoEmpleadoSolicitudVigencia = {
 export type AprobarVigenciaRequest = {
   observacion?: string;
   nivelAprobacion?: number;
+  documentPath?: string;
+  fileName?: string;
 };
 
 export type GenerarPlantillaContratoRequest = {
