@@ -80,11 +80,11 @@ export type AsistenciaGerencialPdfRequest = {
 };
 
 export type AsistenciaEnviarPdfLlamadaAtencionResponse = {
-  success: boolean;
-  statusCode: number;
-  responseBody: string;
-  errorMessage: string;
-  debugPayloadJson: string;
+  accepted: boolean;
+  alreadyRunning?: boolean;
+  executionId?: string;
+  jobId?: string;
+  message: string;
 };
 
 export type AsistenciaActualizarEstadoMarcacionRequest = {

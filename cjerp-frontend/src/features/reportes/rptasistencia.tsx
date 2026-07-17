@@ -2729,11 +2729,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
       };
 
       const response = await enviarAsistenciaEmpleadoPdfLlamadaAtencion(payload);
-      const destinatarios = [employeeRow.correoEmpleado, employeeRow.correoResponsable]
-        .map((item) => item.trim())
-        .filter(Boolean)
-        .join(", ");
-      setSuccess(`El PDF de llamada de atencion fue enviado por correo a ${destinatarios || employeeName}.`);
+      setSuccess(response.message || `El envio del PDF de llamada de atencion para ${employeeName} fue encolado correctamente.`);
     } catch (err) {
       setSuccess("");
       setError(await getValidationPdfErrorMessage(err, "No se pudo enviar el PDF de llamada de atencion."));

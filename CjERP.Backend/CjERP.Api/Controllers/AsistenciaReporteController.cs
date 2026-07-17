@@ -1,5 +1,8 @@
 using CjERP.Application.DTOs;
+using CjERP.Application.DTOs.ReportesWhatsapp;
 using CjERP.Application.Interfaces.Services;
+using CjERP.Api.Jobs;
+using Hangfire;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -14,13 +17,16 @@ public class AsistenciaReporteController : ControllerBase
 {
     private readonly IAsistenciaReporteService _asistenciaReporteService;
     private readonly ILogger<AsistenciaReporteController> _logger;
+    private readonly IBackgroundJobClient _backgroundJobClient;
 
     public AsistenciaReporteController(
         IAsistenciaReporteService asistenciaReporteService,
-        ILogger<AsistenciaReporteController> logger)
+        ILogger<AsistenciaReporteController> logger,
+        IBackgroundJobClient backgroundJobClient)
     {
         _asistenciaReporteService = asistenciaReporteService;
         _logger = logger;
+        _backgroundJobClient = backgroundJobClient;
     }
 
     [HttpGet]
@@ -179,18 +185,19 @@ public class AsistenciaReporteController : ControllerBase
                 ?? User.Identity?.Name
                 ?? "SISTEMA";
 
-            var result = await _asistenciaReporteService.EnviarPdfEmpleadoLlamadaAtencionAsync(request, usuarioEjecucion, cancellationToken);
-            var httpStatus = result.Success
-                ? StatusCodes.Status200OK
-                : (result.StatusCode >= StatusCodes.Status400BadRequest ? result.StatusCode : StatusCodes.Status502BadGateway);
+            var jobId = _backgroundJobClient.Enqueue<AsistenciaReporteJob>(
+                job => job.EnviarPdfEmpleadoLlamadaAtencionAsync(request, usuarioEjecucion));
 
-            return StatusCode(httpStatus, new
+            return Ok(new
             {
-                success = result.Success,
-                message = result.Success
-                    ? "PDF enviado correctamente por correo."
-                    : "No se pudo enviar el PDF por correo.",
-                data = result
+                success = true,
+                message = "Proceso de envio encolado correctamente.",
+                data = new ReporteWhatsappEjecucionResultadoDto
+                {
+                    Accepted = true,
+                    JobId = jobId,
+                    Message = "El envio del PDF fue encolado y se procesara en segundo plano."
+                }
             });
         }
         catch (Exception ex)
