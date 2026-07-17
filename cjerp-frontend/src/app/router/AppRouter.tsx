@@ -19,7 +19,7 @@ const AsistenciaPage = lazy(() => import("../../features/administracion/Asistenc
 const MarcacionPage = lazy(() => import("../../features/administracion/MarcacionPage"));
 const PendientesPage = lazy(() => import("../../features/administracion/pendientes"));
 const SolicitudAdministracionPage = lazy(() => import("../../features/administracion/solicitudadministracion"));
-const VacacionesPage = lazy(() => import("../../features/administracion/VacacionesPage"));
+const VacacionesPage = lazy(() => import("../../features/recursoshumanos/vacacionespage"));
 const AlmacenPage = lazy(() => import("../../features/logistica/almacen/almacen"));
 const InventarioPage = lazy(() => import("../../features/logistica/almacen/inventario"));
 const CrucePage = lazy(() => import("../../features/logistica/gestionequipos/cruce"));
@@ -59,6 +59,7 @@ const ConsultaPage = lazy(() => import("../../features/mantenimiento/consulta/co
 const ModificacionesPage = lazy(() => import("../../features/mantenimiento/consulta/modificaciones"));
 const MigracionPage = lazy(() => import("../../features/mantenimiento/migracion"));
 const MantenimientoPage = lazy(() => import("../../features/mantenimiento/mantenimiento"));
+const MantenimientoEmpleadosPage = lazy(() => import("../../features/mantenimiento/empleados"));
 const RptWupPage = lazy(() => import("../../features/mantenimiento/sistemas/rptwup"));
 const RptWupGerencialPage = lazy(() => import("../../features/mantenimiento/sistemas/rptwupgerencial"));
 const RptBoletaPage = lazy(() => import("../../features/mantenimiento/sistemas/rptboleta"));
@@ -97,6 +98,7 @@ export default function AppRouter() {
             />
             <Route path="/administracion/marcacion" element={<MarcacionPage />} />
             <Route path="/administracion/vacaciones" element={<VacacionesPage />} />
+            <Route path="/recursoshumanos/vacacionespage" element={<VacacionesPage />} />
 
             <Route path="/operaciones/capitalizacion" element={<CapitalizacionPage />} />
             <Route path="/operaciones/operacion" element={<OperacionPage />} />
@@ -139,6 +141,7 @@ export default function AppRouter() {
             <Route path="/mantenimiento/consulta" element={<ConsultaPage />} />
             <Route path="/mantenimiento/consulta/modificaciones" element={<ModificacionesPage />} />
             <Route path="/mantenimiento/modificaciones" element={<ModificacionesPage />} />
+            <Route path="/mantenimiento/empleados" element={<MantenimientoEmpleadosPage />} />
             <Route path="/mantenimiento/migracion" element={<MigracionPage />} />
             <Route path="/mantenimiento/mantenimiento" element={<MantenimientoPage />} />
             <Route path="/mantenimiento/sistemas/rptwup" element={<RptWupPage />} />

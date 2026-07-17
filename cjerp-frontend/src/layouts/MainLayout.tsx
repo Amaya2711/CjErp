@@ -86,6 +86,7 @@ export default function MainLayout() {
   const codigoEmpleadoMostrar = (authUser?.codEmp || authUser?.idEmpleado || authUser?.empleado || "").toString();
   const codigoidperfil: number = Number(authUser?.idperfil ?? 0);
   const codigoidrol: number = Number(authUser?.idrol ?? 0);
+  const isEmployeesPage = location.pathname.startsWith("/mantenimiento/empleados");
 
   const forceLogoutToLogin = () => {
     clearAuthUser();
@@ -406,7 +407,7 @@ export default function MainLayout() {
           )}
         </aside>
 
-        <main style={styles.main}>
+        <main style={{ ...styles.main, ...(isEmployeesPage ? styles.mainNoScroll : {}) }}>
           <Outlet />
         </main>
       </div>
@@ -672,6 +673,10 @@ const styles: Record<string, React.CSSProperties> = {
     overflowY: "auto",
     overflowX: "hidden",
     overscrollBehavior: "contain",
+  },
+  mainNoScroll: {
+    overflowY: "hidden",
+    paddingBottom: 12,
   },
   footer: {
     position: "fixed",
