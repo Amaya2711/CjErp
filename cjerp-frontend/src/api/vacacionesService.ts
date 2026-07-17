@@ -179,8 +179,13 @@ export async function aprobarVacacion(payload: VacacionesAprobarRequest) {
 }
 
 export async function listarVacaciones(payload: VacacionesConsultaRequest = {}): Promise<PlanillaConsultaEstadosResponse> {
+  const params: VacacionesConsultaRequest = {
+    consulta: "vacaciones",
+    ...payload,
+  };
+
   return await httpClient.get<PlanillaConsultaEstadosResponse>("/admin/vacaciones/listar", {
-    params: payload,
+    params,
   });
 }
 
