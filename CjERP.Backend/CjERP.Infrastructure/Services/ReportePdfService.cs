@@ -291,7 +291,23 @@ public sealed class ReportePdfService : IReportePdfService
                         card.Item().Text($"Los porcentajes se calculan sobre {resumenPresentes.TotalRegistros} registros presentes.")
                             .FontSize(8)
                             .FontColor("#667085");
-                        card.Item().Element(c => RenderEstadoKpiCards(c, resumenPresentes, BuildPresentStateSectionId(), "Cada porcentaje refleja la participación dentro del conjunto PRESENTE."));
+                        card.Item().Element(c => RenderEstadoKpiCards(
+                            c,
+                            resumenPresentes,
+                            BuildPresentStateSectionId(),
+                            "Cada porcentaje refleja la participación dentro del conjunto PRESENTE.",
+                            customOrder: new[] { "PRESENTE", "TOLERANCIA", "TARDANZA", "FUERA DE HORARIO" },
+                            customTitleMap: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                            {
+                                ["PRESENTE"] = "EN HORARIO"
+                            },
+                            customDescriptionMap: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                            {
+                                ["PRESENTE"] = "Hasta las 8:35am",
+                                ["TOLERANCIA"] = "Hasta las 8:45 am",
+                                ["TARDANZA"] = "Hasta las 9am",
+                                ["FUERA DE HORARIO"] = "Despues de las 9am"
+                            }));
                     });
 
                 });
@@ -487,7 +503,23 @@ public sealed class ReportePdfService : IReportePdfService
                         card.Item().Text($"Los porcentajes se calculan sobre {resumenPresentes.TotalRegistros} registros presentes.")
                             .FontSize(8)
                             .FontColor("#667085");
-                        card.Item().Element(c => RenderEstadoKpiCards(c, resumenPresentes, BuildPresentStateSectionId(), "Cada porcentaje refleja la participación dentro del conjunto PRESENTE."));
+                        card.Item().Element(c => RenderEstadoKpiCards(
+                            c,
+                            resumenPresentes,
+                            BuildPresentStateSectionId(),
+                            "Cada porcentaje refleja la participación dentro del conjunto PRESENTE.",
+                            customOrder: new[] { "PRESENTE", "TOLERANCIA", "TARDANZA", "FUERA DE HORARIO" },
+                            customTitleMap: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                            {
+                                ["PRESENTE"] = "EN HORARIO"
+                            },
+                            customDescriptionMap: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                            {
+                                ["PRESENTE"] = "Hasta las 8:35am",
+                                ["TOLERANCIA"] = "Hasta las 8:45 am",
+                                ["TARDANZA"] = "Hasta las 9am",
+                                ["FUERA DE HORARIO"] = "Despues de las 9am"
+                            }));
                     });
 
                     column.Item().Background("#F8FAFC").Border(1).BorderColor("#D0D5DD").Padding(12).Column(card =>
@@ -498,7 +530,6 @@ public sealed class ReportePdfService : IReportePdfService
                             text.Span("Observacion: ").SemiBold();
                             text.Span("Se otorga un plazo de seis (6) días naturales, contados desde el día siguiente de recibida la presente notificación, para presentar las aclaraciones y/o documentación que considere pertinente.");
                         });
-                        card.Item().Text("Asimismo, se solicita confirmar la recepción del presente documento, sin que ello implique conformidad con su contenido.");
                     });
                 });
 
@@ -1227,12 +1258,32 @@ public sealed class ReportePdfService : IReportePdfService
         IContainer container,
         ReporteWhatsappPdfResumenDto resumen,
         string? sectionLinkId = null,
-        string? subtitle = null)
+        string? subtitle = null,
+        IReadOnlyList<string>? customOrder = null,
+        IReadOnlyDictionary<string, string>? customTitleMap = null,
+        IReadOnlyDictionary<string, string>? customDescriptionMap = null)
     {
-        var items = resumen.Resumen
-            .OrderByDescending(item => item.Cantidad)
-            .ThenBy(item => item.EstadoMarcacionTexto, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var items = resumen.Resumen.ToList();
+
+        if (customOrder is not null && customOrder.Count > 0)
+        {
+            var orderIndex = customOrder
+                .Select((state, index) => new { state, index })
+                .ToDictionary(item => item.state, item => item.index, StringComparer.OrdinalIgnoreCase);
+
+            items = items
+                .OrderBy(item => orderIndex.TryGetValue(item.EstadoMarcacionTexto, out var index) ? index : int.MaxValue)
+                .ThenByDescending(item => item.Cantidad)
+                .ThenBy(item => item.EstadoMarcacionTexto, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        else
+        {
+            items = items
+                .OrderByDescending(item => item.Cantidad)
+                .ThenBy(item => item.EstadoMarcacionTexto, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
 
         if (items.Count == 0)
         {
@@ -1278,8 +1329,15 @@ public sealed class ReportePdfService : IReportePdfService
                                 stateText = stateText.SectionLink(sectionId);
                             }
 
-                            stateText.Text(item.EstadoMarcacionTexto).SemiBold().FontSize(10).FontColor("#0F172A");
-                            label.Item().Text("Estado").FontSize(7).FontColor("#64748B");
+                            var stateTitle = customTitleMap is not null && customTitleMap.TryGetValue(item.EstadoMarcacionTexto, out var mappedTitle)
+                                ? mappedTitle
+                                : item.EstadoMarcacionTexto;
+                            var stateDescription = customDescriptionMap is not null && customDescriptionMap.TryGetValue(item.EstadoMarcacionTexto, out var mappedDescription)
+                                ? mappedDescription
+                                : "Estado";
+
+                            stateText.Text(stateTitle).SemiBold().FontSize(10).FontColor("#0F172A");
+                            label.Item().Text(stateDescription).FontSize(7).FontColor("#64748B");
                         });
 
                         row.RelativeItem().Column(barColumn =>
