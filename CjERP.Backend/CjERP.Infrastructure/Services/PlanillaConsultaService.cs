@@ -18,6 +18,7 @@ namespace CjERP.Infrastructure.Services
         private const string StoredProcedureEstados = "dbo.sp_Planilla_Consulta_Estados";
         private const string StoredProcedureAprobar = "dbo.sp_Planilla_Consulta_Aprobar";
         private const string StoredProcedureVacaciones = "dbo.sp_EmpleadoOtros_ListarVacaciones";
+        private const string StoredProcedureVacacionesTotal = "dbo.sp_EmpleadoOtros_ListarVacacionesTotal";
         private readonly ISqlCommandFactory _sqlCommandFactory;
 
         public PlanillaConsultaService(ISqlCommandFactory sqlCommandFactory)
@@ -80,6 +81,7 @@ namespace CjERP.Infrastructure.Services
             {
                 "aprobar" => StoredProcedureAprobar,
                 "vacaciones" => StoredProcedureVacaciones,
+                "vacaciones-total" => StoredProcedureVacacionesTotal,
                 _ => StoredProcedureEstados
             };
         }
@@ -305,12 +307,29 @@ WHERE Correlativo IN @Correlativos";
                         "FechaInicial",
                         "FechaFinal",
                         "IdEstado",
-                        "NombreEmpleado"
+                        "NombreEmpleado",
+                        "IdEmpleado"
                     };
 
                     return parametros.Where(parametro =>
                         !string.IsNullOrWhiteSpace(parametro.Nombre) &&
                         allowedParametersVacaciones.Contains(parametro.Nombre.Trim().TrimStart('@')));
+                }
+
+                if (string.Equals(storedProcedureName, StoredProcedureVacacionesTotal, StringComparison.OrdinalIgnoreCase))
+                {
+                    var allowedParametersVacacionesTotal = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        "FechaInicial",
+                        "FechaFinal",
+                        "NombreEmpleado",
+                        "IdEmpresa",
+                        "IdEmpleado"
+                    };
+
+                    return parametros.Where(parametro =>
+                        !string.IsNullOrWhiteSpace(parametro.Nombre) &&
+                        allowedParametersVacacionesTotal.Contains(parametro.Nombre.Trim().TrimStart('@')));
                 }
 
                 return parametros;

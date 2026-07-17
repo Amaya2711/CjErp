@@ -13,6 +13,8 @@ export type FichaEmpleadoRow = {
   meses_n?: string | number | null;
   Meses?: string | number | null;
   meses?: string | number | null;
+  CargoPrint?: string | null;
+  cargoPrint?: string | null;
   [key: string]: unknown;
 };
 

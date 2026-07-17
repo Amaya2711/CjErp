@@ -473,7 +473,7 @@ public sealed class CompensacionService : ICompensacionService
         if (string.Equals(request.Accion, "RECHAZAR", StringComparison.OrdinalIgnoreCase))
         {
             var saldoRechazo = saldoActual
-                ?? throw new InvalidOperationException("No se encontro saldo activo para reprocesar el rechazo.");
+                ?? throw new InvalidOperationException("No se encontro un saldo activo asociado para registrar el rechazo de la compensacion.");
             var cantidadDiasRechazados = Math.Max(
                 1m,
                 request.FechaFin.Date.Subtract(request.FechaInicio.Date).Days + 1);

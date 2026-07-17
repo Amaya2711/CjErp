@@ -143,6 +143,84 @@ public class ContratosController : ControllerBase
         });
     }
 
+    [HttpGet("resumen")]
+    public async Task<IActionResult> ListarResumen(CancellationToken cancellationToken)
+    {
+        var connectionString = _configuration.GetConnectionString("DefaultConnection");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                success = false,
+                message = "La cadena de conexion no esta configurada."
+            });
+        }
+
+        await using var connection = new SqlConnection(connectionString);
+
+        var empleados = (await connection.QueryAsync<ContratoEmpleadoDetalleDto>(
+            new CommandDefinition(
+                """
+                SELECT
+                    emp.IdEmpleado,
+                    ISNULL(emp.NombreEmpleado, '') AS NombreEmpleado,
+                    ISNULL(emp.NroDocumento, '') AS NroDocumento,
+                    ISNULL(emp.Correo, '') AS Correo,
+                    ISNULL(emp.Telefono, '') AS Telefono,
+                    ISNULL(empConst.ValorIni, '') AS Empresa,
+                    ISNULL(cliConst.ValorIni, '') AS Cliente,
+                    ISNULL(areaConst.ValorIni, '') AS Area,
+                    ISNULL(ubiConst.ValorIni, '') AS Ubicacion,
+                    CAST('' AS nvarchar(250)) AS Direccion,
+                    emp.IdCargo,
+                    emp.IdTipoEmpleado,
+                    emp.IdEmpRel,
+                    emp.IdEstado,
+                    CAST(emp.IdActivo AS bit) AS IdActivo,
+                    CONVERT(varchar(10), emp.FechaIniLaboral, 23) AS FechaIniLaboral,
+                    CONVERT(varchar(10), emp.FechaFinLaboral, 23) AS FechaFinLaboral,
+                    CONVERT(varchar(10), emp.FechaBaja, 23) AS FechaBaja
+                FROM dbo.EmpleadoCj emp
+                LEFT JOIN dbo.EmpleadoCjDetalle det
+                    ON emp.IdEmpleado = det.IdEmpleadoCj
+                LEFT JOIN dbo.Constante empConst
+                    ON empConst.Campo = 'EMPRESA_CJ'
+                   AND det.IdEmpresaCj = empConst.Correlativo
+                LEFT JOIN dbo.Constante cliConst
+                    ON cliConst.Campo = 'CLIENTE_CJ'
+                   AND det.IdClienteCj = cliConst.Correlativo
+                LEFT JOIN dbo.Constante areaConst
+                    ON areaConst.Campo = 'AREA_CJ'
+                   AND det.IdAreaCj = areaConst.Correlativo
+                LEFT JOIN dbo.Constante ubiConst
+                    ON ubiConst.Campo = 'UBICACION_CJ'
+                   AND det.IdUbicacionCj = ubiConst.Correlativo
+                WHERE ISNULL(emp.IdActivo, 1) = 1
+                ORDER BY ISNULL(empConst.ValorIni, ''), ISNULL(emp.NombreEmpleado, ''), emp.IdEmpleado
+                """,
+                cancellationToken: cancellationToken))).ToList();
+
+        foreach (var empleado in empleados)
+        {
+            if (string.IsNullOrWhiteSpace(empleado.Cliente))
+            {
+                empleado.Cliente = "Sin cliente";
+            }
+
+            if (string.IsNullOrWhiteSpace(empleado.Empresa))
+            {
+                empleado.Empresa = "Sin empresa";
+            }
+        }
+
+        return Ok(new
+        {
+            success = true,
+            message = "Resumen de contratos obtenido correctamente.",
+            data = empleados
+        });
+    }
+
     [HttpPost("plantilla")]
     public async Task<IActionResult> GenerarPlantilla(
         [FromBody] ContratoPlantillaGenerarRequestDto request,

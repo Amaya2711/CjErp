@@ -758,6 +758,11 @@ export default function ContratosPage() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [saving, setSaving] = useState(false);
   const autoSaveInProgressRef = useRef(false);
+  const relationHeaderScrollRef = useRef<HTMLDivElement | null>(null);
+  const relationTableScrollRef = useRef<HTMLDivElement | null>(null);
+  const relationScrollSyncRef = useRef<"header" | "table" | null>(null);
+  const [relationScrollDockGeometry, setRelationScrollDockGeometry] = useState<{ left: number; width: number } | null>(null);
+  const [relationScrollContentWidth, setRelationScrollContentWidth] = useState(0);
   const [savingRelationEmployeeId, setSavingRelationEmployeeId] = useState<number | null>(null);
   const [processingRelationKey, setProcessingRelationKey] = useState<string | null>(null);
   const [processingRelationMessage, setProcessingRelationMessage] = useState("");
@@ -951,6 +956,77 @@ export default function ContratosPage() {
       return Object.fromEntries(nextEntries) as Record<string, ContractTemplateSelection>;
     });
   }, [relationTableRows]);
+
+  useEffect(() => {
+    const header = relationHeaderScrollRef.current;
+    const table = relationTableScrollRef.current;
+    if (!header || !table) {
+      return;
+    }
+
+    const syncScroll = (source: "header" | "table") => {
+      if (relationScrollSyncRef.current === source) {
+        relationScrollSyncRef.current = null;
+        return;
+      }
+
+      const sourceNode = source === "header" ? header : table;
+      const targetNode = source === "header" ? table : header;
+      relationScrollSyncRef.current = source;
+      targetNode.scrollLeft = sourceNode.scrollLeft;
+    };
+
+    const handleHeaderScroll = () => syncScroll("header");
+    const handleTableScroll = () => syncScroll("table");
+
+    header.addEventListener("scroll", handleHeaderScroll, { passive: true });
+    table.addEventListener("scroll", handleTableScroll, { passive: true });
+
+    return () => {
+      header.removeEventListener("scroll", handleHeaderScroll);
+      table.removeEventListener("scroll", handleTableScroll);
+    };
+  }, [activeTab, relationTableRows.length]);
+
+  useEffect(() => {
+    if (activeTab !== "relacion") {
+      setRelationScrollDockGeometry(null);
+      setRelationScrollContentWidth(0);
+      return;
+    }
+
+    const updateDockGeometry = () => {
+      const tableWrap = relationTableScrollRef.current;
+      if (!tableWrap) {
+        return;
+      }
+
+      const rect = tableWrap.getBoundingClientRect();
+      setRelationScrollDockGeometry({
+        left: rect.left,
+        width: rect.width,
+      });
+      setRelationScrollContentWidth(Math.max(tableWrap.scrollWidth, Math.ceil(rect.width) + 1));
+    };
+
+    updateDockGeometry();
+
+    const tableWrap = relationTableScrollRef.current;
+    let resizeObserver: ResizeObserver | null = null;
+
+    if (tableWrap && typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(() => {
+        updateDockGeometry();
+      });
+      resizeObserver.observe(tableWrap);
+    }
+
+    window.addEventListener("resize", updateDockGeometry);
+    return () => {
+      window.removeEventListener("resize", updateDockGeometry);
+      resizeObserver?.disconnect();
+    };
+  }, [activeTab, relationTableRows.length]);
 
   const getRelationRowKey = (item: { key: string; idEmpleado: number | null }) =>
     item.idEmpleado && item.idEmpleado > 0 ? String(item.idEmpleado) : item.key;
@@ -1611,7 +1687,7 @@ export default function ContratosPage() {
                   <span style={styles.historyCount}>{filteredAndSortedRelationRows.length} registro(s)</span>
                 </div>
 
-                <div style={styles.tableWrap}>
+                <div ref={relationTableScrollRef} style={styles.tableWrap}>
                   <table style={styles.table}>
                     <thead>
                       <tr>
@@ -1929,6 +2005,24 @@ export default function ContratosPage() {
                 </div>
               </div>
             )}
+            {activeTab === "relacion" ? (
+              <div
+                ref={relationHeaderScrollRef}
+                style={{
+                  ...styles.fixedTableScrollDock,
+                  left: relationScrollDockGeometry?.left ?? 24,
+                  width: relationScrollDockGeometry?.width ?? "calc(100vw - 48px)",
+                }}
+                aria-label="Scroll horizontal del grid"
+              >
+                <div
+                  style={{
+                    ...styles.tableScrollHeaderInner,
+                    width: relationScrollContentWidth || "100%",
+                  }}
+                />
+              </div>
+            ) : null}
           </>
         ) : (
           <>
@@ -2345,6 +2439,7 @@ function getRelationPendingApprovalLabel(item: Pick<RelationTableRow, "nuevaFech
 const styles: Record<string, CSSProperties> = {
   page: {
     padding: 24,
+    paddingBottom: 96,
     background: "#f5f7fb",
     minHeight: "100%",
     color: "#0f172a",
@@ -2777,6 +2872,24 @@ const styles: Record<string, CSSProperties> = {
   },
   tableWrap: {
     overflowX: "auto",
+  },
+  tableScrollHeaderInner: {
+    minWidth: 1380,
+    width: "100%",
+    height: 1,
+  },
+  fixedTableScrollDock: {
+    position: "fixed",
+    left: 24,
+    right: 24,
+    bottom: 58,
+    zIndex: 20,
+    overflowX: "auto",
+    overflowY: "hidden",
+    border: "1px solid #dbe3ef",
+    borderRadius: 999,
+    background: "#f8fafc",
+    boxShadow: "0 8px 22px rgba(15, 23, 42, 0.08)",
   },
   table: {
     width: "100%",
