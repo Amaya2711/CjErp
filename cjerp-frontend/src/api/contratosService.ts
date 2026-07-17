@@ -102,6 +102,11 @@ export async function obtenerContratoEmpleado(idEmpleado: number): Promise<Contr
   };
 }
 
+export async function listarContratosResumen(): Promise<ContratoEmpleadoDetalle[]> {
+  const response = await httpClient.get<ContratoEmpleadoDetalle[]>("/recursoshumanos/contratos/resumen");
+  return Array.isArray(response) ? response : [];
+}
+
 export async function renovarContratoEmpleado(payload: RenovarContratoRequest) {
   return await httpClient.put<{
     idEmpleado: number;
