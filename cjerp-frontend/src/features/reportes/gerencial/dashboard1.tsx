@@ -1037,9 +1037,6 @@ export default function Dashboard1Page() {
                       </tbody>
                     </table>
                   </div>
-                  <div style={styles.recordsFooterNote}>
-                    Registros mostrados: <strong>{sortedChartData.length}</strong>
-                  </div>
                 </div>
               </div>
           )}
@@ -1357,10 +1354,6 @@ export default function Dashboard1Page() {
                   <span style={styles.levelModalHeroLabel}>Total convertido PEN</span>
                   <strong style={styles.levelModalHeroValue}>{formatCurrency(totalConvertedToPen, "PEN")}</strong>
                 </div>
-                <div style={styles.levelModalHeroAccent}>
-                  <span style={styles.levelModalHeroLabelAccent}>Registros mostrados</span>
-                  <strong style={styles.levelModalHeroValueAccent}>{sortedChartData.length}</strong>
-                </div>
               </div>
 
               <div style={styles.levelModalGrid}>
@@ -1449,7 +1442,7 @@ export default function Dashboard1Page() {
                 </table>
               </div>
               <div style={styles.recordsFooterNote}>
-                Registros mostrados: <strong>{sortedChartData.length}</strong>
+                Registros seleccionados: <strong>{sortedRows.length}</strong>
               </div>
             </div>
           </div>
@@ -2140,14 +2133,6 @@ const styles: Record<string, React.CSSProperties> = {
     display: "grid",
     gap: 8,
   },
-  levelModalHeroAccent: {
-    borderRadius: 20,
-    border: "1px solid #1D4ED8",
-    background: "linear-gradient(135deg, #DBEAFE, #BFDBFE 55%, #93C5FD)",
-    padding: 18,
-    display: "grid",
-    gap: 8,
-  },
   levelModalHeroLabel: {
     fontSize: 12,
     fontWeight: 800,
@@ -2226,7 +2211,6 @@ const styles: Record<string, React.CSSProperties> = {
     maxHeight: "48vh",
   },
   recordsFooterNote: {
-    marginTop: 12,
     padding: "10px 14px",
     borderRadius: 14,
     background: "#F8FAFC",
