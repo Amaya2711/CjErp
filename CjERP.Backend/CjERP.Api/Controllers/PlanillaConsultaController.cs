@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
 using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.Mvc;
 using System.Diagnostics;
@@ -20,6 +21,7 @@ namespace CjERP.Api.Controllers
         private static readonly string[] RequiredParameters = ["IdCargo", "IdEmpleado"];
         private static readonly string[] RequiredParametersAprobar = ["IdCargo", "IdEmpleado", "Estados"];
         private static readonly string[] RequiredParametersVacaciones = [];
+        private static readonly string[] RequiredParametersPagadosDashboard = [];
 
         private readonly IPlanillaConsultaService _planillaConsultaService;
         private readonly ILogger<PlanillaConsultaController> _logger;
@@ -57,6 +59,8 @@ namespace CjERP.Api.Controllers
                 providedParameters[normalizedName] = parametro.Valor;
             }
 
+            EnsureClaimFallback(providedParameters);
+
             var providedNames = new HashSet<string>(
                 providedParameters.Keys,
                 StringComparer.OrdinalIgnoreCase);
@@ -65,7 +69,9 @@ namespace CjERP.Api.Controllers
                 ? RequiredParametersAprobar
                 : string.Equals(consulta, "vacaciones", StringComparison.OrdinalIgnoreCase)
                     ? RequiredParametersVacaciones
-                    : RequiredParameters;
+                    : string.Equals(consulta, "pagados-dashboard", StringComparison.OrdinalIgnoreCase)
+                        ? RequiredParametersPagadosDashboard
+                        : RequiredParameters;
 
             var missingParameters = requiredParameters
                 .Where(requiredName => !providedNames.Contains(requiredName))
@@ -101,6 +107,8 @@ namespace CjERP.Api.Controllers
                     parametros,
                     consulta,
                     request?.MaxRows,
+                    request?.PageNumber,
+                    request?.PageSize,
                     cancellationToken);
                 stopwatch.Stop();
 
@@ -138,8 +146,54 @@ namespace CjERP.Api.Controllers
             {
                 "aprobar" => "sp_Planilla_Consulta_Aprobar",
                 "vacaciones" => "sp_EmpleadoOtros_ListarVacaciones",
+                "pagados-dashboard" => "sp_Planilla_ConsultarPagados_Dsh",
                 _ => "sp_Planilla_Consulta_Estados"
             };
+        }
+
+        private void EnsureClaimFallback(Dictionary<string, string?> providedParameters)
+        {
+            if (!providedParameters.TryGetValue("IdEmpleado", out var idEmpleado) || string.IsNullOrWhiteSpace(idEmpleado))
+            {
+                var resolvedIdEmpleado = ResolveNumericClaimValue(
+                    User.FindFirstValue("IdEmpleado"),
+                    User.FindFirstValue("CodEmp"),
+                    User.FindFirstValue("codEmp"),
+                    User.FindFirstValue(ClaimTypes.NameIdentifier),
+                    User.FindFirstValue("IdUsuario"));
+
+                if (!string.IsNullOrWhiteSpace(resolvedIdEmpleado))
+                {
+                    providedParameters["IdEmpleado"] = resolvedIdEmpleado;
+                }
+            }
+
+            if (!providedParameters.TryGetValue("IdCargo", out var idCargo) || string.IsNullOrWhiteSpace(idCargo))
+            {
+                var resolvedIdCargo = ResolveNumericClaimValue(
+                    User.FindFirstValue("IdCargo"),
+                    User.FindFirstValue("idCargo"),
+                    User.FindFirstValue("IdRol"),
+                    User.FindFirstValue("idrol"));
+
+                if (!string.IsNullOrWhiteSpace(resolvedIdCargo))
+                {
+                    providedParameters["IdCargo"] = resolvedIdCargo;
+                }
+            }
+        }
+
+        private static string? ResolveNumericClaimValue(params string?[] values)
+        {
+            foreach (var value in values)
+            {
+                if (int.TryParse(value, out var parsed) && parsed > 0)
+                {
+                    return parsed.ToString();
+                }
+            }
+
+            return null;
         }
     }
 }

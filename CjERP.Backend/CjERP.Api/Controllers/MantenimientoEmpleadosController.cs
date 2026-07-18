@@ -109,20 +109,12 @@ public class MantenimientoEmpleadosController : ControllerBase
 
         await using var connection = new SqlConnection(connectionString);
 
-        var constantes = (await connection.QueryAsync<LookupItem>(
-            new CommandDefinition(
-                """
-                SELECT
-                    Campo,
-                    CAST(Correlativo AS nvarchar(50)) AS Value,
-                    ISNULL(ValorIni, '') AS Label,
-                    CAST('' AS nvarchar(50)) AS Codigo,
-                    ISNULL(Correlativo, 0) AS Orden
-                FROM dbo.Constante
-                WHERE Campo IN ('EMPRESA_CJ', 'CLIENTE_CJ', 'AREA_CJ', 'UBICACION_CJ')
-                ORDER BY Campo, ISNULL(Correlativo, 0), ISNULL(ValorIni, '')
-                """,
-                cancellationToken: cancellationToken))).ToList();
+        var empresas = await ObtenerConstantesPorCampoAsync(connection, "EMPRESA_CJ", cancellationToken);
+        var clientes = await ObtenerConstantesPorCampoAsync(connection, "CLIENTE_CJ", cancellationToken);
+        var areas = await ObtenerConstantesPorCampoAsync(connection, "AREA_CJ", cancellationToken);
+        var ubicaciones = await ObtenerConstantesPorCampoAsync(connection, "UBICACION_CJ", cancellationToken);
+        var sexos = await ObtenerConstantesPorCampoAsync(connection, "SEXO", cancellationToken);
+        var tiposDocumento = await ObtenerConstantesPorCampoAsync(connection, "TIPO_DOC", cancellationToken);
 
         var responsables = await ObtenerValidadoresAsync(connection, 1, "RESPONSABLE", cancellationToken);
         var segundoValidadores = await ObtenerValidadoresAsync(connection, 2, "SEGUNDO_VALIDADOR", cancellationToken);
@@ -134,10 +126,12 @@ public class MantenimientoEmpleadosController : ControllerBase
             message = "Lookups obtenidos correctamente.",
             data = new
             {
-                empresas = constantes.Where(x => x.Campo == "EMPRESA_CJ").ToList(),
-                clientes = constantes.Where(x => x.Campo == "CLIENTE_CJ").ToList(),
-                areas = constantes.Where(x => x.Campo == "AREA_CJ").ToList(),
-                ubicaciones = constantes.Where(x => x.Campo == "UBICACION_CJ").ToList(),
+                empresas,
+                clientes,
+                areas,
+                ubicaciones,
+                sexos,
+                tiposDocumento,
                 responsables,
                 segundoValidadores,
                 tercerValidadores
@@ -354,6 +348,7 @@ public class MantenimientoEmpleadosController : ControllerBase
         var usuario = GetCurrentUserName();
         var fechaActual = DateTime.Now.Date;
         var auditoriaVacaciones = new List<AuditoriaCambioDto>();
+        var auditoriaLegacy = new List<AuditoriaCambioDto>();
         EmpleadoCrudDto? after;
 
         await using (var transaction = connection.BeginTransaction())
@@ -375,6 +370,7 @@ public class MantenimientoEmpleadosController : ControllerBase
                     """
                     UPDATE dbo.EmpleadoCj
                     SET IdActivo = 0,
+                        IdEstado = 0,
                         FechaFinLaboral = @FechaActual,
                         FechaBaja = @FechaActual
                     WHERE IdEmpleado = @IdEmpleado;
@@ -387,6 +383,15 @@ public class MantenimientoEmpleadosController : ControllerBase
                     transaction: transaction,
                     commandType: CommandType.Text,
                     cancellationToken: cancellationToken));
+
+            auditoriaLegacy.AddRange(
+                await ResetLegacySeguridadPorBajaAsync(
+                    connection,
+                    before,
+                    idEmpleado,
+                    usuario,
+                    transaction,
+                    cancellationToken));
 
             auditoriaVacaciones.AddRange(
                 await ResetVacacionesPorBajaAsync(connection, idEmpleado, usuario, fechaActual, transaction, cancellationToken));
@@ -404,6 +409,7 @@ public class MantenimientoEmpleadosController : ControllerBase
                 string.Equals(cambio.Campo, "FechaFinLaboral", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(cambio.Campo, "FechaBaja", StringComparison.OrdinalIgnoreCase))
             .ToList();
+        auditoria.AddRange(auditoriaLegacy);
         auditoria.AddRange(auditoriaVacaciones);
 
         await RegistrarAuditoriaAsync(auditoria, cancellationToken);
@@ -497,6 +503,34 @@ public class MantenimientoEmpleadosController : ControllerBase
             .ToList();
     }
 
+    private static async Task<List<LookupItem>> ObtenerConstantesPorCampoAsync(
+        SqlConnection connection,
+        string campo,
+        CancellationToken cancellationToken)
+    {
+        var rows = await connection.QueryAsync(
+            new CommandDefinition(
+                "sp_Constante_ListarPorCampo",
+                new { Campo = campo },
+                commandType: CommandType.StoredProcedure,
+                cancellationToken: cancellationToken));
+
+        return rows
+            .Select(row =>
+            {
+                var values = (IDictionary<string, object>)row;
+                return new LookupItem
+                {
+                    Value = GetString(values, "Value", "value", "Correlativo", "correlativo"),
+                    Label = GetString(values, "Label", "label", "ValorIni", "valorIni", "Valor", "valor"),
+                    Codigo = GetString(values, "Codigo", "codigo"),
+                    Campo = campo,
+                    Orden = GetInt(values, "Orden", "orden") ?? 0
+                };
+            })
+            .ToList();
+    }
+
     private static async Task<string?> ValidarDocumentoActivoAsync(
         SqlConnection connection,
         int? idEmpleado,
@@ -564,9 +598,294 @@ public class MantenimientoEmpleadosController : ControllerBase
 
         try
         {
-            var idEmpleado = await connection.QuerySingleAsync<int>(
-                new CommandDefinition(
+            var tieneIdSexo = await ColumnExistsAsync(connection, "dbo.EmpleadoCj", "IdSexo", transaction, cancellationToken);
+            var tieneSexo = await ColumnExistsAsync(connection, "dbo.EmpleadoCj", "Sexo", transaction, cancellationToken);
+            var tieneIdDocumento = await ColumnExistsAsync(connection, "dbo.EmpleadoCj", "IdDocumento", transaction, cancellationToken);
+            var insertSql = tieneIdSexo && tieneIdDocumento
+                ? """
+                    DECLARE @IdEmpleado INT;
+
+                    SELECT @IdEmpleado = ISNULL(MAX(IdEmpleado), 0) + 1
+                    FROM dbo.EmpleadoCj WITH (UPDLOCK, HOLDLOCK);
+
+                    INSERT INTO dbo.EmpleadoCj
+                    (
+                        IdEmpleado,
+                        NombreEmpleado,
+                        InicialesEmpleado,
+                        IdCargo,
+                        IdDocumento,
+                        IdSexo,
+                        NroDocumento,
+                        Telefono,
+                        Correo,
+                        UsuarioCre,
+                        FechaCreacion,
+                        IdEstado,
+                        Direccion,
+                        IdPuesto,
+                        FechaIniLaboral,
+                        FechaFinLaboral,
+                        IdActivo,
+                        IdAptoBeneficio,
+                        IdEmpRel,
+                        IdEstable,
+                        IdEmpleadoAnt
+                    )
+                    VALUES
+                    (
+                        @IdEmpleado,
+                        @NombreEmpleado,
+                        '',
+                        50,
+                        @IdDocumento,
+                        @IdSexo,
+                        @NroDocumento,
+                        @Telefono,
+                        @Correo,
+                        @Usuario,
+                        SYSDATETIME(),
+                        9,
+                        @Direccion,
+                        @IdPuesto,
+                        @FechaIniLaboral,
+                        @FechaFinLaboral,
+                        1,
+                        1,
+                        0,
+                        0,
+                        0
+                    );
+
+                    SELECT @IdEmpleado;
                     """
+                : tieneIdSexo
+                ? """
+                    DECLARE @IdEmpleado INT;
+
+                    SELECT @IdEmpleado = ISNULL(MAX(IdEmpleado), 0) + 1
+                    FROM dbo.EmpleadoCj WITH (UPDLOCK, HOLDLOCK);
+
+                    INSERT INTO dbo.EmpleadoCj
+                    (
+                        IdEmpleado,
+                        NombreEmpleado,
+                        InicialesEmpleado,
+                        IdCargo,
+                        IdSexo,
+                        NroDocumento,
+                        Telefono,
+                        Correo,
+                        UsuarioCre,
+                        FechaCreacion,
+                        IdEstado,
+                        Direccion,
+                        IdPuesto,
+                        FechaIniLaboral,
+                        FechaFinLaboral,
+                        IdActivo,
+                        IdAptoBeneficio,
+                        IdEmpRel,
+                        IdEstable,
+                        IdEmpleadoAnt
+                    )
+                    VALUES
+                    (
+                        @IdEmpleado,
+                        @NombreEmpleado,
+                        '',
+                        50,
+                        @IdSexo,
+                        @NroDocumento,
+                        @Telefono,
+                        @Correo,
+                        @Usuario,
+                        SYSDATETIME(),
+                        9,
+                        @Direccion,
+                        @IdPuesto,
+                        @FechaIniLaboral,
+                        @FechaFinLaboral,
+                        1,
+                        1,
+                        0,
+                        0,
+                        0
+                    );
+
+                    SELECT @IdEmpleado;
+                    """
+                : tieneSexo && tieneIdDocumento
+                ? """
+                    DECLARE @IdEmpleado INT;
+
+                    SELECT @IdEmpleado = ISNULL(MAX(IdEmpleado), 0) + 1
+                    FROM dbo.EmpleadoCj WITH (UPDLOCK, HOLDLOCK);
+
+                    INSERT INTO dbo.EmpleadoCj
+                    (
+                        IdEmpleado,
+                        NombreEmpleado,
+                        InicialesEmpleado,
+                        IdCargo,
+                        IdDocumento,
+                        NroDocumento,
+                        Telefono,
+                        Correo,
+                        Sexo,
+                        UsuarioCre,
+                        FechaCreacion,
+                        IdEstado,
+                        Direccion,
+                        IdPuesto,
+                        FechaIniLaboral,
+                        FechaFinLaboral,
+                        IdActivo,
+                        IdAptoBeneficio,
+                        IdEmpRel,
+                        IdEstable,
+                        IdEmpleadoAnt
+                    )
+                    VALUES
+                    (
+                        @IdEmpleado,
+                        @NombreEmpleado,
+                        '',
+                        50,
+                        @IdDocumento,
+                        @NroDocumento,
+                        @Telefono,
+                        @Correo,
+                        @Sexo,
+                        @Usuario,
+                        SYSDATETIME(),
+                        9,
+                        @Direccion,
+                        @IdPuesto,
+                        @FechaIniLaboral,
+                        @FechaFinLaboral,
+                        1,
+                        1,
+                        0,
+                        0,
+                        0
+                    );
+
+                    SELECT @IdEmpleado;
+                    """
+                : tieneSexo
+                ? """
+                    DECLARE @IdEmpleado INT;
+
+                    SELECT @IdEmpleado = ISNULL(MAX(IdEmpleado), 0) + 1
+                    FROM dbo.EmpleadoCj WITH (UPDLOCK, HOLDLOCK);
+
+                    INSERT INTO dbo.EmpleadoCj
+                    (
+                        IdEmpleado,
+                        NombreEmpleado,
+                        InicialesEmpleado,
+                        IdCargo,
+                        NroDocumento,
+                        Telefono,
+                        Correo,
+                        Sexo,
+                        UsuarioCre,
+                        FechaCreacion,
+                        IdEstado,
+                        Direccion,
+                        IdPuesto,
+                        FechaIniLaboral,
+                        FechaFinLaboral,
+                        IdActivo,
+                        IdAptoBeneficio,
+                        IdEmpRel,
+                        IdEstable,
+                        IdEmpleadoAnt
+                    )
+                    VALUES
+                    (
+                        @IdEmpleado,
+                        @NombreEmpleado,
+                        '',
+                        50,
+                        @NroDocumento,
+                        @Telefono,
+                        @Correo,
+                        @Sexo,
+                        @Usuario,
+                        SYSDATETIME(),
+                        9,
+                        @Direccion,
+                        @IdPuesto,
+                        @FechaIniLaboral,
+                        @FechaFinLaboral,
+                        1,
+                        1,
+                        0,
+                        0,
+                        0
+                    );
+
+                    SELECT @IdEmpleado;
+                    """
+                : tieneIdDocumento
+                ? """
+                    DECLARE @IdEmpleado INT;
+
+                    SELECT @IdEmpleado = ISNULL(MAX(IdEmpleado), 0) + 1
+                    FROM dbo.EmpleadoCj WITH (UPDLOCK, HOLDLOCK);
+
+                    INSERT INTO dbo.EmpleadoCj
+                    (
+                        IdEmpleado,
+                        NombreEmpleado,
+                        InicialesEmpleado,
+                        IdCargo,
+                        IdDocumento,
+                        NroDocumento,
+                        Telefono,
+                        Correo,
+                        UsuarioCre,
+                        FechaCreacion,
+                        IdEstado,
+                        Direccion,
+                        IdPuesto,
+                        FechaIniLaboral,
+                        FechaFinLaboral,
+                        IdActivo,
+                        IdAptoBeneficio,
+                        IdEmpRel,
+                        IdEstable,
+                        IdEmpleadoAnt
+                    )
+                    VALUES
+                    (
+                        @IdEmpleado,
+                        @NombreEmpleado,
+                        '',
+                        50,
+                        @IdDocumento,
+                        @NroDocumento,
+                        @Telefono,
+                        @Correo,
+                        @Usuario,
+                        SYSDATETIME(),
+                        9,
+                        @Direccion,
+                        @IdPuesto,
+                        @FechaIniLaboral,
+                        @FechaFinLaboral,
+                        1,
+                        1,
+                        0,
+                        0,
+                        0
+                    );
+
+                    SELECT @IdEmpleado;
+                    """
+                : """
                     DECLARE @IdEmpleado INT;
 
                     SELECT @IdEmpleado = ISNULL(MAX(IdEmpleado), 0) + 1
@@ -618,19 +937,14 @@ public class MantenimientoEmpleadosController : ControllerBase
                     );
 
                     SELECT @IdEmpleado;
-                    """,
-                    new
-                    {
-                        NombreEmpleado = request.NombreEmpleado.Trim(),
-                        NroDocumento = NormalizeOptionalString(request.NroDocumento),
-                        Telefono = NormalizeOptionalString(request.Telefono),
-                        Correo = NormalizeOptionalString(request.Correo),
-                        Usuario = usuario,
-                        Direccion = NormalizeOptionalString(request.Direccion),
-                        IdPuesto = request.IdPuesto,
-                        FechaIniLaboral = ParseNullableDate(request.FechaIniLaboral),
-                        FechaFinLaboral = ParseNullableDate(request.FechaFinLaboral)
-                    },
+                    """;
+
+            var parameters = BuildUpsertParameters(request, usuario);
+
+            var idEmpleado = await connection.QuerySingleAsync<int>(
+                new CommandDefinition(
+                    insertSql,
+                    parameters,
                     transaction: transaction,
                     commandType: CommandType.Text,
                     cancellationToken: cancellationToken));
@@ -657,9 +971,92 @@ public class MantenimientoEmpleadosController : ControllerBase
 
         try
         {
-            await connection.ExecuteAsync(
-                new CommandDefinition(
+            var tieneIdSexo = await ColumnExistsAsync(connection, "dbo.EmpleadoCj", "IdSexo", transaction, cancellationToken);
+            var tieneSexo = await ColumnExistsAsync(connection, "dbo.EmpleadoCj", "Sexo", transaction, cancellationToken);
+            var tieneIdDocumento = await ColumnExistsAsync(connection, "dbo.EmpleadoCj", "IdDocumento", transaction, cancellationToken);
+            var updateSql = tieneIdSexo && tieneIdDocumento
+                ? """
+                    UPDATE dbo.EmpleadoCj
+                    SET NombreEmpleado = @NombreEmpleado,
+                        IdDocumento = @IdDocumento,
+                        IdSexo = @IdSexo,
+                        NroDocumento = @NroDocumento,
+                        Telefono = @Telefono,
+                        Correo = @Correo,
+                        Direccion = @Direccion,
+                        IdPuesto = @IdPuesto,
+                        FechaIniLaboral = @FechaIniLaboral,
+                        FechaFinLaboral = @FechaFinLaboral,
+                        IdCargo = 50,
+                        IdActivo = 1
+                    WHERE IdEmpleado = @IdEmpleado;
                     """
+                : tieneIdSexo
+                ? """
+                    UPDATE dbo.EmpleadoCj
+                    SET NombreEmpleado = @NombreEmpleado,
+                        IdSexo = @IdSexo,
+                        NroDocumento = @NroDocumento,
+                        Telefono = @Telefono,
+                        Correo = @Correo,
+                        Direccion = @Direccion,
+                        IdPuesto = @IdPuesto,
+                        FechaIniLaboral = @FechaIniLaboral,
+                        FechaFinLaboral = @FechaFinLaboral,
+                        IdCargo = 50,
+                        IdActivo = 1
+                    WHERE IdEmpleado = @IdEmpleado;
+                    """
+                : tieneSexo && tieneIdDocumento
+                ? """
+                    UPDATE dbo.EmpleadoCj
+                    SET NombreEmpleado = @NombreEmpleado,
+                        IdDocumento = @IdDocumento,
+                        NroDocumento = @NroDocumento,
+                        Telefono = @Telefono,
+                        Correo = @Correo,
+                        Sexo = @Sexo,
+                        Direccion = @Direccion,
+                        IdPuesto = @IdPuesto,
+                        FechaIniLaboral = @FechaIniLaboral,
+                        FechaFinLaboral = @FechaFinLaboral,
+                        IdCargo = 50,
+                        IdActivo = 1
+                    WHERE IdEmpleado = @IdEmpleado;
+                    """
+                : tieneSexo
+                ? """
+                    UPDATE dbo.EmpleadoCj
+                    SET NombreEmpleado = @NombreEmpleado,
+                        NroDocumento = @NroDocumento,
+                        Telefono = @Telefono,
+                        Correo = @Correo,
+                        Sexo = @Sexo,
+                        Direccion = @Direccion,
+                        IdPuesto = @IdPuesto,
+                        FechaIniLaboral = @FechaIniLaboral,
+                        FechaFinLaboral = @FechaFinLaboral,
+                        IdCargo = 50,
+                        IdActivo = 1
+                    WHERE IdEmpleado = @IdEmpleado;
+                    """
+                : tieneIdDocumento
+                ? """
+                    UPDATE dbo.EmpleadoCj
+                    SET NombreEmpleado = @NombreEmpleado,
+                        IdDocumento = @IdDocumento,
+                        NroDocumento = @NroDocumento,
+                        Telefono = @Telefono,
+                        Correo = @Correo,
+                        Direccion = @Direccion,
+                        IdPuesto = @IdPuesto,
+                        FechaIniLaboral = @FechaIniLaboral,
+                        FechaFinLaboral = @FechaFinLaboral,
+                        IdCargo = 50,
+                        IdActivo = 1
+                    WHERE IdEmpleado = @IdEmpleado;
+                    """
+                : """
                     UPDATE dbo.EmpleadoCj
                     SET NombreEmpleado = @NombreEmpleado,
                         NroDocumento = @NroDocumento,
@@ -672,19 +1069,15 @@ public class MantenimientoEmpleadosController : ControllerBase
                         IdCargo = 50,
                         IdActivo = 1
                     WHERE IdEmpleado = @IdEmpleado;
-                    """,
-                    new
-                    {
-                        IdEmpleado = idEmpleado,
-                        NombreEmpleado = request.NombreEmpleado.Trim(),
-                        NroDocumento = NormalizeOptionalString(request.NroDocumento),
-                        Telefono = NormalizeOptionalString(request.Telefono),
-                        Correo = NormalizeOptionalString(request.Correo),
-                        Direccion = NormalizeOptionalString(request.Direccion),
-                        IdPuesto = request.IdPuesto,
-                        FechaIniLaboral = ParseNullableDate(request.FechaIniLaboral),
-                        FechaFinLaboral = ParseNullableDate(request.FechaFinLaboral)
-                    },
+                    """;
+
+            var parameters = BuildUpsertParameters(request, usuario);
+            parameters.Add("@IdEmpleado", idEmpleado, DbType.Int32);
+
+            await connection.ExecuteAsync(
+                new CommandDefinition(
+                    updateSql,
+                    parameters,
                     transaction: transaction,
                     commandType: CommandType.Text,
                     cancellationToken: cancellationToken));
@@ -797,6 +1190,9 @@ public class MantenimientoEmpleadosController : ControllerBase
     {
         var parameters = new DynamicParameters();
         parameters.Add("@NombreEmpleado", request.NombreEmpleado.Trim(), DbType.String);
+        parameters.Add("@Sexo", NormalizeOptionalString(request.Sexo), DbType.String);
+        parameters.Add("@IdSexo", ResolveSexoId(request), DbType.Int32);
+        parameters.Add("@IdDocumento", request.IdDocumento, DbType.Int32);
         parameters.Add("@NroDocumento", NormalizeOptionalString(request.NroDocumento), DbType.String);
         parameters.Add("@Telefono", NormalizeOptionalString(request.Telefono), DbType.String);
         parameters.Add("@Correo", NormalizeOptionalString(request.Correo), DbType.String);
@@ -821,6 +1217,9 @@ public class MantenimientoEmpleadosController : ControllerBase
         {
             IdEmpleado = GetInt(values, "IdEmpleado", "idEmpleado", "IdEmpleadoCj", "idEmpleadoCj") ?? 0,
             NombreEmpleado = GetString(values, "NombreEmpleado", "nombreEmpleado"),
+            Sexo = GetString(values, "Sexo", "sexo"),
+            TipoDoc = GetString(values, "TipoDoc", "tipodoc", "TipoDocumento", "tipodocumento"),
+            IdSexo = GetInt(values, "IdSexo", "idsexo"),
             NroDocumento = GetString(values, "NroDocumento", "nroDocumento"),
             Telefono = GetString(values, "Telefono", "telefono"),
             Correo = GetString(values, "Correo", "correo"),
@@ -838,6 +1237,7 @@ public class MantenimientoEmpleadosController : ControllerBase
             CargoPrint = GetString(values, "CargoPrint", "cargoPrint"),
             Estado = GetString(values, "Estado", "estado"),
             IdEstado = GetInt(values, "IdEstado", "idEstado"),
+            IdDocumento = GetInt(values, "IdDocumento", "iddocumento"),
             IdActivo = GetInt(values, "IdActivo", "idActivo"),
             IdEmpresaCj = GetInt(values, "IdEmpresaCj", "idEmpresaCj"),
             IdClienteCj = GetInt(values, "IdClienteCj", "idClienteCj"),
@@ -864,6 +1264,16 @@ public class MantenimientoEmpleadosController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.NroDocumento))
         {
             return "El numero de documento es obligatorio.";
+        }
+
+        if (ResolveSexoId(request) is null or <= 0)
+        {
+            return "El sexo del empleado es obligatorio.";
+        }
+
+        if (request.IdDocumento is null or <= 0)
+        {
+            return "El tipo de documento es obligatorio.";
         }
 
         if (string.IsNullOrWhiteSpace(request.Telefono))
@@ -933,6 +1343,18 @@ public class MantenimientoEmpleadosController : ControllerBase
     {
         var cleaned = value?.Trim();
         return string.IsNullOrWhiteSpace(cleaned) ? null : cleaned;
+    }
+
+    private static int? ResolveSexoId(EmpleadoCrudUpsertRequest request)
+    {
+        if (request.IdSexo is > 0)
+        {
+            return request.IdSexo;
+        }
+
+        return int.TryParse(request.Sexo, out var parsed) && parsed > 0
+            ? parsed
+            : null;
     }
 
     private static DateTime? ParseNullableDate(string? value)
@@ -1007,20 +1429,27 @@ public class MantenimientoEmpleadosController : ControllerBase
 
         try
         {
+            var empleadoCjTieneSexo = await ColumnExistsAsync(connection, "dbo.EmpleadoCj", "Sexo", transaction, cancellationToken);
+            var empleadoCjTieneIdDocumento = await ColumnExistsAsync(connection, "dbo.EmpleadoCj", "IdDocumento", transaction, cancellationToken);
+            var selectEmpleadoSql = $"""
+                SELECT
+                    IdEmpleado,
+                    NombreEmpleado,
+                    {(empleadoCjTieneSexo ? "Sexo" : "CAST(NULL AS NVARCHAR(50)) AS Sexo")},
+                    {(empleadoCjTieneIdDocumento ? "IdDocumento" : "CAST(NULL AS INT) AS IdDocumento")},
+                    NroDocumento,
+                    Telefono,
+                    Correo,
+                    Direccion,
+                    FechaIniLaboral,
+                    IdEmpRel
+                FROM dbo.EmpleadoCj
+                WHERE IdEmpleado = @IdEmpleado;
+                """;
+
             var empleado = await connection.QueryFirstOrDefaultAsync<EmpleadoAprobacionData>(
                 new CommandDefinition(
-                    """
-                    SELECT
-                        IdEmpleado,
-                        NombreEmpleado,
-                        NroDocumento,
-                        Telefono,
-                        Correo,
-                        Direccion,
-                        FechaIniLaboral
-                    FROM dbo.EmpleadoCj
-                    WHERE IdEmpleado = @IdEmpleado;
-                    """,
+                    selectEmpleadoSql,
                     new { IdEmpleado = idEmpleado },
                     transaction: transaction,
                     cancellationToken: cancellationToken));
@@ -1042,7 +1471,8 @@ public class MantenimientoEmpleadosController : ControllerBase
                     transaction: transaction,
                     cancellationToken: cancellationToken));
 
-            await EnsureUsuarioEmpleadoAsync(connection, empleado, idAprobador, transaction, cancellationToken);
+            var idEmpleadoLegacy = await EnsureLegacyEmpleadoAsync(connection, empleado, transaction, cancellationToken);
+            await EnsureUsuarioEmpleadoAsync(connection, empleado, idEmpleadoLegacy, transaction, cancellationToken);
             await GenerarAsistenciaAprobacionAsync(connection, empleado, idAprobador, transaction, cancellationToken);
 
             await transaction.CommitAsync(cancellationToken);
@@ -1057,23 +1487,29 @@ public class MantenimientoEmpleadosController : ControllerBase
     private static async Task EnsureUsuarioEmpleadoAsync(
         SqlConnection connection,
         EmpleadoAprobacionData empleado,
-        int idAprobador,
+        int idEmpleadoLegacy,
         SqlTransaction transaction,
         CancellationToken cancellationToken)
     {
-        var usuarioGenerado = BuildGeneratedUserName(empleado.NombreEmpleado, empleado.IdEmpleado);
+        var usuarioGenerado = await ResolveGeneratedUserNameAsync(
+            connection,
+            empleado.NombreEmpleado,
+            empleado.IdEmpleado,
+            transaction,
+            cancellationToken);
 
         var usuarioExistente = await connection.QueryFirstOrDefaultAsync<int?>(
             new CommandDefinition(
                 """
                 SELECT TOP (1) Id
                 FROM dbo.Usuario
-                WHERE IdEmpleado = @IdEmpleado
+                WHERE IdEmpleado IN (@IdEmpleadoLegacy, @IdEmpleadoCj)
                    OR IdUsuario = @IdUsuario;
                 """,
                 new
                 {
-                    IdEmpleado = empleado.IdEmpleado,
+                    IdEmpleadoLegacy = idEmpleadoLegacy,
+                    IdEmpleadoCj = empleado.IdEmpleado,
                     IdUsuario = usuarioGenerado
                 },
                 transaction: transaction,
@@ -1110,7 +1546,7 @@ public class MantenimientoEmpleadosController : ControllerBase
                     {
                         Id = usuarioExistente.Value,
                         IdUsuario = usuarioGenerado,
-                        IdEmpleado = empleado.IdEmpleado
+                        IdEmpleado = idEmpleadoLegacy
                     },
                     transaction: transaction,
                     cancellationToken: cancellationToken));
@@ -1179,7 +1615,247 @@ public class MantenimientoEmpleadosController : ControllerBase
                 {
                     Id = nuevoId,
                     IdUsuario = usuarioGenerado,
-                    IdEmpleado = empleado.IdEmpleado
+                    IdEmpleado = idEmpleadoLegacy
+                },
+                transaction: transaction,
+                cancellationToken: cancellationToken));
+    }
+
+    private static async Task<int> EnsureLegacyEmpleadoAsync(
+        SqlConnection connection,
+        EmpleadoAprobacionData empleado,
+        SqlTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        if (!await TableExistsAsync(connection, "dbo.Empleado", transaction, cancellationToken) ||
+            !await ColumnExistsAsync(connection, "dbo.Empleado", "IdEmpleado", transaction, cancellationToken))
+        {
+            return empleado.IdEmpleado;
+        }
+
+        var idEmpleadoLegacy = await connection.QueryFirstOrDefaultAsync<int?>(
+            new CommandDefinition(
+                """
+                SELECT TOP (1) IdEmpleado
+                FROM dbo.Empleado
+                WHERE
+                (
+                    (@IdEmpRel IS NOT NULL AND IdEmpleado = @IdEmpRel)
+                    OR (COL_LENGTH('dbo.Empleado', 'IdEmpleadoCj') IS NOT NULL AND IdEmpleadoCj = @IdEmpleadoCj)
+                    OR (
+                        NULLIF(LTRIM(RTRIM(@NroDocumento)), '') IS NOT NULL
+                        AND COL_LENGTH('dbo.Empleado', 'NroDocumento') IS NOT NULL
+                        AND LTRIM(RTRIM(ISNULL(NroDocumento, ''))) = LTRIM(RTRIM(@NroDocumento))
+                    )
+                    OR (
+                        NULLIF(LTRIM(RTRIM(@NombreEmpleado)), '') IS NOT NULL
+                        AND COL_LENGTH('dbo.Empleado', 'NombreEmpleado') IS NOT NULL
+                        AND UPPER(LTRIM(RTRIM(ISNULL(NombreEmpleado, '')))) = UPPER(LTRIM(RTRIM(@NombreEmpleado)))
+                    )
+                )
+                AND (COL_LENGTH('dbo.Empleado', 'IdEstado') IS NULL OR ISNULL(IdEstado, 0) = 1)
+                ORDER BY IdEmpleado;
+                """,
+                new
+                {
+                    IdEmpRel = empleado.IdEmpRel,
+                    IdEmpleadoCj = empleado.IdEmpleado,
+                    NroDocumento = empleado.NroDocumento,
+                    NombreEmpleado = empleado.NombreEmpleado
+                },
+                transaction: transaction,
+                cancellationToken: cancellationToken));
+
+        if (idEmpleadoLegacy is > 0)
+        {
+            await SyncEmpleadoCjLegacyRelationAsync(connection, empleado.IdEmpleado, idEmpleadoLegacy.Value, transaction, cancellationToken);
+
+            if (await ColumnExistsAsync(connection, "dbo.Empleado", "Sexo", transaction, cancellationToken))
+            {
+                await connection.ExecuteAsync(
+                    new CommandDefinition(
+                        """
+                        UPDATE dbo.Empleado
+                        SET Sexo = @Sexo
+                        WHERE IdEmpleado = @IdEmpleado;
+                        """,
+                        new
+                        {
+                            IdEmpleado = idEmpleadoLegacy.Value,
+                            Sexo = NullIfWhiteSpace(empleado.Sexo)
+                        },
+                        transaction: transaction,
+                        cancellationToken: cancellationToken));
+            }
+
+            if (await ColumnExistsAsync(connection, "dbo.Empleado", "IdDocumento", transaction, cancellationToken))
+            {
+                await connection.ExecuteAsync(
+                    new CommandDefinition(
+                        """
+                        UPDATE dbo.Empleado
+                        SET IdDocumento = @IdDocumento
+                        WHERE IdEmpleado = @IdEmpleado;
+                        """,
+                        new
+                        {
+                            IdEmpleado = idEmpleadoLegacy.Value,
+                            IdDocumento = empleado.IdDocumento
+                        },
+                        transaction: transaction,
+                        cancellationToken: cancellationToken));
+            }
+
+            return idEmpleadoLegacy.Value;
+        }
+
+        var nuevoIdLegacy = await connection.ExecuteScalarAsync<int>(
+            new CommandDefinition(
+                """
+                SELECT ISNULL(MAX(IdEmpleado), 0) + 1
+                FROM dbo.Empleado WITH (UPDLOCK, HOLDLOCK);
+                """,
+                transaction: transaction,
+                cancellationToken: cancellationToken));
+
+        var columns = new List<string> { "IdEmpleado" };
+        var values = new List<string> { "@IdEmpleado" };
+        var parameters = new DynamicParameters();
+        parameters.Add("@IdEmpleado", nuevoIdLegacy, DbType.Int32);
+
+        if (await ColumnExistsAsync(connection, "dbo.Empleado", "NombreEmpleado", transaction, cancellationToken))
+        {
+            columns.Add("NombreEmpleado");
+            values.Add("@NombreEmpleado");
+            parameters.Add("@NombreEmpleado", NullIfWhiteSpace(empleado.NombreEmpleado), DbType.String);
+        }
+
+        if (await ColumnExistsAsync(connection, "dbo.Empleado", "InicialesEmpleado", transaction, cancellationToken))
+        {
+            columns.Add("InicialesEmpleado");
+            values.Add("@InicialesEmpleado");
+            parameters.Add("@InicialesEmpleado", string.Empty, DbType.String);
+        }
+
+        if (await ColumnExistsAsync(connection, "dbo.Empleado", "IdCargo", transaction, cancellationToken))
+        {
+            columns.Add("IdCargo");
+            values.Add("@IdCargo");
+            parameters.Add("@IdCargo", 10, DbType.Int32);
+        }
+
+        if (await ColumnExistsAsync(connection, "dbo.Empleado", "IdDocumento", transaction, cancellationToken))
+        {
+            columns.Add("IdDocumento");
+            values.Add("@IdDocumento");
+            parameters.Add("@IdDocumento", empleado.IdDocumento, DbType.Int32);
+        }
+
+        if (await ColumnExistsAsync(connection, "dbo.Empleado", "NroDocumento", transaction, cancellationToken))
+        {
+            columns.Add("NroDocumento");
+            values.Add("@NroDocumento");
+            parameters.Add("@NroDocumento", NullIfWhiteSpace(empleado.NroDocumento), DbType.String);
+        }
+
+        if (await ColumnExistsAsync(connection, "dbo.Empleado", "Telefono", transaction, cancellationToken))
+        {
+            columns.Add("Telefono");
+            values.Add("@Telefono");
+            parameters.Add("@Telefono", NullIfWhiteSpace(empleado.Telefono) ?? string.Empty, DbType.String);
+        }
+
+        if (await ColumnExistsAsync(connection, "dbo.Empleado", "Correo", transaction, cancellationToken))
+        {
+            columns.Add("Correo");
+            values.Add("@Correo");
+            parameters.Add("@Correo", NullIfWhiteSpace(empleado.Correo), DbType.String);
+        }
+
+        if (await ColumnExistsAsync(connection, "dbo.Empleado", "Sexo", transaction, cancellationToken))
+        {
+            columns.Add("Sexo");
+            values.Add("@Sexo");
+            parameters.Add("@Sexo", NullIfWhiteSpace(empleado.Sexo), DbType.String);
+        }
+
+        if (await ColumnExistsAsync(connection, "dbo.Empleado", "Cuenta", transaction, cancellationToken))
+        {
+            columns.Add("Cuenta");
+            values.Add("@Cuenta");
+            parameters.Add("@Cuenta", string.Empty, DbType.String);
+        }
+
+        if (await ColumnExistsAsync(connection, "dbo.Empleado", "CuentaInter", transaction, cancellationToken))
+        {
+            columns.Add("CuentaInter");
+            values.Add("@CuentaInter");
+            parameters.Add("@CuentaInter", string.Empty, DbType.String);
+        }
+
+        if (await ColumnExistsAsync(connection, "dbo.Empleado", "NombreCta", transaction, cancellationToken))
+        {
+            columns.Add("NombreCta");
+            values.Add("@NombreCta");
+            parameters.Add("@NombreCta", string.Empty, DbType.String);
+        }
+
+        if (await ColumnExistsAsync(connection, "dbo.Empleado", "NombreBanco", transaction, cancellationToken))
+        {
+            columns.Add("NombreBanco");
+            values.Add("@NombreBanco");
+            parameters.Add("@NombreBanco", string.Empty, DbType.String);
+        }
+
+        if (await ColumnExistsAsync(connection, "dbo.Empleado", "IdEstado", transaction, cancellationToken))
+        {
+            columns.Add("IdEstado");
+            values.Add("@IdEstado");
+            parameters.Add("@IdEstado", 1, DbType.Int32);
+        }
+
+        if (await ColumnExistsAsync(connection, "dbo.Empleado", "IdEmpleadoCj", transaction, cancellationToken))
+        {
+            columns.Add("IdEmpleadoCj");
+            values.Add("@IdEmpleadoCj");
+            parameters.Add("@IdEmpleadoCj", empleado.IdEmpleado, DbType.Int32);
+        }
+
+        await connection.ExecuteAsync(
+            new CommandDefinition(
+                $"INSERT INTO dbo.Empleado ({string.Join(", ", columns)}) VALUES ({string.Join(", ", values)});",
+                parameters,
+                transaction: transaction,
+                cancellationToken: cancellationToken));
+
+        await SyncEmpleadoCjLegacyRelationAsync(connection, empleado.IdEmpleado, nuevoIdLegacy, transaction, cancellationToken);
+        return nuevoIdLegacy;
+    }
+
+    private static async Task SyncEmpleadoCjLegacyRelationAsync(
+        SqlConnection connection,
+        int idEmpleadoCj,
+        int idEmpleadoLegacy,
+        SqlTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        if (!await ColumnExistsAsync(connection, "dbo.EmpleadoCj", "IdEmpRel", transaction, cancellationToken))
+        {
+            return;
+        }
+
+        await connection.ExecuteAsync(
+            new CommandDefinition(
+                """
+                UPDATE dbo.EmpleadoCj
+                SET IdEmpRel = @IdEmpleadoLegacy
+                WHERE IdEmpleado = @IdEmpleadoCj
+                  AND ISNULL(IdEmpRel, 0) <> @IdEmpleadoLegacy;
+                """,
+                new
+                {
+                    IdEmpleadoCj = idEmpleadoCj,
+                    IdEmpleadoLegacy = idEmpleadoLegacy
                 },
                 transaction: transaction,
                 cancellationToken: cancellationToken));
@@ -1548,6 +2224,178 @@ public class MantenimientoEmpleadosController : ControllerBase
         return auditoria;
     }
 
+    private static async Task<List<AuditoriaCambioDto>> ResetLegacySeguridadPorBajaAsync(
+        SqlConnection connection,
+        EmpleadoCrudDto before,
+        int idEmpleadoCj,
+        string usuario,
+        SqlTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        var auditoria = new List<AuditoriaCambioDto>();
+        var legacyEmpleadoIds = await ResolveLegacyEmpleadoIdsAsync(connection, before, idEmpleadoCj, transaction, cancellationToken);
+
+        if (await TableExistsAsync(connection, "dbo.Usuario", transaction, cancellationToken) &&
+            await ColumnExistsAsync(connection, "dbo.Usuario", "IdEmpleado", transaction, cancellationToken) &&
+            await ColumnExistsAsync(connection, "dbo.Usuario", "IdEstado", transaction, cancellationToken))
+        {
+            var usuarioTargetIds = legacyEmpleadoIds
+                .Append(idEmpleadoCj)
+                .Distinct()
+                .ToList();
+
+            var usuarios = (await connection.QueryAsync<UsuarioLegacySnapshot>(
+                new CommandDefinition(
+                    """
+                    SELECT
+                        Id,
+                        ISNULL(IdUsuario, '') AS IdUsuario,
+                        ISNULL(IdEmpleado, 0) AS IdEmpleado,
+                        ISNULL(IdEstado, 0) AS IdEstado
+                    FROM dbo.Usuario
+                    WHERE IdEmpleado IN @Ids;
+                    """,
+                    new { Ids = usuarioTargetIds },
+                    transaction: transaction,
+                    cancellationToken: cancellationToken))).ToList();
+
+            if (usuarios.Count > 0)
+            {
+                await connection.ExecuteAsync(
+                    new CommandDefinition(
+                        """
+                        UPDATE dbo.Usuario
+                        SET IdEstado = 0
+                        WHERE IdEmpleado IN @Ids
+                          AND ISNULL(IdEstado, 0) <> 0;
+                        """,
+                        new { Ids = usuarioTargetIds },
+                        transaction: transaction,
+                        cancellationToken: cancellationToken));
+
+                foreach (var item in usuarios.Where(item => item.IdEstado != 0))
+                {
+                    auditoria.Add(new AuditoriaCambioDto
+                    {
+                        Modulo = "Mantenimiento",
+                        Entidad = "Usuario",
+                        IdRegistro = item.Id.ToString(CultureInfo.InvariantCulture),
+                        Accion = "UPDATE",
+                        Seccion = "Seguridad",
+                        Campo = "IdEstado",
+                        ValorAnterior = item.IdEstado.ToString(CultureInfo.InvariantCulture),
+                        ValorNuevo = "0",
+                        UsuarioAccion = usuario,
+                        Observacion = $"Baja de empleado. Usuario {item.IdUsuario} desactivado."
+                    });
+                }
+            }
+        }
+
+        if (legacyEmpleadoIds.Count > 0 &&
+            await TableExistsAsync(connection, "dbo.Empleado", transaction, cancellationToken) &&
+            await ColumnExistsAsync(connection, "dbo.Empleado", "IdEmpleado", transaction, cancellationToken) &&
+            await ColumnExistsAsync(connection, "dbo.Empleado", "IdEstado", transaction, cancellationToken) &&
+            await ColumnExistsAsync(connection, "dbo.Empleado", "IdCargo", transaction, cancellationToken))
+        {
+            var empleados = (await connection.QueryAsync<EmpleadoLegacySnapshot>(
+                new CommandDefinition(
+                    """
+                    SELECT
+                        IdEmpleado,
+                        ISNULL(NombreEmpleado, '') AS NombreEmpleado,
+                        ISNULL(IdCargo, 0) AS IdCargo,
+                        ISNULL(IdEstado, 0) AS IdEstado
+                    FROM dbo.Empleado
+                    WHERE IdEmpleado IN @Ids
+                      AND ISNULL(IdCargo, 0) = 10;
+                    """,
+                    new { Ids = legacyEmpleadoIds },
+                    transaction: transaction,
+                    cancellationToken: cancellationToken))).ToList();
+
+            if (empleados.Count > 0)
+            {
+                await connection.ExecuteAsync(
+                    new CommandDefinition(
+                        """
+                        UPDATE dbo.Empleado
+                        SET IdEstado = 0
+                        WHERE IdEmpleado IN @Ids
+                          AND ISNULL(IdCargo, 0) = 10
+                          AND ISNULL(IdEstado, 0) <> 0;
+                        """,
+                        new { Ids = legacyEmpleadoIds },
+                        transaction: transaction,
+                        cancellationToken: cancellationToken));
+
+                foreach (var item in empleados.Where(item => item.IdEstado != 0))
+                {
+                    auditoria.Add(new AuditoriaCambioDto
+                    {
+                        Modulo = "Mantenimiento",
+                        Entidad = "Empleado",
+                        IdRegistro = item.IdEmpleado.ToString(CultureInfo.InvariantCulture),
+                        Accion = "UPDATE",
+                        Seccion = "Legacy",
+                        Campo = "IdEstado",
+                        ValorAnterior = item.IdEstado.ToString(CultureInfo.InvariantCulture),
+                        ValorNuevo = "0",
+                        UsuarioAccion = usuario,
+                        Observacion = $"Baja de empleado legacy IdCargo=10. {item.NombreEmpleado}"
+                    });
+                }
+            }
+        }
+
+        return auditoria;
+    }
+
+    private static async Task<List<int>> ResolveLegacyEmpleadoIdsAsync(
+        SqlConnection connection,
+        EmpleadoCrudDto before,
+        int idEmpleadoCj,
+        SqlTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        if (!await TableExistsAsync(connection, "dbo.Empleado", transaction, cancellationToken) ||
+            !await ColumnExistsAsync(connection, "dbo.Empleado", "IdEmpleado", transaction, cancellationToken))
+        {
+            return new List<int>();
+        }
+
+        var rows = await connection.QueryAsync<int>(
+            new CommandDefinition(
+                """
+                SELECT DISTINCT IdEmpleado
+                FROM dbo.Empleado
+                WHERE (COL_LENGTH('dbo.Empleado', 'IdEmpleadoCj') IS NOT NULL AND IdEmpleadoCj = @IdEmpleadoCj)
+                   OR (
+                        NULLIF(LTRIM(RTRIM(@NroDocumento)), '') IS NOT NULL
+                        AND COL_LENGTH('dbo.Empleado', 'NroDocumento') IS NOT NULL
+                        AND LTRIM(RTRIM(ISNULL(NroDocumento, ''))) = LTRIM(RTRIM(@NroDocumento))
+                   )
+                   OR (
+                        NULLIF(LTRIM(RTRIM(@NombreEmpleado)), '') IS NOT NULL
+                        AND COL_LENGTH('dbo.Empleado', 'NombreEmpleado') IS NOT NULL
+                        AND UPPER(LTRIM(RTRIM(ISNULL(NombreEmpleado, '')))) = UPPER(LTRIM(RTRIM(@NombreEmpleado)))
+                   );
+                """,
+                new
+                {
+                    IdEmpleadoCj = idEmpleadoCj,
+                    NroDocumento = before.NroDocumento,
+                    NombreEmpleado = before.NombreEmpleado
+                },
+                transaction: transaction,
+                cancellationToken: cancellationToken));
+
+        return rows
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList();
+    }
+
     private static IEnumerable<AuditoriaCambioDto> BuildVacacionPeriodoAuditEntries(
         VacacionPeriodoSnapshot periodo,
         string usuario,
@@ -1626,36 +2474,153 @@ public class MantenimientoEmpleadosController : ControllerBase
 
     private static string BuildGeneratedUserName(string? nombreEmpleado, int idEmpleado)
     {
-        var baseUsuario = (nombreEmpleado ?? string.Empty)
+        var tokens = (nombreEmpleado ?? string.Empty)
             .Trim()
+            .ToUpperInvariant()
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        if (tokens.Length == 0)
+        {
+            return $"emp{idEmpleado}";
+        }
+
+        var apellido = tokens[0];
+        var inicialNombre = tokens.Length > 1 ? tokens[1][0].ToString() : string.Empty;
+        var candidato = $"{inicialNombre}{apellido}"
             .ToLowerInvariant()
             .Replace(" ", string.Empty, StringComparison.Ordinal)
             .Replace(".", string.Empty, StringComparison.Ordinal)
             .Replace(",", string.Empty, StringComparison.Ordinal);
 
-        if (string.IsNullOrWhiteSpace(baseUsuario))
+        return string.IsNullOrWhiteSpace(candidato) ? $"emp{idEmpleado}" : candidato;
+    }
+
+    private static async Task<string> ResolveGeneratedUserNameAsync(
+        SqlConnection connection,
+        string? nombreEmpleado,
+        int idEmpleado,
+        SqlTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        var storedProcedureExists = await connection.ExecuteScalarAsync<int>(
+            new CommandDefinition(
+                """
+                SELECT CASE
+                    WHEN OBJECT_ID('dbo.SP_GenerarUsuario', 'P') IS NOT NULL
+                      OR OBJECT_ID('dbo.sp_GenerarUsuario', 'P') IS NOT NULL
+                    THEN 1
+                    ELSE 0
+                END;
+                """,
+                transaction: transaction,
+                cancellationToken: cancellationToken));
+
+        if (storedProcedureExists == 1)
         {
-            baseUsuario = $"emp{idEmpleado}";
+            var parameters = new DynamicParameters();
+            parameters.Add("@NombreCompleto", nombreEmpleado, DbType.String, ParameterDirection.Input, 200);
+            parameters.Add("@UsuarioGenerado", dbType: DbType.String, direction: ParameterDirection.Output, size: 50);
+
+            await connection.ExecuteAsync(
+                new CommandDefinition(
+                    "dbo.SP_GenerarUsuario",
+                    parameters,
+                    transaction: transaction,
+                    commandType: CommandType.StoredProcedure,
+                    cancellationToken: cancellationToken));
+
+            var generatedBySp = parameters.Get<string?>("@UsuarioGenerado")?.Trim();
+            if (!string.IsNullOrWhiteSpace(generatedBySp))
+            {
+                return generatedBySp;
+            }
         }
 
-        return $"{baseUsuario}{idEmpleado:00000}";
+        var fallbackBase = BuildGeneratedUserName(nombreEmpleado, idEmpleado);
+        if (!await UsuarioExisteAsync(connection, fallbackBase, idEmpleado, transaction, cancellationToken))
+        {
+            return fallbackBase;
+        }
+
+        for (var intento = 1; intento <= 9999; intento++)
+        {
+            var candidate = $"{fallbackBase}{intento}";
+            if (!await UsuarioExisteAsync(connection, candidate, idEmpleado, transaction, cancellationToken))
+            {
+                return candidate;
+            }
+        }
+
+        return $"{fallbackBase}{idEmpleado}";
+    }
+
+    private static async Task<bool> UsuarioExisteAsync(
+        SqlConnection connection,
+        string idUsuario,
+        int idEmpleado,
+        SqlTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        var exists = await connection.ExecuteScalarAsync<int>(
+            new CommandDefinition(
+                """
+                SELECT CASE
+                    WHEN EXISTS
+                    (
+                        SELECT 1
+                        FROM dbo.Usuario
+                        WHERE LTRIM(RTRIM(IdUsuario)) = @IdUsuario
+                          AND ISNULL(IdEmpleado, 0) <> @IdEmpleado
+                    )
+                    THEN 1
+                    ELSE 0
+                END;
+                """,
+                new
+                {
+                    IdUsuario = idUsuario,
+                    IdEmpleado = idEmpleado
+                },
+                transaction: transaction,
+                cancellationToken: cancellationToken));
+
+        return exists == 1;
     }
 
     private sealed class EmpleadoAprobacionData
     {
         public int IdEmpleado { get; set; }
         public string NombreEmpleado { get; set; } = string.Empty;
+        public string Sexo { get; set; } = string.Empty;
+        public int? IdDocumento { get; set; }
         public string NroDocumento { get; set; } = string.Empty;
         public string Telefono { get; set; } = string.Empty;
         public string Correo { get; set; } = string.Empty;
         public string Direccion { get; set; } = string.Empty;
         public DateTime? FechaIniLaboral { get; set; }
+        public int? IdEmpRel { get; set; }
     }
 
     private sealed class EmpleadoOtrosLegacySnapshot
     {
         public int IdEmpleadoOtros { get; set; }
         public int IdEmpleadoCj { get; set; }
+        public int IdEstado { get; set; }
+    }
+
+    private sealed class UsuarioLegacySnapshot
+    {
+        public int Id { get; set; }
+        public string IdUsuario { get; set; } = string.Empty;
+        public int IdEmpleado { get; set; }
+        public int IdEstado { get; set; }
+    }
+
+    private sealed class EmpleadoLegacySnapshot
+    {
+        public int IdEmpleado { get; set; }
+        public string NombreEmpleado { get; set; } = string.Empty;
+        public int IdCargo { get; set; }
         public int IdEstado { get; set; }
     }
 
@@ -1831,6 +2796,9 @@ public class MantenimientoEmpleadosController : ControllerBase
         return new Dictionary<string, AuditFieldValue>(StringComparer.OrdinalIgnoreCase)
         {
             ["NombreEmpleado"] = new("Principal", NullIfWhiteSpace(item.NombreEmpleado)),
+            ["Sexo"] = new("Principal", NullIfWhiteSpace(item.Sexo)),
+            ["IdDocumento"] = new("Principal", FormatInt(item.IdDocumento)),
+            ["TipoDoc"] = new("Principal", NullIfWhiteSpace(item.TipoDoc)),
             ["NroDocumento"] = new("Principal", NullIfWhiteSpace(item.NroDocumento)),
             ["Telefono"] = new("Principal", NullIfWhiteSpace(item.Telefono)),
             ["Correo"] = new("Principal", NullIfWhiteSpace(item.Correo)),
@@ -1872,6 +2840,9 @@ public class MantenimientoEmpleadosController : ControllerBase
     {
         public int IdEmpleado { get; set; }
         public string NombreEmpleado { get; set; } = string.Empty;
+        public string Sexo { get; set; } = string.Empty;
+        public string TipoDoc { get; set; } = string.Empty;
+        public int? IdSexo { get; set; }
         public string NroDocumento { get; set; } = string.Empty;
         public string Telefono { get; set; } = string.Empty;
         public string Correo { get; set; } = string.Empty;
@@ -1889,6 +2860,7 @@ public class MantenimientoEmpleadosController : ControllerBase
         public string CargoPrint { get; set; } = string.Empty;
         public string Estado { get; set; } = string.Empty;
         public int? IdEstado { get; set; }
+        public int? IdDocumento { get; set; }
         public int? IdActivo { get; set; }
         public int? IdEmpresaCj { get; set; }
         public int? IdClienteCj { get; set; }
@@ -1902,6 +2874,9 @@ public class MantenimientoEmpleadosController : ControllerBase
     public sealed class EmpleadoCrudUpsertRequest
     {
         public string NombreEmpleado { get; set; } = string.Empty;
+        public string? Sexo { get; set; }
+        public int? IdSexo { get; set; }
+        public int? IdDocumento { get; set; }
         public string? NroDocumento { get; set; }
         public string? Telefono { get; set; }
         public string? Correo { get; set; }

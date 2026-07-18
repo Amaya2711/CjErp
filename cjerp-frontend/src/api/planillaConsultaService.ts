@@ -5,6 +5,7 @@ import type {
   PlanillaConsultaEstadosResponse,
 } from "../models/planillaConsulta";
 import { getAuthUser } from "../utils/authStorage";
+import { parseJwtPayload } from "../utils/jwt";
 
 const PLANILLA_CONSULTA_API_URL = "/planilla/consulta-estados";
 
@@ -29,18 +30,56 @@ function normalizeParametroNombre(nombre: string): string {
   return nombre.trim().replace(/^@+/, "").toLowerCase();
 }
 
+function getJwtClaimValue(
+  payload: Record<string, unknown> | null,
+  ...keys: string[]
+): unknown {
+  if (!payload) {
+    return undefined;
+  }
+
+  for (const key of keys) {
+    if (key in payload) {
+      return payload[key];
+    }
+  }
+
+  return undefined;
+}
+
 export function buildPlanillaConsultaEstadosBaseParams(): PlanillaConsultaParametro[] {
   const authUser = getAuthUser();
+  const jwtPayload = authUser?.token ? parseJwtPayload(authUser.token) : null;
   const idCargo = getFirstPositiveIntegerString(
     authUser?.idCargo,
     authUser?.idrol,
-    (authUser as Record<string, unknown> | null)?.IdRol
+    (authUser as Record<string, unknown> | null)?.IdRol,
+    getJwtClaimValue(
+      jwtPayload,
+      "IdCargo",
+      "idCargo",
+      "IdRol",
+      "idRol",
+      "idrol",
+      "role"
+    )
   );
   const idEmpleado = getFirstPositiveIntegerString(
     authUser?.idEmpleado,
     authUser?.codEmp,
     authUser?.empleado,
-    (authUser as Record<string, unknown> | null)?.IdEmpleado
+    (authUser as Record<string, unknown> | null)?.IdEmpleado,
+    getJwtClaimValue(
+      jwtPayload,
+      "IdEmpleado",
+      "idEmpleado",
+      "CodEmp",
+      "codEmp",
+      "CodEmpleadoMostrar",
+      "nameid",
+      "sub",
+      "IdUsuario"
+    )
   );
 
   console.log(
@@ -106,4 +145,43 @@ export async function consultarPlanillaEstados(
   request: PlanillaConsultaEstadosRequest
 ): Promise<PlanillaConsultaEstadosResponse> {
   return httpClient.post<PlanillaConsultaEstadosResponse>(PLANILLA_CONSULTA_API_URL, request);
+}
+
+export function buildPlanillaPagadosDashboardRequest(args: {
+  fechaInicio: string;
+  fechaFin: string;
+  textoBusqueda?: string;
+  maxRows?: number;
+  pageNumber?: number;
+  pageSize?: number;
+}): PlanillaConsultaEstadosRequest {
+  const parametros: PlanillaConsultaParametro[] = [
+    {
+      nombre: "FechaInicio",
+      valor: args.fechaInicio,
+      tipo: "date",
+    },
+    {
+      nombre: "FechaFin",
+      valor: args.fechaFin,
+      tipo: "date",
+    },
+  ];
+
+  const textoBusqueda = args.textoBusqueda?.trim() ?? "";
+  if (textoBusqueda) {
+    parametros.push({
+      nombre: "TextoBusqueda",
+      valor: textoBusqueda,
+      tipo: "string",
+    });
+  }
+
+  return {
+    consulta: "pagados-dashboard",
+    parametros,
+    maxRows: args.maxRows,
+    pageNumber: args.pageNumber,
+    pageSize: args.pageSize,
+  };
 }

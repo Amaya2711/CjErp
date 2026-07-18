@@ -18,12 +18,19 @@ export type PlanillaConsultaEstadosRequest = {
   parametros: PlanillaConsultaParametro[];
   maxRows?: number;
   consulta?: string;
+  pageNumber?: number;
+  pageSize?: number;
 };
 
 export type PlanillaConsultaEstadosResponse = {
   columns: string[];
   rows: Array<Record<string, unknown>>;
   totalRows?: number;
+  pageNumber?: number;
+  pageSize?: number;
+  totalPages?: number;
+  hasPreviousPage?: boolean;
+  hasNextPage?: boolean;
   maxRowsAllowed?: number | null;
   limitExceeded?: boolean;
   message?: string | null;

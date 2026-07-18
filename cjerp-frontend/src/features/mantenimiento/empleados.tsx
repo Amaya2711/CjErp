@@ -20,6 +20,8 @@ type EmpleadoForm = {
   id: number | null;
   apellidosEmpleado: string;
   nombresEmpleado: string;
+  sexo: string;
+  idDocumento: string;
   nroDocumento: string;
   telefono: string;
   correo: string;
@@ -41,6 +43,8 @@ const initialForm: EmpleadoForm = {
   id: null,
   apellidosEmpleado: "",
   nombresEmpleado: "",
+  sexo: "",
+  idDocumento: "",
   nroDocumento: "",
   telefono: "",
   correo: "",
@@ -108,6 +112,8 @@ function mapItemToForm(item: EmpleadoCrudItem): EmpleadoForm {
     id: item.idEmpleado,
     apellidosEmpleado: splitName.apellidosEmpleado,
     nombresEmpleado: splitName.nombresEmpleado,
+    sexo: normalizeOptionValue(item.idSexo ?? item.sexo),
+    idDocumento: normalizeOptionValue(item.idDocumento),
     nroDocumento: normalizeTextValue(item.nroDocumento),
     telefono: normalizeTextValue(item.telefono),
     correo: normalizeUppercase(normalizeTextValue(item.correo)),
@@ -131,6 +137,9 @@ function buildPayload(form: EmpleadoForm): EmpleadoCrudSaveRequest {
 
   return {
     nombreEmpleado,
+    sexo: form.sexo || null,
+    idSexo: form.sexo ? Number(form.sexo) : null,
+    idDocumento: form.idDocumento ? Number(form.idDocumento) : null,
     nroDocumento: form.nroDocumento.trim() || null,
     telefono: form.telefono.trim() || null,
     correo: normalizeUppercase(form.correo).trim() || null,
@@ -214,6 +223,8 @@ export default function MantenimientoEmpleadosPage() {
   const [clientes, setClientes] = useState<CrudLookupItem[]>([]);
   const [areas, setAreas] = useState<CrudLookupItem[]>([]);
   const [ubicaciones, setUbicaciones] = useState<CrudLookupItem[]>([]);
+  const [sexos, setSexos] = useState<CrudLookupItem[]>([]);
+  const [tiposDocumento, setTiposDocumento] = useState<CrudLookupItem[]>([]);
   const [responsables, setResponsables] = useState<CrudLookupItem[]>([]);
   const [segundoValidadores, setSegundoValidadores] = useState<CrudLookupItem[]>([]);
   const [tercerValidadores, setTercerValidadores] = useState<CrudLookupItem[]>([]);
@@ -367,6 +378,8 @@ export default function MantenimientoEmpleadosPage() {
       setClientes(lookups.clientes);
       setAreas(lookups.areas);
       setUbicaciones(lookups.ubicaciones);
+      setSexos(lookups.sexos);
+      setTiposDocumento(lookups.tiposDocumento);
       setResponsables(lookups.responsables);
       setSegundoValidadores(lookups.segundoValidadores);
       setTercerValidadores(lookups.tercerValidadores);
@@ -429,12 +442,22 @@ export default function MantenimientoEmpleadosPage() {
     setPanelOpen(true);
   };
 
-  const openEdit = (item: EmpleadoCrudItem) => {
+  const openEdit = async (item: EmpleadoCrudItem) => {
     setMode("editar");
-    setForm(mapItemToForm(item));
     setErrors({});
     setPanelError("");
-    setPanelOpen(true);
+    setSaving(true);
+
+    try {
+      const detalle = await empleadosCrudService.obtener(item.idEmpleado);
+      setForm(mapItemToForm(detalle));
+      setPanelOpen(true);
+    } catch (err) {
+      setPanelError(getHttpErrorMessage(err, "No se pudo cargar el detalle del empleado."));
+      setPanelOpen(true);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const closePanel = () => {
@@ -453,6 +476,14 @@ export default function MantenimientoEmpleadosPage() {
 
     if (!form.nombresEmpleado.trim()) {
       nextErrors.nombresEmpleado = "Ingrese los nombres del empleado.";
+    }
+
+    if (!form.sexo) {
+      nextErrors.sexo = "Seleccione el sexo.";
+    }
+
+    if (!form.idDocumento) {
+      nextErrors.idDocumento = "Seleccione el tipo de documento.";
     }
 
     if (!form.idEmpresaCj) {
@@ -828,6 +859,24 @@ export default function MantenimientoEmpleadosPage() {
             }
           />
           <Field
+            label="Tipo de documento"
+            error={errors.idDocumento}
+            input={
+              <select
+                value={form.idDocumento}
+                onChange={(event) => setForm((prev) => ({ ...prev, idDocumento: event.target.value }))}
+                style={getInputStyle(Boolean(errors.idDocumento))}
+              >
+                <option value="">Seleccione...</option>
+                {tiposDocumento.map((option) => (
+                  <option key={`tipodoc-${option.value}`} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            }
+          />
+          <Field
             label="Documento"
             error={errors.nroDocumento}
             input={
@@ -837,6 +886,24 @@ export default function MantenimientoEmpleadosPage() {
                 onChange={(event) => setForm((prev) => ({ ...prev, nroDocumento: event.target.value }))}
                 style={getInputStyle(Boolean(errors.nroDocumento))}
               />
+            }
+          />
+          <Field
+            label="Sexo"
+            error={errors.sexo}
+            input={
+              <select
+                value={form.sexo}
+                onChange={(event) => setForm((prev) => ({ ...prev, sexo: event.target.value }))}
+                style={getInputStyle(Boolean(errors.sexo))}
+              >
+                <option value="">Seleccione...</option>
+                {sexos.map((option) => (
+                  <option key={`sexo-${option.value}`} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             }
           />
           <Field

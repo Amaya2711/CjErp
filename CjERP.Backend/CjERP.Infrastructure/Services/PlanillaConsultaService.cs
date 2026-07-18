@@ -19,6 +19,7 @@ namespace CjERP.Infrastructure.Services
         private const string StoredProcedureAprobar = "dbo.sp_Planilla_Consulta_Aprobar";
         private const string StoredProcedureVacaciones = "dbo.sp_EmpleadoOtros_ListarVacaciones";
         private const string StoredProcedureVacacionesTotal = "dbo.sp_EmpleadoOtros_ListarVacacionesTotal";
+        private const string StoredProcedurePagadosDashboard = "dbo.sp_Planilla_ConsultarPagados_Dsh";
         private readonly ISqlCommandFactory _sqlCommandFactory;
 
         public PlanillaConsultaService(ISqlCommandFactory sqlCommandFactory)
@@ -30,6 +31,8 @@ namespace CjERP.Infrastructure.Services
             IEnumerable<PlanillaConsultaParametroDto> parametros,
             string? consulta = null,
             int? maxRows = null,
+            int? pageNumber = null,
+            int? pageSize = null,
             CancellationToken cancellationToken = default)
         {
             await using var connection = _sqlCommandFactory.CreateConnection();
@@ -50,14 +53,30 @@ namespace CjERP.Infrastructure.Services
                 .ToList();
 
             var totalRows = rows.Count;
+            var normalizedPageSize = pageSize.HasValue && pageSize.Value > 0 ? pageSize.Value : totalRows > 0 ? totalRows : 1;
+            var normalizedPageNumber = pageNumber.HasValue && pageNumber.Value > 0 ? pageNumber.Value : 1;
+            var totalPages = normalizedPageSize > 0
+                ? Math.Max(1, (int)Math.Ceiling(totalRows / (double)normalizedPageSize))
+                : 1;
+
+            if (normalizedPageNumber > totalPages)
+            {
+                normalizedPageNumber = totalPages;
+            }
+
             var limitExceeded = maxRows.HasValue && maxRows.Value > 0 && totalRows > maxRows.Value;
+            var skip = normalizedPageSize > 0 ? (normalizedPageNumber - 1) * normalizedPageSize : 0;
+            var pagedRows = rows
+                .Skip(skip)
+                .Take(normalizedPageSize)
+                .ToList();
 
             if (!limitExceeded)
             {
-                await EnrichRowsWithFacturaDataAsync(connection, rows, cancellationToken);
+                await EnrichRowsWithFacturaDataAsync(connection, pagedRows, cancellationToken);
             }
 
-            var columns = rows
+            var columns = pagedRows
                 .SelectMany(row => row.Keys)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -65,8 +84,13 @@ namespace CjERP.Infrastructure.Services
             return new PlanillaConsultaEstadosResponseDto
             {
                 Columns = columns,
-                Rows = limitExceeded ? [] : rows,
+                Rows = limitExceeded ? [] : pagedRows,
                 TotalRows = totalRows,
+                PageNumber = normalizedPageNumber,
+                PageSize = normalizedPageSize,
+                TotalPages = totalPages,
+                HasPreviousPage = normalizedPageNumber > 1,
+                HasNextPage = normalizedPageNumber < totalPages,
                 MaxRowsAllowed = maxRows,
                 LimitExceeded = limitExceeded,
                 Message = limitExceeded
@@ -82,6 +106,7 @@ namespace CjERP.Infrastructure.Services
                 "aprobar" => StoredProcedureAprobar,
                 "vacaciones" => StoredProcedureVacaciones,
                 "vacaciones-total" => StoredProcedureVacacionesTotal,
+                "pagados-dashboard" => StoredProcedurePagadosDashboard,
                 _ => StoredProcedureEstados
             };
         }
@@ -330,6 +355,20 @@ WHERE Correlativo IN @Correlativos";
                     return parametros.Where(parametro =>
                         !string.IsNullOrWhiteSpace(parametro.Nombre) &&
                         allowedParametersVacacionesTotal.Contains(parametro.Nombre.Trim().TrimStart('@')));
+                }
+
+                if (string.Equals(storedProcedureName, StoredProcedurePagadosDashboard, StringComparison.OrdinalIgnoreCase))
+                {
+                    var allowedParametersPagadosDashboard = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        "FechaInicio",
+                        "FechaFin",
+                        "TextoBusqueda"
+                    };
+
+                    return parametros.Where(parametro =>
+                        !string.IsNullOrWhiteSpace(parametro.Nombre) &&
+                        allowedParametersPagadosDashboard.Contains(parametro.Nombre.Trim().TrimStart('@')));
                 }
 
                 return parametros;

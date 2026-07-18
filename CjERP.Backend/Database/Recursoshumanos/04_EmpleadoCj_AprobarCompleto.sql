@@ -21,7 +21,12 @@ BEGIN
     DECLARE @Telefono NVARCHAR(50);
     DECLARE @Correo NVARCHAR(150);
     DECLARE @Direccion NVARCHAR(200);
+    DECLARE @IdEmpRel INT;
+    DECLARE @IdEmpleadoLegacy INT;
     DECLARE @IdUsuarioGenerado NVARCHAR(100);
+    DECLARE @SqlInsertEmpleado NVARCHAR(MAX);
+    DECLARE @ColumnasEmpleado NVARCHAR(MAX);
+    DECLARE @ValoresEmpleado NVARCHAR(MAX);
     DECLARE @CantidadAsistenciaActiva INT = 0;
     DECLARE @CantidadAsistenciaInactiva INT = 0;
     DECLARE @Mensaje NVARCHAR(1000) = N'Empleado aprobado correctamente.';
@@ -44,7 +49,8 @@ BEGIN
         @Telefono = Telefono,
         @Correo = Correo,
         @Direccion = Direccion,
-        @FechaInicioLaboral = FechaIniLaboral
+        @FechaInicioLaboral = FechaIniLaboral,
+        @IdEmpRel = IdEmpRel
     FROM dbo.EmpleadoCj
     WHERE IdEmpleado = @IdEmpleado;
 
@@ -59,6 +65,132 @@ BEGIN
             IdActivo = 1
         WHERE IdEmpleado = @IdEmpleado;
 
+        IF OBJECT_ID('dbo.Empleado', 'U') IS NOT NULL
+           AND COL_LENGTH('dbo.Empleado', 'IdEmpleado') IS NOT NULL
+        BEGIN
+            SELECT TOP (1) @IdEmpleadoLegacy = IdEmpleado
+            FROM dbo.Empleado
+            WHERE
+            (
+                (@IdEmpRel IS NOT NULL AND IdEmpleado = @IdEmpRel)
+                OR (COL_LENGTH('dbo.Empleado', 'IdEmpleadoCj') IS NOT NULL AND IdEmpleadoCj = @IdEmpleado)
+                OR (
+                    NULLIF(LTRIM(RTRIM(@NroDocumento)), '') IS NOT NULL
+                    AND COL_LENGTH('dbo.Empleado', 'NroDocumento') IS NOT NULL
+                    AND LTRIM(RTRIM(ISNULL(NroDocumento, ''))) = LTRIM(RTRIM(@NroDocumento))
+                )
+                OR (
+                    NULLIF(LTRIM(RTRIM(@NombreEmpleado)), '') IS NOT NULL
+                    AND COL_LENGTH('dbo.Empleado', 'NombreEmpleado') IS NOT NULL
+                    AND UPPER(LTRIM(RTRIM(ISNULL(NombreEmpleado, '')))) = UPPER(LTRIM(RTRIM(@NombreEmpleado)))
+                )
+            )
+            AND (COL_LENGTH('dbo.Empleado', 'IdEstado') IS NULL OR ISNULL(IdEstado, 0) = 1)
+            ORDER BY IdEmpleado;
+
+            IF ISNULL(@IdEmpleadoLegacy, 0) <= 0
+            BEGIN
+                SELECT @IdEmpleadoLegacy = ISNULL(MAX(IdEmpleado), 0) + 1
+                FROM dbo.Empleado WITH (UPDLOCK, HOLDLOCK);
+
+                SET @ColumnasEmpleado = N'IdEmpleado';
+                SET @ValoresEmpleado = N'@IdEmpleadoLegacy';
+
+                IF COL_LENGTH('dbo.Empleado', 'NombreEmpleado') IS NOT NULL
+                BEGIN
+                    SET @ColumnasEmpleado += N', NombreEmpleado';
+                    SET @ValoresEmpleado += N', ISNULL(@NombreEmpleado, '''')';
+                END;
+
+                IF COL_LENGTH('dbo.Empleado', 'InicialesEmpleado') IS NOT NULL
+                BEGIN
+                    SET @ColumnasEmpleado += N', InicialesEmpleado';
+                    SET @ValoresEmpleado += N', ''''';
+                END;
+
+                IF COL_LENGTH('dbo.Empleado', 'IdCargo') IS NOT NULL
+                BEGIN
+                    SET @ColumnasEmpleado += N', IdCargo';
+                    SET @ValoresEmpleado += N', 10';
+                END;
+
+                IF COL_LENGTH('dbo.Empleado', 'IdDocumento') IS NOT NULL
+                BEGIN
+                    SET @ColumnasEmpleado += N', IdDocumento';
+                    SET @ValoresEmpleado += N', 6';
+                END;
+
+                IF COL_LENGTH('dbo.Empleado', 'NroDocumento') IS NOT NULL
+                BEGIN
+                    SET @ColumnasEmpleado += N', NroDocumento';
+                    SET @ValoresEmpleado += N', ISNULL(@NroDocumento, '''')';
+                END;
+
+                IF COL_LENGTH('dbo.Empleado', 'Telefono') IS NOT NULL
+                BEGIN
+                    SET @ColumnasEmpleado += N', Telefono';
+                    SET @ValoresEmpleado += N', ISNULL(@Telefono, '''')';
+                END;
+
+                IF COL_LENGTH('dbo.Empleado', 'Correo') IS NOT NULL
+                BEGIN
+                    SET @ColumnasEmpleado += N', Correo';
+                    SET @ValoresEmpleado += N', ISNULL(@Correo, '''')';
+                END;
+
+                IF COL_LENGTH('dbo.Empleado', 'IdEstado') IS NOT NULL
+                BEGIN
+                    SET @ColumnasEmpleado += N', IdEstado';
+                    SET @ValoresEmpleado += N', 1';
+                END;
+
+                IF COL_LENGTH('dbo.Empleado', 'IdCheque') IS NOT NULL
+                BEGIN
+                    SET @ColumnasEmpleado += N', IdCheque';
+                    SET @ValoresEmpleado += N', NULL';
+                END;
+
+                IF COL_LENGTH('dbo.Empleado', 'IdEmpleadoCj') IS NOT NULL
+                BEGIN
+                    SET @ColumnasEmpleado += N', IdEmpleadoCj';
+                    SET @ValoresEmpleado += N', @IdEmpleado';
+                END;
+
+                IF COL_LENGTH('dbo.Empleado', 'NombreEmpleadoCJ') IS NOT NULL
+                BEGIN
+                    SET @ColumnasEmpleado += N', NombreEmpleadoCJ';
+                    SET @ValoresEmpleado += N', ISNULL(@NombreEmpleado, '''')';
+                END;
+
+                SET @SqlInsertEmpleado = N'
+                    INSERT INTO dbo.Empleado (' + @ColumnasEmpleado + N')
+                    VALUES (' + @ValoresEmpleado + N');';
+
+                EXEC sp_executesql
+                    @SqlInsertEmpleado,
+                    N'@IdEmpleadoLegacy INT, @IdEmpleado INT, @NombreEmpleado NVARCHAR(200), @NroDocumento NVARCHAR(50), @Telefono NVARCHAR(50), @Correo NVARCHAR(150)',
+                    @IdEmpleadoLegacy = @IdEmpleadoLegacy,
+                    @IdEmpleado = @IdEmpleado,
+                    @NombreEmpleado = @NombreEmpleado,
+                    @NroDocumento = @NroDocumento,
+                    @Telefono = @Telefono,
+                    @Correo = @Correo;
+            END;
+
+            IF COL_LENGTH('dbo.EmpleadoCj', 'IdEmpRel') IS NOT NULL
+            BEGIN
+                UPDATE dbo.EmpleadoCj
+                SET IdEmpRel = @IdEmpleadoLegacy
+                WHERE IdEmpleado = @IdEmpleado
+                  AND ISNULL(IdEmpRel, 0) <> @IdEmpleadoLegacy;
+            END;
+        END;
+
+        IF ISNULL(@IdEmpleadoLegacy, 0) <= 0
+        BEGIN
+            SET @IdEmpleadoLegacy = @IdEmpleado;
+        END;
+
         IF OBJECT_ID('dbo.Usuario', 'U') IS NOT NULL
            AND COL_LENGTH('dbo.Usuario', 'IdUsuario') IS NOT NULL
            AND COL_LENGTH('dbo.Usuario', 'Clave') IS NOT NULL
@@ -70,13 +202,55 @@ BEGIN
 
             IF @IdUsuarioGenerado IS NULL
             BEGIN
-                DECLARE @BaseUsuario NVARCHAR(100) = LOWER(REPLACE(REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(@NombreEmpleado, ''))), ' ', ''), '.', ''), ',', ''));
-                IF ISNULL(@BaseUsuario, '') = ''
+                IF OBJECT_ID('dbo.SP_GenerarUsuario', 'P') IS NOT NULL
+                   OR OBJECT_ID('dbo.sp_GenerarUsuario', 'P') IS NOT NULL
                 BEGIN
-                    SET @BaseUsuario = CONCAT('emp', @IdEmpleado);
+                    EXEC dbo.SP_GenerarUsuario
+                        @NombreCompleto = @NombreEmpleado,
+                        @UsuarioGenerado = @IdUsuarioGenerado OUTPUT;
                 END;
 
-                SET @IdUsuarioGenerado = CONCAT(@BaseUsuario, RIGHT(CONCAT('00000', CAST(@IdEmpleado AS NVARCHAR(10))), 5));
+                IF NULLIF(LTRIM(RTRIM(@IdUsuarioGenerado)), '') IS NULL
+                BEGIN
+                    DECLARE @NombreNormalizado NVARCHAR(200) = UPPER(LTRIM(RTRIM(ISNULL(@NombreEmpleado, ''))));
+                    DECLARE @PosPrimerEspacio INT = CHARINDEX(' ', @NombreNormalizado);
+                    DECLARE @ApellidoBase NVARCHAR(100);
+                    DECLARE @InicialNombre NVARCHAR(1);
+                    DECLARE @BaseUsuario NVARCHAR(100);
+                    DECLARE @SecuenciaUsuario INT = 1;
+
+                    IF @PosPrimerEspacio > 0
+                    BEGIN
+                        SET @ApellidoBase = LEFT(@NombreNormalizado, @PosPrimerEspacio - 1);
+                        SET @InicialNombre = SUBSTRING(LTRIM(SUBSTRING(@NombreNormalizado, @PosPrimerEspacio + 1, LEN(@NombreNormalizado))), 1, 1);
+                    END
+                    ELSE
+                    BEGIN
+                        SET @ApellidoBase = @NombreNormalizado;
+                        SET @InicialNombre = '';
+                    END;
+
+                    SET @BaseUsuario = LOWER(REPLACE(REPLACE(REPLACE(CONCAT(ISNULL(@InicialNombre, ''), ISNULL(@ApellidoBase, '')), ' ', ''), '.', ''), ',', ''));
+
+                    IF ISNULL(@BaseUsuario, '') = ''
+                    BEGIN
+                        SET @BaseUsuario = CONCAT('emp', @IdEmpleado);
+                    END;
+
+                    SET @IdUsuarioGenerado = @BaseUsuario;
+
+                    WHILE EXISTS
+                    (
+                        SELECT 1
+                        FROM dbo.Usuario
+                        WHERE LTRIM(RTRIM(IdUsuario)) = @IdUsuarioGenerado
+                          AND ISNULL(IdEmpleado, 0) <> @IdEmpleadoLegacy
+                    )
+                    BEGIN
+                        SET @SecuenciaUsuario += 1;
+                        SET @IdUsuarioGenerado = CONCAT(@BaseUsuario, @SecuenciaUsuario);
+                    END;
+                END;
             END
 
             IF NOT EXISTS (SELECT 1 FROM dbo.Usuario WHERE IdUsuario = @IdUsuarioGenerado)
@@ -103,7 +277,7 @@ BEGIN
                         @IdUsuarioGenerado,
                         @ClaveInicial,
                         1,
-                        @IdEmpleado,
+                        @IdEmpleadoLegacy,
                         @IdCargoUsuario
                     );
                 END
@@ -122,7 +296,7 @@ BEGIN
                         @IdUsuarioGenerado,
                         @ClaveInicial,
                         1,
-                        @IdEmpleado,
+                        @IdEmpleadoLegacy,
                         @IdCargoUsuario
                     );
                 END
@@ -132,7 +306,7 @@ BEGIN
                 UPDATE dbo.Usuario
                 SET Clave = COALESCE(NULLIF(@ClaveInicial, ''), Clave),
                     IdEstado = COALESCE(IdEstado, 1),
-                    IdEmpleado = COALESCE(IdEmpleado, @IdEmpleado),
+                    IdEmpleado = @IdEmpleadoLegacy,
                     IdCargo = COALESCE(IdCargo, @IdCargoUsuario)
                 WHERE IdUsuario = @IdUsuarioGenerado;
             END
@@ -258,6 +432,7 @@ BEGIN
         Accion = 'APROBAR_EMPLEADO',
         Mensaje = @Mensaje,
         IdEmpleado = @IdEmpleado,
+        IdEmpleadoLegacy = @IdEmpleadoLegacy,
         IdUsuarioGenerado = @IdUsuarioGenerado,
         AsistenciaActiva = @CantidadAsistenciaActiva,
         AsistenciaInactiva = @CantidadAsistenciaInactiva;

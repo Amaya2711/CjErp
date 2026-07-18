@@ -11,6 +11,8 @@ namespace CjERP.Application.Interfaces.Services
             IEnumerable<PlanillaConsultaParametroDto> parametros,
             string? consulta = null,
             int? maxRows = null,
+            int? pageNumber = null,
+            int? pageSize = null,
             CancellationToken cancellationToken = default);
     }
 }

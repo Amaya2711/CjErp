@@ -3,6 +3,9 @@ import httpClient from "./httpClient";
 export type EmpleadoCrudItem = {
   idEmpleado: number;
   nombreEmpleado: string;
+  sexo: string;
+  tipoDoc: string;
+  idSexo: number | null;
   nroDocumento: string;
   telefono: string;
   correo: string;
@@ -19,6 +22,7 @@ export type EmpleadoCrudItem = {
   cargoPrint: string;
   estado: string;
   idEstado: number | null;
+  idDocumento: number | null;
   idEmpresaCj: number | null;
   idClienteCj: number | null;
   idAreaCj: number | null;
@@ -30,6 +34,9 @@ export type EmpleadoCrudItem = {
 
 export type EmpleadoCrudSaveRequest = {
   nombreEmpleado: string;
+  sexo?: string | null;
+  idSexo: number | null;
+  idDocumento: number | null;
   nroDocumento?: string | null;
   telefono?: string | null;
   correo?: string | null;
@@ -58,6 +65,8 @@ export type EmpleadoCrudLookups = {
   clientes: CrudLookupItem[];
   areas: CrudLookupItem[];
   ubicaciones: CrudLookupItem[];
+  sexos: CrudLookupItem[];
+  tiposDocumento: CrudLookupItem[];
   responsables: CrudLookupItem[];
   segundoValidadores: CrudLookupItem[];
   tercerValidadores: CrudLookupItem[];
@@ -76,6 +85,9 @@ function mapItem(raw: Record<string, unknown>): EmpleadoCrudItem {
   return {
     idEmpleado: Number(raw.idEmpleado ?? raw.IdEmpleado ?? 0),
     nombreEmpleado: toStringValue(raw.nombreEmpleado ?? raw.NombreEmpleado),
+    sexo: toStringValue(raw.sexo ?? raw.Sexo),
+    tipoDoc: toStringValue(raw.tipodoc ?? raw.TipoDoc ?? raw.tipodocumento ?? raw.TipoDocumento),
+    idSexo: toNumber(raw.idsexo ?? raw.IdSexo),
     nroDocumento: toStringValue(raw.nroDocumento ?? raw.NroDocumento),
     telefono: toStringValue(raw.telefono ?? raw.Telefono),
     correo: toStringValue(raw.correo ?? raw.Correo),
@@ -92,6 +104,7 @@ function mapItem(raw: Record<string, unknown>): EmpleadoCrudItem {
     cargoPrint: toStringValue(raw.cargoPrint ?? raw.CargoPrint),
     estado: toStringValue(raw.estado ?? raw.Estado),
     idEstado: toNumber(raw.idEstado ?? raw.IdEstado),
+    idDocumento: toNumber(raw.iddocumento ?? raw.IdDocumento),
     idEmpresaCj: toNumber(raw.idEmpresaCj ?? raw.IdEmpresaCj),
     idClienteCj: toNumber(raw.idClienteCj ?? raw.IdClienteCj),
     idAreaCj: toNumber(raw.idAreaCj ?? raw.IdAreaCj),
@@ -160,6 +173,12 @@ export const empleadosCrudService = {
         : [],
       ubicaciones: Array.isArray(response.ubicaciones)
         ? response.ubicaciones.map((item) => mapLookup(item as Record<string, unknown>))
+        : [],
+      sexos: Array.isArray(response.sexos)
+        ? response.sexos.map((item) => mapLookup(item as Record<string, unknown>))
+        : [],
+      tiposDocumento: Array.isArray(response.tiposDocumento)
+        ? response.tiposDocumento.map((item) => mapLookup(item as Record<string, unknown>))
         : [],
       responsables: Array.isArray(response.responsables)
         ? response.responsables.map((item) => mapLookup(item as Record<string, unknown>))

@@ -60,12 +60,21 @@ axiosClient.interceptors.response.use(
       const payload = data as {
         success?: boolean;
         message?: string;
+        errorMessage?: string;
+        detail?: string;
         data?: unknown;
       };
 
       if (typeof payload.success === "boolean") {
         if (payload.success === false) {
-          return Promise.reject(new Error(payload.message || "La operacion no fue completada por el servidor."));
+          return Promise.reject(
+            new Error(
+              payload.message ||
+                payload.errorMessage ||
+                payload.detail ||
+                "La operacion no fue completada por el servidor.",
+            ),
+          );
         }
 
         if ("data" in payload) {
