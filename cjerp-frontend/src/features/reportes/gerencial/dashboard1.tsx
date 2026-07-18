@@ -960,10 +960,6 @@ export default function Dashboard1Page() {
                           <div style={styles.sideLabel}>Periodo aplicado</div>
                           <strong style={styles.sideValue}>{appliedFechaInicio} al {appliedFechaFin}</strong>
                         </div>
-                        <div style={styles.sideCardCompact}>
-                          <div style={styles.sideLabel}>Elementos</div>
-                          <strong style={styles.sideValueCompact}>{chartData.length}</strong>
-                        </div>
                       </div>
                     </div>
                   </div>
@@ -1040,6 +1036,9 @@ export default function Dashboard1Page() {
                         )}
                       </tbody>
                     </table>
+                  </div>
+                  <div style={styles.recordsFooterNote}>
+                    Registros mostrados: <strong>{sortedChartData.length}</strong>
                   </div>
                 </div>
               </div>
@@ -1354,13 +1353,13 @@ export default function Dashboard1Page() {
                     {appliedFechaInicio} al {appliedFechaFin}
                   </strong>
                 </div>
-                <div style={styles.levelModalHeroAccent}>
-                  <span style={styles.levelModalHeroLabelAccent}>Elementos</span>
-                  <strong style={styles.levelModalHeroValueAccent}>{chartData.length}</strong>
-                </div>
                 <div style={styles.levelModalHeroCard}>
                   <span style={styles.levelModalHeroLabel}>Total convertido PEN</span>
                   <strong style={styles.levelModalHeroValue}>{formatCurrency(totalConvertedToPen, "PEN")}</strong>
+                </div>
+                <div style={styles.levelModalHeroAccent}>
+                  <span style={styles.levelModalHeroLabelAccent}>Registros mostrados</span>
+                  <strong style={styles.levelModalHeroValueAccent}>{sortedChartData.length}</strong>
                 </div>
               </div>
 
@@ -1448,6 +1447,9 @@ export default function Dashboard1Page() {
                     )}
                   </tbody>
                 </table>
+              </div>
+              <div style={styles.recordsFooterNote}>
+                Registros mostrados: <strong>{sortedChartData.length}</strong>
               </div>
             </div>
           </div>
@@ -2222,6 +2224,17 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#FFFFFF",
     overflow: "auto",
     maxHeight: "48vh",
+  },
+  recordsFooterNote: {
+    marginTop: 12,
+    padding: "10px 14px",
+    borderRadius: 14,
+    background: "#F8FAFC",
+    border: "1px solid #E2E8F0",
+    color: "#475569",
+    fontSize: 13,
+    fontWeight: 700,
+    textAlign: "right",
   },
   facturaLink: {
     display: "inline-flex",
