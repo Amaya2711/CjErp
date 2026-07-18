@@ -500,6 +500,7 @@ export default function Dashboard1Page() {
   const [levelSortColumn, setLevelSortColumn] = useState<LevelSortColumn>("nivel");
   const [levelSortDirection, setLevelSortDirection] = useState<"asc" | "desc">("asc");
   const [selectedGastoRow, setSelectedGastoRow] = useState<DrillRow | null>(null);
+  const [selectedLevelItem, setSelectedLevelItem] = useState<ChartDatum | null>(null);
   const isMountedRef = useRef(true);
 
   const loadRows = async (params?: { fechaInicio?: string; fechaFin?: string; searchText?: string }) => {
@@ -740,6 +741,14 @@ export default function Dashboard1Page() {
   const handleChartClick = (datum: ChartDatum) => {
     if (currentLevel === "tarea") return;
     setPath((prev) => getNextPath(currentLevel, prev, datum.rawLabel));
+  };
+
+  const handleOpenLevelItem = (item: ChartDatum) => {
+    setSelectedLevelItem(item);
+  };
+
+  const handleCloseLevelItem = () => {
+    setSelectedLevelItem(null);
   };
 
   const handleBreadcrumbReset = (level: "all" | "cliente" | "proyecto") => {
@@ -994,14 +1003,23 @@ export default function Dashboard1Page() {
                           sortedChartData.map((item) => (
                             <tr key={item.label}>
                               <td style={styles.td}>
-                                <button
-                                  type="button"
-                                  style={currentLevel === "tarea" ? styles.flatText : styles.linkButton}
-                                  onClick={() => handleChartClick(item)}
-                                  disabled={currentLevel === "tarea"}
-                                >
-                                  {item.label}
-                                </button>
+                                <div style={styles.levelItemCell}>
+                                  <button
+                                    type="button"
+                                    style={currentLevel === "tarea" ? styles.flatText : styles.linkButton}
+                                    onClick={() => handleChartClick(item)}
+                                    disabled={currentLevel === "tarea"}
+                                  >
+                                    {item.label}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    style={styles.expandLevelButton}
+                                    onClick={() => handleOpenLevelItem(item)}
+                                  >
+                                    Ampliar
+                                  </button>
+                                </div>
                               </td>
                               <td style={styles.td}>{item.count}</td>
                               {visibleCurrencies.map((currency) => (
@@ -1121,7 +1139,7 @@ export default function Dashboard1Page() {
                         No hay registros para mostrar.
                       </td>
                     </tr>
-                    ) : (
+                  ) : (
                     sortedRows.map((row, index) => (
                       <tr key={`${row.id}-${index}`}>
                         <td style={styles.tdStrong}>
@@ -1308,6 +1326,65 @@ export default function Dashboard1Page() {
                   <div style={styles.modalTextBox}>{selectedGastoRow.comentario}</div>
                 </div>
               </>
+            </div>
+          </div>
+        ) : null}
+
+        {selectedLevelItem ? (
+          <div style={styles.modalOverlay} onClick={handleCloseLevelItem} role="presentation">
+            <div
+              style={styles.levelModalPanel}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="nivel-ampliado-title"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div style={styles.modalHeader}>
+                <div>
+                  <div id="nivel-ampliado-title" style={styles.modalTitle}>
+                    Opción ampliada
+                  </div>
+                  <div style={styles.modalSubtitle}>{selectedLevelItem.label}</div>
+                </div>
+                <button type="button" style={styles.modalCloseButton} onClick={handleCloseLevelItem}>
+                  Cerrar
+                </button>
+              </div>
+
+              <div style={styles.levelModalHero}>
+                <div style={styles.levelModalHeroCard}>
+                  <span style={styles.levelModalHeroLabel}>Nivel</span>
+                  <strong style={styles.levelModalHeroValue}>{selectedLevelItem.label}</strong>
+                </div>
+                <div style={styles.levelModalHeroAccent}>
+                  <span style={styles.levelModalHeroLabelAccent}>Registros</span>
+                  <strong style={styles.levelModalHeroValueAccent}>{selectedLevelItem.count}</strong>
+                </div>
+                <div style={styles.levelModalHeroCard}>
+                  <span style={styles.levelModalHeroLabel}>Total convertido PEN</span>
+                  <strong style={styles.levelModalHeroValue}>
+                    {formatCurrency(
+                      Object.entries(selectedLevelItem.amountsByCurrency).reduce(
+                        (accumulator, [currency, amount]) =>
+                          accumulator + convertToPen(amount, currency, appliedUsdExchangeRate, appliedDopExchangeRate),
+                        0,
+                      ),
+                      "PEN",
+                    )}
+                  </strong>
+                </div>
+              </div>
+
+              <div style={styles.levelModalGrid}>
+                {Object.entries(selectedLevelItem.amountsByCurrency)
+                  .sort(([leftCurrency], [rightCurrency]) => leftCurrency.localeCompare(rightCurrency))
+                  .map(([currency, amount]) => (
+                    <div key={`${selectedLevelItem.label}-${currency}`} style={styles.levelModalField}>
+                      <span style={styles.levelModalFieldLabel}>{currency}</span>
+                      <strong style={styles.levelModalFieldValue}>{formatCurrency(amount, currency)}</strong>
+                    </div>
+                  ))}
+              </div>
             </div>
           </div>
         ) : null}
@@ -1822,6 +1899,22 @@ const styles: Record<string, React.CSSProperties> = {
     textDecoration: "underline",
     textUnderlineOffset: 2,
   },
+  levelItemCell: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  expandLevelButton: {
+    borderRadius: 999,
+    border: "1px solid #93C5FD",
+    background: "#EFF6FF",
+    color: "#1D4ED8",
+    fontSize: 12,
+    fontWeight: 800,
+    padding: "4px 10px",
+    cursor: "pointer",
+  },
   flatText: {
     border: "none",
     background: "transparent",
@@ -1954,6 +2047,89 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#B91C1C",
     padding: 16,
     fontWeight: 700,
+  },
+  levelModalPanel: {
+    width: "min(980px, 100%)",
+    maxHeight: "92vh",
+    overflowY: "auto",
+    borderRadius: 28,
+    background: "#FFFFFF",
+    border: "1px solid #BFDBFE",
+    boxShadow: "0 30px 90px rgba(15, 23, 42, 0.4)",
+    padding: 24,
+    display: "grid",
+    gap: 20,
+  },
+  levelModalHero: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: 12,
+  },
+  levelModalHeroCard: {
+    borderRadius: 20,
+    border: "1px solid #E2E8F0",
+    background: "linear-gradient(180deg, #FFFFFF, #F8FAFC)",
+    padding: 18,
+    display: "grid",
+    gap: 8,
+  },
+  levelModalHeroAccent: {
+    borderRadius: 20,
+    border: "1px solid #1D4ED8",
+    background: "linear-gradient(135deg, #DBEAFE, #BFDBFE 55%, #93C5FD)",
+    padding: 18,
+    display: "grid",
+    gap: 8,
+  },
+  levelModalHeroLabel: {
+    fontSize: 12,
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: "#64748B",
+  },
+  levelModalHeroLabelAccent: {
+    fontSize: 12,
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: "#0F172A",
+  },
+  levelModalHeroValue: {
+    fontSize: 22,
+    fontWeight: 800,
+    color: "#0F172A",
+    wordBreak: "break-word",
+  },
+  levelModalHeroValueAccent: {
+    fontSize: 30,
+    fontWeight: 900,
+    color: "#0F172A",
+  },
+  levelModalGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+    gap: 12,
+  },
+  levelModalField: {
+    borderRadius: 16,
+    border: "1px solid #E2E8F0",
+    background: "#F8FAFC",
+    padding: 14,
+    display: "grid",
+    gap: 8,
+  },
+  levelModalFieldLabel: {
+    fontSize: 12,
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: "#64748B",
+  },
+  levelModalFieldValue: {
+    fontSize: 16,
+    fontWeight: 800,
+    color: "#0F172A",
   },
   facturaLink: {
     display: "inline-flex",
