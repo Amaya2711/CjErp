@@ -5,7 +5,6 @@ import AppCard from "../../../components/base/AppCard";
 import AppPage from "../../../components/base/AppPage";
 import AppSectionHeader from "../../../components/base/AppSectionHeader";
 import AppStatusMessage from "../../../components/base/AppStatusMessage";
-import httpClient from "../../../api/httpClient";
 import {
   buildPlanillaPagadosDashboardRequest,
   consultarPlanillaEstados,
@@ -28,62 +27,58 @@ type DrillRow = {
   moneda: string;
   monto: number;
   totalPagar: number;
+  igv: number;
   subtotal: number;
   responsable: string;
   detalle: string;
   comentario: string;
-};
-
-type GastoDto = {
-  Id: number;
-  IdSuministroProvisional?: number | null;
-  FiltroOperativoKey: string;
-  Responsable: string;
-  IdBancoCta?: number | null;
-  IdProyecto?: number | null;
-  IdSite: string;
-  CorreSite?: number | null;
-  IdTarea?: number | null;
-  IdCliente?: number | null;
-  Cuenta: string;
-  CuentaNumero: string;
-  CuentaInter: string;
-  NombreCta: string;
-  Ruc: string;
-  TipoPago: string;
-  TipoPagoLabel: string;
-  Monto: number;
-  Subtotal?: number | null;
-  Total?: number | null;
-  Igv?: number | null;
-  IdRendicion: number;
-  Detalle: string;
-  Comentario: string;
-  FechaVencimiento: string;
-  FecIngreso: string;
-  FechaEmision: string;
-  Solicitante: string;
-  SolicitanteLabel: string;
-  Gestor: string;
-  GestorLabel: string;
-  Validador: string;
-  ValidadorLabel: string;
-  Moneda: string;
-  MonedaLabel: string;
-  Bien: string;
-  BienLabel: string;
-  Comprobante: string;
-  ComprobanteLabel: string;
-  Serie: string;
-  FacturaUrl: string;
-  FacturaPath: string;
-  TipoTrabajo: string;
-  SiteNombre: string;
-  Usuario: string;
-  Ot: string;
-  TipoCambio?: number | null;
-  IdUsuarioFactura?: number | null;
-  Estado?: number | null;
+  cuenta: string;
+  cuentaInter: string;
+  banco: string;
+  nroOperacion: string;
+  solicitante: string;
+  gestor: string;
+  validador: string;
+  bien: string;
+  comprobante: string;
+  serie: string;
+  rendicion: string;
+  facturaUrl: string;
+  facturaPath: string;
+  estado: string;
+  estadoLabel: string;
+  idSuministroProvisional: string;
+  usuario: string;
+  tipoTrabajo: string;
+  siteNombre: string;
+  filtroOperativo: string;
+  Moneda?: string;
+  MonedaLabel?: string;
+  Monto?: number;
+  Subtotal?: number;
+  Total?: number;
+  Igv?: number;
+  IdRendicion?: string;
+  FechaEmision?: string;
+  FechaVencimiento?: string;
+  FecIngreso?: string;
+  Responsable?: string;
+  Solicitante?: string;
+  Gestor?: string;
+  Validador?: string;
+  Bien?: string;
+  Comprobante?: string;
+  Serie?: string;
+  FacturaUrl?: string;
+  FacturaPath?: string;
+  TipoPago?: string;
+  TipoPagoLabel?: string;
+  TipoTrabajo?: string;
+  Ot?: string;
+  NombreEstado?: string;
+  Estado?: string;
+  IdSuministroProvisional?: string;
+  FiltroOperativoKey?: string;
 };
 
 type ChartDatum = {
@@ -120,7 +115,6 @@ const DEFAULT_EXCHANGE_RATES = {
   USD: 3.5,
   DOP: 0.058,
 } as const;
-const GASTOS_API_URL = "/tesoreria/gastos";
 
 function normalizeExchangeRateInput(value: string) {
   return value.replace(",", ".").replace(/[^\d.]/g, "");
@@ -278,10 +272,31 @@ function buildDrillRow(row: RawRow): DrillRow {
   const responsable = pickString(row, ["Responsable", "responsable", "ResponsableLabel", "responsableLabel"]);
   const detalle = pickString(row, ["Detalle", "detalle"]);
   const comentario = pickString(row, ["Comentario", "comentario"]);
+  const cuenta = pickString(row, ["Cuenta", "cuenta"]);
+  const cuentaInter = pickString(row, ["CuentaInter", "cuentaInter"]);
+  const banco = pickString(row, ["Banco", "banco"]);
+  const nroOperacion = pickString(row, ["NroOperacion", "nroOperacion"]);
+  const solicitante = pickString(row, ["Solicitante", "solicitante"]);
+  const gestor = pickString(row, ["Gestor", "gEstor", "gestor"]);
+  const validador = pickString(row, ["Validador", "validador"]);
+  const bien = pickString(row, ["Bien", "bien"]);
+  const comprobante = pickString(row, ["Comprobante", "comprobante"]);
+  const serie = pickString(row, ["Serie", "serie"]);
+  const rendicion = pickString(row, ["IdRendicion", "idRendicion", "Rendicion", "rendicion"]);
+  const facturaUrl = pickString(row, ["RutaFacturaUrl", "rutaFacturaUrl", "FacturaUrl", "facturaUrl", "imgFactura"]);
+  const facturaPath = pickString(row, ["RutaFacturaEnviada", "rutaFacturaEnviada", "RutaFacturaOriginal", "rutaFacturaOriginal", "FacturaPath", "facturaPath"]);
+  const estado = pickString(row, ["Estado", "estado"]);
+  const estadoLabel = pickString(row, ["NombreEstado", "nombreEstado", "EstadoLabel", "estadoLabel"]);
+  const idSuministroProvisional = pickString(row, ["idprovisional", "IdSuministroProvisional", "idSuministroProvisional"]);
+  const usuario = pickString(row, ["Usuario", "usuario"]);
+  const tipoTrabajo = pickString(row, ["Tipo_Trabajo", "TipoTrabajo", "tipoTrabajo"]);
+  const siteNombre = pickString(row, ["Site", "SiteNombre", "siteNombre"]);
+  const filtroOperativo = [cliente, proyecto, siteNombre || site, tipoTrabajo, tarea].filter(Boolean).join(" - ");
   const moneda = normalizeMonedaLabel(
     pickString(row, ["Moneda", "moneda", "MonedaLabel", "monedaLabel", "TipoMoneda", "tipoMoneda"]),
   );
   const subtotal = pickNumber(row, ["Subtotal", "subtotal"]);
+  const igv = pickNumber(row, ["IGV", "Igv", "igv"]);
   const total = pickNumber(row, ["Total", "total", "Monto", "monto"]);
   const totalPagar = pickNumber(row, ["TotalPagar", "totalPagar"]);
   const subtotalSolesValue = row.SubtotalSoles ?? row.subtotalSoles;
@@ -302,10 +317,58 @@ function buildDrillRow(row: RawRow): DrillRow {
     moneda,
     monto,
     totalPagar: totalPagar || 0,
+    igv,
     subtotal: subtotal || 0,
     responsable: responsable || "-",
     detalle: detalle || "-",
     comentario: comentario || "-",
+    cuenta: cuenta || "-",
+    cuentaInter: cuentaInter || "-",
+    banco: banco || "-",
+    nroOperacion: nroOperacion || "-",
+    solicitante: solicitante || "-",
+    gestor: gestor || "-",
+    validador: validador || "-",
+    bien: bien || "-",
+    comprobante: comprobante || "-",
+    serie: serie || "-",
+    rendicion: rendicion || "-",
+    facturaUrl: facturaUrl || "-",
+    facturaPath: facturaPath || "-",
+    estado: estado || "-",
+    estadoLabel: estadoLabel || "-",
+    idSuministroProvisional: idSuministroProvisional || "-",
+    usuario: usuario || "-",
+    tipoTrabajo: tipoTrabajo || "-",
+    siteNombre: siteNombre || site,
+    filtroOperativo: filtroOperativo || "-",
+    Moneda: moneda,
+    MonedaLabel: moneda,
+    Monto: monto,
+    Subtotal: subtotal || 0,
+    Total: total,
+    Igv: igv,
+    IdRendicion: rendicion,
+    FechaEmision: fechaEmision || "-",
+    FechaVencimiento: fechaVencimiento || "-",
+    FecIngreso: fechaIngreso || "-",
+    Responsable: responsable || "-",
+    Solicitante: solicitante || "-",
+    Gestor: gestor || "-",
+    Validador: validador || "-",
+    Bien: bien || "-",
+    Comprobante: comprobante || "-",
+    Serie: serie || "-",
+    FacturaUrl: facturaUrl || "-",
+    FacturaPath: facturaPath || "-",
+    TipoPago: tipoPago || "-",
+    TipoPagoLabel: tipoPago || "-",
+    TipoTrabajo: tipoTrabajo || "-",
+    Ot: ot || "-",
+    NombreEstado: estadoLabel || "-",
+    Estado: estado || "-",
+    IdSuministroProvisional: idSuministroProvisional || "-",
+    FiltroOperativoKey: filtroOperativo || "-",
   };
 }
 
@@ -437,9 +500,6 @@ export default function Dashboard1Page() {
   const [levelSortColumn, setLevelSortColumn] = useState<LevelSortColumn>("nivel");
   const [levelSortDirection, setLevelSortDirection] = useState<"asc" | "desc">("asc");
   const [selectedGastoRow, setSelectedGastoRow] = useState<DrillRow | null>(null);
-  const [selectedGastoDetail, setSelectedGastoDetail] = useState<GastoDto | null>(null);
-  const [selectedGastoLoading, setSelectedGastoLoading] = useState(false);
-  const [selectedGastoError, setSelectedGastoError] = useState("");
   const isMountedRef = useRef(true);
 
   const loadRows = async (params?: { fechaInicio?: string; fechaFin?: string; searchText?: string }) => {
@@ -457,6 +517,7 @@ export default function Dashboard1Page() {
           fechaFin,
           textoBusqueda: searchText,
         }),
+        { timeoutMs: 120000 },
       );
       const detailRows = Array.isArray(response.rows) ? response.rows : [];
 
@@ -716,37 +777,12 @@ export default function Dashboard1Page() {
     XLSX.writeFile(workbook, `registros_detalle_${appliedFechaInicio}_${appliedFechaFin}.xlsx`);
   };
 
-  const handleOpenRowDetails = async (row: DrillRow) => {
+  const handleOpenRowDetails = (row: DrillRow) => {
     setSelectedGastoRow(row);
-    setSelectedGastoDetail(null);
-    setSelectedGastoError("");
-    setSelectedGastoLoading(true);
-
-    try {
-      const gastos = await httpClient.get<GastoDto[]>(GASTOS_API_URL);
-      const gasto = gastos.find((item) => String(item.Id) === String(row.id));
-
-      if (!gasto) {
-        throw new Error(`No se encontró el gasto con Id ${row.id}.`);
-      }
-
-      if (!isMountedRef.current) return;
-      setSelectedGastoDetail(gasto);
-    } catch (err) {
-      if (!isMountedRef.current) return;
-      setSelectedGastoError(getHttpErrorMessage(err, "No se pudo cargar el detalle completo del gasto."));
-    } finally {
-      if (isMountedRef.current) {
-        setSelectedGastoLoading(false);
-      }
-    }
   };
 
   const handleCloseRowDetails = () => {
     setSelectedGastoRow(null);
-    setSelectedGastoDetail(null);
-    setSelectedGastoError("");
-    setSelectedGastoLoading(false);
   };
 
   return (
@@ -841,7 +877,7 @@ export default function Dashboard1Page() {
           </div>
 
           {loading ? (
-            <div style={styles.loadingBox}>Cargando información del store...</div>
+            <div style={styles.loadingBox}>Cargando informaciÃ³n del store...</div>
           ) : chartData.length === 0 ? (
             <div style={styles.emptyBox}>No se encontraron datos para el filtro seleccionado.</div>
           ) : (
@@ -1076,7 +1112,7 @@ export default function Dashboard1Page() {
                   {loading ? (
                     <tr>
                       <td colSpan={9} style={styles.emptyCell}>
-                        Cargando información del store...
+                        Cargando informaciÃ³n del store...
                       </td>
                     </tr>
                   ) : filteredRows.length === 0 ? (
@@ -1130,146 +1166,148 @@ export default function Dashboard1Page() {
                   Cerrar
                 </button>
               </div>
-              {selectedGastoLoading ? (
-                <div style={styles.modalLoadingBox}>Cargando detalle del gasto...</div>
-              ) : selectedGastoError ? (
-                <div style={styles.modalErrorBox}>{selectedGastoError}</div>
-              ) : (
-                <>
-                  {(() => {
-                    const gasto = selectedGastoDetail;
-                    const moneda = gasto?.MonedaLabel || gasto?.Moneda || selectedGastoRow.moneda;
-                    const monto = gasto?.Monto ?? selectedGastoRow.monto;
-                    const subtotal = gasto?.Subtotal ?? selectedGastoRow.subtotal ?? monto;
-                    const total = gasto?.Total ?? gasto?.Monto ?? monto;
-                    const totalPen = convertToPen(monto, gasto?.Moneda || selectedGastoRow.moneda, appliedUsdExchangeRate, appliedDopExchangeRate);
-                    const facturaLink = gasto?.FacturaUrl || gasto?.FacturaPath || "";
+              <>
+                {selectedGastoRow.facturaUrl !== "-" || selectedGastoRow.facturaPath !== "-" ? (
+                  <a
+                    href={selectedGastoRow.facturaUrl !== "-" ? selectedGastoRow.facturaUrl : selectedGastoRow.facturaPath}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={styles.facturaLink}
+                  >
+                    Ver factura
+                  </a>
+                ) : null}
+                <div style={styles.modalGrid}>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Id / Correlativo</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.id}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Filtro</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.filtroOperativo}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Trabajo</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.tipoTrabajo}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>OT</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.ot}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Tarea</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.tarea}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Responsable</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.responsable}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Suministro vigente</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.idSuministroProvisional}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Cuenta</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.cuenta}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Cuenta inter</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.cuentaInter}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Banco</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.banco}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Nro. operación</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.nroOperacion}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Fecha deposito</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.fechaIngreso}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Fecha emision</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.fechaEmision}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Fecha vencimiento</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.fechaVencimiento}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Bien</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.bien}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Comprobante</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.comprobante}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Serie</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.serie}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Rendición</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.rendicion}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Tipo de pago</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.tipoPago}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Subtotal</span>
+                    <strong style={styles.modalValue}>{formatCurrency(selectedGastoRow.subtotal, selectedGastoRow.moneda)}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>IGV</span>
+                    <strong style={styles.modalValue}>{formatCurrency(selectedGastoRow.igv, selectedGastoRow.moneda)}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Total</span>
+                    <strong style={styles.modalValue}>{formatCurrency(selectedGastoRow.totalPagar || selectedGastoRow.monto, selectedGastoRow.moneda)}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Moneda</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.moneda}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Solicitante</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.solicitante}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Gestor</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.gestor}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Validador</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.validador}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Estado</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.estadoLabel || selectedGastoRow.estado}</strong>
+                  </div>
+                  <div style={styles.modalField}>
+                    <span style={styles.modalLabel}>Usuario</span>
+                    <strong style={styles.modalValue}>{selectedGastoRow.usuario}</strong>
+                  </div>
+                  <div style={styles.modalFieldAccent}>
+                    <span style={styles.modalLabelAccent}>Total convertido PEN</span>
+                    <strong style={styles.modalValueAccent}>
+                      {formatCurrency(convertToPen(selectedGastoRow.monto, selectedGastoRow.moneda, appliedUsdExchangeRate, appliedDopExchangeRate), "PEN")}
+                    </strong>
+                  </div>
+                </div>
 
-                    return (
-                      <>
-                        {facturaLink ? (
-                          <a
-                            href={facturaLink}
-                            target="_blank"
-                            rel="noreferrer"
-                            style={styles.facturaLink}
-                          >
-                            Ver factura
-                          </a>
-                        ) : null}
-                        <div style={styles.modalGrid}>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>Id / Correlativo</span>
-                            <strong style={styles.modalValue}>{selectedGastoRow.id}</strong>
-                          </div>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>Filtro</span>
-                            <strong style={styles.modalValue}>{gasto?.FiltroOperativoKey || selectedGastoRow.cliente}</strong>
-                          </div>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>Trabajo</span>
-                            <strong style={styles.modalValue}>{gasto?.TipoTrabajo || selectedGastoRow.proyecto}</strong>
-                          </div>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>OT</span>
-                            <strong style={styles.modalValue}>{gasto?.Ot || selectedGastoRow.ot}</strong>
-                          </div>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>Tarea</span>
-                            <strong style={styles.modalValue}>{selectedGastoRow.tarea}</strong>
-                          </div>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>Responsable</span>
-                            <strong style={styles.modalValue}>{gasto?.Responsable || selectedGastoRow.responsable}</strong>
-                          </div>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>Suministro vigente</span>
-                            <strong style={styles.modalValue}>{gasto?.IdSuministroProvisional != null ? String(gasto.IdSuministroProvisional) : "-"}</strong>
-                          </div>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>Cuenta</span>
-                            <strong style={styles.modalValue}>{gasto?.Cuenta || "-"}</strong>
-                          </div>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>Fecha deposito</span>
-                            <strong style={styles.modalValue}>{formatDisplayDate(gasto?.FecIngreso || selectedGastoRow.fechaIngreso)}</strong>
-                          </div>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>Fecha emision</span>
-                            <strong style={styles.modalValue}>{formatDisplayDate(gasto?.FechaEmision || selectedGastoRow.fechaEmision)}</strong>
-                          </div>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>Fecha vencimiento</span>
-                            <strong style={styles.modalValue}>{formatDisplayDate(gasto?.FechaVencimiento || selectedGastoRow.fechaVencimiento)}</strong>
-                          </div>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>Bien</span>
-                            <strong style={styles.modalValue}>{gasto?.BienLabel || gasto?.Bien || "-"}</strong>
-                          </div>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>Comprobante</span>
-                            <strong style={styles.modalValue}>{gasto?.ComprobanteLabel || gasto?.Comprobante || "-"}</strong>
-                          </div>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>Serie</span>
-                            <strong style={styles.modalValue}>{gasto?.Serie || "-"}</strong>
-                          </div>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>Rendición</span>
-                            <strong style={styles.modalValue}>{gasto?.IdRendicion != null ? String(gasto.IdRendicion) : "-"}</strong>
-                          </div>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>Tipo de pago</span>
-                            <strong style={styles.modalValue}>{gasto?.TipoPagoLabel || gasto?.TipoPago || selectedGastoRow.tipoPago}</strong>
-                          </div>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>Subtotal</span>
-                            <strong style={styles.modalValue}>{formatCurrency(subtotal, gasto?.Moneda || selectedGastoRow.moneda)}</strong>
-                          </div>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>IGV</span>
-                            <strong style={styles.modalValue}>{formatCurrency(gasto?.Igv ?? 0, gasto?.Moneda || selectedGastoRow.moneda)}</strong>
-                          </div>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>Total</span>
-                            <strong style={styles.modalValue}>{formatCurrency(total, gasto?.Moneda || selectedGastoRow.moneda)}</strong>
-                          </div>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>Moneda</span>
-                            <strong style={styles.modalValue}>{moneda}</strong>
-                          </div>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>Solicitante</span>
-                            <strong style={styles.modalValue}>{gasto?.SolicitanteLabel || gasto?.Solicitante || "-"}</strong>
-                          </div>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>Gestor</span>
-                            <strong style={styles.modalValue}>{gasto?.GestorLabel || gasto?.Gestor || "-"}</strong>
-                          </div>
-                          <div style={styles.modalField}>
-                            <span style={styles.modalLabel}>Validador</span>
-                            <strong style={styles.modalValue}>{gasto?.ValidadorLabel || gasto?.Validador || "-"}</strong>
-                          </div>
-                          <div style={styles.modalFieldAccent}>
-                            <span style={styles.modalLabelAccent}>Total convertido PEN</span>
-                            <strong style={styles.modalValueAccent}>{formatCurrency(totalPen, "PEN")}</strong>
-                          </div>
-                        </div>
+                <div style={styles.modalSection}>
+                  <span style={styles.modalLabel}>Detalle</span>
+                  <div style={styles.modalTextBox}>{selectedGastoRow.detalle}</div>
+                </div>
 
-                        <div style={styles.modalSection}>
-                          <span style={styles.modalLabel}>Detalle</span>
-                          <div style={styles.modalTextBox}>{gasto?.Detalle || selectedGastoRow.detalle || "Sin detalle"}</div>
-                        </div>
-
-                        <div style={styles.modalSection}>
-                          <span style={styles.modalLabel}>Comentario</span>
-                          <div style={styles.modalTextBox}>{gasto?.Comentario || selectedGastoRow.comentario || "Sin comentario"}</div>
-                        </div>
-                      </>
-                    );
-                  })()}
-                </>
-              )}
+                <div style={styles.modalSection}>
+                  <span style={styles.modalLabel}>Comentario</span>
+                  <div style={styles.modalTextBox}>{selectedGastoRow.comentario}</div>
+                </div>
+              </>
             </div>
           </div>
         ) : null}
@@ -1926,3 +1964,5 @@ const styles: Record<string, React.CSSProperties> = {
     textDecoration: "underline",
   },
 };
+
+

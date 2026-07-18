@@ -142,9 +142,12 @@ export function buildPlanillaConsultaEstadosRequest(
 }
 
 export async function consultarPlanillaEstados(
-  request: PlanillaConsultaEstadosRequest
+  request: PlanillaConsultaEstadosRequest,
+  options?: { timeoutMs?: number }
 ): Promise<PlanillaConsultaEstadosResponse> {
-  return httpClient.post<PlanillaConsultaEstadosResponse>(PLANILLA_CONSULTA_API_URL, request);
+  return httpClient.post<PlanillaConsultaEstadosResponse>(PLANILLA_CONSULTA_API_URL, request, {
+    timeout: options?.timeoutMs,
+  });
 }
 
 export function buildPlanillaPagadosDashboardRequest(args: {
