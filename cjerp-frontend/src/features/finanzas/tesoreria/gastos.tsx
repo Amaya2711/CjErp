@@ -271,8 +271,6 @@ type SuministroProvisionalVigenteOption = {
 const GASTOS_API_URL = "/tesoreria/gastos";
 const FACTURA_UPLOAD_API_URL = `${GASTOS_API_URL}/upload-factura`;
 const TIPO_CAMBIO_GASTO = 3.8;
-const MAX_GASTOS_PARA_MOSTRAR = 500;
-const UMBRAL_CONSULTA_MASIVA = 2000;
 const TAREAS_CON_SUMINISTRO_VIGENTE = new Set([52, 53]);
 const VALORES_GASTO_INICIALES: ValoresGastoResponse = {
   porcentaje: 0,
@@ -1200,18 +1198,6 @@ export default function GastosPage() {
   const [mostrarFiltrosAdicionales, setMostrarFiltrosAdicionales] = useState(false);
   const [cabeceraFiltroAbierto, setCabeceraFiltroAbierto] = useState<string | null>(null);
   const [mensajeFiltroCabecera, setMensajeFiltroCabecera] = useState<string | null>(null);
-  const [limiteConsultaServidor, setLimiteConsultaServidor] = useState<{
-    totalRows: number;
-    maxRowsAllowed: number;
-    message: string;
-  } | null>(null);
-  const [confirmacionConsultaMasiva, setConfirmacionConsultaMasiva] = useState<{
-    totalRows: number;
-    threshold: number;
-    message: string;
-  } | null>(null);
-  const usarLimiteCargaInicialRef = useRef(true);
-  const forzarConsultaCompletaRef = useRef(false);
     // Estado para ordenamiento
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
 
@@ -1398,31 +1384,15 @@ export default function GastosPage() {
 
       if (estadosSeleccionados.length === 0) {
         setMensajeFiltroCabecera("Seleccione al menos un estado para realizar la búsqueda.");
-        setLimiteConsultaServidor(null);
-        setConfirmacionConsultaMasiva(null);
-        forzarConsultaCompletaRef.current = false;
         return [];
       }
 
       if (!isInputDateRangeValid(fechaInicio, fechaFin)) {
         setMensajeFiltroCabecera("La fecha inicio no puede ser mayor que la fecha fin.");
-        setLimiteConsultaServidor(null);
-        setConfirmacionConsultaMasiva(null);
-        forzarConsultaCompletaRef.current = false;
         return [];
       }
 
       setMensajeFiltroCabecera(null);
-      setLimiteConsultaServidor(null);
-      setConfirmacionConsultaMasiva(null);
-
-      const esCargaInicial = usarLimiteCargaInicialRef.current;
-      const esConsultaForzada = forzarConsultaCompletaRef.current;
-      const maxRowsConsulta = esCargaInicial
-        ? MAX_GASTOS_PARA_MOSTRAR
-        : esConsultaForzada
-          ? undefined
-          : UMBRAL_CONSULTA_MASIVA;
 
       const response = await consultarPlanillaEstados(
         {
@@ -1451,39 +1421,8 @@ export default function GastosPage() {
                 ]
               : []),
           ]),
-          ...(typeof maxRowsConsulta === "number" ? { maxRows: maxRowsConsulta } : {}),
         }
       );
-
-      usarLimiteCargaInicialRef.current = false;
-
-      if (response.limitExceeded) {
-        const totalRows = Number(response.totalRows ?? 0);
-        const maxRowsAllowed = Number(
-          response.maxRowsAllowed ?? maxRowsConsulta ?? UMBRAL_CONSULTA_MASIVA
-        );
-
-        if (!esCargaInicial && !esConsultaForzada && maxRowsAllowed >= UMBRAL_CONSULTA_MASIVA) {
-          setConfirmacionConsultaMasiva({
-            totalRows,
-            threshold: maxRowsAllowed,
-            message: `Se encontraron ${totalRows} registros. Recomendamos aplicar mas filtros para reducir la cantidad de coincidencias. Si decide continuar sin mas filtros, el sistema puede generar demoras en la busqueda por el volumen de informacion.`,
-          });
-          return [];
-        }
-
-        setLimiteConsultaServidor({
-          totalRows,
-          maxRowsAllowed,
-          message:
-            response.message?.trim() ||
-            `Se encontraron ${totalRows} registros. Aplique mas filtros antes de mostrar la informacion.`,
-        });
-        forzarConsultaCompletaRef.current = false;
-        return [];
-      }
-
-      forzarConsultaCompletaRef.current = false;
 
       return extraerArray<Record<string, unknown>>(response.rows).map((row, index) =>
         mapGastoDtoToView(mapPlanillaConsultaRowToGastoDto(row, index))
@@ -1541,8 +1480,6 @@ export default function GastosPage() {
       return;
     }
 
-    forzarConsultaCompletaRef.current = false;
-    setConfirmacionConsultaMasiva(null);
     void cargarGastos();
   }, [filtrosConsultaKey]);
 
@@ -3478,65 +3415,6 @@ export default function GastosPage() {
         </div>
       )}
 
-      {limiteConsultaServidor && (
-        <div
-          style={{
-            marginTop: 12,
-            borderRadius: 12,
-            border: "1px solid #F59E0B",
-            background: "#FFFBEB",
-            color: "#92400E",
-            padding: 14,
-            fontSize: 11,
-            fontWeight: 600,
-          }}
-        >
-          {limiteConsultaServidor.message}
-        </div>
-      )}
-
-      {confirmacionConsultaMasiva && (
-        <div
-          style={{
-            marginTop: 12,
-            borderRadius: 12,
-            border: "1px solid #F59E0B",
-            background: "#FFF7ED",
-            color: "#9A3412",
-            padding: 14,
-            fontSize: 11,
-            fontWeight: 600,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 16,
-            flexWrap: "wrap",
-          }}
-        >
-          <span>{confirmacionConsultaMasiva.message}</span>
-          <button
-            type="button"
-            onClick={() => {
-              forzarConsultaCompletaRef.current = true;
-              setConfirmacionConsultaMasiva(null);
-              void cargarGastos();
-            }}
-            style={{
-              border: "1px solid #C2410C",
-              background: "#EA580C",
-              color: "#FFFFFF",
-              borderRadius: 10,
-              padding: "10px 14px",
-              fontSize: 11,
-              fontWeight: 700,
-              cursor: "pointer",
-            }}
-          >
-            Continuar de todos modos
-          </button>
-        </div>
-      )}
-
       <div
         style={{
           background: "#FFFFFF",
@@ -3634,13 +3512,7 @@ export default function GastosPage() {
               ) : gastosFiltrados.length === 0 ? (
                 <tr>
                   <td colSpan={columnasGridGastos.length} style={{ padding: 24, textAlign: "center", color: "#6B7280", fontSize: 11 }}>
-                    {mensajeFiltroCabecera
-                      ? mensajeFiltroCabecera
-                      : limiteConsultaServidor
-                        ? limiteConsultaServidor.message
-                        : confirmacionConsultaMasiva
-                          ? confirmacionConsultaMasiva.message
-                          : "No se encontraron gastos."}
+                    {mensajeFiltroCabecera ? mensajeFiltroCabecera : "No se encontraron gastos."}
                   </td>
                 </tr>
               ) : (
@@ -3688,9 +3560,7 @@ export default function GastosPage() {
           alignItems: "center"
         }}>
           <span>
-            {limiteConsultaServidor
-              ? `Registros encontrados: ${limiteConsultaServidor.totalRows} | Máximo permitido para mostrar: ${limiteConsultaServidor.maxRowsAllowed}`
-              : `Registros encontrados: ${gastosFiltrados.length}`}
+            Registros encontrados: {gastosFiltrados.length}
           </span>
           <span>
             {(() => {

@@ -5,6 +5,7 @@ import AppCard from "../../../components/base/AppCard";
 import AppPage from "../../../components/base/AppPage";
 import AppSectionHeader from "../../../components/base/AppSectionHeader";
 import AppStatusMessage from "../../../components/base/AppStatusMessage";
+import httpClient from "../../../api/httpClient";
 import {
   buildPlanillaPagadosDashboardRequest,
   consultarPlanillaEstados,
@@ -14,12 +15,75 @@ import { getHttpErrorMessage } from "../../../utils/httpError";
 type RawRow = Record<string, unknown>;
 
 type DrillRow = {
+  id: string;
+  fechaIngreso: string;
+  fechaEmision: string;
+  fechaVencimiento: string;
   cliente: string;
   proyecto: string;
   site: string;
+  ot: string;
   tarea: string;
+  tipoPago: string;
   moneda: string;
   monto: number;
+  totalPagar: number;
+  subtotal: number;
+  responsable: string;
+  detalle: string;
+  comentario: string;
+};
+
+type GastoDto = {
+  Id: number;
+  IdSuministroProvisional?: number | null;
+  FiltroOperativoKey: string;
+  Responsable: string;
+  IdBancoCta?: number | null;
+  IdProyecto?: number | null;
+  IdSite: string;
+  CorreSite?: number | null;
+  IdTarea?: number | null;
+  IdCliente?: number | null;
+  Cuenta: string;
+  CuentaNumero: string;
+  CuentaInter: string;
+  NombreCta: string;
+  Ruc: string;
+  TipoPago: string;
+  TipoPagoLabel: string;
+  Monto: number;
+  Subtotal?: number | null;
+  Total?: number | null;
+  Igv?: number | null;
+  IdRendicion: number;
+  Detalle: string;
+  Comentario: string;
+  FechaVencimiento: string;
+  FecIngreso: string;
+  FechaEmision: string;
+  Solicitante: string;
+  SolicitanteLabel: string;
+  Gestor: string;
+  GestorLabel: string;
+  Validador: string;
+  ValidadorLabel: string;
+  Moneda: string;
+  MonedaLabel: string;
+  Bien: string;
+  BienLabel: string;
+  Comprobante: string;
+  ComprobanteLabel: string;
+  Serie: string;
+  FacturaUrl: string;
+  FacturaPath: string;
+  TipoTrabajo: string;
+  SiteNombre: string;
+  Usuario: string;
+  Ot: string;
+  TipoCambio?: number | null;
+  IdUsuarioFactura?: number | null;
+  Estado?: number | null;
 };
 
 type ChartDatum = {
@@ -31,6 +95,8 @@ type ChartDatum = {
 };
 
 type DrillLevel = "cliente" | "proyecto" | "site" | "tarea";
+type DetailSortColumn = "id" | "fecha" | "cliente" | "proyecto" | "site" | "tarea" | "moneda" | "monto" | "montoPen";
+type LevelSortColumn = "nivel" | "registros" | "montoPen" | string;
 
 type DrillPath = {
   cliente: string | null;
@@ -50,11 +116,20 @@ const PIE_COLORS = [
   "#EC4899",
   "#64748B",
 ];
-const PAGE_SIZE = 5000;
 const DEFAULT_EXCHANGE_RATES = {
   USD: 3.5,
   DOP: 0.058,
 } as const;
+const GASTOS_API_URL = "/tesoreria/gastos";
+
+function normalizeExchangeRateInput(value: string) {
+  return value.replace(",", ".").replace(/[^\d.]/g, "");
+}
+
+function parseExchangeRateInput(value: string) {
+  const parsed = Number(value.replace(",", ".").trim());
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
 
 function getYearStartInputValue() {
   const today = new Date();
@@ -119,27 +194,118 @@ function normalizeMonedaLabel(value: string) {
   return value.trim() || "Sin moneda";
 }
 
+function formatDisplayDate(value: string) {
+  const text = value.trim();
+  if (!text || text === "-") return "-";
+
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(text)) {
+    return text;
+  }
+
+  const isoDate = /^\d{4}-\d{2}-\d{2}$/.test(text) ? `${text}T00:00:00` : text;
+  const parsed = new Date(isoDate);
+  if (Number.isFinite(parsed.getTime())) {
+    return parsed.toLocaleDateString("es-PE");
+  }
+
+  return text;
+}
+
+function parseDisplayDateTime(value: string) {
+  const text = value.trim();
+  if (!text || text === "-") return Number.NaN;
+
+  const ddmmyyyy = /^(\d{2})\/(\d{2})\/(\d{4})$/;
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/;
+  const ddmm = text.match(ddmmyyyy);
+  if (ddmm) {
+    const [, day, month, year] = ddmm;
+    return new Date(Number(year), Number(month) - 1, Number(day)).getTime();
+  }
+
+  const isoMatch = text.match(iso);
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch;
+    return new Date(Number(year), Number(month) - 1, Number(day)).getTime();
+  }
+
+  const parsed = new Date(text);
+  return Number.isFinite(parsed.getTime()) ? parsed.getTime() : Number.NaN;
+}
+
 function buildDrillRow(row: RawRow): DrillRow {
+  const id = pickString(row, ["Correlativo", "correlativo", "Corre", "corre", "Id", "id"]);
+  const fechaIngreso = formatDisplayDate(
+    pickString(row, [
+      "FechaDeposito",
+      "fechadeposito",
+      "fechaDeposito",
+      "FechaDepositoTexto",
+      "fechaDepositoTexto",
+      "FecDeposito",
+      "fecDeposito",
+      "FecIngreso",
+      "fecIngreso",
+      "FechaIngreso",
+      "fechaIngreso",
+    ]),
+  );
+  const fechaEmision = formatDisplayDate(
+    pickString(row, [
+      "FechaEmision",
+      "fechaEmision",
+      "FecIngreso",
+      "fecIngreso",
+      "FechaIngreso",
+      "fechaIngreso",
+    ]),
+  );
+  const fechaVencimiento = formatDisplayDate(
+    pickString(row, [
+      "FechaVencimiento",
+      "fechaVencimiento",
+      "FechaDeposito",
+      "fechadeposito",
+      "fechaDeposito",
+    ]),
+  );
   const cliente = pickString(row, ["Cliente", "cliente", "NombreCliente", "nombreCliente", "clienteNombre"]) || "Sin cliente";
   const proyecto = pickString(row, ["Proyecto", "proyecto", "NombreProyecto", "nombreProyecto"]) || "Sin proyecto";
   const site = pickString(row, ["Site", "site", "NombreSite", "nombreSite", "siteNombre"]) || "Sin site";
+  const ot = pickString(row, ["OT", "Ot", "ot"]);
   const tarea = pickString(row, ["Tarea", "tarea", "NombreTarea", "nombreTarea", "TipoTrabajo", "tipoTrabajo"]) || "Sin tarea";
+  const tipoPago = pickString(row, ["TipoPago", "tipoPago", "IdTipoPago", "idTipoPago", "TipoPagoLabel", "tipoPagoLabel"]);
+  const responsable = pickString(row, ["Responsable", "responsable", "ResponsableLabel", "responsableLabel"]);
+  const detalle = pickString(row, ["Detalle", "detalle"]);
+  const comentario = pickString(row, ["Comentario", "comentario"]);
   const moneda = normalizeMonedaLabel(
     pickString(row, ["Moneda", "moneda", "MonedaLabel", "monedaLabel", "TipoMoneda", "tipoMoneda"]),
   );
   const subtotal = pickNumber(row, ["Subtotal", "subtotal"]);
   const total = pickNumber(row, ["Total", "total", "Monto", "monto"]);
+  const totalPagar = pickNumber(row, ["TotalPagar", "totalPagar"]);
   const subtotalSolesValue = row.SubtotalSoles ?? row.subtotalSoles;
   const subtotalSoles = subtotalSolesValue == null || subtotalSolesValue === "" ? null : toNumber(subtotalSolesValue);
   const monto = subtotal || total || subtotalSoles || 0;
 
   return {
+    id: id || "-",
+    fechaIngreso: fechaIngreso || "-",
+    fechaEmision: fechaEmision || "-",
+    fechaVencimiento: fechaVencimiento || "-",
     cliente,
     proyecto,
     site,
+    ot: ot || "-",
     tarea,
+    tipoPago: tipoPago || "-",
     moneda,
     monto,
+    totalPagar: totalPagar || 0,
+    subtotal: subtotal || 0,
+    responsable: responsable || "-",
+    detalle: detalle || "-",
+    comentario: comentario || "-",
   };
 }
 
@@ -184,6 +350,12 @@ function formatCurrency(value: number, currency = "PEN") {
     currencyDisplay: "symbol",
     maximumFractionDigits: 2,
   }).format(value);
+}
+
+function convertToPen(value: number, currency: string, usdExchangeRate: number, dopExchangeRate: number) {
+  if (currency === "USD") return value * usdExchangeRate;
+  if (currency === "DOP") return value * dopExchangeRate;
+  return value;
 }
 
 function formatExchangeRate(value: number) {
@@ -250,24 +422,30 @@ export default function Dashboard1Page() {
   const [draftFechaInicio, setDraftFechaInicio] = useState(getYearStartInputValue());
   const [draftFechaFin, setDraftFechaFin] = useState(getMonthEndInputValue());
   const [draftSearchText, setDraftSearchText] = useState("");
+  const [draftUsdExchangeRate, setDraftUsdExchangeRate] = useState(String(DEFAULT_EXCHANGE_RATES.USD));
+  const [draftDopExchangeRate, setDraftDopExchangeRate] = useState(String(DEFAULT_EXCHANGE_RATES.DOP));
   const [appliedFechaInicio, setAppliedFechaInicio] = useState(getYearStartInputValue());
   const [appliedFechaFin, setAppliedFechaFin] = useState(getMonthEndInputValue());
   const [appliedSearchText, setAppliedSearchText] = useState("");
+  const [appliedUsdExchangeRate, setAppliedUsdExchangeRate] = useState<number>(DEFAULT_EXCHANGE_RATES.USD);
+  const [appliedDopExchangeRate, setAppliedDopExchangeRate] = useState<number>(DEFAULT_EXCHANGE_RATES.DOP);
   const [path, setPath] = useState<DrillPath>({ cliente: null, proyecto: null, site: null });
-  const [pageNumber, setPageNumber] = useState(1);
-  const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [totalRows, setTotalRows] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
-  const [hasPreviousPage, setHasPreviousPage] = useState(false);
-  const [hasNextPage, setHasNextPage] = useState(false);
+  const [activeTab, setActiveTab] = useState<"resumen" | "detalle">("resumen");
+  const [detailSortColumn, setDetailSortColumn] = useState<DetailSortColumn>("fecha");
+  const [detailSortDirection, setDetailSortDirection] = useState<"asc" | "desc">("asc");
+  const [levelSortColumn, setLevelSortColumn] = useState<LevelSortColumn>("nivel");
+  const [levelSortDirection, setLevelSortDirection] = useState<"asc" | "desc">("asc");
+  const [selectedGastoRow, setSelectedGastoRow] = useState<DrillRow | null>(null);
+  const [selectedGastoDetail, setSelectedGastoDetail] = useState<GastoDto | null>(null);
+  const [selectedGastoLoading, setSelectedGastoLoading] = useState(false);
+  const [selectedGastoError, setSelectedGastoError] = useState("");
   const isMountedRef = useRef(true);
-  const detailSectionRef = useRef<HTMLDivElement | null>(null);
 
-  const loadRows = async (params?: { fechaInicio?: string; fechaFin?: string; searchText?: string; pageNumber?: number }) => {
+  const loadRows = async (params?: { fechaInicio?: string; fechaFin?: string; searchText?: string }) => {
     const fechaInicio = params?.fechaInicio ?? draftFechaInicio;
     const fechaFin = params?.fechaFin ?? draftFechaFin;
     const searchText = params?.searchText ?? draftSearchText;
-    const targetPageNumber = params?.pageNumber ?? 1;
 
     setLoading(true);
     setError("");
@@ -278,8 +456,6 @@ export default function Dashboard1Page() {
           fechaInicio,
           fechaFin,
           textoBusqueda: searchText,
-          pageNumber: targetPageNumber,
-          pageSize: PAGE_SIZE,
         }),
       );
       const detailRows = Array.isArray(response.rows) ? response.rows : [];
@@ -296,20 +472,13 @@ export default function Dashboard1Page() {
       setAppliedFechaFin(fechaFin);
       setAppliedSearchText(searchText);
       setPath({ cliente: null, proyecto: null, site: null });
+      setActiveTab("resumen");
       setRawRows(detailRows);
-      setPageNumber(response.pageNumber && response.pageNumber > 0 ? response.pageNumber : targetPageNumber);
-      setPageSize(response.pageSize && response.pageSize > 0 ? response.pageSize : PAGE_SIZE);
       setTotalRows(response.totalRows ?? detailRows.length);
-      setTotalPages(response.totalPages && response.totalPages > 0 ? response.totalPages : 1);
-      setHasPreviousPage(Boolean(response.hasPreviousPage));
-      setHasNextPage(Boolean(response.hasNextPage));
     } catch (err) {
       if (!isMountedRef.current) return;
       setRawRows([]);
       setTotalRows(0);
-      setTotalPages(1);
-      setHasPreviousPage(false);
-      setHasNextPage(false);
       setError(getHttpErrorMessage(err, "No se pudo cargar el dashboard desde sp_Planilla_ConsultarPagados_Dsh."));
     } finally {
       if (isMountedRef.current) {
@@ -361,44 +530,151 @@ export default function Dashboard1Page() {
   }, [filteredRows]);
   const totalConvertedToPen = useMemo(() => {
     return totalsByCurrency.reduce((accumulator, item) => {
-      if (item.currency === "USD") {
-        return accumulator + item.total * DEFAULT_EXCHANGE_RATES.USD;
-      }
-      if (item.currency === "DOP") {
-        return accumulator + item.total * DEFAULT_EXCHANGE_RATES.DOP;
-      }
-      return accumulator + item.total;
+      return accumulator + convertToPen(item.total, item.currency, appliedUsdExchangeRate, appliedDopExchangeRate);
     }, 0);
-  }, [totalsByCurrency]);
-  const totalClientes = useMemo(() => new Set(rows.map((row) => row.cliente)).size, [rows]);
-  const totalProyectos = useMemo(() => new Set(rows.map((row) => row.proyecto)).size, [rows]);
-  const totalSites = useMemo(() => new Set(rows.map((row) => row.site)).size, [rows]);
-  const totalTareas = useMemo(() => new Set(rows.map((row) => row.tarea)).size, [rows]);
+  }, [appliedDopExchangeRate, appliedUsdExchangeRate, totalsByCurrency]);
+  const sortedChartData = useMemo(() => {
+    const items = [...chartData];
+    const direction = levelSortDirection === "asc" ? 1 : -1;
+
+    const compareValues = (left: string | number, right: string | number) => {
+      if (typeof left === "number" && typeof right === "number") {
+        return (left - right) * direction;
+      }
+
+      return String(left).localeCompare(String(right), "es-PE", { numeric: true, sensitivity: "base" }) * direction;
+    };
+
+    items.sort((left, right) => {
+      if (levelSortColumn === "nivel") return compareValues(left.label, right.label);
+      if (levelSortColumn === "registros") return compareValues(left.count, right.count);
+      if (levelSortColumn === "montoPen") {
+        const leftPen = Object.entries(left.amountsByCurrency).reduce(
+          (accumulator, [currency, amount]) => accumulator + convertToPen(amount, currency, appliedUsdExchangeRate, appliedDopExchangeRate),
+          0,
+        );
+        const rightPen = Object.entries(right.amountsByCurrency).reduce(
+          (accumulator, [currency, amount]) => accumulator + convertToPen(amount, currency, appliedUsdExchangeRate, appliedDopExchangeRate),
+          0,
+        );
+        return compareValues(leftPen, rightPen);
+      }
+
+      const leftAmount = left.amountsByCurrency[levelSortColumn] ?? 0;
+      const rightAmount = right.amountsByCurrency[levelSortColumn] ?? 0;
+      return compareValues(leftAmount, rightAmount);
+    });
+
+    return items;
+  }, [appliedDopExchangeRate, appliedUsdExchangeRate, chartData, levelSortColumn, levelSortDirection]);
+
+  const handleLevelSortClick = (column: LevelSortColumn) => {
+    if (levelSortColumn === column) {
+      setLevelSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+
+    setLevelSortColumn(column);
+    setLevelSortDirection("asc");
+  };
+  const sortedRows = useMemo(() => {
+    const rowsToSort = [...filteredRows];
+    const direction = detailSortDirection === "asc" ? 1 : -1;
+
+    rowsToSort.sort((left, right) => {
+      const leftValue = (() => {
+        switch (detailSortColumn) {
+          case "id":
+            return Number.isFinite(Number(left.id)) ? Number(left.id) : left.id;
+          case "fecha":
+            return parseDisplayDateTime(left.fechaIngreso);
+          case "cliente":
+            return left.cliente;
+          case "proyecto":
+            return left.proyecto;
+          case "site":
+            return left.site;
+          case "tarea":
+            return left.tarea;
+          case "moneda":
+            return left.moneda;
+          case "monto":
+            return left.monto;
+          case "montoPen":
+            return convertToPen(left.monto, left.moneda, appliedUsdExchangeRate, appliedDopExchangeRate);
+          default:
+            return left.id;
+        }
+      })();
+
+      const rightValue = (() => {
+        switch (detailSortColumn) {
+          case "id":
+            return Number.isFinite(Number(right.id)) ? Number(right.id) : right.id;
+          case "fecha":
+            return parseDisplayDateTime(right.fechaIngreso);
+          case "cliente":
+            return right.cliente;
+          case "proyecto":
+            return right.proyecto;
+          case "site":
+            return right.site;
+          case "tarea":
+            return right.tarea;
+          case "moneda":
+            return right.moneda;
+          case "monto":
+            return right.monto;
+          case "montoPen":
+            return convertToPen(right.monto, right.moneda, appliedUsdExchangeRate, appliedDopExchangeRate);
+          default:
+            return right.id;
+        }
+      })();
+
+      if (typeof leftValue === "number" && typeof rightValue === "number") {
+        const leftNaN = Number.isNaN(leftValue);
+        const rightNaN = Number.isNaN(rightValue);
+        if (leftNaN && rightNaN) return 0;
+        if (leftNaN) return 1;
+        if (rightNaN) return -1;
+        return (leftValue - rightValue) * direction;
+      }
+
+      return String(leftValue).localeCompare(String(rightValue), "es-PE", { numeric: true, sensitivity: "base" }) * direction;
+    });
+
+    return rowsToSort;
+  }, [appliedDopExchangeRate, appliedUsdExchangeRate, detailSortColumn, detailSortDirection, filteredRows]);
+
+  const handleDetailSortClick = (column: DetailSortColumn) => {
+    if (detailSortColumn === column) {
+      setDetailSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+
+    setDetailSortColumn(column);
+    setDetailSortDirection("asc");
+  };
 
   const handleApplyFilters = async () => {
+    const usdExchangeRate = parseExchangeRateInput(draftUsdExchangeRate);
+    const dopExchangeRate = parseExchangeRateInput(draftDopExchangeRate);
+
+    if (usdExchangeRate == null || dopExchangeRate == null) {
+      setError("Ingrese tipos de cambio validos y mayores que cero para USD y DOP.");
+      return;
+    }
+
+    setAppliedUsdExchangeRate(usdExchangeRate);
+    setAppliedDopExchangeRate(dopExchangeRate);
+
     await loadRows({
       fechaInicio: draftFechaInicio,
       fechaFin: draftFechaFin,
       searchText: draftSearchText,
-      pageNumber: 1,
     });
   };
-
-  const handleChangePage = async (nextPageNumber: number) => {
-    if (loading || nextPageNumber < 1 || nextPageNumber === pageNumber) {
-      return;
-    }
-
-    await loadRows({
-      fechaInicio: appliedFechaInicio,
-      fechaFin: appliedFechaFin,
-      searchText: appliedSearchText,
-      pageNumber: nextPageNumber,
-    });
-  };
-
-  const pageStart = totalRows === 0 ? 0 : (pageNumber - 1) * pageSize + 1;
-  const pageEnd = totalRows === 0 ? 0 : Math.min(pageNumber * pageSize, totalRows);
 
   const handleChartClick = (datum: ChartDatum) => {
     if (currentLevel === "tarea") return;
@@ -419,12 +695,62 @@ export default function Dashboard1Page() {
     setPath((prev) => ({ cliente: prev.cliente, proyecto: prev.proyecto, site: null }));
   };
 
-  const handleGoToDetail = () => {
-    detailSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const handleExportVisibleToExcel = async () => {
+    if (sortedRows.length === 0) return;
+    const XLSX = await import("xlsx");
+    const workbook = XLSX.utils.book_new();
+    const exportRows = sortedRows.map((row) => ({
+      Id: row.id,
+      Fecha: row.fechaIngreso,
+      Cliente: row.cliente,
+      Proyecto: row.proyecto,
+      Site: row.site,
+      Tarea: row.tarea,
+      Moneda: row.moneda,
+      Monto: row.monto,
+      "Monto en PEN": convertToPen(row.monto, row.moneda, appliedUsdExchangeRate, appliedDopExchangeRate),
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportRows);
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Seleccionados");
+    XLSX.writeFile(workbook, `registros_detalle_${appliedFechaInicio}_${appliedFechaFin}.xlsx`);
+  };
+
+  const handleOpenRowDetails = async (row: DrillRow) => {
+    setSelectedGastoRow(row);
+    setSelectedGastoDetail(null);
+    setSelectedGastoError("");
+    setSelectedGastoLoading(true);
+
+    try {
+      const gastos = await httpClient.get<GastoDto[]>(GASTOS_API_URL);
+      const gasto = gastos.find((item) => String(item.Id) === String(row.id));
+
+      if (!gasto) {
+        throw new Error(`No se encontró el gasto con Id ${row.id}.`);
+      }
+
+      if (!isMountedRef.current) return;
+      setSelectedGastoDetail(gasto);
+    } catch (err) {
+      if (!isMountedRef.current) return;
+      setSelectedGastoError(getHttpErrorMessage(err, "No se pudo cargar el detalle completo del gasto."));
+    } finally {
+      if (isMountedRef.current) {
+        setSelectedGastoLoading(false);
+      }
+    }
+  };
+
+  const handleCloseRowDetails = () => {
+    setSelectedGastoRow(null);
+    setSelectedGastoDetail(null);
+    setSelectedGastoError("");
+    setSelectedGastoLoading(false);
   };
 
   return (
-    <AppPage title="Reportes / Gerencial / Dashboard 1">
+    <AppPage title="">
       <div style={styles.page}>
         <AppCard>
           <div style={styles.filtersRow}>
@@ -446,12 +772,29 @@ export default function Dashboard1Page() {
                 style={styles.input}
               />
             </div>
+            <div style={styles.exchangeRateField}>
+              <label style={styles.label}>Tipo cambio USD</label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={draftUsdExchangeRate}
+                onChange={(event) => setDraftUsdExchangeRate(normalizeExchangeRateInput(event.target.value))}
+                style={styles.input}
+              />
+            </div>
+            <div style={styles.exchangeRateField}>
+              <label style={styles.label}>Tipo cambio DOP</label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={draftDopExchangeRate}
+                onChange={(event) => setDraftDopExchangeRate(normalizeExchangeRateInput(event.target.value))}
+                style={styles.input}
+              />
+            </div>
             <div style={styles.actionsWrap}>
               <button type="button" style={styles.primaryButton} onClick={() => void handleApplyFilters()} disabled={loading}>
                 Actualizar
-              </button>
-              <button type="button" style={styles.secondaryButton} onClick={handleGoToDetail} disabled={loading}>
-                Detalle
               </button>
             </div>
           </div>
@@ -459,28 +802,24 @@ export default function Dashboard1Page() {
 
         {error ? <AppStatusMessage tone="error">{error}</AppStatusMessage> : null}
 
-        <div style={styles.exchangeRateRow}>
-          <div style={styles.exchangeRateBadge}>
-            <span style={styles.exchangeRateLabel}>Tipo cambio USD</span>
-            <strong style={styles.exchangeRateValue}>{formatExchangeRate(DEFAULT_EXCHANGE_RATES.USD)}</strong>
-          </div>
-          <div style={styles.exchangeRateBadge}>
-            <span style={styles.exchangeRateLabel}>Tipo cambio DOP</span>
-            <strong style={styles.exchangeRateValue}>{formatExchangeRate(DEFAULT_EXCHANGE_RATES.DOP)}</strong>
-          </div>
-        </div>
-
         <div style={styles.metricGrid}>
-          <MetricCard label="Total convertido PEN" value={formatCurrency(totalConvertedToPen, "PEN")} />
-          {totalsByCurrency.map((item) => (
-            <MetricCard key={item.currency} label={`Total ${item.currency}`} value={formatCurrency(item.total, item.currency)} />
-          ))}
-          <MetricCard label="Clientes" value={String(totalClientes)} />
-          <MetricCard label="Proyectos" value={String(totalProyectos)} />
-          <MetricCard label="Sites" value={String(totalSites)} />
-          <MetricCard label="Tareas" value={String(totalTareas)} />
+          <MetricCard label="Total convertido PEN" value={formatCurrency(totalConvertedToPen, "PEN")} accent />
+          <MetricCard label="Total DOP" value={formatCurrency(totalsByCurrency.find((item) => item.currency === "DOP")?.total ?? 0, "DOP")} />
+          <MetricCard label="Total PEN" value={formatCurrency(totalsByCurrency.find((item) => item.currency === "PEN")?.total ?? 0, "PEN")} />
+          <MetricCard label="Total USD" value={formatCurrency(totalsByCurrency.find((item) => item.currency === "USD")?.total ?? 0, "USD")} />
         </div>
 
+        <div style={styles.tabBar}>
+          <button type="button" style={activeTab === "resumen" ? styles.tabButtonActive : styles.tabButton} onClick={() => setActiveTab("resumen")}>
+            Resumen
+          </button>
+          <button type="button" style={activeTab === "detalle" ? styles.tabButtonActive : styles.tabButton} onClick={() => setActiveTab("detalle")}>
+            Detalle de registros
+          </button>
+        </div>
+
+        {activeTab === "resumen" ? (
+          <>
         <AppCard>
           <AppSectionHeader title={getLevelTitle(currentLevel, path)} description={getLevelDescription(currentLevel)} />
 
@@ -562,67 +901,61 @@ export default function Dashboard1Page() {
                 </div>
               </div>
 
-                            <div style={styles.sidePanel}>
-                <div style={styles.sidePanelTopRow}>
-                  <div style={styles.sideCard}>
-                    <div style={styles.sideLabel}>Periodo aplicado</div>
-                    <strong style={styles.sideValue}>{appliedFechaInicio} al {appliedFechaFin}</strong>
-                  </div>
-                  <div style={styles.sideCard}>
-                    <div style={styles.sideLabel}>Nivel actual</div>
-                    <strong style={styles.sideValue}>{getLevelTitle(currentLevel, path)}</strong>
-                  </div>
-                  <div style={styles.sideCard}>
-                    <div style={styles.sideLabel}>Elementos</div>
-                    <strong style={styles.sideValue}>{chartData.length}</strong>
-                  </div>
-                </div>
-                <div ref={detailSectionRef} style={styles.detailPanel}>
-                  <AppSectionHeader title="Detalle del nivel actual" description="Puedes hacer clic en una fila para seguir navegando en la estructura del gasto." />
-                  <div style={styles.paginationBar}>
-                    <div style={styles.paginationSummary}>
-                      {totalRows > 0
-                        ? `Mostrando ${pageStart} - ${pageEnd} de ${totalRows} registro(s)`
-                        : "Sin registros para mostrar"}
+                <div style={styles.detailPanel}>
+                  <div style={styles.detailHeaderRow}>
+                    <div style={styles.detailHeaderTitle}>
+                      <AppSectionHeader title="Detalle del nivel actual" description="Puedes hacer clic en una fila para seguir navegando en la estructura del gasto." />
                     </div>
-                    <div style={styles.paginationActions}>
-                      <button
-                        type="button"
-                        style={styles.secondaryButton}
-                        onClick={() => void handleChangePage(pageNumber - 1)}
-                        disabled={loading || !hasPreviousPage}
-                      >
-                        Anterior
-                      </button>
-                      <span style={styles.paginationLabel}>Pagina {pageNumber} de {totalPages}</span>
-                      <button
-                        type="button"
-                        style={styles.secondaryButton}
-                        onClick={() => void handleChangePage(pageNumber + 1)}
-                        disabled={loading || !hasNextPage}
-                      >
-                        Siguiente
-                      </button>
+                    <div style={styles.sidePanelTopRow}>
+                      <div style={styles.sideCardWide}>
+                        <div style={styles.sideLabel}>Periodo aplicado</div>
+                        <strong style={styles.sideValue}>{appliedFechaInicio} al {appliedFechaFin}</strong>
+                      </div>
+                      <div style={styles.sideCardCompact}>
+                        <div style={styles.sideLabel}>Elementos</div>
+                        <strong style={styles.sideValueCompact}>{chartData.length}</strong>
+                      </div>
                     </div>
                   </div>
                   <div style={styles.tableWrap}>
                     <table style={styles.table}>
                       <thead>
                         <tr>
-                          <th style={styles.th}>Nivel</th>
-                          <th style={styles.th}>Registros</th>
+                          <th style={styles.sortableTh}>
+                            <button type="button" style={styles.sortHeaderButton} onClick={() => handleLevelSortClick("nivel")}>
+                              <span>Nivel</span>
+                              {levelSortColumn === "nivel" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                            </button>
+                          </th>
+                          <th style={styles.sortableTh}>
+                            <button type="button" style={styles.sortHeaderButton} onClick={() => handleLevelSortClick("registros")}>
+                              <span>Registros</span>
+                              {levelSortColumn === "registros" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                            </button>
+                          </th>
                           {visibleCurrencies.map((currency) => (
-                            <th key={currency} style={styles.th}>{currency}</th>
+                            <th key={currency} style={styles.sortableTh}>
+                              <button type="button" style={styles.sortHeaderButton} onClick={() => handleLevelSortClick(currency)}>
+                                <span>{currency}</span>
+                                {levelSortColumn === currency ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                              </button>
+                            </th>
                           ))}
+                          <th style={styles.sortableTh}>
+                            <button type="button" style={{ ...styles.sortHeaderButton, ...styles.accentSortHeaderButton }} onClick={() => handleLevelSortClick("montoPen")}>
+                              <span>Monto en PEN</span>
+                              {levelSortColumn === "montoPen" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                            </button>
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
                         {chartData.length === 0 ? (
                           <tr>
-                            <td colSpan={2 + visibleCurrencies.length} style={styles.emptyCell}>No hay detalle para mostrar.</td>
+                            <td colSpan={3 + visibleCurrencies.length} style={styles.emptyCell}>No hay detalle para mostrar.</td>
                           </tr>
                         ) : (
-                          chartData.map((item) => (
+                          sortedChartData.map((item) => (
                             <tr key={item.label}>
                               <td style={styles.td}>
                                 <button
@@ -642,6 +975,16 @@ export default function Dashboard1Page() {
                                     : "-"}
                                 </td>
                               ))}
+                              <td style={{ ...styles.tdStrong, ...styles.accentTableCell }}>
+                                {formatCurrency(
+                                  Object.entries(item.amountsByCurrency).reduce(
+                                    (accumulator, [currency, amount]) =>
+                                      accumulator + convertToPen(amount, currency, appliedUsdExchangeRate, appliedDopExchangeRate),
+                                    0,
+                                  ),
+                                  "PEN",
+                                )}
+                              </td>
                             </tr>
                           ))
                         )}
@@ -650,18 +993,295 @@ export default function Dashboard1Page() {
                   </div>
                 </div>
               </div>
-            </div>
           )}
         </AppCard>
+
+          </>
+        ) : (
+          <AppCard>
+            <div style={styles.detailRecordsToolbar}>
+              <div style={styles.detailHeaderTitle}>
+                <AppSectionHeader title="Detalle de registros seleccionados" description="Los registros mostrados corresponden al filtro y nivel actual seleccionado." />
+              </div>
+              <div style={styles.detailRecordsActions}>
+                <div style={styles.selectionCountBadge}>
+                  Registros existentes: <strong>{filteredRows.length}</strong>
+                </div>
+                <button type="button" style={filteredRows.length > 0 && !loading ? styles.primaryButton : styles.primaryButtonDisabled} onClick={() => void handleExportVisibleToExcel()} disabled={filteredRows.length === 0 || loading}>
+                  Exportar a Excel
+                </button>
+              </div>
+            </div>
+            <div style={styles.detailRecordsTableWrap}>
+              <table style={styles.detailRecordsTable}>
+                <thead>
+                  <tr>
+                    <th style={styles.sortableTh}>
+                      <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("id")}>
+                        <span>Id</span>
+                        {detailSortColumn === "id" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                      </button>
+                    </th>
+                    <th style={styles.sortableTh}>
+                      <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("fecha")}>
+                        <span>Fecha</span>
+                        {detailSortColumn === "fecha" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                      </button>
+                    </th>
+                    <th style={styles.sortableTh}>
+                      <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("cliente")}>
+                        <span>Cliente</span>
+                        {detailSortColumn === "cliente" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                      </button>
+                    </th>
+                    <th style={styles.sortableTh}>
+                      <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("proyecto")}>
+                        <span>Proyecto</span>
+                        {detailSortColumn === "proyecto" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                      </button>
+                    </th>
+                    <th style={styles.sortableTh}>
+                      <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("site")}>
+                        <span>Site</span>
+                        {detailSortColumn === "site" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                      </button>
+                    </th>
+                    <th style={styles.sortableTh}>
+                      <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("tarea")}>
+                        <span>Tarea</span>
+                        {detailSortColumn === "tarea" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                      </button>
+                    </th>
+                    <th style={styles.sortableTh}>
+                      <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("moneda")}>
+                        <span>Moneda</span>
+                        {detailSortColumn === "moneda" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                      </button>
+                    </th>
+                    <th style={styles.sortableTh}>
+                      <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("monto")}>
+                        <span>Monto</span>
+                        {detailSortColumn === "monto" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                      </button>
+                    </th>
+                    <th style={styles.sortableTh}>
+                      <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("montoPen")}>
+                        <span>Monto en PEN</span>
+                        {detailSortColumn === "montoPen" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                      </button>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr>
+                      <td colSpan={9} style={styles.emptyCell}>
+                        Cargando información del store...
+                      </td>
+                    </tr>
+                  ) : filteredRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} style={styles.emptyCell}>
+                        No hay registros para mostrar.
+                      </td>
+                    </tr>
+                    ) : (
+                    sortedRows.map((row, index) => (
+                      <tr key={`${row.id}-${index}`}>
+                        <td style={styles.tdStrong}>
+                          <button type="button" style={styles.rowDetailButton} onClick={() => handleOpenRowDetails(row)}>
+                            {row.id}
+                          </button>
+                        </td>
+                        <td style={styles.td}>{row.fechaIngreso}</td>
+                        <td style={styles.td}>{row.cliente}</td>
+                        <td style={styles.td}>{row.proyecto}</td>
+                        <td style={styles.td}>{row.site}</td>
+                        <td style={styles.td}>{row.tarea}</td>
+                        <td style={styles.tdStrong}>{row.moneda}</td>
+                        <td style={styles.tdStrong}>{formatCurrency(row.monto, row.moneda)}</td>
+                        <td style={styles.tdStrong}>{formatCurrency(convertToPen(row.monto, row.moneda, appliedUsdExchangeRate, appliedDopExchangeRate), "PEN")}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </AppCard>
+        )}
+
+        {selectedGastoRow ? (
+          <div style={styles.modalOverlay} onClick={handleCloseRowDetails} role="presentation">
+            <div
+              style={styles.modalPanel}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="visualizar-gasto-title"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div style={styles.modalHeader}>
+                <div>
+                  <div id="visualizar-gasto-title" style={styles.modalTitle}>
+                    Visualizar gasto
+                  </div>
+                  <div style={styles.modalSubtitle}>Detalle del registro seleccionado desde la tabla principal.</div>
+                </div>
+                <button type="button" style={styles.modalCloseButton} onClick={handleCloseRowDetails}>
+                  Cerrar
+                </button>
+              </div>
+              {selectedGastoLoading ? (
+                <div style={styles.modalLoadingBox}>Cargando detalle del gasto...</div>
+              ) : selectedGastoError ? (
+                <div style={styles.modalErrorBox}>{selectedGastoError}</div>
+              ) : (
+                <>
+                  {(() => {
+                    const gasto = selectedGastoDetail;
+                    const moneda = gasto?.MonedaLabel || gasto?.Moneda || selectedGastoRow.moneda;
+                    const monto = gasto?.Monto ?? selectedGastoRow.monto;
+                    const subtotal = gasto?.Subtotal ?? selectedGastoRow.subtotal ?? monto;
+                    const total = gasto?.Total ?? gasto?.Monto ?? monto;
+                    const totalPen = convertToPen(monto, gasto?.Moneda || selectedGastoRow.moneda, appliedUsdExchangeRate, appliedDopExchangeRate);
+                    const facturaLink = gasto?.FacturaUrl || gasto?.FacturaPath || "";
+
+                    return (
+                      <>
+                        {facturaLink ? (
+                          <a
+                            href={facturaLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={styles.facturaLink}
+                          >
+                            Ver factura
+                          </a>
+                        ) : null}
+                        <div style={styles.modalGrid}>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>Id / Correlativo</span>
+                            <strong style={styles.modalValue}>{selectedGastoRow.id}</strong>
+                          </div>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>Filtro</span>
+                            <strong style={styles.modalValue}>{gasto?.FiltroOperativoKey || selectedGastoRow.cliente}</strong>
+                          </div>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>Trabajo</span>
+                            <strong style={styles.modalValue}>{gasto?.TipoTrabajo || selectedGastoRow.proyecto}</strong>
+                          </div>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>OT</span>
+                            <strong style={styles.modalValue}>{gasto?.Ot || selectedGastoRow.ot}</strong>
+                          </div>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>Tarea</span>
+                            <strong style={styles.modalValue}>{selectedGastoRow.tarea}</strong>
+                          </div>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>Responsable</span>
+                            <strong style={styles.modalValue}>{gasto?.Responsable || selectedGastoRow.responsable}</strong>
+                          </div>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>Suministro vigente</span>
+                            <strong style={styles.modalValue}>{gasto?.IdSuministroProvisional != null ? String(gasto.IdSuministroProvisional) : "-"}</strong>
+                          </div>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>Cuenta</span>
+                            <strong style={styles.modalValue}>{gasto?.Cuenta || "-"}</strong>
+                          </div>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>Fecha deposito</span>
+                            <strong style={styles.modalValue}>{formatDisplayDate(gasto?.FecIngreso || selectedGastoRow.fechaIngreso)}</strong>
+                          </div>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>Fecha emision</span>
+                            <strong style={styles.modalValue}>{formatDisplayDate(gasto?.FechaEmision || selectedGastoRow.fechaEmision)}</strong>
+                          </div>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>Fecha vencimiento</span>
+                            <strong style={styles.modalValue}>{formatDisplayDate(gasto?.FechaVencimiento || selectedGastoRow.fechaVencimiento)}</strong>
+                          </div>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>Bien</span>
+                            <strong style={styles.modalValue}>{gasto?.BienLabel || gasto?.Bien || "-"}</strong>
+                          </div>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>Comprobante</span>
+                            <strong style={styles.modalValue}>{gasto?.ComprobanteLabel || gasto?.Comprobante || "-"}</strong>
+                          </div>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>Serie</span>
+                            <strong style={styles.modalValue}>{gasto?.Serie || "-"}</strong>
+                          </div>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>Rendición</span>
+                            <strong style={styles.modalValue}>{gasto?.IdRendicion != null ? String(gasto.IdRendicion) : "-"}</strong>
+                          </div>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>Tipo de pago</span>
+                            <strong style={styles.modalValue}>{gasto?.TipoPagoLabel || gasto?.TipoPago || selectedGastoRow.tipoPago}</strong>
+                          </div>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>Subtotal</span>
+                            <strong style={styles.modalValue}>{formatCurrency(subtotal, gasto?.Moneda || selectedGastoRow.moneda)}</strong>
+                          </div>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>IGV</span>
+                            <strong style={styles.modalValue}>{formatCurrency(gasto?.Igv ?? 0, gasto?.Moneda || selectedGastoRow.moneda)}</strong>
+                          </div>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>Total</span>
+                            <strong style={styles.modalValue}>{formatCurrency(total, gasto?.Moneda || selectedGastoRow.moneda)}</strong>
+                          </div>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>Moneda</span>
+                            <strong style={styles.modalValue}>{moneda}</strong>
+                          </div>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>Solicitante</span>
+                            <strong style={styles.modalValue}>{gasto?.SolicitanteLabel || gasto?.Solicitante || "-"}</strong>
+                          </div>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>Gestor</span>
+                            <strong style={styles.modalValue}>{gasto?.GestorLabel || gasto?.Gestor || "-"}</strong>
+                          </div>
+                          <div style={styles.modalField}>
+                            <span style={styles.modalLabel}>Validador</span>
+                            <strong style={styles.modalValue}>{gasto?.ValidadorLabel || gasto?.Validador || "-"}</strong>
+                          </div>
+                          <div style={styles.modalFieldAccent}>
+                            <span style={styles.modalLabelAccent}>Total convertido PEN</span>
+                            <strong style={styles.modalValueAccent}>{formatCurrency(totalPen, "PEN")}</strong>
+                          </div>
+                        </div>
+
+                        <div style={styles.modalSection}>
+                          <span style={styles.modalLabel}>Detalle</span>
+                          <div style={styles.modalTextBox}>{gasto?.Detalle || selectedGastoRow.detalle || "Sin detalle"}</div>
+                        </div>
+
+                        <div style={styles.modalSection}>
+                          <span style={styles.modalLabel}>Comentario</span>
+                          <div style={styles.modalTextBox}>{gasto?.Comentario || selectedGastoRow.comentario || "Sin comentario"}</div>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </>
+              )}
+            </div>
+          </div>
+        ) : null}
 
       </div>
     </AppPage>
   );
 }
 
-function MetricCard({ label, value }: { label: string; value: string }) {
+function MetricCard({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) {
   return (
-    <div style={styles.metricCard}>
+    <div style={accent ? styles.metricCardAccent : styles.metricCard}>
       <span style={styles.metricLabel}>{label}</span>
       <strong style={styles.metricValue}>{value}</strong>
     </div>
@@ -681,6 +1301,12 @@ const styles: Record<string, React.CSSProperties> = {
   },
   filterField: {
     minWidth: 180,
+    display: "grid",
+    gap: 6,
+  },
+  exchangeRateField: {
+    minWidth: 150,
+    maxWidth: 170,
     display: "grid",
     gap: 6,
   },
@@ -704,6 +1330,33 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "flex-end",
   },
+  tabBar: {
+    display: "flex",
+    gap: 8,
+    flexWrap: "wrap",
+    marginBottom: 12,
+  },
+  tabButton: {
+    minHeight: 40,
+    borderRadius: 999,
+    border: "1px solid #BFDBFE",
+    background: "#EFF6FF",
+    color: "#1D4ED8",
+    fontWeight: 700,
+    padding: "0 16px",
+    cursor: "pointer",
+  },
+  tabButtonActive: {
+    minHeight: 40,
+    borderRadius: 999,
+    border: "1px solid #1D4ED8",
+    background: "linear-gradient(135deg, #2563EB, #1D4ED8)",
+    color: "#FFFFFF",
+    fontWeight: 700,
+    padding: "0 16px",
+    cursor: "pointer",
+    boxShadow: "0 10px 22px rgba(37, 99, 235, 0.18)",
+  },
   primaryButton: {
     minHeight: 42,
     border: "none",
@@ -714,6 +1367,16 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     cursor: "pointer",
   },
+  primaryButtonDisabled: {
+    minHeight: 42,
+    border: "none",
+    borderRadius: 12,
+    padding: "0 18px",
+    background: "#94A3B8",
+    color: "#FFFFFF",
+    fontWeight: 700,
+    cursor: "not-allowed",
+  },
   secondaryButton: {
     minHeight: 38,
     borderRadius: 10,
@@ -723,32 +1386,6 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#0F172A",
     fontWeight: 700,
     cursor: "pointer",
-  },
-  exchangeRateRow: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: 12,
-    alignItems: "center",
-  },
-  exchangeRateBadge: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    borderRadius: 999,
-    border: "1px solid #BFDBFE",
-    background: "linear-gradient(180deg, #FFFFFF, #EFF6FF)",
-    padding: "10px 14px",
-  },
-  exchangeRateLabel: {
-    fontSize: 12,
-    fontWeight: 700,
-    color: "#475569",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  exchangeRateValue: {
-    fontSize: 16,
-    color: "#0F172A",
   },
   metricGrid: {
     display: "grid",
@@ -763,6 +1400,15 @@ const styles: Record<string, React.CSSProperties> = {
     display: "grid",
     gap: 8,
     boxShadow: "0 10px 30px rgba(37, 99, 235, 0.08)",
+  },
+  metricCardAccent: {
+    borderRadius: 18,
+    border: "1px solid #1D4ED8",
+    background: "linear-gradient(135deg, #DBEAFE, #BFDBFE 55%, #93C5FD)",
+    padding: 16,
+    display: "grid",
+    gap: 8,
+    boxShadow: "0 14px 34px rgba(29, 78, 216, 0.18)",
   },
   metricLabel: {
     fontSize: 12,
@@ -881,15 +1527,19 @@ const styles: Record<string, React.CSSProperties> = {
     minWidth: 0,
     overflowWrap: "anywhere",
   },
-  sidePanel: {
-    display: "grid",
-    gap: 12,
-    minWidth: 0,
-  },
   sidePanelTopRow: {
     display: "grid",
-    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
     gap: 12,
+  },
+  detailHeaderRow: {
+    display: "grid",
+    gridTemplateColumns: "minmax(280px, 1.2fr) minmax(420px, 1fr)",
+    gap: 16,
+    alignItems: "start",
+  },
+  detailHeaderTitle: {
+    minWidth: 0,
   },
   detailPanel: {
     borderRadius: 18,
@@ -900,6 +1550,29 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 12,
     minWidth: 0,
   },
+  detailRecordsToolbar: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) minmax(240px, 320px)",
+    gap: 16,
+    alignItems: "start",
+    marginBottom: 14,
+  },
+  detailRecordsActions: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 10,
+    alignItems: "center",
+    justifyContent: "flex-end",
+  },
+  selectionCountBadge: {
+    borderRadius: 999,
+    border: "1px solid #BFDBFE",
+    background: "#EFF6FF",
+    color: "#1D4ED8",
+    fontWeight: 700,
+    padding: "10px 14px",
+    lineHeight: 1,
+  },
   sideCard: {
     borderRadius: 18,
     border: "1px solid #E2E8F0",
@@ -907,6 +1580,26 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 16,
     display: "grid",
     gap: 6,
+  },
+  sideCardWide: {
+    borderRadius: 18,
+    border: "1px solid #E2E8F0",
+    background: "#FFFFFF",
+    padding: 16,
+    display: "grid",
+    gap: 6,
+    minWidth: 260,
+  },
+  sideCardCompact: {
+    borderRadius: 18,
+    border: "1px solid #E2E8F0",
+    background: "#FFFFFF",
+    padding: "10px 12px",
+    display: "grid",
+    gap: 4,
+    width: "fit-content",
+    minWidth: 120,
+    justifySelf: "end",
   },
   sideLabel: {
     fontSize: 12,
@@ -918,6 +1611,11 @@ const styles: Record<string, React.CSSProperties> = {
   sideValue: {
     fontSize: 18,
     color: "#0F172A",
+  },
+  sideValueCompact: {
+    fontSize: 16,
+    color: "#0F172A",
+    lineHeight: 1.1,
   },
   loadingBox: {
     padding: 24,
@@ -935,6 +1633,14 @@ const styles: Record<string, React.CSSProperties> = {
   },
   tableWrap: {
     overflowX: "auto",
+  },
+  detailRecordsTableWrap: {
+    overflowX: "auto",
+    overflowY: "auto",
+    borderRadius: 18,
+    border: "1px solid #E2E8F0",
+    maxHeight: "calc(100vh - 360px)",
+    minHeight: 0,
   },
   paginationBar: {
     display: "flex",
@@ -965,6 +1671,12 @@ const styles: Record<string, React.CSSProperties> = {
     borderCollapse: "collapse",
     minWidth: 520,
   },
+  detailRecordsTable: {
+    width: "100%",
+    borderCollapse: "collapse",
+    minWidth: 1280,
+    background: "#FFFFFF",
+  },
   th: {
     textAlign: "left",
     padding: "12px 10px",
@@ -974,16 +1686,78 @@ const styles: Record<string, React.CSSProperties> = {
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
+  sortableTh: {
+    textAlign: "left",
+    padding: 0,
+    borderBottom: "1px solid #CBD5E1",
+    color: "#475569",
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    position: "sticky",
+    top: 0,
+    zIndex: 2,
+    background: "#FFFFFF",
+  },
+  sortHeaderButton: {
+    width: "100%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    padding: "12px 10px",
+    border: "none",
+    color: "#475569",
+    fontSize: 12,
+    fontWeight: 700,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    cursor: "pointer",
+    background: "#FFFFFF",
+  },
+  accentSortHeaderButton: {
+    borderRadius: 12,
+    background: "linear-gradient(135deg, #DBEAFE, #BFDBFE 55%, #93C5FD)",
+    color: "#0F172A",
+  },
+  sortIndicator: {
+    fontSize: 11,
+    color: "#1D4ED8",
+    flexShrink: 0,
+  },
+  thCheckbox: {
+    textAlign: "center",
+    padding: "12px 10px",
+    borderBottom: "1px solid #CBD5E1",
+    color: "#475569",
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    width: 44,
+  },
   td: {
     padding: "12px 10px",
     borderBottom: "1px solid #E2E8F0",
     color: "#0F172A",
+  },
+  tdCheckbox: {
+    padding: "12px 10px",
+    borderBottom: "1px solid #E2E8F0",
+    color: "#0F172A",
+    textAlign: "center",
+    width: 44,
   },
   tdStrong: {
     padding: "12px 10px",
     borderBottom: "1px solid #E2E8F0",
     color: "#0F172A",
     fontWeight: 700,
+  },
+  accentTableCell: {
+    background: "linear-gradient(135deg, #DBEAFE, #BFDBFE 55%, #93C5FD)",
+    color: "#0F172A",
+    fontWeight: 800,
+    boxShadow: "inset 0 0 0 1px rgba(29, 78, 216, 0.12)",
   },
   emptyCell: {
     padding: 20,
@@ -999,6 +1773,17 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     textAlign: "left",
   },
+  rowDetailButton: {
+    border: "none",
+    background: "transparent",
+    padding: 0,
+    color: "#2563EB",
+    fontWeight: 800,
+    cursor: "pointer",
+    textAlign: "left",
+    textDecoration: "underline",
+    textUnderlineOffset: 2,
+  },
   flatText: {
     border: "none",
     background: "transparent",
@@ -1007,5 +1792,137 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     textAlign: "left",
   },
+  modalOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(15, 23, 42, 0.56)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+    zIndex: 60,
+  },
+  modalPanel: {
+    width: "min(1120px, 100%)",
+    maxHeight: "90vh",
+    overflowY: "auto",
+    borderRadius: 24,
+    background: "#FFFFFF",
+    border: "1px solid #DBEAFE",
+    boxShadow: "0 24px 80px rgba(15, 23, 42, 0.35)",
+    padding: 20,
+    display: "grid",
+    gap: 16,
+  },
+  modalHeader: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 16,
+  },
+  modalTitle: {
+    fontSize: 28,
+    fontWeight: 800,
+    color: "#0F172A",
+    lineHeight: 1.1,
+  },
+  modalSubtitle: {
+    marginTop: 6,
+    color: "#64748B",
+    fontSize: 14,
+  },
+  modalCloseButton: {
+    minHeight: 40,
+    borderRadius: 12,
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    color: "#0F172A",
+    fontWeight: 700,
+    padding: "0 14px",
+    cursor: "pointer",
+  },
+  modalGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: 12,
+  },
+  modalField: {
+    borderRadius: 16,
+    border: "1px solid #E2E8F0",
+    background: "#F8FAFC",
+    padding: 14,
+    display: "grid",
+    gap: 8,
+  },
+  modalFieldAccent: {
+    borderRadius: 16,
+    border: "1px solid #1D4ED8",
+    background: "linear-gradient(135deg, #DBEAFE, #BFDBFE 55%, #93C5FD)",
+    padding: 14,
+    display: "grid",
+    gap: 8,
+  },
+  modalLabel: {
+    fontSize: 12,
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: "#64748B",
+  },
+  modalLabelAccent: {
+    fontSize: 12,
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: "#0F172A",
+  },
+  modalValue: {
+    fontSize: 15,
+    fontWeight: 700,
+    color: "#0F172A",
+    wordBreak: "break-word",
+  },
+  modalValueAccent: {
+    fontSize: 18,
+    fontWeight: 800,
+    color: "#0F172A",
+  },
+  modalSection: {
+    display: "grid",
+    gap: 8,
+  },
+  modalTextBox: {
+    borderRadius: 16,
+    border: "1px solid #E2E8F0",
+    background: "#F8FAFC",
+    padding: 14,
+    color: "#0F172A",
+    lineHeight: 1.5,
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+  },
+  modalLoadingBox: {
+    borderRadius: 16,
+    border: "1px solid #BFDBFE",
+    background: "#EFF6FF",
+    color: "#1D4ED8",
+    padding: 16,
+    fontWeight: 700,
+  },
+  modalErrorBox: {
+    borderRadius: 16,
+    border: "1px solid #FECACA",
+    background: "#FEF2F2",
+    color: "#B91C1C",
+    padding: 16,
+    fontWeight: 700,
+  },
+  facturaLink: {
+    display: "inline-flex",
+    width: "fit-content",
+    marginBottom: 8,
+    color: "#6D28D9",
+    fontWeight: 700,
+    textDecoration: "underline",
+  },
 };
-
