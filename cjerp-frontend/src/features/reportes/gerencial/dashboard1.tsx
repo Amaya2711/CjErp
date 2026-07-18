@@ -500,7 +500,7 @@ export default function Dashboard1Page() {
   const [levelSortColumn, setLevelSortColumn] = useState<LevelSortColumn>("nivel");
   const [levelSortDirection, setLevelSortDirection] = useState<"asc" | "desc">("asc");
   const [selectedGastoRow, setSelectedGastoRow] = useState<DrillRow | null>(null);
-  const [selectedLevelItem, setSelectedLevelItem] = useState<ChartDatum | null>(null);
+  const [isLevelDetailExpanded, setIsLevelDetailExpanded] = useState(false);
   const isMountedRef = useRef(true);
 
   const loadRows = async (params?: { fechaInicio?: string; fechaFin?: string; searchText?: string }) => {
@@ -743,12 +743,12 @@ export default function Dashboard1Page() {
     setPath((prev) => getNextPath(currentLevel, prev, datum.rawLabel));
   };
 
-  const handleOpenLevelItem = (item: ChartDatum) => {
-    setSelectedLevelItem(item);
+  const handleOpenLevelDetail = () => {
+    setIsLevelDetailExpanded(true);
   };
 
-  const handleCloseLevelItem = () => {
-    setSelectedLevelItem(null);
+  const handleCloseLevelDetail = () => {
+    setIsLevelDetailExpanded(false);
   };
 
   const handleBreadcrumbReset = (level: "all" | "cliente" | "proyecto") => {
@@ -951,14 +951,19 @@ export default function Dashboard1Page() {
                     <div style={styles.detailHeaderTitle}>
                       <AppSectionHeader title="Detalle del nivel actual" description="Puedes hacer clic en una fila para seguir navegando en la estructura del gasto." />
                     </div>
-                    <div style={styles.sidePanelTopRow}>
-                      <div style={styles.sideCardWide}>
-                        <div style={styles.sideLabel}>Periodo aplicado</div>
-                        <strong style={styles.sideValue}>{appliedFechaInicio} al {appliedFechaFin}</strong>
-                      </div>
-                      <div style={styles.sideCardCompact}>
-                        <div style={styles.sideLabel}>Elementos</div>
-                        <strong style={styles.sideValueCompact}>{chartData.length}</strong>
+                    <div style={styles.detailHeaderActions}>
+                      <button type="button" style={styles.expandSectionButton} onClick={handleOpenLevelDetail}>
+                        Ampliar
+                      </button>
+                      <div style={styles.sidePanelTopRow}>
+                        <div style={styles.sideCardWide}>
+                          <div style={styles.sideLabel}>Periodo aplicado</div>
+                          <strong style={styles.sideValue}>{appliedFechaInicio} al {appliedFechaFin}</strong>
+                        </div>
+                        <div style={styles.sideCardCompact}>
+                          <div style={styles.sideLabel}>Elementos</div>
+                          <strong style={styles.sideValueCompact}>{chartData.length}</strong>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1003,23 +1008,14 @@ export default function Dashboard1Page() {
                           sortedChartData.map((item) => (
                             <tr key={item.label}>
                               <td style={styles.td}>
-                                <div style={styles.levelItemCell}>
-                                  <button
-                                    type="button"
-                                    style={currentLevel === "tarea" ? styles.flatText : styles.linkButton}
-                                    onClick={() => handleChartClick(item)}
-                                    disabled={currentLevel === "tarea"}
-                                  >
-                                    {item.label}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    style={styles.expandLevelButton}
-                                    onClick={() => handleOpenLevelItem(item)}
-                                  >
-                                    Ampliar
-                                  </button>
-                                </div>
+                                <button
+                                  type="button"
+                                  style={currentLevel === "tarea" ? styles.flatText : styles.linkButton}
+                                  onClick={() => handleChartClick(item)}
+                                  disabled={currentLevel === "tarea"}
+                                >
+                                  {item.label}
+                                </button>
                               </td>
                               <td style={styles.td}>{item.count}</td>
                               {visibleCurrencies.map((currency) => (
@@ -1330,8 +1326,8 @@ export default function Dashboard1Page() {
           </div>
         ) : null}
 
-        {selectedLevelItem ? (
-          <div style={styles.modalOverlay} onClick={handleCloseLevelItem} role="presentation">
+        {isLevelDetailExpanded ? (
+          <div style={styles.modalOverlay} onClick={handleCloseLevelDetail} role="presentation">
             <div
               style={styles.levelModalPanel}
               role="dialog"
@@ -1342,48 +1338,116 @@ export default function Dashboard1Page() {
               <div style={styles.modalHeader}>
                 <div>
                   <div id="nivel-ampliado-title" style={styles.modalTitle}>
-                    Opción ampliada
+                    Detalle del nivel actual
                   </div>
-                  <div style={styles.modalSubtitle}>{selectedLevelItem.label}</div>
+                  <div style={styles.modalSubtitle}>Vista ampliada del segmento seleccionado.</div>
                 </div>
-                <button type="button" style={styles.modalCloseButton} onClick={handleCloseLevelItem}>
+                <button type="button" style={styles.modalCloseButton} onClick={handleCloseLevelDetail}>
                   Cerrar
                 </button>
               </div>
 
               <div style={styles.levelModalHero}>
                 <div style={styles.levelModalHeroCard}>
-                  <span style={styles.levelModalHeroLabel}>Nivel</span>
-                  <strong style={styles.levelModalHeroValue}>{selectedLevelItem.label}</strong>
+                  <span style={styles.levelModalHeroLabel}>Periodo aplicado</span>
+                  <strong style={styles.levelModalHeroValue}>
+                    {appliedFechaInicio} al {appliedFechaFin}
+                  </strong>
                 </div>
                 <div style={styles.levelModalHeroAccent}>
-                  <span style={styles.levelModalHeroLabelAccent}>Registros</span>
-                  <strong style={styles.levelModalHeroValueAccent}>{selectedLevelItem.count}</strong>
+                  <span style={styles.levelModalHeroLabelAccent}>Elementos</span>
+                  <strong style={styles.levelModalHeroValueAccent}>{chartData.length}</strong>
                 </div>
                 <div style={styles.levelModalHeroCard}>
                   <span style={styles.levelModalHeroLabel}>Total convertido PEN</span>
-                  <strong style={styles.levelModalHeroValue}>
-                    {formatCurrency(
-                      Object.entries(selectedLevelItem.amountsByCurrency).reduce(
-                        (accumulator, [currency, amount]) =>
-                          accumulator + convertToPen(amount, currency, appliedUsdExchangeRate, appliedDopExchangeRate),
-                        0,
-                      ),
-                      "PEN",
-                    )}
-                  </strong>
+                  <strong style={styles.levelModalHeroValue}>{formatCurrency(totalConvertedToPen, "PEN")}</strong>
                 </div>
               </div>
 
               <div style={styles.levelModalGrid}>
-                {Object.entries(selectedLevelItem.amountsByCurrency)
-                  .sort(([leftCurrency], [rightCurrency]) => leftCurrency.localeCompare(rightCurrency))
-                  .map(([currency, amount]) => (
-                    <div key={`${selectedLevelItem.label}-${currency}`} style={styles.levelModalField}>
-                      <span style={styles.levelModalFieldLabel}>{currency}</span>
-                      <strong style={styles.levelModalFieldValue}>{formatCurrency(amount, currency)}</strong>
-                    </div>
-                  ))}
+                {totalsByCurrency.map(({ currency, total }) => (
+                  <div key={currency} style={styles.levelModalField}>
+                    <span style={styles.levelModalFieldLabel}>{currency}</span>
+                    <strong style={styles.levelModalFieldValue}>{formatCurrency(total, currency)}</strong>
+                  </div>
+                ))}
+              </div>
+
+              <div style={styles.levelModalTableWrap}>
+                <table style={styles.table}>
+                  <thead>
+                    <tr>
+                      <th style={styles.sortableTh}>
+                        <button type="button" style={styles.sortHeaderButton} onClick={() => handleLevelSortClick("nivel")}>
+                          <span>Nivel</span>
+                          {levelSortColumn === "nivel" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                        </button>
+                      </th>
+                      <th style={styles.sortableTh}>
+                        <button type="button" style={styles.sortHeaderButton} onClick={() => handleLevelSortClick("registros")}>
+                          <span>Registros</span>
+                          {levelSortColumn === "registros" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                        </button>
+                      </th>
+                      {visibleCurrencies.map((currency) => (
+                        <th key={currency} style={styles.sortableTh}>
+                          <button type="button" style={styles.sortHeaderButton} onClick={() => handleLevelSortClick(currency)}>
+                            <span>{currency}</span>
+                            {levelSortColumn === currency ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                          </button>
+                        </th>
+                      ))}
+                      <th style={styles.sortableTh}>
+                        <button type="button" style={{ ...styles.sortHeaderButton, ...styles.accentSortHeaderButton }} onClick={() => handleLevelSortClick("montoPen")}>
+                          <span>Monto en PEN</span>
+                          {levelSortColumn === "montoPen" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                        </button>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {chartData.length === 0 ? (
+                      <tr>
+                        <td colSpan={3 + visibleCurrencies.length} style={styles.emptyCell}>
+                          No hay detalle para mostrar.
+                        </td>
+                      </tr>
+                    ) : (
+                      sortedChartData.map((item) => (
+                        <tr key={`expanded-${item.label}`}>
+                          <td style={styles.td}>
+                            <button
+                              type="button"
+                              style={currentLevel === "tarea" ? styles.flatText : styles.linkButton}
+                              onClick={() => handleChartClick(item)}
+                              disabled={currentLevel === "tarea"}
+                            >
+                              {item.label}
+                            </button>
+                          </td>
+                          <td style={styles.td}>{item.count}</td>
+                          {visibleCurrencies.map((currency) => (
+                            <td key={currency} style={styles.tdStrong}>
+                              {item.amountsByCurrency[currency] != null
+                                ? formatCurrency(item.amountsByCurrency[currency], currency)
+                                : "-"}
+                            </td>
+                          ))}
+                          <td style={{ ...styles.tdStrong, ...styles.accentTableCell }}>
+                            {formatCurrency(
+                              Object.entries(item.amountsByCurrency).reduce(
+                                (accumulator, [currency, amount]) =>
+                                  accumulator + convertToPen(amount, currency, appliedUsdExchangeRate, appliedDopExchangeRate),
+                                0,
+                              ),
+                              "PEN",
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
@@ -1899,13 +1963,14 @@ const styles: Record<string, React.CSSProperties> = {
     textDecoration: "underline",
     textUnderlineOffset: 2,
   },
-  levelItemCell: {
+  detailHeaderActions: {
     display: "flex",
-    flexDirection: "column",
     alignItems: "flex-start",
-    gap: 8,
+    gap: 12,
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
   },
-  expandLevelButton: {
+  expandSectionButton: {
     borderRadius: 999,
     border: "1px solid #93C5FD",
     background: "#EFF6FF",
@@ -2119,6 +2184,14 @@ const styles: Record<string, React.CSSProperties> = {
     display: "grid",
     gap: 8,
   },
+  levelModalFieldAccent: {
+    borderRadius: 16,
+    border: "1px solid #1D4ED8",
+    background: "linear-gradient(135deg, #DBEAFE, #BFDBFE 55%, #93C5FD)",
+    padding: 14,
+    display: "grid",
+    gap: 8,
+  },
   levelModalFieldLabel: {
     fontSize: 12,
     fontWeight: 800,
@@ -2126,10 +2199,29 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: 0.5,
     color: "#64748B",
   },
+  levelModalFieldLabelAccent: {
+    fontSize: 12,
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: "#0F172A",
+  },
   levelModalFieldValue: {
     fontSize: 16,
     fontWeight: 800,
     color: "#0F172A",
+  },
+  levelModalFieldValueAccent: {
+    fontSize: 18,
+    fontWeight: 900,
+    color: "#0F172A",
+  },
+  levelModalTableWrap: {
+    borderRadius: 20,
+    border: "1px solid #E2E8F0",
+    background: "#FFFFFF",
+    overflow: "auto",
+    maxHeight: "48vh",
   },
   facturaLink: {
     display: "inline-flex",
