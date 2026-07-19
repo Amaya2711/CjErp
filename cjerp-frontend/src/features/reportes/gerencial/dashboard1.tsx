@@ -115,6 +115,9 @@ const DEFAULT_EXCHANGE_RATES = {
   USD: 3.5,
   DOP: 0.058,
 } as const;
+const DETAIL_ROW_HEIGHT = 44;
+const DETAIL_OVERSCAN = 8;
+const DETAIL_VISIBLE_ROWS = 14;
 
 function normalizeExchangeRateInput(value: string) {
   return value.replace(",", ".").replace(/[^\d.]/g, "");
@@ -415,6 +418,17 @@ function formatCurrency(value: number, currency = "PEN") {
   }).format(value);
 }
 
+function formatCompactSoles(value: number) {
+  const absolute = Math.abs(value);
+  if (absolute >= 1_000_000) {
+    return `S/ ${(value / 1_000_000).toFixed(1)} M`;
+  }
+  if (absolute >= 1_000) {
+    return `S/ ${(value / 1_000).toFixed(1)} K`;
+  }
+  return formatCurrency(value, "PEN");
+}
+
 function convertToPen(value: number, currency: string, usdExchangeRate: number, dopExchangeRate: number) {
   if (currency === "USD") return value * usdExchangeRate;
   if (currency === "DOP") return value * dopExchangeRate;
@@ -494,13 +508,14 @@ export default function Dashboard1Page() {
   const [appliedDopExchangeRate, setAppliedDopExchangeRate] = useState<number>(DEFAULT_EXCHANGE_RATES.DOP);
   const [path, setPath] = useState<DrillPath>({ cliente: null, proyecto: null, site: null });
   const [totalRows, setTotalRows] = useState(0);
-  const [activeTab, setActiveTab] = useState<"resumen" | "detalle">("resumen");
   const [detailSortColumn, setDetailSortColumn] = useState<DetailSortColumn>("fecha");
   const [detailSortDirection, setDetailSortDirection] = useState<"asc" | "desc">("asc");
   const [levelSortColumn, setLevelSortColumn] = useState<LevelSortColumn>("nivel");
   const [levelSortDirection, setLevelSortDirection] = useState<"asc" | "desc">("asc");
   const [selectedGastoRow, setSelectedGastoRow] = useState<DrillRow | null>(null);
   const [isLevelDetailExpanded, setIsLevelDetailExpanded] = useState(false);
+  const [recordsExpanded, setRecordsExpanded] = useState(false);
+  const [detailScrollTop, setDetailScrollTop] = useState(0);
   const isMountedRef = useRef(true);
 
   const loadRows = async (params?: { fechaInicio?: string; fechaFin?: string; searchText?: string }) => {
@@ -534,7 +549,6 @@ export default function Dashboard1Page() {
       setAppliedFechaFin(fechaFin);
       setAppliedSearchText(searchText);
       setPath({ cliente: null, proyecto: null, site: null });
-      setActiveTab("resumen");
       setRawRows(detailRows);
       setTotalRows(response.totalRows ?? detailRows.length);
     } catch (err) {
@@ -708,6 +722,30 @@ export default function Dashboard1Page() {
 
     return rowsToSort;
   }, [appliedDopExchangeRate, appliedUsdExchangeRate, detailSortColumn, detailSortDirection, filteredRows]);
+  const detailWindow = useMemo(() => {
+    if (!recordsExpanded) {
+      return {
+        startIndex: 0,
+        endIndex: 0,
+        topSpacer: 0,
+        bottomSpacer: 0,
+        visibleRows: [] as DrillRow[],
+      };
+    }
+
+    const totalRowsCount = sortedRows.length;
+    const startIndex = Math.max(0, Math.floor(detailScrollTop / DETAIL_ROW_HEIGHT) - DETAIL_OVERSCAN);
+    const visibleCount = DETAIL_VISIBLE_ROWS + DETAIL_OVERSCAN * 2;
+    const endIndex = Math.min(totalRowsCount, startIndex + visibleCount);
+
+    return {
+      startIndex,
+      endIndex,
+      topSpacer: startIndex * DETAIL_ROW_HEIGHT,
+      bottomSpacer: Math.max(0, (totalRowsCount - endIndex) * DETAIL_ROW_HEIGHT),
+      visibleRows: sortedRows.slice(startIndex, endIndex),
+    };
+  }, [detailScrollTop, recordsExpanded, sortedRows]);
 
   const handleDetailSortClick = (column: DetailSortColumn) => {
     if (detailSortColumn === column) {
@@ -718,6 +756,10 @@ export default function Dashboard1Page() {
     setDetailSortColumn(column);
     setDetailSortDirection("asc");
   };
+
+  useEffect(() => {
+    setDetailScrollTop(0);
+  }, [detailSortColumn, detailSortDirection, filteredRows.length, recordsExpanded]);
 
   const handleApplyFilters = async () => {
     const usdExchangeRate = parseExchangeRateInput(draftUsdExchangeRate);
@@ -795,9 +837,9 @@ export default function Dashboard1Page() {
   };
 
   return (
-    <AppPage title="">
+    <AppPage title="" style={{ padding: 12 }}>
       <div style={styles.page}>
-        <AppCard>
+        <AppCard style={styles.compactCard}>
           <div style={styles.filtersRow}>
             <div style={styles.filterField}>
               <label style={styles.label}>Fecha inicio</label>
@@ -852,37 +894,32 @@ export default function Dashboard1Page() {
           <MetricCard label="Total DOP" value={formatCurrency(totalsByCurrency.find((item) => item.currency === "DOP")?.total ?? 0, "DOP")} />
           <MetricCard label="Total PEN" value={formatCurrency(totalsByCurrency.find((item) => item.currency === "PEN")?.total ?? 0, "PEN")} />
           <MetricCard label="Total USD" value={formatCurrency(totalsByCurrency.find((item) => item.currency === "USD")?.total ?? 0, "USD")} />
+          <MetricCard label="Periodo aplicado" value={`${appliedFechaInicio} al ${appliedFechaFin}`} period />
         </div>
 
-        <div style={styles.tabBar}>
-          <button type="button" style={activeTab === "resumen" ? styles.tabButtonActive : styles.tabButton} onClick={() => setActiveTab("resumen")}>
-            Resumen
-          </button>
-          <button type="button" style={activeTab === "detalle" ? styles.tabButtonActive : styles.tabButton} onClick={() => setActiveTab("detalle")}>
-            Detalle de registros
-          </button>
-        </div>
-
-        {activeTab === "resumen" ? (
-          <>
-        <AppCard>
+        <AppCard style={styles.compactCard}>
           <AppSectionHeader title={getLevelTitle(currentLevel, path)} description={getLevelDescription(currentLevel)} />
 
-          <div style={styles.breadcrumbRow}>
-            <button type="button" style={path.cliente ? styles.breadcrumbButton : styles.breadcrumbButtonActive} onClick={() => handleBreadcrumbReset("all")}>
-              Clientes
+          <div style={styles.breadcrumbHeaderRow}>
+            <div style={styles.breadcrumbRow}>
+              <button type="button" style={path.cliente ? styles.breadcrumbButton : styles.breadcrumbButtonActive} onClick={() => handleBreadcrumbReset("all")}>
+                Clientes
+              </button>
+              {path.cliente ? (
+                <button type="button" style={path.proyecto ? styles.breadcrumbButton : styles.breadcrumbButtonActive} onClick={() => handleBreadcrumbReset("cliente")}>
+                  {path.cliente}
+                </button>
+              ) : null}
+              {path.proyecto ? (
+                <button type="button" style={path.site ? styles.breadcrumbButton : styles.breadcrumbButtonActive} onClick={() => handleBreadcrumbReset("proyecto")}>
+                  {path.proyecto}
+                </button>
+              ) : null}
+              {path.site ? <span style={styles.breadcrumbFinal}>{path.site}</span> : null}
+            </div>
+            <button type="button" style={styles.expandSectionButton} onClick={handleOpenLevelDetail}>
+              Ampliar
             </button>
-            {path.cliente ? (
-              <button type="button" style={path.proyecto ? styles.breadcrumbButton : styles.breadcrumbButtonActive} onClick={() => handleBreadcrumbReset("cliente")}>
-                {path.cliente}
-              </button>
-            ) : null}
-            {path.proyecto ? (
-              <button type="button" style={path.site ? styles.breadcrumbButton : styles.breadcrumbButtonActive} onClick={() => handleBreadcrumbReset("proyecto")}>
-                {path.proyecto}
-              </button>
-            ) : null}
-            {path.site ? <span style={styles.breadcrumbFinal}>{path.site}</span> : null}
           </div>
 
           {loading ? (
@@ -923,6 +960,10 @@ export default function Dashboard1Page() {
                         <Tooltip formatter={(value) => `${Number(value ?? 0)} registro(s)`} />
                       </PieChart>
                     </ResponsiveContainer>
+                    <div style={styles.chartCenter}>
+                      <div style={styles.chartCenterValue}>{formatCompactSoles(totalConvertedToPen)}</div>
+                      <div style={styles.chartCenterLabel}>Total general</div>
+                    </div>
                   </div>
                   <div style={styles.legendPanel}>
                     {chartData.map((item, index) => (
@@ -946,25 +987,10 @@ export default function Dashboard1Page() {
                 </div>
               </div>
 
-                <div style={styles.detailPanel}>
-                  <div style={styles.detailHeaderRow}>
-                    <div style={styles.detailHeaderTitle}>
-                      <AppSectionHeader title="Detalle del nivel actual" description="Puedes hacer clic en una fila para seguir navegando en la estructura del gasto." />
-                    </div>
-                    <div style={styles.detailHeaderActions}>
-                      <button type="button" style={styles.expandSectionButton} onClick={handleOpenLevelDetail}>
-                        Ampliar
-                      </button>
-                      <div style={styles.sidePanelTopRow}>
-                        <div style={styles.sideCardWide}>
-                          <div style={styles.sideLabel}>Periodo aplicado</div>
-                          <strong style={styles.sideValue}>{appliedFechaInicio} al {appliedFechaFin}</strong>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div style={styles.tableWrap}>
-                    <table style={styles.table}>
+                <div style={styles.detailSection}>
+                  <div style={styles.detailPanel}>
+                    <div style={styles.tableWrap}>
+                      <table style={styles.table}>
                       <thead>
                         <tr>
                           <th style={styles.sortableTh}>
@@ -1039,12 +1065,24 @@ export default function Dashboard1Page() {
                   </div>
                 </div>
               </div>
+            </div>
           )}
         </AppCard>
 
-          </>
-        ) : (
-          <AppCard>
+        <div style={styles.recordsSection}>
+          <button type="button" style={styles.recordsHeaderButton} onClick={() => setRecordsExpanded((value) => !value)}>
+            <div style={styles.recordsHeaderLeft}>
+              <span style={styles.recordsHeaderIcon}>☰</span>
+              <div>
+                <div style={styles.recordsHeaderTitle}>Detalle de registros</div>
+                <div style={styles.recordsHeaderSubtitle}>Consulta el detalle completo de los registros del nivel seleccionado</div>
+              </div>
+            </div>
+            <div style={styles.recordsHeaderChevron}>{recordsExpanded ? "⌃" : "⌄"}</div>
+          </button>
+
+          {recordsExpanded ? (
+            <AppCard style={styles.compactCard}>
             <div style={styles.detailRecordsToolbar}>
               <div style={styles.detailHeaderTitle}>
                 <AppSectionHeader title="Detalle de registros seleccionados" description="Los registros mostrados corresponden al filtro y nivel actual seleccionado." />
@@ -1058,8 +1096,8 @@ export default function Dashboard1Page() {
                 </button>
               </div>
             </div>
-            <div style={styles.detailRecordsTableWrap}>
-              <table style={styles.detailRecordsTable}>
+              <div style={styles.detailRecordsTableWrap} onScroll={(event) => setDetailScrollTop(event.currentTarget.scrollTop)}>
+                <table style={styles.detailRecordsTable}>
                 <thead>
                   <tr>
                     <th style={styles.sortableTh}>
@@ -1132,29 +1170,42 @@ export default function Dashboard1Page() {
                       </td>
                     </tr>
                   ) : (
-                    sortedRows.map((row, index) => (
-                      <tr key={`${row.id}-${index}`}>
-                        <td style={styles.tdStrong}>
-                          <button type="button" style={styles.rowDetailButton} onClick={() => handleOpenRowDetails(row)}>
-                            {row.id}
-                          </button>
-                        </td>
-                        <td style={styles.td}>{row.fechaIngreso}</td>
-                        <td style={styles.td}>{row.cliente}</td>
-                        <td style={styles.td}>{row.proyecto}</td>
-                        <td style={styles.td}>{row.site}</td>
-                        <td style={styles.td}>{row.tarea}</td>
-                        <td style={styles.tdStrong}>{row.moneda}</td>
-                        <td style={styles.tdStrong}>{formatCurrency(row.monto, row.moneda)}</td>
-                        <td style={styles.tdStrong}>{formatCurrency(convertToPen(row.monto, row.moneda, appliedUsdExchangeRate, appliedDopExchangeRate), "PEN")}</td>
-                      </tr>
-                    ))
+                    <>
+                      {detailWindow.topSpacer > 0 ? (
+                        <tr aria-hidden="true">
+                          <td colSpan={9} style={{ padding: 0, border: 0, height: detailWindow.topSpacer }} />
+                        </tr>
+                      ) : null}
+                      {detailWindow.visibleRows.map((row, index) => (
+                        <tr key={`${row.id}-${detailWindow.startIndex + index}`} style={{ height: DETAIL_ROW_HEIGHT }}>
+                          <td style={styles.tdStrong}>
+                            <button type="button" style={styles.rowDetailButton} onClick={() => handleOpenRowDetails(row)}>
+                              {row.id}
+                            </button>
+                          </td>
+                          <td style={styles.td}>{row.fechaIngreso}</td>
+                          <td style={styles.td}>{row.cliente}</td>
+                          <td style={styles.td}>{row.proyecto}</td>
+                          <td style={styles.td}>{row.site}</td>
+                          <td style={styles.td}>{row.tarea}</td>
+                          <td style={styles.tdStrong}>{row.moneda}</td>
+                          <td style={styles.tdStrong}>{formatCurrency(row.monto, row.moneda)}</td>
+                          <td style={styles.tdStrong}>{formatCurrency(convertToPen(row.monto, row.moneda, appliedUsdExchangeRate, appliedDopExchangeRate), "PEN")}</td>
+                        </tr>
+                      ))}
+                      {detailWindow.bottomSpacer > 0 ? (
+                        <tr aria-hidden="true">
+                          <td colSpan={9} style={{ padding: 0, border: 0, height: detailWindow.bottomSpacer }} />
+                        </tr>
+                      ) : null}
+                    </>
                   )}
                 </tbody>
               </table>
             </div>
-          </AppCard>
-        )}
+            </AppCard>
+          ) : null}
+        </div>
 
         {selectedGastoRow ? (
           <div style={styles.modalOverlay} onClick={handleCloseRowDetails} role="presentation">
@@ -1453,11 +1504,21 @@ export default function Dashboard1Page() {
   );
 }
 
-function MetricCard({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) {
+function MetricCard({
+  label,
+  value,
+  accent = false,
+  period = false,
+}: {
+  label: string;
+  value: string;
+  accent?: boolean;
+  period?: boolean;
+}) {
   return (
-    <div style={accent ? styles.metricCardAccent : styles.metricCard}>
+    <div style={period ? styles.metricCardPeriod : accent ? styles.metricCardAccent : styles.metricCard}>
       <span style={styles.metricLabel}>{label}</span>
-      <strong style={styles.metricValue}>{value}</strong>
+      <strong style={period ? styles.metricValuePeriod : styles.metricValue}>{value}</strong>
     </div>
   );
 }
@@ -1465,7 +1526,7 @@ function MetricCard({ label, value, accent = false }: { label: string; value: st
 const styles: Record<string, React.CSSProperties> = {
   page: {
     display: "grid",
-    gap: 16,
+    gap: 10,
   },
   filtersRow: {
     display: "flex",
@@ -1504,11 +1565,70 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "flex-end",
   },
+  compactCard: {
+    marginBottom: 8,
+    padding: 16,
+  },
+  recordsSection: {
+    display: "grid",
+    gap: 8,
+  },
+  recordsHeaderButton: {
+    width: "100%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 16,
+    borderRadius: 16,
+    border: "1px solid #E2E8F0",
+    background: "#FFFFFF",
+    boxShadow: "0 2px 8px rgba(23, 20, 58, 0.06)",
+    padding: "16px 18px",
+    cursor: "pointer",
+    textAlign: "left",
+  },
+  recordsHeaderLeft: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    minWidth: 0,
+  },
+  recordsHeaderIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    background: "#EFF6FF",
+    color: "#1D4ED8",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 16,
+    fontWeight: 800,
+    flexShrink: 0,
+  },
+  recordsHeaderTitle: {
+    fontSize: 18,
+    fontWeight: 800,
+    color: "#0F172A",
+    lineHeight: 1.1,
+  },
+  recordsHeaderSubtitle: {
+    marginTop: 4,
+    fontSize: 13,
+    color: "#64748B",
+  },
+  recordsHeaderChevron: {
+    fontSize: 24,
+    fontWeight: 700,
+    color: "#0F172A",
+    lineHeight: 1,
+    flexShrink: 0,
+  },
   tabBar: {
     display: "flex",
     gap: 8,
     flexWrap: "wrap",
-    marginBottom: 12,
+    marginBottom: 8,
   },
   tabButton: {
     minHeight: 40,
@@ -1563,43 +1683,66 @@ const styles: Record<string, React.CSSProperties> = {
   },
   metricGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
-    gap: 12,
+    gridTemplateColumns: "repeat(auto-fit, minmax(158px, 1fr))",
+    gap: 10,
   },
   metricCard: {
     borderRadius: 18,
     border: "1px solid #DBEAFE",
     background: "linear-gradient(180deg, #FFFFFF, #EFF6FF)",
-    padding: 16,
+    padding: 14,
     display: "grid",
-    gap: 8,
+    gap: 6,
     boxShadow: "0 10px 30px rgba(37, 99, 235, 0.08)",
   },
   metricCardAccent: {
     borderRadius: 18,
     border: "1px solid #1D4ED8",
     background: "linear-gradient(135deg, #DBEAFE, #BFDBFE 55%, #93C5FD)",
-    padding: 16,
+    padding: 14,
     display: "grid",
-    gap: 8,
+    gap: 6,
     boxShadow: "0 14px 34px rgba(29, 78, 216, 0.18)",
   },
+  metricCardPeriod: {
+    borderRadius: 18,
+    border: "1px solid #DBEAFE",
+    background: "linear-gradient(180deg, #FFFFFF, #EFF6FF)",
+    padding: 14,
+    display: "grid",
+    gap: 4,
+    boxShadow: "0 10px 30px rgba(37, 99, 235, 0.08)",
+  },
   metricLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: 700,
     color: "#475569",
     textTransform: "uppercase",
     letterSpacing: 0.6,
   },
   metricValue: {
-    fontSize: 24,
+    fontSize: 20,
     color: "#0F172A",
+    lineHeight: 1.1,
+  },
+  metricValuePeriod: {
+    fontSize: 18,
+    color: "#0F172A",
+    lineHeight: 1.15,
+    wordBreak: "break-word",
   },
   breadcrumbRow: {
     display: "flex",
     flexWrap: "wrap",
     gap: 8,
-    marginBottom: 16,
+    minWidth: 0,
+  },
+  breadcrumbHeaderRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 10,
   },
   breadcrumbButton: {
     borderRadius: 999,
@@ -1629,11 +1772,12 @@ const styles: Record<string, React.CSSProperties> = {
   chartLayout: {
     display: "grid",
     gridTemplateColumns: "minmax(240px, 0.6fr) minmax(680px, 1.4fr)",
-    gap: 20,
+    gap: 12,
     alignItems: "start",
   },
   chartBox: {
-    minHeight: 280,
+    height: "100%",
+    minHeight: 380,
     borderRadius: 20,
     border: "1px solid #E2E8F0",
     background: "radial-gradient(circle at top, rgba(37,99,235,0.08), transparent 55%), #FFFFFF",
@@ -1644,11 +1788,37 @@ const styles: Record<string, React.CSSProperties> = {
     gridTemplateColumns: "minmax(180px, 1fr) minmax(220px, 240px)",
     gap: 12,
     alignItems: "start",
-    minHeight: 260,
+    height: "100%",
+    minHeight: 368,
   },
   pieWrap: {
+    position: "relative",
     minWidth: 0,
-    minHeight: 248,
+    minHeight: 322,
+  },
+  chartCenter: {
+    position: "absolute",
+    inset: 0,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    pointerEvents: "none",
+    textAlign: "center",
+  },
+  chartCenterValue: {
+    fontSize: 18,
+    fontWeight: 900,
+    color: "#0F172A",
+    lineHeight: 1.05,
+    maxWidth: "78%",
+    overflowWrap: "anywhere",
+  },
+  chartCenterLabel: {
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#64748B",
   },
   legendPanel: {
     display: "grid",
@@ -1706,30 +1876,27 @@ const styles: Record<string, React.CSSProperties> = {
     gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
     gap: 12,
   },
-  detailHeaderRow: {
+  detailSection: {
     display: "grid",
-    gridTemplateColumns: "minmax(280px, 1.2fr) minmax(420px, 1fr)",
-    gap: 16,
-    alignItems: "start",
-  },
-  detailHeaderTitle: {
     minWidth: 0,
   },
   detailPanel: {
     borderRadius: 18,
     border: "1px solid #E2E8F0",
     background: "#FFFFFF",
-    padding: 16,
-    display: "grid",
-    gap: 12,
+    padding: 12,
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
     minWidth: 0,
+    height: "100%",
   },
   detailRecordsToolbar: {
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr) minmax(240px, 320px)",
-    gap: 16,
+    gap: 12,
     alignItems: "start",
-    marginBottom: 14,
+    marginBottom: 10,
   },
   detailRecordsActions: {
     display: "flex",
@@ -1759,7 +1926,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 18,
     border: "1px solid #E2E8F0",
     background: "#FFFFFF",
-    padding: 16,
+    padding: 12,
     display: "grid",
     gap: 6,
     minWidth: 260,
@@ -1807,6 +1974,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   tableWrap: {
     overflowX: "auto",
+    flex: 1,
+    minHeight: 0,
   },
   detailRecordsTableWrap: {
     overflowX: "auto",
