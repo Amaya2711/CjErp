@@ -837,9 +837,10 @@ export default function Dashboard1Page() {
   };
 
   return (
-    <AppPage title="" style={{ padding: 12 }}>
+    <AppPage title="" style={{ padding: 12 }} fillHeight>
       <div style={styles.page}>
-        <AppCard style={styles.compactCard}>
+        <div style={styles.mainContent}>
+          <AppCard style={{ ...styles.compactCard, ...styles.mainCard }}>
           <div style={styles.filtersRow}>
             <div style={styles.filterField}>
               <label style={styles.label}>Fecha inicio</label>
@@ -885,7 +886,7 @@ export default function Dashboard1Page() {
               </button>
             </div>
           </div>
-        </AppCard>
+          </AppCard>
 
         {error ? <AppStatusMessage tone="error">{error}</AppStatusMessage> : null}
 
@@ -1067,7 +1068,8 @@ export default function Dashboard1Page() {
               </div>
             </div>
           )}
-        </AppCard>
+          </AppCard>
+        </div>
 
         <div style={styles.recordsSection}>
           <button type="button" style={styles.recordsHeaderButton} onClick={() => setRecordsExpanded((value) => !value)}>
@@ -1525,8 +1527,20 @@ function MetricCard({
 
 const styles: Record<string, React.CSSProperties> = {
   page: {
-    display: "grid",
+    display: "flex",
+    flexDirection: "column",
     gap: 10,
+    height: "100%",
+    minHeight: 0,
+    overflow: "hidden",
+  },
+  mainContent: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    flex: 1,
+    minHeight: 0,
+    overflowY: "auto",
   },
   filtersRow: {
     display: "flex",
@@ -1569,9 +1583,18 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 8,
     padding: 16,
   },
+  mainCard: {
+    flex: 1,
+    minHeight: 0,
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+    marginBottom: 0,
+  },
   recordsSection: {
     display: "grid",
     gap: 8,
+    flex: "0 0 auto",
   },
   recordsHeaderButton: {
     width: "100%",
@@ -1773,7 +1796,9 @@ const styles: Record<string, React.CSSProperties> = {
     display: "grid",
     gridTemplateColumns: "minmax(240px, 0.6fr) minmax(680px, 1.4fr)",
     gap: 12,
-    alignItems: "start",
+    alignItems: "stretch",
+    flex: 1,
+    minHeight: 0,
   },
   chartBox: {
     height: "100%",

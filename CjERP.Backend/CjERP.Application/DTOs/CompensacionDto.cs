@@ -99,6 +99,7 @@ public sealed class ProcesarCompensacionRequestDto
     public string Accion { get; set; } = string.Empty;
     public string? Comentario { get; set; }
     public string Usuario { get; set; } = string.Empty;
+    public int? IdEmpleadoAccion { get; set; }
 }
 
 public sealed class ProcesarCompensacionResultDto

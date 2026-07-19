@@ -439,6 +439,7 @@ public sealed class CompensacionService : ICompensacionService
 
         var estadoId = await ResolveEstadoProcesoAsync(connection, request.Accion, cancellationToken);
         using var transaction = connection.BeginTransaction();
+        IEnumerable<AuditoriaCambioDto>? rejectionAuditEntries = null;
         var spResult = await connection.QueryFirstOrDefaultAsync<SpResultDto>(
             new CommandDefinition(
                 "dbo.sp_EmpleadoCompensacion_Actualizar",
@@ -472,11 +473,24 @@ public sealed class CompensacionService : ICompensacionService
 
         if (string.Equals(request.Accion, "RECHAZAR", StringComparison.OrdinalIgnoreCase))
         {
-            var saldoRechazo = saldoActual
-                ?? throw new InvalidOperationException("No se encontro un saldo activo asociado para registrar el rechazo de la compensacion.");
+            var saldoRechazo = anterior.IdSaldoCompensacion is > 0
+                ? await ObtenerSaldoPorIdAsync(connection, anterior.IdSaldoCompensacion.Value, cancellationToken)
+                : null;
+
+            saldoRechazo ??= saldoActual;
             var cantidadDiasRechazados = Math.Max(
                 1m,
                 request.FechaFin.Date.Subtract(request.FechaInicio.Date).Days + 1);
+            var saldoCreadoParaRechazo = saldoRechazo is null;
+            var saldoRechazoSeguro = saldoRechazo
+                ?? new CompensacionSaldoRowDto
+                {
+                    IdSaldoCompensacion = 0,
+                    IdEmpleadoCj = request.IdEmpleadoCj,
+                    DiasBase = cantidadDiasRechazados,
+                    DiasGanados = 0m,
+                    DiasTomados = 0m
+                };
             var movimientoRechazoResult = await connection.QueryFirstOrDefaultAsync<MovimientoGuardarResultDto>(
                 new CommandDefinition(
                     "dbo.sp_EmpleadoCompensacionMovimiento_Insertar",
@@ -513,9 +527,11 @@ public sealed class CompensacionService : ICompensacionService
                     new
                     {
                         IdEmpleadoCj = request.IdEmpleadoCj,
-                        DiasBase = saldoRechazo.DiasBase,
-                        DiasGanados = saldoRechazo.DiasGanados,
-                        DiasTomados = Math.Max(0m, saldoRechazo.DiasTomados - cantidadDiasRechazados),
+                        DiasBase = saldoRechazoSeguro.DiasBase,
+                        DiasGanados = saldoRechazoSeguro.DiasGanados,
+                        DiasTomados = saldoCreadoParaRechazo
+                            ? saldoRechazoSeguro.DiasTomados
+                            : Math.Max(0m, saldoRechazoSeguro.DiasTomados - cantidadDiasRechazados),
                         IdActivo = 1,
                         Usuario = usuario
                     },
@@ -560,6 +576,16 @@ public sealed class CompensacionService : ICompensacionService
                     },
                     transaction: transaction,
                     cancellationToken: cancellationToken));
+
+            rejectionAuditEntries = BuildRejectionAuditEntries(
+                request,
+                usuario,
+                cantidadDiasRechazados,
+                saldoRechazo,
+                saldoRechazoSeguro,
+                saldoSaveResult,
+                movimientoRechazoResult,
+                saldoCreadoParaRechazo);
         }
 
         var movimientoColumns = await GetTableColumnsAsync(
@@ -600,6 +626,11 @@ public sealed class CompensacionService : ICompensacionService
         await _auditoriaCambiosService.RegistrarLoteAsync(
             BuildUpdateAuditEntries(anterior, actual, usuario),
             cancellationToken);
+
+        if (rejectionAuditEntries is not null)
+        {
+            await _auditoriaCambiosService.RegistrarLoteAsync(rejectionAuditEntries, cancellationToken);
+        }
 
         return new ProcesarCompensacionResultDto
         {
@@ -726,6 +757,68 @@ public sealed class CompensacionService : ICompensacionService
                 Observacion = "Actualizacion de la compensacion."
             };
         }
+    }
+
+    private static IEnumerable<AuditoriaCambioDto> BuildRejectionAuditEntries(
+        ProcesarCompensacionRequestDto request,
+        string usuarioAccion,
+        decimal cantidadDiasRechazados,
+        CompensacionSaldoRowDto? saldoAnterior,
+        CompensacionSaldoRowDto saldoAplicado,
+        SaldoGuardarResultDto saldoResultado,
+        MovimientoGuardarResultDto movimientoResultado,
+        bool saldoCreadoParaRechazo)
+    {
+        var idRegistro = request.IdEmpleadoCj.ToString(CultureInfo.InvariantCulture);
+        var saldoIdAnterior = saldoAnterior?.IdSaldoCompensacion.ToString(CultureInfo.InvariantCulture);
+        var saldoIdNuevo = saldoResultado.IdSaldoCompensacion?.ToString(CultureInfo.InvariantCulture);
+        var movimientoId = movimientoResultado.IdMovimiento?.ToString(CultureInfo.InvariantCulture);
+
+        yield return new AuditoriaCambioDto
+        {
+            Modulo = "RecursosHumanos",
+            Entidad = "CompensacionMovimiento",
+            IdRegistro = movimientoId ?? idRegistro,
+            Accion = "INSERT",
+            Seccion = "Procesar",
+            Campo = "MovimientoRechazo",
+            ValorAnterior = null,
+            ValorNuevo = $"CantidadDias={cantidadDiasRechazados:0.##}; Tipo=GANADO; Estado={request.Accion}",
+            UsuarioAccion = usuarioAccion,
+            Observacion = "Movimiento generado por rechazo de compensacion."
+        };
+
+        yield return new AuditoriaCambioDto
+        {
+            Modulo = "RecursosHumanos",
+            Entidad = "CompensacionSaldo",
+            IdRegistro = saldoIdNuevo ?? idRegistro,
+            Accion = saldoCreadoParaRechazo ? "INSERT" : "UPDATE",
+            Seccion = "Procesar",
+            Campo = "SaldoRechazo",
+            ValorAnterior = saldoCreadoParaRechazo || saldoAnterior is null
+                ? null
+                : $"Base={saldoAnterior.DiasBase:0.##};Ganados={saldoAnterior.DiasGanados:0.##};Tomados={saldoAnterior.DiasTomados:0.##}",
+            ValorNuevo = $"Base={saldoAplicado.DiasBase:0.##};Ganados={saldoAplicado.DiasGanados:0.##};Tomados={saldoAplicado.DiasTomados:0.##};IdSaldo={saldoIdNuevo ?? string.Empty}",
+            UsuarioAccion = usuarioAccion,
+            Observacion = saldoCreadoParaRechazo
+                ? "Saldo creado automaticamente para soportar el rechazo de compensacion."
+                : "Saldo ajustado por rechazo de compensacion."
+        };
+
+        yield return new AuditoriaCambioDto
+        {
+            Modulo = "RecursosHumanos",
+            Entidad = "Compensacion",
+            IdRegistro = idRegistro,
+            Accion = "UPDATE",
+            Seccion = "Procesar",
+            Campo = "RechazoCompensacion",
+            ValorAnterior = saldoIdAnterior,
+            ValorNuevo = saldoIdNuevo,
+            UsuarioAccion = usuarioAccion,
+            Observacion = "Compensacion rechazada y saldo reprocesado."
+        };
     }
 
     private static Dictionary<string, string> BuildFieldValues(CompensacionDto item)
@@ -965,7 +1058,30 @@ public sealed class CompensacionService : ICompensacionService
         return await connection.QueryFirstOrDefaultAsync<CompensacionSaldoRowDto>(
             new CommandDefinition(
                 sql,
-                new { IdEmpleadoCj = idEmpleadoCj },
+            new { IdEmpleadoCj = idEmpleadoCj },
+            cancellationToken: cancellationToken));
+    }
+
+    private static async Task<CompensacionSaldoRowDto?> ObtenerSaldoPorIdAsync(
+        SqlConnection connection,
+        int idSaldoCompensacion,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+        SELECT TOP 1
+            IdSaldoCompensacion,
+            IdEmpleadoCj,
+            DiasBase,
+            DiasGanados,
+            DiasTomados
+        FROM dbo.EmpleadoCompensacionSaldo
+        WHERE IdSaldoCompensacion = @IdSaldoCompensacion;
+        """;
+
+        return await connection.QueryFirstOrDefaultAsync<CompensacionSaldoRowDto>(
+            new CommandDefinition(
+                sql,
+                new { IdSaldoCompensacion = idSaldoCompensacion },
                 cancellationToken: cancellationToken));
     }
 

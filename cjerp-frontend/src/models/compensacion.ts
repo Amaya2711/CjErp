@@ -97,6 +97,7 @@ export type ProcesarCompensacionRequest = {
   accion: CompensacionAccion;
   comentario?: string;
   usuario: string;
+  idEmpleadoAccion?: number;
 };
 
 export type ProcesarCompensacionResponse = {

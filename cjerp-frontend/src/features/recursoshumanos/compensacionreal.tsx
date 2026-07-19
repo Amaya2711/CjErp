@@ -1093,6 +1093,7 @@ export default function CompensacionRealPage() {
       accion: procesarDialog.accion,
       comentario: comentarioLimpio || undefined,
       usuario: currentUserName,
+      idEmpleadoAccion: currentEmployeeId > 0 ? currentEmployeeId : undefined,
     };
 
     try {
@@ -1434,13 +1435,13 @@ export default function CompensacionRealPage() {
                       disableEditButton || isEstadoInvalidoRechazo;
 
                     return (
-                    <tr
-                      key={
-                        item.idEmpleadoCompensacion > 0
-                          ? item.idEmpleadoCompensacion
-                          : `${item.idEmpleadoCj ?? "sin-empleado"}-${item.fechaInicio ?? ""}-${item.fechaFin ?? ""}-${item.usuario ?? ""}`
-                      }
-                    >
+                      <tr
+                        key={
+                          item.idEmpleadoCompensacion > 0
+                            ? `${item.idEmpleadoCompensacion}-${item.idEmpleadoCj ?? "sin-empleado"}-${item.fechaInicio ?? ""}-${item.fechaFin ?? ""}-${item.usuario ?? ""}`
+                            : `${item.idEmpleadoCj ?? "sin-empleado"}-${item.fechaInicio ?? ""}-${item.fechaFin ?? ""}-${item.usuario ?? ""}`
+                        }
+                      >
                       <td style={styles.stickyIdTd}>{item.idEmpleadoCj ?? "-"}</td>
                       <td style={styles.stickyEmpleadoTd}>
                         <div style={styles.cellPrimary}>{getEmpleadoLabel(employeeById, item)}</div>

@@ -135,10 +135,11 @@ public class CompensacionController : ControllerBase
 
         try
         {
+            var empleadoAccion = ResolveEmpleadoAccion(request);
             var result = await _compensacionService.ProcesarAsync(
                 request,
                 ResolveUsuarioAccion(),
-                ResolveEmpleadoAccion(),
+                empleadoAccion,
                 cancellationToken);
 
             return Ok(new
@@ -185,11 +186,21 @@ public class CompensacionController : ControllerBase
             ?? "sistema";
     }
 
-    private int? ResolveEmpleadoAccion()
+    private int? ResolveEmpleadoAccion(ProcesarCompensacionRequestDto? request = null)
     {
+        if (request?.IdEmpleadoAccion is > 0)
+        {
+            return request.IdEmpleadoAccion;
+        }
+
         var empleadoClaim = User.FindFirstValue("IdEmpleado")
+            ?? User.FindFirstValue("idEmpleado")
+            ?? User.FindFirstValue("IdEmpleadoCj")
+            ?? User.FindFirstValue("idEmpleadoCj")
             ?? User.FindFirstValue("CodEmp")
-            ?? User.FindFirstValue("CodEmpleadoMostrar");
+            ?? User.FindFirstValue("codEmp")
+            ?? User.FindFirstValue("CodEmpleadoMostrar")
+            ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
 
         return int.TryParse(empleadoClaim, out var empleadoId) && empleadoId > 0
             ? empleadoId
