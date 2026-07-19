@@ -110,6 +110,23 @@ public class TesoreriaGastosController : ControllerBase
         return Ok(new { success = true, message = "ok", data = Gastos });
     }
 
+    [HttpGet("{id}")]
+    public IActionResult GetById(int id)
+    {
+        if (id <= 0)
+        {
+            return BadRequest(new { success = false, message = "El id del gasto debe ser mayor que cero." });
+        }
+
+        var gasto = Gastos.Find(x => x.Id == id);
+        if (gasto == null)
+        {
+            return NotFound(new { success = false, message = "No encontrado" });
+        }
+
+        return Ok(new { success = true, message = "ok", data = gasto });
+    }
+
     [HttpGet("suministros-vigentes")]
     public async Task<IActionResult> ObtenerSuministrosVigentes(
         [FromQuery] int? responsable,

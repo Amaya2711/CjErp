@@ -20,6 +20,7 @@ namespace CjERP.Infrastructure.Services
         private const string StoredProcedureVacaciones = "dbo.sp_EmpleadoOtros_ListarVacaciones";
         private const string StoredProcedureVacacionesTotal = "dbo.sp_EmpleadoOtros_ListarVacacionesTotal";
         private const string StoredProcedurePagadosDashboard = "dbo.sp_Planilla_ConsultarPagados_Dsh";
+        private const string StoredProcedureGastosPagados = "dbo.sp_Planilla_Consulta_Gastos_Pagados";
         private readonly ISqlCommandFactory _sqlCommandFactory;
 
         public PlanillaConsultaService(ISqlCommandFactory sqlCommandFactory)
@@ -101,6 +102,51 @@ namespace CjERP.Infrastructure.Services
                 Message = limitExceeded
                     ? $"Se encontraron {totalRows} registros. El máximo permitido para mostrar es {maxRows}. Aplique más filtros, preferiblemente por rango de fechas."
                     : null
+            };
+        }
+
+        public async Task<PlanillaConsultaEstadosResponseDto> ConsultarGastosPagadosPorIdAsync(
+            int id,
+            CancellationToken cancellationToken = default)
+        {
+            await using var connection = _sqlCommandFactory.CreateConnection();
+
+            var dynamicParameters = new DynamicParameters();
+            dynamicParameters.Add("@id", id, DbType.Int32);
+
+            var rows = (await connection.QueryAsync(
+                _sqlCommandFactory.Create(
+                    StoredProcedureGastosPagados,
+                    dynamicParameters,
+                    CommandType.StoredProcedure,
+                    cancellationToken,
+                    commandTimeout: 120)))
+                .Select(MapRow)
+                .ToList();
+
+            if (rows.Count > 0)
+            {
+                await EnrichRowsWithFacturaDataAsync(connection, rows, cancellationToken);
+            }
+
+            var columns = rows
+                .SelectMany(row => row.Keys)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            return new PlanillaConsultaEstadosResponseDto
+            {
+                Columns = columns,
+                Rows = rows,
+                TotalRows = rows.Count,
+                PageNumber = 1,
+                PageSize = rows.Count > 0 ? rows.Count : 1,
+                TotalPages = 1,
+                HasPreviousPage = false,
+                HasNextPage = false,
+                MaxRowsAllowed = null,
+                LimitExceeded = false,
+                Message = rows.Count > 0 ? null : "No encontrado"
             };
         }
 

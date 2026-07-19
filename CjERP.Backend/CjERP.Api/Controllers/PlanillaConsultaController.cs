@@ -140,6 +140,42 @@ namespace CjERP.Api.Controllers
             }
         }
 
+        [HttpGet("gastos-pagados/{id:int}")]
+        public async Task<IActionResult> ObtenerGastosPagadosPorId(
+            int id,
+            CancellationToken cancellationToken)
+        {
+            if (id <= 0)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "El id debe ser mayor que cero."
+                });
+            }
+
+            try
+            {
+                var result = await _planillaConsultaService.ConsultarGastosPagadosPorIdAsync(id, cancellationToken);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = result.TotalRows > 0 ? "Consulta ejecutada correctamente." : "No encontrado",
+                    data = result
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "[PlanillaConsulta] Error ejecutando gastos-pagados/{Id}",
+                    id);
+
+                throw;
+            }
+        }
+
         private static string GetStoredProcedureLabel(string? consulta)
         {
             return (consulta ?? string.Empty).Trim().ToLowerInvariant() switch

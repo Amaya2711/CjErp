@@ -14,5 +14,9 @@ namespace CjERP.Application.Interfaces.Services
             int? pageNumber = null,
             int? pageSize = null,
             CancellationToken cancellationToken = default);
+
+        Task<PlanillaConsultaEstadosResponseDto> ConsultarGastosPagadosPorIdAsync(
+            int id,
+            CancellationToken cancellationToken = default);
     }
 }

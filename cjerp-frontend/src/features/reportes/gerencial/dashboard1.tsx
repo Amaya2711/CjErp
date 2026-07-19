@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import { Cell, Label, Pie, PieChart, Tooltip } from "recharts";
 import AppCard from "../../../components/base/AppCard";
 import AppPage from "../../../components/base/AppPage";
 import AppSectionHeader from "../../../components/base/AppSectionHeader";
@@ -8,6 +8,7 @@ import AppStatusMessage from "../../../components/base/AppStatusMessage";
 import { FiltroOperativoLookup } from "../../../components/lookups/FiltroOperativoLookup";
 import {
   buildPlanillaPagadosDashboardRequest,
+  consultarGastosPagadosPorId,
   consultarPlanillaEstados,
 } from "../../../api/planillaConsultaService";
 import type { FiltroOperativoValue } from "../../../models/filtroOperativo";
@@ -18,6 +19,7 @@ type RawRow = Record<string, unknown>;
 type DrillRow = {
   id: string;
   fechaIngreso: string;
+  fechaDeposito: string;
   fechaEmision: string;
   fechaVencimiento: string;
   cliente: string;
@@ -25,6 +27,11 @@ type DrillRow = {
   site: string;
   ot: string;
   tarea: string;
+  idCliente: number;
+  idProyecto: number;
+  idSite: string;
+  correSite: number;
+  idTarea: number;
   tipoPago: string;
   moneda: string;
   monto: number;
@@ -49,6 +56,7 @@ type DrillRow = {
   facturaPath: string;
   estado: string;
   estadoLabel: string;
+  estadoCodigo: number;
   idSuministroProvisional: string;
   usuario: string;
   tipoTrabajo: string;
@@ -205,6 +213,10 @@ function toNumber(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function toNumberOrZero(value: unknown): number {
+  return toNumber(value);
+}
+
 function pickString(row: RawRow, keys: string[]) {
   for (const key of keys) {
     const value = row[key];
@@ -251,11 +263,20 @@ function formatDisplayDate(value: string) {
   return text;
 }
 
+function formatModalText(value: string) {
+  const text = value.trim();
+  return text && text !== "-" ? text : "Sin dato";
+}
+
+function getDisplayDepositDate(row: DrillRow) {
+  return row.fechaDeposito && row.fechaDeposito !== "-" ? row.fechaDeposito : row.fechaIngreso;
+}
+
 function parseDisplayDateTime(value: string) {
   const text = value.trim();
   if (!text || text === "-") return Number.NaN;
 
-  const ddmmyyyy = /^(\d{2})\/(\d{2})\/(\d{4})$/;
+  const ddmmyyyy = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
   const iso = /^(\d{4})-(\d{2})-(\d{2})$/;
   const ddmm = text.match(ddmmyyyy);
   if (ddmm) {
@@ -273,19 +294,32 @@ function parseDisplayDateTime(value: string) {
   return Number.isFinite(parsed.getTime()) ? parsed.getTime() : Number.NaN;
 }
 
-function buildDrillRow(row: RawRow): DrillRow {
-  const id = pickString(row, ["Correlativo", "correlativo", "Corre", "corre", "Id", "id"]);
-  const fechaIngreso = formatDisplayDate(
+function buildDrillRow(row: RawRow, preferredId?: string | number): DrillRow {
+  const id =
+    String(preferredId ?? "").trim() ||
+    pickString(row, ["Correlativo", "correlativo", "Corre", "corre", "CorrelativoPlanilla", "Id", "id", "IdPlanilla", "idPlanilla"]);
+  const fechaDeposito = formatDisplayDate(
     pickString(row, [
       "FechaDeposito",
+      "Fecha Deposito",
+      "Fecha Depósito",
+      "FechaDepósito",
       "fechadeposito",
       "fechaDeposito",
+      "fecha deposito",
       "FechaDepositoTexto",
       "fechaDepositoTexto",
       "FecDeposito",
       "fecDeposito",
+      "Fec Deposito",
+    ]),
+  );
+  const fechaIngreso = formatDisplayDate(
+    pickString(row, [
       "FecIngreso",
       "fecIngreso",
+      "FecIngresoTexto",
+      "fecIngresoTexto",
       "FechaIngreso",
       "fechaIngreso",
     ]),
@@ -294,6 +328,8 @@ function buildDrillRow(row: RawRow): DrillRow {
     pickString(row, [
       "FechaEmision",
       "fechaEmision",
+      "FecEmision",
+      "fecEmision",
       "FecIngreso",
       "fecIngreso",
       "FechaIngreso",
@@ -312,34 +348,52 @@ function buildDrillRow(row: RawRow): DrillRow {
   const cliente = pickString(row, ["Cliente", "cliente", "NombreCliente", "nombreCliente", "clienteNombre"]) || "Sin cliente";
   const proyecto = pickString(row, ["Proyecto", "proyecto", "NombreProyecto", "nombreProyecto"]) || "Sin proyecto";
   const site = pickString(row, ["Site", "site", "NombreSite", "nombreSite", "siteNombre"]) || "Sin site";
-  const ot = pickString(row, ["OT", "Ot", "ot"]);
-  const tarea = pickString(row, ["Tarea", "tarea", "NombreTarea", "nombreTarea", "TipoTrabajo", "tipoTrabajo"]) || "Sin tarea";
+  const ot = pickString(row, ["OT", "Ot", "ot", "NroOt", "nroOt", "NumeroOT", "numeroOT"]);
+  const tarea = pickString(row, ["Tarea", "tarea", "NombreTarea", "nombreTarea", "TipoTrabajo", "tipoTrabajo", "Trabajo", "trabajo", "TrabajoLabel", "trabajoLabel"]) || "Sin tarea";
   const tipoPago = pickString(row, ["TipoPago", "tipoPago", "IdTipoPago", "idTipoPago", "TipoPagoLabel", "tipoPagoLabel"]);
-  const responsable = pickString(row, ["Responsable", "responsable", "ResponsableLabel", "responsableLabel"]);
-  const detalle = pickString(row, ["Detalle", "detalle"]);
-  const comentario = pickString(row, ["Comentario", "comentario"]);
-  const cuenta = pickString(row, ["Cuenta", "cuenta"]);
-  const cuentaInter = pickString(row, ["CuentaInter", "cuentaInter"]);
-  const banco = pickString(row, ["Banco", "banco"]);
-  const nroOperacion = pickString(row, ["NroOperacion", "nroOperacion"]);
-  const solicitante = pickString(row, ["Solicitante", "solicitante"]);
-  const gestor = pickString(row, ["Gestor", "gEstor", "gestor"]);
-  const validador = pickString(row, ["Validador", "validador"]);
-  const bien = pickString(row, ["Bien", "bien"]);
-  const comprobante = pickString(row, ["Comprobante", "comprobante"]);
-  const serie = pickString(row, ["Serie", "serie"]);
+  const responsable = pickString(row, ["Responsable", "responsable", "ResponsableLabel", "responsableLabel", "NomResponsable", "nomResponsable", "NombreResponsable", "nombreResponsable", "ResponsableNombre", "responsableNombre"]);
+  const detalle = pickString(row, ["Detalle", "detalle", "DetallePlanilla", "detallePlanilla"]);
+  const comentario = pickString(row, ["Comentario", "comentario", "Observacion", "observacion"]);
+  const cuenta = pickString(row, ["Cuenta", "cuenta", "CuentaNumero", "cuentaNumero", "NumeroCuenta", "numeroCuenta", "NroCuenta", "nroCuenta"]);
+  const cuentaInter = pickString(row, ["CuentaInter", "cuentaInter", "CuentaInterPlanilla", "cuentaInterPlanilla", "CuentaInterNumero", "cuentaInterNumero"]);
+  const banco = pickString(row, ["Banco", "banco", "NombreBanco", "nombreBanco", "BancoNombre", "bancoNombre"]);
+  const nroOperacion = pickString(row, ["NroOperacion", "nroOperacion", "NumeroOperacion", "numeroOperacion", "Operacion", "operacion"]);
+  const solicitante = pickString(row, ["Solicitante", "solicitante", "SolicitanteLabel", "solicitanteLabel", "NombreSolicitante", "nombreSolicitante"]);
+  const gestor = pickString(row, ["Gestor", "gEstor", "gestor", "GestorLabel", "gestorLabel", "NombreGestor", "nombreGestor"]);
+  const validador = pickString(row, ["Validador", "validador", "ValidadorLabel", "validadorLabel", "NombreValidador", "nombreValidador"]);
+  const bien = pickString(row, ["Bien", "bien", "BienLabel", "bienLabel"]);
+  const comprobante = pickString(row, ["Comprobante", "comprobante", "ComprobanteLabel", "comprobanteLabel"]);
+  const serie = pickString(row, ["Serie", "serie", "SerieDocumento", "serieDocumento"]);
   const rendicion = pickString(row, ["IdRendicion", "idRendicion", "Rendicion", "rendicion"]);
   const facturaUrl = pickString(row, ["RutaFacturaUrl", "rutaFacturaUrl", "FacturaUrl", "facturaUrl", "imgFactura"]);
   const facturaPath = pickString(row, ["RutaFacturaEnviada", "rutaFacturaEnviada", "RutaFacturaOriginal", "rutaFacturaOriginal", "FacturaPath", "facturaPath"]);
-  const estado = pickString(row, ["Estado", "estado"]);
-  const estadoLabel = pickString(row, ["NombreEstado", "nombreEstado", "EstadoLabel", "estadoLabel"]);
-  const idSuministroProvisional = pickString(row, ["idprovisional", "IdSuministroProvisional", "idSuministroProvisional"]);
+  const estadoCodigo = pickNumber(row, ["Estado", "estado"]);
+  const estado = estadoCodigo ? String(estadoCodigo) : pickString(row, ["Estado", "estado"]);
+  const estadoLabel = pickString(row, ["NombreEstado", "nombreEstado", "EstadoLabel", "estadoLabel", "EstadoNombre", "estadoNombre"]);
+  const idSuministroProvisional = pickString(
+    row,
+    [
+      "idprovisional",
+      "IdSuministroProvisional",
+      "idSuministroProvisional",
+      "IdSuministro",
+      "idSuministro",
+      "SuministroVigente",
+      "suministroVigente",
+      "Suministro",
+      "suministro",
+      "NroSuministro",
+      "nroSuministro",
+      "NumeroSuministro",
+      "numeroSuministro",
+    ],
+  );
   const usuario = pickString(row, ["Usuario", "usuario"]);
-  const tipoTrabajo = pickString(row, ["Tipo_Trabajo", "TipoTrabajo", "tipoTrabajo"]);
+  const tipoTrabajo = pickString(row, ["Tipo_Trabajo", "TipoTrabajo", "tipoTrabajo", "Trabajo", "trabajo", "TrabajoLabel", "trabajoLabel"]);
   const siteNombre = pickString(row, ["Site", "SiteNombre", "siteNombre"]);
   const filtroOperativo = [cliente, proyecto, siteNombre || site, tipoTrabajo, tarea].filter(Boolean).join(" - ");
   const moneda = normalizeMonedaLabel(
-    pickString(row, ["Moneda", "moneda", "MonedaLabel", "monedaLabel", "TipoMoneda", "tipoMoneda"]),
+    pickString(row, ["Moneda", "moneda", "MonedaLabel", "monedaLabel", "TipoMoneda", "tipoMoneda", "MonedaDescripcion", "monedaDescripcion"]),
   );
   const subtotal = pickNumber(row, ["Subtotal", "subtotal"]);
   const igv = pickNumber(row, ["IGV", "Igv", "igv"]);
@@ -351,6 +405,7 @@ function buildDrillRow(row: RawRow): DrillRow {
 
   return {
     id: id || "-",
+    fechaDeposito: fechaDeposito || "-",
     fechaIngreso: fechaIngreso || "-",
     fechaEmision: fechaEmision || "-",
     fechaVencimiento: fechaVencimiento || "-",
@@ -359,6 +414,11 @@ function buildDrillRow(row: RawRow): DrillRow {
     site,
     ot: ot || "-",
     tarea,
+    idCliente: toNumber(row.IdCliente ?? row.idCliente),
+    idProyecto: toNumber(row.IdProyecto ?? row.idProyecto),
+    idSite: String(row.IdSite ?? row.idSite ?? "").trim(),
+    correSite: toNumber(row.CorSite ?? row.corSite ?? row.CorreSite ?? row.correSite),
+    idTarea: toNumber(row.IdTarea ?? row.idTarea),
     tipoPago: tipoPago || "-",
     moneda,
     monto,
@@ -383,6 +443,7 @@ function buildDrillRow(row: RawRow): DrillRow {
     facturaPath: facturaPath || "-",
     estado: estado || "-",
     estadoLabel: estadoLabel || "-",
+    estadoCodigo,
     idSuministroProvisional: idSuministroProvisional || "-",
     usuario: usuario || "-",
     tipoTrabajo: tipoTrabajo || "-",
@@ -570,10 +631,15 @@ export default function Dashboard1Page() {
   const [levelSortColumn, setLevelSortColumn] = useState<LevelSortColumn>("montoPen");
   const [levelSortDirection, setLevelSortDirection] = useState<"asc" | "desc">("desc");
   const [selectedGastoRow, setSelectedGastoRow] = useState<DrillRow | null>(null);
+  const [selectedGastoDetailLoading, setSelectedGastoDetailLoading] = useState(false);
+  const [selectedGastoDetailError, setSelectedGastoDetailError] = useState("");
   const [isLevelDetailExpanded, setIsLevelDetailExpanded] = useState(false);
   const [recordsExpanded, setRecordsExpanded] = useState(false);
   const [detailScrollTop, setDetailScrollTop] = useState(0);
+  const pieWrapRef = useRef<HTMLDivElement | null>(null);
+  const [pieSize, setPieSize] = useState({ width: 280, height: 288 });
   const isMountedRef = useRef(true);
+  const selectedGastoDetailRequestRef = useRef(0);
 
   const loadRows = async (params?: {
     fechaInicio?: string;
@@ -658,6 +724,28 @@ export default function Dashboard1Page() {
     return () => {
       isMountedRef.current = false;
     };
+  }, []);
+
+  useEffect(() => {
+    const container = pieWrapRef.current;
+    if (!container || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const updateSize = () => {
+      const { width, height } = container.getBoundingClientRect();
+      setPieSize({
+        width: Math.max(0, Math.floor(width)),
+        height: Math.max(0, Math.floor(height)),
+      });
+    };
+
+    updateSize();
+
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(container);
+
+    return () => observer.disconnect();
   }, []);
 
   const rows = useMemo(() => rawRows.map((row) => buildDrillRow(row)), [rawRows]);
@@ -763,7 +851,7 @@ export default function Dashboard1Page() {
           case "id":
             return Number.isFinite(Number(left.id)) ? Number(left.id) : left.id;
           case "fecha":
-            return parseDisplayDateTime(left.fechaIngreso);
+            return parseDisplayDateTime(getDisplayDepositDate(left));
           case "cliente":
             return left.cliente;
           case "proyecto":
@@ -788,7 +876,7 @@ export default function Dashboard1Page() {
           case "id":
             return Number.isFinite(Number(right.id)) ? Number(right.id) : right.id;
           case "fecha":
-            return parseDisplayDateTime(right.fechaIngreso);
+            return parseDisplayDateTime(getDisplayDepositDate(right));
           case "cliente":
             return right.cliente;
           case "proyecto":
@@ -854,7 +942,7 @@ export default function Dashboard1Page() {
     }
 
     setDetailSortColumn(column);
-    setDetailSortDirection("asc");
+    setDetailSortDirection(column === "fecha" || column === "monto" || column === "montoPen" ? "desc" : "asc");
   };
 
   useEffect(() => {
@@ -915,7 +1003,7 @@ export default function Dashboard1Page() {
     const workbook = XLSX.utils.book_new();
     const exportRows = sortedRows.map((row) => ({
       Id: row.id,
-      Fecha: row.fechaIngreso,
+      Fecha: getDisplayDepositDate(row),
       Cliente: row.cliente,
       Proyecto: row.proyecto,
       Site: row.site,
@@ -932,11 +1020,52 @@ export default function Dashboard1Page() {
 
   const handleOpenRowDetails = (row: DrillRow) => {
     setSelectedGastoRow(row);
+    setSelectedGastoDetailError("");
+    setSelectedGastoDetailLoading(true);
+
+    const requestId = ++selectedGastoDetailRequestRef.current;
+    const selectedId = Number.parseInt(String(row.id).trim(), 10);
+
+    void (async () => {
+      try {
+        if (!Number.isFinite(selectedId) || selectedId <= 0) {
+          throw new Error("El ID seleccionado no es válido.");
+        }
+
+        const response = await consultarGastosPagadosPorId(selectedId, { timeoutMs: 120000 });
+
+        if (selectedGastoDetailRequestRef.current !== requestId) {
+          return;
+        }
+
+        const detailRows = Array.isArray(response.rows) ? response.rows : [];
+        if (detailRows.length > 0) {
+          setSelectedGastoRow(buildDrillRow(detailRows[0], selectedId));
+        }
+      } catch (error) {
+        if (selectedGastoDetailRequestRef.current !== requestId) {
+          return;
+        }
+
+        setSelectedGastoDetailError(getHttpErrorMessage(error, "No se pudo cargar el detalle completo del registro."));
+      } finally {
+        if (selectedGastoDetailRequestRef.current === requestId) {
+          setSelectedGastoDetailLoading(false);
+        }
+      }
+    })();
   };
 
   const handleCloseRowDetails = () => {
+    selectedGastoDetailRequestRef.current += 1;
     setSelectedGastoRow(null);
+    setSelectedGastoDetailLoading(false);
+    setSelectedGastoDetailError("");
   };
+
+  const selectedGastoConvertedPen = selectedGastoRow
+    ? convertToPen(selectedGastoRow.monto, selectedGastoRow.moneda, appliedUsdExchangeRate, appliedDopExchangeRate)
+    : 0;
 
   return (
     <AppPage title="" style={{ padding: 12 }} fillHeight>
@@ -1045,40 +1174,75 @@ export default function Dashboard1Page() {
             <div style={styles.chartLayout}>
               <div style={styles.chartBox}>
                 <div style={styles.chartBoxInner}>
-                  <div style={styles.pieWrap}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
+                  <div ref={pieWrapRef} style={styles.pieWrap}>
+                    {pieSize.width > 0 && pieSize.height > 0 ? (
+                      <PieChart width={pieSize.width} height={pieSize.height}>
                         <Pie
                           data={chartData}
                           dataKey="value"
                           nameKey="label"
                           innerRadius={56}
                           outerRadius={88}
-                          cx="50%"
-                          cy="50%"
+                          cx={Math.max(0, Math.floor(pieSize.width / 2))}
+                          cy={Math.max(0, Math.floor(pieSize.height / 2))}
                           paddingAngle={2}
                           onClick={(_, index) => {
                             const datum = chartData[index];
                             if (datum) handleChartClick(datum);
                           }}
-                        >
-                          {chartData.map((item, index) => (
-                            <Cell
-                              key={`${item.label}-${index}`}
-                              fill={PIE_COLORS[index % PIE_COLORS.length]}
+                          >
+                            {chartData.map((item, index) => (
+                              <Cell
+                                key={`${item.label}-${index}`}
+                                fill={PIE_COLORS[index % PIE_COLORS.length]}
                               stroke="#ffffff"
                               strokeWidth={2}
                               cursor={currentLevel === "tarea" ? "default" : "pointer"}
+                              />
+                            ))}
+                            <Label
+                              position="center"
+                              content={({ viewBox }) => {
+                                const centerBox = viewBox as { cx?: number; cy?: number } | undefined;
+                                const cx = typeof centerBox?.cx === "number" ? centerBox.cx : Math.floor(pieSize.width / 2);
+                                const cy = typeof centerBox?.cy === "number" ? centerBox.cy : Math.floor(pieSize.height / 2);
+
+                                return (
+                                  <g>
+                                    <text
+                                      x={cx}
+                                      y={cy - 5}
+                                      textAnchor="middle"
+                                      dominantBaseline="middle"
+                                      style={{
+                                        fontSize: 18,
+                                        fontWeight: 900,
+                                        fill: "#0F172A",
+                                      }}
+                                    >
+                                      {formatCompactSoles(totalConvertedToPen)}
+                                    </text>
+                                    <text
+                                      x={cx}
+                                      y={cy + 16}
+                                      textAnchor="middle"
+                                      dominantBaseline="middle"
+                                      style={{
+                                        fontSize: 12,
+                                        fontWeight: 700,
+                                        fill: "#64748B",
+                                      }}
+                                    >
+                                      Total general
+                                    </text>
+                                  </g>
+                                );
+                              }}
                             />
-                          ))}
-                        </Pie>
-                        <Tooltip formatter={(value) => formatCurrency(Number(value ?? 0), "PEN")} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                    <div style={styles.chartCenter}>
-                      <div style={styles.chartCenterValue}>{formatCompactSoles(totalConvertedToPen)}</div>
-                      <div style={styles.chartCenterLabel}>Total general</div>
-                    </div>
+                          </Pie>
+                          <Tooltip formatter={(value) => formatCurrency(Number(value ?? 0), "PEN")} />
+                        </PieChart>
+                    ) : null}
                   </div>
                   <div style={styles.legendPanel}>
                     {chartData.map((item, index) => (
@@ -1189,7 +1353,18 @@ export default function Dashboard1Page() {
         </div>
 
         <div style={styles.recordsSection}>
-          <button type="button" style={styles.recordsHeaderButton} onClick={() => setRecordsExpanded((value) => !value)}>
+          <div
+            role="button"
+            tabIndex={0}
+            style={styles.recordsHeaderButton}
+            onClick={() => setRecordsExpanded((value) => !value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                setRecordsExpanded((value) => !value);
+              }
+            }}
+          >
             <div style={styles.recordsHeaderLeft}>
               <span style={styles.recordsHeaderIcon}>☰</span>
               <div>
@@ -1197,24 +1372,28 @@ export default function Dashboard1Page() {
                 <div style={styles.recordsHeaderSubtitle}>Consulta el detalle completo de los registros del nivel seleccionado</div>
               </div>
             </div>
-            <div style={styles.recordsHeaderChevron}>{recordsExpanded ? "⌃" : "⌄"}</div>
-          </button>
+            <div style={styles.recordsHeaderRight}>
+              <div style={styles.selectionCountBadge}>
+                Registros existentes: <strong>{filteredRows.length}</strong>
+              </div>
+              <button
+                type="button"
+                style={filteredRows.length > 0 && !loading ? styles.primaryButton : styles.primaryButtonDisabled}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleExportVisibleToExcel();
+                }}
+                onKeyDown={(event) => event.stopPropagation()}
+                disabled={filteredRows.length === 0 || loading}
+              >
+                Exportar a Excel
+              </button>
+              <div style={styles.recordsHeaderChevron}>{recordsExpanded ? "⌃" : "⌄"}</div>
+            </div>
+          </div>
 
           {recordsExpanded ? (
             <AppCard style={styles.compactCard}>
-            <div style={styles.detailRecordsToolbar}>
-              <div style={styles.detailHeaderTitle}>
-                <AppSectionHeader title="Detalle de registros seleccionados" description="Los registros mostrados corresponden al filtro y nivel actual seleccionado." />
-              </div>
-              <div style={styles.detailRecordsActions}>
-                <div style={styles.selectionCountBadge}>
-                  Registros existentes: <strong>{filteredRows.length}</strong>
-                </div>
-                <button type="button" style={filteredRows.length > 0 && !loading ? styles.primaryButton : styles.primaryButtonDisabled} onClick={() => void handleExportVisibleToExcel()} disabled={filteredRows.length === 0 || loading}>
-                  Exportar a Excel
-                </button>
-              </div>
-            </div>
               <div style={styles.detailRecordsTableWrap} onScroll={(event) => setDetailScrollTop(event.currentTarget.scrollTop)}>
                 <table style={styles.detailRecordsTable}>
                 <thead>
@@ -1302,7 +1481,7 @@ export default function Dashboard1Page() {
                               {row.id}
                             </button>
                           </td>
-                          <td style={styles.td}>{row.fechaIngreso}</td>
+                          <td style={styles.td}>{getDisplayDepositDate(row)}</td>
                           <td style={styles.td}>{row.cliente}</td>
                           <td style={styles.td}>{row.proyecto}</td>
                           <td style={styles.td}>{row.site}</td>
@@ -1340,158 +1519,114 @@ export default function Dashboard1Page() {
                   <div id="visualizar-gasto-title" style={styles.modalTitle}>
                     Visualizar gasto
                   </div>
-                  <div style={styles.modalSubtitle}>Detalle del registro seleccionado desde la tabla principal.</div>
+                  <div style={styles.modalSubtitle}>
+                    Registro #{formatModalText(selectedGastoRow.id)}
+                    {selectedGastoRow.serie !== "-" ? ` - ${formatModalText(selectedGastoRow.comprobante)} ${formatModalText(selectedGastoRow.serie)}` : ""}
+                  </div>
                 </div>
                 <button type="button" style={styles.modalCloseButton} onClick={handleCloseRowDetails}>
-                  Cerrar
+                  x Cerrar
                 </button>
               </div>
               <>
-                {selectedGastoRow.facturaUrl !== "-" || selectedGastoRow.facturaPath !== "-" ? (
-                  <a
-                    href={selectedGastoRow.facturaUrl !== "-" ? selectedGastoRow.facturaUrl : selectedGastoRow.facturaPath}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={styles.facturaLink}
-                  >
-                    Ver factura
-                  </a>
+                {selectedGastoDetailLoading ? (
+                  <div style={styles.modalLoadingBox}>Cargando detalle completo del registro...</div>
                 ) : null}
-                <div style={styles.modalGrid}>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Id / Correlativo</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.id}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Filtro</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.filtroOperativo}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Trabajo</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.tipoTrabajo}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>OT</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.ot}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Tarea</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.tarea}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Responsable</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.responsable}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Suministro vigente</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.idSuministroProvisional}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Cuenta</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.cuenta}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Cuenta inter</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.cuentaInter}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Banco</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.banco}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Nro. operación</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.nroOperacion}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Fecha deposito</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.fechaIngreso}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Fecha emision</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.fechaEmision}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Fecha vencimiento</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.fechaVencimiento}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Bien</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.bien}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Comprobante</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.comprobante}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Serie</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.serie}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Rendición</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.rendicion}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Tipo de pago</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.tipoPago}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Subtotal</span>
-                    <strong style={styles.modalValue}>{formatCurrency(selectedGastoRow.subtotal, selectedGastoRow.moneda)}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>IGV</span>
-                    <strong style={styles.modalValue}>{formatCurrency(selectedGastoRow.igv, selectedGastoRow.moneda)}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Total</span>
-                    <strong style={styles.modalValue}>{formatCurrency(selectedGastoRow.totalPagar || selectedGastoRow.monto, selectedGastoRow.moneda)}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Moneda</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.moneda}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Solicitante</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.solicitante}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Gestor</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.gestor}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Validador</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.validador}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Estado</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.estadoLabel || selectedGastoRow.estado}</strong>
-                  </div>
-                  <div style={styles.modalField}>
-                    <span style={styles.modalLabel}>Usuario</span>
-                    <strong style={styles.modalValue}>{selectedGastoRow.usuario}</strong>
-                  </div>
-                  <div style={styles.modalFieldAccent}>
-                    <span style={styles.modalLabelAccent}>Total convertido PEN</span>
-                    <strong style={styles.modalValueAccent}>
-                      {formatCurrency(convertToPen(selectedGastoRow.monto, selectedGastoRow.moneda, appliedUsdExchangeRate, appliedDopExchangeRate), "PEN")}
-                    </strong>
-                  </div>
+                {selectedGastoDetailError ? (
+                  <div style={styles.modalErrorBox}>{selectedGastoDetailError}</div>
+                ) : null}
+                <div style={styles.modalExecutiveGrid}>
+                  <section style={styles.modalFinancePanel}>
+                    <div style={styles.modalFinanceTitle}>Comprobante</div>
+                    <div style={styles.modalAmountRows}>
+                      <div style={styles.modalAmountRow}>
+                        <span>Subtotal</span>
+                        <strong>{formatCurrency(selectedGastoRow.subtotal, selectedGastoRow.moneda)}</strong>
+                      </div>
+                      <div style={styles.modalAmountRow}>
+                        <span>IGV</span>
+                        <strong>{formatCurrency(selectedGastoRow.igv, selectedGastoRow.moneda)}</strong>
+                      </div>
+                      <div style={styles.modalAmountDivider} />
+                      <div style={styles.modalAmountRowStrong}>
+                        <span>Total ({selectedGastoRow.moneda})</span>
+                        <strong>{formatCurrency(selectedGastoRow.totalPagar || selectedGastoRow.monto, selectedGastoRow.moneda)}</strong>
+                      </div>
+                    </div>
+                    <div style={styles.modalConvertedTile}>
+                      <span style={styles.modalConvertedTileLabel}>Total convertido</span>
+                      <strong style={styles.modalConvertedTileValue}>{formatCurrency(selectedGastoConvertedPen, "PEN")}</strong>
+                    </div>
+                    {selectedGastoRow.facturaUrl !== "-" || selectedGastoRow.facturaPath !== "-" ? (
+                      <a
+                        href={selectedGastoRow.facturaUrl !== "-" ? selectedGastoRow.facturaUrl : selectedGastoRow.facturaPath}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={styles.facturaLink}
+                      >
+                        Ver factura
+                      </a>
+                    ) : null}
+                  </section>
+
+                  <section style={styles.modalInfoPanel}>
+                    <div style={styles.modalInfoRow}>
+                      <span style={styles.modalInfoLabel}>Tipo</span>
+                      <strong style={styles.modalInfoValue}>
+                        {formatModalText(selectedGastoRow.comprobante)}
+                        {selectedGastoRow.serie !== "-" ? ` - serie ${formatModalText(selectedGastoRow.serie)}` : ""}
+                      </strong>
+                    </div>
+                    <div style={styles.modalInfoRow}>
+                      <span style={styles.modalInfoLabel}>Emision</span>
+                      <strong style={styles.modalInfoValue}>{formatModalText(selectedGastoRow.fechaEmision)}</strong>
+                    </div>
+                    <div style={styles.modalInfoRow}>
+                      <span style={styles.modalInfoLabel}>Deposito</span>
+                      <strong style={styles.modalInfoValue}>{formatModalText(getDisplayDepositDate(selectedGastoRow))}</strong>
+                    </div>
+                    <div style={styles.modalInfoRow}>
+                      <span style={styles.modalInfoLabel}>Vencimiento</span>
+                      <strong style={styles.modalInfoValue}>{formatModalText(selectedGastoRow.fechaVencimiento)}</strong>
+                    </div>
+                    <div style={styles.modalInfoGap} />
+                    <div style={styles.modalInfoRow}>
+                      <span style={styles.modalInfoLabel}>Responsable</span>
+                      <strong style={styles.modalInfoValue}>{formatModalText(selectedGastoRow.responsable)}</strong>
+                    </div>
+                    <div style={styles.modalInfoRow}>
+                      <span style={styles.modalInfoLabel}>Solicitante</span>
+                      <strong style={styles.modalInfoValue}>{formatModalText(selectedGastoRow.solicitante)}</strong>
+                    </div>
+                    <div style={styles.modalInfoRow}>
+                      <span style={styles.modalInfoLabel}>Gestor</span>
+                      <strong style={styles.modalInfoValue}>{formatModalText(selectedGastoRow.gestor)}</strong>
+                    </div>
+                    <div style={styles.modalInfoRow}>
+                      <span style={styles.modalInfoLabel}>Validador</span>
+                      <strong style={styles.modalInfoValue}>{formatModalText(selectedGastoRow.validador)}</strong>
+                    </div>
+                    <div style={styles.modalInfoRow}>
+                      <span style={styles.modalInfoLabel}>Usuario</span>
+                      <strong style={styles.modalInfoValue}>{formatModalText(selectedGastoRow.usuario)}</strong>
+                    </div>
+                  </section>
                 </div>
 
-                <div style={styles.modalSection}>
-                  <span style={styles.modalLabel}>Detalle</span>
-                  <div style={styles.modalTextBox}>{selectedGastoRow.detalle}</div>
-                </div>
-
-                <div style={styles.modalSection}>
-                  <span style={styles.modalLabel}>Comentario</span>
-                  <div style={styles.modalTextBox}>{selectedGastoRow.comentario}</div>
-                </div>
+                <section style={styles.modalNarrativeGrid}>
+                  <div style={styles.modalNarrativeBlock}>
+                    <div style={styles.modalNarrativeTitle}>Detalle</div>
+                    <div style={styles.modalPlainText}>{formatModalText(selectedGastoRow.detalle)}</div>
+                  </div>
+                  <div style={styles.modalNarrativeBlock}>
+                    <div style={styles.modalNarrativeTitle}>Comentario</div>
+                    <div style={styles.modalPlainText}>{formatModalText(selectedGastoRow.comentario)}</div>
+                  </div>
+                </section>
               </>
             </div>
           </div>
         ) : null}
-
         {isLevelDetailExpanded ? (
           <div style={styles.modalOverlay} onClick={handleCloseLevelDetail} role="presentation">
             <div
@@ -1765,6 +1900,13 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
     color: "#64748B",
   },
+  recordsHeaderRight: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 14,
+    flexShrink: 0,
+  },
   recordsHeaderChevron: {
     fontSize: 24,
     fontWeight: 700,
@@ -1957,11 +2099,13 @@ const styles: Record<string, React.CSSProperties> = {
   },
   chartCenter: {
     position: "absolute",
-    inset: 0,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    left: "50%",
+    top: "50%",
+    transform: "translate(-50%, -50%)",
+    width: "100%",
+    height: "100%",
+    display: "grid",
+    placeItems: "center",
     pointerEvents: "none",
     textAlign: "center",
   },
@@ -1970,14 +2114,16 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 900,
     color: "#0F172A",
     lineHeight: 1.05,
-    maxWidth: "78%",
+    maxWidth: "82%",
     overflowWrap: "anywhere",
+    textAlign: "center",
   },
   chartCenterLabel: {
     marginTop: 4,
     fontSize: 12,
     fontWeight: 700,
     color: "#64748B",
+    textAlign: "center",
   },
   legendPanel: {
     display: "grid",
@@ -2065,10 +2211,10 @@ const styles: Record<string, React.CSSProperties> = {
     overflowX: "hidden",
   },
   detailRecordsToolbar: {
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) minmax(240px, 320px)",
+    display: "flex",
     gap: 12,
-    alignItems: "start",
+    alignItems: "center",
+    justifyContent: "flex-end",
     marginBottom: 10,
   },
   detailRecordsActions: {
@@ -2148,7 +2294,9 @@ const styles: Record<string, React.CSSProperties> = {
   tableWrap: {
     flex: 1,
     minHeight: 0,
-    overflow: "visible",
+    overflow: "auto",
+    position: "relative",
+    isolation: "isolate",
   },
   detailRecordsTableWrap: {
     overflowX: "auto",
@@ -2157,6 +2305,8 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #E2E8F0",
     maxHeight: "calc(100vh - 360px)",
     minHeight: 0,
+    position: "relative",
+    isolation: "isolate",
   },
   paginationBar: {
     display: "flex",
@@ -2212,8 +2362,9 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: 0.5,
     position: "sticky",
     top: 0,
-    zIndex: 2,
+    zIndex: 10,
     background: "#FFFFFF",
+    boxShadow: "0 1px 0 #CBD5E1, 0 8px 12px rgba(255, 255, 255, 0.96)",
   },
   sortHeaderButton: {
     width: "100%",
@@ -2230,11 +2381,14 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: 0.5,
     cursor: "pointer",
     background: "#FFFFFF",
+    position: "relative",
+    zIndex: 11,
   },
   accentSortHeaderButton: {
     borderRadius: 12,
     background: "linear-gradient(135deg, #DBEAFE, #BFDBFE 55%, #93C5FD)",
     color: "#0F172A",
+    zIndex: 12,
   },
   sortIndicator: {
     fontSize: 11,
@@ -2336,16 +2490,16 @@ const styles: Record<string, React.CSSProperties> = {
     zIndex: 60,
   },
   modalPanel: {
-    width: "min(1120px, 100%)",
-    maxHeight: "90vh",
+    width: "min(760px, 100%)",
+    maxHeight: "88vh",
     overflowY: "auto",
-    borderRadius: 24,
+    borderRadius: 10,
     background: "#FFFFFF",
-    border: "1px solid #DBEAFE",
-    boxShadow: "0 24px 80px rgba(15, 23, 42, 0.35)",
-    padding: 20,
+    border: "1px solid #E2E8F0",
+    boxShadow: "0 26px 80px rgba(15, 23, 42, 0.32)",
+    padding: 24,
     display: "grid",
-    gap: 16,
+    gap: 18,
   },
   modalHeader: {
     display: "flex",
@@ -2354,8 +2508,8 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 16,
   },
   modalTitle: {
-    fontSize: 28,
-    fontWeight: 800,
+    fontSize: 30,
+    fontWeight: 900,
     color: "#0F172A",
     lineHeight: 1.1,
   },
@@ -2365,24 +2519,96 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 14,
   },
   modalCloseButton: {
-    minHeight: 40,
-    borderRadius: 12,
+    minHeight: 34,
+    borderRadius: 8,
     border: "1px solid #CBD5E1",
     background: "#FFFFFF",
     color: "#0F172A",
     fontWeight: 700,
-    padding: "0 14px",
+    padding: "0 16px",
     cursor: "pointer",
   },
   modalGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+    gap: 10,
+  },
+  modalSummaryStrip: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
     gap: 12,
+  },
+  modalSummaryCard: {
+    borderRadius: 18,
+    border: "1px solid #E2E8F0",
+    background: "linear-gradient(180deg, #FFFFFF, #F8FAFC)",
+    padding: 14,
+    display: "grid",
+    gap: 6,
+  },
+  modalSummaryCardAccent: {
+    borderRadius: 18,
+    border: "1px solid #1D4ED8",
+    background: "linear-gradient(135deg, #DBEAFE, #BFDBFE 55%, #93C5FD)",
+    padding: 14,
+    display: "grid",
+    gap: 6,
+  },
+  modalSummaryLabel: {
+    fontSize: 12,
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: "#64748B",
+  },
+  modalSummaryLabelAccent: {
+    fontSize: 12,
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: "#0F172A",
+  },
+  modalSummaryValue: {
+    fontSize: 18,
+    fontWeight: 800,
+    color: "#0F172A",
+    lineHeight: 1.15,
+    wordBreak: "break-word",
+  },
+  modalSummaryValueAccent: {
+    fontSize: 20,
+    fontWeight: 900,
+    color: "#0F172A",
+    lineHeight: 1.15,
+    wordBreak: "break-word",
+  },
+  modalFilterBand: {
+    borderRadius: 18,
+    border: "1px solid #DBEAFE",
+    background: "#F8FBFF",
+    padding: "12px 14px",
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    flexWrap: "wrap",
+  },
+  modalFilterBandLabel: {
+    fontSize: 12,
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: "#64748B",
+  },
+  modalFilterBandValue: {
+    fontSize: 15,
+    fontWeight: 800,
+    color: "#0F172A",
+    wordBreak: "break-word",
   },
   modalField: {
     borderRadius: 16,
     border: "1px solid #E2E8F0",
-    background: "#F8FAFC",
+    background: "linear-gradient(180deg, #FFFFFF, #F8FAFC)",
     padding: 14,
     display: "grid",
     gap: 8,
@@ -2429,6 +2655,204 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #E2E8F0",
     background: "#F8FAFC",
     padding: 14,
+    color: "#0F172A",
+    lineHeight: 1.5,
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+  },
+  modalSectionsGrid: {
+    display: "grid",
+    gap: 16,
+  },
+  modalSectionCard: {
+    borderRadius: 20,
+    border: "1px solid #E2E8F0",
+    background: "#FFFFFF",
+    boxShadow: "0 8px 24px rgba(15, 23, 42, 0.05)",
+    padding: 16,
+    display: "grid",
+    gap: 14,
+  },
+  modalSectionHeader: {
+    display: "grid",
+    gap: 4,
+  },
+  modalSectionTitle: {
+    fontSize: 16,
+    fontWeight: 800,
+    color: "#0F172A",
+    lineHeight: 1.2,
+  },
+  modalSectionSubtitle: {
+    fontSize: 13,
+    color: "#64748B",
+  },
+  modalCardGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+    gap: 10,
+  },
+  modalFieldCard: {
+    borderRadius: 16,
+    border: "1px solid #E2E8F0",
+    background: "linear-gradient(180deg, #FFFFFF, #F8FAFC)",
+    padding: 13,
+    display: "grid",
+    gap: 6,
+  },
+  modalFieldCardAccent: {
+    borderRadius: 16,
+    border: "1px solid #1D4ED8",
+    background: "linear-gradient(135deg, #DBEAFE, #BFDBFE 55%, #93C5FD)",
+    padding: 13,
+    display: "grid",
+    gap: 6,
+  },
+  modalFieldLabel: {
+    fontSize: 11,
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: "#64748B",
+  },
+  modalFieldLabelAccent: {
+    fontSize: 11,
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: "#0F172A",
+  },
+  modalFieldValue: {
+    fontSize: 15,
+    fontWeight: 800,
+    color: "#0F172A",
+    wordBreak: "break-word",
+  },
+  modalFieldValueAccent: {
+    fontSize: 18,
+    fontWeight: 900,
+    color: "#0F172A",
+    wordBreak: "break-word",
+  },
+  modalNarrativeGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: 18,
+  },
+  modalExecutiveGrid: {
+    display: "grid",
+    gridTemplateColumns: "240px minmax(0, 1fr)",
+    gap: 18,
+    alignItems: "start",
+  },
+  modalFinancePanel: {
+    borderRadius: 12,
+    background: "#FBFCFE",
+    padding: 18,
+    display: "grid",
+    gap: 14,
+  },
+  modalFinanceTitle: {
+    fontSize: 12,
+    color: "#64748B",
+  },
+  modalAmountRows: {
+    display: "grid",
+    gap: 8,
+  },
+  modalAmountRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 14,
+    fontSize: 13,
+    color: "#0F172A",
+  },
+  modalAmountRowStrong: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 14,
+    fontSize: 14,
+    color: "#0F172A",
+    fontWeight: 800,
+  },
+  modalAmountDivider: {
+    height: 1,
+    background: "#E2E8F0",
+    margin: "6px 0",
+  },
+  modalConvertedTile: {
+    borderRadius: 8,
+    background: "#BFDBFE",
+    color: "#0F172A",
+    padding: "12px 14px",
+    display: "grid",
+    gap: 2,
+  },
+  modalConvertedTileLabel: {
+    fontSize: 12,
+    color: "#1D4ED8",
+    fontWeight: 700,
+  },
+  modalConvertedTileValue: {
+    fontSize: 18,
+    fontWeight: 900,
+  },
+  modalInfoPanel: {
+    display: "grid",
+    gridTemplateColumns: "128px minmax(0, 1fr)",
+    columnGap: 24,
+    rowGap: 12,
+    paddingTop: 6,
+  },
+  modalInfoRow: {
+    display: "contents",
+  },
+  modalInfoLabel: {
+    color: "#334155",
+    fontSize: 13,
+    lineHeight: 1.35,
+  },
+  modalInfoValue: {
+    color: "#020617",
+    fontSize: 13,
+    fontWeight: 800,
+    lineHeight: 1.35,
+    wordBreak: "break-word",
+  },
+  modalInfoGap: {
+    gridColumn: "1 / -1",
+    height: 2,
+  },
+  modalNarrativeBlock: {
+    display: "grid",
+    gap: 8,
+  },
+  modalNarrativeTitle: {
+    fontSize: 14,
+    color: "#334155",
+    fontWeight: 800,
+  },
+  modalPlainText: {
+    color: "#020617",
+    fontSize: 14,
+    lineHeight: 1.5,
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+  },
+  modalNarrativeBox: {
+    borderRadius: 18,
+    border: "1px solid #E2E8F0",
+    background: "#F8FAFC",
+    padding: 14,
+    display: "grid",
+    gap: 8,
+  },
+  modalNarrativeText: {
+    minHeight: 92,
+    borderRadius: 14,
+    background: "#FFFFFF",
+    border: "1px solid #E2E8F0",
+    padding: 12,
     color: "#0F172A",
     lineHeight: 1.5,
     whiteSpace: "pre-wrap",
@@ -2565,11 +2989,13 @@ const styles: Record<string, React.CSSProperties> = {
   facturaLink: {
     display: "inline-flex",
     width: "fit-content",
-    marginBottom: 8,
-    color: "#6D28D9",
+    color: "#0F4FB8",
     fontWeight: 700,
     textDecoration: "underline",
+    fontSize: 13,
   },
 };
+
+
 
 

@@ -150,6 +150,18 @@ export async function consultarPlanillaEstados(
   });
 }
 
+export async function consultarGastosPagadosPorId(
+  id: number,
+  options?: { timeoutMs?: number }
+): Promise<PlanillaConsultaEstadosResponse> {
+  return httpClient.get<PlanillaConsultaEstadosResponse>(
+    `${PLANILLA_CONSULTA_API_URL}/gastos-pagados/${encodeURIComponent(String(Math.trunc(id)))}`,
+    {
+      timeout: options?.timeoutMs,
+    }
+  );
+}
+
 export function buildPlanillaPagadosDashboardRequest(args: {
   fechaInicio: string;
   fechaFin: string;
