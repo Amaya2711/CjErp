@@ -12,6 +12,9 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
   onSelectionBlur,
   tareaFilter,
   tareaInputMode = "autocomplete",
+  showTrabajo = true,
+  showOt = true,
+  showTarea = true,
   filtroInputRef,
 }) => {
   const safeValue: FiltroOperativoValue = value ?? {};
@@ -263,91 +266,99 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 8 }}>
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <label style={{ whiteSpace: "nowrap" }}>Trabajo</label>
-            <select
-              ref={trabajoSelectRef}
-              onChange={(e) => handleTipoTrabajoChange(e.target.value)}
-              onBlur={(e) =>
-                onSelectionBlur?.({
-                  ...lookupValue,
-                  tipoTrabajo:
-                    tipoTrabajosSafe.find((t) => t.tipoTrabajo === e.target.value) ?? undefined,
-                })
-              }
-              value={safeValue?.tipoTrabajo?.tipoTrabajo || ""}
-              style={{
-                fontSize: "11px",
-                fontFamily: "Arial, sans-serif",
-                border: "1px solid #D1D5DB",
-                borderRadius: 10,
-                padding: "8px 12px",
-                outline: "none",
-                boxSizing: "border-box"
-              }}
-            >
-              <option value="">Seleccione...</option>
-              {tipoTrabajoMissing ? (
-                <option value={currentTipoTrabajo}>{currentTipoTrabajo}</option>
-              ) : null}
-              {tipoTrabajosSafe.map((t, idx) => (
-                <option key={t.tipoTrabajo + "-" + idx} value={t.tipoTrabajo}>
-                  {t.tipoTrabajo}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
+      {showTrabajo || showOt || showTarea ? (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {showTrabajo ? (
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <label style={{ whiteSpace: "nowrap" }}>Trabajo</label>
+                <select
+                  ref={trabajoSelectRef}
+                  onChange={(e) => handleTipoTrabajoChange(e.target.value)}
+                  onBlur={(e) =>
+                    onSelectionBlur?.({
+                      ...lookupValue,
+                      tipoTrabajo:
+                        tipoTrabajosSafe.find((t) => t.tipoTrabajo === e.target.value) ?? undefined,
+                    })
+                  }
+                  value={safeValue?.tipoTrabajo?.tipoTrabajo || ""}
+                  style={{
+                    fontSize: "11px",
+                    fontFamily: "Arial, sans-serif",
+                    border: "1px solid #D1D5DB",
+                    borderRadius: 10,
+                    padding: "8px 12px",
+                    outline: "none",
+                    boxSizing: "border-box"
+                  }}
+                >
+                  <option value="">Seleccione...</option>
+                  {tipoTrabajoMissing ? (
+                    <option value={currentTipoTrabajo}>{currentTipoTrabajo}</option>
+                  ) : null}
+                  {tipoTrabajosSafe.map((t, idx) => (
+                    <option key={t.tipoTrabajo + "-" + idx} value={t.tipoTrabajo}>
+                      {t.tipoTrabajo}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          ) : null}
 
-        <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6 }}>
-          <label style={{ whiteSpace: "nowrap" }}>OT</label>
-          <select
-            onChange={(e) => handleOtChange(e.target.value)}
-            onBlur={(e) =>
-              onSelectionBlur?.({
-                ...lookupValue,
-                ot: otsSafe.find((o) => o.ot === e.target.value) ?? undefined,
-              })
-            }
-            value={safeValue?.ot?.ot || ""}
-            style={{
-              fontSize: "11px",
-              fontFamily: "Arial, sans-serif",
-              border: "1px solid #D1D5DB",
-              borderRadius: 10,
-              padding: "8px 12px",
-              outline: "none",
-              boxSizing: "border-box"
-            }}
-          >
-            <option value="">Seleccione...</option>
-            {otMissing ? (
-              <option value={currentOt}>{currentOt}</option>
-            ) : null}
-            {otsSafe.map((o, idx) => (
-              <option key={o.ot + "-" + idx} value={o.ot}>
-                {o.ot} - {o.fecAsignacion ? new Date(o.fecAsignacion).toLocaleDateString() : ""}
-              </option>
-            ))}
-          </select>
-        </div>
+          {showOt ? (
+            <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6 }}>
+              <label style={{ whiteSpace: "nowrap" }}>OT</label>
+              <select
+                onChange={(e) => handleOtChange(e.target.value)}
+                onBlur={(e) =>
+                  onSelectionBlur?.({
+                    ...lookupValue,
+                    ot: otsSafe.find((o) => o.ot === e.target.value) ?? undefined,
+                  })
+                }
+                value={safeValue?.ot?.ot || ""}
+                style={{
+                  fontSize: "11px",
+                  fontFamily: "Arial, sans-serif",
+                  border: "1px solid #D1D5DB",
+                  borderRadius: 10,
+                  padding: "8px 12px",
+                  outline: "none",
+                  boxSizing: "border-box"
+                }}
+              >
+                <option value="">Seleccione...</option>
+                {otMissing ? (
+                  <option value={currentOt}>{currentOt}</option>
+                ) : null}
+                {otsSafe.map((o, idx) => (
+                  <option key={o.ot + "-" + idx} value={o.ot}>
+                    {o.ot} - {o.fecAsignacion ? new Date(o.fecAsignacion).toLocaleDateString() : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
 
-        {tareaInputMode === "select" ? (
-          <TareaSelect
-            value={safeValue}
-            tareas={tareasDisponibles}
-            handleTareaChange={handleTareaChange}
-          />
-        ) : (
-          <TareaAutocomplete
-            value={safeValue}
-            tareas={tareasDisponibles}
-            handleTareaChange={handleTareaChange}
-          />
-        )}
-      </div>
+          {showTarea ? (
+            tareaInputMode === "select" ? (
+              <TareaSelect
+                value={safeValue}
+                tareas={tareasDisponibles}
+                handleTareaChange={handleTareaChange}
+              />
+            ) : (
+              <TareaAutocomplete
+                value={safeValue}
+                tareas={tareasDisponibles}
+                handleTareaChange={handleTareaChange}
+              />
+            )
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 };

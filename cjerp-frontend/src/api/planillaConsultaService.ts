@@ -154,6 +154,10 @@ export function buildPlanillaPagadosDashboardRequest(args: {
   fechaInicio: string;
   fechaFin: string;
   textoBusqueda?: string;
+  idCliente?: number;
+  idProyecto?: number;
+  idSite?: string;
+  correlativo?: number;
   maxRows?: number;
   pageNumber?: number;
   pageSize?: number;
@@ -177,6 +181,39 @@ export function buildPlanillaPagadosDashboardRequest(args: {
       nombre: "TextoBusqueda",
       valor: textoBusqueda,
       tipo: "string",
+    });
+  }
+
+  if (Number.isFinite(args.idCliente) && (args.idCliente ?? 0) > 0) {
+    parametros.push({
+      nombre: "IdCliente",
+      valor: String(Math.trunc(args.idCliente as number)),
+      tipo: "int",
+    });
+  }
+
+  if (Number.isFinite(args.idProyecto) && (args.idProyecto ?? 0) > 0) {
+    parametros.push({
+      nombre: "IdProyecto",
+      valor: String(Math.trunc(args.idProyecto as number)),
+      tipo: "int",
+    });
+  }
+
+  const idSite = args.idSite?.trim() ?? "";
+  if (idSite) {
+    parametros.push({
+      nombre: "IdSite",
+      valor: idSite,
+      tipo: "string",
+    });
+  }
+
+  if (Number.isFinite(args.correlativo) && (args.correlativo ?? 0) > 0) {
+    parametros.push({
+      nombre: "Correlativo",
+      valor: String(Math.trunc(args.correlativo as number)),
+      tipo: "int",
     });
   }
 

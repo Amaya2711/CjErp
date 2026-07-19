@@ -46,4 +46,7 @@ export interface FiltroOperativoLookupProps {
   readOnly?: boolean;
   className?: string;
   resetOnChange?: boolean;
+  showTrabajo?: boolean;
+  showOt?: boolean;
+  showTarea?: boolean;
 }

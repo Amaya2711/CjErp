@@ -52,6 +52,11 @@ namespace CjERP.Infrastructure.Services
                 .Select(MapRow)
                 .ToList();
 
+            if (string.Equals(storedProcedureName, StoredProcedurePagadosDashboard, StringComparison.OrdinalIgnoreCase))
+            {
+                rows = ApplyPagadosDashboardFilters(rows, parametrosList);
+            }
+
             var totalRows = rows.Count;
             var normalizedPageSize = pageSize.HasValue && pageSize.Value > 0 ? pageSize.Value : totalRows > 0 ? totalRows : 1;
             var normalizedPageNumber = pageNumber.HasValue && pageNumber.Value > 0 ? pageNumber.Value : 1;
@@ -141,6 +146,64 @@ namespace CjERP.Infrastructure.Services
                     if (fechaFin.HasValue && date > fechaFin.Value.Date)
                     {
                         return false;
+                    }
+
+                    return true;
+                })
+                .ToList();
+        }
+
+        private static List<Dictionary<string, object?>> ApplyPagadosDashboardFilters(
+            List<Dictionary<string, object?>> rows,
+            IEnumerable<PlanillaConsultaParametroDto> parametros)
+        {
+            var idCliente = GetIntParameterValue(parametros, "IdCliente");
+            var idProyecto = GetIntParameterValue(parametros, "IdProyecto");
+            var idSite = GetStringParameterValue(parametros, "IdSite");
+            var correlativo = GetIntParameterValue(parametros, "Correlativo");
+
+            if (!idCliente.HasValue &&
+                !idProyecto.HasValue &&
+                string.IsNullOrWhiteSpace(idSite) &&
+                !correlativo.HasValue)
+            {
+                return rows;
+            }
+
+            return rows
+                .Where(row =>
+                {
+                    if (idCliente.HasValue && (TryGetInt(row, "IdCliente") ?? -1) != idCliente.Value)
+                    {
+                        return false;
+                    }
+
+                    if (idProyecto.HasValue && (TryGetInt(row, "IdProyecto") ?? -1) != idProyecto.Value)
+                    {
+                        return false;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(idSite))
+                    {
+                        var rowIdSite = TryGetString(row, "IdSite", "idSite", "IDSITE", "id_site");
+                        if (!string.Equals(rowIdSite?.Trim(), idSite.Trim(), StringComparison.OrdinalIgnoreCase))
+                        {
+                            return false;
+                        }
+                    }
+
+                    if (correlativo.HasValue)
+                    {
+                        var rowCorrelativo =
+                            TryGetInt(row, "Correlativo") ??
+                            TryGetInt(row, "Corre") ??
+                            TryGetInt(row, "CorSite") ??
+                            TryGetInt(row, "Id");
+
+                        if (rowCorrelativo != correlativo.Value)
+                        {
+                            return false;
+                        }
                     }
 
                     return true;
@@ -451,6 +514,31 @@ WHERE Correlativo IN @Correlativos";
             };
         }
 
+        private static string? GetStringParameterValue(
+            IEnumerable<PlanillaConsultaParametroDto> parametros,
+            string parameterName)
+        {
+            var parametro = parametros.FirstOrDefault(p =>
+                string.Equals(
+                    p.Nombre?.Trim().TrimStart('@'),
+                    parameterName,
+                    StringComparison.OrdinalIgnoreCase));
+
+            var value = parametro?.Valor?.Trim();
+            return string.IsNullOrWhiteSpace(value) ? null : value;
+        }
+
+        private static int? GetIntParameterValue(
+            IEnumerable<PlanillaConsultaParametroDto> parametros,
+            string parameterName)
+        {
+            var value = GetStringParameterValue(parametros, parameterName);
+
+            return int.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed)
+                ? parsed
+                : null;
+        }
+
         private static int? TryGetInt(
             IReadOnlyDictionary<string, object?> row,
             string key)
@@ -469,6 +557,28 @@ WHERE Correlativo IN @Correlativos";
                     ? parsed
                     : null
             };
+        }
+
+        private static string? TryGetString(
+            IReadOnlyDictionary<string, object?> row,
+            params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (!row.TryGetValue(key, out var rawValue) || rawValue is null)
+                {
+                    continue;
+                }
+
+                var text = rawValue.ToString()?.Trim();
+
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    return text;
+                }
+            }
+
+            return null;
         }
 
         private static DateTime? TryGetDate(

@@ -5,10 +5,12 @@ import AppCard from "../../../components/base/AppCard";
 import AppPage from "../../../components/base/AppPage";
 import AppSectionHeader from "../../../components/base/AppSectionHeader";
 import AppStatusMessage from "../../../components/base/AppStatusMessage";
+import { FiltroOperativoLookup } from "../../../components/lookups/FiltroOperativoLookup";
 import {
   buildPlanillaPagadosDashboardRequest,
   consultarPlanillaEstados,
 } from "../../../api/planillaConsultaService";
+import type { FiltroOperativoValue } from "../../../models/filtroOperativo";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 
 type RawRow = Record<string, unknown>;
@@ -126,6 +128,47 @@ function normalizeExchangeRateInput(value: string) {
 function parseExchangeRateInput(value: string) {
   const parsed = Number(value.replace(",", ".").trim());
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function buildLookupSearchText(value?: FiltroOperativoValue) {
+  const filtro = value?.filtro;
+  const parts = [
+    filtro?.nombreCliente,
+    filtro?.nombreProyecto,
+    filtro?.nombreSite,
+    filtro?.nroInterno ? String(filtro.nroInterno) : "",
+    value?.tipoTrabajo?.tipoTrabajo,
+    value?.ot?.ot,
+    value?.tarea?.tarea,
+  ].filter(Boolean);
+
+  return parts.join(" ").trim();
+}
+
+function hasValidFiltroSelection(value?: FiltroOperativoValue) {
+  const filtro = value?.filtro;
+
+  return Boolean(
+    filtro &&
+      Number(filtro.idCliente) > 0 &&
+      Number(filtro.idProyecto) > 0 &&
+      String(filtro.idSite ?? "").trim() &&
+      Number(filtro.correlativo) > 0
+  );
+}
+
+function buildPathFromFiltro(value?: FiltroOperativoValue): DrillPath {
+  const filtro = value?.filtro;
+
+  if (!filtro) {
+    return { cliente: null, proyecto: null, site: null };
+  }
+
+  return {
+    cliente: filtro.nombreCliente || null,
+    proyecto: filtro.nombreProyecto || null,
+    site: filtro.nombreSite || null,
+  };
 }
 
 function getYearStartInputValue() {
@@ -375,15 +418,16 @@ function buildDrillRow(row: RawRow): DrillRow {
   };
 }
 
-function buildBreakdown(rows: DrillRow[], key: DrillLevel): ChartDatum[] {
+function buildBreakdown(rows: DrillRow[], key: DrillLevel, usdExchangeRate: number, dopExchangeRate: number): ChartDatum[] {
   const map = new Map<string, ChartDatum>();
 
   for (const row of rows) {
     const rawLabel = row[key] || `Sin ${key}`;
     const currency = row.moneda || "Sin moneda";
+    const penAmount = convertToPen(row.monto, currency, usdExchangeRate, dopExchangeRate);
     const current = map.get(rawLabel);
     if (current) {
-      current.value += 1;
+      current.value += penAmount;
       current.count += 1;
       current.amountsByCurrency[currency] = (current.amountsByCurrency[currency] ?? 0) + row.monto;
       continue;
@@ -392,7 +436,7 @@ function buildBreakdown(rows: DrillRow[], key: DrillLevel): ChartDatum[] {
     map.set(rawLabel, {
       label: rawLabel,
       rawLabel,
-      value: 1,
+      value: penAmount,
       count: 1,
       amountsByCurrency: {
         [currency]: row.monto,
@@ -427,6 +471,19 @@ function formatCompactSoles(value: number) {
     return `S/ ${(value / 1_000).toFixed(1)} K`;
   }
   return formatCurrency(value, "PEN");
+}
+
+function formatPercentage(value: number) {
+  return `${value.toFixed(1)}%`;
+}
+
+function getCurrencyShare(total: number, totalConvertedToPen: number, usdExchangeRate: number, dopExchangeRate: number, currency: string) {
+  if (totalConvertedToPen <= 0) {
+    return "0.0%";
+  }
+
+  const converted = convertToPen(total, currency, usdExchangeRate, dopExchangeRate);
+  return formatPercentage((converted / totalConvertedToPen) * 100);
 }
 
 function convertToPen(value: number, currency: string, usdExchangeRate: number, dopExchangeRate: number) {
@@ -498,7 +555,7 @@ export default function Dashboard1Page() {
   const [error, setError] = useState("");
   const [draftFechaInicio, setDraftFechaInicio] = useState(getYearStartInputValue());
   const [draftFechaFin, setDraftFechaFin] = useState(getMonthEndInputValue());
-  const [draftSearchText, setDraftSearchText] = useState("");
+  const [draftLookupValue, setDraftLookupValue] = useState<FiltroOperativoValue>({});
   const [draftUsdExchangeRate, setDraftUsdExchangeRate] = useState(String(DEFAULT_EXCHANGE_RATES.USD));
   const [draftDopExchangeRate, setDraftDopExchangeRate] = useState(String(DEFAULT_EXCHANGE_RATES.DOP));
   const [appliedFechaInicio, setAppliedFechaInicio] = useState(getYearStartInputValue());
@@ -508,20 +565,30 @@ export default function Dashboard1Page() {
   const [appliedDopExchangeRate, setAppliedDopExchangeRate] = useState<number>(DEFAULT_EXCHANGE_RATES.DOP);
   const [path, setPath] = useState<DrillPath>({ cliente: null, proyecto: null, site: null });
   const [totalRows, setTotalRows] = useState(0);
-  const [detailSortColumn, setDetailSortColumn] = useState<DetailSortColumn>("fecha");
-  const [detailSortDirection, setDetailSortDirection] = useState<"asc" | "desc">("asc");
-  const [levelSortColumn, setLevelSortColumn] = useState<LevelSortColumn>("nivel");
-  const [levelSortDirection, setLevelSortDirection] = useState<"asc" | "desc">("asc");
+  const [detailSortColumn, setDetailSortColumn] = useState<DetailSortColumn>("montoPen");
+  const [detailSortDirection, setDetailSortDirection] = useState<"asc" | "desc">("desc");
+  const [levelSortColumn, setLevelSortColumn] = useState<LevelSortColumn>("montoPen");
+  const [levelSortDirection, setLevelSortDirection] = useState<"asc" | "desc">("desc");
   const [selectedGastoRow, setSelectedGastoRow] = useState<DrillRow | null>(null);
   const [isLevelDetailExpanded, setIsLevelDetailExpanded] = useState(false);
   const [recordsExpanded, setRecordsExpanded] = useState(false);
   const [detailScrollTop, setDetailScrollTop] = useState(0);
   const isMountedRef = useRef(true);
 
-  const loadRows = async (params?: { fechaInicio?: string; fechaFin?: string; searchText?: string }) => {
+  const loadRows = async (params?: {
+    fechaInicio?: string;
+    fechaFin?: string;
+    lookupValue?: FiltroOperativoValue;
+    path?: DrillPath;
+    ignoreCodigoFilters?: boolean;
+  }) => {
     const fechaInicio = params?.fechaInicio ?? draftFechaInicio;
     const fechaFin = params?.fechaFin ?? draftFechaFin;
-    const searchText = params?.searchText ?? draftSearchText;
+    const lookupValue = params?.lookupValue ?? draftLookupValue;
+    const filtroSeleccionado = lookupValue?.filtro;
+    const useCodigoFilters = !params?.ignoreCodigoFilters && hasValidFiltroSelection(lookupValue);
+    const searchText = useCodigoFilters ? "" : buildLookupSearchText(lookupValue);
+    const nextPath = params?.path ?? { cliente: null, proyecto: null, site: null };
 
     setLoading(true);
     setError("");
@@ -532,10 +599,25 @@ export default function Dashboard1Page() {
           fechaInicio,
           fechaFin,
           textoBusqueda: searchText,
+          idCliente: useCodigoFilters ? filtroSeleccionado?.idCliente : undefined,
+          idProyecto: useCodigoFilters ? filtroSeleccionado?.idProyecto : undefined,
+          idSite: useCodigoFilters ? filtroSeleccionado?.idSite : undefined,
+          correlativo: useCodigoFilters ? filtroSeleccionado?.correlativo : undefined,
         }),
         { timeoutMs: 120000 },
       );
       const detailRows = Array.isArray(response.rows) ? response.rows : [];
+
+      if (useCodigoFilters && detailRows.length === 0 && !params?.ignoreCodigoFilters) {
+        await loadRows({
+          fechaInicio,
+          fechaFin,
+          lookupValue,
+          path: nextPath,
+          ignoreCodigoFilters: true,
+        });
+        return;
+      }
 
       if (!isMountedRef.current) return;
 
@@ -548,7 +630,9 @@ export default function Dashboard1Page() {
       setAppliedFechaInicio(fechaInicio);
       setAppliedFechaFin(fechaFin);
       setAppliedSearchText(searchText);
-      setPath({ cliente: null, proyecto: null, site: null });
+      setPath(nextPath);
+      setLevelSortColumn("montoPen");
+      setLevelSortDirection("desc");
       setRawRows(detailRows);
       setTotalRows(response.totalRows ?? detailRows.length);
     } catch (err) {
@@ -568,7 +652,7 @@ export default function Dashboard1Page() {
     void loadRows({
       fechaInicio: getYearStartInputValue(),
       fechaFin: getMonthEndInputValue(),
-      searchText: "",
+      lookupValue: {},
     });
 
     return () => {
@@ -587,7 +671,11 @@ export default function Dashboard1Page() {
   }, [path, rows]);
 
   const currentLevel = getCurrentLevel(path);
-  const chartData = useMemo(() => buildBreakdown(filteredRows, currentLevel), [currentLevel, filteredRows]);
+  const chartData = useMemo(
+    () => buildBreakdown(filteredRows, currentLevel, appliedUsdExchangeRate, appliedDopExchangeRate),
+    [appliedDopExchangeRate, appliedUsdExchangeRate, currentLevel, filteredRows],
+  );
+  const chartTotal = useMemo(() => chartData.reduce((accumulator, item) => accumulator + item.value, 0), [chartData]);
   const visibleCurrencies = useMemo(() => {
     const set = new Set<string>();
     for (const row of filteredRows) {
@@ -595,6 +683,12 @@ export default function Dashboard1Page() {
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [filteredRows]);
+  const orderedVisibleCurrencies = useMemo(() => {
+    const preferredOrder = ["PEN", "USD", "DOP"];
+    const preferred = preferredOrder.filter((currency) => visibleCurrencies.includes(currency));
+    const remaining = visibleCurrencies.filter((currency) => !preferredOrder.includes(currency));
+    return [...preferred, ...remaining];
+  }, [visibleCurrencies]);
   const totalsByCurrency = useMemo(() => {
     const map = new Map<string, number>();
     for (const row of filteredRows) {
@@ -604,11 +698,17 @@ export default function Dashboard1Page() {
       .map(([currency, total]) => ({ currency, total }))
       .sort((a, b) => a.currency.localeCompare(b.currency));
   }, [filteredRows]);
+  const currencyTotalsMap = useMemo(() => {
+    return new Map(totalsByCurrency.map(({ currency, total }) => [currency, total]));
+  }, [totalsByCurrency]);
   const totalConvertedToPen = useMemo(() => {
     return totalsByCurrency.reduce((accumulator, item) => {
       return accumulator + convertToPen(item.total, item.currency, appliedUsdExchangeRate, appliedDopExchangeRate);
     }, 0);
   }, [appliedDopExchangeRate, appliedUsdExchangeRate, totalsByCurrency]);
+  const totalPen = currencyTotalsMap.get("PEN") ?? 0;
+  const totalUsd = currencyTotalsMap.get("USD") ?? 0;
+  const totalDop = currencyTotalsMap.get("DOP") ?? 0;
   const sortedChartData = useMemo(() => {
     const items = [...chartData];
     const direction = levelSortDirection === "asc" ? 1 : -1;
@@ -764,6 +864,7 @@ export default function Dashboard1Page() {
   const handleApplyFilters = async () => {
     const usdExchangeRate = parseExchangeRateInput(draftUsdExchangeRate);
     const dopExchangeRate = parseExchangeRateInput(draftDopExchangeRate);
+    const useCodigoFilters = hasValidFiltroSelection(draftLookupValue);
 
     if (usdExchangeRate == null || dopExchangeRate == null) {
       setError("Ingrese tipos de cambio validos y mayores que cero para USD y DOP.");
@@ -776,7 +877,8 @@ export default function Dashboard1Page() {
     await loadRows({
       fechaInicio: draftFechaInicio,
       fechaFin: draftFechaFin,
-      searchText: draftSearchText,
+      lookupValue: draftLookupValue,
+      path: useCodigoFilters ? buildPathFromFiltro(draftLookupValue) : { cliente: null, proyecto: null, site: null },
     });
   };
 
@@ -840,7 +942,7 @@ export default function Dashboard1Page() {
     <AppPage title="" style={{ padding: 12 }} fillHeight>
       <div style={styles.page}>
         <div style={styles.mainContent}>
-          <AppCard style={{ ...styles.compactCard, ...styles.mainCard }}>
+          <AppCard style={styles.compactCard}>
           <div style={styles.filtersRow}>
             <div style={styles.filterField}>
               <label style={styles.label}>Fecha inicio</label>
@@ -850,14 +952,14 @@ export default function Dashboard1Page() {
               <label style={styles.label}>Fecha fin</label>
               <input type="date" value={draftFechaFin} onChange={(event) => setDraftFechaFin(event.target.value)} style={styles.input} />
             </div>
-            <div style={{ ...styles.filterField, flex: 1.5 }}>
+            <div style={{ ...styles.filterField, flex: 1.5, minWidth: 320 }}>
               <label style={styles.label}>Búsqueda</label>
-              <input
-                type="text"
-                value={draftSearchText}
-                onChange={(event) => setDraftSearchText(event.target.value)}
-                placeholder="Cliente, proyecto, site o tarea..."
-                style={styles.input}
+              <FiltroOperativoLookup
+                value={draftLookupValue}
+                onChange={setDraftLookupValue}
+                showTrabajo={false}
+                showOt={false}
+                showTarea={false}
               />
             </div>
             <div style={styles.exchangeRateField}>
@@ -892,13 +994,25 @@ export default function Dashboard1Page() {
 
         <div style={styles.metricGrid}>
           <MetricCard label="Total convertido PEN" value={formatCurrency(totalConvertedToPen, "PEN")} accent />
-          <MetricCard label="Total DOP" value={formatCurrency(totalsByCurrency.find((item) => item.currency === "DOP")?.total ?? 0, "DOP")} />
-          <MetricCard label="Total PEN" value={formatCurrency(totalsByCurrency.find((item) => item.currency === "PEN")?.total ?? 0, "PEN")} />
-          <MetricCard label="Total USD" value={formatCurrency(totalsByCurrency.find((item) => item.currency === "USD")?.total ?? 0, "USD")} />
+          <MetricCard
+            label="Total PEN"
+            value={formatCurrency(totalPen, "PEN")}
+            subValue={getCurrencyShare(totalPen, totalConvertedToPen, appliedUsdExchangeRate, appliedDopExchangeRate, "PEN")}
+          />
+          <MetricCard
+            label="Total USD"
+            value={formatCurrency(totalUsd, "USD")}
+            subValue={getCurrencyShare(totalUsd, totalConvertedToPen, appliedUsdExchangeRate, appliedDopExchangeRate, "USD")}
+          />
+          <MetricCard
+            label="Total DOP"
+            value={formatCurrency(totalDop, "DOP")}
+            subValue={getCurrencyShare(totalDop, totalConvertedToPen, appliedUsdExchangeRate, appliedDopExchangeRate, "DOP")}
+          />
           <MetricCard label="Periodo aplicado" value={`${appliedFechaInicio} al ${appliedFechaFin}`} period />
         </div>
 
-        <AppCard style={styles.compactCard}>
+        <AppCard style={styles.mainCard}>
           <AppSectionHeader title={getLevelTitle(currentLevel, path)} description={getLevelDescription(currentLevel)} />
 
           <div style={styles.breadcrumbHeaderRow}>
@@ -932,7 +1046,7 @@ export default function Dashboard1Page() {
               <div style={styles.chartBox}>
                 <div style={styles.chartBoxInner}>
                   <div style={styles.pieWrap}>
-                    <ResponsiveContainer width="100%" height={340}>
+                    <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
                           data={chartData}
@@ -958,7 +1072,7 @@ export default function Dashboard1Page() {
                             />
                           ))}
                         </Pie>
-                        <Tooltip formatter={(value) => `${Number(value ?? 0)} registro(s)`} />
+                        <Tooltip formatter={(value) => formatCurrency(Number(value ?? 0), "PEN")} />
                       </PieChart>
                     </ResponsiveContainer>
                     <div style={styles.chartCenter}>
@@ -982,6 +1096,9 @@ export default function Dashboard1Page() {
                           }}
                         />
                         <span style={styles.legendText}>{item.label}</span>
+                        <span style={styles.legendPercent}>
+                          {formatPercentage(chartTotal > 0 ? (item.value / chartTotal) * 100 : 0)}
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -1006,7 +1123,7 @@ export default function Dashboard1Page() {
                               {levelSortColumn === "registros" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "▲" : "▼"}</span> : null}
                             </button>
                           </th>
-                          {visibleCurrencies.map((currency) => (
+                          {orderedVisibleCurrencies.map((currency) => (
                             <th key={currency} style={styles.sortableTh}>
                               <button type="button" style={styles.sortHeaderButton} onClick={() => handleLevelSortClick(currency)}>
                                 <span>{currency}</span>
@@ -1025,7 +1142,7 @@ export default function Dashboard1Page() {
                       <tbody>
                         {chartData.length === 0 ? (
                           <tr>
-                            <td colSpan={3 + visibleCurrencies.length} style={styles.emptyCell}>No hay detalle para mostrar.</td>
+                            <td colSpan={3 + orderedVisibleCurrencies.length} style={styles.emptyCell}>No hay detalle para mostrar.</td>
                           </tr>
                         ) : (
                           sortedChartData.map((item) => (
@@ -1041,7 +1158,7 @@ export default function Dashboard1Page() {
                                 </button>
                               </td>
                               <td style={styles.td}>{item.count}</td>
-                              {visibleCurrencies.map((currency) => (
+                              {orderedVisibleCurrencies.map((currency) => (
                                 <td key={currency} style={styles.tdStrong}>
                                   {item.amountsByCurrency[currency] != null
                                     ? formatCurrency(item.amountsByCurrency[currency], currency)
@@ -1434,7 +1551,7 @@ export default function Dashboard1Page() {
                           {levelSortColumn === "registros" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "▲" : "▼"}</span> : null}
                         </button>
                       </th>
-                      {visibleCurrencies.map((currency) => (
+                      {orderedVisibleCurrencies.map((currency) => (
                         <th key={currency} style={styles.sortableTh}>
                           <button type="button" style={styles.sortHeaderButton} onClick={() => handleLevelSortClick(currency)}>
                             <span>{currency}</span>
@@ -1453,7 +1570,7 @@ export default function Dashboard1Page() {
                   <tbody>
                     {chartData.length === 0 ? (
                       <tr>
-                        <td colSpan={3 + visibleCurrencies.length} style={styles.emptyCell}>
+                        <td colSpan={3 + orderedVisibleCurrencies.length} style={styles.emptyCell}>
                           No hay detalle para mostrar.
                         </td>
                       </tr>
@@ -1471,7 +1588,7 @@ export default function Dashboard1Page() {
                             </button>
                           </td>
                           <td style={styles.td}>{item.count}</td>
-                          {visibleCurrencies.map((currency) => (
+                          {orderedVisibleCurrencies.map((currency) => (
                             <td key={currency} style={styles.tdStrong}>
                               {item.amountsByCurrency[currency] != null
                                 ? formatCurrency(item.amountsByCurrency[currency], currency)
@@ -1511,16 +1628,19 @@ function MetricCard({
   value,
   accent = false,
   period = false,
+  subValue,
 }: {
   label: string;
   value: string;
   accent?: boolean;
   period?: boolean;
+  subValue?: string;
 }) {
   return (
     <div style={period ? styles.metricCardPeriod : accent ? styles.metricCardAccent : styles.metricCard}>
       <span style={styles.metricLabel}>{label}</span>
       <strong style={period ? styles.metricValuePeriod : styles.metricValue}>{value}</strong>
+      {subValue ? <span style={styles.metricSubValue}>{subValue}</span> : null}
     </div>
   );
 }
@@ -1540,7 +1660,8 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 10,
     flex: 1,
     minHeight: 0,
-    overflowY: "auto",
+    overflow: "hidden",
+    overflowX: "hidden",
   },
   filtersRow: {
     display: "flex",
@@ -1584,17 +1705,21 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 16,
   },
   mainCard: {
-    flex: 1,
+    flex: "0 0 auto",
     minHeight: 0,
     display: "flex",
     flexDirection: "column",
     overflow: "hidden",
     marginBottom: 0,
+    padding: 16,
   },
   recordsSection: {
     display: "grid",
     gap: 8,
     flex: "0 0 auto",
+    marginTop: "auto",
+    position: "relative",
+    zIndex: 1,
   },
   recordsHeaderButton: {
     width: "100%",
@@ -1754,6 +1879,12 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1.15,
     wordBreak: "break-word",
   },
+  metricSubValue: {
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#2563EB",
+    lineHeight: 1.1,
+  },
   breadcrumbRow: {
     display: "flex",
     flexWrap: "wrap",
@@ -1794,32 +1925,35 @@ const styles: Record<string, React.CSSProperties> = {
   },
   chartLayout: {
     display: "grid",
-    gridTemplateColumns: "minmax(240px, 0.6fr) minmax(680px, 1.4fr)",
+    gridTemplateColumns: "minmax(280px, 0.8fr) minmax(560px, 1.2fr)",
     gap: 12,
     alignItems: "stretch",
-    flex: 1,
     minHeight: 0,
   },
   chartBox: {
     height: "100%",
-    minHeight: 380,
+    maxHeight: 300,
+    minHeight: 300,
+    boxSizing: "border-box",
     borderRadius: 20,
     border: "1px solid #E2E8F0",
     background: "radial-gradient(circle at top, rgba(37,99,235,0.08), transparent 55%), #FFFFFF",
     padding: 6,
+    overflow: "hidden",
   },
   chartBoxInner: {
     display: "grid",
-    gridTemplateColumns: "minmax(180px, 1fr) minmax(220px, 240px)",
+    gridTemplateColumns: "minmax(220px, 0.95fr) minmax(220px, 1.05fr)",
     gap: 12,
-    alignItems: "start",
+    alignItems: "stretch",
     height: "100%",
-    minHeight: 368,
+    minHeight: 0,
   },
   pieWrap: {
     position: "relative",
     minWidth: 0,
-    minHeight: 322,
+    minHeight: 288,
+    height: 288,
   },
   chartCenter: {
     position: "absolute",
@@ -1850,9 +1984,9 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 6,
     alignContent: "start",
     minWidth: 0,
-    maxHeight: 340,
-    overflowX: "hidden",
+    maxHeight: 288,
     overflowY: "auto",
+    overflowX: "hidden",
     paddingRight: 2,
   },
   legendItem: {
@@ -1889,12 +2023,21 @@ const styles: Record<string, React.CSSProperties> = {
     flexShrink: 0,
   },
   legendText: {
+    flex: 1,
     fontSize: 13,
     fontWeight: 700,
     color: "#0F172A",
     lineHeight: 1.2,
     minWidth: 0,
     overflowWrap: "anywhere",
+  },
+  legendPercent: {
+    marginLeft: "auto",
+    flexShrink: 0,
+    fontSize: 11,
+    fontWeight: 700,
+    color: "#475569",
+    whiteSpace: "nowrap",
   },
   sidePanelTopRow: {
     display: "grid",
@@ -1914,7 +2057,12 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     gap: 10,
     minWidth: 0,
-    height: "100%",
+    height: 300,
+    minHeight: 300,
+    maxHeight: 300,
+    boxSizing: "border-box",
+    overflowY: "auto",
+    overflowX: "hidden",
   },
   detailRecordsToolbar: {
     display: "grid",
@@ -1998,9 +2146,9 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: "center",
   },
   tableWrap: {
-    overflowX: "auto",
     flex: 1,
     minHeight: 0,
+    overflow: "visible",
   },
   detailRecordsTableWrap: {
     overflowX: "auto",
@@ -2047,7 +2195,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   th: {
     textAlign: "left",
-    padding: "12px 10px",
+    padding: "8px 10px",
     borderBottom: "1px solid #CBD5E1",
     color: "#475569",
     fontSize: 12,
@@ -2073,7 +2221,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "space-between",
     gap: 8,
-    padding: "12px 10px",
+    padding: "8px 10px",
     border: "none",
     color: "#475569",
     fontSize: 12,
@@ -2095,7 +2243,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   thCheckbox: {
     textAlign: "center",
-    padding: "12px 10px",
+    padding: "8px 10px",
     borderBottom: "1px solid #CBD5E1",
     color: "#475569",
     fontSize: 12,
@@ -2104,19 +2252,19 @@ const styles: Record<string, React.CSSProperties> = {
     width: 44,
   },
   td: {
-    padding: "12px 10px",
+    padding: "8px 10px",
     borderBottom: "1px solid #E2E8F0",
     color: "#0F172A",
   },
   tdCheckbox: {
-    padding: "12px 10px",
+    padding: "8px 10px",
     borderBottom: "1px solid #E2E8F0",
     color: "#0F172A",
     textAlign: "center",
     width: 44,
   },
   tdStrong: {
-    padding: "12px 10px",
+    padding: "8px 10px",
     borderBottom: "1px solid #E2E8F0",
     color: "#0F172A",
     fontWeight: 700,
