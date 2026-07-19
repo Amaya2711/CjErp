@@ -125,6 +125,9 @@ const DEFAULT_EXCHANGE_RATES = {
   USD: 3.5,
   DOP: 0.058,
 } as const;
+const DASHBOARD_REQUEST_TIMEOUT_MS = 120000;
+const DASHBOARD_CHUNK_DAYS_THRESHOLD = 45;
+const DASHBOARD_CHUNK_CONCURRENCY = 2;
 const DETAIL_ROW_HEIGHT = 44;
 const DETAIL_OVERSCAN = 8;
 const DETAIL_VISIBLE_ROWS = 14;
@@ -188,6 +191,55 @@ function getMonthEndInputValue() {
   const today = new Date();
   const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
   return `${lastDay.getFullYear()}-${String(lastDay.getMonth() + 1).padStart(2, "0")}-${String(lastDay.getDate()).padStart(2, "0")}`;
+}
+
+function parseInputDateValue(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+
+  const [, year, month, day] = match;
+  const parsed = new Date(Number(year), Number(month) - 1, Number(day));
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+function formatInputDateValue(value: Date) {
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+}
+
+function countDaysBetween(start: Date, end: Date) {
+  const startTime = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime();
+  const endTime = new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime();
+  return Math.floor((endTime - startTime) / 86400000) + 1;
+}
+
+function addDays(value: Date, days: number) {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate() + days);
+}
+
+function splitDateRangeIntoMonthChunks(fechaInicio: string, fechaFin: string) {
+  const start = parseInputDateValue(fechaInicio);
+  const end = parseInputDateValue(fechaFin);
+
+  if (!start || !end || start > end || countDaysBetween(start, end) <= DASHBOARD_CHUNK_DAYS_THRESHOLD) {
+    return [{ fechaInicio, fechaFin }];
+  }
+
+  const chunks: Array<{ fechaInicio: string; fechaFin: string }> = [];
+  let cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+
+  while (cursor <= end) {
+    const monthEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
+    const chunkEnd = monthEnd < end ? monthEnd : end;
+
+    chunks.push({
+      fechaInicio: formatInputDateValue(cursor),
+      fechaFin: formatInputDateValue(chunkEnd),
+    });
+
+    cursor = addDays(chunkEnd, 1);
+  }
+
+  return chunks;
 }
 
 function normalizeText(value?: string | null) {
@@ -610,6 +662,70 @@ function getNextPath(level: DrillLevel, path: DrillPath, label: string): DrillPa
   return path;
 }
 
+type DashboardFetchArgs = {
+  fechaInicio: string;
+  fechaFin: string;
+  textoBusqueda: string;
+  idCliente?: number;
+  idProyecto?: number;
+  idSite?: string;
+  correlativo?: number;
+};
+
+type DashboardFetchResult = {
+  rows: RawRow[];
+  totalRows: number;
+  limitExceeded: boolean;
+  message?: string | null;
+};
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>,
+) {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
+}
+
+async function fetchDashboardRows(args: DashboardFetchArgs): Promise<DashboardFetchResult> {
+  const chunks = splitDateRangeIntoMonthChunks(args.fechaInicio, args.fechaFin);
+  const responses = await mapWithConcurrency(chunks, DASHBOARD_CHUNK_CONCURRENCY, async (chunk) =>
+    consultarPlanillaEstados(
+      buildPlanillaPagadosDashboardRequest({
+        ...args,
+        fechaInicio: chunk.fechaInicio,
+        fechaFin: chunk.fechaFin,
+      }),
+      { timeoutMs: DASHBOARD_REQUEST_TIMEOUT_MS },
+    ),
+  );
+
+  const limitExceededResponse = responses.find((response) => response.limitExceeded);
+  const rows = responses.flatMap((response) => (Array.isArray(response.rows) ? response.rows : []));
+  const totalRows = responses.reduce((sum, response) => {
+    const responseRows = Array.isArray(response.rows) ? response.rows.length : 0;
+    return sum + (response.totalRows ?? responseRows);
+  }, 0);
+
+  return {
+    rows,
+    totalRows,
+    limitExceeded: Boolean(limitExceededResponse),
+    message: limitExceededResponse?.message,
+  };
+}
+
 export default function Dashboard1Page() {
   const [rawRows, setRawRows] = useState<RawRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -660,19 +776,16 @@ export default function Dashboard1Page() {
     setError("");
 
     try {
-      const response = await consultarPlanillaEstados(
-        buildPlanillaPagadosDashboardRequest({
-          fechaInicio,
-          fechaFin,
-          textoBusqueda: searchText,
-          idCliente: useCodigoFilters ? filtroSeleccionado?.idCliente : undefined,
-          idProyecto: useCodigoFilters ? filtroSeleccionado?.idProyecto : undefined,
-          idSite: useCodigoFilters ? filtroSeleccionado?.idSite : undefined,
-          correlativo: useCodigoFilters ? filtroSeleccionado?.correlativo : undefined,
-        }),
-        { timeoutMs: 120000 },
-      );
-      const detailRows = Array.isArray(response.rows) ? response.rows : [];
+      const response = await fetchDashboardRows({
+        fechaInicio,
+        fechaFin,
+        textoBusqueda: searchText,
+        idCliente: useCodigoFilters ? filtroSeleccionado?.idCliente : undefined,
+        idProyecto: useCodigoFilters ? filtroSeleccionado?.idProyecto : undefined,
+        idSite: useCodigoFilters ? filtroSeleccionado?.idSite : undefined,
+        correlativo: useCodigoFilters ? filtroSeleccionado?.correlativo : undefined,
+      });
+      const detailRows = response.rows;
 
       if (useCodigoFilters && detailRows.length === 0 && !params?.ignoreCodigoFilters) {
         await loadRows({
