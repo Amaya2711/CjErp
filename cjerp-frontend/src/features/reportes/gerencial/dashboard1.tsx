@@ -752,6 +752,7 @@ export default function Dashboard1Page() {
   const [isLevelDetailExpanded, setIsLevelDetailExpanded] = useState(false);
   const [recordsExpanded, setRecordsExpanded] = useState(false);
   const [detailScrollTop, setDetailScrollTop] = useState(0);
+  const [loadProgress, setLoadProgress] = useState(0);
   const pieWrapRef = useRef<HTMLDivElement | null>(null);
   const [pieSize, setPieSize] = useState({ width: 280, height: 288 });
   const isMountedRef = useRef(true);
@@ -838,6 +839,39 @@ export default function Dashboard1Page() {
       isMountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!loading) {
+      return undefined;
+    }
+
+    setLoadProgress(12);
+
+    const progressTimer = window.setInterval(() => {
+      setLoadProgress((current) => {
+        if (current >= 92) {
+          return 92;
+        }
+
+        if (current < 60) {
+          return current + 12;
+        }
+
+        return current + 4;
+      });
+    }, 180);
+
+    return () => window.clearInterval(progressTimer);
+  }, [loading]);
+
+  useEffect(() => {
+    if (loading || loadProgress === 0) {
+      return undefined;
+    }
+
+    const resetTimer = window.setTimeout(() => setLoadProgress(0), 260);
+    return () => window.clearTimeout(resetTimer);
+  }, [loading, loadProgress]);
 
   useEffect(() => {
     const container = pieWrapRef.current;
@@ -1184,6 +1218,30 @@ export default function Dashboard1Page() {
     <AppPage title="" style={{ padding: 12 }} fillHeight>
       <div style={styles.page}>
         <div style={styles.mainContent}>
+          <div style={styles.heroCard}>
+            <div style={styles.heroIcon}>
+              <div style={styles.heroIconBars}>
+                <span style={{ width: 8, height: 14, borderRadius: 4, background: "#2563EB" }} />
+                <span style={{ width: 8, height: 20, borderRadius: 4, background: "#14B8A6" }} />
+                <span style={{ width: 8, height: 10, borderRadius: 4, background: "#F59E0B" }} />
+              </div>
+            </div>
+            <div>
+              <div style={styles.heroTitle}>Reporte de gastos</div>
+              <div style={styles.heroSubtitle}>Reporte gerencial sobre planilla</div>
+            </div>
+          </div>
+          {loading || loadProgress > 0 ? (
+            <div style={styles.loadingProgressWrap} aria-live="polite" aria-label="Progreso de carga">
+              <div style={styles.loadingProgressText}>
+                Cargando informaciÃ³n...
+                <span style={styles.loadingProgressPercent}>{loadProgress}%</span>
+              </div>
+              <div style={styles.loadingProgressTrack}>
+                <div style={{ ...styles.loadingProgressBar, width: `${Math.max(8, loadProgress)}%` }} />
+              </div>
+            </div>
+          ) : null}
           <AppCard style={styles.compactCard}>
           <div style={styles.filtersRow}>
             <div style={styles.filterField}>
@@ -1911,6 +1969,37 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: "hidden",
     overflowX: "hidden",
   },
+  heroCard: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "8px 6px 0",
+  },
+  heroIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    background: "linear-gradient(180deg, #EFF6FF, #F8FAFF)",
+    display: "grid",
+    placeItems: "center",
+    boxShadow: "0 6px 18px rgba(37, 99, 235, 0.12)",
+  },
+  heroIconBars: {
+    display: "flex",
+    gap: 3,
+    alignItems: "flex-end",
+  },
+  heroTitle: {
+    fontSize: 24,
+    fontWeight: 800,
+    color: "#0F172A",
+    lineHeight: 1.05,
+  },
+  heroSubtitle: {
+    color: "#475569",
+    fontSize: 13,
+    marginTop: 2,
+  },
   filtersRow: {
     display: "flex",
     flexWrap: "wrap",
@@ -2396,6 +2485,38 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#F8FAFC",
     color: "#334155",
     textAlign: "center",
+  },
+  loadingProgressWrap: {
+    display: "grid",
+    gap: 6,
+    padding: "0 6px 2px",
+  },
+  loadingProgressText: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#475569",
+  },
+  loadingProgressPercent: {
+    color: "#1D4ED8",
+    fontWeight: 800,
+  },
+  loadingProgressTrack: {
+    width: "100%",
+    height: 8,
+    borderRadius: 999,
+    background: "#E2E8F0",
+    overflow: "hidden",
+    border: "1px solid #DBEAFE",
+  },
+  loadingProgressBar: {
+    height: "100%",
+    borderRadius: 999,
+    background: "linear-gradient(90deg, #2563EB, #14B8A6)",
+    transition: "width 180ms ease-out",
   },
   emptyBox: {
     padding: 24,

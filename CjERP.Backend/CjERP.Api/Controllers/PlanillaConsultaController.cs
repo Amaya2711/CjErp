@@ -22,6 +22,7 @@ namespace CjERP.Api.Controllers
         private static readonly string[] RequiredParametersAprobar = ["IdCargo", "IdEmpleado", "Estados"];
         private static readonly string[] RequiredParametersVacaciones = [];
         private static readonly string[] RequiredParametersPagadosDashboard = [];
+        private static readonly string[] RequiredParametersImportarConsultaDsh = [];
 
         private readonly IPlanillaConsultaService _planillaConsultaService;
         private readonly ILogger<PlanillaConsultaController> _logger;
@@ -71,6 +72,8 @@ namespace CjERP.Api.Controllers
                     ? RequiredParametersVacaciones
                     : string.Equals(consulta, "pagados-dashboard", StringComparison.OrdinalIgnoreCase)
                         ? RequiredParametersPagadosDashboard
+                        : string.Equals(consulta, "importar-consulta-dsh", StringComparison.OrdinalIgnoreCase)
+                            ? RequiredParametersImportarConsultaDsh
                         : RequiredParameters;
 
             var missingParameters = requiredParameters
@@ -183,6 +186,7 @@ namespace CjERP.Api.Controllers
                 "aprobar" => "sp_Planilla_Consulta_Aprobar",
                 "vacaciones" => "sp_EmpleadoOtros_ListarVacaciones",
                 "pagados-dashboard" => "sp_Planilla_ConsultarPagados_Dsh",
+                "importar-consulta-dsh" => "sp_Importar_ConsultaDsh",
                 _ => "sp_Planilla_Consulta_Estados"
             };
         }

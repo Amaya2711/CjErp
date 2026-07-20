@@ -20,6 +20,7 @@ namespace CjERP.Infrastructure.Services
         private const string StoredProcedureVacaciones = "dbo.sp_EmpleadoOtros_ListarVacaciones";
         private const string StoredProcedureVacacionesTotal = "dbo.sp_EmpleadoOtros_ListarVacacionesTotal";
         private const string StoredProcedurePagadosDashboard = "dbo.sp_Planilla_ConsultarPagados_Dsh";
+        private const string StoredProcedureImportarConsultaDsh = "dbo.sp_Importar_ConsultaDsh";
         private const string StoredProcedureGastosPagados = "dbo.sp_Planilla_Consulta_Gastos_Pagados";
         private readonly ISqlCommandFactory _sqlCommandFactory;
 
@@ -158,6 +159,7 @@ namespace CjERP.Infrastructure.Services
                 "vacaciones" => StoredProcedureVacaciones,
                 "vacaciones-total" => StoredProcedureVacacionesTotal,
                 "pagados-dashboard" => StoredProcedurePagadosDashboard,
+                "importar-consulta-dsh" => StoredProcedureImportarConsultaDsh,
                 _ => StoredProcedureEstados
             };
         }
@@ -478,6 +480,12 @@ WHERE Correlativo IN @Correlativos";
                     return parametros.Where(parametro =>
                         !string.IsNullOrWhiteSpace(parametro.Nombre) &&
                         allowedParametersPagadosDashboard.Contains(parametro.Nombre.Trim().TrimStart('@')));
+                }
+
+                if (string.Equals(storedProcedureName, StoredProcedureImportarConsultaDsh, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Este SP no recibe parámetros.
+                    return Enumerable.Empty<PlanillaConsultaParametroDto>();
                 }
 
                 return parametros;
