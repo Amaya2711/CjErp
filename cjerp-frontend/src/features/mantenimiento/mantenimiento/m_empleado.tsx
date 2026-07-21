@@ -635,6 +635,7 @@ const styles: Record<string, CSSProperties> = {
   tableShell: {
     display: "flex",
     flexDirection: "column",
+    flex: 1,
     minHeight: 0,
     gap: 12,
   },
@@ -682,11 +683,12 @@ const styles: Record<string, CSSProperties> = {
   tableWrap: {
     width: "100%",
     overflowX: "auto",
-    overflowY: "hidden",
+    overflowY: "auto",
     borderRadius: 14,
     border: "1px solid #E2E8F0",
     flex: 1,
     minHeight: 0,
+    maxHeight: "100%",
   },
   table: {
     minWidth: 1200,
