@@ -221,7 +221,7 @@ public class MantenimientoEmpleadosController : ControllerBase
 
         var effectiveRequest = MergeEmpleadoUpdateRequest(before, request);
 
-        var validationMessage = ValidateRequest(effectiveRequest);
+        var validationMessage = ValidateRequest(effectiveRequest, isUpdate: true);
         if (validationMessage is not null)
         {
             return BadRequest(new { success = false, message = validationMessage });
@@ -1223,11 +1223,24 @@ public class MantenimientoEmpleadosController : ControllerBase
         };
     }
 
-    private static string? ValidateRequest(EmpleadoCrudUpsertRequest request)
+    private static string? ValidateRequest(EmpleadoCrudUpsertRequest request, bool isUpdate = false)
     {
         if (request is null)
         {
             return "La solicitud es obligatoria.";
+        }
+
+        var fechaIngreso = ParseNullableDate(request.FechaIngreso);
+        var fechaInicio = ParseNullableDate(request.FechaIniLaboral);
+
+        if (fechaIngreso.HasValue && fechaInicio.HasValue && fechaIngreso.Value.Date > fechaInicio.Value.Date)
+        {
+            return "La fecha de ingreso no puede ser mayor que la fecha de inicio.";
+        }
+
+        if (isUpdate)
+        {
+            return null;
         }
 
         if (string.IsNullOrWhiteSpace(request.NombreEmpleado))
@@ -1265,17 +1278,9 @@ public class MantenimientoEmpleadosController : ControllerBase
             return "La direccion es obligatoria.";
         }
 
-        var fechaIngreso = ParseNullableDate(request.FechaIngreso);
-        var fechaInicio = ParseNullableDate(request.FechaIniLaboral);
-
         if (string.IsNullOrWhiteSpace(request.FechaIniLaboral))
         {
             return "La fecha de inicio laboral es obligatoria.";
-        }
-
-        if (fechaIngreso.HasValue && fechaInicio.HasValue && fechaIngreso.Value.Date > fechaInicio.Value.Date)
-        {
-            return "La fecha de ingreso no puede ser mayor que la fecha de inicio.";
         }
 
         if (request.IdEmpresaCj is null or <= 0)
