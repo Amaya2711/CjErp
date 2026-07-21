@@ -271,8 +271,19 @@ function resolveCurrencyLabelFromId(idMoneda: number | null) {
   if (idMoneda === 1) return "PEN";
   if (idMoneda === 2) return "USD";
   if (idMoneda === 3) return "DOP";
+  if (idMoneda === 4) return "Moneda 4";
   if (idMoneda != null && idMoneda > 0) return `Moneda ${idMoneda}`;
   return "Sin moneda";
+}
+
+function formatCurrencyKpiValue(value: number, currency: string) {
+  if (currency === "PEN" || currency === "USD" || currency === "DOP") {
+    return formatCurrency(value, currency);
+  }
+
+  return new Intl.NumberFormat("es-PE", {
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
 function buildDrillRow(row: RawRow): DrillRow {
@@ -650,6 +661,23 @@ export default function Dashboard3Page() {
     return kpiTotalConvertedToPen;
   }, [kpiTotalConvertedToPen]);
 
+  const orderedTotalsByCurrency = useMemo(() => {
+    const preferredOrder = ["PEN", "USD", "DOP"];
+
+    return [...kpiTotalsByCurrency].sort((left, right) => {
+      const leftIndex = preferredOrder.indexOf(left.currency);
+      const rightIndex = preferredOrder.indexOf(right.currency);
+
+      if (leftIndex !== -1 || rightIndex !== -1) {
+        if (leftIndex === -1) return 1;
+        if (rightIndex === -1) return -1;
+        return leftIndex - rightIndex;
+      }
+
+      return left.currency.localeCompare(right.currency, "es", { sensitivity: "base" });
+    });
+  }, [kpiTotalsByCurrency]);
+
   const summaryCards = useMemo(
     () => [
       {
@@ -657,23 +685,20 @@ export default function Dashboard3Page() {
         value: formatCurrency(kpiTotalConvertedToPen, "PEN"),
         tone: "blue",
       },
-      {
-        label: "Total PEN",
-        value: formatCurrency(kpiTotalsByCurrency.find((item) => item.currency === "PEN")?.total ?? 0, "PEN"),
-        tone: "neutral",
-      },
-      {
-        label: "Total USD",
-        value: formatCurrency(kpiTotalsByCurrency.find((item) => item.currency === "USD")?.total ?? 0, "USD"),
-        tone: "green",
-      },
-      {
-        label: "Total DOP",
-        value: formatCurrency(kpiTotalsByCurrency.find((item) => item.currency === "DOP")?.total ?? 0, "DOP"),
-        tone: "orange",
-      },
+      ...orderedTotalsByCurrency.map((item, index) => ({
+        label:
+          item.currency === "PEN"
+            ? "Total PEN"
+            : item.currency === "USD"
+              ? "Total USD"
+              : item.currency === "DOP"
+                ? "Total DOP"
+                : `Total ${item.currency}`,
+        value: formatCurrencyKpiValue(item.total, item.currency),
+        tone: ["neutral", "green", "orange", "violet", "slate"][index % 5],
+      })),
     ],
-    [kpiTotalConvertedToPen, kpiTotalsByCurrency],
+    [kpiTotalConvertedToPen, orderedTotalsByCurrency],
   );
 
   const appliedPeriodCard = useMemo(
