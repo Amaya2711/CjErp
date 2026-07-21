@@ -280,6 +280,7 @@ function resolveCurrencyLabelFromId(idMoneda: number | null) {
   if (idMoneda === 1) return "PEN";
   if (idMoneda === 2) return "USD";
   if (idMoneda === 3) return "DOP";
+  if (idMoneda === 4) return "DOP";
   if (idMoneda != null && idMoneda > 0) return `Moneda ${idMoneda}`;
   return "Sin moneda";
 }
