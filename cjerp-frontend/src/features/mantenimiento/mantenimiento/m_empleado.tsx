@@ -402,7 +402,7 @@ export default function MantenimientoEmpleadoPage() {
               <div style={{ ...styles.bottomScrollSpacer, width: contentWidth }} />
             </div>
 
-            <div ref={tableWrapRef} className="employee-horizontal-scroll" style={styles.tableWrap}>
+            <div ref={tableWrapRef} className="employee-grid-scroll" style={styles.tableWrap}>
               <table style={{ ...styles.table, width: contentWidth }}>
                 <thead>
                   <tr>
@@ -683,12 +683,13 @@ const styles: Record<string, CSSProperties> = {
   tableWrap: {
     width: "100%",
     overflowX: "auto",
-    overflowY: "auto",
+    overflowY: "scroll",
     borderRadius: 14,
     border: "1px solid #E2E8F0",
     flex: 1,
     minHeight: 0,
-    maxHeight: "100%",
+    maxHeight: "calc(100vh - 430px)",
+    scrollbarGutter: "stable",
   },
   table: {
     minWidth: 1200,
