@@ -25,13 +25,16 @@ namespace CjERP.Api.Controllers
         private static readonly string[] RequiredParametersImportarConsultaDsh = [];
 
         private readonly IPlanillaConsultaService _planillaConsultaService;
+        private readonly IPlanillaService _planillaService;
         private readonly ILogger<PlanillaConsultaController> _logger;
 
         public PlanillaConsultaController(
             IPlanillaConsultaService planillaConsultaService,
+            IPlanillaService planillaService,
             ILogger<PlanillaConsultaController> logger)
         {
             _planillaConsultaService = planillaConsultaService;
+            _planillaService = planillaService;
             _logger = logger;
         }
 
@@ -179,6 +182,66 @@ namespace CjERP.Api.Controllers
             }
         }
 
+        [HttpPut("{id:int}/tarea")]
+        public async Task<IActionResult> ActualizarTarea(
+            int id,
+            [FromBody] PlanillaActualizarTareaRequestDto request,
+            CancellationToken cancellationToken)
+        {
+            if (id <= 0)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "El correlativo debe ser mayor que cero."
+                });
+            }
+
+            if (request is null || request.IdTarea <= 0)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "La tarea seleccionada es obligatoria."
+                });
+            }
+
+            try
+            {
+                await _planillaService.ActualizarTareaPlanillaAsync(
+                    new PlanillaActualizarTareaRequestDto
+                    {
+                        Correlativo = id,
+                        IdTarea = request.IdTarea
+                    },
+                    ResolveUsuarioAccion(),
+                    cancellationToken);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Tarea actualizada correctamente."
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = ex.Message
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "[PlanillaConsulta] Error actualizando tarea del correlativo {Correlativo}",
+                    id);
+
+                throw;
+            }
+        }
+
         private static string GetStoredProcedureLabel(string? consulta)
         {
             return (consulta ?? string.Empty).Trim().ToLowerInvariant() switch
@@ -234,6 +297,15 @@ namespace CjERP.Api.Controllers
             }
 
             return null;
+        }
+
+        private string ResolveUsuarioAccion()
+        {
+            return User.FindFirstValue("Usuario")
+                ?? User.FindFirstValue("IdUsuario")
+                ?? User.FindFirstValue(ClaimTypes.Name)
+                ?? User.Identity?.Name
+                ?? "SISTEMA";
         }
     }
 }

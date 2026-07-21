@@ -18,11 +18,16 @@ namespace CjERP.Infrastructure.Services
         private const string UpdateStatusStoredProcedureName = "dbo.sp_Planilla_ActualizarEstado";
 
         private readonly ISqlCommandFactory _sqlCommandFactory;
+        private readonly IAuditoriaCambiosService _auditoriaCambiosService;
         private readonly ILogger<PlanillaService> _logger;
 
-        public PlanillaService(ISqlCommandFactory sqlCommandFactory, ILogger<PlanillaService> logger)
+        public PlanillaService(
+            ISqlCommandFactory sqlCommandFactory,
+            IAuditoriaCambiosService auditoriaCambiosService,
+            ILogger<PlanillaService> logger)
         {
             _sqlCommandFactory = sqlCommandFactory;
+            _auditoriaCambiosService = auditoriaCambiosService;
             _logger = logger;
         }
 
@@ -165,8 +170,77 @@ namespace CjERP.Infrastructure.Services
                     UpdateStoredProcedureName,
                     parameters,
                     CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120));
+        }
+
+        public async Task ActualizarTareaPlanillaAsync(
+            PlanillaActualizarTareaRequestDto request,
+            string usuarioAccion,
+            CancellationToken cancellationToken = default)
+        {
+            if (request.Correlativo <= 0)
+            {
+                throw new InvalidOperationException("El correlativo es obligatorio para actualizar la tarea.");
+            }
+
+            if (request.IdTarea <= 0)
+            {
+                throw new InvalidOperationException("La tarea seleccionada es obligatoria.");
+            }
+
+            await using var connection = _sqlCommandFactory.CreateConnection();
+            var tareaActual = await ObtenerTareaActualAsync(connection, request.Correlativo, cancellationToken);
+            if (tareaActual is null)
+            {
+                throw new InvalidOperationException($"No se encontro la planilla {request.Correlativo}.");
+            }
+
+            if (tareaActual.IdTarea.GetValueOrDefault() == request.IdTarea)
+            {
+                return;
+            }
+
+            var parameters = new DynamicParameters();
+            parameters.Add("@Correlativo", request.Correlativo, DbType.Int32);
+            parameters.Add("@IdTarea", request.IdTarea, DbType.Int32);
+
+            _logger.LogInformation(
+                "[PlanillaService] Par\u00e1metros enviados a sp_Planilla_Actualizar:{NewLine}{Payload}",
+                Environment.NewLine,
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        request.Correlativo,
+                        request.IdTarea
+                    },
+                    new JsonSerializerOptions { WriteIndented = true }));
+
+            await connection.ExecuteAsync(
+                _sqlCommandFactory.Create(
+                    UpdateStoredProcedureName,
+                    parameters,
+                    CommandType.StoredProcedure,
                     cancellationToken,
                     commandTimeout: 120));
+
+            var tareaNueva = await ObtenerTareaActualAsync(connection, request.Correlativo, cancellationToken);
+
+            await _auditoriaCambiosService.RegistrarAsync(
+                new AuditoriaCambioDto
+                {
+                    Modulo = "Planilla",
+                    Entidad = "Planilla",
+                    IdRegistro = request.Correlativo.ToString(CultureInfo.InvariantCulture),
+                    Accion = "UPDATE",
+                    Seccion = "Filtro Operativo",
+                    Campo = "Tarea",
+                    ValorAnterior = FormatTareaAuditValue(tareaActual.IdTarea, tareaActual.Tarea),
+                    ValorNuevo = FormatTareaAuditValue(tareaNueva?.IdTarea, tareaNueva?.Tarea),
+                    UsuarioAccion = ResolveUsuarioAccion(usuarioAccion),
+                    Observacion = "Actualizacion de la tarea de planilla."
+                },
+                cancellationToken);
         }
 
         public async Task ActualizarEstadoPlanillaAsync(PlanillaActualizarEstadoRequestDto request, CancellationToken cancellationToken = default)
@@ -474,6 +548,49 @@ namespace CjERP.Infrastructure.Services
                 : null;
         }
 
+        private async Task<PlanillaTareaAuditRow?> ObtenerTareaActualAsync(
+            SqlConnection connection,
+            int correlativo,
+            CancellationToken cancellationToken)
+        {
+            const string sql = """
+                SELECT TOP (1)
+                    a.IdTarea,
+                    c.ValorIni AS Tarea
+                FROM dbo.Planilla a
+                LEFT JOIN dbo.Constante c
+                    ON c.Sociedad = 'PE01'
+                   AND c.Programa = 'PLANTILLA'
+                   AND c.Campo = 'TAREA'
+                   AND a.IdTarea = c.Correlativo
+                WHERE a.Correlativo = @Correlativo;
+                """;
+
+            return await connection.QuerySingleOrDefaultAsync<PlanillaTareaAuditRow>(
+                _sqlCommandFactory.Create(
+                    sql,
+                    new { Correlativo = correlativo },
+                    cancellationToken: cancellationToken));
+        }
+
+        private static string? FormatTareaAuditValue(int? idTarea, string? tarea)
+        {
+            if (!idTarea.HasValue || idTarea.Value <= 0)
+            {
+                return null;
+            }
+
+            var tareaTexto = string.IsNullOrWhiteSpace(tarea) ? string.Empty : $" - {tarea.Trim()}";
+            return $"{idTarea.Value.ToString(CultureInfo.InvariantCulture)}{tareaTexto}";
+        }
+
+        private static string ResolveUsuarioAccion(string? usuarioAccion)
+        {
+            return string.IsNullOrWhiteSpace(usuarioAccion)
+                ? "SISTEMA"
+                : usuarioAccion.Trim();
+        }
+
         private static int ParseRequiredInt(string? value, string fieldName)
         {
             if (int.TryParse(value, out var parsed))
@@ -483,6 +600,11 @@ namespace CjERP.Infrastructure.Services
 
             throw new InvalidOperationException(
                 $"El campo {fieldName} debe enviarse como cÃ³digo numÃ©rico. Valor recibido: '{value ?? "null"}'.");
+        }
+        private sealed class PlanillaTareaAuditRow
+        {
+            public int? IdTarea { get; set; }
+            public string? Tarea { get; set; }
         }
     }
 }

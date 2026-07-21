@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { Cell, Label, Pie, PieChart, Tooltip } from "recharts";
 import AppCard from "../../../components/base/AppCard";
@@ -8,10 +8,12 @@ import AppStatusMessage from "../../../components/base/AppStatusMessage";
 import { FiltroOperativoLookup } from "../../../components/lookups/FiltroOperativoLookup";
 import {
   buildPlanillaPagadosDashboardRequest,
+  actualizarPlanillaTarea,
   consultarGastosPagadosPorId,
   consultarPlanillaEstados,
 } from "../../../api/planillaConsultaService";
-import type { FiltroOperativoValue } from "../../../models/filtroOperativo";
+import { getTareas } from "../../../api/filtroOperativoService";
+import type { FiltroOperativoValue, TareaOption } from "../../../models/filtroOperativo";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 
 type RawRow = Record<string, unknown>;
@@ -354,8 +356,8 @@ function buildDrillRow(row: RawRow, preferredId?: string | number): DrillRow {
     pickString(row, [
       "FechaDeposito",
       "Fecha Deposito",
-      "Fecha Depósito",
-      "FechaDepósito",
+      "Fecha DepÃ³sito",
+      "FechaDepÃ³sito",
       "fechadeposito",
       "fechaDeposito",
       "fecha deposito",
@@ -751,12 +753,25 @@ export default function Dashboard1Page() {
   const [selectedGastoDetailError, setSelectedGastoDetailError] = useState("");
   const [isLevelDetailExpanded, setIsLevelDetailExpanded] = useState(false);
   const [recordsExpanded, setRecordsExpanded] = useState(false);
+  const [isRecordsDetailExpanded, setIsRecordsDetailExpanded] = useState(false);
+  const [tareasCatalogo, setTareasCatalogo] = useState<TareaOption[]>([]);
+  const [tareasCatalogoLoading, setTareasCatalogoLoading] = useState(false);
+  const [tareasCatalogoError, setTareasCatalogoError] = useState("");
+  const [editingTaskRowId, setEditingTaskRowId] = useState<string | null>(null);
+  const [editingTaskId, setEditingTaskId] = useState<string>("");
+  const [savingTaskRowId, setSavingTaskRowId] = useState<string | null>(null);
+  const [taskEditMessage, setTaskEditMessage] = useState("");
+  const [taskEditError, setTaskEditError] = useState("");
+  const [selectedDetailLevelLabel, setSelectedDetailLevelLabel] = useState<string | null>(null);
   const [detailScrollTop, setDetailScrollTop] = useState(0);
   const [loadProgress, setLoadProgress] = useState(0);
   const pieWrapRef = useRef<HTMLDivElement | null>(null);
   const [pieSize, setPieSize] = useState({ width: 280, height: 288 });
   const isMountedRef = useRef(true);
+  const loadProgressTickerRef = useRef<number | null>(null);
+  const loadProgressStartedAtRef = useRef<number | null>(null);
   const selectedGastoDetailRequestRef = useRef(0);
+  const preserveDetailSelectionOnNextRowsRef = useRef(false);
 
   const loadRows = async (params?: {
     fechaInicio?: string;
@@ -773,10 +788,13 @@ export default function Dashboard1Page() {
     const searchText = useCodigoFilters ? "" : buildLookupSearchText(lookupValue);
     const nextPath = params?.path ?? { cliente: null, proyecto: null, site: null };
 
+    loadProgressStartedAtRef.current = Date.now();
     setLoading(true);
     setError("");
+    setLoadProgress(12);
 
     try {
+      setLoadProgress(28);
       const response = await fetchDashboardRows({
         fechaInicio,
         fechaFin,
@@ -801,12 +819,16 @@ export default function Dashboard1Page() {
 
       if (!isMountedRef.current) return;
 
+      setLoadProgress(68);
+
       if (response.limitExceeded) {
         setRawRows([]);
         setError(response.message?.trim() || "La consulta excedio el maximo permitido para el dashboard.");
+        setLoadProgress(100);
         return;
       }
 
+      setLoadProgress(88);
       setAppliedFechaInicio(fechaInicio);
       setAppliedFechaFin(fechaFin);
       setAppliedSearchText(searchText);
@@ -815,11 +837,13 @@ export default function Dashboard1Page() {
       setLevelSortDirection("desc");
       setRawRows(detailRows);
       setTotalRows(response.totalRows ?? detailRows.length);
+      setLoadProgress(100);
     } catch (err) {
       if (!isMountedRef.current) return;
       setRawRows([]);
       setTotalRows(0);
       setError(getHttpErrorMessage(err, "No se pudo cargar el dashboard desde sp_Planilla_ConsultarPagados_Dsh."));
+      setLoadProgress(100);
     } finally {
       if (isMountedRef.current) {
         setLoading(false);
@@ -842,26 +866,50 @@ export default function Dashboard1Page() {
 
   useEffect(() => {
     if (!loading) {
+      if (loadProgressTickerRef.current !== null) {
+        window.clearInterval(loadProgressTickerRef.current);
+        loadProgressTickerRef.current = null;
+      }
       return undefined;
     }
 
-    setLoadProgress(12);
+    if (loadProgressTickerRef.current !== null) {
+      window.clearInterval(loadProgressTickerRef.current);
+    }
 
-    const progressTimer = window.setInterval(() => {
+    loadProgressTickerRef.current = window.setInterval(() => {
       setLoadProgress((current) => {
-        if (current >= 92) {
-          return 92;
+        const startedAt = loadProgressStartedAtRef.current ?? Date.now();
+        const elapsedMs = Date.now() - startedAt;
+
+        const target =
+          elapsedMs < 700
+            ? 20
+            : elapsedMs < 1500
+              ? 35
+              : elapsedMs < 2500
+                ? 52
+                : elapsedMs < 4000
+                  ? 66
+                  : elapsedMs < 6500
+                    ? 76
+                    : 84;
+
+        if (current >= target) {
+          return current;
         }
 
-        if (current < 60) {
-          return current + 12;
-        }
-
-        return current + 4;
+        const step = elapsedMs < 1500 ? 5 : elapsedMs < 4000 ? 3 : 2;
+        return Math.min(current + step, target);
       });
-    }, 180);
+    }, 140);
 
-    return () => window.clearInterval(progressTimer);
+    return () => {
+      if (loadProgressTickerRef.current !== null) {
+        window.clearInterval(loadProgressTickerRef.current);
+        loadProgressTickerRef.current = null;
+      }
+    };
   }, [loading]);
 
   useEffect(() => {
@@ -869,7 +917,7 @@ export default function Dashboard1Page() {
       return undefined;
     }
 
-    const resetTimer = window.setTimeout(() => setLoadProgress(0), 260);
+    const resetTimer = window.setTimeout(() => setLoadProgress(0), 360);
     return () => window.clearTimeout(resetTimer);
   }, [loading, loadProgress]);
 
@@ -895,6 +943,39 @@ export default function Dashboard1Page() {
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    let active = true;
+
+    setTareasCatalogoLoading(true);
+    setTareasCatalogoError("");
+
+    void getTareas()
+      .then((data) => {
+        if (!active) {
+          return;
+        }
+
+        setTareasCatalogo(Array.isArray(data) ? data : []);
+      })
+      .catch((error) => {
+        if (!active) {
+          return;
+        }
+
+        setTareasCatalogo([]);
+        setTareasCatalogoError(getHttpErrorMessage(error, "No se pudo cargar el catálogo de tareas."));
+      })
+      .finally(() => {
+        if (active) {
+          setTareasCatalogoLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const rows = useMemo(() => rawRows.map((row) => buildDrillRow(row)), [rawRows]);
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
@@ -906,6 +987,15 @@ export default function Dashboard1Page() {
   }, [path, rows]);
 
   const currentLevel = getCurrentLevel(path);
+
+  const detailFilteredRows = useMemo(() => {
+    if (currentLevel !== "tarea" || !selectedDetailLevelLabel) {
+      return filteredRows;
+    }
+
+    const selectedLabel = normalizeText(selectedDetailLevelLabel);
+    return filteredRows.filter((row) => normalizeText(row.tarea) === selectedLabel);
+  }, [currentLevel, filteredRows, selectedDetailLevelLabel]);
   const chartData = useMemo(
     () => buildBreakdown(filteredRows, currentLevel, appliedUsdExchangeRate, appliedDopExchangeRate),
     [appliedDopExchangeRate, appliedUsdExchangeRate, currentLevel, filteredRows],
@@ -989,7 +1079,7 @@ export default function Dashboard1Page() {
     setLevelSortDirection("asc");
   };
   const sortedRows = useMemo(() => {
-    const rowsToSort = [...filteredRows];
+    const rowsToSort = [...detailFilteredRows];
     const direction = detailSortDirection === "asc" ? 1 : -1;
 
     rowsToSort.sort((left, right) => {
@@ -1056,7 +1146,7 @@ export default function Dashboard1Page() {
     });
 
     return rowsToSort;
-  }, [appliedDopExchangeRate, appliedUsdExchangeRate, detailSortColumn, detailSortDirection, filteredRows]);
+  }, [appliedDopExchangeRate, appliedUsdExchangeRate, detailFilteredRows, detailSortColumn, detailSortDirection]);
   const detailWindow = useMemo(() => {
     if (!recordsExpanded) {
       return {
@@ -1094,7 +1184,25 @@ export default function Dashboard1Page() {
 
   useEffect(() => {
     setDetailScrollTop(0);
-  }, [detailSortColumn, detailSortDirection, filteredRows.length, recordsExpanded]);
+  }, [detailSortColumn, detailSortDirection, detailFilteredRows.length, recordsExpanded]);
+
+  useEffect(() => {
+    setSelectedDetailLevelLabel(null);
+    setDetailScrollTop(0);
+  }, [path.cliente, path.proyecto, path.site]);
+
+  useEffect(() => {
+    if (preserveDetailSelectionOnNextRowsRef.current) {
+      preserveDetailSelectionOnNextRowsRef.current = false;
+      return;
+    }
+
+    setSelectedDetailLevelLabel(null);
+  }, [rawRows]);
+
+  useEffect(() => {
+    setIsRecordsDetailExpanded(false);
+  }, [path.cliente, path.proyecto, path.site, rawRows]);
 
   const handleApplyFilters = async () => {
     const usdExchangeRate = parseExchangeRateInput(draftUsdExchangeRate);
@@ -1118,9 +1226,21 @@ export default function Dashboard1Page() {
   };
 
   const handleChartClick = (datum: ChartDatum) => {
-    if (currentLevel === "tarea") return;
+    if (currentLevel === "tarea") {
+      setSelectedDetailLevelLabel(datum.rawLabel);
+      setRecordsExpanded(true);
+      setDetailScrollTop(0);
+      return;
+    }
+
+    setSelectedDetailLevelLabel(null);
     setPath((prev) => getNextPath(currentLevel, prev, datum.rawLabel));
   };
+
+  const isDetailLevelSelected = (label: string) =>
+    currentLevel === "tarea" &&
+    selectedDetailLevelLabel !== null &&
+    normalizeText(label) === normalizeText(selectedDetailLevelLabel);
 
   const handleOpenLevelDetail = () => {
     setIsLevelDetailExpanded(true);
@@ -1128,6 +1248,119 @@ export default function Dashboard1Page() {
 
   const handleCloseLevelDetail = () => {
     setIsLevelDetailExpanded(false);
+  };
+
+  const handleOpenRecordsDetail = () => {
+    setRecordsExpanded(true);
+    setDetailScrollTop(0);
+    setIsRecordsDetailExpanded(true);
+    setTaskEditMessage("");
+    setTaskEditError("");
+  };
+
+  const handleCloseRecordsDetail = () => {
+    setIsRecordsDetailExpanded(false);
+    setEditingTaskRowId(null);
+    setEditingTaskId("");
+    setSavingTaskRowId(null);
+    setTaskEditMessage("");
+    setTaskEditError("");
+  };
+
+  const getTareaLabelById = (id: number) => {
+    const tarea = tareasCatalogo.find((item) => Number(item.correlativo) === Number(id));
+    return tarea?.tarea?.trim() || "";
+  };
+
+  const handleStartTaskEdit = (row: DrillRow) => {
+    setEditingTaskRowId(row.id);
+    setEditingTaskId(row.idTarea > 0 ? String(row.idTarea) : "");
+    setTaskEditMessage("");
+    setTaskEditError("");
+  };
+
+  const handleCancelTaskEdit = () => {
+    setEditingTaskRowId(null);
+    setEditingTaskId("");
+    setTaskEditMessage("");
+    setTaskEditError("");
+  };
+
+  const handleSaveTaskEdit = async (row: DrillRow, taskIdOverride?: string) => {
+    const nextTaskId = Number(taskIdOverride ?? editingTaskId);
+    if (!Number.isFinite(nextTaskId) || nextTaskId <= 0) {
+      setTaskEditError("Seleccione una tarea válida.");
+      setEditingTaskRowId(null);
+      setEditingTaskId("");
+      return;
+    }
+
+    if (nextTaskId === Number(row.idTarea ?? 0)) {
+      handleCancelTaskEdit();
+      return;
+    }
+
+    setSavingTaskRowId(row.id);
+    setTaskEditError("");
+    setTaskEditMessage("");
+
+    try {
+      await actualizarPlanillaTarea(Number(row.id), nextTaskId, { timeoutMs: DASHBOARD_REQUEST_TIMEOUT_MS });
+      const nextTaskLabel = getTareaLabelById(nextTaskId) || row.tarea;
+
+      setRawRows((currentRows) =>
+        currentRows.map((currentRow) => {
+          const currentId = String(
+            currentRow.Correlativo ??
+              currentRow.correlativo ??
+              currentRow.Corre ??
+              currentRow.corre ??
+              currentRow.CorrelativoPlanilla ??
+              currentRow.Id ??
+              currentRow.id ??
+              currentRow.IdPlanilla ??
+              currentRow.idPlanilla ??
+              ""
+          ).trim();
+
+          if (currentId !== row.id) {
+            return currentRow;
+          }
+
+          return {
+            ...currentRow,
+            IdTarea: nextTaskId,
+            idTarea: nextTaskId,
+            Tarea: nextTaskLabel,
+            tarea: nextTaskLabel,
+            NombreTarea: nextTaskLabel,
+            nombreTarea: nextTaskLabel,
+            Trabajo: nextTaskLabel,
+            trabajo: nextTaskLabel,
+            TrabajoLabel: nextTaskLabel,
+            trabajoLabel: nextTaskLabel,
+          };
+        })
+      );
+
+      setSelectedGastoRow((currentRow) =>
+        currentRow && currentRow.id === row.id
+          ? {
+              ...currentRow,
+              idTarea: nextTaskId,
+              tarea: nextTaskLabel,
+            }
+          : currentRow
+      );
+
+      setTaskEditMessage("Tarea actualizada correctamente.");
+    } catch (error) {
+      setTaskEditError(getHttpErrorMessage(error, "No se pudo actualizar la tarea."));
+    } finally {
+      setSavingTaskRowId(null);
+      setEditingTaskRowId(null);
+      setEditingTaskId("");
+    }
   };
 
   const handleBreadcrumbReset = (level: "all" | "cliente" | "proyecto") => {
@@ -1176,7 +1409,7 @@ export default function Dashboard1Page() {
     void (async () => {
       try {
         if (!Number.isFinite(selectedId) || selectedId <= 0) {
-          throw new Error("El ID seleccionado no es válido.");
+          throw new Error("El ID seleccionado no es vÃ¡lido.");
         }
 
         const response = await consultarGastosPagadosPorId(selectedId, { timeoutMs: 120000 });
@@ -1214,6 +1447,183 @@ export default function Dashboard1Page() {
     ? convertToPen(selectedGastoRow.monto, selectedGastoRow.moneda, appliedUsdExchangeRate, appliedDopExchangeRate)
     : 0;
 
+  const renderDetailRecordsTable = (options?: {
+    wrapStyle?: React.CSSProperties;
+    allowTaskEdit?: boolean;
+    forceTaskEditor?: boolean;
+  }) => {
+    const wrapStyle = options?.wrapStyle ?? {};
+    const allowTaskEdit = options?.allowTaskEdit ?? true;
+    const forceTaskEditor = options?.forceTaskEditor ?? false;
+    const colSpan = 9;
+
+    return (
+      <AppCard style={styles.compactCard}>
+        <div
+          style={{ ...styles.detailRecordsTableWrap, ...wrapStyle }}
+          onScroll={(event) => setDetailScrollTop(event.currentTarget.scrollTop)}
+        >
+          <table style={styles.detailRecordsTable}>
+            <thead>
+              <tr>
+                <th style={styles.sortableTh}>
+                  <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("id")}>
+                    <span>Id</span>
+                    {detailSortColumn === "id" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
+                  </button>
+                </th>
+                <th style={styles.sortableTh}>
+                  <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("fecha")}>
+                    <span>Fecha</span>
+                    {detailSortColumn === "fecha" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
+                  </button>
+                </th>
+                <th style={styles.sortableTh}>
+                  <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("cliente")}>
+                    <span>Cliente</span>
+                    {detailSortColumn === "cliente" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
+                  </button>
+                </th>
+                <th style={styles.sortableTh}>
+                  <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("proyecto")}>
+                    <span>Proyecto</span>
+                    {detailSortColumn === "proyecto" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
+                  </button>
+                </th>
+                <th style={styles.sortableTh}>
+                  <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("site")}>
+                    <span>Site</span>
+                    {detailSortColumn === "site" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
+                  </button>
+                </th>
+                <th style={styles.sortableTh}>
+                  <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("tarea")}>
+                    <span>Tarea</span>
+                    {detailSortColumn === "tarea" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
+                  </button>
+                </th>
+                <th style={styles.sortableTh}>
+                  <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("moneda")}>
+                    <span>Moneda</span>
+                    {detailSortColumn === "moneda" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
+                  </button>
+                </th>
+                <th style={styles.sortableTh}>
+                  <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("monto")}>
+                    <span>Monto</span>
+                    {detailSortColumn === "monto" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
+                  </button>
+                </th>
+                <th style={styles.sortableTh}>
+                  <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("montoPen")}>
+                    <span>Monto en PEN</span>
+                    {detailSortColumn === "montoPen" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
+                  </button>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={colSpan} style={styles.emptyCell}>
+                    Cargando información del store...
+                  </td>
+                </tr>
+              ) : filteredRows.length === 0 ? (
+                <tr>
+                  <td colSpan={colSpan} style={styles.emptyCell}>
+                    No hay registros para mostrar.
+                  </td>
+                </tr>
+              ) : (
+                <>
+                  {detailWindow.topSpacer > 0 ? (
+                    <tr aria-hidden="true">
+                      <td colSpan={colSpan} style={{ padding: 0, border: 0, height: detailWindow.topSpacer }} />
+                    </tr>
+                  ) : null}
+                  {detailWindow.visibleRows.map((row) => {
+                    const isEditing = allowTaskEdit && (forceTaskEditor || editingTaskRowId === row.id);
+                    const tareaLabel = getTareaLabelById(row.idTarea) || row.tarea;
+                    const selectedValue = editingTaskId || (row.idTarea > 0 ? String(row.idTarea) : "");
+                    const taskValue = row.idTarea > 0 ? String(row.idTarea) : "";
+
+                    return (
+                      <tr key={row.id}>
+                        <td style={styles.tdStrong}>
+                          <button type="button" style={styles.rowDetailButton} onClick={() => handleOpenRowDetails(row)}>
+                            {row.id}
+                          </button>
+                        </td>
+                        <td style={styles.td}>{getDisplayDepositDate(row)}</td>
+                        <td style={styles.td}>{row.cliente}</td>
+                        <td style={styles.td}>{row.proyecto}</td>
+                        <td style={styles.td}>{row.site}</td>
+                        <td style={styles.td}>
+                          {isEditing ? (
+                            <select
+                              autoFocus={!forceTaskEditor}
+                              value={forceTaskEditor ? taskValue : selectedValue}
+                              onChange={(event) => {
+                                if (forceTaskEditor) {
+                                  void handleSaveTaskEdit(row, event.currentTarget.value);
+                                  return;
+                                }
+
+                                setEditingTaskId(event.target.value);
+                                event.currentTarget.blur();
+                              }}
+                              onBlur={
+                                forceTaskEditor
+                                  ? undefined
+                                  : (event) => void handleSaveTaskEdit(row, event.currentTarget.value)
+                              }
+                              style={styles.recordsTaskSelect}
+                              disabled={savingTaskRowId === row.id || tareasCatalogoLoading}
+                            >
+                              <option value="">Seleccione una tarea</option>
+                              {tareasCatalogo.map((tarea) => (
+                                <option key={tarea.correlativo} value={String(tarea.correlativo)}>
+                                  {tarea.tarea}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <button
+                              type="button"
+                              style={styles.taskHoverActivator}
+                              title="Pasa el mouse o enfoca para editar la tarea"
+                              onPointerEnter={() => handleStartTaskEdit(row)}
+                              onMouseEnter={() => handleStartTaskEdit(row)}
+                              onFocus={() => handleStartTaskEdit(row)}
+                              onClick={() => handleStartTaskEdit(row)}
+                              >
+                                {tareaLabel}
+                              </button>
+                          )}
+                        </td>
+                        <td style={styles.tdStrong}>{row.moneda}</td>
+                        <td style={styles.tdStrong}>{formatCurrency(row.monto, row.moneda)}</td>
+                        <td style={styles.tdStrong}>
+                          {formatCurrency(convertToPen(row.monto, row.moneda, appliedUsdExchangeRate, appliedDopExchangeRate), "PEN")}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {detailWindow.bottomSpacer > 0 ? (
+                    <tr aria-hidden="true">
+                      <td colSpan={colSpan} style={{ padding: 0, border: 0, height: detailWindow.bottomSpacer }} />
+                    </tr>
+                  ) : null}
+                </>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </AppCard>
+    );
+  };
+
   return (
     <AppPage title="" style={{ padding: 12 }} fillHeight>
       <div style={styles.page}>
@@ -1234,7 +1644,7 @@ export default function Dashboard1Page() {
           {loading || loadProgress > 0 ? (
             <div style={styles.loadingProgressWrap} aria-live="polite" aria-label="Progreso de carga">
               <div style={styles.loadingProgressText}>
-                Cargando informaciÃ³n...
+                Cargando información...
                 <span style={styles.loadingProgressPercent}>{loadProgress}%</span>
               </div>
               <div style={styles.loadingProgressTrack}>
@@ -1338,7 +1748,7 @@ export default function Dashboard1Page() {
           </div>
 
           {loading ? (
-            <div style={styles.loadingBox}>Cargando informaciÃ³n del store...</div>
+            <div style={styles.loadingBox}>Cargando información del store...</div>
           ) : chartData.length === 0 ? (
             <div style={styles.emptyBox}>No se encontraron datos para el filtro seleccionado.</div>
           ) : (
@@ -1420,9 +1830,8 @@ export default function Dashboard1Page() {
                       <button
                         key={`${item.label}-legend`}
                         type="button"
-                        style={currentLevel === "tarea" ? styles.legendItemDisabled : styles.legendItem}
+                        style={isDetailLevelSelected(item.label) ? styles.legendItemSelected : styles.legendItem}
                         onClick={() => handleChartClick(item)}
-                        disabled={currentLevel === "tarea"}
                       >
                         <span
                           style={{
@@ -1449,27 +1858,27 @@ export default function Dashboard1Page() {
                           <th style={styles.sortableTh}>
                             <button type="button" style={styles.sortHeaderButton} onClick={() => handleLevelSortClick("nivel")}>
                               <span>Nivel</span>
-                              {levelSortColumn === "nivel" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                              {levelSortColumn === "nivel" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
                             </button>
                           </th>
                           <th style={styles.sortableTh}>
                             <button type="button" style={styles.sortHeaderButton} onClick={() => handleLevelSortClick("registros")}>
                               <span>Registros</span>
-                              {levelSortColumn === "registros" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                              {levelSortColumn === "registros" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
                             </button>
                           </th>
                           {orderedVisibleCurrencies.map((currency) => (
                             <th key={currency} style={styles.sortableTh}>
                               <button type="button" style={styles.sortHeaderButton} onClick={() => handleLevelSortClick(currency)}>
                                 <span>{currency}</span>
-                                {levelSortColumn === currency ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                                {levelSortColumn === currency ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
                               </button>
                             </th>
                           ))}
                           <th style={styles.sortableTh}>
                             <button type="button" style={{ ...styles.sortHeaderButton, ...styles.accentSortHeaderButton }} onClick={() => handleLevelSortClick("montoPen")}>
                               <span>Monto en PEN</span>
-                              {levelSortColumn === "montoPen" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                              {levelSortColumn === "montoPen" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
                             </button>
                           </th>
                         </tr>
@@ -1485,9 +1894,8 @@ export default function Dashboard1Page() {
                               <td style={styles.td}>
                                 <button
                                   type="button"
-                                  style={currentLevel === "tarea" ? styles.flatText : styles.linkButton}
+                                  style={isDetailLevelSelected(item.label) ? styles.linkButtonSelected : styles.linkButton}
                                   onClick={() => handleChartClick(item)}
-                                  disabled={currentLevel === "tarea"}
                                 >
                                   {item.label}
                                 </button>
@@ -1537,7 +1945,11 @@ export default function Dashboard1Page() {
             }}
           >
             <div style={styles.recordsHeaderLeft}>
-              <span style={styles.recordsHeaderIcon}>☰</span>
+              <span style={styles.recordsHeaderIcon} aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none">
+                  <path d="M5 7h14M5 12h14M5 17h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </span>
               <div>
                 <div style={styles.recordsHeaderTitle}>Detalle de registros</div>
                 <div style={styles.recordsHeaderSubtitle}>Consulta el detalle completo de los registros del nivel seleccionado</div>
@@ -1545,136 +1957,116 @@ export default function Dashboard1Page() {
             </div>
             <div style={styles.recordsHeaderRight}>
               <div style={styles.selectionCountBadge}>
-                Registros existentes: <strong>{filteredRows.length}</strong>
+                Registros existentes: <strong>{detailFilteredRows.length}</strong>
               </div>
+              {selectedDetailLevelLabel ? (
+                <button
+                  type="button"
+                  style={styles.clearSelectionButton}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setSelectedDetailLevelLabel(null);
+                    setDetailScrollTop(0);
+                  }}
+                  onKeyDown={(event) => event.stopPropagation()}
+                >
+                  Ver todo
+                </button>
+              ) : null}
               <button
                 type="button"
-                style={filteredRows.length > 0 && !loading ? styles.primaryButton : styles.primaryButtonDisabled}
+                style={detailFilteredRows.length > 0 && !loading ? styles.primaryButton : styles.primaryButtonDisabled}
                 onClick={(event) => {
                   event.stopPropagation();
                   void handleExportVisibleToExcel();
                 }}
                 onKeyDown={(event) => event.stopPropagation()}
-                disabled={filteredRows.length === 0 || loading}
+                disabled={detailFilteredRows.length === 0 || loading}
               >
                 Exportar a Excel
               </button>
-              <div style={styles.recordsHeaderChevron}>{recordsExpanded ? "⌃" : "⌄"}</div>
+              <button
+                type="button"
+                style={styles.recordsExpandButton}
+                title="Ampliar detalle de registros"
+                aria-label="Ampliar detalle de registros"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleOpenRecordsDetail();
+                }}
+                onKeyDown={(event) => event.stopPropagation()}
+              >
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
+                  <path
+                    d="M9 4H4v5M15 4h5v5M20 15v5h-5M4 15v5h5"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+              <div style={styles.recordsHeaderChevron} aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none">
+                  <path
+                    d={recordsExpanded ? "M6 14l6-6 6 6" : "M6 10l6 6 6-6"}
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
             </div>
           </div>
 
-          {recordsExpanded ? (
-            <AppCard style={styles.compactCard}>
-              <div style={styles.detailRecordsTableWrap} onScroll={(event) => setDetailScrollTop(event.currentTarget.scrollTop)}>
-                <table style={styles.detailRecordsTable}>
-                <thead>
-                  <tr>
-                    <th style={styles.sortableTh}>
-                      <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("id")}>
-                        <span>Id</span>
-                        {detailSortColumn === "id" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "▲" : "▼"}</span> : null}
-                      </button>
-                    </th>
-                    <th style={styles.sortableTh}>
-                      <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("fecha")}>
-                        <span>Fecha</span>
-                        {detailSortColumn === "fecha" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "▲" : "▼"}</span> : null}
-                      </button>
-                    </th>
-                    <th style={styles.sortableTh}>
-                      <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("cliente")}>
-                        <span>Cliente</span>
-                        {detailSortColumn === "cliente" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "▲" : "▼"}</span> : null}
-                      </button>
-                    </th>
-                    <th style={styles.sortableTh}>
-                      <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("proyecto")}>
-                        <span>Proyecto</span>
-                        {detailSortColumn === "proyecto" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "▲" : "▼"}</span> : null}
-                      </button>
-                    </th>
-                    <th style={styles.sortableTh}>
-                      <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("site")}>
-                        <span>Site</span>
-                        {detailSortColumn === "site" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "▲" : "▼"}</span> : null}
-                      </button>
-                    </th>
-                    <th style={styles.sortableTh}>
-                      <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("tarea")}>
-                        <span>Tarea</span>
-                        {detailSortColumn === "tarea" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "▲" : "▼"}</span> : null}
-                      </button>
-                    </th>
-                    <th style={styles.sortableTh}>
-                      <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("moneda")}>
-                        <span>Moneda</span>
-                        {detailSortColumn === "moneda" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "▲" : "▼"}</span> : null}
-                      </button>
-                    </th>
-                    <th style={styles.sortableTh}>
-                      <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("monto")}>
-                        <span>Monto</span>
-                        {detailSortColumn === "monto" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "▲" : "▼"}</span> : null}
-                      </button>
-                    </th>
-                    <th style={styles.sortableTh}>
-                      <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("montoPen")}>
-                        <span>Monto en PEN</span>
-                        {detailSortColumn === "montoPen" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "▲" : "▼"}</span> : null}
-                      </button>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading ? (
-                    <tr>
-                      <td colSpan={9} style={styles.emptyCell}>
-                        Cargando informaciÃ³n del store...
-                      </td>
-                    </tr>
-                  ) : filteredRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={9} style={styles.emptyCell}>
-                        No hay registros para mostrar.
-                      </td>
-                    </tr>
-                  ) : (
-                    <>
-                      {detailWindow.topSpacer > 0 ? (
-                        <tr aria-hidden="true">
-                          <td colSpan={9} style={{ padding: 0, border: 0, height: detailWindow.topSpacer }} />
-                        </tr>
-                      ) : null}
-                      {detailWindow.visibleRows.map((row, index) => (
-                        <tr key={`${row.id}-${detailWindow.startIndex + index}`} style={{ height: DETAIL_ROW_HEIGHT }}>
-                          <td style={styles.tdStrong}>
-                            <button type="button" style={styles.rowDetailButton} onClick={() => handleOpenRowDetails(row)}>
-                              {row.id}
-                            </button>
-                          </td>
-                          <td style={styles.td}>{getDisplayDepositDate(row)}</td>
-                          <td style={styles.td}>{row.cliente}</td>
-                          <td style={styles.td}>{row.proyecto}</td>
-                          <td style={styles.td}>{row.site}</td>
-                          <td style={styles.td}>{row.tarea}</td>
-                          <td style={styles.tdStrong}>{row.moneda}</td>
-                          <td style={styles.tdStrong}>{formatCurrency(row.monto, row.moneda)}</td>
-                          <td style={styles.tdStrong}>{formatCurrency(convertToPen(row.monto, row.moneda, appliedUsdExchangeRate, appliedDopExchangeRate), "PEN")}</td>
-                        </tr>
-                      ))}
-                      {detailWindow.bottomSpacer > 0 ? (
-                        <tr aria-hidden="true">
-                          <td colSpan={9} style={{ padding: 0, border: 0, height: detailWindow.bottomSpacer }} />
-                        </tr>
-                      ) : null}
-                    </>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            </AppCard>
-          ) : null}
+          {recordsExpanded ? renderDetailRecordsTable({ allowTaskEdit: true }) : null}
         </div>
+
+        {isRecordsDetailExpanded ? (
+          <div style={styles.modalOverlay} onClick={handleCloseRecordsDetail} role="presentation">
+            <div
+              style={styles.recordsModalPanel}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="records-expanded-title"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div style={styles.modalHeader}>
+                <div>
+                  <div id="records-expanded-title" style={styles.modalTitle}>
+                    Detalle de registros
+                  </div>
+                  <div style={styles.modalSubtitle}>
+                    Vista ampliada para revisar mejor los registros
+                    {selectedDetailLevelLabel ? ` del nivel ${selectedDetailLevelLabel}` : ''}.
+                  </div>
+                </div>
+                <button type="button" style={styles.modalCloseButton} onClick={handleCloseRecordsDetail}>
+                  Cerrar
+                </button>
+              </div>
+
+              {tareasCatalogoError ? <div style={styles.modalErrorBox}>{tareasCatalogoError}</div> : null}
+              {taskEditError ? <div style={styles.modalErrorBox}>{taskEditError}</div> : null}
+              {taskEditMessage ? <div style={styles.modalSuccessBox}>{taskEditMessage}</div> : null}
+              {tareasCatalogoLoading ? <div style={styles.modalLoadingBox}>Cargando catálogo de tareas...</div> : null}
+
+              <div style={styles.modalFilterBand}>
+                <span style={styles.modalFilterBandLabel}>Filtro activo</span>
+                <strong style={styles.modalFilterBandValue}>
+                  {selectedDetailLevelLabel ? selectedDetailLevelLabel : 'Todos los niveles'}
+                </strong>
+              </div>
+
+              {renderDetailRecordsTable({
+                wrapStyle: styles.recordsDetailTableWrapExpanded,
+                allowTaskEdit: true,
+                forceTaskEditor: true,
+              })}
+            </div>
+          </div>
+        ) : null}
 
         {selectedGastoRow ? (
           <div style={styles.modalOverlay} onClick={handleCloseRowDetails} role="presentation">
@@ -1848,27 +2240,27 @@ export default function Dashboard1Page() {
                       <th style={styles.sortableTh}>
                         <button type="button" style={styles.sortHeaderButton} onClick={() => handleLevelSortClick("nivel")}>
                           <span>Nivel</span>
-                          {levelSortColumn === "nivel" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                          {levelSortColumn === "nivel" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
                         </button>
                       </th>
                       <th style={styles.sortableTh}>
                         <button type="button" style={styles.sortHeaderButton} onClick={() => handleLevelSortClick("registros")}>
                           <span>Registros</span>
-                          {levelSortColumn === "registros" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                          {levelSortColumn === "registros" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
                         </button>
                       </th>
                       {orderedVisibleCurrencies.map((currency) => (
                         <th key={currency} style={styles.sortableTh}>
                           <button type="button" style={styles.sortHeaderButton} onClick={() => handleLevelSortClick(currency)}>
                             <span>{currency}</span>
-                            {levelSortColumn === currency ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                            {levelSortColumn === currency ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
                           </button>
                         </th>
                       ))}
                       <th style={styles.sortableTh}>
                         <button type="button" style={{ ...styles.sortHeaderButton, ...styles.accentSortHeaderButton }} onClick={() => handleLevelSortClick("montoPen")}>
                           <span>Monto en PEN</span>
-                          {levelSortColumn === "montoPen" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                          {levelSortColumn === "montoPen" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
                         </button>
                       </th>
                     </tr>
@@ -1886,9 +2278,8 @@ export default function Dashboard1Page() {
                           <td style={styles.td}>
                             <button
                               type="button"
-                              style={currentLevel === "tarea" ? styles.flatText : styles.linkButton}
+                              style={isDetailLevelSelected(item.label) ? styles.linkButtonSelected : styles.linkButton}
                               onClick={() => handleChartClick(item)}
-                              disabled={currentLevel === "tarea"}
                             >
                               {item.label}
                             </button>
@@ -2115,6 +2506,20 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#0F172A",
     lineHeight: 1,
     flexShrink: 0,
+  },
+  recordsExpandButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    border: "1px solid #BFDBFE",
+    background: "#EFF6FF",
+    color: "#1D4ED8",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    cursor: "pointer",
+    boxShadow: "0 6px 16px rgba(37, 99, 235, 0.10)",
   },
   tabBar: {
     display: "flex",
@@ -2350,6 +2755,20 @@ const styles: Record<string, React.CSSProperties> = {
     width: "100%",
     minWidth: 0,
   },
+  legendItemSelected: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    border: "1px solid #1D4ED8",
+    borderRadius: 12,
+    background: "#EFF6FF",
+    padding: "8px 10px",
+    cursor: "pointer",
+    textAlign: "left",
+    width: "100%",
+    minWidth: 0,
+    boxShadow: "0 0 0 1px rgba(29,78,216,0.08)",
+  },
   legendItemDisabled: {
     display: "flex",
     alignItems: "center",
@@ -2426,6 +2845,29 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "flex-end",
   },
+  recordsTaskSelect: {
+    width: "100%",
+    minWidth: 220,
+    minHeight: 36,
+    borderRadius: 10,
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    color: "#0F172A",
+    padding: "0 10px",
+    fontSize: 13,
+    boxSizing: "border-box",
+  },
+  taskHoverActivator: {
+    width: "100%",
+    border: "none",
+    background: "transparent",
+    color: "#0F172A",
+    padding: 0,
+    textAlign: "left",
+    font: "inherit",
+    cursor: "pointer",
+    minHeight: 24,
+  },
   selectionCountBadge: {
     borderRadius: 999,
     border: "1px solid #BFDBFE",
@@ -2434,6 +2876,18 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     padding: "10px 14px",
     lineHeight: 1,
+  },
+  clearSelectionButton: {
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    color: "#0F172A",
+    borderRadius: 999,
+    padding: "10px 14px",
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: "pointer",
+    lineHeight: 1,
+    whiteSpace: "nowrap",
   },
   sideCard: {
     borderRadius: 18,
@@ -2541,6 +2995,9 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: 0,
     position: "relative",
     isolation: "isolate",
+  },
+  recordsDetailTableWrapExpanded: {
+    maxHeight: "calc(100vh - 260px)",
   },
   paginationBar: {
     display: "flex",
@@ -2676,6 +3133,17 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     cursor: "pointer",
     textAlign: "left",
+  },
+  linkButtonSelected: {
+    border: "none",
+    background: "transparent",
+    padding: 0,
+    color: "#0F172A",
+    fontWeight: 900,
+    cursor: "pointer",
+    textAlign: "left",
+    textDecoration: "underline",
+    textUnderlineOffset: 2,
   },
   rowDetailButton: {
     border: "none",
@@ -3108,9 +3576,29 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 16,
     fontWeight: 700,
   },
+  modalSuccessBox: {
+    borderRadius: 16,
+    border: "1px solid #86EFAC",
+    background: "#F0FDF4",
+    color: "#166534",
+    padding: 16,
+    fontWeight: 700,
+  },
   levelModalPanel: {
     width: "min(980px, 100%)",
     maxHeight: "92vh",
+    overflowY: "auto",
+    borderRadius: 28,
+    background: "#FFFFFF",
+    border: "1px solid #BFDBFE",
+    boxShadow: "0 30px 90px rgba(15, 23, 42, 0.4)",
+    padding: 24,
+    display: "grid",
+    gap: 20,
+  },
+  recordsModalPanel: {
+    width: "min(1440px, 100%)",
+    maxHeight: "94vh",
     overflowY: "auto",
     borderRadius: 28,
     background: "#FFFFFF",
@@ -3229,6 +3717,8 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
   },
 };
+
+
 
 
 
