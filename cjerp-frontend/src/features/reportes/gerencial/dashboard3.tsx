@@ -240,9 +240,8 @@ function parseExchangeRateInput(value: string) {
 
 function resolveCurrencyCode(row: RawRow) {
   const idMoneda = pickNumber(row, ["IdMoneda", "idMoneda", "idmoneda", "TipoMoneda", "tipoMoneda"]);
-  const label = normalizeMonedaLabel(
-    pickString(row, ["Moneda", "moneda", "MonedaLabel", "monedaLabel", "TipoMonedaLabel", "tipoMonedaLabel"]),
-  );
+  const rawLabel = pickString(row, ["MONEDA", "Moneda", "moneda", "MonedaLabel", "monedaLabel", "TipoMonedaLabel", "tipoMonedaLabel"]);
+  const label = normalizeMonedaLabel(rawLabel);
 
   if (label === "PEN" || label === "USD" || label === "DOP") {
     return { code: label, idMoneda: idMoneda > 0 ? idMoneda : null, label };
@@ -260,10 +259,20 @@ function resolveCurrencyCode(row: RawRow) {
     return { code: "DOP", idMoneda, label: "DOP" };
   }
 
+  if (rawLabel.trim()) {
+    return {
+      code: label,
+      idMoneda: idMoneda > 0 ? idMoneda : null,
+      label,
+    };
+  }
+
+  const fallbackLabel = resolveCurrencyLabelFromId(idMoneda > 0 ? idMoneda : null);
+
   return {
-    code: label,
+    code: fallbackLabel,
     idMoneda: idMoneda > 0 ? idMoneda : null,
-    label,
+    label: fallbackLabel,
   };
 }
 
@@ -271,7 +280,6 @@ function resolveCurrencyLabelFromId(idMoneda: number | null) {
   if (idMoneda === 1) return "PEN";
   if (idMoneda === 2) return "USD";
   if (idMoneda === 3) return "DOP";
-  if (idMoneda === 4) return "Moneda 4";
   if (idMoneda != null && idMoneda > 0) return `Moneda ${idMoneda}`;
   return "Sin moneda";
 }
@@ -356,7 +364,7 @@ function buildDashboard3ExcelRows(rows: ImportarConsultaDshRow[]) {
 }
 
 function buildImportarConsultaDshRow(row: RawRow): ImportarConsultaDshRow {
-  const idMoneda = pickNumber(row, ["IdMoneda", "idMoneda", "idmoneda", "TipoMoneda", "tipoMoneda"]);
+  const currency = resolveCurrencyCode(row);
 
   return {
     idCliente: pickString(row, ["IdCliente", "idCliente"]),
@@ -367,8 +375,8 @@ function buildImportarConsultaDshRow(row: RawRow): ImportarConsultaDshRow {
     correlativo: pickString(row, ["Correlativo", "correlativo"]),
     nombreSite: pickString(row, ["NombreSite", "nombreSite"]) || "Sin site",
     tipoTrabajo: pickString(row, ["TipoTrabajo", "tipoTrabajo"]) || "Sin tipo",
-    idMoneda: idMoneda > 0 ? idMoneda : null,
-    moneda: resolveCurrencyLabelFromId(idMoneda > 0 ? idMoneda : null),
+    idMoneda: currency.idMoneda,
+    moneda: currency.label,
     ot: pickString(row, ["OT", "Ot", "ot"]),
     mes: pickString(row, ["Mes", "mes"]),
     ano: pickString(row, ["Ano", "ano"]),
