@@ -26,6 +26,7 @@ type DrillRow = {
   proyecto: string;
   site: string;
   tarea: string;
+  idMoneda: number | null;
   moneda: string;
   monto: number;
   subtotal: number;
@@ -44,6 +45,8 @@ type ImportarConsultaDshRow = {
   correlativo: string;
   nombreSite: string;
   tipoTrabajo: string;
+  idMoneda: number | null;
+  moneda: string;
   ot: string;
   mes: string;
   ano: string;
@@ -235,6 +238,43 @@ function parseExchangeRateInput(value: string) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function resolveCurrencyCode(row: RawRow) {
+  const idMoneda = pickNumber(row, ["IdMoneda", "idMoneda", "idmoneda", "TipoMoneda", "tipoMoneda"]);
+  const label = normalizeMonedaLabel(
+    pickString(row, ["Moneda", "moneda", "MonedaLabel", "monedaLabel", "TipoMonedaLabel", "tipoMonedaLabel"]),
+  );
+
+  if (label === "PEN" || label === "USD" || label === "DOP") {
+    return { code: label, idMoneda: idMoneda > 0 ? idMoneda : null, label };
+  }
+
+  if (idMoneda === 1) {
+    return { code: "PEN", idMoneda, label: "PEN" };
+  }
+
+  if (idMoneda === 2) {
+    return { code: "USD", idMoneda, label: "USD" };
+  }
+
+  if (idMoneda === 3) {
+    return { code: "DOP", idMoneda, label: "DOP" };
+  }
+
+  return {
+    code: label,
+    idMoneda: idMoneda > 0 ? idMoneda : null,
+    label,
+  };
+}
+
+function resolveCurrencyLabelFromId(idMoneda: number | null) {
+  if (idMoneda === 1) return "PEN";
+  if (idMoneda === 2) return "USD";
+  if (idMoneda === 3) return "DOP";
+  if (idMoneda != null && idMoneda > 0) return `Moneda ${idMoneda}`;
+  return "Sin moneda";
+}
+
 function buildDrillRow(row: RawRow): DrillRow {
   const fechaIngreso = formatDisplayDate(
     pickString(row, [
@@ -254,9 +294,7 @@ function buildDrillRow(row: RawRow): DrillRow {
   const site = pickString(row, ["Site", "site", "NombreSite", "nombreSite", "siteNombre"]) || "Sin site";
   const tarea = pickString(row, ["Tarea", "tarea", "NombreTarea", "nombreTarea", "TipoTrabajo", "tipoTrabajo"]) || "Sin tarea";
   const anoGestion = pickString(row, ["AnoGestion", "anoGestion", "Ano", "ano"]) || "Sin año";
-  const moneda = normalizeMonedaLabel(
-    pickString(row, ["Moneda", "moneda", "MonedaLabel", "monedaLabel", "TipoMoneda", "tipoMoneda"]),
-  );
+  const currency = resolveCurrencyCode(row);
 
   const subtotal = pickNumber(row, ["Subtotal", "subtotal"]);
   const igv = pickNumber(row, ["IGV", "Igv", "igv"]);
@@ -273,7 +311,8 @@ function buildDrillRow(row: RawRow): DrillRow {
     proyecto,
     site,
     tarea,
-    moneda,
+    idMoneda: currency.idMoneda,
+    moneda: currency.label,
     monto,
     subtotal: subtotal || 0,
     igv: igv || 0,
@@ -306,6 +345,8 @@ function buildDashboard3ExcelRows(rows: ImportarConsultaDshRow[]) {
 }
 
 function buildImportarConsultaDshRow(row: RawRow): ImportarConsultaDshRow {
+  const idMoneda = pickNumber(row, ["IdMoneda", "idMoneda", "idmoneda", "TipoMoneda", "tipoMoneda"]);
+
   return {
     idCliente: pickString(row, ["IdCliente", "idCliente"]),
     nombreCliente: pickString(row, ["NombreCliente", "nombreCliente"]) || "Sin cliente",
@@ -315,6 +356,8 @@ function buildImportarConsultaDshRow(row: RawRow): ImportarConsultaDshRow {
     correlativo: pickString(row, ["Correlativo", "correlativo"]),
     nombreSite: pickString(row, ["NombreSite", "nombreSite"]) || "Sin site",
     tipoTrabajo: pickString(row, ["TipoTrabajo", "tipoTrabajo"]) || "Sin tipo",
+    idMoneda: idMoneda > 0 ? idMoneda : null,
+    moneda: resolveCurrencyLabelFromId(idMoneda > 0 ? idMoneda : null),
     ot: pickString(row, ["OT", "Ot", "ot"]),
     mes: pickString(row, ["Mes", "mes"]),
     ano: pickString(row, ["Ano", "ano"]),
@@ -343,7 +386,7 @@ function buildStoreBreakdown(rows: ImportarConsultaDshRow[], key: DrillLevel): C
           : key === "site"
             ? row.nombreSite
             : row.tipoTrabajo;
-    const currency = "PEN";
+    const currency = row.moneda || "Sin moneda";
     const amount = row.montoOc;
     const current = map.get(rawLabel);
 
@@ -570,26 +613,42 @@ export default function Dashboard3Page() {
   const chartData = useMemo(() => buildStoreBreakdown(navigableRows, currentLevel), [currentLevel, navigableRows]);
 
   const totalsByCurrency = useMemo(() => {
-    const totalPen = filteredStoreRows.reduce((accumulator, row) => accumulator + row.montoOc, 0);
-    return [{ currency: "PEN", total: totalPen }];
+    const map = new Map<string, number>();
+
+    for (const row of filteredStoreRows) {
+      const currency = row.moneda || "Sin moneda";
+      map.set(currency, (map.get(currency) ?? 0) + row.montoOc);
+    }
+
+    return Array.from(map.entries()).map(([currency, total]) => ({ currency, total }));
   }, [filteredStoreRows]);
 
   const totalConvertedToPen = useMemo(() => {
-    return filteredStoreRows.reduce((accumulator, row) => accumulator + row.montoOc, 0);
-  }, [filteredStoreRows]);
+    return totalsByCurrency.reduce((accumulator, item) => {
+      return accumulator + convertToPen(item.total, item.currency, appliedUsdExchangeRate, appliedDopExchangeRate);
+    }, 0);
+  }, [appliedDopExchangeRate, appliedUsdExchangeRate, totalsByCurrency]);
 
   const kpiTotalsByCurrency = useMemo(() => {
-    const totalPen = navigableRows.reduce((accumulator, row) => accumulator + row.montoOc, 0);
-    return [{ currency: "PEN", total: totalPen }];
+    const map = new Map<string, number>();
+
+    for (const row of navigableRows) {
+      const currency = row.moneda || "Sin moneda";
+      map.set(currency, (map.get(currency) ?? 0) + row.montoOc);
+    }
+
+    return Array.from(map.entries()).map(([currency, total]) => ({ currency, total }));
   }, [navigableRows]);
 
   const kpiTotalConvertedToPen = useMemo(() => {
-    return navigableRows.reduce((accumulator, row) => accumulator + row.montoOc, 0);
-  }, [navigableRows]);
+    return kpiTotalsByCurrency.reduce((accumulator, item) => {
+      return accumulator + convertToPen(item.total, item.currency, appliedUsdExchangeRate, appliedDopExchangeRate);
+    }, 0);
+  }, [appliedDopExchangeRate, appliedUsdExchangeRate, kpiTotalsByCurrency]);
 
   const chartTotalConvertedToPen = useMemo(() => {
-    return navigableRows.reduce((accumulator, row) => accumulator + row.montoOc, 0);
-  }, [navigableRows]);
+    return kpiTotalConvertedToPen;
+  }, [kpiTotalConvertedToPen]);
 
   const summaryCards = useMemo(
     () => [
