@@ -201,12 +201,6 @@ public class MantenimientoEmpleadosController : ControllerBase
             return BadRequest(new { success = false, message = "IdEmpleado es obligatorio." });
         }
 
-        var validationMessage = ValidateRequest(request);
-        if (validationMessage is not null)
-        {
-            return BadRequest(new { success = false, message = validationMessage });
-        }
-
         var connectionString = GetConnectionString();
         if (connectionString is null)
         {
@@ -225,19 +219,20 @@ public class MantenimientoEmpleadosController : ControllerBase
             return NotFound(new { success = false, message = "No se encontro el empleado solicitado." });
         }
 
-        var documentoDuplicadoMessage = await ValidarDocumentoActivoAsync(
-            connection,
-            idEmpleado,
-            request.NroDocumento,
-            cancellationToken);
+        var effectiveRequest = MergeEmpleadoUpdateRequest(before, request);
 
-        if (documentoDuplicadoMessage is not null)
+        var validationMessage = ValidateRequest(effectiveRequest);
+        if (validationMessage is not null)
         {
-            return BadRequest(new { success = false, message = documentoDuplicadoMessage });
+            return BadRequest(new { success = false, message = validationMessage });
         }
 
         var usuario = GetCurrentUserName();
-        await ActualizarEmpleadoDirectoAsync(connection, idEmpleado, request, usuario, cancellationToken);
+        if (effectiveRequest.IdPuesto is null)
+        {
+            effectiveRequest.IdPuesto = await ObtenerIdPuestoAsync(connection, idEmpleado, transaction: null, cancellationToken);
+        }
+        await ActualizarEmpleadoDirectoAsync(connection, idEmpleado, effectiveRequest, usuario, cancellationToken);
 
         var updated = await ObtenerEmpleadoPorIdAsync(connection, idEmpleado, cancellationToken);
         if (updated is not null)
@@ -472,6 +467,55 @@ public class MantenimientoEmpleadosController : ControllerBase
         }
 
         return MapEmpleadoCrudRow((IDictionary<string, object>)row);
+    }
+
+    private static async Task<int?> ObtenerIdPuestoAsync(
+        SqlConnection connection,
+        int idEmpleado,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        return await connection.ExecuteScalarAsync<int?>(
+            new CommandDefinition(
+                """
+                SELECT TOP (1) IdPuesto
+                FROM dbo.EmpleadoCj
+                WHERE IdEmpleado = @IdEmpleado;
+                """,
+                new { IdEmpleado = idEmpleado },
+                transaction: transaction,
+                commandType: CommandType.Text,
+                cancellationToken: cancellationToken));
+    }
+
+    private static EmpleadoCrudUpsertRequest MergeEmpleadoUpdateRequest(
+        EmpleadoCrudDto before,
+        EmpleadoCrudUpsertRequest request)
+    {
+        return new EmpleadoCrudUpsertRequest
+        {
+            NombreEmpleado = string.IsNullOrWhiteSpace(request.NombreEmpleado)
+                ? before.NombreEmpleado
+                : request.NombreEmpleado.Trim(),
+            Sexo = string.IsNullOrWhiteSpace(request.Sexo) ? before.Sexo : request.Sexo,
+            IdSexo = request.IdSexo ?? before.IdSexo,
+            IdDocumento = request.IdDocumento ?? before.IdDocumento,
+            NroDocumento = string.IsNullOrWhiteSpace(request.NroDocumento) ? before.NroDocumento : request.NroDocumento,
+            Telefono = string.IsNullOrWhiteSpace(request.Telefono) ? before.Telefono : request.Telefono,
+            Correo = string.IsNullOrWhiteSpace(request.Correo) ? before.Correo : request.Correo,
+            Direccion = string.IsNullOrWhiteSpace(request.Direccion) ? before.Direccion : request.Direccion,
+            FechaIngreso = string.IsNullOrWhiteSpace(request.FechaIngreso) ? before.FechaIngreso : request.FechaIngreso,
+            FechaIniLaboral = string.IsNullOrWhiteSpace(request.FechaIniLaboral) ? before.FechaIniLaboral : request.FechaIniLaboral,
+            FechaFinLaboral = string.IsNullOrWhiteSpace(request.FechaFinLaboral) ? before.FechaFinLaboral : request.FechaFinLaboral,
+            IdPuesto = request.IdPuesto,
+            IdEmpresaCj = request.IdEmpresaCj ?? before.IdEmpresaCj,
+            IdClienteCj = request.IdClienteCj ?? before.IdClienteCj,
+            IdAreaCj = request.IdAreaCj ?? before.IdAreaCj,
+            IdUbicacionCj = request.IdUbicacionCj ?? before.IdUbicacionCj,
+            IdResponsableCj = request.IdResponsableCj ?? before.IdResponsableCj,
+            IdSegundoVacaciones = request.IdSegundoVacaciones ?? before.IdSegundoVacaciones,
+            IdTerceroVacaciones = request.IdTerceroVacaciones ?? before.IdTerceroVacaciones
+        };
     }
 
     private static async Task<List<LookupItem>> ObtenerValidadoresAsync(
@@ -971,115 +1015,14 @@ public class MantenimientoEmpleadosController : ControllerBase
 
         try
         {
-            var tieneIdSexo = await ColumnExistsAsync(connection, "dbo.EmpleadoCj", "IdSexo", transaction, cancellationToken);
-            var tieneSexo = await ColumnExistsAsync(connection, "dbo.EmpleadoCj", "Sexo", transaction, cancellationToken);
-            var tieneIdDocumento = await ColumnExistsAsync(connection, "dbo.EmpleadoCj", "IdDocumento", transaction, cancellationToken);
-            var updateSql = tieneIdSexo && tieneIdDocumento
-                ? """
-                    UPDATE dbo.EmpleadoCj
-                    SET NombreEmpleado = @NombreEmpleado,
-                        IdDocumento = @IdDocumento,
-                        IdSexo = @IdSexo,
-                        NroDocumento = @NroDocumento,
-                        Telefono = @Telefono,
-                        Correo = @Correo,
-                        Direccion = @Direccion,
-                        IdPuesto = @IdPuesto,
-                        FechaIniLaboral = @FechaIniLaboral,
-                        FechaFinLaboral = @FechaFinLaboral,
-                        IdCargo = 50,
-                        IdActivo = 1
-                    WHERE IdEmpleado = @IdEmpleado;
-                    """
-                : tieneIdSexo
-                ? """
-                    UPDATE dbo.EmpleadoCj
-                    SET NombreEmpleado = @NombreEmpleado,
-                        IdSexo = @IdSexo,
-                        NroDocumento = @NroDocumento,
-                        Telefono = @Telefono,
-                        Correo = @Correo,
-                        Direccion = @Direccion,
-                        IdPuesto = @IdPuesto,
-                        FechaIniLaboral = @FechaIniLaboral,
-                        FechaFinLaboral = @FechaFinLaboral,
-                        IdCargo = 50,
-                        IdActivo = 1
-                    WHERE IdEmpleado = @IdEmpleado;
-                    """
-                : tieneSexo && tieneIdDocumento
-                ? """
-                    UPDATE dbo.EmpleadoCj
-                    SET NombreEmpleado = @NombreEmpleado,
-                        IdDocumento = @IdDocumento,
-                        NroDocumento = @NroDocumento,
-                        Telefono = @Telefono,
-                        Correo = @Correo,
-                        Sexo = @Sexo,
-                        Direccion = @Direccion,
-                        IdPuesto = @IdPuesto,
-                        FechaIniLaboral = @FechaIniLaboral,
-                        FechaFinLaboral = @FechaFinLaboral,
-                        IdCargo = 50,
-                        IdActivo = 1
-                    WHERE IdEmpleado = @IdEmpleado;
-                    """
-                : tieneSexo
-                ? """
-                    UPDATE dbo.EmpleadoCj
-                    SET NombreEmpleado = @NombreEmpleado,
-                        NroDocumento = @NroDocumento,
-                        Telefono = @Telefono,
-                        Correo = @Correo,
-                        Sexo = @Sexo,
-                        Direccion = @Direccion,
-                        IdPuesto = @IdPuesto,
-                        FechaIniLaboral = @FechaIniLaboral,
-                        FechaFinLaboral = @FechaFinLaboral,
-                        IdCargo = 50,
-                        IdActivo = 1
-                    WHERE IdEmpleado = @IdEmpleado;
-                    """
-                : tieneIdDocumento
-                ? """
-                    UPDATE dbo.EmpleadoCj
-                    SET NombreEmpleado = @NombreEmpleado,
-                        IdDocumento = @IdDocumento,
-                        NroDocumento = @NroDocumento,
-                        Telefono = @Telefono,
-                        Correo = @Correo,
-                        Direccion = @Direccion,
-                        IdPuesto = @IdPuesto,
-                        FechaIniLaboral = @FechaIniLaboral,
-                        FechaFinLaboral = @FechaFinLaboral,
-                        IdCargo = 50,
-                        IdActivo = 1
-                    WHERE IdEmpleado = @IdEmpleado;
-                    """
-                : """
-                    UPDATE dbo.EmpleadoCj
-                    SET NombreEmpleado = @NombreEmpleado,
-                        NroDocumento = @NroDocumento,
-                        Telefono = @Telefono,
-                        Correo = @Correo,
-                        Direccion = @Direccion,
-                        IdPuesto = @IdPuesto,
-                        FechaIniLaboral = @FechaIniLaboral,
-                        FechaFinLaboral = @FechaFinLaboral,
-                        IdCargo = 50,
-                        IdActivo = 1
-                    WHERE IdEmpleado = @IdEmpleado;
-                    """;
-
-            var parameters = BuildUpsertParameters(request, usuario);
-            parameters.Add("@IdEmpleado", idEmpleado, DbType.Int32);
+            var parameters = BuildUpdateSpParameters(request, usuario, idEmpleado);
 
             await connection.ExecuteAsync(
                 new CommandDefinition(
-                    updateSql,
+                    ActualizarSp,
                     parameters,
                     transaction: transaction,
-                    commandType: CommandType.Text,
+                    commandType: CommandType.StoredProcedure,
                     cancellationToken: cancellationToken));
 
             await UpsertEmpleadoDetalleAsync(connection, idEmpleado, request, transaction, cancellationToken);
@@ -1186,9 +1129,14 @@ public class MantenimientoEmpleadosController : ControllerBase
         }
     }
 
-    private static DynamicParameters BuildUpsertParameters(EmpleadoCrudUpsertRequest request, string usuario)
+    private static DynamicParameters BuildUpsertParameters(EmpleadoCrudUpsertRequest request, string usuario, int? idEmpleado = null)
     {
         var parameters = new DynamicParameters();
+        if (idEmpleado.HasValue)
+        {
+            parameters.Add("@IdEmpleado", idEmpleado.Value, DbType.Int32);
+        }
+
         parameters.Add("@NombreEmpleado", request.NombreEmpleado.Trim(), DbType.String);
         parameters.Add("@Sexo", NormalizeOptionalString(request.Sexo), DbType.String);
         parameters.Add("@IdSexo", ResolveSexoId(request), DbType.Int32);
@@ -1196,6 +1144,31 @@ public class MantenimientoEmpleadosController : ControllerBase
         parameters.Add("@NroDocumento", NormalizeOptionalString(request.NroDocumento), DbType.String);
         parameters.Add("@Telefono", NormalizeOptionalString(request.Telefono), DbType.String);
         parameters.Add("@Correo", NormalizeOptionalString(request.Correo), DbType.String);
+        parameters.Add("@FechaIngreso", ParseNullableDate(request.FechaIngreso), DbType.Date);
+        parameters.Add("@FechaIniLaboral", ParseNullableDate(request.FechaIniLaboral), DbType.Date);
+        parameters.Add("@FechaFinLaboral", ParseNullableDate(request.FechaFinLaboral), DbType.Date);
+        parameters.Add("@IdPuesto", request.IdPuesto, DbType.Int32);
+        parameters.Add("@Direccion", NormalizeOptionalString(request.Direccion), DbType.String);
+        parameters.Add("@IdEmpresaCj", request.IdEmpresaCj, DbType.Int32);
+        parameters.Add("@IdClienteCj", request.IdClienteCj, DbType.Int32);
+        parameters.Add("@IdAreaCj", request.IdAreaCj, DbType.Int32);
+        parameters.Add("@IdUbicacionCj", request.IdUbicacionCj, DbType.Int32);
+        parameters.Add("@IdResponsableCj", request.IdResponsableCj, DbType.Int32);
+        parameters.Add("@IdSegundoVacaciones", request.IdSegundoVacaciones, DbType.Int32);
+        parameters.Add("@IdTerceroVacaciones", request.IdTerceroVacaciones, DbType.Int32);
+        parameters.Add("@Usuario", usuario, DbType.String);
+        return parameters;
+    }
+
+    private static DynamicParameters BuildUpdateSpParameters(EmpleadoCrudUpsertRequest request, string usuario, int idEmpleado)
+    {
+        var parameters = new DynamicParameters();
+        parameters.Add("@IdEmpleado", idEmpleado, DbType.Int32);
+        parameters.Add("@NombreEmpleado", request.NombreEmpleado.Trim(), DbType.String);
+        parameters.Add("@NroDocumento", NormalizeOptionalString(request.NroDocumento), DbType.String);
+        parameters.Add("@Telefono", NormalizeOptionalString(request.Telefono), DbType.String);
+        parameters.Add("@Correo", NormalizeOptionalString(request.Correo), DbType.String);
+        parameters.Add("@FechaIngreso", ParseNullableDate(request.FechaIngreso), DbType.Date);
         parameters.Add("@FechaIniLaboral", ParseNullableDate(request.FechaIniLaboral), DbType.Date);
         parameters.Add("@FechaFinLaboral", ParseNullableDate(request.FechaFinLaboral), DbType.Date);
         parameters.Add("@IdPuesto", request.IdPuesto, DbType.Int32);
@@ -1231,6 +1204,7 @@ public class MantenimientoEmpleadosController : ControllerBase
             SoValidador = GetString(values, "SoValidador", "soValidador", "SolValidador", "solValidador"),
             TerValidador = GetString(values, "TerValidador", "terValidador", "TercerValidador", "tercerValidador"),
             FechaIniLaboral = GetDateString(values, "FechaIniLaboral", "fechaIniLaboral"),
+            FechaIngreso = GetDateString(values, "FechaIngreso", "fechaIngreso", "fechaingreso"),
             FechaFinLaboral = GetDateString(values, "FechaFinLaboral", "fechaFinLaboral"),
             FechaBaja = GetDateString(values, "FechaBaja", "fechaBaja"),
             Direccion = GetString(values, "Direccion", "direccion"),
@@ -1291,9 +1265,17 @@ public class MantenimientoEmpleadosController : ControllerBase
             return "La direccion es obligatoria.";
         }
 
+        var fechaIngreso = ParseNullableDate(request.FechaIngreso);
+        var fechaInicio = ParseNullableDate(request.FechaIniLaboral);
+
         if (string.IsNullOrWhiteSpace(request.FechaIniLaboral))
         {
             return "La fecha de inicio laboral es obligatoria.";
+        }
+
+        if (fechaIngreso.HasValue && fechaInicio.HasValue && fechaIngreso.Value.Date > fechaInicio.Value.Date)
+        {
+            return "La fecha de ingreso no puede ser mayor que la fecha de inicio.";
         }
 
         if (request.IdEmpresaCj is null or <= 0)
@@ -2803,6 +2785,7 @@ public class MantenimientoEmpleadosController : ControllerBase
             ["Telefono"] = new("Principal", NullIfWhiteSpace(item.Telefono)),
             ["Correo"] = new("Principal", NullIfWhiteSpace(item.Correo)),
             ["Direccion"] = new("Principal", NullIfWhiteSpace(item.Direccion)),
+            ["FechaIngreso"] = new("Laboral", NullIfWhiteSpace(item.FechaIngreso)),
             ["FechaIniLaboral"] = new("Laboral", NullIfWhiteSpace(item.FechaIniLaboral)),
             ["FechaFinLaboral"] = new("Laboral", NullIfWhiteSpace(item.FechaFinLaboral)),
             ["FechaBaja"] = new("Laboral", NullIfWhiteSpace(item.FechaBaja)),
@@ -2857,6 +2840,7 @@ public class MantenimientoEmpleadosController : ControllerBase
         public string FechaFinLaboral { get; set; } = string.Empty;
         public string FechaBaja { get; set; } = string.Empty;
         public string Direccion { get; set; } = string.Empty;
+        public string FechaIngreso { get; set; } = string.Empty;
         public string CargoPrint { get; set; } = string.Empty;
         public string Estado { get; set; } = string.Empty;
         public int? IdEstado { get; set; }
@@ -2881,6 +2865,7 @@ public class MantenimientoEmpleadosController : ControllerBase
         public string? Telefono { get; set; }
         public string? Correo { get; set; }
         public string? Direccion { get; set; }
+        public string? FechaIngreso { get; set; }
         public string? FechaIniLaboral { get; set; }
         public string? FechaFinLaboral { get; set; }
         public int? IdPuesto { get; set; }

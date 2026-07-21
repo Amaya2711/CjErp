@@ -60,6 +60,7 @@ const ModificacionesPage = lazy(() => import("../../features/mantenimiento/consu
 const MigracionPage = lazy(() => import("../../features/mantenimiento/migracion"));
 const MantenimientoPage = lazy(() => import("../../features/mantenimiento/mantenimiento"));
 const MantenimientoEmpleadosPage = lazy(() => import("../../features/mantenimiento/empleados"));
+const MantenimientoEmpleadoFichaPage = lazy(() => import("../../features/mantenimiento/mantenimiento/m_empleado"));
 const RptWupPage = lazy(() => import("../../features/mantenimiento/sistemas/rptwup"));
 const RptWupGerencialPage = lazy(() => import("../../features/mantenimiento/sistemas/rptwupgerencial"));
 const RptBoletaPage = lazy(() => import("../../features/mantenimiento/sistemas/rptboleta"));
@@ -144,6 +145,7 @@ export default function AppRouter() {
             <Route path="/mantenimiento/consulta/modificaciones" element={<ModificacionesPage />} />
             <Route path="/mantenimiento/modificaciones" element={<ModificacionesPage />} />
             <Route path="/mantenimiento/empleados" element={<MantenimientoEmpleadosPage />} />
+            <Route path="/mantenimiento/mantenimiento/m_empleado" element={<MantenimientoEmpleadoFichaPage />} />
             <Route path="/mantenimiento/migracion" element={<MigracionPage />} />
             <Route path="/mantenimiento/mantenimiento" element={<MantenimientoPage />} />
             <Route path="/mantenimiento/sistemas/rptwup" element={<RptWupPage />} />

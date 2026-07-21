@@ -68,6 +68,16 @@ function normalizeTextValue(value: string | null | undefined): string {
   return value == null ? "" : String(value);
 }
 
+function formatDateValue(value: string | null | undefined): string {
+  const text = normalizeTextValue(value).trim();
+  if (!text) {
+    return "-";
+  }
+
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : text;
+}
+
 function normalizeUppercase(value: string | null | undefined): string {
   return (value ?? "").toUpperCase();
 }
@@ -250,6 +260,7 @@ export default function MantenimientoEmpleadosPage() {
       { key: "cliente", label: "Cliente", getValue: (item) => item.cliente },
       { key: "area", label: "Area", getValue: (item) => item.area },
       { key: "ubicacion", label: "Ubicacion", getValue: (item) => item.ubicacion },
+      { key: "fechaIngreso", label: "Fecha ingreso", getValue: (item) => item.fechaIngreso },
       { key: "correo", label: "Correo", getValue: (item) => item.correo },
     ],
     []
@@ -729,6 +740,7 @@ export default function MantenimientoEmpleadosPage() {
                     <th style={styles.th}>Area</th>
                     <th style={styles.th}>Ubicacion</th>
                     <th style={styles.th}>Responsable</th>
+                    <th style={styles.th}>Fecha ingreso</th>
                     <th style={styles.th}>Inicio</th>
                     <th style={styles.th}>Fin</th>
                     <th style={styles.th}>Acciones</th>
@@ -737,7 +749,7 @@ export default function MantenimientoEmpleadosPage() {
                 <tbody>
                   {filteredItems.length === 0 ? (
                     <tr>
-                      <td colSpan={12} style={styles.emptyCell}>
+                      <td colSpan={13} style={styles.emptyCell}>
                         No se encontraron empleados.
                       </td>
                     </tr>
@@ -753,8 +765,9 @@ export default function MantenimientoEmpleadosPage() {
                         <td style={styles.td}>{item.area || "-"}</td>
                         <td style={styles.td}>{item.ubicacion || "-"}</td>
                         <td style={styles.td}>{item.responsable || "-"}</td>
-                        <td style={styles.td}>{item.fechaIniLaboral || "-"}</td>
-                        <td style={styles.td}>{item.fechaFinLaboral || "-"}</td>
+                        <td style={styles.td}>{formatDateValue(item.fechaIngreso)}</td>
+                        <td style={styles.td}>{formatDateValue(item.fechaIniLaboral)}</td>
+                        <td style={styles.td}>{formatDateValue(item.fechaFinLaboral)}</td>
                         <td style={styles.actionsTd}>
                           <button
                             type="button"

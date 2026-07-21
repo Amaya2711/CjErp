@@ -56,11 +56,14 @@ namespace CjERP.Infrastructure.Services
         public async Task<IEnumerable<TareaDto>> ListarTareasAsync(CancellationToken cancellationToken = default)
         {
             await using var connection = _sqlCommandFactory.CreateConnection();
-            return await connection.QueryAsync<TareaDto>(
+            var rows = await connection.QueryAsync(
                 _sqlCommandFactory.Create(
-                    "sp_Constante_Tarea_Listar",
-                    commandType: CommandType.StoredProcedure,
-                    cancellationToken: cancellationToken));
+                    "sp_Constante_ListarPorCampo",
+                    new { Campo = "tarea" },
+                    CommandType.StoredProcedure,
+                    cancellationToken));
+
+            return rows.Select(MapTarea).Cast<TareaDto>();
         }
 
         public async Task<ValoresGastoDto> ObtenerValoresGastoAsync(
@@ -244,6 +247,18 @@ namespace CjERP.Infrastructure.Services
                 Adelantado = GetDecimal(data, "Adelantado", "adelantado"),
                 Saldo2 = GetDecimal(data, "Saldo2", "saldo2", "SaldoAprobadoMenosPagado", "saldoAprobadoMenosPagado"),
                 Saldo = GetDecimal(data, "Saldo", "saldo", "SaldoFinal", "saldoFinal")
+            };
+        }
+
+        private static TareaDto MapTarea(dynamic row)
+        {
+            var data = (IDictionary<string, object>)row;
+
+            return new TareaDto
+            {
+                TareaKey = GetStringAllowEmpty(data, "TareaKey", "tareaKey", "Codigo", "codigo", "Clave", "clave") ?? string.Empty,
+                correlativo = GetStringAllowEmpty(data, "Correlativo", "correlativo", "Id", "id", "Codigo", "codigo") ?? string.Empty,
+                tarea = GetStringAllowEmpty(data, "Descripcion", "descripcion", "Nombre", "nombre", "Valor", "valor", "ValorIni", "valorIni") ?? string.Empty
             };
         }
 

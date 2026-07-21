@@ -40,21 +40,6 @@ type MenuAccesoDto = {
 
 const CLAUDEIA_RUTA = "/reportes/administrativo/claudeia";
 
-const IACHAT_ACCESO: MenuAccesoDto = {
-  idMenu: -999002,
-  idMenuPadre: null,
-  nombreMenu: "IA Chat",
-  ruta: "/reportes/administrativo/iachat",
-  icono: null,
-  ordenMenu: 10000,
-  nivelMenu: 1,
-  codigoMenu: "IACHAT",
-  esVisible: true,
-  esActivo: true,
-  acceso: 1,
-  esNodoPrincipal: false,
-};
-
 function getSaludo() {
   const hour = new Date().getHours();
 
@@ -149,30 +134,18 @@ export default function DashboardPage() {
           esNodoPrincipal: Boolean((item as any).esNodoPrincipal ?? false),
         }));
 
-        const hasIaChat = menu.some(
-          (item) => getMenuRoute(item) === IACHAT_ACCESO.ruta
-        );
-
-        const menuConAsistentes = [
-          ...menu,
-          ...(hasIaChat ? [] : [IACHAT_ACCESO]),
-        ];
-
         if (!active) {
           return;
         }
 
         setAccesosDirectos(
-          //menu.filter(
-          //  (m) => m.acceso === 1 && m.nivelMenu > 0 && getMenuRoute(m) !== ""
-          //)
-          menuConAsistentes.filter(
-          (m) =>
-            Number(m.acceso) === 1 &&
-            Number(m.nivelMenu ?? 0) > 0 &&
-            getMenuRoute(m) !== "" &&
-            getMenuRoute(m) !== CLAUDEIA_RUTA
-        )
+          menu.filter(
+            (m) =>
+              Number(m.acceso) === 1 &&
+              Number(m.nivelMenu ?? 0) > 0 &&
+              getMenuRoute(m) !== "" &&
+              getMenuRoute(m) !== CLAUDEIA_RUTA
+          )
         );
       } catch (_error: unknown) {
         if (active) {
