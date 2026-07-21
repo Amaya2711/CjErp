@@ -162,6 +162,20 @@ export async function consultarGastosPagadosPorId(
   );
 }
 
+export async function actualizarPlanillaTarea(
+  id: number,
+  idTarea: number,
+  options?: { timeoutMs?: number }
+): Promise<void> {
+  await httpClient.put(
+    `${PLANILLA_CONSULTA_API_URL}/${encodeURIComponent(String(Math.trunc(id)))}/tarea`,
+    { idTarea: Math.trunc(idTarea) },
+    {
+      timeout: options?.timeoutMs,
+    },
+  );
+}
+
 export function buildPlanillaPagadosDashboardRequest(args: {
   fechaInicio: string;
   fechaFin: string;
