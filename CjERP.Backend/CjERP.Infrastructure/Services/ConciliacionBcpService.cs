@@ -1,4 +1,4 @@
-using System.Data;
+﻿using System.Data;
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
@@ -74,10 +74,14 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         ["FechaValuta"] = ["fechavaluta", "fecha valuta", "fecha valua", "value date", "fecha valor"],
         ["Proveedor"] = ["proveedor", "beneficiario", "supplier", "vendor", "counterparty"],
         ["ItemSistema"] = ["itemsistema", "item del sistema", "item sistema", "system item"],
-        ["DescripcionOperacion"] = ["descripcionoperacion", "descripcion operacion", "descripción operación", "description", "transaction description", "detail", "details", "glosa"],
+        ["DescripcionOperacion"] = ["descripcionoperacion", "descripcion operacion", "descripciÃ³n operaciÃ³n", "description", "transaction description", "detail", "details", "glosa", "movimiento"],
+        ["CDR"] = ["cdr", "codigo cdr"],
+        ["Modulo"] = ["modulo", "módulo", "module", "mód."],
+        ["Transaccion"] = ["transaccion", "transacción", "transaction", "transac.", "transac"],
+        ["Relacion"] = ["relacion", "relación", "relation", "rel."],
         ["Monto"] = ["monto", "importe", "amount", "transaction amount"],
         ["SucursalAgencia"] = ["sucursalagencia", "sucursal agencia", "sucursal - agencia", "branch", "office"],
-        ["NroOperacion"] = ["nrooperacion", "nro operacion", "n° operacion", "nº operacion", "numero operacion", "reference", "reference number", "transaction number", "operation number", "document number"],
+        ["NroOperacion"] = ["nrooperacion", "nro operacion", "nÂ° operacion", "nÂº operacion", "numero operacion", "reference", "reference number", "transaction number", "operation number", "document number"],
         ["Usuario"] = ["usuario", "user", "channel user"]
     };
     private static readonly string[] OrderedMovementColumns =
@@ -90,6 +94,10 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         "Proveedor",
         "ItemSistema",
         "DescripcionOperacion",
+        "CDR",
+        "Modulo",
+        "Transaccion",
+        "Relacion",
         "Monto",
         "SucursalAgencia",
         "NroOperacion",
@@ -147,20 +155,13 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         await using var connection = _sqlCommandFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
         var parametrosProcedimiento = await LoadStoredProcedureParametersAsync(connection, cancellationToken);
-        var rawAnalysis = archivos.Any(HasRawFileContent)
-            ? await AnalyzeRawFilesWithOpenAiAsync(archivos, cancellationToken)
-            : null;
-
-        if (rawAnalysis?.ParsedResponse is not null)
-        {
-            return BuildAppAnalysisResponseFromPrompt(rawAnalysis, archivos, parametrosProcedimiento);
-        }
+        ConciliacionBcpRawAnalysisResult? rawAnalysis = null;
 
         var archivosAnalizados = new List<ConciliacionBcpAnalizarArchivoResponseDto>();
         foreach (var archivo in archivos)
         {
             archivosAnalizados.Add(
-                await AnalyzeFileAsync(archivo, null, parametrosProcedimiento, usuario, cancellationToken));
+                await AnalyzeFileAsync(archivo, null, parametrosProcedimiento, usuario, request?.CodigoBanco, cancellationToken));
         }
 
         return new ConciliacionBcpAnalizarResponseDto
@@ -468,7 +469,7 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
             })
             .ToList();
 
-        var registros = BuildConciliacionRegistros(movimientos, planilla)
+        var registros = BuildConciliacionRegistros(movimientos, planilla, request.CodigoBanco)
             .OrderByDescending(item => item.Fecha)
             .ThenBy(item => item.Empresa)
             .ThenBy(item => item.Moneda)
@@ -488,8 +489,8 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         return new ConciliacionBcpConciliarPlanillaResponseDto
         {
             Resumen =
-                $"Conciliación ejecutada sobre {registros.Count} movimiento(s): " +
-                $"{coincidenciasPorNroOperacion} por Nro. Operación, " +
+                $"ConciliaciÃ³n ejecutada sobre {registros.Count} movimiento(s): " +
+                $"{coincidenciasPorNroOperacion} por Nro. OperaciÃ³n, " +
                 $"{coincidenciasPorCuenta} por Cuenta, " +
                 $"{coincidenciasPorCuentaInter} por Cuenta Inter y " +
                 $"{sinCoincidencia} sin coincidencia.",
@@ -964,15 +965,27 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
 
     private static List<ConciliacionBcpConciliarPlanillaRegistroDto> BuildConciliacionRegistros(
         IReadOnlyList<MovimientoBcpBusquedaRow> movimientos,
-        IReadOnlyList<PlanillaConciliacionRow> planillaRows)
+        IReadOnlyList<PlanillaConciliacionRow> planillaRows,
+        string? codigoBanco)
     {
+        var esScotiabank = IsScotiabankCode(codigoBanco);
+
         var contexts = movimientos
             .Select(movimiento =>
             {
+                if (esScotiabank && IsScotiabankOperacionDescartable(movimiento))
+                {
+                    return new MovimientoConciliacionContext
+                    {
+                        Movimiento = movimiento,
+                        Candidates = []
+                    };
+                }
+
                 var nroOperacionNormalizado = NormalizeText(movimiento.NroOperacion)?.Trim() ?? string.Empty;
                 var descripcionNumerica = ExtractDigits(movimiento.DescripcionOperacion);
                 var candidates = planillaRows
-                    .Select(planilla => BuildConciliacionCandidate(movimiento, nroOperacionNormalizado, descripcionNumerica, planilla))
+                    .Select(planilla => BuildConciliacionCandidate(movimiento, nroOperacionNormalizado, descripcionNumerica, planilla, esScotiabank))
                     .Where(candidate => candidate is not null)
                     .Select(candidate => candidate!)
                     .ToList();
@@ -1015,6 +1028,14 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                     : [],
                 context.Candidates.Count > 0))
             .ToList();
+    }
+
+    private static bool IsScotiabankOperacionDescartable(MovimientoBcpBusquedaRow movimiento)
+    {
+        var descripcion = movimiento.DescripcionOperacion;
+        return !string.IsNullOrWhiteSpace(descripcion) &&
+               (descripcion.Contains("COMISION", StringComparison.OrdinalIgnoreCase) ||
+                descripcion.Contains("IMPUESTO", StringComparison.OrdinalIgnoreCase));
     }
 
     private static ConciliacionBcpConciliarPlanillaRegistroDto BuildConciliacionRegistro(
@@ -1159,7 +1180,8 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         MovimientoBcpBusquedaRow movimiento,
         string nroOperacionNormalizado,
         string descripcionNumerica,
-        PlanillaConciliacionRow planilla)
+        PlanillaConciliacionRow planilla,
+        bool esScotiabank)
     {
         if (!string.IsNullOrWhiteSpace(nroOperacionNormalizado) &&
             string.Equals(planilla.NroOperacionNormalizado, nroOperacionNormalizado, StringComparison.OrdinalIgnoreCase))
@@ -1175,6 +1197,11 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                 DiferenciaMontoAbs = CalculateAmountDifferenceAbsolute(movimiento.Monto, planilla.TotalPagar),
                 DiferenciaFechaDias = CalculateDateDifferenceDays(movimiento.Fecha, planilla.FechaDeposito)
             };
+        }
+
+        if (esScotiabank)
+        {
+            return null;
         }
 
         if (!string.IsNullOrWhiteSpace(descripcionNumerica) &&
@@ -1442,17 +1469,17 @@ ORDER BY ic.key_ordinal;";
 
         if (filasDuplicadasEnBase > 0)
         {
-            warnings.Add($"{filasDuplicadasEnBase} registro(s) ya existían en la base de datos.");
+            warnings.Add($"{filasDuplicadasEnBase} registro(s) ya existÃ­an en la base de datos.");
         }
 
         if (filasDuplicadasEnLote > 0)
         {
-            warnings.Add($"{filasDuplicadasEnLote} registro(s) venían repetidos en el archivo procesado.");
+            warnings.Add($"{filasDuplicadasEnLote} registro(s) venÃ­an repetidos en el archivo procesado.");
         }
 
         if (filasOmitidasPorIndiceDuranteInsercion > 0)
         {
-            warnings.Add($"{filasOmitidasPorIndiceDuranteInsercion} registro(s) fueron descartados al grabar por validación final de llave única.");
+            warnings.Add($"{filasOmitidasPorIndiceDuranteInsercion} registro(s) fueron descartados al grabar por validaciÃ³n final de llave Ãºnica.");
         }
 
         return warnings.Count > 0
@@ -1503,6 +1530,16 @@ ORDER BY ic.key_ordinal;";
             if (TryGetValueIgnoreCase(fila, "NumeroOperacion", out var numeroOperacion))
             {
                 return numeroOperacion;
+            }
+
+            if (TryGetValueIgnoreCase(fila, "Operación - Número", out var operacionNumero))
+            {
+                return operacionNumero;
+            }
+
+            if (TryGetValueIgnoreCase(fila, "Nº operación", out var numeroOperacionAcento))
+            {
+                return numeroOperacionAcento;
             }
         }
 
@@ -1559,6 +1596,7 @@ ORDER BY ic.key_ordinal;";
         ConciliacionBcpAnalizarArchivoAiResponseDto? aiArchivoFromBatch,
         IReadOnlyList<StoredProcedureParameterInfo> parametrosProcedimiento,
         string? usuario,
+        string? codigoBanco,
         CancellationToken cancellationToken)
     {
         if (!HasOpenAiConfiguration())
@@ -1570,10 +1608,23 @@ ORDER BY ic.key_ordinal;";
         try
         {
             var aiArchivo = aiArchivoFromBatch;
+            var matrix = archivo.Filas
+                .Where(row => row is not null)
+                .Select(row => row.Select(cell => cell?.Trim() ?? string.Empty).ToList())
+                .ToList();
+            var detectedHeaderRowIndex = DetectHeaderRowIndex(matrix);
+            var normalizedHeaders = BuildNormalizedHeaderInfos(archivo.Encabezados);
+            var detectedHeaders = detectedHeaderRowIndex.HasValue && detectedHeaderRowIndex.Value < matrix.Count
+                ? BuildNormalizedHeaderInfos(matrix[detectedHeaderRowIndex.Value])
+                : [];
+
+            var selectedHeaders = detectedHeaders.Count > 0
+                ? detectedHeaders
+                : normalizedHeaders;
 
             if (aiArchivo is null)
             {
-                var analysisInstructions = BuildBcpAnalysisInstructions();
+                var analysisInstructions = BuildBcpAnalysisInstructions(codigoBanco);
                 var promptPayload = new
                 {
                     archivo = new
@@ -1582,12 +1633,20 @@ ORDER BY ic.key_ordinal;";
                         archivo.NombreHoja,
                         archivo.NumeroHoja,
                         archivo.TotalFilas,
-                        archivo.Encabezados,
+                        encabezados = selectedHeaders.Select(header => header.Header).ToList(),
                         archivo.Filas,
                         archivo.FilasMuestra
                     },
                     parametrosProcedimiento = parametrosProcedimiento.Select(MapParameter).ToList(),
-                    instrucciones = analysisInstructions
+                    instrucciones = analysisInstructions,
+                    instruccionesBanco = IsScotiabankCode(codigoBanco)
+                        ? new[]
+                        {
+                            "Para SCOTIABANK, la fila 8 contiene los titulos de la tabla de movimientos y los registros comienzan en la fila siguiente.",
+                            "Para SCOTIABANK, mapear tambien las columnas CDR, Modulo, Transaccion y Relacion.",
+                            "Para SCOTIABANK, no perder CDR, Modulo, Transaccion ni Relacion aunque vengan como texto numerico."
+                        }
+                        : Array.Empty<string>()
                 };
 
                 var analysisJson = await SendOpenAiChatCompletionAsync(
@@ -1595,7 +1654,7 @@ ORDER BY ic.key_ordinal;";
                         new OpenAiChatMessage
                         {
                             Role = "system",
-                            Content = """
+                            Content = $"""
  Eres un analista experto en archivos Excel de movimientos bancarios BCP.
  Tu tarea es identificar la estructura del archivo, reconocer la hoja correcta, detectar encabezados aunque tengan variaciones, y devolver un JSON valido que sirva para consolidar e insertar movimientos en dbo.MovimientosBcp.
  Debes respetar las reglas de normalizacion, validacion y clasificacion descritas en las instrucciones del usuario.
@@ -1604,6 +1663,7 @@ ORDER BY ic.key_ordinal;";
  La respuesta debe tener un objeto raiz con la propiedad "archivos", incluso si solo analizas un archivo.
  Cada elemento de "archivos" debe incluir: nombreArchivo, nombreHoja, numeroHoja, filaCabecera, filaDatos, requiereRevision, observacion, advertencias, mapeos y filasNormalizadas.
  No uses markdown, bloques ```json ni texto adicional.
+  {GetScotiabankSystemPromptExtra(codigoBanco)}
  """
                         },
                         new OpenAiChatMessage
@@ -1621,16 +1681,32 @@ ORDER BY ic.key_ordinal;";
 
             if (aiArchivo is null)
             {
-                throw new InvalidOperationException(
-                    $"ChatGPT no devolvio una estructura util para el archivo {archivo.NombreArchivo}.");
+                var heuristicMappings = BuildBcpFallbackMappings(selectedHeaders);
+                if (heuristicMappings.Count == 0)
+                {
+                    var procParams = parametrosProcedimiento
+                        .Where(parametro => !parametro.EsSalida)
+                        .ToList();
+                    heuristicMappings = BuildFallbackFromStoredProcedureParams(selectedHeaders, procParams);
+                }
+
+                aiArchivo = new ConciliacionBcpAnalizarArchivoAiResponseDto
+                {
+                    NombreArchivo = archivo.NombreArchivo,
+                    NombreHoja = archivo.NombreHoja,
+                    NumeroHoja = archivo.NumeroHoja,
+                    FilaCabecera = detectedHeaderRowIndex.HasValue ? detectedHeaderRowIndex.Value + 1 : (selectedHeaders.Count > 0 ? 1 : null),
+                    FilaDatos = detectedHeaderRowIndex.HasValue ? detectedHeaderRowIndex.Value + 2 : (selectedHeaders.Count > 0 ? 2 : null),
+                    RequiereRevision = heuristicMappings.Count == 0,
+                    Observacion = "Analisis heuristico generado porque ChatGPT no devolvio una estructura util.",
+                    Advertencias = ["Se aplico analisis heuristico por ausencia de respuesta util de ChatGPT."],
+                    Mapeos = heuristicMappings,
+                    FilasNormalizadas = []
+                };
             }
 
-            var normalizedHeaders = archivo.Encabezados
-                .Where(header => !string.IsNullOrWhiteSpace(header))
-                .Select(header => new HeaderInfo(header.Trim(), NormalizeKey(header)))
-                .ToList();
             var mapeosIa = NormalizeMappings(aiArchivo.Mapeos, parametrosProcedimiento);
-            var mapeosHeuristicos = BuildBcpFallbackMappings(normalizedHeaders);
+            var mapeosHeuristicos = BuildBcpFallbackMappings(selectedHeaders);
             var mapeos = MergeMappings(mapeosIa, mapeosHeuristicos);
             var advertencias = (aiArchivo.Advertencias ?? [])
                 .Where(item => !string.IsNullOrWhiteSpace(item))
@@ -1642,13 +1718,25 @@ ORDER BY ic.key_ordinal;";
                 var procParams = parametrosProcedimiento
                     .Where(parametro => !parametro.EsSalida)
                     .ToList();
-                mapeos = BuildFallbackFromStoredProcedureParams(normalizedHeaders, procParams);
+                mapeos = BuildFallbackFromStoredProcedureParams(selectedHeaders, procParams);
             }
+
+            var filaCabecera = aiArchivo.FilaCabecera ?? (detectedHeaderRowIndex.HasValue ? detectedHeaderRowIndex.Value + 1 : (selectedHeaders.Count > 0 ? 1 : null));
+            var filaDatos = aiArchivo.FilaDatos ?? ((filaCabecera ?? 1) + 1);
+
+            var filasNormalizadasDesdeExcel = BuildNormalizedRowsFromAnalysis(
+                archivo,
+                mapeos,
+                filaCabecera,
+                filaDatos,
+                usuario,
+                codigoBanco);
 
             var filasNormalizadasIa = BuildNormalizedRowsFromAiOutput(
                 aiArchivo.FilasNormalizadas,
                 archivo.NombreArchivo,
-                usuario);
+                usuario,
+                codigoBanco);
 
             if (mapeosIa.Count == 0 && mapeos.Count > 0 && filasNormalizadasIa.Count == 0)
             {
@@ -1661,16 +1749,9 @@ ORDER BY ic.key_ordinal;";
                     $"ChatGPT no devolvio mapeos validos para el archivo {archivo.NombreArchivo}.");
             }
 
-            var filaCabecera = aiArchivo.FilaCabecera ?? (archivo.Encabezados.Count > 0 ? 1 : null);
-            var filaDatos = aiArchivo.FilaDatos ?? ((filaCabecera ?? 1) + 1);
-            var filasNormalizadas = filasNormalizadasIa.Count > 0
-                ? filasNormalizadasIa
-                : BuildNormalizedRowsFromAnalysis(
-                    archivo,
-                    mapeos,
-                    filaCabecera,
-                    filaDatos,
-                    usuario);
+            var filasNormalizadas = filasNormalizadasDesdeExcel.Count > 0
+                ? filasNormalizadasDesdeExcel
+                : filasNormalizadasIa;
 
             if (filasNormalizadas.Count == 0)
             {
@@ -1706,6 +1787,7 @@ ORDER BY ic.key_ordinal;";
 
     private async Task<ConciliacionBcpRawAnalysisResult?> AnalyzeRawFilesWithOpenAiAsync(
         IReadOnlyList<ConciliacionBcpArchivoMuestraDto> archivos,
+        string? codigoBanco,
         CancellationToken cancellationToken)
     {
         var rawFiles = archivos.Where(HasRawFileContent).ToList();
@@ -1714,7 +1796,7 @@ ORDER BY ic.key_ordinal;";
             return null;
         }
 
-        var prompt = BuildRawFilesPrompt();
+        var prompt = BuildRawFilesPrompt(codigoBanco);
         var analysisJson = await SendOpenAiRawFilesAnalysisAsync(rawFiles, prompt, cancellationToken);
         var parsed = ParsePromptAnalysisResponse(analysisJson);
 
@@ -1737,14 +1819,15 @@ ORDER BY ic.key_ordinal;";
     private static ConciliacionBcpAnalizarResponseDto BuildAppAnalysisResponseFromPrompt(
         ConciliacionBcpRawAnalysisResult rawAnalysis,
         IReadOnlyList<ConciliacionBcpArchivoMuestraDto> archivos,
-        IReadOnlyList<StoredProcedureParameterInfo> parametrosProcedimiento)
+        IReadOnlyList<StoredProcedureParameterInfo> parametrosProcedimiento,
+        string? codigoBanco)
     {
         var promptResponse = rawAnalysis.ParsedResponse!;
         var archivoAliasMap = BuildArchivoAliasMap(promptResponse, archivos);
         var clientMetadata = archivos
             .Select(ExtractClientFileMetadata)
             .ToList();
-        var movimientosAsignados = BuildPromptMovementsByFile(promptResponse, archivos, clientMetadata, archivoAliasMap);
+        var movimientosAsignados = BuildPromptMovementsByFile(promptResponse, archivos, clientMetadata, archivoAliasMap, codigoBanco);
         var archivosAnalizados = new List<ConciliacionBcpAnalizarArchivoResponseDto>();
 
         for (var index = 0; index < archivos.Count; index++)
@@ -1811,12 +1894,29 @@ ORDER BY ic.key_ordinal;";
         ConciliacionBcpPromptAnalysisResponseDto promptResponse,
         IReadOnlyList<ConciliacionBcpArchivoMuestraDto> archivos,
         IReadOnlyList<ClientFileMetadata> clientMetadata,
-        IReadOnlyDictionary<string, string> archivoAliasMap)
+        IReadOnlyDictionary<string, string> archivoAliasMap,
+        string? codigoBanco)
     {
         var movimientosPorArchivo = archivos.ToDictionary(
             item => item.NombreArchivo,
             _ => new List<ConciliacionBcpPromptMovimientoDto>(),
             StringComparer.OrdinalIgnoreCase);
+        var cuotasPorArchivo = archivos.ToDictionary(
+            item => item.NombreArchivo,
+            _ => 0,
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var resumen in promptResponse.ResumenArchivos)
+        {
+            var matchedFileName = FindBestMatchingFileNameForResumen(resumen, clientMetadata, archivoAliasMap);
+            if (matchedFileName is null || !cuotasPorArchivo.ContainsKey(matchedFileName))
+            {
+                continue;
+            }
+
+            cuotasPorArchivo[matchedFileName] += Math.Max(resumen.TotalMovimientos, 0);
+        }
+
         var movimientosExactosPorClave = promptResponse.Movimientos
             .GroupBy(GetPromptMovementCompositeKey, StringComparer.OrdinalIgnoreCase)
             .Where(group => !string.IsNullOrWhiteSpace(group.Key))
@@ -1837,7 +1937,7 @@ ORDER BY ic.key_ordinal;";
 
             var nombreArchivoDestino = archivos[index].NombreArchivo;
             movimientosPorArchivo[nombreArchivoDestino].AddRange(
-                movimientosExactos.Select(movimiento => CloneMovementForArchivoOrigen(movimiento, nombreArchivoDestino)));
+                movimientosExactos.Select(movimiento => CloneMovementForArchivoOrigen(movimiento, nombreArchivoDestino, codigoBanco)));
             foreach (var movimiento in movimientosExactos)
             {
                 movimientosYaAsignados.Add(movimiento);
@@ -1861,19 +1961,57 @@ ORDER BY ic.key_ordinal;";
             if (matchedFileName is not null &&
                 movimientosPorArchivo.TryGetValue(matchedFileName, out var movimientos))
             {
-                movimientos.Add(CloneMovementForArchivoOrigen(movimiento, matchedFileName));
+                movimientos.Add(CloneMovementForArchivoOrigen(movimiento, matchedFileName, codigoBanco));
+                if (cuotasPorArchivo.TryGetValue(matchedFileName, out var cuotaActual) && cuotaActual > 0)
+                {
+                    cuotasPorArchivo[matchedFileName] = cuotaActual - 1;
+                }
+                continue;
+            }
+
+            var archivoFallback = ObtenerArchivoFallbackParaMovimiento(archivos, cuotasPorArchivo);
+            if (archivoFallback is not null &&
+                movimientosPorArchivo.TryGetValue(archivoFallback, out var movimientosFallback))
+            {
+                movimientosFallback.Add(CloneMovementForArchivoOrigen(movimiento, archivoFallback, codigoBanco));
+                if (cuotasPorArchivo.TryGetValue(archivoFallback, out var cuotaFallback) && cuotaFallback > 0)
+                {
+                    cuotasPorArchivo[archivoFallback] = cuotaFallback - 1;
+                }
             }
         }
 
         return movimientosPorArchivo;
     }
 
+    private static string? ObtenerArchivoFallbackParaMovimiento(
+        IReadOnlyList<ConciliacionBcpArchivoMuestraDto> archivos,
+        IReadOnlyDictionary<string, int> cuotasPorArchivo)
+    {
+        var archivoConCuota = cuotasPorArchivo
+            .Where(item => item.Value > 0)
+            .OrderByDescending(item => item.Value)
+            .ThenBy(item => archivos
+                .Select((archivo, index) => new { archivo.NombreArchivo, index })
+                .FirstOrDefault(candidate => string.Equals(candidate.NombreArchivo, item.Key, StringComparison.OrdinalIgnoreCase))?.index ?? int.MaxValue)
+            .FirstOrDefault();
+
+        if (!string.IsNullOrWhiteSpace(archivoConCuota.Key))
+        {
+            return archivoConCuota.Key;
+        }
+
+        return archivos.FirstOrDefault()?.NombreArchivo;
+    }
+
     private static ConciliacionBcpPromptMovimientoDto CloneMovementForArchivoOrigen(
         ConciliacionBcpPromptMovimientoDto movimiento,
-        string archivoOrigen)
+        string archivoOrigen,
+        string? codigoBanco)
     {
         return new ConciliacionBcpPromptMovimientoDto
         {
+            CodigoBanco = NormalizeText(movimiento.CodigoBanco) ?? NormalizeText(codigoBanco),
             Empresa = movimiento.Empresa,
             Cuenta = movimiento.Cuenta,
             Moneda = movimiento.Moneda,
@@ -1882,6 +2020,11 @@ ORDER BY ic.key_ordinal;";
             Proveedor = movimiento.Proveedor,
             ItemSistema = movimiento.ItemSistema,
             DescripcionOperacion = movimiento.DescripcionOperacion,
+            Referencia = movimiento.Referencia,
+            CDR = movimiento.CDR,
+            Modulo = movimiento.Modulo,
+            Transaccion = movimiento.Transaccion,
+            Relacion = movimiento.Relacion,
             Monto = movimiento.Monto,
             SucursalAgencia = movimiento.SucursalAgencia,
             NumeroOperacion = movimiento.NumeroOperacion,
@@ -2485,6 +2628,28 @@ ORDER BY ic.key_ordinal;";
     private static Dictionary<string, object?> MapPromptMovimientoToRow(ConciliacionBcpPromptMovimientoDto movimiento)
     {
         var row = CreateEmptyOrderedMovementRow();
+        var esScotiabank = IsScotiabankCode(movimiento.CodigoBanco);
+        var cdr = esScotiabank
+            ? NormalizeScotiabankCodeSegment(NormalizeText(movimiento.CDR), 3)
+            : NormalizeText(movimiento.CDR);
+        var modulo = esScotiabank
+            ? NormalizeScotiabankCodeSegment(NormalizeText(movimiento.Modulo), 3)
+            : NormalizeText(movimiento.Modulo);
+        var transaccion = esScotiabank
+            ? NormalizeScotiabankCodeSegment(NormalizeText(movimiento.Transaccion), 3)
+            : NormalizeText(movimiento.Transaccion);
+        var relacion = esScotiabank
+            ? NormalizeScotiabankCodeSegment(NormalizeText(movimiento.Relacion), 4)
+            : NormalizeText(movimiento.Relacion);
+        var numeroOperacionDirecta = NormalizeText(movimiento.NumeroOperacion);
+        var numeroOperacionCompuesta = esScotiabank &&
+                                       !string.IsNullOrWhiteSpace(cdr) &&
+                                       !string.IsNullOrWhiteSpace(modulo) &&
+                                       !string.IsNullOrWhiteSpace(transaccion) &&
+                                       !string.IsNullOrWhiteSpace(relacion)
+            ? $"{cdr}{modulo}{transaccion}{relacion}"
+            : null;
+
         row["Empresa"] = NormalizeText(movimiento.Empresa);
         row["Cuenta"] = NormalizeText(movimiento.Cuenta);
         row["Moneda"] = NormalizeText(movimiento.Moneda);
@@ -2493,9 +2658,17 @@ ORDER BY ic.key_ordinal;";
         row["Proveedor"] = NormalizeText(movimiento.Proveedor);
         row["ItemSistema"] = NormalizeText(movimiento.ItemSistema);
         row["DescripcionOperacion"] = NormalizeText(movimiento.DescripcionOperacion);
+        row["CDR"] = cdr;
+        row["Modulo"] = modulo;
+        row["Transaccion"] = transaccion;
+        row["Relacion"] = relacion;
         row["Monto"] = movimiento.Monto;
         row["SucursalAgencia"] = NormalizeText(movimiento.SucursalAgencia);
-        row["NroOperacion"] = NormalizeText(movimiento.NumeroOperacion);
+        row["NroOperacion"] = numeroOperacionCompuesta
+            ?? numeroOperacionDirecta
+            ?? (esScotiabank
+                ? ComposeScotiabankOperationNumber(cdr, modulo, transaccion, relacion)
+                : null);
         row["Usuario"] = NormalizeText(movimiento.Usuario);
         row["ArchivoOrigen"] = ResolveArchivoOrigenDisplay(
             movimiento.ArchivoOrigen,
@@ -2512,6 +2685,43 @@ ORDER BY ic.key_ordinal;";
         row["EstadoConciliacion"] = ResolveEstadoConciliacion(esNroOperacionValido, descripcionOperacion);
 
         return row;
+    }
+
+    private static List<HeaderInfo> BuildNormalizedHeaderInfos(IEnumerable<string> headers)
+    {
+        return headers
+            .Where(header => !string.IsNullOrWhiteSpace(header))
+            .Select(header =>
+            {
+                var text = NormalizeText(header) ?? string.Empty;
+                return new HeaderInfo(text.Trim(), NormalizeKey(text));
+            })
+            .Where(header => !string.IsNullOrWhiteSpace(header.Header))
+            .ToList();
+    }
+
+    private static int CountRecognizedHeaderMatches(IReadOnlyList<HeaderInfo> headers)
+    {
+        if (headers.Count == 0)
+        {
+            return 0;
+        }
+
+        return headers.Count(header =>
+            HeaderAliases.Keys.Any(target => MatchesAlias(target, header.Normalized)));
+    }
+
+    private static string? ComposeScotiabankOperationNumber(string? cdr, string? modulo, string? transaccion, string? relacion)
+    {
+        if (string.IsNullOrWhiteSpace(cdr) ||
+            string.IsNullOrWhiteSpace(modulo) ||
+            string.IsNullOrWhiteSpace(transaccion) ||
+            string.IsNullOrWhiteSpace(relacion))
+        {
+            return null;
+        }
+
+        return $"{cdr}{modulo}{transaccion}{relacion}";
     }
 
     private static ConciliacionBcpPromptAnalysisResponseDto? ParsePromptAnalysisResponse(string analysisJson)
@@ -2584,6 +2794,8 @@ ORDER BY ic.key_ordinal;";
 
     private static ConciliacionBcpPromptMovimientoDto MapAnalysisRowToPromptMovimiento(Dictionary<string, object?> row)
     {
+        var nroOperacion = GetText(row, "NroOperacion") ?? GetText(row, "NumeroOperacion");
+
         return new ConciliacionBcpPromptMovimientoDto
         {
             Empresa = GetText(row, "Empresa"),
@@ -2594,12 +2806,33 @@ ORDER BY ic.key_ordinal;";
             Proveedor = GetText(row, "Proveedor"),
             ItemSistema = GetText(row, "ItemSistema"),
             DescripcionOperacion = GetText(row, "DescripcionOperacion"),
+            CDR = GetText(row, "CDR") ?? TryExtractScotiabankSegmentFromOperationNumber(nroOperacion, 0, 3),
+            Modulo = GetText(row, "Modulo") ?? TryExtractScotiabankSegmentFromOperationNumber(nroOperacion, 3, 3),
+            Transaccion = GetText(row, "Transaccion") ?? TryExtractScotiabankSegmentFromOperationNumber(nroOperacion, 6, 3),
+            Relacion = GetText(row, "Relacion") ?? TryExtractScotiabankSegmentFromOperationNumber(nroOperacion, 9, 4),
             Monto = GetDecimal(row, "Monto"),
             SucursalAgencia = GetText(row, "SucursalAgencia"),
-            NumeroOperacion = GetText(row, "NroOperacion"),
+            NumeroOperacion = nroOperacion,
             Usuario = GetText(row, "Usuario"),
             ArchivoOrigen = GetText(row, "ArchivoOrigen")
         };
+    }
+
+    private static string? TryExtractScotiabankSegmentFromOperationNumber(string? nroOperacion, int startIndex, int length)
+    {
+        if (string.IsNullOrWhiteSpace(nroOperacion))
+        {
+            return null;
+        }
+
+        var value = NormalizeOperationNumber(nroOperacion);
+        if (value.Length < startIndex + length)
+        {
+            return null;
+        }
+
+        var segment = value.Substring(startIndex, length);
+        return string.IsNullOrWhiteSpace(segment) ? null : segment;
     }
 
     private static string? GetText(IReadOnlyDictionary<string, object?> row, string field)
@@ -2637,87 +2870,153 @@ ORDER BY ic.key_ordinal;";
             .Count(group => group.Count() > 1);
     }
 
-    private static string BuildRawFilesPrompt()
+    private static bool IsScotiabankCode(string? codigoBanco)
     {
+        return NormalizeKey(codigoBanco).Contains("scotiabank", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetScotiabankRawPromptExtra(string? codigoBanco)
+    {
+        if (!IsScotiabankCode(codigoBanco))
+        {
+            return string.Empty;
+        }
+
         return """
-Actúa como un analizador experto de archivos Excel bancarios BCP.
+
+Reglas especificas para SCOTIABANK:
+1. Los titulos de la tabla de movimientos se encuentran en la fila 8.
+2. Desde la fila siguiente comienzan los registros a analizar.
+3. Los campos CDR, Modulo, Transaccion y Relacion deben conservarse y devolverse siempre como texto.
+4. Nunca elimines ceros a la izquierda en CDR, Modulo, Transaccion ni Relacion.
+5. El NroOperacion de cada movimiento debe construirse concatenando CDR + Modulo + Transaccion + Relacion cuando el archivo no lo traiga en una sola columna.
+6. Si el archivo contiene una columna llamada "NroOperacion" o equivalente, priorizarla solo si no pierde informacion frente a la concatenacion anterior.
+7. En cada objeto del arreglo "movimientos" agrega tambien las propiedades "cdr", "modulo", "transaccion" y "relacion".
+8. Si alguna de esas propiedades viene vacia, devuelve null.
+9. No elimines esas propiedades aunque el archivo tenga tambien una columna unica de numero de operacion.
+
+Fragmento de estructura esperado para cada movimiento de SCOTIABANK:
+{
+  "empresa": "",
+  "cuenta": "",
+  "moneda": "",
+  "fecha": "",
+  "fechaValuta": null,
+  "proveedor": null,
+  "itemSistema": null,
+  "descripcionOperacion": "",
+  "cdr": "",
+  "modulo": "",
+  "transaccion": "",
+  "relacion": "",
+  "monto": 0,
+  "sucursalAgencia": "",
+  "numeroOperacion": "",
+  "usuario": null,
+  "archivoOrigen": ""
+}
+""";
+    }
+
+    private static string GetScotiabankSystemPromptExtra(string? codigoBanco)
+    {
+        if (!IsScotiabankCode(codigoBanco))
+        {
+            return string.Empty;
+        }
+
+        return """
+ SCOTIABANK:
+- Considera que la fila 8 contiene los titulos de la tabla de movimientos.
+- Mapea y conserva las columnas CDR, Modulo, Transaccion y Relacion como texto literal.
+- No elimines ceros a la izquierda en CDR, Modulo, Transaccion ni Relacion.
+- Si esas columnas vienen con menos digitos de los visibles en el Excel, completalas con ceros a la izquierda hasta conservar el formato de la celda.
+- Si no existe una columna unica de numero de operacion, construye NroOperacion concatenando CDR + Modulo + Transaccion + Relacion.
+- No omitas esas columnas aunque algunas vengan como texto numerico.
+""";
+    }
+
+    private static string BuildRawFilesPrompt(string? codigoBanco)
+    {
+        var prompt = """
+ActÃºa como un analizador experto de archivos Excel bancarios BCP.
 
 Vas a recibir uno o varios archivos Excel de movimientos bancarios. Debes analizar SIEMPRE el contenido real de los archivos cargados usando la API de ChatGPT instalada en el sistema.
 
-Tu objetivo es consolidar todos los movimientos encontrados en un único resultado normalizado, para luego generar un Excel final con el mismo formato del archivo:
-“movimientos_consolidados_ordenados_por_operacion.xlsx”.
+Tu objetivo es consolidar todos los movimientos encontrados en un Ãºnico resultado normalizado, para luego generar un Excel final con el mismo formato del archivo:
+â€œmovimientos_consolidados_ordenados_por_operacion.xlsxâ€.
 
 IMPORTANTE:
-Devuelve únicamente un JSON válido.
+Devuelve Ãºnicamente un JSON vÃ¡lido.
 No devuelvas explicaciones.
 No devuelvas markdown.
 No inventes datos.
-Si un campo no existe, devuélvelo como null.
+Si un campo no existe, devuÃ©lvelo como null.
 
 Estructura conocida de los archivos:
-Los archivos suelen tener una hoja llamada “AccountDetail”.
+Los archivos suelen tener una hoja llamada â€œAccountDetailâ€.
 
 En la parte superior del archivo se encuentran datos de cabecera:
 - Cuenta
 - Moneda
 - Tipo de cuenta
 
-También puede existir una sección de saldos:
-- Saldo líquido (A)
+TambiÃ©n puede existir una secciÃ³n de saldos:
+- Saldo lÃ­quido (A)
 - Saldo no disponible (B)
 - Saldo contable (A+B)
-- Cheques en trámite
-- Consultas en trámite
+- Cheques en trÃ¡mite
+- Consultas en trÃ¡mite
 
 Luego existe una tabla de movimientos. La fila de encabezados puede tener una de estas estructuras:
 
 Estructura 1:
 - Fecha
 - Fecha valuta
-- Descripción operación
+ - Descripción operación
 - Monto
 - Sucursal - agencia
-- Nº operación
+ - Nº operación
 - Usuario
 
 Estructura 2:
 - Fecha
 - PROVEEDOR
 - ITEM DEL SISTEMA
-- Descripción operación
+ - Descripción operación
 - Monto
 - Sucursal - agencia
-- Nº operación
+ - Nº operación
 - Usuario
 
-Reglas de análisis:
-1. Buscar automáticamente la hoja que contiene los movimientos. Normalmente será “AccountDetail”.
-2. Detectar la cuenta desde la fila donde la primera columna dice “Cuenta”.
+Reglas de anÃ¡lisis:
+1. Buscar automÃ¡ticamente la hoja que contiene los movimientos. Normalmente serÃ¡ â€œAccountDetailâ€.
+2. Detectar la cuenta desde la fila donde la primera columna dice â€œCuentaâ€.
 3. Separar la cuenta bancaria y la empresa cuando el valor tenga el formato:
-   “193-2390016-0-74 - CJ TELECOM SAC”.
+   â€œ193-2390016-0-74 - CJ TELECOM SACâ€.
    En ese caso:
-   - Cuenta = “193-2390016-0-74”
-   - Empresa = “CJ TELECOM SAC”
-4. Detectar la moneda desde la fila donde la primera columna dice “Moneda”.
-5. Detectar el tipo de cuenta desde la fila donde la primera columna dice “Tipo de cuenta”.
-6. Detectar los saldos desde la sección donde aparecen los encabezados de saldos.
-7. Detectar automáticamente la fila de encabezados de movimientos buscando la columna “Fecha”.
-8. No asumir una posición fija de columnas. Usar siempre el nombre del encabezado.
-9. Si el archivo tiene columna “PROVEEDOR”, mapearla como proveedor.
-10. Si el archivo tiene columna “ITEM DEL SISTEMA”, mapearla como itemSistema.
-11. Si el archivo no tiene “PROVEEDOR” ni “ITEM DEL SISTEMA”, devolver esos campos como null.
-12. Si existe la columna “Fecha valuta”, mapearla como fechaValuta.
-13. Si no existe “Fecha valuta”, devolver fechaValuta como null.
+   - Cuenta = â€œ193-2390016-0-74â€
+   - Empresa = â€œCJ TELECOM SACâ€
+4. Detectar la moneda desde la fila donde la primera columna dice â€œMonedaâ€.
+5. Detectar el tipo de cuenta desde la fila donde la primera columna dice â€œTipo de cuentaâ€.
+6. Detectar los saldos desde la secciÃ³n donde aparecen los encabezados de saldos.
+7. Detectar automÃ¡ticamente la fila de encabezados de movimientos buscando la columna â€œFechaâ€.
+8. No asumir una posiciÃ³n fija de columnas. Usar siempre el nombre del encabezado.
+9. Si el archivo tiene columna â€œPROVEEDORâ€, mapearla como proveedor.
+10. Si el archivo tiene columna â€œITEM DEL SISTEMAâ€, mapearla como itemSistema.
+11. Si el archivo no tiene â€œPROVEEDORâ€ ni â€œITEM DEL SISTEMAâ€, devolver esos campos como null.
+12. Si existe la columna â€œFecha valutaâ€, mapearla como fechaValuta.
+13. Si no existe â€œFecha valutaâ€, devolver fechaValuta como null.
 14. Mantener todos los movimientos de todos los archivos.
-15. Ignorar filas vacías, títulos, subtítulos, totales, saldos y cualquier fila que no corresponda a un movimiento bancario.
-16. Una fila es movimiento válido si tiene fecha válida, descripción de operación y monto numérico.
+15. Ignorar filas vacÃ­as, tÃ­tulos, subtÃ­tulos, totales, saldos y cualquier fila que no corresponda a un movimiento bancario.
+16. Una fila es movimiento vÃ¡lido si tiene fecha vÃ¡lida, descripciÃ³n de operaciÃ³n y monto numÃ©rico.
 17. Convertir fechas al formato yyyy-MM-dd.
-18. Convertir montos y saldos a número decimal.
+18. Convertir montos y saldos a nÃºmero decimal.
 19. Mantener egresos como montos negativos.
 20. Mantener ingresos como montos positivos.
-21. No cambiar la descripción original de la operación.
-22. No cambiar el número de operación.
-23. No completar proveedor ni itemSistema por deducción.
+        21. No cambiar la descripciÃ³n original de la operación.
+        22. La columna de número de operación puede llamarse "Operación - Número", "Operacion - Numero", "Nº operación" o "N° operación"; capturar siempre su valor y devolverlo en numeroOperacion.
+23. No completar proveedor ni itemSistema por deducciÃ³n.
 24. Agregar el nombre del archivo origen en cada movimiento.
 25. El valor de archivoOrigen debe ser el nombre exacto del archivo de entrada, no la hoja del Excel.
 26. Ordenar los movimientos por:
@@ -2734,7 +3033,7 @@ Columnas finales requeridas para el Excel:
 - Fecha valuta
 - Proveedor
 - Item del sistema
-- Descripción operación
+- DescripciÃ³n operaciÃ³n
 - Monto
 - Sucursal - agencia
 - Nº operación
@@ -2797,24 +3096,25 @@ Validaciones obligatorias:
 7. Detectar posibles duplicados usando:
    empresa + cuenta + fecha + numeroOperacion + descripcionOperacion + monto.
 8. Si existen duplicados, agregarlos en duplicadosDetectados.
-9. Si un archivo no tiene movimientos válidos, agregarlo a archivosConError.
-10. Si existe algún error crítico, insertable debe ser false.
+9. Si un archivo no tiene movimientos vÃ¡lidos, agregarlo a archivosConError.
+10. Si existe algÃºn error crÃ­tico, insertable debe ser false.
 
-El JSON devuelto será usado por el backend para:
-1. Mostrar la vista previa del análisis.
-2. Activar el botón “Exportar análisis”.
+El JSON devuelto serÃ¡ usado por el backend para:
+1. Mostrar la vista previa del anÃ¡lisis.
+2. Activar el botÃ³n â€œExportar anÃ¡lisisâ€.
 3. Generar un Excel con las hojas:
    - Resumen
    - Movimientos Ordenados
 
-No debes programar la lectura pensando que siempre están las mismas columnas. El análisis debe detectar la fila de encabezados y mapear columnas por nombre, porque algunos archivos tienen “Proveedor” e “Item del sistema”, y otros no.
+No debes programar la lectura pensando que siempre estÃ¡n las mismas columnas. El anÃ¡lisis debe detectar la fila de encabezados y mapear columnas por nombre, porque algunos archivos tienen â€œProveedorâ€ e â€œItem del sistemaâ€, y otros no.
 """;
+        return prompt + GetScotiabankRawPromptExtra(codigoBanco);
     }
 
     private static string BuildExportPrompt()
     {
         return """
-Genera el archivo Excel final usando el JSON normalizado del análisis.
+Genera el archivo Excel final usando el JSON normalizado del anÃ¡lisis.
 
 El Excel debe llamarse:
 movimientos_consolidados_ordenados_por_operacion.xlsx
@@ -2831,7 +3131,7 @@ Debe mostrar:
 - Cantidad de duplicados detectados
 - Estado insertable
 
-También debe incluir un resumen por archivo con:
+TambiÃ©n debe incluir un resumen por archivo con:
 Archivo origen, Empresa, Cuenta, Moneda, Tipo de cuenta, Total movimientos, Total ingresos, Total egresos y Neto.
 
 2. Movimientos Ordenados
@@ -2843,10 +3143,10 @@ Fecha
 Fecha valuta
 Proveedor
 Item del sistema
-Descripción operación
+DescripciÃ³n operaciÃ³n
 Monto
 Sucursal - agencia
-Nº operación
+  Nº operación
 Usuario
 
 Reglas de formato:
@@ -2854,12 +3154,12 @@ Reglas de formato:
 2. Aplicar autofiltro.
 3. Congelar la primera fila.
 4. Formato de fecha dd/MM/yyyy.
-5. Formato numérico para Monto con dos decimales.
+5. Formato numÃ©rico para Monto con dos decimales.
 6. Ajustar ancho de columnas.
 7. Ordenar la hoja por Fecha descendente, Empresa, Moneda y Nº operación.
-8. No incluir columnas técnicas como archivoOrigen, validaciones o claves internas en la hoja Movimientos Ordenados, salvo que el usuario lo solicite.
+8. No incluir columnas tÃ©cnicas como archivoOrigen, validaciones o claves internas en la hoja Movimientos Ordenados, salvo que el usuario lo solicite.
 
-Devuelve únicamente JSON válido con esta estructura:
+Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
 {
   "nombreArchivo": "movimientos_consolidados_ordenados_por_operacion.xlsx",
   "archivosProcesados": 0,
@@ -2906,8 +3206,56 @@ Devuelve únicamente JSON válido con esta estructura:
 """;
     }
 
-    private static object BuildBcpAnalysisInstructions()
+    private static object BuildBcpAnalysisInstructions(string? codigoBanco)
     {
+        var columnasTablaDestino = new List<string>
+        {
+            "Empresa",
+            "Cuenta",
+            "Moneda",
+            "Fecha",
+            "FechaValuta",
+            "Proveedor",
+            "ItemSistema",
+            "DescripcionOperacion",
+            "Monto",
+            "SucursalAgencia",
+            "NroOperacion",
+            "Usuario",
+            "ArchivoOrigen",
+            "FechaImportacion",
+            "UsuarioImportacion",
+            "IdActivo",
+            "EsNroOperacionValido",
+            "TipoMovimientoBanco",
+            "EstadoConciliacion"
+        };
+
+        if (IsScotiabankCode(codigoBanco))
+        {
+            columnasTablaDestino.Insert(8, "CDR");
+            columnasTablaDestino.Insert(9, "Modulo");
+            columnasTablaDestino.Insert(10, "Transaccion");
+            columnasTablaDestino.Insert(11, "Relacion");
+        }
+
+        var equivalenciasEncabezados = new List<object>
+        {
+            new { destino = "NroOperacion", variantes = new[] { "Operación - Número", "Operacion - Numero", "Nº operación", "N° operación", "Nro operacion", "Numero Operacion", "Nro Operacion" } },
+            new { destino = "DescripcionOperacion", variantes = new[] { "Descripcion operacion", "Descripcion Operacion", "DescripciÃ³n operaciÃ³n" } },
+            new { destino = "FechaValuta", variantes = new[] { "Fecha valuta", "Fecha Valuta" } },
+            new { destino = "SucursalAgencia", variantes = new[] { "Sucursal - agencia", "SucursalAgencia", "Sucursal Agencia" } },
+            new { destino = "ItemSistema", variantes = new[] { "Item del sistema", "ItemSistema" } }
+        };
+
+        if (IsScotiabankCode(codigoBanco))
+        {
+            equivalenciasEncabezados.Add(new { destino = "CDR", variantes = new[] { "CDR", "cdr", "codigo cdr" } });
+            equivalenciasEncabezados.Add(new { destino = "Modulo", variantes = new[] { "Modulo", "modulo", "módulo" } });
+            equivalenciasEncabezados.Add(new { destino = "Transaccion", variantes = new[] { "Transaccion", "transaccion", "transacción" } });
+            equivalenciasEncabezados.Add(new { destino = "Relacion", variantes = new[] { "Relacion", "relacion", "relación" } });
+        }
+
         return new
         {
             contexto = new
@@ -2923,28 +3271,7 @@ Devuelve únicamente JSON válido con esta estructura:
                 tablaDestino = new
                 {
                     nombre = "dbo.MovimientosBcp",
-                    columnas = new[]
-                    {
-                        "Empresa",
-                        "Cuenta",
-                        "Moneda",
-                        "Fecha",
-                        "FechaValuta",
-                        "Proveedor",
-                        "ItemSistema",
-                        "DescripcionOperacion",
-                        "Monto",
-                        "SucursalAgencia",
-                        "NroOperacion",
-                        "Usuario",
-                        "ArchivoOrigen",
-                        "FechaImportacion",
-                        "UsuarioImportacion",
-                        "IdActivo",
-                        "EsNroOperacionValido",
-                        "TipoMovimientoBanco",
-                        "EstadoConciliacion"
-                    }
+                    columnas = columnasTablaDestino.ToArray()
                 }
             },
             reglasLecturaExcel = new[]
@@ -2956,16 +3283,10 @@ Devuelve únicamente JSON válido con esta estructura:
                 "Convertir Fecha y FechaValuta a tipo DATE.",
                 "Convertir Monto a DECIMAL(18,2), considerando montos negativos.",
                 "Mantener NroOperacion como texto para no perder ceros a la izquierda.",
+                "Si el encabezado del Excel aparece como 'Operación - Número', 'Operacion - Numero', 'Nº operación' o 'N° operación', mapearlo siempre como NroOperacion.",
                 "Los NroOperacion vacios, NULL, 0, 0000000 o similares deben considerarse no validos."
             },
-            equivalenciasEncabezados = new[]
-            {
-                new { destino = "NroOperacion", variantes = new[] { "Nº operacion", "Nro operacion", "N° operacion", "Numero Operacion" } },
-                new { destino = "DescripcionOperacion", variantes = new[] { "Descripcion operacion", "Descripcion Operacion", "Descripción operación" } },
-                new { destino = "FechaValuta", variantes = new[] { "Fecha valuta", "Fecha Valuta" } },
-                new { destino = "SucursalAgencia", variantes = new[] { "Sucursal - agencia", "SucursalAgencia", "Sucursal Agencia" } },
-                new { destino = "ItemSistema", variantes = new[] { "Item del sistema", "ItemSistema" } }
-            },
+            equivalenciasEncabezados = equivalenciasEncabezados.ToArray(),
             reglasCamposCalculados = new object[]
             {
                 new
@@ -3034,7 +3355,8 @@ Devuelve únicamente JSON válido con esta estructura:
         IReadOnlyList<ConciliacionBcpMapeoColumnaDto> mapeos,
         int? filaCabecera,
         int? filaDatos,
-        string? usuario)
+        string? usuario,
+        string? codigoBanco)
     {
         var matrix = archivo.Filas
             .Where(row => row is not null)
@@ -3097,6 +3419,7 @@ Devuelve únicamente JSON válido con esta estructura:
 
             ApplyHeaderFallbackValues(normalizedRow, sourceRow, sourceIndexes);
             ApplyContextValues(normalizedRow, contextValues);
+            ApplyScotiabankOperationNumber(normalizedRow, codigoBanco);
 
             normalizedRow["ArchivoOrigen"] = archivo.NombreArchivo;
             normalizedRow["UsuarioImportacion"] = string.IsNullOrWhiteSpace(usuario) ? null : usuario.Trim();
@@ -3129,7 +3452,8 @@ Devuelve únicamente JSON válido con esta estructura:
     private static List<Dictionary<string, object?>> BuildNormalizedRowsFromAiOutput(
         IReadOnlyList<Dictionary<string, object?>>? rows,
         string nombreArchivo,
-        string? usuario)
+        string? usuario,
+        string? codigoBanco)
     {
         if (rows is null || rows.Count == 0)
         {
@@ -3158,6 +3482,8 @@ Devuelve únicamente JSON válido con esta estructura:
                     ? null
                     : NormalizeCellForTarget(column, rawValue.ToString());
             }
+
+            ApplyScotiabankOperationNumber(normalizedRow, codigoBanco);
 
             normalizedRow["ArchivoOrigen"] = nombreArchivo;
             normalizedRow["UsuarioImportacion"] = string.IsNullOrWhiteSpace(usuario) ? null : usuario.Trim();
@@ -3260,7 +3586,12 @@ Devuelve únicamente JSON válido con esta estructura:
         FillValueIfMissing(normalizedRow, "Fecha", sourceRow, sourceIndexes);
         FillValueIfMissing(normalizedRow, "FechaValuta", sourceRow, sourceIndexes);
         FillValueIfMissing(normalizedRow, "DescripcionOperacion", sourceRow, sourceIndexes);
+        FillValueIfMissing(normalizedRow, "Monto", sourceRow, sourceIndexes);
         FillValueIfMissing(normalizedRow, "NroOperacion", sourceRow, sourceIndexes);
+        FillValueIfMissing(normalizedRow, "CDR", sourceRow, sourceIndexes);
+        FillValueIfMissing(normalizedRow, "Modulo", sourceRow, sourceIndexes);
+        FillValueIfMissing(normalizedRow, "Transaccion", sourceRow, sourceIndexes);
+        FillValueIfMissing(normalizedRow, "Relacion", sourceRow, sourceIndexes);
         FillValueIfMissing(normalizedRow, "SucursalAgencia", sourceRow, sourceIndexes);
         FillValueIfMissing(normalizedRow, "Usuario", sourceRow, sourceIndexes);
         FillValueIfMissing(normalizedRow, "Proveedor", sourceRow, sourceIndexes);
@@ -3273,6 +3604,140 @@ Devuelve únicamente JSON válido con esta estructura:
                 normalizedRow["Monto"] = monto;
             }
         }
+    }
+
+    private static int? DetectHeaderRowIndex(IReadOnlyList<List<string>> matrix)
+    {
+        if (matrix.Count == 0)
+        {
+            return null;
+        }
+
+        var headerHints = new[]
+        {
+            "fecha",
+            "movimiento",
+            "importe",
+            "cdr",
+            "modulo",
+            "transac",
+            "relacion",
+            "operacion",
+            "numerooperacion"
+        };
+
+        var bestIndex = -1;
+        var bestScore = 0;
+
+        for (var rowIndex = 0; rowIndex < Math.Min(matrix.Count, 15); rowIndex++)
+        {
+            var row = matrix[rowIndex];
+            var score = row
+                .Select(cell => NormalizeKey(cell))
+                .Count(cell => !string.IsNullOrWhiteSpace(cell) && headerHints.Any(hint => cell.Contains(hint, StringComparison.OrdinalIgnoreCase) || hint.Contains(cell, StringComparison.OrdinalIgnoreCase)));
+
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestIndex = rowIndex;
+            }
+        }
+
+        return bestScore >= 3 ? bestIndex : null;
+    }
+
+    private static void ApplyScotiabankOperationNumber(
+        Dictionary<string, object?> normalizedRow,
+        string? codigoBanco)
+    {
+        if (!IsScotiabankCode(codigoBanco))
+        {
+            return;
+        }
+
+        ApplyScotiabankCodePadding(normalizedRow);
+        PopulateScotiabankCodeSegmentsFromOperationNumber(normalizedRow);
+
+        var cdr = NormalizeText(normalizedRow.TryGetValue("CDR", out var cdrValue) ? cdrValue?.ToString() : null);
+        var modulo = NormalizeText(normalizedRow.TryGetValue("Modulo", out var moduloValue) ? moduloValue?.ToString() : null);
+        var transaccion = NormalizeText(normalizedRow.TryGetValue("Transaccion", out var transaccionValue) ? transaccionValue?.ToString() : null);
+        var relacion = NormalizeText(normalizedRow.TryGetValue("Relacion", out var relacionValue) ? relacionValue?.ToString() : null);
+
+        if (string.IsNullOrWhiteSpace(cdr) ||
+            string.IsNullOrWhiteSpace(modulo) ||
+            string.IsNullOrWhiteSpace(transaccion) ||
+            string.IsNullOrWhiteSpace(relacion))
+        {
+            return;
+        }
+
+        normalizedRow["NroOperacion"] = $"{cdr}{modulo}{transaccion}{relacion}";
+    }
+
+    private static void PopulateScotiabankCodeSegmentsFromOperationNumber(Dictionary<string, object?> normalizedRow)
+    {
+        var nroOperacion = NormalizeText(normalizedRow.TryGetValue("NroOperacion", out var nroValue) ? nroValue?.ToString() : null);
+        if (string.IsNullOrWhiteSpace(nroOperacion) || !nroOperacion.All(char.IsDigit))
+        {
+            return;
+        }
+
+        if (nroOperacion.Length < 13)
+        {
+            return;
+        }
+
+        var relacion = nroOperacion[^4..];
+        var transaccion = nroOperacion.Substring(nroOperacion.Length - 7, 3);
+        var modulo = nroOperacion.Substring(nroOperacion.Length - 10, 3);
+        var cdr = nroOperacion[..(nroOperacion.Length - 10)];
+
+        if (!HasValue(normalizedRow, "CDR"))
+        {
+            normalizedRow["CDR"] = cdr;
+        }
+
+        if (!HasValue(normalizedRow, "Modulo"))
+        {
+            normalizedRow["Modulo"] = modulo;
+        }
+
+        if (!HasValue(normalizedRow, "Transaccion"))
+        {
+            normalizedRow["Transaccion"] = transaccion;
+        }
+
+        if (!HasValue(normalizedRow, "Relacion"))
+        {
+            normalizedRow["Relacion"] = relacion;
+        }
+    }
+
+    private static void ApplyScotiabankCodePadding(Dictionary<string, object?> normalizedRow)
+    {
+        normalizedRow["CDR"] = NormalizeScotiabankCodeSegment(normalizedRow.TryGetValue("CDR", out var cdrValue) ? cdrValue?.ToString() : null, 3);
+        normalizedRow["Modulo"] = NormalizeScotiabankCodeSegment(normalizedRow.TryGetValue("Modulo", out var moduloValue) ? moduloValue?.ToString() : null, 3);
+        normalizedRow["Transaccion"] = NormalizeScotiabankCodeSegment(normalizedRow.TryGetValue("Transaccion", out var transaccionValue) ? transaccionValue?.ToString() : null, 3);
+        normalizedRow["Relacion"] = NormalizeScotiabankCodeSegment(normalizedRow.TryGetValue("Relacion", out var relacionValue) ? relacionValue?.ToString() : null, 4);
+    }
+
+    private static string? NormalizeScotiabankCodeSegment(string? value, int minimumLength)
+    {
+        var text = NormalizeText(value);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var trimmed = text.Trim();
+        if (!trimmed.All(char.IsDigit))
+        {
+            return trimmed;
+        }
+
+        return trimmed.Length < minimumLength
+            ? trimmed.PadLeft(minimumLength, '0')
+            : trimmed;
     }
 
     private static void ApplyContextValues(
@@ -3606,10 +4071,14 @@ Devuelve únicamente JSON válido con esta estructura:
             ["FechaValuta"] = ["fechavaluta", "fecha valuta", "fecha valua", "fecha valuta "],
             ["Proveedor"] = ["proveedor"],
             ["ItemSistema"] = ["itemsistema", "item del sistema", "item sistema"],
-            ["DescripcionOperacion"] = ["descripcionoperacion", "descripcion operacion", "descripción operación", "descripcion operación", "detalle operacion"],
+            ["DescripcionOperacion"] = ["descripcionoperacion", "descripcion operacion", "descripciÃ³n operaciÃ³n", "descripcion operaciÃ³n", "detalle operacion", "movimiento"],
+            ["CDR"] = ["cdr", "cdr."],
+            ["Modulo"] = ["modulo", "mÃ³dulo", "módulo", "mód."],
+            ["Transaccion"] = ["transaccion", "transacciÃ³n", "transacción", "transac.", "transac"],
+            ["Relacion"] = ["relacion", "relaciÃ³n", "relación", "rel."],
             ["Monto"] = ["monto"],
             ["SucursalAgencia"] = ["sucursalagencia", "sucursal agencia", "sucursal - agencia"],
-            ["NroOperacion"] = ["nrooperacion", "nro operacion", "n° operacion", "nº operacion", "numero operacion"],
+            ["NroOperacion"] = ["nrooperacion", "nro operacion", "n° operacion", "nº operacion", "numero operacion", "operación - número", "operacion - numero", "nº operación", "n° operación"],
             ["Usuario"] = ["usuario"]
         };
 
@@ -4507,3 +4976,4 @@ ORDER BY p.parameter_id;";
         public ConciliacionCandidate Candidate { get; set; } = new();
     }
 }
+

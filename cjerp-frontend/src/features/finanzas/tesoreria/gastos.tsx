@@ -756,7 +756,7 @@ function formatDecimalValue(value: number): string {
 }
 
 function getFacturaDisplayPath(facturaPath?: string, facturaUrl?: string): string {
-  // Prioriza la URL pública de SharePoint si existe
+  // Prioriza la URL pÃºblica de SharePoint si existe
   return facturaUrl?.trim() || facturaPath?.trim() || "";
 }
 
@@ -1191,7 +1191,10 @@ const formularioInicial: GastoForm = {
 export default function GastosPage() {
   // Estado para fila seleccionada
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
+  const [busqueda, setBusqueda] = useState("");
   const [filtrosCabecera, setFiltrosCabecera] = useState<GastosHeaderFilters>(GASTOS_HEADER_FILTERS_INITIAL);
+  const [filtrosCabeceraAplicados, setFiltrosCabeceraAplicados] = useState<GastosHeaderFilters>(GASTOS_HEADER_FILTERS_INITIAL);
+  const filtrosCabeceraAplicadosRef = useRef<GastosHeaderFilters>(GASTOS_HEADER_FILTERS_INITIAL);
   const [headerFilterSearch, setHeaderFilterSearch] = useState<Record<GastosHeaderSearchableFilterKey, string>>(
     GASTOS_HEADER_FILTER_SEARCH_INITIAL
   );
@@ -1209,7 +1212,6 @@ export default function GastosPage() {
   const porcentajeRef = useRef<HTMLSpanElement | null>(null);
   const sidePanelRef = useRef<HTMLDivElement | null>(null);
   const cabeceraFiltroMenuRef = useRef<HTMLDivElement | null>(null);
-  const hasLoadedEstadoFilterRef = useRef(false);
   const ultimoSuministroVigenteLookupKeyRef = useRef("");
   const preservarSuministroEdicionRef = useRef(false);
   const authUser = getAuthUser();
@@ -1278,13 +1280,36 @@ export default function GastosPage() {
   const bienOptions = constantesPorCampo.tipo_bien ?? [];
   const comprobanteOptions = constantesPorCampo.tipo_comprobante ?? [];
   const estadoOptions = constantesPorCampo.estado ?? [];
+  useEffect(() => {
+    filtrosCabeceraAplicadosRef.current = filtrosCabeceraAplicados;
+  }, [filtrosCabeceraAplicados]);
+  const tieneFiltrosBusqueda = useMemo(
+    () =>
+      Boolean(
+        busqueda.trim() ||
+          filtrosCabecera.id.trim() ||
+          filtrosCabecera.fechaInicio.trim() ||
+          filtrosCabecera.fechaFin.trim() ||
+          filtrosCabecera.estado.length > 0 ||
+          filtrosCabecera.cliente.length > 0 ||
+          filtrosCabecera.solicitante.length > 0 ||
+          filtrosCabecera.proyecto.length > 0 ||
+          filtrosCabecera.site.length > 0 ||
+          filtrosCabecera.comprobante.length > 0 ||
+          filtrosCabecera.moneda.length > 0 ||
+          filtrosCabecera.tipoTrabajo.length > 0 ||
+          filtrosCabecera.responsable.length > 0 ||
+          filtrosCabecera.validador.length > 0
+      ),
+    [busqueda, filtrosCabecera]
+  );
 
-  // Utilidad para formatear fecha a MM/DD/YYYY en zona horaria de Perú (UTC-5)
+  // Utilidad para formatear fecha a MM/DD/YYYY en zona horaria de PerÃº (UTC-5)
   function formatDateToMMDDYYYYPeru(dateStr?: string) {
     if (!dateStr) return undefined;
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return undefined;
-    // Convertir a UTC-5 (hora de Perú)
+    // Convertir a UTC-5 (hora de PerÃº)
     // Obtener los componentes de la fecha en UTC-5
     const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
     // UTC-5 son -5 horas respecto a UTC
@@ -1362,33 +1387,34 @@ export default function GastosPage() {
       imgFactura: form.facturaUrl || undefined,
     };
 
-    //console.log("[Gastos] Parámetros enviados a Guardar/Planilla", payload);
+    //console.log("[Gastos] ParÃ¡metros enviados a Guardar/Planilla", payload);
 
     return payload;
   };
 
   const gastosApi = {
     list: async () => {
+      const filtrosConsulta = filtrosCabeceraAplicadosRef.current;
       const estadosSeleccionados = Array.from(
         new Set(
-          filtrosCabecera.estado
+          filtrosConsulta.estado
             .map((estado) => normalizeConstanteValue(estadoOptions, estado))
             .map((estado) => estado.trim())
             .filter(Boolean)
         )
       );
-      const fechaInicio = filtrosCabecera.fechaInicio.trim();
-      const fechaFin = filtrosCabecera.fechaFin.trim();
+      const fechaInicio = filtrosConsulta.fechaInicio.trim();
+      const fechaFin = filtrosConsulta.fechaFin.trim();
       const fechaInicioParametro = formatInputDateForPlanillaParametro(fechaInicio);
       const fechaFinParametro = formatInputDateForPlanillaParametro(fechaFin);
 
       if (estadosSeleccionados.length === 0) {
-        setMensajeFiltroCabecera("Seleccione al menos un estado para realizar la búsqueda.");
+        setMensajeFiltroCabecera(null);
         return [];
       }
 
       if (!isInputDateRangeValid(fechaInicio, fechaFin)) {
-        setMensajeFiltroCabecera("La fecha inicio no puede ser mayor que la fecha fin.");
+        setMensajeFiltroCabecera(null);
         return [];
       }
 
@@ -1466,22 +1492,6 @@ export default function GastosPage() {
     handleSave,
     load: cargarGastos,
   } = useCrudForm<GastoForm, GastoForm>(gastosApi, formularioInicial);
-
-  const filtrosConsultaKey = [
-    filtrosCabecera.id,
-    filtrosCabecera.estado.join(","),
-    filtrosCabecera.fechaInicio,
-    filtrosCabecera.fechaFin,
-  ].join("|");
-
-  useEffect(() => {
-    if (!hasLoadedEstadoFilterRef.current) {
-      hasLoadedEstadoFilterRef.current = true;
-      return;
-    }
-
-    void cargarGastos();
-  }, [filtrosConsultaKey]);
 
   // Determinar color del porcentaje
   const porcentajeValue = Number(valoresGasto?.porcentaje ?? 0);
@@ -1812,7 +1822,7 @@ export default function GastosPage() {
     const request = buildValoresGastoRequest(filtroOperativo);
 
     if (!request) {
-      //console.log("[Gastos] No se ejecuta sp_Finanzas_CargarValoresGasto porque faltan parámetros válidos.", {
+      //console.log("[Gastos] No se ejecuta sp_Finanzas_CargarValoresGasto porque faltan parÃ¡metros vÃ¡lidos.", {
       //  filtroOperativo,
       //});
       valoresGastoRequestRef.current += 1;
@@ -1821,7 +1831,7 @@ export default function GastosPage() {
       return;
     }
 
-    //console.log("[Gastos] Parámetros enviados a sp_Finanzas_CargarValoresGasto", request);
+    //console.log("[Gastos] ParÃ¡metros enviados a sp_Finanzas_CargarValoresGasto", request);
 
     const currentRequestId = valoresGastoRequestRef.current + 1;
     valoresGastoRequestRef.current = currentRequestId;
@@ -2121,7 +2131,7 @@ export default function GastosPage() {
     }
 
     if (form.responsable && !form.idBancoCta) {
-      nuevosErrores.responsable = "El responsable seleccionado no tiene una cuenta válida.";
+      nuevosErrores.responsable = "El responsable seleccionado no tiene una cuenta vÃ¡lida.";
     }
 
     if (!form.tipoPago) {
@@ -2129,7 +2139,7 @@ export default function GastosPage() {
     }
 
     if (!form.monto || isNaN(Number(form.monto))) {
-      nuevosErrores.monto = "Ingrese un monto válido.";
+      nuevosErrores.monto = "Ingrese un monto vÃ¡lido.";
     }
 
     if (form.tipoPago && !esConstanteValida(tipoPagoOptions, form.tipoPago)) {
@@ -2255,8 +2265,32 @@ export default function GastosPage() {
 
   const gastoSeleccionadoEliminar = gastosSafe.find((x) => x.id === idEliminar);
 
+  const handleBuscarGastos = async () => {
+    if (!tieneFiltrosBusqueda) {
+      return;
+    }
 
-  const [busqueda, setBusqueda] = useState("");
+    const snapshot: GastosHeaderFilters = {
+      ...filtrosCabecera,
+      estado: [...filtrosCabecera.estado],
+      cliente: [...filtrosCabecera.cliente],
+      solicitante: [...filtrosCabecera.solicitante],
+      proyecto: [...filtrosCabecera.proyecto],
+      site: [...filtrosCabecera.site],
+      comprobante: [...filtrosCabecera.comprobante],
+      moneda: [...filtrosCabecera.moneda],
+      tipoTrabajo: [...filtrosCabecera.tipoTrabajo],
+      responsable: [...filtrosCabecera.responsable],
+      validador: [...filtrosCabecera.validador],
+    };
+
+    filtrosCabeceraAplicadosRef.current = snapshot;
+    setFiltrosCabeceraAplicados(snapshot);
+    setMensajeFiltroCabecera(null);
+
+    await cargarGastos();
+  };
+
   // Solo columnas visibles: id, monto, tipoPago, ot, fecIngreso, fechaVencimiento
   const camposBusquedaGastos = useMemo<CrudToolbarSearchField<GastoForm>[]>(
     () => [
@@ -2399,7 +2433,7 @@ export default function GastosPage() {
         sorted.sort((a, b) => {
           let aValue = col.getValue(a);
           let bValue = col.getValue(b);
-          // Si es string, comparar insensible a mayúsculas
+          // Si es string, comparar insensible a mayÃºsculas
           if (typeof aValue === 'string' && typeof bValue === 'string') {
             aValue = aValue.toLowerCase();
             bValue = bValue.toLowerCase();
@@ -2412,7 +2446,7 @@ export default function GastosPage() {
         });
       }
     }
-    // Filtrar después de ordenar
+    // Filtrar despuÃ©s de ordenar
     return sorted
       .filter((gasto) => matchesCrudToolbarSearch(gasto, busqueda, camposBusquedaGastos))
       .filter((gasto) => {
@@ -2439,24 +2473,24 @@ export default function GastosPage() {
         ).trim();
 
         return (
-          (!filtrosCabecera.id || idGasto.includes(filtrosCabecera.id.trim())) &&
-          (filtrosCabecera.estado.length === 0 || filtrosCabecera.estado.includes(estadoGasto)) &&
-          (filtrosCabecera.comprobante.length === 0 || filtrosCabecera.comprobante.includes(comprobanteGasto)) &&
-          (filtrosCabecera.moneda.length === 0 || filtrosCabecera.moneda.includes(monedaGasto)) &&
-          (filtrosCabecera.cliente.length === 0 || filtrosCabecera.cliente.includes(clienteGasto)) &&
-          (filtrosCabecera.proyecto.length === 0 || filtrosCabecera.proyecto.includes(proyectoGasto)) &&
-          (filtrosCabecera.site.length === 0 || filtrosCabecera.site.includes(siteGasto)) &&
-          (filtrosCabecera.tipoTrabajo.length === 0 || filtrosCabecera.tipoTrabajo.includes(tipoTrabajoGasto)) &&
-          (filtrosCabecera.solicitante.length === 0 || filtrosCabecera.solicitante.includes(solicitanteGasto)) &&
-          (filtrosCabecera.responsable.length === 0 || filtrosCabecera.responsable.includes(responsableGasto)) &&
-          (filtrosCabecera.validador.length === 0 || filtrosCabecera.validador.includes(validadorGasto))
+          (!filtrosCabeceraAplicados.id || idGasto.includes(filtrosCabeceraAplicados.id.trim())) &&
+          (filtrosCabeceraAplicados.estado.length === 0 || filtrosCabeceraAplicados.estado.includes(estadoGasto)) &&
+          (filtrosCabeceraAplicados.comprobante.length === 0 || filtrosCabeceraAplicados.comprobante.includes(comprobanteGasto)) &&
+          (filtrosCabeceraAplicados.moneda.length === 0 || filtrosCabeceraAplicados.moneda.includes(monedaGasto)) &&
+          (filtrosCabeceraAplicados.cliente.length === 0 || filtrosCabeceraAplicados.cliente.includes(clienteGasto)) &&
+          (filtrosCabeceraAplicados.proyecto.length === 0 || filtrosCabeceraAplicados.proyecto.includes(proyectoGasto)) &&
+          (filtrosCabeceraAplicados.site.length === 0 || filtrosCabeceraAplicados.site.includes(siteGasto)) &&
+          (filtrosCabeceraAplicados.tipoTrabajo.length === 0 || filtrosCabeceraAplicados.tipoTrabajo.includes(tipoTrabajoGasto)) &&
+          (filtrosCabeceraAplicados.solicitante.length === 0 || filtrosCabeceraAplicados.solicitante.includes(solicitanteGasto)) &&
+          (filtrosCabeceraAplicados.responsable.length === 0 || filtrosCabeceraAplicados.responsable.includes(responsableGasto)) &&
+          (filtrosCabeceraAplicados.validador.length === 0 || filtrosCabeceraAplicados.validador.includes(validadorGasto))
         );
       });
   }, [
     busqueda,
     camposBusquedaGastos,
     comprobanteOptions,
-    filtrosCabecera,
+    filtrosCabeceraAplicados,
     gastosSafe,
     monedaOptions,
     solicitanteOptions,
@@ -2881,11 +2915,18 @@ export default function GastosPage() {
             onClick: abrirNuevo,
           },
           {
+            key: "buscar",
+            label: "Buscar",
+            title: "Buscar registros con los filtros seleccionados",
+            onClick: () => void handleBuscarGastos(),
+            disabled: !tieneFiltrosBusqueda || cargando,
+          },
+          {
             key: "exportar",
             label: "Exportar",
             title: "Exportar",
             iconOnly: true,
-            icon: "⤓",
+            icon: "â¤“",
             onClick: async () => {
               // Exportar a Excel los registros filtrados y columnas visibles
               const XLSX = await import("xlsx");
@@ -2917,7 +2958,7 @@ export default function GastosPage() {
                     case "tarea":
                       return getTareaLabelOrFallback(tareasCatalogo, gasto.filtroOperativo.tarea?.correlativo, gasto.filtroOperativo.tarea?.tarea);
                     case "detalle":
-                      // Migrar el campo Detalle a una sola línea, reemplazando saltos de línea por espacio
+                      // Migrar el campo Detalle a una sola lÃ­nea, reemplazando saltos de lÃ­nea por espacio
                       return gasto.detalle ? String(gasto.detalle).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim() : "";
                     case "bien":
                       return getConstanteLabel(bienOptions, gasto.bien);
@@ -2943,7 +2984,7 @@ export default function GastosPage() {
                       return gasto.filtroOperativo.ot?.ot ?? "";
                     case "fecIngreso":
                       return formatInputDateForDisplay(gasto.fecIngreso);
-                    case "comentario":                      // Migrar el campo Comentario a una sola línea, reemplazando saltos de línea por espacio
+                    case "comentario":                      // Migrar el campo Comentario a una sola lÃ­nea, reemplazando saltos de lÃ­nea por espacio
                       return gasto.comentario ? String(gasto.comentario).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim() : "";
                     case "estado": {
                       return getEstadoLabel(estadoOptions, gasto.estado, gasto.estadoLabel);
@@ -3156,7 +3197,7 @@ export default function GastosPage() {
                 >
                   {summary}
                 </span>
-                <span style={{ color: "#6B7280", fontSize: 10 }}>{isOpen ? "▲" : "▼"}</span>
+                <span style={{ color: "#6B7280", fontSize: 10 }}>{isOpen ? "â–²" : "â–¼"}</span>
               </button>
 
               {isOpen && (
@@ -3347,7 +3388,7 @@ export default function GastosPage() {
             fontWeight: 600,
           }}
         >
-          <span>Más opciones</span>
+          <span>MÃ¡s opciones</span>
           <button
             type="button"
             onClick={() => {
@@ -3377,7 +3418,7 @@ export default function GastosPage() {
             }}
           >
             <span>{mostrarFiltrosAdicionales ? "Ocultar filtros" : "Filtros adicionales"}</span>
-            <span style={{ color: "#6B7280", fontSize: 10 }}>{mostrarFiltrosAdicionales ? "â–²" : "â–¼"}</span>
+            <span style={{ color: "#6B7280", fontSize: 10 }}>{mostrarFiltrosAdicionales ? "Ã¢â€“Â²" : "Ã¢â€“Â¼"}</span>
           </button>
         </div>
       </div>
@@ -3472,7 +3513,7 @@ export default function GastosPage() {
                         if (header.key === 'acciones') return;
                         setSortConfig((prev) => {
                           if (prev?.key === header.key) {
-                            // Alternar dirección
+                            // Alternar direcciÃ³n
                             return { key: header.key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
                           }
                           return { key: header.key, direction: 'asc' };
@@ -3611,7 +3652,7 @@ export default function GastosPage() {
 {modo === "nuevo" ? "Nuevo gasto" : modo === "ver" ? "Visualizar gasto" : "Editar gasto"}
                   </h2>
                   <p style={{ marginTop: 8, marginBottom: 0, color: "#6B7280", fontSize: 13 }}>
-                    Complete la información del gasto.
+                    Complete la informaciÃ³n del gasto.
                   </p>
                   <p style={{ marginTop: 6, marginBottom: 0, color: "#475569", fontSize: 12 }}>
                     El sistema registra auditoria automatica por seccion al guardar o rechazar cambios.
@@ -3671,9 +3712,9 @@ export default function GastosPage() {
                     }}
                     onClick={cerrarPanel}
                   >
-                    ×
+                    Ã—
                   </button>
-                  {/* Eliminado: Etiqueta Utilidad bajo el botón */}
+                  {/* Eliminado: Etiqueta Utilidad bajo el botÃ³n */}
                 </div>
               </div>
             </div>
@@ -4206,7 +4247,7 @@ export default function GastosPage() {
         onChange={(e) => setForm((prev) => ({ ...prev, rendicion: e.target.checked }))}
         style={{ width: 16, height: 16 }}
       />
-      <label htmlFor="rendicion" style={{ fontSize: 11, fontWeight: 700, color: "#374151", cursor: "pointer" }}>Rendición</label>
+      <label htmlFor="rendicion" style={{ fontSize: 11, fontWeight: 700, color: "#374151", cursor: "pointer" }}>RendiciÃ³n</label>
     </div>
   </div>
 
@@ -4656,7 +4697,7 @@ export default function GastosPage() {
             </div>
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 10 }}>
-              {/* Botón de factura alineado a la izquierda */}
+              {/* BotÃ³n de factura alineado a la izquierda */}
               <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0, flex: 1 }}>
                 <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
                   <button
@@ -4752,7 +4793,7 @@ export default function GastosPage() {
                                 onClick={() => setShowFacturaViewer(false)}
                                 title="Cerrar"
                               >
-                                ×
+                                Ã—
                               </button>
                               {facturaDisplayPath.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
                                 <img
@@ -4918,10 +4959,10 @@ export default function GastosPage() {
             }}
           >
             <h3 style={{ marginTop: 0, marginBottom: 12, color: "#17143A" }}>
-              Confirmar eliminación
+              Confirmar eliminaciÃ³n
             </h3>
             <p style={{ marginTop: 0, color: "#4B5563", lineHeight: 1.6 }}>
-              ¿Desea rechazar el gasto <strong>{gastoSeleccionadoEliminar?.id}</strong>?
+              Â¿Desea rechazar el gasto <strong>{gastoSeleccionadoEliminar?.id}</strong>?
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 24 }}>
               <button
@@ -4983,7 +5024,7 @@ export default function GastosPage() {
               Motivo del rechazo
             </h3>
             <p style={{ marginTop: 0, color: "#4B5563", lineHeight: 1.6 }}>
-              Ingrese la observación que se enviará al rechazo del registro seleccionado.
+              Ingrese la observaciÃ³n que se enviarÃ¡ al rechazo del registro seleccionado.
             </p>
             <textarea
               value={motivoRechazo}

@@ -13,6 +13,7 @@ export type ConciliacionBcpArchivoMuestra = {
 
 export type ConciliacionBcpAnalizarRequest = {
   archivos: ConciliacionBcpArchivoMuestra[];
+  codigoBanco?: string | null;
 };
 
 export type ConciliacionBcpParametro = {
@@ -33,6 +34,10 @@ export type ConciliacionBcpMapeo = {
 
 export type ConciliacionBcpArchivoAnalisis = {
   nombreArchivo: string;
+  idBanco?: number | null;
+  codigoBanco?: string | null;
+  idPlantillaBanco?: number | null;
+  codigoPlantillaBanco?: string | null;
   nombreHoja: string;
   numeroHoja: number;
   totalFilas: number;
@@ -53,6 +58,7 @@ export type ConciliacionBcpArchivoAnalisis = {
 export type ConciliacionBcpAnalizarResponse = {
   resumen?: string | null;
   puedeInsertar: boolean;
+  motivosNoInsertables?: string[];
   parametrosProcedimiento: ConciliacionBcpParametro[];
   archivos: ConciliacionBcpArchivoAnalisis[];
   debug?: {
@@ -74,9 +80,11 @@ export type ConciliacionBcpAnalizarResponse = {
 
 export type ConciliacionBcpInsertRequest = {
   filas: Array<Record<string, unknown>>;
+  codigoBanco?: string | null;
 };
 
 export type ConciliacionBcpConciliarPlanillaRequest = {
+  codigoBanco?: string | null;
   idCargo?: number | null;
   idEmpleado?: number | null;
   estados?: string | null;
@@ -91,6 +99,8 @@ export type ConciliacionBcpConciliarPlanillaRequest = {
 
 export type ConciliacionBcpConciliarPlanillaRegistro = {
   idMovimientoBanco: number;
+  idBanco?: number | null;
+  codigoBanco?: string | null;
   empresa?: string | null;
   cuenta?: string | null;
   moneda?: string | null;
@@ -227,6 +237,10 @@ export type ConciliacionBcpExportResumenArchivo = {
 };
 
 export type ConciliacionBcpExportMovimiento = {
+  idBanco?: number | null;
+  codigoBanco?: string | null;
+  idPlantillaBanco?: number | null;
+  codigoPlantillaBanco?: string | null;
   empresa?: string | null;
   cuenta?: string | null;
   moneda?: string | null;
@@ -235,8 +249,14 @@ export type ConciliacionBcpExportMovimiento = {
   proveedor?: string | null;
   itemSistema?: string | null;
   descripcionOperacion?: string | null;
+  referencia?: string | null;
+  cdr?: string | null;
+  modulo?: string | null;
+  transaccion?: string | null;
+  relacion?: string | null;
   monto?: number | null;
   sucursalAgencia?: string | null;
+  nroOperacion?: string | null;
   numeroOperacion?: string | null;
   usuario?: string | null;
   archivoOrigen?: string | null;

@@ -159,6 +159,11 @@ const DEFAULT_CONCILIACION_REVISION_FILTERS: ConciliacionRevisionFilters = {
   periodo: "",
 };
 
+const BANCO_OPTIONS = [
+  { code: "BCP", label: "BCP" },
+  { code: "SCOTIABANK", label: "Scotiabank" },
+] as const;
+
 const MOVIMIENTOS_ORDENADOS_COLUMNS = [
   "Empresa",
   "Cuenta",
@@ -168,6 +173,11 @@ const MOVIMIENTOS_ORDENADOS_COLUMNS = [
   "Proveedor",
   "ItemSistema",
   "DescripcionOperacion",
+  "Referencia",
+  "CDR",
+  "Modulo",
+  "Transaccion",
+  "Relacion",
   "Monto",
   "SucursalAgencia",
   "NroOperacion",
@@ -581,7 +591,13 @@ function buildPreviewTextFromRow(values: unknown[] | undefined) {
 }
 
 function buildOrderedMovementRow(row: Record<string, unknown>) {
-  return MOVIMIENTOS_ORDENADOS_COLUMNS.map((column) => row[column] ?? "");
+  return MOVIMIENTOS_ORDENADOS_COLUMNS.map((column) => {
+    if (column === "NroOperacion") {
+      return row.NroOperacion ?? row.nroOperacion ?? row.numeroOperacion ?? row.NumeroOperacion ?? row["Nº operación"] ?? row["Operación - Número"] ?? "";
+    }
+
+    return row[column] ?? "";
+  });
 }
 
 function buildExportOrderedMovementRow(row: ConciliacionBcpExportResponse["movimientos"][number]) {
@@ -594,11 +610,253 @@ function buildExportOrderedMovementRow(row: ConciliacionBcpExportResponse["movim
     row.proveedor ?? "",
     row.itemSistema ?? "",
     row.descripcionOperacion ?? "",
+    row.referencia ?? "",
+    getScotiabankSegmentForExport(row, "cdr", 0, 3),
+    getScotiabankSegmentForExport(row, "modulo", 3, 3),
+    getScotiabankSegmentForExport(row, "transaccion", 6, 3),
+    getScotiabankSegmentForExport(row, "relacion", 9, 4),
     row.monto ?? "",
     row.sucursalAgencia ?? "",
-    row.numeroOperacion ?? "",
+    row.nroOperacion ?? row.numeroOperacion ?? "",
     row.usuario ?? "",
   ];
+}
+
+function getPreviewCellValue(row: Record<string, unknown>, column: string) {
+  if (column === "NroOperacion") {
+    return row.NroOperacion ?? row.nroOperacion ?? row.numeroOperacion ?? row.NumeroOperacion ?? row["NÂº operaciÃ³n"] ?? row["OperaciÃ³n - NÃºmero"] ?? "";
+  }
+
+  return (
+    row[column] ??
+    row[column.toLowerCase()] ??
+    row[column.charAt(0).toLowerCase() + column.slice(1)] ??
+    row[column.toUpperCase()] ??
+    ""
+  );
+}
+
+function getRecordTextValue(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key];
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const normalized = normalizeCellValue(value);
+  return normalized.length > 0 ? normalized : null;
+}
+
+function getRecordNumberValue(record: Record<string, unknown>, key: string): number | null {
+  const value = record[key];
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  const parsed = Number(String(value).replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatScotiabankCodeSegment(value: unknown, length: number): string {
+  const text = normalizeCellValue(value);
+  if (!text) {
+    return "";
+  }
+
+  if (!/^\d+$/.test(text)) {
+    return text;
+  }
+
+  return text.padStart(length, "0");
+}
+
+function getScotiabankSegmentForExport(
+  row: ConciliacionBcpExportResponse["movimientos"][number],
+  field: "cdr" | "modulo" | "transaccion" | "relacion",
+  startIndex: number,
+  length: number,
+): string {
+  const directValue = formatScotiabankCodeSegment(row[field], length);
+  if (directValue) {
+    return directValue;
+  }
+
+  const nroOperacion =
+    row.nroOperacion ?? row.numeroOperacion ?? "";
+  const nroOperacionText = normalizeCellValue(nroOperacion);
+  if (!/^\d+$/.test(nroOperacionText) || nroOperacionText.length < startIndex + length) {
+    return "";
+  }
+
+  return nroOperacionText.slice(startIndex, startIndex + length);
+}
+
+function extractScotiabankSegmentFromOperationNumber(
+  nroOperacion: string | null,
+  startIndex: number,
+  length: number,
+): string | null {
+  if (!nroOperacion) {
+    return null;
+  }
+
+  const normalized = nroOperacion.trim();
+  if (!/^\d+$/.test(normalized) || normalized.length < startIndex + length) {
+    return null;
+  }
+
+  const segment = normalized.slice(startIndex, startIndex + length);
+  return segment.length === length ? segment : null;
+}
+
+function buildExportResponseFromAnalysisData(analysis: ConciliacionBcpAnalizarResponse): ConciliacionBcpExportResponse {
+  const movimientos = getAnalysisRows(analysis.archivos).map((row) => {
+    const rowRecord = row as Record<string, unknown>;
+    const nroOperacion =
+      getRecordTextValue(rowRecord, "nroOperacion") ??
+      getRecordTextValue(rowRecord, "numeroOperacion") ??
+      getRecordTextValue(rowRecord, "NroOperacion");
+
+    return {
+      idBanco: getRecordNumberValue(rowRecord, "idBanco"),
+      codigoBanco: getRecordTextValue(rowRecord, "codigoBanco"),
+      idPlantillaBanco: getRecordNumberValue(rowRecord, "idPlantillaBanco"),
+      codigoPlantillaBanco: getRecordTextValue(rowRecord, "codigoPlantillaBanco"),
+      empresa: getRecordTextValue(rowRecord, "empresa") ?? getRecordTextValue(rowRecord, "Empresa"),
+      cuenta: getRecordTextValue(rowRecord, "cuenta") ?? getRecordTextValue(rowRecord, "Cuenta"),
+      moneda: getRecordTextValue(rowRecord, "moneda") ?? getRecordTextValue(rowRecord, "Moneda"),
+      fecha: getRecordTextValue(rowRecord, "fecha") ?? getRecordTextValue(rowRecord, "Fecha"),
+      fechaValuta: getRecordTextValue(rowRecord, "fechaValuta") ?? getRecordTextValue(rowRecord, "FechaValuta"),
+      proveedor: getRecordTextValue(rowRecord, "proveedor") ?? getRecordTextValue(rowRecord, "Proveedor"),
+      itemSistema: getRecordTextValue(rowRecord, "itemSistema") ?? getRecordTextValue(rowRecord, "ItemSistema"),
+      descripcionOperacion:
+        getRecordTextValue(rowRecord, "descripcionOperacion") ?? getRecordTextValue(rowRecord, "DescripcionOperacion"),
+      referencia: getRecordTextValue(rowRecord, "referencia") ?? getRecordTextValue(rowRecord, "Referencia"),
+      cdr:
+        getRecordTextValue(rowRecord, "cdr") ??
+        getRecordTextValue(rowRecord, "CDR") ??
+        extractScotiabankSegmentFromOperationNumber(nroOperacion, 0, 3),
+      modulo:
+        getRecordTextValue(rowRecord, "modulo") ??
+        getRecordTextValue(rowRecord, "Modulo") ??
+        extractScotiabankSegmentFromOperationNumber(nroOperacion, 3, 3),
+      transaccion:
+        getRecordTextValue(rowRecord, "transaccion") ??
+        getRecordTextValue(rowRecord, "Transaccion") ??
+        extractScotiabankSegmentFromOperationNumber(nroOperacion, 6, 3),
+      relacion:
+        getRecordTextValue(rowRecord, "relacion") ??
+        getRecordTextValue(rowRecord, "Relacion") ??
+        extractScotiabankSegmentFromOperationNumber(nroOperacion, 9, 4),
+      monto: getRecordNumberValue(rowRecord, "monto") ?? getRecordNumberValue(rowRecord, "Monto"),
+      sucursalAgencia:
+        getRecordTextValue(rowRecord, "sucursalAgencia") ?? getRecordTextValue(rowRecord, "SucursalAgencia"),
+      nroOperacion,
+      usuario: getRecordTextValue(rowRecord, "usuario") ?? getRecordTextValue(rowRecord, "Usuario"),
+      archivoOrigen: getRecordTextValue(rowRecord, "archivoOrigen") ?? getRecordTextValue(rowRecord, "ArchivoOrigen"),
+    };
+  });
+
+  const resumenArchivos = (analysis.archivos ?? []).map((item) => {
+    const rows = item.filasNormalizadas ?? [];
+    const ingresos = rows.reduce((accumulator, row) => {
+      const rowRecord = row as Record<string, unknown>;
+      const monto = getRecordNumberValue(rowRecord, "monto") ?? getRecordNumberValue(rowRecord, "Monto") ?? 0;
+      return monto > 0 ? accumulator + monto : accumulator;
+    }, 0);
+    const egresos = rows.reduce((accumulator, row) => {
+      const rowRecord = row as Record<string, unknown>;
+      const monto = getRecordNumberValue(rowRecord, "monto") ?? getRecordNumberValue(rowRecord, "Monto") ?? 0;
+      return monto < 0 ? accumulator + monto : accumulator;
+    }, 0);
+    const firstRow = (rows[0] ?? {}) as Record<string, unknown>;
+
+    return {
+      archivoOrigen: item.nombreArchivo,
+      empresa: getRecordTextValue(firstRow, "empresa") ?? getRecordTextValue(firstRow, "Empresa") ?? "",
+      cuenta: getRecordTextValue(firstRow, "cuenta") ?? getRecordTextValue(firstRow, "Cuenta") ?? "",
+      moneda: getRecordTextValue(firstRow, "moneda") ?? getRecordTextValue(firstRow, "Moneda") ?? "",
+      tipoCuenta: null,
+      totalMovimientos: rows.length,
+      totalIngresos: ingresos,
+      totalEgresos: egresos,
+      neto: ingresos + egresos,
+    };
+  });
+
+  const totalIngresos = resumenArchivos.reduce((accumulator, item) => accumulator + (item.totalIngresos ?? 0), 0);
+  const totalEgresos = resumenArchivos.reduce((accumulator, item) => accumulator + (item.totalEgresos ?? 0), 0);
+
+  return {
+    nombreArchivo: "movimientos_consolidados_ordenados_por_operacion.xlsx",
+    archivosProcesados: analysis.archivos.length,
+    totalMovimientos: movimientos.length,
+    totalIngresos,
+    totalEgresos,
+    neto: totalIngresos + totalEgresos,
+    cantidadDuplicadosDetectados: 0,
+    insertable: analysis.puedeInsertar,
+    resumenArchivos,
+    movimientos,
+  };
+}
+
+function buildExportWorkbook(XLSX: typeof import("xlsx"), exportResponse: ConciliacionBcpExportResponse) {
+  const workbook = XLSX.utils.book_new();
+
+  const resumenRows = [
+    ["Archivos procesados", exportResponse.archivosProcesados],
+    ["Total de movimientos", exportResponse.totalMovimientos],
+    ["Total de ingresos", exportResponse.totalIngresos],
+    ["Total de egresos", exportResponse.totalEgresos],
+    ["Neto", exportResponse.neto],
+    ["Cantidad de duplicados detectados", exportResponse.cantidadDuplicadosDetectados],
+    ["Estado insertable", exportResponse.insertable ? "Si" : "No"],
+    [],
+    [
+      "Archivo origen",
+      "Empresa",
+      "Cuenta",
+      "Moneda",
+      "Tipo de cuenta",
+      "Total movimientos",
+      "Total ingresos",
+      "Total egresos",
+      "Neto",
+    ],
+    ...exportResponse.resumenArchivos.map((item) => [
+      item.archivoOrigen ?? "",
+      item.empresa ?? "",
+      item.cuenta ?? "",
+      item.moneda ?? "",
+      item.tipoCuenta ?? "",
+      item.totalMovimientos ?? 0,
+      item.totalIngresos ?? 0,
+      item.totalEgresos ?? 0,
+      item.neto ?? 0,
+    ]),
+  ];
+
+  const resumenSheet = XLSX.utils.aoa_to_sheet(resumenRows);
+  resumenSheet["!autofilter"] = { ref: "A9:I9" };
+  resumenSheet["!freeze"] = { xSplit: 0, ySplit: 1 };
+  XLSX.utils.book_append_sheet(workbook, resumenSheet, "Resumen");
+
+  const movimientosRows = [
+    [...MOVIMIENTOS_ORDENADOS_COLUMNS],
+    ...exportResponse.movimientos.map((row) => buildExportOrderedMovementRow(row)),
+  ];
+
+  const movimientosSheet = XLSX.utils.aoa_to_sheet(movimientosRows);
+  const movimientosLastColumn = XLSX.utils.encode_col(MOVIMIENTOS_ORDENADOS_COLUMNS.length - 1);
+  movimientosSheet["!autofilter"] = { ref: `A1:${movimientosLastColumn}1` };
+  movimientosSheet["!freeze"] = { xSplit: 0, ySplit: 1 };
+  XLSX.utils.book_append_sheet(workbook, movimientosSheet, "Movimientos ordenados");
+
+  return { XLSX, workbook };
 }
 
 function getAnalysisRows(analysisFiles: ConciliacionBcpArchivoAnalisis[]) {
@@ -606,6 +864,12 @@ function getAnalysisRows(analysisFiles: ConciliacionBcpArchivoAnalisis[]) {
 }
 
 function buildInsertBlockedMessage(analysis: ConciliacionBcpAnalizarResponse): string {
+  const explicitReasons = (analysis.motivosNoInsertables ?? []).map((item) => item.trim()).filter(Boolean);
+
+  if (explicitReasons.length > 0) {
+    return `Carga no habilitada: ${explicitReasons.join(" | ")}`;
+  }
+
   const filesInReview = analysis.archivos.filter((item) => item.requiereRevision);
   const filesWithoutRows = filesInReview.filter((item) => (item.filasNormalizadas?.length ?? 0) === 0);
 
@@ -761,9 +1025,11 @@ export default function ConciliacionBcpPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [dragActive, setDragActive] = useState(false);
+  const [codigoBanco, setCodigoBanco] = useState("BCP");
   const [isAnalysisExpanded, setIsAnalysisExpanded] = useState(false);
   const [isConciliacionExpanded, setIsConciliacionExpanded] = useState(false);
   const [isFilesExpanded, setIsFilesExpanded] = useState(false);
+  const [showExportAnalysisButton, setShowExportAnalysisButton] = useState(true);
   const [conciliacionSort, setConciliacionSort] = useState<ConciliacionSortState | null>(null);
   const [conciliacionFiltros, setConciliacionFiltros] = useState({
     idCargo: "5",
@@ -1773,6 +2039,7 @@ export default function ConciliacionBcpPage() {
 
   const loadConciliacionPlanilla = async (options?: { preserveMessage?: boolean }) => {
     const response = await conciliarPlanillaConciliacionBcp({
+      codigoBanco,
       idCargo: Number(conciliacionFiltros.idCargo),
       idEmpleado: Number(conciliacionFiltros.idEmpleado),
       estados: conciliacionFiltros.estados,
@@ -1950,6 +2217,7 @@ export default function ConciliacionBcpPage() {
     setError("");
     setMessage("");
     setAnalysis(null);
+    setShowExportAnalysisButton(true);
 
     try {
       const parsedFiles = await Promise.all(
@@ -2000,7 +2268,7 @@ export default function ConciliacionBcpPage() {
       throw new Error("No se generaron filas normalizadas para insertar.");
     }
 
-    const response = await insertarConciliacionBcp({ filas });
+    const response = await insertarConciliacionBcp({ filas, codigoBanco });
     const advertencias = response.advertencias?.length
       ? ` ${response.advertencias.join(" ")}`
       : "";
@@ -2022,6 +2290,7 @@ export default function ConciliacionBcpPage() {
     setLoadingAnalysis(true);
     setError("");
     setMessage("");
+    setShowExportAnalysisButton(false);
 
     try {
       const archivos = await Promise.all(
@@ -2046,9 +2315,12 @@ export default function ConciliacionBcpPage() {
 
       const request = { archivos };
 
-      const response = await analizarConciliacionBcp(request);
+      const response = await analizarConciliacionBcp({ ...request, codigoBanco });
       setAnalysis(response);
       setConciliacionPlanilla(null);
+
+      // Genera la descarga apenas termina el análisis, igual que el flujo de Scotiabank.
+      await handleExportAnalysis(response);
 
       if (response.puedeInsertar) {
         try {
@@ -2068,8 +2340,8 @@ export default function ConciliacionBcpPage() {
     }
   };
 
-  const handleExportAnalysis = async () => {
-    if (!analysis?.archivos?.length) {
+  const handleExportAnalysis = async (analysisToExport = analysis) => {
+    if (!analysisToExport?.archivos?.length) {
       setError("Primero debes analizar los archivos.");
       return;
     }
@@ -2078,58 +2350,22 @@ export default function ConciliacionBcpPage() {
     setMessage("");
 
     try {
-      const exportResponse = await exportarAnalisisConciliacionBcp({ analisis: analysis });
       const XLSX = await import("xlsx");
-      const workbook = XLSX.utils.book_new();
 
-      const resumenRows = [
-        ["Archivos procesados", exportResponse.archivosProcesados],
-        ["Total de movimientos", exportResponse.totalMovimientos],
-        ["Total de ingresos", exportResponse.totalIngresos],
-        ["Total de egresos", exportResponse.totalEgresos],
-        ["Neto", exportResponse.neto],
-        ["Cantidad de duplicados detectados", exportResponse.cantidadDuplicadosDetectados],
-        ["Estado insertable", exportResponse.insertable ? "Si" : "No"],
-        [],
-        [
-          "Archivo origen",
-          "Empresa",
-          "Cuenta",
-          "Moneda",
-          "Tipo de cuenta",
-          "Total movimientos",
-          "Total ingresos",
-          "Total egresos",
-          "Neto",
-        ],
-        ...exportResponse.resumenArchivos.map((item) => [
-          item.archivoOrigen ?? "",
-          item.empresa ?? "",
-          item.cuenta ?? "",
-          item.moneda ?? "",
-          item.tipoCuenta ?? "",
-          item.totalMovimientos ?? 0,
-          item.totalIngresos ?? 0,
-          item.totalEgresos ?? 0,
-          item.neto ?? 0,
-        ]),
-      ];
+      let exportResponse: ConciliacionBcpExportResponse;
 
-      const resumenSheet = XLSX.utils.aoa_to_sheet(resumenRows);
-      resumenSheet["!autofilter"] = { ref: "A9:I9" };
-      resumenSheet["!freeze"] = { xSplit: 0, ySplit: 1 };
-      XLSX.utils.book_append_sheet(workbook, resumenSheet, "Resumen");
+      try {
+        const apiResponse = await exportarAnalisisConciliacionBcp({ analisis: analysisToExport });
+        exportResponse =
+          apiResponse?.movimientos?.length > 0 || apiResponse?.resumenArchivos?.length > 0
+            ? apiResponse
+            : buildExportResponseFromAnalysisData(analysisToExport);
+      } catch (exportError) {
+        console.warn("[ConciliacionBcp] Export remoto falló, se usará el respaldo local.", exportError);
+        exportResponse = buildExportResponseFromAnalysisData(analysisToExport);
+      }
 
-      const movimientosRows = [
-        [...MOVIMIENTOS_ORDENADOS_COLUMNS],
-        ...exportResponse.movimientos.map((row) => buildExportOrderedMovementRow(row)),
-      ];
-
-      const movimientosSheet = XLSX.utils.aoa_to_sheet(movimientosRows);
-      movimientosSheet["!autofilter"] = { ref: "A1:L1" };
-      movimientosSheet["!freeze"] = { xSplit: 0, ySplit: 1 };
-      XLSX.utils.book_append_sheet(workbook, movimientosSheet, "Movimientos ordenados");
-
+      const { workbook } = buildExportWorkbook(XLSX, exportResponse);
       XLSX.writeFile(workbook, exportResponse.nombreArchivo || "movimientos_consolidados_ordenados_por_operacion.xlsx");
       setMessage("Se genero el Excel final correctamente.");
     } catch (exportError) {
@@ -2177,7 +2413,8 @@ export default function ConciliacionBcpPage() {
     setMessage("");
 
     try {
-      await loadConciliacionPlanilla();
+      const response = await loadConciliacionPlanilla();
+      await handleExportConciliacionPlanilla(response);
     } catch (conciliacionError) {
       setConciliacionPlanilla(null);
       setError(getHttpErrorMessage(conciliacionError, "No se pudo ejecutar la conciliacion con planilla."));
@@ -2186,13 +2423,15 @@ export default function ConciliacionBcpPage() {
     }
   };
 
-  const handleExportConciliacionPlanilla = async () => {
-    if (!conciliacionPlanilla) {
+  const handleExportConciliacionPlanilla = async (
+    sourceConciliacionPlanilla: ConciliacionBcpConciliarPlanillaResponse | null = conciliacionPlanilla
+  ) => {
+    if (!sourceConciliacionPlanilla) {
       return;
     }
 
     const XLSX = await import("xlsx");
-    const exportRows = conciliacionPlanilla.registros.map((row) => ({
+    const exportRows = sourceConciliacionPlanilla.registros.map((row) => ({
       Fecha: formatDateValue(row.fecha),
       Empresa: row.empresa || "",
       Cuenta: row.cuenta || "",
@@ -2280,7 +2519,7 @@ export default function ConciliacionBcpPage() {
     <div style={styles.page}>
       <div style={styles.hero}>
         <div>
-          <p style={styles.kicker}>Finanzas / Conciliacion BCP</p>
+          <p style={styles.kicker}>Finanzas / Conciliacion {codigoBanco}</p>
           <h1 style={styles.title}>Carga, analiza y graba movimientos bancarios</h1>
           <p style={styles.subtitle}>
             Sube uno o varios archivos Excel, deja que ChatGPT reconozca la estructura.
@@ -2297,6 +2536,20 @@ export default function ConciliacionBcpPage() {
         <div style={styles.card}>
           <div style={styles.toolbarRow}>
             <div style={styles.toolbarActionsGroup}>
+              <label style={{ ...styles.fieldGroup, minWidth: 180 }}>
+                <span style={styles.fieldLabel}>Banco</span>
+                <select
+                  value={codigoBanco}
+                  onChange={(event) => setCodigoBanco(event.target.value)}
+                  style={styles.input}
+                >
+                  {BANCO_OPTIONS.map((option) => (
+                    <option key={option.code} value={option.code}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <button
                 ref={selectExcelButtonRef}
                 type="button"
@@ -2314,6 +2567,18 @@ export default function ConciliacionBcpPage() {
               >
                 {loadingParse || loadingAnalysis ? "Analizando..." : "Analizar estructura"}
               </button>
+              {analysis?.archivos?.length && showExportAnalysisButton ? (
+                <button
+                  type="button"
+                  style={styles.secondaryButton}
+                  onClick={() => void handleExportAnalysis()}
+                  title="Exportar analisis a Excel"
+                  aria-label="Exportar analisis a Excel"
+                >
+                  <FileDown size={16} strokeWidth={2.25} />
+                  <span>Exportar Excel</span>
+                </button>
+              ) : null}
               <button
                 type="button"
                 style={styles.secondaryButton}
@@ -2355,113 +2620,6 @@ export default function ConciliacionBcpPage() {
                 />
               </label>
             </div>
-            <div
-              style={{ ...styles.dropZoneInline, ...(dragActive ? styles.dropZoneActive : {}) }}
-              onDragOver={(event) => {
-                event.preventDefault();
-                setDragActive(true);
-              }}
-              onDragLeave={(event) => {
-                event.preventDefault();
-                setDragActive(false);
-              }}
-              onDrop={(event) => {
-                event.preventDefault();
-                setDragActive(false);
-                if (event.dataTransfer.files?.length) {
-                  void handleReplaceFiles(event.dataTransfer.files);
-                }
-              }}
-            >
-              <strong style={{ color: "#0F172A" }}>Arrastra tus archivos aqui</strong>
-              <span style={styles.dropHint}>
-                ChatGPT analizara la hoja preferida del archivo, identificara la estructura y generara
-                un consolidado estilo `Movimientos ordenados`.
-              </span>
-            </div>
-          </div>
-
-          <div style={styles.filterPanel}>
-            <label style={styles.fieldGroup}>
-              <span style={styles.fieldLabel}>Area Flujo</span>
-              <select
-                value={conciliacionFiltros.idAreaFlujo}
-                onChange={(event) =>
-                  setConciliacionFiltros((current) => ({
-                    ...current,
-                    idAreaFlujo: event.target.value,
-                  }))
-                }
-                style={styles.input}
-                disabled={clasificacionCombosLoading}
-              >
-                <option value="">Todos</option>
-                {(clasificacionCombos?.areasFlujo ?? []).map((option) => (
-                  <option key={option.idAreaFlujo} value={String(option.idAreaFlujo)}>
-                    {option.nombreAreaFlujo}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={styles.fieldGroup}>
-              <span style={styles.fieldLabel}>Referencia</span>
-              <select
-                value={conciliacionFiltros.idReferencia}
-                onChange={(event) =>
-                  setConciliacionFiltros((current) => ({
-                    ...current,
-                    idReferencia: event.target.value,
-                  }))
-                }
-                style={styles.input}
-                disabled={clasificacionCombosLoading}
-              >
-                <option value="">Todas</option>
-                {(clasificacionCombos?.referencias ?? []).map((option) => (
-                  <option key={option.idReferencia} value={String(option.idReferencia)}>
-                    {option.codigoReferencia} - {option.nombreReferencia}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={styles.fieldGroup}>
-              <span style={styles.fieldLabel}>Cuenta Contable</span>
-              <select
-                value={conciliacionFiltros.idCuentaContable}
-                onChange={(event) =>
-                  setConciliacionFiltros((current) => ({
-                    ...current,
-                    idCuentaContable: event.target.value,
-                  }))
-                }
-                style={styles.input}
-                disabled={clasificacionCombosLoading}
-              >
-                <option value="">Todas</option>
-                {(clasificacionCombos?.cuentasContables ?? []).map((option) => (
-                  <option key={option.idCuentaContable} value={String(option.idCuentaContable)}>
-                    {option.cuentaContableTexto}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={styles.fieldGroup}>
-              <span style={styles.fieldLabel}>Conciliado</span>
-              <select
-                value={conciliacionFiltros.esConciliado}
-                onChange={(event) =>
-                  setConciliacionFiltros((current) => ({
-                    ...current,
-                    esConciliado: event.target.value,
-                  }))
-                }
-                style={styles.input}
-              >
-                <option value="">Todos</option>
-                <option value="1">Conciliado</option>
-                <option value="0">Pendiente</option>
-              </select>
-            </label>
           </div>
 
         {error ? <div style={styles.errorBanner}>{error}</div> : null}
@@ -2557,7 +2715,7 @@ export default function ConciliacionBcpPage() {
                           <table style={styles.mappingTable}>
                             <thead>
                               <tr>
-                                {MOVIMIENTOS_ORDENADOS_COLUMNS.slice(0, 8).map((column) => (
+                                {MOVIMIENTOS_ORDENADOS_COLUMNS.slice(0, 16).map((column) => (
                                   <th key={column} style={styles.th}>
                                     {column}
                                   </th>
@@ -2567,9 +2725,9 @@ export default function ConciliacionBcpPage() {
                             <tbody>
                               {analysisFile.filasNormalizadas.slice(0, 5).map((row, rowIndex) => (
                                 <tr key={`${analysisFile.nombreArchivo}-preview-${rowIndex}`}>
-                                  {MOVIMIENTOS_ORDENADOS_COLUMNS.slice(0, 8).map((column) => (
+                                  {MOVIMIENTOS_ORDENADOS_COLUMNS.slice(0, 16).map((column) => (
                                     <td key={`${analysisFile.nombreArchivo}-${rowIndex}-${column}`} style={styles.td}>
-                                      {String(row[column] ?? "")}
+                                      {String(getPreviewCellValue(row as Record<string, unknown>, column))}
                                     </td>
                                   ))}
                                 </tr>
@@ -2638,16 +2796,30 @@ export default function ConciliacionBcpPage() {
                 `MovimientosBcp`.
               </p>
             </div>
-            <button
-              type="button"
-              style={styles.collapseToggleButton}
-              onClick={() => setIsAnalysisExpanded((current) => !current)}
-              aria-label={isAnalysisExpanded ? "Ocultar resultado IA" : "Expandir resultado IA"}
-              title={isAnalysisExpanded ? "Ocultar resultado IA" : "Expandir resultado IA"}
-            >
-              {isAnalysisExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-              <span>{isAnalysisExpanded ? "Ocultar" : "Expandir"}</span>
-            </button>
+            <div style={styles.sectionActions}>
+              {showExportAnalysisButton ? (
+                <button
+                  type="button"
+                  style={styles.iconActionButton}
+                  onClick={() => void handleExportAnalysis()}
+                  title="Exportar analisis a Excel"
+                  aria-label="Exportar analisis a Excel"
+                  disabled={!analysis?.archivos?.length}
+                >
+                  <FileDown size={18} strokeWidth={2.25} />
+                </button>
+              ) : null}
+              <button
+                type="button"
+                style={styles.collapseToggleButton}
+                onClick={() => setIsAnalysisExpanded((current) => !current)}
+                aria-label={isAnalysisExpanded ? "Ocultar resultado IA" : "Expandir resultado IA"}
+                title={isAnalysisExpanded ? "Ocultar resultado IA" : "Expandir resultado IA"}
+              >
+                {isAnalysisExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                <span>{isAnalysisExpanded ? "Ocultar" : "Expandir"}</span>
+              </button>
+            </div>
           </div>
 
           {isAnalysisExpanded ? (
@@ -2674,6 +2846,17 @@ export default function ConciliacionBcpPage() {
                   value="ChatGPT"
                 />
               </div>
+
+              {!analysis.puedeInsertar && (analysis.motivosNoInsertables?.length ?? 0) > 0 ? (
+                <div style={styles.inlineError}>
+                  <div style={{ fontWeight: 700, marginBottom: 6 }}>Motivos de bloqueo para insertar</div>
+                  <ul style={styles.warningList}>
+                    {analysis.motivosNoInsertables!.map((reason) => (
+                      <li key={reason}>{reason}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
 
               <div style={styles.previewBlock}>
                 <div style={styles.previewTitle}>Conexion activa</div>
@@ -2758,7 +2941,7 @@ export default function ConciliacionBcpPage() {
               </button>
               <button
                 type="button"
-                onClick={handleExportConciliacionPlanilla}
+                onClick={() => void handleExportConciliacionPlanilla()}
                 style={styles.iconActionButton}
                 title="Exportar conciliacion planilla a Excel"
                 aria-label="Exportar conciliacion planilla a Excel"
@@ -3521,19 +3704,19 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexWrap: "wrap",
     gap: 10,
-    alignItems: "center",
+    alignItems: "flex-end",
     marginBottom: 14,
   },
   toolbarActionsGroup: {
     display: "flex",
     flexWrap: "wrap",
-    alignItems: "center",
+    alignItems: "flex-end",
     gap: 10,
   },
   toolbarDates: {
     display: "flex",
-    flexDirection: "column",
-    alignItems: "stretch",
+    flexDirection: "row",
+    alignItems: "flex-end",
     gap: 10,
   },
   filterPanel: {

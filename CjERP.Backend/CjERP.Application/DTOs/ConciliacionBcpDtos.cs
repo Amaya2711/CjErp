@@ -1,10 +1,39 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace CjERP.Application.DTOs;
 
+internal sealed class FlexibleNullableInt32Converter : JsonConverter<int?>
+{
+    public override int? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        return reader.TokenType switch
+        {
+            JsonTokenType.Null => null,
+            JsonTokenType.Number when reader.TryGetInt32(out var number) => number,
+            JsonTokenType.String when int.TryParse(reader.GetString(), out var parsed) => parsed,
+            JsonTokenType.String => null,
+            _ => null
+        };
+    }
+
+    public override void Write(Utf8JsonWriter writer, int? value, JsonSerializerOptions options)
+    {
+        if (value.HasValue)
+        {
+            writer.WriteNumberValue(value.Value);
+            return;
+        }
+
+        writer.WriteNullValue();
+    }
+}
+
 public sealed class ConciliacionBcpAnalizarRequestDto
 {
     public List<ConciliacionBcpArchivoMuestraDto> Archivos { get; set; } = [];
+
+    public string? CodigoBanco { get; set; }
 }
 
 public sealed class ConciliacionBcpArchivoMuestraDto
@@ -36,6 +65,8 @@ public sealed class ConciliacionBcpAnalizarResponseDto
 
     public bool PuedeInsertar { get; set; }
 
+    public List<string> MotivosNoInsertables { get; set; } = [];
+
     public List<ConciliacionBcpParametroDto> ParametrosProcedimiento { get; set; } = [];
 
     public List<ConciliacionBcpAnalizarArchivoResponseDto> Archivos { get; set; } = [];
@@ -46,6 +77,16 @@ public sealed class ConciliacionBcpAnalizarResponseDto
 public sealed class ConciliacionBcpAnalizarArchivoResponseDto
 {
     public string NombreArchivo { get; set; } = string.Empty;
+
+    [JsonConverter(typeof(FlexibleNullableInt32Converter))]
+    public int? IdBanco { get; set; }
+
+    public string? CodigoBanco { get; set; }
+
+    [JsonConverter(typeof(FlexibleNullableInt32Converter))]
+    public int? IdPlantillaBanco { get; set; }
+
+    public string? CodigoPlantillaBanco { get; set; }
 
     public string NombreHoja { get; set; } = string.Empty;
 
@@ -138,6 +179,8 @@ public sealed class ConciliacionBcpParametroDto
 public sealed class ConciliacionBcpInsertRequestDto
 {
     public List<Dictionary<string, object?>> Filas { get; set; } = [];
+
+    public string? CodigoBanco { get; set; }
 }
 
 public sealed class ConciliacionBcpExportRequestDto
@@ -147,6 +190,8 @@ public sealed class ConciliacionBcpExportRequestDto
 
 public sealed class ConciliacionBcpConciliarPlanillaRequestDto
 {
+    public string? CodigoBanco { get; set; }
+
     public int? IdCargo { get; set; }
 
     public int? IdEmpleado { get; set; }
@@ -193,6 +238,10 @@ public sealed class ConciliacionBcpActualizarComentarioRequestDto
 public sealed class ConciliacionBcpConciliarPlanillaRegistroDto
 {
     public int IdMovimientoBanco { get; set; }
+
+    public int? IdBanco { get; set; }
+
+    public string? CodigoBanco { get; set; }
 
     public string? Empresa { get; set; }
 
@@ -453,11 +502,22 @@ public sealed class ConciliacionBcpPromptAnalysisResponseDto
 
     public List<ConciliacionBcpPromptMovimientoDto> Movimientos { get; set; } = [];
 
+    [JsonConverter(typeof(FlexibleConciliacionBcpPromptValidacionesDtoConverter))]
     public ConciliacionBcpPromptValidacionesDto? Validaciones { get; set; }
 }
 
 public sealed class ConciliacionBcpPromptResumenArchivoDto
 {
+    [JsonConverter(typeof(FlexibleNullableInt32Converter))]
+    public int? IdBanco { get; set; }
+
+    public string? CodigoBanco { get; set; }
+
+    [JsonConverter(typeof(FlexibleNullableInt32Converter))]
+    public int? IdPlantillaBanco { get; set; }
+
+    public string? CodigoPlantillaBanco { get; set; }
+
     public string? ArchivoOrigen { get; set; }
 
     public string? Empresa { get; set; }
@@ -468,23 +528,76 @@ public sealed class ConciliacionBcpPromptResumenArchivoDto
 
     public string? TipoCuenta { get; set; }
 
+    [JsonIgnore]
     public decimal? SaldoLiquido { get; set; }
 
+    [JsonIgnore]
     public decimal? SaldoNoDisponible { get; set; }
 
+    [JsonIgnore]
     public decimal? SaldoContable { get; set; }
+
+    [JsonPropertyName("saldoLiquido")]
+    public JsonElement? SaldoLiquidoRaw { get; set; }
+
+    [JsonPropertyName("saldoNoDisponible")]
+    public JsonElement? SaldoNoDisponibleRaw { get; set; }
+
+    [JsonPropertyName("saldoContable")]
+    public JsonElement? SaldoContableRaw { get; set; }
 
     public int TotalMovimientos { get; set; }
 
+    [JsonIgnore]
     public decimal? TotalIngresos { get; set; }
 
+    [JsonIgnore]
     public decimal? TotalEgresos { get; set; }
 
+    [JsonIgnore]
     public decimal? Neto { get; set; }
+
+    [JsonPropertyName("totalIngresos")]
+    public JsonElement? TotalIngresosRaw { get; set; }
+
+    [JsonPropertyName("totalEgresos")]
+    public JsonElement? TotalEgresosRaw { get; set; }
+
+    [JsonPropertyName("neto")]
+    public JsonElement? NetoRaw { get; set; }
+
+    [JsonIgnore]
+    public List<ConciliacionBcpPromptMovimientoDto> Movimientos { get; set; } = [];
+
+    [JsonPropertyName("movimientos")]
+    public JsonElement? MovimientosRaw { get; set; }
+
+    public ConciliacionBcpPromptResumenArchivoDetalleDto? Resumen { get; set; }
+}
+
+public sealed class ConciliacionBcpPromptResumenArchivoDetalleDto
+{
+    public decimal? SaldoContable { get; set; }
+
+    public decimal? SaldoDisponible { get; set; }
+
+    public decimal? SaldoLiquido { get; set; }
+
+    public string? Moneda { get; set; }
 }
 
 public sealed class ConciliacionBcpPromptMovimientoDto
 {
+    [JsonConverter(typeof(FlexibleNullableInt32Converter))]
+    public int? IdBanco { get; set; }
+
+    public string? CodigoBanco { get; set; }
+
+    [JsonConverter(typeof(FlexibleNullableInt32Converter))]
+    public int? IdPlantillaBanco { get; set; }
+
+    public string? CodigoPlantillaBanco { get; set; }
+
     public string? Empresa { get; set; }
 
     public string? Cuenta { get; set; }
@@ -501,6 +614,16 @@ public sealed class ConciliacionBcpPromptMovimientoDto
 
     public string? DescripcionOperacion { get; set; }
 
+    public string? Referencia { get; set; }
+
+    public string? CDR { get; set; }
+
+    public string? Modulo { get; set; }
+
+    public string? Transaccion { get; set; }
+
+    public string? Relacion { get; set; }
+
     public decimal? Monto { get; set; }
 
     public string? SucursalAgencia { get; set; }
@@ -510,6 +633,9 @@ public sealed class ConciliacionBcpPromptMovimientoDto
     public string? Usuario { get; set; }
 
     public string? ArchivoOrigen { get; set; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtraData { get; set; }
 }
 
 public sealed class ConciliacionBcpPromptValidacionesDto
@@ -523,4 +649,108 @@ public sealed class ConciliacionBcpPromptValidacionesDto
     public List<Dictionary<string, object?>> DuplicadosDetectados { get; set; } = [];
 
     public List<string> Observaciones { get; set; } = [];
+}
+
+internal sealed class FlexibleConciliacionBcpPromptValidacionesDtoConverter : JsonConverter<ConciliacionBcpPromptValidacionesDto?>
+{
+    public override ConciliacionBcpPromptValidacionesDto? Read(
+        ref Utf8JsonReader reader,
+        Type typeToConvert,
+        JsonSerializerOptions options)
+    {
+        return reader.TokenType switch
+        {
+            JsonTokenType.Null => null,
+            JsonTokenType.StartObject =>
+                JsonSerializer.Deserialize<ConciliacionBcpPromptValidacionesDto>(
+                    ref reader,
+                    options),
+            JsonTokenType.String => new ConciliacionBcpPromptValidacionesDto
+            {
+                Insertable = false,
+                Observaciones = string.IsNullOrWhiteSpace(reader.GetString())
+                    ? []
+                    : [reader.GetString()!.Trim()]
+            },
+            JsonTokenType.StartArray => ReadFromArray(ref reader, options),
+            _ => null
+        };
+    }
+
+    public override void Write(
+        Utf8JsonWriter writer,
+        ConciliacionBcpPromptValidacionesDto? value,
+        JsonSerializerOptions options)
+    {
+        JsonSerializer.Serialize(writer, value, options);
+    }
+
+    private static ConciliacionBcpPromptValidacionesDto ReadFromArray(
+        ref Utf8JsonReader reader,
+        JsonSerializerOptions options)
+    {
+        var observaciones = new List<string>();
+
+        while (reader.Read())
+        {
+            if (reader.TokenType == JsonTokenType.EndArray)
+            {
+                break;
+            }
+
+            if (reader.TokenType == JsonTokenType.String)
+            {
+                var item = reader.GetString();
+                if (!string.IsNullOrWhiteSpace(item))
+                {
+                    observaciones.Add(item.Trim());
+                }
+                continue;
+            }
+
+            if (reader.TokenType == JsonTokenType.StartObject)
+            {
+                try
+                {
+                    var item = JsonSerializer.Deserialize<ConciliacionBcpPromptValidacionesDto>(ref reader, options);
+                    if (item is not null)
+                    {
+                        observaciones.AddRange(item.Observaciones.Where(x => !string.IsNullOrWhiteSpace(x)));
+                    }
+                }
+                catch
+                {
+                    SkipValue(ref reader);
+                }
+                continue;
+            }
+
+            SkipValue(ref reader);
+        }
+
+        return new ConciliacionBcpPromptValidacionesDto
+        {
+            Insertable = false,
+            Observaciones = observaciones
+        };
+    }
+
+    private static void SkipValue(ref Utf8JsonReader reader)
+    {
+            if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray)
+            {
+                var depth = 1;
+                while (depth > 0 && reader.Read())
+                {
+                    if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray)
+                    {
+                        depth++;
+                    }
+                    else if (reader.TokenType is JsonTokenType.EndObject or JsonTokenType.EndArray)
+                    {
+                        depth--;
+                    }
+                }
+            }
+    }
 }

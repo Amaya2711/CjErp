@@ -31,6 +31,7 @@ const TesoreriaChequesPage = lazy(() => import("../../features/finanzas/tesoreri
 const TesoreriaGastosPage = lazy(() => import("../../features/finanzas/tesoreria/gastos"));
 const TesoreriaGastosAprobarPage = lazy(() => import("../../features/finanzas/tesoreria/gastosaprobar"));
 const ConciliacionBcpPage = lazy(() => import("../../features/finanzas/conciliacion"));
+const ConciliacionBcpV1Page = lazy(() => import("../../features/finanzas/conciliacion_v1"));
 const ActFacturaPage = lazy(() => import("../../features/finanzas/facturacionfinanciera/actfactura"));
 const OcPage = lazy(() => import("../../features/finanzas/facturacionfinanciera/oc"));
 const AsientosPage = lazy(() => import("../../features/finanzas/contabilidad/asientos"));
@@ -215,6 +216,7 @@ export default function AppRouter() {
             <Route path="/finanzas/tesoreria/gastos" element={<TesoreriaGastosPage />} />
             <Route path="/finanzas/tesoreria/gastosaprobar" element={<TesoreriaGastosAprobarPage />} />
             <Route path="/finanzas/conciliacion" element={<ConciliacionBcpPage />} />
+            <Route path="/finanzas/conciliacion_v1" element={<ConciliacionBcpV1Page />} />
 
             <Route
               path="/finanzas/facturacionfinanciera"

@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { RotateCcw, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Eye, RotateCcw, Search } from "lucide-react";
 import AppCard from "../../../components/base/AppCard";
 import AppPage from "../../../components/base/AppPage";
 import AppStatusMessage from "../../../components/base/AppStatusMessage";
@@ -23,6 +23,15 @@ type EditingCellState = {
   columnKey: EditableDateColumn;
 };
 
+type SortDirection = "asc" | "desc";
+
+type SortState = {
+  key: string;
+  direction: SortDirection;
+};
+
+type ColumnFiltersState = Record<string, string>;
+
 const EDITABLE_DATE_COLUMNS = new Set<EditableDateColumn>(["fechaIngreso", "fechaIniLaboral"]);
 
 const GRID_COLUMNS: GridColumn[] = [
@@ -31,6 +40,7 @@ const GRID_COLUMNS: GridColumn[] = [
   { key: "tipoDoc", label: "Tipo Doc", width: 80 },
   { key: "nroDocumento", label: "Documento", width: 110 },
   { key: "sexo", label: "Sexo", width: 86 },
+  { key: "empresa", label: "Empresa", width: 130 },
   { key: "cliente", label: "Cliente", width: 130 },
   { key: "area", label: "Area", width: 120 },
   { key: "ubicacion", label: "Ubicacion", width: 130 },
@@ -40,13 +50,29 @@ const GRID_COLUMNS: GridColumn[] = [
   { key: "responsable", label: "Responsable", width: 190 },
   { key: "soValidador", label: "2do Validador", width: 190 },
   { key: "terValidador", label: "3er Validador", width: 190 },
-  { key: "empresa", label: "Empresa", width: 130 },
   { key: "telefono", label: "Telefono", width: 120 },
   { key: "correo", label: "Correo", width: 230 },
   { key: "direccion", label: "Direccion", width: 320 },
   { key: "cargoPrint", label: "Cargo", width: 170 },
   { key: "estado", label: "Estado", width: 100 },
 ];
+
+const NON_FILTERABLE_COLUMN_KEYS = new Set([
+  "idEmpleado",
+  "sexo",
+  "telefono",
+  "correo",
+  "direccion",
+  "estado",
+  "fechaIngreso",
+  "fechaIniLaboral",
+  "fechaFinLaboral",
+]);
+
+const FILTERABLE_COLUMNS = GRID_COLUMNS.filter((column) => !NON_FILTERABLE_COLUMN_KEYS.has(column.key));
+const SECONDARY_FILTER_COLUMN_KEYS = new Set(["tipoDoc", "soValidador", "terValidador", "cargoPrint"]);
+const PRIMARY_FILTER_COLUMNS = FILTERABLE_COLUMNS.filter((column) => !SECONDARY_FILTER_COLUMN_KEYS.has(column.key));
+const SECONDARY_FILTER_COLUMNS = FILTERABLE_COLUMNS.filter((column) => SECONDARY_FILTER_COLUMN_KEYS.has(column.key));
 
 function normalizeText(value: unknown): string {
   if (value == null) {
@@ -185,6 +211,33 @@ function formatDateCell(value: unknown): string {
   return match ? match[1] : text;
 }
 
+function getSortValue(value: unknown, columnKey: string): string | number {
+  const text = normalizeText(value);
+
+  if (!text) {
+    return "";
+  }
+
+  if (columnKey.toLowerCase().includes("fecha")) {
+    const parsedDate = Date.parse(toDateInputValue(text));
+    return Number.isNaN(parsedDate) ? text.toLowerCase() : parsedDate;
+  }
+
+  const numericValue = Number(text);
+  if (Number.isFinite(numericValue)) {
+    return numericValue;
+  }
+
+  return text.toLowerCase();
+}
+
+function createEmptyColumnFilters(): ColumnFiltersState {
+  return FILTERABLE_COLUMNS.reduce<ColumnFiltersState>((acc, column) => {
+    acc[column.key] = "";
+    return acc;
+  }, {});
+}
+
 export default function MantenimientoEmpleadoPage() {
   const [rows, setRows] = useState<ExcelRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -195,9 +248,25 @@ export default function MantenimientoEmpleadoPage() {
   const [hoveredCell, setHoveredCell] = useState<EditingCellState | null>(null);
   const [draftDateValue, setDraftDateValue] = useState("");
   const [savingCell, setSavingCell] = useState<EditingCellState | null>(null);
+  const [sortState, setSortState] = useState<SortState | null>(null);
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>(() => createEmptyColumnFilters());
+  const [showSecondaryFilters, setShowSecondaryFilters] = useState(false);
   const topScrollRef = useRef<HTMLDivElement | null>(null);
   const tableWrapRef = useRef<HTMLDivElement | null>(null);
   const bottomScrollRef = useRef<HTMLDivElement | null>(null);
+  const successTimerRef = useRef<number | null>(null);
+
+  const showTemporarySuccess = (message: string, durationMs = 3000) => {
+    if (successTimerRef.current !== null) {
+      window.clearTimeout(successTimerRef.current);
+    }
+
+    setSuccess(message);
+    successTimerRef.current = window.setTimeout(() => {
+      setSuccess("");
+      successTimerRef.current = null;
+    }, durationMs);
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -208,7 +277,7 @@ export default function MantenimientoEmpleadoPage() {
       const response = await empleadosCrudService.listar();
       const nextRows = Array.isArray(response) ? response.map(toExcelRow) : [];
       setRows(nextRows);
-      setSuccess(`Se cargaron ${nextRows.length} registros del mantenimiento de empleados.`);
+      showTemporarySuccess(`Se cargaron ${nextRows.length} registros del mantenimiento de empleados.`);
     } catch (err) {
       setRows([]);
       setError(getHttpErrorMessage(err, "No se pudo cargar el listado de empleados."));
@@ -223,8 +292,44 @@ export default function MantenimientoEmpleadoPage() {
 
   const filteredRows = useMemo(() => {
     const normalizedQuery = normalizeSearchText(searchText);
-    return rows.filter((row) => rowMatchesQuery(row, normalizedQuery));
-  }, [rows, searchText]);
+    return rows.filter((row) => {
+      if (!rowMatchesQuery(row, normalizedQuery)) {
+        return false;
+      }
+
+      return FILTERABLE_COLUMNS.every((column) => {
+        const filterValue = normalizeSearchText(columnFilters[column.key] ?? "");
+        if (!filterValue) {
+          return true;
+        }
+
+        const cellValue = normalizeSearchText(normalizeText(row[column.key]));
+        return cellValue.includes(filterValue);
+      });
+    });
+  }, [columnFilters, rows, searchText]);
+
+  const sortedRows = useMemo(() => {
+    if (!sortState) {
+      return filteredRows;
+    }
+
+    return [...filteredRows].sort((leftRow, rightRow) => {
+      const leftValue = getSortValue(leftRow[sortState.key], sortState.key);
+      const rightValue = getSortValue(rightRow[sortState.key], sortState.key);
+
+      if (leftValue === rightValue) {
+        return 0;
+      }
+
+      const comparison =
+        typeof leftValue === "number" && typeof rightValue === "number"
+          ? leftValue - rightValue
+          : String(leftValue).localeCompare(String(rightValue), "es", { sensitivity: "base", numeric: true });
+
+      return sortState.direction === "asc" ? comparison : -comparison;
+    });
+  }, [filteredRows, sortState]);
 
   const contentWidth = useMemo(() => {
     const baseWidth = GRID_COLUMNS.reduce((total, column) => total + column.width, 0);
@@ -243,6 +348,31 @@ export default function MantenimientoEmpleadoPage() {
       return current;
     });
   }, []);
+
+  const handleSortColumn = (columnKey: string) => {
+    setSortState((current) => {
+      if (current?.key === columnKey) {
+        return {
+          key: columnKey,
+          direction: current.direction === "asc" ? "desc" : "asc",
+        };
+      }
+
+      return {
+        key: columnKey,
+        direction: "asc",
+      };
+    });
+  };
+
+  const clearColumnFilters = () => {
+    setColumnFilters(createEmptyColumnFilters());
+  };
+
+  const hasActiveColumnFilters = useMemo(
+    () => GRID_COLUMNS.some((column) => normalizeSearchText(columnFilters[column.key] ?? "") !== ""),
+    [columnFilters],
+  );
 
   const saveDateCell = async (row: ExcelRow, columnKey: EditableDateColumn, nextValue: string) => {
     const previousValue = toDateInputValue(row[columnKey]);
@@ -270,7 +400,9 @@ export default function MantenimientoEmpleadoPage() {
           Number(currentRow.idEmpleado) === Number(row.idEmpleado) ? { ...currentRow, ...updatedRow } : currentRow,
         ),
       );
-      setSuccess(`Se actualizó ${columnKey === "fechaIngreso" ? "Fecha Ingreso" : "Inicio"} del empleado ${normalizeText(row.nombreEmpleado)}.`);
+      showTemporarySuccess(
+        `Se actualizó ${columnKey === "fechaIngreso" ? "Fecha Ingreso" : "Inicio"} del empleado ${normalizeText(row.nombreEmpleado)}.`,
+      );
     } catch (err) {
       setError(getHttpErrorMessage(err, "No se pudo actualizar la fecha del empleado."));
     } finally {
@@ -332,7 +464,15 @@ export default function MantenimientoEmpleadoPage() {
       tableEl.removeEventListener("scroll", syncFromTable);
       bottomEl.removeEventListener("scroll", syncFromBottom);
     };
-  }, [filteredRows.length]);
+  }, [sortedRows.length]);
+
+  useEffect(() => {
+    return () => {
+      if (successTimerRef.current !== null) {
+        window.clearTimeout(successTimerRef.current);
+      }
+    };
+  }, []);
 
   return (
     <AppPage
@@ -341,17 +481,9 @@ export default function MantenimientoEmpleadoPage() {
       style={{ height: "100%", minHeight: 0, overflow: "hidden", boxSizing: "border-box" }}
     >
       <div style={styles.page}>
-        <AppCard>
+        <AppCard style={{ marginBottom: 0 }}>
           <div style={styles.headerRow}>
-            <div>
-              <h2 style={styles.title}>Listado de empleados</h2>
-              <p style={styles.subtitle}>
-                Vista tipo Excel con los datos cargados desde <code>sp_EmpleadoCj_Ficha</code>.
-              </p>
-            </div>
-            <div style={styles.summaryBadge}>
-              {filteredRows.length} de {rows.length} registros
-            </div>
+            <div />
           </div>
 
           <div style={styles.toolbar}>
@@ -381,23 +513,93 @@ export default function MantenimientoEmpleadoPage() {
           </div>
         </AppCard>
 
+        <AppCard style={{ ...styles.filterCard, marginBottom: 0 }}>
+          <div style={styles.filterHeader}>
+            <div>
+              <h3 style={styles.filterTitle}>Filtros por columna</h3>
+              <p style={styles.filterSubtitle}>Filtra la información ya cargada sin volver a consultar el store.</p>
+            </div>
+            <div style={styles.filterActions}>
+              <div style={styles.filterBadge}>{hasActiveColumnFilters ? "Filtros activos" : "Sin filtros"}</div>
+              <button
+                type="button"
+                onClick={() => setShowSecondaryFilters((current) => !current)}
+                style={styles.secondaryButton}
+                aria-label={showSecondaryFilters ? "Ocultar filtros secundarios" : "Ver filtros secundarios"}
+                title={showSecondaryFilters ? "Ocultar filtros secundarios" : "Ver filtros secundarios"}
+              >
+                <Eye size={16} />
+              </button>
+              <button type="button" onClick={clearColumnFilters} style={styles.secondaryButton} disabled={!hasActiveColumnFilters}>
+                <RotateCcw size={16} />
+                Limpiar filtros
+              </button>
+            </div>
+          </div>
+
+          <div style={styles.filterGrid}>
+            {PRIMARY_FILTER_COLUMNS.map((column) => {
+              const isDateFilter = column.key.toLowerCase().includes("fecha");
+
+              return (
+                <label key={column.key} style={styles.filterField}>
+                  <span style={styles.filterLabel}>{column.label}</span>
+                  <input
+                    type={isDateFilter ? "date" : "text"}
+                    value={columnFilters[column.key] ?? ""}
+                    onChange={(event) =>
+                      setColumnFilters((current) => ({
+                        ...current,
+                        [column.key]: event.target.value,
+                      }))
+                    }
+                    placeholder={isDateFilter ? "Filtrar fecha" : `Filtrar ${column.label.toLowerCase()}`}
+                    style={styles.filterInput}
+                  />
+                </label>
+              );
+            })}
+          </div>
+
+          {showSecondaryFilters ? (
+            <div style={styles.secondaryFilterSection}>
+              <div style={styles.secondaryFilterHeader}>
+                <h4 style={styles.secondaryFilterTitle}>Filtros secundarios</h4>
+                <span style={styles.secondaryFilterHint}>Tipo Doc, 2do Validador, 3er Validador y Cargo</span>
+              </div>
+              <div style={styles.filterGrid}>
+                {SECONDARY_FILTER_COLUMNS.map((column) => {
+                  const isDateFilter = column.key.toLowerCase().includes("fecha");
+
+                  return (
+                    <label key={column.key} style={styles.filterField}>
+                      <span style={styles.filterLabel}>{column.label}</span>
+                      <input
+                        type={isDateFilter ? "date" : "text"}
+                        value={columnFilters[column.key] ?? ""}
+                        onChange={(event) =>
+                          setColumnFilters((current) => ({
+                            ...current,
+                            [column.key]: event.target.value,
+                          }))
+                        }
+                        placeholder={isDateFilter ? "Filtrar fecha" : `Filtrar ${column.label.toLowerCase()}`}
+                        style={styles.filterInput}
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+        </AppCard>
+
         {loading ? <AppStatusMessage tone="info">Cargando listado de empleados...</AppStatusMessage> : null}
         {success ? <AppStatusMessage tone="success">{success}</AppStatusMessage> : null}
         {error ? <AppStatusMessage tone="error">{error}</AppStatusMessage> : null}
 
-        <AppCard style={{ minHeight: 0, flex: 1, display: "flex", flexDirection: "column" }}>
+        <AppCard style={{ minHeight: 0, flex: 1, display: "flex", flexDirection: "column", marginBottom: 0 }}>
           <div style={styles.tableShell}>
-            <div style={styles.tableMeta}>
-              <div style={styles.metaItem}>
-                <span style={styles.metaLabel}>Registros visibles</span>
-                <strong style={styles.metaValue}>{filteredRows.length}</strong>
-              </div>
-              <div style={styles.metaItem}>
-                <span style={styles.metaLabel}>Columnas</span>
-                <strong style={styles.metaValue}>{GRID_COLUMNS.length}</strong>
-              </div>
-            </div>
-
             <div ref={topScrollRef} className="employee-horizontal-scroll" style={styles.topScrollBar} aria-hidden="true">
               <div style={{ ...styles.bottomScrollSpacer, width: contentWidth }} />
             </div>
@@ -406,36 +608,56 @@ export default function MantenimientoEmpleadoPage() {
               <table style={{ ...styles.table, width: contentWidth }}>
                 <thead>
                   <tr>
-                    {GRID_COLUMNS.map((column, columnIndex) => (
-                      <th
-                        key={column.key}
-                        style={{
-                          ...styles.th,
-                          width: column.width,
-                          minWidth: column.width,
-                          maxWidth: column.width,
-                          ...(column.sticky
-                            ? {
-                                ...styles.stickyTh,
-                                left: stickyOffsets[columnIndex] ?? 0,
-                              }
-                            : {}),
-                        }}
-                      >
-                        {column.label}
-                      </th>
-                    ))}
+                    {GRID_COLUMNS.map((column, columnIndex) => {
+                      const isSorted = sortState?.key === column.key;
+
+                      return (
+                        <th
+                          key={column.key}
+                          style={{
+                            ...styles.th,
+                            width: column.width,
+                            minWidth: column.width,
+                            maxWidth: column.width,
+                            ...(column.sticky
+                              ? {
+                                  ...styles.stickyTh,
+                                  left: stickyOffsets[columnIndex] ?? 0,
+                                }
+                              : {}),
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => handleSortColumn(column.key)}
+                            style={styles.headerButton}
+                            aria-label={`Ordenar por ${column.label}`}
+                          >
+                            <span style={styles.headerLabel}>{column.label}</span>
+                            {isSorted ? (
+                              sortState.direction === "asc" ? (
+                                <ArrowUp size={14} />
+                              ) : (
+                                <ArrowDown size={14} />
+                              )
+                            ) : (
+                              <ArrowUpDown size={14} />
+                            )}
+                          </button>
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredRows.length === 0 ? (
+                  {sortedRows.length === 0 ? (
                     <tr>
                       <td colSpan={GRID_COLUMNS.length} style={styles.emptyCell}>
                         No se encontraron registros.
                       </td>
                     </tr>
                   ) : (
-                    filteredRows.map((row, rowIndex) => (
+                    sortedRows.map((row, rowIndex) => (
                       <tr key={`${rowIndex}-${normalizeText(row.idEmpleado)}`} style={rowIndex % 2 === 0 ? styles.rowEven : styles.rowOdd}>
                         {GRID_COLUMNS.map((column, columnIndex) => {
                           const rowId = Number(row.idEmpleado);
@@ -536,7 +758,7 @@ const styles: Record<string, CSSProperties> = {
   page: {
     display: "flex",
     flexDirection: "column",
-    gap: 16,
+    gap: 10,
     minHeight: 0,
   },
   headerRow: {
@@ -545,17 +767,6 @@ const styles: Record<string, CSSProperties> = {
     justifyContent: "space-between",
     gap: 16,
     marginBottom: 16,
-  },
-  title: {
-    margin: 0,
-    fontSize: 22,
-    fontWeight: 800,
-    color: "#0F172A",
-  },
-  subtitle: {
-    margin: "4px 0 0",
-    fontSize: 13,
-    color: "#64748B",
   },
   summaryBadge: {
     borderRadius: 999,
@@ -632,17 +843,103 @@ const styles: Record<string, CSSProperties> = {
     cursor: "pointer",
     minHeight: 44,
   },
+  filterCard: {
+    border: "1px solid #E2E8F0",
+    background: "linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%)",
+  },
+  filterHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 16,
+    marginBottom: 14,
+  },
+  filterTitle: {
+    margin: 0,
+    fontSize: 18,
+    fontWeight: 800,
+    color: "#0F172A",
+  },
+  filterSubtitle: {
+    margin: "4px 0 0",
+    fontSize: 13,
+    color: "#64748B",
+  },
+  filterActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+  },
+  filterBadge: {
+    borderRadius: 999,
+    padding: "8px 12px",
+    background: "#EFF6FF",
+    color: "#1D4ED8",
+    fontSize: 12,
+    fontWeight: 800,
+    whiteSpace: "nowrap",
+  },
+  filterGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+    gap: 12,
+  },
+  secondaryFilterSection: {
+    marginTop: 14,
+    paddingTop: 14,
+    borderTop: "1px solid #E2E8F0",
+  },
+  secondaryFilterHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 10,
+    flexWrap: "wrap",
+  },
+  secondaryFilterTitle: {
+    margin: 0,
+    fontSize: 13,
+    fontWeight: 800,
+    color: "#0F172A",
+  },
+  secondaryFilterHint: {
+    fontSize: 12,
+    color: "#64748B",
+    fontWeight: 600,
+  },
+  filterField: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    minWidth: 0,
+  },
+  filterLabel: {
+    fontSize: 11,
+    fontWeight: 800,
+    color: "#475569",
+    textTransform: "uppercase",
+    letterSpacing: "0.03em",
+  },
+  filterInput: {
+    border: "1px solid #CBD5E1",
+    borderRadius: 12,
+    minHeight: 40,
+    padding: "0 12px",
+    background: "#FFFFFF",
+    fontSize: 14,
+    color: "#0F172A",
+    outline: "none",
+    width: "100%",
+  },
   tableShell: {
     display: "flex",
     flexDirection: "column",
     flex: 1,
     minHeight: 0,
     gap: 12,
-  },
-  tableMeta: {
-    display: "flex",
-    gap: 12,
-    flexWrap: "wrap",
   },
   topScrollBar: {
     width: "100%",
@@ -657,28 +954,6 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: 10,
     scrollbarWidth: "thin",
     scrollbarColor: "#94A3B8 #E2E8F0",
-  },
-  metaItem: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 2,
-    borderRadius: 14,
-    border: "1px solid #E2E8F0",
-    background: "#F8FAFC",
-    padding: "10px 12px",
-    minWidth: 140,
-  },
-  metaLabel: {
-    fontSize: 11,
-    fontWeight: 800,
-    color: "#64748B",
-    textTransform: "uppercase",
-    letterSpacing: "0.04em",
-  },
-  metaValue: {
-    fontSize: 14,
-    fontWeight: 800,
-    color: "#0F172A",
   },
   tableWrap: {
     width: "100%",
@@ -701,7 +976,7 @@ const styles: Record<string, CSSProperties> = {
     top: 0,
     zIndex: 2,
     textAlign: "left",
-    padding: "12px 14px",
+    padding: 0,
     fontSize: 12,
     fontWeight: 800,
     color: "#334155",
@@ -716,6 +991,26 @@ const styles: Record<string, CSSProperties> = {
     zIndex: 5,
     background: "#F8FAFC",
     boxShadow: "2px 0 0 #E2E8F0",
+  },
+  headerButton: {
+    width: "100%",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    padding: "12px 14px",
+    border: "none",
+    background: "transparent",
+    color: "inherit",
+    font: "inherit",
+    fontWeight: 800,
+    cursor: "pointer",
+    textAlign: "left",
+  },
+  headerLabel: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
   },
   td: {
     padding: "10px 14px",

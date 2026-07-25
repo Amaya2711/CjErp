@@ -31,6 +31,7 @@ export const menuDashboard: DashboardGroup[] = [
       { label: "Aprobaciones", path: "/finanzas/aprobar" },
       { label: "Orden Compra", path: "/finanzas/orden-compra" },
       { label: "Conciliación BCP", path: "/finanzas/conciliacion" },
+      { label: "Conciliación BCP v1", path: "/finanzas/conciliacion_v1" },
       { label: "Gastos", path: "/finanzas/gastos" },
       { label: "Bien / Servicio", path: "/finanzas/bien-servicio" },
       { label: "Act. Factura", path: "/finanzas/act-factura" },
