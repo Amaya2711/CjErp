@@ -107,18 +107,26 @@ public class MantenimientoEmpleadosController : ControllerBase
             });
         }
 
-        await using var connection = new SqlConnection(connectionString);
+        var empresasTask = ObtenerConstantesPorCampoAsync(connectionString, "EMPRESA_CJ", cancellationToken);
+        var clientesTask = ObtenerConstantesPorCampoAsync(connectionString, "CLIENTE_CJ", cancellationToken);
+        var areasTask = ObtenerConstantesPorCampoAsync(connectionString, "AREA_CJ", cancellationToken);
+        var ubicacionesTask = ObtenerConstantesPorCampoAsync(connectionString, "UBICACION_CJ", cancellationToken);
+        var sexosTask = ObtenerConstantesPorCampoAsync(connectionString, "SEXO", cancellationToken);
+        var tiposDocumentoTask = ObtenerConstantesPorCampoAsync(connectionString, "TIPO_DOC", cancellationToken);
+        var responsablesTask = ObtenerValidadoresAsync(connectionString, 1, "RESPONSABLE", cancellationToken);
+        var segundoValidadoresTask = ObtenerValidadoresAsync(connectionString, 2, "SEGUNDO_VALIDADOR", cancellationToken);
+        var tercerValidadoresTask = ObtenerValidadoresAsync(connectionString, 3, "TERCER_VALIDADOR", cancellationToken);
 
-        var empresas = await ObtenerConstantesPorCampoAsync(connection, "EMPRESA_CJ", cancellationToken);
-        var clientes = await ObtenerConstantesPorCampoAsync(connection, "CLIENTE_CJ", cancellationToken);
-        var areas = await ObtenerConstantesPorCampoAsync(connection, "AREA_CJ", cancellationToken);
-        var ubicaciones = await ObtenerConstantesPorCampoAsync(connection, "UBICACION_CJ", cancellationToken);
-        var sexos = await ObtenerConstantesPorCampoAsync(connection, "SEXO", cancellationToken);
-        var tiposDocumento = await ObtenerConstantesPorCampoAsync(connection, "TIPO_DOC", cancellationToken);
-
-        var responsables = await ObtenerValidadoresAsync(connection, 1, "RESPONSABLE", cancellationToken);
-        var segundoValidadores = await ObtenerValidadoresAsync(connection, 2, "SEGUNDO_VALIDADOR", cancellationToken);
-        var tercerValidadores = await ObtenerValidadoresAsync(connection, 3, "TERCER_VALIDADOR", cancellationToken);
+        await Task.WhenAll(
+            empresasTask,
+            clientesTask,
+            areasTask,
+            ubicacionesTask,
+            sexosTask,
+            tiposDocumentoTask,
+            responsablesTask,
+            segundoValidadoresTask,
+            tercerValidadoresTask);
 
         return Ok(new
         {
@@ -126,15 +134,15 @@ public class MantenimientoEmpleadosController : ControllerBase
             message = "Lookups obtenidos correctamente.",
             data = new
             {
-                empresas,
-                clientes,
-                areas,
-                ubicaciones,
-                sexos,
-                tiposDocumento,
-                responsables,
-                segundoValidadores,
-                tercerValidadores
+                empresas = empresasTask.Result,
+                clientes = clientesTask.Result,
+                areas = areasTask.Result,
+                ubicaciones = ubicacionesTask.Result,
+                sexos = sexosTask.Result,
+                tiposDocumento = tiposDocumentoTask.Result,
+                responsables = responsablesTask.Result,
+                segundoValidadores = segundoValidadoresTask.Result,
+                tercerValidadores = tercerValidadoresTask.Result
             }
         });
     }
@@ -430,6 +438,7 @@ public class MantenimientoEmpleadosController : ControllerBase
                     IdEmpleado = idEmpleado,
                     NombreEmpleado = string.IsNullOrWhiteSpace(nombreEmpleado) ? null : nombreEmpleado.Trim()
                 },
+                commandTimeout: 60,
                 commandType: CommandType.StoredProcedure,
                 cancellationToken: cancellationToken));
 
@@ -454,10 +463,11 @@ public class MantenimientoEmpleadosController : ControllerBase
         CancellationToken cancellationToken)
     {
         var row = await connection.QueryFirstOrDefaultAsync(
-            new CommandDefinition(
+                new CommandDefinition(
                 ObtenerSp,
                 new { IdEmpleado = idEmpleado },
                 transaction: transaction,
+                commandTimeout: 60,
                 commandType: CommandType.StoredProcedure,
                 cancellationToken: cancellationToken));
 
@@ -519,15 +529,19 @@ public class MantenimientoEmpleadosController : ControllerBase
     }
 
     private static async Task<List<LookupItem>> ObtenerValidadoresAsync(
-        SqlConnection connection,
+        string connectionString,
         int tipoValidador,
         string campo,
         CancellationToken cancellationToken)
     {
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+
         var rows = await connection.QueryAsync(
             new CommandDefinition(
                 "dbo.sp_Empleado_ListarValidadores",
                 new { TipoValidador = tipoValidador },
+                commandTimeout: 60,
                 commandType: CommandType.StoredProcedure,
                 cancellationToken: cancellationToken));
 
@@ -548,14 +562,18 @@ public class MantenimientoEmpleadosController : ControllerBase
     }
 
     private static async Task<List<LookupItem>> ObtenerConstantesPorCampoAsync(
-        SqlConnection connection,
+        string connectionString,
         string campo,
         CancellationToken cancellationToken)
     {
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+
         var rows = await connection.QueryAsync(
             new CommandDefinition(
                 "sp_Constante_ListarPorCampo",
                 new { Campo = campo },
+                commandTimeout: 60,
                 commandType: CommandType.StoredProcedure,
                 cancellationToken: cancellationToken));
 

@@ -221,6 +221,7 @@ export default function MantenimientoEmpleadosPage() {
   const [saving, setSaving] = useState(false);
   const [approvingId, setApprovingId] = useState<number | null>(null);
   const [error, setError] = useState("");
+  const [lookupError, setLookupError] = useState("");
   const [panelError, setPanelError] = useState("");
   const [success, setSuccess] = useState("");
   const [panelOpen, setPanelOpen] = useState(false);
@@ -374,17 +375,25 @@ export default function MantenimientoEmpleadosPage() {
     };
   }, [filteredItems.length]);
 
-  const loadData = async () => {
+  const loadEmployees = async () => {
     setLoading(true);
     setError("");
 
     try {
-      const [empleados, lookups] = await Promise.all([
-        empleadosCrudService.listar(),
-        empleadosCrudService.obtenerLookups(),
-      ]);
-
+      const empleados = await empleadosCrudService.listar();
       setItems(empleados);
+    } catch (err) {
+      setError(getHttpErrorMessage(err, "No se pudo cargar el mantenimiento de empleados."));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadLookups = async () => {
+    setLookupError("");
+
+    try {
+      const lookups = await empleadosCrudService.obtenerLookups();
       setEmpresas(lookups.empresas);
       setClientes(lookups.clientes);
       setAreas(lookups.areas);
@@ -395,14 +404,13 @@ export default function MantenimientoEmpleadosPage() {
       setSegundoValidadores(lookups.segundoValidadores);
       setTercerValidadores(lookups.tercerValidadores);
     } catch (err) {
-      setError(getHttpErrorMessage(err, "No se pudo cargar el mantenimiento de empleados."));
-    } finally {
-      setLoading(false);
+      setLookupError(getHttpErrorMessage(err, "No se pudieron cargar los catálogos de empleados."));
     }
   };
 
   useEffect(() => {
-    void loadData();
+    void loadEmployees();
+    void loadLookups();
   }, []);
 
   useEffect(() => {
@@ -579,7 +587,7 @@ export default function MantenimientoEmpleadosPage() {
       }
 
       closePanel();
-      await loadData();
+      await loadEmployees();
     } catch (err) {
       setPanelError(getHttpErrorMessage(err, "No se pudo guardar el empleado."));
     } finally {
@@ -598,7 +606,7 @@ export default function MantenimientoEmpleadosPage() {
       await empleadosCrudService.eliminar(deleteItem.idEmpleado);
       setSuccess("Empleado dado de baja correctamente.");
       setDeleteItem(null);
-      await loadData();
+      await loadEmployees();
     } catch (err) {
       setError(getHttpErrorMessage(err, "No se pudo dar de baja al empleado."));
     } finally {
@@ -620,7 +628,7 @@ export default function MantenimientoEmpleadosPage() {
       await empleadosCrudService.aprobar(item.idEmpleado);
       setSuccess("Empleado aprobado correctamente.");
       setApproveItem(null);
-      await loadData();
+      await loadEmployees();
     } catch (err) {
       setError(getHttpErrorMessage(err, "No se pudo aprobar el empleado."));
     } finally {
@@ -657,7 +665,7 @@ export default function MantenimientoEmpleadosPage() {
           {
             key: "recargar",
             label: "Actualizar",
-            onClick: () => void loadData(),
+            onClick: () => void loadEmployees(),
             variant: "secondary",
           },
         ]}
@@ -713,6 +721,7 @@ export default function MantenimientoEmpleadosPage() {
       {loading ? <AppStatusMessage tone="info">Cargando empleados...</AppStatusMessage> : null}
       {success ? <AppStatusMessage tone="success">{success}</AppStatusMessage> : null}
       {error ? <AppStatusMessage tone="error">{error}</AppStatusMessage> : null}
+      {lookupError ? <AppStatusMessage tone="error">{lookupError}</AppStatusMessage> : null}
 
       <AppCard style={styles.card}>
         <div style={styles.cardInner}>

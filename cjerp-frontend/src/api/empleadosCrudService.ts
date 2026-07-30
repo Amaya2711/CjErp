@@ -1,5 +1,8 @@
 import httpClient from "./httpClient";
 
+const EMPLEADOS_LIST_TIMEOUT_MS = 60000;
+const EMPLEADOS_LOOKUPS_TIMEOUT_MS = 60000;
+
 export type EmpleadoCrudItem = {
   idEmpleado: number;
   nombreEmpleado: string;
@@ -132,6 +135,7 @@ export const empleadosCrudService = {
   async listar(nombreEmpleado?: string): Promise<EmpleadoCrudItem[]> {
     const response = await httpClient.get<Record<string, unknown>[] | unknown>("/mantenimiento/empleados", {
       params: nombreEmpleado ? { nombreEmpleado } : undefined,
+      timeout: EMPLEADOS_LIST_TIMEOUT_MS,
     });
 
     return Array.isArray(response) ? response.map((item) => mapItem(item as Record<string, unknown>)) : [];
@@ -162,7 +166,9 @@ export const empleadosCrudService = {
   },
 
   async obtenerLookups(): Promise<EmpleadoCrudLookups> {
-    const response = await httpClient.get<Record<string, unknown>>("/mantenimiento/empleados/lookups");
+    const response = await httpClient.get<Record<string, unknown>>("/mantenimiento/empleados/lookups", {
+      timeout: EMPLEADOS_LOOKUPS_TIMEOUT_MS,
+    });
 
     return {
       empresas: Array.isArray(response.empresas)
