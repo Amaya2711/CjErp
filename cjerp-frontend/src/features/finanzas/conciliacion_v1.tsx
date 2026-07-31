@@ -14,6 +14,7 @@ import {
   actualizarPlanillaNroOperacion,
   consultarPlanillaEstados,
 } from "../../api/planillaConsultaService";
+import { consultarMovimientosGastosIngresos } from "../../api/movimientosConsultaService";
 import type {
   ConciliacionBcpAnalizarResponse,
   ConciliacionBcpArchivoAnalisis,
@@ -1068,6 +1069,39 @@ function getPlanillaGastoSearchText(row: PlanillaGastoConciliacionRow): string {
   );
 }
 
+function normalizePlanillaGastoFallbackRow(row: PlanillaGastoConciliacionRow): PlanillaGastoConciliacionRow {
+  const nextRow: PlanillaGastoConciliacionRow = { ...row };
+  const assignAlias = (key: string, value: string) => {
+    if (value.trim()) {
+      nextRow[key] = value.trim();
+    }
+  };
+
+  assignAlias("corre", getPlanillaGastoText(row, "corre", "Corre", "correlativo", "Correlativo", "id", "Id"));
+  assignAlias("cliente", getPlanillaGastoText(row, "cliente", "Cliente", "NombreCliente", "nombreCliente"));
+  assignAlias("nombreproyecto", getPlanillaGastoText(row, "nombreproyecto", "NombreProyecto", "proyecto", "Proyecto"));
+  assignAlias("site", getPlanillaGastoText(row, "site", "Site", "NombreSite", "nombreSite", "siteNombre"));
+  assignAlias(
+    "tipo_trabajo",
+    getPlanillaGastoText(row, "tipo_trabajo", "tipoTrabajo", "TipoTrabajo", "Tipo_Trabajo", "tipoTrabajoNombre")
+  );
+  assignAlias("nrooperacion", getPlanillaGastoText(row, "nrooperacion", "NroOperacion", "nroOperacion", "NumeroOperacion", "numeroOperacion"));
+  assignAlias("banco", getPlanillaGastoText(row, "banco", "Banco", "CodigoBanco", "codigoBanco"));
+  assignAlias("comprobante", getPlanillaGastoText(row, "comprobante", "Comprobante", "Documento", "documento", "Voucher", "voucher"));
+  assignAlias("moneda", getPlanillaGastoText(row, "moneda", "Moneda", "monedaLabel", "TipoMoneda", "tipoMoneda"));
+  assignAlias("subtotal", getPlanillaGastoNumber(row, "subtotal", "Subtotal", "Monto", "monto"));
+  assignAlias("igv", getPlanillaGastoNumber(row, "igv", "IGV"));
+  assignAlias("total", getPlanillaGastoNumber(row, "total", "Total"));
+  assignAlias("totalpagar", getPlanillaGastoNumber(row, "totalpagar", "TotalPagar", "totalPagar"));
+  assignAlias("solicitante", getPlanillaGastoText(row, "solicitante", "Solicitante"));
+  assignAlias("responsable", getPlanillaGastoText(row, "responsable", "Responsable", "Usuario"));
+  assignAlias("serie", getPlanillaGastoText(row, "serie", "Serie"));
+  assignAlias("fechadeposito", getPlanillaGastoDate(row, "fechadeposito", "FechaDeposito", "fechaDeposito", "Fecha", "fecha"));
+  assignAlias("detalle", getPlanillaGastoText(row, "detalle", "Detalle", "Descripcion", "descripcion", "Observacion", "observacion"));
+
+  return nextRow;
+}
+
 const GASTOS_PLANILLA_COLUMNS: PlanillaGastoColumnDef[] = [
   { key: "corre", label: "corre", render: (row) => getPlanillaGastoText(row, "corre", "Corre") },
   { key: "cliente", label: "cliente", render: (row) => getPlanillaGastoText(row, "cliente", "Cliente") },
@@ -1457,10 +1491,37 @@ export default function ConciliacionBcpPage() {
         return;
       }
 
-      const rows = Array.isArray(response.rows) ? response.rows : [];
+      let rows = Array.isArray(response.rows) ? response.rows : [];
+      let message = response.message?.trim() || "";
+
+      if (rows.length === 0) {
+        const fallbackResponse = await consultarMovimientosGastosIngresos(
+          {
+            consulta: "movimientos-gastos-ingresos",
+            parametros: [
+              { nombre: "FechaInicio", valor: fechaDeposito, tipo: "date" },
+              { nombre: "FechaFin", valor: fechaDeposito, tipo: "date" },
+            ],
+          },
+          { timeoutMs: 120000 }
+        );
+
+        if (cancelToken?.cancelled) {
+          return;
+        }
+
+        rows = Array.isArray(fallbackResponse.rows)
+          ? fallbackResponse.rows.map((fallbackRow) => normalizePlanillaGastoFallbackRow(fallbackRow))
+          : [];
+
+        if (!message) {
+          message = "Se cargó el detalle desde movimientos porque el store de planilla no devolvió filas.";
+        }
+      }
+
       setGastosPlanillaRows(rows);
       setGastosPlanillaMessage(
-        response.message?.trim() || (rows.length > 0 ? `Se encontraron ${rows.length} registro(s).` : "No se encontraron gastos para la fecha seleccionada.")
+        message || (rows.length > 0 ? `Se encontraron ${rows.length} registro(s).` : "No se encontraron gastos para la fecha seleccionada.")
       );
     } catch (gastosError) {
       if (!cancelToken?.cancelled) {
