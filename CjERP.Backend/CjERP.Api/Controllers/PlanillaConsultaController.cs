@@ -22,6 +22,7 @@ namespace CjERP.Api.Controllers
         private static readonly string[] RequiredParameters = ["IdCargo", "IdEmpleado"];
         private static readonly string[] RequiredParametersAprobar = ["IdCargo", "IdEmpleado", "Estados"];
         private static readonly string[] RequiredParametersVacaciones = [];
+        private static readonly string[] RequiredParametersGastos = [];
         private static readonly string[] RequiredParametersPagadosDashboard = [];
         private static readonly string[] RequiredParametersImportarConsultaDsh = [];
         private static readonly string[] RequiredParametersMovimientosGastosIngresos = [];
@@ -65,13 +66,15 @@ namespace CjERP.Api.Controllers
                 providedParameters[normalizedName] = parametro.Valor;
             }
 
-            EnsureClaimFallback(providedParameters);
+            EnsureClaimFallback(consulta, providedParameters);
 
             var providedNames = new HashSet<string>(
                 providedParameters.Keys,
                 StringComparer.OrdinalIgnoreCase);
 
-            var requiredParameters = string.Equals(consulta, "aprobar", StringComparison.OrdinalIgnoreCase)
+            var requiredParameters = string.Equals(consulta, "gastos", StringComparison.OrdinalIgnoreCase)
+                ? RequiredParametersGastos
+                : string.Equals(consulta, "aprobar", StringComparison.OrdinalIgnoreCase)
                 ? RequiredParametersAprobar
                 : string.Equals(consulta, "vacaciones", StringComparison.OrdinalIgnoreCase)
                     ? RequiredParametersVacaciones
@@ -338,8 +341,13 @@ namespace CjERP.Api.Controllers
             };
         }
 
-        private void EnsureClaimFallback(Dictionary<string, string?> providedParameters)
+        private void EnsureClaimFallback(string? consulta, Dictionary<string, string?> providedParameters)
         {
+            if (string.Equals(consulta, "gastos", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
             if (!providedParameters.TryGetValue("IdEmpleado", out var idEmpleado) || string.IsNullOrWhiteSpace(idEmpleado))
             {
                 var resolvedIdEmpleado = ResolveNumericClaimValue(

@@ -1443,11 +1443,14 @@ export default function ConciliacionBcpPage() {
 
     try {
       const idBanco = getBancoSeleccionadoId(codigoBanco);
-      const request = buildPlanillaConsultaEstadosRequest([
-        { nombre: "Estados", valor: "4", tipo: "int" },
-        { nombre: "FechaDeposito", valor: fechaDeposito, tipo: "date" },
-        { nombre: "IdBanco", valor: String(idBanco), tipo: "int" },
-      ]);
+      const request = {
+        ...buildPlanillaConsultaEstadosRequest([
+          { nombre: "Estados", valor: "4", tipo: "int" },
+          { nombre: "FechaDeposito", valor: fechaDeposito, tipo: "date" },
+          { nombre: "IdBanco", valor: String(idBanco), tipo: "int" },
+        ]),
+        consulta: "gastos",
+      };
       const response = await consultarPlanillaEstados(request, { timeoutMs: 120000 });
 
       if (cancelToken?.cancelled) {
