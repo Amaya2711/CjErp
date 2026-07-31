@@ -22,7 +22,7 @@ namespace CjERP.Api.Controllers
         private static readonly string[] RequiredParameters = ["IdCargo", "IdEmpleado"];
         private static readonly string[] RequiredParametersAprobar = ["IdCargo", "IdEmpleado", "Estados"];
         private static readonly string[] RequiredParametersVacaciones = [];
-        private static readonly string[] RequiredParametersGastos = [];
+        private static readonly string[] RequiredParametersGastos = ["Estados", "FechaDeposito", "IdBanco"];
         private static readonly string[] RequiredParametersPagadosDashboard = [];
         private static readonly string[] RequiredParametersImportarConsultaDsh = [];
         private static readonly string[] RequiredParametersMovimientosGastosIngresos = [];

@@ -1445,8 +1445,8 @@ export default function ConciliacionBcpPage() {
       const idBanco = getBancoSeleccionadoId(codigoBanco);
       const request = {
         ...buildPlanillaConsultaEstadosRequest([
-          { nombre: "Estados", valor: "4", tipo: "int" },
-          { nombre: "FechaDeposito", valor: fechaDeposito, tipo: "date" },
+          { nombre: "Estados", valor: "4", tipo: "string" },
+          { nombre: "FechaDeposito", valor: fechaDeposito, tipo: "string" },
           { nombre: "IdBanco", valor: String(idBanco), tipo: "int" },
         ]),
         consulta: "gastos",
