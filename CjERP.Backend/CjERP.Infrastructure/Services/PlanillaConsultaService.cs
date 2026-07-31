@@ -21,6 +21,7 @@ namespace CjERP.Infrastructure.Services
         private const string StoredProcedureVacacionesTotal = "dbo.sp_EmpleadoOtros_ListarVacacionesTotal";
         private const string StoredProcedurePagadosDashboard = "dbo.sp_Planilla_ConsultarPagados_Dsh";
         private const string StoredProcedureImportarConsultaDsh = "dbo.sp_Importar_ConsultaDsh";
+        private const string StoredProcedureMovimientosGastosIngresos = "dbo.sp_Movimientos_Consulta_GastosIngresos";
         private const string StoredProcedureGastosPagados = "dbo.sp_Planilla_Consulta_Gastos_Pagados";
         private readonly ISqlCommandFactory _sqlCommandFactory;
 
@@ -41,6 +42,11 @@ namespace CjERP.Infrastructure.Services
 
             var parametrosList = (parametros ?? []).ToList();
             var storedProcedureName = ResolveStoredProcedureName(consulta);
+            parametrosList = await EnsureBancoIdParameterAsync(
+                connection,
+                parametrosList,
+                storedProcedureName,
+                cancellationToken);
             var parametrosFiltrados = FilterParametersForStoredProcedure(storedProcedureName, parametrosList);
             var dynamicParameters = BuildParameters(parametrosFiltrados);
 
@@ -160,6 +166,7 @@ namespace CjERP.Infrastructure.Services
                 "vacaciones-total" => StoredProcedureVacacionesTotal,
                 "pagados-dashboard" => StoredProcedurePagadosDashboard,
                 "importar-consulta-dsh" => StoredProcedureImportarConsultaDsh,
+                "movimientos-gastos-ingresos" => StoredProcedureMovimientosGastosIngresos,
                 _ => StoredProcedureEstados
             };
         }
@@ -495,6 +502,7 @@ WHERE Correlativo IN @Correlativos";
             {
                 "IdSolicitante",
                 "IdValidador",
+                "IdBanco",
                 "Estados",
                 "FechaInicio",
                 "FechaFin",
@@ -506,6 +514,62 @@ WHERE Correlativo IN @Correlativos";
             return parametros.Where(parametro =>
                 !string.IsNullOrWhiteSpace(parametro.Nombre) &&
                 allowedParameters.Contains(parametro.Nombre.Trim().TrimStart('@')));
+        }
+
+        private async Task<List<PlanillaConsultaParametroDto>> EnsureBancoIdParameterAsync(
+            SqlConnection connection,
+            List<PlanillaConsultaParametroDto> parametros,
+            string storedProcedureName,
+            CancellationToken cancellationToken)
+        {
+            if (!string.Equals(storedProcedureName, StoredProcedureEstados, StringComparison.OrdinalIgnoreCase))
+            {
+                return parametros;
+            }
+
+            if (parametros.Any(parametro =>
+                string.Equals(
+                    parametro.Nombre?.Trim().TrimStart('@'),
+                    "IdBanco",
+                    StringComparison.OrdinalIgnoreCase)))
+            {
+                return parametros;
+            }
+
+            var codigoBanco = GetStringParameterValue(parametros, "CodigoBanco");
+            if (string.IsNullOrWhiteSpace(codigoBanco))
+            {
+                return parametros;
+            }
+
+            var idBanco = await connection.QueryFirstOrDefaultAsync<int?>(
+                CreateCommand(
+                    @"
+SELECT TOP 1 IdBanco
+FROM dbo.Bancos
+WHERE Codigo = @CodigoBanco
+  AND Activo = 1",
+                    new { CodigoBanco = codigoBanco.Trim() },
+                    CommandType.Text,
+                    cancellationToken,
+                    commandTimeout: 30));
+
+            if (!idBanco.HasValue || idBanco.Value <= 0)
+            {
+                throw new InvalidOperationException($"No se encontro un banco activo con codigo {codigoBanco}.");
+            }
+
+            var resolved = new List<PlanillaConsultaParametroDto>(parametros)
+            {
+                new()
+                {
+                    Nombre = "IdBanco",
+                    Valor = idBanco.Value.ToString(CultureInfo.InvariantCulture),
+                    Tipo = "int"
+                }
+            };
+
+            return resolved;
         }
 
         private static Dictionary<string, object?> MapRow(dynamic row)

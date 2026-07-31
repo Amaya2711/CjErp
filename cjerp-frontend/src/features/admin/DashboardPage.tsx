@@ -279,7 +279,7 @@ export default function DashboardPage() {
         gap: 20,
         alignItems: "start"
       }}>
-        {/* Columna izquierda: Accesos directos y Ayuda y orientación */}
+        {/* Columna izquierda: Accesos directos */}
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
           {/* Accesos directos */}
           <div style={styles.card}>
@@ -322,7 +322,38 @@ export default function DashboardPage() {
               )}
             </div>
           </div>
-          {/* Ayuda y orientación debajo */}
+        </div>
+        {/* Columna derecha: Avisos generales y Ayuda y orientación */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <div style={styles.card}>
+            <div style={styles.cardHeader}>
+              <h2 style={styles.cardTitle}>Avisos generales</h2>
+              <span style={styles.cardTag}>Institucional</span>
+            </div>
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 12
+            }}>
+              {avisos.filter((aviso) => aviso.titulo !== "Estado del sistema").map((aviso) => (
+                <div
+                  key={aviso.id}
+                  style={{
+                    ...styles.noticeItem,
+                    borderLeft:
+                      aviso.tipo === "info"
+                        ? "4px solid #3B82F6"
+                        : aviso.tipo === "warning"
+                        ? "4px solid #F59E0B"
+                        : "4px solid #10B981",
+                  }}
+                >
+                  <div style={styles.noticeTitle}>{aviso.titulo}</div>
+                  <div style={styles.noticeText}>{aviso.detalle}</div>
+                </div>
+              ))}
+            </div>
+          </div>
           <div style={styles.card}>
             <div style={styles.cardHeader}>
               <h2 style={styles.cardTitle}>Ayuda y orientación</h2>
@@ -334,7 +365,15 @@ export default function DashboardPage() {
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
                     <div style={styles.noticeTitle}>{item.titulo}</div>
                     <div style={styles.noticeText}>{item.descripcion}</div>
-                    <button type="button" style={styles.quickButton}>
+                    <button
+                      type="button"
+                      style={styles.quickButton}
+                      onClick={() => {
+                        if (item.titulo === "Asistencia") {
+                          navigate("/reportes/rptasistenciaempleado");
+                        }
+                      }}
+                    >
                       Ver opción
                     </button>
                   </div>
@@ -343,38 +382,6 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
-        {/* Avisos generales: columna central */}
-        <div style={styles.card}>
-          <div style={styles.cardHeader}>
-            <h2 style={styles.cardTitle}>Avisos generales</h2>
-            <span style={styles.cardTag}>Institucional</span>
-          </div>
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 12
-          }}>
-            {avisos.map((aviso) => (
-              <div
-                key={aviso.id}
-                style={{
-                  ...styles.noticeItem,
-                  borderLeft:
-                    aviso.tipo === "info"
-                      ? "4px solid #3B82F6"
-                      : aviso.tipo === "warning"
-                      ? "4px solid #F59E0B"
-                      : "4px solid #10B981",
-                }}
-              >
-                <div style={styles.noticeTitle}>{aviso.titulo}</div>
-                <div style={styles.noticeText}>{aviso.detalle}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-        {/* Columna derecha vacía para mantener alineación si se desea */}
-        <div></div>
       </div>
     </div>
   );

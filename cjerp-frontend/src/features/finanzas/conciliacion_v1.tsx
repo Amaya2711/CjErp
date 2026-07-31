@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+﻿import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { API_BASE_URL } from "../../api/httpClient";
 import {
   actualizarClasificacionMovimientoConciliacionBcp,
@@ -9,6 +9,11 @@ import {
   insertarConciliacionBcp,
   obtenerCombosClasificacionConciliacionBcp,
 } from "../../api/conciliacionService";
+import {
+  buildPlanillaConsultaEstadosRequest,
+  actualizarPlanillaNroOperacion,
+  consultarPlanillaEstados,
+} from "../../api/planillaConsultaService";
 import type {
   ConciliacionBcpAnalizarResponse,
   ConciliacionBcpArchivoAnalisis,
@@ -85,7 +90,7 @@ type ConciliacionExecutiveSelection = {
   moneda: string | null;
   resultado: string | null;
 };
-type ConciliacionPlanillaTab = "revision" | "ejecutivo" | "detalle";
+type ConciliacionPlanillaTab = "revision" | "ejecutivo" | "detalle" | "gastos";
 type ConciliacionRevisionFilters = {
   areaFlujo: string;
   referencia: string;
@@ -100,6 +105,12 @@ type ConciliacionRevisionResumen = {
   saldoMn: number;
   saldoMe: number;
   totalMn: number;
+};
+type PlanillaGastoConciliacionRow = Record<string, unknown>;
+type PlanillaGastoColumnDef = {
+  key: string;
+  label: string;
+  render: (row: PlanillaGastoConciliacionRow) => React.ReactNode;
 };
 
 type ConciliacionClasificacionForm = {
@@ -160,9 +171,13 @@ const DEFAULT_CONCILIACION_REVISION_FILTERS: ConciliacionRevisionFilters = {
 };
 
 const BANCO_OPTIONS = [
-  { code: "BCP", label: "BCP" },
-  { code: "SCOTIABANK", label: "Scotiabank" },
+  { code: "BCP", label: "BCP", idBanco: 1 },
+  { code: "SCOTIABANK", label: "Scotiabank", idBanco: 2 },
 ] as const;
+
+function getBancoSeleccionadoId(codigo: string): number {
+  return BANCO_OPTIONS.find((option) => option.code === codigo)?.idBanco ?? 0;
+}
 
 const MOVIMIENTOS_ORDENADOS_COLUMNS = [
   "Empresa",
@@ -593,7 +608,7 @@ function buildPreviewTextFromRow(values: unknown[] | undefined) {
 function buildOrderedMovementRow(row: Record<string, unknown>) {
   return MOVIMIENTOS_ORDENADOS_COLUMNS.map((column) => {
     if (column === "NroOperacion") {
-      return row.NroOperacion ?? row.nroOperacion ?? row.numeroOperacion ?? row.NumeroOperacion ?? row["Nº operación"] ?? row["Operación - Número"] ?? "";
+      return row.NroOperacion ?? row.nroOperacion ?? row.numeroOperacion ?? row.NumeroOperacion ?? row["NÂº operaciÃ³n"] ?? row["OperaciÃ³n - NÃºmero"] ?? "";
     }
 
     return row[column] ?? "";
@@ -624,7 +639,7 @@ function buildExportOrderedMovementRow(row: ConciliacionBcpExportResponse["movim
 
 function getPreviewCellValue(row: Record<string, unknown>, column: string) {
   if (column === "NroOperacion") {
-    return row.NroOperacion ?? row.nroOperacion ?? row.numeroOperacion ?? row.NumeroOperacion ?? row["NÂº operaciÃ³n"] ?? row["OperaciÃ³n - NÃºmero"] ?? "";
+    return row.NroOperacion ?? row.nroOperacion ?? row.numeroOperacion ?? row.NumeroOperacion ?? row["NÃ‚Âº operaciÃƒÂ³n"] ?? row["OperaciÃƒÂ³n - NÃƒÂºmero"] ?? "";
   }
 
   return (
@@ -875,15 +890,15 @@ function buildInsertBlockedMessage(analysis: ConciliacionBcpAnalizarResponse): s
 
   if (filesWithoutRows.length > 0) {
     const names = filesWithoutRows.map((item) => item.nombreArchivo).join(", ");
-    return `Carga no habilitada: ${filesWithoutRows.length} archivo(s) no generaron movimientos válidos para insertar (${names}).`;
+    return `Carga no habilitada: ${filesWithoutRows.length} archivo(s) no generaron movimientos vÃ¡lidos para insertar (${names}).`;
   }
 
   if (filesInReview.length > 0) {
     const names = filesInReview.map((item) => item.nombreArchivo).join(", ");
-    return `Carga no habilitada: ${filesInReview.length} archivo(s) requieren revisión antes de insertar (${names}).`;
+    return `Carga no habilitada: ${filesInReview.length} archivo(s) requieren revisiÃ³n antes de insertar (${names}).`;
   }
 
-  return "Carga no habilitada: el análisis actual no cumple las condiciones para insertar.";
+  return "Carga no habilitada: el anÃ¡lisis actual no cumple las condiciones para insertar.";
 }
 
 function formatDateValue(value?: string | null): string {
@@ -891,9 +906,22 @@ function formatDateValue(value?: string | null): string {
     return "";
   }
 
-  const date = new Date(value);
+  const trimmedValue = value.trim();
+  const isoDateMatch = trimmedValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (isoDateMatch) {
+    const year = Number(isoDateMatch[1]);
+    const month = Number(isoDateMatch[2]) - 1;
+    const day = Number(isoDateMatch[3]);
+    const localDate = new Date(year, month, day);
+    if (!Number.isNaN(localDate.getTime())) {
+      return `${String(day).padStart(2, "0")}/${String(month + 1).padStart(2, "0")}/${year}`;
+    }
+  }
+
+  const date = new Date(trimmedValue);
   if (Number.isNaN(date.getTime())) {
-    return value;
+    return trimmedValue;
   }
 
   const day = String(date.getDate()).padStart(2, "0");
@@ -901,6 +929,169 @@ function formatDateValue(value?: string | null): string {
   const year = date.getFullYear();
   return `${day}/${month}/${year}`;
 }
+
+function normalizePlanillaGastoKey(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toLowerCase();
+}
+
+function normalizePlanillaGastoSearchValue(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function getPlanillaGastoFieldValue(row: PlanillaGastoConciliacionRow, ...keys: string[]): unknown {
+  const normalizedEntries = Object.entries(row).map(([entryKey, entryValue]) => ({
+    key: normalizePlanillaGastoKey(entryKey),
+    value: entryValue,
+  }));
+
+  for (const key of keys) {
+    const directValue = row[key];
+    if (directValue !== null && directValue !== undefined) {
+      if (!(typeof directValue === "string" && !directValue.trim())) {
+        return directValue;
+      }
+    }
+
+    const normalizedKey = normalizePlanillaGastoKey(key);
+    const normalizedEntry = normalizedEntries.find((entry) => entry.key === normalizedKey);
+
+    if (!normalizedEntry) {
+      continue;
+    }
+
+    if (normalizedEntry.value === null || normalizedEntry.value === undefined) {
+      continue;
+    }
+
+    if (typeof normalizedEntry.value === "string" && !normalizedEntry.value.trim()) {
+      continue;
+    }
+
+    return normalizedEntry.value;
+  }
+
+  return "";
+}
+
+function getPlanillaGastoText(row: PlanillaGastoConciliacionRow, ...keys: string[]): string {
+  const value = getPlanillaGastoFieldValue(row, ...keys);
+  return value === null || value === undefined ? "" : String(value).trim();
+}
+
+function getPlanillaGastoDate(row: PlanillaGastoConciliacionRow, ...keys: string[]): string {
+  return formatDateValue(getPlanillaGastoText(row, ...keys));
+}
+
+function getPlanillaGastoNumber(row: PlanillaGastoConciliacionRow, ...keys: string[]): string {
+  const value = getPlanillaGastoFieldValue(row, ...keys);
+  if (value === null || value === undefined || value === "") {
+    return "";
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return formatNumber(value);
+  }
+
+  const normalized = String(value).replace(/\s+/g, "").replace(/,/g, "");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? formatNumber(parsed) : String(value).trim();
+}
+
+function getPlanillaGastoRowId(row: PlanillaGastoConciliacionRow): string {
+  return getPlanillaGastoText(row, "corre", "Corre", "correlativo", "Correlativo", "id", "Id");
+}
+
+function getPlanillaGastoNroOperacion(row: PlanillaGastoConciliacionRow): string {
+  return getPlanillaGastoText(row, "nrooperacion", "NroOperacion", "nroOperacion", "NumeroOperacion", "numeroOperacion");
+}
+
+function getPlanillaGastoSearchText(row: PlanillaGastoConciliacionRow): string {
+  const preferredKeys = [
+    "corre",
+    "cliente",
+    "nombreproyecto",
+    "site",
+    "idsite",
+    "tipo_trabajo",
+    "tipoTrabajo",
+    "TipoTrabajo",
+    "Tipo_Trabajo",
+    "nrooperacion",
+    "NroOperacion",
+    "banco",
+    "comprobante",
+    "moneda",
+    "subtotal",
+    "igv",
+    "total",
+    "totalpagar",
+    "solicitante",
+    "responsable",
+    "serie",
+    "fechadeposito",
+    "fechaDeposito",
+    "FechaDeposito",
+    "detalle",
+    "comentario",
+    "estado",
+    "Estado",
+    "area",
+    "Area",
+    "ubicacion",
+    "Ubicacion",
+    "ubicación",
+    "Ubicación",
+  ];
+
+  const searchParts = preferredKeys
+    .map((key) => getPlanillaGastoText(row, key))
+    .filter(Boolean);
+
+  if (searchParts.length > 0) {
+    return normalizePlanillaGastoSearchValue(searchParts.join(" "));
+  }
+
+  return normalizePlanillaGastoSearchValue(
+    Object.values(row)
+      .map((value) => (value === null || value === undefined ? "" : String(value)))
+      .join(" ")
+  );
+}
+
+const GASTOS_PLANILLA_COLUMNS: PlanillaGastoColumnDef[] = [
+  { key: "corre", label: "corre", render: (row) => getPlanillaGastoText(row, "corre", "Corre") },
+  { key: "cliente", label: "cliente", render: (row) => getPlanillaGastoText(row, "cliente", "Cliente") },
+  { key: "nombreproyecto", label: "nombreproyecto", render: (row) => getPlanillaGastoText(row, "nombreproyecto", "NombreProyecto") },
+  { key: "site", label: "site", render: (row) => getPlanillaGastoText(row, "site", "Site") },
+  { key: "tipo_trabajo", label: "tipo_trabajo", render: (row) => getPlanillaGastoText(row, "tipo_trabajo", "tipoTrabajo", "TipoTrabajo", "Tipo_Trabajo") },
+  { key: "nrooperacion", label: "nrooperacion", render: (row) => getPlanillaGastoText(row, "nrooperacion", "NroOperacion") },
+  { key: "banco", label: "banco", render: (row) => getPlanillaGastoText(row, "banco", "Banco") },
+  { key: "comprobante", label: "comprobante", render: (row) => getPlanillaGastoText(row, "comprobante", "Comprobante") },
+  { key: "moneda", label: "moneda", render: (row) => getPlanillaGastoText(row, "moneda", "Moneda") },
+  { key: "subtotal", label: "subtotal", render: (row) => getPlanillaGastoNumber(row, "subtotal", "Subtotal") },
+  { key: "igv", label: "igv", render: (row) => getPlanillaGastoNumber(row, "igv", "IGV") },
+  { key: "total", label: "total", render: (row) => getPlanillaGastoNumber(row, "total", "Total") },
+  { key: "totalpagar", label: "totalpagar", render: (row) => getPlanillaGastoNumber(row, "totalpagar", "TotalPagar") },
+  { key: "solicitante", label: "solicitante", render: (row) => getPlanillaGastoText(row, "solicitante", "Solicitante") },
+  { key: "responsable", label: "responsable", render: (row) => getPlanillaGastoText(row, "responsable", "Responsable") },
+  { key: "serie", label: "serie", render: (row) => getPlanillaGastoText(row, "serie", "Serie") },
+  {
+    key: "fechadeposito",
+    label: "fechadeposito",
+    render: (row) => getPlanillaGastoDate(row, "fechadeposito", "fechaDeposito", "FechaDeposito"),
+  },
+  { key: "detalle", label: "detalle", render: (row) => getPlanillaGastoText(row, "detalle", "Detalle") },
+];
 
 function isMonedaMn(value?: string | null): boolean {
   const moneda = (value ?? "").trim().toUpperCase();
@@ -1016,6 +1207,9 @@ export default function ConciliacionBcpPage() {
   const selectExcelButtonRef = useRef<HTMLButtonElement | null>(null);
   const analyzeButtonRef = useRef<HTMLButtonElement | null>(null);
   const resultadoFilterDropdownRef = useRef<HTMLDivElement | null>(null);
+  const detalleHeaderScrollRef = useRef<HTMLDivElement | null>(null);
+  const detalleTableScrollRef = useRef<HTMLDivElement | null>(null);
+  const detalleScrollSyncRef = useRef<"header" | "table" | null>(null);
   const [files, setFiles] = useState<ParsedConciliacionExcelFile[]>([]);
   const [analysis, setAnalysis] = useState<ConciliacionBcpAnalizarResponse | null>(null);
   const [loadingParse, setLoadingParse] = useState(false);
@@ -1059,6 +1253,13 @@ export default function ConciliacionBcpPage() {
   const [referenciaSavingIds, setReferenciaSavingIds] = useState<Record<number, boolean>>({});
   const [cuentaContableDrafts, setCuentaContableDrafts] = useState<Record<number, string>>({});
   const [cuentaContableSavingIds, setCuentaContableSavingIds] = useState<Record<number, boolean>>({});
+  const [gastosPlanillaRows, setGastosPlanillaRows] = useState<PlanillaGastoConciliacionRow[]>([]);
+  const [gastosPlanillaLoading, setGastosPlanillaLoading] = useState(false);
+  const [gastosPlanillaError, setGastosPlanillaError] = useState("");
+  const [gastosPlanillaMessage, setGastosPlanillaMessage] = useState("");
+  const [gastosPlanillaDrafts, setGastosPlanillaDrafts] = useState<Record<string, string>>({});
+  const [gastosPlanillaSavingIds, setGastosPlanillaSavingIds] = useState<Record<string, boolean>>({});
+  const [gastosPlanillaQuickSearch, setGastosPlanillaQuickSearch] = useState("");
   const [revisionFilters, setRevisionFilters] = useState<ConciliacionRevisionFilters>(
     DEFAULT_CONCILIACION_REVISION_FILTERS
   );
@@ -1068,6 +1269,87 @@ export default function ConciliacionBcpPage() {
   const [clasificacionCombosLoading, setClasificacionCombosLoading] = useState(false);
   const [clasificacionModal, setClasificacionModal] = useState<ConciliacionClasificacionForm | null>(null);
   const [clasificacionSaving, setClasificacionSaving] = useState(false);
+  const [detalleScrollContentWidth, setDetalleScrollContentWidth] = useState(0);
+
+  const fechaDepositoGastos = useMemo(
+    () => conciliacionFiltros.fechaFin.trim() || conciliacionFiltros.fechaInicio.trim(),
+    [conciliacionFiltros.fechaFin, conciliacionFiltros.fechaInicio]
+  );
+  const gastosPlanillaFilteredRows = useMemo(() => {
+    const quickSearch = normalizePlanillaGastoSearchValue(gastosPlanillaQuickSearch);
+
+    if (!quickSearch) {
+      return gastosPlanillaRows;
+    }
+
+    const tokens = quickSearch.split(" ").filter(Boolean);
+
+    return gastosPlanillaRows.filter((row) => {
+      const rowSearchText = getPlanillaGastoSearchText(row);
+      return tokens.every((token) => rowSearchText.includes(token));
+    });
+  }, [gastosPlanillaRows, gastosPlanillaQuickSearch]);
+
+  const guardarNroOperacionGasto = async (row: PlanillaGastoConciliacionRow, nextValue?: string) => {
+    const rowId = getPlanillaGastoRowId(row);
+    const correlativo = Number(rowId);
+
+    if (!Number.isFinite(correlativo) || correlativo <= 0) {
+      setGastosPlanillaError("No se pudo identificar el correlativo del registro para actualizar el numero de operacion.");
+      return;
+    }
+
+    const originalValue = getPlanillaGastoNroOperacion(row);
+    const draftValue = nextValue ?? gastosPlanillaDrafts[rowId] ?? originalValue;
+    const normalizedNextValue = draftValue.trim();
+
+    if (normalizedNextValue === originalValue.trim()) {
+      setGastosPlanillaDrafts((current) => {
+        const next = { ...current };
+        delete next[rowId];
+        return next;
+      });
+      return;
+    }
+
+    setGastosPlanillaSavingIds((current) => ({ ...current, [rowId]: true }));
+    setGastosPlanillaError("");
+
+    try {
+      await actualizarPlanillaNroOperacion(correlativo, normalizedNextValue, { timeoutMs: 120000 });
+
+      setGastosPlanillaRows((currentRows) =>
+        currentRows.map((currentRow) => {
+          if (getPlanillaGastoRowId(currentRow) !== rowId) {
+            return currentRow;
+          }
+
+          return {
+            ...currentRow,
+            NroOperacion: normalizedNextValue,
+            nroOperacion: normalizedNextValue,
+            numeroOperacion: normalizedNextValue,
+          };
+        })
+      );
+
+      setGastosPlanillaDrafts((current) => {
+        const next = { ...current };
+        delete next[rowId];
+        return next;
+      });
+
+      setGastosPlanillaMessage(`Numero de operacion actualizado para el correlativo ${rowId}.`);
+    } catch (gastosUpdateError) {
+      setGastosPlanillaError(getHttpErrorMessage(gastosUpdateError, "No se pudo actualizar el numero de operacion."));
+    } finally {
+      setGastosPlanillaSavingIds((current) => {
+        const next = { ...current };
+        delete next[rowId];
+        return next;
+      });
+    }
+  };
 
   useEffect(() => {
     return () => {
@@ -1141,6 +1423,68 @@ export default function ConciliacionBcpPage() {
     conciliacionFiltros.fechaInicio.trim().length > 0 && conciliacionFiltros.fechaFin.trim().length > 0;
   const canConciliar = !loadingConciliacion && !loadingAnalysis && !loadingInsert;
 
+  const cargarGastosPlanilla = async (cancelToken?: { cancelled: boolean }) => {
+    const fechaDeposito = fechaDepositoGastos;
+
+    if (!fechaDeposito) {
+      if (!cancelToken?.cancelled) {
+        setGastosPlanillaRows([]);
+        setGastosPlanillaError("");
+        setGastosPlanillaMessage("Selecciona Fecha inicio o Fecha fin para consultar los gastos.");
+      }
+      return;
+    }
+
+    if (!cancelToken?.cancelled) {
+      setGastosPlanillaLoading(true);
+      setGastosPlanillaError("");
+      setGastosPlanillaMessage("");
+    }
+
+    try {
+      const idBanco = getBancoSeleccionadoId(codigoBanco);
+      const request = buildPlanillaConsultaEstadosRequest([
+        { nombre: "Estados", valor: "4", tipo: "int" },
+        { nombre: "FechaDeposito", valor: fechaDeposito, tipo: "date" },
+        { nombre: "IdBanco", valor: String(idBanco), tipo: "int" },
+      ]);
+      const response = await consultarPlanillaEstados(request, { timeoutMs: 120000 });
+
+      if (cancelToken?.cancelled) {
+        return;
+      }
+
+      const rows = Array.isArray(response.rows) ? response.rows : [];
+      setGastosPlanillaRows(rows);
+      setGastosPlanillaMessage(
+        response.message?.trim() || (rows.length > 0 ? `Se encontraron ${rows.length} registro(s).` : "No se encontraron gastos para la fecha seleccionada.")
+      );
+    } catch (gastosError) {
+      if (!cancelToken?.cancelled) {
+        setGastosPlanillaRows([]);
+        setGastosPlanillaMessage("");
+        setGastosPlanillaError(getHttpErrorMessage(gastosError, "No se pudo consultar el store de gastos."));
+      }
+    } finally {
+      if (!cancelToken?.cancelled) {
+        setGastosPlanillaLoading(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (conciliacionPlanillaTab !== "gastos") {
+      return;
+    }
+
+    const cancelToken = { cancelled: false };
+    void cargarGastosPlanilla(cancelToken);
+
+    return () => {
+      cancelToken.cancelled = true;
+    };
+  }, [conciliacionPlanillaTab, codigoBanco, fechaDepositoGastos]);
+
   useLayoutEffect(() => {
     const frameId = window.requestAnimationFrame(() => {
       if (canAnalyze) {
@@ -1198,6 +1542,92 @@ export default function ConciliacionBcpPage() {
       return true;
     });
   }, [filteredConciliacionRegistros, conciliacionExecutiveSelection]);
+  const detalleTablaRegistros = executiveFilteredConciliacionRegistros;
+  const detalleTablaTitulo = "Detalle";
+  const detalleTablaDescripcion = "Filtra por cualquier valor visible en la tabla principal.";
+
+  useEffect(() => {
+    if (conciliacionPlanillaTab !== "detalle") {
+      detalleScrollSyncRef.current = null;
+      return;
+    }
+
+    const header = detalleHeaderScrollRef.current;
+    const table = detalleTableScrollRef.current;
+    if (!header || !table) {
+      return;
+    }
+
+    const syncScroll = (source: "header" | "table") => {
+      if (detalleScrollSyncRef.current === source) {
+        detalleScrollSyncRef.current = null;
+        return;
+      }
+
+      const sourceNode = source === "header" ? header : table;
+      const targetNode = source === "header" ? table : header;
+      detalleScrollSyncRef.current = source;
+      targetNode.scrollLeft = sourceNode.scrollLeft;
+    };
+
+    const handleHeaderScroll = () => syncScroll("header");
+    const handleTableScroll = () => syncScroll("table");
+
+    header.addEventListener("scroll", handleHeaderScroll, { passive: true });
+    table.addEventListener("scroll", handleTableScroll, { passive: true });
+
+    header.scrollLeft = table.scrollLeft;
+
+    return () => {
+      header.removeEventListener("scroll", handleHeaderScroll);
+      table.removeEventListener("scroll", handleTableScroll);
+    };
+  }, [conciliacionPlanillaTab, filteredConciliacionRegistros.length]);
+
+  useLayoutEffect(() => {
+    if (conciliacionPlanillaTab !== "detalle") {
+      setDetalleScrollContentWidth(0);
+      return;
+    }
+
+    const tableWrap = detalleTableScrollRef.current;
+    if (!tableWrap) {
+      return;
+    }
+
+    let frameId = 0;
+
+    const updateWidth = () => {
+      cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(() => {
+        const nextWidth = Math.max(tableWrap.scrollWidth, tableWrap.clientWidth, 1);
+        setDetalleScrollContentWidth((currentWidth) => (currentWidth === nextWidth ? currentWidth : nextWidth));
+      });
+    };
+
+    updateWidth();
+
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => {
+            updateWidth();
+          });
+
+    resizeObserver?.observe(tableWrap);
+    const tableNode = tableWrap.querySelector("table");
+    if (tableNode) {
+      resizeObserver?.observe(tableNode);
+    }
+
+    window.addEventListener("resize", updateWidth);
+
+    return () => {
+      cancelAnimationFrame(frameId);
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateWidth);
+    };
+  }, [conciliacionPlanillaTab, filteredConciliacionRegistros.length]);
   const totalConciliacionRegistros = conciliacionPlanilla?.registros.length ?? 0;
   const conciliacionResumenEjecutivo = useMemo(() => {
     const byMoneda = new Map<string, { totalPagar: number; cantidad: number; resultados: Map<string, ConciliacionResultadoResumen> }>();
@@ -1406,7 +1836,7 @@ export default function ConciliacionBcpPage() {
       ? "Todos"
       : resultadoConciliacionSelectedFilters.length === 1
         ? resultadoConciliacionSelectedFilters[0] === EMPTY_CONCILIACION_FILTER_VALUE
-          ? "(Vacío)"
+          ? "(VacÃ­o)"
           : resultadoConciliacionSelectedFilters[0]
         : `${resultadoConciliacionSelectedFilters.length} seleccionados`;
 
@@ -2319,7 +2749,7 @@ export default function ConciliacionBcpPage() {
       setAnalysis(response);
       setConciliacionPlanilla(null);
 
-      // Genera la descarga apenas termina el análisis, igual que el flujo de Scotiabank.
+      // Genera la descarga apenas termina el anÃ¡lisis, igual que el flujo de Scotiabank.
       await handleExportAnalysis(response);
 
       if (response.puedeInsertar) {
@@ -2361,7 +2791,7 @@ export default function ConciliacionBcpPage() {
             ? apiResponse
             : buildExportResponseFromAnalysisData(analysisToExport);
       } catch (exportError) {
-        console.warn("[ConciliacionBcp] Export remoto falló, se usará el respaldo local.", exportError);
+        console.warn("[ConciliacionBcp] Export remoto fallÃ³, se usarÃ¡ el respaldo local.", exportError);
         exportResponse = buildExportResponseFromAnalysisData(analysisToExport);
       }
 
@@ -2487,6 +2917,10 @@ export default function ConciliacionBcpPage() {
     setConciliacionSort(null);
     setConciliacionGridFilters(DEFAULT_CONCILIACION_FILTERS);
     setRevisionFilters(DEFAULT_CONCILIACION_REVISION_FILTERS);
+    setGastosPlanillaRows([]);
+    setGastosPlanillaLoading(false);
+    setGastosPlanillaError("");
+    setGastosPlanillaMessage("");
     setError("");
     setMessage("");
     setDragActive(false);
@@ -2760,7 +3194,7 @@ export default function ConciliacionBcpPage() {
                             ) : (
                               <tr>
                                 <td style={styles.td} colSpan={4}>
-                                  No se detectaron mapeos automáticos.
+                                  No se detectaron mapeos automÃ¡ticos.
                                 </td>
                               </tr>
                             )}
@@ -2992,6 +3426,16 @@ export default function ConciliacionBcpPage() {
                 >
                   Detalle
                 </button>
+                <button
+                  type="button"
+                  style={{
+                    ...styles.planillaTabButton,
+                    ...(conciliacionPlanillaTab === "gastos" ? styles.planillaTabButtonActive : null),
+                  }}
+                  onClick={() => setConciliacionPlanillaTab("gastos")}
+                >
+                  Gastos
+                </button>
               </div>
 
               {conciliacionPlanillaTab === "revision" ? (
@@ -3176,16 +3620,16 @@ export default function ConciliacionBcpPage() {
                     </div>
                   )}
                 </div>
-              ) : (
+              ) : conciliacionPlanillaTab === "detalle" ? (
                 <>
                   <div style={styles.mappingTableWrap}>
                     <div style={styles.gridToolbar}>
                       <div style={styles.gridToolbarInfo}>
                         <div style={styles.gridToolbarText}>
-                          Filtra por cualquier valor visible en la tabla principal.
+                          {detalleTablaDescripcion}
                         </div>
                         <div style={styles.gridToolbarCount}>
-                          Registros: {executiveFilteredConciliacionRegistros.length} de {totalConciliacionRegistros}
+                          Registros: {detalleTablaRegistros.length} de {executiveFilteredConciliacionRegistros.length}
                           {executiveSelectionLabel ? ` | Ejecutivo: ${executiveSelectionLabel}` : ""}
                         </div>
                       </div>
@@ -3193,6 +3637,20 @@ export default function ConciliacionBcpPage() {
                         Limpiar filtros
                       </button>
                     </div>
+                    <div
+                      ref={detalleHeaderScrollRef}
+                      className="employee-horizontal-scroll"
+                      style={styles.detailScrollHeader}
+                      aria-hidden="true"
+                    >
+                      <div
+                        style={{
+                          ...styles.detailScrollSpacer,
+                          width: detalleScrollContentWidth || "100%",
+                        }}
+                      />
+                    </div>
+                    <div ref={detalleTableScrollRef} className="employee-grid-scroll" style={styles.detailTableScroll}>
             <table style={styles.mappingTable}>
               <thead>
                 <tr>
@@ -3295,7 +3753,7 @@ export default function ConciliacionBcpPage() {
                                       checked={checked}
                                       onChange={() => handleResultadoConciliacionFilterToggle(optionValue)}
                                     />
-                                    <span>{optionValue === EMPTY_CONCILIACION_FILTER_VALUE ? "(Vacío)" : optionValue}</span>
+                                    <span>{optionValue === EMPTY_CONCILIACION_FILTER_VALUE ? "(VacÃ­o)" : optionValue}</span>
                                   </label>
                                 );
                               })}
@@ -3321,7 +3779,7 @@ export default function ConciliacionBcpPage() {
                           <option value="">Todos</option>
                           {conciliacionFilterOptions[key].map((optionValue) => (
                             <option key={`${key}-${optionValue}`} value={optionValue}>
-                              {optionValue === EMPTY_CONCILIACION_FILTER_VALUE ? "(Vacío)" : optionValue}
+                              {optionValue === EMPTY_CONCILIACION_FILTER_VALUE ? "(VacÃ­o)" : optionValue}
                             </option>
                           ))}
                         </select>
@@ -3332,8 +3790,8 @@ export default function ConciliacionBcpPage() {
                 </tr>
               </thead>
               <tbody>
-                {executiveFilteredConciliacionRegistros.length > 0 ? (
-                  executiveFilteredConciliacionRegistros.map((row) => (
+                {detalleTablaRegistros.length > 0 ? (
+                  detalleTablaRegistros.map((row) => (
                     <tr key={`conciliacion-${row.idMovimientoBanco}`}>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "fecha")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "empresa")}</td>
@@ -3493,10 +3951,117 @@ export default function ConciliacionBcpPage() {
                 )}
               </tbody>
             </table>
+                    </div>
           </div>
                 </>
+              ) : (
+                <div style={styles.helperText}>
+                  La pestaña solicitada no esta disponible.
+                </div>
               )}
-            </>
+              {conciliacionPlanillaTab === "gastos" ? (
+                <div style={styles.mappingTableWrap}>
+                  <div style={styles.gridToolbar}>
+                    <div style={styles.gridToolbarInfo}>
+                      <div style={styles.gridToolbarText}>
+                        Consulta directa del store `sp_Planilla_Consulta_Estados` con `Estados = 4`.
+                      </div>
+                      <div style={styles.gridToolbarCount}>
+                        Registros: {gastosPlanillaFilteredRows.length}
+                        {fechaDepositoGastos ? ` | Fecha: ${formatDateValue(fechaDepositoGastos)}` : ""}
+                        {codigoBanco ? ` | Banco: ${codigoBanco}` : ""}
+                      </div>
+                    </div>
+                    <button type="button" style={styles.gridToolbarButton} onClick={() => void cargarGastosPlanilla()}>
+                      Actualizar
+                    </button>
+                  </div>
+                  <div style={styles.gastosSearchWrap}>
+                    <input
+                      type="text"
+                      value={gastosPlanillaQuickSearch}
+                      onChange={(event) => setGastosPlanillaQuickSearch(event.target.value)}
+                      placeholder="Busqueda rapida por empleado, estado, cliente, area, ubicacion o comentario"
+                      style={styles.gastosSearchInput}
+                    />
+                  </div>
+
+                  {gastosPlanillaError ? <div style={styles.errorBanner}>{gastosPlanillaError}</div> : null}
+                  {gastosPlanillaMessage ? <div style={styles.successBanner}>{gastosPlanillaMessage}</div> : null}
+
+                  <div ref={detalleTableScrollRef} className="employee-grid-scroll" style={styles.detailTableScroll}>
+                    <table style={styles.mappingTable}>
+                      <thead>
+                        <tr>
+                          {GASTOS_PLANILLA_COLUMNS.map((column) => (
+                            <th key={column.key} style={styles.th}>
+                              {column.label}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {gastosPlanillaLoading ? (
+                          <tr>
+                            <td style={styles.td} colSpan={GASTOS_PLANILLA_COLUMNS.length}>
+                              Cargando gastos...
+                            </td>
+                          </tr>
+                        ) : gastosPlanillaFilteredRows.length > 0 ? (
+                          gastosPlanillaFilteredRows.map((row, rowIndex) => {
+                            const rowId = getPlanillaGastoRowId(row);
+                            const nroOperacionValue = gastosPlanillaDrafts[rowId] ?? getPlanillaGastoNroOperacion(row);
+                            const isSaving = Boolean(gastosPlanillaSavingIds[rowId]);
+
+                            return (
+                              <tr key={`gastos-${rowId || rowIndex}`}>
+                                {GASTOS_PLANILLA_COLUMNS.map((column) => (
+                                  <td key={`${column.key}-${rowId || rowIndex}`} style={styles.td}>
+                                    {column.key === "nrooperacion" ? (
+                                      <input
+                                        type="text"
+                                        value={nroOperacionValue}
+                                        disabled={isSaving}
+                                        onChange={(event) =>
+                                          setGastosPlanillaDrafts((current) => ({
+                                            ...current,
+                                            [rowId]: event.target.value,
+                                          }))
+                                        }
+                                        onBlur={() => void guardarNroOperacionGasto(row)}
+                                        onKeyDown={(event) => {
+                                          if (event.key === "Enter") {
+                                            event.preventDefault();
+                                            void guardarNroOperacionGasto(row, nroOperacionValue);
+                                          }
+                                        }}
+                                        style={styles.gastosEditableInput}
+                                      />
+                                    ) : (
+                                      column.render(row)
+                                    )}
+                                  </td>
+                                ))}
+                              </tr>
+                            );
+                          })
+                        ) : (
+                          <tr>
+                            <td style={styles.td} colSpan={GASTOS_PLANILLA_COLUMNS.length}>
+                              {gastosPlanillaQuickSearch.trim()
+                                ? "No se encontraron registros que coincidan con la búsqueda."
+                                : fechaDepositoGastos
+                                ? "No se encontraron gastos para la fecha seleccionada."
+                                : "Selecciona una fecha de conciliacion para consultar los gastos."}
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
+          </>
           ) : (
             <div style={styles.helperText}>
               La conciliacion planilla esta contraida. Usa <strong>Expandir</strong> para ver el detalle.
@@ -4191,7 +4756,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   mappingTableWrap: {
     marginTop: 12,
-    overflowX: "auto",
+    overflowX: "hidden",
     border: "1px solid #E2E8F0",
     borderRadius: 12,
   },
@@ -4227,6 +4792,47 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
     fontWeight: 800,
     flexShrink: 0,
+  },
+  gastosSearchWrap: {
+    padding: "12px 12px 0",
+  },
+  gastosSearchInput: {
+    width: "100%",
+    boxSizing: "border-box",
+    borderRadius: 10,
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    padding: "10px 12px",
+    fontSize: 13,
+    color: "#0F172A",
+    outline: "none",
+  },
+  gastosEditableInput: {
+    width: "100%",
+    boxSizing: "border-box",
+    borderRadius: 8,
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    padding: "6px 8px",
+    fontSize: 12,
+    color: "#0F172A",
+    outline: "none",
+  },
+  detailScrollHeader: {
+    overflowX: "auto",
+    overflowY: "hidden",
+    borderTop: "1px solid #E2E8F0",
+    borderBottom: "1px solid #E2E8F0",
+    background: "#F8FAFC",
+  },
+  detailScrollSpacer: {
+    minWidth: 1380,
+    width: "100%",
+    height: 1,
+  },
+  detailTableScroll: {
+    overflowX: "auto",
+    overflowY: "hidden",
   },
   gridActionButton: {
     border: "1px solid #0F766E",

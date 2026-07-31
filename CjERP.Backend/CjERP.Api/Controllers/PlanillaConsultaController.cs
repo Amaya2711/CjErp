@@ -10,6 +10,7 @@ using System.Security.Claims;
 using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.Mvc;
 using System.Diagnostics;
+using Microsoft.Data.SqlClient;
 
 namespace CjERP.Api.Controllers
 {
@@ -23,6 +24,7 @@ namespace CjERP.Api.Controllers
         private static readonly string[] RequiredParametersVacaciones = [];
         private static readonly string[] RequiredParametersPagadosDashboard = [];
         private static readonly string[] RequiredParametersImportarConsultaDsh = [];
+        private static readonly string[] RequiredParametersMovimientosGastosIngresos = [];
 
         private readonly IPlanillaConsultaService _planillaConsultaService;
         private readonly IPlanillaService _planillaService;
@@ -73,10 +75,12 @@ namespace CjERP.Api.Controllers
                 ? RequiredParametersAprobar
                 : string.Equals(consulta, "vacaciones", StringComparison.OrdinalIgnoreCase)
                     ? RequiredParametersVacaciones
-                    : string.Equals(consulta, "pagados-dashboard", StringComparison.OrdinalIgnoreCase)
-                        ? RequiredParametersPagadosDashboard
-                        : string.Equals(consulta, "importar-consulta-dsh", StringComparison.OrdinalIgnoreCase)
+                : string.Equals(consulta, "pagados-dashboard", StringComparison.OrdinalIgnoreCase)
+                    ? RequiredParametersPagadosDashboard
+                    : string.Equals(consulta, "importar-consulta-dsh", StringComparison.OrdinalIgnoreCase)
                             ? RequiredParametersImportarConsultaDsh
+                        : string.Equals(consulta, "movimientos-gastos-ingresos", StringComparison.OrdinalIgnoreCase)
+                            ? RequiredParametersMovimientosGastosIngresos
                         : RequiredParameters;
 
             var missingParameters = requiredParameters
@@ -242,6 +246,85 @@ namespace CjERP.Api.Controllers
             }
         }
 
+        [HttpPut("{correlativo:int}/nro-operacion")]
+        public async Task<IActionResult> ActualizarNroOperacion(
+            int correlativo,
+            [FromBody] PlanillaActualizarNroOperacionRequestDto request,
+            CancellationToken cancellationToken)
+        {
+            if (correlativo <= 0)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "El correlativo debe ser mayor que cero."
+                });
+            }
+
+            if (request is null)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "La información de la operación es obligatoria."
+                });
+            }
+
+            try
+            {
+                await _planillaService.ActualizarNroOperacionPlanillaAsync(
+                    new PlanillaActualizarNroOperacionRequestDto
+                    {
+                        Correlativo = correlativo,
+                        NroOperacion = request.NroOperacion
+                    },
+                    ResolveUsuarioAccion(),
+                    cancellationToken);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Numero de operacion actualizado correctamente."
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = ex.Message
+                });
+            }
+            catch (SqlException ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "[PlanillaConsulta] Error SQL actualizando nro operacion del correlativo {Correlativo}",
+                    correlativo);
+
+                return StatusCode(500, new
+                {
+                    success = false,
+                    message = ex.Message,
+                    detail = ex.ToString()
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "[PlanillaConsulta] Error actualizando nro operacion del correlativo {Correlativo}",
+                    correlativo);
+
+                return StatusCode(500, new
+                {
+                    success = false,
+                    message = ex.Message,
+                    detail = ex.ToString()
+                });
+            }
+        }
+
         private static string GetStoredProcedureLabel(string? consulta)
         {
             return (consulta ?? string.Empty).Trim().ToLowerInvariant() switch
@@ -250,6 +333,7 @@ namespace CjERP.Api.Controllers
                 "vacaciones" => "sp_EmpleadoOtros_ListarVacaciones",
                 "pagados-dashboard" => "sp_Planilla_ConsultarPagados_Dsh",
                 "importar-consulta-dsh" => "sp_Importar_ConsultaDsh",
+                "movimientos-gastos-ingresos" => "sp_Movimientos_Consulta_GastosIngresos",
                 _ => "sp_Planilla_Consulta_Estados"
             };
         }

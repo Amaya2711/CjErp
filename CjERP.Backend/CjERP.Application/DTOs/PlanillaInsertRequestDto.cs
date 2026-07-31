@@ -55,6 +55,12 @@ namespace CjERP.Application.DTOs
         public int Correlativo { get; set; }
     }
 
+    public class PlanillaActualizarNroOperacionRequestDto
+    {
+        public int Correlativo { get; set; }
+        public string NroOperacion { get; set; } = string.Empty;
+    }
+
     public class SuministroProvisionalVigenteRequestDto
     {
         public int? IdResponsable { get; set; }

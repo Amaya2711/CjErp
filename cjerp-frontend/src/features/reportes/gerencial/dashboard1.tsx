@@ -452,10 +452,10 @@ function buildDrillRow(row: RawRow, preferredId?: string | number): DrillRow {
   const subtotal = pickNumber(row, ["Subtotal", "subtotal"]);
   const igv = pickNumber(row, ["IGV", "Igv", "igv"]);
   const total = pickNumber(row, ["Total", "total", "Monto", "monto"]);
-  const totalPagar = pickNumber(row, ["TotalPagar", "totalPagar"]);
+  const totalPagar = pickNumber(row, ["TotalPagar", "totalPagar", "MontoGasto", "montoGasto", "Total", "total"]);
   const subtotalSolesValue = row.SubtotalSoles ?? row.subtotalSoles;
   const subtotalSoles = subtotalSolesValue == null || subtotalSolesValue === "" ? null : toNumber(subtotalSolesValue);
-  const monto = subtotal || total || subtotalSoles || 0;
+  const monto = subtotal || totalPagar || total || subtotalSoles || 0;
 
   return {
     id: id || "-",
@@ -684,7 +684,7 @@ type DashboardFetchResult = {
 async function mapWithConcurrency<T, R>(
   items: T[],
   concurrency: number,
-  mapper: (item: T, index: number) => Promise<R>,
+  mapper: (item: T, _index: number) => Promise<R>,
 ) {
   const results = new Array<R>(items.length);
   let nextIndex = 0;

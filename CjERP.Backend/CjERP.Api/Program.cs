@@ -222,6 +222,7 @@ builder.Services.AddScoped<IPlanillaService, PlanillaService>();
 builder.Services.AddScoped<IPlanillaBoletaService, PlanillaBoletaService>();
 builder.Services.AddScoped<PlanillaBoletaPdfGenerator>();
 builder.Services.AddScoped<IPlanillaConsultaService, PlanillaConsultaService>();
+builder.Services.AddScoped<IMigracionImportService, MigracionImportService>();
 builder.Services.AddHttpClient<IConciliacionBcpService, ConciliacionBcpService>(client =>
 {
     client.BaseAddress = new Uri("https://api.openai.com");

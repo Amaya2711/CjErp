@@ -1,8 +1,9 @@
 ALTER PROCEDURE [dbo].[sp_Planilla_Consulta_Estados]
 (
-    @IdCargo        INT,
-    @IdEmpleado     INT,
+    @IdCargo        INT = NULL,
+    @IdEmpleado     INT = NULL,
     @IdValidador    INT = NULL,
+    @IdBanco        INT = NULL,
     @Estados        VARCHAR(50),
     @FechaInicio    DATE = NULL,
     @FechaFin       DATE = NULL,
@@ -12,7 +13,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @FiltrarPorSolicitante BIT = 1;
+    DECLARE @FiltrarPorSolicitante BIT = CASE WHEN @IdEmpleado IS NULL THEN 0 ELSE 1 END;
     DECLARE @IdEmpleado2 VARCHAR(MAX) = '0';
     DECLARE @IncluyeEstado4 BIT = 0;
     DECLARE @EstadosFiltro TABLE (Estado INT PRIMARY KEY);
@@ -23,16 +24,19 @@ BEGIN
     FROM STRING_SPLIT(@Estados, ',')
     WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) IS NOT NULL;
 
-    SELECT @IdEmpleado2 =
-        ISNULL(
-            STRING_AGG(CONVERT(VARCHAR(20), b.IdEmpleado), ','),
-            '0'
-        )
-    FROM EmpleadoCj a
-    LEFT JOIN Empleado b
-        ON a.IdEmpleado = b.IdEmpleadoCj
-    WHERE a.IdEmpleado = @IdEmpleado
-      AND b.IdEmpleado IS NOT NULL;
+    IF @IdEmpleado IS NOT NULL
+    BEGIN
+        SELECT @IdEmpleado2 =
+            ISNULL(
+                STRING_AGG(CONVERT(VARCHAR(20), b.IdEmpleado), ','),
+                '0'
+            )
+        FROM EmpleadoCj a
+        LEFT JOIN Empleado b
+            ON a.IdEmpleado = b.IdEmpleadoCj
+        WHERE a.IdEmpleado = @IdEmpleado
+          AND b.IdEmpleado IS NOT NULL;
+    END;
 
     IF EXISTS (
         SELECT 1
@@ -219,6 +223,10 @@ BEGIN
         WHERE estadoFiltro.Estado = a.Estado
     )
     AND (@IdValidador IS NULL OR a.IdValidador = @IdValidador)
+    AND (
+        @IdBanco IS NULL
+        OR a.IdBanco = @IdBanco
+    )
     AND (
         @FechaInicio IS NULL
         OR (

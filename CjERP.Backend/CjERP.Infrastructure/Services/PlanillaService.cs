@@ -174,6 +174,69 @@ namespace CjERP.Infrastructure.Services
                 commandTimeout: 120));
         }
 
+        public async Task ActualizarNroOperacionPlanillaAsync(
+            PlanillaActualizarNroOperacionRequestDto request,
+            string usuarioAccion,
+            CancellationToken cancellationToken = default)
+        {
+            if (request.Correlativo <= 0)
+            {
+                throw new InvalidOperationException("El correlativo es obligatorio para actualizar el numero de operacion.");
+            }
+
+            await using var connection = _sqlCommandFactory.CreateConnection();
+            var nroOperacionActual = (await ObtenerNroOperacionActualAsync(connection, request.Correlativo, cancellationToken))?.NroOperacion;
+            var nroOperacionNueva = NullIfWhiteSpace(request.NroOperacion);
+
+            if (string.Equals(nroOperacionActual?.Trim() ?? string.Empty, nroOperacionNueva ?? string.Empty, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var parameters = new DynamicParameters();
+            parameters.Add("@Correlativo", request.Correlativo, DbType.Int32);
+            parameters.Add("@NroOperacion", nroOperacionNueva, DbType.String);
+
+            _logger.LogInformation(
+                "[PlanillaService] Parametros enviados a sp_Planilla_Actualizar para NroOperacion:{NewLine}{Payload}",
+                Environment.NewLine,
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        request.Correlativo,
+                        NroOperacionAnterior = nroOperacionActual,
+                        NroOperacionNueva = nroOperacionNueva,
+                        Usuario = ResolveUsuarioAccion(usuarioAccion)
+                    },
+                    new JsonSerializerOptions { WriteIndented = true }));
+
+            await connection.ExecuteAsync(
+                _sqlCommandFactory.Create(
+                    UpdateStoredProcedureName,
+                    parameters,
+                    CommandType.StoredProcedure,
+                    cancellationToken,
+                    commandTimeout: 120));
+
+            var nroOperacionActualizada = (await ObtenerNroOperacionActualAsync(connection, request.Correlativo, cancellationToken))?.NroOperacion;
+
+            await _auditoriaCambiosService.RegistrarAsync(
+                new AuditoriaCambioDto
+                {
+                    Modulo = "Planilla",
+                    Entidad = "Planilla",
+                    IdRegistro = request.Correlativo.ToString(CultureInfo.InvariantCulture),
+                    Accion = "UPDATE",
+                    Seccion = "Gastos",
+                    Campo = "NroOperacion",
+                    ValorAnterior = nroOperacionActual,
+                    ValorNuevo = nroOperacionActualizada,
+                    UsuarioAccion = ResolveUsuarioAccion(usuarioAccion),
+                    Observacion = "Actualizacion de NroOperacion desde conciliacion_v1."
+                },
+                cancellationToken);
+        }
+
         public async Task ActualizarTareaPlanillaAsync(
             PlanillaActualizarTareaRequestDto request,
             string usuarioAccion,
@@ -573,6 +636,25 @@ namespace CjERP.Infrastructure.Services
                     cancellationToken: cancellationToken));
         }
 
+        private async Task<PlanillaNroOperacionAuditRow?> ObtenerNroOperacionActualAsync(
+            SqlConnection connection,
+            int correlativo,
+            CancellationToken cancellationToken)
+        {
+            const string sql = """
+                SELECT TOP (1)
+                    NroOperacion
+                FROM dbo.Planilla
+                WHERE Correlativo = @Correlativo;
+                """;
+
+            return await connection.QuerySingleOrDefaultAsync<PlanillaNroOperacionAuditRow>(
+                _sqlCommandFactory.Create(
+                    sql,
+                    new { Correlativo = correlativo },
+                    cancellationToken: cancellationToken));
+        }
+
         private static string? FormatTareaAuditValue(int? idTarea, string? tarea)
         {
             if (!idTarea.HasValue || idTarea.Value <= 0)
@@ -605,6 +687,11 @@ namespace CjERP.Infrastructure.Services
         {
             public int? IdTarea { get; set; }
             public string? Tarea { get; set; }
+        }
+
+        private sealed class PlanillaNroOperacionAuditRow
+        {
+            public string? NroOperacion { get; set; }
         }
     }
 }

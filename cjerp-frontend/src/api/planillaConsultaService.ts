@@ -162,6 +162,20 @@ export async function consultarGastosPagadosPorId(
   );
 }
 
+export async function actualizarPlanillaNroOperacion(
+  correlativo: number,
+  nroOperacion: string,
+  options?: { timeoutMs?: number }
+): Promise<void> {
+  await httpClient.put(
+    `${PLANILLA_CONSULTA_API_URL}/${encodeURIComponent(String(Math.trunc(correlativo)))}/nro-operacion`,
+    { nroOperacion },
+    {
+      timeout: options?.timeoutMs,
+    }
+  );
+}
+
 export async function actualizarPlanillaTarea(
   id: number,
   idTarea: number,

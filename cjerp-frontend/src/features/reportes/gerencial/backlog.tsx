@@ -52,9 +52,11 @@ type ImportarConsultaDshRow = {
   ano: string;
   nroOc: string;
   montoOc: number;
+  montoBck: number;
   montoLiq: number;
   statusPap: string;
   statusCj: string;
+  facturado: string;
   anoGestion: string;
   atp: string;
   prePasivo: string;
@@ -68,6 +70,7 @@ type ChartDatum = {
   count: number;
   totalAmount: number;
   amountsByCurrency: Record<string, number>;
+  trabajoTerminadoPen?: number;
 };
 
 type DetailSortColumn =
@@ -79,7 +82,7 @@ type DetailSortColumn =
   | "mes"
   | "ano"
   | "nroOc"
-  | "montoOc"
+  | "montoBck"
   | "montoLiq"
   | "statusPap"
   | "statusCj"
@@ -87,9 +90,10 @@ type DetailSortColumn =
   | "atp"
   | "prePasivo"
   | "proyecto2"
-  | "gerencia";
+  | "gerencia"
+  | "trabajoTerminado";
 
-type LevelSortColumn = "nivel" | "registros" | "montoPen";
+type LevelSortColumn = "nivel" | "registros" | "montoPen" | "trabajoTerminado" | "avance" | `currency:${string}`;
 type SortDirection = "asc" | "desc";
 
 const PIE_COLORS = [
@@ -251,10 +255,70 @@ function formatCompactSoles(value: number) {
   return formatCurrency(value, "PEN");
 }
 
+function formatPercent(value: number) {
+  return `${Math.max(0, value).toFixed(1)}%`;
+}
+
+function getLevelAdvancePercent(item: ChartDatum) {
+  return item.totalAmount > 0 ? ((item.trabajoTerminadoPen ?? 0) / item.totalAmount) * 100 : 0;
+}
+
+function getLevelSortValue(item: ChartDatum, column: LevelSortColumn) {
+  if (column === "nivel") return item.label;
+  if (column === "registros") return item.count;
+  if (column === "montoPen") return item.totalAmount;
+  if (column === "trabajoTerminado") return item.trabajoTerminadoPen ?? 0;
+  if (column === "avance") return getLevelAdvancePercent(item);
+  if (column.startsWith("currency:")) {
+    const currency = column.slice("currency:".length);
+    return item.amountsByCurrency[currency] ?? 0;
+  }
+
+  return item.totalAmount;
+}
+
 function convertToPen(value: number, currency: string, usdExchangeRate: number, dopExchangeRate: number) {
   if (currency === "USD") return value * usdExchangeRate;
   if (currency === "DOP") return value * dopExchangeRate;
   return value;
+}
+
+function normalizeCurrencyForPenConversion(currency: string) {
+  const normalized = currency.trim().toUpperCase();
+
+  if (!normalized || normalized === "PEN" || normalized === "S/" || normalized.includes("SOLES") || normalized.includes("SOL")) {
+    return "PEN";
+  }
+
+  if (normalized === "USD" || normalized.includes("DOLAR") || normalized.includes("DÓLAR")) {
+    return "USD";
+  }
+
+  if (normalized === "DOP" || normalized.includes("PESO DOMINICANO") || normalized.includes("DOMINICANO")) {
+    return "DOP";
+  }
+
+  return normalized;
+}
+
+function isTrabajoTerminadoStatus(status: string) {
+  const normalized = status.trim().toUpperCase();
+  return normalized === "ON AIR" || normalized === "TERMINADO";
+}
+
+function formatInteger(value: number) {
+  return new Intl.NumberFormat("es-PE", {
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function normalizeFlagValue(value: string) {
+  return normalizeText(value).replace(/[^A-Z0-9]/g, "");
+}
+
+function isFacturadoValue(value: string) {
+  const normalized = normalizeFlagValue(value);
+  return ["OK", "SI", "YES", "TRUE", "1", "X"].includes(normalized);
 }
 
 function parseExchangeRateInput(value: string) {
@@ -376,10 +440,11 @@ function buildDashboard3ExcelRows(rows: ImportarConsultaDshRow[]) {
     Mes: row.mes || "",
     Año: row.ano || "",
     "Nro Oc": row.nroOc || "",
-    "Monto Oc": row.montoOc,
+    "Monto BCK": row.montoBck,
     "Monto Liq": row.montoLiq,
     "STATUS PAP": row.statusPap || "",
     "Status CJ": row.statusCj || "",
+    Facturado: row.facturado || "",
     "Año Gestion": row.anoGestion || "",
     ATP: row.atp || "",
     "Pre Pasivo": row.prePasivo || "",
@@ -390,6 +455,7 @@ function buildDashboard3ExcelRows(rows: ImportarConsultaDshRow[]) {
 
 function buildImportarConsultaDshRow(row: RawRow): ImportarConsultaDshRow {
   const currency = resolveCurrencyCode(row);
+  const montoBck = pickNumber(row, ["MontoBck", "montoBck", "Monto_BCK", "monto_bck", "MontoOc", "montoOc"]);
 
   return {
     idCliente: pickString(row, ["IdCliente", "idCliente"]),
@@ -407,9 +473,11 @@ function buildImportarConsultaDshRow(row: RawRow): ImportarConsultaDshRow {
     ano: pickString(row, ["Ano", "ano"]),
     nroOc: pickString(row, ["Nro_Oc", "nro_Oc", "NroOc", "nroOc"]),
     montoOc: pickNumber(row, ["MontoOc", "montoOc"]),
+    montoBck,
     montoLiq: pickNumber(row, ["MontoLiq", "montoLiq"]),
     statusPap: pickString(row, ["STATUS_PAP", "Status_Pap", "statusPap"]),
-    statusCj: pickString(row, ["Status_Cj", "statusCj"]),
+    statusCj: pickString(row, ["Status_cj", "Status_Cj", "STATUS_CJ", "statusCj"]),
+    facturado: pickString(row, ["FACTURADO", "Facturado", "facturado", "STATUS_FACT", "Status_Fact", "statusFact"]),
     anoGestion: pickString(row, ["AnoGestion", "anoGestion"]),
     atp: pickString(row, ["ATP", "atp"]),
     prePasivo: pickString(row, ["PrePasivo", "prePasivo"]),
@@ -431,7 +499,7 @@ function buildStoreBreakdown(rows: ImportarConsultaDshRow[], key: DrillLevel): C
             ? row.nombreSite
             : row.tipoTrabajo;
     const currency = row.moneda || "Sin moneda";
-    const amount = row.montoOc;
+    const amount = row.montoBck;
     const current = map.get(rawLabel);
 
     if (current) {
@@ -467,7 +535,7 @@ function getCurrentLevel(path: DrillPath): DrillLevel {
 function getLevelTitle(level: DrillLevel, path: DrillPath) {
   switch (level) {
     case "cliente":
-      return "Gastos por cliente";
+      return "Backlog por cliente";
     case "proyecto":
       return `Proyectos de ${path.cliente}`;
     case "site":
@@ -482,7 +550,7 @@ function getLevelTitle(level: DrillLevel, path: DrillPath) {
 function getLevelDescription(level: DrillLevel) {
   switch (level) {
     case "cliente":
-      return "Selecciona un cliente para ver el siguiente nivel.";
+      return "Selecciona un cliente para ver proyectos, sites y tipo de trabajo.";
     case "proyecto":
       return "Haz clic en un proyecto para desglosar sus sites.";
     case "site":
@@ -517,7 +585,7 @@ function compareSortValues(left: string | number, right: string | number, direct
   return String(left).localeCompare(String(right), "es", { sensitivity: "base" }) * factor;
 }
 
-export default function Dashboard3Page() {
+export default function BacklogPage() {
   const [rawRows, setRawRows] = useState<RawRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -534,8 +602,9 @@ export default function Dashboard3Page() {
   const [path, setPath] = useState<DrillPath>({ cliente: null, proyecto: null, site: null });
   const [levelSortColumn, setLevelSortColumn] = useState<LevelSortColumn>("montoPen");
   const [levelSortDirection, setLevelSortDirection] = useState<SortDirection>("desc");
-  const [detailSortColumn, setDetailSortColumn] = useState<DetailSortColumn>("montoOc");
+  const [detailSortColumn, setDetailSortColumn] = useState<DetailSortColumn>("montoBck");
   const [detailSortDirection, setDetailSortDirection] = useState<SortDirection>("desc");
+  const [selectedSummaryKpi, setSelectedSummaryKpi] = useState<string | null>(null);
   const isMountedRef = useRef(true);
 
   const loadRows = async () => {
@@ -617,8 +686,9 @@ export default function Dashboard3Page() {
             row.mes,
             row.ano,
             row.nroOc,
-            String(row.montoOc),
+            String(row.montoBck),
             String(row.montoLiq),
+            row.facturado,
             row.statusPap,
             row.statusCj,
             row.anoGestion,
@@ -656,11 +726,50 @@ export default function Dashboard3Page() {
 
   const chartData = useMemo(() => buildStoreBreakdown(navigableRows, currentLevel), [currentLevel, navigableRows]);
 
+  const workFinishedByLevel = useMemo(() => {
+    const map = new Map<string, number>();
+
+    for (const row of navigableRows) {
+      if (!isTrabajoTerminadoStatus(row.statusCj)) {
+        continue;
+      }
+
+      const levelKey =
+        currentLevel === "cliente"
+          ? row.nombreCliente || "Sin cliente"
+          : currentLevel === "proyecto"
+            ? row.nombreProyecto || "Sin proyecto"
+            : currentLevel === "site"
+              ? row.nombreSite || "Sin site"
+              : row.tipoTrabajo || "Sin tipo";
+      const normalizedKey = normalizeText(levelKey);
+      const currency = normalizeCurrencyForPenConversion(row.moneda || "PEN");
+      const amountPen = convertToPen(row.montoBck, currency, appliedUsdExchangeRate, appliedDopExchangeRate);
+
+      map.set(normalizedKey, (map.get(normalizedKey) ?? 0) + amountPen);
+    }
+
+    return map;
+  }, [appliedDopExchangeRate, appliedUsdExchangeRate, currentLevel, navigableRows]);
+
+  const chartDataWithTrabajoTerminado = useMemo(
+    () =>
+      chartData.map((item) => {
+        const levelKey = normalizeText(item.rawLabel);
+
+        return {
+          ...item,
+          trabajoTerminadoPen: workFinishedByLevel.get(levelKey) ?? 0,
+        };
+      }),
+    [chartData, workFinishedByLevel],
+  );
+
   const detailCurrencyColumns = useMemo(() => {
     const preferredOrder = ["PEN", "USD", "DOP"];
     const currencies = new Set<string>();
 
-    for (const item of chartData) {
+    for (const item of chartDataWithTrabajoTerminado) {
       Object.keys(item.amountsByCurrency).forEach((currency) => {
         currencies.add(currency || "Sin moneda");
       });
@@ -678,31 +787,31 @@ export default function Dashboard3Page() {
 
       return left.localeCompare(right, "es", { sensitivity: "base" });
     });
-  }, [chartData]);
+  }, [chartDataWithTrabajoTerminado]);
 
-  const totalsByCurrency = useMemo(() => {
+  const chartTotalsByCurrency = useMemo(() => {
     const map = new Map<string, number>();
 
-    for (const row of filteredStoreRows) {
+    for (const row of navigableRows) {
       const currency = row.moneda || "Sin moneda";
-      map.set(currency, (map.get(currency) ?? 0) + row.montoOc);
+      map.set(currency, (map.get(currency) ?? 0) + row.montoBck);
     }
 
     return Array.from(map.entries()).map(([currency, total]) => ({ currency, total }));
-  }, [filteredStoreRows]);
+  }, [navigableRows]);
 
-  const totalConvertedToPen = useMemo(() => {
-    return totalsByCurrency.reduce((accumulator, item) => {
+  const chartTotalConvertedToPen = useMemo(() => {
+    return chartTotalsByCurrency.reduce((accumulator, item) => {
       return accumulator + convertToPen(item.total, item.currency, appliedUsdExchangeRate, appliedDopExchangeRate);
     }, 0);
-  }, [appliedDopExchangeRate, appliedUsdExchangeRate, totalsByCurrency]);
+  }, [appliedDopExchangeRate, appliedUsdExchangeRate, chartTotalsByCurrency]);
 
   const kpiTotalsByCurrency = useMemo(() => {
     const map = new Map<string, number>();
 
     for (const row of navigableRows) {
       const currency = row.moneda || "Sin moneda";
-      map.set(currency, (map.get(currency) ?? 0) + row.montoOc);
+      map.set(currency, (map.get(currency) ?? 0) + row.montoBck);
     }
 
     return Array.from(map.entries()).map(([currency, total]) => ({ currency, total }));
@@ -714,9 +823,32 @@ export default function Dashboard3Page() {
     }, 0);
   }, [appliedDopExchangeRate, appliedUsdExchangeRate, kpiTotalsByCurrency]);
 
-  const chartTotalConvertedToPen = useMemo(() => {
-    return kpiTotalConvertedToPen;
-  }, [kpiTotalConvertedToPen]);
+  const workFinishedConvertedToPen = useMemo(() => {
+    return Array.from(workFinishedByLevel.values()).reduce((accumulator, amount) => accumulator + amount, 0);
+  }, [workFinishedByLevel]);
+
+  const advancePercent = useMemo(() => {
+    return kpiTotalConvertedToPen > 0 ? (workFinishedConvertedToPen / kpiTotalConvertedToPen) * 100 : 0;
+  }, [kpiTotalConvertedToPen, workFinishedConvertedToPen]);
+
+  const pendingExecuteConvertedToPen = useMemo(() => {
+    return Math.max(0, kpiTotalConvertedToPen - workFinishedConvertedToPen);
+  }, [kpiTotalConvertedToPen, workFinishedConvertedToPen]);
+
+  const facturadoConvertedToPen = useMemo(() => {
+    return navigableRows.reduce((accumulator, row) => {
+      if (!isFacturadoValue(row.facturado)) {
+        return accumulator;
+      }
+
+      const currency = normalizeCurrencyForPenConversion(row.moneda || "PEN");
+      return accumulator + convertToPen(row.montoBck, currency, appliedUsdExchangeRate, appliedDopExchangeRate);
+    }, 0);
+  }, [appliedDopExchangeRate, appliedUsdExchangeRate, navigableRows]);
+
+  const pendingFacturarConvertedToPen = useMemo(() => {
+    return Math.max(0, workFinishedConvertedToPen - facturadoConvertedToPen);
+  }, [facturadoConvertedToPen, workFinishedConvertedToPen]);
 
   const orderedTotalsByCurrency = useMemo(() => {
     const preferredOrder = ["PEN", "USD", "DOP"];
@@ -738,9 +870,34 @@ export default function Dashboard3Page() {
   const summaryCards = useMemo(
     () => [
       {
-        label: "Total general convertido a PEN",
+        label: "Contratado (backlog)",
         value: formatCurrency(kpiTotalConvertedToPen, "PEN"),
         tone: "blue",
+      },
+      {
+        label: "% avance",
+        value: formatPercent(advancePercent),
+        tone: "orange",
+      },
+      {
+        label: "Trabajo terminado",
+        value: formatCurrency(workFinishedConvertedToPen, "PEN"),
+        tone: "green",
+      },
+      {
+        label: "Pend.Ejecutar",
+        value: formatCurrency(pendingExecuteConvertedToPen, "PEN"),
+        tone: "cream",
+      },
+      {
+        label: "Facturado",
+        value: formatCurrency(facturadoConvertedToPen, "PEN"),
+        tone: "violet",
+      },
+      {
+        label: "Pend.Facturar",
+        value: formatCurrency(pendingFacturarConvertedToPen, "PEN"),
+        tone: "cream",
       },
       ...orderedTotalsByCurrency.map((item, index) => ({
         label:
@@ -755,7 +912,37 @@ export default function Dashboard3Page() {
         tone: ["neutral", "green", "orange", "violet", "slate"][index % 5],
       })),
     ],
-    [kpiTotalConvertedToPen, orderedTotalsByCurrency],
+    [
+      facturadoConvertedToPen,
+      advancePercent,
+      kpiTotalConvertedToPen,
+      orderedTotalsByCurrency,
+      pendingExecuteConvertedToPen,
+      pendingFacturarConvertedToPen,
+      workFinishedConvertedToPen,
+    ],
+  );
+
+  const summaryCardsToRender = useMemo(
+    () => summaryCards.filter((card) => card.label !== "Total PEN" && card.label !== "Total DOP"),
+    [summaryCards],
+  );
+
+  const contractedSummaryCard = useMemo(
+    () => summaryCardsToRender.find((card) => card.label === "Contratado (backlog)") ?? null,
+    [summaryCardsToRender],
+  );
+
+  const otherSummaryCards = useMemo(
+    () => summaryCardsToRender.filter((card) => card.label !== "Contratado (backlog)"),
+    [summaryCardsToRender],
+  );
+
+  const showCurrencyTotals = selectedSummaryKpi === "Contratado (backlog)";
+
+  const stackedCurrencyCards = useMemo(
+    () => (showCurrencyTotals ? orderedTotalsByCurrency.filter((item) => item.currency === "PEN" || item.currency === "DOP") : []),
+    [orderedTotalsByCurrency, showCurrencyTotals],
   );
 
   const appliedPeriodCard = useMemo(
@@ -784,21 +971,13 @@ export default function Dashboard3Page() {
   };
 
   const sortedChartData = useMemo(() => {
-    const items = [...chartData];
+    const items = [...chartDataWithTrabajoTerminado];
     items.sort((left, right) => {
-      if (levelSortColumn === "nivel") {
-        return compareSortValues(left.label, right.label, levelSortDirection);
-      }
-
-      if (levelSortColumn === "registros") {
-        return compareSortValues(left.count, right.count, levelSortDirection);
-      }
-
-      return compareSortValues(left.totalAmount, right.totalAmount, levelSortDirection);
+      return compareSortValues(getLevelSortValue(left, levelSortColumn), getLevelSortValue(right, levelSortColumn), levelSortDirection);
     });
 
     return items;
-  }, [chartData, levelSortColumn, levelSortDirection]);
+  }, [chartDataWithTrabajoTerminado, levelSortColumn, levelSortDirection]);
 
   const sortedRows = useMemo(() => {
     const items = [...navigableRows];
@@ -821,8 +1000,8 @@ export default function Dashboard3Page() {
           return compareSortValues(left.ano, right.ano, detailSortDirection);
         case "nroOc":
           return compareSortValues(left.nroOc, right.nroOc, detailSortDirection);
-        case "montoOc":
-          return compareSortValues(left.montoOc, right.montoOc, detailSortDirection);
+        case "montoBck":
+          return compareSortValues(left.montoBck, right.montoBck, detailSortDirection);
         case "montoLiq":
           return compareSortValues(left.montoLiq, right.montoLiq, detailSortDirection);
         case "statusPap":
@@ -876,7 +1055,11 @@ export default function Dashboard3Page() {
     }
 
     setLevelSortColumn(column);
-    setLevelSortDirection(column === "montoPen" ? "desc" : "asc");
+    setLevelSortDirection(
+      column === "montoPen" || column === "trabajoTerminado" || column === "avance" || column.startsWith("currency:")
+        ? "desc"
+        : "asc",
+    );
   };
 
   const handleDetailSortClick = (column: DetailSortColumn) => {
@@ -886,14 +1069,14 @@ export default function Dashboard3Page() {
     }
 
     setDetailSortColumn(column);
-    setDetailSortDirection(column === "montoOc" || column === "montoLiq" ? "desc" : "asc");
+    setDetailSortDirection(column === "montoBck" || column === "montoLiq" ? "desc" : "asc");
   };
 
   const handleExportRecords = () => {
     const workbook = XLSX.utils.book_new();
     const worksheet = XLSX.utils.json_to_sheet(buildDashboard3ExcelRows(sortedRows));
     XLSX.utils.book_append_sheet(workbook, worksheet, "Detalle registros");
-    XLSX.writeFile(workbook, `dashboard3_detalle_registros_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.writeFile(workbook, `backlog_detalle_registros_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   return (
@@ -909,8 +1092,8 @@ export default function Dashboard3Page() {
               </div>
             </div>
             <div>
-              <div style={styles.heroTitle}>Reporte de Sitios</div>
-              <div style={styles.heroSubtitle}>Reporte gerencial sobre sp_Importar_ConsultaDsh</div>
+              <div style={styles.heroTitle}>Reporte de Backlog</div>
+              <div style={styles.heroSubtitle}>Backlog gerencial sobre sp_Importar_ConsultaDsh</div>
             </div>
           </div>
       <AppCard style={styles.compactCard}>
@@ -974,22 +1157,88 @@ export default function Dashboard3Page() {
       {error ? <AppStatusMessage tone="error">{error}</AppStatusMessage> : null}
 
       <div style={styles.kpiGrid}>
-        {summaryCards.map((card) => (
-          <div
+        {contractedSummaryCard ? (
+          <div style={styles.kpiContractedGroup}>
+            <button
+              type="button"
+              onClick={() =>
+                setSelectedSummaryKpi((currentSelected) =>
+                  currentSelected === contractedSummaryCard.label ? null : contractedSummaryCard.label,
+                )
+              }
+              style={
+                {
+                  ...(contractedSummaryCard.tone === "blue"
+                    ? styles.kpiCardPrimary
+                    : contractedSummaryCard.tone === "green"
+                      ? styles.kpiCardGreen
+                      : contractedSummaryCard.tone === "orange"
+                        ? styles.kpiCardOrange
+                        : contractedSummaryCard.tone === "cream"
+                          ? styles.kpiCardCream
+                          : styles.kpiCard),
+                  cursor: "pointer",
+                  textAlign: "left",
+                  width: "100%",
+                  appearance: "none",
+                  WebkitAppearance: "none",
+                  outline: selectedSummaryKpi === contractedSummaryCard.label ? "2px solid rgba(37, 99, 235, 0.32)" : "none",
+                  boxShadow:
+                    selectedSummaryKpi === contractedSummaryCard.label
+                      ? "0 0 0 1px rgba(37, 99, 235, 0.18), 0 18px 32px rgba(29, 78, 216, 0.16)"
+                      : undefined,
+                } as React.CSSProperties
+              }
+            >
+              <div style={styles.kpiLabel}>{contractedSummaryCard.label}</div>
+              <div style={styles.kpiValue}>{contractedSummaryCard.value}</div>
+            </button>
+
+            {stackedCurrencyCards.length > 0 ? (
+              <div style={styles.kpiCurrencyStackCard}>
+                {stackedCurrencyCards.map((item) => (
+                  <div key={item.currency} style={styles.kpiCurrencyStackItem}>
+                    <div style={styles.kpiCurrencyStackLabel}>{item.currency === "PEN" ? "Total PEN" : "Total DOP"}</div>
+                    <div style={styles.kpiCurrencyStackValue}>{formatCurrencyKpiValue(item.total, item.currency)}</div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {otherSummaryCards.map((card) => (
+          <button
             key={card.label}
+            type="button"
+            onClick={() => setSelectedSummaryKpi(card.label)}
             style={
-              card.tone === "blue"
-                ? styles.kpiCardPrimary
-                : card.tone === "green"
-                  ? styles.kpiCardGreen
-                  : card.tone === "orange"
-                    ? styles.kpiCardOrange
-                    : styles.kpiCard
+              {
+                ...(card.tone === "blue"
+                  ? styles.kpiCardPrimary
+                  : card.tone === "green"
+                    ? styles.kpiCardGreen
+                    : card.tone === "orange"
+                      ? styles.kpiCardOrange
+                      : card.tone === "cream"
+                        ? styles.kpiCardCream
+                        : styles.kpiCard),
+                cursor: "pointer",
+                textAlign: "left",
+                width: "100%",
+                appearance: "none",
+                WebkitAppearance: "none",
+                outline: selectedSummaryKpi === card.label ? "2px solid rgba(37, 99, 235, 0.32)" : "none",
+                boxShadow:
+                  selectedSummaryKpi === card.label
+                    ? "0 0 0 1px rgba(37, 99, 235, 0.18), 0 18px 32px rgba(29, 78, 216, 0.16)"
+                    : undefined,
+              } as React.CSSProperties
             }
           >
             <div style={styles.kpiLabel}>{card.label}</div>
             <div style={styles.kpiValue}>{card.value}</div>
-          </div>
+          </button>
         ))}
         <div style={styles.kpiPeriodCard}>
           <div style={styles.kpiPeriodLabel}>{appliedPeriodCard.label}</div>
@@ -1012,8 +1261,7 @@ export default function Dashboard3Page() {
             </div>
           </div>
 
-          <div style={styles.breadcrumbHeaderRow}>
-            <div style={styles.breadcrumbRow}>
+          <div style={styles.breadcrumbRow}>
               <button
                 type="button"
                 style={path.cliente ? styles.breadcrumbButton : styles.breadcrumbButtonActive}
@@ -1040,7 +1288,6 @@ export default function Dashboard3Page() {
                 </button>
               ) : null}
               {path.site ? <span style={styles.breadcrumbFinal}>{path.site}</span> : null}
-            </div>
           </div>
 
           <div style={styles.chartLayout}>
@@ -1140,13 +1387,34 @@ export default function Dashboard3Page() {
                   </th>
                   {detailCurrencyColumns.map((currency) => (
                     <th key={currency} style={styles.sortableTh}>
-                      <span>{currency}</span>
+                      <button
+                        type="button"
+                        style={styles.sortHeaderButton}
+                        onClick={() => handleLevelSortClick(`currency:${currency}`)}
+                      >
+                        <span>{currency}</span>
+                        {levelSortColumn === `currency:${currency}` ? (
+                          <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "▲" : "▼"}</span>
+                        ) : null}
+                      </button>
                     </th>
                   ))}
-                  <th style={{ ...styles.sortableTh, ...styles.breakdownHeaderAccent }}>
+                  <th style={{ ...styles.sortableTh, ...styles.breakdownHeaderSuccess }}>
                     <button type="button" style={{ ...styles.sortHeaderButton, ...styles.sortHeaderButtonAccent }} onClick={() => handleLevelSortClick("montoPen")}>
-                      <span>Monto en PEN</span>
+                      <span>Contratado</span>
                       {levelSortColumn === "montoPen" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                    </button>
+                  </th>
+                  <th style={{ ...styles.sortableTh, ...styles.breakdownHeaderAccent }}>
+                    <button type="button" style={{ ...styles.sortHeaderButton, ...styles.sortHeaderButtonAccent }} onClick={() => handleLevelSortClick("trabajoTerminado")}>
+                      <span>Trabajo terminado</span>
+                      {levelSortColumn === "trabajoTerminado" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                    </button>
+                  </th>
+                  <th style={{ ...styles.sortableTh, ...styles.breakdownHeaderPercent }}>
+                    <button type="button" style={styles.sortHeaderButton} onClick={() => handleLevelSortClick("avance")}>
+                      <span>% Avance</span>
+                      {levelSortColumn === "avance" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "▲" : "▼"}</span> : null}
                     </button>
                   </th>
                 </tr>
@@ -1154,7 +1422,7 @@ export default function Dashboard3Page() {
               <tbody>
                 {sortedChartData.length === 0 ? (
                   <tr>
-                    <td colSpan={3 + detailCurrencyColumns.length} style={styles.emptyCell}>
+                    <td colSpan={5 + detailCurrencyColumns.length} style={styles.emptyCell}>
                       No hay datos para mostrar.
                     </td>
                   </tr>
@@ -1174,12 +1442,14 @@ export default function Dashboard3Page() {
                           const currencyAmount = item.amountsByCurrency[currency] ?? 0;
 
                           return (
-                            <td key={`${item.label}-${currency}`} style={styles.breakdownCellStrong}>
+                            <td key={`${item.label}-${currency}`} style={styles.breakdownCell}>
                               {formatCurrencyKpiValue(currencyAmount, currency)}
                             </td>
                           );
                         })}
-                        <td style={{ ...styles.breakdownCellStrong, ...styles.breakdownCellAccent }}>{formatCurrency(amountPen, "PEN")}</td>
+                        <td style={{ ...styles.breakdownCell, ...styles.breakdownCellAccent }}>{formatCurrency(amountPen, "PEN")}</td>
+                        <td style={{ ...styles.breakdownCell, ...styles.breakdownCellSuccess }}>{formatCurrency(item.trabajoTerminadoPen ?? 0, "PEN")}</td>
+                        <td style={{ ...styles.breakdownCell, ...styles.breakdownCellPercent }}>{formatPercent(getLevelAdvancePercent(item))}</td>
                       </tr>
                     );
                   })
@@ -1259,9 +1529,9 @@ export default function Dashboard3Page() {
                       </button>
                     </th>
                     <th style={styles.sortableTh}>
-                      <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("montoOc")}>
-                        <span>Monto Oc</span>
-                        {detailSortColumn === "montoOc" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                      <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("montoBck")}>
+                        <span>Monto BCK</span>
+                        {detailSortColumn === "montoBck" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "▲" : "▼"}</span> : null}
                       </button>
                     </th>
                     <th style={styles.sortableTh}>
@@ -1332,7 +1602,7 @@ export default function Dashboard3Page() {
                         <td style={styles.recordsCell}>{row.mes || "-"}</td>
                         <td style={styles.recordsCell}>{row.ano || "-"}</td>
                         <td style={styles.recordsCell}>{row.nroOc || "-"}</td>
-                        <td style={styles.recordsCellStrong}>{formatCurrency(row.montoOc, "PEN")}</td>
+                        <td style={styles.recordsCellStrong}>{formatCurrency(row.montoBck, "PEN")}</td>
                         <td style={styles.recordsCellStrong}>{formatCurrency(row.montoLiq, "PEN")}</td>
                         <td style={styles.recordsCell}>{row.statusPap || "-"}</td>
                         <td style={styles.recordsCell}>{row.statusCj || "-"}</td>
@@ -1459,7 +1729,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   kpiGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(158px, 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
     gap: 10,
   },
   kpiCard: {
@@ -1485,19 +1755,69 @@ const styles: Record<string, React.CSSProperties> = {
     position: "relative",
     overflow: "hidden",
     borderRadius: 18,
-    background: "#FFFFFF",
-    border: "1px solid #E2E8F0",
+    background: "#EAF8F1",
+    border: "1px solid #A9E3C1",
     padding: 14,
-    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.05)",
+    boxShadow: "0 10px 24px rgba(34, 197, 94, 0.08)",
   },
   kpiCardOrange: {
     position: "relative",
     overflow: "hidden",
     borderRadius: 18,
+    background: "#FFF6E8",
+    border: "1px solid #F3C98B",
+    padding: 14,
+    boxShadow: "0 10px 24px rgba(245, 158, 11, 0.08)",
+  },
+  kpiCardCream: {
+    position: "relative",
+    overflow: "hidden",
+    borderRadius: 18,
+    background: "#FFF7EA",
+    border: "1px solid #F1D7A6",
+    padding: 14,
+    boxShadow: "0 10px 24px rgba(245, 158, 11, 0.06)",
+  },
+  kpiContractedGroup: {
+    display: "grid",
+    gridColumn: "span 2",
+    gridTemplateColumns: "minmax(220px, 1.4fr) minmax(160px, 0.9fr)",
+    gap: 10,
+    alignItems: "stretch",
+    minWidth: 0,
+  },
+  kpiCurrencyStackCard: {
+    position: "relative",
+    overflow: "hidden",
+    borderRadius: 18,
     background: "#FFFFFF",
     border: "1px solid #E2E8F0",
-    padding: 14,
+    padding: 10,
     boxShadow: "0 10px 24px rgba(15, 23, 42, 0.05)",
+    display: "grid",
+    gap: 8,
+    minWidth: 0,
+  },
+  kpiCurrencyStackItem: {
+    borderRadius: 14,
+    border: "1px solid #E2E8F0",
+    background: "#F8FAFC",
+    padding: "8px 10px",
+    display: "grid",
+    gap: 4,
+  },
+  kpiCurrencyStackLabel: {
+    fontSize: 10,
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: "#475569",
+  },
+  kpiCurrencyStackValue: {
+    fontSize: 16,
+    fontWeight: 900,
+    color: "#0F172A",
+    lineHeight: 1.05,
   },
   kpiPeriodCard: {
     position: "relative",
@@ -1541,7 +1861,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   contentGrid: {
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1.1fr) minmax(0, 1fr)",
+    gridTemplateColumns: "minmax(0, 0.78fr) minmax(0, 1.22fr)",
     gap: 10,
     alignItems: "start",
     minHeight: 0,
@@ -1554,7 +1874,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#FFFFFF",
     border: "1px solid #E2E8F0",
     boxShadow: "0 10px 30px rgba(15, 23, 42, 0.05)",
-    padding: 16,
+    padding: 10,
   },
   detailCard: {
     display: "flex",
@@ -1602,15 +1922,15 @@ const styles: Record<string, React.CSSProperties> = {
   },
   chartLayout: {
     display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: 14,
+    gridTemplateColumns: "minmax(0, 0.72fr) minmax(0, 1.28fr)",
+    gap: 10,
     alignItems: "center",
     minHeight: 0,
     flex: 1,
   },
   chartWrap: {
     position: "relative",
-    minHeight: 240,
+    minHeight: 180,
     display: "grid",
     placeItems: "center",
   },
@@ -1634,8 +1954,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   legendList: {
     display: "grid",
-    gap: 10,
-    maxHeight: 280,
+    gap: 8,
+    maxHeight: 190,
     overflowY: "auto",
     paddingRight: 4,
     scrollbarGutter: "stable",
@@ -1822,6 +2142,7 @@ const styles: Record<string, React.CSSProperties> = {
     width: "100%",
     borderCollapse: "collapse",
     minWidth: 640,
+    fontSize: 13,
   },
   breakdownHeader: {
     position: "sticky",
@@ -1831,13 +2152,17 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "10px 10px",
     borderBottom: "1px solid #E2E8F0",
     color: "#475569",
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: 800,
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
   breakdownHeaderAccent: {
     background: "linear-gradient(135deg, #DBEAFE, #BFDBFE 55%, #93C5FD)",
+    color: "#0F172A",
+  },
+  breakdownHeaderSuccess: {
+    background: "linear-gradient(135deg, #E8F8EE, #D2F2DE 55%, #B9EBC9)",
     color: "#0F172A",
   },
   breakdownCell: {
@@ -1855,30 +2180,45 @@ const styles: Record<string, React.CSSProperties> = {
     background: "linear-gradient(135deg, #DBEAFE, #BFDBFE 55%, #93C5FD)",
     color: "#0F172A",
   },
+  breakdownCellSuccess: {
+    background: "linear-gradient(135deg, #E8F8EE, #D2F2DE 55%, #B9EBC9)",
+    color: "#0F172A",
+  },
+  breakdownHeaderPercent: {
+    background: "linear-gradient(135deg, #FFF7E6, #FDECCB 55%, #F8DFA3)",
+    color: "#0F172A",
+  },
+  breakdownCellPercent: {
+    background: "linear-gradient(135deg, #FFF7E6, #FDECCB 55%, #F8DFA3)",
+    color: "#0F172A",
+    fontWeight: 700,
+  },
   legendItem: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 12,
+    gap: 10,
     width: "100%",
     border: "1px solid #E2E8F0",
     borderRadius: 12,
     background: "#FFFFFF",
-    padding: "8px 10px",
+    padding: "6px 8px",
     cursor: "pointer",
+    minWidth: 0,
   },
   legendItemDisabled: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 12,
+    gap: 10,
     width: "100%",
     border: "1px solid #E2E8F0",
     borderRadius: 12,
     background: "#F8FAFC",
-    padding: "8px 10px",
+    padding: "6px 8px",
     cursor: "default",
     opacity: 0.75,
+    minWidth: 0,
   },
   emptyCell: {
     padding: 20,

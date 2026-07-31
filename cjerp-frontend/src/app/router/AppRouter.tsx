@@ -59,6 +59,7 @@ const RecursosHumanosVacacionesPage = lazy(() => import("../../features/recursos
 const ConsultaPage = lazy(() => import("../../features/mantenimiento/consulta/consulta"));
 const ModificacionesPage = lazy(() => import("../../features/mantenimiento/consulta/modificaciones"));
 const MigracionPage = lazy(() => import("../../features/mantenimiento/migracion"));
+const MigracionImportPage = lazy(() => import("../../features/mantenimiento/migracion/m_importar"));
 const MantenimientoPage = lazy(() => import("../../features/mantenimiento/mantenimiento"));
 const MantenimientoEmpleadosPage = lazy(() => import("../../features/mantenimiento/empleados"));
 const MantenimientoEmpleadoFichaPage = lazy(() => import("../../features/mantenimiento/mantenimiento/m_empleado"));
@@ -77,6 +78,8 @@ const GerencialPage = lazy(() => import("../../pages/reporte/gerencial"));
 const DashboardCjPage = lazy(() => import("../../features/reportes/gerencial/dashboardcj"));
 const Dashboard1Page = lazy(() => import("../../features/reportes/gerencial/dashboard1"));
 const Dashboard3Page = lazy(() => import("../../features/reportes/gerencial/dashboard3"));
+const BacklogPage = lazy(() => import("../../features/reportes/gerencial/backlog"));
+const IngresosEgresosPage = lazy(() => import("../../features/reportes/gerencial/ingresosegresos"));
 const RptAsistenciaPage = lazy(() => import("../../features/reportes/rptasistencia"));
 const RptAsistenciaEmpleadoPage = lazy(() => import("../../features/reportes/rptasistenciaempleado"));
 const ClaudeiaPage = lazy(() => import("../../features/reportes/administrativo/claudeia"));
@@ -148,6 +151,7 @@ export default function AppRouter() {
             <Route path="/mantenimiento/empleados" element={<MantenimientoEmpleadosPage />} />
             <Route path="/mantenimiento/mantenimiento/m_empleado" element={<MantenimientoEmpleadoFichaPage />} />
             <Route path="/mantenimiento/migracion" element={<MigracionPage />} />
+            <Route path="/mantenimiento/migracion/m_importar" element={<MigracionImportPage />} />
             <Route path="/mantenimiento/mantenimiento" element={<MantenimientoPage />} />
             <Route path="/mantenimiento/sistemas/rptwup" element={<RptWupPage />} />
             <Route path="/mantenimiento/sistemas/rptwupgerencial" element={<RptWupGerencialPage />} />
@@ -173,6 +177,8 @@ export default function AppRouter() {
             <Route path="/reporte/gerencial" element={<GerencialPage />} />
             <Route path="/gerencial/dashboard1" element={<Dashboard1Page />} />
             <Route path="/reportes/gerencial/dashboard3" element={<Dashboard3Page />} />
+            <Route path="/reportes/gerencial/backlog" element={<BacklogPage />} />
+            <Route path="/reportes/gerencial/ingresosegresos" element={<IngresosEgresosPage />} />
             <Route path="/reportes/gerencial/dashboardcj" element={<DashboardCjPage />} />
             <Route path="/reportes/gerencial/dashboard1" element={<Dashboard1Page />} />
             <Route path="/reportes/rptasistencia" element={<RptAsistenciaPage />} />
