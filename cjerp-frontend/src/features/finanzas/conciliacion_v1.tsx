@@ -10,7 +10,6 @@ import {
   obtenerCombosClasificacionConciliacionBcp,
 } from "../../api/conciliacionService";
 import {
-  buildPlanillaConsultaEstadosRequest,
   actualizarPlanillaNroOperacion,
   consultarPlanillaEstados,
 } from "../../api/planillaConsultaService";
@@ -26,6 +25,7 @@ import type {
   ConciliacionReglaContableOption,
   ParsedConciliacionExcelFile,
 } from "../../models/conciliacionBcp";
+import type { PlanillaConsultaParametro } from "../../models/planillaConsulta";
 import { getHttpErrorMessage } from "../../utils/httpError";
 import { ArrowUpDown, ChevronDown, ChevronRight, FileDown } from "lucide-react";
 
@@ -1443,13 +1443,13 @@ export default function ConciliacionBcpPage() {
 
     try {
       const idBanco = getBancoSeleccionadoId(codigoBanco);
-      const request = {
-        ...buildPlanillaConsultaEstadosRequest([
+      const request: { consulta: string; parametros: PlanillaConsultaParametro[] } = {
+        consulta: "gastos",
+        parametros: [
           { nombre: "Estados", valor: "4", tipo: "string" },
           { nombre: "FechaDeposito", valor: fechaDeposito, tipo: "string" },
           { nombre: "IdBanco", valor: String(idBanco), tipo: "int" },
-        ]),
-        consulta: "gastos",
+        ],
       };
       const response = await consultarPlanillaEstados(request, { timeoutMs: 120000 });
 
