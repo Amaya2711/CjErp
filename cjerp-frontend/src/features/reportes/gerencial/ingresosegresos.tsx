@@ -1,18 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
+import { Suspense, lazy } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 import * as XLSX from "xlsx";
 import AppPage from "../../../components/base/AppPage";
 import AppCard from "../../../components/base/AppCard";
 import AppSectionHeader from "../../../components/base/AppSectionHeader";
 import AppStatusMessage from "../../../components/base/AppStatusMessage";
-import {
-  consultarMovimientosGastosIngresos,
-  type MovimientoConsultaRequest,
-} from "../../../api/movimientosConsultaService";
+import { buildImportarConsultaDshRow, calculateBacklogContractedTotalPen } from "./backlog";
+import { consultarImportarConsultaDsh } from "../../../api/importarConsultaService";
+import { consultarMovimientosGastosIngresos, type MovimientoConsultaRequest } from "../../../api/movimientosConsultaService";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 
 type RawRow = Record<string, unknown>;
+type BacklogStoreRow = ReturnType<typeof buildImportarConsultaDshRow>;
 
 type MovimientoTipo = "Ingreso" | "Egreso" | "Sin tipo";
 
@@ -41,6 +43,18 @@ type MovimientoRow = {
 
 type SortColumn = "fecha" | "tipo" | "cliente" | "proyecto" | "site" | "categoria" | "moneda" | "monto" | "montoPen";
 type SortDirection = "asc" | "desc";
+type ExpenseDetailSortColumn =
+  | "id"
+  | "fecha"
+  | "cliente"
+  | "proyecto"
+  | "site"
+  | "tipoTrabajo"
+  | "moneda"
+  | "subtotal"
+  | "subtotalPen"
+  | "nroOperacion"
+  | "detalle";
 
 type PieDatum = {
   label: string;
@@ -58,6 +72,10 @@ type ExpenseDrillPath = {
   site: string | null;
   tipoTrabajo: string | null;
 };
+
+import { useDeferredValue } from "react";
+
+const BacklogPage = lazy(() => import("./backlog"));
 
 const PIE_COLORS = ["#2563EB", "#14B8A6", "#22C55E", "#F59E0B", "#F97316", "#EF4444", "#A855F7", "#64748B"];
 const INCOME_GREEN_COLORS = ["#22C55E", "#16A34A", "#15803D", "#4ADE80", "#86EFAC", "#BBF7D0", "#166534", "#0F766E"];
@@ -80,6 +98,22 @@ function getYearStartInputValue() {
 function getTodayInputValue() {
   const today = new Date();
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+}
+
+function parseYearInputValue(value: string) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return null;
+  }
+
+  const direct = Number(text);
+  if (Number.isFinite(direct)) {
+    return direct;
+  }
+
+  const dateCandidate = /^\d{4}-\d{2}-\d{2}$/.test(text) ? `${text}T00:00:00` : text;
+  const parsed = new Date(dateCandidate);
+  return Number.isFinite(parsed.getTime()) ? parsed.getFullYear() : null;
 }
 
 function normalizeText(value?: string | null) {
@@ -467,12 +501,10 @@ export default function IngresosEgresosPage() {
   const [error, setError] = useState("");
   const [draftFechaInicio, setDraftFechaInicio] = useState(getYearStartInputValue());
   const [draftFechaFin, setDraftFechaFin] = useState(getTodayInputValue());
-  const [draftSearchText, setDraftSearchText] = useState("");
   const [draftUsdExchangeRate, setDraftUsdExchangeRate] = useState(String(DEFAULT_EXCHANGE_RATES.USD));
   const [draftDopExchangeRate, setDraftDopExchangeRate] = useState(String(DEFAULT_EXCHANGE_RATES.DOP));
   const [appliedFechaInicio, setAppliedFechaInicio] = useState(getYearStartInputValue());
   const [appliedFechaFin, setAppliedFechaFin] = useState(getTodayInputValue());
-  const [appliedSearchText, setAppliedSearchText] = useState("");
   const [appliedUsdExchangeRate, setAppliedUsdExchangeRate] = useState<number>(DEFAULT_EXCHANGE_RATES.USD);
   const [appliedDopExchangeRate, setAppliedDopExchangeRate] = useState<number>(DEFAULT_EXCHANGE_RATES.DOP);
   const [sortColumn, setSortColumn] = useState<SortColumn>("fecha");
@@ -485,9 +517,15 @@ export default function IngresosEgresosPage() {
   const [activeTab, setActiveTab] = useState<ReportTab>("principal");
   const [selectedExpenseDetailLevel, setSelectedExpenseDetailLevel] = useState<ExpenseDrillLevel | null>(null);
   const [selectedExpenseDetailLabel, setSelectedExpenseDetailLabel] = useState<string | null>(null);
+  const [expenseDetailSortColumn, setExpenseDetailSortColumn] = useState<ExpenseDetailSortColumn>("fecha");
+  const [expenseDetailSortDirection, setExpenseDetailSortDirection] = useState<SortDirection>("desc");
   const [expenseDetailPage, setExpenseDetailPage] = useState(1);
   const [expenseDetailPageSize, setExpenseDetailPageSize] = useState(25);
   const [isExpenseDetailCollapsed, setIsExpenseDetailCollapsed] = useState(true);
+  const [backlogContractedTotalPen, setBacklogContractedTotalPen] = useState<number | null>(null);
+  const [backlogStoreRows, setBacklogStoreRows] = useState<BacklogStoreRow[] | null>(null);
+  const [tabContentLoading, setTabContentLoading] = useState(false);
+  const [tabContentLoadProgress, setTabContentLoadProgress] = useState(0);
   const [egresoDrillPath, setEgresoDrillPath] = useState<ExpenseDrillPath>({
     cliente: null,
     proyecto: null,
@@ -497,11 +535,19 @@ export default function IngresosEgresosPage() {
   const isMountedRef = useRef(true);
   const loadProgressTickerRef = useRef<number | null>(null);
   const loadProgressStartedAtRef = useRef<number>(0);
+  const tabLoadingTimerRef = useRef<number | null>(null);
+  const tabLoadingTickerRef = useRef<number | null>(null);
+  const tabLoadingHideTimerRef = useRef<number | null>(null);
+  const tabLoadingStartedAtRef = useRef<number>(0);
+  const backlogLoadKeyRef = useRef<string>("");
 
-  const loadRows = async (overrides?: { fechaInicio?: string; fechaFin?: string; searchText?: string }) => {
+  const backlogLoadKey = `${appliedFechaInicio}|${appliedFechaFin}|${appliedUsdExchangeRate}|${appliedDopExchangeRate}`;
+
+  const loadRows = async (overrides?: { fechaInicio?: string; fechaFin?: string }) => {
     const fechaInicio = overrides?.fechaInicio ?? draftFechaInicio;
     const fechaFin = overrides?.fechaFin ?? draftFechaFin;
-    const searchText = overrides?.searchText ?? draftSearchText;
+    const appliedUsdRate = parseExchangeRateInput(draftUsdExchangeRate) ?? DEFAULT_EXCHANGE_RATES.USD;
+    const appliedDopRate = parseExchangeRateInput(draftDopExchangeRate) ?? DEFAULT_EXCHANGE_RATES.DOP;
 
     const request: MovimientoConsultaRequest = {
       consulta: "movimientos-gastos-ingresos",
@@ -511,15 +557,12 @@ export default function IngresosEgresosPage() {
       ],
     };
 
-    const textoBusqueda = searchText.trim();
-    if (textoBusqueda) {
-      request.parametros.push({ nombre: "TextoBusqueda", valor: textoBusqueda, tipo: "string" });
-    }
-
     setLoading(true);
     setLoadProgress((current) => (current === 0 ? 8 : current));
     loadProgressStartedAtRef.current = Date.now();
     setError("");
+    setBacklogStoreRows(null);
+    setBacklogContractedTotalPen(null);
 
     try {
       const response = await consultarMovimientosGastosIngresos(request, { timeoutMs: 120000 });
@@ -531,18 +574,18 @@ export default function IngresosEgresosPage() {
         setError(response.message?.trim() || "La consulta excedio el maximo permitido para la visualizacion de ingresos y egresos.");
         return;
       }
-
       setAppliedFechaInicio(fechaInicio);
       setAppliedFechaFin(fechaFin);
-      setAppliedSearchText(textoBusqueda);
-      setAppliedUsdExchangeRate(parseExchangeRateInput(draftUsdExchangeRate) ?? DEFAULT_EXCHANGE_RATES.USD);
-      setAppliedDopExchangeRate(parseExchangeRateInput(draftDopExchangeRate) ?? DEFAULT_EXCHANGE_RATES.DOP);
+      setAppliedUsdExchangeRate(appliedUsdRate);
+      setAppliedDopExchangeRate(appliedDopRate);
       setRawRows(Array.isArray(response.rows) ? response.rows : []);
       setSortColumn("fecha");
       setSortDirection("desc");
     } catch (err) {
       if (!isMountedRef.current) return;
       setRawRows([]);
+      setBacklogStoreRows([]);
+      setBacklogContractedTotalPen(null);
       setError(getHttpErrorMessage(err, "No se pudo cargar el dashboard de ingresos y egresos desde sp_Movimientos_Consulta_GastosIngresos."));
     } finally {
       if (isMountedRef.current) {
@@ -597,17 +640,202 @@ export default function IngresosEgresosPage() {
   }, [loading, loadProgress]);
 
   useEffect(() => {
+    if (tabLoadingHideTimerRef.current !== null) {
+      window.clearTimeout(tabLoadingHideTimerRef.current);
+      tabLoadingHideTimerRef.current = null;
+    }
+
+    if (activeTab === "principal") {
+      if (tabLoadingTickerRef.current !== null) {
+        window.clearInterval(tabLoadingTickerRef.current);
+        tabLoadingTickerRef.current = null;
+      }
+      setTabContentLoading(false);
+      setTabContentLoadProgress(0);
+      return undefined;
+    }
+
+    if (tabContentLoading) {
+      if (tabLoadingTickerRef.current !== null) {
+        window.clearInterval(tabLoadingTickerRef.current);
+        tabLoadingTickerRef.current = null;
+      }
+
+      if (tabContentLoadProgress === 0) {
+        setTabContentLoadProgress(8);
+      }
+      tabLoadingStartedAtRef.current = Date.now();
+
+      tabLoadingTickerRef.current = window.setInterval(() => {
+        const elapsedMs = Date.now() - tabLoadingStartedAtRef.current;
+        const target = elapsedMs < 1000 ? 45 : elapsedMs < 3000 ? 75 : 98;
+
+        setTabContentLoadProgress((current) => {
+          if (current >= target) {
+            return current;
+          }
+
+          const step = elapsedMs < 1000 ? 6 : elapsedMs < 3000 ? 4 : 2;
+          return Math.min(current + step, target);
+        });
+      }, 140);
+
+      return () => {
+        if (tabLoadingTickerRef.current !== null) {
+          window.clearInterval(tabLoadingTickerRef.current);
+          tabLoadingTickerRef.current = null;
+        }
+      };
+    }
+
+    if (tabLoadingTickerRef.current !== null) {
+      window.clearInterval(tabLoadingTickerRef.current);
+      tabLoadingTickerRef.current = null;
+    }
+
+    if (tabContentLoadProgress > 0) {
+      setTabContentLoadProgress(100);
+      tabLoadingHideTimerRef.current = window.setTimeout(() => {
+        if (isMountedRef.current) {
+          setTabContentLoadProgress(0);
+        }
+        tabLoadingHideTimerRef.current = null;
+      }, 240);
+    }
+
+    return undefined;
+  }, [activeTab, tabContentLoading]);
+
+  useEffect(() => {
+    if (activeTab !== "ingresos") {
+      return undefined;
+    }
+
+    if (backlogStoreRows !== null && backlogLoadKeyRef.current === backlogLoadKey) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const loadBacklogRows = async () => {
+      setTabContentLoading(true);
+      setTabContentLoadProgress(8);
+
+      try {
+        const response = await consultarImportarConsultaDsh(
+          {
+            consulta: "importar-consulta-dsh",
+            parametros: [
+              { nombre: "FechaInicio", valor: appliedFechaInicio, tipo: "date" },
+              { nombre: "FechaFin", valor: appliedFechaFin, tipo: "date" },
+            ],
+          },
+          { timeoutMs: 120000 },
+        );
+
+        if (cancelled || !isMountedRef.current) {
+          return;
+        }
+
+        if (response.limitExceeded) {
+          setBacklogStoreRows([]);
+          setBacklogContractedTotalPen(null);
+          setError(response.message?.trim() || "La consulta excedio el maximo permitido para el backlog.");
+          backlogLoadKeyRef.current = backlogLoadKey;
+          return;
+        }
+
+        const backlogRows = Array.isArray(response.rows) ? response.rows.map((row) => buildImportarConsultaDshRow(row)) : [];
+        const yearStart = parseYearInputValue(appliedFechaInicio);
+        const yearEnd = parseYearInputValue(appliedFechaFin);
+        const filteredBacklogRows = backlogRows.filter((row) => {
+          const rowYear = parseYearInputValue(row.anoGestion);
+
+          if (yearStart !== null && rowYear !== null && rowYear < yearStart) {
+            return false;
+          }
+
+          if (yearEnd !== null && rowYear !== null && rowYear > yearEnd) {
+            return false;
+          }
+
+          return true;
+        });
+
+        setBacklogStoreRows(backlogRows);
+        setBacklogContractedTotalPen(calculateBacklogContractedTotalPen(filteredBacklogRows, appliedUsdExchangeRate, appliedDopExchangeRate));
+        backlogLoadKeyRef.current = backlogLoadKey;
+      } catch (err) {
+        if (cancelled || !isMountedRef.current) {
+          return;
+        }
+
+        setBacklogStoreRows([]);
+        setBacklogContractedTotalPen(null);
+        setError(getHttpErrorMessage(err, "No se pudo cargar el backlog desde sp_Importar_ConsultaDsh."));
+        backlogLoadKeyRef.current = backlogLoadKey;
+      } finally {
+        if (!cancelled && isMountedRef.current) {
+          setTabContentLoading(false);
+        }
+      }
+    };
+
+    void loadBacklogRows();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, appliedDopExchangeRate, appliedFechaFin, appliedFechaInicio, appliedUsdExchangeRate, backlogLoadKey, backlogStoreRows]);
+
+  useEffect(() => {
     isMountedRef.current = true;
     void loadRows();
 
     return () => {
       isMountedRef.current = false;
+      if (tabLoadingTimerRef.current !== null) {
+        window.clearTimeout(tabLoadingTimerRef.current);
+        tabLoadingTimerRef.current = null;
+      }
+      if (tabLoadingTickerRef.current !== null) {
+        window.clearInterval(tabLoadingTickerRef.current);
+        tabLoadingTickerRef.current = null;
+      }
+      if (tabLoadingHideTimerRef.current !== null) {
+        window.clearTimeout(tabLoadingHideTimerRef.current);
+        tabLoadingHideTimerRef.current = null;
+      }
     };
   }, []);
 
+  const handleTabChange = (nextTab: ReportTab) => {
+    if (tabLoadingTimerRef.current !== null) {
+      window.clearTimeout(tabLoadingTimerRef.current);
+      tabLoadingTimerRef.current = null;
+    }
+
+    if (nextTab === "principal") {
+      setTabContentLoading(false);
+      setTabContentLoadProgress(0);
+      setActiveTab(nextTab);
+      return;
+    }
+
+    setActiveTab(nextTab);
+
+    if (nextTab === "egresos") {
+      tabLoadingTimerRef.current = window.setTimeout(() => {
+        if (isMountedRef.current) {
+          setTabContentLoading(false);
+        }
+        tabLoadingTimerRef.current = null;
+      }, 250);
+    }
+  };
+
   const storeRows = useMemo(() => rawRows.map((row) => buildMovimientoRow(row)), [rawRows]);
   const filteredRows = useMemo(() => {
-    const searchText = normalizeText(appliedSearchText);
     const fromDate = appliedFechaInicio ? new Date(`${appliedFechaInicio}T00:00:00`).getTime() : 0;
     const toDate = appliedFechaFin ? new Date(`${appliedFechaFin}T23:59:59`).getTime() : Number.POSITIVE_INFINITY;
     const fromYear = appliedFechaInicio ? new Date(`${appliedFechaInicio}T00:00:00`).getFullYear() : null;
@@ -625,40 +853,16 @@ export default function IngresosEgresosPage() {
         if (row.fechaSort && row.fechaSort > toDate) return false;
       }
 
-      if (searchText) {
-        const haystack = normalizeText(
-          [
-            row.id,
-            row.fechaRaw,
-            row.fechaLabel,
-            row.tipo,
-            row.cliente,
-            row.proyecto,
-            row.site,
-            row.categoria,
-            row.moneda,
-            String(row.monto),
-            row.detalle,
-            row.comentario,
-            row.documento,
-            row.nroOperacion,
-            row.responsable,
-          ].join(" "),
-        );
-
-        if (!haystack.includes(searchText)) {
-          return false;
-        }
-      }
-
       return true;
     });
-  }, [appliedFechaFin, appliedFechaInicio, appliedSearchText, storeRows]);
+  }, [appliedFechaFin, appliedFechaInicio, storeRows]);
   const summaryRows = filteredRows;
+  const deferredSummaryRows = useDeferredValue(summaryRows);
+  const isPrincipalRenderPending = deferredSummaryRows !== summaryRows;
 
   const sortedRows = useMemo(() => {
     const factor = sortDirection === "asc" ? 1 : -1;
-    return [...filteredRows].sort((left, right) => {
+    return [...deferredSummaryRows].sort((left, right) => {
       switch (sortColumn) {
         case "fecha":
           return (left.fechaSort - right.fechaSort) * factor;
@@ -673,7 +877,7 @@ export default function IngresosEgresosPage() {
         return String(left[sortColumn]).localeCompare(String(right[sortColumn]), "es", { sensitivity: "base" }) * factor;
     }
   });
-  }, [appliedDopExchangeRate, appliedUsdExchangeRate, filteredRows, sortColumn, sortDirection]);
+  }, [appliedDopExchangeRate, appliedUsdExchangeRate, deferredSummaryRows, sortColumn, sortDirection]);
   const totalDetailPages = useMemo(() => Math.max(1, Math.ceil(sortedRows.length / detailPageSize)), [detailPageSize, sortedRows.length]);
   const visibleDetailRows = useMemo(() => {
     const startIndex = (detailPage - 1) * detailPageSize;
@@ -704,8 +908,9 @@ export default function IngresosEgresosPage() {
     return percentage > 100 ? percentage - 100 : percentage;
   })() : 0;
   const saldoPercentageWithSign = saldo < 0 ? -saldoPercentage : saldoPercentage;
-  const ingresoRows = useMemo(() => summaryRows.filter((row) => row.tipo === "Ingreso"), [summaryRows]);
-  const egresoRows = useMemo(() => summaryRows.filter((row) => row.tipo === "Egreso"), [summaryRows]);
+  const avanceEgresosPercentage = totalIngresos > 0 ? (totalEgresos / totalIngresos) * 100 : 0;
+  const ingresoRows = useMemo(() => deferredSummaryRows.filter((row) => row.tipo === "Ingreso"), [deferredSummaryRows]);
+  const egresoRows = useMemo(() => deferredSummaryRows.filter((row) => row.tipo === "Egreso"), [deferredSummaryRows]);
   const visibleIncomeRows = useMemo(() => ingresoRows.slice(0, 50), [ingresoRows]);
   const egresoDrillLevel = useMemo(() => getExpenseDrillLevel(egresoDrillPath), [egresoDrillPath]);
   const egresoDrillRows = useMemo(
@@ -734,10 +939,33 @@ export default function IngresosEgresosPage() {
     }
   }, [egresoDrillLevel, egresoDrillRows, selectedExpenseDetailLabel, selectedExpenseDetailLevel]);
   const totalExpenseDetailPages = Math.max(1, Math.ceil(expenseDetailFilteredRows.length / expenseDetailPageSize));
+  const sortedExpenseDetailRows = useMemo(() => {
+    const factor = expenseDetailSortDirection === "asc" ? 1 : -1;
+
+    return [...expenseDetailFilteredRows].sort((left, right) => {
+      switch (expenseDetailSortColumn) {
+        case "fecha":
+          return (left.fechaSort - right.fechaSort) * factor;
+        case "subtotal":
+          return ((left.egresos || left.monto) - (right.egresos || right.monto)) * factor;
+        case "subtotalPen":
+          return (
+            convertAmountToPen(left.egresos || left.monto, left.moneda, appliedUsdExchangeRate, appliedDopExchangeRate) -
+            convertAmountToPen(right.egresos || right.monto, right.moneda, appliedUsdExchangeRate, appliedDopExchangeRate)
+          ) * factor;
+        case "id":
+          return (toNumber(left.id) - toNumber(right.id)) * factor;
+        default:
+          return String(left[expenseDetailSortColumn]).localeCompare(String(right[expenseDetailSortColumn]), "es", {
+            sensitivity: "base",
+          }) * factor;
+      }
+    });
+  }, [appliedDopExchangeRate, appliedUsdExchangeRate, expenseDetailFilteredRows, expenseDetailSortColumn, expenseDetailSortDirection]);
   const visibleExpenseDetailRows = useMemo(() => {
     const startIndex = (expenseDetailPage - 1) * expenseDetailPageSize;
-    return expenseDetailFilteredRows.slice(startIndex, startIndex + expenseDetailPageSize);
-  }, [expenseDetailFilteredRows, expenseDetailPage, expenseDetailPageSize]);
+    return sortedExpenseDetailRows.slice(startIndex, startIndex + expenseDetailPageSize);
+  }, [expenseDetailPage, expenseDetailPageSize, sortedExpenseDetailRows]);
   const egresoDrillBreakdown = useMemo(() => {
     const accessor =
       egresoDrillLevel === "cliente"
@@ -820,25 +1048,25 @@ export default function IngresosEgresosPage() {
 
   const breakdownByType = useMemo(
     () =>
-      buildBreakdown(summaryRows, (row) => row.tipo, (row) => {
+      buildBreakdown(deferredSummaryRows, (row) => row.tipo, (row) => {
         const amountBase = tipoIgvMode === "con-igv" ? (row.totalPagar > 0 ? row.totalPagar : row.monto) : row.monto;
         return convertAmountToPen(amountBase, row.moneda, appliedUsdExchangeRate, appliedDopExchangeRate);
       }),
-    [appliedDopExchangeRate, appliedUsdExchangeRate, summaryRows, tipoIgvMode],
+    [appliedDopExchangeRate, appliedUsdExchangeRate, deferredSummaryRows, tipoIgvMode],
   );
   const typeTotalIngresos = useMemo(
     () =>
-      summaryRows
+      deferredSummaryRows
         .filter((row) => row.tipo === "Ingreso")
         .reduce((sum, row) => sum + convertAmountToPen(resolveIgvBaseAmount(row, tipoIgvMode), row.moneda, appliedUsdExchangeRate, appliedDopExchangeRate), 0),
-    [appliedDopExchangeRate, appliedUsdExchangeRate, summaryRows, tipoIgvMode],
+    [appliedDopExchangeRate, appliedUsdExchangeRate, deferredSummaryRows, tipoIgvMode],
   );
   const typeTotalEgresos = useMemo(
     () =>
-      summaryRows
+      deferredSummaryRows
         .filter((row) => row.tipo === "Egreso")
         .reduce((sum, row) => sum + convertAmountToPen(resolveIgvBaseAmount(row, tipoIgvMode), row.moneda, appliedUsdExchangeRate, appliedDopExchangeRate), 0),
-    [appliedDopExchangeRate, appliedUsdExchangeRate, summaryRows, tipoIgvMode],
+    [appliedDopExchangeRate, appliedUsdExchangeRate, deferredSummaryRows, tipoIgvMode],
   );
   const typeSaldo = typeTotalIngresos - typeTotalEgresos;
   const typeEgresoPercentageBase = typeTotalIngresos > 0 ? (typeTotalEgresos / typeTotalIngresos) * 100 : 0;
@@ -862,6 +1090,38 @@ export default function IngresosEgresosPage() {
     () => breakdownByCurrencyEgresos.reduce((sum, item) => sum + convertAmountToPen(item.amount, item.rawLabel, appliedUsdExchangeRate, appliedDopExchangeRate), 0),
     [appliedDopExchangeRate, appliedUsdExchangeRate, breakdownByCurrencyEgresos],
   );
+  const headerIngresosTotal = backlogContractedTotalPen != null ? backlogContractedTotalPen : totalIngresos;
+  const headerSaldo = headerIngresosTotal - totalEgresos;
+  const headerAvanceEgresosPercentage = headerIngresosTotal > 0 ? (totalEgresos / headerIngresosTotal) * 100 : 0;
+  const avanceKpiStyle = useMemo(() => {
+    if (headerAvanceEgresosPercentage < 60) {
+      return {
+        background: "linear-gradient(135deg, #F0FDF4 0%, #DCFCE7 100%)",
+        border: "1px solid #BBF7D0",
+        labelStyle: { color: "#166534" },
+        valueStyle: { color: "#14532D" },
+        helperStyle: { color: "#15803D" },
+      };
+    }
+
+    if (headerAvanceEgresosPercentage <= 80) {
+      return {
+        background: "linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)",
+        border: "1px solid #FCD34D",
+        labelStyle: { color: "#92400E" },
+        valueStyle: { color: "#78350F" },
+        helperStyle: { color: "#B45309" },
+      };
+    }
+
+    return {
+      background: "linear-gradient(135deg, #FEF2F2 0%, #FECACA 100%)",
+      border: "1px solid #FCA5A5",
+      labelStyle: { color: "#991B1B" },
+      valueStyle: { color: "#7F1D1D" },
+      helperStyle: { color: "#B91C1C" },
+    };
+  }, [headerAvanceEgresosPercentage]);
 
   const kpiCards = [
     {
@@ -871,18 +1131,45 @@ export default function IngresosEgresosPage() {
     },
     {
       label: "Ingresos",
-      value: formatCurrency(totalIngresos, "PEN"),
+      value: formatCurrency(headerIngresosTotal, "PEN"),
       helper: "Total acumulado",
+      style: {
+        background: "linear-gradient(135deg, #F0FDF4 0%, #DCFCE7 100%)",
+        border: "1px solid #BBF7D0",
+      },
+      labelStyle: { color: "#166534" },
+      valueStyle: { color: "#14532D" },
+      helperStyle: { color: "#15803D" },
     },
     {
       label: "Egresos",
       value: formatCurrency(totalEgresos, "PEN"),
       helper: "Total acumulado",
+      style: {
+        background: "linear-gradient(135deg, #FEF2F2 0%, #FECACA 100%)",
+        border: "1px solid #FCA5A5",
+      },
+      labelStyle: { color: "#991B1B" },
+      valueStyle: { color: "#7F1D1D" },
+      helperStyle: { color: "#B91C1C" },
     },
     {
       label: "Saldo",
-      value: formatCurrency(saldo, "PEN"),
+      value: formatCurrency(headerSaldo, "PEN"),
       helper: "Ingresos menos egresos",
+      style: {
+        background: "linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%)",
+        border: "1px solid #BFDBFE",
+      },
+      labelStyle: { color: "#1D4ED8" },
+      valueStyle: { color: "#1E3A8A" },
+      helperStyle: { color: "#2563EB" },
+    },
+    {
+      label: "Avance",
+      value: formatPercentage(headerAvanceEgresosPercentage),
+      helper: "Egresos / ingresos",
+      style: avanceKpiStyle,
     },
   ];
 
@@ -891,7 +1178,6 @@ export default function IngresosEgresosPage() {
     void loadRows({
       fechaInicio: draftFechaInicio,
       fechaFin: draftFechaFin,
-      searchText: draftSearchText,
     });
   };
 
@@ -928,7 +1214,7 @@ export default function IngresosEgresosPage() {
       <button style={styles.secondaryButton} type="button" onClick={handleApplyFilters} disabled={loading}>
         {loading ? "Cargando..." : "Aplicar filtros"}
       </button>
-      <button style={styles.primaryButton} type="button" onClick={handleExport} disabled={!sortedRows.length}>
+      <button style={styles.primaryButton} type="button" onClick={handleExport} disabled={!sortedRows.length || isPrincipalRenderPending}>
         Exportar Excel
       </button>
     </div>
@@ -938,53 +1224,13 @@ export default function IngresosEgresosPage() {
     <AppPage
       fillHeight
       style={{
+        paddingTop: 10,
         background:
           "radial-gradient(circle at top left, rgba(37,99,235,0.12), transparent 32%), radial-gradient(circle at top right, rgba(20,184,166,0.12), transparent 28%), linear-gradient(180deg, #F8FAFC 0%, #EEF2FF 100%)",
       }}
     >
-      <AppCard
-        style={{
-          borderRadius: 18,
-          background: "linear-gradient(135deg, #0F172A 0%, #1E293B 55%, #0F766E 100%)",
-          color: "#FFFFFF",
-          marginBottom: 18,
-          overflow: "hidden",
-          position: "relative",
-        }}
-      >
-        <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 16, alignItems: "center" }}>
-          <div style={{ maxWidth: 760 }}>
-            <div style={{ opacity: 0.82, fontSize: 12, fontWeight: 800, letterSpacing: 1.1, textTransform: "uppercase" }}>
-              Reporte gerencial
-            </div>
-            <div style={{ fontSize: 28, fontWeight: 900, marginTop: 8 }}>Ingresos y egresos por movimiento</div>
-            <p style={{ margin: "10px 0 0", color: "rgba(255,255,255,0.82)", lineHeight: 1.5 }}>
-              Visualizacion basada en el store <strong>sp_Movimientos_Consulta_GastosIngresos</strong>.
-            </p>
-          </div>
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              minWidth: 0,
-              alignItems: "stretch",
-              flexWrap: "nowrap",
-              overflowX: "auto",
-              paddingBottom: 2,
-            }}
-          >
-            <div style={styles.heroBadge}>Desde {getMonthTitle(appliedFechaInicio)}</div>
-            <div style={styles.heroBadge}>Hasta {getMonthTitle(appliedFechaFin)}</div>
-            <div style={styles.heroBadge}>Tipos: ingresos y egresos</div>
-            <div style={styles.heroBadge}>
-              TC USD {appliedUsdExchangeRate.toFixed(2)} | TC DOP {appliedDopExchangeRate.toFixed(4)}
-            </div>
-          </div>
-        </div>
-      </AppCard>
-
       {loading || loadProgress > 0 ? (
-        <div style={{ ...styles.loadingProgressWrap, marginBottom: 14 }} aria-live="polite" aria-label="Progreso de carga">
+        <div style={{ ...styles.loadingProgressWrap, marginBottom: 4 }} aria-live="polite" aria-label="Progreso de carga">
           <div style={styles.loadingProgressText}>
             Cargando información...
             <span style={styles.loadingProgressPercent}>{loadProgress}%</span>
@@ -995,12 +1241,7 @@ export default function IngresosEgresosPage() {
         </div>
       ) : null}
 
-      <AppCard style={{ borderRadius: 18, marginBottom: 18 }}>
-        <AppSectionHeader
-          title="Filtros"
-          description="Ajusta el rango de fechas y el texto de busqueda antes de volver a consultar el store."
-          actions={actions}
-        />
+      <AppCard style={{ borderRadius: 18, marginBottom: 2 }}>
         <div style={styles.filtersGrid}>
           <label style={styles.field}>
             <span style={styles.fieldLabel}>Fecha inicio</span>
@@ -1009,16 +1250,6 @@ export default function IngresosEgresosPage() {
           <label style={styles.field}>
             <span style={styles.fieldLabel}>Fecha fin</span>
             <input style={styles.input} type="date" value={draftFechaFin} onChange={(event) => setDraftFechaFin(event.target.value)} />
-          </label>
-          <label style={styles.field}>
-            <span style={styles.fieldLabel}>Buscar</span>
-            <input
-              style={styles.input}
-              type="text"
-              value={draftSearchText}
-              placeholder="cliente, proyecto, site, detalle..."
-              onChange={(event) => setDraftSearchText(event.target.value)}
-            />
           </label>
           <label style={styles.field}>
             <span style={styles.fieldLabel}>Tipo USD</span>
@@ -1042,17 +1273,18 @@ export default function IngresosEgresosPage() {
               onChange={(event) => setDraftDopExchangeRate(event.target.value)}
             />
           </label>
+          <div style={styles.filtersActionsCell}>{actions}</div>
         </div>
       </AppCard>
 
-      {error ? <AppStatusMessage tone="error" style={{ marginBottom: 18 }}>{error}</AppStatusMessage> : null}
+      {error ? <AppStatusMessage tone="error" style={{ marginBottom: 4 }}>{error}</AppStatusMessage> : null}
 
       <div style={styles.kpiGrid}>
         {kpiCards.map((card) => (
-          <AppCard key={card.label} style={styles.kpiCard}>
-            <div style={styles.kpiLabel}>{card.label}</div>
-            <div style={styles.kpiValue}>{card.value}</div>
-            <div style={styles.kpiHelper}>{card.helper}</div>
+          <AppCard key={card.label} style={{ ...styles.kpiCard, ...(card.style ?? {}) }}>
+            <div style={{ ...styles.kpiLabel, ...(card.labelStyle ?? {}) }}>{card.label}</div>
+            <div style={{ ...styles.kpiValue, ...(card.valueStyle ?? {}) }}>{card.value}</div>
+            <div style={{ ...styles.kpiHelper, ...(card.helperStyle ?? {}) }}>{card.helper}</div>
           </AppCard>
         ))}
       </div>
@@ -1061,31 +1293,44 @@ export default function IngresosEgresosPage() {
         <button
           type="button"
           style={{ ...styles.tabButton, ...(activeTab === "principal" ? styles.tabButtonActive : {}) }}
-          onClick={() => setActiveTab("principal")}
+          onClick={() => handleTabChange("principal")}
         >
           Principal
         </button>
         <button
           type="button"
           style={{ ...styles.tabButton, ...(activeTab === "ingresos" ? styles.tabButtonActive : {}) }}
-          onClick={() => setActiveTab("ingresos")}
+          onClick={() => handleTabChange("ingresos")}
         >
           Ingresos
         </button>
         <button
           type="button"
           style={{ ...styles.tabButton, ...(activeTab === "egresos" ? styles.tabButtonActive : {}) }}
-          onClick={() => setActiveTab("egresos")}
+          onClick={() => handleTabChange("egresos")}
         >
           Egresos
         </button>
       </div>
 
-      {activeTab === "principal" ? (
-        <>
+      {activeTab === "ingresos" && backlogStoreRows === null ? (
+        <AppCard style={{ borderRadius: 18, marginTop: 2, minHeight: 260, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={styles.loadingBox}>
+            <div style={styles.loadingProgressText}>Cargando información...</div>
+          </div>
+        </AppCard>
+      ) : activeTab === "principal" ? (
+        isPrincipalRenderPending ? (
+          <AppCard style={{ borderRadius: 18, marginTop: 2, minHeight: 320, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={styles.loadingBox}>
+              <div style={styles.loadingProgressText}>Preparando visualizaciones del panel principal...</div>
+            </div>
+          </AppCard>
+        ) : (
+          <>
       <div style={styles.chartGrid}>
         <AppCard style={styles.chartCard}>
-          <AppSectionHeader title="Distribucion por tipo" description="Composicion de ingresos y egresos en el rango filtrado." />
+          <AppSectionHeader title="Distribucion por tipo" />
           <div style={styles.chartControls}>
             <label style={styles.igvToggleOption}>
               <input
@@ -1110,7 +1355,7 @@ export default function IngresosEgresosPage() {
               <span>Con Igv</span>
             </label>
           </div>
-          <div style={{ height: 280 }}>
+          <div style={{ height: 240 }}>
             <div style={styles.chartWrap}>
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -1153,8 +1398,8 @@ export default function IngresosEgresosPage() {
         </AppCard>
 
         <AppCard style={styles.chartCard}>
-          <AppSectionHeader title="Distribucion por moneda" description="Resumen por moneda detectada en los ingresos filtrados." />
-          <div style={{ height: 280 }}>
+          <AppSectionHeader title="Distribucion por moneda - Ingresos" />
+          <div style={{ height: 240 }}>
             <div style={styles.chartWrap}>
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -1202,8 +1447,8 @@ export default function IngresosEgresosPage() {
         </AppCard>
 
         <AppCard style={styles.chartCard}>
-          <AppSectionHeader title="Distribucion por moneda" description="Resumen por moneda detectada en los egresos filtrados." />
-          <div style={{ height: 280 }}>
+          <AppSectionHeader title="Distribucion por moneda - Egresos" />
+          <div style={{ height: 240 }}>
             <div style={styles.chartWrap}>
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -1249,32 +1494,31 @@ export default function IngresosEgresosPage() {
         </AppCard>
       </div>
 
-      <AppCard style={{ borderRadius: 18, marginTop: 2, flex: 1, minHeight: 0 }}>
-        <AppSectionHeader
-          title={`Detalle de movimientos (${sortedRows.length})`}
-          description={`Consulta ejecutada entre ${appliedFechaInicio} y ${appliedFechaFin} sobre sp_Movimientos_Consulta_GastosIngresos.`}
-          actions={
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button
-                style={styles.secondaryButton}
-                type="button"
-                onClick={() => setIsDetailControllerCollapsed((current) => !current)}
-              >
-                {isDetailControllerCollapsed ? "Expandir controlador" : "Comprimir controlador"}
-              </button>
-              {!isDetailControllerCollapsed ? (
-                <>
-                  <button style={styles.secondaryButton} type="button" onClick={handleApplyFilters} disabled={loading}>
-                    Recargar
-                  </button>
-                  <button style={styles.primaryButton} type="button" onClick={handleExport} disabled={!sortedRows.length}>
-                    Exportar
-                  </button>
-                </>
-              ) : null}
-            </div>
-          }
-        />
+      <AppCard style={{ borderRadius: 18, marginTop: 0, flex: 1, minHeight: 0, padding: 12 }}>
+        <div style={styles.detailHeaderCompact}>
+          <h2 style={styles.detailHeaderTitle}>{`Detalle de movimientos (${sortedRows.length})`}</h2>
+          <div style={styles.detailHeaderActions}>
+            <button
+              style={styles.secondaryButton}
+              type="button"
+              onClick={() => setIsDetailControllerCollapsed((current) => !current)}
+              aria-label={isDetailControllerCollapsed ? "Expandir controlador" : "Comprimir controlador"}
+              title={isDetailControllerCollapsed ? "Expandir controlador" : "Comprimir controlador"}
+            >
+              {isDetailControllerCollapsed ? <ChevronDown size={16} strokeWidth={2.4} /> : <ChevronUp size={16} strokeWidth={2.4} />}
+            </button>
+            {!isDetailControllerCollapsed ? (
+              <>
+                <button style={styles.secondaryButton} type="button" onClick={handleApplyFilters} disabled={loading}>
+                  Recargar
+                </button>
+                <button style={styles.primaryButton} type="button" onClick={handleExport} disabled={!sortedRows.length || isPrincipalRenderPending}>
+                  Exportar
+                </button>
+              </>
+            ) : null}
+          </div>
+        </div>
 
         {!isDetailControllerCollapsed ? (
           loading ? (
@@ -1318,16 +1562,20 @@ export default function IngresosEgresosPage() {
                     style={styles.secondaryButton}
                     onClick={() => setDetailPage(1)}
                     disabled={detailPage === 1}
+                    aria-label="Primera"
+                    title="Primera"
                   >
-                    Primera
+                    <ChevronsLeft size={16} strokeWidth={2.4} />
                   </button>
                   <button
                     type="button"
                     style={styles.secondaryButton}
                     onClick={() => setDetailPage((current) => Math.max(1, current - 1))}
                     disabled={detailPage === 1}
+                    aria-label="Anterior"
+                    title="Anterior"
                   >
-                    Anterior
+                    <ChevronLeft size={16} strokeWidth={2.4} />
                   </button>
                   <span style={styles.tablePagerPage}>
                     Pagina {detailPage} de {totalDetailPages}
@@ -1337,16 +1585,20 @@ export default function IngresosEgresosPage() {
                     style={styles.secondaryButton}
                     onClick={() => setDetailPage((current) => Math.min(totalDetailPages, current + 1))}
                     disabled={detailPage === totalDetailPages}
+                    aria-label="Siguiente"
+                    title="Siguiente"
                   >
-                    Siguiente
+                    <ChevronRight size={16} strokeWidth={2.4} />
                   </button>
                   <button
                     type="button"
                     style={styles.secondaryButton}
                     onClick={() => setDetailPage(totalDetailPages)}
                     disabled={detailPage === totalDetailPages}
+                    aria-label="Ultima"
+                    title="Ultima"
                   >
-                    Ultima
+                    <ChevronsRight size={16} strokeWidth={2.4} />
                   </button>
                 </div>
               </div>
@@ -1403,76 +1655,34 @@ export default function IngresosEgresosPage() {
           )
         ) : null}
       </AppCard>
-        </>
+          </>
+        )
       ) : activeTab === "ingresos" ? (
-        <AppCard style={{ borderRadius: 18, marginTop: 2 }}>
-          <AppSectionHeader
-            title={`Ingresos (${ingresoRows.length})`}
-            description="Vista resumida de los movimientos clasificados como ingresos."
-          />
-          <div style={styles.chartGrid}>
-            <AppCard style={styles.chartCard}>
-              <AppSectionHeader title="Distribucion por moneda" description="Resumen por moneda de ingresos." />
-              <div style={{ height: 280 }}>
-                <div style={styles.chartWrap}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={breakdownByCurrency}
-                        dataKey="amount"
-                        nameKey="label"
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={64}
-                        outerRadius={110}
-                        paddingAngle={3}
-                      >
-                        {breakdownByCurrency.map((entry, index) => (
-                          <Cell key={entry.rawLabel} fill={INCOME_GREEN_COLORS[index % INCOME_GREEN_COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip formatter={(value, _name, props) => formatAmountByCurrency(Number(value), String(props?.payload?.rawLabel ?? "PEN"))} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div style={styles.chartCenterOverlay}>
-                    <div style={styles.chartCenterValue}>{formatCompactSoles(currencyIncomePenTotal)}</div>
-                    <div style={styles.chartCenterLabel}>Total en PEN</div>
-                  </div>
-                </div>
+        <Suspense
+          fallback={
+            <AppCard style={{ borderRadius: 18, marginTop: 2, minHeight: 260, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <div style={styles.loadingBox}>
+                <div style={styles.loadingProgressText}>Cargando modulo de ingresos...</div>
               </div>
             </AppCard>
-          </div>
-          <div style={styles.tableWrap}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th style={styles.th}>Fecha</th>
-                  <th style={styles.th}>Cliente</th>
-                  <th style={styles.th}>Proyecto</th>
-                  <th style={styles.th}>Site</th>
-                  <th style={styles.th}>Moneda</th>
-                  <th style={styles.th}>Monto</th>
-                  <th style={styles.th}>Detalle</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleIncomeRows.map((row) => (
-                  <tr key={row.id}>
-                    <td style={styles.td}>{row.fechaLabel}</td>
-                    <td style={styles.td}>{row.cliente}</td>
-                    <td style={styles.td}>{row.proyecto}</td>
-                    <td style={styles.td}>{row.site}</td>
-                    <td style={styles.td}>{row.moneda}</td>
-                    <td style={styles.tdStrong}>{formatCurrency(row.monto, row.moneda)}</td>
-                    <td style={styles.td}>{row.detalle}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </AppCard>
-      ) : (
-        <AppCard style={{ borderRadius: 18, marginTop: 2 }}>
+          }
+        >
+          <BacklogPage
+            showHero={false}
+            showFilters={false}
+            showCurrentLevelHeader={false}
+            showAppliedPeriodCard={false}
+            onContractedBacklogTotalChange={setBacklogContractedTotalPen}
+            useExternalData
+            externalStoreRows={backlogStoreRows}
+            appliedFechaInicio={appliedFechaInicio}
+            appliedFechaFin={appliedFechaFin}
+            appliedUsdExchangeRate={appliedUsdExchangeRate}
+            appliedDopExchangeRate={appliedDopExchangeRate}
+          />
+        </Suspense>
+          ) : (
+            <AppCard style={{ borderRadius: 18, marginTop: 2 }}>
           <AppSectionHeader
             title={`${getExpenseLevelTitle(egresoDrillLevel, egresoDrillPath)} (${egresoDrillRows.length})`}
             description={`${getExpenseLevelDescription(egresoDrillLevel)} ${egresoDrillBreadcrumb ? `Ruta activa: ${egresoDrillBreadcrumb}.` : ""}`.trim()}
@@ -1560,7 +1770,7 @@ export default function IngresosEgresosPage() {
                 <AppCard style={styles.chartCard}>
                   <div style={styles.expenseChartLayout}>
                     <div style={styles.expensePieBox}>
-                      <div style={styles.chartWrap}>
+                      <div style={styles.expenseChartWrap}>
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
                             <Pie
@@ -1629,27 +1839,19 @@ export default function IngresosEgresosPage() {
                 </AppCard>
 
                 <AppCard style={styles.chartCard}>
-                  <AppSectionHeader
-                    title="Detalle del nivel"
-                    description={
-                      egresoDrillLevel === "tipoTrabajo"
-                        ? "Haz clic en un tipo de trabajo para filtrar el detalle de registros."
-                        : "Haz clic en una fila para bajar al siguiente nivel."
-                    }
-                  />
                   <div style={styles.detailPanel}>
                     <table style={styles.table}>
                       <thead>
                         <tr>
-                          <th style={styles.th}>Nivel</th>
-                          <th style={styles.th}>Registros</th>
+                          <th style={{ ...styles.th, textAlign: "left" }}>Nivel</th>
+                          <th style={{ ...styles.th, textAlign: "left" }}>Participacion</th>
                           {egresoDrillCurrencyColumns.map((currency) => (
-                            <th key={currency} style={styles.th}>
+                            <th key={currency} style={{ ...styles.th, textAlign: "left" }}>
                               Monto {currency}
                             </th>
                           ))}
-                          <th style={styles.th}>Monto en PEN</th>
-                          <th style={styles.th}>Participacion</th>
+                          <th style={{ ...styles.th, textAlign: "left" }}>Monto en PEN</th>
+                          <th style={{ ...styles.th, textAlign: "left" }}>Registros</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1680,13 +1882,13 @@ export default function IngresosEgresosPage() {
                                     setSelectedExpenseDetailLabel(item.label);
                                     setEgresoDrillPath(nextPath);
                                   }}
-                                >
+                              >
                                   {item.label}
                                 </button>
                                 {isCurrentType ? <span style={styles.activeLevelTag}>Activo</span> : null}
                                 {isSelectedDetailLabel ? <span style={styles.activeLevelTag}>Seleccionado</span> : null}
                               </td>
-                              <td style={styles.td}>{item.count}</td>
+                              <td style={styles.td}>{egresoDrillPenTotal > 0 ? `${((item.amount / egresoDrillPenTotal) * 100).toFixed(1)}%` : "0.0%"}</td>
                               {egresoDrillCurrencyColumns.map((currency) => (
                                 <td key={`${item.rawLabel}-${currency}`} style={styles.tdStrong}>
                                   {egresoDrillCurrencyAmountsByLabel.get(item.rawLabel)?.get(currency)
@@ -1698,7 +1900,7 @@ export default function IngresosEgresosPage() {
                                 </td>
                               ))}
                               <td style={styles.tdStrong}>{formatCurrency(item.amount, "PEN")}</td>
-                              <td style={styles.td}>{egresoDrillPenTotal > 0 ? `${((item.amount / egresoDrillPenTotal) * 100).toFixed(1)}%` : "0.0%"}</td>
+                              <td style={styles.td}>{item.count}</td>
                             </tr>
                           );
                         })}
@@ -1710,16 +1912,17 @@ export default function IngresosEgresosPage() {
 
               <div style={styles.tableWrap}>
                 <AppSectionHeader
-                  title={`Detalle de gastos (${expenseDetailFilteredRows.length})`}
-                  description={`Registros filtrados por ${egresoDrillBreadcrumb || "todos los egresos"}.`}
+                  title="Detalle de gastos"
                   actions={
                     <div style={styles.expenseDetailHeaderActions}>
                       <button
                         type="button"
                         style={styles.detailCollapseButton}
                         onClick={() => setIsExpenseDetailCollapsed((current) => !current)}
+                        aria-label={isExpenseDetailCollapsed ? "Expandir detalle de gastos" : "Comprimir detalle de gastos"}
+                        title={isExpenseDetailCollapsed ? "Expandir detalle de gastos" : "Comprimir detalle de gastos"}
                       >
-                        {isExpenseDetailCollapsed ? "Expandir" : "Comprimir"}
+                        {isExpenseDetailCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
                       </button>
                       <div style={styles.detailRecordsPill}>Registros existentes: {expenseDetailFilteredRows.length}</div>
                       <button type="button" style={styles.detailExportButton} onClick={handleExport} disabled={!sortedRows.length}>
@@ -1768,16 +1971,20 @@ export default function IngresosEgresosPage() {
                       style={styles.secondaryButton}
                       onClick={() => setExpenseDetailPage(1)}
                       disabled={expenseDetailPage === 1}
+                      aria-label="Primera"
+                      title="Primera"
                     >
-                      Primera
+                      <ChevronsLeft size={16} strokeWidth={2.4} />
                     </button>
                     <button
                       type="button"
                       style={styles.secondaryButton}
                       onClick={() => setExpenseDetailPage((current) => Math.max(1, current - 1))}
                       disabled={expenseDetailPage === 1}
+                      aria-label="Anterior"
+                      title="Anterior"
                     >
-                      Anterior
+                      <ChevronLeft size={16} strokeWidth={2.4} />
                     </button>
                     <span style={styles.tablePagerPage}>
                       Pagina {expenseDetailPage} de {totalExpenseDetailPages}
@@ -1787,16 +1994,20 @@ export default function IngresosEgresosPage() {
                       style={styles.secondaryButton}
                       onClick={() => setExpenseDetailPage((current) => Math.min(totalExpenseDetailPages, current + 1))}
                       disabled={expenseDetailPage === totalExpenseDetailPages}
+                      aria-label="Siguiente"
+                      title="Siguiente"
                     >
-                      Siguiente
+                      <ChevronRight size={16} strokeWidth={2.4} />
                     </button>
                     <button
                       type="button"
                       style={styles.secondaryButton}
                       onClick={() => setExpenseDetailPage(totalExpenseDetailPages)}
                       disabled={expenseDetailPage === totalExpenseDetailPages}
+                      aria-label="Ultima"
+                      title="Ultima"
                     >
-                      Ultima
+                      <ChevronsRight size={16} strokeWidth={2.4} />
                     </button>
                   </div>
                 </div>
@@ -1804,29 +2015,67 @@ export default function IngresosEgresosPage() {
                   <table style={styles.table}>
                     <thead>
                       <tr>
-                        <th style={styles.th}>Fecha</th>
-                        <th style={styles.th}>Cliente</th>
-                        <th style={styles.th}>Proyecto</th>
-                        <th style={styles.th}>Site</th>
-                        <th style={styles.th}>Tipo trabajo</th>
-                        <th style={styles.th}>Moneda</th>
-                        <th style={styles.th}>Monto</th>
-                        <th style={styles.th}>Total pagar</th>
-                        <th style={styles.th}>Nro. operación</th>
-                        <th style={styles.th}>Detalle</th>
+                        {[
+                          ["id", "ID"],
+                          ["fecha", "Fecha"],
+                          ["cliente", "Cliente"],
+                          ["proyecto", "Proyecto"],
+                          ["site", "Site"],
+                          ["tipoTrabajo", "Tipo trabajo"],
+                          ["moneda", "Moneda"],
+                          ["subtotal", "Subtotal"],
+                          ["subtotalPen", "Subtotal en PEN"],
+                          ["nroOperacion", "Nro. operacion"],
+                          ["detalle", "Detalle"],
+                        ].map(([column, label]) => {
+                          const isActive = expenseDetailSortColumn === column;
+                          const icon = isActive ? (expenseDetailSortDirection === "asc" ? "▲" : "▼") : null;
+
+                          return (
+                            <th key={column} style={styles.th}>
+                              <button
+                                type="button"
+                                style={styles.thButton}
+                                onClick={() => {
+                                  setExpenseDetailPage(1);
+                                  setExpenseDetailSortColumn((current) => {
+                                    if (current === column) {
+                                      setExpenseDetailSortDirection((direction) => (direction === "asc" ? "desc" : "asc"));
+                                      return current;
+                                    }
+
+                                    setExpenseDetailSortDirection("asc");
+                                    return column as ExpenseDetailSortColumn;
+                                  });
+                                }}
+                                aria-label={`Ordenar por ${label}`}
+                                title={`Ordenar por ${label}`}
+                              >
+                                {label}
+                                {icon ? <span aria-hidden="true" style={{ marginLeft: 6 }}>{icon}</span> : null}
+                              </button>
+                            </th>
+                          );
+                        })}
                       </tr>
                     </thead>
                     <tbody>
                       {visibleExpenseDetailRows.map((row) => (
                         <tr key={row.id}>
+                          <td style={styles.tdStrong}>{row.id}</td>
                           <td style={styles.td}>{row.fechaLabel}</td>
                           <td style={styles.td}>{row.cliente}</td>
                           <td style={styles.td}>{row.proyecto}</td>
                           <td style={styles.td}>{row.site}</td>
                           <td style={styles.td}>{row.tipoTrabajo}</td>
                           <td style={styles.td}>{row.moneda}</td>
-                          <td style={styles.tdStrong}>{formatCurrency(row.monto, row.moneda)}</td>
-                          <td style={styles.tdStrong}>{formatCurrency(row.totalPagar || row.monto, row.moneda)}</td>
+                          <td style={styles.tdStrong}>{formatCurrency(row.egresos || row.monto, row.moneda)}</td>
+                          <td style={styles.tdStrong}>
+                            {formatCurrency(
+                              convertAmountToPen(row.egresos || row.monto, row.moneda, appliedUsdExchangeRate, appliedDopExchangeRate),
+                              "PEN",
+                            )}
+                          </td>
                           <td style={styles.td}>{row.nroOperacion}</td>
                           <td style={styles.td}>{row.detalle}</td>
                         </tr>
@@ -1847,83 +2096,81 @@ export default function IngresosEgresosPage() {
 
 const styles: Record<string, React.CSSProperties> = {
   filtersGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-    gap: 14,
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "end",
+    gap: 6,
   },
   field: {
     display: "grid",
-    gap: 8,
+    gap: 3,
+    flex: "1 1 170px",
+    minWidth: 170,
   },
   fieldLabel: {
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: 800,
     color: "#475569",
   },
   input: {
-    minHeight: 40,
-    borderRadius: 10,
+    minHeight: 34,
+    borderRadius: 9,
     border: "1px solid #CBD5E1",
     background: "#FFFFFF",
-    padding: "0 12px",
+    padding: "0 10px",
     color: "#0F172A",
     outline: "none",
   },
   primaryButton: {
-    minHeight: 40,
-    borderRadius: 10,
+    minHeight: 34,
+    borderRadius: 9,
     border: "1px solid #1D4ED8",
     background: "linear-gradient(135deg, #1D4ED8, #0F172A)",
     color: "#FFFFFF",
-    padding: "0 14px",
+    padding: "0 12px",
     fontWeight: 800,
     cursor: "pointer",
   },
   secondaryButton: {
-    minHeight: 40,
-    borderRadius: 10,
+    minHeight: 34,
+    borderRadius: 9,
     border: "1px solid #CBD5E1",
     background: "#FFFFFF",
     color: "#0F172A",
-    padding: "0 14px",
+    padding: "0 12px",
     fontWeight: 800,
     cursor: "pointer",
   },
-  heroBadge: {
-    borderRadius: 999,
-    padding: "10px 14px",
-    background: "rgba(255,255,255,0.12)",
-    color: "#FFFFFF",
-    border: "1px solid rgba(255,255,255,0.18)",
-    fontSize: 13,
-    fontWeight: 700,
-    textAlign: "center",
-    backdropFilter: "blur(8px)",
-    whiteSpace: "nowrap",
+  filtersActionsCell: {
+    display: "flex",
+    justifyContent: "flex-end",
+    alignItems: "end",
     flex: "0 0 auto",
+    marginLeft: "auto",
+    gap: 6,
   },
   kpiGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-    gap: 14,
-    marginBottom: 18,
+    gap: 8,
+    marginBottom: 4,
   },
   tabsBar: {
     display: "flex",
-    gap: 10,
-    padding: 10,
+    gap: 6,
+    padding: 7,
     borderRadius: 16,
     background: "#E2E8F0",
-    marginBottom: 18,
+    marginBottom: 4,
     flexWrap: "wrap",
   },
   tabButton: {
-    minHeight: 40,
-    borderRadius: 12,
+    minHeight: 36,
+    borderRadius: 11,
     border: "1px solid #D6DCE7",
     background: "rgba(255,255,255,0.65)",
     color: "#334155",
-    padding: "0 16px",
+    padding: "0 13px",
     fontWeight: 800,
     cursor: "pointer",
   },
@@ -1938,43 +2185,76 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 0,
     border: "1px solid #E2E8F0",
     boxShadow: "0 12px 28px rgba(15,23,42,0.06)",
+    padding: "12px 14px",
   },
   kpiLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: 800,
     color: "#64748B",
     textTransform: "uppercase",
     letterSpacing: 0.6,
   },
   kpiValue: {
-    marginTop: 8,
-    fontSize: 26,
+    marginTop: 4,
+    fontSize: 23,
     fontWeight: 900,
     color: "#0F172A",
   },
   kpiHelper: {
-    marginTop: 8,
+    marginTop: 4,
     color: "#64748B",
-    fontSize: 13,
+    fontSize: 12,
+  },
+  detailHeaderCompact: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    marginBottom: 6,
+    flexWrap: "nowrap",
+  },
+  detailHeaderTitle: {
+    margin: 0,
+    fontSize: 17,
+    fontWeight: 800,
+    color: "#0F172A",
+    lineHeight: 1.05,
+    flex: "1 1 auto",
+    minWidth: 0,
+  },
+  detailHeaderActions: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 6,
+    flexWrap: "nowrap",
+    flexShrink: 0,
+    whiteSpace: "nowrap",
   },
   chartGrid: {
     display: "grid",
-    gridTemplateColumns: "minmax(220px, 0.75fr) minmax(320px, 1fr) minmax(320px, 1fr)",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
     gap: 14,
-    marginBottom: 18,
+    marginBottom: 6,
+    alignItems: "stretch",
   },
   drilldownGrid: {
     display: "grid",
     gridTemplateColumns: "minmax(240px, 0.72fr) minmax(420px, 1.28fr)",
-    gap: 14,
-    marginBottom: 18,
+    gap: 12,
+    marginBottom: 8,
+    alignItems: "start",
   },
   chartCard: {
+    display: "flex",
+    flexDirection: "column",
     borderRadius: 18,
     marginBottom: 0,
     border: "1px solid #E2E8F0",
     boxShadow: "0 12px 28px rgba(15,23,42,0.06)",
     minWidth: 0,
+    alignSelf: "stretch",
+    height: "100%",
   },
   chartControls: {
     display: "flex",
@@ -2007,9 +2287,9 @@ const styles: Record<string, React.CSSProperties> = {
   },
   chartWrap: {
     width: "100%",
-    height: 240,
+    height: 220,
     minWidth: 0,
-    minHeight: 240,
+    minHeight: 220,
     position: "relative",
   },
   expenseBreadcrumbHeaderRow: {
@@ -2069,46 +2349,63 @@ const styles: Record<string, React.CSSProperties> = {
   },
   expenseChartLayout: {
     display: "grid",
-    gridTemplateColumns: "minmax(200px, 0.62fr) minmax(240px, 0.38fr)",
-    gap: 20,
+    gridTemplateColumns: "minmax(220px, 0.34fr) minmax(0, 0.66fr)",
+    gap: 18,
     alignItems: "start",
-    overflowX: "auto",
+    height: 300,
+    overflowY: "auto",
+    overflowX: "hidden",
+    paddingRight: 4,
+    paddingBottom: 4,
+  },
+  expenseChartWrap: {
+    width: "100%",
+    height: 220,
+    minWidth: 0,
+    minHeight: 220,
+    position: "relative",
   },
   expensePieBox: {
     minWidth: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
   },
   expenseLegendPanel: {
     display: "grid",
-    gap: 6,
+    gridTemplateColumns: "minmax(0, 1fr)",
+    gap: 4,
     alignContent: "start",
     minWidth: 0,
-    maxHeight: 288,
-    overflowY: "auto",
-    overflowX: "hidden",
-    paddingLeft: 8,
+    width: "100%",
+    maxHeight: "none",
+    overflow: "visible",
+    paddingLeft: 14,
     paddingRight: 2,
   },
   expenseLegendItem: {
-    display: "flex",
+    display: "grid",
+    gridTemplateColumns: "9px minmax(180px, 1fr) 72px",
     alignItems: "center",
-    gap: 10,
+    columnGap: 16,
     border: "1px solid #E2E8F0",
-    borderRadius: 12,
+    borderRadius: 10,
     background: "#FFFFFF",
-    padding: "8px 10px",
+    padding: "5px 9px",
     cursor: "pointer",
     textAlign: "left",
     width: "100%",
     minWidth: 0,
   },
   expenseLegendItemSelected: {
-    display: "flex",
+    display: "grid",
+    gridTemplateColumns: "9px minmax(180px, 1fr) 72px",
     alignItems: "center",
-    gap: 10,
+    columnGap: 16,
     border: "1px solid #1D4ED8",
-    borderRadius: 12,
+    borderRadius: 10,
     background: "#EFF6FF",
-    padding: "8px 10px",
+    padding: "5px 9px",
     cursor: "pointer",
     textAlign: "left",
     width: "100%",
@@ -2116,24 +2413,25 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: "0 0 0 1px rgba(29,78,216,0.08)",
   },
   expenseLegendSwatch: {
-    width: 12,
-    height: 12,
+    width: 9,
+    height: 9,
     borderRadius: 999,
     flexShrink: 0,
   },
   expenseLegendText: {
-    flex: 1,
+    minWidth: 0,
     fontSize: 13,
     fontWeight: 700,
     color: "#0F172A",
     lineHeight: 1.2,
-    minWidth: 0,
     overflowWrap: "anywhere",
+    wordBreak: "break-word",
+    paddingRight: 4,
   },
   expenseLegendPercent: {
-    marginLeft: "auto",
-    flexShrink: 0,
-    fontSize: 11,
+    justifySelf: "end",
+    minWidth: 72,
+    fontSize: 12,
     fontWeight: 700,
     color: "#475569",
     whiteSpace: "nowrap",
@@ -2168,15 +2466,17 @@ const styles: Record<string, React.CSSProperties> = {
     flexWrap: "wrap",
   },
   detailCollapseButton: {
+    width: 36,
     minHeight: 36,
     borderRadius: 10,
     border: "1px solid #CBD5E1",
     background: "#FFFFFF",
     color: "#0F172A",
-    padding: "0 14px",
-    fontSize: 13,
-    fontWeight: 800,
+    padding: 0,
     cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
   },
   detailRecordsPill: {
     minHeight: 36,
@@ -2481,24 +2781,25 @@ const styles: Record<string, React.CSSProperties> = {
     top: 0,
     background: "#F8FAFC",
     borderBottom: "1px solid #E2E8F0",
-    textAlign: "left",
+    textAlign: "center",
     padding: 0,
+    fontSize: 11,
     zIndex: 30,
     backgroundClip: "padding-box",
     boxShadow: "0 2px 0 #E2E8F0",
   },
   thButton: {
     width: "100%",
-    padding: "10px 8px",
+    padding: "6px 8px",
     background: "transparent",
     border: "none",
     color: "#475569",
-    fontSize: 10,
-    fontWeight: 800,
+    fontSize: 11,
+    fontWeight: 700,
     textTransform: "uppercase",
-    letterSpacing: 0.6,
+    letterSpacing: 0.4,
     cursor: "pointer",
-    textAlign: "left",
+    textAlign: "center",
   },
   td: {
     padding: "10px 10px",

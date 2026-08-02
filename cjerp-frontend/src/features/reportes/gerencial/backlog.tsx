@@ -283,6 +283,24 @@ function convertToPen(value: number, currency: string, usdExchangeRate: number, 
   return value;
 }
 
+export function calculateBacklogContractedTotalPen(
+  rows: Array<{ montoBck: number; moneda: string }>,
+  usdExchangeRate: number,
+  dopExchangeRate: number,
+) {
+  const totalsByCurrency = new Map<string, number>();
+
+  for (const row of rows) {
+    const currency = normalizeCurrencyForPenConversion(row.moneda || "PEN");
+    totalsByCurrency.set(currency, (totalsByCurrency.get(currency) ?? 0) + row.montoBck);
+  }
+
+  return Array.from(totalsByCurrency.entries()).reduce(
+    (accumulator, [currency, total]) => accumulator + convertToPen(total, currency, usdExchangeRate, dopExchangeRate),
+    0,
+  );
+}
+
 function normalizeCurrencyForPenConversion(currency: string) {
   const normalized = currency.trim().toUpperCase();
 
@@ -453,9 +471,9 @@ function buildDashboard3ExcelRows(rows: ImportarConsultaDshRow[]) {
   }));
 }
 
-function buildImportarConsultaDshRow(row: RawRow): ImportarConsultaDshRow {
+export function buildImportarConsultaDshRow(row: RawRow): ImportarConsultaDshRow {
   const currency = resolveCurrencyCode(row);
-  const montoBck = pickNumber(row, ["MontoBck", "montoBck", "Monto_BCK", "monto_bck", "MontoOc", "montoOc"]);
+  const montoBck = pickNumber(row, ["monto_bck"]);
 
   return {
     idCliente: pickString(row, ["IdCliente", "idCliente"]),
@@ -585,9 +603,37 @@ function compareSortValues(left: string | number, right: string | number, direct
   return String(left).localeCompare(String(right), "es", { sensitivity: "base" }) * factor;
 }
 
-export default function BacklogPage() {
-  const [rawRows, setRawRows] = useState<RawRow[]>([]);
-  const [loading, setLoading] = useState(true);
+type BacklogPageProps = {
+  showHero?: boolean;
+  showFilters?: boolean;
+  showCurrentLevelHeader?: boolean;
+  showAppliedPeriodCard?: boolean;
+  onContractedBacklogTotalChange?: (value: number) => void;
+  useExternalData?: boolean;
+  externalStoreRows?: ImportarConsultaDshRow[] | null;
+  appliedFechaInicio?: string;
+  appliedFechaFin?: string;
+  appliedSearchText?: string;
+  appliedUsdExchangeRate?: number;
+  appliedDopExchangeRate?: number;
+};
+
+export default function BacklogPage({
+  showHero = true,
+  showFilters = true,
+  showCurrentLevelHeader = true,
+  showAppliedPeriodCard = true,
+  onContractedBacklogTotalChange,
+  useExternalData = false,
+  externalStoreRows,
+  appliedFechaInicio: externalAppliedFechaInicio,
+  appliedFechaFin: externalAppliedFechaFin,
+  appliedSearchText: externalAppliedSearchText,
+  appliedUsdExchangeRate: externalAppliedUsdExchangeRate,
+  appliedDopExchangeRate: externalAppliedDopExchangeRate,
+}: BacklogPageProps) {
+  const [storeRows, setStoreRows] = useState<ImportarConsultaDshRow[]>(externalStoreRows ?? []);
+  const [loading, setLoading] = useState(useExternalData ? externalStoreRows == null : true);
   const [error, setError] = useState("");
   const [draftAnoInicio, setDraftAnoInicio] = useState(getYearInputValue());
   const [draftAnoFin, setDraftAnoFin] = useState(getYearInputValue());
@@ -606,6 +652,11 @@ export default function BacklogPage() {
   const [detailSortDirection, setDetailSortDirection] = useState<SortDirection>("desc");
   const [selectedSummaryKpi, setSelectedSummaryKpi] = useState<string | null>(null);
   const isMountedRef = useRef(true);
+  const effectiveFechaInicio = externalAppliedFechaInicio ?? appliedAnoInicio;
+  const effectiveFechaFin = externalAppliedFechaFin ?? appliedAnoFin;
+  const effectiveSearchText = externalAppliedSearchText ?? appliedSearchText;
+  const effectiveUsdExchangeRate = externalAppliedUsdExchangeRate ?? appliedUsdExchangeRate;
+  const effectiveDopExchangeRate = externalAppliedDopExchangeRate ?? appliedDopExchangeRate;
 
   const loadRows = async () => {
     setLoading(true);
@@ -624,7 +675,7 @@ export default function BacklogPage() {
 
       const detailRows = Array.isArray(response.rows) ? response.rows : [];
       if (response.limitExceeded) {
-        setRawRows([]);
+        setStoreRows([]);
         setError(response.message?.trim() || "La consulta excedio el maximo permitido para el dashboard.");
         return;
       }
@@ -633,10 +684,10 @@ export default function BacklogPage() {
       setAppliedAnoFin(draftAnoFin);
       setAppliedSearchText(draftSearchText);
       setPath({ cliente: null, proyecto: null, site: null });
-      setRawRows(detailRows);
+      setStoreRows(detailRows.map((row) => buildImportarConsultaDshRow(row)));
     } catch (err) {
       if (!isMountedRef.current) return;
-      setRawRows([]);
+      setStoreRows([]);
       setError(getHttpErrorMessage(err, "No se pudo cargar el dashboard 3."));
     } finally {
       if (isMountedRef.current) {
@@ -647,18 +698,29 @@ export default function BacklogPage() {
 
   useEffect(() => {
     isMountedRef.current = true;
+
+    if (useExternalData) {
+      if (externalStoreRows != null) {
+        setStoreRows(externalStoreRows);
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
+      return () => {
+        isMountedRef.current = false;
+      };
+    }
+
     void loadRows();
 
     return () => {
       isMountedRef.current = false;
     };
-  }, []);
-
-  const storeRows = useMemo(() => rawRows.map((row) => buildImportarConsultaDshRow(row)), [rawRows]);
+  }, [externalStoreRows, useExternalData]);
   const filteredStoreRows = useMemo(() => {
-    const yearStart = parseYearInputValue(appliedAnoInicio);
-    const yearEnd = parseYearInputValue(appliedAnoFin);
-    const searchText = normalizeText(appliedSearchText);
+    const yearStart = parseYearInputValue(effectiveFechaInicio);
+    const yearEnd = parseYearInputValue(effectiveFechaFin);
+    const searchText = normalizeText(effectiveSearchText);
 
     return storeRows.filter((row) => {
       const rowYear = parseYearInputValue(row.anoGestion);
@@ -706,7 +768,7 @@ export default function BacklogPage() {
 
       return true;
     });
-  }, [appliedAnoFin, appliedAnoInicio, appliedSearchText, storeRows]);
+  }, [effectiveFechaFin, effectiveFechaInicio, effectiveSearchText, storeRows]);
   const currentLevel = getCurrentLevel(path);
 
   const navigableRows = useMemo(() => {
@@ -744,13 +806,13 @@ export default function BacklogPage() {
               : row.tipoTrabajo || "Sin tipo";
       const normalizedKey = normalizeText(levelKey);
       const currency = normalizeCurrencyForPenConversion(row.moneda || "PEN");
-      const amountPen = convertToPen(row.montoBck, currency, appliedUsdExchangeRate, appliedDopExchangeRate);
+      const amountPen = convertToPen(row.montoBck, currency, effectiveUsdExchangeRate, effectiveDopExchangeRate);
 
       map.set(normalizedKey, (map.get(normalizedKey) ?? 0) + amountPen);
     }
 
     return map;
-  }, [appliedDopExchangeRate, appliedUsdExchangeRate, currentLevel, navigableRows]);
+  }, [currentLevel, effectiveDopExchangeRate, effectiveUsdExchangeRate, navigableRows]);
 
   const chartDataWithTrabajoTerminado = useMemo(
     () =>
@@ -802,9 +864,13 @@ export default function BacklogPage() {
 
   const chartTotalConvertedToPen = useMemo(() => {
     return chartTotalsByCurrency.reduce((accumulator, item) => {
-      return accumulator + convertToPen(item.total, item.currency, appliedUsdExchangeRate, appliedDopExchangeRate);
-    }, 0);
-  }, [appliedDopExchangeRate, appliedUsdExchangeRate, chartTotalsByCurrency]);
+        return accumulator + convertToPen(item.total, item.currency, effectiveUsdExchangeRate, effectiveDopExchangeRate);
+      }, 0);
+  }, [chartTotalsByCurrency, effectiveDopExchangeRate, effectiveUsdExchangeRate]);
+
+  const kpiTotalConvertedToPen = useMemo(() => {
+    return calculateBacklogContractedTotalPen(navigableRows, appliedUsdExchangeRate, appliedDopExchangeRate);
+  }, [appliedDopExchangeRate, appliedUsdExchangeRate, navigableRows]);
 
   const kpiTotalsByCurrency = useMemo(() => {
     const map = new Map<string, number>();
@@ -816,12 +882,6 @@ export default function BacklogPage() {
 
     return Array.from(map.entries()).map(([currency, total]) => ({ currency, total }));
   }, [navigableRows]);
-
-  const kpiTotalConvertedToPen = useMemo(() => {
-    return kpiTotalsByCurrency.reduce((accumulator, item) => {
-      return accumulator + convertToPen(item.total, item.currency, appliedUsdExchangeRate, appliedDopExchangeRate);
-    }, 0);
-  }, [appliedDopExchangeRate, appliedUsdExchangeRate, kpiTotalsByCurrency]);
 
   const workFinishedConvertedToPen = useMemo(() => {
     return Array.from(workFinishedByLevel.values()).reduce((accumulator, amount) => accumulator + amount, 0);
@@ -842,9 +902,9 @@ export default function BacklogPage() {
       }
 
       const currency = normalizeCurrencyForPenConversion(row.moneda || "PEN");
-      return accumulator + convertToPen(row.montoBck, currency, appliedUsdExchangeRate, appliedDopExchangeRate);
+      return accumulator + convertToPen(row.montoBck, currency, effectiveUsdExchangeRate, effectiveDopExchangeRate);
     }, 0);
-  }, [appliedDopExchangeRate, appliedUsdExchangeRate, navigableRows]);
+  }, [effectiveDopExchangeRate, effectiveUsdExchangeRate, navigableRows]);
 
   const pendingFacturarConvertedToPen = useMemo(() => {
     return Math.max(0, workFinishedConvertedToPen - facturadoConvertedToPen);
@@ -866,6 +926,10 @@ export default function BacklogPage() {
       return left.currency.localeCompare(right.currency, "es", { sensitivity: "base" });
     });
   }, [kpiTotalsByCurrency]);
+
+  useEffect(() => {
+    onContractedBacklogTotalChange?.(kpiTotalConvertedToPen);
+  }, [kpiTotalConvertedToPen, onContractedBacklogTotalChange]);
 
   const summaryCards = useMemo(
     () => [
@@ -948,9 +1012,9 @@ export default function BacklogPage() {
   const appliedPeriodCard = useMemo(
     () => ({
       label: "Año aplicado",
-      value: `${appliedAnoInicio} al ${appliedAnoFin}`,
+      value: `${effectiveFechaInicio} al ${effectiveFechaFin}`,
     }),
-    [appliedAnoFin, appliedAnoInicio],
+    [effectiveFechaFin, effectiveFechaInicio],
   );
 
   const handleApplyFilters = async () => {
@@ -1083,21 +1147,24 @@ export default function BacklogPage() {
     <AppPage title="" style={{ padding: 12 }} fillHeight>
       <div style={styles.page}>
         <div style={styles.mainContent}>
-          <div style={styles.heroCard}>
-            <div style={styles.heroIcon}>
-              <div style={styles.heroIconBars}>
-                <span style={{ width: 8, height: 14, borderRadius: 4, background: "#2563EB" }} />
-                <span style={{ width: 8, height: 20, borderRadius: 4, background: "#14B8A6" }} />
-                <span style={{ width: 8, height: 10, borderRadius: 4, background: "#F59E0B" }} />
+          {showHero ? (
+            <div style={styles.heroCard}>
+              <div style={styles.heroIcon}>
+                <div style={styles.heroIconBars}>
+                  <span style={{ width: 8, height: 14, borderRadius: 4, background: "#2563EB" }} />
+                  <span style={{ width: 8, height: 20, borderRadius: 4, background: "#14B8A6" }} />
+                  <span style={{ width: 8, height: 10, borderRadius: 4, background: "#F59E0B" }} />
+                </div>
+              </div>
+              <div>
+                <div style={styles.heroTitle}>Reporte de Backlog</div>
+                <div style={styles.heroSubtitle}>Backlog gerencial sobre sp_Importar_ConsultaDsh</div>
               </div>
             </div>
-            <div>
-              <div style={styles.heroTitle}>Reporte de Backlog</div>
-              <div style={styles.heroSubtitle}>Backlog gerencial sobre sp_Importar_ConsultaDsh</div>
-            </div>
-          </div>
-      <AppCard style={styles.compactCard}>
-        <div style={styles.filterGrid}>
+          ) : null}
+      {showFilters ? (
+        <AppCard style={styles.compactCard}>
+          <div style={styles.filterGrid}>
           <label style={styles.filterField}>
             <span style={styles.filterLabel}>Año inicio</span>
             <input
@@ -1151,8 +1218,9 @@ export default function BacklogPage() {
           <button type="button" style={styles.primaryButton} onClick={() => void handleApplyFilters()} disabled={loading}>
             Aplicar filtros
           </button>
-        </div>
-      </AppCard>
+          </div>
+        </AppCard>
+      ) : null}
 
       {error ? <AppStatusMessage tone="error">{error}</AppStatusMessage> : null}
 
@@ -1240,10 +1308,12 @@ export default function BacklogPage() {
             <div style={styles.kpiValue}>{card.value}</div>
           </button>
         ))}
-        <div style={styles.kpiPeriodCard}>
-          <div style={styles.kpiPeriodLabel}>{appliedPeriodCard.label}</div>
-          <div style={styles.kpiPeriodValue}>{appliedPeriodCard.value}</div>
-        </div>
+        {showAppliedPeriodCard ? (
+          <div style={styles.kpiPeriodCard}>
+            <div style={styles.kpiPeriodLabel}>{appliedPeriodCard.label}</div>
+            <div style={styles.kpiPeriodValue}>{appliedPeriodCard.value}</div>
+          </div>
+        ) : null}
       </div>
 
       <div style={styles.contentGrid}>
@@ -1251,13 +1321,7 @@ export default function BacklogPage() {
           <div style={styles.sectionHeaderRow}>
             <div>
               <div style={styles.sectionTitle}>{getLevelTitle(currentLevel, path)}</div>
-              <div style={styles.sectionSubtitle}>{getLevelDescription(currentLevel)}</div>
-            </div>
-            <div style={styles.periodBadge}>
-              <div style={styles.periodBadgeLabel}>Año aplicado</div>
-              <div style={styles.periodBadgeValue}>
-                {appliedAnoInicio} al {appliedAnoFin}
-              </div>
+              {showCurrentLevelHeader ? <div style={styles.sectionSubtitle}>{getLevelDescription(currentLevel)}</div> : null}
             </div>
           </div>
 
@@ -1356,18 +1420,14 @@ export default function BacklogPage() {
         </div>
 
         <div style={styles.detailCard}>
-          <div style={styles.sectionHeaderRow}>
-            <div>
-              <div style={styles.sectionTitle}>Detalle del nivel actual</div>
-              <div style={styles.recordsCountText}>Registros encontrados en el nivel actual: {sortedRows.length}</div>
-            </div>
-            <div style={styles.periodBadge}>
-              <div style={styles.periodBadgeLabel}>Año aplicado</div>
-              <div style={styles.periodBadgeValue}>
-                {appliedAnoInicio} al {appliedAnoFin}
+          {showCurrentLevelHeader ? (
+            <div style={styles.sectionHeaderRow}>
+              <div>
+                <div style={styles.sectionTitle}>Detalle del nivel actual</div>
+                <div style={styles.recordsCountText}>Registros encontrados en el nivel actual: {sortedRows.length}</div>
               </div>
             </div>
-          </div>
+          ) : null}
 
           <div style={styles.breakdownTableWrap}>
             <table style={styles.breakdownTable}>
@@ -1464,7 +1524,6 @@ export default function BacklogPage() {
         <summary style={styles.recordsSummary}>
           <div style={styles.recordsSummaryTextWrap}>
             <div style={styles.recordsSummaryTitle}>Detalle de registros</div>
-            <div style={styles.recordsSummarySubtitle}>Consulta el detalle completo de los registros del nivel seleccionado</div>
           </div>
           <div style={styles.recordsSummaryActions}>
             <div style={styles.recordsCountPill}>Registros existentes: {sortedRows.length}</div>

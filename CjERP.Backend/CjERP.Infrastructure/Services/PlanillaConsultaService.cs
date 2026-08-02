@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Text.RegularExpressions;
 using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces.Services;
 using CjERP.Infrastructure.Persistence.Sql;
@@ -63,6 +64,11 @@ namespace CjERP.Infrastructure.Services
             if (string.Equals(storedProcedureName, StoredProcedurePagadosDashboard, StringComparison.OrdinalIgnoreCase))
             {
                 rows = ApplyPagadosDashboardFilters(rows, parametrosList);
+            }
+
+            if (string.Equals(storedProcedureName, StoredProcedureImportarConsultaDsh, StringComparison.OrdinalIgnoreCase))
+            {
+                rows = ApplyImportarConsultaDshFilters(rows, parametrosList);
             }
 
             var totalRows = rows.Count;
@@ -259,6 +265,46 @@ namespace CjERP.Infrastructure.Services
                         {
                             return false;
                         }
+                    }
+
+                    return true;
+                })
+                .ToList();
+        }
+
+        private static List<Dictionary<string, object?>> ApplyImportarConsultaDshFilters(
+            List<Dictionary<string, object?>> rows,
+            IEnumerable<PlanillaConsultaParametroDto> parametros)
+        {
+            var fechaInicio = GetDateParameterValue(parametros, "FechaInicio");
+            var fechaFin = GetDateParameterValue(parametros, "FechaFin");
+
+            if (!fechaInicio.HasValue && !fechaFin.HasValue)
+            {
+                return rows;
+            }
+
+            var yearStart = fechaInicio?.Year;
+            var yearEnd = fechaFin?.Year;
+
+            return rows
+                .Where(row =>
+                {
+                    var rowYear = TryGetYear(row, "AnoGestion", "anoGestion", "Ano", "ano");
+
+                    if (!rowYear.HasValue)
+                    {
+                        return false;
+                    }
+
+                    if (yearStart.HasValue && rowYear.Value < yearStart.Value)
+                    {
+                        return false;
+                    }
+
+                    if (yearEnd.HasValue && rowYear.Value > yearEnd.Value)
+                    {
+                        return false;
                     }
 
                     return true;
@@ -756,6 +802,36 @@ WHERE Codigo = @CodigoBanco
                 {
                     return parsedDate;
                 }
+            }
+
+            return null;
+        }
+
+        private static int? TryGetYear(
+            IReadOnlyDictionary<string, object?> row,
+            params string[] keys)
+        {
+            var text = TryGetString(row, keys);
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return null;
+            }
+
+            if (int.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var year) && year > 0)
+            {
+                return year;
+            }
+
+            if (DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate))
+            {
+                return parsedDate.Year;
+            }
+
+            var match = Regex.Match(text, @"\b(19|20)\d{2}\b");
+            if (match.Success && int.TryParse(match.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out var matchedYear))
+            {
+                return matchedYear;
             }
 
             return null;

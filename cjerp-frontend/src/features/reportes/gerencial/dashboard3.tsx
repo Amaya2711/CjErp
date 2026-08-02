@@ -406,7 +406,7 @@ function buildImportarConsultaDshRow(row: RawRow): ImportarConsultaDshRow {
     mes: pickString(row, ["Mes", "mes"]),
     ano: pickString(row, ["Ano", "ano"]),
     nroOc: pickString(row, ["Nro_Oc", "nro_Oc", "NroOc", "nroOc"]),
-    montoOc: pickNumber(row, ["MontoOc", "montoOc"]),
+    montoOc: pickNumber(row, ["monto_bck"]),
     montoLiq: pickNumber(row, ["MontoLiq", "montoLiq"]),
     statusPap: pickString(row, ["STATUS_PAP", "Status_Pap", "statusPap"]),
     statusCj: pickString(row, ["Status_Cj", "statusCj"]),

@@ -79,6 +79,10 @@ export default function MainLayout() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const collapseDirection: "left" | "right" = "left";
   const logoutRef = useRef(false);
+  const ingresosEgresosSidebarStateRef = useRef<{
+    active: boolean;
+    previousCollapsed: boolean;
+  } | null>(null);
 
   const usuarioMostrar = (authUser?.usuario || "").toUpperCase();
   const empleadoMostrar = (authUser?.nombre || authUser?.nombreEmpleado || "").toUpperCase();
@@ -158,6 +162,33 @@ export default function MainLayout() {
     setExpandedGroups((prev) => ({ ...prev, ...nextExpandedGroups }));
     setExpandedNodes((prev) => ({ ...prev, ...nextExpandedNodes }));
   }, [menuDashboard, location.pathname]);
+
+  useEffect(() => {
+    const isIngresosEgresosPage = location.pathname.startsWith("/reportes/gerencial/ingresosegresos");
+
+    if (isIngresosEgresosPage) {
+      if (!ingresosEgresosSidebarStateRef.current?.active) {
+        ingresosEgresosSidebarStateRef.current = {
+          active: true,
+          previousCollapsed: isSidebarCollapsed,
+        };
+
+        if (!isSidebarCollapsed) {
+          setIsSidebarCollapsed(true);
+        }
+      }
+      return;
+    }
+
+    const savedState = ingresosEgresosSidebarStateRef.current;
+    if (savedState?.active) {
+      ingresosEgresosSidebarStateRef.current = null;
+
+      if (savedState.previousCollapsed !== isSidebarCollapsed) {
+        setIsSidebarCollapsed(savedState.previousCollapsed);
+      }
+    }
+  }, [isSidebarCollapsed, location.pathname]);
 
   const cerrarSesion = async () => {
     if (logoutRef.current) {
