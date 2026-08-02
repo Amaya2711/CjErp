@@ -1214,9 +1214,6 @@ export default function IngresosEgresosPage() {
       <button style={styles.secondaryButton} type="button" onClick={handleApplyFilters} disabled={loading}>
         {loading ? "Cargando..." : "Aplicar filtros"}
       </button>
-      <button style={styles.primaryButton} type="button" onClick={handleExport} disabled={!sortedRows.length || isPrincipalRenderPending}>
-        Exportar Excel
-      </button>
     </div>
   );
 
