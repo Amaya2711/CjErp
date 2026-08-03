@@ -24,6 +24,8 @@ namespace CjERP.Infrastructure.Services
         private const string StoredProcedureImportarConsultaDsh = "dbo.sp_Importar_ConsultaDsh";
         private const string StoredProcedureMovimientosGastosIngresos = "dbo.sp_Movimientos_Consulta_GastosIngresos";
         private const string StoredProcedureGastosPagados = "dbo.sp_Planilla_Consulta_Gastos_Pagados";
+        private const string QueryClientesActivos = "clientes-activos";
+        private const string QueryProyectosActivos = "proyectos-activos";
         private readonly ISqlCommandFactory _sqlCommandFactory;
 
         public PlanillaConsultaService(ISqlCommandFactory sqlCommandFactory)
@@ -43,6 +45,131 @@ namespace CjERP.Infrastructure.Services
 
             var parametrosList = (parametros ?? []).ToList();
             var storedProcedureName = ResolveStoredProcedureName(consulta);
+
+            if (string.Equals(storedProcedureName, QueryClientesActivos, StringComparison.OrdinalIgnoreCase))
+            {
+                var clienteRows = (await connection.QueryAsync(
+                        _sqlCommandFactory.Create(
+                            """
+                            SELECT
+                                IdCliente,
+                                NombreCliente
+                            FROM dbo.Cliente
+                            WHERE Estado = 1
+                            ORDER BY NombreCliente;
+                            """,
+                            null,
+                            CommandType.Text,
+                            cancellationToken,
+                            commandTimeout: 120)))
+                    .Select(MapRow)
+                    .ToList();
+
+                var clienteTotalRows = clienteRows.Count;
+                var clienteNormalizedPageSize = pageSize.HasValue && pageSize.Value > 0 ? pageSize.Value : clienteTotalRows > 0 ? clienteTotalRows : 1;
+                var clienteNormalizedPageNumber = pageNumber.HasValue && pageNumber.Value > 0 ? pageNumber.Value : 1;
+                var clienteTotalPages = clienteNormalizedPageSize > 0
+                    ? Math.Max(1, (int)Math.Ceiling(clienteTotalRows / (double)clienteNormalizedPageSize))
+                    : 1;
+
+                if (clienteNormalizedPageNumber > clienteTotalPages)
+                {
+                    clienteNormalizedPageNumber = clienteTotalPages;
+                }
+
+                var clienteSkip = clienteNormalizedPageSize > 0 ? (clienteNormalizedPageNumber - 1) * clienteNormalizedPageSize : 0;
+                var clientePagedRows = clienteRows
+                    .Skip(clienteSkip)
+                    .Take(clienteNormalizedPageSize)
+                    .ToList();
+
+                var clienteColumns = clientePagedRows
+                    .SelectMany(row => row.Keys)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                return new PlanillaConsultaEstadosResponseDto
+                {
+                    Columns = clienteColumns,
+                    Rows = clientePagedRows,
+                    TotalRows = clienteTotalRows,
+                    PageNumber = clienteNormalizedPageNumber,
+                    PageSize = clienteNormalizedPageSize,
+                    TotalPages = clienteTotalPages,
+                    HasPreviousPage = clienteNormalizedPageNumber > 1,
+                    HasNextPage = clienteNormalizedPageNumber < clienteTotalPages,
+                    MaxRowsAllowed = maxRows,
+                    LimitExceeded = maxRows.HasValue && maxRows.Value > 0 && clienteTotalRows > maxRows.Value,
+                    Message = null
+                };
+            }
+
+            if (string.Equals(storedProcedureName, QueryProyectosActivos, StringComparison.OrdinalIgnoreCase))
+            {
+                var proyectoRows = (await connection.QueryAsync(
+                        _sqlCommandFactory.Create(
+                            """
+                            SELECT DISTINCT
+                                a.IdCliente,
+                                b.NombreCliente,
+                                a.IdProyecto,
+                                c.NombreProyecto
+                            FROM dbo.Importar a
+                            LEFT JOIN dbo.Cliente b
+                                ON b.IdCliente = a.IdCliente
+                            LEFT JOIN dbo.Proyecto c
+                                ON c.IdProyecto = a.IdProyecto
+                            WHERE a.IdEstado = 1
+                            ORDER BY
+                                b.NombreCliente,
+                                c.NombreProyecto;
+                            """,
+                            null,
+                            CommandType.Text,
+                            cancellationToken,
+                            commandTimeout: 120)))
+                    .Select(MapRow)
+                    .ToList();
+
+                var proyectoTotalRows = proyectoRows.Count;
+                var proyectoNormalizedPageSize = pageSize.HasValue && pageSize.Value > 0 ? pageSize.Value : proyectoTotalRows > 0 ? proyectoTotalRows : 1;
+                var proyectoNormalizedPageNumber = pageNumber.HasValue && pageNumber.Value > 0 ? pageNumber.Value : 1;
+                var proyectoTotalPages = proyectoNormalizedPageSize > 0
+                    ? Math.Max(1, (int)Math.Ceiling(proyectoTotalRows / (double)proyectoNormalizedPageSize))
+                    : 1;
+
+                if (proyectoNormalizedPageNumber > proyectoTotalPages)
+                {
+                    proyectoNormalizedPageNumber = proyectoTotalPages;
+                }
+
+                var proyectoSkip = proyectoNormalizedPageSize > 0 ? (proyectoNormalizedPageNumber - 1) * proyectoNormalizedPageSize : 0;
+                var proyectoPagedRows = proyectoRows
+                    .Skip(proyectoSkip)
+                    .Take(proyectoNormalizedPageSize)
+                    .ToList();
+
+                var proyectoColumns = proyectoPagedRows
+                    .SelectMany(row => row.Keys)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                return new PlanillaConsultaEstadosResponseDto
+                {
+                    Columns = proyectoColumns,
+                    Rows = proyectoPagedRows,
+                    TotalRows = proyectoTotalRows,
+                    PageNumber = proyectoNormalizedPageNumber,
+                    PageSize = proyectoNormalizedPageSize,
+                    TotalPages = proyectoTotalPages,
+                    HasPreviousPage = proyectoNormalizedPageNumber > 1,
+                    HasNextPage = proyectoNormalizedPageNumber < proyectoTotalPages,
+                    MaxRowsAllowed = maxRows,
+                    LimitExceeded = maxRows.HasValue && maxRows.Value > 0 && proyectoTotalRows > maxRows.Value,
+                    Message = null
+                };
+            }
+
             parametrosList = await EnsureBancoIdParameterAsync(
                 connection,
                 parametrosList,
@@ -173,6 +300,8 @@ namespace CjERP.Infrastructure.Services
                 "pagados-dashboard" => StoredProcedurePagadosDashboard,
                 "importar-consulta-dsh" => StoredProcedureImportarConsultaDsh,
                 "movimientos-gastos-ingresos" => StoredProcedureMovimientosGastosIngresos,
+                "clientes-activos" => QueryClientesActivos,
+                "proyectos-activos" => QueryProyectosActivos,
                 _ => StoredProcedureEstados
             };
         }

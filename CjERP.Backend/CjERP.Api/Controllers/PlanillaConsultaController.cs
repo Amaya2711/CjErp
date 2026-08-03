@@ -337,6 +337,8 @@ namespace CjERP.Api.Controllers
                 "pagados-dashboard" => "sp_Planilla_ConsultarPagados_Dsh",
                 "importar-consulta-dsh" => "sp_Importar_ConsultaDsh",
                 "movimientos-gastos-ingresos" => "sp_Movimientos_Consulta_GastosIngresos",
+                "clientes-activos" => "clientes-activos",
+                "proyectos-activos" => "proyectos-activos",
                 _ => "sp_Planilla_Consulta_Estados"
             };
         }
