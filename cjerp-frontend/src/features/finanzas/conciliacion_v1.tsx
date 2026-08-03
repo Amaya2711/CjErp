@@ -2909,6 +2909,7 @@ export default function ConciliacionBcpPage() {
     const XLSX = await import("xlsx");
     const exportRows = sourceConciliacionPlanilla.registros.map((row) => ({
       Fecha: formatDateValue(row.fecha),
+      BancoMovimiento: row.codigoBanco || "",
       Empresa: row.empresa || "",
       Cuenta: row.cuenta || "",
       Moneda: row.moneda || "",
