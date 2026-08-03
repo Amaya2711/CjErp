@@ -422,6 +422,15 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                 Advertencias = advertencias
             };
         }
+        catch (Exception ex) when (ContainsDuplicateKeyViolation(ex))
+        {
+            _logger.LogWarning(ex, "[ConciliacionBcp] Se intento insertar un movimiento duplicado en {StoredProcedure}", StoredProcedureConciliacionInsert);
+            return new ConciliacionBcpInsertResponseDto
+            {
+                FilasRecibidas = filas.Count,
+                Errores = ["No se permite el registro para evitar registros duplicados."]
+            };
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[ConciliacionBcp] Error insertando movimientos mediante {StoredProcedure}", StoredProcedureConciliacionInsert);
@@ -1693,6 +1702,16 @@ ORDER BY ic.key_ordinal;";
     private static bool IsDuplicateKeyViolation(SqlException exception)
     {
         return exception.Number is 2601 or 2627;
+    }
+
+    private static bool ContainsDuplicateKeyViolation(Exception exception)
+    {
+        if (exception is SqlException sqlException && IsDuplicateKeyViolation(sqlException))
+        {
+            return true;
+        }
+
+        return exception.InnerException is not null && ContainsDuplicateKeyViolation(exception.InnerException);
     }
 
     private async Task<ConciliacionBcpAnalizarArchivoResponseDto> AnalyzeFileAsync(
