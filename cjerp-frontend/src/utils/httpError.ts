@@ -13,13 +13,32 @@ type ErrorWithResponse = {
   message?: unknown;
 };
 
+function isDuplicateProtectionMessage(value: string): boolean {
+  const normalized = value.toLowerCase();
+
+  return (
+    normalized.includes("duplicate key row") ||
+    normalized.includes("registro duplicado") ||
+    normalized.includes("evitar registros duplicados") ||
+    normalized.includes("no se permite el registro")
+  );
+}
+
+function normalizeFriendlyErrorMessage(value: string): string {
+  if (isDuplicateProtectionMessage(value)) {
+    return "No se permite el registro para evitar registros duplicados.";
+  }
+
+  return value;
+}
+
 export function getHttpErrorMessage(error: unknown, fallback: string): string {
   if (typeof error === "object" && error !== null) {
     const candidate = error as ErrorWithResponse;
     const responseData = candidate.response?.data;
 
     if (typeof responseData === "string" && responseData.trim()) {
-      return responseData;
+      return normalizeFriendlyErrorMessage(responseData.trim());
     }
 
     if (typeof responseData === "object" && responseData !== null) {
@@ -31,32 +50,32 @@ export function getHttpErrorMessage(error: unknown, fallback: string): string {
         typeof payload.detail === "string" &&
         payload.detail.trim()
       ) {
-        return `${payload.message} | ${payload.detail}`;
+        return normalizeFriendlyErrorMessage(`${payload.message} | ${payload.detail}`);
       }
 
       if (typeof payload.message === "string" && payload.message.trim()) {
-        return payload.message;
+        return normalizeFriendlyErrorMessage(payload.message);
       }
 
       if (typeof payload.mensaje === "string" && payload.mensaje.trim()) {
-        return payload.mensaje;
+        return normalizeFriendlyErrorMessage(payload.mensaje);
       }
 
       if (typeof payload.detail === "string" && payload.detail.trim()) {
-        return payload.detail;
+        return normalizeFriendlyErrorMessage(payload.detail);
       }
 
       if (typeof payload.error === "string" && payload.error.trim()) {
-        return payload.error;
+        return normalizeFriendlyErrorMessage(payload.error);
       }
 
       if (typeof payload.title === "string" && payload.title.trim()) {
-        return payload.title;
+        return normalizeFriendlyErrorMessage(payload.title);
       }
     }
 
     if (typeof candidate.message === "string" && candidate.message.trim()) {
-      return candidate.message;
+      return normalizeFriendlyErrorMessage(candidate.message);
     }
   }
 

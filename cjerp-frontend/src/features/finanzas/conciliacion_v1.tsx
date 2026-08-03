@@ -2980,6 +2980,10 @@ export default function ConciliacionBcpPage() {
     );
   };
 
+  const isFriendlyDuplicateWarning =
+    error.toLowerCase().includes("no se permite el registro para evitar registros duplicados") ||
+    error.toLowerCase().includes("evitar registros duplicados");
+
   return (
     <div style={styles.page}>
       <div style={styles.hero}>
@@ -3087,7 +3091,9 @@ export default function ConciliacionBcpPage() {
             </div>
           </div>
 
-        {error ? <div style={styles.errorBanner}>{error}</div> : null}
+        {error ? (
+          <div style={isFriendlyDuplicateWarning ? styles.warningBanner : styles.errorBanner}>{error}</div>
+        ) : null}
         {message ? <div style={styles.successBanner}>{message}</div> : null}
 
         {files.length === 0 ? (
@@ -4445,6 +4451,16 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#ECFDF5",
     border: "1px solid #A7F3D0",
     color: "#065F46",
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 13,
+    fontWeight: 700,
+    marginBottom: 12,
+  },
+  warningBanner: {
+    background: "#FFFBEB",
+    border: "1px solid #FCD34D",
+    color: "#92400E",
     borderRadius: 12,
     padding: 12,
     fontSize: 13,
