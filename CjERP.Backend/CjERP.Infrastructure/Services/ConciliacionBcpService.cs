@@ -1077,6 +1077,7 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         return new ConciliacionBcpConciliarPlanillaRegistroDto
         {
             IdMovimientoBanco = movimiento.IdMovimientoBanco,
+            CodigoBanco = movimiento.CodigoBanco,
             Empresa = movimiento.Empresa,
             Cuenta = movimiento.Cuenta,
             Moneda = movimiento.Moneda,
@@ -1147,6 +1148,7 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         return new ConciliacionBcpConciliarPlanillaRegistroDto
         {
             IdMovimientoBanco = movimiento.IdMovimientoBanco,
+            CodigoBanco = movimiento.CodigoBanco,
             Empresa = movimiento.Empresa,
             Cuenta = movimiento.Cuenta,
             Moneda = movimiento.Moneda,
@@ -4959,6 +4961,7 @@ ORDER BY p.parameter_id;";
     private sealed class MovimientoBcpBusquedaRow
     {
         public int IdMovimientoBanco { get; set; }
+        public string? CodigoBanco { get; set; }
         public string? Empresa { get; set; }
         public string? Cuenta { get; set; }
         public string? Moneda { get; set; }

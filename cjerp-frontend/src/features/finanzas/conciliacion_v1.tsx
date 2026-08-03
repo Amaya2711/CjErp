@@ -32,6 +32,7 @@ import { ArrowUpDown, ChevronDown, ChevronRight, FileDown } from "lucide-react";
 const MAX_FILE_SIZE_BYTES = 15_000_000;
 type ConciliacionSortKey =
   | "fecha"
+  | "codigoBanco"
   | "empresa"
   | "cuenta"
   | "moneda"
@@ -124,6 +125,7 @@ type ConciliacionClasificacionForm = {
 
 const DEFAULT_CONCILIACION_FILTERS: ConciliacionFilterState = {
   fecha: "",
+  codigoBanco: "",
   empresa: "",
   cuenta: "",
   moneda: "",
@@ -359,6 +361,8 @@ function getConciliacionDisplayValue(row: ConciliacionBcpConciliarPlanillaRegist
   switch (key) {
     case "fecha":
       return formatDateValue(row.fecha);
+    case "codigoBanco":
+      return row.codigoBanco || "";
     case "empresa":
       return row.empresa || "";
     case "cuenta":
@@ -486,6 +490,8 @@ function getConciliacionSortValue(row: ConciliacionBcpConciliarPlanillaRegistro,
       const date = row.fecha ? new Date(row.fecha) : null;
       return date && !Number.isNaN(date.getTime()) ? date.getTime() : null;
     }
+    case "codigoBanco":
+      return row.codigoBanco?.trim().toLowerCase() ?? "";
     case "monto":
       return row.monto ?? null;
     case "totalPagar":
@@ -1762,6 +1768,7 @@ export default function ConciliacionBcpPage() {
   const conciliacionFilterOptions = useMemo(() => {
     const keys: ConciliacionSortKey[] = [
       "fecha",
+      "codigoBanco",
       "empresa",
       "cuenta",
       "moneda",
@@ -3678,46 +3685,48 @@ export default function ConciliacionBcpPage() {
             <table style={styles.mappingTable}>
               <thead>
                 <tr>
-                  <th style={styles.th}>{renderSortHeader("Fecha", "fecha")}</th>
-                  <th style={styles.th}>{renderSortHeader("Empresa", "empresa")}</th>
-                  <th style={styles.th}>{renderSortHeader("Cuenta", "cuenta")}</th>
-                  <th style={styles.th}>{renderSortHeader("Moneda", "moneda")}</th>
-                  <th style={styles.th}>{renderSortHeader("Monto", "monto")}</th>
-                  <th style={styles.th}>{renderSortHeader("TotalPagar", "totalPagar")}</th>
-                  <th style={styles.th}>{renderSortHeader("Diferencia", "diferencia")}</th>
-                  <th style={styles.th}>{renderSortHeader("NroOperacion", "nroOperacion")}</th>
-                  <th style={styles.th}>{renderSortHeader("DescripcionOperacion", "descripcionOperacion")}</th>
-                  <th style={styles.th}>{renderSortHeader("Comentario", "comentario")}</th>
-                  <th style={styles.th}>{renderSortHeader("Resultado", "resultadoConciliacion")}</th>
-                  <th style={styles.th}>{renderSortHeader("Tipo", "tipoCoincidencia")}</th>
-                  <th style={styles.th}>{renderSortHeader("NroOperacionPlanilla", "nroOperacionPlanilla")}</th>
-                  <th style={styles.th}>{renderSortHeader("CuentaPlanilla", "cuentaPlanilla")}</th>
-                  <th style={styles.th}>{renderSortHeader("CuentaInterPlanilla", "cuentaInterPlanilla")}</th>
-                  <th style={styles.th}>{renderSortHeader("Cliente", "clientePlanilla")}</th>
-                  <th style={styles.th}>{renderSortHeader("Proyecto", "proyectoPlanilla")}</th>
-                  <th style={styles.th}>{renderSortHeader("Site", "sitePlanilla")}</th>
-                  <th style={styles.th}>{renderSortHeader("Tipo_Trabajo", "tipoTrabajoPlanilla")}</th>
-                  <th style={styles.th}>{renderSortHeader("Tarea", "tareaPlanilla")}</th>
-                  <th style={styles.th}>{renderSortHeader("Responsable", "responsablePlanilla")}</th>
-                  <th style={styles.th}>{renderSortHeader("Comprobante", "comprobantePlanilla")}</th>
-                  <th style={styles.th}>{renderSortHeader("Area Flujo", "areaFlujo")}</th>
-                  <th style={styles.th}>{renderSortHeader("Referencia", "referencia")}</th>
-                  <th style={styles.th}>{renderSortHeader("Cuenta Contable", "cuentaContable")}</th>
-                  <th style={styles.th}>{renderSortHeader("Conciliado", "conciliado")}</th>
-                  <th style={styles.th}>{renderSortHeader("Estado Conciliacion", "estadoConciliacionTexto")}</th>
-                  <th style={styles.th}>{renderSortHeader("Estado Operativo", "estadoOperativoConciliacion")}</th>
-                  <th style={styles.th}>{renderSortHeader("Fecha Conciliacion", "fechaConciliacion")}</th>
-                  <th style={styles.th}>{renderSortHeader("Usuario Conciliacion", "usuarioConciliacion")}</th>
-                  <th style={styles.th}>{renderSortHeader("Obs. Conciliacion", "observacionConciliacionMovimiento")}</th>
-                  <th style={styles.th}>{renderSortHeader("Banco", "bancoPlanilla")}</th>
-                  <th style={styles.th}>{renderSortHeader("Serie", "seriePlanilla")}</th>
-                  <th style={styles.th}>{renderSortHeader("Detalle", "detallePlanilla")}</th>
-                  <th style={styles.th}>{renderSortHeader("Correlativo", "correlativoPlanilla")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Fecha", "fecha")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Banco Movimiento", "codigoBanco")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Empresa", "empresa")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Cuenta", "cuenta")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Moneda", "moneda")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Monto", "monto")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("TotalPagar", "totalPagar")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Diferencia", "diferencia")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("NroOperacion", "nroOperacion")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("DescripcionOperacion", "descripcionOperacion")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Comentario", "comentario")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Resultado", "resultadoConciliacion")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Tipo", "tipoCoincidencia")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("NroOperacionPlanilla", "nroOperacionPlanilla")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("CuentaPlanilla", "cuentaPlanilla")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("CuentaInterPlanilla", "cuentaInterPlanilla")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Cliente", "clientePlanilla")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Proyecto", "proyectoPlanilla")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Site", "sitePlanilla")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Tipo_Trabajo", "tipoTrabajoPlanilla")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Tarea", "tareaPlanilla")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Responsable", "responsablePlanilla")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Comprobante", "comprobantePlanilla")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Area Flujo", "areaFlujo")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Referencia", "referencia")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Cuenta Contable", "cuentaContable")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Conciliado", "conciliado")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Estado Conciliacion", "estadoConciliacionTexto")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Estado Operativo", "estadoOperativoConciliacion")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Fecha Conciliacion", "fechaConciliacion")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Usuario Conciliacion", "usuarioConciliacion")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Obs. Conciliacion", "observacionConciliacionMovimiento")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Banco", "bancoPlanilla")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Serie", "seriePlanilla")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Detalle", "detallePlanilla")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Correlativo", "correlativoPlanilla")}</th>
                 </tr>
                 <tr>
                   {(
                     [
                       "fecha",
+                      "codigoBanco",
                       "empresa",
                       "cuenta",
                       "moneda",
@@ -3754,7 +3763,7 @@ export default function ConciliacionBcpPage() {
                       "correlativoPlanilla",
                     ] as ConciliacionSortKey[]
                   ).map((key) => (
-                    <th key={`filter-${key}`} style={styles.filterTh}>
+                    <th key={`filter-${key}`} style={{ ...styles.filterTh, ...styles.detailStickyFilterTh }}>
                       {key === "resultadoConciliacion" ? (
                         <div ref={resultadoFilterDropdownRef} style={styles.multiFilterWrap}>
                           <button
@@ -3810,7 +3819,7 @@ export default function ConciliacionBcpPage() {
                       )}
                     </th>
                   ))}
-                  <th style={styles.filterTh} />
+                  <th style={{ ...styles.filterTh, ...styles.detailStickyFilterTh }} />
                 </tr>
               </thead>
               <tbody>
@@ -3818,6 +3827,7 @@ export default function ConciliacionBcpPage() {
                   detalleTablaRegistros.map((row) => (
                     <tr key={`conciliacion-${row.idMovimientoBanco}`}>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "fecha")}</td>
+                      <td style={styles.td}>{getConciliacionDisplayValue(row, "codigoBanco")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "empresa")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "cuenta")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "moneda")}</td>
@@ -4782,7 +4792,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   mappingTableWrap: {
     marginTop: 12,
-    overflowX: "hidden",
+    overflow: "visible",
     border: "1px solid #E2E8F0",
     borderRadius: 12,
   },
@@ -4858,7 +4868,12 @@ const styles: Record<string, React.CSSProperties> = {
   },
   detailTableScroll: {
     overflowX: "auto",
-    overflowY: "hidden",
+    overflowY: "scroll",
+    flex: 1,
+    minHeight: 0,
+    maxHeight: "calc(100vh - 430px)",
+    position: "relative",
+    scrollbarGutter: "stable",
   },
   gridActionButton: {
     border: "1px solid #0F766E",
@@ -4885,6 +4900,12 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#334155",
     fontWeight: 800,
   },
+  detailStickyHeaderTh: {
+    position: "sticky",
+    top: 0,
+    zIndex: 20,
+    boxShadow: "0 2px 0 rgba(226, 232, 240, 0.95)",
+  },
   sortHeaderButton: {
     width: "100%",
     display: "inline-flex",
@@ -4910,6 +4931,12 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "8px 10px 10px",
     background: "#FFFFFF",
     borderBottom: "1px solid #E2E8F0",
+  },
+  detailStickyFilterTh: {
+    position: "sticky",
+    top: 42,
+    zIndex: 19,
+    boxShadow: "0 2px 0 rgba(226, 232, 240, 0.95)",
   },
   filterInput: {
     width: "100%",
