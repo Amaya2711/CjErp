@@ -730,7 +730,7 @@ async function fetchDashboardRows(args: DashboardFetchArgs): Promise<DashboardFe
 
 export default function Dashboard1Page() {
   const [rawRows, setRawRows] = useState<RawRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [draftFechaInicio, setDraftFechaInicio] = useState(getYearStartInputValue());
   const [draftFechaFin, setDraftFechaFin] = useState(getMonthEndInputValue());
@@ -853,11 +853,6 @@ export default function Dashboard1Page() {
 
   useEffect(() => {
     isMountedRef.current = true;
-    void loadRows({
-      fechaInicio: getYearStartInputValue(),
-      fechaFin: getMonthEndInputValue(),
-      lookupValue: {},
-    });
 
     return () => {
       isMountedRef.current = false;

@@ -86,6 +86,25 @@ const RptAsistenciaPage = lazy(() => import("../../features/reportes/rptasistenc
 const RptAsistenciaEmpleadoPage = lazy(() => import("../../features/reportes/rptasistenciaempleado"));
 const ClaudeiaPage = lazy(() => import("../../features/reportes/administrativo/claudeia"));
 const IaChatPage = lazy(() => import("../../features/reportes/administrativo/iachat"));
+const ArrendamientosDashboardPage = lazy(() => import("../../features/arrendamientos/pages/dashboard"));
+const ArrendamientosMaestrosPage = lazy(() => import("../../features/arrendamientos/pages/maestros"));
+const ArrendamientosArrendadoresPage = lazy(() => import("../../features/arrendamientos/pages/arrendadores"));
+const ArrendamientosInquilinosPage = lazy(() => import("../../features/arrendamientos/pages/inquilinos"));
+const ArrendamientosInmueblesPage = lazy(() => import("../../features/arrendamientos/pages/inmuebles"));
+const ArrendamientosUnidadesPage = lazy(() => import("../../features/arrendamientos/pages/unidades"));
+const ArrendamientosContratosPage = lazy(() => import("../../features/arrendamientos/pages/contratos"));
+const ArrendamientosObligacionesPage = lazy(() => import("../../features/arrendamientos/pages/obligaciones"));
+const ArrendamientosPagosPage = lazy(() => import("../../features/arrendamientos/pages/pagos"));
+const ArrendamientosFraccionamientosPage = lazy(() => import("../../features/arrendamientos/pages/fraccionamientos"));
+const ArrendamientosGarantiasPage = lazy(() => import("../../features/arrendamientos/pages/garantias"));
+const ArrendamientosArbitriosPage = lazy(() => import("../../features/arrendamientos/pages/arbitrios"));
+const ArrendamientosEstadoCuentaPage = lazy(() => import("../../features/arrendamientos/pages/estado-cuenta"));
+const ArrendamientosCobranzaPage = lazy(() => import("../../features/arrendamientos/pages/cobranza"));
+const ArrendamientosTiposCambioPage = lazy(() => import("../../features/arrendamientos/pages/tipos-cambio"));
+const ArrendamientosDocumentosPage = lazy(() => import("../../features/arrendamientos/pages/documentos"));
+const ArrendamientosReportesPage = lazy(() => import("../../features/arrendamientos/pages/reportes"));
+const ArrendamientosAuditoriaPage = lazy(() => import("../../features/arrendamientos/pages/auditoria"));
+const ArrendamientosConfiguracionPage = lazy(() => import("../../features/arrendamientos/pages/configuracion"));
 
 export default function AppRouter() {
   return (
@@ -119,6 +138,27 @@ export default function AppRouter() {
             <Route path="/comercial/cliente" element={<ClientePage />} />
             <Route path="/comercial/facturacion" element={<FacturacionPage />} />
             <Route path="/comercial/cobranzas" element={<CobranzasPage />} />
+
+            <Route path="/arrendamientos" element={<Navigate to="/arrendamientos/dashboard" replace />} />
+            <Route path="/arrendamientos/dashboard" element={<ArrendamientosDashboardPage />} />
+            <Route path="/arrendamientos/maestros" element={<ArrendamientosMaestrosPage />} />
+            <Route path="/arrendamientos/arrendadores" element={<ArrendamientosArrendadoresPage />} />
+            <Route path="/arrendamientos/inquilinos" element={<ArrendamientosInquilinosPage />} />
+            <Route path="/arrendamientos/inmuebles" element={<ArrendamientosInmueblesPage />} />
+            <Route path="/arrendamientos/unidades" element={<ArrendamientosUnidadesPage />} />
+            <Route path="/arrendamientos/contratos" element={<ArrendamientosContratosPage />} />
+            <Route path="/arrendamientos/obligaciones" element={<ArrendamientosObligacionesPage />} />
+            <Route path="/arrendamientos/pagos" element={<ArrendamientosPagosPage />} />
+            <Route path="/arrendamientos/fraccionamientos" element={<ArrendamientosFraccionamientosPage />} />
+            <Route path="/arrendamientos/garantias" element={<ArrendamientosGarantiasPage />} />
+            <Route path="/arrendamientos/arbitrios" element={<ArrendamientosArbitriosPage />} />
+            <Route path="/arrendamientos/estado-cuenta" element={<ArrendamientosEstadoCuentaPage />} />
+            <Route path="/arrendamientos/cobranza" element={<ArrendamientosCobranzaPage />} />
+            <Route path="/arrendamientos/tipos-cambio" element={<ArrendamientosTiposCambioPage />} />
+            <Route path="/arrendamientos/documentos" element={<ArrendamientosDocumentosPage />} />
+            <Route path="/arrendamientos/reportes" element={<ArrendamientosReportesPage />} />
+            <Route path="/arrendamientos/auditoria" element={<ArrendamientosAuditoriaPage />} />
+            <Route path="/arrendamientos/configuracion" element={<ArrendamientosConfiguracionPage />} />
 
             <Route path="/compras/solicitudes" element={<SolicitudesPage />} />
             <Route path="/compras/ordencompra" element={<OrdenCompraPage />} />

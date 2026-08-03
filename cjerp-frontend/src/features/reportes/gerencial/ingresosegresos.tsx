@@ -497,7 +497,7 @@ function formatPercentage(value: number) {
 
 export default function IngresosEgresosPage() {
   const [rawRows, setRawRows] = useState<RawRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [draftFechaInicio, setDraftFechaInicio] = useState(getYearStartInputValue());
   const [draftFechaFin, setDraftFechaFin] = useState(getTodayInputValue());
@@ -540,6 +540,7 @@ export default function IngresosEgresosPage() {
   const tabLoadingHideTimerRef = useRef<number | null>(null);
   const tabLoadingStartedAtRef = useRef<number>(0);
   const backlogLoadKeyRef = useRef<string>("");
+  const hasManualLoadRef = useRef(false);
 
   const backlogLoadKey = `${appliedFechaInicio}|${appliedFechaFin}|${appliedUsdExchangeRate}|${appliedDopExchangeRate}`;
 
@@ -711,6 +712,10 @@ export default function IngresosEgresosPage() {
       return undefined;
     }
 
+    if (!hasManualLoadRef.current) {
+      return undefined;
+    }
+
     if (backlogStoreRows !== null && backlogLoadKeyRef.current === backlogLoadKey) {
       return undefined;
     }
@@ -790,7 +795,6 @@ export default function IngresosEgresosPage() {
 
   useEffect(() => {
     isMountedRef.current = true;
-    void loadRows();
 
     return () => {
       isMountedRef.current = false;
@@ -1175,6 +1179,7 @@ export default function IngresosEgresosPage() {
 
   const handleApplyFilters = () => {
     setDetailPage(1);
+    hasManualLoadRef.current = true;
     void loadRows({
       fechaInicio: draftFechaInicio,
       fechaFin: draftFechaFin,
@@ -1212,7 +1217,7 @@ export default function IngresosEgresosPage() {
   const actions = (
     <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
       <button style={styles.secondaryButton} type="button" onClick={handleApplyFilters} disabled={loading}>
-        {loading ? "Cargando..." : "Aplicar filtros"}
+        {loading ? "Cargando..." : "Actualizar"}
       </button>
     </div>
   );

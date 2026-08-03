@@ -10,9 +10,11 @@ using CjERP.Application.DTOs.WhatsappInbound;
 using CjERP.Application.Interfaces;
 using CjERP.Application.Interfaces.Repositories;
 using CjERP.Application.Interfaces.Services;
+using CjERP.Application.Interfaces.Services.Arrendamientos;
 using CjERP.Infrastructure.DependencyInjection;
 using CjERP.Infrastructure.Repositories;
 using CjERP.Infrastructure.Services;
+using CjERP.Infrastructure.Services.Arrendamientos;
 using CjERP.Shared.Configuration;
 using Hangfire;
 using Hangfire.SqlServer;
@@ -244,6 +246,7 @@ builder.Services.AddScoped<IReportePdfService, ReportePdfService>();
 builder.Services.AddScoped<IReporteAutomaticoService, ReporteAutomaticoService>();
 builder.Services.AddScoped<IReporteWhatsappJobScheduler, ReporteWhatsappJobScheduler>();
 builder.Services.AddScoped<IWhatsappInboundService, WhatsappInboundService>();
+builder.Services.AddScoped<IArrendamientosService, ArrendamientosService>();
 builder.Services.AddHttpClient<IMetaWhatsAppService, MetaWhatsAppService>(client =>
 {
     client.BaseAddress = new Uri("https://graph.facebook.com/");

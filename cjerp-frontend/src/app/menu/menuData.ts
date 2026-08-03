@@ -107,4 +107,17 @@ export const menuDashboard: DashboardGroup[] = [
       { label: "Cierre contable", path: "/contabilidad/cierre" },
     ],
   },
+  {
+    titulo: "Arrendamientos",
+    subtitulo: "Contratos, obligaciones y cobranza",
+    color: "#1D4ED8",
+    tiles: [
+      { label: "Dashboard", path: "/arrendamientos/dashboard" },
+      { label: "Maestros", path: "/arrendamientos/maestros" },
+      { label: "Contratos", path: "/arrendamientos/contratos" },
+      { label: "Obligaciones", path: "/arrendamientos/obligaciones" },
+      { label: "Pagos", path: "/arrendamientos/pagos" },
+      { label: "Reportes", path: "/arrendamientos/reportes" },
+    ],
+  },
 ];
