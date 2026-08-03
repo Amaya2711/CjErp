@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsLeft, ChevronsRight } from "lucide-react";
@@ -31,8 +31,6 @@ type MovementRow = {
 
 type RankingRow = {
   label: string;
-  cliente?: string;
-  proyecto?: string;
   count: number;
   ingresosPen: number;
   egresosPen: number;
@@ -283,7 +281,7 @@ function formatCompactSoles(value: number) {
 }
 
 function getLevelLabel(level: LevelKey) {
-  if (level === "cliente") return "Clientes";
+  if (level === "cliente") return "Proyectos";
   if (level === "proyecto") return "Proyectos";
   return "Sites";
 }
@@ -307,15 +305,6 @@ function aggregateByLevel(rows: MovementRow[], level: LevelKey, usdRate: number,
         egresosPen: 0,
         netoPen: 0,
       };
-
-    if (level === "proyecto" && !current.cliente) {
-      current.cliente = row.cliente;
-    }
-
-    if (level === "site") {
-      if (!current.cliente) current.cliente = row.cliente;
-      if (!current.proyecto) current.proyecto = row.proyecto;
-    }
 
     current.count += 1;
 
@@ -346,49 +335,14 @@ function sanitizeFileName(value: string) {
 }
 
 async function exportRowsToExcel(rows: Record<string, unknown>[], sheetName: string, fileName: string) {
-  if (typeof window === "undefined" || typeof Worker === "undefined") {
-    const XLSX = await import("xlsx");
-    const workbook = XLSX.utils.book_new();
-    const worksheet = XLSX.utils.json_to_sheet(rows);
-    XLSX.utils.book_append_sheet(workbook, worksheet, sheetName.slice(0, 31));
-    XLSX.writeFile(workbook, fileName);
-    return;
-  }
-
-  await new Promise<void>((resolve, reject) => {
-    const worker = new Worker(new URL("./analisisExport.worker.ts", import.meta.url), { type: "module" });
-
-    worker.onmessage = (event: MessageEvent<{ ok: boolean; fileName?: string; buffer?: ArrayBuffer; error?: string }>) => {
-      const { ok, buffer, error } = event.data;
-      worker.terminate();
-
-      if (!ok || !buffer) {
-        reject(new Error(error || "No fue posible generar el archivo Excel."));
-        return;
-      }
-
-      const blob = new Blob([buffer], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      });
-      const objectUrl = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = objectUrl;
-      anchor.download = fileName;
-      anchor.click();
-      URL.revokeObjectURL(objectUrl);
-      resolve();
-    };
-
-    worker.onerror = (event) => {
-      worker.terminate();
-      reject(event.error ?? new Error("No fue posible generar el archivo Excel."));
-    };
-
-    worker.postMessage({ rows, sheetName, fileName });
-  });
+  const XLSX = await import("xlsx");
+  const workbook = XLSX.utils.book_new();
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  XLSX.utils.book_append_sheet(workbook, worksheet, sheetName.slice(0, 31));
+  XLSX.writeFile(workbook, fileName);
 }
 
-export default function AnalisisPage() {
+export default function AnalisisProyectoPage() {
   const [rawRows, setRawRows] = useState<RawRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -405,7 +359,6 @@ export default function AnalisisPage() {
   const [selectedCliente, setSelectedCliente] = useState("");
   const [selectedProyecto, setSelectedProyecto] = useState("");
   const [selectedSite, setSelectedSite] = useState("");
-  const [winnerScopeLevel, setWinnerScopeLevel] = useState<LevelKey>("cliente");
   const [masterClientes, setMasterClientes] = useState<string[]>([]);
   const [masterProyectos, setMasterProyectos] = useState<ProjectCatalogRow[]>([]);
   const [detailPage, setDetailPage] = useState(1);
@@ -538,20 +491,6 @@ export default function AnalisisPage() {
   }, []);
 
   const movements = useMemo(() => rawRows.map((row) => buildMovementRow(row)), [rawRows]);
-  const siteCatalogByName = useMemo(() => {
-    const map = new Map<string, { cliente: string; proyecto: string }>();
-
-    for (const row of movements) {
-      const key = normalizeText(row.site);
-      if (!key || map.has(key)) continue;
-      map.set(key, {
-        cliente: row.cliente,
-        proyecto: row.proyecto,
-      });
-    }
-
-    return map;
-  }, [movements]);
   const appliedLookupFiltro = appliedLookupValue?.filtro;
   const dateFilteredMovements = useMemo(() => {
     const fromDate = appliedFechaInicio ? new Date(`${appliedFechaInicio}T00:00:00`).getTime() : 0;
@@ -570,34 +509,57 @@ export default function AnalisisPage() {
       if (!filterText) return true;
       return rowText === filterText || rowText.includes(filterText) || filterText.includes(rowText);
     };
-    const lookupCliente = appliedLookupFiltro?.nombreCliente ?? "";
-    const lookupProyecto = appliedLookupFiltro?.nombreProyecto ?? "";
-    const lookupSite = appliedLookupFiltro?.nombreSite ?? "";
+
+    if (appliedLookupFiltro) {
+      const lookupCliente = appliedLookupFiltro.nombreCliente ?? "";
+      const lookupProyecto = appliedLookupFiltro.nombreProyecto ?? "";
+      const lookupSite = appliedLookupFiltro.nombreSite ?? "";
+
+      const exactRows = dateFilteredMovements.filter((row) => {
+        if (!matches(row.cliente, lookupCliente)) return false;
+        if (!matches(row.proyecto, lookupProyecto)) return false;
+        if (!matches(row.site, lookupSite)) return false;
+        return true;
+      });
+      if (exactRows.length > 0) {
+        return {
+          rows: exactRows,
+          level: (lookupSite ? "site" : "proyecto") as LevelKey,
+        };
+      }
+
+      const projectRows = dateFilteredMovements.filter((row) => {
+        if (!matches(row.cliente, lookupCliente)) return false;
+        if (lookupProyecto && !matches(row.proyecto, lookupProyecto)) return false;
+        return true;
+      });
+      if (projectRows.length > 0) {
+        return {
+          rows: projectRows,
+          level: "proyecto" as LevelKey,
+        };
+      }
+
+      const clientRows = dateFilteredMovements.filter((row) => matches(row.cliente, lookupCliente));
+      if (clientRows.length > 0) {
+        return { rows: clientRows, level: "proyecto" as LevelKey };
+      }
+
+      return { rows: dateFilteredMovements, level: "proyecto" as LevelKey };
+    }
+
     const selectedRows = dateFilteredMovements.filter((row) => {
-      if (winnerScopeLevel !== "proyecto" && lookupCliente && !matches(row.cliente, lookupCliente)) return false;
-      if (lookupProyecto && !matches(row.proyecto, lookupProyecto)) return false;
-      if (lookupSite && !matches(row.site, lookupSite)) return false;
-      if (winnerScopeLevel === "cliente" && selectedCliente && row.cliente !== selectedCliente) return false;
-      if (winnerScopeLevel !== "site" && selectedProyecto && row.proyecto !== selectedProyecto) return false;
+      if (selectedProyecto && row.proyecto !== selectedProyecto) return false;
       if (selectedSite && row.site !== selectedSite) return false;
       return true;
     });
 
     return {
       rows: selectedRows,
+      level: selectedSite ? ("site" as LevelKey) : ("proyecto" as LevelKey),
     };
-  }, [appliedLookupFiltro, dateFilteredMovements, selectedCliente, selectedProyecto, selectedSite, winnerScopeLevel]);
-  const activeLevel: LevelKey = useMemo(() => {
-    if (winnerScopeLevel === "site") return "site";
-    if (winnerScopeLevel === "proyecto") {
-      return selectedProyecto ? "site" : "proyecto";
-    }
-
-    if (selectedSite) return "site";
-    if (selectedProyecto) return "site";
-    if (selectedCliente) return "proyecto";
-    return "cliente";
-  }, [selectedCliente, selectedProyecto, selectedSite, winnerScopeLevel]);
+  }, [appliedLookupFiltro, dateFilteredMovements, selectedCliente, selectedProyecto, selectedSite]);
+  const activeLevel: LevelKey = scopeSelection.level;
   const currentLevelLabel = getLevelLabel(activeLevel);
   const scopedMovements = scopeSelection.rows;
 
@@ -616,6 +578,7 @@ export default function AnalisisPage() {
   );
   const saldo = totalIngresos - totalEgresos;
   const avance = totalIngresos > 0 ? (totalEgresos / totalIngresos) * 100 : 0;
+  const resolvedProyectoForHierarchy = selectedProyecto || appliedLookupFiltro?.nombreProyecto || "";
   const selectedRanking = useMemo(
     () => aggregateByLevel(scopedMovements, activeLevel, appliedUsdExchangeRate, appliedDopExchangeRate),
     [activeLevel, appliedDopExchangeRate, appliedUsdExchangeRate, scopedMovements],
@@ -652,20 +615,22 @@ export default function AnalisisPage() {
   }, [totalDetailPages]);
 
   const displayRanking = useMemo(() => {
-    const byLabel = new Map<string, RankingRow>();
-    for (const item of selectedRanking) {
-      byLabel.set(normalizeText(item.label), item);
-    }
+    if (activeLevel !== "site") {
+      const byLabel = new Map<string, RankingRow>();
+      for (const item of selectedRanking) {
+        byLabel.set(normalizeText(item.label), item);
+      }
 
-    if (activeLevel === "cliente") {
-      const sourceClients =
-        masterClientes.length > 0 ? masterClientes : Array.from(new Set(movements.map((row) => row.cliente).filter(Boolean)));
+      const sourceProjects =
+        masterProyectos.length > 0
+          ? Array.from(new Set(masterProyectos.map((row) => row.nombreProyecto).filter(Boolean)))
+          : Array.from(new Set(movements.map((row) => row.proyecto).filter(Boolean)));
 
-      for (const cliente of sourceClients) {
-        const normalizedCliente = normalizeText(cliente);
-        if (!byLabel.has(normalizedCliente)) {
-          byLabel.set(normalizedCliente, {
-            label: cliente,
+      for (const proyecto of sourceProjects) {
+        const normalizedProyecto = normalizeText(proyecto);
+        if (!byLabel.has(normalizedProyecto)) {
+          byLabel.set(normalizedProyecto, {
+            label: proyecto,
             count: 0,
             ingresosPen: 0,
             egresosPen: 0,
@@ -673,77 +638,42 @@ export default function AnalisisPage() {
           });
         }
       }
-    } else if (activeLevel === "proyecto") {
-      const sourceProjects =
-        masterProyectos.length > 0
-          ? masterProyectos.map((row) => ({
-              nombreProyecto: row.nombreProyecto,
-              nombreCliente: row.nombreCliente,
-            }))
-          : Array.from(
-              new Map(
-                movements.map((row) => [
-                  normalizeText(row.proyecto),
-                  { nombreProyecto: row.proyecto, nombreCliente: row.cliente },
-                ]),
-              ).values(),
-            );
 
-      for (const proyecto of sourceProjects) {
-        const normalizedProyecto = normalizeText(proyecto.nombreProyecto);
-        const existing = byLabel.get(normalizedProyecto);
-        if (existing) {
-          existing.cliente = existing.cliente || proyecto.nombreCliente;
-          continue;
-        }
+      return Array.from(byLabel.values()).sort((left, right) => left.netoPen - right.netoPen || left.count - right.count || left.label.localeCompare(right.label, "es", { sensitivity: "base" }));
+    }
 
-        byLabel.set(normalizedProyecto, {
-          label: proyecto.nombreProyecto,
-          cliente: proyecto.nombreCliente,
+    const byLabel = new Map<string, RankingRow>();
+    for (const item of selectedRanking) {
+      byLabel.set(normalizeText(item.label), item);
+    }
+
+    const sourceSites =
+      movements.length > 0
+        ? Array.from(
+            new Set(
+              movements
+                .filter((row) => !resolvedProyectoForHierarchy || normalizeText(row.proyecto) === normalizeText(resolvedProyectoForHierarchy))
+                .map((row) => row.site)
+                .filter(Boolean),
+            ),
+          )
+        : [];
+
+    for (const site of sourceSites) {
+      const normalizedSite = normalizeText(site);
+      if (!byLabel.has(normalizedSite)) {
+        byLabel.set(normalizedSite, {
+          label: site,
           count: 0,
           ingresosPen: 0,
           egresosPen: 0,
           netoPen: 0,
         });
       }
-    } else {
-      const siteSourceRows = winnerScopeLevel === "site" ? movements : scopedMovements;
-      const sourceSites = siteSourceRows.length > 0 ? Array.from(new Set(siteSourceRows.map((row) => row.site).filter(Boolean))) : [];
-
-      for (const site of sourceSites) {
-        const normalizedSite = normalizeText(site);
-        const siteMatch = siteCatalogByName.get(normalizedSite);
-        if (!byLabel.has(normalizedSite)) {
-          byLabel.set(normalizedSite, {
-            label: site,
-            cliente: siteMatch?.cliente,
-            proyecto: siteMatch?.proyecto,
-            count: 0,
-            ingresosPen: 0,
-            egresosPen: 0,
-            netoPen: 0,
-          });
-        }
-      }
     }
 
-    const rows = Array.from(byLabel.values()).sort((left, right) => left.netoPen - right.netoPen || left.count - right.count || left.label.localeCompare(right.label, "es", { sensitivity: "base" }));
-
-    if (activeLevel === "site" && winnerScopeLevel === "site") {
-      const topLosses = [...rows]
-        .filter((row) => row.netoPen < 0)
-        .sort((left, right) => left.netoPen - right.netoPen || right.count - left.count || left.label.localeCompare(right.label, "es", { sensitivity: "base" }))
-        .slice(0, 5);
-      const topGains = [...rows]
-        .filter((row) => row.netoPen > 0)
-        .sort((left, right) => right.netoPen - left.netoPen || right.count - left.count || left.label.localeCompare(right.label, "es", { sensitivity: "base" }))
-        .slice(0, 5);
-
-      return [...topLosses, ...topGains];
-    }
-
-    return rows;
-  }, [activeLevel, masterClientes, masterProyectos, movements, selectedCliente, selectedRanking, selectedProyecto, siteCatalogByName, winnerScopeLevel]);
+    return Array.from(byLabel.values()).sort((left, right) => left.netoPen - right.netoPen || left.count - right.count || left.label.localeCompare(right.label, "es", { sensitivity: "base" }));
+  }, [activeLevel, masterProyectos, movements, resolvedProyectoForHierarchy, selectedRanking]);
 
   const topIngresos = useMemo(
     () => [...displayRanking].sort((left, right) => right.ingresosPen - left.ingresosPen).slice(0, 10),
@@ -758,14 +688,17 @@ export default function AnalisisPage() {
     [displayRanking],
   );
 
-  const winnerRanking = useMemo(
-    () => aggregateByLevel(scopedMovements, winnerScopeLevel, appliedUsdExchangeRate, appliedDopExchangeRate),
-    [appliedDopExchangeRate, appliedUsdExchangeRate, scopedMovements, winnerScopeLevel],
-  );
-  const topWinner = winnerRanking[0] ?? null;
+  const topWinner = [...displayRanking].sort((left, right) => right.netoPen - left.netoPen || right.count - left.count)[0] ?? null;
   const topLoser = [...displayRanking].sort((left, right) => left.netoPen - right.netoPen)[0] ?? null;
+  const biggestIncome = [...displayRanking].sort((left, right) => right.ingresosPen - left.ingresosPen)[0] ?? null;
+  const biggestExpense = [...displayRanking].sort((left, right) => right.egresosPen - left.egresosPen)[0] ?? null;
   const rankingPieData = useMemo<PieEntry[]>(() => {
-    const source = [...displayRanking];
+    const source =
+      activeLevel === "cliente"
+        ? [...displayRanking]
+        : activeLevel === "proyecto"
+          ? [...displayRanking]
+          : [...displayRanking].sort((left, right) => right.netoPen - left.netoPen).slice(0, 8);
 
     return source
       .map((item, index) => ({
@@ -774,7 +707,7 @@ export default function AnalisisPage() {
         signedValue: item.netoPen,
         color: PIE_COLORS[index % PIE_COLORS.length],
       }))
-      .filter((item) => item.value > 0);
+      .filter((item) => (activeLevel === "cliente" || activeLevel === "proyecto" ? true : item.value > 0));
   }, [activeLevel, displayRanking]);
 
   const clienteOptions = useMemo(() => {
@@ -794,60 +727,24 @@ export default function AnalisisPage() {
     );
   }, [masterProyectos, movements]);
   const siteOptions = useMemo(() => {
-    return Array.from(new Set(movements.map((row) => row.site).filter(Boolean))).sort((left, right) =>
-      left.localeCompare(right, "es", { sensitivity: "base" }),
-    );
-  }, [movements]);
-
-  const scopeDescription = useMemo(() => {
-    if (activeLevel === "cliente") {
-      return "";
-    }
-
-    if (activeLevel === "proyecto") {
-      return selectedProyecto ? `Ranking, detalle y movimientos del proyecto ${selectedProyecto}.` : "";
-    }
-
-    if (winnerScopeLevel === "site") {
-      return selectedSite ? `Ranking, detalle y movimientos del site ${selectedSite}.` : "";
-    }
-
-    return selectedSite
-      ? `Ranking, detalle y movimientos del site ${selectedSite}.`
-      : "";
-  }, [activeLevel, selectedCliente, selectedProyecto, selectedSite, winnerScopeLevel]);
-
-  const resolveSiteOwner = (siteName: string) => {
-    const normalizedSite = normalizeText(siteName);
-    const siteMatch = movements.find((row) => normalizeText(row.site) === normalizedSite);
-
-    return {
-      cliente: siteMatch?.cliente || "",
-      proyecto: siteMatch?.proyecto || "",
-    };
-  };
+    if (!resolvedProyectoForHierarchy) return [];
+    return Array.from(
+      new Set(
+        movements
+          .filter((row) => row.proyecto === resolvedProyectoForHierarchy)
+          .map((row) => row.site)
+          .filter(Boolean),
+      ),
+    ).sort((left, right) => left.localeCompare(right, "es", { sensitivity: "base" }));
+  }, [movements, resolvedProyectoForHierarchy]);
 
   const handleRankingSelection = (label: string) => {
-    if (activeLevel === "cliente") {
-      setSelectedCliente(label);
-      setSelectedProyecto("");
-      setSelectedSite("");
-      return;
-    }
-
     if (activeLevel === "proyecto") {
       setSelectedProyecto(label);
       setSelectedSite("");
       return;
     }
 
-    const resolvedSiteOwner = resolveSiteOwner(label);
-    if (resolvedSiteOwner.cliente) {
-      setSelectedCliente(resolvedSiteOwner.cliente);
-    }
-    if (resolvedSiteOwner.proyecto) {
-      setSelectedProyecto(resolvedSiteOwner.proyecto);
-    }
     setSelectedSite(label);
   };
 
@@ -855,11 +752,9 @@ export default function AnalisisPage() {
     setAppliedLookupValue(draftLookupValue);
     setDetailPage(1);
     if (draftLookupValue?.filtro) {
-      setSelectedCliente(draftLookupValue.filtro.nombreCliente ?? "");
       setSelectedProyecto(draftLookupValue.filtro.nombreProyecto ?? "");
       setSelectedSite(draftLookupValue.filtro.nombreSite ?? "");
     } else {
-      setSelectedCliente("");
       setSelectedProyecto("");
       setSelectedSite("");
     }
@@ -876,8 +771,6 @@ export default function AnalisisPage() {
     const levelLabel = currentLevelLabel.toLowerCase();
     const exportRows = displayRanking.map((row) => ({
       Nivel: row.label,
-      ...(activeLevel === "proyecto" ? { Cliente: row.cliente || "-" } : {}),
-      ...(activeLevel === "site" ? { Cliente: row.cliente || "-", Proyecto: row.proyecto || "-" } : {}),
       Ingresos: formatCurrency(row.ingresosPen, "PEN"),
       Egresos: formatCurrency(row.egresosPen, "PEN"),
       Neto: formatCurrency(row.netoPen, "PEN"),
@@ -892,13 +785,14 @@ export default function AnalisisPage() {
   };
 
   const handleExportVisibleMovements = async () => {
-    if (detailSortedRows.length === 0) return;
+    if (visibleDetailRows.length === 0) return;
 
-    const exportRows = detailSortedRows.map((row, index) => ({
-      Item: index + 1,
+    const startIndex = (detailPage - 1) * detailPageSize;
+    const exportRows = visibleDetailRows.map((row, index) => ({
+      Item: startIndex + index + 1,
       Fecha: row.fechaRaw || "-",
       Tipo: row.tipo,
-      ...(activeLevel === "proyecto" ? { Cliente: row.cliente } : {}),
+      Cliente: row.cliente,
       Proyecto: row.proyecto,
       Site: row.site,
       Moneda: row.moneda,
@@ -913,7 +807,7 @@ export default function AnalisisPage() {
     await exportRowsToExcel(
       exportRows,
       "movimientos",
-      `analisis_movimientos_${sanitizeFileName(currentLevelLabel)}_${appliedFechaInicio}_${appliedFechaFin}.xlsx`,
+      `analisis_movimientos_${sanitizeFileName(currentLevelLabel)}_p${detailPage}_${appliedFechaInicio}_${appliedFechaFin}.xlsx`,
     );
   };
 
@@ -1009,44 +903,15 @@ export default function AnalisisPage() {
       ) : (
         <>
           <div style={styles.kpiGrid}>
-            <AppCard style={styles.winnerScopeCard}>
-                <div style={styles.winnerScopeRow}>
-                  <div>
-                    <div style={styles.kpiLabel}>Criterio de seleccion</div>
-                  </div>
-                  <div style={styles.winnerScopeActions}>
-                  {(["cliente", "proyecto", "site"] as LevelKey[]).map((level) => (
-                    <button
-                      key={level}
-                      type="button"
-                      style={winnerScopeLevel === level ? styles.kpiPillButtonActive : styles.kpiPillButton}
-                      onClick={() => {
-                        startTransition(() => {
-                          setWinnerScopeLevel(level);
-                          setDetailPage(1);
-
-                          if (level === "cliente") {
-                            setSelectedCliente("");
-                            setSelectedProyecto("");
-                            setSelectedSite("");
-                            return;
-                          }
-
-                          if (level === "proyecto") {
-                            setSelectedCliente("");
-                            setSelectedProyecto("");
-                            setSelectedSite("");
-                            return;
-                          }
-                        });
-                      }}
-                      aria-pressed={winnerScopeLevel === level}
-                    >
-                      {level === "cliente" ? "Por cliente" : level === "proyecto" ? "Por proyecto" : "Por site"}
-                    </button>
-                  ))}
-                </div>
-              </div>
+            <AppCard style={styles.highlightCard}>
+              <div style={styles.kpiLabel}>Mayor ingreso</div>
+              <div style={styles.highlightTitle}>{biggestIncome?.label ?? "-"}</div>
+              <div style={{ ...styles.kpiValue, color: "#14532D" }}>{formatCurrency(biggestIncome?.ingresosPen ?? 0, "PEN")}</div>
+            </AppCard>
+            <AppCard style={styles.highlightCard}>
+              <div style={styles.kpiLabel}>Mayor egreso</div>
+              <div style={styles.highlightTitle}>{biggestExpense?.label ?? "-"}</div>
+              <div style={{ ...styles.kpiValue, color: "#7F1D1D" }}>{formatCurrency(biggestExpense?.egresosPen ?? 0, "PEN")}</div>
             </AppCard>
             <AppCard style={styles.highlightCard}>
               <div style={styles.kpiLabel}>Quien gana mas</div>
@@ -1064,72 +929,31 @@ export default function AnalisisPage() {
             <AppCard style={styles.analysisChartCard}>
               <AppSectionHeader
                 title={`Ranking por ${currentLevelLabel.toLowerCase()}`}
-                description={scopeDescription}
+                description={
+                  !selectedProyecto
+                    ? "Primero se muestran proyectos."
+                    : !selectedSite
+                      ? "Selecciona un proyecto para ver sites."
+                      : "Vista detallada del site seleccionado."
+                }
               />
               <div style={styles.chartBreadcrumb}>
                 <span style={styles.chartBreadcrumbLabel}>Ruta</span>
                 <div style={styles.chartBreadcrumbTrail}>
-                  {winnerScopeLevel === "cliente" ? (
-                    <button
-                      type="button"
-                      style={!selectedCliente ? styles.chartBreadcrumbButtonActive : styles.chartBreadcrumbButton}
-                      onClick={() => {
-                        setSelectedCliente("");
-                        setSelectedProyecto("");
-                        setSelectedSite("");
-                      }}
-                    >
-                      Cliente
-                    </button>
-                  ) : winnerScopeLevel === "proyecto" ? (
-                    <button
-                      type="button"
-                      style={!selectedProyecto ? styles.chartBreadcrumbButtonActive : styles.chartBreadcrumbButton}
-                      onClick={() => {
-                        setSelectedProyecto("");
-                        setSelectedSite("");
-                      }}
-                    >
-                      Proyecto
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      style={!selectedSite ? styles.chartBreadcrumbButtonActive : styles.chartBreadcrumbButton}
-                      onClick={() => {
-                        setSelectedSite("");
-                      }}
-                    >
-                      Site
-                    </button>
-                  )}
-                  {winnerScopeLevel === "cliente" && selectedCliente ? <ChevronRight size={14} strokeWidth={2.2} color="#94A3B8" /> : null}
-                  {winnerScopeLevel === "cliente" && selectedCliente ? (
-                    <button
-                      type="button"
-                      style={!selectedProyecto ? styles.chartBreadcrumbButtonActive : styles.chartBreadcrumbButton}
-                      onClick={() => {
-                        setSelectedProyecto("");
-                        setSelectedSite("");
-                      }}
-                    >
-                      {selectedCliente}
-                    </button>
+                  <button
+                    type="button"
+                    style={!selectedProyecto ? styles.chartBreadcrumbButtonActive : styles.chartBreadcrumbButton}
+                    onClick={() => {
+                      setSelectedProyecto("");
+                      setSelectedSite("");
+                    }}
+                  >
+                    Proyecto
+                  </button>
+                  {selectedProyecto ? (
+                    <ChevronRight size={14} strokeWidth={2.2} color="#94A3B8" />
                   ) : null}
-                  {winnerScopeLevel === "cliente" && selectedProyecto ? <ChevronRight size={14} strokeWidth={2.2} color="#94A3B8" /> : null}
-                  {winnerScopeLevel === "cliente" && selectedProyecto ? (
-                    <button
-                      type="button"
-                      style={!selectedSite ? styles.chartBreadcrumbButtonActive : styles.chartBreadcrumbButton}
-                      onClick={() => {
-                        setSelectedSite("");
-                      }}
-                    >
-                      {selectedProyecto}
-                    </button>
-                  ) : null}
-                  {winnerScopeLevel === "proyecto" && selectedProyecto ? <ChevronRight size={14} strokeWidth={2.2} color="#94A3B8" /> : null}
-                  {winnerScopeLevel === "proyecto" && selectedProyecto ? (
+                  {selectedProyecto ? (
                     <button
                       type="button"
                       style={!selectedSite ? styles.chartBreadcrumbButtonActive : styles.chartBreadcrumbButton}
@@ -1175,7 +999,6 @@ export default function AnalisisPage() {
                         key={item.label}
                         type="button"
                         style={
-                          (activeLevel === "cliente" && normalizeText(selectedCliente) === normalizeText(item.label)) ||
                           (activeLevel === "proyecto" && normalizeText(selectedProyecto) === normalizeText(item.label)) ||
                           (activeLevel === "site" && normalizeText(selectedSite) === normalizeText(item.label))
                             ? styles.legendItemSelected
@@ -1191,11 +1014,6 @@ export default function AnalisisPage() {
               </div>
                 </div>
               </div>
-              {winnerScopeLevel === "site" ? (
-                <div style={styles.siteFootnote}>
-                  Se muestran los 5 clientes con mayor perdida y ganancia neta.
-                </div>
-              ) : null}
             </AppCard>
 
           <AppCard style={styles.analysisTableCard}>
@@ -1215,8 +1033,6 @@ export default function AnalisisPage() {
               <RankingTable
                 rows={displayRanking}
                 kind="neto"
-                showClient={activeLevel === "proyecto" || activeLevel === "site"}
-                showProject={activeLevel === "site"}
                 onRowClick={(row) => {
                   handleRankingSelection(row.label);
                 }}
@@ -1330,7 +1146,7 @@ export default function AnalisisPage() {
                           {[
                             ["fecha", "Fecha"],
                             ["tipo", "Tipo"],
-                            ...(activeLevel === "proyecto" ? ([["cliente", "Cliente"]] as Array<[string, string]>) : []),
+                            ["cliente", "Cliente"],
                             ["proyecto", "Proyecto"],
                             ["site", "Site"],
                             ["moneda", "Moneda"],
@@ -1339,7 +1155,7 @@ export default function AnalisisPage() {
                             ["detalle", "Detalle"],
                           ].map(([column, label]) => {
                             const isActive = detailSortColumn === column;
-                            const icon = isActive ? (detailSortDirection === "asc" ? "Ã¢â€“Â²" : "Ã¢â€“Â¼") : "";
+                            const icon = isActive ? (detailSortDirection === "asc" ? "▲" : "▼") : "";
                             return (
                               <th key={column} style={styles.th}>
                                 <button
@@ -1369,7 +1185,7 @@ export default function AnalisisPage() {
                           <tr key={`${row.fechaRaw}-${row.cliente}-${row.proyecto}-${row.site}-${index}`}>
                             <td style={styles.tdStrong}>{row.fechaRaw || "-"}</td>
                             <td style={styles.td}>{row.tipo}</td>
-                            {activeLevel === "proyecto" ? <td style={styles.td}>{row.cliente}</td> : null}
+                            <td style={styles.td}>{row.cliente}</td>
                             <td style={styles.td}>{row.proyecto}</td>
                             <td style={styles.td}>{row.site}</td>
                             <td style={styles.td}>{row.moneda}</td>
@@ -1397,14 +1213,10 @@ function RankingTable({
   rows,
   kind = "neto",
   onRowClick,
-  showClient = false,
-  showProject = false,
 }: {
   rows: RankingRow[];
   kind?: "ingreso" | "egreso" | "neto";
   onRowClick?: (row: RankingRow) => void;
-  showClient?: boolean;
-  showProject?: boolean;
 }) {
   return (
     <div style={styles.tableWrap}>
@@ -1413,8 +1225,6 @@ function RankingTable({
           <thead>
             <tr>
               <th style={styles.th}>Nivel</th>
-              {showClient ? <th style={styles.th}>Cliente</th> : null}
-              {showProject ? <th style={styles.th}>Proyecto</th> : null}
               <th style={styles.thRight}>Ingresos</th>
               <th style={styles.thRight}>Egresos</th>
               <th style={styles.thRight}>{kind === "ingreso" ? "Ingresos" : kind === "egreso" ? "Egresos" : "Neto"}</th>
@@ -1427,11 +1237,9 @@ function RankingTable({
                 <tr
                   key={row.label}
                   style={onRowClick ? styles.clickableRow : undefined}
-                onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  onClick={onRowClick ? () => onRowClick(row) : undefined}
                 >
                   <td style={styles.tdStrong}>{row.label}</td>
-                  {showClient ? <td style={styles.td}>{row.cliente || "-"}</td> : null}
-                  {showProject ? <td style={styles.td}>{row.proyecto || "-"}</td> : null}
                   <td style={styles.tdRight}>{formatCurrency(row.ingresosPen, "PEN")}</td>
                   <td style={styles.tdRight}>{formatCurrency(row.egresosPen, "PEN")}</td>
                   <td style={{ ...styles.tdRight, fontWeight: 700, color: mainValue >= 0 ? "#14532D" : "#7F1D1D" }}>
@@ -1534,71 +1342,21 @@ const styles: Record<string, React.CSSProperties> = {
       gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
       gap: 10,
       marginBottom: 2,
-      alignItems: "stretch",
     },
     kpiCard: {
       borderRadius: 18,
       padding: "8px 16px",
       minHeight: 80,
     },
-  highlightCard: {
-    borderRadius: 18,
-    padding: "8px 12px",
-    minHeight: 78,
-    height: "100%",
-    marginBottom: 0,
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "center",
-  },
-  winnerScopeCard: {
-    borderRadius: 18,
-    padding: "8px 12px",
-    minHeight: 78,
-    height: "100%",
-    marginBottom: 0,
-    display: "flex",
-    alignItems: "center",
-  },
-  winnerScopeRow: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-    flexWrap: "wrap",
-    width: "100%",
-  },
-  winnerScopeActions: {
-    display: "flex",
-    alignItems: "center",
-    gap: 4,
-    flexWrap: "wrap",
-  },
-  kpiPillButton: {
-    borderRadius: 999,
-    border: "1px solid #CBD5E1",
-    background: "#FFFFFF",
-    color: "#334155",
-    fontSize: 10,
-    fontWeight: 800,
-    padding: "3px 9px",
-    cursor: "pointer",
-  },
-  kpiPillButtonActive: {
-    borderRadius: 999,
-    border: "1px solid #2563EB",
-    background: "linear-gradient(135deg, #1D4ED8 0%, #2563EB 100%)",
-    color: "#FFFFFF",
-    fontSize: 10,
-    fontWeight: 800,
-    padding: "3px 9px",
-    cursor: "pointer",
-    boxShadow: "0 6px 14px rgba(37,99,235,0.18)",
-  },
-  kpiLabel: {
-    fontSize: 10,
-    fontWeight: 800,
-    color: "#64748B",
+    highlightCard: {
+      borderRadius: 18,
+      padding: "8px 12px",
+      minHeight: 78,
+    },
+    kpiLabel: {
+      fontSize: 10,
+      fontWeight: 800,
+      color: "#64748B",
       textTransform: "uppercase",
       letterSpacing: 0.4,
       marginBottom: 2,
@@ -1888,14 +1646,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 800,
     color: "#0F172A",
     whiteSpace: "nowrap",
-  },
-  siteFootnote: {
-    marginTop: 10,
-    paddingTop: 8,
-    borderTop: "1px dashed #CBD5E1",
-    fontSize: 12,
-    fontWeight: 700,
-    color: "#475569",
   },
   tableWrap: {
     overflowX: "auto",

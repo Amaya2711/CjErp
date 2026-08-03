@@ -81,6 +81,7 @@ const Dashboard3Page = lazy(() => import("../../features/reportes/gerencial/dash
 const BacklogPage = lazy(() => import("../../features/reportes/gerencial/backlog"));
 const IngresosEgresosPage = lazy(() => import("../../features/reportes/gerencial/ingresosegresos"));
 const AnalisisPage = lazy(() => import("../../features/reportes/gerencial/analisis"));
+const AnalisisProyectoPage = lazy(() => import("../../features/reportes/gerencial/analisisproyecto"));
 const RptAsistenciaPage = lazy(() => import("../../features/reportes/rptasistencia"));
 const RptAsistenciaEmpleadoPage = lazy(() => import("../../features/reportes/rptasistenciaempleado"));
 const ClaudeiaPage = lazy(() => import("../../features/reportes/administrativo/claudeia"));
@@ -181,6 +182,7 @@ export default function AppRouter() {
             <Route path="/reportes/gerencial/backlog" element={<BacklogPage />} />
             <Route path="/reportes/gerencial/ingresosegresos" element={<IngresosEgresosPage />} />
             <Route path="/reportes/gerencial/analisis" element={<AnalisisPage />} />
+            <Route path="/reportes/gerencial/analisisproyecto" element={<AnalisisProyectoPage />} />
             <Route path="/reportes/gerencial/dashboardcj" element={<DashboardCjPage />} />
             <Route path="/reportes/gerencial/dashboard1" element={<Dashboard1Page />} />
             <Route path="/reportes/rptasistencia" element={<RptAsistenciaPage />} />

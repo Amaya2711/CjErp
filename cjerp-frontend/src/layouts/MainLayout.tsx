@@ -166,7 +166,8 @@ export default function MainLayout() {
   useEffect(() => {
     const isIngresosEgresosPage =
       location.pathname.startsWith("/reportes/gerencial/ingresosegresos") ||
-      location.pathname.startsWith("/reportes/gerencial/analisis");
+      location.pathname.startsWith("/reportes/gerencial/analisis") ||
+      location.pathname.startsWith("/reportes/gerencial/analisisproyecto");
 
     if (isIngresosEgresosPage) {
       if (!ingresosEgresosSidebarStateRef.current?.active) {
