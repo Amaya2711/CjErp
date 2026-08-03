@@ -390,7 +390,7 @@ async function exportRowsToExcel(rows: Record<string, unknown>[], sheetName: str
 
 export default function AnalisisPage() {
   const [rawRows, setRawRows] = useState<RawRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [draftFechaInicio, setDraftFechaInicio] = useState(getYearStartInputValue());
   const [draftFechaFin, setDraftFechaFin] = useState(getTodayInputValue());
@@ -528,9 +528,6 @@ export default function AnalisisPage() {
 
   useEffect(() => {
     isMountedRef.current = true;
-    void loadRows();
-    void loadClientCatalog();
-    void loadProjectCatalog();
 
     return () => {
       isMountedRef.current = false;

@@ -116,6 +116,15 @@ function parseYearInputValue(value: string) {
   return Number.isFinite(parsed.getTime()) ? parsed.getFullYear() : null;
 }
 
+function getYearRangeInputValue(value: string, position: "start" | "end") {
+  const year = parseYearInputValue(value);
+  if (year === null) {
+    return value;
+  }
+
+  return position === "start" ? `${year}-01-01` : `${year}-12-31`;
+}
+
 function normalizeText(value?: string | null) {
   return String(value ?? "")
     .normalize("NFD")
@@ -731,8 +740,8 @@ export default function IngresosEgresosPage() {
           {
             consulta: "importar-consulta-dsh",
             parametros: [
-              { nombre: "FechaInicio", valor: appliedFechaInicio, tipo: "date" },
-              { nombre: "FechaFin", valor: appliedFechaFin, tipo: "date" },
+              { nombre: "FechaInicio", valor: getYearRangeInputValue(appliedFechaInicio, "start"), tipo: "date" },
+              { nombre: "FechaFin", valor: getYearRangeInputValue(appliedFechaFin, "end"), tipo: "date" },
             ],
           },
           { timeoutMs: 120000 },
