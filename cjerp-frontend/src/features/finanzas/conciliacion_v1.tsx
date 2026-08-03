@@ -1271,10 +1271,8 @@ export default function ConciliacionBcpPage() {
   const [clasificacionSaving, setClasificacionSaving] = useState(false);
   const [detalleScrollContentWidth, setDetalleScrollContentWidth] = useState(0);
 
-  const fechaDepositoGastos = useMemo(
-    () => conciliacionFiltros.fechaFin.trim() || conciliacionFiltros.fechaInicio.trim(),
-    [conciliacionFiltros.fechaFin, conciliacionFiltros.fechaInicio]
-  );
+  const fechaDepositoInicioGastos = useMemo(() => conciliacionFiltros.fechaInicio.trim(), [conciliacionFiltros.fechaInicio]);
+  const fechaDepositoFinGastos = useMemo(() => conciliacionFiltros.fechaFin.trim(), [conciliacionFiltros.fechaFin]);
   const gastosPlanillaFilteredRows = useMemo(() => {
     const quickSearch = normalizePlanillaGastoSearchValue(gastosPlanillaQuickSearch);
 
@@ -1424,13 +1422,14 @@ export default function ConciliacionBcpPage() {
   const canConciliar = !loadingConciliacion && !loadingAnalysis && !loadingInsert;
 
   const cargarGastosPlanilla = async (cancelToken?: { cancelled: boolean }) => {
-    const fechaDeposito = fechaDepositoGastos;
+    const fechaInicio = fechaDepositoInicioGastos;
+    const fechaFin = fechaDepositoFinGastos;
 
-    if (!fechaDeposito) {
+    if (!fechaInicio || !fechaFin) {
       if (!cancelToken?.cancelled) {
         setGastosPlanillaRows([]);
         setGastosPlanillaError("");
-        setGastosPlanillaMessage("Selecciona Fecha inicio o Fecha fin para consultar los gastos.");
+        setGastosPlanillaMessage("Selecciona Fecha inicio y Fecha fin para consultar los gastos.");
       }
       return;
     }
@@ -1447,7 +1446,8 @@ export default function ConciliacionBcpPage() {
         consulta: "gastos",
         parametros: [
           { nombre: "Estados", valor: "4", tipo: "string" },
-          { nombre: "FechaDeposito", valor: fechaDeposito, tipo: "string" },
+          { nombre: "FechaInicio", valor: fechaInicio, tipo: "date" },
+          { nombre: "FechaFin", valor: fechaFin, tipo: "date" },
           { nombre: "IdBanco", valor: String(idBanco), tipo: "int" },
         ],
       };
@@ -1461,7 +1461,9 @@ export default function ConciliacionBcpPage() {
       setGastosPlanillaRows(rows);
       setGastosPlanillaMessage(
         response.message?.trim() ||
-          (rows.length > 0 ? `Se encontraron ${rows.length} registro(s).` : "No se encontraron gastos para la fecha seleccionada.")
+          (rows.length > 0
+            ? `Se encontraron ${rows.length} registro(s).`
+            : "No se encontraron gastos para el rango de fechas seleccionado.")
       );
     } catch (gastosError) {
       if (!cancelToken?.cancelled) {
@@ -1475,19 +1477,6 @@ export default function ConciliacionBcpPage() {
       }
     }
   };
-
-  useEffect(() => {
-    if (conciliacionPlanillaTab !== "gastos") {
-      return;
-    }
-
-    const cancelToken = { cancelled: false };
-    void cargarGastosPlanilla(cancelToken);
-
-    return () => {
-      cancelToken.cancelled = true;
-    };
-  }, [conciliacionPlanillaTab, codigoBanco, fechaDepositoGastos]);
 
   useLayoutEffect(() => {
     const frameId = window.requestAnimationFrame(() => {
@@ -2848,6 +2837,20 @@ export default function ConciliacionBcpPage() {
 
     try {
       const response = await loadConciliacionPlanilla();
+
+      if ((response.registros?.length ?? 0) > 0) {
+        await handleExportConciliacionPlanilla(response);
+        return;
+      }
+
+      if (analysis?.archivos?.length) {
+        await handleExportConciliacionPlanillaFromAnalysis(analysis);
+        setMessage(
+          "No se encontraron movimientos en MovimientosBcp para el rango seleccionado. Se exportó el análisis cargado como respaldo."
+        );
+        return;
+      }
+
       await handleExportConciliacionPlanilla(response);
     } catch (conciliacionError) {
       setConciliacionPlanilla(null);
@@ -2909,6 +2912,23 @@ export default function ConciliacionBcpPage() {
     XLSX.writeFile(
       workbook,
       `conciliacion_planilla_${new Date().toISOString().slice(0, 10)}.xlsx`
+    );
+  };
+
+  const handleExportConciliacionPlanillaFromAnalysis = async (
+    analysisToExport: ConciliacionBcpAnalizarResponse | null = analysis
+  ) => {
+    if (!analysisToExport?.archivos?.length) {
+      return;
+    }
+
+    const XLSX = await import("xlsx");
+    const exportResponse = buildExportResponseFromAnalysisData(analysisToExport);
+    const { workbook } = buildExportWorkbook(XLSX, exportResponse);
+
+    XLSX.writeFile(
+      workbook,
+      `conciliacion_planilla_respaldo_${new Date().toISOString().slice(0, 10)}.xlsx`
     );
   };
 
@@ -3972,7 +3992,9 @@ export default function ConciliacionBcpPage() {
                       </div>
                       <div style={styles.gridToolbarCount}>
                         Registros: {gastosPlanillaFilteredRows.length}
-                        {fechaDepositoGastos ? ` | Fecha: ${formatDateValue(fechaDepositoGastos)}` : ""}
+                        {fechaDepositoInicioGastos && fechaDepositoFinGastos
+                          ? ` | Rango: ${formatDateValue(fechaDepositoInicioGastos)} al ${formatDateValue(fechaDepositoFinGastos)}`
+                          : ""}
                         {codigoBanco ? ` | Banco: ${codigoBanco}` : ""}
                       </div>
                     </div>
@@ -4054,9 +4076,9 @@ export default function ConciliacionBcpPage() {
                             <td style={styles.td} colSpan={GASTOS_PLANILLA_COLUMNS.length}>
                               {gastosPlanillaQuickSearch.trim()
                                 ? "No se encontraron registros que coincidan con la búsqueda."
-                                : fechaDepositoGastos
-                                ? "No se encontraron gastos para la fecha seleccionada."
-                                : "Selecciona una fecha de conciliacion para consultar los gastos."}
+                                : fechaDepositoInicioGastos && fechaDepositoFinGastos
+                                ? "No se encontraron gastos para el rango de fechas seleccionado."
+                                : "Selecciona Fecha inicio y Fecha fin para consultar los gastos."}
                             </td>
                           </tr>
                         )}

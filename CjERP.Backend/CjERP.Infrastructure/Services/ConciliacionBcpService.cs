@@ -192,6 +192,16 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
             };
         }
 
+        var erroresFormatoFecha = BuildDateFormatErrors(filas);
+        if (erroresFormatoFecha.Count > 0)
+        {
+            return new ConciliacionBcpInsertResponseDto
+            {
+                FilasRecibidas = filas.Count,
+                Errores = erroresFormatoFecha
+            };
+        }
+
         await using var connection = _sqlCommandFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
         var parametrosProcedimiento = await LoadStoredProcedureParametersAsync(connection, cancellationToken);
@@ -1753,12 +1763,28 @@ ORDER BY ic.key_ordinal;";
                 ? filasNormalizadasDesdeExcel
                 : filasNormalizadasIa;
 
+            var erroresFormatoFecha = BuildDateFormatWarnings(filasNormalizadas, archivo.NombreArchivo);
+            if (erroresFormatoFecha.Count > 0)
+            {
+                advertencias.AddRange(erroresFormatoFecha);
+            }
+
             if (filasNormalizadas.Count == 0)
             {
                 advertencias.Add("No se generaron filas normalizadas para el consolidado Movimientos ordenados.");
             }
 
-            var requiereRevision = (aiArchivo.RequiereRevision ?? false) || filasNormalizadas.Count == 0;
+            var requiereRevision = (aiArchivo.RequiereRevision ?? false) ||
+                                   filasNormalizadas.Count == 0 ||
+                                   erroresFormatoFecha.Count > 0;
+
+            var observacion = NormalizeText(aiArchivo.Observacion)
+                ?? "Analisis validado con ChatGPT y consolidado en formato Movimientos ordenados.";
+
+            if (erroresFormatoFecha.Count > 0)
+            {
+                observacion = "Se detectaron fechas con formato invalido. Ajusta la plantilla de carga para usar el formato requerido antes de insertar.";
+            }
 
             return new ConciliacionBcpAnalizarArchivoResponseDto
             {
@@ -1769,8 +1795,7 @@ ORDER BY ic.key_ordinal;";
                 FilaCabecera = filaCabecera,
                 FilaDatos = filaDatos,
                 RequiereRevision = requiereRevision,
-                Observacion = NormalizeText(aiArchivo.Observacion)
-                    ?? "Analisis validado con ChatGPT y consolidado en formato Movimientos ordenados.",
+                Observacion = observacion,
                 Advertencias = advertencias,
                 Mapeos = mapeos,
                 FilasNormalizadas = filasNormalizadas
@@ -4566,19 +4591,72 @@ ORDER BY p.parameter_id;";
             return isoDate;
         }
 
-        if (DateTime.TryParseExact(dateText, "MM/dd/yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var usDate))
-        {
-            return usDate;
-        }
-
         if (DateTime.TryParseExact(dateText, "dd/MM/yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var peruDate))
         {
             return peruDate;
         }
 
-        return DateTime.TryParse(dateText, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate)
-            ? parsedDate
-            : null;
+        return null;
+    }
+
+    private static List<string> BuildDateFormatErrors(IReadOnlyList<Dictionary<string, object?>> filas)
+    {
+        var errores = new List<string>();
+        var camposFecha = new[] { "Fecha", "FechaValuta" };
+        var formatosEsperados = "yyyy-MM-dd o dd/MM/yyyy";
+
+        for (var index = 0; index < filas.Count; index++)
+        {
+            var fila = filas[index];
+
+            foreach (var campo in camposFecha)
+            {
+                if (!TryGetValueIgnoreCase(fila, campo, out var rawValue) || rawValue is null || rawValue == DBNull.Value)
+                {
+                    continue;
+                }
+
+                var text = NormalizeText(rawValue.ToString());
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    continue;
+                }
+
+                if (rawValue is DateTime or DateOnly)
+                {
+                    continue;
+                }
+
+                if (TryParseDateValue(text) is not null)
+                {
+                    continue;
+                }
+
+                var archivo = TryGetValueIgnoreCase(fila, "ArchivoOrigen", out var archivoOrigen)
+                    ? NormalizeText(archivoOrigen?.ToString())
+                    : null;
+
+                var prefijoArchivo = string.IsNullOrWhiteSpace(archivo) ? string.Empty : $"Archivo '{archivo}': ";
+                errores.Add(
+                    $"{prefijoArchivo}fila {index + 1}, campo {campo} con valor '{text}' no tiene un formato valido. Usa {formatosEsperados}.");
+            }
+        }
+
+        return errores;
+    }
+
+    private static List<string> BuildDateFormatWarnings(IReadOnlyList<Dictionary<string, object?>> filas, string nombreArchivo)
+    {
+        var errores = BuildDateFormatErrors(filas);
+        if (errores.Count == 0)
+        {
+            return [];
+        }
+
+        return errores
+            .Select(item => $"[{nombreArchivo}] {item}")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static long? TryParseLongValue(string value)

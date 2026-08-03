@@ -22,7 +22,8 @@ namespace CjERP.Api.Controllers
         private static readonly string[] RequiredParameters = ["IdCargo", "IdEmpleado"];
         private static readonly string[] RequiredParametersAprobar = ["IdCargo", "IdEmpleado", "Estados"];
         private static readonly string[] RequiredParametersVacaciones = [];
-        private static readonly string[] RequiredParametersGastos = ["Estados", "FechaDeposito", "IdBanco"];
+        private static readonly string[] RequiredParametersGastosFechaDeposito = ["Estados", "FechaDeposito", "IdBanco"];
+        private static readonly string[] RequiredParametersGastosRango = ["Estados", "FechaInicio", "FechaFin", "IdBanco"];
         private static readonly string[] RequiredParametersPagadosDashboard = [];
         private static readonly string[] RequiredParametersImportarConsultaDsh = [];
         private static readonly string[] RequiredParametersMovimientosGastosIngresos = [];
@@ -73,7 +74,11 @@ namespace CjERP.Api.Controllers
                 StringComparer.OrdinalIgnoreCase);
 
             var requiredParameters = string.Equals(consulta, "gastos", StringComparison.OrdinalIgnoreCase)
-                ? RequiredParametersGastos
+                ? (
+                    providedNames.Contains("FechaDeposito")
+                        ? RequiredParametersGastosFechaDeposito
+                        : RequiredParametersGastosRango
+                  )
                 : string.Equals(consulta, "aprobar", StringComparison.OrdinalIgnoreCase)
                 ? RequiredParametersAprobar
                 : string.Equals(consulta, "vacaciones", StringComparison.OrdinalIgnoreCase)
