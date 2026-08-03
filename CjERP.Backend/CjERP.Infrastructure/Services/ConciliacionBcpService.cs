@@ -19,6 +19,7 @@ namespace CjERP.Infrastructure.Services;
 public sealed class ConciliacionBcpService : IConciliacionBcpService
 {
     private const string StoredProcedureInsert = "dbo.sp_MovimientosBcp_Insertar";
+    private const string StoredProcedureConciliacionInsert = "dbo.sp_MovimientosConciliacion_Insertar";
     private const string StoredProcedureBuscarMovimientos = "dbo.sp_MovimientosBcp_Buscar";
     private const string StoredProcedurePlanillaEstados = "dbo.sp_Planilla_Consulta_Estados";
     private const string StoredProcedureCombosClasificacionContable = "dbo.sp_MovimientosBcp_ObtenerCombosClasificacionContable";
@@ -64,6 +65,8 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
 """;
     private const string MovimientosTableName = "dbo.MovimientosBcp";
     private const string MovimientosUniqueIndexName = "UX_MovimientosBancarios_Unico";
+    private const string MovimientosConciliacionTableName = "dbo.MovimientosConciliacion";
+    private const string MovimientosConciliacionUniqueIndexName = "UX_MovimientosBancarios_Unico";
     private const int MaxSampleRows = 8;
     private static readonly Dictionary<string, string[]> HeaderAliases = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -108,6 +111,46 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         "EsNroOperacionValido",
         "TipoMovimientoBanco",
         "EstadoConciliacion"
+    ];
+    private static readonly string[] ConciliacionInsertColumns =
+    [
+        "IdBanco",
+        "CodigoBanco",
+        "IdPlantillaBanco",
+        "CodigoPlantillaBanco",
+        "Empresa",
+        "Cuenta",
+        "Moneda",
+        "Fecha",
+        "FechaValuta",
+        "Proveedor",
+        "ItemSistema",
+        "DescripcionOperacion",
+        "CDR",
+        "Referencia",
+        "Modulo",
+        "Transaccion",
+        "Relacion",
+        "Monto",
+        "SucursalAgencia",
+        "NroOperacion",
+        "Usuario",
+        "ArchivoOrigen",
+        "UsuarioImportacion",
+        "IdActivo",
+        "EsNroOperacionValido",
+        "TipoMovimientoBanco",
+        "EstadoConciliacion",
+        "Comentario",
+        "IdAreaFlujo",
+        "IdReferencia",
+        "IdCuentaContable",
+        "IdReglaContable",
+        "EsConciliado",
+        "FechaConciliacion",
+        "UsuarioConciliacion",
+        "ObservacionConciliacion",
+        "CamposExtraJson"
     ];
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -154,7 +197,11 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
 
         await using var connection = _sqlCommandFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
-        var parametrosProcedimiento = await LoadStoredProcedureParametersAsync(connection, cancellationToken);
+        var parametrosProcedimiento = await LoadStoredProcedureParametersAsync(connection, StoredProcedureInsert, cancellationToken);
+        var parametrosProcedimientoConciliacion = await LoadStoredProcedureParametersAsync(
+            connection,
+            StoredProcedureConciliacionInsert,
+            cancellationToken);
         ConciliacionBcpRawAnalysisResult? rawAnalysis = null;
 
         var archivosAnalizados = new List<ConciliacionBcpAnalizarArchivoResponseDto>();
@@ -204,128 +251,168 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
 
         await using var connection = _sqlCommandFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
-        var parametrosProcedimiento = await LoadStoredProcedureParametersAsync(connection, cancellationToken);
+        var parametrosProcedimientoConciliacion = await LoadStoredProcedureParametersAsync(
+            connection,
+            StoredProcedureConciliacionInsert,
+            cancellationToken);
 
-        if (parametrosProcedimiento.Count == 0)
+        if (parametrosProcedimientoConciliacion.Count == 0)
         {
             return new ConciliacionBcpInsertResponseDto
             {
                 FilasRecibidas = filas.Count,
-                Errores = [$"No se encontro el stored procedure {StoredProcedureInsert} o no tiene parametros visibles."]
+                Errores = [$"No se encontro el stored procedure {StoredProcedureConciliacionInsert} o no tiene parametros visibles."]
             };
         }
 
         try
         {
-            var uniqueKeyColumns = await LoadUniqueIndexColumnsAsync(connection, cancellationToken);
-            var duplicateFilter = await FilterDuplicateRowsAsync(
+            ApplyBancoMetadata(filas, request.CodigoBanco);
+            ApplyScotiabankOperationNumber(filas, request.CodigoBanco);
+            var filasPreparadas = BuildCanonicalConciliacionRows(filas);
+
+            var uniqueKeyColumns = await LoadUniqueIndexColumnsAsync(
                 connection,
-                filas,
+                MovimientosConciliacionTableName,
+                MovimientosConciliacionUniqueIndexName,
+                cancellationToken);
+
+            var filasUnicas = new List<Dictionary<string, object?>>(filasPreparadas.Count);
+            var keysEnLote = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var filasDuplicadasEnLote = 0;
+
+            foreach (var fila in filasPreparadas)
+            {
+                var key = BuildUniqueKey(fila, uniqueKeyColumns);
+                if (!keysEnLote.Add(key))
+                {
+                    filasDuplicadasEnLote++;
+                    continue;
+                }
+
+                filasUnicas.Add(fila);
+            }
+
+            var existingKeysConciliacion = await LoadExistingUniqueKeysAsync(
+                connection,
+                MovimientosConciliacionTableName,
+                MovimientosConciliacionUniqueIndexName,
                 uniqueKeyColumns,
                 cancellationToken);
 
-            var filasParaInsertar = duplicateFilter.Filas;
-            var advertencias = duplicateFilter.Advertencias;
+            var filasParaInsertarConciliacion = new List<Dictionary<string, object?>>();
+            var filasDuplicadasEnConciliacion = 0;
 
-            if (filasParaInsertar.Count == 0)
+            foreach (var fila in filasUnicas)
             {
-                advertencias = BuildManagerialInsertWarnings(
-                    advertencias,
-                    duplicateFilter.FilasDuplicadasEnBase,
-                    duplicateFilter.FilasDuplicadasEnLote,
-                    0,
-                    uniqueKeyColumns);
+                var key = BuildUniqueKey(fila, uniqueKeyColumns);
+                var existeEnConciliacion = existingKeysConciliacion.Contains(key);
 
+                if (!existeEnConciliacion)
+                {
+                    filasParaInsertarConciliacion.Add(fila);
+                }
+                else
+                {
+                    filasDuplicadasEnConciliacion++;
+                }
+            }
+
+            if (filasUnicas.Count == 0)
+            {
                 return new ConciliacionBcpInsertResponseDto
                 {
                     FilasRecibidas = filas.Count,
-                    FilasOmitidasDuplicadas = duplicateFilter.FilasDuplicadas,
-                    Advertencias = advertencias.Count > 0
-                        ? advertencias
-                        : ["Todas las filas recibidas ya existen en MovimientosBcp o repiten la llave unica."]
+                    FilasOmitidasDuplicadas = filas.Count,
+                    Advertencias =
+                    [
+                        "Todas las filas recibidas venian repetidas dentro del mismo lote."
+                    ]
                 };
             }
 
-            if (CanUseJsonPayload(parametrosProcedimiento))
+            var advertencias = new List<string>();
+            if (filasDuplicadasEnLote > 0)
             {
-                var jsonParameter = parametrosProcedimiento.First(item => !item.EsSalida);
-                var parametros = new DynamicParameters();
-                parametros.Add(
-                    TrimAt(jsonParameter.Nombre),
-                    JsonSerializer.Serialize(filasParaInsertar, JsonOptions),
-                    DbType.String);
+                advertencias.Add($"{filasDuplicadasEnLote} registro(s) venian repetidos dentro del mismo lote y se ignoraron una sola vez.");
+            }
 
-                await connection.ExecuteAsync(
-                    _sqlCommandFactory.Create(
-                        StoredProcedureInsert,
-                        parametros,
-                        CommandType.StoredProcedure,
-                        cancellationToken,
-                        commandTimeout: 300));
+            if (filasDuplicadasEnConciliacion > 0)
+            {
+                advertencias.Add($"{filasDuplicadasEnConciliacion} registro(s) ya existian en MovimientosConciliacion y no se volvieron a insertar.");
+            }
+
+            if (CanUseJsonPayload(parametrosProcedimientoConciliacion))
+            {
+                using var jsonTransaction = connection.BeginTransaction();
+
+                if (filasParaInsertarConciliacion.Count > 0)
+                {
+                    var jsonParameterConciliacion = parametrosProcedimientoConciliacion.First(item => !item.EsSalida);
+                    var parametrosConciliacion = new DynamicParameters();
+                    parametrosConciliacion.Add(
+                        TrimAt(jsonParameterConciliacion.Nombre),
+                        JsonSerializer.Serialize(filasParaInsertarConciliacion, JsonOptions),
+                        DbType.String);
+
+                    await connection.ExecuteAsync(
+                        new CommandDefinition(
+                            StoredProcedureConciliacionInsert,
+                            parametrosConciliacion,
+                            transaction: jsonTransaction,
+                            commandType: CommandType.StoredProcedure,
+                            commandTimeout: 300,
+                            cancellationToken: cancellationToken));
+                }
+
+                jsonTransaction.Commit();
 
                 return new ConciliacionBcpInsertResponseDto
                 {
                     FilasRecibidas = filas.Count,
-                    FilasInsertadas = filasParaInsertar.Count,
-                    FilasOmitidasDuplicadas = duplicateFilter.FilasDuplicadas,
+                    FilasInsertadas = filasParaInsertarConciliacion.Count,
+                    FilasOmitidasDuplicadas = filasDuplicadasEnLote + filasDuplicadasEnConciliacion,
                     Advertencias = advertencias
                 };
             }
 
             using var transaction = connection.BeginTransaction();
             var filasInsertadas = 0;
-            var filasOmitidasDuplicadas = duplicateFilter.FilasDuplicadas;
-            var filasOmitidasPorIndiceDuranteInsercion = 0;
+            var filasOmitidasDuplicadas = filasDuplicadasEnLote + filasDuplicadasEnConciliacion;
 
-            foreach (var fila in filasParaInsertar)
+            foreach (var fila in filasUnicas)
             {
-                var parametros = new DynamicParameters();
-                var normalizedRow = new Dictionary<string, object?>(fila, StringComparer.OrdinalIgnoreCase);
+                var key = BuildUniqueKey(fila, uniqueKeyColumns);
+                var insertarEnConciliacion = !existingKeysConciliacion.Contains(key);
 
-                foreach (var parametro in parametrosProcedimiento.Where(item => !item.EsSalida))
+                if (!insertarEnConciliacion)
                 {
-                    var key = TrimAt(parametro.Nombre);
-                    if (!normalizedRow.TryGetValue(key, out var rawValue))
-                    {
-                        continue;
-                    }
-
-                    parametros.Add(
-                        key,
-                        NormalizeParameterValue(rawValue, parametro.Tipo),
-                        ResolveDbType(parametro.Tipo));
+                    continue;
                 }
 
-                TryAddAuditParameters(parametros, parametrosProcedimiento, usuario);
+                var normalizedRow = new Dictionary<string, object?>(fila, StringComparer.OrdinalIgnoreCase);
+                ApplyBancoMetadata(normalizedRow, request.CodigoBanco);
 
                 try
                 {
                     await connection.ExecuteAsync(
-                        new CommandDefinition(
-                            StoredProcedureInsert,
-                            parametros,
-                            transaction: transaction,
-                            commandType: CommandType.StoredProcedure,
-                            commandTimeout: 300,
-                            cancellationToken: cancellationToken));
+                        BuildInsertCommand(
+                            StoredProcedureConciliacionInsert,
+                            normalizedRow,
+                            parametrosProcedimientoConciliacion,
+                            transaction,
+                            usuario,
+                            cancellationToken));
 
                     filasInsertadas++;
                 }
                 catch (SqlException sqlException) when (IsDuplicateKeyViolation(sqlException))
                 {
                     filasOmitidasDuplicadas++;
-                    filasOmitidasPorIndiceDuranteInsercion++;
                 }
             }
 
             transaction.Commit();
-
-            advertencias = BuildManagerialInsertWarnings(
-                advertencias,
-                duplicateFilter.FilasDuplicadasEnBase,
-                duplicateFilter.FilasDuplicadasEnLote,
-                filasOmitidasPorIndiceDuranteInsercion,
-                uniqueKeyColumns);
 
             return new ConciliacionBcpInsertResponseDto
             {
@@ -337,11 +424,11 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[ConciliacionBcp] Error insertando movimientos mediante {StoredProcedure}", StoredProcedureInsert);
+            _logger.LogError(ex, "[ConciliacionBcp] Error insertando movimientos mediante {StoredProcedure}", StoredProcedureConciliacionInsert);
             return new ConciliacionBcpInsertResponseDto
             {
                 FilasRecibidas = filas.Count,
-                Errores = [$"No se pudo insertar la informacion en {StoredProcedureInsert}: {ex.Message}"]
+                Errores = [$"No se pudo insertar la informacion en {StoredProcedureConciliacionInsert}: {ex.Message}"]
             };
         }
     }
@@ -1374,6 +1461,8 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
 
     private async Task<List<string>> LoadUniqueIndexColumnsAsync(
         SqlConnection connection,
+        string tableName,
+        string indexName,
         CancellationToken cancellationToken)
     {
         const string sql = @"
@@ -1389,7 +1478,7 @@ ORDER BY ic.key_ordinal;";
         var rows = await connection.QueryAsync<string>(
             _sqlCommandFactory.Create(
                 sql,
-                new { TableName = MovimientosTableName, IndexName = MovimientosUniqueIndexName },
+                new { TableName = tableName, IndexName = indexName },
                 CommandType.Text,
                 cancellationToken));
 
@@ -1398,6 +1487,7 @@ ORDER BY ic.key_ordinal;";
 
     private async Task<ConciliacionBcpDuplicateFilterResult> FilterDuplicateRowsAsync(
         SqlConnection connection,
+        string tableName,
         IReadOnlyList<Dictionary<string, object?>> filas,
         IReadOnlyList<string> uniqueKeyColumns,
         CancellationToken cancellationToken)
@@ -1407,7 +1497,7 @@ ORDER BY ic.key_ordinal;";
             return new ConciliacionBcpDuplicateFilterResult(filas.ToList(), 0, [], 0, 0);
         }
 
-        var existingKeys = await LoadExistingUniqueKeysAsync(connection, uniqueKeyColumns, cancellationToken);
+        var existingKeys = await LoadExistingUniqueKeysAsync(connection, tableName, null, uniqueKeyColumns, cancellationToken);
         var existingKeysSet = new HashSet<string>(existingKeys, StringComparer.OrdinalIgnoreCase);
         var seenInPayload = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var filteredRows = new List<Dictionary<string, object?>>(filas.Count);
@@ -1440,7 +1530,7 @@ ORDER BY ic.key_ordinal;";
         if (duplicateCount > 0)
         {
             advertencias.Add(
-                $"Se omitieron {duplicateCount} fila(s) duplicada(s) por la llave unica de MovimientosBcp ({string.Join(", ", uniqueKeyColumns)}).");
+                $"Se omitieron {duplicateCount} fila(s) duplicada(s) por la llave unica de {tableName} ({string.Join(", ", uniqueKeyColumns)}).");
 
             if (duplicateCountInDatabase > 0)
             {
@@ -1501,11 +1591,13 @@ ORDER BY ic.key_ordinal;";
 
     private async Task<HashSet<string>> LoadExistingUniqueKeysAsync(
         SqlConnection connection,
+        string tableName,
+        string? indexName,
         IReadOnlyList<string> uniqueKeyColumns,
         CancellationToken cancellationToken)
     {
         var keyExpression = string.Join(" + N'|' + ", uniqueKeyColumns.Select(GetSqlKeyExpression));
-        var sql = $"SELECT DISTINCT {keyExpression} AS UniqueKey FROM {MovimientosTableName};";
+        var sql = $"SELECT DISTINCT {keyExpression} AS UniqueKey FROM {tableName};";
 
         var rows = await connection.QueryAsync<string>(
             _sqlCommandFactory.Create(sql, commandType: CommandType.Text, cancellationToken: cancellationToken));
@@ -2702,6 +2794,7 @@ ORDER BY ic.key_ordinal;";
             movimiento.Empresa,
             movimiento.Cuenta,
             movimiento.Moneda);
+        ApplyBancoMetadata(row, movimiento.CodigoBanco);
 
         var descripcionOperacion = row["DescripcionOperacion"]?.ToString();
         var nroOperacion = row["NroOperacion"]?.ToString();
@@ -3446,6 +3539,7 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
 
             ApplyHeaderFallbackValues(normalizedRow, sourceRow, sourceIndexes);
             ApplyContextValues(normalizedRow, contextValues);
+            ApplyBancoMetadata(normalizedRow, codigoBanco);
             ApplyScotiabankOperationNumber(normalizedRow, codigoBanco);
 
             normalizedRow["ArchivoOrigen"] = archivo.NombreArchivo;
@@ -3510,6 +3604,7 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
                     : NormalizeCellForTarget(column, rawValue.ToString());
             }
 
+            ApplyBancoMetadata(normalizedRow, codigoBanco);
             ApplyScotiabankOperationNumber(normalizedRow, codigoBanco);
 
             normalizedRow["ArchivoOrigen"] = nombreArchivo;
@@ -3550,6 +3645,77 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
         }
 
         return row;
+    }
+
+    private static List<Dictionary<string, object?>> BuildCanonicalConciliacionRows(IReadOnlyList<Dictionary<string, object?>> rows)
+    {
+        var normalizedRows = new List<Dictionary<string, object?>>(rows.Count);
+
+        foreach (var sourceRow in rows)
+        {
+            var normalizedRow = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var column in ConciliacionInsertColumns)
+            {
+                normalizedRow[column] = GetConciliacionInsertValue(sourceRow, column);
+            }
+
+            normalizedRows.Add(normalizedRow);
+        }
+
+        return normalizedRows;
+    }
+
+    private static object? GetConciliacionInsertValue(
+        IReadOnlyDictionary<string, object?> sourceRow,
+        string column)
+    {
+        if (string.Equals(column, "NroOperacion", StringComparison.OrdinalIgnoreCase))
+        {
+            if (TryGetValueIgnoreCase(sourceRow, "NroOperacion", out var nroOperacion))
+            {
+                return nroOperacion;
+            }
+
+            if (TryGetValueIgnoreCase(sourceRow, "NumeroOperacion", out nroOperacion))
+            {
+                return nroOperacion;
+            }
+
+            if (TryGetValueIgnoreCase(sourceRow, "Operación - Número", out nroOperacion))
+            {
+                return nroOperacion;
+            }
+
+            if (TryGetValueIgnoreCase(sourceRow, "Nº operación", out nroOperacion))
+            {
+                return nroOperacion;
+            }
+        }
+
+        if (TryGetValueIgnoreCase(sourceRow, column, out var value))
+        {
+            return value;
+        }
+
+        return null;
+    }
+
+    private static void ApplyBancoMetadata(Dictionary<string, object?> row, string? codigoBanco)
+    {
+        var resolvedCodigoBanco = NormalizeText(codigoBanco);
+        var resolvedIdBanco = IsScotiabankCode(resolvedCodigoBanco) ? 2 : 1;
+
+        row["IdBanco"] = resolvedIdBanco;
+        row["CodigoBanco"] = string.IsNullOrWhiteSpace(resolvedCodigoBanco) ? "BCP" : resolvedCodigoBanco;
+    }
+
+    private static void ApplyBancoMetadata(IEnumerable<Dictionary<string, object?>> rows, string? codigoBanco)
+    {
+        foreach (var row in rows)
+        {
+            ApplyBancoMetadata(row, codigoBanco);
+        }
     }
 
     private static Dictionary<string, string> BuildContextValues(IReadOnlyList<List<string>> matrix, int headerRowIndex)
@@ -3699,6 +3865,16 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
         }
 
         normalizedRow["NroOperacion"] = $"{cdr}{modulo}{transaccion}{relacion}";
+    }
+
+    private static void ApplyScotiabankOperationNumber(
+        IEnumerable<Dictionary<string, object?>> rows,
+        string? codigoBanco)
+    {
+        foreach (var row in rows)
+        {
+            ApplyScotiabankOperationNumber(row, codigoBanco);
+        }
     }
 
     private static void PopulateScotiabankCodeSegmentsFromOperationNumber(Dictionary<string, object?> normalizedRow)
@@ -4165,6 +4341,14 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
         SqlConnection connection,
         CancellationToken cancellationToken)
     {
+        return await LoadStoredProcedureParametersAsync(connection, StoredProcedureInsert, cancellationToken);
+    }
+
+    private async Task<List<StoredProcedureParameterInfo>> LoadStoredProcedureParametersAsync(
+        SqlConnection connection,
+        string storedProcedureName,
+        CancellationToken cancellationToken)
+    {
         const string sql = @"
 SELECT
     p.name AS Name,
@@ -4180,11 +4364,14 @@ ORDER BY p.parameter_id;";
         var rows = await connection.QueryAsync<StoredProcedureParameterInfo>(
             _sqlCommandFactory.Create(
                 sql,
-                new { StoredProcedureName = StoredProcedureInsert },
+                new { StoredProcedureName = storedProcedureName },
                 CommandType.Text,
                 cancellationToken));
 
-        return rows.ToList();
+        return rows
+            .GroupBy(item => TrimAt(item.Nombre), StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
     }
 
     private static List<ConciliacionBcpMapeoColumnaDto> NormalizeMappings(
@@ -4517,6 +4704,47 @@ ORDER BY p.parameter_id;";
         {
             parameters.Add(candidateName, value);
         }
+    }
+
+    private static CommandDefinition BuildInsertCommand(
+        string storedProcedureName,
+        IReadOnlyDictionary<string, object?> normalizedRow,
+        IReadOnlyList<StoredProcedureParameterInfo> procParams,
+        IDbTransaction transaction,
+        string? usuario,
+        CancellationToken cancellationToken)
+    {
+        var parametros = new DynamicParameters();
+        var addedParameterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var parametro in procParams.Where(item => !item.EsSalida))
+        {
+            var key = TrimAt(parametro.Nombre);
+            if (!addedParameterNames.Add(key))
+            {
+                continue;
+            }
+
+            if (!normalizedRow.TryGetValue(key, out var rawValue))
+            {
+                continue;
+            }
+
+            parametros.Add(
+                key,
+                NormalizeParameterValue(rawValue, parametro.Tipo),
+                ResolveDbType(parametro.Tipo));
+        }
+
+        TryAddAuditParameters(parametros, procParams, usuario);
+
+        return new CommandDefinition(
+            storedProcedureName,
+            parametros,
+            transaction: transaction,
+            commandType: CommandType.StoredProcedure,
+            commandTimeout: 300,
+            cancellationToken: cancellationToken);
     }
 
     private static bool CanUseJsonPayload(IReadOnlyList<StoredProcedureParameterInfo> parametrosProcedimiento)
