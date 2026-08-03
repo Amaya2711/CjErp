@@ -5,6 +5,7 @@ import {
   actualizarComentarioMovimientoConciliacionBcp,
   analizarConciliacionBcp,
   conciliarPlanillaConciliacionBcp,
+  conciliarPlanillaConciliacionV1,
   exportarAnalisisConciliacionBcp,
   insertarConciliacionBcp,
   obtenerCombosClasificacionConciliacionBcp,
@@ -2501,6 +2502,37 @@ export default function ConciliacionBcpPage() {
     return response;
   };
 
+  const loadConciliacionPlanillaV1 = async (options?: { preserveMessage?: boolean }) => {
+    const response = await conciliarPlanillaConciliacionV1({
+      codigoBanco,
+      idCargo: Number(conciliacionFiltros.idCargo),
+      idEmpleado: Number(conciliacionFiltros.idEmpleado),
+      estados: conciliacionFiltros.estados,
+      fechaInicio: conciliacionFiltros.fechaInicio || null,
+      fechaFin: conciliacionFiltros.fechaFin || null,
+      idActivo: conciliacionFiltros.idActivo ? Number(conciliacionFiltros.idActivo) : null,
+      idAreaFlujo: conciliacionFiltros.idAreaFlujo ? Number(conciliacionFiltros.idAreaFlujo) : null,
+      idReferencia: conciliacionFiltros.idReferencia ? Number(conciliacionFiltros.idReferencia) : null,
+      idCuentaContable: conciliacionFiltros.idCuentaContable ? Number(conciliacionFiltros.idCuentaContable) : null,
+      esConciliado:
+        conciliacionFiltros.esConciliado === ""
+          ? null
+          : conciliacionFiltros.esConciliado === "1"
+            ? true
+            : conciliacionFiltros.esConciliado === "0"
+              ? false
+              : null,
+    });
+
+    setConciliacionPlanilla(response);
+
+    if (!options?.preserveMessage) {
+      setMessage(response.resumen || "Conciliacion_v1 ejecutada correctamente.");
+    }
+
+    return response;
+  };
+
   const handleGuardarClasificacion = async () => {
     if (!clasificacionModal) {
       return;
@@ -2922,6 +2954,38 @@ export default function ConciliacionBcpPage() {
     );
   };
 
+  const handleConciliarPlanillaV1 = async () => {
+    if (!conciliacionFiltros.idCargo.trim() || !conciliacionFiltros.idEmpleado.trim() || !conciliacionFiltros.estados.trim()) {
+      setError("Completa IdCargo, IdEmpleado y Estados antes de ejecutar la conciliacion_v1.");
+      return;
+    }
+
+    if (!tieneRangoFechasConciliacion) {
+      setError("Completa Fecha Inicio y Fecha Fin antes de ejecutar la conciliacion_v1.");
+      return;
+    }
+
+    setLoadingConciliacion(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const response = await loadConciliacionPlanillaV1();
+
+      if ((response.registros?.length ?? 0) > 0) {
+        await handleExportConciliacionPlanilla(response);
+        return;
+      }
+
+      await handleExportConciliacionPlanilla(response);
+    } catch (conciliacionError) {
+      setConciliacionPlanilla(null);
+      setError(getHttpErrorMessage(conciliacionError, "No se pudo ejecutar la conciliacion_v1 con planilla."));
+    } finally {
+      setLoadingConciliacion(false);
+    }
+  };
+
   const handleExportConciliacionPlanillaFromAnalysis = async (
     analysisToExport: ConciliacionBcpAnalizarResponse | null = analysis
   ) => {
@@ -3055,6 +3119,15 @@ export default function ConciliacionBcpPage() {
                 disabled={!canConciliar}
               >
                 {loadingConciliacion ? "Conciliando..." : "Conciliacion"}
+              </button>
+              <button
+                type="button"
+                style={styles.secondaryButton}
+                onClick={() => void handleConciliarPlanillaV1()}
+                disabled={!canConciliar}
+                title="Conciliacion sobre MovimientosConciliacion"
+              >
+                {loadingConciliacion ? "Conciliando..." : "Conciliacion_v1"}
               </button>
             </div>
             <input

@@ -48,6 +48,14 @@ export async function conciliarPlanillaConciliacionBcp(
   });
 }
 
+export async function conciliarPlanillaConciliacionV1(
+  request: ConciliacionBcpConciliarPlanillaRequest
+): Promise<ConciliacionBcpConciliarPlanillaResponse> {
+  return await httpClient.post<ConciliacionBcpConciliarPlanillaResponse>(`${BASE_URL}/conciliar-planilla-v1`, request, {
+    timeout: 120000,
+  });
+}
+
 export async function actualizarComentarioMovimientoConciliacionBcp(
   idMovimientoBanco: number,
   request: ConciliacionBcpActualizarComentarioRequest

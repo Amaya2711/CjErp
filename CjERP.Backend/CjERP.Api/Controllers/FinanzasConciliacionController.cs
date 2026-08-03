@@ -194,6 +194,68 @@ public sealed class FinanzasConciliacionController : ControllerBase
         }
     }
 
+    [HttpPost("conciliar-planilla-v1")]
+    public async Task<IActionResult> ConciliarPlanillaV1(
+        [FromBody] ConciliacionBcpConciliarPlanillaRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return BadRequest(new { success = false, message = "La solicitud no puede venir vacia." });
+        }
+
+        if (!request.IdCargo.HasValue || !request.IdEmpleado.HasValue || string.IsNullOrWhiteSpace(request.Estados))
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = "IdCargo, IdEmpleado y Estados son obligatorios para ejecutar la conciliacion."
+            });
+        }
+
+        try
+        {
+            var usuario = ResolveUsuarioAccion();
+            var response = await _conciliacionBcpService.ConciliarPlanillaV1Async(request, usuario, cancellationToken);
+
+            return Ok(new
+            {
+                success = true,
+                message = "Conciliacion_v1 ejecutada correctamente.",
+                data = response
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "[FinanzasConciliacionController] No se pudo ejecutar la conciliacion_v1 MovimientosConciliacion vs Planilla.");
+            return BadRequest(new
+            {
+                success = false,
+                message = ex.Message
+            });
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogError(ex, "[FinanzasConciliacionController] Error SQL al conciliar movimientos conciliacion con planilla.");
+            return StatusCode(500, new
+            {
+                success = false,
+                message = "Ocurrio un error SQL al ejecutar la conciliacion_v1 con planilla.",
+                detail = ex.Message
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[FinanzasConciliacionController] Error no controlado al conciliar movimientos conciliacion con planilla.");
+            return StatusCode(500, new
+            {
+                success = false,
+                message = "Ocurrio un error al ejecutar la conciliacion_v1 con planilla.",
+                detail = ex.Message
+            });
+        }
+    }
+
     [HttpPut("movimientos/{idMovimientoBanco:int}/comentario")]
     public async Task<IActionResult> ActualizarComentarioMovimiento(
         int idMovimientoBanco,

@@ -21,6 +21,7 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
     private const string StoredProcedureInsert = "dbo.sp_MovimientosBcp_Insertar";
     private const string StoredProcedureConciliacionInsert = "dbo.sp_MovimientosConciliacion_Insertar";
     private const string StoredProcedureBuscarMovimientos = "dbo.sp_MovimientosBcp_Buscar";
+    private const string StoredProcedureBuscarMovimientosConciliacion = "dbo.sp_MovimientosConciliacion_Buscar";
     private const string StoredProcedurePlanillaEstados = "dbo.sp_Planilla_Consulta_Estados";
     private const string StoredProcedureCombosClasificacionContable = "dbo.sp_MovimientosBcp_ObtenerCombosClasificacionContable";
     private const string StoredProcedureActualizarClasificacionContable = "dbo.sp_MovimientosBcp_ActualizarClasificacionContable";
@@ -495,6 +496,34 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         string? usuario,
         CancellationToken cancellationToken = default)
     {
+        return await ConciliarPlanillaAsyncCore(
+            request,
+            usuario,
+            cancellationToken,
+            StoredProcedureBuscarMovimientos,
+            "Movimientos BCP vs Planilla");
+    }
+
+    public async Task<ConciliacionBcpConciliarPlanillaResponseDto> ConciliarPlanillaV1Async(
+        ConciliacionBcpConciliarPlanillaRequestDto request,
+        string? usuario,
+        CancellationToken cancellationToken = default)
+    {
+        return await ConciliarPlanillaAsyncCore(
+            request,
+            usuario,
+            cancellationToken,
+            StoredProcedureBuscarMovimientosConciliacion,
+            "MovimientosConciliacion vs Planilla");
+    }
+
+    private async Task<ConciliacionBcpConciliarPlanillaResponseDto> ConciliarPlanillaAsyncCore(
+        ConciliacionBcpConciliarPlanillaRequestDto request,
+        string? usuario,
+        CancellationToken cancellationToken,
+        string storedProcedureMovimientos,
+        string etiquetaResumen)
+    {
         if (!request.IdCargo.HasValue || !request.IdEmpleado.HasValue || string.IsNullOrWhiteSpace(request.Estados))
         {
             throw new InvalidOperationException("IdCargo, IdEmpleado y Estados son obligatorios para ejecutar la conciliacion.");
@@ -520,8 +549,8 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         parametrosMovimientos.Add("EsConciliado", request.EsConciliado, DbType.Boolean);
 
         _logger.LogInformation(
-            "[ConciliacionBcpService] Ejecutando conciliacion con banco={StoredProcedureMovimientos} y planilla={StoredProcedurePlanilla}. IdCargo={IdCargo}, IdEmpleado={IdEmpleado}, Estados={Estados}, FechaInicioFiltro={FechaInicioFiltro}, FechaFinFiltro={FechaFinFiltro}, IdActivo={IdActivo}, Usuario={Usuario}",
-            StoredProcedureBuscarMovimientos,
+            "[ConciliacionBcpService] Ejecutando conciliacion con movimientos={StoredProcedureMovimientos} y planilla={StoredProcedurePlanilla}. IdCargo={IdCargo}, IdEmpleado={IdEmpleado}, Estados={Estados}, FechaInicioFiltro={FechaInicioFiltro}, FechaFinFiltro={FechaFinFiltro}, IdActivo={IdActivo}, Usuario={Usuario}",
+            storedProcedureMovimientos,
             StoredProcedurePlanillaEstados,
             request.IdCargo,
             request.IdEmpleado,
@@ -533,7 +562,7 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
 
         var movimientos = (await connection.QueryAsync<MovimientoBcpBusquedaRow>(
                 _sqlCommandFactory.Create(
-                    StoredProcedureBuscarMovimientos,
+                    storedProcedureMovimientos,
                     parametrosMovimientos,
                     CommandType.StoredProcedure,
                     cancellationToken,
@@ -595,7 +624,7 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         return new ConciliacionBcpConciliarPlanillaResponseDto
         {
             Resumen =
-                $"ConciliaciÃ³n ejecutada sobre {registros.Count} movimiento(s): " +
+                $"ConciliaciÃ³n {etiquetaResumen} ejecutada sobre {registros.Count} movimiento(s): " +
                 $"{coincidenciasPorNroOperacion} por Nro. OperaciÃ³n, " +
                 $"{coincidenciasPorCuenta} por Cuenta, " +
                 $"{coincidenciasPorCuentaInter} por Cuenta Inter y " +
