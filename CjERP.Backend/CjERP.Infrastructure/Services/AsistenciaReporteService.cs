@@ -414,7 +414,8 @@ public class AsistenciaReporteService : IAsistenciaReporteService
                 ReporteSp,
                 parameters,
                 commandType: CommandType.StoredProcedure,
-                cancellationToken: cancellationToken));
+                cancellationToken: cancellationToken,
+                commandTimeout: 120));
     }
 
     private static AsistenciaGerencialPdfDto BuildExecutiveReport(
@@ -1260,7 +1261,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             {
                 using var smtp = new MailKitSmtpClient
                 {
-                    Timeout = Math.Max(1, _smtpSettings.TimeoutSeconds) * 1000
+                    Timeout = Math.Max(120, _smtpSettings.TimeoutSeconds) * 1000
                 };
 
                 if (attempt.AllowInvalidCertificate)

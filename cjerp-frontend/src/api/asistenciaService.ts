@@ -10,6 +10,8 @@ import type {
 
 type AsistenciaReporteApiRow = Record<string, unknown>;
 
+const RPT_ASISTENCIA_TIMEOUT_MS = 120000;
+
 function getRowValue(row: AsistenciaReporteApiRow, key: string) {
   if (key in row) {
     return row[key];
@@ -106,7 +108,10 @@ function normalizeAsistenciaRow(row: AsistenciaReporteApiRow): AsistenciaReporte
 }
 
 export async function buscarAsistencia(params: AsistenciaReporteQueryParams) {
-  const response = await httpClient.get<AsistenciaReporteApiRow[]>("/asistencia/reporte", { params });
+  const response = await httpClient.get<AsistenciaReporteApiRow[]>("/asistencia/reporte", {
+    params,
+    timeout: RPT_ASISTENCIA_TIMEOUT_MS,
+  });
   const rows = Array.isArray(response) ? response : [];
   return rows.map(normalizeAsistenciaRow);
 }
@@ -114,18 +119,21 @@ export async function buscarAsistencia(params: AsistenciaReporteQueryParams) {
 export async function exportarAsistenciaEmpleadoPdf(payload: AsistenciaReportePdfRequest) {
   return await httpClient.post<Blob>("/asistencia/reporte/pdf-empleado", payload, {
     responseType: "blob",
+    timeout: RPT_ASISTENCIA_TIMEOUT_MS,
   });
 }
 
 export async function exportarAsistenciaEmpleadoPdfValidacion(payload: AsistenciaReportePdfRequest) {
   return await httpClient.post<Blob>("/asistencia/reporte/pdf-empleado-validacion", payload, {
     responseType: "blob",
+    timeout: RPT_ASISTENCIA_TIMEOUT_MS,
   });
 }
 
 export async function exportarAsistenciaEmpleadoPdfLlamadaAtencion(payload: AsistenciaReportePdfRequest) {
   return await httpClient.post<Blob>("/asistencia/reporte/pdf-empleado-llamada-atencion", payload, {
     responseType: "blob",
+    timeout: RPT_ASISTENCIA_TIMEOUT_MS,
   });
 }
 
@@ -139,6 +147,7 @@ export async function enviarAsistenciaEmpleadoPdfLlamadaAtencion(payload: Asiste
 export async function previsualizarAsistenciaEmpleadoPdfLlamadaAtencion(payload: AsistenciaReportePdfRequest) {
   return await httpClient.post<Blob>("/asistencia/reporte/pdf-empleado-llamada-atencion/preview", payload, {
     responseType: "blob",
+    timeout: RPT_ASISTENCIA_TIMEOUT_MS,
   });
 }
 

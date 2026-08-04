@@ -22,8 +22,8 @@ namespace CjERP.Api.Controllers
         private static readonly string[] RequiredParameters = ["IdCargo", "IdEmpleado"];
         private static readonly string[] RequiredParametersAprobar = ["IdCargo", "IdEmpleado", "Estados"];
         private static readonly string[] RequiredParametersVacaciones = [];
-        private static readonly string[] RequiredParametersGastosFechaDeposito = ["Estados", "FechaDeposito", "IdBanco"];
-        private static readonly string[] RequiredParametersGastosRango = ["Estados", "FechaInicio", "FechaFin", "IdBanco"];
+        private static readonly string[] RequiredParametersGastosFechaDeposito = ["Estados", "FechaDeposito"];
+        private static readonly string[] RequiredParametersGastosRango = ["Estados", "FechaInicio", "FechaFin"];
         private static readonly string[] RequiredParametersPagadosDashboard = [];
         private static readonly string[] RequiredParametersImportarConsultaDsh = [];
         private static readonly string[] RequiredParametersMovimientosGastosIngresos = [];
@@ -89,7 +89,15 @@ namespace CjERP.Api.Controllers
                             ? RequiredParametersImportarConsultaDsh
                         : string.Equals(consulta, "movimientos-gastos-ingresos", StringComparison.OrdinalIgnoreCase)
                             ? RequiredParametersMovimientosGastosIngresos
-                        : RequiredParameters;
+                : RequiredParameters;
+
+            if (string.Equals(consulta, "gastos", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation(
+                    "[PlanillaConsulta] consulta=gastos parametros recibidos={Parametros} required={Required}",
+                    string.Join(", ", providedParameters.Select(item => $"{item.Key}={item.Value ?? string.Empty}")),
+                    string.Join(", ", requiredParameters));
+            }
 
             var missingParameters = requiredParameters
                 .Where(requiredName => !providedNames.Contains(requiredName))

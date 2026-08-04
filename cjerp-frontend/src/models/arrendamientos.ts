@@ -5,6 +5,8 @@ export type ArrendamientosFila = {
   detalle?: string | null;
   estado?: string | null;
   moneda?: string | null;
+  monedaAlquiler?: string | null;
+  monedaMantenimiento?: string | null;
   importe?: number | null;
   saldo?: number | null;
   fecha?: string | null;

@@ -982,6 +982,45 @@ function formatDateValue(value?: string | null): string {
   return `${day}/${month}/${year}`;
 }
 
+function normalizeIsoDateValue(value: string): string {
+  const trimmedValue = value.trim();
+  if (!trimmedValue) {
+    return "";
+  }
+
+  const isoDateMatch = trimmedValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoDateMatch) {
+    return trimmedValue;
+  }
+
+  const slashDateMatch = trimmedValue.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (slashDateMatch) {
+    const [, first, second, year] = slashDateMatch;
+    const firstNumber = Number(first);
+    const secondNumber = Number(second);
+
+    if (firstNumber > 12 && secondNumber <= 12) {
+      return `${year}-${second}-${first}`;
+    }
+
+    if (secondNumber > 12 && firstNumber <= 12) {
+      return `${year}-${first}-${second}`;
+    }
+
+    return `${year}-${second}-${first}`;
+  }
+
+  const parsedDate = new Date(trimmedValue);
+  if (!Number.isNaN(parsedDate.getTime())) {
+    const year = parsedDate.getFullYear();
+    const month = String(parsedDate.getMonth() + 1).padStart(2, "0");
+    const day = String(parsedDate.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  return trimmedValue;
+}
+
 function normalizePlanillaGastoKey(value: string): string {
   return value
     .normalize("NFD")
@@ -1491,19 +1530,35 @@ export default function ConciliacionBcpPage() {
       setGastosPlanillaLoading(true);
       setGastosPlanillaError("");
       setGastosPlanillaMessage("");
+      setGastosPlanillaQuickSearch("");
     }
 
     try {
-      const idBanco = getBancoSeleccionadoId(codigoBanco);
+      const fechaInicioIso = normalizeIsoDateValue(fechaInicio);
+      const fechaFinIso = normalizeIsoDateValue(fechaFin);
       const request: { consulta: string; parametros: PlanillaConsultaParametro[] } = {
         consulta: "gastos",
         parametros: [
           { nombre: "Estados", valor: "4", tipo: "string" },
-          { nombre: "FechaInicio", valor: fechaInicio, tipo: "date" },
-          { nombre: "FechaFin", valor: fechaFin, tipo: "date" },
-          { nombre: "IdBanco", valor: String(idBanco), tipo: "int" },
+          { nombre: "FechaInicio", valor: fechaInicioIso, tipo: "date" },
+          { nombre: "FechaFin", valor: fechaFinIso, tipo: "date" },
         ],
       };
+
+      console.log("[Conciliacion_v1] Ejecutando sp_Planilla_Consulta_Estados (consulta directa)", {
+        estados: "4",
+        filtroFechaDeposito: {
+          desde: fechaInicio,
+          hasta: fechaFin,
+        },
+        filtroFechaDepositoIso: {
+          desde: fechaInicioIso,
+          hasta: fechaFinIso,
+        },
+        consulta: request.consulta,
+        parametros: request.parametros,
+      });
+
       const response = await consultarPlanillaEstados(request, { timeoutMs: 120000 });
 
       if (cancelToken?.cancelled) {
@@ -1511,6 +1566,29 @@ export default function ConciliacionBcpPage() {
       }
 
       const rows = Array.isArray(response.rows) ? response.rows : [];
+      console.log("[Conciliacion_v1] Respuesta sp_Planilla_Consulta_Estados", {
+        registros: rows.length,
+        mensaje: response.message ?? "",
+        columnas: Array.isArray(response.columns) ? response.columns.length : 0,
+      });
+
+      if (rows.length === 0) {
+        console.error("[Conciliacion_v1] sp_Planilla_Consulta_Estados devolvio 0 registros", {
+          motivo: "No hubo coincidencias para los filtros enviados",
+          estados: "4",
+          filtroFechaDeposito: {
+            desde: fechaInicio,
+            hasta: fechaFin,
+          },
+          filtroFechaDepositoIso: {
+            desde: fechaInicioIso,
+            hasta: fechaFinIso,
+          },
+          consulta: request.consulta,
+          parametros: request.parametros,
+        });
+      }
+
       setGastosPlanillaRows(rows);
       setGastosPlanillaMessage(
         response.message?.trim() ||
@@ -1520,6 +1598,7 @@ export default function ConciliacionBcpPage() {
       );
     } catch (gastosError) {
       if (!cancelToken?.cancelled) {
+        console.error("[Conciliacion_v1] Error al consultar sp_Planilla_Consulta_Estados", gastosError);
         setGastosPlanillaRows([]);
         setGastosPlanillaMessage("");
         setGastosPlanillaError(getHttpErrorMessage(gastosError, "No se pudo consultar el store de gastos."));
@@ -2047,6 +2126,14 @@ export default function ConciliacionBcpPage() {
     setConciliacionExecutiveSelection({ moneda: null, resultado: null });
     setIsResultadoFilterOpen(false);
     setDetalleQuickSearch("");
+  };
+
+  const handleSelectConciliacionPlanillaTab = (tab: ConciliacionPlanillaTab) => {
+    setConciliacionPlanillaTab(tab);
+
+    if (tab === "gastos") {
+      setGastosPlanillaQuickSearch("");
+    }
   };
 
   const resolveClasificacionInlineSelection = (
@@ -2959,15 +3046,8 @@ export default function ConciliacionBcpPage() {
     }
   };
 
-  const handleExportConciliacionPlanilla = async (
-    sourceConciliacionPlanilla: ConciliacionBcpConciliarPlanillaResponse | null = conciliacionPlanilla
-  ) => {
-    if (!sourceConciliacionPlanilla) {
-      return;
-    }
-
-    const XLSX = await import("xlsx");
-    const exportRows = sourceConciliacionPlanilla.registros.map((row) => ({
+  const buildConciliacionPlanillaExportRows = (rows: ConciliacionBcpConciliarPlanillaRegistro[]) =>
+    rows.map((row) => ({
       Fecha: formatDateValue(row.fecha),
       BancoMovimiento: row.codigoBanco || "",
       Empresa: row.empresa || "",
@@ -3006,6 +3086,16 @@ export default function ConciliacionBcpPage() {
       Correlativo: row.correlativoPlanilla || "",
     }));
 
+  const handleExportConciliacionPlanilla = async (
+    sourceConciliacionPlanilla: ConciliacionBcpConciliarPlanillaResponse | null = conciliacionPlanilla
+  ) => {
+    if (!sourceConciliacionPlanilla) {
+      return;
+    }
+
+    const XLSX = await import("xlsx");
+    const exportRows = buildConciliacionPlanillaExportRows(sourceConciliacionPlanilla.registros);
+
     const worksheet = XLSX.utils.json_to_sheet(exportRows);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "ConciliacionPlanilla");
@@ -3013,6 +3103,27 @@ export default function ConciliacionBcpPage() {
       workbook,
       `conciliacion_planilla_${new Date().toISOString().slice(0, 10)}.xlsx`
     );
+  };
+
+  const handleExportDetalle = async () => {
+    if (detalleTablaRegistros.length === 0) {
+      setError("No hay registros visibles en la pestaña Detalle para exportar.");
+      return;
+    }
+
+    try {
+      const XLSX = await import("xlsx");
+      const exportRows = buildConciliacionPlanillaExportRows(detalleTablaRegistros);
+      const worksheet = XLSX.utils.json_to_sheet(exportRows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Detalle");
+      XLSX.writeFile(
+        workbook,
+        `conciliacion_detalle_${new Date().toISOString().slice(0, 10)}.xlsx`
+      );
+    } catch (exportError) {
+      setError(getHttpErrorMessage(exportError, "No se pudo exportar el detalle de conciliacion."));
+    }
   };
 
   const handleConciliarPlanillaV1 = async () => {
@@ -3077,6 +3188,7 @@ export default function ConciliacionBcpPage() {
     setGastosPlanillaLoading(false);
     setGastosPlanillaError("");
     setGastosPlanillaMessage("");
+    setGastosPlanillaQuickSearch("");
     setError("");
     setMessage("");
     setDragActive(false);
@@ -3173,14 +3285,17 @@ export default function ConciliacionBcpPage() {
                   <span>Exportar Excel</span>
                 </button>
               ) : null}
-              <button
-                type="button"
-                style={styles.secondaryButton}
-                onClick={() => void handleConciliarPlanilla()}
-                disabled={!canConciliar}
-              >
-                {loadingConciliacion ? "Conciliando..." : "Conciliacion"}
-              </button>
+                <button
+                  type="button"
+                  style={styles.secondaryButton}
+                  onClick={() => {
+                    setError("");
+                    setMessage("Boton desactualizado, tratar de no usar");
+                  }}
+                  disabled={!canConciliar}
+                >
+                  {loadingConciliacion ? "Conciliando..." : "Conciliacion"}
+                </button>
               <button
                 type="button"
                 style={styles.secondaryButton}
@@ -3573,7 +3688,7 @@ export default function ConciliacionBcpPage() {
                     ...styles.planillaTabButton,
                     ...(conciliacionPlanillaTab === "revision" ? styles.planillaTabButtonActive : null),
                   }}
-                  onClick={() => setConciliacionPlanillaTab("revision")}
+                  onClick={() => handleSelectConciliacionPlanillaTab("revision")}
                 >
                   Reporte revision
                 </button>
@@ -3583,7 +3698,7 @@ export default function ConciliacionBcpPage() {
                     ...styles.planillaTabButton,
                     ...(conciliacionPlanillaTab === "ejecutivo" ? styles.planillaTabButtonActive : null),
                   }}
-                  onClick={() => setConciliacionPlanillaTab("ejecutivo")}
+                  onClick={() => handleSelectConciliacionPlanillaTab("ejecutivo")}
                 >
                   Resumen grafico ejecutivo
                 </button>
@@ -3593,7 +3708,7 @@ export default function ConciliacionBcpPage() {
                     ...styles.planillaTabButton,
                     ...(conciliacionPlanillaTab === "detalle" ? styles.planillaTabButtonActive : null),
                   }}
-                  onClick={() => setConciliacionPlanillaTab("detalle")}
+                  onClick={() => handleSelectConciliacionPlanillaTab("detalle")}
                 >
                   Detalle
                 </button>
@@ -3603,7 +3718,7 @@ export default function ConciliacionBcpPage() {
                     ...styles.planillaTabButton,
                     ...(conciliacionPlanillaTab === "gastos" ? styles.planillaTabButtonActive : null),
                   }}
-                  onClick={() => setConciliacionPlanillaTab("gastos")}
+                  onClick={() => handleSelectConciliacionPlanillaTab("gastos")}
                 >
                   Gastos
                 </button>
@@ -3804,9 +3919,26 @@ export default function ConciliacionBcpPage() {
                           {executiveSelectionLabel ? ` | Ejecutivo: ${executiveSelectionLabel}` : ""}
                         </div>
                       </div>
-                      <button type="button" style={styles.gridToolbarButton} onClick={handleClearConciliacionFilters}>
-                        Limpiar filtros
-                      </button>
+                      <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                        <button type="button" style={styles.gridToolbarButton} onClick={handleClearConciliacionFilters}>
+                          Limpiar filtros
+                        </button>
+                        <button
+                          type="button"
+                          style={{
+                            ...styles.gridToolbarButton,
+                            opacity: detalleTablaRegistros.length === 0 ? 0.6 : 1,
+                            cursor: detalleTablaRegistros.length === 0 ? "not-allowed" : "pointer",
+                          }}
+                          onClick={() => void handleExportDetalle()}
+                          disabled={detalleTablaRegistros.length === 0}
+                        >
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                            <FileDown size={14} />
+                            Exportar
+                          </span>
+                        </button>
+                      </div>
                     </div>
                     <div style={styles.gastosSearchWrap}>
                       <input
@@ -4149,14 +4281,13 @@ export default function ConciliacionBcpPage() {
                   <div style={styles.gridToolbar}>
                     <div style={styles.gridToolbarInfo}>
                       <div style={styles.gridToolbarText}>
-                        Consulta directa del store `sp_Planilla_Consulta_Estados` con `Estados = 4`.
+                        Consulta directa del store `sp_Planilla_Consulta_Estados` con `Estados = 4` y `FechaDeposito` entre la fecha inicio y fecha fin.
                       </div>
                       <div style={styles.gridToolbarCount}>
                         Registros: {gastosPlanillaFilteredRows.length}
                         {fechaDepositoInicioGastos && fechaDepositoFinGastos
                           ? ` | Rango: ${formatDateValue(fechaDepositoInicioGastos)} al ${formatDateValue(fechaDepositoFinGastos)}`
                           : ""}
-                        {codigoBanco ? ` | Banco: ${codigoBanco}` : ""}
                       </div>
                     </div>
                     <button type="button" style={styles.gridToolbarButton} onClick={() => void cargarGastosPlanilla()}>

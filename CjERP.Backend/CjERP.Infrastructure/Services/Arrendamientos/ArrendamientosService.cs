@@ -177,6 +177,8 @@ public sealed class ArrendamientosService : IArrendamientosService
                 COALESCE(u.NombreUnidad, 'Sin unidad') AS Detalle,
                 c.EstadoContrato AS Estado,
                 c.Moneda,
+                c.MonedaAlquiler,
+                c.MonedaMantenimiento,
                 c.ImporteAlquiler AS Importe,
                 NULL AS Saldo,
                 CONVERT(varchar(10), c.FechaCreacion, 23) AS Fecha,
@@ -432,14 +434,13 @@ public sealed class ArrendamientosService : IArrendamientosService
     {
         var result = await ExecuteSaveAsync(SpArrendadorGuardar, new
         {
-            request.Id,
+            IdArrendador = request.Id,
             CodigoArrendador = request.Codigo,
-            request.Detalle,
             RazonSocial = request.Nombre,
             NombreComercial = request.Detalle,
             request.IdEmpleadoResponsable,
             request.Observacion,
-            request.Estado,
+            Activo = EsActivo(request.Estado),
             UsuarioAccion = usuarioAccion
         }, cancellationToken);
 
@@ -451,14 +452,13 @@ public sealed class ArrendamientosService : IArrendamientosService
     {
         var result = await ExecuteSaveAsync(SpInquilinoGuardar, new
         {
-            request.Id,
+            IdInquilino = request.Id,
             CodigoInquilino = request.Codigo,
-            request.Detalle,
             RazonSocial = request.Nombre,
             NombreComercial = request.Detalle,
             request.IdEmpleadoResponsable,
             request.Observacion,
-            request.Estado,
+            Activo = EsActivo(request.Estado),
             UsuarioAccion = usuarioAccion
         }, cancellationToken);
 
@@ -470,7 +470,7 @@ public sealed class ArrendamientosService : IArrendamientosService
     {
         var result = await ExecuteSaveAsync(SpInmuebleGuardar, new
         {
-            request.Id,
+            IdInmueble = request.Id,
             CodigoInmueble = request.Codigo,
             NombreInmueble = request.Nombre,
             TipoInmueble = request.TipoInmueble,
@@ -479,7 +479,7 @@ public sealed class ArrendamientosService : IArrendamientosService
             request.Referencia,
             request.IdEmpleadoResponsable,
             request.Observacion,
-            request.Estado,
+            Activo = EsActivo(request.Estado),
             UsuarioAccion = usuarioAccion
         }, cancellationToken);
 
@@ -491,7 +491,7 @@ public sealed class ArrendamientosService : IArrendamientosService
     {
         var result = await ExecuteSaveAsync(SpUnidadGuardar, new
         {
-            request.Id,
+            IdUnidad = request.Id,
             request.IdInmueble,
             CodigoUnidad = request.Codigo,
             NombreUnidad = request.Nombre,
@@ -500,7 +500,7 @@ public sealed class ArrendamientosService : IArrendamientosService
             request.AreaM2,
             Descripcion = request.Detalle,
             request.Observacion,
-            request.Estado,
+            Activo = EsActivo(request.Estado),
             UsuarioAccion = usuarioAccion
         }, cancellationToken);
 
@@ -522,6 +522,8 @@ public sealed class ArrendamientosService : IArrendamientosService
             FechaInicio = request.FechaInicio.ToDateTime(TimeOnly.MinValue),
             FechaFin = request.FechaFin.ToDateTime(TimeOnly.MinValue),
             request.Moneda,
+            request.MonedaAlquiler,
+            request.MonedaMantenimiento,
             request.ImporteAlquiler,
             request.PeriodicidadAlquiler,
             request.DiaLimitePago,
@@ -837,6 +839,9 @@ public sealed class ArrendamientosService : IArrendamientosService
             IdVersion = row?.IdVersion
         };
     }
+
+    private static bool EsActivo(string? estado)
+        => string.IsNullOrWhiteSpace(estado) || estado.Trim().Equals("ACTIVO", StringComparison.OrdinalIgnoreCase);
 
     private async Task RegistrarAuditoriaAsync(
         string modulo,

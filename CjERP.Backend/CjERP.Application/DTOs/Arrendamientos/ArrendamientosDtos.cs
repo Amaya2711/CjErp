@@ -10,6 +10,8 @@ public sealed class ArrendamientosFilaDto
     public string? Detalle { get; set; }
     public string? Estado { get; set; }
     public string? Moneda { get; set; }
+    public string? MonedaAlquiler { get; set; }
+    public string? MonedaMantenimiento { get; set; }
     public decimal? Importe { get; set; }
     public decimal? Saldo { get; set; }
     public string? Fecha { get; set; }
@@ -86,6 +88,8 @@ public sealed class ArrendamientosContratoRequestDto
     public DateOnly FechaInicio { get; set; }
     public DateOnly FechaFin { get; set; }
     public string Moneda { get; set; } = "PEN";
+    public string MonedaAlquiler { get; set; } = "PEN";
+    public string MonedaMantenimiento { get; set; } = "PEN";
     public decimal ImporteAlquiler { get; set; }
     public string? PeriodicidadAlquiler { get; set; }
     public int DiaLimitePago { get; set; } = 5;

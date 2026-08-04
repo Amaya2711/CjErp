@@ -14,6 +14,9 @@ type DataGridBaseProps<T> = {
   loading?: boolean;
   loadingMessage?: string;
   getRowKey: (row: T) => string | number;
+  rowActions?: (row: T) => React.ReactNode;
+  actionsHeader?: string;
+  actionsAlign?: "left" | "center" | "right";
 };
 
 export default function DataGridBase<T>({
@@ -23,8 +26,11 @@ export default function DataGridBase<T>({
   loading = false,
   loadingMessage = "Cargando...",
   getRowKey,
+  rowActions,
+  actionsHeader = "Acciones",
+  actionsAlign = "center",
 }: DataGridBaseProps<T>) {
-  const columnCount = Math.max(columns.length, 1);
+  const columnCount = Math.max(columns.length + (rowActions ? 1 : 0), 1);
 
   return (
     <div style={styles.wrapper}>
@@ -42,6 +48,17 @@ export default function DataGridBase<T>({
                 {column.header}
               </th>
             ))}
+            {rowActions ? (
+              <th
+                style={{
+                  ...styles.th,
+                  textAlign: actionsAlign,
+                  width: 120,
+                }}
+              >
+                {actionsHeader}
+              </th>
+            ) : null}
           </tr>
         </thead>
         <tbody>
@@ -71,6 +88,11 @@ export default function DataGridBase<T>({
                     {column.render(row)}
                   </td>
                 ))}
+                {rowActions ? (
+                  <td style={{ ...styles.td, textAlign: actionsAlign }}>
+                    {rowActions(row)}
+                  </td>
+                ) : null}
               </tr>
             ))
           )}
