@@ -1,8 +1,6 @@
 using CjERP.Application.DTOs;
 using CjERP.Application.DTOs.ReportesWhatsapp;
 using CjERP.Application.Interfaces.Services;
-using CjERP.Api.Jobs;
-using Hangfire;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -17,16 +15,13 @@ public class AsistenciaReporteController : ControllerBase
 {
     private readonly IAsistenciaReporteService _asistenciaReporteService;
     private readonly ILogger<AsistenciaReporteController> _logger;
-    private readonly IBackgroundJobClient _backgroundJobClient;
 
     public AsistenciaReporteController(
         IAsistenciaReporteService asistenciaReporteService,
-        ILogger<AsistenciaReporteController> logger,
-        IBackgroundJobClient backgroundJobClient)
+        ILogger<AsistenciaReporteController> logger)
     {
         _asistenciaReporteService = asistenciaReporteService;
         _logger = logger;
-        _backgroundJobClient = backgroundJobClient;
     }
 
     [HttpGet]
@@ -185,18 +180,27 @@ public class AsistenciaReporteController : ControllerBase
                 ?? User.Identity?.Name
                 ?? "SISTEMA";
 
-            var jobId = _backgroundJobClient.Enqueue<AsistenciaReporteJob>(
-                job => job.EnviarPdfEmpleadoLlamadaAtencionAsync(request, usuarioEjecucion));
+            var response = await _asistenciaReporteService.EnviarPdfEmpleadoLlamadaAtencionAsync(
+                request,
+                usuarioEjecucion,
+                cancellationToken);
 
             return Ok(new
             {
-                success = true,
-                message = "Proceso de envio encolado correctamente.",
+                success = response.Success,
+                message = response.Success
+                    ? "El PDF se envio correctamente."
+                    : string.IsNullOrWhiteSpace(response.ErrorMessage)
+                        ? "No se pudo enviar el PDF."
+                        : response.ErrorMessage,
                 data = new ReporteWhatsappEjecucionResultadoDto
                 {
-                    Accepted = true,
-                    JobId = jobId,
-                    Message = "El envio del PDF fue encolado y se procesara en segundo plano."
+                    Accepted = response.Success,
+                    Message = response.Success
+                        ? "El PDF se envio correctamente."
+                        : string.IsNullOrWhiteSpace(response.ErrorMessage)
+                            ? "No se pudo enviar el PDF."
+                            : response.ErrorMessage
                 }
             });
         }

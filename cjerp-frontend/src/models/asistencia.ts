@@ -80,6 +80,7 @@ export type AsistenciaGerencialPdfRequest = {
 };
 
 export type AsistenciaEnviarPdfLlamadaAtencionResponse = {
+  success: boolean;
   accepted: boolean;
   alreadyRunning?: boolean;
   executionId?: string;
