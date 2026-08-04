@@ -2460,9 +2460,9 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
         if (text.trim()) {
           try {
             const parsed = JSON.parse(text) as { message?: string; detail?: string; mensaje?: string; error?: string };
-            return parsed.message || parsed.detail || parsed.mensaje || parsed.error || text;
+            return getHttpErrorMessage({ response: { data: parsed } }, fallback);
           } catch {
-            return text;
+            return getHttpErrorMessage({ response: { data: text } }, fallback);
           }
         }
       } catch {

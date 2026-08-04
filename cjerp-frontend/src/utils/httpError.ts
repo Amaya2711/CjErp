@@ -3,7 +3,10 @@ type ErrorPayload = {
   mensaje?: unknown;
   detail?: unknown;
   error?: unknown;
+  errorMessage?: unknown;
   title?: unknown;
+  Error?: unknown;
+  ErrorMessage?: unknown;
 };
 
 type ErrorWithResponse = {
@@ -29,7 +32,44 @@ function normalizeFriendlyErrorMessage(value: string): string {
     return "No se permite el registro para evitar registros duplicados.";
   }
 
+  const normalized = value.toLowerCase();
+  if (
+    normalized.includes("the operation has timed out") ||
+    normalized.includes("operation has timed out") ||
+    normalized.includes("tiempo de espera")
+  ) {
+    return "La operacion excedio el tiempo de espera.";
+  }
+
   return value;
+}
+
+function extractErrorPayloadMessage(payload: ErrorPayload): string | undefined {
+  if (
+    typeof payload.message === "string" &&
+    payload.message.trim() &&
+    typeof payload.detail === "string" &&
+    payload.detail.trim()
+  ) {
+    return `${payload.message.trim()} | ${payload.detail.trim()}`;
+  }
+
+  const candidates = [
+    payload.message,
+    payload.mensaje,
+    payload.detail,
+    payload.error,
+    payload.errorMessage,
+    payload.title,
+    payload.Error,
+    payload.ErrorMessage,
+  ];
+
+  const firstMessage = candidates.find(
+    (item) => typeof item === "string" && item.trim()
+  ) as string | undefined;
+
+  return firstMessage?.trim();
 }
 
 export function getHttpErrorMessage(error: unknown, fallback: string): string {
@@ -38,39 +78,37 @@ export function getHttpErrorMessage(error: unknown, fallback: string): string {
     const responseData = candidate.response?.data;
 
     if (typeof responseData === "string" && responseData.trim()) {
-      return normalizeFriendlyErrorMessage(responseData.trim());
+      const trimmed = responseData.trim();
+
+      if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+        try {
+          const parsed = JSON.parse(trimmed) as unknown;
+          if (typeof parsed === "string" && parsed.trim()) {
+            return normalizeFriendlyErrorMessage(parsed.trim());
+          }
+
+          if (typeof parsed === "object" && parsed !== null) {
+            const payload = parsed as ErrorPayload;
+            const extracted = extractErrorPayloadMessage(payload);
+
+            if (extracted) {
+              return normalizeFriendlyErrorMessage(extracted);
+            }
+          }
+        } catch {
+          // Si el texto parece JSON pero no se puede parsear, seguimos con el texto plano.
+        }
+      }
+
+      return normalizeFriendlyErrorMessage(trimmed);
     }
 
     if (typeof responseData === "object" && responseData !== null) {
       const payload = responseData as ErrorPayload;
+      const extracted = extractErrorPayloadMessage(payload);
 
-      if (
-        typeof payload.message === "string" &&
-        payload.message.trim() &&
-        typeof payload.detail === "string" &&
-        payload.detail.trim()
-      ) {
-        return normalizeFriendlyErrorMessage(`${payload.message} | ${payload.detail}`);
-      }
-
-      if (typeof payload.message === "string" && payload.message.trim()) {
-        return normalizeFriendlyErrorMessage(payload.message);
-      }
-
-      if (typeof payload.mensaje === "string" && payload.mensaje.trim()) {
-        return normalizeFriendlyErrorMessage(payload.mensaje);
-      }
-
-      if (typeof payload.detail === "string" && payload.detail.trim()) {
-        return normalizeFriendlyErrorMessage(payload.detail);
-      }
-
-      if (typeof payload.error === "string" && payload.error.trim()) {
-        return normalizeFriendlyErrorMessage(payload.error);
-      }
-
-      if (typeof payload.title === "string" && payload.title.trim()) {
-        return normalizeFriendlyErrorMessage(payload.title);
+      if (extracted) {
+        return normalizeFriendlyErrorMessage(extracted);
       }
     }
 
