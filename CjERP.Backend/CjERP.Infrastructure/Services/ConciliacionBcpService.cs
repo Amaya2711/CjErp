@@ -1161,7 +1161,8 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                 assignmentsByMovimiento.TryGetValue(context.Movimiento.IdMovimientoBanco, out var assignedCandidates)
                     ? assignedCandidates
                     : [],
-                context.Candidates.Count > 0))
+                context.Candidates.Count > 0,
+                esScotiabank))
             .ToList();
     }
 
@@ -1176,27 +1177,29 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
     private static ConciliacionBcpConciliarPlanillaRegistroDto BuildConciliacionRegistro(
         MovimientoBcpBusquedaRow movimiento,
         IReadOnlyList<ConciliacionCandidate> assignedCandidates,
-        bool hadUnassignedCandidates)
+        bool hadUnassignedCandidates,
+        bool esScotiabank)
     {
-        var candidate = assignedCandidates
-            .OrderBy(item => item.Prioridad)
-            .ThenBy(item => item.DiferenciaMontoAbs ?? decimal.MaxValue)
-            .ThenBy(item => item.DiferenciaFechaDias ?? int.MaxValue)
-            .ThenBy(item => item.OrdenPlanilla)
-            .FirstOrDefault();
+        var candidate = esScotiabank
+            ? assignedCandidates.Count == 1
+                ? assignedCandidates[0]
+                : null
+            : assignedCandidates
+                .OrderBy(item => item.Prioridad)
+                .ThenBy(item => item.DiferenciaMontoAbs ?? decimal.MaxValue)
+                .ThenBy(item => item.DiferenciaFechaDias ?? int.MaxValue)
+                .ThenBy(item => item.OrdenPlanilla)
+                .FirstOrDefault();
 
-        var totalPagar = assignedCandidates.Count > 0
-            ? assignedCandidates.Sum(item => item.Planilla.TotalPagar ?? 0m)
+        var candidatosParaMostrar = esScotiabank && candidate is not null
+            ? [candidate]
+            : assignedCandidates;
+
+        var totalPagar = candidatosParaMostrar.Count > 0
+            ? candidatosParaMostrar.Sum(item => item.Planilla.TotalPagar ?? 0m)
             : (decimal?)null;
-        var correlativoPlanilla = assignedCandidates.Count > 0
-            ? string.Join(", ",
-                assignedCandidates
-                    .Select(item => item.Planilla.Corre)
-                    .Where(value => value.HasValue)
-                    .Select(value => value!.Value)
-                    .Distinct()
-                    .OrderBy(value => value)
-                    .Select(value => value.ToString(CultureInfo.InvariantCulture)))
+        var correlativoPlanilla = candidate?.Planilla.Corre.HasValue == true
+            ? candidate.Planilla.Corre.Value.ToString(CultureInfo.InvariantCulture)
             : null;
 
         return new ConciliacionBcpConciliarPlanillaRegistroDto
@@ -1257,9 +1260,11 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
             TotalPagar = totalPagar,
             Comentario = movimiento.Comentario,
             ObservacionConciliacion = candidate is not null
-                ? assignedCandidates.Count > 1
-                    ? $"Se encontraron {assignedCandidates.Count} coincidencias. TotalPagar acumulado: {totalPagar:0.##}."
+                ? candidatosParaMostrar.Count > 1
+                    ? $"Se encontraron {assignedCandidates.Count} coincidencias. Se mostro la mejor coincidencia por prioridad y diferencia. TotalPagar acumulado: {totalPagar:0.##}."
                     : candidate.ObservacionConciliacion
+                : esScotiabank
+                    ? "No se encontro coincidencia exacta con planilla."
                 : hadUnassignedCandidates
                     ? "Las coincidencias detectadas ya fueron asignadas a otros movimientos para evitar duplicados."
                     : "No se encontro coincidencia con planilla."
