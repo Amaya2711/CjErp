@@ -173,6 +173,45 @@ const DEFAULT_CONCILIACION_REVISION_FILTERS: ConciliacionRevisionFilters = {
   periodo: "",
 };
 
+const DETAIL_CONCILIACION_SEARCH_KEYS: ConciliacionSortKey[] = [
+  "fecha",
+  "codigoBanco",
+  "empresa",
+  "cuenta",
+  "moneda",
+  "monto",
+  "totalPagar",
+  "diferencia",
+  "nroOperacion",
+  "descripcionOperacion",
+  "comentario",
+  "resultadoConciliacion",
+  "tipoCoincidencia",
+  "nroOperacionPlanilla",
+  "cuentaPlanilla",
+  "cuentaInterPlanilla",
+  "clientePlanilla",
+  "proyectoPlanilla",
+  "sitePlanilla",
+  "tipoTrabajoPlanilla",
+  "tareaPlanilla",
+  "responsablePlanilla",
+  "comprobantePlanilla",
+  "areaFlujo",
+  "referencia",
+  "cuentaContable",
+  "conciliado",
+  "estadoConciliacionTexto",
+  "estadoOperativoConciliacion",
+  "fechaConciliacion",
+  "usuarioConciliacion",
+  "observacionConciliacionMovimiento",
+  "bancoPlanilla",
+  "seriePlanilla",
+  "detallePlanilla",
+  "correlativoPlanilla",
+];
+
 const BANCO_OPTIONS = [
   { code: "BCP", label: "BCP", idBanco: 1 },
   { code: "SCOTIABANK", label: "Scotiabank", idBanco: 2 },
@@ -483,6 +522,12 @@ function matchesConciliacionFilter(
 
 function getConciliacionFilterOptionValue(displayValue: string) {
   return displayValue === "" ? EMPTY_CONCILIACION_FILTER_VALUE : displayValue;
+}
+
+function getConciliacionDetalleSearchText(row: ConciliacionBcpConciliarPlanillaRegistro) {
+  return DETAIL_CONCILIACION_SEARCH_KEYS.map((key) => getConciliacionDisplayValue(row, key))
+    .join(" ")
+    .toLowerCase();
 }
 
 function getConciliacionSortValue(row: ConciliacionBcpConciliarPlanillaRegistro, key: ConciliacionSortKey): string | number | null {
@@ -1267,6 +1312,7 @@ export default function ConciliacionBcpPage() {
   const [gastosPlanillaDrafts, setGastosPlanillaDrafts] = useState<Record<string, string>>({});
   const [gastosPlanillaSavingIds, setGastosPlanillaSavingIds] = useState<Record<string, boolean>>({});
   const [gastosPlanillaQuickSearch, setGastosPlanillaQuickSearch] = useState("");
+  const [detalleQuickSearch, setDetalleQuickSearch] = useState("");
   const [revisionFilters, setRevisionFilters] = useState<ConciliacionRevisionFilters>(
     DEFAULT_CONCILIACION_REVISION_FILTERS
   );
@@ -1542,7 +1588,20 @@ export default function ConciliacionBcpPage() {
       return true;
     });
   }, [filteredConciliacionRegistros, conciliacionExecutiveSelection]);
-  const detalleTablaRegistros = executiveFilteredConciliacionRegistros;
+  const detalleTablaRegistros = useMemo(() => {
+    const quickSearch = normalizePlanillaGastoSearchValue(detalleQuickSearch);
+
+    if (!quickSearch) {
+      return executiveFilteredConciliacionRegistros;
+    }
+
+    const tokens = quickSearch.split(" ").filter(Boolean);
+
+    return executiveFilteredConciliacionRegistros.filter((row) => {
+      const rowSearchText = getConciliacionDetalleSearchText(row);
+      return tokens.every((token) => rowSearchText.includes(token));
+    });
+  }, [executiveFilteredConciliacionRegistros, detalleQuickSearch]);
   const detalleTablaTitulo = "Detalle";
   const detalleTablaDescripcion = "Filtra por cualquier valor visible en la tabla principal.";
 
@@ -1582,7 +1641,7 @@ export default function ConciliacionBcpPage() {
       header.removeEventListener("scroll", handleHeaderScroll);
       table.removeEventListener("scroll", handleTableScroll);
     };
-  }, [conciliacionPlanillaTab, filteredConciliacionRegistros.length]);
+  }, [conciliacionPlanillaTab, detalleTablaRegistros.length]);
 
   useLayoutEffect(() => {
     if (conciliacionPlanillaTab !== "detalle") {
@@ -1627,7 +1686,7 @@ export default function ConciliacionBcpPage() {
       resizeObserver?.disconnect();
       window.removeEventListener("resize", updateWidth);
     };
-  }, [conciliacionPlanillaTab, filteredConciliacionRegistros.length]);
+  }, [conciliacionPlanillaTab, detalleTablaRegistros.length]);
   const totalConciliacionRegistros = conciliacionPlanilla?.registros.length ?? 0;
   const conciliacionResumenEjecutivo = useMemo(() => {
     const byMoneda = new Map<string, { totalPagar: number; cantidad: number; resultados: Map<string, ConciliacionResultadoResumen> }>();
@@ -1987,6 +2046,7 @@ export default function ConciliacionBcpPage() {
     setConciliacionGridFilters(DEFAULT_CONCILIACION_FILTERS);
     setConciliacionExecutiveSelection({ moneda: null, resultado: null });
     setIsResultadoFilterOpen(false);
+    setDetalleQuickSearch("");
   };
 
   const resolveClasificacionInlineSelection = (
@@ -3748,6 +3808,15 @@ export default function ConciliacionBcpPage() {
                         Limpiar filtros
                       </button>
                     </div>
+                    <div style={styles.gastosSearchWrap}>
+                      <input
+                        type="text"
+                        value={detalleQuickSearch}
+                        onChange={(event) => setDetalleQuickSearch(event.target.value)}
+                        placeholder="Busqueda rapida por cualquier columna visible del grid"
+                        style={styles.gastosSearchInput}
+                      />
+                    </div>
                     <div
                       ref={detalleHeaderScrollRef}
                       className="employee-horizontal-scroll"
@@ -4059,7 +4128,9 @@ export default function ConciliacionBcpPage() {
                 ) : (
                   <tr>
                     <td style={styles.td} colSpan={35}>
-                      No se encontraron movimientos para los filtros ingresados.
+                      {detalleQuickSearch.trim()
+                        ? "No se encontraron movimientos que coincidan con la búsqueda."
+                        : "No se encontraron movimientos para los filtros ingresados."}
                     </td>
                   </tr>
                 )}
