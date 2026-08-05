@@ -9,6 +9,7 @@ import {
   insertarConciliacionBcp,
   obtenerCombosClasificacionConciliacionBcp,
 } from "../../api/conciliacionService";
+import { Cell, Label, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import type {
   ConciliacionBcpAnalizarResponse,
   ConciliacionBcpArchivoAnalisis,
@@ -85,6 +86,17 @@ type ConciliacionExecutiveSelection = {
   moneda: string | null;
   resultado: string | null;
 };
+type ConciliacionExecutiveChartLevel = "bancoMovimiento" | "resultado" | "cuentaContable";
+type ConciliacionExecutiveChartPath = {
+  bancoMovimiento: string | null;
+  resultado: string | null;
+};
+type ConciliacionExecutiveChartDatum = {
+  label: string;
+  rawLabel: string;
+  value: number;
+  count: number;
+};
 type ConciliacionPlanillaTab = "revision" | "ejecutivo" | "detalle";
 type ConciliacionRevisionFilters = {
   areaFlujo: string;
@@ -158,6 +170,18 @@ const DEFAULT_CONCILIACION_REVISION_FILTERS: ConciliacionRevisionFilters = {
   cliente: "",
   periodo: "",
 };
+const EXECUTIVE_PIE_COLORS = [
+  "#2563EB",
+  "#0EA5E9",
+  "#14B8A6",
+  "#22C55E",
+  "#F59E0B",
+  "#F97316",
+  "#EF4444",
+  "#A855F7",
+  "#EC4899",
+  "#64748B",
+];
 
 const MOVIMIENTOS_ORDENADOS_COLUMNS = [
   "Empresa",
@@ -233,6 +257,10 @@ function formatNumber(value: number): string {
   return value.toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function formatPercentage(value: number): string {
+  return `${value.toFixed(1)}%`;
+}
+
 function normalizeTotalPagarForComparison(value?: number | null): number | null {
   if (value === null || value === undefined) {
     return null;
@@ -251,6 +279,14 @@ function calculateMontoDiferencia(monto?: number | null, totalPagar?: number | n
 
 function normalizeComentarioValue(value?: string | null): string {
   return value?.trim() ?? "";
+}
+
+function normalizeText(value?: string | null): string {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .trim();
 }
 
 function getResultadoChartColor(resultado: string): string {
@@ -277,6 +313,35 @@ function getResultadoChartColor(resultado: string): string {
   }
 
   return "#475569";
+}
+
+function getConciliacionExecutivePieLevelLabel(level: ConciliacionExecutiveChartLevel): string {
+  switch (level) {
+    case "bancoMovimiento":
+      return "Banco movimiento";
+    case "resultado":
+      return "Resultado";
+    case "cuentaContable":
+      return "Cuenta contable";
+    default:
+      return "Banco movimiento";
+  }
+}
+
+function getConciliacionExecutivePieLabel(
+  row: ConciliacionBcpConciliarPlanillaRegistro,
+  level: ConciliacionExecutiveChartLevel
+): string {
+  switch (level) {
+    case "bancoMovimiento":
+      return row.codigoBanco?.trim() || row.empresa?.trim() || "Sin banco movimiento";
+    case "resultado":
+      return row.resultadoConciliacion?.trim() || "Sin resultado";
+    case "cuentaContable":
+      return row.cuentaContableTexto?.trim() || (row.esConciliado ? "Sin cuenta contable" : "PENDIENTE");
+    default:
+      return "Sin clasificar";
+  }
 }
 
 function getReferenciaLabel(row: ConciliacionBcpConciliarPlanillaRegistro): string {
@@ -453,6 +518,10 @@ function matchesConciliacionFilter(
 
 function getConciliacionFilterOptionValue(displayValue: string) {
   return displayValue === "" ? EMPTY_CONCILIACION_FILTER_VALUE : displayValue;
+}
+
+function isConciliacionMovimientoActivo(row: ConciliacionBcpConciliarPlanillaRegistro): boolean {
+  return row.idActivo !== false && row.idActivo !== null && row.idActivo !== undefined;
 }
 
 function getConciliacionSortValue(row: ConciliacionBcpConciliarPlanillaRegistro, key: ConciliacionSortKey): string | number | null {
@@ -784,6 +853,11 @@ export default function ConciliacionBcpPage() {
     moneda: null,
     resultado: null,
   });
+  const [conciliacionExecutivePieLevel, setConciliacionExecutivePieLevel] = useState<ConciliacionExecutiveChartLevel>("bancoMovimiento");
+  const [conciliacionExecutivePiePath, setConciliacionExecutivePiePath] = useState<ConciliacionExecutiveChartPath>({
+    bancoMovimiento: null,
+    resultado: null,
+  });
   const [conciliacionPlanilla, setConciliacionPlanilla] = useState<ConciliacionBcpConciliarPlanillaResponse | null>(null);
   const [comentarioDrafts, setComentarioDrafts] = useState<Record<number, string>>({});
   const [comentarioSavingIds, setComentarioSavingIds] = useState<Record<number, boolean>>({});
@@ -989,6 +1063,61 @@ export default function ConciliacionBcpPage() {
       registrosSinTotalPagar,
     };
   }, [filteredConciliacionRegistros]);
+  const conciliacionResumenGraficoEjecutivo = useMemo(() => {
+    const rowsWithTotal = filteredConciliacionRegistros.filter((row) => normalizeTotalPagarForComparison(row.totalPagar) !== null);
+    const normalizedBankPath = normalizeText(conciliacionExecutivePiePath.bancoMovimiento);
+    const normalizedResultPath = normalizeText(conciliacionExecutivePiePath.resultado);
+
+    const visibleRows = rowsWithTotal.filter((row) => {
+      if (normalizedBankPath && normalizeText(getConciliacionExecutivePieLabel(row, "bancoMovimiento")) !== normalizedBankPath) {
+        return false;
+      }
+
+      if (normalizedResultPath && normalizeText(getConciliacionExecutivePieLabel(row, "resultado")) !== normalizedResultPath) {
+        return false;
+      }
+
+      return true;
+    });
+
+    const grouped = new Map<string, ConciliacionExecutiveChartDatum>();
+
+    visibleRows.forEach((row) => {
+      const rawLabel = getConciliacionExecutivePieLabel(row, conciliacionExecutivePieLevel);
+      const label = rawLabel.trim() || "Sin clasificar";
+      const totalPagar = Math.abs(normalizeTotalPagarForComparison(row.totalPagar) ?? 0);
+
+      const current =
+        grouped.get(label) ??
+        {
+          label,
+          rawLabel: label,
+          value: 0,
+          count: 0,
+        };
+
+      current.value += totalPagar;
+      current.count += 1;
+      grouped.set(label, current);
+    });
+
+    const chartData = Array.from(grouped.values()).sort((left, right) => {
+      const compare = Math.abs(right.value) - Math.abs(left.value);
+      if (compare !== 0) {
+        return compare;
+      }
+
+      return left.label.localeCompare(right.label, "es", { sensitivity: "base" });
+    });
+
+    return {
+      chartData,
+      totalValue: chartData.reduce((accumulator, item) => accumulator + item.value, 0),
+      rowsWithTotal: rowsWithTotal.length,
+      rowsWithoutTotal: filteredConciliacionRegistros.length - rowsWithTotal.length,
+      visibleRows: visibleRows.length,
+    };
+  }, [filteredConciliacionRegistros, conciliacionExecutivePieLevel, conciliacionExecutivePiePath]);
   const revisionFilterOptions = useMemo(() => {
     const registros = conciliacionPlanilla?.registros ?? [];
 
@@ -1389,6 +1518,11 @@ export default function ConciliacionBcpPage() {
   };
 
   const handleAreaFlujoInlineChange = async (row: ConciliacionBcpConciliarPlanillaRegistro, value: string) => {
+    if (!isConciliacionMovimientoActivo(row)) {
+      setError("El movimiento bancario no existe o no se encuentra activo.");
+      return;
+    }
+
     const nextIdAreaFlujo = Number(value);
     const currentValue = row.idAreaFlujo ? String(row.idAreaFlujo) : "";
 
@@ -1487,6 +1621,11 @@ export default function ConciliacionBcpPage() {
   };
 
   const handleReferenciaInlineChange = async (row: ConciliacionBcpConciliarPlanillaRegistro, value: string) => {
+    if (!isConciliacionMovimientoActivo(row)) {
+      setError("El movimiento bancario no existe o no se encuentra activo.");
+      return;
+    }
+
     const nextIdReferencia = Number(value);
     const currentValue = row.idReferencia ? String(row.idReferencia) : "";
 
@@ -1575,6 +1714,11 @@ export default function ConciliacionBcpPage() {
   };
 
   const handleCuentaContableInlineChange = async (row: ConciliacionBcpConciliarPlanillaRegistro, value: string) => {
+    if (!isConciliacionMovimientoActivo(row)) {
+      setError("El movimiento bancario no existe o no se encuentra activo.");
+      return;
+    }
+
     const nextIdCuentaContable = Number(value);
     const currentValue = row.idCuentaContable ? String(row.idCuentaContable) : "";
 
@@ -1809,6 +1953,12 @@ export default function ConciliacionBcpPage() {
       return;
     }
 
+    const rowInactiva = conciliacionPlanilla?.registros.find((item) => item.idMovimientoBanco === clasificacionModal.idMovimientoBanco);
+    if (rowInactiva && !isConciliacionMovimientoActivo(rowInactiva)) {
+      setError("El movimiento bancario no existe o no se encuentra activo.");
+      return;
+    }
+
     if (
       !clasificacionModal.idAreaFlujo ||
       !clasificacionModal.idReferencia ||
@@ -1872,6 +2022,45 @@ export default function ConciliacionBcpPage() {
         ? { moneda: null, resultado: null }
         : { moneda, resultado }
     );
+  };
+
+  const handleConciliacionExecutivePieItemClick = (item: ConciliacionExecutiveChartDatum) => {
+    if (conciliacionExecutivePieLevel === "bancoMovimiento") {
+      setConciliacionExecutivePiePath({
+        bancoMovimiento: item.rawLabel,
+        resultado: null,
+      });
+      setConciliacionExecutivePieLevel("resultado");
+      return;
+    }
+
+    if (conciliacionExecutivePieLevel === "resultado") {
+      setConciliacionExecutivePiePath((current) => ({
+        ...current,
+        resultado: item.rawLabel,
+      }));
+      setConciliacionExecutivePieLevel("cuentaContable");
+    }
+  };
+
+  const handleConciliacionExecutivePieReset = () => {
+    setConciliacionExecutivePieLevel("bancoMovimiento");
+    setConciliacionExecutivePiePath({
+      bancoMovimiento: null,
+      resultado: null,
+    });
+  };
+
+  const handleConciliacionExecutivePieBackToBank = () => {
+    if (!conciliacionExecutivePiePath.bancoMovimiento) {
+      return;
+    }
+
+    setConciliacionExecutivePieLevel("resultado");
+    setConciliacionExecutivePiePath((current) => ({
+      bancoMovimiento: current.bancoMovimiento,
+      resultado: null,
+    }));
   };
 
   const handleComentarioDraftChange = (idMovimientoBanco: number, value: string) => {
@@ -2914,6 +3103,155 @@ export default function ConciliacionBcpPage() {
                     </div>
                   </div>
 
+                  {conciliacionResumenGraficoEjecutivo.chartData.length > 0 ? (
+                    <div style={styles.executivePieBoard}>
+                      <div style={styles.executivePieHeader}>
+                        <div>
+                          <div style={styles.executivePieTitle}>Torta dinamica ejecutiva</div>
+                          <div style={styles.executivePieText}>
+                            Agrupa los registros visibles por{" "}
+                            {getConciliacionExecutivePieLevelLabel(conciliacionExecutivePieLevel).toLowerCase()} y permite bajar
+                            desde banco movimiento, resultado y cuenta contable.
+                          </div>
+                        </div>
+                        <div style={styles.executivePieMeta}>
+                          Con importe: {conciliacionResumenGraficoEjecutivo.rowsWithTotal} | Sin importe:{" "}
+                          {conciliacionResumenGraficoEjecutivo.rowsWithoutTotal} | Visible:{" "}
+                          {conciliacionResumenGraficoEjecutivo.visibleRows}
+                        </div>
+                      </div>
+
+                      <div style={styles.executivePieTrail}>
+                        <button type="button" style={styles.executivePieTrailButton} onClick={handleConciliacionExecutivePieReset}>
+                          Banco movimiento
+                        </button>
+                        {conciliacionExecutivePiePath.bancoMovimiento ? (
+                          <button
+                            type="button"
+                            style={styles.executivePieTrailButton}
+                            onClick={handleConciliacionExecutivePieBackToBank}
+                          >
+                            {conciliacionExecutivePiePath.bancoMovimiento}
+                          </button>
+                        ) : null}
+                        <span style={styles.executivePieTrailText}>
+                          {getConciliacionExecutivePieLevelLabel(conciliacionExecutivePieLevel)}
+                        </span>
+                      </div>
+
+                      <div style={styles.executivePieLayout}>
+                        <div style={styles.executivePieChartCard}>
+                          <div style={styles.executivePieChartWrap}>
+                            <ResponsiveContainer width="100%" height={300}>
+                              <PieChart>
+                                <Pie
+                                  data={conciliacionResumenGraficoEjecutivo.chartData}
+                                  dataKey="value"
+                                  nameKey="label"
+                                  innerRadius={62}
+                                  outerRadius={96}
+                                  paddingAngle={2}
+                                  onClick={(_, index) => {
+                                    const datum = conciliacionResumenGraficoEjecutivo.chartData[index];
+                                    if (datum) {
+                                      handleConciliacionExecutivePieItemClick(datum);
+                                    }
+                                  }}
+                                >
+                                  {conciliacionResumenGraficoEjecutivo.chartData.map((item, index) => (
+                                    <Cell
+                                      key={`${item.label}-${index}`}
+                                      fill={EXECUTIVE_PIE_COLORS[index % EXECUTIVE_PIE_COLORS.length]}
+                                      stroke="#FFFFFF"
+                                      strokeWidth={2}
+                                      cursor={conciliacionExecutivePieLevel === "cuentaContable" ? "default" : "pointer"}
+                                    />
+                                  ))}
+                                  <Label
+                                    position="center"
+                                    content={({ viewBox }) => {
+                                      const centerBox = viewBox as { cx?: number; cy?: number } | undefined;
+                                      const cx = typeof centerBox?.cx === "number" ? centerBox.cx : 0;
+                                      const cy = typeof centerBox?.cy === "number" ? centerBox.cy : 0;
+
+                                      return (
+                                        <g>
+                                          <text
+                                            x={cx}
+                                            y={cy - 6}
+                                            textAnchor="middle"
+                                            dominantBaseline="middle"
+                                            style={{
+                                              fontSize: 18,
+                                              fontWeight: 900,
+                                              fill: "#0F172A",
+                                            }}
+                                          >
+                                            {formatNumber(conciliacionResumenGraficoEjecutivo.totalValue)}
+                                          </text>
+                                          <text
+                                            x={cx}
+                                            y={cy + 16}
+                                            textAnchor="middle"
+                                            dominantBaseline="middle"
+                                            style={{
+                                              fontSize: 12,
+                                              fontWeight: 700,
+                                              fill: "#64748B",
+                                            }}
+                                          >
+                                            {getConciliacionExecutivePieLevelLabel(conciliacionExecutivePieLevel)}
+                                          </text>
+                                        </g>
+                                      );
+                                    }}
+                                  />
+                                </Pie>
+                                <Tooltip formatter={(value, label) => [formatNumber(Number(value ?? 0)), String(label ?? "")]} />
+                              </PieChart>
+                            </ResponsiveContainer>
+                          </div>
+                        </div>
+
+                        <div style={styles.executivePieLegend}>
+                          {conciliacionResumenGraficoEjecutivo.chartData.map((item, index) => (
+                            <button
+                              key={`${item.label}-legend`}
+                              type="button"
+                              style={styles.executivePieLegendItem}
+                              onClick={() => handleConciliacionExecutivePieItemClick(item)}
+                            >
+                              <span
+                                style={{
+                                  ...styles.executivePieSwatch,
+                                  backgroundColor: EXECUTIVE_PIE_COLORS[index % EXECUTIVE_PIE_COLORS.length],
+                                }}
+                              />
+                              <span style={styles.executivePieLegendInfo}>
+                                <span style={styles.executivePieLegendLabel}>{item.label}</span>
+                                <span style={styles.executivePieLegendFoot}>{item.count} registro(s)</span>
+                              </span>
+                              <span style={styles.executivePieLegendRight}>
+                                <span style={styles.executivePieLegendValue}>{formatNumber(item.value)}</span>
+                                <span style={styles.executivePieLegendPercent}>
+                                  {formatPercentage(
+                                    conciliacionResumenGraficoEjecutivo.totalValue > 0
+                                      ? (item.value / conciliacionResumenGraficoEjecutivo.totalValue) * 100
+                                      : 0
+                                  )}
+                                </span>
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={styles.helperText}>
+                      No hay registros visibles con TotalPagar para construir la torta ejecutiva.
+                    </div>
+                  )}
+
                   {conciliacionResumenEjecutivo.monedas.length > 0 ? (
                     <div style={styles.executiveCurrencyGrid}>
                       {conciliacionResumenEjecutivo.monedas.map((monedaResumen) => {
@@ -3197,7 +3535,11 @@ export default function ConciliacionBcpPage() {
                             value={areaFlujoDrafts[row.idMovimientoBanco] ?? (row.idAreaFlujo ? String(row.idAreaFlujo) : "")}
                             onChange={(event) => void handleAreaFlujoInlineChange(row, event.target.value)}
                             style={styles.inlineEditableSelect}
-                            disabled={clasificacionCombosLoading || Boolean(areaFlujoSavingIds[row.idMovimientoBanco])}
+                            disabled={
+                              clasificacionCombosLoading ||
+                              Boolean(areaFlujoSavingIds[row.idMovimientoBanco]) ||
+                              !isConciliacionMovimientoActivo(row)
+                            }
                             aria-label={`Editar Area Flujo del movimiento ${row.idMovimientoBanco}`}
                           >
                             <option value="">{row.nombreAreaFlujo || "PENDIENTE"}</option>
@@ -3221,6 +3563,7 @@ export default function ConciliacionBcpPage() {
                             disabled={
                               clasificacionCombosLoading ||
                               Boolean(referenciaSavingIds[row.idMovimientoBanco]) ||
+                              !isConciliacionMovimientoActivo(row) ||
                               !row.idAreaFlujo ||
                               getReferenciasClasificacionInlineDisponibles(row.idAreaFlujo).length === 0
                             }
@@ -3252,6 +3595,7 @@ export default function ConciliacionBcpPage() {
                             disabled={
                               clasificacionCombosLoading ||
                               Boolean(cuentaContableSavingIds[row.idMovimientoBanco]) ||
+                              !isConciliacionMovimientoActivo(row) ||
                               !row.idAreaFlujo ||
                               !row.idReferencia ||
                               getCuentasClasificacionInlineDisponibles(row.idAreaFlujo, row.idReferencia).length === 0
@@ -3976,6 +4320,139 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 11,
     color: "#64748B",
     fontWeight: 700,
+  },
+  executivePieBoard: {
+    marginBottom: 12,
+    border: "1px solid #E2E8F0",
+    borderRadius: 14,
+    padding: 14,
+    background: "linear-gradient(180deg, #F8FAFC 0%, #FFFFFF 100%)",
+  },
+  executivePieHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+    marginBottom: 12,
+    flexWrap: "wrap",
+  },
+  executivePieTitle: {
+    fontSize: 14,
+    fontWeight: 900,
+    color: "#0F172A",
+  },
+  executivePieText: {
+    marginTop: 4,
+    fontSize: 12,
+    color: "#64748B",
+    lineHeight: 1.5,
+  },
+  executivePieMeta: {
+    fontSize: 12,
+    color: "#0F766E",
+    fontWeight: 800,
+    textAlign: "right",
+  },
+  executivePieTrail: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+    marginBottom: 12,
+  },
+  executivePieTrailButton: {
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    color: "#0F172A",
+    borderRadius: 999,
+    padding: "6px 10px",
+    fontSize: 12,
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  executivePieTrailText: {
+    fontSize: 12,
+    color: "#475569",
+    fontWeight: 700,
+  },
+  executivePieLayout: {
+    display: "grid",
+    gridTemplateColumns: "minmax(320px, 1.2fr) minmax(280px, 0.8fr)",
+    gap: 12,
+    alignItems: "stretch",
+  },
+  executivePieChartCard: {
+    border: "1px solid #E2E8F0",
+    borderRadius: 14,
+    background: "#FFFFFF",
+    minHeight: 320,
+    padding: 12,
+  },
+  executivePieChartWrap: {
+    width: "100%",
+    height: 300,
+  },
+  executivePieLegend: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+  },
+  executivePieLegendItem: {
+    border: "1px solid #E2E8F0",
+    borderRadius: 12,
+    background: "#FFFFFF",
+    padding: 10,
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    textAlign: "left",
+    cursor: "pointer",
+    width: "100%",
+  },
+  executivePieSwatch: {
+    width: 12,
+    height: 12,
+    borderRadius: 999,
+    flexShrink: 0,
+    border: "1px solid rgba(255,255,255,0.75)",
+  },
+  executivePieLegendInfo: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    minWidth: 0,
+    flex: 1,
+  },
+  executivePieLegendLabel: {
+    fontSize: 12,
+    fontWeight: 800,
+    color: "#0F172A",
+    lineHeight: 1.35,
+    wordBreak: "break-word",
+  },
+  executivePieLegendFoot: {
+    fontSize: 11,
+    color: "#64748B",
+    fontWeight: 700,
+  },
+  executivePieLegendRight: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: 2,
+    flexShrink: 0,
+  },
+  executivePieLegendValue: {
+    fontSize: 12,
+    color: "#0F172A",
+    fontWeight: 900,
+    whiteSpace: "nowrap",
+  },
+  executivePieLegendPercent: {
+    fontSize: 11,
+    color: "#475569",
+    fontWeight: 700,
+    whiteSpace: "nowrap",
   },
   debugPre: {
     margin: 0,

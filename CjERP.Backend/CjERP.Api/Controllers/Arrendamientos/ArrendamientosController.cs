@@ -131,6 +131,16 @@ public class ArrendamientosController : ControllerBase
         CancellationToken cancellationToken)
         => await ResponderGuardado(() => _arrendamientosService.RegistrarPagoAsync(request, ObtenerUsuarioAccion(), cancellationToken));
 
+    [HttpPost("pagos/{idPago:int}")]
+    public async Task<IActionResult> ActualizarPago(
+        int idPago,
+        [FromBody] ArrendamientosPagoRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        request.IdPago = idPago;
+        return await ResponderGuardado(() => _arrendamientosService.RegistrarPagoAsync(request, ObtenerUsuarioAccion(), cancellationToken));
+    }
+
     [HttpPost("pagos/{idPago:int}/aprobar")]
     public async Task<IActionResult> AprobarPago(
         int idPago,

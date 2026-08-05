@@ -327,6 +327,77 @@ public sealed class FinanzasConciliacionController : ControllerBase
         }
     }
 
+    [HttpPut("movimientos/{idMovimientoBanco:int}/comentario-v1")]
+    public async Task<IActionResult> ActualizarComentarioMovimientoV1(
+        int idMovimientoBanco,
+        [FromBody] ConciliacionBcpActualizarComentarioRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (idMovimientoBanco <= 0)
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = "El IdMovimientoBanco es invalido."
+            });
+        }
+
+        if (request is null)
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = "La solicitud no puede venir vacia."
+            });
+        }
+
+        try
+        {
+            var usuario = ResolveUsuarioAccion();
+            var response = await _conciliacionBcpService.ActualizarComentarioMovimientoV1Async(
+                idMovimientoBanco,
+                request,
+                usuario,
+                cancellationToken);
+
+            return Ok(new
+            {
+                success = true,
+                message = "Comentario actualizado correctamente.",
+                data = response
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "[FinanzasConciliacionController] No se pudo actualizar el comentario del movimiento conciliacion_v1.");
+            return BadRequest(new
+            {
+                success = false,
+                message = ex.Message
+            });
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogError(ex, "[FinanzasConciliacionController] Error SQL al actualizar el comentario del movimiento conciliacion_v1.");
+            return StatusCode(500, new
+            {
+                success = false,
+                message = "Ocurrio un error SQL al actualizar el comentario del movimiento.",
+                detail = ex.Message
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[FinanzasConciliacionController] Error no controlado al actualizar el comentario del movimiento conciliacion_v1.");
+            return StatusCode(500, new
+            {
+                success = false,
+                message = "Ocurrio un error al actualizar el comentario del movimiento.",
+                detail = ex.Message
+            });
+        }
+    }
+
     [HttpGet("clasificacion/combos")]
     public async Task<IActionResult> ObtenerCombosClasificacion(CancellationToken cancellationToken)
     {
@@ -401,6 +472,63 @@ public sealed class FinanzasConciliacionController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "[FinanzasConciliacionController] Error no controlado al actualizar la clasificacion contable del movimiento BCP.");
+            return StatusCode(500, new
+            {
+                success = false,
+                message = "Ocurrio un error al actualizar la clasificacion contable.",
+                detail = ex.Message
+            });
+        }
+    }
+
+    [HttpPut("movimientos/clasificacion-v1")]
+    public async Task<IActionResult> ActualizarClasificacionContableV1(
+        [FromBody] ConciliacionBcpActualizarClasificacionRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = "La solicitud no puede venir vacia."
+            });
+        }
+
+        try
+        {
+            var usuario = ResolveUsuarioAccion();
+            var response = await _conciliacionBcpService.ActualizarClasificacionContableV1Async(request, usuario, cancellationToken);
+
+            return Ok(new
+            {
+                success = true,
+                message = "Clasificacion contable actualizada correctamente.",
+                data = response
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "[FinanzasConciliacionController] No se pudo actualizar la clasificacion contable del movimiento conciliacion_v1.");
+            return BadRequest(new
+            {
+                success = false,
+                message = ex.Message
+            });
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogError(ex, "[FinanzasConciliacionController] Error SQL al actualizar la clasificacion contable del movimiento conciliacion_v1.");
+            return StatusCode(500, new
+            {
+                success = false,
+                message = "Ocurrio un error SQL al actualizar la clasificacion contable.",
+                detail = ex.Message
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[FinanzasConciliacionController] Error no controlado al actualizar la clasificacion contable del movimiento conciliacion_v1.");
             return StatusCode(500, new
             {
                 success = false,

@@ -25,6 +25,7 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
     private const string StoredProcedurePlanillaEstados = "dbo.sp_Planilla_Consulta_Estados";
     private const string StoredProcedureCombosClasificacionContable = "dbo.sp_MovimientosBcp_ObtenerCombosClasificacionContable";
     private const string StoredProcedureActualizarClasificacionContable = "dbo.sp_MovimientosBcp_ActualizarClasificacionContable";
+    private const string StoredProcedureActualizarClasificacionContableConciliacion = "dbo.sp_MovimientosConciliacion_ActualizarClasificacionContable";
     private const string SqlCombosClasificacionContableFallback = """
 SELECT
     af.IdAreaFlujo,
@@ -643,6 +644,19 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         ConciliacionBcpActualizarComentarioRequestDto request,
         string? usuario,
         CancellationToken cancellationToken = default)
+        => await ActualizarComentarioMovimientoEnTablaAsync(
+            "dbo.MovimientosBcp",
+            "MovimientosBcp",
+            idMovimientoBanco,
+            request,
+            usuario,
+            cancellationToken);
+
+    public async Task<ConciliacionBcpConciliarPlanillaRegistroDto> ActualizarComentarioMovimientoV1Async(
+        int idMovimientoBanco,
+        ConciliacionBcpActualizarComentarioRequestDto request,
+        string? usuario,
+        CancellationToken cancellationToken = default)
     {
         if (idMovimientoBanco <= 0)
         {
@@ -652,11 +666,135 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         await using var connection = _sqlCommandFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        var movimiento = await GetMovimientoByIdAsync(connection, idMovimientoBanco, cancellationToken);
+        var movimientoConciliacion = await GetMovimientoByIdAsync(connection, idMovimientoBanco, "dbo.MovimientosConciliacion", cancellationToken);
+        if (movimientoConciliacion is null)
+        {
+            throw new InvalidOperationException("El movimiento bancario no existe o no se encuentra activo.");
+        }
 
+        var movimientoBcp = await GetMovimientoByIdAsync(connection, idMovimientoBanco, "dbo.MovimientosBcp", cancellationToken);
+        if (movimientoBcp is null)
+        {
+            throw new InvalidOperationException("El movimiento bancario espejo en MovimientosBcp no existe o no se encuentra activo.");
+        }
+
+        var comentarioNuevo = NullIfWhiteSpace(request.Comentario);
+        var comentarioConciliacionAnterior = NullIfWhiteSpace(movimientoConciliacion.Comentario);
+        var comentarioBcpAnterior = NullIfWhiteSpace(movimientoBcp.Comentario);
+
+        if (string.Equals(comentarioConciliacionAnterior, comentarioNuevo, StringComparison.Ordinal) &&
+            string.Equals(comentarioBcpAnterior, comentarioNuevo, StringComparison.Ordinal))
+        {
+            return BuildConciliacionRegistroActualizado(movimientoConciliacion, comentarioNuevo);
+        }
+
+        using var transaction = connection.BeginTransaction();
+
+        try
+        {
+            if (!string.Equals(comentarioConciliacionAnterior, comentarioNuevo, StringComparison.Ordinal))
+            {
+                await connection.ExecuteAsync(
+                    new CommandDefinition(
+                        """
+                        UPDATE dbo.MovimientosConciliacion
+                        SET Comentario = @Comentario
+                        WHERE IdMovimientoBanco = @IdMovimientoBanco
+                          AND IdActivo = 1;
+                        """,
+                        new
+                        {
+                            IdMovimientoBanco = idMovimientoBanco,
+                            Comentario = comentarioNuevo
+                        },
+                        transaction: transaction,
+                        commandType: CommandType.Text,
+                        cancellationToken: cancellationToken));
+            }
+
+            if (!string.Equals(comentarioBcpAnterior, comentarioNuevo, StringComparison.Ordinal))
+            {
+                await connection.ExecuteAsync(
+                    new CommandDefinition(
+                        """
+                        UPDATE dbo.MovimientosBcp
+                        SET Comentario = @Comentario
+                        WHERE IdMovimientoBanco = @IdMovimientoBanco
+                          AND IdActivo = 1;
+                        """,
+                        new
+                        {
+                            IdMovimientoBanco = idMovimientoBanco,
+                            Comentario = comentarioNuevo
+                        },
+                        transaction: transaction,
+                        commandType: CommandType.Text,
+                        cancellationToken: cancellationToken));
+            }
+
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+
+        await _auditoriaCambiosService.RegistrarLoteAsync(
+            [
+                new AuditoriaCambioDto
+                {
+                    Modulo = "Finanzas",
+                    Entidad = "MovimientosConciliacion",
+                    IdRegistro = idMovimientoBanco.ToString(CultureInfo.InvariantCulture),
+                    Accion = "UPDATE",
+                    Seccion = "Conciliacion V1",
+                    Campo = "Comentario",
+                    ValorAnterior = comentarioConciliacionAnterior,
+                    ValorNuevo = comentarioNuevo,
+                    UsuarioAccion = usuario ?? "sistema",
+                    Observacion = "Actualizacion manual del comentario desde conciliacion_v1."
+                },
+                new AuditoriaCambioDto
+                {
+                    Modulo = "Finanzas",
+                    Entidad = "MovimientosBcp",
+                    IdRegistro = idMovimientoBanco.ToString(CultureInfo.InvariantCulture),
+                    Accion = "UPDATE",
+                    Seccion = "Conciliacion V1",
+                    Campo = "Comentario",
+                    ValorAnterior = comentarioBcpAnterior,
+                    ValorNuevo = comentarioNuevo,
+                    UsuarioAccion = usuario ?? "sistema",
+                    Observacion = "Sincronizacion espejo del comentario desde conciliacion_v1."
+                }
+            ],
+            cancellationToken);
+
+        movimientoConciliacion.Comentario = comentarioNuevo;
+        return BuildConciliacionRegistroActualizado(movimientoConciliacion, comentarioNuevo);
+    }
+
+    private async Task<ConciliacionBcpConciliarPlanillaRegistroDto> ActualizarComentarioMovimientoEnTablaAsync(
+        string tableName,
+        string entidad,
+        int idMovimientoBanco,
+        ConciliacionBcpActualizarComentarioRequestDto request,
+        string? usuario,
+        CancellationToken cancellationToken)
+    {
+        if (idMovimientoBanco <= 0)
+        {
+            throw new InvalidOperationException("El IdMovimientoBanco es invalido.");
+        }
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        var movimiento = await GetMovimientoByIdAsync(connection, idMovimientoBanco, tableName, cancellationToken);
         if (movimiento is null)
         {
-            throw new InvalidOperationException("No se encontro el movimiento BCP solicitado.");
+            throw new InvalidOperationException("El movimiento bancario no existe o no se encuentra activo.");
         }
 
         var comentarioAnterior = NullIfWhiteSpace(movimiento.Comentario);
@@ -670,10 +808,10 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         await connection.ExecuteAsync(
             _sqlCommandFactory.Create(
                 """
-                UPDATE dbo.MovimientosBcp
+                UPDATE {0}
                 SET Comentario = @Comentario
                 WHERE IdMovimientoBanco = @IdMovimientoBanco
-                """,
+                """.Replace("{0}", tableName),
                 new
                 {
                     IdMovimientoBanco = idMovimientoBanco,
@@ -687,7 +825,7 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                 new AuditoriaCambioDto
                 {
                     Modulo = "Finanzas",
-                    Entidad = "MovimientosBcp",
+                    Entidad = entidad,
                     IdRegistro = idMovimientoBanco.ToString(CultureInfo.InvariantCulture),
                     Accion = "UPDATE",
                     Seccion = "Conciliacion Planilla",
@@ -778,6 +916,18 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         ConciliacionBcpActualizarClasificacionRequestDto request,
         string? usuario,
         CancellationToken cancellationToken = default)
+        => await ActualizarClasificacionContableEnTablaAsync(
+            "dbo.MovimientosBcp",
+            StoredProcedureActualizarClasificacionContable,
+            "MovimientosBcp",
+            request,
+            usuario,
+            cancellationToken);
+
+    public async Task<ConciliacionBcpConciliarPlanillaRegistroDto> ActualizarClasificacionContableV1Async(
+        ConciliacionBcpActualizarClasificacionRequestDto request,
+        string? usuario,
+        CancellationToken cancellationToken = default)
     {
         if (request.IdMovimientoBanco <= 0)
         {
@@ -792,6 +942,211 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         await using var connection = _sqlCommandFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
+        var movimientoConciliacion = await GetMovimientoByIdAsync(connection, request.IdMovimientoBanco, "dbo.MovimientosConciliacion", cancellationToken);
+        if (movimientoConciliacion is null)
+        {
+            throw new InvalidOperationException("El movimiento bancario no existe o no se encuentra activo.");
+        }
+
+        var movimientoBcp = await GetMovimientoByIdAsync(connection, request.IdMovimientoBanco, "dbo.MovimientosBcp", cancellationToken);
+        if (movimientoBcp is null)
+        {
+            throw new InvalidOperationException("El movimiento bancario espejo en MovimientosBcp no existe o no se encuentra activo.");
+        }
+
+        var parametros = new DynamicParameters();
+        parametros.Add("IdMovimientoBanco", request.IdMovimientoBanco, DbType.Int32);
+        parametros.Add("IdAreaFlujo", request.IdAreaFlujo, DbType.Int32);
+        parametros.Add("IdReferencia", request.IdReferencia, DbType.Int32);
+        parametros.Add("IdCuentaContable", request.IdCuentaContable, DbType.Int32);
+        parametros.Add("IdReglaContable", request.IdReglaContable, DbType.Int32);
+        parametros.Add("ObservacionConciliacion", NullIfWhiteSpace(request.ObservacionConciliacion), DbType.String);
+        parametros.Add("UsuarioConciliacion", string.IsNullOrWhiteSpace(usuario) ? "sistema" : usuario.Trim(), DbType.String);
+
+        using var transaction = connection.BeginTransaction();
+
+        try
+        {
+            await connection.ExecuteAsync(
+                new CommandDefinition(
+                    StoredProcedureActualizarClasificacionContableConciliacion,
+                    parametros,
+                    transaction: transaction,
+                    commandType: CommandType.StoredProcedure,
+                    commandTimeout: 120,
+                    cancellationToken: cancellationToken));
+
+            await connection.ExecuteAsync(
+                new CommandDefinition(
+                    StoredProcedureActualizarClasificacionContable,
+                    parametros,
+                    transaction: transaction,
+                    commandType: CommandType.StoredProcedure,
+                    commandTimeout: 120,
+                    cancellationToken: cancellationToken));
+
+            transaction.Commit();
+        }
+        catch (SqlException sqlException) when (IsMissingStoredProcedure(sqlException))
+        {
+            transaction.Rollback();
+
+            using var fallbackTransaction = connection.BeginTransaction();
+            try
+            {
+                await connection.ExecuteAsync(
+                    new CommandDefinition(
+                        """
+                        UPDATE dbo.MovimientosConciliacion
+                        SET IdAreaFlujo = @IdAreaFlujo,
+                            IdReferencia = @IdReferencia,
+                            IdCuentaContable = @IdCuentaContable,
+                            IdReglaContable = @IdReglaContable,
+                            EsConciliado = 1,
+                            EstadoConciliacion = 'CONCILIADO',
+                            FechaConciliacion = GETDATE(),
+                            UsuarioConciliacion = LTRIM(RTRIM(ISNULL(@UsuarioConciliacion, ''))),
+                            ObservacionConciliacion = NULLIF(LTRIM(RTRIM(@ObservacionConciliacion)), '')
+                        WHERE IdMovimientoBanco = @IdMovimientoBanco
+                          AND IdActivo = 1;
+                        """,
+                        new
+                        {
+                            request.IdMovimientoBanco,
+                            request.IdAreaFlujo,
+                            request.IdReferencia,
+                            request.IdCuentaContable,
+                            request.IdReglaContable,
+                            UsuarioConciliacion = string.IsNullOrWhiteSpace(usuario) ? "sistema" : usuario.Trim(),
+                            ObservacionConciliacion = NullIfWhiteSpace(request.ObservacionConciliacion)
+                        },
+                        transaction: fallbackTransaction,
+                        commandType: CommandType.Text,
+                        commandTimeout: 120,
+                        cancellationToken: cancellationToken));
+
+                await connection.ExecuteAsync(
+                    new CommandDefinition(
+                        """
+                        UPDATE dbo.MovimientosBcp
+                        SET IdAreaFlujo = @IdAreaFlujo,
+                            IdReferencia = @IdReferencia,
+                            IdCuentaContable = @IdCuentaContable,
+                            IdReglaContable = @IdReglaContable,
+                            EsConciliado = 1,
+                            EstadoConciliacion = 'CONCILIADO',
+                            FechaConciliacion = GETDATE(),
+                            UsuarioConciliacion = LTRIM(RTRIM(ISNULL(@UsuarioConciliacion, ''))),
+                            ObservacionConciliacion = NULLIF(LTRIM(RTRIM(@ObservacionConciliacion)), '')
+                        WHERE IdMovimientoBanco = @IdMovimientoBanco
+                          AND IdActivo = 1;
+                        """,
+                        new
+                        {
+                            request.IdMovimientoBanco,
+                            request.IdAreaFlujo,
+                            request.IdReferencia,
+                            request.IdCuentaContable,
+                            request.IdReglaContable,
+                            UsuarioConciliacion = string.IsNullOrWhiteSpace(usuario) ? "sistema" : usuario.Trim(),
+                            ObservacionConciliacion = NullIfWhiteSpace(request.ObservacionConciliacion)
+                        },
+                        transaction: fallbackTransaction,
+                        commandType: CommandType.Text,
+                        commandTimeout: 120,
+                        cancellationToken: cancellationToken));
+
+                fallbackTransaction.Commit();
+            }
+            catch
+            {
+                fallbackTransaction.Rollback();
+                throw;
+            }
+        }
+
+        await _auditoriaCambiosService.RegistrarLoteAsync(
+            [
+                new AuditoriaCambioDto
+                {
+                    Modulo = "Finanzas",
+                    Entidad = "MovimientosConciliacion",
+                    IdRegistro = request.IdMovimientoBanco.ToString(CultureInfo.InvariantCulture),
+                    Accion = "UPDATE",
+                    Seccion = "Conciliacion V1",
+                    Campo = "ClasificacionContable",
+                    ValorAnterior = $"{movimientoConciliacion.IdAreaFlujo}|{movimientoConciliacion.IdReferencia}|{movimientoConciliacion.IdCuentaContable}|{movimientoConciliacion.IdReglaContable}",
+                    ValorNuevo = $"{request.IdAreaFlujo}|{request.IdReferencia}|{request.IdCuentaContable}|{request.IdReglaContable}",
+                    UsuarioAccion = usuario ?? "sistema",
+                    Observacion = "Actualizacion de clasificacion desde conciliacion_v1."
+                },
+                new AuditoriaCambioDto
+                {
+                    Modulo = "Finanzas",
+                    Entidad = "MovimientosBcp",
+                    IdRegistro = request.IdMovimientoBanco.ToString(CultureInfo.InvariantCulture),
+                    Accion = "UPDATE",
+                    Seccion = "Conciliacion V1",
+                    Campo = "ClasificacionContable",
+                    ValorAnterior = $"{movimientoBcp.IdAreaFlujo}|{movimientoBcp.IdReferencia}|{movimientoBcp.IdCuentaContable}|{movimientoBcp.IdReglaContable}",
+                    ValorNuevo = $"{request.IdAreaFlujo}|{request.IdReferencia}|{request.IdCuentaContable}|{request.IdReglaContable}",
+                    UsuarioAccion = usuario ?? "sistema",
+                    Observacion = "Sincronizacion espejo de clasificacion desde conciliacion_v1."
+                }
+            ],
+            cancellationToken);
+
+        var movimientoActualizado = await GetMovimientoByIdAsync(connection, request.IdMovimientoBanco, "dbo.MovimientosConciliacion", cancellationToken);
+        if (movimientoActualizado is null)
+        {
+            throw new InvalidOperationException("No se pudo recuperar el movimiento actualizado.");
+        }
+
+        return BuildConciliacionRegistroActualizado(
+            movimientoActualizado,
+            movimientoActualizado.Comentario);
+    }
+
+    private async Task<ConciliacionBcpConciliarPlanillaRegistroDto> ActualizarClasificacionContableEnTablaAsync(
+        string tableName,
+        string storedProcedure,
+        string entidad,
+        ConciliacionBcpActualizarClasificacionRequestDto request,
+        string? usuario,
+        CancellationToken cancellationToken)
+    {
+        if (request.IdMovimientoBanco <= 0)
+        {
+            throw new InvalidOperationException("El IdMovimientoBanco es invalido.");
+        }
+
+        if (request.IdAreaFlujo <= 0 || request.IdReferencia <= 0 || request.IdCuentaContable <= 0 || request.IdReglaContable <= 0)
+        {
+            throw new InvalidOperationException("La clasificacion contable requiere Area Flujo, Referencia, Cuenta Contable y Regla.");
+        }
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        var movimientoExiste = await connection.ExecuteScalarAsync<int>(
+            new CommandDefinition(
+                """
+                SELECT CASE WHEN EXISTS (
+                    SELECT 1
+                    FROM {0} WITH (UPDLOCK, HOLDLOCK)
+                    WHERE IdMovimientoBanco = @IdMovimientoBanco
+                      AND IdActivo = 1
+                ) THEN 1 ELSE 0 END;
+                """.Replace("{0}", tableName),
+                new { request.IdMovimientoBanco },
+                commandType: CommandType.Text,
+                cancellationToken: cancellationToken));
+
+        if (movimientoExiste == 0)
+        {
+            throw new InvalidOperationException("El movimiento bancario no existe o no se encuentra activo.");
+        }
+
         var parametros = new DynamicParameters();
         parametros.Add("IdMovimientoBanco", request.IdMovimientoBanco, DbType.Int32);
         parametros.Add("IdAreaFlujo", request.IdAreaFlujo, DbType.Int32);
@@ -805,7 +1160,7 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         {
             await connection.ExecuteAsync(
                 _sqlCommandFactory.Create(
-                    StoredProcedureActualizarClasificacionContable,
+                    storedProcedure,
                     parametros,
                     CommandType.StoredProcedure,
                     cancellationToken,
@@ -816,16 +1171,17 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
             _logger.LogWarning(
                 sqlException,
                 "[ConciliacionBcp] No existe el SP {StoredProcedure}. Se usara un update directo como fallback.",
-                StoredProcedureActualizarClasificacionContable);
+                storedProcedure);
 
             await ActualizarClasificacionContableDirectamenteAsync(
                 connection,
+                tableName,
                 request,
                 usuario,
                 cancellationToken);
         }
 
-        var movimientoActualizado = await GetMovimientoByIdAsync(connection, request.IdMovimientoBanco, cancellationToken);
+        var movimientoActualizado = await GetMovimientoByIdAsync(connection, request.IdMovimientoBanco, tableName, cancellationToken);
         if (movimientoActualizado is null)
         {
             throw new InvalidOperationException("No se pudo recuperar el movimiento actualizado.");
@@ -838,6 +1194,7 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
 
     private async Task ActualizarClasificacionContableDirectamenteAsync(
         IDbConnection connection,
+        string tableName,
         ConciliacionBcpActualizarClasificacionRequestDto request,
         string? usuario,
         CancellationToken cancellationToken)
@@ -849,11 +1206,11 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                 """
                 SELECT CASE WHEN EXISTS (
                     SELECT 1
-                    FROM dbo.MovimientosBcp WITH (UPDLOCK, HOLDLOCK)
+                    FROM {0} WITH (UPDLOCK, HOLDLOCK)
                     WHERE IdMovimientoBanco = @IdMovimientoBanco
                       AND IdActivo = 1
                 ) THEN 1 ELSE 0 END;
-                """,
+                """.Replace("{0}", tableName),
                 new { request.IdMovimientoBanco },
                 transaction: transaction,
                 commandType: CommandType.Text,
@@ -916,7 +1273,7 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         await connection.ExecuteAsync(
             new CommandDefinition(
                 """
-                UPDATE dbo.MovimientosBcp
+                UPDATE {0}
                 SET IdAreaFlujo = @IdAreaFlujo,
                     IdReferencia = @IdReferencia,
                     IdCuentaContable = @IdCuentaContable,
@@ -928,7 +1285,7 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                     ObservacionConciliacion = NULLIF(LTRIM(RTRIM(@ObservacionConciliacion)), '')
                 WHERE IdMovimientoBanco = @IdMovimientoBanco
                   AND IdActivo = 1;
-                """,
+                """.Replace("{0}", tableName),
                 new
                 {
                     request.IdMovimientoBanco,
@@ -952,14 +1309,61 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         return exception.Number == 2812;
     }
 
-    private async Task<MovimientoBcpBusquedaRow?> GetMovimientoByIdAsync(
+    private async Task<MovimientoClasificacionTarget?> ResolveClasificacionTargetAsync(
         IDbConnection connection,
         int idMovimientoBanco,
         CancellationToken cancellationToken)
     {
+        var existeBcpActivo = await connection.ExecuteScalarAsync<int>(
+            new CommandDefinition(
+                """
+                SELECT CASE WHEN EXISTS (
+                    SELECT 1
+                    FROM dbo.MovimientosBcp WITH (UPDLOCK, HOLDLOCK)
+                    WHERE IdMovimientoBanco = @IdMovimientoBanco
+                      AND IdActivo = 1
+                ) THEN 1 ELSE 0 END;
+                """,
+                new { IdMovimientoBanco = idMovimientoBanco },
+                commandType: CommandType.Text,
+                cancellationToken: cancellationToken));
+
+        if (existeBcpActivo == 1)
+        {
+            return new MovimientoClasificacionTarget("dbo.MovimientosBcp", StoredProcedureActualizarClasificacionContable);
+        }
+
+        var existeConciliacionActivo = await connection.ExecuteScalarAsync<int>(
+            new CommandDefinition(
+                """
+                SELECT CASE WHEN EXISTS (
+                    SELECT 1
+                    FROM dbo.MovimientosConciliacion WITH (UPDLOCK, HOLDLOCK)
+                    WHERE IdMovimientoBanco = @IdMovimientoBanco
+                      AND IdActivo = 1
+                ) THEN 1 ELSE 0 END;
+                """,
+                new { IdMovimientoBanco = idMovimientoBanco },
+                commandType: CommandType.Text,
+                cancellationToken: cancellationToken));
+
+        if (existeConciliacionActivo == 1)
+        {
+            return new MovimientoClasificacionTarget("dbo.MovimientosConciliacion", StoredProcedureActualizarClasificacionContableConciliacion);
+        }
+
+        return null;
+    }
+
+    private async Task<MovimientoBcpBusquedaRow?> GetMovimientoByIdAsync(
+        IDbConnection connection,
+        int idMovimientoBanco,
+        string tableName,
+        CancellationToken cancellationToken)
+    {
         return await connection.QuerySingleOrDefaultAsync<MovimientoBcpBusquedaRow>(
             _sqlCommandFactory.Create(
-                """
+                $"""
                 SELECT
                     mov.IdMovimientoBanco,
                     mov.Empresa,
@@ -1015,7 +1419,7 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                         WHEN mov.EsConciliado = 1 THEN 'CONCILIADO'
                         ELSE 'PENDIENTE'
                     END AS EstadoOperativoConciliacion
-                FROM dbo.MovimientosBcp mov
+                FROM {tableName} mov
                 LEFT JOIN dbo.ConciliacionAreaFlujo af
                     ON af.IdAreaFlujo = mov.IdAreaFlujo
                 LEFT JOIN dbo.ConciliacionReferencia cref
@@ -5337,5 +5741,7 @@ ORDER BY p.parameter_id;";
         public MovimientoBcpBusquedaRow Movimiento { get; set; } = new();
         public ConciliacionCandidate Candidate { get; set; } = new();
     }
+
+    private sealed record MovimientoClasificacionTarget(string TableName, string StoredProcedure);
 }
 

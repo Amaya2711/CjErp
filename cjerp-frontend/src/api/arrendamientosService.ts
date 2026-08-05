@@ -88,6 +88,10 @@ export async function crearPagoArrendamientos(payload: unknown) {
   return guardarArrendamientos("pagos", payload);
 }
 
+export async function actualizarPagoArrendamientos(idPago: number, payload: unknown) {
+  return guardarArrendamientos(`pagos/${idPago}`, payload);
+}
+
 export async function aprobarPagoArrendamientos(idPago: number, payload: unknown) {
   return guardarArrendamientos(`pagos/${idPago}/aprobar`, payload);
 }

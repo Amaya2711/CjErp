@@ -493,6 +493,8 @@ BEGIN
         CuentaDestino NVARCHAR(100) NULL,
         Banco NVARCHAR(100) NULL,
         MonedaOperacion CHAR(3) NOT NULL,
+        TipoPago NVARCHAR(20) NOT NULL CONSTRAINT DF_a_pago_TipoPago DEFAULT ('COMPLETO'),
+        ConceptoPago NVARCHAR(30) NOT NULL CONSTRAINT DF_a_pago_ConceptoPago DEFAULT ('ALQUILER'),
         TipoCambio DECIMAL(18,6) NULL,
         ImporteTransferido DECIMAL(18,2) NOT NULL CONSTRAINT DF_a_pago_ImporteTransferido DEFAULT (0),
         ComisionBancaria DECIMAL(18,2) NOT NULL CONSTRAINT DF_a_pago_ComisionBancaria DEFAULT (0),
@@ -520,6 +522,8 @@ BEGIN
         CONSTRAINT FK_a_pago_a_inquilino FOREIGN KEY (IdInquilino) REFERENCES dbo.a_inquilino (IdInquilino),
         CONSTRAINT FK_a_pago_a_arrendador FOREIGN KEY (IdArrendador) REFERENCES dbo.a_arrendador (IdArrendador),
         CONSTRAINT CK_a_pago_Moneda CHECK (LEN(MonedaOperacion) = 3),
+        CONSTRAINT CK_a_pago_TipoPago CHECK (TipoPago IN ('COMPLETO', 'PARCIAL', 'EXONERADO')),
+        CONSTRAINT CK_a_pago_ConceptoPago CHECK (ConceptoPago IN ('ALQUILER', 'MANTENIMIENTO', 'COCHERA', 'OTRO')),
         CONSTRAINT CK_a_pago_Montos CHECK (
             ImporteTransferido >= 0 AND ComisionBancaria >= 0 AND Itf >= 0 AND ImporteTotalCargado >= 0 AND ImporteOriginal >= 0 AND ImporteConvertido >= 0
         ),
@@ -531,6 +535,82 @@ BEGIN
 
     CREATE INDEX IX_a_pago_Estado
         ON dbo.a_pago (EstadoValidacion, FechaOperacion DESC, IdPago DESC);
+END;
+GO
+
+IF COL_LENGTH('dbo.a_pago', 'ConceptoPago') IS NULL
+BEGIN
+    ALTER TABLE dbo.a_pago
+        ADD ConceptoPago NVARCHAR(30) NULL;
+
+    UPDATE dbo.a_pago
+    SET ConceptoPago = 'ALQUILER'
+    WHERE ConceptoPago IS NULL;
+
+    ALTER TABLE dbo.a_pago
+        ALTER COLUMN ConceptoPago NVARCHAR(30) NOT NULL;
+END;
+GO
+
+IF COL_LENGTH('dbo.a_pago', 'TipoPago') IS NULL
+BEGIN
+    ALTER TABLE dbo.a_pago
+        ADD TipoPago NVARCHAR(20) NULL;
+
+    UPDATE dbo.a_pago
+    SET TipoPago = 'COMPLETO'
+    WHERE TipoPago IS NULL;
+
+    ALTER TABLE dbo.a_pago
+        ALTER COLUMN TipoPago NVARCHAR(20) NOT NULL;
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.default_constraints
+    WHERE parent_object_id = OBJECT_ID('dbo.a_pago')
+      AND name = 'DF_a_pago_ConceptoPago'
+)
+BEGIN
+    ALTER TABLE dbo.a_pago
+        ADD CONSTRAINT DF_a_pago_ConceptoPago DEFAULT ('ALQUILER') FOR ConceptoPago;
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.check_constraints
+    WHERE parent_object_id = OBJECT_ID('dbo.a_pago')
+      AND name = 'CK_a_pago_ConceptoPago'
+)
+BEGIN
+    ALTER TABLE dbo.a_pago
+        ADD CONSTRAINT CK_a_pago_ConceptoPago CHECK (ConceptoPago IN ('ALQUILER', 'MANTENIMIENTO', 'COCHERA', 'OTRO'));
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.default_constraints
+    WHERE parent_object_id = OBJECT_ID('dbo.a_pago')
+      AND name = 'DF_a_pago_TipoPago'
+)
+BEGIN
+    ALTER TABLE dbo.a_pago
+        ADD CONSTRAINT DF_a_pago_TipoPago DEFAULT ('COMPLETO') FOR TipoPago;
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.check_constraints
+    WHERE parent_object_id = OBJECT_ID('dbo.a_pago')
+      AND name = 'CK_a_pago_TipoPago'
+)
+BEGIN
+    ALTER TABLE dbo.a_pago
+        ADD CONSTRAINT CK_a_pago_TipoPago CHECK (TipoPago IN ('COMPLETO', 'PARCIAL', 'EXONERADO'));
 END;
 GO
 
@@ -2020,6 +2100,7 @@ END;
 GO
 
 CREATE OR ALTER PROCEDURE dbo.sp_a_Pago_Registrar
+    @IdPago INT = NULL,
     @NumeroOperacion NVARCHAR(100),
     @FechaOperacion DATE,
     @FechaContabilizacion DATE = NULL,
@@ -2030,6 +2111,8 @@ CREATE OR ALTER PROCEDURE dbo.sp_a_Pago_Registrar
     @CuentaDestino NVARCHAR(100) = NULL,
     @Banco NVARCHAR(100) = NULL,
     @MonedaOperacion CHAR(3),
+    @TipoPago NVARCHAR(20) = 'COMPLETO',
+    @ConceptoPago NVARCHAR(30) = 'ALQUILER',
     @TipoCambio DECIMAL(18,6) = NULL,
     @ImporteTransferido DECIMAL(18,2) = 0,
     @ComisionBancaria DECIMAL(18,2) = 0,
@@ -2053,7 +2136,9 @@ BEGIN
     SET XACT_ABORT ON;
 
     DECLARE @Usuario NVARCHAR(100) = ISNULL(NULLIF(LTRIM(RTRIM(@UsuarioAccion)), ''), 'sistema');
-    DECLARE @IdPago INT;
+    DECLARE @EstadoActual NVARCHAR(30);
+    DECLARE @TipoPagoNormalizado NVARCHAR(20) = UPPER(LTRIM(RTRIM(ISNULL(@TipoPago, 'COMPLETO'))));
+    DECLARE @ConceptoPagoNormalizado NVARCHAR(30) = UPPER(LTRIM(RTRIM(ISNULL(@ConceptoPago, 'ALQUILER'))));
 
     IF ISNULL(LTRIM(RTRIM(@NumeroOperacion)), '') = ''
     BEGIN
@@ -2073,6 +2158,36 @@ BEGIN
         RETURN;
     END;
 
+    IF @TipoPagoNormalizado NOT IN ('COMPLETO', 'PARCIAL', 'EXONERADO')
+    BEGIN
+        RAISERROR('Debe indicar un tipo de pago valido: COMPLETO, PARCIAL o EXONERADO.', 16, 1);
+        RETURN;
+    END;
+
+    IF @ConceptoPagoNormalizado NOT IN ('ALQUILER', 'MANTENIMIENTO', 'COCHERA', 'OTRO')
+    BEGIN
+        RAISERROR('Debe indicar un concepto de pago valido: ALQUILER, MANTENIMIENTO, COCHERA u OTRO.', 16, 1);
+        RETURN;
+    END;
+
+    IF @TipoPagoNormalizado = 'COMPLETO'
+       AND @FechaContabilizacion IS NOT NULL
+       AND EXISTS
+       (
+           SELECT 1
+           FROM dbo.a_pago
+           WHERE IdInquilino = @IdInquilino
+             AND UPPER(LTRIM(RTRIM(ConceptoPago))) = @ConceptoPagoNormalizado
+             AND UPPER(LTRIM(RTRIM(TipoPago))) = 'COMPLETO'
+             AND YEAR(FechaContabilizacion) = YEAR(@FechaContabilizacion)
+             AND MONTH(FechaContabilizacion) = MONTH(@FechaContabilizacion)
+             AND (@IdPago IS NULL OR IdPago <> @IdPago)
+       )
+    BEGIN
+        RAISERROR('Ya existe un pago COMPLETO para el mismo inquilino, concepto y periodo de contabilizacion.', 16, 1);
+        RETURN;
+    END;
+
     BEGIN TRANSACTION;
 
     IF EXISTS
@@ -2083,6 +2198,7 @@ BEGIN
           AND FechaOperacion = @FechaOperacion
           AND IdInquilino = @IdInquilino
           AND IdArrendador = @IdArrendador
+          AND (@IdPago IS NULL OR IdPago <> @IdPago)
     )
     BEGIN
         ROLLBACK TRANSACTION;
@@ -2090,31 +2206,96 @@ BEGIN
         RETURN;
     END;
 
-    INSERT INTO dbo.a_pago
-    (
-        NumeroOperacion, FechaOperacion, FechaContabilizacion, IdInquilino, IdArrendador, IdEmpleadoRegistrador, CuentaOrigen,
-        CuentaDestino, Banco, MonedaOperacion, TipoCambio, ImporteTransferido, ComisionBancaria, Itf, ImporteTotalCargado,
-        ImporteOriginal, ImporteConvertido, DiferenciaCambio, TipoTransferencia, ConceptoBanco, Observacion, EstadoValidacion,
-        VoucherNombre, VoucherExtension, VoucherTamanoBytes, VoucherRuta, VoucherUrl, Activo, UsuarioCreacion, FechaCreacion
-    )
-    VALUES
-    (
-        LTRIM(RTRIM(@NumeroOperacion)), @FechaOperacion, @FechaContabilizacion, @IdInquilino, @IdArrendador, @IdEmpleadoRegistrador, @CuentaOrigen,
-        @CuentaDestino, @Banco, @MonedaOperacion, @TipoCambio, ISNULL(@ImporteTransferido, 0), ISNULL(@ComisionBancaria, 0), ISNULL(@Itf, 0), ISNULL(@ImporteTotalCargado, 0),
-        ISNULL(@ImporteOriginal, 0), ISNULL(@ImporteConvertido, 0), ISNULL(@DiferenciaCambio, 0), @TipoTransferencia, @ConceptoBanco, @Observacion, 'PENDIENTE',
-        @VoucherNombre, @VoucherExtension, @VoucherTamanoBytes, @VoucherRuta, @VoucherUrl, 1, @Usuario, SYSDATETIME()
-    );
+    IF ISNULL(@IdPago, 0) > 0
+    BEGIN
+        SELECT @EstadoActual = EstadoValidacion
+        FROM dbo.a_pago
+        WHERE IdPago = @IdPago;
 
-    SET @IdPago = SCOPE_IDENTITY();
+        IF @EstadoActual IS NULL
+        BEGIN
+            ROLLBACK TRANSACTION;
+            RAISERROR('No existe el pago indicado para actualizar.', 16, 1);
+            RETURN;
+        END;
 
-    INSERT INTO dbo.a_pago_aprobacion
-    (
-        IdPago, NivelAprobacion, EstadoAprobacion, Observacion, UsuarioCreacion, FechaCreacion
-    )
-    VALUES
-    (
-        @IdPago, 1, 'PENDIENTE', 'Aprobacion inicial pendiente.', @Usuario, SYSDATETIME()
-    );
+        IF @EstadoActual NOT IN ('PENDIENTE', 'RECHAZADO')
+        BEGIN
+            ROLLBACK TRANSACTION;
+            RAISERROR('Solo se pueden editar pagos pendientes o rechazados.', 16, 1);
+            RETURN;
+        END;
+
+        UPDATE dbo.a_pago
+        SET NumeroOperacion = LTRIM(RTRIM(@NumeroOperacion)),
+            FechaOperacion = @FechaOperacion,
+            FechaContabilizacion = @FechaContabilizacion,
+            IdInquilino = @IdInquilino,
+            IdArrendador = @IdArrendador,
+            IdEmpleadoRegistrador = @IdEmpleadoRegistrador,
+            CuentaOrigen = @CuentaOrigen,
+            CuentaDestino = @CuentaDestino,
+            Banco = @Banco,
+            MonedaOperacion = @MonedaOperacion,
+            TipoPago = @TipoPagoNormalizado,
+            ConceptoPago = @ConceptoPagoNormalizado,
+            TipoCambio = @TipoCambio,
+            ImporteTransferido = ISNULL(@ImporteTransferido, 0),
+            ComisionBancaria = ISNULL(@ComisionBancaria, 0),
+            Itf = ISNULL(@Itf, 0),
+            ImporteTotalCargado = ISNULL(@ImporteTotalCargado, 0),
+            ImporteOriginal = ISNULL(@ImporteOriginal, 0),
+            ImporteConvertido = ISNULL(@ImporteConvertido, 0),
+            DiferenciaCambio = ISNULL(@DiferenciaCambio, 0),
+            TipoTransferencia = @TipoTransferencia,
+            ConceptoBanco = @ConceptoBanco,
+            Observacion = @Observacion,
+            EstadoValidacion = 'PENDIENTE',
+            FechaValidacion = NULL,
+            VoucherNombre = @VoucherNombre,
+            VoucherExtension = @VoucherExtension,
+            VoucherTamanoBytes = @VoucherTamanoBytes,
+            VoucherRuta = @VoucherRuta,
+            VoucherUrl = @VoucherUrl,
+            Activo = 1,
+            UsuarioModificacion = @Usuario,
+            FechaModificacion = SYSDATETIME()
+        WHERE IdPago = @IdPago;
+    END
+    ELSE
+    BEGIN
+        INSERT INTO dbo.a_pago
+        (
+            NumeroOperacion, FechaOperacion, FechaContabilizacion, IdInquilino, IdArrendador, IdEmpleadoRegistrador, CuentaOrigen,
+            CuentaDestino, Banco, MonedaOperacion, TipoPago, ConceptoPago, TipoCambio, ImporteTransferido, ComisionBancaria, Itf, ImporteTotalCargado,
+            ImporteOriginal, ImporteConvertido, DiferenciaCambio, TipoTransferencia, ConceptoBanco, Observacion, EstadoValidacion,
+            VoucherNombre, VoucherExtension, VoucherTamanoBytes, VoucherRuta, VoucherUrl, Activo, UsuarioCreacion, FechaCreacion
+        )
+        VALUES
+        (
+            LTRIM(RTRIM(@NumeroOperacion)), @FechaOperacion, @FechaContabilizacion, @IdInquilino, @IdArrendador, @IdEmpleadoRegistrador, @CuentaOrigen,
+            @CuentaDestino, @Banco, @MonedaOperacion, @TipoPagoNormalizado, @ConceptoPagoNormalizado, @TipoCambio, ISNULL(@ImporteTransferido, 0), ISNULL(@ComisionBancaria, 0), ISNULL(@Itf, 0), ISNULL(@ImporteTotalCargado, 0),
+            ISNULL(@ImporteOriginal, 0), ISNULL(@ImporteConvertido, 0), ISNULL(@DiferenciaCambio, 0), @TipoTransferencia, @ConceptoBanco, @Observacion, 'PENDIENTE',
+            @VoucherNombre, @VoucherExtension, @VoucherTamanoBytes, @VoucherRuta, @VoucherUrl, 1, @Usuario, SYSDATETIME()
+        );
+
+        SET @IdPago = SCOPE_IDENTITY();
+    END;
+
+    MERGE dbo.a_pago_aprobacion AS target
+    USING (SELECT @IdPago AS IdPago, 1 AS NivelAprobacion) AS source
+    ON target.IdPago = source.IdPago AND target.NivelAprobacion = source.NivelAprobacion
+    WHEN MATCHED THEN
+        UPDATE SET
+            EstadoAprobacion = 'PENDIENTE',
+            IdEmpleadoAprobador = NULL,
+            FechaAprobacion = NULL,
+            Observacion = 'Aprobacion inicial pendiente.',
+            UsuarioModificacion = @Usuario,
+            FechaModificacion = SYSDATETIME()
+    WHEN NOT MATCHED THEN
+        INSERT (IdPago, NivelAprobacion, EstadoAprobacion, Observacion, UsuarioCreacion, FechaCreacion)
+        VALUES (@IdPago, 1, 'PENDIENTE', 'Aprobacion inicial pendiente.', @Usuario, SYSDATETIME());
 
     COMMIT TRANSACTION;
 

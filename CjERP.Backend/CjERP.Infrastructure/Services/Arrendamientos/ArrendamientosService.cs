@@ -168,8 +168,22 @@ public sealed class ArrendamientosService : IArrendamientosService
             ORDER BY u.FechaCreacion DESC, u.IdUnidad DESC;
             """, cancellationToken);
 
-    public Task<IReadOnlyList<ArrendamientosFilaDto>> ListarContratosAsync(CancellationToken cancellationToken = default)
-        => QueryListAsync("""
+    public async Task<IReadOnlyList<ArrendamientosFilaDto>> ListarContratosAsync(CancellationToken cancellationToken = default)
+    {
+        var monedaCocheraSelect = await ObtenerSelectColumnaAsync(
+            "dbo.a_contrato",
+            "MonedaCochera",
+            "c.MonedaCochera",
+            "NULL AS MonedaCochera",
+            cancellationToken);
+        var monedaGarantiaSelect = await ObtenerSelectColumnaAsync(
+            "dbo.a_contrato",
+            "MonedaGarantia",
+            "c.MonedaGarantia",
+            "NULL AS MonedaGarantia",
+            cancellationToken);
+
+        var sql = $"""
             SELECT TOP (300)
                 c.IdContrato AS Id,
                 c.CodigoContrato AS Codigo,
@@ -179,7 +193,12 @@ public sealed class ArrendamientosService : IArrendamientosService
                 c.Moneda,
                 c.MonedaAlquiler,
                 c.MonedaMantenimiento,
+                {monedaCocheraSelect},
+                {monedaGarantiaSelect},
                 c.ImporteAlquiler AS Importe,
+                c.ImporteAlquiler AS ImporteAlquiler,
+                c.ImporteMantenimiento AS ImporteMantenimiento,
+                c.ImporteCochera AS ImporteCochera,
                 NULL AS Saldo,
                 CONVERT(varchar(10), c.FechaCreacion, 23) AS Fecha,
                 CONVERT(varchar(10), c.FechaInicio, 23) AS FechaInicio,
@@ -200,7 +219,10 @@ public sealed class ArrendamientosService : IArrendamientosService
             LEFT JOIN dbo.a_unidad u ON u.IdUnidad = c.IdUnidadPrincipal
             LEFT JOIN dbo.EmpleadoCj resp ON resp.IdEmpleado = c.IdEmpleadoResponsable
             ORDER BY c.FechaCreacion DESC, c.IdContrato DESC;
-            """, cancellationToken);
+            """;
+
+        return await QueryListAsync(sql, cancellationToken: cancellationToken);
+    }
 
     public Task<IReadOnlyList<ArrendamientosFilaDto>> ListarObligacionesAsync(CancellationToken cancellationToken = default)
         => QueryListAsync("""
@@ -235,28 +257,63 @@ public sealed class ArrendamientosService : IArrendamientosService
             ORDER BY o.FechaVencimiento DESC, o.IdObligacion DESC;
             """, cancellationToken);
 
-    public Task<IReadOnlyList<ArrendamientosFilaDto>> ListarPagosAsync(CancellationToken cancellationToken = default)
-        => QueryListAsync("""
+    public async Task<IReadOnlyList<ArrendamientosFilaDto>> ListarPagosAsync(CancellationToken cancellationToken = default)
+    {
+        var tipoPagoSelect = await ObtenerSelectColumnaAsync(
+            "dbo.a_pago",
+            "TipoPago",
+            "p.TipoPago",
+            "'COMPLETO' AS TipoPago",
+            cancellationToken);
+        var conceptoPagoSelect = await ObtenerSelectColumnaAsync(
+            "dbo.a_pago",
+            "ConceptoPago",
+            "p.ConceptoPago",
+            "NULL",
+            cancellationToken);
+
+        return await QueryListAsync($"""
             SELECT TOP (300)
                 p.IdPago AS Id,
                 p.NumeroOperacion AS Codigo,
                 CONCAT(i.RazonSocial, ' / ', a.RazonSocial) AS Nombre,
                 COALESCE(p.TipoTransferencia, p.ConceptoBanco, '') AS Detalle,
                 p.EstadoValidacion AS Estado,
+                {tipoPagoSelect},
                 p.MonedaOperacion AS Moneda,
+                p.TipoCambio,
+                p.ImporteTransferido,
+                p.ComisionBancaria,
+                p.Itf,
+                p.ImporteTotalCargado,
+                p.ImporteOriginal,
                 p.ImporteConvertido AS Importe,
+                p.ImporteConvertido,
+                p.DiferenciaCambio,
                 NULL AS Saldo,
                 CONVERT(varchar(10), p.FechaOperacion, 23) AS Fecha,
+                CONVERT(varchar(10), p.FechaContabilizacion, 23) AS FechaContabilizacion,
                 NULL AS FechaInicio,
                 NULL AS FechaFin,
                 a.RazonSocial AS Arrendador,
                 i.RazonSocial AS Inquilino,
                 NULL AS Inmueble,
                 NULL AS Unidad,
-                NULL AS Concepto,
+                {conceptoPagoSelect} AS ConceptoPago,
+                {conceptoPagoSelect} AS Concepto,
                 NULL AS Periodo,
                 resp.NombreEmpleado AS Responsable,
+                p.CuentaOrigen,
+                p.CuentaDestino,
+                p.Banco,
+                p.TipoTransferencia,
+                p.ConceptoBanco,
                 p.Observacion,
+                p.VoucherNombre,
+                p.VoucherExtension,
+                p.VoucherTamanoBytes,
+                p.VoucherRuta,
+                p.VoucherUrl,
                 'PAGO' AS Tipo
             FROM dbo.a_pago p
             INNER JOIN dbo.a_arrendador a ON a.IdArrendador = p.IdArrendador
@@ -264,6 +321,7 @@ public sealed class ArrendamientosService : IArrendamientosService
             LEFT JOIN dbo.EmpleadoCj resp ON resp.IdEmpleado = p.IdEmpleadoRegistrador
             ORDER BY p.FechaOperacion DESC, p.IdPago DESC;
             """, cancellationToken);
+    }
 
     public Task<IReadOnlyList<ArrendamientosFilaDto>> ListarFraccionamientosAsync(CancellationToken cancellationToken = default)
         => QueryListAsync("""
@@ -296,15 +354,23 @@ public sealed class ArrendamientosService : IArrendamientosService
             ORDER BY f.FechaCreacion DESC, f.IdFraccionamiento DESC;
             """, cancellationToken);
 
-    public Task<IReadOnlyList<ArrendamientosFilaDto>> ListarGarantiasAsync(CancellationToken cancellationToken = default)
-        => QueryListAsync("""
+    public async Task<IReadOnlyList<ArrendamientosFilaDto>> ListarGarantiasAsync(CancellationToken cancellationToken = default)
+    {
+        var monedaGarantiaSelect = await ObtenerSelectColumnaAsync(
+            "dbo.a_contrato",
+            "MonedaGarantia",
+            "c.MonedaGarantia",
+            "c.Moneda",
+            cancellationToken);
+
+        return await QueryListAsync($"""
             SELECT TOP (300)
                 g.IdGarantia AS Id,
                 CONCAT('GAR-', g.IdGarantia) AS Codigo,
                 c.CodigoContrato AS Nombre,
                 CONCAT('Pactada: ', FORMAT(g.GarantiaPactada, 'N2')) AS Detalle,
                 g.Estado,
-                c.Moneda,
+                {monedaGarantiaSelect},
                 g.GarantiaPactada AS Importe,
                 g.GarantiaPendiente AS Saldo,
                 CONVERT(varchar(10), g.FechaCreacion, 23) AS Fecha,
@@ -325,6 +391,7 @@ public sealed class ArrendamientosService : IArrendamientosService
             INNER JOIN dbo.a_inquilino i ON i.IdInquilino = c.IdInquilino
             ORDER BY g.FechaCreacion DESC, g.IdGarantia DESC;
             """, cancellationToken);
+    }
 
     public Task<IReadOnlyList<ArrendamientosFilaDto>> ListarArbitriosAsync(CancellationToken cancellationToken = default)
         => QueryListAsync("""
@@ -510,48 +577,73 @@ public sealed class ArrendamientosService : IArrendamientosService
 
     public async Task<ArrendamientosCommandResultDto> GuardarContratoAsync(ArrendamientosContratoRequestDto request, string usuarioAccion, CancellationToken cancellationToken = default)
     {
-        var result = await ExecuteSaveAsync(SpContratoGuardar, new
+        var parametros = new DynamicParameters();
+        parametros.Add("IdContrato", request.IdContrato);
+        parametros.Add("CodigoContrato", request.CodigoContrato);
+        parametros.Add("IdArrendador", request.IdArrendador);
+        parametros.Add("IdInquilino", request.IdInquilino);
+        parametros.Add("IdInmueble", request.IdInmueble);
+        parametros.Add("IdUnidadPrincipal", request.IdUnidadPrincipal);
+        parametros.Add("FechaFirma", request.FechaFirma?.ToDateTime(TimeOnly.MinValue));
+        parametros.Add("FechaInicio", request.FechaInicio.ToDateTime(TimeOnly.MinValue));
+        parametros.Add("FechaFin", request.FechaFin.ToDateTime(TimeOnly.MinValue));
+        parametros.Add("Moneda", request.Moneda);
+        parametros.Add("MonedaAlquiler", request.MonedaAlquiler);
+        parametros.Add("MonedaMantenimiento", request.MonedaMantenimiento);
+        parametros.Add("ImporteAlquiler", request.ImporteAlquiler);
+        parametros.Add("PeriodicidadAlquiler", request.PeriodicidadAlquiler);
+        parametros.Add("DiaLimitePago", request.DiaLimitePago);
+        parametros.Add("DiasGracia", request.DiasGracia);
+        parametros.Add("ImporteMantenimiento", request.ImporteMantenimiento);
+        parametros.Add("PeriodicidadMantenimiento", request.PeriodicidadMantenimiento);
+        parametros.Add("DiaLimiteMantenimiento", request.DiaLimiteMantenimiento);
+        parametros.Add("GarantiaPactada", request.GarantiaPactada);
+        parametros.Add("GarantiaPagada", request.GarantiaPagada);
+        parametros.Add("GarantiaPendiente", request.GarantiaPendiente);
+        parametros.Add("TipoReajuste", request.TipoReajuste);
+        parametros.Add("PorcentajeReajuste", request.PorcentajeReajuste);
+        parametros.Add("FormulaReajuste", request.FormulaReajuste);
+        parametros.Add("FrecuenciaReajuste", request.FrecuenciaReajuste);
+        parametros.Add("PenalidadMora", request.PenalidadMora);
+        parametros.Add("InteresMoratorio", request.InteresMoratorio);
+        parametros.Add("EstadoContrato", request.EstadoContrato);
+        parametros.Add("Observaciones", request.Observaciones);
+        parametros.Add("DocumentoFirmadoNombre", request.DocumentoFirmadoNombre);
+        parametros.Add("DocumentoFirmadoUrl", request.DocumentoFirmadoUrl);
+        parametros.Add("DocumentoFirmadoTamanoKB", request.DocumentoFirmadoTamanoKB);
+        parametros.Add("IdEmpleadoResponsable", request.IdEmpleadoResponsable);
+        parametros.Add("FechaSuspension", request.FechaSuspension?.ToDateTime(TimeOnly.MinValue));
+        parametros.Add("FechaCancelacion", request.FechaCancelacion?.ToDateTime(TimeOnly.MinValue));
+        parametros.Add("MotivoCancelacion", request.MotivoCancelacion);
+        parametros.Add("Activo", request.Activo);
+        parametros.Add("UsuarioAccion", usuarioAccion);
+
+        if (await ExisteParametroProcedimientoAsync(SpContratoGuardar, "MonedaCochera", cancellationToken))
         {
-            IdContrato = request.IdContrato,
-            request.CodigoContrato,
-            request.IdArrendador,
-            request.IdInquilino,
-            request.IdInmueble,
-            request.IdUnidadPrincipal,
-            FechaFirma = request.FechaFirma?.ToDateTime(TimeOnly.MinValue),
-            FechaInicio = request.FechaInicio.ToDateTime(TimeOnly.MinValue),
-            FechaFin = request.FechaFin.ToDateTime(TimeOnly.MinValue),
-            request.Moneda,
-            request.MonedaAlquiler,
-            request.MonedaMantenimiento,
-            request.ImporteAlquiler,
-            request.PeriodicidadAlquiler,
-            request.DiaLimitePago,
-            request.DiasGracia,
-            request.ImporteMantenimiento,
-            request.PeriodicidadMantenimiento,
-            request.DiaLimiteMantenimiento,
-            request.GarantiaPactada,
-            request.GarantiaPagada,
-            request.GarantiaPendiente,
-            request.TipoReajuste,
-            request.PorcentajeReajuste,
-            request.FormulaReajuste,
-            request.FrecuenciaReajuste,
-            request.PenalidadMora,
-            request.InteresMoratorio,
-            request.EstadoContrato,
-            request.Observaciones,
-            request.DocumentoFirmadoNombre,
-            request.DocumentoFirmadoUrl,
-            request.DocumentoFirmadoTamanoKB,
-            request.IdEmpleadoResponsable,
-            FechaSuspension = request.FechaSuspension?.ToDateTime(TimeOnly.MinValue),
-            FechaCancelacion = request.FechaCancelacion?.ToDateTime(TimeOnly.MinValue),
-            request.MotivoCancelacion,
-            request.Activo,
-            UsuarioAccion = usuarioAccion
-        }, cancellationToken);
+            parametros.Add("MonedaCochera", request.MonedaCochera);
+        }
+
+        if (await ExisteParametroProcedimientoAsync(SpContratoGuardar, "MonedaGarantia", cancellationToken))
+        {
+            parametros.Add("MonedaGarantia", request.MonedaGarantia);
+        }
+
+        if (await ExisteParametroProcedimientoAsync(SpContratoGuardar, "ImporteCochera", cancellationToken))
+        {
+            parametros.Add("ImporteCochera", request.ImporteCochera);
+        }
+
+        if (await ExisteParametroProcedimientoAsync(SpContratoGuardar, "PeriodicidadCochera", cancellationToken))
+        {
+            parametros.Add("PeriodicidadCochera", request.PeriodicidadCochera);
+        }
+
+        if (await ExisteParametroProcedimientoAsync(SpContratoGuardar, "DiaLimiteCochera", cancellationToken))
+        {
+            parametros.Add("DiaLimiteCochera", request.DiaLimiteCochera);
+        }
+
+        var result = await ExecuteSaveAsync(SpContratoGuardar, parametros, cancellationToken);
 
         await RegistrarAuditoriaAsync("Arrendamientos", "a_contrato", result.Id ?? 0, request.IdContrato is null ? "CREAR" : "EDITAR", request.CodigoContrato, request.EstadoContrato, usuarioAccion, request.Observaciones, cancellationToken);
         return result;
@@ -574,26 +666,48 @@ public sealed class ArrendamientosService : IArrendamientosService
 
     public async Task<ArrendamientosCommandResultDto> GenerarObligacionesAsync(ArrendamientosObligacionGenerarRequestDto request, string usuarioAccion, CancellationToken cancellationToken = default)
     {
-        var payload = request.Obligaciones.Select(item => new
+        var contratoIds = request.Obligaciones
+            .Select(item => item.IdContrato)
+            .Where(id => id > 0)
+            .Distinct()
+            .ToArray();
+
+        var conceptoIds = request.Obligaciones
+            .Select(item => item.IdConcepto)
+            .Where(id => id > 0)
+            .Distinct()
+            .ToArray();
+
+        var monedasContrato = await ObtenerMonedasContratoAsync(contratoIds, cancellationToken);
+        var codigosConcepto = await ObtenerCodigosConceptoAsync(conceptoIds, cancellationToken);
+
+        var payload = request.Obligaciones.Select(item =>
         {
-            item.IdContrato,
-            item.IdContratoVersion,
-            item.IdUnidad,
-            item.IdConcepto,
-            PeriodoDesde = item.PeriodoDesde.ToDateTime(TimeOnly.MinValue),
-            PeriodoHasta = item.PeriodoHasta.ToDateTime(TimeOnly.MinValue),
-            FechaEmision = item.FechaEmision.ToDateTime(TimeOnly.MinValue),
-            FechaVencimiento = item.FechaVencimiento.ToDateTime(TimeOnly.MinValue),
-            item.Moneda,
-            item.TipoCambio,
-            item.ImporteOriginal,
-            item.ImporteConvertido,
-            item.Interes,
-            item.Penalidad,
-            item.Descuento,
-            item.Ajuste,
-            item.Observacion,
-            item.EsGeneradaAutomaticamente
+            var contrato = monedasContrato.TryGetValue(item.IdContrato, out var monedaContrato) ? monedaContrato : null;
+            var codigoConcepto = codigosConcepto.TryGetValue(item.IdConcepto, out var codigo) ? codigo : null;
+            var moneda = ResolverMonedaObligacion(item.Moneda, codigoConcepto, contrato);
+
+            return new
+            {
+                item.IdContrato,
+                item.IdContratoVersion,
+                item.IdUnidad,
+                item.IdConcepto,
+                PeriodoDesde = item.PeriodoDesde.ToDateTime(TimeOnly.MinValue),
+                PeriodoHasta = item.PeriodoHasta.ToDateTime(TimeOnly.MinValue),
+                FechaEmision = item.FechaEmision.ToDateTime(TimeOnly.MinValue),
+                FechaVencimiento = item.FechaVencimiento.ToDateTime(TimeOnly.MinValue),
+                Moneda = moneda,
+                item.TipoCambio,
+                item.ImporteOriginal,
+                item.ImporteConvertido,
+                item.Interes,
+                item.Penalidad,
+                item.Descuento,
+                item.Ajuste,
+                item.Observacion,
+                item.EsGeneradaAutomaticamente
+            };
         });
 
         var result = await ExecuteSaveAsync(SpObligacionGenerar, new
@@ -608,38 +722,54 @@ public sealed class ArrendamientosService : IArrendamientosService
 
     public async Task<ArrendamientosCommandResultDto> RegistrarPagoAsync(ArrendamientosPagoRequestDto request, string usuarioAccion, CancellationToken cancellationToken = default)
     {
-        var result = await ExecuteSaveAsync(SpPagoRegistrar, new
-        {
-            request.NumeroOperacion,
-            FechaOperacion = request.FechaOperacion.ToDateTime(TimeOnly.MinValue),
-            FechaContabilizacion = request.FechaContabilizacion?.ToDateTime(TimeOnly.MinValue),
-            request.IdInquilino,
-            request.IdArrendador,
-            request.IdEmpleadoRegistrador,
-            request.CuentaOrigen,
-            request.CuentaDestino,
-            request.Banco,
-            request.MonedaOperacion,
-            request.TipoCambio,
-            request.ImporteTransferido,
-            request.ComisionBancaria,
-            request.Itf,
-            request.ImporteTotalCargado,
-            request.ImporteOriginal,
-            request.ImporteConvertido,
-            request.DiferenciaCambio,
-            request.TipoTransferencia,
-            request.ConceptoBanco,
-            request.Observacion,
-            request.VoucherNombre,
-            request.VoucherExtension,
-            request.VoucherTamanoBytes,
-            request.VoucherRuta,
-            request.VoucherUrl,
-            UsuarioAccion = usuarioAccion
-        }, cancellationToken);
+        request.TipoPago = NormalizarTipoPago(request.TipoPago);
+        request.ConceptoPago = NormalizarConceptoPago(request.ConceptoPago);
+        await ValidarPagoCompletoDuplicadoAsync(request, cancellationToken);
+        ArrendamientosCommandResultDto result;
 
-        await RegistrarAuditoriaAsync("Arrendamientos", "a_pago", result.Id ?? 0, "CREAR", request.NumeroOperacion, request.MonedaOperacion, usuarioAccion, request.Observacion, cancellationToken);
+        if (request.IdPago.GetValueOrDefault() > 0 && !await ExisteParametroProcedimientoAsync(SpPagoRegistrar, "IdPago", cancellationToken))
+        {
+            result = await ActualizarPagoDirectoAsync(request, usuarioAccion, cancellationToken);
+        }
+        else
+        {
+            result = await ExecuteSaveAsync(SpPagoRegistrar, new
+            {
+                request.IdPago,
+                request.NumeroOperacion,
+                FechaOperacion = request.FechaOperacion.ToDateTime(TimeOnly.MinValue),
+                FechaContabilizacion = request.FechaContabilizacion?.ToDateTime(TimeOnly.MinValue),
+                request.IdInquilino,
+                request.IdArrendador,
+                request.IdEmpleadoRegistrador,
+                request.CuentaOrigen,
+                request.CuentaDestino,
+                request.Banco,
+                request.MonedaOperacion,
+                request.TipoPago,
+                request.ConceptoPago,
+                request.TipoCambio,
+                request.ImporteTransferido,
+                request.ComisionBancaria,
+                request.Itf,
+                request.ImporteTotalCargado,
+                request.ImporteOriginal,
+                request.ImporteConvertido,
+                request.DiferenciaCambio,
+                request.TipoTransferencia,
+                request.ConceptoBanco,
+                request.Observacion,
+                request.VoucherNombre,
+                request.VoucherExtension,
+                request.VoucherTamanoBytes,
+                request.VoucherRuta,
+                request.VoucherUrl,
+                UsuarioAccion = usuarioAccion
+            }, cancellationToken);
+        }
+
+        var accionAuditoria = request.IdPago.GetValueOrDefault() > 0 ? "MODIFICAR" : "CREAR";
+        await RegistrarAuditoriaAsync("Arrendamientos", "a_pago", result.Id ?? 0, accionAuditoria, request.NumeroOperacion, request.MonedaOperacion, usuarioAccion, request.Observacion, cancellationToken);
         return result;
     }
 
@@ -827,8 +957,9 @@ public sealed class ArrendamientosService : IArrendamientosService
         CancellationToken cancellationToken = default)
     {
         await using var connection = _sqlCommandFactory.CreateConnection();
+        var compatibleParameters = await BuildCompatibleParametersAsync(connection, storedProcedure, parameters, cancellationToken);
         var row = await connection.QueryFirstOrDefaultAsync<StoredProcedureResultRow>(
-            _sqlCommandFactory.Create(storedProcedure, parameters, CommandType.StoredProcedure, cancellationToken));
+            _sqlCommandFactory.Create(storedProcedure, compatibleParameters, CommandType.StoredProcedure, cancellationToken));
 
         return new ArrendamientosCommandResultDto
         {
@@ -840,8 +971,453 @@ public sealed class ArrendamientosService : IArrendamientosService
         };
     }
 
+    private async Task<DynamicParameters> BuildCompatibleParametersAsync(
+        Microsoft.Data.SqlClient.SqlConnection connection,
+        string storedProcedure,
+        object parameters,
+        CancellationToken cancellationToken)
+    {
+        var allowedParameters = await connection.QueryAsync<string>(
+            _sqlCommandFactory.Create(
+                """
+                SELECT p.name
+                FROM sys.parameters p
+                INNER JOIN sys.objects o ON o.object_id = p.object_id
+                WHERE o.object_id = OBJECT_ID(@StoredProcedure)
+                """,
+                new { StoredProcedure = storedProcedure },
+                cancellationToken: cancellationToken));
+
+        var allowed = new HashSet<string>(
+            allowedParameters.Select(name => name.TrimStart('@')),
+            StringComparer.OrdinalIgnoreCase);
+
+        var dynamicParameters = new DynamicParameters();
+        foreach (var property in parameters.GetType().GetProperties())
+        {
+            if (!allowed.Contains(property.Name))
+            {
+                continue;
+            }
+
+            dynamicParameters.Add(property.Name, property.GetValue(parameters));
+        }
+
+        return dynamicParameters;
+    }
+
+    private async Task<bool> ExisteColumnaAsync(string tabla, string columna, CancellationToken cancellationToken)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        var result = await connection.ExecuteScalarAsync<int>(
+            _sqlCommandFactory.Create(
+                $"SELECT CASE WHEN COL_LENGTH('{tabla}', '{columna}') IS NULL THEN 0 ELSE 1 END;",
+                cancellationToken: cancellationToken));
+        return result == 1;
+    }
+
+    private async Task<bool> ExisteParametroProcedimientoAsync(string procedimiento, string parametro, CancellationToken cancellationToken)
+    {
+        var nombreProcedimiento = procedimiento.Contains('.') ? procedimiento[(procedimiento.LastIndexOf('.') + 1)..] : procedimiento;
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        var result = await connection.ExecuteScalarAsync<int>(
+            _sqlCommandFactory.Create(
+                $"""
+                SELECT CASE WHEN EXISTS (
+                    SELECT 1
+                    FROM sys.parameters p
+                    INNER JOIN sys.objects o ON o.object_id = p.object_id
+                    WHERE o.name = '{nombreProcedimiento}'
+                      AND p.name = '@{parametro}'
+                ) THEN 1 ELSE 0 END;
+                """,
+                cancellationToken: cancellationToken));
+        return result == 1;
+    }
+
+    private async Task<string> ObtenerSelectColumnaAsync(
+        string tabla,
+        string columna,
+        string selectExiste,
+        string selectNoExiste,
+        CancellationToken cancellationToken)
+        => await ExisteColumnaAsync(tabla, columna, cancellationToken) ? selectExiste : selectNoExiste;
+
     private static bool EsActivo(string? estado)
         => string.IsNullOrWhiteSpace(estado) || estado.Trim().Equals("ACTIVO", StringComparison.OrdinalIgnoreCase);
+
+    private static void ValidarPagoRequest(ArrendamientosPagoRequestDto request)
+    {
+        if (string.IsNullOrWhiteSpace(request.NumeroOperacion))
+        {
+            throw new InvalidOperationException("Debe indicar el numero de operacion.");
+        }
+
+        if (request.FechaOperacion == default)
+        {
+            throw new InvalidOperationException("Debe indicar la fecha de operacion.");
+        }
+
+        if (request.FechaContabilizacion is null)
+        {
+            throw new InvalidOperationException("Debe indicar la fecha de contabilizacion.");
+        }
+
+        if (request.IdArrendador <= 0)
+        {
+            throw new InvalidOperationException("Debe indicar el arrendador.");
+        }
+
+        if (request.IdInquilino <= 0)
+        {
+            throw new InvalidOperationException("Debe indicar el inquilino.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.MonedaOperacion))
+        {
+            throw new InvalidOperationException("Debe indicar la moneda de operacion.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.TipoPago))
+        {
+            throw new InvalidOperationException("Debe indicar el tipo de pago.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ConceptoPago))
+        {
+            throw new InvalidOperationException("Debe indicar el concepto del pago.");
+        }
+    }
+
+    private async Task ValidarPagoCompletoDuplicadoAsync(ArrendamientosPagoRequestDto request, CancellationToken cancellationToken)
+    {
+        if (!string.Equals(request.TipoPago?.Trim(), "COMPLETO", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (request.FechaContabilizacion is null)
+        {
+            throw new InvalidOperationException("Debe indicar la fecha de contabilizacion.");
+        }
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        var existe = await connection.ExecuteScalarAsync<int>(
+            """
+            SELECT CASE WHEN EXISTS (
+                SELECT 1
+                FROM dbo.a_pago
+                WHERE IdInquilino = @IdInquilino
+                  AND UPPER(LTRIM(RTRIM(ConceptoPago))) = @ConceptoPago
+                  AND UPPER(LTRIM(RTRIM(TipoPago))) = 'COMPLETO'
+                  AND YEAR(FechaContabilizacion) = @AnioContabilizacion
+                  AND MONTH(FechaContabilizacion) = @MesContabilizacion
+                  AND (@IdPago IS NULL OR IdPago <> @IdPago)
+            ) THEN 1 ELSE 0 END;
+            """,
+            new
+            {
+                request.IdInquilino,
+                request.ConceptoPago,
+                AnioContabilizacion = request.FechaContabilizacion.Value.Year,
+                MesContabilizacion = request.FechaContabilizacion.Value.Month,
+                request.IdPago
+            });
+
+        if (existe == 1)
+        {
+            throw new InvalidOperationException("Ya existe un pago COMPLETO para el mismo inquilino, concepto y periodo de contabilizacion.");
+        }
+    }
+
+    private async Task<ArrendamientosCommandResultDto> ActualizarPagoDirectoAsync(
+        ArrendamientosPagoRequestDto request,
+        string usuarioAccion,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        try
+        {
+            var estadoActual = await connection.ExecuteScalarAsync<string?>(
+                """
+                SELECT EstadoValidacion
+                FROM dbo.a_pago
+                WHERE IdPago = @IdPago;
+                """,
+                new { request.IdPago },
+                transaction: transaction);
+
+            if (estadoActual is null)
+            {
+                throw new InvalidOperationException("No existe el pago indicado para actualizar.");
+            }
+
+            if (!estadoActual.Equals("PENDIENTE", StringComparison.OrdinalIgnoreCase)
+                && !estadoActual.Equals("RECHAZADO", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Solo se pueden editar pagos pendientes o rechazados.");
+            }
+
+            var duplicado = await connection.ExecuteScalarAsync<int>(
+                """
+                SELECT CASE WHEN EXISTS (
+                    SELECT 1
+                    FROM dbo.a_pago
+                    WHERE NumeroOperacion = @NumeroOperacion
+                      AND FechaOperacion = @FechaOperacion
+                      AND IdInquilino = @IdInquilino
+                      AND IdArrendador = @IdArrendador
+                      AND IdPago <> @IdPago
+                ) THEN 1 ELSE 0 END;
+                """,
+                new
+                {
+                    request.NumeroOperacion,
+                    FechaOperacion = request.FechaOperacion.ToDateTime(TimeOnly.MinValue),
+                    request.IdInquilino,
+                    request.IdArrendador,
+                    request.IdPago
+                },
+                transaction: transaction);
+
+            if (duplicado == 1)
+            {
+                throw new InvalidOperationException("Ya existe un pago con el mismo numero de operacion.");
+            }
+
+            var duplicadoPeriodoCompleto = await connection.ExecuteScalarAsync<int>(
+                """
+                SELECT CASE WHEN EXISTS (
+                    SELECT 1
+                    FROM dbo.a_pago
+                    WHERE IdInquilino = @IdInquilino
+                      AND UPPER(LTRIM(RTRIM(ConceptoPago))) = @ConceptoPago
+                      AND UPPER(LTRIM(RTRIM(TipoPago))) = 'COMPLETO'
+                      AND YEAR(FechaContabilizacion) = @AnioContabilizacion
+                      AND MONTH(FechaContabilizacion) = @MesContabilizacion
+                      AND IdPago <> @IdPago
+                ) THEN 1 ELSE 0 END;
+                """,
+                new
+                {
+                    request.IdInquilino,
+                    request.ConceptoPago,
+                    AnioContabilizacion = request.FechaContabilizacion?.Year,
+                    MesContabilizacion = request.FechaContabilizacion?.Month,
+                    request.IdPago
+                },
+                transaction: transaction);
+
+            if (duplicadoPeriodoCompleto == 1)
+            {
+                throw new InvalidOperationException("Ya existe un pago COMPLETO para el mismo inquilino, concepto y periodo de contabilizacion.");
+            }
+
+            var tieneTipoPago = await ExisteColumnaAsync("dbo.a_pago", "TipoPago", cancellationToken);
+            var tieneConceptoPago = await ExisteColumnaAsync("dbo.a_pago", "ConceptoPago", cancellationToken);
+
+            var sqlUpdate = """
+                UPDATE dbo.a_pago
+                SET NumeroOperacion = @NumeroOperacion,
+                    FechaOperacion = @FechaOperacion,
+                    FechaContabilizacion = @FechaContabilizacion,
+                    IdInquilino = @IdInquilino,
+                    IdArrendador = @IdArrendador,
+                    IdEmpleadoRegistrador = @IdEmpleadoRegistrador,
+                    CuentaOrigen = @CuentaOrigen,
+                    CuentaDestino = @CuentaDestino,
+                    Banco = @Banco,
+                    MonedaOperacion = @MonedaOperacion,
+                """;
+
+            if (tieneTipoPago)
+            {
+                sqlUpdate += """
+                    TipoPago = @TipoPago,
+                    """;
+            }
+
+            if (tieneConceptoPago)
+            {
+                sqlUpdate += """
+                    ConceptoPago = @ConceptoPago,
+                    """;
+            }
+
+            sqlUpdate += """
+                    TipoCambio = @TipoCambio,
+                    ImporteTransferido = @ImporteTransferido,
+                    ComisionBancaria = @ComisionBancaria,
+                    Itf = @Itf,
+                    ImporteTotalCargado = @ImporteTotalCargado,
+                    ImporteOriginal = @ImporteOriginal,
+                    ImporteConvertido = @ImporteConvertido,
+                    DiferenciaCambio = @DiferenciaCambio,
+                    TipoTransferencia = @TipoTransferencia,
+                    ConceptoBanco = @ConceptoBanco,
+                    Observacion = @Observacion,
+                    VoucherNombre = @VoucherNombre,
+                    VoucherExtension = @VoucherExtension,
+                    VoucherTamanoBytes = @VoucherTamanoBytes,
+                    VoucherRuta = @VoucherRuta,
+                    VoucherUrl = @VoucherUrl,
+                    EstadoValidacion = 'PENDIENTE',
+                    UsuarioModificacion = @UsuarioAccion,
+                    FechaModificacion = SYSDATETIME()
+                WHERE IdPago = @IdPago;
+                """;
+
+            await connection.ExecuteAsync(
+                sqlUpdate,
+                new
+                {
+                    request.IdPago,
+                    request.NumeroOperacion,
+                    FechaOperacion = request.FechaOperacion.ToDateTime(TimeOnly.MinValue),
+                    FechaContabilizacion = request.FechaContabilizacion?.ToDateTime(TimeOnly.MinValue),
+                    request.IdInquilino,
+                    request.IdArrendador,
+                    request.IdEmpleadoRegistrador,
+                    request.CuentaOrigen,
+                    request.CuentaDestino,
+                    request.Banco,
+                    request.MonedaOperacion,
+                    request.TipoPago,
+                    request.ConceptoPago,
+                    request.TipoCambio,
+                    request.ImporteTransferido,
+                    request.ComisionBancaria,
+                    request.Itf,
+                    request.ImporteTotalCargado,
+                    request.ImporteOriginal,
+                    request.ImporteConvertido,
+                    request.DiferenciaCambio,
+                    request.TipoTransferencia,
+                    request.ConceptoBanco,
+                    request.Observacion,
+                    request.VoucherNombre,
+                    request.VoucherExtension,
+                    request.VoucherTamanoBytes,
+                    request.VoucherRuta,
+                    request.VoucherUrl,
+                    UsuarioAccion = usuarioAccion
+                },
+                transaction: transaction);
+
+            await transaction.CommitAsync(cancellationToken);
+
+            return new ArrendamientosCommandResultDto
+            {
+                Success = true,
+                Message = "Pago actualizado correctamente.",
+                Id = request.IdPago
+            };
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
+
+    private static string ResolverMonedaObligacion(string? monedaItem, string? codigoConcepto, ArrendamientosContratoMonedaDto? contrato)
+    {
+        var monedaNormalizada = NormalizarMoneda(monedaItem);
+        if (monedaNormalizada is not null)
+        {
+            return monedaNormalizada;
+        }
+
+        var concepto = (codigoConcepto ?? string.Empty).Trim().ToUpperInvariant();
+        return concepto switch
+        {
+            "ALQUILER" => NormalizarMoneda(contrato?.MonedaAlquiler) ?? NormalizarMoneda(contrato?.Moneda) ?? "PEN",
+            "MANTENIMIENTO" => NormalizarMoneda(contrato?.MonedaMantenimiento) ?? NormalizarMoneda(contrato?.Moneda) ?? "PEN",
+            "COCHERA" => NormalizarMoneda(contrato?.MonedaCochera) ?? NormalizarMoneda(contrato?.Moneda) ?? "PEN",
+            _ => NormalizarMoneda(contrato?.Moneda) ?? "PEN"
+        };
+    }
+
+    private static string? NormalizarMoneda(string? moneda)
+    {
+        var value = moneda?.Trim().ToUpperInvariant();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private static string NormalizarTipoPago(string? tipoPago)
+        => string.IsNullOrWhiteSpace(tipoPago) ? "COMPLETO" : tipoPago.Trim().ToUpperInvariant();
+
+    private static string NormalizarConceptoPago(string? conceptoPago)
+        => string.IsNullOrWhiteSpace(conceptoPago) ? "ALQUILER" : conceptoPago.Trim().ToUpperInvariant();
+
+    private async Task<Dictionary<int, ArrendamientosContratoMonedaDto>> ObtenerMonedasContratoAsync(
+        IReadOnlyCollection<int> idsContrato,
+        CancellationToken cancellationToken)
+    {
+        if (idsContrato.Count == 0)
+        {
+            return new Dictionary<int, ArrendamientosContratoMonedaDto>();
+        }
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        var monedaCocheraSelect = await ObtenerSelectColumnaAsync(
+            "dbo.a_contrato",
+            "MonedaCochera",
+            "MonedaCochera",
+            "NULL AS MonedaCochera",
+            cancellationToken);
+        var monedaGarantiaSelect = await ObtenerSelectColumnaAsync(
+            "dbo.a_contrato",
+            "MonedaGarantia",
+            "MonedaGarantia",
+            "NULL AS MonedaGarantia",
+            cancellationToken);
+
+        var rows = await connection.QueryAsync<ArrendamientosContratoMonedaDto>(
+            _sqlCommandFactory.Create($$"""
+                SELECT
+                    IdContrato,
+                    Moneda,
+                    MonedaAlquiler,
+                    MonedaMantenimiento,
+                    {{monedaCocheraSelect}},
+                    {{monedaGarantiaSelect}}
+                FROM dbo.a_contrato
+                WHERE IdContrato IN @IdsContrato;
+                """,
+                new { IdsContrato = idsContrato },
+                cancellationToken: cancellationToken));
+
+        return rows.ToDictionary(x => x.IdContrato, x => x);
+    }
+
+    private async Task<Dictionary<int, string>> ObtenerCodigosConceptoAsync(
+        IReadOnlyCollection<int> idsConcepto,
+        CancellationToken cancellationToken)
+    {
+        if (idsConcepto.Count == 0)
+        {
+            return new Dictionary<int, string>();
+        }
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        var rows = await connection.QueryAsync<ConceptoCodigoRow>(
+            _sqlCommandFactory.Create("""
+                SELECT
+                    IdConcepto,
+                    CodigoConcepto
+                FROM dbo.a_concepto
+                WHERE IdConcepto IN @IdsConcepto;
+                """,
+                new { IdsConcepto = idsConcepto },
+                cancellationToken: cancellationToken));
+
+        return rows.ToDictionary(x => x.IdConcepto, x => x.CodigoConcepto ?? string.Empty);
+    }
 
     private async Task RegistrarAuditoriaAsync(
         string modulo,
@@ -883,6 +1459,22 @@ public sealed class ArrendamientosService : IArrendamientosService
         public int? Id { get; set; }
         public int? IdSecundario { get; set; }
         public int? IdVersion { get; set; }
+    }
+
+    private sealed class ArrendamientosContratoMonedaDto
+    {
+        public int IdContrato { get; set; }
+        public string? Moneda { get; set; }
+        public string? MonedaAlquiler { get; set; }
+        public string? MonedaMantenimiento { get; set; }
+        public string? MonedaCochera { get; set; }
+        public string? MonedaGarantia { get; set; }
+    }
+
+    private sealed class ConceptoCodigoRow
+    {
+        public int IdConcepto { get; set; }
+        public string? CodigoConcepto { get; set; }
     }
 }
 

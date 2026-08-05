@@ -9,12 +9,26 @@ public sealed class ArrendamientosFilaDto
     public string? Nombre { get; set; }
     public string? Detalle { get; set; }
     public string? Estado { get; set; }
+    public string? TipoPago { get; set; }
     public string? Moneda { get; set; }
     public string? MonedaAlquiler { get; set; }
     public string? MonedaMantenimiento { get; set; }
+    public string? MonedaCochera { get; set; }
+    public string? MonedaGarantia { get; set; }
     public decimal? Importe { get; set; }
+    public decimal? ImporteAlquiler { get; set; }
+    public decimal? ImporteMantenimiento { get; set; }
+    public decimal? ImporteCochera { get; set; }
+    public decimal? ImporteTransferido { get; set; }
+    public decimal? ComisionBancaria { get; set; }
+    public decimal? Itf { get; set; }
+    public decimal? ImporteTotalCargado { get; set; }
+    public decimal? ImporteOriginal { get; set; }
+    public decimal? ImporteConvertido { get; set; }
+    public decimal? DiferenciaCambio { get; set; }
     public decimal? Saldo { get; set; }
     public string? Fecha { get; set; }
+    public string? FechaContabilizacion { get; set; }
     public string? FechaInicio { get; set; }
     public string? FechaFin { get; set; }
     public string? Arrendador { get; set; }
@@ -24,6 +38,7 @@ public sealed class ArrendamientosFilaDto
     public string? Concepto { get; set; }
     public string? Periodo { get; set; }
     public string? Responsable { get; set; }
+    public string? ConceptoPago { get; set; }
     public string? Observacion { get; set; }
     public string? Tipo { get; set; }
 }
@@ -90,6 +105,8 @@ public sealed class ArrendamientosContratoRequestDto
     public string Moneda { get; set; } = "PEN";
     public string MonedaAlquiler { get; set; } = "PEN";
     public string MonedaMantenimiento { get; set; } = "PEN";
+    public string MonedaCochera { get; set; } = "PEN";
+    public string MonedaGarantia { get; set; } = "PEN";
     public decimal ImporteAlquiler { get; set; }
     public string? PeriodicidadAlquiler { get; set; }
     public int DiaLimitePago { get; set; } = 5;
@@ -97,6 +114,9 @@ public sealed class ArrendamientosContratoRequestDto
     public decimal ImporteMantenimiento { get; set; }
     public string? PeriodicidadMantenimiento { get; set; }
     public int DiaLimiteMantenimiento { get; set; } = 5;
+    public decimal ImporteCochera { get; set; }
+    public string? PeriodicidadCochera { get; set; }
+    public int DiaLimiteCochera { get; set; } = 5;
     public decimal GarantiaPactada { get; set; }
     public decimal GarantiaPagada { get; set; }
     public decimal GarantiaPendiente { get; set; }
@@ -160,6 +180,7 @@ public sealed class ArrendamientosObligacionGenerarRequestDto
 
 public sealed class ArrendamientosPagoRequestDto
 {
+    public int? IdPago { get; set; }
     public string NumeroOperacion { get; set; } = string.Empty;
     public DateOnly FechaOperacion { get; set; }
     public DateOnly? FechaContabilizacion { get; set; }
@@ -170,6 +191,8 @@ public sealed class ArrendamientosPagoRequestDto
     public string? CuentaDestino { get; set; }
     public string? Banco { get; set; }
     public string MonedaOperacion { get; set; } = "PEN";
+    public string TipoPago { get; set; } = "COMPLETO";
+    public string ConceptoPago { get; set; } = "ALQUILER";
     public decimal? TipoCambio { get; set; }
     public decimal ImporteTransferido { get; set; }
     public decimal ComisionBancaria { get; set; }

@@ -35,10 +35,21 @@ public interface IConciliacionBcpService
         string? usuario,
         CancellationToken cancellationToken = default);
 
+    Task<ConciliacionBcpConciliarPlanillaRegistroDto> ActualizarComentarioMovimientoV1Async(
+        int idMovimientoBanco,
+        ConciliacionBcpActualizarComentarioRequestDto request,
+        string? usuario,
+        CancellationToken cancellationToken = default);
+
     Task<ConciliacionBcpClasificacionCombosResponseDto> ObtenerCombosClasificacionAsync(
         CancellationToken cancellationToken = default);
 
     Task<ConciliacionBcpConciliarPlanillaRegistroDto> ActualizarClasificacionContableAsync(
+        ConciliacionBcpActualizarClasificacionRequestDto request,
+        string? usuario,
+        CancellationToken cancellationToken = default);
+
+    Task<ConciliacionBcpConciliarPlanillaRegistroDto> ActualizarClasificacionContableV1Async(
         ConciliacionBcpActualizarClasificacionRequestDto request,
         string? usuario,
         CancellationToken cancellationToken = default);

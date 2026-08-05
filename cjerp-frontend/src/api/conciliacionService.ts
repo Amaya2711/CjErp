@@ -69,6 +69,19 @@ export async function actualizarComentarioMovimientoConciliacionBcp(
   );
 }
 
+export async function actualizarComentarioMovimientoConciliacionV1(
+  idMovimientoBanco: number,
+  request: ConciliacionBcpActualizarComentarioRequest
+): Promise<ConciliacionBcpConciliarPlanillaRegistro> {
+  return await httpClient.put<ConciliacionBcpConciliarPlanillaRegistro>(
+    `${BASE_URL}/movimientos/${idMovimientoBanco}/comentario-v1`,
+    request,
+    {
+      timeout: 30000,
+    }
+  );
+}
+
 export async function obtenerCombosClasificacionConciliacionBcp(): Promise<ConciliacionBcpClasificacionCombosResponse> {
   return await httpClient.get<ConciliacionBcpClasificacionCombosResponse>(`${BASE_URL}/clasificacion/combos`, {
     timeout: 30000,
@@ -80,6 +93,18 @@ export async function actualizarClasificacionMovimientoConciliacionBcp(
 ): Promise<ConciliacionBcpConciliarPlanillaRegistro> {
   return await httpClient.put<ConciliacionBcpConciliarPlanillaRegistro>(
     `${BASE_URL}/movimientos/clasificacion`,
+    request,
+    {
+      timeout: 30000,
+    }
+  );
+}
+
+export async function actualizarClasificacionMovimientoConciliacionV1(
+  request: ConciliacionBcpActualizarClasificacionRequest
+): Promise<ConciliacionBcpConciliarPlanillaRegistro> {
+  return await httpClient.put<ConciliacionBcpConciliarPlanillaRegistro>(
+    `${BASE_URL}/movimientos/clasificacion-v1`,
     request,
     {
       timeout: 30000,

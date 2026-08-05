@@ -40,6 +40,16 @@ type ArrendamientosCrudPageProps<TForm extends { id?: number | null }> = {
   panelSubtitle?: string;
   exportFileName?: string;
   showSearchHint?: boolean;
+  rowActionsPosition?: number;
+  renderRowActions?: (
+    row: ArrendamientosFila,
+    helpers: {
+      abrirEdicion: (row: ArrendamientosFila) => void;
+      recargar: () => Promise<void>;
+      notificarExito: (mensaje: string) => void;
+      notificarError: (mensaje: string) => void;
+    }
+  ) => ReactNode;
 };
 
 function matchesFallbackSearch(row: ArrendamientosFila, query: string) {
@@ -97,6 +107,8 @@ export default function ArrendamientosCrudPage<TForm extends { id?: number | nul
   panelSubtitle,
   exportFileName,
   showSearchHint = true,
+  rowActionsPosition,
+  renderRowActions,
 }: ArrendamientosCrudPageProps<TForm>) {
   const [rows, setRows] = useState<ArrendamientosFila[]>([]);
   const [loading, setLoading] = useState(true);
@@ -232,10 +244,21 @@ export default function ArrendamientosCrudPage<TForm extends { id?: number | nul
           loading={loading}
           emptyMessage={emptyMessage}
           getRowKey={(row) => row.id ?? `${row.codigo ?? "fila"}-${row.fecha ?? ""}`}
+          rowActionsPosition={rowActionsPosition}
           rowActions={(row) => (
-            <button type="button" style={styles.editButton} onClick={() => abrirEdicion(row)} title="Editar">
-              <Pencil size={16} />
-            </button>
+            <div style={styles.rowActionsCell}>
+              <button type="button" style={styles.editButton} onClick={() => abrirEdicion(row)} title="Editar">
+                <Pencil size={16} />
+              </button>
+              {renderRowActions
+                ? renderRowActions(row, {
+                    abrirEdicion,
+                    recargar: cargar,
+                    notificarExito: setSuccess,
+                    notificarError: setError,
+                  })
+                : null}
+            </div>
           )}
         />
       </AppCard>
@@ -325,5 +348,12 @@ const styles: Record<string, React.CSSProperties> = {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
+  },
+  rowActionsCell: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    flexWrap: "wrap",
   },
 };

@@ -1,4 +1,4 @@
-import type React from "react";
+import React from "react";
 
 export type DataGridColumn<T> = {
   key: string;
@@ -17,6 +17,7 @@ type DataGridBaseProps<T> = {
   rowActions?: (row: T) => React.ReactNode;
   actionsHeader?: string;
   actionsAlign?: "left" | "center" | "right";
+  rowActionsPosition?: number;
 };
 
 export default function DataGridBase<T>({
@@ -29,36 +30,50 @@ export default function DataGridBase<T>({
   rowActions,
   actionsHeader = "Acciones",
   actionsAlign = "center",
+  rowActionsPosition,
 }: DataGridBaseProps<T>) {
   const columnCount = Math.max(columns.length + (rowActions ? 1 : 0), 1);
+  const actionIndex = rowActions ? Math.min(Math.max(rowActionsPosition ?? columns.length, 0), columns.length) : -1;
+
+  const renderActionHeader = () =>
+    rowActions ? (
+      <th
+        style={{
+          ...styles.th,
+          textAlign: actionsAlign,
+          width: 120,
+        }}
+      >
+        {actionsHeader}
+      </th>
+    ) : null;
+
+  const renderActionCell = (row: T) =>
+    rowActions ? (
+      <td style={{ ...styles.td, textAlign: actionsAlign }}>
+        {rowActions(row)}
+      </td>
+    ) : null;
 
   return (
     <div style={styles.wrapper}>
       <table style={styles.table}>
         <thead>
           <tr>
-            {columns.map((column) => (
-              <th
-                key={column.key}
-                style={{
-                  ...styles.th,
-                  textAlign: column.align ?? "left",
-                }}
-              >
-                {column.header}
-              </th>
+            {columns.map((column, index) => (
+              <React.Fragment key={column.key}>
+                {index === actionIndex ? renderActionHeader() : null}
+                <th
+                  style={{
+                    ...styles.th,
+                    textAlign: column.align ?? "left",
+                  }}
+                >
+                  {column.header}
+                </th>
+              </React.Fragment>
             ))}
-            {rowActions ? (
-              <th
-                style={{
-                  ...styles.th,
-                  textAlign: actionsAlign,
-                  width: 120,
-                }}
-              >
-                {actionsHeader}
-              </th>
-            ) : null}
+            {actionIndex === columns.length ? renderActionHeader() : null}
           </tr>
         </thead>
         <tbody>
@@ -77,22 +92,20 @@ export default function DataGridBase<T>({
           ) : (
             rows.map((row) => (
               <tr key={getRowKey(row)}>
-                {columns.map((column) => (
-                  <td
-                    key={column.key}
-                    style={{
-                      ...styles.td,
-                      textAlign: column.align ?? "left",
-                    }}
-                  >
-                    {column.render(row)}
-                  </td>
+                {columns.map((column, index) => (
+                  <React.Fragment key={column.key}>
+                    {index === actionIndex ? renderActionCell(row) : null}
+                    <td
+                      style={{
+                        ...styles.td,
+                        textAlign: column.align ?? "left",
+                      }}
+                    >
+                      {column.render(row)}
+                    </td>
+                  </React.Fragment>
                 ))}
-                {rowActions ? (
-                  <td style={{ ...styles.td, textAlign: actionsAlign }}>
-                    {rowActions(row)}
-                  </td>
-                ) : null}
+                {actionIndex === columns.length ? renderActionCell(row) : null}
               </tr>
             ))
           )}

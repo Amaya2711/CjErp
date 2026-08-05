@@ -25,6 +25,8 @@ type ContratoForm = {
   moneda: string;
   monedaAlquiler: string;
   monedaMantenimiento: string;
+  monedaCochera: string;
+  monedaGarantia: string;
   importeAlquiler: string;
   periodicidadAlquiler: string;
   diaLimitePago: string;
@@ -32,6 +34,9 @@ type ContratoForm = {
   importeMantenimiento: string;
   periodicidadMantenimiento: string;
   diaLimiteMantenimiento: string;
+  importeCochera: string;
+  periodicidadCochera: string;
+  diaLimiteCochera: string;
   garantiaPactada: string;
   garantiaPagada: string;
   garantiaPendiente: string;
@@ -54,13 +59,10 @@ type ContratoForm = {
 
 const columns: DataGridColumn<ArrendamientosFila>[] = [
   { key: "codigo", header: "Codigo", render: (row) => row.codigo ?? "-" },
-  { key: "nombre", header: "Contrato", render: (row) => row.nombre ?? "-" },
   { key: "arrendador", header: "Arrendador", render: (row) => row.arrendador ?? "-" },
   { key: "inquilino", header: "Inquilino", render: (row) => row.inquilino ?? "-" },
   { key: "inmueble", header: "Inmueble", render: (row) => row.inmueble ?? "-" },
   { key: "unidad", header: "Unidad", render: (row) => row.unidad ?? "-" },
-  { key: "estado", header: "Estado", render: (row) => row.estado ?? "-" },
-  { key: "moneda", header: "Moneda", render: (row) => row.moneda ?? "-" },
   {
     key: "importe",
     header: "Importe",
@@ -71,6 +73,30 @@ const columns: DataGridColumn<ArrendamientosFila>[] = [
         maximumFractionDigits: 2,
       }),
   },
+  { key: "monedaAlquiler", header: "Moneda alquiler", render: (row) => row.monedaAlquiler ?? row.moneda ?? "-" },
+  {
+    key: "importeCochera",
+    header: "Importe cochera",
+    align: "right",
+    render: (row) =>
+      (row.importeCochera ?? 0).toLocaleString("es-PE", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }),
+  },
+  { key: "monedaCochera", header: "Moneda cochera", render: (row) => row.monedaCochera ?? row.moneda ?? "-" },
+  {
+    key: "importeMantenimiento",
+    header: "Importe mantenimiento",
+    align: "right",
+    render: (row) =>
+      (row.importeMantenimiento ?? 0).toLocaleString("es-PE", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }),
+  },
+  { key: "monedaMantenimiento", header: "Moneda mantenimiento", render: (row) => row.monedaMantenimiento ?? row.moneda ?? "-" },
+  { key: "estado", header: "Estado", render: (row) => row.estado ?? "-" },
 ];
 
 const initialForm = (): ContratoForm => {
@@ -90,6 +116,8 @@ const initialForm = (): ContratoForm => {
     moneda: "PEN",
     monedaAlquiler: "PEN",
     monedaMantenimiento: "PEN",
+    monedaCochera: "PEN",
+    monedaGarantia: "PEN",
     importeAlquiler: "",
     periodicidadAlquiler: "MENSUAL",
     diaLimitePago: "5",
@@ -97,6 +125,9 @@ const initialForm = (): ContratoForm => {
     importeMantenimiento: "",
     periodicidadMantenimiento: "MENSUAL",
     diaLimiteMantenimiento: "5",
+    importeCochera: "",
+    periodicidadCochera: "MENSUAL",
+    diaLimiteCochera: "5",
     garantiaPactada: "",
     garantiaPagada: "",
     garantiaPendiente: "",
@@ -171,6 +202,7 @@ export default function ArrendamientosContratosPage() {
       searchHint="codigo, arrendador, inquilino, inmueble, unidad"
       loadRows={listarContratosArrendamientos}
       columns={columns}
+      rowActionsPosition={11}
       initialForm={initialForm}
       mapRowToForm={(row) => ({
         id: row.id ?? null,
@@ -185,13 +217,18 @@ export default function ArrendamientosContratosPage() {
         moneda: row.moneda ?? "PEN",
         monedaAlquiler: row.monedaAlquiler ?? row.moneda ?? "PEN",
         monedaMantenimiento: row.monedaMantenimiento ?? row.moneda ?? "PEN",
+        monedaCochera: row.monedaCochera ?? row.moneda ?? "PEN",
+        monedaGarantia: row.monedaGarantia ?? row.moneda ?? "PEN",
         importeAlquiler: row.importe != null ? String(row.importe) : "",
         periodicidadAlquiler: "MENSUAL",
         diaLimitePago: "5",
         diasGracia: "0",
-        importeMantenimiento: "",
+        importeMantenimiento: row.importeMantenimiento != null ? String(row.importeMantenimiento) : "",
         periodicidadMantenimiento: "MENSUAL",
         diaLimiteMantenimiento: "5",
+        importeCochera: row.importeCochera != null ? String(row.importeCochera) : "",
+        periodicidadCochera: "MENSUAL",
+        diaLimiteCochera: "5",
         garantiaPactada: "",
         garantiaPagada: "",
         garantiaPendiente: "",
@@ -224,13 +261,18 @@ export default function ArrendamientosContratosPage() {
         moneda: form.moneda,
         monedaAlquiler: form.monedaAlquiler,
         monedaMantenimiento: form.monedaMantenimiento,
+        monedaCochera: form.monedaCochera,
+        monedaGarantia: form.monedaGarantia,
         importeAlquiler: Number(form.importeAlquiler || 0),
         periodicidadAlquiler: form.periodicidadAlquiler || null,
-        diaLimitePago: Number(form.diaLimitePago || 0),
+        diaLimitePago: Number(form.diaLimitePago || 5),
         diasGracia: Number(form.diasGracia || 0),
         importeMantenimiento: Number(form.importeMantenimiento || 0),
         periodicidadMantenimiento: form.periodicidadMantenimiento || null,
-        diaLimiteMantenimiento: Number(form.diaLimiteMantenimiento || 0),
+        diaLimiteMantenimiento: Number(form.diaLimiteMantenimiento || 5),
+        importeCochera: Number(form.importeCochera || 0),
+        periodicidadCochera: form.periodicidadCochera || null,
+        diaLimiteCochera: Number(form.diaLimiteCochera || 5),
         garantiaPactada: Number(form.garantiaPactada || 0),
         garantiaPagada: Number(form.garantiaPagada || 0),
         garantiaPendiente: Number(form.garantiaPendiente || 0),
@@ -268,7 +310,16 @@ export default function ArrendamientosContratosPage() {
         if (!form.moneda.trim()) errors.moneda = "Seleccione la moneda.";
         if (!form.monedaAlquiler.trim()) errors.monedaAlquiler = "Seleccione la moneda del alquiler.";
         if (!form.monedaMantenimiento.trim()) errors.monedaMantenimiento = "Seleccione la moneda del mantenimiento.";
+        if (!form.monedaCochera.trim()) errors.monedaCochera = "Seleccione la moneda de cochera.";
+        if (!form.monedaGarantia.trim()) errors.monedaGarantia = "Seleccione la moneda de garantia.";
         if (!form.importeAlquiler || Number(form.importeAlquiler) < 0) errors.importeAlquiler = "Ingrese el importe del alquiler.";
+        if (!form.diaLimitePago || Number(form.diaLimitePago) < 1 || Number(form.diaLimitePago) > 31) errors.diaLimitePago = "Ingrese un dia entre 1 y 31.";
+        if (!form.diaLimiteMantenimiento || Number(form.diaLimiteMantenimiento) < 1 || Number(form.diaLimiteMantenimiento) > 31) {
+          errors.diaLimiteMantenimiento = "Ingrese un dia entre 1 y 31.";
+        }
+        if (!form.diaLimiteCochera || Number(form.diaLimiteCochera) < 1 || Number(form.diaLimiteCochera) > 31) {
+          errors.diaLimiteCochera = "Ingrese un dia entre 1 y 31.";
+        }
         return errors;
       }}
       renderForm={(form, setForm, errors) => (
@@ -386,7 +437,14 @@ export default function ArrendamientosContratosPage() {
                 </select>
               </Field>
               <Field label="Dia limite pago">
-                <input type="number" min="1" max="31" value={form.diaLimitePago} onChange={(e) => setForm((p) => ({ ...p, diaLimitePago: e.target.value }))} style={getFieldStyle(false)} />
+                <input
+                  type="number"
+                  min="1"
+                  max="31"
+                  value={form.diaLimitePago}
+                  onChange={(e) => setForm((p) => ({ ...p, diaLimitePago: e.target.value }))}
+                  style={getFieldStyle(Boolean(errors.diaLimitePago))}
+                />
               </Field>
               <Field label="Dias gracia">
                 <input type="number" min="0" value={form.diasGracia} onChange={(e) => setForm((p) => ({ ...p, diasGracia: e.target.value }))} style={getFieldStyle(false)} />
@@ -414,10 +472,59 @@ export default function ArrendamientosContratosPage() {
                 </select>
               </Field>
               <Field label="Dia limite mantenimiento">
-                <input type="number" min="1" max="31" value={form.diaLimiteMantenimiento} onChange={(e) => setForm((p) => ({ ...p, diaLimiteMantenimiento: e.target.value }))} style={getFieldStyle(false)} />
+                <input
+                  type="number"
+                  min="1"
+                  max="31"
+                  value={form.diaLimiteMantenimiento}
+                  onChange={(e) => setForm((p) => ({ ...p, diaLimiteMantenimiento: e.target.value }))}
+                  style={getFieldStyle(Boolean(errors.diaLimiteMantenimiento))}
+                />
+              </Field>
+              <Field label="Moneda cochera" error={errors.monedaCochera}>
+                <select
+                  value={form.monedaCochera}
+                  onChange={(e) => setForm((p) => ({ ...p, monedaCochera: e.target.value }))}
+                  style={getFieldStyle(Boolean(errors.monedaCochera))}
+                >
+                  <option value="PEN">PEN</option>
+                  <option value="USD">USD</option>
+                </select>
+              </Field>
+              <Field label="Importe cochera">
+                <input type="number" step="0.01" value={form.importeCochera} onChange={(e) => setForm((p) => ({ ...p, importeCochera: e.target.value }))} style={getFieldStyle(false)} />
+              </Field>
+              <Field label="Periodicidad cochera">
+                <select value={form.periodicidadCochera} onChange={(e) => setForm((p) => ({ ...p, periodicidadCochera: e.target.value }))} style={getFieldStyle(false)}>
+                  <option value="MENSUAL">MENSUAL</option>
+                  <option value="BIMESTRAL">BIMESTRAL</option>
+                  <option value="TRIMESTRAL">TRIMESTRAL</option>
+                  <option value="SEMESTRAL">SEMESTRAL</option>
+                  <option value="ANUAL">ANUAL</option>
+                </select>
+              </Field>
+              <Field label="Dia limite cochera">
+                <input
+                  type="number"
+                  min="1"
+                  max="31"
+                  value={form.diaLimiteCochera}
+                  onChange={(e) => setForm((p) => ({ ...p, diaLimiteCochera: e.target.value }))}
+                  style={getFieldStyle(Boolean(errors.diaLimiteCochera))}
+                />
               </Field>
               <Field label="Garantia pactada">
                 <input type="number" step="0.01" value={form.garantiaPactada} onChange={(e) => setForm((p) => ({ ...p, garantiaPactada: e.target.value }))} style={getFieldStyle(false)} />
+              </Field>
+              <Field label="Moneda garantia" error={errors.monedaGarantia}>
+                <select
+                  value={form.monedaGarantia}
+                  onChange={(e) => setForm((p) => ({ ...p, monedaGarantia: e.target.value }))}
+                  style={getFieldStyle(Boolean(errors.monedaGarantia))}
+                >
+                  <option value="PEN">PEN</option>
+                  <option value="USD">USD</option>
+                </select>
               </Field>
               <Field label="Garantia pagada">
                 <input type="number" step="0.01" value={form.garantiaPagada} onChange={(e) => setForm((p) => ({ ...p, garantiaPagada: e.target.value }))} style={getFieldStyle(false)} />
