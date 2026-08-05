@@ -2319,6 +2319,19 @@ export default function ConciliacionBcpPage() {
     }
   };
 
+  useEffect(() => {
+    if (conciliacionPlanillaTab !== "gastos") {
+      return;
+    }
+
+    const cancelToken = { cancelled: false };
+    void cargarGastosPlanilla(cancelToken);
+
+    return () => {
+      cancelToken.cancelled = true;
+    };
+  }, [conciliacionPlanillaTab, fechaDepositoInicioGastos, fechaDepositoFinGastos]);
+
   const resolveClasificacionInlineSelection = (
     row: ConciliacionBcpConciliarPlanillaRegistro,
     nextIdAreaFlujo: number,
