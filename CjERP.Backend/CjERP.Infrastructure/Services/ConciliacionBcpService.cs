@@ -949,10 +949,7 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         }
 
         var movimientoBcp = await GetMovimientoByIdAsync(connection, request.IdMovimientoBanco, "dbo.MovimientosBcp", cancellationToken);
-        if (movimientoBcp is null)
-        {
-            throw new InvalidOperationException("El movimiento bancario espejo en MovimientosBcp no existe o no se encuentra activo.");
-        }
+        var tieneMovimientoBcpEspejo = movimientoBcp is not null;
 
         var parametros = new DynamicParameters();
         parametros.Add("IdMovimientoBanco", request.IdMovimientoBanco, DbType.Int32);
@@ -984,6 +981,24 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                     commandType: CommandType.StoredProcedure,
                     commandTimeout: 120,
                     cancellationToken: cancellationToken));
+
+            if (!tieneMovimientoBcpEspejo)
+            {
+                _logger.LogInformation(
+                    "[ConciliacionBcp] El movimiento espejo en MovimientosBcp no existe o esta inactivo. Se omite la sincronizacion espejo para IdMovimientoBanco={IdMovimientoBanco}.",
+                    request.IdMovimientoBanco);
+            }
+            else
+            {
+                await connection.ExecuteAsync(
+                    new CommandDefinition(
+                        StoredProcedureActualizarClasificacionContableConciliacion,
+                        parametros,
+                        transaction: transaction,
+                        commandType: CommandType.StoredProcedure,
+                        commandTimeout: 120,
+                        cancellationToken: cancellationToken));
+            }
 
             transaction.Commit();
         }
@@ -1025,36 +1040,39 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                         commandTimeout: 120,
                         cancellationToken: cancellationToken));
 
-                await connection.ExecuteAsync(
-                    new CommandDefinition(
-                        """
-                        UPDATE dbo.MovimientosBcp
-                        SET IdAreaFlujo = @IdAreaFlujo,
-                            IdReferencia = @IdReferencia,
-                            IdCuentaContable = @IdCuentaContable,
-                            IdReglaContable = @IdReglaContable,
-                            EsConciliado = 1,
-                            EstadoConciliacion = 'CONCILIADO',
-                            FechaConciliacion = GETDATE(),
-                            UsuarioConciliacion = LTRIM(RTRIM(ISNULL(@UsuarioConciliacion, ''))),
-                            ObservacionConciliacion = NULLIF(LTRIM(RTRIM(@ObservacionConciliacion)), '')
-                        WHERE IdMovimientoBanco = @IdMovimientoBanco
-                          AND IdActivo = 1;
-                        """,
-                        new
-                        {
-                            request.IdMovimientoBanco,
-                            request.IdAreaFlujo,
-                            request.IdReferencia,
-                            request.IdCuentaContable,
-                            request.IdReglaContable,
-                            UsuarioConciliacion = string.IsNullOrWhiteSpace(usuario) ? "sistema" : usuario.Trim(),
-                            ObservacionConciliacion = NullIfWhiteSpace(request.ObservacionConciliacion)
-                        },
-                        transaction: fallbackTransaction,
-                        commandType: CommandType.Text,
-                        commandTimeout: 120,
-                        cancellationToken: cancellationToken));
+                if (tieneMovimientoBcpEspejo)
+                {
+                    await connection.ExecuteAsync(
+                        new CommandDefinition(
+                            """
+                            UPDATE dbo.MovimientosBcp
+                            SET IdAreaFlujo = @IdAreaFlujo,
+                                IdReferencia = @IdReferencia,
+                                IdCuentaContable = @IdCuentaContable,
+                                IdReglaContable = @IdReglaContable,
+                                EsConciliado = 1,
+                                EstadoConciliacion = 'CONCILIADO',
+                                FechaConciliacion = GETDATE(),
+                                UsuarioConciliacion = LTRIM(RTRIM(ISNULL(@UsuarioConciliacion, ''))),
+                                ObservacionConciliacion = NULLIF(LTRIM(RTRIM(@ObservacionConciliacion)), '')
+                            WHERE IdMovimientoBanco = @IdMovimientoBanco
+                              AND IdActivo = 1;
+                            """,
+                            new
+                            {
+                                request.IdMovimientoBanco,
+                                request.IdAreaFlujo,
+                                request.IdReferencia,
+                                request.IdCuentaContable,
+                                request.IdReglaContable,
+                                UsuarioConciliacion = string.IsNullOrWhiteSpace(usuario) ? "sistema" : usuario.Trim(),
+                                ObservacionConciliacion = NullIfWhiteSpace(request.ObservacionConciliacion)
+                            },
+                            transaction: fallbackTransaction,
+                            commandType: CommandType.Text,
+                            commandTimeout: 120,
+                            cancellationToken: cancellationToken));
+                }
 
                 fallbackTransaction.Commit();
             }
@@ -1065,35 +1083,42 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
             }
         }
 
+        var auditorias = new List<AuditoriaCambioDto>
+        {
+            new AuditoriaCambioDto
+            {
+                Modulo = "Finanzas",
+                Entidad = "MovimientosConciliacion",
+                IdRegistro = request.IdMovimientoBanco.ToString(CultureInfo.InvariantCulture),
+                Accion = "UPDATE",
+                Seccion = "Conciliacion V1",
+                Campo = "ClasificacionContable",
+                ValorAnterior = $"{movimientoConciliacion.IdAreaFlujo}|{movimientoConciliacion.IdReferencia}|{movimientoConciliacion.IdCuentaContable}|{movimientoConciliacion.IdReglaContable}",
+                ValorNuevo = $"{request.IdAreaFlujo}|{request.IdReferencia}|{request.IdCuentaContable}|{request.IdReglaContable}",
+                UsuarioAccion = usuario ?? "sistema",
+                Observacion = "Actualizacion de clasificacion desde conciliacion_v1."
+            }
+        };
+
+        if (tieneMovimientoBcpEspejo)
+        {
+            auditorias.Add(new AuditoriaCambioDto
+            {
+                Modulo = "Finanzas",
+                Entidad = "MovimientosBcp",
+                IdRegistro = request.IdMovimientoBanco.ToString(CultureInfo.InvariantCulture),
+                Accion = "UPDATE",
+                Seccion = "Conciliacion V1",
+                Campo = "ClasificacionContable",
+                ValorAnterior = $"{movimientoBcp.IdAreaFlujo}|{movimientoBcp.IdReferencia}|{movimientoBcp.IdCuentaContable}|{movimientoBcp.IdReglaContable}",
+                ValorNuevo = $"{request.IdAreaFlujo}|{request.IdReferencia}|{request.IdCuentaContable}|{request.IdReglaContable}",
+                UsuarioAccion = usuario ?? "sistema",
+                Observacion = "Sincronizacion espejo de clasificacion desde conciliacion_v1."
+            });
+        }
+
         await _auditoriaCambiosService.RegistrarLoteAsync(
-            [
-                new AuditoriaCambioDto
-                {
-                    Modulo = "Finanzas",
-                    Entidad = "MovimientosConciliacion",
-                    IdRegistro = request.IdMovimientoBanco.ToString(CultureInfo.InvariantCulture),
-                    Accion = "UPDATE",
-                    Seccion = "Conciliacion V1",
-                    Campo = "ClasificacionContable",
-                    ValorAnterior = $"{movimientoConciliacion.IdAreaFlujo}|{movimientoConciliacion.IdReferencia}|{movimientoConciliacion.IdCuentaContable}|{movimientoConciliacion.IdReglaContable}",
-                    ValorNuevo = $"{request.IdAreaFlujo}|{request.IdReferencia}|{request.IdCuentaContable}|{request.IdReglaContable}",
-                    UsuarioAccion = usuario ?? "sistema",
-                    Observacion = "Actualizacion de clasificacion desde conciliacion_v1."
-                },
-                new AuditoriaCambioDto
-                {
-                    Modulo = "Finanzas",
-                    Entidad = "MovimientosBcp",
-                    IdRegistro = request.IdMovimientoBanco.ToString(CultureInfo.InvariantCulture),
-                    Accion = "UPDATE",
-                    Seccion = "Conciliacion V1",
-                    Campo = "ClasificacionContable",
-                    ValorAnterior = $"{movimientoBcp.IdAreaFlujo}|{movimientoBcp.IdReferencia}|{movimientoBcp.IdCuentaContable}|{movimientoBcp.IdReglaContable}",
-                    ValorNuevo = $"{request.IdAreaFlujo}|{request.IdReferencia}|{request.IdCuentaContable}|{request.IdReglaContable}",
-                    UsuarioAccion = usuario ?? "sistema",
-                    Observacion = "Sincronizacion espejo de clasificacion desde conciliacion_v1."
-                }
-            ],
+            auditorias,
             cancellationToken);
 
         var movimientoActualizado = await GetMovimientoByIdAsync(connection, request.IdMovimientoBanco, "dbo.MovimientosConciliacion", cancellationToken);
@@ -2414,7 +2439,7 @@ ORDER BY ic.key_ordinal;";
             var resumen = FindBestResumenForFile(promptResponse.ResumenArchivos, metadata, nombreArchivo, archivoAliasMap);
 
             var movimientosArchivo = movimientosAsignados[archivo.NombreArchivo]
-                .Select(MapPromptMovimientoToRow)
+                .Select(movimiento => MapPromptMovimientoToRow(movimiento, metadata))
                 .Where(HasMeaningfulMovementData)
                 .ToList();
 
@@ -2437,6 +2462,10 @@ ORDER BY ic.key_ordinal;";
                 NombreHoja = archivo.NombreHoja,
                 NumeroHoja = archivo.NumeroHoja,
                 TotalFilas = archivo.TotalFilas,
+                Empresa = metadata.Empresa,
+                Cuenta = metadata.Cuenta,
+                Moneda = metadata.Moneda,
+                SaldoContable = archivo.SaldoContable,
                 FilaCabecera = archivo.Encabezados.Count > 0 ? 1 : null,
                 FilaDatos = archivo.Encabezados.Count > 0 ? 2 : null,
                 RequiereRevision = movimientosArchivo.Count == 0 ||
@@ -3027,9 +3056,15 @@ ORDER BY ic.key_ordinal;";
 
     private static ClientFileMetadata ExtractClientFileMetadata(ConciliacionBcpArchivoMuestraDto archivo)
     {
-        string? cuenta = null;
-        string? empresa = null;
-        string? moneda = null;
+        var cuenta = NormalizeText(archivo.Cuenta);
+        var empresa = NormalizeText(archivo.Empresa);
+        var moneda = NormalizeText(archivo.Moneda);
+        var saldoContable = NormalizeText(archivo.SaldoContable);
+
+        if (string.IsNullOrWhiteSpace(moneda) && !string.IsNullOrWhiteSpace(saldoContable))
+        {
+            moneda = ExtractScotiabankMonedaFromSaldoContable(saldoContable);
+        }
 
         foreach (var row in archivo.Filas.Take(40))
         {
@@ -3044,12 +3079,12 @@ ORDER BY ic.key_ordinal;";
                 continue;
             }
 
-            if (cuenta is null && TryExtractRowLabeledValue(normalizedCells, "Cuenta", out var cuentaTexto))
+            if (string.IsNullOrWhiteSpace(cuenta) && TryExtractRowLabeledValue(normalizedCells, "Cuenta", out var cuentaTexto))
             {
                 SplitCuentaEmpresa(cuentaTexto, out cuenta, out empresa);
             }
 
-            if (moneda is null && TryExtractRowLabeledValue(normalizedCells, "Moneda", out var monedaTexto))
+            if (string.IsNullOrWhiteSpace(moneda) && TryExtractRowLabeledValue(normalizedCells, "Moneda", out var monedaTexto))
             {
                 moneda = monedaTexto;
             }
@@ -3060,6 +3095,27 @@ ORDER BY ic.key_ordinal;";
             NormalizeText(cuenta),
             NormalizeText(empresa),
             NormalizeText(moneda));
+    }
+
+    private static string? ExtractScotiabankMonedaFromSaldoContable(string? saldoContable)
+    {
+        var normalized = NormalizeText(saldoContable);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        if (normalized.Contains("S/"))
+        {
+            return "Soles";
+        }
+
+        if (normalized.Contains("$"))
+        {
+            return "Dólares";
+        }
+
+        return null;
     }
 
     private static bool TryExtractLabeledValue(string text, string label, out string value)
@@ -3201,7 +3257,9 @@ ORDER BY ic.key_ordinal;";
                $"Movimientos: {resumen.TotalMovimientos}";
     }
 
-    private static Dictionary<string, object?> MapPromptMovimientoToRow(ConciliacionBcpPromptMovimientoDto movimiento)
+    private static Dictionary<string, object?> MapPromptMovimientoToRow(
+        ConciliacionBcpPromptMovimientoDto movimiento,
+        ClientFileMetadata? metadata = null)
     {
         var row = CreateEmptyOrderedMovementRow();
         var esScotiabank = IsScotiabankCode(movimiento.CodigoBanco);
@@ -3226,9 +3284,9 @@ ORDER BY ic.key_ordinal;";
             ? $"{cdr}{modulo}{transaccion}{relacion}"
             : null;
 
-        row["Empresa"] = NormalizeText(movimiento.Empresa);
-        row["Cuenta"] = NormalizeText(movimiento.Cuenta);
-        row["Moneda"] = NormalizeText(movimiento.Moneda);
+        row["Empresa"] = NormalizeText(movimiento.Empresa) ?? metadata?.Empresa;
+        row["Cuenta"] = NormalizeText(movimiento.Cuenta) ?? metadata?.Cuenta;
+        row["Moneda"] = NormalizeText(movimiento.Moneda) ?? metadata?.Moneda;
         row["Fecha"] = NormalizeText(movimiento.Fecha);
         row["FechaValuta"] = NormalizeText(movimiento.FechaValuta);
         row["Proveedor"] = NormalizeText(movimiento.Proveedor);
@@ -3248,9 +3306,9 @@ ORDER BY ic.key_ordinal;";
         row["Usuario"] = NormalizeText(movimiento.Usuario);
         row["ArchivoOrigen"] = ResolveArchivoOrigenDisplay(
             movimiento.ArchivoOrigen,
-            movimiento.Empresa,
-            movimiento.Cuenta,
-            movimiento.Moneda);
+            row["Empresa"]?.ToString(),
+            row["Cuenta"]?.ToString(),
+            row["Moneda"]?.ToString());
         ApplyBancoMetadata(row, movimiento.CodigoBanco);
 
         var descripcionOperacion = row["DescripcionOperacion"]?.ToString();
@@ -3954,6 +4012,7 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
         var dataStartIndex = Math.Max((filaDatos ?? (headerRowIndex + 2)) - 1, headerRowIndex + 1);
         var headerRow = matrix[headerRowIndex];
         var sourceIndexes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var clientMetadata = ExtractClientFileMetadata(archivo);
 
         for (var index = 0; index < headerRow.Count; index++)
         {
@@ -3996,6 +4055,7 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
 
             ApplyHeaderFallbackValues(normalizedRow, sourceRow, sourceIndexes);
             ApplyContextValues(normalizedRow, contextValues);
+            ApplyClientMetadataValues(normalizedRow, clientMetadata);
             ApplyBancoMetadata(normalizedRow, codigoBanco);
             ApplyScotiabankOperationNumber(normalizedRow, codigoBanco);
 
@@ -4410,6 +4470,26 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
             {
                 normalizedRow[field] = value;
             }
+        }
+    }
+
+    private static void ApplyClientMetadataValues(
+        Dictionary<string, object?> normalizedRow,
+        ClientFileMetadata metadata)
+    {
+        if (!HasValue(normalizedRow, "Empresa") && !string.IsNullOrWhiteSpace(metadata.Empresa))
+        {
+            normalizedRow["Empresa"] = metadata.Empresa;
+        }
+
+        if (!HasValue(normalizedRow, "Cuenta") && !string.IsNullOrWhiteSpace(metadata.Cuenta))
+        {
+            normalizedRow["Cuenta"] = metadata.Cuenta;
+        }
+
+        if (!HasValue(normalizedRow, "Moneda") && !string.IsNullOrWhiteSpace(metadata.Moneda))
+        {
+            normalizedRow["Moneda"] = metadata.Moneda;
         }
     }
 

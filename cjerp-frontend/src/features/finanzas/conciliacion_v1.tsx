@@ -434,6 +434,52 @@ function normalizeText(value?: string | null): string {
     .trim();
 }
 
+function isScotiabankBankCode(codigoBanco?: string | null): boolean {
+  return normalizeText(codigoBanco).includes("SCOTIABANK");
+}
+
+function joinNonEmptyCells(cells: string[] | undefined, startIndex = 0): string {
+  return (cells ?? [])
+    .slice(startIndex)
+    .map((cell) => normalizeCellValue(cell))
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+}
+
+function extractScotiabankCompany(matrix: string[][]): string {
+  return normalizeCellValue(matrix[2]?.[0]);
+}
+
+function extractScotiabankCuenta(matrix: string[][]): string {
+  const accountRow = matrix[3] ?? [];
+  const combined = joinNonEmptyCells(accountRow, 1) || joinNonEmptyCells(accountRow);
+
+  if (!combined) {
+    return "";
+  }
+
+  return combined.replace(/^CUENTA\s+CORRIENTE\s*/i, "").trim();
+}
+
+function extractScotiabankMonedaFromSaldoContable(matrix: string[][]): string {
+  const saldoRow = joinNonEmptyCells(matrix[4] ?? []);
+
+  if (!saldoRow) {
+    return "";
+  }
+
+  if (saldoRow.includes("S/")) {
+    return "Soles";
+  }
+
+  if (saldoRow.includes("$")) {
+    return "Dólares";
+  }
+
+  return "";
+}
+
 function getConciliacionExecutivePieLevelLabel(level: ConciliacionExecutiveChartLevel): string {
   switch (level) {
     case "bancoMovimiento":
@@ -1327,11 +1373,23 @@ function getRevisionPeriodoLabel(value?: string | null): string {
 }
 
 function getRevisionResumenLabel(row: ConciliacionBcpConciliarPlanillaRegistro): string {
-  if (row.cuentaContableTexto?.trim()) {
-    return row.cuentaContableTexto.trim();
+  const areaFlujo = row.nombreAreaFlujo?.trim() ?? "";
+
+  if (!areaFlujo) {
+    return "(sin area flujo)";
   }
 
-  return "SIN CUENTA CONTABLE";
+  return areaFlujo;
+}
+
+function getRevisionResumenSortOrder(label: string): number {
+  const normalized = normalizeText(label);
+
+  if (normalized === "SINAREAFLUJO" || normalized === "SINAREA" || normalized === "SINFLUJO") {
+    return 999;
+  }
+
+  return 3;
 }
 
 function getDistinctSortedValues(values: string[]): string[] {
@@ -1354,7 +1412,7 @@ async function fileToBase64(file: File): Promise<string> {
   return btoa(binary);
 }
 
-async function parseExcelFile(file: File): Promise<ParsedConciliacionExcelFile> {
+async function parseExcelFile(file: File, codigoBanco?: string | null): Promise<ParsedConciliacionExcelFile> {
   const XLSX = await import("xlsx");
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
@@ -1378,7 +1436,7 @@ async function parseExcelFile(file: File): Promise<ParsedConciliacionExcelFile> 
   const matrix = XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
     header: 1,
     defval: "",
-    blankrows: false,
+    blankrows: true,
     // Leer el valor formateado evita perder ceros a la izquierda en bancos como Scotiabank.
     raw: false,
   });
@@ -1388,6 +1446,11 @@ async function parseExcelFile(file: File): Promise<ParsedConciliacionExcelFile> 
     .filter((row) => row.length > 0 && !isRowEmpty(row as string[]))
     .map((row) => row as string[]);
 
+  const esScotiabank = isScotiabankBankCode(codigoBanco);
+  const empresa = esScotiabank ? extractScotiabankCompany(matrix.map((row) => (Array.isArray(row) ? row.map(normalizeCellValue) : []))) : "";
+  const cuenta = esScotiabank ? extractScotiabankCuenta(matrix.map((row) => (Array.isArray(row) ? row.map(normalizeCellValue) : []))) : "";
+  const moneda = esScotiabank ? extractScotiabankMonedaFromSaldoContable(matrix.map((row) => (Array.isArray(row) ? row.map(normalizeCellValue) : []))) : "";
+  const saldoContable = esScotiabank ? joinNonEmptyCells(matrix[4] as string[] | undefined) : "";
   const totalFilas = normalizedRows.length > 0 ? normalizedRows.length - 1 : 0;
   const sampleRows = normalizedRows.slice(0, 8);
 
@@ -1400,6 +1463,10 @@ async function parseExcelFile(file: File): Promise<ParsedConciliacionExcelFile> 
     rows: normalizedRows,
     sampleRows,
     totalFilas,
+    empresa,
+    cuenta,
+    moneda,
+    saldoContable,
     clientError: normalizedRows.length === 0 ? "La hoja seleccionada no contiene filas utilidades." : "",
   };
 }
@@ -2013,7 +2080,7 @@ export default function ConciliacionBcpPage() {
       areaFlujo: getDistinctSortedValues(registros.map((row) => row.nombreAreaFlujo?.trim() ?? "")),
       referencia: getDistinctSortedValues(registros.map((row) => getReferenciaLabel(row).trim())),
       empresa: getDistinctSortedValues(registros.map((row) => row.empresa?.trim() ?? "")),
-      banco: getDistinctSortedValues(registros.map((row) => row.bancoPlanilla?.trim() ?? "")),
+      banco: getDistinctSortedValues(registros.map((row) => row.codigoBanco?.trim() ?? "")),
       system: getDistinctSortedValues(registros.map((row) => getRevisionSystemLabel(row))),
       cliente: getDistinctSortedValues(registros.map((row) => row.clientePlanilla?.trim() ?? "")),
       periodo: getDistinctSortedValues(registros.map((row) => getRevisionPeriodoLabel(row.fecha))),
@@ -2028,7 +2095,7 @@ export default function ConciliacionBcpPage() {
       const matchesReferencia =
         !revisionFilters.referencia || getReferenciaLabel(row).trim() === revisionFilters.referencia;
       const matchesEmpresa = !revisionFilters.empresa || (row.empresa?.trim() ?? "") === revisionFilters.empresa;
-      const matchesBanco = !revisionFilters.banco || (row.bancoPlanilla?.trim() ?? "") === revisionFilters.banco;
+      const matchesBanco = !revisionFilters.banco || (row.codigoBanco?.trim() ?? "") === revisionFilters.banco;
       const matchesSystem = !revisionFilters.system || getRevisionSystemLabel(row) === revisionFilters.system;
       const matchesCliente = !revisionFilters.cliente || (row.clientePlanilla?.trim() ?? "") === revisionFilters.cliente;
       const matchesPeriodo = !revisionFilters.periodo || getRevisionPeriodoLabel(row.fecha) === revisionFilters.periodo;
@@ -2069,9 +2136,16 @@ export default function ConciliacionBcpPage() {
       grouped.set(resumen, current);
     });
 
-    return Array.from(grouped.values()).sort((left, right) =>
-      left.resumen.localeCompare(right.resumen, "es", { sensitivity: "base", numeric: true })
-    );
+    return Array.from(grouped.values()).sort((left, right) => {
+      const leftOrder = getRevisionResumenSortOrder(left.resumen);
+      const rightOrder = getRevisionResumenSortOrder(right.resumen);
+
+      if (leftOrder !== rightOrder) {
+        return leftOrder - rightOrder;
+      }
+
+      return left.resumen.localeCompare(right.resumen, "es", { sensitivity: "base", numeric: true });
+    });
   }, [revisionFilteredRows]);
   const revisionResumenTotals = useMemo(() => {
     return revisionResumenRows.reduce(
@@ -3104,7 +3178,7 @@ export default function ConciliacionBcpPage() {
           }
 
           try {
-            return await parseExcelFile(file);
+            return await parseExcelFile(file, codigoBanco);
           } catch (parseError) {
             return {
               id: createSelectionId(file),
@@ -3175,6 +3249,10 @@ export default function ConciliacionBcpPage() {
             encabezados: headers,
             filas: file.rows,
             filasMuestra: sampleRows,
+            empresa: file.empresa ?? null,
+            cuenta: file.cuenta ?? null,
+            moneda: file.moneda ?? null,
+            saldoContable: file.saldoContable ?? null,
           };
         })
       );
@@ -3399,14 +3477,7 @@ export default function ConciliacionBcpPage() {
     setMessage("");
 
     try {
-      const response = await loadConciliacionPlanillaV1();
-
-      if ((response.registros?.length ?? 0) > 0) {
-        await handleExportConciliacionPlanilla(response);
-        return;
-      }
-
-      await handleExportConciliacionPlanilla(response);
+      await loadConciliacionPlanillaV1();
     } catch (conciliacionError) {
       setConciliacionPlanilla(null);
       setError(getHttpErrorMessage(conciliacionError, "No se pudo ejecutar la conciliacion_v1 con planilla."));
@@ -3651,8 +3722,17 @@ export default function ConciliacionBcpPage() {
 
                   {file.clientError ? <div style={styles.inlineError}>{file.clientError}</div> : null}
 
-                    <div style={styles.previewBlock}>
+                  <div style={styles.previewBlock}>
                     <div style={styles.previewTitle}>Vista previa</div>
+                    <div style={styles.previewText}>
+                      Empresa: {analysisFile?.empresa || file.empresa || "(sin empresa)"}
+                    </div>
+                    <div style={styles.previewText}>
+                      Cuenta: {analysisFile?.cuenta || file.cuenta || "(sin cuenta)"}
+                    </div>
+                    <div style={styles.previewText}>
+                      Moneda: {analysisFile?.moneda || file.moneda || "(sin moneda)"}
+                    </div>
                     <div style={styles.previewText}>
                       {buildPreviewTextFromRow(file.rows[0]) || "Sin encabezados detectados"}
                     </div>
@@ -3981,10 +4061,10 @@ export default function ConciliacionBcpPage() {
               {conciliacionPlanillaTab === "revision" ? (
                 <div style={styles.revisionBoard}>
                   <div style={styles.revisionHeader}>
-                    <div>
+                      <div>
                       <div style={styles.revisionTitle}>Reporte revision</div>
                       <div style={styles.revisionText}>
-                        Resumen relacionado con conciliacion planilla, agrupado por cuenta contable y filtrable por las dimensiones principales.
+                        Resumen relacionado con conciliacion planilla, agrupado por area flujo y filtrable por las dimensiones principales.
                       </div>
                     </div>
                     <div style={styles.revisionMeta}>
@@ -3996,12 +4076,10 @@ export default function ConciliacionBcpPage() {
                     {(
                       [
                         ["areaFlujo", "AREA_FLUJO"],
-                        ["referencia", "REFERENCIA"],
                         ["empresa", "EMPRESA"],
-                        ["banco", "BANCO"],
+                        ["banco", "BANCO MOVIMIENTO"],
                         ["system", "SYSTEM"],
                         ["cliente", "CLIENTE"],
-                        ["periodo", "FECHA"],
                       ] as const
                     ).map(([key, label]) => (
                       <div key={key} style={styles.revisionFilterCard}>
@@ -4028,13 +4106,19 @@ export default function ConciliacionBcpPage() {
                   </div>
 
                   <div style={styles.revisionTableWrap}>
-                    <table style={styles.mappingTable}>
+                    <table style={styles.revisionTable}>
+                      <colgroup>
+                        <col style={styles.revisionColResumen} />
+                        <col style={styles.revisionColNumeric} />
+                        <col style={styles.revisionColNumeric} />
+                        <col style={styles.revisionColNumeric} />
+                      </colgroup>
                       <thead>
                         <tr>
                           <th style={styles.th}>RESUMEN</th>
-                          <th style={styles.th}>SALDO MN</th>
-                          <th style={styles.th}>SALDO ME</th>
-                          <th style={styles.th}>TOTAL MN</th>
+                          <th style={styles.thRight}>SALDO MN</th>
+                          <th style={styles.thRight}>SALDO ME</th>
+                          <th style={styles.thRight}>TOTAL MN</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -5719,13 +5803,30 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 800,
     whiteSpace: "nowrap",
   },
-  mappingTable: {
+  revisionTable: {
     width: "100%",
+    minWidth: 760,
     borderCollapse: "collapse",
+    tableLayout: "fixed",
     background: "#FFFFFF",
+  },
+  revisionColResumen: {
+    width: "42%",
+  },
+  revisionColNumeric: {
+    width: "19.333%",
   },
   th: {
     textAlign: "left",
+    padding: "10px 12px",
+    background: "#F8FAFC",
+    borderBottom: "1px solid #E2E8F0",
+    fontSize: 11,
+    color: "#334155",
+    fontWeight: 800,
+  },
+  thRight: {
+    textAlign: "right",
     padding: "10px 12px",
     background: "#F8FAFC",
     borderBottom: "1px solid #E2E8F0",

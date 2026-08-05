@@ -57,6 +57,14 @@ public sealed class ConciliacionBcpArchivoMuestraDto
     public List<List<string?>> Filas { get; set; } = [];
 
     public List<List<string?>> FilasMuestra { get; set; } = [];
+
+    public string? Empresa { get; set; }
+
+    public string? Cuenta { get; set; }
+
+    public string? Moneda { get; set; }
+
+    public string? SaldoContable { get; set; }
 }
 
 public sealed class ConciliacionBcpAnalizarResponseDto
@@ -77,6 +85,14 @@ public sealed class ConciliacionBcpAnalizarResponseDto
 public sealed class ConciliacionBcpAnalizarArchivoResponseDto
 {
     public string NombreArchivo { get; set; } = string.Empty;
+
+    public string? Empresa { get; set; }
+
+    public string? Cuenta { get; set; }
+
+    public string? Moneda { get; set; }
+
+    public string? SaldoContable { get; set; }
 
     [JsonConverter(typeof(FlexibleNullableInt32Converter))]
     public int? IdBanco { get; set; }

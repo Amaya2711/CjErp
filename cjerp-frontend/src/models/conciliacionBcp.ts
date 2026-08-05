@@ -9,6 +9,10 @@ export type ConciliacionBcpArchivoMuestra = {
   encabezados: string[];
   filas: string[][];
   filasMuestra: string[][];
+  empresa?: string | null;
+  cuenta?: string | null;
+  moneda?: string | null;
+  saldoContable?: string | null;
 };
 
 export type ConciliacionBcpAnalizarRequest = {
@@ -34,6 +38,10 @@ export type ConciliacionBcpMapeo = {
 
 export type ConciliacionBcpArchivoAnalisis = {
   nombreArchivo: string;
+  empresa?: string | null;
+  cuenta?: string | null;
+  moneda?: string | null;
+  saldoContable?: string | null;
   idBanco?: number | null;
   codigoBanco?: string | null;
   idPlantillaBanco?: number | null;
@@ -292,5 +300,9 @@ export type ParsedConciliacionExcelFile = {
   rows: string[][];
   sampleRows: string[][];
   totalFilas: number;
+  empresa?: string | null;
+  cuenta?: string | null;
+  moneda?: string | null;
+  saldoContable?: string | null;
   clientError: string;
 };
