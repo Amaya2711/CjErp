@@ -3625,9 +3625,9 @@ export default function ConciliacionBcpPage() {
               ) : null}
                 <button
                   type="button"
-                  style={styles.secondaryButton}
+                  style={{ ...styles.secondaryButton, ...styles.secondaryButtonDisabled }}
                   onClick={() => void loadConciliacionPlanilla()}
-                  disabled={!canConciliar}
+                  disabled
                 >
                   {loadingConciliacion ? "Conciliando..." : "Conciliacion"}
                 </button>
