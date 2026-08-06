@@ -1748,7 +1748,7 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
             EstadoConciliacionTexto = movimiento.EstadoConciliacionTexto,
             EstadoOperativoConciliacion = movimiento.EstadoOperativoConciliacion,
             ResultadoConciliacion = esDescripcionNoConciliable
-                ? "NO CONCILIABLE"
+                ? "SIN COINCIDENCIA"
                 : candidate?.ResultadoConciliacion ?? "SIN COINCIDENCIA",
             TipoCoincidencia = candidate?.TipoCoincidencia,
             NroOperacionPlanilla = nroOperacionPlanilla,
@@ -4066,7 +4066,7 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
                     reglas = new[]
                     {
                         "Si EsNroOperacionValido = 1, guardar PENDIENTE CONCILIACION.",
-                        "Si EsNroOperacionValido = 0 y DescripcionOperacion contiene ITF, guardar NO CONCILIABLE - ITF.",
+                        "Si EsNroOperacionValido = 0 y DescripcionOperacion contiene ITF, guardar SIN COINCIDENCIA - ITF.",
                         "Si EsNroOperacionValido = 0 y no es ITF, guardar PENDIENTE VALIDACION SIN NRO OPERACION."
                     }
                 }
@@ -4937,7 +4937,7 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
         }
 
         return NormalizeKey(descripcionOperacion).Contains("itf", StringComparison.OrdinalIgnoreCase)
-            ? "NO CONCILIABLE - ITF"
+            ? "SIN COINCIDENCIA - ITF"
             : "PENDIENTE VALIDACION SIN NRO OPERACION";
     }
 
