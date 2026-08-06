@@ -386,8 +386,7 @@ function normalizeTotalPagarForComparison(value?: number | null): number | null 
 
 function calculateMontoDiferencia(
   monto?: number | null,
-  totalPagar?: number | null,
-  codigoBanco?: string | null
+  totalPagar?: number | null
 ): number | null {
   if (monto === null || monto === undefined || totalPagar === null || totalPagar === undefined) {
     return null;
@@ -583,7 +582,7 @@ function getConciliacionDisplayValue(row: ConciliacionBcpConciliarPlanillaRegist
     }
     case "diferencia": {
       const totalPagar = normalizeTotalPagarForComparison(row.totalPagar);
-      const diferencia = calculateMontoDiferencia(row.monto, totalPagar, row.codigoBanco);
+      const diferencia = calculateMontoDiferencia(row.monto, totalPagar);
       return diferencia != null ? formatNumber(diferencia) : "";
     }
     case "nroOperacion":
@@ -713,7 +712,7 @@ function getConciliacionSortValue(row: ConciliacionBcpConciliarPlanillaRegistro,
     case "totalPagar":
       return normalizeTotalPagarForComparison(row.totalPagar);
     case "diferencia":
-      return calculateMontoDiferencia(row.monto, normalizeTotalPagarForComparison(row.totalPagar), row.codigoBanco);
+      return calculateMontoDiferencia(row.monto, normalizeTotalPagarForComparison(row.totalPagar));
     case "empresa":
       return row.empresa?.trim().toLowerCase() ?? "";
     case "cuenta":
@@ -3401,7 +3400,7 @@ export default function ConciliacionBcpPage() {
       Moneda: row.moneda || "",
       Monto: row.monto ?? "",
       TotalPagar: normalizeTotalPagarForComparison(row.totalPagar) ?? "",
-      Diferencia: calculateMontoDiferencia(row.monto, normalizeTotalPagarForComparison(row.totalPagar), row.codigoBanco) ?? "",
+      Diferencia: calculateMontoDiferencia(row.monto, normalizeTotalPagarForComparison(row.totalPagar)) ?? "",
       NroOperacion: row.nroOperacion || "",
       DescripcionOperacion: row.descripcionOperacion || "",
       Comentario: row.comentario || "",
