@@ -384,7 +384,11 @@ function normalizeTotalPagarForComparison(value?: number | null): number | null 
   return value > 0 ? -Math.abs(value) : value;
 }
 
-function calculateMontoDiferencia(monto?: number | null, totalPagar?: number | null): number | null {
+function calculateMontoDiferencia(
+  monto?: number | null,
+  totalPagar?: number | null,
+  codigoBanco?: string | null
+): number | null {
   if (monto === null || monto === undefined || totalPagar === null || totalPagar === undefined) {
     return null;
   }
@@ -579,7 +583,7 @@ function getConciliacionDisplayValue(row: ConciliacionBcpConciliarPlanillaRegist
     }
     case "diferencia": {
       const totalPagar = normalizeTotalPagarForComparison(row.totalPagar);
-      const diferencia = calculateMontoDiferencia(row.monto, totalPagar);
+      const diferencia = calculateMontoDiferencia(row.monto, totalPagar, row.codigoBanco);
       return diferencia != null ? formatNumber(diferencia) : "";
     }
     case "nroOperacion":
@@ -709,7 +713,7 @@ function getConciliacionSortValue(row: ConciliacionBcpConciliarPlanillaRegistro,
     case "totalPagar":
       return normalizeTotalPagarForComparison(row.totalPagar);
     case "diferencia":
-      return calculateMontoDiferencia(row.monto, normalizeTotalPagarForComparison(row.totalPagar));
+      return calculateMontoDiferencia(row.monto, normalizeTotalPagarForComparison(row.totalPagar), row.codigoBanco);
     case "empresa":
       return row.empresa?.trim().toLowerCase() ?? "";
     case "cuenta":
@@ -2016,11 +2020,10 @@ export default function ConciliacionBcpPage() {
     };
   }, [filteredConciliacionRegistros]);
   const conciliacionResumenGraficoEjecutivo = useMemo(() => {
-    const rowsWithTotal = filteredConciliacionRegistros.filter((row) => normalizeTotalPagarForComparison(row.totalPagar) !== null);
     const normalizedBankPath = normalizeText(conciliacionExecutivePiePath.bancoMovimiento);
     const normalizedResultPath = normalizeText(conciliacionExecutivePiePath.resultado);
 
-    const visibleRows = rowsWithTotal.filter((row) => {
+    const visibleRows = filteredConciliacionRegistros.filter((row) => {
       if (normalizedBankPath && normalizeText(getConciliacionExecutivePieLabel(row, "bancoMovimiento")) !== normalizedBankPath) {
         return false;
       }
@@ -2032,12 +2035,19 @@ export default function ConciliacionBcpPage() {
       return true;
     });
 
+    const rowsWithTotal = visibleRows.filter((row) => normalizeTotalPagarForComparison(row.totalPagar) !== null);
+    const rowsWithoutTotal = visibleRows.filter((row) => normalizeTotalPagarForComparison(row.totalPagar) === null);
+    const rowsSinCoincidencia = visibleRows.filter((row) => {
+      const resultado = row.resultadoConciliacion?.trim() || "Sin resultado";
+      return normalizeText(resultado).includes("SIN COINCIDENCIA");
+    });
+
     const grouped = new Map<string, ConciliacionExecutiveChartDatum>();
 
     visibleRows.forEach((row) => {
       const rawLabel = getConciliacionExecutivePieLabel(row, conciliacionExecutivePieLevel);
       const label = rawLabel.trim() || "Sin clasificar";
-      const totalPagar = Math.abs(normalizeTotalPagarForComparison(row.totalPagar) ?? 0);
+      const totalPagar = Math.abs(normalizeTotalPagarForComparison(row.totalPagar) ?? row.monto ?? 0);
 
       const current =
         grouped.get(label) ??
@@ -2068,7 +2078,8 @@ export default function ConciliacionBcpPage() {
       chartData,
       totalValue,
       rowsWithTotal: rowsWithTotal.length,
-      rowsWithoutTotal: filteredConciliacionRegistros.length - rowsWithTotal.length,
+      rowsWithoutTotal: rowsWithoutTotal.length,
+      rowsSinCoincidencia: rowsSinCoincidencia.length,
       visibleRows: visibleRows.length,
     };
   }, [filteredConciliacionRegistros, conciliacionExecutivePieLevel, conciliacionExecutivePiePath]);
@@ -3390,7 +3401,7 @@ export default function ConciliacionBcpPage() {
       Moneda: row.moneda || "",
       Monto: row.monto ?? "",
       TotalPagar: normalizeTotalPagarForComparison(row.totalPagar) ?? "",
-      Diferencia: calculateMontoDiferencia(row.monto, normalizeTotalPagarForComparison(row.totalPagar)) ?? "",
+      Diferencia: calculateMontoDiferencia(row.monto, normalizeTotalPagarForComparison(row.totalPagar), row.codigoBanco) ?? "",
       NroOperacion: row.nroOperacion || "",
       DescripcionOperacion: row.descripcionOperacion || "",
       Comentario: row.comentario || "",
@@ -4170,12 +4181,13 @@ export default function ConciliacionBcpPage() {
                       <div style={styles.executivePieHeader}>
                         <div>
                           <div style={styles.executivePieTitle}>Torta dinamica ejecutiva</div>
-                          <div style={styles.executivePieText}>
+                        <div style={styles.executivePieText}>
                             Agrupa los registros visibles por {getConciliacionExecutivePieLevelLabel(conciliacionExecutivePieLevel).toLowerCase()} y permite bajar desde banco movimiento, resultado y cuenta contable.
                           </div>
                         </div>
                         <div style={styles.executivePieMeta}>
                           Con importe: {conciliacionResumenGraficoEjecutivo.rowsWithTotal} | Sin importe: {conciliacionResumenGraficoEjecutivo.rowsWithoutTotal} |
+                          Sin coincidencia: {conciliacionResumenGraficoEjecutivo.rowsSinCoincidencia} |
                           Visible: {conciliacionResumenGraficoEjecutivo.visibleRows}
                         </div>
                       </div>
@@ -4742,7 +4754,17 @@ export default function ConciliacionBcpPage() {
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "bancoPlanilla")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "seriePlanilla")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "detallePlanilla")}</td>
-                      <td style={styles.td}>{getConciliacionDisplayValue(row, "correlativoPlanilla")}</td>
+                      <td
+                        style={{
+                          ...styles.td,
+                          whiteSpace: "normal",
+                          wordBreak: "break-word",
+                          minWidth: 180,
+                        }}
+                        title={getConciliacionDisplayValue(row, "correlativoPlanilla")}
+                      >
+                        {getConciliacionDisplayValue(row, "correlativoPlanilla")}
+                      </td>
                     </tr>
                   ))
                 ) : (

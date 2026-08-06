@@ -58,6 +58,7 @@ BEGIN
         Responsable        VARCHAR(250) NULL,
         Cliente            VARCHAR(250) NULL,
         IdOc               INT NULL,
+        TotalPlanillaBase  DECIMAL(18, 2) NULL,
         TotalPagar         DECIMAL(18, 2) NULL,
         IdTarea            INT NULL,
         imgFactura         VARCHAR(MAX) NULL,
@@ -204,7 +205,8 @@ BEGIN
                 p.CuentaInter AS CuentaInterPlanilla,
                 p.Corre AS IdRegistroPlanilla,
                 CONCAT('Coincidencia exacta por NroOperacion: ', p.NroOperacion) AS ObservacionConciliacion,
-                ISNULL(p.Corre, 0) AS OrdenPlanilla
+                ISNULL(p.Corre, 0) AS OrdenPlanilla,
+                ABS(ABS(ISNULL(m.Monto, 0)) - ABS(ISNULL(ISNULL(p.TotalPlanillaBase, p.TotalPagar), 0))) AS DiferenciaMontoAbs
             FROM PlanillaNormalizada p
             WHERE m.NroOperacionNormalizado <> ''
               AND p.NroOperacionNormalizado = m.NroOperacionNormalizado
@@ -220,7 +222,8 @@ BEGIN
                 p.CuentaInter AS CuentaInterPlanilla,
                 p.Corre AS IdRegistroPlanilla,
                 CONCAT('Coincidencia por Cuenta dentro de DescripcionOperacion: ', p.Cuenta) AS ObservacionConciliacion,
-                ISNULL(p.Corre, 0) AS OrdenPlanilla
+                ISNULL(p.Corre, 0) AS OrdenPlanilla,
+                ABS(ABS(ISNULL(m.Monto, 0)) - ABS(ISNULL(ISNULL(p.TotalPlanillaBase, p.TotalPagar), 0))) AS DiferenciaMontoAbs
             FROM PlanillaNormalizada p
             WHERE m.DescripcionNumerica <> ''
               AND p.CuentaNumerica <> ''
@@ -241,7 +244,8 @@ BEGIN
                 p.CuentaInter AS CuentaInterPlanilla,
                 p.Corre AS IdRegistroPlanilla,
                 CONCAT('Coincidencia por CuentaInter dentro de DescripcionOperacion: ', p.CuentaInter) AS ObservacionConciliacion,
-                ISNULL(p.Corre, 0) AS OrdenPlanilla
+                ISNULL(p.Corre, 0) AS OrdenPlanilla,
+                ABS(ABS(ISNULL(m.Monto, 0)) - ABS(ISNULL(ISNULL(p.TotalPlanillaBase, p.TotalPagar), 0))) AS DiferenciaMontoAbs
             FROM PlanillaNormalizada p
             WHERE m.DescripcionNumerica <> ''
               AND p.CuentaInterNumerica <> ''
@@ -251,7 +255,7 @@ BEGIN
                  OR m.DescripcionNumerica LIKE '%' + p.CuentaInterNumerica + '%'
               )
         ) candidate
-        ORDER BY candidate.Prioridad, candidate.OrdenPlanilla
-    ) match
-    ORDER BY m.Fecha DESC, m.Empresa, m.Moneda, m.NroOperacion;
+        ORDER BY candidate.Prioridad, CASE WHEN candidate.DiferenciaMontoAbs = 0 THEN 0 ELSE 1 END, candidate.DiferenciaMontoAbs, candidate.OrdenPlanilla
+        ) match
+        ORDER BY m.Fecha DESC, m.Empresa, m.Moneda, m.NroOperacion;
 END;

@@ -1501,12 +1501,14 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         var comprobante = NormalizeText(GetDictionaryString(row, "Comprobante"));
         var banco = NormalizeText(GetDictionaryString(row, "Banco"));
         var serie = NormalizeText(GetDictionaryString(row, "Serie"));
+        var descripcionOperacion = NormalizeText(GetDictionaryString(row, "DescripcionOperacion"))
+            ?? NormalizeText(GetDictionaryString(row, "Detalle"));
         var detalle = NormalizeText(GetDictionaryString(row, "Detalle"));
 
         return new PlanillaConciliacionRow
         {
             NroOperacion = nroOperacion,
-            NroOperacionNormalizado = nroOperacion?.Trim() ?? string.Empty,
+            NroOperacionNormalizado = NormalizeOperationNumber(nroOperacion),
             Cuenta = cuenta,
             CuentaInter = cuentaInter,
             Cliente = cliente,
@@ -1518,12 +1520,22 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
             Comprobante = comprobante,
             Banco = banco,
             Serie = serie,
+            DescripcionOperacion = descripcionOperacion,
             Detalle = detalle,
             CuentaNumerica = ExtractDigits(cuenta),
             CuentaInterNumerica = ExtractDigits(cuentaInter),
             Corre = GetDictionaryInt(row, "Corre"),
+            CorreTexto = NormalizeText(GetDictionaryString(row, "Corre")),
             FechaDeposito = GetDictionaryDate(row, "FechaDeposito"),
+            TotalPlanillaBase = GetDictionaryDecimal(row, "TotalPlanillaBase")
+                ?? GetDictionaryDecimal(row, "Total")
+                ?? GetDictionaryDecimal(row, "Monto")
+                ?? GetDictionaryDecimal(row, "Importe")
+                ?? GetDictionaryDecimal(row, "TotalPagar"),
             TotalPagar = GetDictionaryDecimal(row, "TotalPagar")
+                ?? GetDictionaryDecimal(row, "total")
+                ?? GetDictionaryDecimal(row, "Monto")
+                ?? GetDictionaryDecimal(row, "Importe")
         };
     }
 
@@ -1532,27 +1544,32 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         IReadOnlyList<PlanillaConciliacionRow> planillaRows,
         string? codigoBanco)
     {
-        var esScotiabank = IsScotiabankCode(codigoBanco);
+        var esScotiabank = IsScotiabankCode(codigoBanco)
+            || planillaRows.Any(planilla => IsScotiabankCode(planilla.Banco));
+        var planillaRowsByNroOperacion = planillaRows
+            .Where(planilla => !string.IsNullOrWhiteSpace(planilla.NroOperacionNormalizado))
+            .GroupBy(planilla => planilla.NroOperacionNormalizado, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.OrdinalIgnoreCase);
+        var scotiabankOperationSummaries = esScotiabank
+            ? planillaRowsByNroOperacion.ToDictionary(
+                entry => entry.Key,
+                entry => BuildScotiabankOperationSummary(entry.Value),
+                StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, ScotiabankOperationSummary>(StringComparer.OrdinalIgnoreCase);
 
         var contexts = movimientos
             .Select(movimiento =>
             {
-                if (esScotiabank && IsScotiabankOperacionDescartable(movimiento))
-                {
-                    return new MovimientoConciliacionContext
-                    {
-                        Movimiento = movimiento,
-                        Candidates = []
-                    };
-                }
-
                 var nroOperacionNormalizado = NormalizeText(movimiento.NroOperacion)?.Trim() ?? string.Empty;
                 var descripcionNumerica = ExtractDigits(movimiento.DescripcionOperacion);
-                var candidates = planillaRows
-                    .Select(planilla => BuildConciliacionCandidate(movimiento, nroOperacionNormalizado, descripcionNumerica, planilla, esScotiabank))
-                    .Where(candidate => candidate is not null)
-                    .Select(candidate => candidate!)
-                    .ToList();
+                var descripcionNoConciliable = IsDescripcionOperacionDescartable(movimiento.DescripcionOperacion);
+                var candidates = descripcionNoConciliable
+                    ? []
+                    : planillaRows
+                        .Select(planilla => BuildConciliacionCandidate(movimiento, nroOperacionNormalizado, descripcionNumerica, planilla, esScotiabank, planillaRows, planillaRowsByNroOperacion, scotiabankOperationSummaries))
+                        .Where(candidate => candidate is not null)
+                        .Select(candidate => candidate!)
+                        .ToList();
 
                 return new MovimientoConciliacionContext
                 {
@@ -1569,13 +1586,14 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                 Candidate = candidate
             }))
             .GroupBy(item => item.Candidate.Planilla.RowKey, StringComparer.OrdinalIgnoreCase)
-            .Select(group => group
-                .OrderBy(item => item.Candidate.Prioridad)
-                .ThenBy(item => item.Candidate.DiferenciaMontoAbs ?? decimal.MaxValue)
-                .ThenBy(item => item.Candidate.DiferenciaFechaDias ?? int.MaxValue)
-                .ThenBy(item => item.Candidate.OrdenPlanilla)
-                .ThenBy(item => item.Movimiento.IdMovimientoBanco)
-                .First())
+                .Select(group => group
+                    .OrderBy(item => item.Candidate.Prioridad)
+                    .ThenByDescending(item => item.Candidate.CoincidenciaMontoExacta)
+                    .ThenBy(item => item.Candidate.DiferenciaMontoAbs ?? decimal.MaxValue)
+                    .ThenBy(item => item.Candidate.DiferenciaFechaDias ?? int.MaxValue)
+                    .ThenBy(item => item.Candidate.OrdenPlanilla)
+                    .ThenBy(item => item.Movimiento.IdMovimientoBanco)
+                    .First())
             .ToList();
 
         var assignmentsByMovimiento = assignments
@@ -1591,45 +1609,105 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                     ? assignedCandidates
                     : [],
                 context.Candidates.Count > 0,
-                esScotiabank))
+                esScotiabank,
+                planillaRows,
+                planillaRowsByNroOperacion,
+                scotiabankOperationSummaries))
             .ToList();
     }
 
-    private static bool IsScotiabankOperacionDescartable(MovimientoBcpBusquedaRow movimiento)
+    private static bool IsDescripcionOperacionDescartable(string? descripcionOperacion)
     {
-        var descripcion = movimiento.DescripcionOperacion;
-        return !string.IsNullOrWhiteSpace(descripcion) &&
-               (descripcion.Contains("COMISION", StringComparison.OrdinalIgnoreCase) ||
-                descripcion.Contains("IMPUESTO", StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(descripcionOperacion))
+        {
+            return false;
+        }
+
+        return descripcionOperacion.Contains("IMPUESTO", StringComparison.OrdinalIgnoreCase) ||
+               descripcionOperacion.Contains("IGV", StringComparison.OrdinalIgnoreCase) ||
+               descripcionOperacion.Contains("ITF", StringComparison.OrdinalIgnoreCase) ||
+               descripcionOperacion.Contains("RETENCION", StringComparison.OrdinalIgnoreCase);
     }
 
     private static ConciliacionBcpConciliarPlanillaRegistroDto BuildConciliacionRegistro(
         MovimientoBcpBusquedaRow movimiento,
         IReadOnlyList<ConciliacionCandidate> assignedCandidates,
         bool hadUnassignedCandidates,
-        bool esScotiabank)
+        bool esScotiabank,
+        IReadOnlyList<PlanillaConciliacionRow> planillaRows,
+        IReadOnlyDictionary<string, List<PlanillaConciliacionRow>> planillaRowsByNroOperacion,
+        IReadOnlyDictionary<string, ScotiabankOperationSummary> scotiabankOperationSummaries)
     {
-        var candidate = esScotiabank
-            ? assignedCandidates.Count == 1
-                ? assignedCandidates[0]
-                : null
+        var esDescripcionNoConciliable = IsDescripcionOperacionDescartable(movimiento.DescripcionOperacion);
+        var nroOperacionMovimientoNormalizado = NormalizeOperationNumber(movimiento.NroOperacion);
+        var candidate = !esDescripcionNoConciliable && esScotiabank
+            ? assignedCandidates
+                .OrderBy(item => item.Prioridad)
+                .ThenByDescending(item => item.CoincidenciaMontoExacta)
+                .ThenBy(item => item.DiferenciaMontoAbs ?? decimal.MaxValue)
+                .ThenBy(item => item.DiferenciaFechaDias ?? int.MaxValue)
+                .ThenBy(item => item.OrdenPlanilla)
+                .FirstOrDefault()
             : assignedCandidates
                 .OrderBy(item => item.Prioridad)
+                .ThenByDescending(item => item.CoincidenciaMontoExacta)
                 .ThenBy(item => item.DiferenciaMontoAbs ?? decimal.MaxValue)
                 .ThenBy(item => item.DiferenciaFechaDias ?? int.MaxValue)
                 .ThenBy(item => item.OrdenPlanilla)
                 .FirstOrDefault();
+        var nroOperacionPlanillaNormalizado = candidate?.Planilla.NroOperacionNormalizado ?? nroOperacionMovimientoNormalizado;
+        ScotiabankOperationSummary? scotiabankSummary = null;
+        List<PlanillaConciliacionRow> planillaRowsParaMostrar = [];
 
-        var candidatosParaMostrar = esScotiabank && candidate is not null
-            ? [candidate]
-            : assignedCandidates;
+        if (esScotiabank && !esDescripcionNoConciliable)
+        {
+            if (!string.IsNullOrWhiteSpace(nroOperacionMovimientoNormalizado) &&
+                scotiabankOperationSummaries.TryGetValue(nroOperacionMovimientoNormalizado, out var summaryByMovimiento))
+            {
+                scotiabankSummary = summaryByMovimiento;
+            }
 
-        var totalPagar = candidatosParaMostrar.Count > 0
-            ? candidatosParaMostrar.Sum(item => item.Planilla.TotalPagar ?? 0m)
-            : (decimal?)null;
-        var correlativoPlanilla = candidate?.Planilla.Corre.HasValue == true
-            ? candidate.Planilla.Corre.Value.ToString(CultureInfo.InvariantCulture)
-            : null;
+            var rowsScotiabank = GetScotiabankRowsForOperation(
+                nroOperacionPlanillaNormalizado,
+                nroOperacionMovimientoNormalizado,
+                planillaRows,
+                planillaRowsByNroOperacion);
+            if (rowsScotiabank.Count > 0)
+            {
+                scotiabankSummary ??= BuildScotiabankOperationSummary(rowsScotiabank);
+                planillaRowsParaMostrar = rowsScotiabank
+                    .OrderBy(row => row.Corre ?? int.MaxValue)
+                    .ToList();
+            }
+        }
+
+        if (!esScotiabank)
+        {
+            planillaRowsParaMostrar = candidate is not null
+                ? [candidate.Planilla]
+                : [];
+        }
+
+        var totalPagar = esDescripcionNoConciliable
+            ? null
+            : esScotiabank && scotiabankSummary is not null
+            ? scotiabankSummary.TotalPagar
+            : esScotiabank && planillaRowsParaMostrar.Count > 0
+                ? -planillaRowsParaMostrar.Sum(row => Math.Abs(row.TotalPlanillaBase ?? row.TotalPagar ?? 0m))
+                : candidate?.Planilla.TotalPagar;
+        var correlativoPlanilla = esDescripcionNoConciliable
+            ? null
+            : esScotiabank && scotiabankSummary is not null
+            ? scotiabankSummary.CorrelativoCsv
+            : candidate?.Planilla.CorreTexto
+                ?? (candidate?.Planilla.Corre.HasValue == true
+                    ? candidate.Planilla.Corre.Value.ToString(CultureInfo.InvariantCulture)
+                    : null);
+        var nroOperacionPlanilla = esDescripcionNoConciliable
+            ? null
+            : esScotiabank && scotiabankSummary is not null
+            ? scotiabankSummary.NroOperacion
+            : candidate?.Planilla.NroOperacion;
 
         return new ConciliacionBcpConciliarPlanillaRegistroDto
         {
@@ -1669,9 +1747,11 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
             ObservacionReglaContable = movimiento.ObservacionReglaContable,
             EstadoConciliacionTexto = movimiento.EstadoConciliacionTexto,
             EstadoOperativoConciliacion = movimiento.EstadoOperativoConciliacion,
-            ResultadoConciliacion = candidate?.ResultadoConciliacion ?? "SIN COINCIDENCIA",
+            ResultadoConciliacion = esDescripcionNoConciliable
+                ? "NO CONCILIABLE"
+                : candidate?.ResultadoConciliacion ?? "SIN COINCIDENCIA",
             TipoCoincidencia = candidate?.TipoCoincidencia,
-            NroOperacionPlanilla = candidate?.Planilla.NroOperacion,
+            NroOperacionPlanilla = nroOperacionPlanilla,
             CuentaPlanilla = candidate?.Planilla.Cuenta,
             CuentaInterPlanilla = candidate?.Planilla.CuentaInter,
             ClientePlanilla = candidate?.Planilla.Cliente,
@@ -1688,9 +1768,11 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
             IdRegistroPlanilla = candidate?.Planilla.Corre,
             TotalPagar = totalPagar,
             Comentario = movimiento.Comentario,
-            ObservacionConciliacion = candidate is not null
-                ? candidatosParaMostrar.Count > 1
-                    ? $"Se encontraron {assignedCandidates.Count} coincidencias. Se mostro la mejor coincidencia por prioridad y diferencia. TotalPagar acumulado: {totalPagar:0.##}."
+            ObservacionConciliacion = esDescripcionNoConciliable
+                ? "Movimiento excluido de conciliacion por descripcion de operacion."
+                : candidate is not null
+                ? esScotiabank && scotiabankSummary is not null && scotiabankSummary.Correlativos.Count > 1
+                    ? $"Se encontraron {scotiabankSummary.Correlativos.Count} coincidencias del mismo NroOperacion. Se mostraron todos los correlativos relacionados."
                     : candidate.ObservacionConciliacion
                 : esScotiabank
                     ? "No se encontro coincidencia exacta con planilla."
@@ -1752,21 +1834,53 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         string nroOperacionNormalizado,
         string descripcionNumerica,
         PlanillaConciliacionRow planilla,
-        bool esScotiabank)
+        bool esScotiabank,
+        IReadOnlyList<PlanillaConciliacionRow> allPlanillaRows,
+        IReadOnlyDictionary<string, List<PlanillaConciliacionRow>> planillaRowsByNroOperacion,
+        IReadOnlyDictionary<string, ScotiabankOperationSummary> scotiabankOperationSummaries)
     {
         if (!string.IsNullOrWhiteSpace(nroOperacionNormalizado) &&
             string.Equals(planilla.NroOperacionNormalizado, nroOperacionNormalizado, StringComparison.OrdinalIgnoreCase))
         {
+            var sameNroRows = GetScotiabankRowsForOperation(
+                planilla.NroOperacionNormalizado,
+                nroOperacionNormalizado,
+                allPlanillaRows,
+                planillaRowsByNroOperacion);
+            var rowsForComparison = sameNroRows;
+            var groupTotal = scotiabankOperationSummaries.TryGetValue(nroOperacionNormalizado, out var summary)
+                ? summary.TotalPagar
+                : rowsForComparison.Count > 0
+                    ? BuildScotiabankOperationSummary(rowsForComparison).TotalPagar
+                    : 0m;
+            var amountDifference = CalculateAmountDifferenceAbsolute(movimiento.Monto, groupTotal);
+
+            if (esScotiabank)
+            {
+                if (rowsForComparison.Count == 0)
+                {
+                    return null;
+                }
+
+                if (amountDifference != 0)
+                {
+                    return null;
+                }
+            }
+
             return new ConciliacionCandidate
             {
-                Prioridad = 1,
+                Prioridad = amountDifference == 0 ? 0 : 1,
                 ResultadoConciliacion = "COINCIDENCIA POR NRO OPERACION",
                 TipoCoincidencia = "NRO OPERACION",
                 Planilla = planilla,
-                ObservacionConciliacion = $"Coincidencia exacta por NroOperacion: {planilla.NroOperacion}",
+                ObservacionConciliacion = esScotiabank && rowsForComparison.Count > 1
+                    ? $"Coincidencia por NroOperacion con {rowsForComparison.Count} registro(s) válidos sumados."
+                    : $"Coincidencia exacta por NroOperacion: {planilla.NroOperacion}",
                 OrdenPlanilla = planilla.Corre ?? 0,
-                DiferenciaMontoAbs = CalculateAmountDifferenceAbsolute(movimiento.Monto, planilla.TotalPagar),
-                DiferenciaFechaDias = CalculateDateDifferenceDays(movimiento.Fecha, planilla.FechaDeposito)
+                DiferenciaMontoAbs = amountDifference,
+                DiferenciaFechaDias = CalculateDateDifferenceDays(movimiento.Fecha, planilla.FechaDeposito),
+                CoincidenciaMontoExacta = amountDifference == 0
             };
         }
 
@@ -1780,16 +1894,17 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
             (planilla.CuentaNumerica.Contains(descripcionNumerica, StringComparison.OrdinalIgnoreCase) ||
              descripcionNumerica.Contains(planilla.CuentaNumerica, StringComparison.OrdinalIgnoreCase)))
         {
-            return new ConciliacionCandidate
-            {
-                Prioridad = 2,
-                ResultadoConciliacion = "COINCIDENCIA POR CUENTA",
-                TipoCoincidencia = "CUENTA",
+                return new ConciliacionCandidate
+                {
+                    Prioridad = 2,
+                    ResultadoConciliacion = "COINCIDENCIA POR CUENTA",
+                    TipoCoincidencia = "CUENTA",
                 Planilla = planilla,
                 ObservacionConciliacion = $"Coincidencia por Cuenta dentro de DescripcionOperacion: {planilla.Cuenta}",
                 OrdenPlanilla = planilla.Corre ?? 0,
                 DiferenciaMontoAbs = CalculateAmountDifferenceAbsolute(movimiento.Monto, planilla.TotalPagar),
-                DiferenciaFechaDias = CalculateDateDifferenceDays(movimiento.Fecha, planilla.FechaDeposito)
+                DiferenciaFechaDias = CalculateDateDifferenceDays(movimiento.Fecha, planilla.FechaDeposito),
+                CoincidenciaMontoExacta = CalculateAmountDifferenceAbsolute(movimiento.Monto, planilla.TotalPagar) == 0
             };
         }
 
@@ -1798,16 +1913,17 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
             (planilla.CuentaInterNumerica.Contains(descripcionNumerica, StringComparison.OrdinalIgnoreCase) ||
              descripcionNumerica.Contains(planilla.CuentaInterNumerica, StringComparison.OrdinalIgnoreCase)))
         {
-            return new ConciliacionCandidate
-            {
-                Prioridad = 3,
-                ResultadoConciliacion = "COINCIDENCIA POR CUENTA INTER",
-                TipoCoincidencia = "CUENTA INTER",
+                return new ConciliacionCandidate
+                {
+                    Prioridad = 3,
+                    ResultadoConciliacion = "COINCIDENCIA POR CUENTA INTER",
+                    TipoCoincidencia = "CUENTA INTER",
                 Planilla = planilla,
                 ObservacionConciliacion = $"Coincidencia por CuentaInter dentro de DescripcionOperacion: {planilla.CuentaInter}",
                 OrdenPlanilla = planilla.Corre ?? 0,
                 DiferenciaMontoAbs = CalculateAmountDifferenceAbsolute(movimiento.Monto, planilla.TotalPagar),
-                DiferenciaFechaDias = CalculateDateDifferenceDays(movimiento.Fecha, planilla.FechaDeposito)
+                DiferenciaFechaDias = CalculateDateDifferenceDays(movimiento.Fecha, planilla.FechaDeposito),
+                CoincidenciaMontoExacta = CalculateAmountDifferenceAbsolute(movimiento.Monto, planilla.TotalPagar) == 0
             };
         }
 
@@ -3507,7 +3623,8 @@ ORDER BY ic.key_ordinal;";
 
     private static bool IsScotiabankCode(string? codigoBanco)
     {
-        return NormalizeKey(codigoBanco).Contains("scotiabank", StringComparison.OrdinalIgnoreCase);
+        var normalized = NormalizeKey(codigoBanco);
+        return normalized.Contains("scoti", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string GetScotiabankRawPromptExtra(string? codigoBanco)
@@ -4469,6 +4586,84 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
             if (!HasValue(normalizedRow, field) && contextValues.TryGetValue(field, out var value))
             {
                 normalizedRow[field] = value;
+            }
+        }
+    }
+
+    private static ScotiabankOperationSummary BuildScotiabankOperationSummary(IReadOnlyList<PlanillaConciliacionRow> rows)
+    {
+        var rowsToUse = rows.ToList();
+        var totalPagarAgrupado = rowsToUse
+            .Select(row => row.TotalPagar ?? row.TotalPlanillaBase)
+            .FirstOrDefault(value => value.HasValue)
+            ?? 0m;
+        var correlativos = rowsToUse
+            .Select(row => row.CorreTexto ?? row.Corre?.ToString(CultureInfo.InvariantCulture))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!.Trim())
+            .Distinct()
+            .ToList();
+
+        return new ScotiabankOperationSummary(
+            totalPagarAgrupado,
+            string.Join(", ", correlativos),
+            rowsToUse
+                .Select(row => row.NroOperacion?.Trim())
+                .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)),
+            rowsToUse.Count);
+    }
+
+    private static List<PlanillaConciliacionRow> GetScotiabankRowsForOperation(
+        string? nroOperacionPlanillaNormalizado,
+        string? nroOperacionMovimientoNormalizado,
+        IReadOnlyList<PlanillaConciliacionRow> allPlanillaRows,
+        IReadOnlyDictionary<string, List<PlanillaConciliacionRow>> planillaRowsByNroOperacion)
+    {
+        var rows = new List<PlanillaConciliacionRow>();
+        AddRowsFromAllRows(nroOperacionPlanillaNormalizado);
+        AddRowsFromAllRows(nroOperacionMovimientoNormalizado);
+        AddRows(nroOperacionPlanillaNormalizado);
+
+        if (!string.Equals(nroOperacionMovimientoNormalizado, nroOperacionPlanillaNormalizado, StringComparison.OrdinalIgnoreCase))
+        {
+            AddRows(nroOperacionMovimientoNormalizado);
+        }
+
+        return rows;
+
+        void AddRowsFromAllRows(string? key)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return;
+            }
+
+            foreach (var row in allPlanillaRows.Where(row => string.Equals(row.NroOperacionNormalizado, key, StringComparison.OrdinalIgnoreCase)))
+            {
+                if (rows.Any(existing => string.Equals(existing.RowKey, row.RowKey, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                rows.Add(row);
+            }
+        }
+
+        void AddRows(string? key)
+        {
+            if (string.IsNullOrWhiteSpace(key) || !planillaRowsByNroOperacion.TryGetValue(key, out var matchingRows))
+            {
+                return;
+            }
+
+            foreach (var row in matchingRows)
+            {
+                if (rows.Any(existing => string.Equals(existing.RowKey, row.RowKey, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                rows.Add(row);
             }
         }
     }
@@ -5788,11 +5983,14 @@ ORDER BY p.parameter_id;";
         public string? Comprobante { get; set; }
         public string? Banco { get; set; }
         public string? Serie { get; set; }
+        public string? DescripcionOperacion { get; set; }
         public string? Detalle { get; set; }
         public string CuentaNumerica { get; set; } = string.Empty;
         public string CuentaInterNumerica { get; set; } = string.Empty;
         public int? Corre { get; set; }
+        public string? CorreTexto { get; set; }
         public DateTime? FechaDeposito { get; set; }
+        public decimal? TotalPlanillaBase { get; set; }
         public decimal? TotalPagar { get; set; }
     }
 
@@ -5808,6 +6006,18 @@ ORDER BY p.parameter_id;";
         public int OrdenPlanilla { get; set; }
         public decimal? DiferenciaMontoAbs { get; set; }
         public int? DiferenciaFechaDias { get; set; }
+        public bool CoincidenciaMontoExacta { get; set; }
+    }
+
+    private sealed record ScotiabankOperationSummary(
+        decimal TotalPagar,
+        string CorrelativoCsv,
+        string? NroOperacion,
+        int Cantidad)
+    {
+        public IReadOnlyList<string> Correlativos => string.IsNullOrWhiteSpace(CorrelativoCsv)
+            ? []
+            : CorrelativoCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
     private sealed class MovimientoConciliacionContext

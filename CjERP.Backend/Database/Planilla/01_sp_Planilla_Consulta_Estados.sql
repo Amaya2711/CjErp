@@ -65,6 +65,22 @@ BEGIN
     FROM STRING_SPLIT(@IdEmpleado2, ',')
     WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) IS NOT NULL;
 
+    ;WITH PlanillaScotiabankAgrupada AS
+    (
+        SELECT
+            LTRIM(RTRIM(p.NroOperacion)) AS NroOperacion,
+            STRING_AGG(CONVERT(VARCHAR(20), p.Correlativo), ', ') WITHIN GROUP (ORDER BY p.Correlativo) AS Correlativos,
+            -SUM(ABS(ISNULL(p.Total, 0))) AS TotalPagarAgrupado
+        FROM Planilla p
+        INNER JOIN Constante banAgrupado
+            ON banAgrupado.Sociedad = 'PE01'
+           AND banAgrupado.Programa = 'PLANTILLA'
+           AND banAgrupado.Campo = 'BANCO'
+           AND p.IdBanco = banAgrupado.Correlativo
+        WHERE UPPER(LTRIM(RTRIM(ISNULL(banAgrupado.ValorIni, '')))) LIKE '%SCOTI%'
+        GROUP BY LTRIM(RTRIM(p.NroOperacion))
+    )
+
     SELECT DISTINCT
         CONVERT(VARCHAR(10), a.FecIngreso, 103) AS FecIngreso,
         CAST(a.Detalle AS VARCHAR(MAX)) AS Detalle,
@@ -132,7 +148,16 @@ BEGIN
         f_emp.NombreEmpleado AS Responsable,
         g.NombreCliente AS Cliente,
         a.IdOc,
-        a.TotalPagar,
+        CASE
+            WHEN UPPER(LTRIM(RTRIM(ISNULL(ban.ValorIni, '')))) LIKE '%SCOTI%'
+                THEN pa.TotalPagarAgrupado
+            ELSE a.TotalPagar
+        END AS TotalPlanillaBase,
+        CASE
+            WHEN UPPER(LTRIM(RTRIM(ISNULL(ban.ValorIni, '')))) LIKE '%SCOTI%'
+                THEN pa.TotalPagarAgrupado
+            ELSE a.TotalPagar
+        END AS TotalPagar,
         a.IdTarea,
         a.imgFactura,
         a.idprovisional,
@@ -168,6 +193,8 @@ BEGIN
        AND ban.Programa = 'PLANTILLA'
        AND ban.Campo = 'BANCO'
        AND a.IdBanco = ban.Correlativo
+    LEFT JOIN PlanillaScotiabankAgrupada pa
+        ON pa.NroOperacion = LTRIM(RTRIM(a.NroOperacion))
     LEFT JOIN Constante j
         ON j.Sociedad = 'PE01'
        AND j.Programa = 'PLANTILLA'
