@@ -58,6 +58,19 @@ public class ArrendamientosController : ControllerBase
     public async Task<IActionResult> ListarPagos(CancellationToken cancellationToken)
         => await ResponderLista(() => _arrendamientosService.ListarPagosAsync(cancellationToken));
 
+    [HttpGet("pagosdsh/resumen-anual")]
+    public async Task<IActionResult> ListarPagosDshResumenAnual(CancellationToken cancellationToken)
+        => await ResponderLista(() => _arrendamientosService.ListarPagosDshResumenAnualAsync(cancellationToken));
+
+    [HttpGet("dshpagos")]
+    public async Task<IActionResult> ObtenerDshPagos(
+        [FromQuery] ArrendamientosDshPagosFiltroDto filtro,
+        CancellationToken cancellationToken)
+    {
+        var data = await _arrendamientosService.ObtenerDshPagosAsync(filtro, cancellationToken);
+        return Ok(new { success = true, message = "Dashboard de pagos obtenido correctamente.", data });
+    }
+
     [HttpGet("fraccionamientos")]
     public async Task<IActionResult> ListarFraccionamientos(CancellationToken cancellationToken)
         => await ResponderLista(() => _arrendamientosService.ListarFraccionamientosAsync(cancellationToken));

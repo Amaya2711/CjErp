@@ -2,6 +2,8 @@ import httpClient from "./httpClient";
 import type {
   ArrendamientosCommandResult,
   ArrendamientosDashboard,
+  ArrendamientosDshPagosFiltro,
+  ArrendamientosDshPagosResponse,
   ArrendamientosEstadoCuentaFiltro,
   ArrendamientosFila,
 } from "../models/arrendamientos";
@@ -39,6 +41,7 @@ export const listarUnidadesArrendamientos = () => listarArrendamientos("unidades
 export const listarContratosArrendamientos = () => listarArrendamientos("contratos");
 export const listarObligacionesArrendamientos = () => listarArrendamientos("obligaciones");
 export const listarPagosArrendamientos = () => listarArrendamientos("pagos");
+export const listarPagosDshResumenAnualArrendamientos = () => listarArrendamientos("pagosdsh/resumen-anual");
 export const listarFraccionamientosArrendamientos = () => listarArrendamientos("fraccionamientos");
 export const listarGarantiasArrendamientos = () => listarArrendamientos("garantias");
 export const listarArbitriosArrendamientos = () => listarArrendamientos("arbitrios");
@@ -58,6 +61,40 @@ export async function consultarEstadoCuentaArrendamientos(
     query ? `/arrendamientos/estado-cuenta?${query}` : "/arrendamientos/estado-cuenta"
   );
   return Array.isArray(response) ? response : [];
+}
+
+export async function obtenerDshPagosArrendamientos(
+  filtro: ArrendamientosDshPagosFiltro
+): Promise<ArrendamientosDshPagosResponse> {
+  const params = new URLSearchParams();
+
+  if (filtro.idInmueble != null) params.set("idInmueble", String(filtro.idInmueble));
+  if (filtro.idInquilino != null) params.set("idInquilino", String(filtro.idInquilino));
+
+  const query = params.toString();
+  const response = await httpClient.get<ArrendamientosDshPagosResponse>(
+    query ? `/arrendamientos/dshpagos?${query}` : "/arrendamientos/dshpagos"
+  );
+
+  return (
+    response ?? {
+      idInmuebleSeleccionado: null,
+      idInquilinoSeleccionado: null,
+      inmuebles: [],
+      inquilinos: [],
+      kpi: {
+        contratosActivos: 0,
+        obligacionesPendientes: 0,
+        saldoPendiente: 0,
+        pagosAplicados: 0,
+        ultimoPagoFecha: null,
+        ultimoPagoImporte: 0,
+        monedaBase: null,
+      },
+      principal: [],
+      detalle: [],
+    }
+  );
 }
 
 export async function crearArrendadorArrendamientos(payload: unknown) {

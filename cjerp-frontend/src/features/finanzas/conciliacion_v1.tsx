@@ -118,6 +118,7 @@ type ConciliacionRevisionResumen = {
   resumen: string;
   saldoMn: number;
   saldoMe: number;
+  saldoMeConvertido: number;
   totalMn: number;
 };
 type PlanillaGastoConciliacionRow = Record<string, unknown>;
@@ -248,6 +249,8 @@ const DEFAULT_CONCILIACION_REVISION_FILTERS: ConciliacionRevisionFilters = {
   cliente: "",
   periodo: "",
 };
+
+const DEFAULT_TIPO_CAMBIO_DIARIO = 3.5;
 
 const DETAIL_CONCILIACION_SEARCH_KEYS: ConciliacionSortKey[] = [
   "fecha",
@@ -1275,13 +1278,17 @@ function getPlanillaGastoNroOperacion(row: PlanillaGastoConciliacionRow): string
   return getPlanillaGastoText(row, "nrooperacion", "NroOperacion", "nroOperacion", "NumeroOperacion", "numeroOperacion");
 }
 
+function getPlanillaGastoRenderKey(row: PlanillaGastoConciliacionRow, rowIndex: number): string {
+  const rowId = getPlanillaGastoRowId(row);
+  return `gastos-${rowIndex}-${rowId || "sin-id"}`;
+}
+
 function getPlanillaGastoSearchText(row: PlanillaGastoConciliacionRow): string {
   const preferredKeys = [
     "corre",
     "cliente",
     "nombreproyecto",
     "site",
-    "idsite",
     "tipo_trabajo",
     "tipoTrabajo",
     "TipoTrabajo",
@@ -1302,15 +1309,6 @@ function getPlanillaGastoSearchText(row: PlanillaGastoConciliacionRow): string {
     "fechaDeposito",
     "FechaDeposito",
     "detalle",
-    "comentario",
-    "estado",
-    "Estado",
-    "area",
-    "Area",
-    "ubicacion",
-    "Ubicacion",
-    "ubicación",
-    "Ubicación",
   ];
 
   const searchParts = preferredKeys
@@ -1550,6 +1548,7 @@ export default function ConciliacionBcpPage() {
   const [revisionFilters, setRevisionFilters] = useState<ConciliacionRevisionFilters>(
     DEFAULT_CONCILIACION_REVISION_FILTERS
   );
+  const [revisionTipoCambioDiario, setRevisionTipoCambioDiario] = useState<number>(DEFAULT_TIPO_CAMBIO_DIARIO);
   const [conciliacionPlanillaTab, setConciliacionPlanillaTab] = useState<ConciliacionPlanillaTab>("revision");
   const [isResultadoFilterOpen, setIsResultadoFilterOpen] = useState(false);
   const [clasificacionCombos, setClasificacionCombos] = useState<ConciliacionBcpClasificacionCombosResponse | null>(null);
@@ -1560,7 +1559,7 @@ export default function ConciliacionBcpPage() {
 
   const fechaDepositoInicioGastos = useMemo(() => conciliacionFiltros.fechaInicio.trim(), [conciliacionFiltros.fechaInicio]);
   const fechaDepositoFinGastos = useMemo(() => conciliacionFiltros.fechaFin.trim(), [conciliacionFiltros.fechaFin]);
-  const gastosPlanillaFilteredRows = useMemo(() => {
+  const gastosPlanillaVisibleRows = useMemo(() => {
     const quickSearch = normalizePlanillaGastoSearchValue(gastosPlanillaQuickSearch);
 
     if (!quickSearch) {
@@ -1574,6 +1573,34 @@ export default function ConciliacionBcpPage() {
       return tokens.every((token) => rowSearchText.includes(token));
     });
   }, [gastosPlanillaRows, gastosPlanillaQuickSearch]);
+
+  const gastosPlanillaCountText = useMemo(() => {
+    const totalRows = gastosPlanillaRows.length;
+    const visibleRows = gastosPlanillaVisibleRows.length;
+
+    if (!gastosPlanillaQuickSearch.trim()) {
+      return `Registros: ${visibleRows}`;
+    }
+
+    return `Registros: ${visibleRows} de ${totalRows}`;
+  }, [gastosPlanillaQuickSearch, gastosPlanillaRows.length, gastosPlanillaVisibleRows.length]);
+
+  const gastosPlanillaMessageText = useMemo(() => {
+    if (!gastosPlanillaMessage) {
+      return "";
+    }
+
+    if (!gastosPlanillaQuickSearch.trim()) {
+      return gastosPlanillaMessage;
+    }
+
+    return `${gastosPlanillaMessage} | Mostrando ${gastosPlanillaVisibleRows.length} de ${gastosPlanillaRows.length} por búsqueda rápida.`;
+  }, [
+    gastosPlanillaMessage,
+    gastosPlanillaQuickSearch,
+    gastosPlanillaVisibleRows.length,
+    gastosPlanillaRows.length,
+  ]);
 
   const guardarNroOperacionGasto = async (row: PlanillaGastoConciliacionRow, nextValue?: string) => {
     const rowId = getPlanillaGastoRowId(row);
@@ -2123,6 +2150,7 @@ export default function ConciliacionBcpPage() {
   }, [conciliacionPlanilla?.registros, revisionFilters]);
   const revisionResumenRows = useMemo(() => {
     const grouped = new Map<string, ConciliacionRevisionResumen>();
+    const tipoCambio = Number.isFinite(revisionTipoCambioDiario) && revisionTipoCambioDiario > 0 ? revisionTipoCambioDiario : DEFAULT_TIPO_CAMBIO_DIARIO;
 
     revisionFilteredRows.forEach((row) => {
       const resumen = getRevisionResumenLabel(row);
@@ -2132,6 +2160,7 @@ export default function ConciliacionBcpPage() {
           resumen,
           saldoMn: 0,
           saldoMe: 0,
+          saldoMeConvertido: 0,
           totalMn: 0,
         };
       const monto = row.monto ?? 0;
@@ -2140,9 +2169,10 @@ export default function ConciliacionBcpPage() {
         current.saldoMn += monto;
       } else {
         current.saldoMe += monto;
+        current.saldoMeConvertido += monto * tipoCambio;
       }
 
-      current.totalMn += monto;
+      current.totalMn = current.saldoMn + current.saldoMeConvertido;
       grouped.set(resumen, current);
     });
 
@@ -2156,15 +2186,16 @@ export default function ConciliacionBcpPage() {
 
       return left.resumen.localeCompare(right.resumen, "es", { sensitivity: "base", numeric: true });
     });
-  }, [revisionFilteredRows]);
+  }, [revisionFilteredRows, revisionTipoCambioDiario]);
   const revisionResumenTotals = useMemo(() => {
     return revisionResumenRows.reduce(
       (accumulator, item) => ({
         saldoMn: accumulator.saldoMn + item.saldoMn,
         saldoMe: accumulator.saldoMe + item.saldoMe,
+        saldoMeConvertido: accumulator.saldoMeConvertido + item.saldoMeConvertido,
         totalMn: accumulator.totalMn + item.totalMn,
       }),
-      { saldoMn: 0, saldoMe: 0, totalMn: 0 }
+      { saldoMn: 0, saldoMe: 0, saldoMeConvertido: 0, totalMn: 0 }
     );
   }, [revisionResumenRows]);
   const executiveSelectionLabel = conciliacionExecutiveSelection.resultado
@@ -4113,6 +4144,20 @@ export default function ConciliacionBcpPage() {
                         </select>
                       </div>
                     ))}
+                    <div style={styles.revisionFilterCard}>
+                      <div style={styles.revisionFilterLabel}>TIPO CAMBIO DIARIO</div>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={revisionTipoCambioDiario}
+                        onChange={(event) => {
+                          const parsed = Number(event.target.value);
+                          setRevisionTipoCambioDiario(Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TIPO_CAMBIO_DIARIO);
+                        }}
+                        style={styles.revisionFilterInput}
+                      />
+                    </div>
                   </div>
 
                   <div style={styles.revisionTableWrap}>
@@ -4122,12 +4167,14 @@ export default function ConciliacionBcpPage() {
                         <col style={styles.revisionColNumeric} />
                         <col style={styles.revisionColNumeric} />
                         <col style={styles.revisionColNumeric} />
+                        <col style={styles.revisionColNumeric} />
                       </colgroup>
                       <thead>
                         <tr>
                           <th style={styles.th}>RESUMEN</th>
                           <th style={styles.thRight}>SALDO MN</th>
                           <th style={styles.thRight}>SALDO ME</th>
+                          <th style={styles.thRight}>ME - CON</th>
                           <th style={styles.thRight}>TOTAL MN</th>
                         </tr>
                       </thead>
@@ -4139,6 +4186,7 @@ export default function ConciliacionBcpPage() {
                                 <td style={styles.td}>{item.resumen}</td>
                                 <td style={styles.tdNumeric}>{formatNumber(item.saldoMn)}</td>
                                 <td style={styles.tdNumeric}>{formatNumber(item.saldoMe)}</td>
+                                <td style={styles.tdNumericStrong}>{formatNumber(item.saldoMeConvertido)}</td>
                                 <td style={styles.tdNumericStrong}>{formatNumber(item.totalMn)}</td>
                               </tr>
                             ))}
@@ -4146,12 +4194,13 @@ export default function ConciliacionBcpPage() {
                               <td style={styles.tdStrong}>TOTAL</td>
                               <td style={styles.tdNumericStrong}>{formatNumber(revisionResumenTotals.saldoMn)}</td>
                               <td style={styles.tdNumericStrong}>{formatNumber(revisionResumenTotals.saldoMe)}</td>
+                              <td style={styles.tdNumericStrong}>{formatNumber(revisionResumenTotals.saldoMeConvertido)}</td>
                               <td style={styles.tdNumericStrong}>{formatNumber(revisionResumenTotals.totalMn)}</td>
                             </tr>
                           </>
                         ) : (
                           <tr>
-                            <td style={styles.td} colSpan={4}>
+                            <td style={styles.td} colSpan={5}>
                               No hay datos para el reporte con los filtros actuales.
                             </td>
                           </tr>
@@ -4793,7 +4842,7 @@ export default function ConciliacionBcpPage() {
                         Consulta directa del store `sp_Planilla_Consulta_Estados` con `Estados = 4` y `FechaDeposito` entre la fecha inicio y fecha fin.
                       </div>
                       <div style={styles.gridToolbarCount}>
-                        Registros: {gastosPlanillaFilteredRows.length}
+                        {gastosPlanillaCountText}
                         {fechaDepositoInicioGastos && fechaDepositoFinGastos
                           ? ` | Rango: ${formatDateValue(fechaDepositoInicioGastos)} al ${formatDateValue(fechaDepositoFinGastos)}`
                           : ""}
@@ -4814,7 +4863,7 @@ export default function ConciliacionBcpPage() {
                   </div>
 
                   {gastosPlanillaError ? <div style={styles.errorBanner}>{gastosPlanillaError}</div> : null}
-                  {gastosPlanillaMessage ? <div style={styles.successBanner}>{gastosPlanillaMessage}</div> : null}
+                  {gastosPlanillaMessageText ? <div style={styles.successBanner}>{gastosPlanillaMessageText}</div> : null}
 
                   <div ref={detalleTableScrollRef} className="employee-grid-scroll" style={styles.detailTableScroll}>
                     <table style={styles.mappingTable}>
@@ -4827,23 +4876,24 @@ export default function ConciliacionBcpPage() {
                           ))}
                         </tr>
                       </thead>
-                      <tbody>
+                      <tbody key={`gastos-planilla-${gastosPlanillaQuickSearch.trim().toLowerCase()}-${gastosPlanillaVisibleRows.length}`}>
                         {gastosPlanillaLoading ? (
                           <tr>
                             <td style={styles.td} colSpan={GASTOS_PLANILLA_COLUMNS.length}>
                               Cargando gastos...
                             </td>
                           </tr>
-                        ) : gastosPlanillaFilteredRows.length > 0 ? (
-                          gastosPlanillaFilteredRows.map((row, rowIndex) => {
+                        ) : gastosPlanillaVisibleRows.length > 0 ? (
+                          gastosPlanillaVisibleRows.map((row, rowIndex) => {
                             const rowId = getPlanillaGastoRowId(row);
+                            const rowKey = getPlanillaGastoRenderKey(row, rowIndex);
                             const nroOperacionValue = gastosPlanillaDrafts[rowId] ?? getPlanillaGastoNroOperacion(row);
                             const isSaving = Boolean(gastosPlanillaSavingIds[rowId]);
 
                             return (
-                              <tr key={`gastos-${rowId || rowIndex}`}>
+                              <tr key={rowKey}>
                                 {GASTOS_PLANILLA_COLUMNS.map((column) => (
-                                  <td key={`${column.key}-${rowId || rowIndex}`} style={styles.td}>
+                                  <td key={`${column.key}-${rowKey}`} style={styles.td}>
                                     {column.key === "nrooperacion" ? (
                                       <input
                                         type="text"
@@ -6089,6 +6139,18 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#0F172A",
     outline: "none",
     cursor: "pointer",
+    fontFamily: "inherit",
+  },
+  revisionFilterInput: {
+    width: "100%",
+    boxSizing: "border-box",
+    borderRadius: 10,
+    border: "1px solid #93C5DD",
+    background: "#E0F2FE",
+    padding: "8px 10px",
+    fontSize: 12,
+    color: "#0F172A",
+    outline: "none",
     fontFamily: "inherit",
   },
   revisionTableWrap: {

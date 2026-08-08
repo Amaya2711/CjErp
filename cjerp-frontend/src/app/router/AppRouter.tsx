@@ -95,6 +95,8 @@ const ArrendamientosUnidadesPage = lazy(() => import("../../features/arrendamien
 const ArrendamientosContratosPage = lazy(() => import("../../features/arrendamientos/pages/contratos"));
 const ArrendamientosObligacionesPage = lazy(() => import("../../features/arrendamientos/pages/obligaciones"));
 const ArrendamientosPagosPage = lazy(() => import("../../features/arrendamientos/pages/pagos"));
+const ArrendamientosDshPagosPage = lazy(() => import("../../features/arrendamientos/pages/dshpagos"));
+const ArrendamientosPagosDshPage = lazy(() => import("../../features/arrendamientos/pages/dshpagos"));
 const ArrendamientosFraccionamientosPage = lazy(() => import("../../features/arrendamientos/pages/fraccionamientos"));
 const ArrendamientosGarantiasPage = lazy(() => import("../../features/arrendamientos/pages/garantias"));
 const ArrendamientosArbitriosPage = lazy(() => import("../../features/arrendamientos/pages/arbitrios"));
@@ -149,6 +151,8 @@ export default function AppRouter() {
             <Route path="/arrendamientos/contratos" element={<ArrendamientosContratosPage />} />
             <Route path="/arrendamientos/obligaciones" element={<ArrendamientosObligacionesPage />} />
             <Route path="/arrendamientos/pagos" element={<ArrendamientosPagosPage />} />
+            <Route path="/arrendamientos/pagosdsh" element={<ArrendamientosPagosDshPage />} />
+            <Route path="/arrendamientos/dshpagos" element={<ArrendamientosDshPagosPage />} />
             <Route path="/arrendamientos/fraccionamientos" element={<ArrendamientosFraccionamientosPage />} />
             <Route path="/arrendamientos/garantias" element={<ArrendamientosGarantiasPage />} />
             <Route path="/arrendamientos/arbitrios" element={<ArrendamientosArbitriosPage />} />

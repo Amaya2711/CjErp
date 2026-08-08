@@ -5,6 +5,7 @@ namespace CjERP.Application.Interfaces.Services.Arrendamientos;
 public interface IArrendamientosService
 {
     Task<ArrendamientosDashboardDto> ObtenerDashboardAsync(CancellationToken cancellationToken = default);
+    Task<ArrendamientosDshPagosResponseDto> ObtenerDshPagosAsync(ArrendamientosDshPagosFiltroDto filtro, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<ArrendamientosFilaDto>> ListarArrendadoresAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ArrendamientosFilaDto>> ListarInquilinosAsync(CancellationToken cancellationToken = default);
@@ -13,6 +14,7 @@ public interface IArrendamientosService
     Task<IReadOnlyList<ArrendamientosFilaDto>> ListarContratosAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ArrendamientosFilaDto>> ListarObligacionesAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ArrendamientosFilaDto>> ListarPagosAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ArrendamientosFilaDto>> ListarPagosDshResumenAnualAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ArrendamientosFilaDto>> ListarFraccionamientosAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ArrendamientosFilaDto>> ListarGarantiasAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ArrendamientosFilaDto>> ListarArbitriosAsync(CancellationToken cancellationToken = default);

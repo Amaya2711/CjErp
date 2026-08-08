@@ -55,6 +55,85 @@ public sealed class ArrendamientosDashboardDto
     public decimal PagosMesUSD { get; set; }
 }
 
+public sealed class ArrendamientosDshPagosFiltroDto
+{
+    public int? IdInmueble { get; set; }
+    public int? IdInquilino { get; set; }
+}
+
+public sealed class ArrendamientosDshPagosInmuebleDto
+{
+    public int IdInmueble { get; set; }
+    public string? NombreInmueble { get; set; }
+}
+
+public sealed class ArrendamientosDshPagosInquilinoDto
+{
+    public int IdInquilino { get; set; }
+    public string? NombreComercial { get; set; }
+    public int? IdInmueble { get; set; }
+    public string? NombreInmueble { get; set; }
+}
+
+public sealed class ArrendamientosDshPagosKpiDto
+{
+    public int ContratosActivos { get; set; }
+    public int ObligacionesPendientes { get; set; }
+    public decimal SaldoPendiente { get; set; }
+    public decimal PagosAplicados { get; set; }
+    public string? UltimoPagoFecha { get; set; }
+    public decimal UltimoPagoImporte { get; set; }
+    public string? MonedaBase { get; set; }
+}
+
+public sealed class ArrendamientosDshPagosPrincipalDto
+{
+    public int IdContrato { get; set; }
+    public string? CodigoContrato { get; set; }
+    public string? NombreInmueble { get; set; }
+    public string? NombreInquilino { get; set; }
+    public string? EstadoContrato { get; set; }
+    public string? FechaInicio { get; set; }
+    public string? FechaFin { get; set; }
+    public string? Moneda { get; set; }
+    public decimal ImporteAlquiler { get; set; }
+    public decimal ImporteMantenimiento { get; set; }
+    public decimal ImporteCochera { get; set; }
+    public decimal TotalObligado { get; set; }
+    public decimal SaldoPendiente { get; set; }
+    public decimal TotalPagado { get; set; }
+    public string? UltimoPagoFecha { get; set; }
+    public decimal UltimoPagoImporte { get; set; }
+}
+
+public sealed class ArrendamientosDshPagosDetalleDto
+{
+    public int IdMovimiento { get; set; }
+    public string? TipoMovimiento { get; set; }
+    public string? CodigoContrato { get; set; }
+    public string? NombreInmueble { get; set; }
+    public string? NombreInquilino { get; set; }
+    public string? Concepto { get; set; }
+    public string? Periodo { get; set; }
+    public string? Estado { get; set; }
+    public string? Fecha { get; set; }
+    public string? Moneda { get; set; }
+    public decimal Importe { get; set; }
+    public decimal Saldo { get; set; }
+    public string? Observacion { get; set; }
+}
+
+public sealed class ArrendamientosDshPagosResponseDto
+{
+    public int? IdInmuebleSeleccionado { get; set; }
+    public int? IdInquilinoSeleccionado { get; set; }
+    public IReadOnlyList<ArrendamientosDshPagosInmuebleDto> Inmuebles { get; set; } = [];
+    public IReadOnlyList<ArrendamientosDshPagosInquilinoDto> Inquilinos { get; set; } = [];
+    public ArrendamientosDshPagosKpiDto Kpi { get; set; } = new();
+    public IReadOnlyList<ArrendamientosDshPagosPrincipalDto> Principal { get; set; } = [];
+    public IReadOnlyList<ArrendamientosDshPagosDetalleDto> Detalle { get; set; } = [];
+}
+
 public sealed class ArrendamientosCommandResultDto
 {
     public bool Success { get; set; } = true;

@@ -185,7 +185,8 @@ namespace CjERP.Infrastructure.Services
             }
 
             await using var connection = _sqlCommandFactory.CreateConnection();
-            var nroOperacionActual = (await ObtenerNroOperacionActualAsync(connection, request.Correlativo, cancellationToken))?.NroOperacion;
+            var planillaActual = await ObtenerPlanillaActualParaNroOperacionAsync(connection, request.Correlativo, cancellationToken);
+            var nroOperacionActual = planillaActual?.NroOperacion;
             var nroOperacionNueva = NullIfWhiteSpace(request.NroOperacion);
 
             if (string.Equals(nroOperacionActual?.Trim() ?? string.Empty, nroOperacionNueva ?? string.Empty, StringComparison.Ordinal))
@@ -193,9 +194,27 @@ namespace CjERP.Infrastructure.Services
                 return;
             }
 
+            if (planillaActual is null)
+            {
+                throw new InvalidOperationException($"No se encontro la planilla {request.Correlativo}.");
+            }
+
+            var availableParameters = NormalizeParameterNames(
+                await GetStoredProcedureParametersAsync(connection, UpdateStoredProcedureName, cancellationToken));
+
             var parameters = new DynamicParameters();
-            parameters.Add("@Correlativo", request.Correlativo, DbType.Int32);
-            parameters.Add("@NroOperacion", nroOperacionNueva, DbType.String);
+            AddParameterIfExists(availableParameters, parameters, request.Correlativo, DbType.Int32, "@Correlativo", "@correlativo");
+            AddParameterIfExists(availableParameters, parameters, nroOperacionNueva, DbType.String, "@NroOperacion", "@nroOperacion", "@nrooperacion");
+            AddParameterIfExists(
+                availableParameters,
+                parameters,
+                planillaActual.IdProvisional,
+                DbType.Int64,
+                "@IdProvisional",
+                "@idProvisional",
+                "@idprovisional",
+                "@IdSuministroProvisional",
+                "@idSuministroProvisional");
 
             _logger.LogInformation(
                 "[PlanillaService] Parametros enviados a sp_Planilla_Actualizar para NroOperacion:{NewLine}{Payload}",
@@ -206,6 +225,7 @@ namespace CjERP.Infrastructure.Services
                         request.Correlativo,
                         NroOperacionAnterior = nroOperacionActual,
                         NroOperacionNueva = nroOperacionNueva,
+                        planillaActual.IdProvisional,
                         Usuario = ResolveUsuarioAccion(usuarioAccion)
                     },
                     new JsonSerializerOptions { WriteIndented = true }));
@@ -655,6 +675,26 @@ namespace CjERP.Infrastructure.Services
                     cancellationToken: cancellationToken));
         }
 
+        private async Task<PlanillaNroOperacionActualRow?> ObtenerPlanillaActualParaNroOperacionAsync(
+            SqlConnection connection,
+            int correlativo,
+            CancellationToken cancellationToken)
+        {
+            const string sql = """
+                SELECT TOP (1)
+                    NroOperacion,
+                    IdProvisional
+                FROM dbo.Planilla
+                WHERE Correlativo = @Correlativo;
+                """;
+
+            return await connection.QuerySingleOrDefaultAsync<PlanillaNroOperacionActualRow>(
+                _sqlCommandFactory.Create(
+                    sql,
+                    new { Correlativo = correlativo },
+                    cancellationToken: cancellationToken));
+        }
+
         private static string? FormatTareaAuditValue(int? idTarea, string? tarea)
         {
             if (!idTarea.HasValue || idTarea.Value <= 0)
@@ -692,6 +732,12 @@ namespace CjERP.Infrastructure.Services
         private sealed class PlanillaNroOperacionAuditRow
         {
             public string? NroOperacion { get; set; }
+        }
+
+        private sealed class PlanillaNroOperacionActualRow
+        {
+            public string? NroOperacion { get; set; }
+            public long? IdProvisional { get; set; }
         }
     }
 }

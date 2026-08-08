@@ -117,6 +117,8 @@ export const menuDashboard: DashboardGroup[] = [
       { label: "Contratos", path: "/arrendamientos/contratos" },
       { label: "Obligaciones", path: "/arrendamientos/obligaciones" },
       { label: "Pagos", path: "/arrendamientos/pagos" },
+      { label: "Pagos DSH", path: "/arrendamientos/pagosdsh" },
+      { label: "Dashboard Pagos", path: "/arrendamientos/dshpagos" },
       { label: "Reportes", path: "/arrendamientos/reportes" },
     ],
   },

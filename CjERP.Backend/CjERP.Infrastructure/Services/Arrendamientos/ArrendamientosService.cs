@@ -22,6 +22,7 @@ public sealed class ArrendamientosService : IArrendamientosService
     private const string SpPagoAprobar = "dbo.sp_a_Pago_Aprobar";
     private const string SpPagoAplicar = "dbo.sp_a_Pago_Aplicar";
     private const string SpPagoRevertir = "dbo.sp_a_Pago_Revertir";
+    private const string SpArrendamientoResumenAnual = "dbo.sp_Arrendamiento_ResumenAnual";
     private const string SpFraccionamientoGuardar = "dbo.sp_a_Fraccionamiento_Guardar";
     private const string SpGarantiaGuardar = "dbo.sp_a_Garantia_Guardar";
     private const string SpCobranzaRegistrar = "dbo.sp_a_Cobranza_Gestion_Registrar";
@@ -57,6 +58,270 @@ public sealed class ArrendamientosService : IArrendamientosService
         var result = await connection.QuerySingleAsync<ArrendamientosDashboardDto>(
             _sqlCommandFactory.Create(sql, cancellationToken: cancellationToken));
         return result;
+    }
+
+    public async Task<ArrendamientosDshPagosResponseDto> ObtenerDshPagosAsync(
+        ArrendamientosDshPagosFiltroDto filtro,
+        CancellationToken cancellationToken = default)
+    {
+        const string sql = """
+        SET NOCOUNT ON;
+
+        DECLARE @IdInmuebleSeleccionado INT = @IdInmueble;
+        DECLARE @IdInquilinoSeleccionado INT = @IdInquilino;
+
+        IF OBJECT_ID('tempdb..#ContratosFiltrados') IS NOT NULL
+        BEGIN
+            DROP TABLE #ContratosFiltrados;
+        END;
+
+        SELECT
+            a.IdContrato,
+            a.CodigoContrato,
+            a.IdInquilino,
+            COALESCE(c.NombreComercial, c.RazonSocial) AS NombreInquilino,
+            a.IdInmueble,
+            b.NombreInmueble,
+            a.EstadoContrato,
+            CONVERT(varchar(10), a.FechaInicio, 23) AS FechaInicio,
+            CONVERT(varchar(10), a.FechaFin, 23) AS FechaFin,
+            a.Moneda,
+            a.ImporteAlquiler,
+            a.ImporteMantenimiento,
+            COALESCE(a.ImporteCochera, 0) AS ImporteCochera
+        INTO #ContratosFiltrados
+        FROM dbo.a_contrato a
+        LEFT JOIN dbo.a_inmueble b ON a.IdInmueble = b.IdInmueble
+        LEFT JOIN dbo.a_inquilino c ON a.IdInquilino = c.IdInquilino
+        WHERE a.Activo = 1
+          AND (@IdInmuebleSeleccionado IS NULL OR a.IdInmueble = @IdInmuebleSeleccionado)
+          AND (@IdInquilinoSeleccionado IS NULL OR a.IdInquilino = @IdInquilinoSeleccionado);
+
+        IF @IdInquilinoSeleccionado IS NULL
+        BEGIN
+            SELECT TOP (1) @IdInquilinoSeleccionado = IdInquilino
+            FROM #ContratosFiltrados
+            ORDER BY NombreInquilino, NombreInmueble, CodigoContrato, IdContrato;
+        END;
+
+        SELECT
+            @IdInmuebleSeleccionado AS IdInmuebleSeleccionado,
+            @IdInquilinoSeleccionado AS IdInquilinoSeleccionado;
+
+        SELECT
+            IdInmueble,
+            NombreInmueble
+        FROM dbo.a_inmueble
+        WHERE Activo = 1
+        ORDER BY NombreInmueble;
+
+        SELECT DISTINCT
+            IdInquilino,
+            NombreInquilino AS NombreComercial,
+            IdInmueble,
+            NombreInmueble
+        FROM #ContratosFiltrados
+        ORDER BY NombreComercial, NombreInmueble, IdInquilino;
+
+        SELECT
+            COUNT(1) AS ContratosActivos,
+            ISNULL((
+                SELECT COUNT(1)
+                FROM dbo.a_obligacion o
+                INNER JOIN #ContratosFiltrados cf ON cf.IdContrato = o.IdContrato
+                WHERE o.Activo = 1
+                  AND o.Estado IN ('PENDIENTE', 'PARCIAL', 'VENCIDO')
+                  AND cf.IdInquilino = @IdInquilinoSeleccionado
+            ), 0) AS ObligacionesPendientes,
+            ISNULL((
+                SELECT SUM(o.SaldoPendiente)
+                FROM dbo.a_obligacion o
+                INNER JOIN #ContratosFiltrados cf ON cf.IdContrato = o.IdContrato
+                WHERE o.Activo = 1
+                  AND cf.IdInquilino = @IdInquilinoSeleccionado
+            ), 0) AS SaldoPendiente,
+            ISNULL((
+                SELECT SUM(p.ImporteConvertido)
+                FROM dbo.a_pago p
+                WHERE p.Activo = 1
+                  AND p.IdInquilino = @IdInquilinoSeleccionado
+                  AND p.EstadoValidacion IN ('APROBADO', 'PARCIAL')
+            ), 0) AS PagosAplicados,
+            (
+                SELECT TOP (1) CONVERT(varchar(10), p.FechaOperacion, 23)
+                FROM dbo.a_pago p
+                WHERE p.Activo = 1
+                  AND p.IdInquilino = @IdInquilinoSeleccionado
+                ORDER BY p.FechaOperacion DESC, p.IdPago DESC
+            ) AS UltimoPagoFecha,
+            ISNULL((
+                SELECT TOP (1) p.ImporteConvertido
+                FROM dbo.a_pago p
+                WHERE p.Activo = 1
+                  AND p.IdInquilino = @IdInquilinoSeleccionado
+                ORDER BY p.FechaOperacion DESC, p.IdPago DESC
+            ), 0) AS UltimoPagoImporte,
+            (
+                SELECT TOP (1) p.MonedaOperacion
+                FROM dbo.a_pago p
+                WHERE p.Activo = 1
+                  AND p.IdInquilino = @IdInquilinoSeleccionado
+                ORDER BY p.FechaOperacion DESC, p.IdPago DESC
+            ) AS MonedaBase
+        FROM #ContratosFiltrados
+        WHERE IdInquilino = @IdInquilinoSeleccionado;
+
+        SELECT
+            cf.IdContrato,
+            cf.CodigoContrato,
+            cf.NombreInmueble,
+            cf.NombreInquilino,
+            cf.EstadoContrato,
+            cf.FechaInicio,
+            cf.FechaFin,
+            cf.Moneda,
+            cf.ImporteAlquiler,
+            cf.ImporteMantenimiento,
+            cf.ImporteCochera,
+            ISNULL(obl.TotalObligado, 0) AS TotalObligado,
+            ISNULL(obl.SaldoPendiente, 0) AS SaldoPendiente,
+            ISNULL(pag.TotalPagado, 0) AS TotalPagado,
+            pag.UltimoPagoFecha,
+            ISNULL(pag.UltimoPagoImporte, 0) AS UltimoPagoImporte
+        FROM #ContratosFiltrados cf
+        OUTER APPLY (
+            SELECT
+                SUM(o.TotalPagar) AS TotalObligado,
+                SUM(o.SaldoPendiente) AS SaldoPendiente
+            FROM dbo.a_obligacion o
+            WHERE o.Activo = 1
+              AND o.IdContrato = cf.IdContrato
+        ) obl
+        OUTER APPLY (
+            SELECT
+                SUM(p.ImporteConvertido) AS TotalPagado,
+                (
+                    SELECT TOP (1) CONVERT(varchar(10), p2.FechaOperacion, 23)
+                    FROM dbo.a_pago p2
+                    WHERE p2.Activo = 1
+                      AND p2.IdInquilino = cf.IdInquilino
+                    ORDER BY p2.FechaOperacion DESC, p2.IdPago DESC
+                ) AS UltimoPagoFecha,
+                (
+                    SELECT TOP (1) p2.ImporteConvertido
+                    FROM dbo.a_pago p2
+                    WHERE p2.Activo = 1
+                      AND p2.IdInquilino = cf.IdInquilino
+                    ORDER BY p2.FechaOperacion DESC, p2.IdPago DESC
+                ) AS UltimoPagoImporte
+            FROM dbo.a_pago p
+            WHERE p.Activo = 1
+              AND p.IdInquilino = cf.IdInquilino
+        ) pag
+        WHERE cf.IdInquilino = @IdInquilinoSeleccionado
+        ORDER BY cf.FechaInicio DESC, cf.IdContrato DESC;
+
+        SELECT
+            x.IdMovimiento,
+            x.TipoMovimiento,
+            x.CodigoContrato,
+            x.NombreInmueble,
+            x.NombreInquilino,
+            x.Concepto,
+            x.Periodo,
+            x.Estado,
+            x.Fecha,
+            x.Moneda,
+            x.Importe,
+            x.Saldo,
+            x.Observacion
+        FROM (
+            SELECT
+                o.IdObligacion AS IdMovimiento,
+                'OBLIGACION' AS TipoMovimiento,
+                cf.CodigoContrato,
+                cf.NombreInmueble,
+                cf.NombreInquilino,
+                co.NombreConcepto AS Concepto,
+                CONCAT(o.Anio, '-', RIGHT('00' + CAST(o.Mes AS varchar(2)), 2)) AS Periodo,
+                o.Estado,
+                CONVERT(varchar(10), o.FechaVencimiento, 23) AS Fecha,
+                o.Moneda,
+                o.TotalPagar AS Importe,
+                o.SaldoPendiente AS Saldo,
+                o.Observacion
+            FROM dbo.a_obligacion o
+            INNER JOIN #ContratosFiltrados cf ON cf.IdContrato = o.IdContrato
+            INNER JOIN dbo.a_concepto co ON co.IdConcepto = o.IdConcepto
+            WHERE o.Activo = 1
+              AND cf.IdInquilino = @IdInquilinoSeleccionado
+
+            UNION ALL
+
+            SELECT
+                p.IdPago AS IdMovimiento,
+                'PAGO' AS TipoMovimiento,
+                ct.CodigoContrato,
+                ct.NombreInmueble,
+                ct.NombreInquilino,
+                COALESCE(p.ConceptoPago, p.TipoPago) AS Concepto,
+                NULL AS Periodo,
+                p.EstadoValidacion AS Estado,
+                CONVERT(varchar(10), p.FechaOperacion, 23) AS Fecha,
+                p.MonedaOperacion AS Moneda,
+                p.ImporteConvertido AS Importe,
+                CAST(0 AS decimal(18,2)) AS Saldo,
+                p.Observacion
+            FROM dbo.a_pago p
+            OUTER APPLY (
+                SELECT TOP (1)
+                    cf.CodigoContrato,
+                    cf.NombreInmueble,
+                    cf.NombreInquilino
+                FROM #ContratosFiltrados cf
+                WHERE cf.IdInquilino = p.IdInquilino
+                ORDER BY cf.FechaInicio DESC, cf.IdContrato DESC
+            ) ct
+            WHERE p.Activo = 1
+              AND p.IdInquilino = @IdInquilinoSeleccionado
+              AND (@IdInmuebleSeleccionado IS NULL OR EXISTS (
+                    SELECT 1
+                    FROM #ContratosFiltrados cf2
+                    WHERE cf2.IdInquilino = p.IdInquilino
+                      AND cf2.IdInmueble = @IdInmuebleSeleccionado
+              ))
+        ) x
+        ORDER BY x.Fecha DESC, x.IdMovimiento DESC;
+        """;
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        var reader = await connection.QueryMultipleAsync(
+            _sqlCommandFactory.Create(
+                sql,
+                new
+                {
+                    filtro.IdInmueble,
+                    filtro.IdInquilino
+                },
+                cancellationToken: cancellationToken));
+
+        var seleccion = await reader.ReadSingleAsync<ArrendamientosDshPagosSeleccionDto>();
+        var inmuebles = (await reader.ReadAsync<ArrendamientosDshPagosInmuebleDto>()).ToList();
+        var inquilinos = (await reader.ReadAsync<ArrendamientosDshPagosInquilinoDto>()).ToList();
+        var kpi = await reader.ReadSingleOrDefaultAsync<ArrendamientosDshPagosKpiDto>() ?? new ArrendamientosDshPagosKpiDto();
+        var principal = (await reader.ReadAsync<ArrendamientosDshPagosPrincipalDto>()).ToList();
+        var detalle = (await reader.ReadAsync<ArrendamientosDshPagosDetalleDto>()).ToList();
+
+        return new ArrendamientosDshPagosResponseDto
+        {
+            IdInmuebleSeleccionado = seleccion.IdInmuebleSeleccionado,
+            IdInquilinoSeleccionado = seleccion.IdInquilinoSeleccionado,
+            Inmuebles = inmuebles,
+            Inquilinos = inquilinos,
+            Kpi = kpi,
+            Principal = principal,
+            Detalle = detalle
+        };
     }
 
     public Task<IReadOnlyList<ArrendamientosFilaDto>> ListarArrendadoresAsync(CancellationToken cancellationToken = default)
@@ -137,6 +402,7 @@ public sealed class ArrendamientosService : IArrendamientosService
                 Observacion,
                 'INMUEBLE' AS Tipo
             FROM dbo.a_inmueble
+            WHERE ISNULL(Activo, 0) = 1
             ORDER BY FechaCreacion DESC, IdInmueble DESC;
             """, cancellationToken);
 
@@ -321,6 +587,17 @@ public sealed class ArrendamientosService : IArrendamientosService
             LEFT JOIN dbo.EmpleadoCj resp ON resp.IdEmpleado = p.IdEmpleadoRegistrador
             ORDER BY p.FechaOperacion DESC, p.IdPago DESC;
             """, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<ArrendamientosFilaDto>> ListarPagosDshResumenAnualAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        var rows = await connection.QueryAsync(
+            _sqlCommandFactory.Create(SpArrendamientoResumenAnual, commandType: CommandType.StoredProcedure, cancellationToken: cancellationToken));
+
+        return rows
+            .Select(MapResumenAnualRow)
+            .ToList();
     }
 
     public Task<IReadOnlyList<ArrendamientosFilaDto>> ListarFraccionamientosAsync(CancellationToken cancellationToken = default)
@@ -1047,6 +1324,192 @@ public sealed class ArrendamientosService : IArrendamientosService
     private static bool EsActivo(string? estado)
         => string.IsNullOrWhiteSpace(estado) || estado.Trim().Equals("ACTIVO", StringComparison.OrdinalIgnoreCase);
 
+    private static ArrendamientosFilaDto MapResumenAnualRow(object row)
+    {
+        var values = ToCaseInsensitiveDictionary(row);
+
+        var contrato = GetDecimal(values,
+            "ImporteContrato",
+            "MontoContrato",
+            "Contrato",
+            "MontoDebe",
+            "Debe",
+            "Importe",
+            "Monto");
+
+        var pagado = GetDecimal(values,
+            "ImportePagado",
+            "MontoPagado",
+            "Pagado",
+            "MontoHaber",
+            "Haber",
+            "Pago");
+
+        var saldo = GetDecimal(values,
+            "Saldo",
+            "Pendiente",
+            "Diferencia",
+            "MontoPendiente");
+
+        if (!pagado.HasValue && contrato.HasValue && saldo.HasValue)
+        {
+            pagado = contrato.Value - saldo.Value;
+        }
+
+        if (!saldo.HasValue && contrato.HasValue && pagado.HasValue)
+        {
+            saldo = contrato.Value - pagado.Value;
+        }
+
+        var periodo = GetString(values,
+            "Periodo",
+            "PeriodoAnual",
+            "Anio",
+            "Año",
+            "Ejercicio",
+            "Year");
+
+        if (string.IsNullOrWhiteSpace(periodo))
+        {
+            var anio = GetInt(values, "Anio", "Año", "Ejercicio", "Year");
+            if (anio.HasValue)
+            {
+                periodo = anio.Value.ToString();
+            }
+        }
+
+        return new ArrendamientosFilaDto
+        {
+            Id = GetInt(values, "Id", "IdRegistro", "IdDetalle"),
+            Codigo = GetString(values, "Codigo", "CodigoContrato", "Contrato"),
+            Nombre = GetString(values, "Nombre", "Contrato", "Descripcion"),
+            Detalle = GetString(values, "Detalle", "Descripcion", "Glosa"),
+            Estado = GetString(values, "Estado"),
+            Moneda = GetString(values, "Moneda", "MonedaOperacion", "Currency"),
+            Importe = contrato,
+            ImporteTransferido = pagado,
+            Saldo = pagado,
+            Fecha = GetString(values, "Fecha", "FechaPago", "FechaOperacion", "FechaContabilizacion"),
+            Arrendador = GetString(values, "Arrendador", "Propietario"),
+            Inquilino = GetString(values, "Inquilino", "Cliente", "RazonSocial", "RazonSocialInquilino", "NombreInquilino", "NomInquilino")
+                ?? GetStringByContains(values, "inquilin"),
+            Inmueble = GetString(values, "Inmueble", "NombreInmueble", "Local", "Predio"),
+            Unidad = GetString(values, "Unidad"),
+            Concepto = GetString(values, "Concepto", "Servicio", "TipoConcepto", "ConceptoPago", "TipoPago"),
+            Periodo = periodo,
+            Observacion = GetString(values, "Observacion", "Comentario"),
+            Tipo = "PAGOS_DSH_RESUMEN_ANUAL"
+        };
+    }
+
+    private static Dictionary<string, object?> ToCaseInsensitiveDictionary(object row)
+    {
+        if (row is IDictionary<string, object> dictionary)
+        {
+            return dictionary.ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.OrdinalIgnoreCase);
+        }
+
+        if (row is IDictionary<string, object?> nullableDictionary)
+        {
+            return nullableDictionary.ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.OrdinalIgnoreCase);
+        }
+
+        return new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static object? GetValue(Dictionary<string, object?> values, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (!values.TryGetValue(key, out var value))
+            {
+                continue;
+            }
+
+            if (value is null || value is DBNull)
+            {
+                continue;
+            }
+
+            return value;
+        }
+
+        return null;
+    }
+
+    private static string? GetString(Dictionary<string, object?> values, params string[] keys)
+    {
+        var value = GetValue(values, keys);
+        var text = value?.ToString()?.Trim();
+        return string.IsNullOrWhiteSpace(text) ? null : text;
+    }
+
+    private static string? GetStringByContains(Dictionary<string, object?> values, string fragment)
+    {
+        if (string.IsNullOrWhiteSpace(fragment))
+        {
+            return null;
+        }
+
+        foreach (var kvp in values)
+        {
+            if (!kvp.Key.Contains(fragment, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var text = kvp.Value?.ToString()?.Trim();
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                return text;
+            }
+        }
+
+        return null;
+    }
+
+    private static decimal? GetDecimal(Dictionary<string, object?> values, params string[] keys)
+    {
+        var value = GetValue(values, keys);
+        if (value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            decimal d => d,
+            double d when !double.IsNaN(d) && !double.IsInfinity(d) => Convert.ToDecimal(d),
+            float f when !float.IsNaN(f) && !float.IsInfinity(f) => Convert.ToDecimal(f),
+            int i => i,
+            long l => l,
+            short s => s,
+            byte b => b,
+            string text when decimal.TryParse(text, out var parsed) => parsed,
+            _ => decimal.TryParse(Convert.ToString(value), out var parsed) ? parsed : null
+        };
+    }
+
+    private static int? GetInt(Dictionary<string, object?> values, params string[] keys)
+    {
+        var value = GetValue(values, keys);
+        if (value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            int i => i,
+            long l when l >= int.MinValue && l <= int.MaxValue => (int)l,
+            short s => s,
+            byte b => b,
+            decimal d when d >= int.MinValue && d <= int.MaxValue => (int)d,
+            string text when int.TryParse(text, out var parsed) => parsed,
+            _ => int.TryParse(Convert.ToString(value), out var parsed) ? parsed : null
+        };
+    }
+
     private static void ValidarPagoRequest(ArrendamientosPagoRequestDto request)
     {
         if (string.IsNullOrWhiteSpace(request.NumeroOperacion))
@@ -1475,6 +1938,12 @@ public sealed class ArrendamientosService : IArrendamientosService
     {
         public int IdConcepto { get; set; }
         public string? CodigoConcepto { get; set; }
+    }
+
+    private sealed class ArrendamientosDshPagosSeleccionDto
+    {
+        public int? IdInmuebleSeleccionado { get; set; }
+        public int? IdInquilinoSeleccionado { get; set; }
     }
 }
 
