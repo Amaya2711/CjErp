@@ -11,6 +11,8 @@ GO
     Resumen anual de arrendamientos con vigencia historica por adendas.
     La base historica se toma del primer snapshot guardado del contrato.
     Las adendas se aplican solo desde su fecha de vigencia.
+    Las filas de tipo MODIFICACION se excluyen del calculo historico porque
+    solo representan auditoria y no deben reemplazar el documento vigente.
 */
 
 CREATE OR ALTER PROCEDURE [dbo].[sp_Arrendamiento_ResumenAnual]
@@ -111,24 +113,24 @@ BEGIN
                 TRY_CONVERT(DATE, JSON_VALUE(v.CondicionesNuevasJson, '$.FechaFin')),
                 c.FechaFin
             ) AS FechaFinVigente,
-            COALESCE(TRY_CONVERT(DECIMAL(18,2), JSON_VALUE(v.CondicionesNuevasJson, '$.ImporteAlquiler')), c.ImporteAlquiler, 0) AS ImporteAlquiler,
-            COALESCE(NULLIF(JSON_VALUE(v.CondicionesNuevasJson, '$.MonedaAlquiler'), ''), NULLIF(JSON_VALUE(v.CondicionesNuevasJson, '$.Moneda'), ''), c.MonedaAlquiler, c.Moneda, 'PEN') AS MonedaAlquiler,
-            COALESCE(NULLIF(JSON_VALUE(v.CondicionesNuevasJson, '$.PeriodicidadAlquiler'), ''), c.PeriodicidadAlquiler, 'MENSUAL') AS PeriodicidadAlquiler,
-            COALESCE(TRY_CONVERT(INT, JSON_VALUE(v.CondicionesNuevasJson, '$.DiaLimitePago')), c.DiaLimitePago, 5) AS DiaLimitePago,
-            COALESCE(TRY_CONVERT(DECIMAL(18,2), JSON_VALUE(v.CondicionesNuevasJson, '$.ImporteMantenimiento')), c.ImporteMantenimiento, 0) AS ImporteMantenimiento,
-            COALESCE(NULLIF(JSON_VALUE(v.CondicionesNuevasJson, '$.MonedaMantenimiento'), ''), NULLIF(JSON_VALUE(v.CondicionesNuevasJson, '$.Moneda'), ''), c.MonedaMantenimiento, c.Moneda, 'PEN') AS MonedaMantenimiento,
-            COALESCE(NULLIF(JSON_VALUE(v.CondicionesNuevasJson, '$.PeriodicidadMantenimiento'), ''), c.PeriodicidadMantenimiento, 'MENSUAL') AS PeriodicidadMantenimiento,
-            COALESCE(TRY_CONVERT(INT, JSON_VALUE(v.CondicionesNuevasJson, '$.DiaLimiteMantenimiento')), c.DiaLimiteMantenimiento, 5) AS DiaLimiteMantenimiento,
-            COALESCE(TRY_CONVERT(DECIMAL(18,2), JSON_VALUE(v.CondicionesNuevasJson, '$.ImporteCochera')), c.ImporteCochera, 0) AS ImporteCochera,
-            COALESCE(NULLIF(JSON_VALUE(v.CondicionesNuevasJson, '$.MonedaCochera'), ''), NULLIF(JSON_VALUE(v.CondicionesNuevasJson, '$.Moneda'), ''), c.MonedaCochera, c.Moneda, 'PEN') AS MonedaCochera,
-            COALESCE(NULLIF(JSON_VALUE(v.CondicionesNuevasJson, '$.PeriodicidadCochera'), ''), c.PeriodicidadCochera, 'MENSUAL') AS PeriodicidadCochera,
-            COALESCE(TRY_CONVERT(INT, JSON_VALUE(v.CondicionesNuevasJson, '$.DiaLimiteCochera')), c.DiaLimiteCochera, 5) AS DiaLimiteCochera,
-            COALESCE(NULLIF(JSON_VALUE(v.CondicionesNuevasJson, '$.Moneda'), ''), c.Moneda, 'PEN') AS MonedaContrato
+            COALESCE(TRY_CONVERT(DECIMAL(18,2), JSON_VALUE(v.CondicionesNuevasJson, '$.ImporteAlquiler')), 0) AS ImporteAlquiler,
+            COALESCE(NULLIF(JSON_VALUE(v.CondicionesNuevasJson, '$.MonedaAlquiler'), ''), NULLIF(JSON_VALUE(v.CondicionesNuevasJson, '$.Moneda'), ''), 'PEN') AS MonedaAlquiler,
+            COALESCE(NULLIF(JSON_VALUE(v.CondicionesNuevasJson, '$.PeriodicidadAlquiler'), ''), 'MENSUAL') AS PeriodicidadAlquiler,
+            COALESCE(TRY_CONVERT(INT, JSON_VALUE(v.CondicionesNuevasJson, '$.DiaLimitePago')), 5) AS DiaLimitePago,
+            COALESCE(TRY_CONVERT(DECIMAL(18,2), JSON_VALUE(v.CondicionesNuevasJson, '$.ImporteMantenimiento')), 0) AS ImporteMantenimiento,
+            COALESCE(NULLIF(JSON_VALUE(v.CondicionesNuevasJson, '$.MonedaMantenimiento'), ''), NULLIF(JSON_VALUE(v.CondicionesNuevasJson, '$.Moneda'), ''), 'PEN') AS MonedaMantenimiento,
+            COALESCE(NULLIF(JSON_VALUE(v.CondicionesNuevasJson, '$.PeriodicidadMantenimiento'), ''), 'MENSUAL') AS PeriodicidadMantenimiento,
+            COALESCE(TRY_CONVERT(INT, JSON_VALUE(v.CondicionesNuevasJson, '$.DiaLimiteMantenimiento')), 5) AS DiaLimiteMantenimiento,
+            COALESCE(TRY_CONVERT(DECIMAL(18,2), JSON_VALUE(v.CondicionesNuevasJson, '$.ImporteCochera')), 0) AS ImporteCochera,
+            COALESCE(NULLIF(JSON_VALUE(v.CondicionesNuevasJson, '$.MonedaCochera'), ''), NULLIF(JSON_VALUE(v.CondicionesNuevasJson, '$.Moneda'), ''), 'PEN') AS MonedaCochera,
+            COALESCE(NULLIF(JSON_VALUE(v.CondicionesNuevasJson, '$.PeriodicidadCochera'), ''), 'MENSUAL') AS PeriodicidadCochera,
+            COALESCE(TRY_CONVERT(INT, JSON_VALUE(v.CondicionesNuevasJson, '$.DiaLimiteCochera')), 5) AS DiaLimiteCochera,
+            COALESCE(NULLIF(JSON_VALUE(v.CondicionesNuevasJson, '$.Moneda'), ''), 'PEN') AS MonedaContrato
         FROM Contratos c
         INNER JOIN dbo.a_contrato_version v
             ON v.IdContrato = c.IdContrato
         WHERE v.CondicionesNuevasJson IS NOT NULL
-          AND UPPER(LTRIM(RTRIM(ISNULL(v.TipoMovimiento, '')))) <> 'CREACION'
+          AND UPPER(LTRIM(RTRIM(ISNULL(v.TipoMovimiento, '')))) = 'ADENDA'
     ),
     VersionBaseContrato AS
     (
@@ -141,44 +143,27 @@ BEGIN
             c.IdUnidadPrincipal,
             c.FechaInicio AS FechaInicioContrato,
             c.FechaFin AS FechaFinContrato,
-            COALESCE(NULLIF(JSON_VALUE(v0.CondicionesNuevasJson, '$.EstadoContrato'), ''), c.EstadoContrato) AS EstadoContrato,
+            c.EstadoContrato AS EstadoContrato,
             CAST(NULL AS INT) AS IdContratoVersion,
             CAST('BASE' AS NVARCHAR(30)) AS TipoMovimiento,
             c.FechaInicio AS VigenciaDesde,
             c.FechaFin AS VigenciaHastaBase,
-            COALESCE(
-                TRY_CONVERT(DATE, JSON_VALUE(v0.CondicionesNuevasJson, '$.FechaInicio')),
-                c.FechaInicio
-            ) AS FechaInicioVigente,
-            COALESCE(
-                TRY_CONVERT(DATE, JSON_VALUE(v0.CondicionesNuevasJson, '$.FechaFin')),
-                c.FechaFin
-            ) AS FechaFinVigente,
-            COALESCE(TRY_CONVERT(DECIMAL(18,2), JSON_VALUE(v0.CondicionesNuevasJson, '$.ImporteAlquiler')), c.ImporteAlquiler, 0) AS ImporteAlquiler,
-            COALESCE(NULLIF(JSON_VALUE(v0.CondicionesNuevasJson, '$.MonedaAlquiler'), ''), NULLIF(JSON_VALUE(v0.CondicionesNuevasJson, '$.Moneda'), ''), c.MonedaAlquiler, c.Moneda, 'PEN') AS MonedaAlquiler,
-            COALESCE(NULLIF(JSON_VALUE(v0.CondicionesNuevasJson, '$.PeriodicidadAlquiler'), ''), c.PeriodicidadAlquiler, 'MENSUAL') AS PeriodicidadAlquiler,
-            COALESCE(TRY_CONVERT(INT, JSON_VALUE(v0.CondicionesNuevasJson, '$.DiaLimitePago')), c.DiaLimitePago, 5) AS DiaLimitePago,
-            COALESCE(TRY_CONVERT(DECIMAL(18,2), JSON_VALUE(v0.CondicionesNuevasJson, '$.ImporteMantenimiento')), c.ImporteMantenimiento, 0) AS ImporteMantenimiento,
-            COALESCE(NULLIF(JSON_VALUE(v0.CondicionesNuevasJson, '$.MonedaMantenimiento'), ''), NULLIF(JSON_VALUE(v0.CondicionesNuevasJson, '$.Moneda'), ''), c.MonedaMantenimiento, c.Moneda, 'PEN') AS MonedaMantenimiento,
-            COALESCE(NULLIF(JSON_VALUE(v0.CondicionesNuevasJson, '$.PeriodicidadMantenimiento'), ''), c.PeriodicidadMantenimiento, 'MENSUAL') AS PeriodicidadMantenimiento,
-            COALESCE(TRY_CONVERT(INT, JSON_VALUE(v0.CondicionesNuevasJson, '$.DiaLimiteMantenimiento')), c.DiaLimiteMantenimiento, 5) AS DiaLimiteMantenimiento,
-            COALESCE(TRY_CONVERT(DECIMAL(18,2), JSON_VALUE(v0.CondicionesNuevasJson, '$.ImporteCochera')), c.ImporteCochera, 0) AS ImporteCochera,
-            COALESCE(NULLIF(JSON_VALUE(v0.CondicionesNuevasJson, '$.MonedaCochera'), ''), NULLIF(JSON_VALUE(v0.CondicionesNuevasJson, '$.Moneda'), ''), c.MonedaCochera, c.Moneda, 'PEN') AS MonedaCochera,
-            COALESCE(NULLIF(JSON_VALUE(v0.CondicionesNuevasJson, '$.PeriodicidadCochera'), ''), c.PeriodicidadCochera, 'MENSUAL') AS PeriodicidadCochera,
-            COALESCE(TRY_CONVERT(INT, JSON_VALUE(v0.CondicionesNuevasJson, '$.DiaLimiteCochera')), c.DiaLimiteCochera, 5) AS DiaLimiteCochera,
-            COALESCE(NULLIF(JSON_VALUE(v0.CondicionesNuevasJson, '$.Moneda'), ''), c.Moneda, 'PEN') AS MonedaContrato
+            c.FechaInicio AS FechaInicioVigente,
+            c.FechaFin AS FechaFinVigente,
+            COALESCE(c.ImporteAlquiler, 0) AS ImporteAlquiler,
+            COALESCE(c.MonedaAlquiler, c.Moneda, 'PEN') AS MonedaAlquiler,
+            COALESCE(c.PeriodicidadAlquiler, 'MENSUAL') AS PeriodicidadAlquiler,
+            COALESCE(c.DiaLimitePago, 5) AS DiaLimitePago,
+            COALESCE(c.ImporteMantenimiento, 0) AS ImporteMantenimiento,
+            COALESCE(c.MonedaMantenimiento, c.Moneda, 'PEN') AS MonedaMantenimiento,
+            COALESCE(c.PeriodicidadMantenimiento, 'MENSUAL') AS PeriodicidadMantenimiento,
+            COALESCE(c.DiaLimiteMantenimiento, 5) AS DiaLimiteMantenimiento,
+            COALESCE(c.ImporteCochera, 0) AS ImporteCochera,
+            COALESCE(c.MonedaCochera, c.Moneda, 'PEN') AS MonedaCochera,
+            COALESCE(c.PeriodicidadCochera, 'MENSUAL') AS PeriodicidadCochera,
+            COALESCE(c.DiaLimiteCochera, 5) AS DiaLimiteCochera,
+            COALESCE(c.Moneda, 'PEN') AS MonedaContrato
         FROM Contratos c
-        OUTER APPLY
-        (
-            SELECT TOP (1)
-                v.CondicionesNuevasJson
-            FROM dbo.a_contrato_version v
-            WHERE v.IdContrato = c.IdContrato
-              AND v.CondicionesNuevasJson IS NOT NULL
-            ORDER BY
-                COALESCE(v.FechaVigenciaDesde, CONVERT(DATE, v.FechaMovimiento), CONVERT(DATE, v.FechaCreacion), c.FechaInicio) ASC,
-                v.IdContratoVersion ASC
-        ) v0
     ),
     VersionesBase AS
     (
