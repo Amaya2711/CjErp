@@ -1,6 +1,8 @@
+using CjERP.Api.Jobs;
 using CjERP.Application.DTOs;
 using CjERP.Application.DTOs.ReportesWhatsapp;
 using CjERP.Application.Interfaces.Services;
+using Hangfire;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -14,13 +16,16 @@ namespace CjERP.Api.Controllers;
 public class AsistenciaReporteController : ControllerBase
 {
     private readonly IAsistenciaReporteService _asistenciaReporteService;
+    private readonly IBackgroundJobClient _backgroundJobClient;
     private readonly ILogger<AsistenciaReporteController> _logger;
 
     public AsistenciaReporteController(
         IAsistenciaReporteService asistenciaReporteService,
+        IBackgroundJobClient backgroundJobClient,
         ILogger<AsistenciaReporteController> logger)
     {
         _asistenciaReporteService = asistenciaReporteService;
+        _backgroundJobClient = backgroundJobClient;
         _logger = logger;
     }
 
@@ -180,27 +185,22 @@ public class AsistenciaReporteController : ControllerBase
                 ?? User.Identity?.Name
                 ?? "SISTEMA";
 
-            var response = await _asistenciaReporteService.EnviarPdfEmpleadoLlamadaAtencionAsync(
-                request,
-                usuarioEjecucion,
-                cancellationToken);
+            // Generar el PDF y conectarse al servidor SMTP puede tardar mas que la
+            // ventana HTTP disponible en produccion. Hangfire persiste el trabajo
+            // antes de responder y permite que continue aunque el navegador cierre
+            // la peticion.
+            var jobId = _backgroundJobClient.Enqueue<AsistenciaReporteJob>(job =>
+                job.EnviarPdfEmpleadoLlamadaAtencionAsync(request, usuarioEjecucion));
 
-            return Ok(new
+            return Accepted(new
             {
-                success = response.Success,
-                message = response.Success
-                    ? "El PDF se envio correctamente."
-                    : string.IsNullOrWhiteSpace(response.ErrorMessage)
-                        ? "No se pudo enviar el PDF."
-                        : response.ErrorMessage,
+                success = true,
+                message = "El envio del PDF fue programado correctamente.",
                 data = new ReporteWhatsappEjecucionResultadoDto
                 {
-                    Accepted = response.Success,
-                    Message = response.Success
-                        ? "El PDF se envio correctamente."
-                        : string.IsNullOrWhiteSpace(response.ErrorMessage)
-                            ? "No se pudo enviar el PDF."
-                            : response.ErrorMessage
+                    Accepted = true,
+                    JobId = jobId,
+                    Message = "El envio del PDF fue programado correctamente."
                 }
             });
         }

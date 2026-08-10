@@ -499,7 +499,7 @@ public sealed class ReporteRepository : IReporteRepository
         WHERE IdEmpleado = @IdEmpleado
           AND CAST(FechaEnvio AS date) = @FechaReferencia
           AND TipoReporte = @TipoReporte
-          AND EstadoEnvio = 'ENVIADO';
+          AND EstadoEnvio IN ('ENVIADO', 'ENVIADO_EMAIL');
         """;
 
         await using var connection = CreateConnection();
@@ -542,7 +542,7 @@ public sealed class ReporteRepository : IReporteRepository
         WHERE IdEmpleado IN @IdsEmpleado
           AND CAST(FechaEnvio AS date) = @FechaReferencia
           AND TipoReporte = @TipoReporte
-          AND EstadoEnvio = 'ENVIADO';
+          AND EstadoEnvio IN ('ENVIADO', 'ENVIADO_EMAIL');
         """;
 
         await using var connection = CreateConnection();

@@ -2729,10 +2729,10 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
       };
 
       const response = await enviarAsistenciaEmpleadoPdfLlamadaAtencion(payload);
-      if (response.success) {
-        setSuccess(response.message || `El PDF de llamada de atencion para ${employeeName} se envio correctamente.`);
+      if (response.accepted) {
+        setSuccess(response.message || `El envio del PDF de llamada de atencion para ${employeeName} fue programado correctamente.`);
       } else {
-        setError(response.message || "No se pudo enviar el PDF de llamada de atencion.");
+        setError(response.message || "No se pudo programar el envio del PDF de llamada de atencion.");
       }
     } catch (err) {
       setSuccess("");

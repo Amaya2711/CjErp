@@ -140,7 +140,6 @@ export async function exportarAsistenciaEmpleadoPdfLlamadaAtencion(payload: Asis
 export async function enviarAsistenciaEmpleadoPdfLlamadaAtencion(payload: AsistenciaReportePdfRequest) {
   return await httpClient.post<AsistenciaEnviarPdfLlamadaAtencionResponse>("/asistencia/reporte/pdf-empleado-llamada-atencion/enviar", payload, {
     skipAuthRedirect: true,
-    timeout: 120000,
   });
 }
 
