@@ -6,10 +6,23 @@ import type {
   ArrendamientosDshPagosResponse,
   ArrendamientosEstadoCuentaFiltro,
   ArrendamientosFila,
+  ArrendamientosResumenAnualFiltro,
 } from "../models/arrendamientos";
 
-async function listarArrendamientos(endpoint: string): Promise<ArrendamientosFila[]> {
-  const response = await httpClient.get<ArrendamientosFila[]>(`/arrendamientos/${endpoint}`);
+async function listarArrendamientos(
+  endpoint: string,
+  params?: Record<string, string | number | null | undefined>
+): Promise<ArrendamientosFila[]> {
+  const query = new URLSearchParams();
+
+  Object.entries(params ?? {}).forEach(([key, value]) => {
+    if (value != null && value !== "") {
+      query.set(key, String(value));
+    }
+  });
+
+  const url = query.toString() ? `/arrendamientos/${endpoint}?${query.toString()}` : `/arrendamientos/${endpoint}`;
+  const response = await httpClient.get<ArrendamientosFila[]>(url);
   return Array.isArray(response) ? response : [];
 }
 
@@ -40,8 +53,24 @@ export const listarInmueblesArrendamientos = () => listarArrendamientos("inmuebl
 export const listarUnidadesArrendamientos = () => listarArrendamientos("unidades");
 export const listarContratosArrendamientos = () => listarArrendamientos("contratos");
 export const listarObligacionesArrendamientos = () => listarArrendamientos("obligaciones");
-export const listarPagosArrendamientos = () => listarArrendamientos("pagos");
-export const listarPagosDshResumenAnualArrendamientos = () => listarArrendamientos("pagosdsh/resumen-anual");
+export const listarPagosArrendamientos = (anio?: number | null) => listarArrendamientos("pagos", { anio });
+export async function listarPagosDshResumenAnualArrendamientos(
+  filtro?: ArrendamientosResumenAnualFiltro
+): Promise<ArrendamientosFila[]> {
+  const params = new URLSearchParams();
+
+  if (filtro?.idInmueble != null) params.set("idInmueble", String(filtro.idInmueble));
+  if (filtro?.idInquilino != null) params.set("idInquilino", String(filtro.idInquilino));
+  if (filtro?.idArrendador != null) params.set("idArrendador", String(filtro.idArrendador));
+  if (filtro?.anioInicio != null) params.set("anioInicio", String(filtro.anioInicio));
+  if (filtro?.anioFin != null) params.set("anioFin", String(filtro.anioFin));
+
+  const query = params.toString();
+  const response = await httpClient.get<ArrendamientosFila[]>(
+    query ? `/arrendamientos/pagosdsh/resumen-anual?${query}` : "/arrendamientos/pagosdsh/resumen-anual"
+  );
+  return Array.isArray(response) ? response : [];
+}
 export const listarFraccionamientosArrendamientos = () => listarArrendamientos("fraccionamientos");
 export const listarGarantiasArrendamientos = () => listarArrendamientos("garantias");
 export const listarArbitriosArrendamientos = () => listarArrendamientos("arbitrios");
@@ -70,31 +99,49 @@ export async function obtenerDshPagosArrendamientos(
 
   if (filtro.idInmueble != null) params.set("idInmueble", String(filtro.idInmueble));
   if (filtro.idInquilino != null) params.set("idInquilino", String(filtro.idInquilino));
+  if (filtro.anio != null) params.set("anio", String(filtro.anio));
 
   const query = params.toString();
   const response = await httpClient.get<ArrendamientosDshPagosResponse>(
     query ? `/arrendamientos/dshpagos?${query}` : "/arrendamientos/dshpagos"
   );
 
-  return (
-    response ?? {
-      idInmuebleSeleccionado: null,
-      idInquilinoSeleccionado: null,
-      inmuebles: [],
-      inquilinos: [],
-      kpi: {
-        contratosActivos: 0,
-        obligacionesPendientes: 0,
-        saldoPendiente: 0,
-        pagosAplicados: 0,
-        ultimoPagoFecha: null,
-        ultimoPagoImporte: 0,
-        monedaBase: null,
-      },
-      principal: [],
-      detalle: [],
-    }
-  );
+  const fallback: ArrendamientosDshPagosResponse = {
+    idInmuebleSeleccionado: null,
+    idInquilinoSeleccionado: null,
+    aniosDisponibles: [],
+    inmuebles: [],
+    inquilinos: [],
+    kpi: {
+      contratosActivos: 0,
+      obligacionesPendientes: 0,
+      saldoPendiente: 0,
+      pagosAplicados: 0,
+      ultimoPagoFecha: null,
+      ultimoPagoImporte: 0,
+      monedaBase: null,
+    },
+    principal: [],
+    detalle: [],
+  };
+
+  if (!response) {
+    return fallback;
+  }
+
+  return {
+    ...fallback,
+    ...response,
+    aniosDisponibles: Array.isArray(response.aniosDisponibles) ? response.aniosDisponibles : [],
+    inmuebles: Array.isArray(response.inmuebles) ? response.inmuebles : [],
+    inquilinos: Array.isArray(response.inquilinos) ? response.inquilinos : [],
+    principal: Array.isArray(response.principal) ? response.principal : [],
+    detalle: Array.isArray(response.detalle) ? response.detalle : [],
+    kpi: {
+      ...fallback.kpi,
+      ...(response.kpi ?? {}),
+    },
+  };
 }
 
 export async function crearArrendadorArrendamientos(payload: unknown) {
@@ -115,6 +162,10 @@ export async function crearUnidadArrendamientos(payload: unknown) {
 
 export async function crearContratoArrendamientos(payload: unknown) {
   return guardarArrendamientos("contratos", payload);
+}
+
+export async function crearVersionContratoArrendamientos(payload: unknown) {
+  return guardarArrendamientos("contratos/versiones", payload);
 }
 
 export async function crearObligacionesArrendamientos(payload: unknown) {

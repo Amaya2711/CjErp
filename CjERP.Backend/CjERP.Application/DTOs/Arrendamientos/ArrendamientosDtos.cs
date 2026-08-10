@@ -5,6 +5,7 @@ namespace CjERP.Application.DTOs.Arrendamientos;
 public sealed class ArrendamientosFilaDto
 {
     public int? Id { get; set; }
+    public int? IdInmueble { get; set; }
     public string? Codigo { get; set; }
     public string? Nombre { get; set; }
     public string? Detalle { get; set; }
@@ -20,6 +21,7 @@ public sealed class ArrendamientosFilaDto
     public decimal? ImporteMantenimiento { get; set; }
     public decimal? ImporteCochera { get; set; }
     public decimal? ImporteTransferido { get; set; }
+    public decimal? Exonerado { get; set; }
     public decimal? ComisionBancaria { get; set; }
     public decimal? Itf { get; set; }
     public decimal? ImporteTotalCargado { get; set; }
@@ -27,6 +29,12 @@ public sealed class ArrendamientosFilaDto
     public decimal? ImporteConvertido { get; set; }
     public decimal? DiferenciaCambio { get; set; }
     public decimal? Saldo { get; set; }
+    public decimal? SaldoReal { get; set; }
+    public decimal? TotalContratoAnualServicio { get; set; }
+    public decimal? TotalPagadoAnualServicio { get; set; }
+    public decimal? TotalExoneradoAnualServicio { get; set; }
+    public decimal? TotalDebeAnualServicio { get; set; }
+    public decimal? SaldoAcumulado { get; set; }
     public string? Fecha { get; set; }
     public string? FechaContabilizacion { get; set; }
     public string? FechaInicio { get; set; }
@@ -59,6 +67,27 @@ public sealed class ArrendamientosDshPagosFiltroDto
 {
     public int? IdInmueble { get; set; }
     public int? IdInquilino { get; set; }
+    public int? Anio { get; set; }
+}
+
+public sealed class ArrendamientosPagosFiltroDto
+{
+    public int? Anio { get; set; }
+}
+
+public sealed class ArrendamientosResumenAnualFiltroDto
+{
+    public int? IdInmueble { get; set; }
+    public int? IdInquilino { get; set; }
+    public int? IdArrendador { get; set; }
+    public int? AnioInicio { get; set; }
+    public int? AnioFin { get; set; }
+}
+
+public sealed class ArrendamientosDshPagosAniosRangoDto
+{
+    public int? AnioMin { get; set; }
+    public int? AnioMax { get; set; }
 }
 
 public sealed class ArrendamientosDshPagosInmuebleDto
@@ -71,6 +100,7 @@ public sealed class ArrendamientosDshPagosInquilinoDto
 {
     public int IdInquilino { get; set; }
     public string? NombreComercial { get; set; }
+    public string? RazonSocial { get; set; }
     public int? IdInmueble { get; set; }
     public string? NombreInmueble { get; set; }
 }
@@ -127,6 +157,7 @@ public sealed class ArrendamientosDshPagosResponseDto
 {
     public int? IdInmuebleSeleccionado { get; set; }
     public int? IdInquilinoSeleccionado { get; set; }
+    public IReadOnlyList<int> AniosDisponibles { get; set; } = [];
     public IReadOnlyList<ArrendamientosDshPagosInmuebleDto> Inmuebles { get; set; } = [];
     public IReadOnlyList<ArrendamientosDshPagosInquilinoDto> Inquilinos { get; set; } = [];
     public ArrendamientosDshPagosKpiDto Kpi { get; set; } = new();
@@ -141,6 +172,20 @@ public sealed class ArrendamientosCommandResultDto
     public int? Id { get; set; }
     public int? IdSecundario { get; set; }
     public int? IdVersion { get; set; }
+}
+
+public sealed class ArrendamientosContratoVersionDetalleDto
+{
+    public string Servicio { get; set; } = string.Empty;
+    public string? MonedaAnterior { get; set; }
+    public decimal? ImporteAnterior { get; set; }
+    public string? MonedaNueva { get; set; }
+    public decimal? ImporteNuevo { get; set; }
+    public string? PeriodicidadAnterior { get; set; }
+    public string? PeriodicidadNueva { get; set; }
+    public int? DiaLimiteAnterior { get; set; }
+    public int? DiaLimiteNuevo { get; set; }
+    public string? Observacion { get; set; }
 }
 
 public class ArrendamientosCatalogoRequestDto
@@ -215,6 +260,11 @@ public sealed class ArrendamientosContratoRequestDto
     public DateOnly? FechaCancelacion { get; set; }
     public string? MotivoCancelacion { get; set; }
     public bool Activo { get; set; } = true;
+    public string? TipoMovimiento { get; set; }
+    public DateOnly? FechaVigenciaDesde { get; set; }
+    public DateOnly? FechaVigenciaHasta { get; set; }
+    public string? MotivoVersion { get; set; }
+    public List<ArrendamientosContratoVersionDetalleDto> DetallesVersion { get; set; } = [];
 }
 
 public sealed class ArrendamientosContratoUnidadRequestDto

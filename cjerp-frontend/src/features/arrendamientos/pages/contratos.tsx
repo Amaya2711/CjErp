@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import {
   crearContratoArrendamientos,
+  crearVersionContratoArrendamientos,
   listarArrendadoresArrendamientos,
   listarContratosArrendamientos,
   listarInmueblesArrendamientos,
@@ -10,6 +11,7 @@ import {
 } from "../../../api/arrendamientosService";
 import type { ArrendamientosFila } from "../../../models/arrendamientos";
 import ArrendamientosCrudPage from "../components/ArrendamientosCrudPage";
+import SidePanelForm from "../../../components/base/SidePanelForm";
 import type { DataGridColumn } from "../../../components/base/DataGridBase";
 
 type ContratoForm = {
@@ -55,6 +57,10 @@ type ContratoForm = {
   fechaCancelacion: string;
   motivoCancelacion: string;
   activo: boolean;
+  tipoMovimiento: string;
+  fechaVigenciaDesde: string;
+  fechaVigenciaHasta: string;
+  motivoVersion: string;
 };
 
 const columns: DataGridColumn<ArrendamientosFila>[] = [
@@ -146,6 +152,10 @@ const initialForm = (): ContratoForm => {
     fechaCancelacion: "",
     motivoCancelacion: "",
     activo: true,
+    tipoMovimiento: "",
+    fechaVigenciaDesde: today,
+    fechaVigenciaHasta: nextYear,
+    motivoVersion: "",
   };
 };
 
@@ -154,6 +164,12 @@ export default function ArrendamientosContratosPage() {
   const [inquilinos, setInquilinos] = useState<ArrendamientosFila[]>([]);
   const [inmuebles, setInmuebles] = useState<ArrendamientosFila[]>([]);
   const [unidades, setUnidades] = useState<ArrendamientosFila[]>([]);
+  const [adendaOpen, setAdendaOpen] = useState(false);
+  const [adendaForm, setAdendaForm] = useState<ContratoForm>(initialForm());
+  const [adendaErrors, setAdendaErrors] = useState<Record<string, string>>({});
+  const [adendaSaving, setAdendaSaving] = useState(false);
+  const [adendaFeedback, setAdendaFeedback] = useState<string | null>(null);
+  const [pageReloadKey, setPageReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -195,8 +211,166 @@ export default function ArrendamientosContratosPage() {
   const inmuebleOptions = useMemo(() => sortByLabel(inmuebles, (row) => row.nombre ?? row.codigo ?? ""), [inmuebles]);
   const unidadOptions = useMemo(() => sortByLabel(unidades, (row) => row.nombre ?? row.codigo ?? ""), [unidades]);
 
+  const mapRowToContratoForm = (row: ArrendamientosFila, tipoMovimiento = ""): ContratoForm => {
+    const fechaVigenciaDesde = row.fechaFin ?? row.fechaInicio ?? dateInputValue(new Date());
+
+    return {
+      id: row.id ?? null,
+      codigoContrato: row.codigo ?? generarCodigoContrato(),
+      idArrendador: resolveIdByLabel(row.arrendador, arrendadorOptions, (item) => item.nombre ?? item.codigo ?? ""),
+      idInquilino: resolveIdByLabel(row.inquilino, inquilinoOptions, (item) => item.nombre ?? item.codigo ?? ""),
+      idInmueble: resolveIdByLabel(row.inmueble, inmuebleOptions, (item) => item.nombre ?? item.codigo ?? ""),
+      idUnidadPrincipal: resolveIdByLabel(row.unidad, unidadOptions, (item) => item.nombre ?? item.codigo ?? ""),
+      fechaFirma: row.fecha ?? dateInputValue(new Date()),
+      fechaInicio: row.fechaInicio ?? dateInputValue(new Date()),
+      fechaFin: row.fechaFin ?? dateInputValue(addMonths(new Date(), 12)),
+      moneda: row.moneda ?? "PEN",
+      monedaAlquiler: row.monedaAlquiler ?? row.moneda ?? "PEN",
+      monedaMantenimiento: row.monedaMantenimiento ?? row.moneda ?? "PEN",
+      monedaCochera: row.monedaCochera ?? row.moneda ?? "PEN",
+      monedaGarantia: row.monedaGarantia ?? row.moneda ?? "PEN",
+      importeAlquiler: row.importe != null ? String(row.importe) : "",
+      periodicidadAlquiler: "MENSUAL",
+      diaLimitePago: "5",
+      diasGracia: "0",
+      importeMantenimiento: row.importeMantenimiento != null ? String(row.importeMantenimiento) : "",
+      periodicidadMantenimiento: "MENSUAL",
+      diaLimiteMantenimiento: "5",
+      importeCochera: row.importeCochera != null ? String(row.importeCochera) : "",
+      periodicidadCochera: "MENSUAL",
+      diaLimiteCochera: "5",
+      garantiaPactada: "",
+      garantiaPagada: "",
+      garantiaPendiente: "",
+      tipoReajuste: "",
+      porcentajeReajuste: "",
+      formulaReajuste: "",
+      frecuenciaReajuste: "",
+      penalidadMora: "",
+      interesMoratorio: "",
+      estadoContrato: row.estado ?? "ACTIVO",
+      observaciones: row.observacion ?? "",
+      documentoFirmadoNombre: "",
+      documentoFirmadoUrl: "",
+      documentoFirmadoTamanoKB: "",
+      fechaSuspension: "",
+      fechaCancelacion: "",
+      motivoCancelacion: "",
+      activo: true,
+      tipoMovimiento,
+      fechaVigenciaDesde,
+      fechaVigenciaHasta: row.fechaFin ?? addMonths(new Date(), 12).toISOString().slice(0, 10),
+      motivoVersion: "",
+    };
+  };
+
+  const abrirAdenda = (row: ArrendamientosFila) => {
+    setAdendaForm(mapRowToContratoForm(row, "ADENDA"));
+    setAdendaErrors({});
+    setAdendaFeedback(null);
+    setAdendaOpen(true);
+  };
+
+  const guardarAdenda = async () => {
+    const errors: Record<string, string> = {};
+
+    if (!adendaForm.id) errors.id = "No se pudo identificar el contrato.";
+    if (!adendaForm.tipoMovimiento.trim()) errors.tipoMovimiento = "Seleccione el tipo de movimiento.";
+    if (!adendaForm.fechaVigenciaDesde) errors.fechaVigenciaDesde = "Seleccione la vigencia desde.";
+    if (!adendaForm.fechaFin) errors.fechaFin = "Seleccione la fecha de termino.";
+    if (!adendaForm.moneda.trim()) errors.moneda = "Seleccione la moneda.";
+    if (!adendaForm.monedaAlquiler.trim()) errors.monedaAlquiler = "Seleccione la moneda del alquiler.";
+    if (!adendaForm.monedaMantenimiento.trim()) errors.monedaMantenimiento = "Seleccione la moneda del mantenimiento.";
+    if (!adendaForm.importeAlquiler || Number(adendaForm.importeAlquiler) < 0) errors.importeAlquiler = "Ingrese el importe del alquiler.";
+    if (!adendaForm.importeMantenimiento || Number(adendaForm.importeMantenimiento) < 0) errors.importeMantenimiento = "Ingrese el importe del mantenimiento.";
+    if (adendaForm.importeCochera === "" || Number(adendaForm.importeCochera) < 0) {
+      errors.importeCochera = "Ingrese el importe de cochera o 0.";
+    }
+    if (!adendaForm.diaLimitePago || Number(adendaForm.diaLimitePago) < 1 || Number(adendaForm.diaLimitePago) > 31) {
+      errors.diaLimitePago = "Ingrese un dia entre 1 y 31.";
+    }
+    if (!adendaForm.diaLimiteMantenimiento || Number(adendaForm.diaLimiteMantenimiento) < 1 || Number(adendaForm.diaLimiteMantenimiento) > 31) {
+      errors.diaLimiteMantenimiento = "Ingrese un dia entre 1 y 31.";
+    }
+    if (!adendaForm.diaLimiteCochera || Number(adendaForm.diaLimiteCochera) < 1 || Number(adendaForm.diaLimiteCochera) > 31) {
+      errors.diaLimiteCochera = "Ingrese un dia entre 1 y 31.";
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setAdendaErrors(errors);
+      return;
+    }
+
+    try {
+      setAdendaSaving(true);
+      setAdendaErrors({});
+      setAdendaFeedback(null);
+      const payload = buildContratoPayload(adendaForm);
+      const result = await crearVersionContratoArrendamientos(payload);
+      setAdendaFeedback(result.message || "Version del contrato registrada correctamente.");
+      setAdendaOpen(false);
+      setPageReloadKey((value) => value + 1);
+    } catch (error) {
+      setAdendaFeedback(error instanceof Error ? error.message : "No se pudo registrar la version del contrato.");
+    } finally {
+      setAdendaSaving(false);
+    }
+  };
+
+  const buildContratoPayload = (form: ContratoForm) => ({
+    idContrato: form.id,
+    codigoContrato: form.codigoContrato.trim(),
+    idArrendador: Number(form.idArrendador),
+    idInquilino: Number(form.idInquilino),
+    idInmueble: Number(form.idInmueble),
+    idUnidadPrincipal: form.idUnidadPrincipal ? Number(form.idUnidadPrincipal) : null,
+    fechaFirma: form.fechaFirma || null,
+    fechaInicio: form.fechaInicio,
+    fechaFin: form.fechaFin,
+    moneda: form.moneda,
+    monedaAlquiler: form.monedaAlquiler,
+    monedaMantenimiento: form.monedaMantenimiento,
+    monedaCochera: form.monedaCochera,
+    monedaGarantia: form.monedaGarantia,
+    importeAlquiler: Number(form.importeAlquiler || 0),
+    periodicidadAlquiler: form.periodicidadAlquiler || null,
+    diaLimitePago: Number(form.diaLimitePago || 5),
+    diasGracia: Number(form.diasGracia || 0),
+    importeMantenimiento: Number(form.importeMantenimiento || 0),
+    periodicidadMantenimiento: form.periodicidadMantenimiento || null,
+    diaLimiteMantenimiento: Number(form.diaLimiteMantenimiento || 5),
+    importeCochera: Number(form.importeCochera || 0),
+    periodicidadCochera: form.periodicidadCochera || null,
+    diaLimiteCochera: Number(form.diaLimiteCochera || 5),
+    garantiaPactada: Number(form.garantiaPactada || 0),
+    garantiaPagada: Number(form.garantiaPagada || 0),
+    garantiaPendiente: Number(form.garantiaPendiente || 0),
+    tipoReajuste: form.tipoReajuste.trim() || null,
+    porcentajeReajuste: form.porcentajeReajuste ? Number(form.porcentajeReajuste) : null,
+    formulaReajuste: form.formulaReajuste.trim() || null,
+    frecuenciaReajuste: form.frecuenciaReajuste.trim() || null,
+    penalidadMora: Number(form.penalidadMora || 0),
+    interesMoratorio: Number(form.interesMoratorio || 0),
+    estadoContrato: form.estadoContrato.trim() || "ACTIVO",
+    observaciones: form.observaciones.trim() || null,
+    documentoFirmadoNombre: form.documentoFirmadoNombre.trim() || null,
+    documentoFirmadoUrl: form.documentoFirmadoUrl.trim() || null,
+    documentoFirmadoTamanoKB: form.documentoFirmadoTamanoKB ? Number(form.documentoFirmadoTamanoKB) : null,
+    idEmpleadoResponsable: null,
+    fechaSuspension: form.fechaSuspension || null,
+    fechaCancelacion: form.fechaCancelacion || null,
+    motivoCancelacion: form.motivoCancelacion.trim() || null,
+    activo: form.activo,
+    tipoMovimiento: form.tipoMovimiento.trim() || null,
+    fechaVigenciaDesde: form.fechaVigenciaDesde || null,
+    fechaVigenciaHasta: form.fechaVigenciaHasta || null,
+    motivoVersion: form.motivoVersion.trim() || null,
+  });
+
   return (
+    <div>
     <ArrendamientosCrudPage<ContratoForm>
+      key={pageReloadKey}
       title="Contratos"
       description="Contratos vigentes, renovaciones y vínculos entre arrendador, inquilino, inmueble y unidad."
       searchHint="codigo, arrendador, inquilino, inmueble, unidad"
@@ -204,95 +378,8 @@ export default function ArrendamientosContratosPage() {
       columns={columns}
       rowActionsPosition={11}
       initialForm={initialForm}
-      mapRowToForm={(row) => ({
-        id: row.id ?? null,
-        codigoContrato: row.codigo ?? generarCodigoContrato(),
-        idArrendador: resolveIdByLabel(row.arrendador, arrendadorOptions, (item) => item.nombre ?? item.codigo ?? ""),
-        idInquilino: resolveIdByLabel(row.inquilino, inquilinoOptions, (item) => item.nombre ?? item.codigo ?? ""),
-        idInmueble: resolveIdByLabel(row.inmueble, inmuebleOptions, (item) => item.nombre ?? item.codigo ?? ""),
-        idUnidadPrincipal: resolveIdByLabel(row.unidad, unidadOptions, (item) => item.nombre ?? item.codigo ?? ""),
-        fechaFirma: row.fecha ?? dateInputValue(new Date()),
-        fechaInicio: row.fechaInicio ?? dateInputValue(new Date()),
-        fechaFin: row.fechaFin ?? dateInputValue(addMonths(new Date(), 12)),
-        moneda: row.moneda ?? "PEN",
-        monedaAlquiler: row.monedaAlquiler ?? row.moneda ?? "PEN",
-        monedaMantenimiento: row.monedaMantenimiento ?? row.moneda ?? "PEN",
-        monedaCochera: row.monedaCochera ?? row.moneda ?? "PEN",
-        monedaGarantia: row.monedaGarantia ?? row.moneda ?? "PEN",
-        importeAlquiler: row.importe != null ? String(row.importe) : "",
-        periodicidadAlquiler: "MENSUAL",
-        diaLimitePago: "5",
-        diasGracia: "0",
-        importeMantenimiento: row.importeMantenimiento != null ? String(row.importeMantenimiento) : "",
-        periodicidadMantenimiento: "MENSUAL",
-        diaLimiteMantenimiento: "5",
-        importeCochera: row.importeCochera != null ? String(row.importeCochera) : "",
-        periodicidadCochera: "MENSUAL",
-        diaLimiteCochera: "5",
-        garantiaPactada: "",
-        garantiaPagada: "",
-        garantiaPendiente: "",
-        tipoReajuste: "",
-        porcentajeReajuste: "",
-        formulaReajuste: "",
-        frecuenciaReajuste: "",
-        penalidadMora: "",
-        interesMoratorio: "",
-        estadoContrato: row.estado ?? "ACTIVO",
-        observaciones: row.observacion ?? "",
-        documentoFirmadoNombre: "",
-        documentoFirmadoUrl: "",
-        documentoFirmadoTamanoKB: "",
-        fechaSuspension: "",
-        fechaCancelacion: "",
-        motivoCancelacion: "",
-        activo: true,
-      })}
-      buildPayload={(form) => ({
-        idContrato: form.id,
-        codigoContrato: form.codigoContrato.trim(),
-        idArrendador: Number(form.idArrendador),
-        idInquilino: Number(form.idInquilino),
-        idInmueble: Number(form.idInmueble),
-        idUnidadPrincipal: form.idUnidadPrincipal ? Number(form.idUnidadPrincipal) : null,
-        fechaFirma: form.fechaFirma || null,
-        fechaInicio: form.fechaInicio,
-        fechaFin: form.fechaFin,
-        moneda: form.moneda,
-        monedaAlquiler: form.monedaAlquiler,
-        monedaMantenimiento: form.monedaMantenimiento,
-        monedaCochera: form.monedaCochera,
-        monedaGarantia: form.monedaGarantia,
-        importeAlquiler: Number(form.importeAlquiler || 0),
-        periodicidadAlquiler: form.periodicidadAlquiler || null,
-        diaLimitePago: Number(form.diaLimitePago || 5),
-        diasGracia: Number(form.diasGracia || 0),
-        importeMantenimiento: Number(form.importeMantenimiento || 0),
-        periodicidadMantenimiento: form.periodicidadMantenimiento || null,
-        diaLimiteMantenimiento: Number(form.diaLimiteMantenimiento || 5),
-        importeCochera: Number(form.importeCochera || 0),
-        periodicidadCochera: form.periodicidadCochera || null,
-        diaLimiteCochera: Number(form.diaLimiteCochera || 5),
-        garantiaPactada: Number(form.garantiaPactada || 0),
-        garantiaPagada: Number(form.garantiaPagada || 0),
-        garantiaPendiente: Number(form.garantiaPendiente || 0),
-        tipoReajuste: form.tipoReajuste.trim() || null,
-        porcentajeReajuste: form.porcentajeReajuste ? Number(form.porcentajeReajuste) : null,
-        formulaReajuste: form.formulaReajuste.trim() || null,
-        frecuenciaReajuste: form.frecuenciaReajuste.trim() || null,
-        penalidadMora: Number(form.penalidadMora || 0),
-        interesMoratorio: Number(form.interesMoratorio || 0),
-        estadoContrato: form.estadoContrato.trim() || "ACTIVO",
-        observaciones: form.observaciones.trim() || null,
-        documentoFirmadoNombre: form.documentoFirmadoNombre.trim() || null,
-        documentoFirmadoUrl: form.documentoFirmadoUrl.trim() || null,
-        documentoFirmadoTamanoKB: form.documentoFirmadoTamanoKB ? Number(form.documentoFirmadoTamanoKB) : null,
-        idEmpleadoResponsable: null,
-        fechaSuspension: form.fechaSuspension || null,
-        fechaCancelacion: form.fechaCancelacion || null,
-        motivoCancelacion: form.motivoCancelacion.trim() || null,
-        activo: form.activo,
-      })}
+      mapRowToForm={(row) => mapRowToContratoForm(row)}
+      buildPayload={(form) => buildContratoPayload(form)}
       saveForm={async (payload, mode) => {
         const result = await crearContratoArrendamientos(payload);
         return {
@@ -322,6 +409,11 @@ export default function ArrendamientosContratosPage() {
         }
         return errors;
       }}
+      renderRowActions={(row) => (
+        <button type="button" style={styles.versionButton} onClick={() => abrirAdenda(row)} title="Crear adenda">
+          + Adenda
+        </button>
+      )}
       renderForm={(form, setForm, errors) => (
         <div style={styles.stack}>
           <section style={styles.section}>
@@ -582,6 +674,118 @@ export default function ArrendamientosContratosPage() {
         </div>
       )}
     />
+      {adendaFeedback ? <div style={styles.feedbackBanner}>{adendaFeedback}</div> : null}
+      <SidePanelForm
+        open={adendaOpen}
+        title="Nueva adenda"
+        subtitle="Registra una nueva version del contrato sin perder historial."
+        onClose={() => {
+          setAdendaOpen(false);
+          setAdendaErrors({});
+        }}
+        maxWidth={880}
+        footer={
+          <>
+            <button
+              type="button"
+              style={styles.secondaryButton}
+              onClick={() => {
+                setAdendaOpen(false);
+                setAdendaErrors({});
+              }}
+              disabled={adendaSaving}
+            >
+              Cancelar
+            </button>
+            <button type="button" style={styles.primaryButton} onClick={() => void guardarAdenda()} disabled={adendaSaving}>
+              {adendaSaving ? "Guardando..." : "Guardar adenda"}
+            </button>
+          </>
+        }
+      >
+        <div style={styles.stack}>
+          <section style={styles.section}>
+            <h4 style={styles.sectionTitle}>Version y vigencia</h4>
+            <div style={styles.grid}>
+              <Field label="Tipo movimiento" error={adendaErrors.tipoMovimiento}>
+                <select value={adendaForm.tipoMovimiento} onChange={(e) => setAdendaForm((prev) => ({ ...prev, tipoMovimiento: e.target.value }))} style={getFieldStyle(Boolean(adendaErrors.tipoMovimiento))}>
+                  <option value="ADENDA">ADENDA</option>
+                  <option value="AMPLIACION">AMPLIACION</option>
+                  <option value="MODIFICACION">MODIFICACION</option>
+                </select>
+              </Field>
+              <Field label="Fecha vigencia desde" error={adendaErrors.fechaVigenciaDesde}>
+                <input
+                  type="date"
+                  value={adendaForm.fechaVigenciaDesde}
+                  onChange={(e) => setAdendaForm((prev) => ({ ...prev, fechaVigenciaDesde: e.target.value }))}
+                  style={getFieldStyle(Boolean(adendaErrors.fechaVigenciaDesde))}
+                />
+              </Field>
+              <Field label="Fecha termino" error={adendaErrors.fechaFin}>
+                <input type="date" value={adendaForm.fechaFin} onChange={(e) => setAdendaForm((prev) => ({ ...prev, fechaFin: e.target.value }))} style={getFieldStyle(Boolean(adendaErrors.fechaFin))} />
+              </Field>
+              <Field label="Motivo de la version" fullWidth error={adendaErrors.motivoVersion}>
+                <textarea
+                  rows={3}
+                  value={adendaForm.motivoVersion}
+                  onChange={(e) => setAdendaForm((prev) => ({ ...prev, motivoVersion: e.target.value }))}
+                  style={{ ...getFieldStyle(Boolean(adendaErrors.motivoVersion)), resize: "vertical", minHeight: 90 }}
+                />
+              </Field>
+            </div>
+          </section>
+
+          <section style={styles.section}>
+            <h4 style={styles.sectionTitle}>Importes nuevos</h4>
+            <div style={styles.grid}>
+              <Field label="Moneda alquiler" error={adendaErrors.monedaAlquiler}>
+                <select value={adendaForm.monedaAlquiler} onChange={(e) => setAdendaForm((prev) => ({ ...prev, monedaAlquiler: e.target.value }))} style={getFieldStyle(Boolean(adendaErrors.monedaAlquiler))}>
+                  <option value="PEN">PEN</option>
+                  <option value="USD">USD</option>
+                </select>
+              </Field>
+              <Field label="Importe alquiler" error={adendaErrors.importeAlquiler}>
+                <input type="number" step="0.01" value={adendaForm.importeAlquiler} onChange={(e) => setAdendaForm((prev) => ({ ...prev, importeAlquiler: e.target.value }))} style={getFieldStyle(Boolean(adendaErrors.importeAlquiler))} />
+              </Field>
+              <Field label="Moneda mantenimiento" error={adendaErrors.monedaMantenimiento}>
+                <select value={adendaForm.monedaMantenimiento} onChange={(e) => setAdendaForm((prev) => ({ ...prev, monedaMantenimiento: e.target.value }))} style={getFieldStyle(Boolean(adendaErrors.monedaMantenimiento))}>
+                  <option value="PEN">PEN</option>
+                  <option value="USD">USD</option>
+                </select>
+              </Field>
+              <Field label="Importe mantenimiento" error={adendaErrors.importeMantenimiento}>
+                <input type="number" step="0.01" value={adendaForm.importeMantenimiento} onChange={(e) => setAdendaForm((prev) => ({ ...prev, importeMantenimiento: e.target.value }))} style={getFieldStyle(Boolean(adendaErrors.importeMantenimiento))} />
+              </Field>
+              <Field label="Moneda cochera">
+                <select value={adendaForm.monedaCochera} onChange={(e) => setAdendaForm((prev) => ({ ...prev, monedaCochera: e.target.value }))} style={getFieldStyle(false)}>
+                  <option value="PEN">PEN</option>
+                  <option value="USD">USD</option>
+                </select>
+              </Field>
+              <Field label="Importe cochera" error={adendaErrors.importeCochera}>
+                <input type="number" step="0.01" value={adendaForm.importeCochera} onChange={(e) => setAdendaForm((prev) => ({ ...prev, importeCochera: e.target.value }))} style={getFieldStyle(Boolean(adendaErrors.importeCochera))} />
+              </Field>
+            </div>
+          </section>
+
+          <section style={styles.section}>
+            <h4 style={styles.sectionTitle}>Documento</h4>
+            <div style={styles.grid}>
+              <Field label="Archivo firmado">
+                <input value={adendaForm.documentoFirmadoNombre} onChange={(e) => setAdendaForm((prev) => ({ ...prev, documentoFirmadoNombre: e.target.value }))} style={getFieldStyle(false)} />
+              </Field>
+              <Field label="URL documento" fullWidth>
+                <input value={adendaForm.documentoFirmadoUrl} onChange={(e) => setAdendaForm((prev) => ({ ...prev, documentoFirmadoUrl: e.target.value }))} style={getFieldStyle(false)} />
+              </Field>
+              <Field label="Tamano KB">
+                <input type="number" step="0.01" value={adendaForm.documentoFirmadoTamanoKB} onChange={(e) => setAdendaForm((prev) => ({ ...prev, documentoFirmadoTamanoKB: e.target.value }))} style={getFieldStyle(false)} />
+              </Field>
+            </div>
+          </section>
+        </div>
+      </SidePanelForm>
+    </div>
   );
 }
 
@@ -723,5 +927,29 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 12,
     color: "#DC2626",
     fontWeight: 600,
+  },
+  feedbackBanner: {
+    marginTop: 12,
+    padding: "12px 14px",
+    borderRadius: 12,
+    border: "1px solid #BBF7D0",
+    background: "#F0FDF4",
+    color: "#166534",
+    fontSize: 13,
+    fontWeight: 700,
+  },
+  versionButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    border: "1px solid #F59E0B",
+    borderRadius: 10,
+    background: "#FFF7ED",
+    color: "#9A3412",
+    padding: "10px 12px",
+    fontSize: 12,
+    fontWeight: 800,
+    cursor: "pointer",
   },
 };

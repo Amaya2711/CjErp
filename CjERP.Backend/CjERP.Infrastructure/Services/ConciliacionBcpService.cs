@@ -4593,10 +4593,8 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
     private static ScotiabankOperationSummary BuildScotiabankOperationSummary(IReadOnlyList<PlanillaConciliacionRow> rows)
     {
         var rowsToUse = rows.ToList();
-        var totalPagarAgrupado = rowsToUse
-            .Select(row => row.TotalPagar ?? row.TotalPlanillaBase)
-            .FirstOrDefault(value => value.HasValue)
-            ?? 0m;
+        var totalPagarAgrupado = -rowsToUse
+            .Sum(row => Math.Abs(row.TotalPlanillaBase ?? row.TotalPagar ?? 0m));
         var correlativos = rowsToUse
             .Select(row => row.CorreTexto ?? row.Corre?.ToString(CultureInfo.InvariantCulture))
             .Where(value => !string.IsNullOrWhiteSpace(value))

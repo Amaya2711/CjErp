@@ -55,12 +55,16 @@ public class ArrendamientosController : ControllerBase
         => await ResponderLista(() => _arrendamientosService.ListarObligacionesAsync(cancellationToken));
 
     [HttpGet("pagos")]
-    public async Task<IActionResult> ListarPagos(CancellationToken cancellationToken)
-        => await ResponderLista(() => _arrendamientosService.ListarPagosAsync(cancellationToken));
+    public async Task<IActionResult> ListarPagos(
+        [FromQuery] ArrendamientosPagosFiltroDto filtro,
+        CancellationToken cancellationToken)
+        => await ResponderLista(() => _arrendamientosService.ListarPagosAsync(filtro, cancellationToken));
 
     [HttpGet("pagosdsh/resumen-anual")]
-    public async Task<IActionResult> ListarPagosDshResumenAnual(CancellationToken cancellationToken)
-        => await ResponderLista(() => _arrendamientosService.ListarPagosDshResumenAnualAsync(cancellationToken));
+    public async Task<IActionResult> ListarPagosDshResumenAnual(
+        [FromQuery] ArrendamientosResumenAnualFiltroDto filtro,
+        CancellationToken cancellationToken)
+        => await ResponderLista(() => _arrendamientosService.ListarPagosDshResumenAnualAsync(filtro, cancellationToken));
 
     [HttpGet("dshpagos")]
     public async Task<IActionResult> ObtenerDshPagos(
@@ -125,6 +129,12 @@ public class ArrendamientosController : ControllerBase
         [FromBody] ArrendamientosContratoRequestDto request,
         CancellationToken cancellationToken)
         => await ResponderGuardado(() => _arrendamientosService.GuardarContratoAsync(request, ObtenerUsuarioAccion(), cancellationToken));
+
+    [HttpPost("contratos/versiones")]
+    public async Task<IActionResult> GuardarVersionContrato(
+        [FromBody] ArrendamientosContratoRequestDto request,
+        CancellationToken cancellationToken)
+        => await ResponderGuardado(() => _arrendamientosService.GuardarVersionContratoAsync(request, ObtenerUsuarioAccion(), cancellationToken));
 
     [HttpPost("contratos/unidades")]
     public async Task<IActionResult> GuardarContratoUnidad(

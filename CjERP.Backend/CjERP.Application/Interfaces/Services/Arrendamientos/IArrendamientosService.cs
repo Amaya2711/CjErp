@@ -13,8 +13,8 @@ public interface IArrendamientosService
     Task<IReadOnlyList<ArrendamientosFilaDto>> ListarUnidadesAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ArrendamientosFilaDto>> ListarContratosAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ArrendamientosFilaDto>> ListarObligacionesAsync(CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<ArrendamientosFilaDto>> ListarPagosAsync(CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<ArrendamientosFilaDto>> ListarPagosDshResumenAnualAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ArrendamientosFilaDto>> ListarPagosAsync(ArrendamientosPagosFiltroDto filtro, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ArrendamientosFilaDto>> ListarPagosDshResumenAnualAsync(ArrendamientosResumenAnualFiltroDto filtro, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ArrendamientosFilaDto>> ListarFraccionamientosAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ArrendamientosFilaDto>> ListarGarantiasAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ArrendamientosFilaDto>> ListarArbitriosAsync(CancellationToken cancellationToken = default);
@@ -26,6 +26,7 @@ public interface IArrendamientosService
     Task<ArrendamientosCommandResultDto> GuardarInmuebleAsync(ArrendamientosInmuebleRequestDto request, string usuarioAccion, CancellationToken cancellationToken = default);
     Task<ArrendamientosCommandResultDto> GuardarUnidadAsync(ArrendamientosUnidadRequestDto request, string usuarioAccion, CancellationToken cancellationToken = default);
     Task<ArrendamientosCommandResultDto> GuardarContratoAsync(ArrendamientosContratoRequestDto request, string usuarioAccion, CancellationToken cancellationToken = default);
+    Task<ArrendamientosCommandResultDto> GuardarVersionContratoAsync(ArrendamientosContratoRequestDto request, string usuarioAccion, CancellationToken cancellationToken = default);
     Task<ArrendamientosCommandResultDto> GuardarContratoUnidadAsync(ArrendamientosContratoUnidadRequestDto request, string usuarioAccion, CancellationToken cancellationToken = default);
     Task<ArrendamientosCommandResultDto> GenerarObligacionesAsync(ArrendamientosObligacionGenerarRequestDto request, string usuarioAccion, CancellationToken cancellationToken = default);
     Task<ArrendamientosCommandResultDto> RegistrarPagoAsync(ArrendamientosPagoRequestDto request, string usuarioAccion, CancellationToken cancellationToken = default);

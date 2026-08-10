@@ -126,13 +126,15 @@ export default function ArrendamientosPagosPage() {
 
   const arrendadorOptions = useMemo(() => sortByLabel(arrendadores, (row) => row.nombre ?? row.codigo ?? ""), [arrendadores]);
   const inquilinoOptions = useMemo(() => sortByLabel(inquilinos, (row) => row.nombre ?? row.codigo ?? ""), [inquilinos]);
+  const loadRows = useMemo(() => () => listarPagosArrendamientos(null), []);
+  const toolbarExtras = null;
 
   return (
     <ArrendamientosCrudPage<PagoForm>
       title="Pagos"
       description="Registro, edición y validacion de pagos completos, parciales y exonerados."
       searchHint="operacion, arrendador, inquilino, tipo pago, validacion, banco, observacion"
-      loadRows={listarPagosArrendamientos}
+      loadRows={loadRows}
       columns={columns}
       initialForm={initialForm}
       renderRowActions={(row, helpers) => (

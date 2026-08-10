@@ -1,6 +1,7 @@
 export type ArrendamientosFila = {
   id?: number | null;
   codigo?: string | null;
+  codigoContrato?: string | null;
   nombre?: string | null;
   detalle?: string | null;
   estado?: string | null;
@@ -17,6 +18,7 @@ export type ArrendamientosFila = {
   importeMantenimiento?: number | null;
   importeCochera?: number | null;
   importeTransferido?: number | null;
+  exonerado?: number | null;
   comisionBancaria?: number | null;
   itf?: number | null;
   importeTotalCargado?: number | null;
@@ -25,6 +27,12 @@ export type ArrendamientosFila = {
   diferenciaCambio?: number | null;
   tipoCambio?: number | null;
   saldo?: number | null;
+  saldoReal?: number | null;
+  totalContratoAnualServicio?: number | null;
+  totalPagadoAnualServicio?: number | null;
+  totalExoneradoAnualServicio?: number | null;
+  totalDebeAnualServicio?: number | null;
+  saldoAcumulado?: number | null;
   fecha?: string | null;
   fechaContabilizacion?: string | null;
   fechaInicio?: string | null;
@@ -75,9 +83,18 @@ export type ArrendamientosEstadoCuentaFiltro = {
   idConcepto?: number | null;
 };
 
+export type ArrendamientosResumenAnualFiltro = {
+  idInmueble?: number | null;
+  idInquilino?: number | null;
+  idArrendador?: number | null;
+  anioInicio?: number | null;
+  anioFin?: number | null;
+};
+
 export type ArrendamientosDshPagosFiltro = {
   idInmueble?: number | null;
   idInquilino?: number | null;
+  anio?: number | null;
 };
 
 export type ArrendamientosDshPagosInmueble = {
@@ -88,6 +105,7 @@ export type ArrendamientosDshPagosInmueble = {
 export type ArrendamientosDshPagosInquilino = {
   idInquilino: number;
   nombreComercial?: string | null;
+  razonSocial?: string | null;
   idInmueble?: number | null;
   nombreInmueble?: string | null;
 };
@@ -97,6 +115,7 @@ export type ArrendamientosDshPagosKpi = {
   obligacionesPendientes: number;
   saldoPendiente: number;
   pagosAplicados: number;
+  exonerado?: number;
   ultimoPagoFecha?: string | null;
   ultimoPagoImporte: number;
   monedaBase?: string | null;
@@ -140,6 +159,7 @@ export type ArrendamientosDshPagosDetalle = {
 export type ArrendamientosDshPagosResponse = {
   idInmuebleSeleccionado?: number | null;
   idInquilinoSeleccionado?: number | null;
+  aniosDisponibles: number[];
   inmuebles: ArrendamientosDshPagosInmueble[];
   inquilinos: ArrendamientosDshPagosInquilino[];
   kpi: ArrendamientosDshPagosKpi;

@@ -67,8 +67,16 @@ public sealed class ArrendamientosService : IArrendamientosService
         const string sql = """
         SET NOCOUNT ON;
 
+        SELECT
+            MIN(YEAR(a.FechaInicio)) AS AnioMin,
+            MAX(YEAR(a.FechaFin)) AS AnioMax
+        FROM dbo.a_contrato a
+        WHERE a.FechaInicio IS NOT NULL
+          AND a.FechaFin IS NOT NULL;
+
         DECLARE @IdInmuebleSeleccionado INT = @IdInmueble;
         DECLARE @IdInquilinoSeleccionado INT = @IdInquilino;
+        DECLARE @AnioSeleccionado INT = @Anio;
 
         IF OBJECT_ID('tempdb..#ContratosFiltrados') IS NOT NULL
         BEGIN
@@ -116,12 +124,19 @@ public sealed class ArrendamientosService : IArrendamientosService
         ORDER BY NombreInmueble;
 
         SELECT DISTINCT
-            IdInquilino,
-            NombreInquilino AS NombreComercial,
-            IdInmueble,
-            NombreInmueble
-        FROM #ContratosFiltrados
-        ORDER BY NombreComercial, NombreInmueble, IdInquilino;
+            a.IdInquilino,
+            c.NombreComercial,
+            c.RazonSocial,
+            a.IdInmueble,
+            b.NombreInmueble
+        FROM dbo.a_contrato a
+        LEFT JOIN dbo.a_inmueble b
+            ON b.IdInmueble = a.IdInmueble
+        LEFT JOIN dbo.a_inquilino c
+            ON c.IdInquilino = a.IdInquilino
+        WHERE a.Activo = 1
+          AND (@IdInmuebleSeleccionado IS NULL OR a.IdInmueble = @IdInmuebleSeleccionado)
+        ORDER BY c.NombreComercial, c.RazonSocial, NombreInmueble, IdInquilino;
 
         SELECT
             COUNT(1) AS ContratosActivos,
@@ -132,6 +147,7 @@ public sealed class ArrendamientosService : IArrendamientosService
                 WHERE o.Activo = 1
                   AND o.Estado IN ('PENDIENTE', 'PARCIAL', 'VENCIDO')
                   AND cf.IdInquilino = @IdInquilinoSeleccionado
+                  AND (@AnioSeleccionado IS NULL OR YEAR(o.FechaVencimiento) = @AnioSeleccionado)
             ), 0) AS ObligacionesPendientes,
             ISNULL((
                 SELECT SUM(o.SaldoPendiente)
@@ -139,6 +155,7 @@ public sealed class ArrendamientosService : IArrendamientosService
                 INNER JOIN #ContratosFiltrados cf ON cf.IdContrato = o.IdContrato
                 WHERE o.Activo = 1
                   AND cf.IdInquilino = @IdInquilinoSeleccionado
+                  AND (@AnioSeleccionado IS NULL OR YEAR(o.FechaVencimiento) = @AnioSeleccionado)
             ), 0) AS SaldoPendiente,
             ISNULL((
                 SELECT SUM(p.ImporteConvertido)
@@ -146,12 +163,14 @@ public sealed class ArrendamientosService : IArrendamientosService
                 WHERE p.Activo = 1
                   AND p.IdInquilino = @IdInquilinoSeleccionado
                   AND p.EstadoValidacion IN ('APROBADO', 'PARCIAL')
+                  AND (@AnioSeleccionado IS NULL OR YEAR(p.FechaOperacion) = @AnioSeleccionado)
             ), 0) AS PagosAplicados,
             (
                 SELECT TOP (1) CONVERT(varchar(10), p.FechaOperacion, 23)
                 FROM dbo.a_pago p
                 WHERE p.Activo = 1
                   AND p.IdInquilino = @IdInquilinoSeleccionado
+                  AND (@AnioSeleccionado IS NULL OR YEAR(p.FechaOperacion) = @AnioSeleccionado)
                 ORDER BY p.FechaOperacion DESC, p.IdPago DESC
             ) AS UltimoPagoFecha,
             ISNULL((
@@ -159,6 +178,7 @@ public sealed class ArrendamientosService : IArrendamientosService
                 FROM dbo.a_pago p
                 WHERE p.Activo = 1
                   AND p.IdInquilino = @IdInquilinoSeleccionado
+                  AND (@AnioSeleccionado IS NULL OR YEAR(p.FechaOperacion) = @AnioSeleccionado)
                 ORDER BY p.FechaOperacion DESC, p.IdPago DESC
             ), 0) AS UltimoPagoImporte,
             (
@@ -166,6 +186,7 @@ public sealed class ArrendamientosService : IArrendamientosService
                 FROM dbo.a_pago p
                 WHERE p.Activo = 1
                   AND p.IdInquilino = @IdInquilinoSeleccionado
+                  AND (@AnioSeleccionado IS NULL OR YEAR(p.FechaOperacion) = @AnioSeleccionado)
                 ORDER BY p.FechaOperacion DESC, p.IdPago DESC
             ) AS MonedaBase
         FROM #ContratosFiltrados
@@ -196,6 +217,7 @@ public sealed class ArrendamientosService : IArrendamientosService
             FROM dbo.a_obligacion o
             WHERE o.Activo = 1
               AND o.IdContrato = cf.IdContrato
+              AND (@AnioSeleccionado IS NULL OR YEAR(o.FechaVencimiento) = @AnioSeleccionado)
         ) obl
         OUTER APPLY (
             SELECT
@@ -205,6 +227,7 @@ public sealed class ArrendamientosService : IArrendamientosService
                     FROM dbo.a_pago p2
                     WHERE p2.Activo = 1
                       AND p2.IdInquilino = cf.IdInquilino
+                      AND (@AnioSeleccionado IS NULL OR YEAR(p2.FechaOperacion) = @AnioSeleccionado)
                     ORDER BY p2.FechaOperacion DESC, p2.IdPago DESC
                 ) AS UltimoPagoFecha,
                 (
@@ -212,11 +235,13 @@ public sealed class ArrendamientosService : IArrendamientosService
                     FROM dbo.a_pago p2
                     WHERE p2.Activo = 1
                       AND p2.IdInquilino = cf.IdInquilino
+                      AND (@AnioSeleccionado IS NULL OR YEAR(p2.FechaOperacion) = @AnioSeleccionado)
                     ORDER BY p2.FechaOperacion DESC, p2.IdPago DESC
                 ) AS UltimoPagoImporte
             FROM dbo.a_pago p
             WHERE p.Activo = 1
               AND p.IdInquilino = cf.IdInquilino
+              AND (@AnioSeleccionado IS NULL OR YEAR(p.FechaOperacion) = @AnioSeleccionado)
         ) pag
         WHERE cf.IdInquilino = @IdInquilinoSeleccionado
         ORDER BY cf.FechaInicio DESC, cf.IdContrato DESC;
@@ -255,6 +280,7 @@ public sealed class ArrendamientosService : IArrendamientosService
             INNER JOIN dbo.a_concepto co ON co.IdConcepto = o.IdConcepto
             WHERE o.Activo = 1
               AND cf.IdInquilino = @IdInquilinoSeleccionado
+              AND (@AnioSeleccionado IS NULL OR YEAR(o.FechaVencimiento) = @AnioSeleccionado)
 
             UNION ALL
 
@@ -290,6 +316,7 @@ public sealed class ArrendamientosService : IArrendamientosService
                     WHERE cf2.IdInquilino = p.IdInquilino
                       AND cf2.IdInmueble = @IdInmuebleSeleccionado
               ))
+              AND (@AnioSeleccionado IS NULL OR YEAR(p.FechaOperacion) = @AnioSeleccionado)
         ) x
         ORDER BY x.Fecha DESC, x.IdMovimiento DESC;
         """;
@@ -301,21 +328,36 @@ public sealed class ArrendamientosService : IArrendamientosService
                 new
                 {
                     filtro.IdInmueble,
-                    filtro.IdInquilino
+                    filtro.IdInquilino,
+                    filtro.Anio
                 },
                 cancellationToken: cancellationToken));
 
+        var aniosRango = await reader.ReadSingleOrDefaultAsync<ArrendamientosDshPagosAniosRangoDto>();
         var seleccion = await reader.ReadSingleAsync<ArrendamientosDshPagosSeleccionDto>();
         var inmuebles = (await reader.ReadAsync<ArrendamientosDshPagosInmuebleDto>()).ToList();
         var inquilinos = (await reader.ReadAsync<ArrendamientosDshPagosInquilinoDto>()).ToList();
         var kpi = await reader.ReadSingleOrDefaultAsync<ArrendamientosDshPagosKpiDto>() ?? new ArrendamientosDshPagosKpiDto();
         var principal = (await reader.ReadAsync<ArrendamientosDshPagosPrincipalDto>()).ToList();
         var detalle = (await reader.ReadAsync<ArrendamientosDshPagosDetalleDto>()).ToList();
+        var aniosDisponibles = new List<int>();
+
+        if (aniosRango?.AnioMin != null && aniosRango.AnioMax != null)
+        {
+            var anioMin = Math.Min(aniosRango.AnioMin.Value, aniosRango.AnioMax.Value);
+            var anioMax = Math.Max(aniosRango.AnioMin.Value, aniosRango.AnioMax.Value);
+
+            for (var anio = anioMin; anio <= anioMax; anio++)
+            {
+                aniosDisponibles.Add(anio);
+            }
+        }
 
         return new ArrendamientosDshPagosResponseDto
         {
             IdInmuebleSeleccionado = seleccion.IdInmuebleSeleccionado,
             IdInquilinoSeleccionado = seleccion.IdInquilinoSeleccionado,
+            AniosDisponibles = aniosDisponibles,
             Inmuebles = inmuebles,
             Inquilinos = inquilinos,
             Kpi = kpi,
@@ -353,29 +395,34 @@ public sealed class ArrendamientosService : IArrendamientosService
 
     public Task<IReadOnlyList<ArrendamientosFilaDto>> ListarInquilinosAsync(CancellationToken cancellationToken = default)
         => QueryListAsync("""
-            SELECT TOP (300)
-                IdInquilino AS Id,
-                CodigoInquilino AS Codigo,
-                RazonSocial AS Nombre,
-                NombreComercial AS Detalle,
-                CASE WHEN Activo = 1 THEN 'ACTIVO' ELSE 'INACTIVO' END AS Estado,
+            SELECT DISTINCT
+                c.IdInquilino AS Id,
+                b.IdInmueble,
+                c.NombreComercial AS Codigo,
+                c.RazonSocial AS Nombre,
+                b.NombreInmueble AS Detalle,
+                CASE WHEN c.Activo = 1 THEN 'ACTIVO' ELSE 'INACTIVO' END AS Estado,
                 NULL AS Moneda,
                 NULL AS Importe,
                 NULL AS Saldo,
-                CONVERT(varchar(10), FechaCreacion, 23) AS Fecha,
+                CONVERT(varchar(10), c.FechaCreacion, 23) AS Fecha,
                 NULL AS FechaInicio,
                 NULL AS FechaFin,
                 NULL AS Arrendador,
                 NULL AS Inquilino,
-                NULL AS Inmueble,
+                b.NombreInmueble AS Inmueble,
                 NULL AS Unidad,
                 NULL AS Concepto,
                 NULL AS Periodo,
                 NULL AS Responsable,
-                Observacion,
+                c.Observacion,
                 'INQUILINO' AS Tipo
-            FROM dbo.a_inquilino
-            ORDER BY FechaCreacion DESC, IdInquilino DESC;
+            FROM dbo.a_contrato a
+            LEFT JOIN dbo.a_inmueble b ON a.IdInmueble = b.IdInmueble
+            LEFT JOIN dbo.a_inquilino c ON a.IdInquilino = c.IdInquilino
+            WHERE a.Activo = 1
+              AND ISNULL(c.Activo, 0) = 1
+            ORDER BY c.RazonSocial, c.NombreComercial, b.NombreInmueble, c.IdInquilino;
             """, cancellationToken);
 
     public Task<IReadOnlyList<ArrendamientosFilaDto>> ListarInmueblesAsync(CancellationToken cancellationToken = default)
@@ -523,8 +570,11 @@ public sealed class ArrendamientosService : IArrendamientosService
             ORDER BY o.FechaVencimiento DESC, o.IdObligacion DESC;
             """, cancellationToken);
 
-    public async Task<IReadOnlyList<ArrendamientosFilaDto>> ListarPagosAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ArrendamientosFilaDto>> ListarPagosAsync(
+        ArrendamientosPagosFiltroDto filtro,
+        CancellationToken cancellationToken = default)
     {
+        var anio = filtro.Anio;
         var tipoPagoSelect = await ObtenerSelectColumnaAsync(
             "dbo.a_pago",
             "TipoPago",
@@ -585,15 +635,31 @@ public sealed class ArrendamientosService : IArrendamientosService
             INNER JOIN dbo.a_arrendador a ON a.IdArrendador = p.IdArrendador
             INNER JOIN dbo.a_inquilino i ON i.IdInquilino = p.IdInquilino
             LEFT JOIN dbo.EmpleadoCj resp ON resp.IdEmpleado = p.IdEmpleadoRegistrador
+            WHERE (@Anio IS NULL OR YEAR(p.FechaOperacion) = @Anio)
             ORDER BY p.FechaOperacion DESC, p.IdPago DESC;
-            """, cancellationToken);
+            """,
+            new { Anio = anio },
+            cancellationToken: cancellationToken);
     }
 
-    public async Task<IReadOnlyList<ArrendamientosFilaDto>> ListarPagosDshResumenAnualAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ArrendamientosFilaDto>> ListarPagosDshResumenAnualAsync(
+        ArrendamientosResumenAnualFiltroDto filtro,
+        CancellationToken cancellationToken = default)
     {
         await using var connection = _sqlCommandFactory.CreateConnection();
         var rows = await connection.QueryAsync(
-            _sqlCommandFactory.Create(SpArrendamientoResumenAnual, commandType: CommandType.StoredProcedure, cancellationToken: cancellationToken));
+            _sqlCommandFactory.Create(
+                SpArrendamientoResumenAnual,
+                new
+                {
+                    filtro.IdInmueble,
+                    filtro.IdInquilino,
+                    filtro.IdArrendador,
+                    filtro.AnioInicio,
+                    filtro.AnioFin
+                },
+                CommandType.StoredProcedure,
+                cancellationToken: cancellationToken));
 
         return rows
             .Select(MapResumenAnualRow)
@@ -924,6 +990,475 @@ public sealed class ArrendamientosService : IArrendamientosService
 
         await RegistrarAuditoriaAsync("Arrendamientos", "a_contrato", result.Id ?? 0, request.IdContrato is null ? "CREAR" : "EDITAR", request.CodigoContrato, request.EstadoContrato, usuarioAccion, request.Observaciones, cancellationToken);
         return result;
+    }
+
+    public async Task<ArrendamientosCommandResultDto> GuardarVersionContratoAsync(ArrendamientosContratoRequestDto request, string usuarioAccion, CancellationToken cancellationToken = default)
+    {
+        if (request.IdContrato.GetValueOrDefault() <= 0)
+        {
+            throw new InvalidOperationException("Debe indicar el contrato a versionar.");
+        }
+
+        var tipoMovimiento = string.IsNullOrWhiteSpace(request.TipoMovimiento)
+            ? "ADENDA"
+            : request.TipoMovimiento.Trim().ToUpperInvariant();
+
+        if (request.FechaVigenciaDesde is null)
+        {
+            throw new InvalidOperationException("Debe indicar la fecha de vigencia desde.");
+        }
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        try
+        {
+            var monedaGarantiaSelect = await ObtenerSelectColumnaAsync(
+                "dbo.a_contrato",
+                "MonedaGarantia",
+                "c.MonedaGarantia",
+                "NULL AS MonedaGarantia",
+                cancellationToken);
+
+            var contratoActual = await connection.QuerySingleOrDefaultAsync<ContratoVersionSnapshotRow>(
+                $"""
+                SELECT
+                        c.IdContrato,
+                        c.CodigoContrato,
+                        c.IdArrendador,
+                        c.IdInquilino,
+                        c.IdInmueble,
+                        c.IdUnidadPrincipal,
+                        c.FechaFirma,
+                        c.FechaInicio,
+                        c.FechaFin,
+                        c.Moneda,
+                        c.MonedaAlquiler,
+                        c.MonedaMantenimiento,
+                        c.MonedaCochera,
+                        {monedaGarantiaSelect},
+                        c.ImporteAlquiler,
+                        c.PeriodicidadAlquiler,
+                        c.DiaLimitePago,
+                        c.DiasGracia,
+                        c.ImporteMantenimiento,
+                        c.PeriodicidadMantenimiento,
+                        c.DiaLimiteMantenimiento,
+                        c.ImporteCochera,
+                        c.PeriodicidadCochera,
+                        c.DiaLimiteCochera,
+                        c.GarantiaPactada,
+                        c.GarantiaPagada,
+                        c.GarantiaPendiente,
+                        c.TipoReajuste,
+                        c.PorcentajeReajuste,
+                        c.FormulaReajuste,
+                        c.FrecuenciaReajuste,
+                        c.PenalidadMora,
+                        c.InteresMoratorio,
+                        c.EstadoContrato,
+                        c.Observaciones,
+                        c.DocumentoFirmadoNombre,
+                        c.DocumentoFirmadoUrl,
+                        c.DocumentoFirmadoTamanoKB,
+                        c.IdEmpleadoResponsable,
+                        c.FechaSuspension,
+                        c.FechaCancelacion,
+                        c.MotivoCancelacion,
+                        c.Activo
+                FROM dbo.a_contrato c
+                WHERE c.IdContrato = @IdContrato;
+                """,
+                new { request.IdContrato },
+                transaction: transaction);
+
+            if (contratoActual is null)
+            {
+                throw new InvalidOperationException("No existe el contrato indicado.");
+            }
+
+            var fechaVigenciaDesde = request.FechaVigenciaDesde.Value.ToDateTime(TimeOnly.MinValue);
+            var fechaVigenciaHasta = request.FechaVigenciaHasta?.ToDateTime(TimeOnly.MinValue);
+            var usuario = string.IsNullOrWhiteSpace(usuarioAccion) ? "sistema" : usuarioAccion.Trim();
+            var observacion = string.IsNullOrWhiteSpace(request.MotivoVersion) ? request.Observaciones : request.MotivoVersion;
+
+            var valoresAnteriores = new
+            {
+                contratoActual.IdContrato,
+                contratoActual.CodigoContrato,
+                contratoActual.IdArrendador,
+                contratoActual.IdInquilino,
+                contratoActual.IdInmueble,
+                contratoActual.IdUnidadPrincipal,
+                contratoActual.FechaFirma,
+                contratoActual.FechaInicio,
+                contratoActual.FechaFin,
+                contratoActual.Moneda,
+                contratoActual.MonedaAlquiler,
+                contratoActual.MonedaMantenimiento,
+                contratoActual.MonedaCochera,
+                contratoActual.MonedaGarantia,
+                contratoActual.ImporteAlquiler,
+                contratoActual.PeriodicidadAlquiler,
+                contratoActual.DiaLimitePago,
+                contratoActual.DiasGracia,
+                contratoActual.ImporteMantenimiento,
+                contratoActual.PeriodicidadMantenimiento,
+                contratoActual.DiaLimiteMantenimiento,
+                contratoActual.ImporteCochera,
+                contratoActual.PeriodicidadCochera,
+                contratoActual.DiaLimiteCochera,
+                contratoActual.GarantiaPactada,
+                contratoActual.GarantiaPagada,
+                contratoActual.GarantiaPendiente,
+                contratoActual.TipoReajuste,
+                contratoActual.PorcentajeReajuste,
+                contratoActual.FormulaReajuste,
+                contratoActual.FrecuenciaReajuste,
+                contratoActual.PenalidadMora,
+                contratoActual.InteresMoratorio,
+                contratoActual.EstadoContrato,
+                contratoActual.Observaciones,
+                contratoActual.DocumentoFirmadoNombre,
+                contratoActual.DocumentoFirmadoUrl,
+                contratoActual.DocumentoFirmadoTamanoKB,
+                contratoActual.IdEmpleadoResponsable,
+                contratoActual.FechaSuspension,
+                contratoActual.FechaCancelacion,
+                contratoActual.MotivoCancelacion,
+                contratoActual.Activo
+            };
+
+            var valoresNuevos = new
+            {
+                request.IdContrato,
+                request.CodigoContrato,
+                request.IdArrendador,
+                request.IdInquilino,
+                request.IdInmueble,
+                request.IdUnidadPrincipal,
+                FechaFirma = request.FechaFirma?.ToDateTime(TimeOnly.MinValue),
+                FechaInicio = request.FechaInicio.ToDateTime(TimeOnly.MinValue),
+                FechaFin = request.FechaFin.ToDateTime(TimeOnly.MinValue),
+                request.Moneda,
+                request.MonedaAlquiler,
+                request.MonedaMantenimiento,
+                request.MonedaCochera,
+                request.MonedaGarantia,
+                request.ImporteAlquiler,
+                request.PeriodicidadAlquiler,
+                request.DiaLimitePago,
+                request.DiasGracia,
+                request.ImporteMantenimiento,
+                request.PeriodicidadMantenimiento,
+                request.DiaLimiteMantenimiento,
+                request.ImporteCochera,
+                request.PeriodicidadCochera,
+                request.DiaLimiteCochera,
+                request.GarantiaPactada,
+                request.GarantiaPagada,
+                request.GarantiaPendiente,
+                request.TipoReajuste,
+                request.PorcentajeReajuste,
+                request.FormulaReajuste,
+                request.FrecuenciaReajuste,
+                request.PenalidadMora,
+                request.InteresMoratorio,
+                request.EstadoContrato,
+                request.Observaciones,
+                request.DocumentoFirmadoNombre,
+                request.DocumentoFirmadoUrl,
+                request.DocumentoFirmadoTamanoKB,
+                request.IdEmpleadoResponsable,
+                FechaSuspension = request.FechaSuspension?.ToDateTime(TimeOnly.MinValue),
+                FechaCancelacion = request.FechaCancelacion?.ToDateTime(TimeOnly.MinValue),
+                request.MotivoCancelacion,
+                request.Activo,
+                FechaVigenciaDesde = fechaVigenciaDesde,
+                FechaVigenciaHasta = fechaVigenciaHasta,
+                TipoMovimiento = tipoMovimiento
+            };
+
+            var detalles = new List<ContratoVersionDetalleBuilderRow>();
+            AgregarDetalleVersion(detalles, "ALQUILER",
+                contratoActual.MonedaAlquiler ?? contratoActual.Moneda,
+                contratoActual.ImporteAlquiler,
+                request.MonedaAlquiler ?? request.Moneda,
+                request.ImporteAlquiler,
+                contratoActual.PeriodicidadAlquiler,
+                request.PeriodicidadAlquiler,
+                contratoActual.DiaLimitePago,
+                request.DiaLimitePago,
+                request.Observaciones);
+
+            AgregarDetalleVersion(detalles, "MANTENIMIENTO",
+                contratoActual.MonedaMantenimiento ?? contratoActual.Moneda,
+                contratoActual.ImporteMantenimiento,
+                request.MonedaMantenimiento ?? request.Moneda,
+                request.ImporteMantenimiento,
+                contratoActual.PeriodicidadMantenimiento,
+                request.PeriodicidadMantenimiento,
+                contratoActual.DiaLimiteMantenimiento,
+                request.DiaLimiteMantenimiento,
+                request.Observaciones);
+
+            AgregarDetalleVersion(detalles, "COCHERA",
+                contratoActual.MonedaCochera ?? contratoActual.Moneda,
+                contratoActual.ImporteCochera,
+                request.MonedaCochera ?? request.Moneda,
+                request.ImporteCochera,
+                contratoActual.PeriodicidadCochera,
+                request.PeriodicidadCochera,
+                contratoActual.DiaLimiteCochera,
+                request.DiaLimiteCochera,
+                request.Observaciones);
+
+            var columnasVersion = new List<string>
+            {
+                "IdContrato",
+                "TipoMovimiento",
+                "FechaMovimiento",
+                "UsuarioAccion",
+                "Motivo",
+                "CondicionesAnterioresJson",
+                "CondicionesNuevasJson",
+                "DocumentoNombre",
+                "DocumentoUrl",
+                "DocumentoTamanoKB",
+                "FechaVigenciaDesde",
+                "FechaVigenciaHasta",
+                "ImporteAlquilerAnterior",
+                "ImporteAlquilerNuevo",
+                "ImporteMantenimientoAnterior",
+                "ImporteMantenimientoNuevo",
+                "ImporteCocheraAnterior",
+                "ImporteCocheraNuevo",
+                "MonedaAnterior"
+            };
+            var valoresVersion = new List<string>
+            {
+                "@IdContrato",
+                "@TipoMovimiento",
+                "SYSDATETIME()",
+                "@UsuarioAccion",
+                "@Motivo",
+                "@CondicionesAnterioresJson",
+                "@CondicionesNuevasJson",
+                "@DocumentoNombre",
+                "@DocumentoUrl",
+                "@DocumentoTamanoKB",
+                "@FechaVigenciaDesde",
+                "@FechaVigenciaHasta",
+                "@ImporteAlquilerAnterior",
+                "@ImporteAlquilerNuevo",
+                "@ImporteMantenimientoAnterior",
+                "@ImporteMantenimientoNuevo",
+                "@ImporteCocheraAnterior",
+                "@ImporteCocheraNuevo",
+                "@MonedaAnterior"
+            };
+
+            if (await ExisteColumnaAsync("dbo.a_contrato_version", "MonedaNueva", cancellationToken))
+            {
+                columnasVersion.Add("MonedaNueva");
+                valoresVersion.Add("@MonedaNueva");
+            }
+
+            if (await ExisteColumnaAsync("dbo.a_contrato_version", "UsuarioCreacion", cancellationToken))
+            {
+                columnasVersion.Add("UsuarioCreacion");
+                valoresVersion.Add("@UsuarioAccion");
+            }
+
+            if (await ExisteColumnaAsync("dbo.a_contrato_version", "FechaCreacion", cancellationToken))
+            {
+                columnasVersion.Add("FechaCreacion");
+                valoresVersion.Add("SYSDATETIME()");
+            }
+
+            var versionId = await connection.QuerySingleAsync<int>(
+                $"""
+                INSERT INTO dbo.a_contrato_version
+                (
+                    {string.Join(", ", columnasVersion)}
+                )
+                OUTPUT INSERTED.IdContratoVersion
+                VALUES
+                (
+                    {string.Join(", ", valoresVersion)}
+                );
+                """,
+                new
+                {
+                    request.IdContrato,
+                    TipoMovimiento = tipoMovimiento,
+                    UsuarioAccion = usuario,
+                    Motivo = observacion ?? "Adenda / modificacion de contrato.",
+                    CondicionesAnterioresJson = System.Text.Json.JsonSerializer.Serialize(valoresAnteriores),
+                    CondicionesNuevasJson = System.Text.Json.JsonSerializer.Serialize(valoresNuevos),
+                    DocumentoNombre = request.DocumentoFirmadoNombre,
+                    DocumentoUrl = request.DocumentoFirmadoUrl,
+                    DocumentoTamanoKB = request.DocumentoFirmadoTamanoKB,
+                    FechaVigenciaDesde = fechaVigenciaDesde,
+                    FechaVigenciaHasta = fechaVigenciaHasta,
+                    ImporteAlquilerAnterior = contratoActual.ImporteAlquiler,
+                    ImporteAlquilerNuevo = request.ImporteAlquiler,
+                    ImporteMantenimientoAnterior = contratoActual.ImporteMantenimiento,
+                    ImporteMantenimientoNuevo = request.ImporteMantenimiento,
+                    ImporteCocheraAnterior = contratoActual.ImporteCochera,
+                    ImporteCocheraNuevo = request.ImporteCochera,
+                    MonedaAnterior = contratoActual.Moneda,
+                    MonedaNueva = request.Moneda
+                },
+                transaction: transaction);
+
+            var columnasDetalle = new List<string>
+            {
+                "IdContratoVersion",
+                "Servicio",
+                "MonedaAnterior",
+                "ImporteAnterior",
+                "ImporteNuevo",
+                "PeriodicidadAnterior",
+                "PeriodicidadNueva",
+                "DiaLimiteAnterior",
+                "DiaLimiteNuevo",
+                "Observacion"
+            };
+            var valoresDetalle = new List<string>
+            {
+                "@IdContratoVersion",
+                "@Servicio",
+                "@MonedaAnterior",
+                "@ImporteAnterior",
+                "@ImporteNuevo",
+                "@PeriodicidadAnterior",
+                "@PeriodicidadNueva",
+                "@DiaLimiteAnterior",
+                "@DiaLimiteNuevo",
+                "@Observacion"
+            };
+
+            if (await ExisteColumnaAsync("dbo.a_contrato_version_detalle", "MonedaNueva", cancellationToken))
+            {
+                columnasDetalle.Add("MonedaNueva");
+                valoresDetalle.Add("@MonedaNueva");
+            }
+
+            if (await ExisteColumnaAsync("dbo.a_contrato_version_detalle", "UsuarioCreacion", cancellationToken))
+            {
+                columnasDetalle.Add("UsuarioCreacion");
+                valoresDetalle.Add("@UsuarioCreacion");
+            }
+
+            if (await ExisteColumnaAsync("dbo.a_contrato_version_detalle", "FechaCreacion", cancellationToken))
+            {
+                columnasDetalle.Add("FechaCreacion");
+                valoresDetalle.Add("SYSDATETIME()");
+            }
+
+            foreach (var detalle in detalles)
+            {
+                await connection.ExecuteAsync(
+                    $"""
+                    INSERT INTO dbo.a_contrato_version_detalle
+                    (
+                        {string.Join(", ", columnasDetalle)}
+                    )
+                    VALUES
+                    (
+                        {string.Join(", ", valoresDetalle)}
+                    );
+                    """,
+                    new
+                    {
+                        IdContratoVersion = versionId,
+                        UsuarioCreacion = usuario,
+                        Servicio = detalle.Servicio,
+                        MonedaAnterior = detalle.MonedaAnterior,
+                        ImporteAnterior = detalle.ImporteAnterior,
+                        MonedaNueva = detalle.MonedaNueva,
+                        ImporteNuevo = detalle.ImporteNuevo,
+                        PeriodicidadAnterior = detalle.PeriodicidadAnterior,
+                        PeriodicidadNueva = detalle.PeriodicidadNueva,
+                        DiaLimiteAnterior = detalle.DiaLimiteAnterior,
+                        DiaLimiteNuevo = detalle.DiaLimiteNuevo,
+                        Observacion = detalle.Observacion
+                    },
+                    transaction: transaction);
+            }
+
+            // La adenda solo registra una nueva version y su auditoria.
+            // El contrato base permanece intacto para conservar el historial original.
+            await transaction.CommitAsync(cancellationToken);
+
+            var auditorias = new List<AuditoriaCambioDto>();
+
+            AgregarAuditoriaCambio(
+                auditorias,
+                "Arrendamientos",
+                "a_contrato_version",
+                versionId,
+                tipoMovimiento,
+                "Cabecera",
+                "Moneda",
+                contratoActual.Moneda,
+                request.Moneda,
+                usuario,
+                observacion);
+
+            AgregarAuditoriaCambio(
+                auditorias,
+                "Arrendamientos",
+                "a_contrato_version",
+                versionId,
+                tipoMovimiento,
+                "Cabecera",
+                "FechaVigenciaDesde",
+                contratoActual.FechaFin.ToString("yyyy-MM-dd"),
+                fechaVigenciaDesde.ToString("yyyy-MM-dd"),
+                usuario,
+                observacion);
+
+            if (fechaVigenciaHasta.HasValue || contratoActual.FechaFin != default)
+            {
+                AgregarAuditoriaCambio(
+                    auditorias,
+                    "Arrendamientos",
+                    "a_contrato_version",
+                    versionId,
+                    tipoMovimiento,
+                    "Cabecera",
+                    "FechaVigenciaHasta",
+                    contratoActual.FechaFin.ToString("yyyy-MM-dd"),
+                    fechaVigenciaHasta?.ToString("yyyy-MM-dd"),
+                    usuario,
+                    observacion);
+            }
+
+            AgregarAuditoriaDetalleServicio(auditorias, versionId, tipoMovimiento, usuario, observacion, detalles, "ALQUILER");
+            AgregarAuditoriaDetalleServicio(auditorias, versionId, tipoMovimiento, usuario, observacion, detalles, "MANTENIMIENTO");
+            AgregarAuditoriaDetalleServicio(auditorias, versionId, tipoMovimiento, usuario, observacion, detalles, "COCHERA");
+
+            if (auditorias.Count > 0)
+            {
+                await _auditoriaCambiosService.RegistrarLoteAsync(auditorias, cancellationToken);
+            }
+
+            return new ArrendamientosCommandResultDto
+            {
+                Success = true,
+                Message = "Version de contrato registrada correctamente.",
+                Id = request.IdContrato,
+                IdVersion = versionId
+            };
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
     }
 
     public Task<ArrendamientosCommandResultDto> GuardarContratoUnidadAsync(ArrendamientosContratoUnidadRequestDto request, string usuarioAccion, CancellationToken cancellationToken = default)
@@ -1345,6 +1880,41 @@ public sealed class ArrendamientosService : IArrendamientosService
             "Haber",
             "Pago");
 
+        var exonerado = GetDecimal(values,
+            "Exonerado",
+            "MontoExonerado",
+            "ImporteExonerado");
+
+        var totalContratoAnualServicio = GetDecimal(values,
+            "TotalContratoAnualServicio",
+            "TotalContratoAnual",
+            "ContratoAnual");
+
+        var totalPagadoAnualServicio = GetDecimal(values,
+            "TotalPagadoAnualServicio",
+            "TotalPagadoAnual",
+            "PagadoAnual");
+
+        var totalExoneradoAnualServicio = GetDecimal(values,
+            "TotalExoneradoAnualServicio",
+            "TotalExoneradoAnual",
+            "ExoneradoAnual");
+
+        var totalDebeAnualServicio = GetDecimal(values,
+            "TotalDebeAnualServicio",
+            "TotalDebeAnual",
+            "DebeAnual");
+
+        var saldoAcumulado = GetDecimal(values,
+            "SaldoAcumulado",
+            "SaldoAcumuladoServicio",
+            "SaldoAcumuladoAnual");
+
+        var saldoReal = GetDecimal(values,
+            "SaldoReal",
+            "SaldoNeto",
+            "SaldoRealMensual");
+
         var saldo = GetDecimal(values,
             "Saldo",
             "Pendiente",
@@ -1360,6 +1930,18 @@ public sealed class ArrendamientosService : IArrendamientosService
         {
             saldo = contrato.Value - pagado.Value;
         }
+
+        if (!saldoReal.HasValue && contrato.HasValue)
+        {
+            saldoReal = contrato.Value - (pagado ?? 0m) - (exonerado ?? 0m);
+        }
+
+        if (!saldo.HasValue)
+        {
+            saldo = saldoReal ?? (contrato.HasValue && pagado.HasValue ? contrato.Value - pagado.Value : null);
+        }
+
+        saldo = saldoReal ?? saldo;
 
         var periodo = GetString(values,
             "Periodo",
@@ -1386,9 +1968,17 @@ public sealed class ArrendamientosService : IArrendamientosService
             Detalle = GetString(values, "Detalle", "Descripcion", "Glosa"),
             Estado = GetString(values, "Estado"),
             Moneda = GetString(values, "Moneda", "MonedaOperacion", "Currency"),
+            TipoPago = GetString(values, "TipoPago", "Tipo", "TipoMovimiento"),
             Importe = contrato,
             ImporteTransferido = pagado,
-            Saldo = pagado,
+            Exonerado = exonerado,
+            Saldo = saldo,
+            SaldoReal = saldoReal,
+            TotalContratoAnualServicio = totalContratoAnualServicio,
+            TotalPagadoAnualServicio = totalPagadoAnualServicio,
+            TotalExoneradoAnualServicio = totalExoneradoAnualServicio,
+            TotalDebeAnualServicio = totalDebeAnualServicio,
+            SaldoAcumulado = saldoAcumulado,
             Fecha = GetString(values, "Fecha", "FechaPago", "FechaOperacion", "FechaContabilizacion"),
             Arrendador = GetString(values, "Arrendador", "Propietario"),
             Inquilino = GetString(values, "Inquilino", "Cliente", "RazonSocial", "RazonSocialInquilino", "NombreInquilino", "NomInquilino")
@@ -1787,6 +2377,47 @@ public sealed class ArrendamientosService : IArrendamientosService
         }
     }
 
+    private static void AgregarDetalleVersion(
+        ICollection<ContratoVersionDetalleBuilderRow> detalles,
+        string servicio,
+        string? monedaAnterior,
+        decimal? importeAnterior,
+        string? monedaNueva,
+        decimal? importeNuevo,
+        string? periodicidadAnterior,
+        string? periodicidadNueva,
+        int? diaLimiteAnterior,
+        int? diaLimiteNuevo,
+        string? observacion)
+    {
+        var cambioMonto = (importeAnterior ?? 0m) != (importeNuevo ?? 0m)
+                          || !string.Equals(NormalizarMoneda(monedaAnterior), NormalizarMoneda(monedaNueva), StringComparison.OrdinalIgnoreCase)
+                          || !string.Equals(NormalizarTexto(periodicidadAnterior), NormalizarTexto(periodicidadNueva), StringComparison.OrdinalIgnoreCase)
+                          || diaLimiteAnterior != diaLimiteNuevo;
+
+        if (!cambioMonto)
+        {
+            return;
+        }
+
+        detalles.Add(new ContratoVersionDetalleBuilderRow
+        {
+            Servicio = servicio,
+            MonedaAnterior = NormalizarMoneda(monedaAnterior),
+            ImporteAnterior = importeAnterior,
+            MonedaNueva = NormalizarMoneda(monedaNueva),
+            ImporteNuevo = importeNuevo,
+            PeriodicidadAnterior = NormalizarTexto(periodicidadAnterior),
+            PeriodicidadNueva = NormalizarTexto(periodicidadNueva),
+            DiaLimiteAnterior = diaLimiteAnterior,
+            DiaLimiteNuevo = diaLimiteNuevo,
+            Observacion = observacion
+        });
+    }
+
+    private static string NormalizarTexto(string? value)
+        => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim().ToUpperInvariant();
+
     private static string ResolverMonedaObligacion(string? monedaItem, string? codigoConcepto, ArrendamientosContratoMonedaDto? contrato)
     {
         var monedaNormalizada = NormalizarMoneda(monedaItem);
@@ -1915,6 +2546,71 @@ public sealed class ArrendamientosService : IArrendamientosService
             cancellationToken);
     }
 
+    private static void AgregarAuditoriaCambio(
+        List<AuditoriaCambioDto> auditorias,
+        string modulo,
+        string entidad,
+        int idRegistro,
+        string accion,
+        string seccion,
+        string campo,
+        string? valorAnterior,
+        string? valorNuevo,
+        string usuarioAccion,
+        string? observacion)
+    {
+        if (string.Equals(valorAnterior, valorNuevo, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        auditorias.Add(new AuditoriaCambioDto
+        {
+            Modulo = modulo,
+            Entidad = entidad,
+            IdRegistro = idRegistro.ToString(),
+            Accion = accion,
+            Seccion = seccion,
+            Campo = campo,
+            ValorAnterior = valorAnterior,
+            ValorNuevo = valorNuevo,
+            UsuarioAccion = usuarioAccion,
+            Observacion = observacion
+        });
+    }
+
+    private static void AgregarAuditoriaDetalleServicio(
+        List<AuditoriaCambioDto> auditorias,
+        int idRegistro,
+        string accion,
+        string usuarioAccion,
+        string? observacion,
+        IReadOnlyCollection<ContratoVersionDetalleBuilderRow> detalles,
+        string servicio)
+    {
+        var detalle = detalles.FirstOrDefault(item => string.Equals(item.Servicio, servicio, StringComparison.OrdinalIgnoreCase));
+        if (detalle is null)
+        {
+            return;
+        }
+
+        var valorAnterior = $"{detalle.MonedaAnterior ?? string.Empty} | {detalle.ImporteAnterior:0.00} | {detalle.PeriodicidadAnterior ?? string.Empty} | Dia {detalle.DiaLimiteAnterior?.ToString() ?? string.Empty}";
+        var valorNuevo = $"{detalle.MonedaNueva ?? string.Empty} | {detalle.ImporteNuevo:0.00} | {detalle.PeriodicidadNueva ?? string.Empty} | Dia {detalle.DiaLimiteNuevo?.ToString() ?? string.Empty}";
+
+        AgregarAuditoriaCambio(
+            auditorias,
+            "Arrendamientos",
+            "a_contrato_version",
+            idRegistro,
+            accion,
+            "Servicios",
+            servicio,
+            valorAnterior,
+            valorNuevo,
+            usuarioAccion,
+            observacion);
+    }
+
     private sealed class StoredProcedureResultRow
     {
         public bool? Exito { get; set; }
@@ -1932,6 +2628,67 @@ public sealed class ArrendamientosService : IArrendamientosService
         public string? MonedaMantenimiento { get; set; }
         public string? MonedaCochera { get; set; }
         public string? MonedaGarantia { get; set; }
+    }
+
+    private sealed class ContratoVersionDetalleBuilderRow
+    {
+        public string Servicio { get; set; } = string.Empty;
+        public string? MonedaAnterior { get; set; }
+        public decimal? ImporteAnterior { get; set; }
+        public string? MonedaNueva { get; set; }
+        public decimal? ImporteNuevo { get; set; }
+        public string? PeriodicidadAnterior { get; set; }
+        public string? PeriodicidadNueva { get; set; }
+        public int? DiaLimiteAnterior { get; set; }
+        public int? DiaLimiteNuevo { get; set; }
+        public string? Observacion { get; set; }
+    }
+
+    private sealed class ContratoVersionSnapshotRow
+    {
+        public int IdContrato { get; set; }
+        public string? CodigoContrato { get; set; }
+        public int IdArrendador { get; set; }
+        public int IdInquilino { get; set; }
+        public int IdInmueble { get; set; }
+        public int? IdUnidadPrincipal { get; set; }
+        public DateTime? FechaFirma { get; set; }
+        public DateTime FechaInicio { get; set; }
+        public DateTime FechaFin { get; set; }
+        public string? Moneda { get; set; }
+        public string? MonedaAlquiler { get; set; }
+        public string? MonedaMantenimiento { get; set; }
+        public string? MonedaCochera { get; set; }
+        public string? MonedaGarantia { get; set; }
+        public decimal ImporteAlquiler { get; set; }
+        public string? PeriodicidadAlquiler { get; set; }
+        public int DiaLimitePago { get; set; }
+        public int DiasGracia { get; set; }
+        public decimal ImporteMantenimiento { get; set; }
+        public string? PeriodicidadMantenimiento { get; set; }
+        public int DiaLimiteMantenimiento { get; set; }
+        public decimal ImporteCochera { get; set; }
+        public string? PeriodicidadCochera { get; set; }
+        public int DiaLimiteCochera { get; set; }
+        public decimal GarantiaPactada { get; set; }
+        public decimal GarantiaPagada { get; set; }
+        public decimal GarantiaPendiente { get; set; }
+        public string? TipoReajuste { get; set; }
+        public decimal? PorcentajeReajuste { get; set; }
+        public string? FormulaReajuste { get; set; }
+        public string? FrecuenciaReajuste { get; set; }
+        public decimal PenalidadMora { get; set; }
+        public decimal InteresMoratorio { get; set; }
+        public string? EstadoContrato { get; set; }
+        public string? Observaciones { get; set; }
+        public string? DocumentoFirmadoNombre { get; set; }
+        public string? DocumentoFirmadoUrl { get; set; }
+        public decimal? DocumentoFirmadoTamanoKB { get; set; }
+        public int? IdEmpleadoResponsable { get; set; }
+        public DateTime? FechaSuspension { get; set; }
+        public DateTime? FechaCancelacion { get; set; }
+        public string? MotivoCancelacion { get; set; }
+        public bool Activo { get; set; }
     }
 
     private sealed class ConceptoCodigoRow

@@ -41,6 +41,7 @@ type ArrendamientosCrudPageProps<TForm extends { id?: number | null }> = {
   exportFileName?: string;
   showSearchHint?: boolean;
   rowActionsPosition?: number;
+  toolbarExtras?: ReactNode;
   renderRowActions?: (
     row: ArrendamientosFila,
     helpers: {
@@ -108,6 +109,7 @@ export default function ArrendamientosCrudPage<TForm extends { id?: number | nul
   exportFileName,
   showSearchHint = true,
   rowActionsPosition,
+  toolbarExtras,
   renderRowActions,
 }: ArrendamientosCrudPageProps<TForm>) {
   const [rows, setRows] = useState<ArrendamientosFila[]>([]);
@@ -144,7 +146,7 @@ export default function ArrendamientosCrudPage<TForm extends { id?: number | nul
 
   useEffect(() => {
     void cargar();
-  }, []);
+  }, [loadRows]);
 
   const abrirNuevo = () => {
     setMode("nuevo");
@@ -201,6 +203,7 @@ export default function ArrendamientosCrudPage<TForm extends { id?: number | nul
       fillHeight
       actions={
         <div style={styles.actionsRow}>
+          {toolbarExtras ? <div style={styles.toolbarExtras}>{toolbarExtras}</div> : null}
           <button type="button" style={styles.secondaryButton} onClick={abrirNuevo}>
             <Plus size={16} />
             Nuevo
@@ -303,6 +306,18 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexWrap: "wrap",
     gap: 8,
+    alignItems: "center",
+  },
+  toolbarExtras: {
+    display: "inline-flex",
+    alignItems: "center",
+  },
+  headerActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
   },
   primaryButton: {
     display: "inline-flex",

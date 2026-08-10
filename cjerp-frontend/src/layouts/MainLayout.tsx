@@ -83,6 +83,10 @@ export default function MainLayout() {
     active: boolean;
     previousCollapsed: boolean;
   } | null>(null);
+  const dshPagosSidebarStateRef = useRef<{
+    active: boolean;
+    previousCollapsed: boolean;
+  } | null>(null);
 
   const usuarioMostrar = (authUser?.usuario || "").toUpperCase();
   const empleadoMostrar = (authUser?.nombre || authUser?.nombreEmpleado || "").toUpperCase();
@@ -186,6 +190,35 @@ export default function MainLayout() {
     const savedState = ingresosEgresosSidebarStateRef.current;
     if (savedState?.active) {
       ingresosEgresosSidebarStateRef.current = null;
+
+      if (savedState.previousCollapsed !== isSidebarCollapsed) {
+        setIsSidebarCollapsed(savedState.previousCollapsed);
+      }
+    }
+  }, [isSidebarCollapsed, location.pathname]);
+
+  useEffect(() => {
+    const isDshPagosPage =
+      location.pathname.startsWith("/arrendamientos/dshpagos") ||
+      location.pathname.startsWith("/arrendamientos/pagosdsh");
+
+    if (isDshPagosPage) {
+      if (!dshPagosSidebarStateRef.current?.active) {
+        dshPagosSidebarStateRef.current = {
+          active: true,
+          previousCollapsed: isSidebarCollapsed,
+        };
+
+        if (!isSidebarCollapsed) {
+          setIsSidebarCollapsed(true);
+        }
+      }
+      return;
+    }
+
+    const savedState = dshPagosSidebarStateRef.current;
+    if (savedState?.active) {
+      dshPagosSidebarStateRef.current = null;
 
       if (savedState.previousCollapsed !== isSidebarCollapsed) {
         setIsSidebarCollapsed(savedState.previousCollapsed);
