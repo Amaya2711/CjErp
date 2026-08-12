@@ -206,7 +206,7 @@ BEGIN
                 p.Corre AS IdRegistroPlanilla,
                 CONCAT('Coincidencia exacta por NroOperacion: ', p.NroOperacion) AS ObservacionConciliacion,
                 ISNULL(p.Corre, 0) AS OrdenPlanilla,
-                ABS(ABS(ISNULL(m.Monto, 0)) - ABS(ISNULL(ISNULL(p.TotalPlanillaBase, p.TotalPagar), 0))) AS DiferenciaMontoAbs
+                ABS(ABS(ISNULL(m.Monto, 0)) - ABS(ISNULL(p.TotalPagar, 0))) AS DiferenciaMontoAbs
             FROM PlanillaNormalizada p
             WHERE m.NroOperacionNormalizado <> ''
               AND p.NroOperacionNormalizado = m.NroOperacionNormalizado
@@ -223,7 +223,7 @@ BEGIN
                 p.Corre AS IdRegistroPlanilla,
                 CONCAT('Coincidencia por Cuenta dentro de DescripcionOperacion: ', p.Cuenta) AS ObservacionConciliacion,
                 ISNULL(p.Corre, 0) AS OrdenPlanilla,
-                ABS(ABS(ISNULL(m.Monto, 0)) - ABS(ISNULL(ISNULL(p.TotalPlanillaBase, p.TotalPagar), 0))) AS DiferenciaMontoAbs
+                ABS(ABS(ISNULL(m.Monto, 0)) - ABS(ISNULL(p.TotalPagar, 0))) AS DiferenciaMontoAbs
             FROM PlanillaNormalizada p
             WHERE m.DescripcionNumerica <> ''
               AND p.CuentaNumerica <> ''
@@ -245,7 +245,7 @@ BEGIN
                 p.Corre AS IdRegistroPlanilla,
                 CONCAT('Coincidencia por CuentaInter dentro de DescripcionOperacion: ', p.CuentaInter) AS ObservacionConciliacion,
                 ISNULL(p.Corre, 0) AS OrdenPlanilla,
-                ABS(ABS(ISNULL(m.Monto, 0)) - ABS(ISNULL(ISNULL(p.TotalPlanillaBase, p.TotalPagar), 0))) AS DiferenciaMontoAbs
+                ABS(ABS(ISNULL(m.Monto, 0)) - ABS(ISNULL(p.TotalPagar, 0))) AS DiferenciaMontoAbs
             FROM PlanillaNormalizada p
             WHERE m.DescripcionNumerica <> ''
               AND p.CuentaInterNumerica <> ''

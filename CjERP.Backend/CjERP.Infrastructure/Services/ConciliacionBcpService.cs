@@ -1695,7 +1695,7 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
             : esScotiabank && scotiabankSummary is not null
             ? scotiabankSummary.TotalPagar
             : esScotiabank && planillaRowsParaMostrar.Count > 0
-                ? -planillaRowsParaMostrar.Sum(row => Math.Abs(row.TotalPlanillaBase ?? row.TotalPagar ?? 0m))
+                ? planillaRowsParaMostrar[0].TotalPagar
                 : candidate?.Planilla.TotalPagar;
         var correlativoPlanilla = esDescripcionNoConciliable
             ? null
@@ -4595,11 +4595,9 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
     private static ScotiabankOperationSummary BuildScotiabankOperationSummary(IReadOnlyList<PlanillaConciliacionRow> rows)
     {
         var rowsToUse = rows.ToList();
-        var primerMonto = rowsToUse
-            .OrderBy(row => row.Corre ?? int.MaxValue)
-            .Select(row => row.TotalPlanillaBase ?? row.TotalPagar)
-            .FirstOrDefault(value => value.HasValue);
-        var totalPagarAgrupado = primerMonto ?? 0m;
+        var totalPagarAgrupado = rowsToUse
+            .Select(row => row.TotalPagar)
+            .FirstOrDefault(value => value.HasValue) ?? 0m;
         var correlativos = rowsToUse
             .Select(row => row.CorreTexto ?? row.Corre?.ToString(CultureInfo.InvariantCulture))
             .Where(value => !string.IsNullOrWhiteSpace(value))
