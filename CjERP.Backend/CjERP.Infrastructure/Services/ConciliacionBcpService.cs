@@ -1626,6 +1626,8 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         return descripcionOperacion.Contains("IMPUESTO", StringComparison.OrdinalIgnoreCase) ||
                descripcionOperacion.Contains("IGV", StringComparison.OrdinalIgnoreCase) ||
                descripcionOperacion.Contains("ITF", StringComparison.OrdinalIgnoreCase) ||
+               descripcionOperacion.Contains("AJUSTE CIRCULAR", StringComparison.OrdinalIgnoreCase) ||
+               descripcionOperacion.Contains("COMISION", StringComparison.OrdinalIgnoreCase) ||
                descripcionOperacion.Contains("RETENCION", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -4593,8 +4595,11 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
     private static ScotiabankOperationSummary BuildScotiabankOperationSummary(IReadOnlyList<PlanillaConciliacionRow> rows)
     {
         var rowsToUse = rows.ToList();
-        var totalPagarAgrupado = -rowsToUse
-            .Sum(row => Math.Abs(row.TotalPlanillaBase ?? row.TotalPagar ?? 0m));
+        var primerMonto = rowsToUse
+            .OrderBy(row => row.Corre ?? int.MaxValue)
+            .Select(row => row.TotalPlanillaBase ?? row.TotalPagar)
+            .FirstOrDefault(value => value.HasValue);
+        var totalPagarAgrupado = primerMonto ?? 0m;
         var correlativos = rowsToUse
             .Select(row => row.CorreTexto ?? row.Corre?.ToString(CultureInfo.InvariantCulture))
             .Where(value => !string.IsNullOrWhiteSpace(value))
