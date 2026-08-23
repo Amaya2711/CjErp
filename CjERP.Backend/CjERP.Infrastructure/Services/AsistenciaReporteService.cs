@@ -33,6 +33,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
         "CJIBERICO@CJ-TELECOM.COM"
     };
     private const string ReporteSp = "dbo.RptAsistenciaFechas";
+    private const string TrackingSp = "dbo.sp_AsistenciaTracking_Consulta";
     private const string UpdateEstadoMarcacionSp = "dbo.sp_Asistencia_ActualizarEstadoEmpleado";
     private const decimal MissingOrIncompleteHours = 9.6m;
     private static readonly TimeSpan WupSendTimeout = TimeSpan.FromSeconds(30);
@@ -245,6 +246,38 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             cancellationToken);
     }
 
+    public async Task<AsistenciaTrackingConsultaDto> ObtenerTrackingEmpleadoAsync(
+        AsistenciaTrackingConsultaRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request.IdEmpleado <= 0)
+        {
+            throw new InvalidOperationException("El IdEmpleado es obligatorio para consultar el tracking.");
+        }
+
+        var fechaAsistencia = ParseDate(request.FechaAsistencia);
+        if (!fechaAsistencia.HasValue)
+        {
+            throw new InvalidOperationException("La FechaAsistencia no tiene un formato valido.");
+        }
+
+        var rows = await QueryTrackingRowsAsync(request.IdEmpleado, fechaAsistencia.Value.Date, cancellationToken);
+        var puntos = rows
+            .Select(MapTrackingRow)
+            .Where(item => item.LatPto.HasValue && item.LonPto.HasValue)
+            .OrderBy(item => item.FechaHora ?? DateTime.MinValue)
+            .ThenBy(item => item.Hora, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return new AsistenciaTrackingConsultaDto
+        {
+            IdEmpleado = request.IdEmpleado,
+            NombreEmpleado = puntos.FirstOrDefault()?.NombreEmpleado ?? string.Empty,
+            FechaAsistencia = fechaAsistencia.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            Puntos = puntos
+        };
+    }
+
     private async Task<byte[]> GenerarPdfEmpleadoLlamadaAtencionInternoAsync(
         AsistenciaReportePdfRequestDto request,
         string usuarioEjecucion,
@@ -412,6 +445,26 @@ public class AsistenciaReporteService : IAsistenciaReporteService
         return await connection.QueryAsync(
             new CommandDefinition(
                 ReporteSp,
+                parameters,
+                commandType: CommandType.StoredProcedure,
+                cancellationToken: cancellationToken,
+                commandTimeout: 120));
+    }
+
+    private async Task<IEnumerable<dynamic>> QueryTrackingRowsAsync(
+        int idEmpleado,
+        DateTime fechaAsistencia,
+        CancellationToken cancellationToken)
+    {
+        using var connection = new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
+
+        var parameters = new DynamicParameters();
+        parameters.Add("@IdEmpleado", idEmpleado, DbType.Int32);
+        parameters.Add("@FechaAsistencia", fechaAsistencia.Date, DbType.Date);
+
+        return await connection.QueryAsync(
+            new CommandDefinition(
+                TrackingSp,
                 parameters,
                 commandType: CommandType.StoredProcedure,
                 cancellationToken: cancellationToken,
@@ -1218,6 +1271,24 @@ public class AsistenciaReporteService : IAsistenciaReporteService
         };
     }
 
+    private static AsistenciaTrackingPuntoDto MapTrackingRow(dynamic row)
+    {
+        var values = (IDictionary<string, object?>)row;
+
+        return new AsistenciaTrackingPuntoDto
+        {
+            IdEmpleado = GetInt(values, "IdEmpleado", "idEmpleado") ?? 0,
+            NombreEmpleado = GetString(values, "nombreempleado", "NombreEmpleado", "nombreEmpleado"),
+            FechaAsistencia = GetDateDisplayString(values, "FechaAsistencia", "fechaAsistencia", "Fecha", "fecha"),
+            Hora = GetTimeString(values, "Hora", "hora", "FechaHora", "fechaHora"),
+            HoraSalida = GetString(values, "HoraSalida", "horaSalida", "Salida", "salida"),
+            LatPto = GetNullableDecimal(values, "LatPto", "latpto", "Latitud", "latitud"),
+            LonPto = GetNullableDecimal(values, "LonPto", "lonpto", "Longitud", "longitud"),
+            Source = GetString(values, "Source", "source"),
+            FechaHora = GetNullableDateTime(values, "FechaHora", "fechaHora")
+        };
+    }
+
     private MailRecipients BuildEmailRecipients(IReadOnlyList<AsistenciaReportePdfItemDto> items)
     {
         var itemPrincipal = items.FirstOrDefault();
@@ -1750,6 +1821,94 @@ public class AsistenciaReporteService : IAsistenciaReporteService
         }
 
         return 0m;
+    }
+
+    private static decimal? GetNullableDecimal(IDictionary<string, object?> values, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (!TryGetValue(values, key, out var value) || value is null || value is DBNull)
+            {
+                continue;
+            }
+
+            if (value is decimal decimalValue)
+            {
+                return decimalValue;
+            }
+
+            if (value is double doubleValue && !double.IsNaN(doubleValue) && !double.IsInfinity(doubleValue))
+            {
+                return (decimal)doubleValue;
+            }
+
+            if (value is float floatValue && !float.IsNaN(floatValue) && !float.IsInfinity(floatValue))
+            {
+                return (decimal)floatValue;
+            }
+
+            var text = Convert.ToString(value, CultureInfo.InvariantCulture)?.Trim();
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            if (decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedInvariant))
+            {
+                return parsedInvariant;
+            }
+
+            if (decimal.TryParse(text.Replace(",", "."), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedNormalized))
+            {
+                return parsedNormalized;
+            }
+
+            if (decimal.TryParse(text, NumberStyles.Any, CultureInfo.CurrentCulture, out var parsedCurrent))
+            {
+                return parsedCurrent;
+            }
+        }
+
+        return null;
+    }
+
+    private static DateTime? GetNullableDateTime(IDictionary<string, object?> values, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (!TryGetValue(values, key, out var value) || value is null || value is DBNull)
+            {
+                continue;
+            }
+
+            if (value is DateTime dateTime)
+            {
+                return dateTime;
+            }
+
+            if (value is DateTimeOffset dateTimeOffset)
+            {
+                return dateTimeOffset.DateTime;
+            }
+
+            var text = Convert.ToString(value, CultureInfo.InvariantCulture)?.Trim();
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            if (DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedInvariant))
+            {
+                return parsedInvariant;
+            }
+
+            if (DateTime.TryParse(text, CultureInfo.CurrentCulture, DateTimeStyles.None, out var parsedCurrent))
+            {
+                return parsedCurrent;
+            }
+        }
+
+        return null;
     }
 
     private static async Task<ReporteWhatsappSendResponseDto> ExecuteWithRetryAsync(

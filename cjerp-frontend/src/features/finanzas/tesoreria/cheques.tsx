@@ -8,6 +8,7 @@ import SidePanelForm from "../../../components/base/SidePanelForm";
 import {
   actualizarCheque,
   crearCheque,
+  obtenerAdjuntoCheque,
   listarCheques,
   obtenerCheque,
   rechazarCheque,
@@ -21,7 +22,6 @@ import type { ChequeGuardarRequest, ChequeRow } from "../../../models/cheque";
 import { getAuthUser } from "../../../utils/authStorage";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 import { compressImageForUpload } from "../../../utils/imageCompression";
-import { buildSharePointUrl } from "../../../utils/sharepoint";
 
 type SortKey =
   | "fechaCheque"
@@ -61,6 +61,8 @@ type RejectModalState = {
 type ImageViewerState = {
   title: string;
   url: string;
+  sourceUrl: string;
+  mimeType: string;
 } | null;
 
 function normalizeOptionValue(option: ConstanteOption): string {
@@ -257,6 +259,8 @@ export default function TesoreriaChequesPage() {
   const [rejectModal, setRejectModal] = useState<RejectModalState>(null);
   const [imageViewer, setImageViewer] = useState<ImageViewerState>(null);
   const [showPanelImagePreview, setShowPanelImagePreview] = useState(false);
+  const [panelImagePreviewUrl, setPanelImagePreviewUrl] = useState("");
+  const [panelImagePreviewMimeType, setPanelImagePreviewMimeType] = useState("");
   const [uploadingImage, setUploadingImage] = useState(false);
   const [uploadImageError, setUploadImageError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -655,18 +659,143 @@ export default function TesoreriaChequesPage() {
     }
   };
 
-  const getRutaVisualizacion = (ruta?: string | null) => {
-    return buildSharePointUrl(ruta);
+  const getRutaVisualizacion = (ruta?: string | null) => String(ruta ?? "").trim();
+
+  const isPreviewMimeType = (mimeType?: string | null) => {
+    const normalized = String(mimeType ?? "").trim().toLowerCase();
+    return (
+      normalized.startsWith("image/") ||
+      normalized === "application/pdf" ||
+      normalized === "application/x-pdf"
+    );
   };
 
-  const abrirVistaImagen = (ruta?: string | null, title = "Imagen adjunta") => {
-    const finalUrl = getRutaVisualizacion(ruta);
-    if (!finalUrl) {
+  const cerrarVistaImagen = () => {
+    setImageViewer((current) => {
+      if (current?.url?.startsWith("blob:")) {
+        URL.revokeObjectURL(current.url);
+      }
+
+      return null;
+    });
+  };
+
+  const abrirAdjuntoEnNuevaPestana = () => {
+    if (!imageViewer?.url) {
       return;
     }
 
-    setImageViewer({ title, url: finalUrl });
+    const targetUrl =
+      imageViewer.sourceUrl && /^https?:\/\//i.test(imageViewer.sourceUrl)
+        ? imageViewer.sourceUrl
+        : imageViewer.url;
+
+    const link = document.createElement("a");
+    link.href = targetUrl;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
   };
+
+  const descargarAdjunto = () => {
+    if (!imageViewer?.url) {
+      return;
+    }
+
+    const link = document.createElement("a");
+    link.href = imageViewer.url;
+    link.download = "adjunto";
+    link.rel = "noopener";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
+  const abrirVistaImagen = async (ruta?: string | null, title = "Imagen adjunta") => {
+    const raw = getRutaVisualizacion(ruta);
+    if (!raw) {
+      return;
+    }
+
+    try {
+      const blob = await obtenerAdjuntoCheque(raw);
+      const objectUrl = URL.createObjectURL(blob);
+      const mimeType = blob.type || "";
+
+      setImageViewer((current) => {
+        if (current?.url?.startsWith("blob:")) {
+          URL.revokeObjectURL(current.url);
+        }
+
+        return { title, url: objectUrl, sourceUrl: raw, mimeType };
+      });
+    } catch (err: unknown) {
+      setError(getHttpErrorMessage(err, "No se pudo cargar el adjunto del cheque."));
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl = "";
+
+    if (!showPanelImagePreview || !form.ruta.trim()) {
+      setPanelImagePreviewUrl((current) => {
+        if (current.startsWith("blob:")) {
+          URL.revokeObjectURL(current);
+        }
+
+        return "";
+      });
+      setPanelImagePreviewMimeType("");
+
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const loadPanelPreview = async () => {
+      try {
+        const blob = await obtenerAdjuntoCheque(form.ruta);
+        if (cancelled) {
+          return;
+        }
+
+        objectUrl = URL.createObjectURL(blob);
+        const mimeType = blob.type || "";
+        setPanelImagePreviewUrl((current) => {
+          if (current.startsWith("blob:")) {
+            URL.revokeObjectURL(current);
+          }
+
+          return objectUrl;
+        });
+        setPanelImagePreviewMimeType(mimeType);
+      } catch {
+        if (!cancelled) {
+          setPanelImagePreviewUrl((current) => {
+            if (current.startsWith("blob:")) {
+              URL.revokeObjectURL(current);
+            }
+
+            return "";
+          });
+          setPanelImagePreviewMimeType("");
+        }
+      }
+    };
+
+    void loadPanelPreview();
+
+    return () => {
+      cancelled = true;
+
+      if (objectUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [form.ruta, showPanelImagePreview]);
 
   const procesarRutaSeleccionada = async (
     event: React.ChangeEvent<HTMLInputElement>
@@ -682,7 +811,9 @@ export default function TesoreriaChequesPage() {
     setUploadImageError(null);
 
     try {
-      const optimizedFile = await compressImageForUpload(file);
+      const optimizedFile = file.type.startsWith("image/")
+        ? await compressImageForUpload(file)
+        : file;
       const formData = new FormData();
       formData.append("archivo", optimizedFile);
 
@@ -701,7 +832,7 @@ export default function TesoreriaChequesPage() {
       const response = await subirImagenCheque(formData);
       setForm((prev) => ({
         ...prev,
-        ruta: response.fileUrl || response.storagePath || "",
+        ruta: response.storagePath || response.fileUrl || "",
       }));
       setShowPanelImagePreview(false);
     } catch (err: unknown) {
@@ -849,15 +980,18 @@ export default function TesoreriaChequesPage() {
                       </td>
                       <td style={styles.td} title={row.ruta ?? ""}>
                         {row.ruta ? (
-                          <button
-                            type="button"
-                            style={styles.linkButton}
-                            onClick={() =>
-                              abrirVistaImagen(row.ruta, `Cheque ${row.nroCheque || row.idCheque}`)
-                            }
-                          >
-                            Ver imagen
-                          </button>
+                            <button
+                              type="button"
+                              style={styles.linkButton}
+                              onClick={() =>
+                                void abrirVistaImagen(
+                                  row.ruta,
+                                  `Cheque ${row.nroCheque || row.idCheque}`
+                                )
+                              }
+                            >
+                              Ver imagen
+                            </button>
                         ) : (
                           "-"
                         )}
@@ -1109,7 +1243,7 @@ export default function TesoreriaChequesPage() {
               <input
                 ref={archivoRutaInputRef}
                 type="file"
-                accept="image/*"
+                accept=".jpg,.jpeg,.png,.webp,.bmp,.pdf,.doc,.docx,.xls,.xlsx,.txt"
                 style={{ display: "none" }}
                 onChange={procesarRutaSeleccionada}
               />
@@ -1120,13 +1254,30 @@ export default function TesoreriaChequesPage() {
                 style={{ ...styles.input, background: "#F8FAFC" }}
                 placeholder="Se mostrara la URL o ruta almacenada"
               />
-              {showPanelImagePreview && getRutaVisualizacion(form.ruta) ? (
+              {showPanelImagePreview && panelImagePreviewUrl ? (
                 <div style={styles.panelImagePreviewCard}>
-                  <img
-                    src={getRutaVisualizacion(form.ruta) || ""}
-                    alt="Imagen adjunta del cheque"
-                    style={styles.panelImagePreview}
-                  />
+                  {isPreviewMimeType(panelImagePreviewMimeType) ? (
+                    panelImagePreviewMimeType.startsWith("image/") ? (
+                      <img
+                        src={panelImagePreviewUrl}
+                        alt="Adjunto del cheque"
+                        style={styles.panelImagePreview}
+                      />
+                    ) : (
+                      <iframe
+                        src={panelImagePreviewUrl}
+                        title="Adjunto del cheque"
+                        style={styles.panelAdjuntoPreview}
+                      />
+                    )
+                  ) : (
+                    <div style={styles.panelAdjuntoNoPreview}>
+                      <strong>Adjunto cargado.</strong>
+                      <span>
+                        Este tipo de archivo no se previsualiza aquí. Puedes abrirlo o descargarlo.
+                      </span>
+                    </div>
+                  )}
                 </div>
               ) : null}
             </div>
@@ -1188,20 +1339,45 @@ export default function TesoreriaChequesPage() {
       ) : null}
 
       {imageViewer ? (
-        <div style={styles.modalOverlay} onClick={() => setImageViewer(null)}>
+        <div style={styles.modalOverlay} onClick={cerrarVistaImagen}>
           <div style={styles.imageViewerCard} onClick={(event) => event.stopPropagation()}>
             <div style={styles.imageViewerHeader}>
               <h3 style={styles.modalTitle}>{imageViewer.title}</h3>
-              <button type="button" style={styles.secondaryButton} onClick={() => setImageViewer(null)}>
-                Cerrar
-              </button>
+              <div style={styles.modalHeaderActions}>
+                <button type="button" style={styles.secondaryButton} onClick={abrirAdjuntoEnNuevaPestana}>
+                  Abrir
+                </button>
+                <button type="button" style={styles.secondaryButton} onClick={descargarAdjunto}>
+                  Descargar
+                </button>
+                <button type="button" style={styles.secondaryButton} onClick={cerrarVistaImagen}>
+                  Cerrar
+                </button>
+              </div>
             </div>
             <div style={styles.imageViewerBody}>
-              <img
-                src={imageViewer.url}
-                alt={imageViewer.title}
-                style={styles.imagePreview}
-              />
+              {isPreviewMimeType(imageViewer.mimeType) ? (
+                imageViewer.mimeType.startsWith("image/") ? (
+                  <img
+                    src={imageViewer.url}
+                    alt={imageViewer.title}
+                    style={styles.imagePreview}
+                  />
+                ) : (
+                  <iframe
+                    src={imageViewer.url}
+                    title={imageViewer.title}
+                    style={styles.imagePreview}
+                  />
+                )
+              ) : (
+                <div style={styles.noPreviewMessage}>
+                  <p style={styles.noPreviewTitle}>No hay vista previa para este tipo de archivo.</p>
+                  <p style={styles.noPreviewText}>
+                    Usa <strong>Abrir</strong> o <strong>Descargar</strong> para revisar el adjunto.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1629,11 +1805,18 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "space-between",
     gap: 12,
     alignItems: "center",
+    flexWrap: "wrap",
+  },
+  modalHeaderActions: {
+    display: "flex",
+    gap: 10,
+    flexWrap: "wrap",
   },
   imageViewerBody: {
     overflow: "auto",
     display: "flex",
     justifyContent: "center",
+    alignItems: "center",
   },
   panelImagePreviewCard: {
     marginTop: 8,
@@ -1653,11 +1836,55 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #CBD5E1",
     background: "#FFFFFF",
   },
+  panelAdjuntoPreview: {
+    width: "100%",
+    minHeight: 280,
+    border: "1px solid #CBD5E1",
+    borderRadius: 12,
+    background: "#FFFFFF",
+  },
+  panelAdjuntoNoPreview: {
+    width: "100%",
+    minHeight: 160,
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 8,
+    color: "#475569",
+    textAlign: "center",
+    padding: 16,
+  },
   imagePreview: {
+    width: "100%",
     maxWidth: "100%",
-    maxHeight: "75vh",
+    height: "75vh",
     objectFit: "contain",
     borderRadius: 16,
     border: "1px solid #E5E7EB",
+    background: "#FFFFFF",
+  },
+  noPreviewMessage: {
+    width: "100%",
+    minHeight: 260,
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 8,
+    padding: 24,
+    textAlign: "center",
+    color: "#334155",
+  },
+  noPreviewTitle: {
+    margin: 0,
+    fontSize: 18,
+    fontWeight: 800,
+    color: "#0F172A",
+  },
+  noPreviewText: {
+    margin: 0,
+    fontSize: 14,
+    color: "#475569",
   },
 };

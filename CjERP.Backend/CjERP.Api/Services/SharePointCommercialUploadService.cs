@@ -110,6 +110,7 @@ public sealed class SharePointCommercialUploadService : ISharePointCommercialUpl
     {
         ValidateConfiguration();
 
+        var originalFilePath = (filePath ?? string.Empty).Trim();
         var normalizedFilePath = NormalizeDriveRelativePath(filePath);
         if (string.IsNullOrWhiteSpace(normalizedFilePath))
         {
@@ -127,10 +128,43 @@ public sealed class SharePointCommercialUploadService : ISharePointCommercialUpl
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
 
+        if (!response.IsSuccessStatusCode && Uri.TryCreate(originalFilePath, UriKind.Absolute, out var absoluteUri))
+        {
+            var sharedFileBytes = await TryDownloadByShareUrlAsync(absoluteUri, accessToken, cancellationToken);
+            if (sharedFileBytes is not null)
+            {
+                return sharedFileBytes;
+            }
+        }
+
         if (!response.IsSuccessStatusCode)
         {
             throw new InvalidOperationException(
                 $"No se pudo descargar la plantilla desde SharePoint. Detalle: {response.StatusCode} {responseContent}");
+        }
+
+        return await response.Content.ReadAsByteArrayAsync(cancellationToken);
+    }
+
+    private async Task<byte[]?> TryDownloadByShareUrlAsync(
+        Uri absoluteUri,
+        string accessToken,
+        CancellationToken cancellationToken)
+    {
+        var shareId = BuildShareId(absoluteUri);
+        if (string.IsNullOrWhiteSpace(shareId))
+        {
+            return null;
+        }
+
+        var requestUrl = $"https://graph.microsoft.com/v1.0/shares/{shareId}/driveItem/content";
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUrl);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
         }
 
         return await response.Content.ReadAsByteArrayAsync(cancellationToken);
@@ -322,7 +356,7 @@ public sealed class SharePointCommercialUploadService : ISharePointCommercialUpl
 
     private string NormalizeDriveRelativePath(string? filePath)
     {
-        var normalizedPath = NormalizeFolderPath(filePath);
+        var normalizedPath = NormalizeFolderPath(ExtractPathFromUrlIfNeeded(filePath));
         if (string.IsNullOrWhiteSpace(normalizedPath))
         {
             return string.Empty;
@@ -339,12 +373,47 @@ public sealed class SharePointCommercialUploadService : ISharePointCommercialUpl
             return string.Empty;
         }
 
+        var librarySegment = $"{libraryPath}/";
+        var libraryIndex = normalizedPath.IndexOf(librarySegment, StringComparison.OrdinalIgnoreCase);
+        if (libraryIndex >= 0)
+        {
+            return normalizedPath[(libraryIndex + librarySegment.Length)..];
+        }
+
         if (normalizedPath.StartsWith($"{libraryPath}/", StringComparison.OrdinalIgnoreCase))
         {
             return normalizedPath[(libraryPath.Length + 1)..];
         }
 
         return normalizedPath;
+    }
+
+    private static string? ExtractPathFromUrlIfNeeded(string? filePath)
+    {
+        var trimmed = (filePath ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return string.Empty;
+        }
+
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+        {
+            return trimmed;
+        }
+
+        return Uri.UnescapeDataString(uri.AbsolutePath);
+    }
+
+    private static string BuildShareId(Uri absoluteUri)
+    {
+        var url = absoluteUri.ToString();
+        var bytes = Encoding.UTF8.GetBytes(url);
+        var base64 = Convert.ToBase64String(bytes)
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
+
+        return $"u!{base64}";
     }
 
     private string ResolveFolderPath(ExpenseInvoiceUploadContext context)

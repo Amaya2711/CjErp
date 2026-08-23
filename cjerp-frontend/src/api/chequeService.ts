@@ -125,3 +125,14 @@ export async function rechazarCheque(
 export async function subirImagenCheque(formData: FormData): Promise<ChequeImagenUploadResponse> {
   return await httpClient.post<ChequeImagenUploadResponse>(`${BASE_URL}/upload-imagen`, formData);
 }
+
+export async function obtenerAdjuntoCheque(ruta: string): Promise<Blob> {
+  return await httpClient.get<Blob>(`${BASE_URL}/imagen`, {
+    params: { ruta },
+    responseType: "blob",
+  });
+}
+
+export async function obtenerImagenCheque(ruta: string): Promise<Blob> {
+  return await obtenerAdjuntoCheque(ruta);
+}

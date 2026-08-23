@@ -4,6 +4,7 @@ using CjERP.Application.Interfaces.Services;
 using CjERP.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Net.Mime;
 
 namespace CjERP.Api.Controllers;
 
@@ -153,6 +154,68 @@ public class TesoreriaChequesController : ControllerBase
         {
             return BadRequest(new { success = false, message = ex.Message });
         }
+    }
+
+    [HttpGet("imagen")]
+    public async Task<IActionResult> ObtenerImagen([FromQuery] string ruta, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(ruta))
+        {
+            return BadRequest(new { success = false, message = "La ruta de la imagen es obligatoria." });
+        }
+
+        try
+        {
+            var bytes = await _sharePointCommercialUploadService.DownloadFileAsync(ruta, cancellationToken);
+            var contentType = ResolveImageContentType(ruta);
+            var fileName = ResolveFileName(ruta);
+
+            return File(bytes, contentType, string.IsNullOrWhiteSpace(fileName) ? null : fileName);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
+    private static string ResolveImageContentType(string ruta)
+    {
+        var path = ruta.Trim();
+        if (Uri.TryCreate(path, UriKind.Absolute, out var absoluteUri))
+        {
+            path = absoluteUri.AbsolutePath;
+        }
+
+        path = Path.GetFileName(path);
+        var extension = Path.GetExtension(path).ToLowerInvariant();
+
+        return extension switch
+        {
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".webp" => "image/webp",
+            ".bmp" => "image/bmp",
+            ".gif" => "image/gif",
+            ".svg" => "image/svg+xml",
+            ".pdf" => MediaTypeNames.Application.Pdf,
+            ".doc" => "application/msword",
+            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".xls" => "application/vnd.ms-excel",
+            ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".txt" => MediaTypeNames.Text.Plain,
+            _ => "application/octet-stream"
+        };
+    }
+
+    private static string ResolveFileName(string ruta)
+    {
+        var path = ruta.Trim();
+        if (Uri.TryCreate(path, UriKind.Absolute, out var absoluteUri))
+        {
+            path = absoluteUri.AbsolutePath;
+        }
+
+        return Path.GetFileName(path);
     }
 
     private string ResolveUsuarioAccion(string? usuarioAccion)

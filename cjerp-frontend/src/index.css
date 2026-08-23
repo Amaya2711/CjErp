@@ -1,4 +1,33 @@
-:root {
+@import "tailwindcss";
+
+@theme {
+  /* Marca CJ Telecom */
+  --color-brand-dark: #17143A;
+  --color-brand-purple: #6E4CCB;
+  --color-brand-purple-light: #EEEDFE;
+  --color-brand-orange: #F5A623;
+  --color-brand-blue: #3FA9F5;
+
+  /* Superficie y texto */
+  --color-bg-app: #F4F6F8;
+  --color-surface: #FFFFFF;
+  --color-text-strong: #1F2937;
+  --color-text-soft: #6B7280;
+  --color-text-muted: #9CA3AF;
+  --color-border-soft: #E5E7EB;
+
+  /* Estados semanticos */
+  --color-success-bg: #EAF3DE;
+  --color-success-text: #27500A;
+  --color-warning-bg: #FAEEDA;
+  --color-warning-text: #854F0B;
+  --color-danger-bg: #FCEBEB;
+  --color-danger-text: #791F1F;
+
+  --font-sans: "Inter", "Segoe UI", Arial, Helvetica, sans-serif;
+  --radius-app: 10px;
+
+  /* Alias retro-compatibles: el resto del proyecto aun los referencia */
   --color-primary-dark: #17143A;
   --color-primary-purple: #6E4CCB;
   --color-primary-blue: #3FA9F5;
@@ -22,9 +51,9 @@ body,
   padding: 0;
   min-height: 100%;
   width: 100%;
-  font-family: Arial, Helvetica, sans-serif;
-  background: var(--color-bg);
-  color: var(--color-text);
+  font-family: var(--font-sans);
+  background: var(--color-bg-app);
+  color: var(--color-text-strong);
 }
 
 .sidebar-scroll::-webkit-scrollbar {

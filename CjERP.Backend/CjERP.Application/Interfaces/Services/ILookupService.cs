@@ -11,6 +11,13 @@ namespace CjERP.Application.Interfaces
         Task<IEnumerable<TipoTrabajoDto>> ListarTipoTrabajoAsync(string filtroKey, CancellationToken cancellationToken = default);
         Task<IEnumerable<OTDto>> ListarOTAsync(string filtroKey, CancellationToken cancellationToken = default);
         Task<IEnumerable<TareaDto>> ListarTareasAsync(CancellationToken cancellationToken = default);
+        Task<IEnumerable<SiteMapaDto>> ListarMapaSiteAsync(
+            string? nombreSite = null,
+            string? departamento = null,
+            string? cliente = null,
+            string? proyecto = null,
+            CancellationToken cancellationToken = default);
+        Task<IEnumerable<PersonalMapaDto>> ListarMapaPersonalAsync(CancellationToken cancellationToken = default);
         Task<ValoresGastoDto> ObtenerValoresGastoAsync(
             int idCliente,
             int idProyecto,

@@ -36,6 +36,12 @@ public sealed class AsistenciaLlamadaAtencionEstadoRequestDto
     public IReadOnlyList<int> IdsEmpleado { get; set; } = Array.Empty<int>();
 }
 
+public sealed class AsistenciaTrackingConsultaRequestDto
+{
+    public int IdEmpleado { get; set; }
+    public string FechaAsistencia { get; set; } = string.Empty;
+}
+
 public class AsistenciaReportePdfItemDto
 {
     public string Fecha { get; set; } = string.Empty;
@@ -98,6 +104,27 @@ public class AsistenciaReporteDto
     public string EstadoValidacionHoras { get; set; } = string.Empty;
     public string TiempoHoras { get; set; } = string.Empty;
     public string OrigenMarcacion { get; set; } = string.Empty;
+}
+
+public sealed class AsistenciaTrackingConsultaDto
+{
+    public int IdEmpleado { get; set; }
+    public string NombreEmpleado { get; set; } = string.Empty;
+    public string FechaAsistencia { get; set; } = string.Empty;
+    public IReadOnlyList<AsistenciaTrackingPuntoDto> Puntos { get; set; } = Array.Empty<AsistenciaTrackingPuntoDto>();
+}
+
+public sealed class AsistenciaTrackingPuntoDto
+{
+    public int IdEmpleado { get; set; }
+    public string NombreEmpleado { get; set; } = string.Empty;
+    public string FechaAsistencia { get; set; } = string.Empty;
+    public string Hora { get; set; } = string.Empty;
+    public string? HoraSalida { get; set; }
+    public decimal? LatPto { get; set; }
+    public decimal? LonPto { get; set; }
+    public string Source { get; set; } = string.Empty;
+    public DateTime? FechaHora { get; set; }
 }
 
 public sealed class AsistenciaGerencialPdfDto

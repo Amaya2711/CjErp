@@ -1,4 +1,4 @@
-using System.Data;
+﻿using System.Data;
 using System.Globalization;
 using System.Security.Claims;
 using CjERP.Application.DTOs;
@@ -11,11 +11,11 @@ using Microsoft.Data.SqlClient;
 namespace CjERP.Api.Controllers;
 
 [ApiController]
-[Route("api/mantenimiento/empleados")]
+[Route("api/mantenimiento/externos")]
 [Authorize]
-public class MantenimientoEmpleadosController : ControllerBase
+public class MantenimientoExternosController : ControllerBase
 {
-    private const int CargoId = 50;
+    private const int CargoId = 51;
     private const string ListarSp = "dbo.sp_EmpleadoCj_Ficha";
     private const string ObtenerSp = "dbo.sp_EmpleadoCj_Ficha";
     private const string GuardarSp = "dbo.sp_EmpleadoCj_Guardar";
@@ -26,7 +26,7 @@ public class MantenimientoEmpleadosController : ControllerBase
     private readonly IConfiguration _configuration;
     private readonly IAuditoriaCambiosService _auditoriaCambiosService;
 
-    public MantenimientoEmpleadosController(
+    public MantenimientoExternosController(
         IConfiguration configuration,
         IAuditoriaCambiosService auditoriaCambiosService)
     {
@@ -38,6 +38,7 @@ public class MantenimientoEmpleadosController : ControllerBase
     public async Task<IActionResult> Listar(
         [FromQuery] int? idEmpleado,
         [FromQuery] string? nombreEmpleado,
+        [FromQuery] string? empresa,
         CancellationToken cancellationToken)
     {
         var connectionString = GetConnectionString();
@@ -51,22 +52,25 @@ public class MantenimientoEmpleadosController : ControllerBase
         }
 
         await using var connection = new SqlConnection(connectionString);
-        var rows = await ListarEmpleadosAsync(connection, idEmpleado, nombreEmpleado, cancellationToken);
+        var rows = await ListarExternosAsync(connection, idEmpleado, nombreEmpleado, empresa, cancellationToken);
 
         return Ok(new
         {
             success = true,
-            message = "Empleados obtenidos correctamente.",
+            message = "Externos obtenidos correctamente.",
             data = rows
         });
     }
 
     [HttpGet("{idEmpleado:int}")]
-    public async Task<IActionResult> ObtenerPorId(int idEmpleado, CancellationToken cancellationToken)
+    public async Task<IActionResult> ObtenerPorId(
+        int idEmpleado,
+        [FromQuery] string? empresa,
+        CancellationToken cancellationToken)
     {
         if (idEmpleado <= 0)
         {
-            return BadRequest(new { success = false, message = "IdEmpleado es obligatorio." });
+            return BadRequest(new { success = false, message = "IdExterno es obligatorio." });
         }
 
         var connectionString = GetConnectionString();
@@ -80,17 +84,17 @@ public class MantenimientoEmpleadosController : ControllerBase
         }
 
         await using var connection = new SqlConnection(connectionString);
-        var row = await ObtenerEmpleadoPorIdAsync(connection, idEmpleado, cancellationToken);
+        var row = await ObtenerExternoPorIdAsync(connection, idEmpleado, empresa, cancellationToken);
 
         if (row is null)
         {
-            return NotFound(new { success = false, message = "No se encontro el empleado solicitado." });
+            return NotFound(new { success = false, message = "No se encontro el externo solicitado." });
         }
 
         return Ok(new
         {
             success = true,
-            message = "Empleado obtenido correctamente.",
+            message = "Externo obtenido correctamente.",
             data = row
         });
     }
@@ -150,7 +154,7 @@ public class MantenimientoEmpleadosController : ControllerBase
 
     [HttpPost]
     public async Task<IActionResult> Crear(
-        [FromBody] EmpleadoCrudUpsertRequest request,
+        [FromBody] ExternoCrudUpsertRequest request,
         CancellationToken cancellationToken)
     {
         var validationMessage = ValidateRequest(request);
@@ -186,7 +190,7 @@ public class MantenimientoEmpleadosController : ControllerBase
         var usuario = GetCurrentUserName();
         var idEmpleado = await CrearEmpleadoDirectoAsync(connection, request, usuario, CargoId, cancellationToken);
 
-        var created = await ObtenerEmpleadoPorIdAsync(connection, idEmpleado, cancellationToken);
+        var created = await ObtenerExternoPorIdAsync(connection, idEmpleado, cancellationToken);
         if (created is not null)
         {
             await RegistrarAuditoriaAsync(BuildInsertAuditEntries(created, usuario), cancellationToken);
@@ -195,7 +199,7 @@ public class MantenimientoEmpleadosController : ControllerBase
         return Ok(new
         {
             success = true,
-            message = "Empleado creado correctamente.",
+            message = "Externo creado correctamente.",
             data = created
         });
     }
@@ -203,12 +207,12 @@ public class MantenimientoEmpleadosController : ControllerBase
     [HttpPut("{idEmpleado:int}")]
     public async Task<IActionResult> Actualizar(
         int idEmpleado,
-        [FromBody] EmpleadoCrudUpsertRequest request,
+        [FromBody] ExternoCrudUpsertRequest request,
         CancellationToken cancellationToken)
     {
         if (idEmpleado <= 0)
         {
-            return BadRequest(new { success = false, message = "IdEmpleado es obligatorio." });
+            return BadRequest(new { success = false, message = "IdExterno es obligatorio." });
         }
 
         var connectionString = GetConnectionString();
@@ -223,13 +227,13 @@ public class MantenimientoEmpleadosController : ControllerBase
 
         await using var connection = new SqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
-        var before = await ObtenerEmpleadoPorIdAsync(connection, idEmpleado, cancellationToken);
+        var before = await ObtenerExternoPorIdAsync(connection, idEmpleado, cancellationToken);
         if (before is null)
         {
-            return NotFound(new { success = false, message = "No se encontro el empleado solicitado." });
+            return NotFound(new { success = false, message = "No se encontro el externo solicitado." });
         }
 
-        var effectiveRequest = MergeEmpleadoUpdateRequest(before, request);
+        var effectiveRequest = MergeExternoUpdateRequest(before, request);
 
         var validationMessage = ValidateRequest(effectiveRequest, isUpdate: true);
         if (validationMessage is not null)
@@ -244,7 +248,7 @@ public class MantenimientoEmpleadosController : ControllerBase
         }
         await ActualizarEmpleadoDirectoAsync(connection, idEmpleado, effectiveRequest, usuario, cancellationToken);
 
-        var updated = await ObtenerEmpleadoPorIdAsync(connection, idEmpleado, cancellationToken);
+        var updated = await ObtenerExternoPorIdAsync(connection, idEmpleado, cancellationToken);
         if (updated is not null)
         {
             await RegistrarAuditoriaAsync(BuildUpdateAuditEntries(before, updated, usuario), cancellationToken);
@@ -253,7 +257,7 @@ public class MantenimientoEmpleadosController : ControllerBase
         return Ok(new
         {
             success = true,
-            message = "Empleado actualizado correctamente.",
+            message = "Externo actualizado correctamente.",
             data = updated
         });
     }
@@ -263,7 +267,7 @@ public class MantenimientoEmpleadosController : ControllerBase
     {
         if (idEmpleado <= 0)
         {
-            return BadRequest(new { success = false, message = "IdEmpleado es obligatorio." });
+            return BadRequest(new { success = false, message = "IdExterno es obligatorio." });
         }
 
         var connectionString = GetConnectionString();
@@ -279,10 +283,10 @@ public class MantenimientoEmpleadosController : ControllerBase
         await using var connection = new SqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
 
-        var before = await ObtenerEmpleadoPorIdAsync(connection, idEmpleado, cancellationToken);
+        var before = await ObtenerExternoPorIdAsync(connection, idEmpleado, cancellationToken);
         if (before is null)
         {
-            return NotFound(new { success = false, message = "No se encontro el empleado solicitado." });
+            return NotFound(new { success = false, message = "No se encontro el externo solicitado." });
         }
 
         try
@@ -305,12 +309,12 @@ public class MantenimientoEmpleadosController : ControllerBase
             return StatusCode(StatusCodes.Status500InternalServerError, new
             {
                 success = false,
-                message = $"No se pudo aprobar el empleado. {ex.Message}"
+                message = $"No se pudo aprobar el externo. {ex.Message}"
             });
         }
 
         var usuarioAuditoria = GetCurrentUserName();
-        var after = await ObtenerEmpleadoPorIdAsync(connection, idEmpleado, cancellationToken);
+        var after = await ObtenerExternoPorIdAsync(connection, idEmpleado, cancellationToken);
         if (after is not null)
         {
             await RegistrarAuditoriaAsync(BuildUpdateAuditEntries(before, after, usuarioAuditoria), cancellationToken);
@@ -319,7 +323,7 @@ public class MantenimientoEmpleadosController : ControllerBase
         return Ok(new
         {
             success = true,
-            message = "Empleado aprobado correctamente.",
+            message = "Externo aprobado correctamente.",
             data = after
         });
     }
@@ -329,7 +333,7 @@ public class MantenimientoEmpleadosController : ControllerBase
     {
         if (idEmpleado <= 0)
         {
-            return BadRequest(new { success = false, message = "IdEmpleado es obligatorio." });
+            return BadRequest(new { success = false, message = "IdExterno es obligatorio." });
         }
 
         var connectionString = GetConnectionString();
@@ -344,17 +348,17 @@ public class MantenimientoEmpleadosController : ControllerBase
 
         await using var connection = new SqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
-        var before = await ObtenerEmpleadoPorIdAsync(connection, idEmpleado, cancellationToken);
+        var before = await ObtenerExternoPorIdAsync(connection, idEmpleado, cancellationToken);
         if (before is null)
         {
-            return NotFound(new { success = false, message = "No se encontro el empleado solicitado." });
+            return NotFound(new { success = false, message = "No se encontro el externo solicitado." });
         }
 
         var usuario = GetCurrentUserName();
         var fechaActual = DateTime.Now.Date;
         var auditoriaVacaciones = new List<AuditoriaCambioDto>();
         var auditoriaLegacy = new List<AuditoriaCambioDto>();
-        EmpleadoCrudDto? after;
+        ExternoCrudDto? after;
 
         await using (var transaction = connection.BeginTransaction())
         {
@@ -401,7 +405,7 @@ public class MantenimientoEmpleadosController : ControllerBase
             auditoriaVacaciones.AddRange(
                 await ResetVacacionesPorBajaAsync(connection, idEmpleado, usuario, fechaActual, transaction, cancellationToken));
 
-            after = await ObtenerEmpleadoPorIdAsync(connection, idEmpleado, transaction, cancellationToken);
+            after = await ObtenerExternoPorIdAsync(connection, idEmpleado, "EXTERNO", transaction, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
 
@@ -422,14 +426,15 @@ public class MantenimientoEmpleadosController : ControllerBase
         return Ok(new
         {
             success = true,
-            message = "Empleado dado de baja correctamente."
+            message = "Externo dado de baja correctamente."
         });
     }
 
-    private async Task<List<EmpleadoCrudDto>> ListarEmpleadosAsync(
+    private async Task<List<ExternoCrudDto>> ListarExternosAsync(
         SqlConnection connection,
         int? idEmpleado,
         string? nombreEmpleado,
+        string? empresa,
         CancellationToken cancellationToken)
     {
         var rows = await connection.QueryAsync(
@@ -439,6 +444,7 @@ public class MantenimientoEmpleadosController : ControllerBase
                 {
                     IdEmpleado = idEmpleado,
                     NombreEmpleado = string.IsNullOrWhiteSpace(nombreEmpleado) ? null : nombreEmpleado.Trim(),
+                    Empresa = string.IsNullOrWhiteSpace(empresa) ? "EXTERNO" : empresa.Trim(),
                     IdCargo = CargoId
                 },
                 commandTimeout: 60,
@@ -446,29 +452,44 @@ public class MantenimientoEmpleadosController : ControllerBase
                 cancellationToken: cancellationToken));
 
         return rows
-            .Select(row => MapEmpleadoCrudRow((IDictionary<string, object>)row))
+            .Select(row => MapExternoCrudRow((IDictionary<string, object>)row))
             .Where(item => item.IdEmpleado > 0)
             .ToList();
     }
 
-    private async Task<EmpleadoCrudDto?> ObtenerEmpleadoPorIdAsync(
+    private async Task<ExternoCrudDto?> ObtenerExternoPorIdAsync(
+        SqlConnection connection,
+        int idEmpleado,
+        string? empresa,
+        CancellationToken cancellationToken)
+    {
+        return await ObtenerExternoPorIdAsync(connection, idEmpleado, empresa, transaction: null, cancellationToken);
+    }
+
+    private async Task<ExternoCrudDto?> ObtenerExternoPorIdAsync(
         SqlConnection connection,
         int idEmpleado,
         CancellationToken cancellationToken)
     {
-        return await ObtenerEmpleadoPorIdAsync(connection, idEmpleado, transaction: null, cancellationToken);
+        return await ObtenerExternoPorIdAsync(connection, idEmpleado, null, transaction: null, cancellationToken);
     }
 
-    private async Task<EmpleadoCrudDto?> ObtenerEmpleadoPorIdAsync(
+    private async Task<ExternoCrudDto?> ObtenerExternoPorIdAsync(
         SqlConnection connection,
         int idEmpleado,
+        string? empresa,
         SqlTransaction? transaction,
         CancellationToken cancellationToken)
     {
         var row = await connection.QueryFirstOrDefaultAsync(
                 new CommandDefinition(
                 ObtenerSp,
-                new { IdEmpleado = idEmpleado, IdCargo = CargoId },
+                new
+                {
+                    IdEmpleado = idEmpleado,
+                    Empresa = string.IsNullOrWhiteSpace(empresa) ? "EXTERNO" : empresa.Trim(),
+                    IdCargo = CargoId
+                },
                 transaction: transaction,
                 commandTimeout: 60,
                 commandType: CommandType.StoredProcedure,
@@ -479,7 +500,7 @@ public class MantenimientoEmpleadosController : ControllerBase
             return null;
         }
 
-        return MapEmpleadoCrudRow((IDictionary<string, object>)row);
+        return MapExternoCrudRow((IDictionary<string, object>)row);
     }
 
     private static async Task<int?> ObtenerIdPuestoAsync(
@@ -489,23 +510,23 @@ public class MantenimientoEmpleadosController : ControllerBase
         CancellationToken cancellationToken)
     {
         return await connection.ExecuteScalarAsync<int?>(
-            new CommandDefinition(
-                """
-                SELECT TOP (1) IdPuesto
-                FROM dbo.EmpleadoCj
-                WHERE IdEmpleado = @IdEmpleado;
-                """,
+                new CommandDefinition(
+                    """
+                    SELECT TOP (1) IdPuesto
+                    FROM dbo.EmpleadoCj
+                    WHERE IdEmpleado = @IdEmpleado;
+                    """,
                 new { IdEmpleado = idEmpleado },
                 transaction: transaction,
                 commandType: CommandType.Text,
                 cancellationToken: cancellationToken));
     }
 
-    private static EmpleadoCrudUpsertRequest MergeEmpleadoUpdateRequest(
-        EmpleadoCrudDto before,
-        EmpleadoCrudUpsertRequest request)
+    private static ExternoCrudUpsertRequest MergeExternoUpdateRequest(
+        ExternoCrudDto before,
+        ExternoCrudUpsertRequest request)
     {
-        return new EmpleadoCrudUpsertRequest
+        return new ExternoCrudUpsertRequest
         {
             NombreEmpleado = string.IsNullOrWhiteSpace(request.NombreEmpleado)
                 ? before.NombreEmpleado
@@ -610,7 +631,7 @@ public class MantenimientoEmpleadosController : ControllerBase
         }
 
         var existeActivo = await connection.ExecuteScalarAsync<int>(
-            new CommandDefinition(
+                new CommandDefinition(
                 """
                 SELECT TOP (1) 1
                 FROM dbo.EmpleadoCj
@@ -625,8 +646,8 @@ public class MantenimientoEmpleadosController : ControllerBase
                     IdEmpleado = idEmpleado,
                     IdCargo = idCargo
                 },
-                commandType: CommandType.Text,
-                cancellationToken: cancellationToken));
+                    commandType: CommandType.Text,
+                    cancellationToken: cancellationToken));
 
         return existeActivo == 1
             ? "Ya existe un empleado activo con el mismo numero de documento."
@@ -640,24 +661,24 @@ public class MantenimientoEmpleadosController : ControllerBase
         CancellationToken cancellationToken)
     {
         return connection.ExecuteAsync(
-            new CommandDefinition(
-                """
-                UPDATE dbo.EmpleadoCj
-                SET IdEstado = @IdEstado
-                WHERE IdEmpleado = @IdEmpleado;
-                """,
-                new
-                {
-                    IdEmpleado = idEmpleado,
-                    IdEstado = idEstado
-                },
-                commandType: CommandType.Text,
-                cancellationToken: cancellationToken));
+                new CommandDefinition(
+                    """
+                    UPDATE dbo.EmpleadoCj
+                    SET IdEstado = @IdEstado
+                    WHERE IdEmpleado = @IdEmpleado;
+                    """,
+                    new
+                    {
+                        IdEmpleado = idEmpleado,
+                        IdEstado = idEstado
+                    },
+                    commandType: CommandType.Text,
+                    cancellationToken: cancellationToken));
     }
 
     private static async Task<int> CrearEmpleadoDirectoAsync(
         SqlConnection connection,
-        EmpleadoCrudUpsertRequest request,
+        ExternoCrudUpsertRequest request,
         string usuario,
         int idCargo,
         CancellationToken cancellationToken)
@@ -876,7 +897,7 @@ public class MantenimientoEmpleadosController : ControllerBase
                         @IdEmpleado,
                         @NombreEmpleado,
                         '',
-                        50,
+                        @IdCargo,
                         @NroDocumento,
                         @Telefono,
                         @Correo,
@@ -1031,7 +1052,7 @@ public class MantenimientoEmpleadosController : ControllerBase
     private static async Task ActualizarEmpleadoDirectoAsync(
         SqlConnection connection,
         int idEmpleado,
-        EmpleadoCrudUpsertRequest request,
+        ExternoCrudUpsertRequest request,
         string usuario,
         CancellationToken cancellationToken)
     {
@@ -1061,17 +1082,17 @@ public class MantenimientoEmpleadosController : ControllerBase
     private static async Task UpsertEmpleadoDetalleAsync(
         SqlConnection connection,
         int idEmpleado,
-        EmpleadoCrudUpsertRequest request,
+        ExternoCrudUpsertRequest request,
         SqlTransaction transaction,
         CancellationToken cancellationToken)
     {
         var existeDetalle = await connection.ExecuteScalarAsync<int>(
-            new CommandDefinition(
-                """
-                SELECT TOP (1) 1
-                FROM dbo.EmpleadoCjDetalle
-                WHERE IdEmpleadoCj = @IdEmpleado;
-                """,
+                new CommandDefinition(
+                    """
+                    SELECT TOP (1) 1
+                    FROM dbo.EmpleadoCjDetalle
+                    WHERE IdEmpleadoCj = @IdEmpleado;
+                    """,
                 new { IdEmpleado = idEmpleado },
                 transaction: transaction,
                 commandType: CommandType.Text,
@@ -1153,7 +1174,7 @@ public class MantenimientoEmpleadosController : ControllerBase
     }
 
     private static DynamicParameters BuildUpsertParameters(
-        EmpleadoCrudUpsertRequest request,
+        ExternoCrudUpsertRequest request,
         string usuario,
         int? idCargo = null,
         int? idEmpleado = null)
@@ -1188,7 +1209,7 @@ public class MantenimientoEmpleadosController : ControllerBase
         return parameters;
     }
 
-    private static DynamicParameters BuildUpdateSpParameters(EmpleadoCrudUpsertRequest request, string usuario, int idEmpleado)
+    private static DynamicParameters BuildUpdateSpParameters(ExternoCrudUpsertRequest request, string usuario, int idEmpleado)
     {
         var parameters = new DynamicParameters();
         parameters.Add("@IdEmpleado", idEmpleado, DbType.Int32);
@@ -1214,9 +1235,9 @@ public class MantenimientoEmpleadosController : ControllerBase
         return parameters;
     }
 
-    private static EmpleadoCrudDto MapEmpleadoCrudRow(IDictionary<string, object> values)
+    private static ExternoCrudDto MapExternoCrudRow(IDictionary<string, object> values)
     {
-        return new EmpleadoCrudDto
+        return new ExternoCrudDto
         {
             IdEmpleado = GetInt(values, "IdEmpleado", "idEmpleado", "IdEmpleadoCj", "idEmpleadoCj") ?? 0,
             NombreEmpleado = GetString(values, "NombreEmpleado", "nombreEmpleado"),
@@ -1254,7 +1275,7 @@ public class MantenimientoEmpleadosController : ControllerBase
         };
     }
 
-    private static string? ValidateRequest(EmpleadoCrudUpsertRequest request, bool isUpdate = false)
+    private static string? ValidateRequest(ExternoCrudUpsertRequest request, bool isUpdate = false)
     {
         if (request is null)
         {
@@ -1363,7 +1384,7 @@ public class MantenimientoEmpleadosController : ControllerBase
         return string.IsNullOrWhiteSpace(cleaned) ? null : cleaned;
     }
 
-    private static int? ResolveSexoId(EmpleadoCrudUpsertRequest request)
+    private static int? ResolveSexoId(ExternoCrudUpsertRequest request)
     {
         if (request.IdSexo is > 0)
         {
@@ -1485,7 +1506,7 @@ public class MantenimientoEmpleadosController : ControllerBase
 
             if (empleado is null)
             {
-                throw new InvalidOperationException("No se encontro el empleado solicitado.");
+                throw new InvalidOperationException("No se encontro el externo solicitado.");
             }
 
             await connection.ExecuteAsync(
@@ -1702,19 +1723,19 @@ public class MantenimientoEmpleadosController : ControllerBase
             if (await ColumnExistsAsync(connection, "dbo.Empleado", "Sexo", transaction, cancellationToken))
             {
                 await connection.ExecuteAsync(
-                    new CommandDefinition(
-                        """
-                        UPDATE dbo.Empleado
-                        SET Sexo = @Sexo
-                        WHERE IdEmpleado = @IdEmpleado;
-                        """,
-                        new
-                        {
+                        new CommandDefinition(
+                            """
+                            UPDATE dbo.Empleado
+                            SET Sexo = @Sexo
+                            WHERE IdEmpleado = @IdEmpleado;
+                            """,
+                            new
+                            {
                             IdEmpleado = idEmpleadoLegacy.Value,
                             Sexo = NullIfWhiteSpace(empleado.Sexo)
-                        },
-                        transaction: transaction,
-                        cancellationToken: cancellationToken));
+                            },
+                            transaction: transaction,
+                            cancellationToken: cancellationToken));
             }
 
             if (await ColumnExistsAsync(connection, "dbo.Empleado", "IdDocumento", transaction, cancellationToken))
@@ -2255,7 +2276,7 @@ public class MantenimientoEmpleadosController : ControllerBase
 
     private static async Task<List<AuditoriaCambioDto>> ResetLegacySeguridadPorBajaAsync(
         SqlConnection connection,
-        EmpleadoCrudDto before,
+        ExternoCrudDto before,
         int idEmpleadoCj,
         string usuario,
         SqlTransaction transaction,
@@ -2382,7 +2403,7 @@ public class MantenimientoEmpleadosController : ControllerBase
 
     private static async Task<List<int>> ResolveLegacyEmpleadoIdsAsync(
         SqlConnection connection,
-        EmpleadoCrudDto before,
+        ExternoCrudDto before,
         int idEmpleadoCj,
         SqlTransaction transaction,
         CancellationToken cancellationToken)
@@ -2757,7 +2778,7 @@ public class MantenimientoEmpleadosController : ControllerBase
     }
 
     private static IEnumerable<AuditoriaCambioDto> BuildInsertAuditEntries(
-        EmpleadoCrudDto item,
+        ExternoCrudDto item,
         string usuario)
     {
         foreach (var field in BuildAuditFieldMap(item))
@@ -2784,8 +2805,8 @@ public class MantenimientoEmpleadosController : ControllerBase
     }
 
     private static IEnumerable<AuditoriaCambioDto> BuildUpdateAuditEntries(
-        EmpleadoCrudDto before,
-        EmpleadoCrudDto after,
+        ExternoCrudDto before,
+        ExternoCrudDto after,
         string usuario)
     {
         var beforeMap = BuildAuditFieldMap(before);
@@ -2820,7 +2841,7 @@ public class MantenimientoEmpleadosController : ControllerBase
         }
     }
 
-    private static Dictionary<string, AuditFieldValue> BuildAuditFieldMap(EmpleadoCrudDto item)
+    private static Dictionary<string, AuditFieldValue> BuildAuditFieldMap(ExternoCrudDto item)
     {
         return new Dictionary<string, AuditFieldValue>(StringComparer.OrdinalIgnoreCase)
         {
@@ -2866,7 +2887,7 @@ public class MantenimientoEmpleadosController : ControllerBase
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
-    public sealed class EmpleadoCrudDto
+    public sealed class ExternoCrudDto
     {
         public int IdEmpleado { get; set; }
         public string NombreEmpleado { get; set; } = string.Empty;
@@ -2903,7 +2924,7 @@ public class MantenimientoEmpleadosController : ControllerBase
         public int? IdTerceroVacaciones { get; set; }
     }
 
-    public sealed class EmpleadoCrudUpsertRequest
+    public sealed class ExternoCrudUpsertRequest
     {
         public string NombreEmpleado { get; set; } = string.Empty;
         public string? Sexo { get; set; }

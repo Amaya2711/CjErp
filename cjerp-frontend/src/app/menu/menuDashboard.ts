@@ -70,6 +70,7 @@ export const menuDashboard: DashboardGroup[] = [
     color: "#38BDF8",
     tiles: [
       { label: "Reporte asistencia", path: "/reportes/rptasistencia" },
+      { label: "SQL Monitor", path: "/sqlmonitor" },
     ],
   },
 ];

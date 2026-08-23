@@ -218,6 +218,7 @@ builder.Services.AddScoped<ISegMenuService, SegMenuService>();
 builder.Services.AddScoped<ISegUsuarioService, SegUsuarioService>();
 builder.Services.AddScoped<ISegRolMenuPermisoService, SegRolMenuPermisoService>();
 builder.Services.AddScoped<ILookupService, LookupService>();
+builder.Services.AddHostedService<SqlMonitorWorker>();
 builder.Services.AddScoped<IEmpleadoCtaService, EmpleadoCtaService>();
 builder.Services.AddScoped<IChequeEmpleadoService, ChequeEmpleadoService>();
 builder.Services.AddScoped<IPlanillaService, PlanillaService>();
@@ -225,6 +226,7 @@ builder.Services.AddScoped<IPlanillaBoletaService, PlanillaBoletaService>();
 builder.Services.AddScoped<PlanillaBoletaPdfGenerator>();
 builder.Services.AddScoped<IPlanillaConsultaService, PlanillaConsultaService>();
 builder.Services.AddScoped<IMigracionImportService, MigracionImportService>();
+builder.Services.AddScoped<IMigracionImportProcesarNewService, MigracionImportProcesarNewService>();
 builder.Services.AddHttpClient<IConciliacionBcpService, ConciliacionBcpService>(client =>
 {
     client.BaseAddress = new Uri("https://api.openai.com");

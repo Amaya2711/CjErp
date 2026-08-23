@@ -342,4 +342,30 @@ public class AsistenciaReporteController : ControllerBase
             return BadRequest(new { success = false, message = ex.Message });
         }
     }
+
+    [HttpGet("tracking")]
+    public async Task<IActionResult> ObtenerTrackingEmpleado(
+        [FromQuery] AsistenciaTrackingConsultaRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (request.IdEmpleado <= 0)
+        {
+            return BadRequest(new { success = false, message = "El IdEmpleado es obligatorio." });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.FechaAsistencia))
+        {
+            return BadRequest(new { success = false, message = "La FechaAsistencia es obligatoria." });
+        }
+
+        try
+        {
+            var data = await _asistenciaReporteService.ObtenerTrackingEmpleadoAsync(request, cancellationToken);
+            return Ok(new { success = true, message = "ok", data });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
 }

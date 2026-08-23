@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Globalization;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces;
@@ -64,6 +66,47 @@ namespace CjERP.Infrastructure.Services
                     cancellationToken));
 
             return rows.Select(MapTarea).Cast<TareaDto>();
+        }
+
+        public async Task<IEnumerable<SiteMapaDto>> ListarMapaSiteAsync(
+            string? nombreSite = null,
+            string? departamento = null,
+            string? cliente = null,
+            string? proyecto = null,
+            CancellationToken cancellationToken = default)
+        {
+            await using var connection = _sqlCommandFactory.CreateConnection();
+
+            var parameters = new DynamicParameters();
+            parameters.Add("@NombreSite", NormalizeNullableQueryValue(nombreSite), DbType.String);
+            parameters.Add("@Departamento", NormalizeNullableQueryValue(departamento), DbType.String);
+            parameters.Add("@Cliente", NormalizeNullableQueryValue(cliente), DbType.String);
+            parameters.Add("@Proyecto", NormalizeNullableQueryValue(proyecto), DbType.String);
+
+            var rows = await connection.QueryAsync(
+                _sqlCommandFactory.Create(
+                    "sp_Site_Listar",
+                    parameters,
+                    CommandType.StoredProcedure,
+                    cancellationToken));
+
+            return rows
+                .Select(MapSiteMapa)
+                .Cast<SiteMapaDto>()
+                .ToArray();
+        }
+
+        public async Task<IEnumerable<PersonalMapaDto>> ListarMapaPersonalAsync(CancellationToken cancellationToken = default)
+        {
+            await using var connection = _sqlCommandFactory.CreateConnection();
+
+            var rows = await connection.QueryAsync(
+                _sqlCommandFactory.Create(
+                    "dbo.sp_Asistencia_UltimoMovimientoEmpleado",
+                    commandType: CommandType.StoredProcedure,
+                    cancellationToken: cancellationToken));
+
+            return rows.Select(MapPersonalMapa).Cast<PersonalMapaDto>();
         }
 
         public async Task<ValoresGastoDto> ObtenerValoresGastoAsync(
@@ -262,6 +305,64 @@ namespace CjERP.Infrastructure.Services
             };
         }
 
+        private static SiteMapaDto MapSiteMapa(dynamic row)
+        {
+            var data = (IDictionary<string, object>)row;
+
+            return new SiteMapaDto
+            {
+                IdSite = GetStringAllowEmpty(data, "IdSite", "idSite", "idsite", "Codigo", "codigo", "Id", "id") ?? string.Empty,
+                NombreSite = GetStringAllowEmpty(data, "NombreSite", "nombreSite", "nombresite", "NombreSitio", "nombreSitio", "Site", "site") ?? string.Empty,
+                Correlativo = GetNullableInt(data, "Correlativo", "correlativo"),
+                Departamento = GetStringAllowEmpty(data, "Departamento", "departamento", "NombreDepartamento", "nombreDepartamento", "Depto", "depto") ?? string.Empty,
+                Provincia = GetStringAllowEmpty(data, "Provincia", "provincia", "NombreProvincia", "nombreProvincia"),
+                Distrito = GetStringAllowEmpty(data, "Distrito", "distrito", "NombreDistrito", "nombreDistrito"),
+                Latitud = GetNullableDecimal(data, "Latitud", "latitud", "Lat", "lat"),
+                Longitud = GetNullableDecimal(data, "Longitud", "longitud", "Lon", "lon", "Lng", "lng"),
+                IdCliente = GetNullableInt(data, "IdCliente", "idCliente"),
+                IdProyecto = GetNullableInt(data, "IdProyecto", "idProyecto"),
+                NombreCliente = GetStringAllowEmpty(data, "NombreCliente", "nombreCliente", "Cliente", "cliente"),
+                NombreProyecto = GetStringAllowEmpty(data, "NombreProyecto", "nombreProyecto", "Proyecto", "proyecto"),
+                Direccion = GetStringAllowEmpty(data, "Direccion", "direccion", "Dirección", "direccionCompleta", "DireccionCompleta"),
+                Referencia = GetStringAllowEmpty(data, "Referencia", "referencia", "Ubicacion", "ubicacion", "Localizacion", "localizacion")
+            };
+        }
+
+        private static PersonalMapaDto MapPersonalMapa(dynamic row)
+        {
+            var data = (IDictionary<string, object>)row;
+
+            return new PersonalMapaDto
+            {
+                IdEmpleado = GetNullableInt(data, "IdEmpleado", "idEmpleado", "idempleado", "Id", "id", "Codigo", "codigo"),
+                NombreEmpleado = GetStringAllowEmpty(
+                    data,
+                    "NombreEmpleado", "nombreEmpleado", "nombreempleado",
+                    "Empleado", "empleado",
+                    "NombreCompleto", "nombreCompleto",
+                    "NombresApellidos", "nombresApellidos",
+                    "Nombres", "nombres",
+                    "Apellidos", "apellidos"
+                ) ?? string.Empty,
+                Departamento = GetStringAllowEmpty(data, "Departamento", "departamento", "Area", "area", "Sede", "sede"),
+                Cargo = GetStringAllowEmpty(data, "Cargo", "cargo", "Puesto", "puesto"),
+                LatitudFinal = GetNullableDecimal(data, "LatitudFinal", "latitudFinal", "Latitudfinal", "latitudfinal", "Latitud_Final", "latitud_final"),
+                LongitudFinal = GetNullableDecimal(data, "LongitudFinal", "longitudFinal", "Longitudfinal", "longitudfinal", "Longitud_Final", "longitud_final"),
+                FechaHora = GetDateTime(data, "FechaHora", "fechaHora", "FechaMovimiento", "fechaMovimiento", "Fecha", "fecha"),
+                Fecha = GetStringAllowEmpty(data, "Fecha", "fecha", "FechaMovimiento", "fechaMovimiento"),
+                FechaAsistencia = GetStringAllowEmpty(data, "FechaAsistencia", "fechaAsistencia"),
+                Hora = GetStringAllowEmpty(data, "Hora", "hora", "HoraMovimiento", "horaMovimiento"),
+                OrigenMarcacion = GetStringAllowEmpty(data, "OrigenMarcacion", "origenMarcacion", "Origen", "origen"),
+                Ubicacion = GetStringAllowEmpty(data, "Ubicacion", "ubicacion", "UBICACION"),
+                Site = GetStringAllowEmpty(data, "Site", "site", "NombreSite", "nombreSite", "nombresite"),
+                Cliente = GetStringAllowEmpty(data, "Cliente", "cliente", "NombreCliente", "nombreCliente"),
+                Proyecto = GetStringAllowEmpty(data, "Proyecto", "proyecto", "NombreProyecto", "nombreProyecto"),
+                Imagen = GetStringAllowEmpty(data, "Imagen", "imagen", "ImagenEntrada", "imagenEntrada"),
+                ImagenSalida = GetStringAllowEmpty(data, "ImagenSalida", "imagenSalida", "ImagenSalidaBase64", "imagenSalidaBase64"),
+                ImagenFinal = GetStringAllowEmpty(data, "ImagenFinal", "imagenFinal", "Imagenfinal", "imagenfinal")
+            };
+        }
+
         private static UbigeoLookupDto MapUbigeoLookup(dynamic row)
         {
             var data = (IDictionary<string, object>)row;
@@ -339,5 +440,93 @@ namespace CjERP.Infrastructure.Services
 
             return 0;
         }
+
+        private static decimal? GetNullableDecimal(IDictionary<string, object> data, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (data.TryGetValue(key, out var value) && value != null)
+                {
+                    var text = Convert.ToString(value)?.Trim();
+                    if (string.IsNullOrWhiteSpace(text))
+                    {
+                        continue;
+                    }
+
+                    if (decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var number))
+                    {
+                        return number;
+                    }
+
+                    if (decimal.TryParse(text, NumberStyles.Any, CultureInfo.CurrentCulture, out number))
+                    {
+                        return number;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static int? GetNullableInt(IDictionary<string, object> data, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (data.TryGetValue(key, out var value) && value != null)
+                {
+                    var text = Convert.ToString(value)?.Trim();
+                    if (string.IsNullOrWhiteSpace(text))
+                    {
+                        continue;
+                    }
+
+                    if (int.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var number))
+                    {
+                        return number;
+                    }
+
+                    if (int.TryParse(text, NumberStyles.Any, CultureInfo.CurrentCulture, out number))
+                    {
+                        return number;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static DateTime? GetDateTime(IDictionary<string, object> data, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (data.TryGetValue(key, out var value) && value != null)
+                {
+                    var text = Convert.ToString(value)?.Trim();
+                    if (string.IsNullOrWhiteSpace(text))
+                    {
+                        continue;
+                    }
+
+                    if (DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var dateTime))
+                    {
+                        return dateTime;
+                    }
+
+                    if (DateTime.TryParse(text, CultureInfo.CurrentCulture, DateTimeStyles.AssumeLocal, out dateTime))
+                    {
+                        return dateTime;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static string? NormalizeNullableQueryValue(string? value)
+        {
+            var text = value?.Trim();
+            return string.IsNullOrWhiteSpace(text) ? null : text;
+        }
+
     }
 }

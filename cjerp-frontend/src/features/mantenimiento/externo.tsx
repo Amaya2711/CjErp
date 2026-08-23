@@ -9,12 +9,12 @@ import CrudToolbar, {
 } from "../../components/base/CrudToolbar";
 import SidePanelForm from "../../components/base/SidePanelForm";
 import {
-  empleadosCrudService,
+  externosCrudService,
   type CrudLookupItem,
-  type EmpleadoCrudLookups,
-  type EmpleadoCrudItem,
-  type EmpleadoCrudSaveRequest,
-} from "../../api/empleadosCrudService";
+  type ExternoCrudLookups,
+  type ExternoCrudItem,
+  type ExternoCrudSaveRequest,
+} from "../../api/externosCrudService";
 import { getHttpErrorMessage } from "../../utils/httpError";
 
 type EmpleadoForm = {
@@ -40,7 +40,7 @@ type EmpleadoForm = {
 
 type EmpleadoTab = "todos" | "pendientes" | "activos" | "inactivos";
 
-const EMPLEADO_CARGO_ID = 50;
+const EXTERNO_CARGO_ID = 51;
 
 const initialForm: EmpleadoForm = {
   id: null,
@@ -113,6 +113,35 @@ function resolveLookupSelectValue(options: CrudLookupItem[], rawValue: string | 
   return normalized;
 }
 
+function resolveLookupId(options: CrudLookupItem[], value: string): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const selected = options.find((item) => getLookupStoredValue(item) === value || item.label.trim() === value);
+  const candidate = selected ? getLookupStoredValue(selected) : value;
+  const parsed = Number(candidate);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function resolveSexoId(options: CrudLookupItem[], value: string): number | null {
+  const resolved = resolveLookupId(options, value);
+  if (resolved !== null) {
+    return resolved;
+  }
+
+  const normalized = normalizeOptionValue(value).toUpperCase();
+  if (normalized.includes("MASC")) {
+    return 1;
+  }
+
+  if (normalized.includes("FEM")) {
+    return 2;
+  }
+
+  return null;
+}
+
 function normalizeTextValue(value: string | null | undefined): string {
   return value == null ? "" : String(value);
 }
@@ -165,7 +194,7 @@ function splitFullName(fullName: string): { apellidosEmpleado: string; nombresEm
 }
 
 function mapItemToForm(
-  item: EmpleadoCrudItem,
+  item: ExternoCrudItem,
   lookups?: { sexos: CrudLookupItem[]; tiposDocumento: CrudLookupItem[] }
 ): EmpleadoForm {
   const splitName = splitFullName(item.nombreEmpleado);
@@ -196,45 +225,10 @@ function mapItemToForm(
   };
 }
 
-function resolveLookupId(options: CrudLookupItem[], value: string): number | null {
-  if (!value) {
-    return null;
-  }
-
-  const selected = options.find(
-    (item) =>
-      getLookupStoredValue(item) === value ||
-      getLookupIdValue(item) === value ||
-      item.label.trim() === value ||
-      matchesLookupNumericValue(item, value)
-  );
-  const candidates = selected ? [selected.value, selected.codigo, selected.label, value] : [value];
-  const parsed = candidates.map((candidate) => Number(candidate)).find((candidate) => Number.isFinite(candidate)) ?? null;
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function resolveSexoId(options: CrudLookupItem[], value: string): number | null {
-  const resolved = resolveLookupId(options, value);
-  if (resolved !== null) {
-    return resolved;
-  }
-
-  const normalized = normalizeOptionValue(value).toUpperCase();
-  if (normalized.includes("MASC")) {
-    return 1;
-  }
-
-  if (normalized.includes("FEM")) {
-    return 2;
-  }
-
-  return null;
-}
-
 function buildPayload(
   form: EmpleadoForm,
   lookups: { sexos: CrudLookupItem[]; tiposDocumento: CrudLookupItem[] }
-): EmpleadoCrudSaveRequest {
+): ExternoCrudSaveRequest {
   const nombreEmpleado = `${normalizeUppercase(form.apellidosEmpleado).trim()} ${normalizeUppercase(form.nombresEmpleado).trim()}`
     .replace(/\s+/g, " ")
     .trim();
@@ -243,8 +237,8 @@ function buildPayload(
     nombreEmpleado,
     sexo: (lookups.sexos.find((option) => getLookupIdValue(option) === form.sexo)?.label ?? form.sexo) || null,
     idSexo: resolveSexoId(lookups.sexos, form.sexo),
-    idDocumento: resolveLookupId(lookups.tiposDocumento, form.idDocumento),
-    idCargo: EMPLEADO_CARGO_ID,
+    idDocumento: form.idDocumento ? Number(form.idDocumento) : null,
+    idCargo: EXTERNO_CARGO_ID,
     nroDocumento: form.nroDocumento.trim() || null,
     telefono: form.telefono.trim() || null,
     correo: normalizeUppercase(form.correo).trim() || null,
@@ -278,11 +272,11 @@ function getEstadoLabel(idEstado: number | null | undefined): string {
   return "ACTIVO";
 }
 
-function getEstadoNormalizado(item: EmpleadoCrudItem): string {
+function getEstadoNormalizado(item: ExternoCrudItem): string {
   return (item.estado || getEstadoLabel(item.idEstado)).trim().toUpperCase();
 }
 
-function matchesEmpleadoTab(item: EmpleadoCrudItem, tab: EmpleadoTab): boolean {
+function matchesEmpleadoTab(item: ExternoCrudItem, tab: EmpleadoTab): boolean {
   const estado = getEstadoNormalizado(item);
 
   if (tab === "todos") {
@@ -300,7 +294,7 @@ function matchesEmpleadoTab(item: EmpleadoCrudItem, tab: EmpleadoTab): boolean {
   return item.idEstado === 1 || estado.includes("ACTIVO");
 }
 
-function canApproveEmpleado(item: EmpleadoCrudItem, tab: EmpleadoTab): boolean {
+function canApproveEmpleado(item: ExternoCrudItem, tab: EmpleadoTab): boolean {
   return tab === "pendientes" ? matchesEmpleadoTab(item, "pendientes") : item.idEstado === 9;
 }
 
@@ -308,8 +302,8 @@ function canDeleteEmpleado(tab: EmpleadoTab): boolean {
   return tab === "pendientes" ? false : true;
 }
 
-export default function MantenimientoEmpleadosPage() {
-  const [items, setItems] = useState<EmpleadoCrudItem[]>([]);
+export default function MantenimientoExternoPage() {
+  const [items, setItems] = useState<ExternoCrudItem[]>([]);
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState<EmpleadoTab>("todos");
   const [loading, setLoading] = useState(false);
@@ -323,8 +317,8 @@ export default function MantenimientoEmpleadosPage() {
   const [mode, setMode] = useState<"nuevo" | "editar" | "ver">("nuevo");
   const [form, setForm] = useState<EmpleadoForm>(initialForm);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [deleteItem, setDeleteItem] = useState<EmpleadoCrudItem | null>(null);
-  const [approveItem, setApproveItem] = useState<EmpleadoCrudItem | null>(null);
+  const [deleteItem, setDeleteItem] = useState<ExternoCrudItem | null>(null);
+  const [approveItem, setApproveItem] = useState<ExternoCrudItem | null>(null);
   const [empresas, setEmpresas] = useState<CrudLookupItem[]>([]);
   const [clientes, setClientes] = useState<CrudLookupItem[]>([]);
   const [areas, setAreas] = useState<CrudLookupItem[]>([]);
@@ -347,7 +341,7 @@ export default function MantenimientoEmpleadosPage() {
   const tableScrollRef = useRef<HTMLDivElement | null>(null);
   const bottomScrollRef = useRef<HTMLDivElement | null>(null);
 
-  const searchFields = useMemo<CrudToolbarSearchField<EmpleadoCrudItem>[]>(
+  const searchFields = useMemo<CrudToolbarSearchField<ExternoCrudItem>[]>(
     () => [
       { key: "idEmpleado", label: "Id", getValue: (item) => item.idEmpleado },
       { key: "nombreEmpleado", label: "Empleado", getValue: (item) => item.nombreEmpleado },
@@ -475,20 +469,20 @@ export default function MantenimientoEmpleadosPage() {
     setError("");
 
     try {
-      const empleados = await empleadosCrudService.listar();
-      setItems(empleados);
+      const externos = await externosCrudService.listar();
+      setItems(externos);
     } catch (err) {
-      setError(getHttpErrorMessage(err, "No se pudo cargar el mantenimiento de empleados."));
+      setError(getHttpErrorMessage(err, "No se pudo cargar el mantenimiento de externos."));
     } finally {
       setLoading(false);
     }
   };
 
-  const loadLookups = async (): Promise<EmpleadoCrudLookups | null> => {
+  const loadLookups = async (): Promise<ExternoCrudLookups | null> => {
     setLookupError("");
 
     try {
-      const lookups = await empleadosCrudService.obtenerLookups();
+      const lookups = await externosCrudService.obtenerLookups();
       setEmpresas(lookups.empresas);
       setClientes(lookups.clientes);
       setAreas(lookups.areas);
@@ -500,7 +494,7 @@ export default function MantenimientoEmpleadosPage() {
       setTercerValidadores(lookups.tercerValidadores);
       return lookups;
     } catch (err) {
-      setLookupError(getHttpErrorMessage(err, "No se pudieron cargar los catálogos de empleados."));
+      setLookupError(getHttpErrorMessage(err, "No se pudieron cargar los catálogos de externos."));
       return null;
     }
   };
@@ -558,7 +552,7 @@ export default function MantenimientoEmpleadosPage() {
     setPanelOpen(true);
   };
 
-  const openEdit = async (item: EmpleadoCrudItem) => {
+  const openEdit = async (item: ExternoCrudItem) => {
     setMode("editar");
     setErrors({});
     setPanelError("");
@@ -566,7 +560,7 @@ export default function MantenimientoEmpleadosPage() {
 
     try {
       const currentLookups = sexos.length && tiposDocumento.length ? { sexos, tiposDocumento } : await loadLookups();
-      const detalle = await empleadosCrudService.obtener(item.idEmpleado);
+      const detalle = await externosCrudService.obtener(item.idEmpleado);
       const source = {
         ...item,
         ...detalle,
@@ -583,7 +577,7 @@ export default function MantenimientoEmpleadosPage() {
       );
       setPanelOpen(true);
     } catch (err) {
-      setPanelError(getHttpErrorMessage(err, "No se pudo cargar el detalle del empleado."));
+      setPanelError(getHttpErrorMessage(err, "No se pudo cargar el detalle del externo."));
       setPanelOpen(true);
     } finally {
       setSaving(false);
@@ -601,11 +595,11 @@ export default function MantenimientoEmpleadosPage() {
     const nextErrors: Record<string, string> = {};
 
     if (!form.apellidosEmpleado.trim()) {
-      nextErrors.apellidosEmpleado = "Ingrese los apellidos del empleado.";
+      nextErrors.apellidosEmpleado = "Ingrese los apellidos del externo.";
     }
 
     if (!form.nombresEmpleado.trim()) {
-      nextErrors.nombresEmpleado = "Ingrese los nombres del empleado.";
+      nextErrors.nombresEmpleado = "Ingrese los nombres del externo.";
     }
 
     if (!form.sexo) {
@@ -690,17 +684,17 @@ export default function MantenimientoEmpleadosPage() {
       const payload = buildPayload(form, { sexos, tiposDocumento });
 
       if (mode === "nuevo") {
-        await empleadosCrudService.crear(payload);
+        await externosCrudService.crear(payload);
         setSuccess("Empleado creado correctamente.");
       } else if (form.id) {
-        await empleadosCrudService.actualizar(form.id, payload);
+        await externosCrudService.actualizar(form.id, payload);
         setSuccess("Empleado actualizado correctamente.");
       }
 
       closePanel();
       await loadEmployees();
     } catch (err) {
-      setPanelError(getHttpErrorMessage(err, "No se pudo guardar el empleado."));
+      setPanelError(getHttpErrorMessage(err, "No se pudo guardar el externo."));
     } finally {
       setSaving(false);
     }
@@ -714,12 +708,12 @@ export default function MantenimientoEmpleadosPage() {
     setSuccess("");
 
     try {
-      await empleadosCrudService.eliminar(deleteItem.idEmpleado);
+      await externosCrudService.eliminar(deleteItem.idEmpleado);
       setSuccess("Empleado dado de baja correctamente.");
       setDeleteItem(null);
       await loadEmployees();
     } catch (err) {
-      setError(getHttpErrorMessage(err, "No se pudo dar de baja al empleado."));
+      setError(getHttpErrorMessage(err, "No se pudo dar de baja al externo."));
     } finally {
       setSaving(false);
     }
@@ -736,18 +730,18 @@ export default function MantenimientoEmpleadosPage() {
     setSuccess("");
 
     try {
-      await empleadosCrudService.aprobar(item.idEmpleado);
+      await externosCrudService.aprobar(item.idEmpleado);
       setSuccess("Empleado aprobado correctamente.");
       setApproveItem(null);
       await loadEmployees();
     } catch (err) {
-      setError(getHttpErrorMessage(err, "No se pudo aprobar el empleado."));
+      setError(getHttpErrorMessage(err, "No se pudo aprobar el externo."));
     } finally {
       setApprovingId(null);
     }
   };
 
-  const handleApprove = async (item: EmpleadoCrudItem) => {
+  const handleApprove = async (item: ExternoCrudItem) => {
     if (!canApproveEmpleado(item, activeTab)) {
       return;
     }
@@ -765,12 +759,12 @@ export default function MantenimientoEmpleadosPage() {
       <CrudToolbar
         searchValue={search}
         onSearchChange={setSearch}
-        searchPlaceholder="Buscar empleados..."
+        searchPlaceholder="Buscar externos..."
         searchFieldsHint={searchFields.map((field) => field.label).join(", ")}
         buttons={[
           {
             key: "nuevo",
-            label: "Nuevo empleado",
+            label: "Nuevo externo",
             onClick: openNew,
           },
           {
@@ -829,7 +823,7 @@ export default function MantenimientoEmpleadosPage() {
         </button>
       </div>
 
-      {loading ? <AppStatusMessage tone="info">Cargando empleados...</AppStatusMessage> : null}
+      {loading ? <AppStatusMessage tone="info">Cargando externos...</AppStatusMessage> : null}
       {success ? <AppStatusMessage tone="success">{success}</AppStatusMessage> : null}
       {error ? <AppStatusMessage tone="error">{error}</AppStatusMessage> : null}
       {lookupError ? <AppStatusMessage tone="error">{lookupError}</AppStatusMessage> : null}
@@ -838,7 +832,7 @@ export default function MantenimientoEmpleadosPage() {
         <div style={styles.cardInner}>
           <div style={styles.headerRow}>
             <div>
-              <h2 style={styles.title}>Crud de empleados</h2>
+              <h2 style={styles.title}>Crud de externos</h2>
               <p style={styles.subtitle}>
                 Mantenimiento de ficha laboral en base a `sp_EmpleadoCj_Ficha`.
               </p>
@@ -870,7 +864,7 @@ export default function MantenimientoEmpleadosPage() {
                   {filteredItems.length === 0 ? (
                     <tr>
                       <td colSpan={13} style={styles.emptyCell}>
-                        No se encontraron empleados.
+                        No se encontraron externos.
                       </td>
                     </tr>
                   ) : (
@@ -902,7 +896,7 @@ export default function MantenimientoEmpleadosPage() {
                             }}
                             onClick={() => setApproveItem(item)}
                             disabled={!canApproveEmpleado(item, activeTab) || approvingId === item.idEmpleado}
-                            title={canApproveEmpleado(item, activeTab) ? "Aprobar empleado" : "Solo disponible para pendientes"}
+                            title={canApproveEmpleado(item, activeTab) ? "Aprobar externo" : "Solo disponible para pendientes"}
                           >
                             {approvingId === item.idEmpleado ? "Aprobando..." : "Aprobar"}
                           </button>
@@ -922,7 +916,7 @@ export default function MantenimientoEmpleadosPage() {
                               setDeleteItem(item);
                             }}
                             disabled={!canDeleteEmpleado(activeTab)}
-                            title={canDeleteEmpleado(activeTab) ? "Dar baja empleado" : "No disponible en Pendientes"}
+                            title={canDeleteEmpleado(activeTab) ? "Dar baja externo" : "No disponible en Pendientes"}
                           >
                             Dar baja
                           </button>
@@ -948,8 +942,8 @@ export default function MantenimientoEmpleadosPage() {
 
       <SidePanelForm
         open={panelOpen}
-        title={mode === "nuevo" ? "Nuevo empleado" : "Editar empleado"}
-        subtitle="Actualice la ficha principal y los datos de detalle del empleado."
+        title={mode === "nuevo" ? "Nuevo externo" : "Editar externo"}
+        subtitle="Actualice la ficha principal y los datos de detalle del externo."
         onClose={closePanel}
         maxWidth={880}
         footer={
@@ -1350,10 +1344,10 @@ export default function MantenimientoEmpleadosPage() {
 
       <ConfirmDialog
         open={deleteItem != null}
-        title="Dar baja empleado"
+        title="Dar baja externo"
         message={
           <>
-            Se dará de baja el empleado <strong>{deleteItem?.nombreEmpleado ?? ""}</strong>. El registro dejará de aparecer
+            Se dará de baja el externo <strong>{deleteItem?.nombreEmpleado ?? ""}</strong>. El registro dejará de aparecer
             en el mantenimiento activo.
           </>
         }
@@ -1366,10 +1360,10 @@ export default function MantenimientoEmpleadosPage() {
 
       <ConfirmDialog
         open={approveItem != null}
-        title="Aprobar empleado"
+        title="Aprobar externo"
         message={
           <>
-            �Est� de acuerdo en aprobar la creaci�n del empleado <strong>{approveItem?.nombreEmpleado ?? ""}</strong>?
+            ¿Está de acuerdo en aprobar la creación del externo <strong>{approveItem?.nombreEmpleado ?? ""}</strong>?
           </>
         }
         confirmLabel={approvingId === approveItem?.idEmpleado ? "Procesando..." : "Aprobar"}

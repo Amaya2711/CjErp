@@ -2,6 +2,8 @@ import httpClient from "./httpClient";
 import type {
   AsistenciaActualizarEstadoMarcacionRequest,
   AsistenciaGerencialPdfRequest,
+  AsistenciaTrackingQueryParams,
+  AsistenciaTrackingResponse,
   AsistenciaReporteItem,
   AsistenciaReportePdfRequest,
   AsistenciaReporteQueryParams,
@@ -70,6 +72,26 @@ function getNumber(row: AsistenciaReporteApiRow, ...keys: string[]): number {
   return 0;
 }
 
+function getDateTimeString(row: AsistenciaReporteApiRow, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = getRowValue(row, key);
+    if (value == null) {
+      continue;
+    }
+
+    if (value instanceof Date) {
+      return value.toISOString();
+    }
+
+    const text = String(value).trim();
+    if (text) {
+      return text;
+    }
+  }
+
+  return "";
+}
+
 function normalizeAsistenciaRow(row: AsistenciaReporteApiRow): AsistenciaReporteItem {
   return {
     fecha: getString(row, "Fecha", "fecha"),
@@ -104,6 +126,33 @@ function normalizeAsistenciaRow(row: AsistenciaReporteApiRow): AsistenciaReporte
     estadoValidacionHoras: getString(row, "EstadoValidacionHoras", "estadoValidacionHoras", "Estadovalidacionhoras", "estadovalidacionhoras"),
     tiempoHoras: getString(row, "TiempoHoras", "tiempoHoras"),
     origenMarcacion: getString(row, "OrigenMarcacion", "origenMarcacion"),
+  };
+}
+
+function normalizeTrackingRow(row: AsistenciaReporteApiRow) {
+  return {
+    idEmpleado: getNumber(row, "IdEmpleado", "idEmpleado") || 0,
+    nombreEmpleado: getString(row, "nombreempleado", "nombreEmpleado", "NombreEmpleado"),
+    fechaAsistencia: getString(row, "FechaAsistencia", "fechaAsistencia", "Fecha", "fecha"),
+    hora: getString(row, "Hora", "hora", "FechaHora", "fechaHora"),
+    horaSalida: getString(row, "HoraSalida", "horaSalida", "Salida", "salida") || null,
+    latPto: (() => {
+      const value = getRowValue(row, "LatPto") ?? getRowValue(row, "latpto") ?? getRowValue(row, "Latitud") ?? getRowValue(row, "latitud");
+      if (value == null) return null;
+      const parsed = typeof value === "number" ? value : Number(String(value).replace(",", "."));
+      return Number.isFinite(parsed) ? parsed : null;
+    })(),
+    lonPto: (() => {
+      const value = getRowValue(row, "LonPto") ?? getRowValue(row, "lonpto") ?? getRowValue(row, "Longitud") ?? getRowValue(row, "longitud");
+      if (value == null) return null;
+      const parsed = typeof value === "number" ? value : Number(String(value).replace(",", "."));
+      return Number.isFinite(parsed) ? parsed : null;
+    })(),
+    source: getString(row, "Source", "source"),
+    fechaHora: getDateTimeString(row, "FechaHora", "fechaHora") || null,
+    imagen: getString(row, "Imagen", "imagen") || null,
+    imagenSalida: getString(row, "ImagenSalida", "imagenSalida") || null,
+    imagenFinal: getString(row, "ImagenFinal", "imagenFinal") || null,
   };
 }
 
@@ -177,4 +226,32 @@ export async function exportarAsistenciaGerencialPdf(payload: AsistenciaGerencia
 
 export async function actualizarEstadoMarcacionAsistencia(payload: AsistenciaActualizarEstadoMarcacionRequest) {
   return await httpClient.put<{ success: boolean; message: string }>("/asistencia/reporte/estado-marcacion", payload);
+}
+
+export async function consultarSeguimientoEmpleado(payload: AsistenciaTrackingQueryParams) {
+  const response = await httpClient.get<{ idEmpleado?: number; nombreEmpleado?: string; fechaAsistencia?: string; puntos?: AsistenciaReporteApiRow[] } | AsistenciaReporteApiRow[]>(
+    "/asistencia/reporte/tracking",
+    {
+      params: payload,
+    }
+  );
+
+  if (Array.isArray(response)) {
+    const puntos = response.map(normalizeTrackingRow);
+    return {
+      idEmpleado: payload.idEmpleado,
+      nombreEmpleado: puntos[0]?.nombreEmpleado ?? "",
+      fechaAsistencia: payload.fechaAsistencia,
+      puntos,
+    } satisfies AsistenciaTrackingResponse;
+  }
+
+  const puntos = Array.isArray(response?.puntos) ? response.puntos.map(normalizeTrackingRow) : [];
+
+  return {
+    idEmpleado: response?.idEmpleado ?? payload.idEmpleado,
+    nombreEmpleado: response?.nombreEmpleado ?? puntos[0]?.nombreEmpleado ?? "",
+    fechaAsistencia: response?.fechaAsistencia ?? payload.fechaAsistencia,
+    puntos,
+  } satisfies AsistenciaTrackingResponse;
 }

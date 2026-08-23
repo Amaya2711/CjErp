@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { menuService } from "../seguridad/services/menuService";
+import { buildMenuTree } from "../../utils/buildMenuTree";
+import { getMenuAccentByName, getMenuIconComponent } from "../../utils/menuIcons";
 //import type { MenuDto } from "../../models/seguridad/menu.types";
 import type { MenuDto as MenuModelDto } from "../../models/seguridad/menu.types";
 import { getAuthUser } from "../../utils/authStorage";
@@ -93,12 +95,92 @@ function getMenuRoute(item: MenuAccesoDto): string {
   return typeof item.ruta === "string" ? item.ruta.trim() : "";
 }
 
+function getShortcutIcon(nombreMenu: string) {
+  return getMenuIconComponent({ nombreMenu });
+}
+
+function buildMenuBreadcrumb(item: MenuAccesoDto | undefined, menuById: Map<number, MenuAccesoDto>): string {
+  if (!item) {
+    return "";
+  }
+
+  const trail: string[] = [];
+  const visited = new Set<number>();
+  let current: MenuAccesoDto | undefined = item;
+
+  while (current && !visited.has(current.idMenu)) {
+    visited.add(current.idMenu);
+    trail.push(current.nombreMenu);
+
+    const parentId = current.idMenuPadre ?? null;
+    if (parentId == null) {
+      break;
+    }
+
+    current = menuById.get(parentId);
+  }
+
+  return trail.reverse().join(" / ");
+}
+
+function getPrimaryMenuAncestor(item: MenuAccesoDto | undefined, menuById: Map<number, MenuAccesoDto>): MenuAccesoDto | undefined {
+  if (!item) {
+    return undefined;
+  }
+
+  const visited = new Set<number>();
+  let current: MenuAccesoDto | undefined = item;
+
+  while (current && current.idMenuPadre != null && !visited.has(current.idMenu)) {
+    visited.add(current.idMenu);
+    const parent = menuById.get(current.idMenuPadre);
+    if (!parent) {
+      break;
+    }
+    current = parent;
+  }
+
+  return current;
+}
+
+function buildSidebarOrderMap(menu: MenuAccesoDto[]) {
+  const tree = buildMenuTree(
+    menu.map((item) => ({
+      ...item,
+      esActivo: item.esActivo ?? true,
+      esVisible: item.esVisible ?? true,
+      ordenMenu: Number(item.ordenMenu ?? 0),
+      nivelMenu: Number(item.nivelMenu ?? 0),
+      esNodoPrincipal: Boolean(item.esNodoPrincipal ?? false),
+      acceso: Number(getAccesoValue(item)),
+    }))
+  );
+
+  const orderMap = new Map<number, number>();
+  let order = 0;
+  type TreeNode = ReturnType<typeof buildMenuTree>[number];
+
+  const walk = (nodes: TreeNode[]) => {
+    for (const node of nodes) {
+      order += 1;
+      orderMap.set(node.idMenu, order);
+      if (node.hijos.length > 0) {
+        walk(node.hijos);
+      }
+    }
+  };
+
+  walk(tree);
+  return orderMap;
+}
+
 
 export default function DashboardPage() {
   const navigate = useNavigate();
   const authUser = getAuthUser();
   // const [fechaHora, setFechaHora] = useState(formatFechaHora(new Date()));
   const [accesosDirectos, setAccesosDirectos] = useState<MenuAccesoDto[]>([]);
+  const [menuCompleto, setMenuCompleto] = useState<MenuAccesoDto[]>([]);
   const [accesosLoading, setAccesosLoading] = useState(true);
 
   // useEffect(() => {
@@ -138,6 +220,7 @@ export default function DashboardPage() {
           return;
         }
 
+        setMenuCompleto(menu);
         setAccesosDirectos(
           menu.filter(
             (m) =>
@@ -205,6 +288,65 @@ export default function DashboardPage() {
       idrol
     };
   }, [authUser]);
+
+  const accesosAgrupados = useMemo(() => {
+    const menuPorId = new Map(menuCompleto.map((item) => [item.idMenu, item] as const));
+    const ordenSidebar = buildSidebarOrderMap(menuCompleto);
+
+    const getOrdenSidebar = (item?: MenuAccesoDto) => {
+      if (!item) {
+        return Number.MAX_SAFE_INTEGER;
+      }
+
+      return ordenSidebar.get(item.idMenu) ?? Number.MAX_SAFE_INTEGER;
+    };
+
+    const grupos = new Map<
+      string,
+      {
+        id: string;
+        titulo: string;
+        icono?: MenuAccesoDto;
+        rutaCompleta?: string;
+        items: MenuAccesoDto[];
+      }
+    >();
+
+    for (const item of accesosDirectos) {
+      const parentId = item.idMenuPadre ?? 0;
+      const groupKey = String(parentId);
+      const parent = menuPorId.get(parentId);
+      const principal = getPrimaryMenuAncestor(parent ?? item, menuPorId);
+
+      if (!grupos.has(groupKey)) {
+        grupos.set(groupKey, {
+          id: groupKey,
+          titulo: principal?.nombreMenu ?? parent?.nombreMenu ?? item.nombreMenu,
+          icono: principal ?? parent ?? item,
+          rutaCompleta: buildMenuBreadcrumb(item, menuPorId),
+          items: [],
+        });
+      }
+
+      grupos.get(groupKey)!.items.push(item);
+    }
+
+    return Array.from(grupos.values())
+      .map((group) => ({
+        ...group,
+        path: group.icono ? buildMenuBreadcrumb(group.icono, menuPorId) : group.titulo,
+        items: group.items.sort((a, b) => {
+          const orderDiff = getOrdenSidebar(a) - getOrdenSidebar(b);
+          if (orderDiff !== 0) return orderDiff;
+          return a.nombreMenu.localeCompare(b.nombreMenu, "es", { sensitivity: "base" });
+        }),
+      }))
+      .sort((a, b) => {
+        const orderDiff = getOrdenSidebar(a.icono ?? a.items[0]) - getOrdenSidebar(b.icono ?? b.items[0]);
+        if (orderDiff !== 0) return orderDiff;
+        return a.titulo.localeCompare(b.titulo, "es", { sensitivity: "base" });
+      });
+  }, [accesosDirectos, menuCompleto]);
 
   const avisos: AvisoItem[] = [
     {
@@ -294,31 +436,55 @@ export default function DashboardPage() {
               ) : accesosDirectos.length === 0 ? (
                 <em>No hay accesos directos configurados.</em>
               ) : (
-                Object.entries(
-                  accesosDirectos.reduce((acc, item) => {
-                    const key = item.idMenuPadre ?? 'sinPadre';
-                    if (!acc[key]) acc[key] = [];
-                    acc[key].push(item);
-                    return acc;
-                  }, {} as Record<string, MenuAccesoDto[]>)
-                ).map(([idPadre, items]) => (
-                  <div key={idPadre} style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-                    {items.map((item) => (
-                      <button
-                        key={item.idMenu}
-                        style={styles.quickButton}
-                        onClick={() => {
-                          const route = getMenuRoute(item);
-                          if (route) {
-                            navigate(route);
-                          }
+                accesosAgrupados.map((group) => {
+                  const GroupIcon = getShortcutIcon(group.titulo);
+                  const accent = getMenuAccentByName(group.titulo);
+                  const tooltipPath = group.rutaCompleta || group.path || group.titulo;
+
+                  return (
+                    <div
+                      key={group.id}
+                      style={{
+                        ...styles.quickAccessGroup,
+                        borderColor: accent.border,
+                        background: accent.softBackground,
+                      }}
+                    >
+                      <span
+                        title={tooltipPath}
+                        style={{
+                          ...styles.quickAccessIcon,
+                          borderColor: accent.border,
+                          background: accent.background,
+                          color: accent.color,
                         }}
                       >
-                        {item.nombreMenu}
-                      </button>
-                    ))}
-                  </div>
-                ))
+                        <GroupIcon size={15} strokeWidth={2.2} />
+                      </span>
+                      <div style={styles.quickAccessButtons}>
+                        {group.items.map((item) => (
+                          <button
+                            key={item.idMenu}
+                            style={{
+                              ...styles.quickButton,
+                              borderColor: accent.border,
+                              color: accent.color,
+                              background: "#FFFFFF",
+                            }}
+                            onClick={() => {
+                              const route = getMenuRoute(item);
+                              if (route) {
+                                navigate(route);
+                              }
+                            }}
+                          >
+                            {item.nombreMenu}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>
@@ -671,5 +837,42 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     padding: "0 12px",
     fontSize: 13,
+  },
+
+  quickAccessLine: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 2,
+  },
+
+  quickAccessGroup: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 8,
+    marginBottom: 8,
+    padding: "5px 6px",
+    borderRadius: 12,
+    border: "1px solid transparent",
+  },
+
+  quickAccessButtons: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 8,
+    flex: 1,
+  },
+
+  quickAccessIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 999,
+    border: "1px solid #E2E8F0",
+    background: "#F8FAFC",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "#6D28D9",
+    flexShrink: 0,
   },
 };

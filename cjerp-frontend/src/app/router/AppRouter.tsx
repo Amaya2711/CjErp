@@ -30,6 +30,7 @@ const TesoreriaDepositoPage = lazy(() => import("../../features/finanzas/tesorer
 const TesoreriaChequesPage = lazy(() => import("../../features/finanzas/tesoreria/cheques"));
 const TesoreriaGastosPage = lazy(() => import("../../features/finanzas/tesoreria/gastos"));
 const TesoreriaGastosAprobarPage = lazy(() => import("../../features/finanzas/tesoreria/gastosaprobar"));
+const TesoreriaPagosV1Page = lazy(() => import("../../features/finanzas/tesoreria/pagos_v1"));
 const ConciliacionBcpPage = lazy(() => import("../../features/finanzas/conciliacion"));
 const ConciliacionBcpV1Page = lazy(() => import("../../features/finanzas/conciliacion_v1"));
 const ActFacturaPage = lazy(() => import("../../features/finanzas/facturacionfinanciera/actfactura"));
@@ -44,6 +45,7 @@ const AsignacionPage = lazy(() => import("../../features/operaciones/asignacion"
 const ReembolsoPage = lazy(() => import("../../features/operaciones/operacion/reembolso"));
 const SuministroPage = lazy(() => import("../../features/operaciones/operacion/suministro"));
 const AprobarCampoPage = lazy(() => import("../../features/operaciones/operacion/aprobarcampo"));
+const SeguimientoEmpleadoPage = lazy(() => import("../../features/operaciones/operacion/seguimientoempleado"));
 const ClientePage = lazy(() => import("../../features/comercial/cliente"));
 const FacturacionPage = lazy(() => import("../../features/comercial/facturacion"));
 const CobranzasPage = lazy(() => import("../../features/comercial/cobranzas"));
@@ -60,8 +62,10 @@ const ConsultaPage = lazy(() => import("../../features/mantenimiento/consulta/co
 const ModificacionesPage = lazy(() => import("../../features/mantenimiento/consulta/modificaciones"));
 const MigracionPage = lazy(() => import("../../features/mantenimiento/migracion"));
 const MigracionImportPage = lazy(() => import("../../features/mantenimiento/migracion/m_importar"));
+const MigracionImportNewPage = lazy(() => import("../../features/mantenimiento/migracion/importar"));
 const MantenimientoPage = lazy(() => import("../../features/mantenimiento/mantenimiento"));
 const MantenimientoEmpleadosPage = lazy(() => import("../../features/mantenimiento/empleados"));
+const MantenimientoExternoPage = lazy(() => import("../../features/mantenimiento/externo"));
 const MantenimientoEmpleadoFichaPage = lazy(() => import("../../features/mantenimiento/mantenimiento/m_empleado"));
 const RptWupPage = lazy(() => import("../../features/mantenimiento/sistemas/rptwup"));
 const RptWupGerencialPage = lazy(() => import("../../features/mantenimiento/sistemas/rptwupgerencial"));
@@ -82,6 +86,8 @@ const BacklogPage = lazy(() => import("../../features/reportes/gerencial/backlog
 const IngresosEgresosPage = lazy(() => import("../../features/reportes/gerencial/ingresosegresos"));
 const AnalisisPage = lazy(() => import("../../features/reportes/gerencial/analisis"));
 const AnalisisProyectoPage = lazy(() => import("../../features/reportes/gerencial/analisisproyecto"));
+const MapaSitePage = lazy(() => import("../../features/reportes/gerencial/mapasite"));
+const SqlMonitorPage = lazy(() => import("../../features/sqlmonitor/pages/sqlmonitor"));
 const RptAsistenciaPage = lazy(() => import("../../features/reportes/rptasistencia"));
 const RptAsistenciaEmpleadoPage = lazy(() => import("../../features/reportes/rptasistenciaempleado"));
 const ClaudeiaPage = lazy(() => import("../../features/reportes/administrativo/claudeia"));
@@ -135,6 +141,7 @@ export default function AppRouter() {
             <Route path="/operaciones/operacion/reembolso" element={<ReembolsoPage />} />
             <Route path="/operaciones/operacion/suministro" element={<SuministroPage />} />
             <Route path="/operaciones/operacion/aprobarcampo" element={<AprobarCampoPage />} />
+            <Route path="/operaciones/operacion/seguimientoempleado" element={<SeguimientoEmpleadoPage />} />
             <Route path="/operaciones/asignacion" element={<AsignacionPage />} />
 
             <Route path="/comercial/cliente" element={<ClientePage />} />
@@ -195,9 +202,11 @@ export default function AppRouter() {
             <Route path="/mantenimiento/consulta/modificaciones" element={<ModificacionesPage />} />
             <Route path="/mantenimiento/modificaciones" element={<ModificacionesPage />} />
             <Route path="/mantenimiento/empleados" element={<MantenimientoEmpleadosPage />} />
+            <Route path="/mantenimiento/externo" element={<MantenimientoExternoPage />} />
             <Route path="/mantenimiento/mantenimiento/m_empleado" element={<MantenimientoEmpleadoFichaPage />} />
             <Route path="/mantenimiento/migracion" element={<MigracionPage />} />
             <Route path="/mantenimiento/migracion/m_importar" element={<MigracionImportPage />} />
+            <Route path="/mantenimiento/migracion/importar" element={<MigracionImportNewPage />} />
             <Route path="/mantenimiento/mantenimiento" element={<MantenimientoPage />} />
             <Route path="/mantenimiento/sistemas/rptwup" element={<RptWupPage />} />
             <Route path="/mantenimiento/sistemas/rptwupgerencial" element={<RptWupGerencialPage />} />
@@ -227,6 +236,9 @@ export default function AppRouter() {
             <Route path="/reportes/gerencial/ingresosegresos" element={<IngresosEgresosPage />} />
             <Route path="/reportes/gerencial/analisis" element={<AnalisisPage />} />
             <Route path="/reportes/gerencial/analisisproyecto" element={<AnalisisProyectoPage />} />
+            <Route path="/reportes/gerencial/mapasite" element={<MapaSitePage />} />
+            <Route path="/sqlmonitor" element={<SqlMonitorPage />} />
+            <Route path="/sqlmonitor/query/:id" element={<SqlMonitorPage />} />
             <Route path="/reportes/gerencial/dashboardcj" element={<DashboardCjPage />} />
             <Route path="/reportes/gerencial/dashboard1" element={<Dashboard1Page />} />
             <Route path="/reportes/rptasistencia" element={<RptAsistenciaPage />} />
@@ -269,6 +281,7 @@ export default function AppRouter() {
             <Route path="/finanzas/tesoreria/cheques" element={<TesoreriaChequesPage />} />
             <Route path="/finanzas/tesoreria/gastos" element={<TesoreriaGastosPage />} />
             <Route path="/finanzas/tesoreria/gastosaprobar" element={<TesoreriaGastosAprobarPage />} />
+            <Route path="/finanzas/tesoreria/pagos_v1" element={<TesoreriaPagosV1Page />} />
             <Route path="/finanzas/conciliacion" element={<ConciliacionBcpPage />} />
             <Route path="/finanzas/conciliacion_v1" element={<ConciliacionBcpV1Page />} />
 

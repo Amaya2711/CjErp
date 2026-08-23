@@ -94,3 +94,30 @@ export type AsistenciaActualizarEstadoMarcacionRequest = {
   estadoMarcacionAnterior: string;
   estadoMarcacionNuevo: string;
 };
+
+export type AsistenciaTrackingQueryParams = {
+  idEmpleado: number;
+  fechaAsistencia: string;
+};
+
+export type AsistenciaTrackingPunto = {
+  idEmpleado: number;
+  nombreEmpleado: string;
+  fechaAsistencia: string;
+  hora: string;
+  horaSalida?: string | null;
+  latPto: number | null;
+  lonPto: number | null;
+  source: string;
+  fechaHora: string | null;
+  imagen?: string | null;
+  imagenSalida?: string | null;
+  imagenFinal?: string | null;
+};
+
+export type AsistenciaTrackingResponse = {
+  idEmpleado: number;
+  nombreEmpleado: string;
+  fechaAsistencia: string;
+  puntos: AsistenciaTrackingPunto[];
+};

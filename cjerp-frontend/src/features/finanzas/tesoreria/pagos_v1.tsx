@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -82,6 +82,7 @@ type GroupRow = {
   total: number;
   subtotal: number;
   count: number;
+  totalsByCurrency: Record<string, { subtotal: number; igv: number; total: number }>;
 };
 
 const TAB_ORDER: PagoTabKey[] = ["aprobar", "reaprobar", "hormiga", "observadas", "resumen"];
@@ -417,6 +418,28 @@ function formatMoney(value: number) {
   return value.toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function getCurrencySymbol(currency: string) {
+  const normalized = normalizeText(currency);
+
+  if (normalized.includes("usd") || normalized.includes("dolar")) {
+    return "$";
+  }
+
+  if (normalized.includes("eur") || normalized.includes("euro")) {
+    return "€";
+  }
+
+  if (normalized.includes("peso dominicano") || normalized.includes("rd$") || normalized === "dop" || normalized.includes("dominicano")) {
+    return "RD$";
+  }
+
+  return "S/";
+}
+
+function formatCurrency(value: number, currency: string) {
+  return `${getCurrencySymbol(currency)} ${formatMoney(value)}`;
+}
+
 function formatDate(value: string) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
@@ -724,18 +747,44 @@ export default function PagosV1Page() {
           total: 0,
           subtotal: 0,
           count: 0,
+          totalsByCurrency: {},
         });
       }
 
       const group = map.get(key)!;
+      const currencyKey = (row.moneda || "Sin moneda").trim();
+      if (!group.totalsByCurrency[currencyKey]) {
+        group.totalsByCurrency[currencyKey] = { subtotal: 0, igv: 0, total: 0 };
+      }
+
       group.rows.push(row);
       group.total += row.total;
       group.subtotal += row.subtotal;
       group.count += 1;
+      group.totalsByCurrency[currencyKey].subtotal += row.subtotal;
+      group.totalsByCurrency[currencyKey].igv += row.igv;
+      group.totalsByCurrency[currencyKey].total += row.total;
     });
 
     return Array.from(map.values());
   }, [filteredRows]);
+
+  const visibleRowIds = useMemo(() => {
+    const ids: number[] = [];
+
+    groupedRows.forEach((group) => {
+      const isCollapsed = collapsedGroups[group.key] ?? false;
+      if (isCollapsed) {
+        return;
+      }
+
+      group.rows.forEach((row) => ids.push(row.id));
+    });
+
+    return ids;
+  }, [groupedRows, collapsedGroups]);
+
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const visibleIds = new Set(filteredRows.map((row) => row.id));
@@ -745,9 +794,21 @@ export default function PagosV1Page() {
   }, [filteredRows, selectedId]);
 
   useEffect(() => {
-    const visibleIds = new Set(filteredRows.map((row) => row.id));
+    const visibleIds = new Set(visibleRowIds);
     setCheckedIds((prev) => prev.filter((id) => visibleIds.has(id)));
-  }, [filteredRows]);
+  }, [visibleRowIds]);
+
+  useEffect(() => {
+    if (!selectAllRef.current) {
+      return;
+    }
+
+    const allChecked = visibleRowIds.length > 0 && visibleRowIds.every((id) => checkedIds.includes(id));
+    const someChecked = visibleRowIds.some((id) => checkedIds.includes(id));
+
+    selectAllRef.current.checked = allChecked;
+    selectAllRef.current.indeterminate = !allChecked && someChecked;
+  }, [checkedIds, visibleRowIds]);
 
   useEffect(() => {
     setCollapsedGroups((prev) => {
@@ -801,16 +862,17 @@ export default function PagosV1Page() {
     };
   }, [filteredRows, selectedRow]);
 
-  const totals = useMemo(() => {
-    return filteredRows.reduce(
-      (acc, row) => {
-        acc.total += row.total;
-        acc.subtotal += row.subtotal;
-        acc.igv += row.igv;
-        return acc;
-      },
-      { total: 0, subtotal: 0, igv: 0 }
-    );
+  const totalsByCurrency = useMemo(() => {
+    return filteredRows.reduce<Record<string, { subtotal: number; igv: number; total: number }>>((acc, row) => {
+      const key = (row.moneda || "Sin moneda").trim();
+      if (!acc[key]) {
+        acc[key] = { subtotal: 0, igv: 0, total: 0 };
+      }
+      acc[key].subtotal += row.subtotal;
+      acc[key].igv += row.igv;
+      acc[key].total += row.total;
+      return acc;
+    }, {});
   }, [filteredRows]);
 
   const actionConfig = useMemo(() => {
@@ -960,10 +1022,18 @@ export default function PagosV1Page() {
                 </div>
                 <div>
                   <h1 style={styles.title}>Órdenes de Pago</h1>
-                  <p style={styles.subtitle}>
-                    Gestión y control de pagos con los estados Aprobar, Re-aprobar, Hormiga, Observadas y Resumen.
-                  </p>
+                  
                 </div>
+              </div>
+              <div style={{ ...styles.quickSearchWrap, borderColor: currentTheme.border, background: "#FFFFFF" }}>
+                <Search size={16} color={currentTheme.accent} />
+                <input
+                  type="text"
+                  value={filters.query}
+                  onChange={(event) => setFilters((prev) => ({ ...prev, query: event.target.value }))}
+                  placeholder="Búsqueda rápida por correlativo, responsable, cliente o proyecto"
+                  style={styles.quickSearchInput}
+                />
               </div>
 
             </div>
@@ -1022,7 +1092,7 @@ export default function PagosV1Page() {
           <div style={styles.leftColumn}>
             <div style={styles.gridCard}>
             <div style={styles.gridHeader}>
-              <div>
+              <div style={styles.gridHeaderTitleBlock}>
                 <div style={styles.gridHeaderKicker}>Agrupado por:</div>
                 <div style={styles.gridHeaderTitle}>Solicitante</div>
               </div>
@@ -1036,7 +1106,19 @@ export default function PagosV1Page() {
               <table style={styles.table}>
                 <thead>
                   <tr>
-                    <th style={{ ...styles.th, width: 44 }} />
+                    <th style={{ ...styles.th, width: 44, textAlign: "center" }}>
+                      <input
+                        ref={selectAllRef}
+                        type="checkbox"
+                        aria-label="Seleccionar todas las filas visibles"
+                        onChange={(event) => {
+                          const nextIds = event.target.checked ? visibleRowIds : [];
+                          setCheckedIds(nextIds);
+                        }}
+                        onClick={(event) => event.stopPropagation()}
+                        style={{ accentColor: currentTheme.accent }}
+                      />
+                    </th>
                     <th style={{ ...styles.th, width: 94 }}>Correlativo</th>
                     <th style={{ ...styles.th, width: 90 }}>Responsable</th>
                     <th style={{ ...styles.th, width: 90 }}>Subtotal</th>
@@ -1092,11 +1174,15 @@ export default function PagosV1Page() {
                                 </button>
                                 <strong style={styles.groupTitle}>Solicitante: {group.label}</strong>
                                 <span style={styles.groupCount}>{group.count}</span>
-                                <div style={styles.groupAmount}>
-                                  S/ {formatMoney(group.total)}
-                                </div>
-                                <div style={styles.groupMeta}>
-                                  Subtotal: <strong>S/ {formatMoney(group.subtotal)}</strong>
+                                <div style={styles.groupCurrencyStack}>
+                                  {Object.entries(group.totalsByCurrency).map(([currency, amounts]) => (
+                                    <div key={currency} style={styles.groupCurrencyLine}>
+                                      <span style={styles.groupCurrencyLabel}>{currency}:</span>
+                                      <strong>
+                                        Subtotal {formatCurrency(amounts.subtotal, currency)} | IGV {formatCurrency(amounts.igv, currency)} | Total {formatCurrency(amounts.total, currency)}
+                                      </strong>
+                                    </div>
+                                  ))}
                                 </div>
                               </div>
                             </td>
@@ -1135,9 +1221,9 @@ export default function PagosV1Page() {
                                   </td>
                                   <td style={styles.td}>{row.correlativo}</td>
                                   <td style={styles.td}>{row.responsable}</td>
-                                  <td style={styles.td}>S/ {formatMoney(row.subtotal)}</td>
-                                  <td style={styles.td}>S/ {formatMoney(row.igv)}</td>
-                                  <td style={{ ...styles.td, fontWeight: 900 }}>S/ {formatMoney(row.total)}</td>
+                                  <td style={styles.td}>{formatCurrency(row.subtotal, row.moneda)}</td>
+                                  <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
+                                  <td style={{ ...styles.td, fontWeight: 900 }}>{formatCurrency(row.total, row.moneda)}</td>
                                   <td style={styles.td}>{formatDate(row.fecha)}</td>
                                   <td style={styles.td}>{row.cliente}</td>
                                   <td style={styles.td}>{row.proyecto}</td>
@@ -1176,9 +1262,14 @@ export default function PagosV1Page() {
                 Mostrando {filteredRows.length} registros de {rowsByTab.resumen.length}
               </div>
               <div style={styles.gridFooterTotals}>
-                <span>Subtotal: <strong>S/ {formatMoney(totals.subtotal)}</strong></span>
-                <span>IGV: <strong>S/ {formatMoney(totals.igv)}</strong></span>
-                <span>Total: <strong>S/ {formatMoney(totals.total)}</strong></span>
+                {Object.entries(totalsByCurrency).map(([currency, amounts]) => (
+                    <span key={currency}>
+                      {currency}:{" "}
+                      <strong>
+                        Subtotal {formatCurrency(amounts.subtotal, currency)} | IGV {formatCurrency(amounts.igv, currency)} | Total {formatCurrency(amounts.total, currency)}
+                    </strong>
+                  </span>
+                ))}
               </div>
             </div>
             </div>
@@ -1262,21 +1353,22 @@ export default function PagosV1Page() {
                 </div>
 
                 <div style={styles.detailInfoGrid}>
-                  <InfoField label="Monto OC" value={`S/ ${formatMoney(selectedRow.total)}`} />
+                  <InfoField label="Monto OC" value={formatCurrency(selectedRow.total, selectedRow.moneda)} />
                   <InfoField
                     label="Pagado"
-                    value={`S/ ${formatMoney(ocSnapshot ? Math.max(ocSnapshot.totalAcumuladoSitio - selectedRow.total, 0) : 0)}`}
+                    value={formatCurrency(ocSnapshot ? Math.max(ocSnapshot.totalAcumuladoSitio - selectedRow.total, 0) : 0, selectedRow.moneda)}
                   />
-                  <InfoField label="Saldo" value={`S/ ${formatMoney(ocSnapshot ? ocSnapshot.disponible : 0)}`} />
+                  <InfoField label="Saldo" value={formatCurrency(ocSnapshot ? ocSnapshot.disponible : 0, selectedRow.moneda)} />
                   <InfoField
                     label="Solicitado"
-                    value={`S/ ${formatMoney(ocSnapshot ? ocSnapshot.totalAcumuladoSitio : selectedRow.total)}`}
+                    value={formatCurrency(ocSnapshot ? ocSnapshot.totalAcumuladoSitio : selectedRow.total, selectedRow.moneda)}
                   />
                   <InfoField
                     label="Pendiente"
-                    value={`S/ ${formatMoney(
-                      ocSnapshot ? Math.max(selectedRow.total - ocSnapshot.totalAcumuladoSitio, 0) : 0
-                    )}`}
+                    value={formatCurrency(
+                      ocSnapshot ? Math.max(selectedRow.total - ocSnapshot.totalAcumuladoSitio, 0) : 0,
+                      selectedRow.moneda
+                    )}
                   />
                 </div>
 
@@ -1298,8 +1390,8 @@ export default function PagosV1Page() {
                     />
                   </div>
                   <div style={styles.ocProgressFooter}>
-                    <span>Disponible: S/ {formatMoney(ocSnapshot ? ocSnapshot.disponible : 0)}</span>
-                    <span>Total sitio: S/ {formatMoney(ocSnapshot ? ocSnapshot.totalAcumuladoSitio : selectedRow.total)}</span>
+                    <span>Disponible: {formatCurrency(ocSnapshot ? ocSnapshot.disponible : 0, selectedRow.moneda)}</span>
+                    <span>Total sitio: {formatCurrency(ocSnapshot ? ocSnapshot.totalAcumuladoSitio : selectedRow.total, selectedRow.moneda)}</span>
                   </div>
                 </div>
               </>
@@ -1463,20 +1555,20 @@ const styles: Record<string, React.CSSProperties> = {
   page: {
     display: "flex",
     flexDirection: "column",
-    gap: 16,
+    gap: 10,
     height: "100%",
     minHeight: 0,
   },
   hero: {
     border: "1px solid #E2E8F0",
     borderRadius: 18,
-    padding: 18,
+    padding: 10,
     boxShadow: "0 1px 6px rgba(15, 23, 42, 0.05)",
   },
   heroTopRow: {
     display: "grid",
     gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 1fr)",
-    gap: 16,
+    gap: 6,
     alignItems: "start",
   },
   heroTitleBlock: {
@@ -1485,8 +1577,8 @@ const styles: Record<string, React.CSSProperties> = {
   heroTitleLine: {
     display: "flex",
     alignItems: "flex-start",
-    gap: 14,
-    marginTop: 8,
+    gap: 8,
+    marginTop: 2,
   },
   heroIconBox: {
     width: 48,
@@ -1510,26 +1602,47 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 11,
     fontWeight: 900,
     letterSpacing: 0.25,
-    marginBottom: 10,
+    marginBottom: 4,
   },
   title: {
     margin: 0,
-    fontSize: 28,
+    fontSize: 26,
     lineHeight: 1.08,
     fontWeight: 900,
     color: "#0F172A",
   },
   subtitle: {
-    margin: "8px 0 0",
+    margin: "6px 0 0",
     fontSize: 14,
     color: "#475569",
     maxWidth: 760,
+  },
+  quickSearchWrap: {
+    marginTop: 4,
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    width: "100%",
+    maxWidth: 460,
+    border: "1px solid",
+    borderRadius: 12,
+    padding: "5px 10px",
+    boxShadow: "0 1px 4px rgba(15, 23, 42, 0.05)",
+  },
+  quickSearchInput: {
+    border: "none",
+    outline: "none",
+    flex: 1,
+    minWidth: 0,
+    background: "transparent",
+    fontSize: 13,
+    color: "#0F172A",
   },
   tabsRow: {
     display: "flex",
     gap: 10,
     flexWrap: "wrap",
-    marginTop: 16,
+    marginTop: 10,
   },
   tabButton: {
     height: 38,
@@ -1549,16 +1662,16 @@ const styles: Record<string, React.CSSProperties> = {
   metricsStrip: {
     display: "grid",
     gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
-    gap: 10,
+    gap: 6,
   },
   kpiCard: {
     border: "1px solid",
     borderRadius: 16,
-    padding: 12,
+    padding: 9,
     display: "flex",
     gap: 10,
     alignItems: "center",
-    minHeight: 78,
+    minHeight: 72,
   },
   kpiIcon: {
     width: 34,
@@ -1588,11 +1701,11 @@ const styles: Record<string, React.CSSProperties> = {
   controlsGrid: {
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr)",
-    gap: 16,
+    gap: 10,
     alignItems: "start",
   },
   actionsBar: {
-    marginTop: 6,
+    marginTop: 2,
   },
   filtersCard: {
     background: "#FFFFFF",
@@ -1763,7 +1876,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     minHeight: 0,
-    maxHeight: "calc(100vh - 450px)",
+    maxHeight: "calc(100vh - 420px)",
     overflow: "hidden",
     boxShadow: "0 1px 6px rgba(15, 23, 42, 0.05)",
   },
@@ -1775,6 +1888,13 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0px 0px",
     borderBottom: "1px solid #E2E8F0",
     flexWrap: "wrap",
+  },
+  gridHeaderTitleBlock: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    minWidth: 0,
+    whiteSpace: "nowrap",
   },
   gridHeaderKicker: {
     fontSize: 11,
@@ -1883,6 +2003,26 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
     fontWeight: 900,
     color: "#2563EB",
+  },
+  groupCurrencyStack: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    minWidth: 0,
+    flex: "1 1 320px",
+  },
+  groupCurrencyLine: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 6,
+    alignItems: "baseline",
+    fontSize: 12,
+    color: "#0F172A",
+    fontWeight: 700,
+  },
+  groupCurrencyLabel: {
+    fontWeight: 900,
+    color: "#475569",
   },
   groupMeta: {
     fontSize: 12,
@@ -2242,5 +2382,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 24,
   },
 };
+
+
 
 

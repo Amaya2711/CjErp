@@ -1,9 +1,10 @@
-import httpClient from "./httpClient";
+﻿import httpClient from "./httpClient";
 
-const EMPLEADOS_LIST_TIMEOUT_MS = 60000;
-const EMPLEADOS_LOOKUPS_TIMEOUT_MS = 60000;
+const EXTERNOS_LIST_TIMEOUT_MS = 60000;
+const EXTERNOS_LOOKUPS_TIMEOUT_MS = 60000;
+const EXTERNOS_EMPRESA_FILTRO = "EXTERNO";
 
-export type EmpleadoCrudItem = {
+export type ExternoCrudItem = {
   idEmpleado: number;
   nombreEmpleado: string;
   sexo: string;
@@ -37,7 +38,7 @@ export type EmpleadoCrudItem = {
   idTerceroVacaciones: number | null;
 };
 
-export type EmpleadoCrudSaveRequest = {
+export type ExternoCrudSaveRequest = {
   nombreEmpleado: string;
   sexo?: string | null;
   idSexo: number | null;
@@ -67,7 +68,7 @@ export type CrudLookupItem = {
   orden: number;
 };
 
-export type EmpleadoCrudLookups = {
+export type ExternoCrudLookups = {
   empresas: CrudLookupItem[];
   clientes: CrudLookupItem[];
   areas: CrudLookupItem[];
@@ -88,7 +89,7 @@ function toStringValue(value: unknown): string {
   return value == null ? "" : String(value).trim();
 }
 
-function mapItem(raw: Record<string, unknown>): EmpleadoCrudItem {
+function mapItem(raw: Record<string, unknown>): ExternoCrudItem {
   return {
     idEmpleado: Number(raw.idEmpleado ?? raw.IdEmpleado ?? 0),
     nombreEmpleado: toStringValue(raw.nombreEmpleado ?? raw.NombreEmpleado),
@@ -134,43 +135,48 @@ function mapLookup(raw: Record<string, unknown>): CrudLookupItem {
   };
 }
 
-export const empleadosCrudService = {
-  async listar(nombreEmpleado?: string): Promise<EmpleadoCrudItem[]> {
-    const response = await httpClient.get<Record<string, unknown>[] | unknown>("/mantenimiento/empleados", {
-      params: nombreEmpleado ? { nombreEmpleado } : undefined,
-      timeout: EMPLEADOS_LIST_TIMEOUT_MS,
+export const externosCrudService = {
+  async listar(nombreEmpleado?: string): Promise<ExternoCrudItem[]> {
+    const response = await httpClient.get<Record<string, unknown>[] | unknown>("/mantenimiento/externos", {
+      params: {
+        nombreEmpleado: nombreEmpleado ?? undefined,
+        empresa: EXTERNOS_EMPRESA_FILTRO,
+      },
+      timeout: EXTERNOS_LIST_TIMEOUT_MS,
     });
 
     return Array.isArray(response) ? response.map((item) => mapItem(item as Record<string, unknown>)) : [];
   },
 
-  async obtener(idEmpleado: number): Promise<EmpleadoCrudItem> {
-    const response = await httpClient.get<Record<string, unknown>>(`/mantenimiento/empleados/${idEmpleado}`);
+  async obtener(idEmpleado: number): Promise<ExternoCrudItem> {
+    const response = await httpClient.get<Record<string, unknown>>(`/mantenimiento/externos/${idEmpleado}`, {
+      params: { empresa: EXTERNOS_EMPRESA_FILTRO },
+    });
     return mapItem(response);
   },
 
-  async crear(payload: EmpleadoCrudSaveRequest): Promise<EmpleadoCrudItem> {
-    const response = await httpClient.post<Record<string, unknown>>("/mantenimiento/empleados", payload);
+  async crear(payload: ExternoCrudSaveRequest): Promise<ExternoCrudItem> {
+    const response = await httpClient.post<Record<string, unknown>>("/mantenimiento/externos", payload);
     return mapItem(response);
   },
 
-  async actualizar(idEmpleado: number, payload: EmpleadoCrudSaveRequest): Promise<EmpleadoCrudItem> {
-    const response = await httpClient.put<Record<string, unknown>>(`/mantenimiento/empleados/${idEmpleado}`, payload);
+  async actualizar(idEmpleado: number, payload: ExternoCrudSaveRequest): Promise<ExternoCrudItem> {
+    const response = await httpClient.put<Record<string, unknown>>(`/mantenimiento/externos/${idEmpleado}`, payload);
     return mapItem(response);
   },
 
-  async aprobar(idEmpleado: number): Promise<EmpleadoCrudItem> {
-    const response = await httpClient.post<Record<string, unknown>>(`/mantenimiento/empleados/${idEmpleado}/aprobar`);
+  async aprobar(idEmpleado: number): Promise<ExternoCrudItem> {
+    const response = await httpClient.post<Record<string, unknown>>(`/mantenimiento/externos/${idEmpleado}/aprobar`);
     return mapItem(response);
   },
 
   async eliminar(idEmpleado: number): Promise<void> {
-    await httpClient.delete(`/mantenimiento/empleados/${idEmpleado}`);
+    await httpClient.delete(`/mantenimiento/externos/${idEmpleado}`);
   },
 
-  async obtenerLookups(): Promise<EmpleadoCrudLookups> {
-    const response = await httpClient.get<Record<string, unknown>>("/mantenimiento/empleados/lookups", {
-      timeout: EMPLEADOS_LOOKUPS_TIMEOUT_MS,
+  async obtenerLookups(): Promise<ExternoCrudLookups> {
+    const response = await httpClient.get<Record<string, unknown>>("/mantenimiento/externos/lookups", {
+      timeout: EXTERNOS_LOOKUPS_TIMEOUT_MS,
     });
 
     return {

@@ -1,9 +1,11 @@
 import React from "react";
+import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 
 export type DataGridColumn<T> = {
   key: string;
   header: string;
   align?: "left" | "center" | "right";
+  sortable?: boolean;
   render: (row: T) => React.ReactNode;
 };
 
@@ -18,6 +20,10 @@ type DataGridBaseProps<T> = {
   actionsHeader?: string;
   actionsAlign?: "left" | "center" | "right";
   rowActionsPosition?: number;
+  sortKey?: string;
+  sortDirection?: "asc" | "desc";
+  onSortChange?: (key: string) => void;
+  maxHeight?: number | string;
 };
 
 export default function DataGridBase<T>({
@@ -31,6 +37,10 @@ export default function DataGridBase<T>({
   actionsHeader = "Acciones",
   actionsAlign = "center",
   rowActionsPosition,
+  sortKey,
+  sortDirection,
+  onSortChange,
+  maxHeight,
 }: DataGridBaseProps<T>) {
   const columnCount = Math.max(columns.length + (rowActions ? 1 : 0), 1);
   const actionIndex = rowActions ? Math.min(Math.max(rowActionsPosition ?? columns.length, 0), columns.length) : -1;
@@ -56,7 +66,12 @@ export default function DataGridBase<T>({
     ) : null;
 
   return (
-    <div style={styles.wrapper}>
+    <div
+      style={{
+        ...styles.wrapper,
+        ...(maxHeight != null ? { maxHeight, overflowY: "auto" } : null),
+      }}
+    >
       <table style={styles.table}>
         <thead>
           <tr>
@@ -67,9 +82,24 @@ export default function DataGridBase<T>({
                   style={{
                     ...styles.th,
                     textAlign: column.align ?? "left",
+                    cursor: onSortChange && column.sortable ? "pointer" : "default",
                   }}
+                  onClick={
+                    onSortChange && column.sortable
+                      ? () => onSortChange(column.key)
+                      : undefined
+                  }
                 >
-                  {column.header}
+                  <span style={styles.headerContent}>
+                    <span>{column.header}</span>
+                    {onSortChange && column.sortable ? (
+                      sortKey === column.key ? (
+                        sortDirection === "asc" ? <ArrowUp size={14} /> : <ArrowDown size={14} />
+                      ) : (
+                        <ArrowUpDown size={14} />
+                      )
+                    ) : null}
+                  </span>
                 </th>
               </React.Fragment>
             ))}
@@ -125,11 +155,19 @@ const styles: Record<string, React.CSSProperties> = {
     borderCollapse: "collapse",
   },
   th: {
+    position: "sticky",
+    top: 0,
+    zIndex: 2,
     padding: "14px 12px",
     fontSize: 13,
     color: "#374151",
     borderBottom: "1px solid #E5E7EB",
     background: "#F8FAFC",
+  },
+  headerContent: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
   },
   td: {
     padding: "14px 12px",

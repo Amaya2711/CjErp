@@ -1,6 +1,8 @@
 using CjERP.Api.Configuration;
+using CjERP.Application.Interfaces.Services;
 using CjERP.Infrastructure.Persistence.Context;
 using CjERP.Infrastructure.Persistence.Sql;
+using CjERP.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -29,6 +31,7 @@ namespace CjERP.Infrastructure.DependencyInjection
             var sqlCommandFactory = new SqlCommandFactory(configuration, Options.Create(sqlSettings));
 
             services.AddSingleton<ISqlCommandFactory>(sqlCommandFactory);
+            services.AddScoped<ISqlMonitorService, SqlMonitorService>();
 
             services.AddDbContext<CJERPDbContext>(options =>
                 options.UseSqlServer(

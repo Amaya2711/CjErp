@@ -39,6 +39,10 @@ public interface IAsistenciaReporteService
         IReadOnlyList<int> idsEmpleado,
         CancellationToken cancellationToken = default);
 
+    Task<AsistenciaTrackingConsultaDto> ObtenerTrackingEmpleadoAsync(
+        AsistenciaTrackingConsultaRequestDto request,
+        CancellationToken cancellationToken = default);
+
     Task<AsistenciaGerencialPdfDto> ObtenerReporteGerencialAsync(
         AsistenciaGerencialPdfRequestDto request,
         CancellationToken cancellationToken = default);

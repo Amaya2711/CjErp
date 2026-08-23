@@ -43,6 +43,7 @@ public class EmpleadoFichaController : ControllerBase
     public async Task<IActionResult> Obtener(
         [FromQuery] int? idEmpleado,
         [FromQuery] string? nombreEmpleado,
+        [FromQuery] int? idCargo,
         CancellationToken cancellationToken)
     {
         var normalizedNombreEmpleado = string.IsNullOrWhiteSpace(nombreEmpleado)
@@ -92,7 +93,7 @@ ORDER BY p.parameter_id
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .ToList();
 
-        var commandParameters = BuildParameters(parameterNames, idEmpleado, normalizedNombreEmpleado);
+        var commandParameters = BuildParameters(parameterNames, idEmpleado, normalizedNombreEmpleado, idCargo);
 
         var rows = (await connection.QueryAsync(
             new CommandDefinition(
@@ -125,7 +126,8 @@ ORDER BY p.parameter_id
     private static DynamicParameters BuildParameters(
         IReadOnlyCollection<string> parameterNames,
         int? idEmpleado,
-        string nombreEmpleado)
+        string nombreEmpleado,
+        int? idCargo)
     {
         var parameters = new DynamicParameters();
 
@@ -139,7 +141,7 @@ ORDER BY p.parameter_id
             return parameters;
         }
 
-        var resolvedParameterName = ResolveParameterName(parameterNames, idEmpleado, nombreEmpleado);
+        var resolvedParameterName = ResolveParameterName(parameterNames, idEmpleado, nombreEmpleado, idCargo);
         if (string.IsNullOrWhiteSpace(resolvedParameterName))
         {
             throw new InvalidOperationException(
@@ -155,13 +157,21 @@ ORDER BY p.parameter_id
             parameters.Add(resolvedParameterName, idEmpleado.Value, DbType.Int32);
         }
 
+        if (parameterNames.Any(name => string.Equals(NormalizeParameterName(name), "IdCargo", StringComparison.OrdinalIgnoreCase))
+            && idCargo.HasValue
+            && idCargo.Value > 0)
+        {
+            parameters.Add("@IdCargo", idCargo.Value, DbType.Int32);
+        }
+
         return parameters;
     }
 
     private static string? ResolveParameterName(
         IEnumerable<string> parameterNames,
         int? idEmpleado,
-        string nombreEmpleado)
+        string nombreEmpleado,
+        int? idCargo)
     {
         var normalizedNames = parameterNames
             .Select(name => NormalizeParameterName(name))
@@ -174,7 +184,9 @@ ORDER BY p.parameter_id
                 ? new[] { "IdEmpleado", "idEmpleado", "IdEmpleadoCj", "idEmpleadoCj", "CodEmp", "codEmp" }
                 : [];
 
-        foreach (var candidate in preferredCandidates.Concat(CandidateParameterNames))
+        foreach (var candidate in preferredCandidates
+            .Concat(idCargo.HasValue && idCargo.Value > 0 ? new[] { "IdCargo", "idCargo" } : [])
+            .Concat(CandidateParameterNames))
         {
             if (normalizedNames.Contains(NormalizeParameterName(candidate), StringComparer.OrdinalIgnoreCase))
             {

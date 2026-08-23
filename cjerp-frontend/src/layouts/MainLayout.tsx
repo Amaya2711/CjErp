@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import logo from "../assets/logo.png";
+import { PageTitleContext } from "../components/base/AppPage";
 import { clearAuthUser, getAuthUser } from "../utils/authStorage";
 import { logoutSession } from "../features/auth/services/logoutSession";
 import {
@@ -8,6 +9,7 @@ import {
   type DashboardGroup,
   type DashboardTile,
 } from "../features/dashboard/services/dashboardMenuService";
+import { getMenuAccentByName, getMenuIconComponent } from "../utils/menuIcons";
 
 function tileMatchesPath(tile: DashboardTile, pathname: string): boolean {
   const tilePath = normalizeRoutePath(tile.path);
@@ -77,13 +79,21 @@ export default function MainLayout() {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const collapseDirection: "left" | "right" = "left";
+  const [pageTitle, setPageTitle] = useState<string | null>(null);
   const logoutRef = useRef(false);
   const ingresosEgresosSidebarStateRef = useRef<{
     active: boolean;
     previousCollapsed: boolean;
   } | null>(null);
+  const mapasiteSidebarStateRef = useRef<{
+    active: boolean;
+    previousCollapsed: boolean;
+  } | null>(null);
   const dshPagosSidebarStateRef = useRef<{
+    active: boolean;
+    previousCollapsed: boolean;
+  } | null>(null);
+  const pagosV1SidebarStateRef = useRef<{
     active: boolean;
     previousCollapsed: boolean;
   } | null>(null);
@@ -94,7 +104,17 @@ export default function MainLayout() {
   const codigoEmpleadoMostrar = (authUser?.codEmp || authUser?.idEmpleado || authUser?.empleado || "").toString();
   const codigoidperfil: number = Number(authUser?.idperfil ?? 0);
   const codigoidrol: number = Number(authUser?.idrol ?? 0);
-  const isEmployeesPage = location.pathname.startsWith("/mantenimiento/empleados");
+  const isEmployeesPage =
+    location.pathname.startsWith("/mantenimiento/empleados") ||
+    location.pathname.startsWith("/mantenimiento/externo");
+  const isMapaSitesPage = location.pathname.startsWith("/reportes/gerencial/mapasite");
+
+  const iniciales = (empleadoMostrar || usuarioMostrar || "??")
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("") || "??";
 
   const forceLogoutToLogin = () => {
     clearAuthUser();
@@ -102,10 +122,6 @@ export default function MainLayout() {
   };
 
   useEffect(() => {
-      //console.log("[MainLayout] authUser", authUser);
-      //console.log("[MainLayout] codigoEmpleadoMostrar", codigoEmpleadoMostrar);
-      //console.log("[MainLayout] codigoidrol", codigoidrol);
-
     let activo = true;
 
     const cargarMenu = async () => {
@@ -122,7 +138,7 @@ export default function MainLayout() {
       const grupos = await loadDashboardMenus(authUser.usuario);
 
       if (activo) {
-        setMenuDashboard(grupos); // Mostrar todos los grupos, sin filtrar por tiles
+        setMenuDashboard(grupos);
         setMenuLoading(false);
       }
     };
@@ -226,6 +242,60 @@ export default function MainLayout() {
     }
   }, [isSidebarCollapsed, location.pathname]);
 
+  useEffect(() => {
+    const isMapaSitePage = location.pathname.startsWith("/reportes/gerencial/mapasite");
+
+    if (isMapaSitePage) {
+      if (!mapasiteSidebarStateRef.current?.active) {
+        mapasiteSidebarStateRef.current = {
+          active: true,
+          previousCollapsed: isSidebarCollapsed,
+        };
+
+        if (!isSidebarCollapsed) {
+          setIsSidebarCollapsed(true);
+        }
+      }
+      return;
+    }
+
+    const savedState = mapasiteSidebarStateRef.current;
+    if (savedState?.active) {
+      mapasiteSidebarStateRef.current = null;
+
+      if (savedState.previousCollapsed !== isSidebarCollapsed) {
+        setIsSidebarCollapsed(savedState.previousCollapsed);
+      }
+    }
+  }, [isSidebarCollapsed, location.pathname]);
+
+  useEffect(() => {
+    const isPagosV1Page = location.pathname.startsWith("/finanzas/tesoreria/pagos_v1");
+
+    if (isPagosV1Page) {
+      if (!pagosV1SidebarStateRef.current?.active) {
+        pagosV1SidebarStateRef.current = {
+          active: true,
+          previousCollapsed: isSidebarCollapsed,
+        };
+
+        if (!isSidebarCollapsed) {
+          setIsSidebarCollapsed(true);
+        }
+      }
+      return;
+    }
+
+    const savedState = pagosV1SidebarStateRef.current;
+    if (savedState?.active) {
+      pagosV1SidebarStateRef.current = null;
+
+      if (savedState.previousCollapsed !== isSidebarCollapsed) {
+        setIsSidebarCollapsed(savedState.previousCollapsed);
+      }
+    }
+  }, [isSidebarCollapsed, location.pathname]);
+
   const cerrarSesion = async () => {
     if (logoutRef.current) {
       return;
@@ -262,32 +332,6 @@ export default function MainLayout() {
     setIsSidebarCollapsed((prev) => !prev);
   };
 
-  const getHeaderLabel = (): string => {
-    if (location.pathname.startsWith("/dashboard")) {
-      return "Portal de Aplicaciones";
-    }
-
-    if (location.pathname.startsWith("/finanzas/tesoreria/gastosaprobar")) {
-      return "Finanzas / Tesoreria / Aprobar gastos";
-    }
-
-    for (const group of menuDashboard) {
-      const labelPath = findTileLabelPath(group.tiles, location.pathname);
-      if (labelPath) {
-        return [group.titulo, ...labelPath].join(" / ");
-      }
-    }
-
-    const segments = location.pathname.split("/").filter(Boolean);
-    if (segments.length > 0) {
-      return segments.map(formatPathLabel).join(" / ");
-    }
-
-    return "Portal de Aplicaciones";
-  };
-
-  const headerLabel = getHeaderLabel();
-
   const toggleGroup = (groupKey: string) => {
     setExpandedGroups((prev) => ({
       ...prev,
@@ -302,11 +346,7 @@ export default function MainLayout() {
     }));
   };
 
-  const renderTileNode = (
-    tile: DashboardTile,
-    nodeKey: string,
-    depth: number
-  ) => {
+  const renderTileNode = (tile: DashboardTile, nodeKey: string, depth: number) => {
     const hasChildren = (tile.children?.length ?? 0) > 0;
     const normalizedPath = normalizeRoutePath(tile.path);
     const isActive = tileMatchesPath({ ...tile, path: normalizedPath }, location.pathname);
@@ -315,38 +355,35 @@ export default function MainLayout() {
     return (
       <div key={nodeKey}>
         <div
-          style={{
-            ...styles.sideNodeRow,
-            paddingLeft: 14 + depth * 14,
-          }}
+          className="flex items-center gap-1.5 pr-1 mb-0.5"
+          style={{ paddingLeft: 8 + depth * 14 }}
         >
           <NavLink
             to={normalizedPath || "#"}
-            style={{
-              ...styles.sideNodeLink,
-              ...(isActive ? styles.sideNodeLinkActive : {}),
-            }}
+            className={`flex-1 no-underline text-[12px] font-semibold rounded-md px-2 py-1.5 leading-tight transition-colors ${
+              isActive
+                ? "bg-brand-purple-light text-brand-dark"
+                : "text-text-soft hover:bg-slate-50 hover:text-text-strong"
+            }`}
           >
-            <span>{tile.label}</span>
+            {tile.label}
           </NavLink>
 
           {hasChildren && (
             <button
               type="button"
-              style={styles.sideExpandButton}
+              className="w-[22px] h-[22px] rounded-md flex items-center justify-center text-text-muted font-bold text-xs hover:bg-slate-100"
               onClick={() => toggleNode(nodeKey)}
               aria-label={isExpanded ? "Contraer submenu" : "Expandir submenu"}
             >
-              {isExpanded ? "v" : ">"}
+              {isExpanded ? "\u2013" : "+"}
             </button>
           )}
         </div>
 
         {hasChildren && isExpanded && (
           <div>
-            {tile.children!.map((child, index) =>
-              renderTileNode(child, `${nodeKey}-${index}`, depth + 1)
-            )}
+            {tile.children!.map((child, index) => renderTileNode(child, `${nodeKey}-${index}`, depth + 1))}
           </div>
         )}
       </div>
@@ -354,40 +391,47 @@ export default function MainLayout() {
   };
 
   return (
-    <div style={styles.wrapper}>
-      <div style={styles.pageHeader}>
-        <header style={styles.header}>
-          <div style={styles.brandBox} onClick={irDashboard}>
-            <img src={logo} alt="CJ Telecom" style={styles.logo} />
+    <PageTitleContext.Provider value={{ setPageTitle }}>
+      <div className="min-h-screen h-screen bg-bg-app flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="sticky top-0 z-[1100] shadow-[0_4px_14px_rgba(23,20,58,0.08)]">
+        <header className="h-14 bg-brand-dark text-white flex items-center px-4 box-border border-b-[3px] border-brand-purple gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              type="button"
+              onClick={irDashboard}
+              className="flex items-center gap-2.5 bg-transparent border-none cursor-pointer p-0"
+            >
+              <img src={logo} alt="CJ Telecom" className="h-9 w-auto object-contain block" />
+            </button>
           </div>
 
-          <div style={styles.headerPortalLabel}>{headerLabel}</div>
+          <div className="flex items-center gap-3 min-w-0 justify-end">
+            {pageTitle ? (
+              <div className="text-xl font-extrabold text-white/95 text-right truncate max-w-[34vw]">
+                {pageTitle}
+              </div>
+            ) : null}
+            <div className="w-8 h-8 rounded-full bg-brand-purple flex items-center justify-center text-xs font-bold flex-shrink-0">
+              {iniciales}
+            </div>
+          </div>
         </header>
       </div>
 
-      <div style={styles.bodyContent}>
+      <div className="flex items-stretch flex-1 min-h-0 min-w-0 relative overflow-hidden">
+        {/* Sidebar */}
         <aside
-          className="sidebar-scroll"
-          style={{
-            ...styles.sidebar,
-            ...(isSidebarCollapsed
-              ? collapseDirection === "left"
-                ? styles.sidebarCollapsedLeft
-                : styles.sidebarCollapsedRight
-              : {}),
-          }}
+          className={`sidebar-scroll bg-white box-border h-full overflow-hidden transition-[width,min-width,padding] duration-200 ease-in-out ${
+            isSidebarCollapsed ? "w-11 min-w-11 p-2" : "w-80 min-w-[280px] max-w-[360px] p-3 pb-24"
+          }`}
         >
-          <div
-            style={{
-              ...styles.sidebarHeaderRow,
-              ...(isSidebarCollapsed ? styles.sidebarHeaderRowCollapsed : {}),
-            }}
-          >
+          <div className={`flex items-center gap-2 mb-2.5 pb-1.5 bg-white ${isSidebarCollapsed ? "justify-center" : "justify-between"}`}>
             {!isSidebarCollapsed && (
               <button
                 type="button"
-                style={styles.sidebarHeaderTitle}
                 onClick={irDashboard}
+                className="text-[13px] font-extrabold text-slate-700 bg-transparent border-none cursor-pointer p-0"
                 aria-label="Ir al dashboard"
                 title="Ir al dashboard"
               >
@@ -396,17 +440,12 @@ export default function MainLayout() {
             )}
             <button
               type="button"
-              style={styles.footerMenuButton}
               onClick={alternarMenu}
+              className="border-none bg-brand-orange text-brand-dark w-7 h-7 rounded-md cursor-pointer flex items-center justify-center"
               aria-label={isSidebarCollapsed ? "Abrir menu lateral" : "Cerrar menu lateral"}
               title={isSidebarCollapsed ? "Abrir menu" : "Cerrar menu"}
             >
-              <svg
-                viewBox="0 0 24 24"
-                style={styles.menuToggleIcon}
-                aria-hidden="true"
-                focusable="false"
-              >
+              <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 block" aria-hidden="true" focusable="false">
                 {isSidebarCollapsed ? (
                   <path
                     d="M4 6h8v2H4V6zm0 5h8v2H4v-2zm0 5h8v2H4v-2zm9.5-5 4-4 1.4 1.4L16.3 11H21v2h-4.7l2.6 2.6L17.5 17l-4-4z"
@@ -423,47 +462,71 @@ export default function MainLayout() {
           </div>
 
           {!isSidebarCollapsed && (
-            <div className="sidebar-scroll" style={styles.sidebarScrollArea}>
+            <div className="sidebar-scroll overflow-y-scroll overflow-x-hidden pr-0.5" style={{ height: "calc(100% - 40px)" }}>
               {menuLoading ? (
-                <div style={styles.sideEmpty}>Cargando menu...</div>
+                <div className="text-text-soft text-sm font-semibold px-2 py-2.5">Cargando menu...</div>
               ) : menuDashboard.length === 0 ? (
-                <div style={styles.sideEmpty}>Usuario no tiene opciones de menu configurado</div>
+                <div className="text-text-soft text-sm font-semibold px-2 py-2.5">
+                  Usuario no tiene opciones de menu configurado
+                </div>
               ) : (
                 menuDashboard.map((grupo, groupIndex) => {
                   const groupKey = `group-${groupIndex}`;
-                  const groupIsActive = grupo.tiles.some((tile) =>
-                    tileMatchesPath(tile, location.pathname)
-                  );
+                  const groupIsActive = grupo.tiles.some((tile) => tileMatchesPath(tile, location.pathname));
                   const groupIsExpanded = expandedGroups[groupKey] ?? groupIsActive;
+                  const GroupIcon = getSidebarPrimaryIcon(grupo.titulo);
+                  const accent = getMenuAccentByName(grupo.titulo);
 
                   return (
-                    <section key={groupKey} style={styles.sideGroup}>
-                      <div style={styles.sideGroupHeader}>
+                    <section
+                      key={groupKey}
+                      className="border rounded-xl mb-2"
+                      style={{
+                        borderColor: accent.border,
+                        background: groupIsActive ? accent.background : accent.softBackground,
+                      }}
+                    >
+                      <div className="flex items-center px-2 py-2 pl-2.5 gap-2">
+                        <span
+                          className="w-7 h-7 rounded-md border flex items-center justify-center flex-shrink-0"
+                          style={
+                            {
+                              borderColor: accent.border,
+                              background: accent.background,
+                              color: accent.color,
+                            }
+                          }
+                          title={grupo.titulo}
+                          aria-hidden="true"
+                        >
+                          <GroupIcon size={16} strokeWidth={2.1} />
+                        </span>
                         <button
                           type="button"
-                          style={{
-                            ...styles.sideGroupButton,
-                            ...(groupIsActive ? styles.sideGroupButtonActive : {}),
-                          }}
                           onClick={() => toggleGroup(groupKey)}
+                          className="flex-1 text-left bg-transparent border-none text-[13px] font-extrabold cursor-pointer py-1"
+                          style={{ color: accent.color }}
                         >
                           {grupo.titulo}
                         </button>
                         <button
                           type="button"
-                          style={styles.sideExpandButton}
                           onClick={() => toggleGroup(groupKey)}
+                          className="w-[22px] h-[22px] rounded-md flex items-center justify-center font-bold text-xs hover:brightness-95"
+                          style={{
+                            border: `1px solid ${accent.border}`,
+                            background: accent.softBackground,
+                            color: accent.color,
+                          }}
                           aria-label={groupIsExpanded ? "Contraer grupo" : "Expandir grupo"}
                         >
-                          {groupIsExpanded ? "v" : ">"}
+                          {groupIsExpanded ? "\u2013" : "+"}
                         </button>
                       </div>
 
                       {groupIsExpanded && (
-                        <div style={styles.sideGroupBody}>
-                          {grupo.tiles.map((tile, tileIndex) =>
-                            renderTileNode(tile, `${groupKey}-${tileIndex}`, 0)
-                          )}
+                        <div className="border-t border-border-soft p-1.5 pb-2">
+                          {grupo.tiles.map((tile, tileIndex) => renderTileNode(tile, `${groupKey}-${tileIndex}`, 0))}
                         </div>
                       )}
                     </section>
@@ -474,342 +537,46 @@ export default function MainLayout() {
           )}
         </aside>
 
-        <main style={{ ...styles.main, ...(isEmployeesPage ? styles.mainNoScroll : {}) }}>
+        <main
+          className={`flex-1 min-w-0 w-0 h-full p-3 box-border overflow-x-hidden ${
+            isEmployeesPage ? "overflow-y-hidden pb-3" : "overflow-y-auto pb-20"
+          }`}
+        >
           <Outlet />
         </main>
       </div>
 
-      <footer style={styles.footer}>
-        <div style={styles.footerContent}>
-          <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-              <div style={styles.userLabel}>Usuario: {usuarioMostrar}</div>
-              <div style={styles.employeeLabel}>
-                Empleado: {empleadoMostrar || "NO DEFINIDO"} &nbsp;|&nbsp; 
-                Código: {`${codigoEmpleadoMostrar || "ND"} - ${codigoidperfil || "ND"} - ${codigoidrol || "ND"}`} 
-                &nbsp;|&nbsp; Correo: {correoMostrar || "NO DEFINIDO"}
-              </div>
+      {/* Footer */}
+      <footer className="fixed left-0 right-0 bottom-0 min-h-[44px] bg-brand-dark border-t-2 border-brand-purple text-slate-200 z-[1200] flex items-center">
+        <div className="w-full flex justify-between items-center px-6 py-2.5 text-xs font-semibold box-border gap-3 flex-wrap">
+          <div className="flex items-center gap-4">
+            <div className="text-sm font-bold">Usuario: {usuarioMostrar}</div>
+            <div className="text-xs font-semibold opacity-90">
+              Empleado: {empleadoMostrar || "NO DEFINIDO"} &nbsp;|&nbsp; Codigo:{" "}
+              {`${codigoEmpleadoMostrar || "ND"} - ${codigoidperfil || "ND"} - ${codigoidrol || "ND"}`} &nbsp;|&nbsp;
+              Correo: {correoMostrar || "NO DEFINIDO"}
             </div>
-            <button type="button" style={styles.footerLogoutButton} onClick={() => void cerrarSesion()}>
-              Cerrar sesión
-            </button>
           </div>
+          {isMapaSitesPage ? (
+            <div className="text-center text-[11px] font-semibold opacity-90 leading-tight">
+              Visualiza el resultado de <strong>sp_Site_Listar</strong> y{" "}
+              <strong>sp_Asistencia_UltimoMovimientoEmpleado</strong> sobre el mapa del Peru.
+            </div>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void cerrarSesion()}
+            className="border-none bg-brand-orange text-brand-dark px-2.5 py-1.5 rounded-md cursor-pointer font-extrabold text-[11px] hover:brightness-95"
+          >
+            Cerrar sesion
+          </button>
         </div>
       </footer>
-    </div>
+      </div>
+    </PageTitleContext.Provider>
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  wrapper: {
-    minHeight: "100vh",
-    height: "100vh",
-    background: "#F3F5F9",
-    display: "flex",
-    flexDirection: "column",
-    overflow: "hidden",
-  },
-  pageHeader: {
-    position: "sticky",
-    top: 0,
-    zIndex: 1100,
-    boxShadow: "0 4px 14px rgba(23,20,58,0.08)",
-  },
-  header: {
-    height: 56,
-    background: "#17143A",
-    color: "#FFFFFF",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: "0 14px",
-    boxSizing: "border-box",
-    borderBottom: "3px solid #6E4CCB",
-  },
-  brandBox: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    cursor: "pointer",
-  },
-  logo: {
-    height: 38,
-    width: "auto",
-    objectFit: "contain",
-    display: "block",
-  },
-  brandTitle: {
-    fontSize: 16,
-    fontWeight: 800,
-    lineHeight: 1.1,
-  },
-  brandSubtitle: {
-    fontSize: 12,
-    fontWeight: 700,
-    opacity: 0.95,
-    marginTop: 0,
-  },
-  headerPortalLabel: {
-    fontSize: 18,
-    fontWeight: 800,
-    textAlign: "right",
-    color: "#FFFFFF",
-  },
-  headerRight: {
-    display: "flex",
-    alignItems: "center",
-    gap: 18,
-  },
-  userInfoBox: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "flex-end",
-    gap: 2,
-  },
-  userLabel: {
-    fontSize: 14,
-    fontWeight: 700,
-  },
-  employeeLabel: {
-    fontSize: 12,
-    fontWeight: 600,
-    opacity: 0.9,
-  },
-  logoutButton: {
-    border: "none",
-    background: "#F5A623",
-    color: "#17143A",
-    padding: "12px 18px",
-    borderRadius: 10,
-    cursor: "pointer",
-    fontWeight: 800,
-    fontSize: 14,
-  },
-  bodyContent: {
-    display: "flex",
-    alignItems: "stretch",
-    flex: 1,
-    minHeight: 0,
-    minWidth: 0,
-    position: "relative",
-    overflow: "hidden",
-  },
-  sidebar: {
-    width: 320,
-    minWidth: 280,
-    maxWidth: 360,
-    background: "#FFFFFF",
-    padding: "12px 10px 90px 10px",
-    boxSizing: "border-box",
-    height: "100%",
-    overflow: "hidden",
-    overscrollBehavior: "contain",
-    transform: "translateX(0)",
-    transition:
-      "width 0.24s ease, min-width 0.24s ease, padding 0.24s ease, transform 0.24s ease, opacity 0.2s ease",
-  },
-  sidebarCollapsedLeft: {
-    width: 44,
-    minWidth: 44,
-    maxWidth: 44,
-    padding: "8px 6px",
-    overflow: "hidden",
-    transform: "translateX(0)",
-    opacity: 1,
-  },
-  sidebarCollapsedRight: {
-    width: 44,
-    minWidth: 44,
-    maxWidth: 44,
-    padding: "8px 6px",
-    overflow: "hidden",
-    transform: "translateX(0)",
-    opacity: 1,
-  },
-  sidebarHeaderRow: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
-    marginBottom: 10,
-    background: "#FFFFFF",
-    paddingBottom: 6,
-  },
-  sidebarHeaderRowCollapsed: {
-    justifyContent: "center",
-    marginBottom: 0,
-  },
-  sidebarHeaderTitle: {
-    border: "none",
-    background: "transparent",
-    padding: 0,
-    fontSize: 13,
-    fontWeight: 800,
-    color: "#374151",
-    cursor: "pointer",
-  },
-  sidebarScrollArea: {
-    height: "calc(100% - 40px)",
-    overflowY: "scroll",
-    overflowX: "hidden",
-    scrollbarWidth: "thin",
-    scrollbarColor: "#9CA3AF #F3F4F6",
-    scrollbarGutter: "stable",
-    overscrollBehavior: "contain",
-    paddingRight: 2,
-  },
-  sideGroup: {
-    border: "1px solid #E5E7EB",
-    borderRadius: 12,
-    marginBottom: 8,
-    background: "#FAFBFF",
-  },
-  sideGroupHeader: {
-    display: "flex",
-    alignItems: "center",
-    padding: "8px 8px 8px 10px",
-    gap: 8,
-  },
-  sideGroupButton: {
-    flex: 1,
-    border: "none",
-    background: "transparent",
-    textAlign: "left",
-    fontSize: 13,
-    fontWeight: 800,
-    color: "#1F2937",
-    cursor: "pointer",
-    padding: "4px 0",
-  },
-  sideGroupButtonActive: {
-    color: "#4C1D95",
-  },
-  sideGroupBody: {
-    borderTop: "1px solid #E5E7EB",
-    padding: "6px 6px 8px 6px",
-  },
-  sideNodeRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: 6,
-    paddingRight: 4,
-    marginBottom: 2,
-  },
-  sideNodeLink: {
-    flex: 1,
-    textDecoration: "none",
-    color: "#374151",
-    fontSize: 12,
-    fontWeight: 600,
-    borderRadius: 8,
-    padding: "7px 8px",
-    lineHeight: 1.2,
-  },
-  sideNodeLinkActive: {
-    background: "#E0E7FF",
-    color: "#1E3A8A",
-  },
-  sideExpandButton: {
-    border: "none",
-    background: "transparent",
-    color: "#6B7280",
-    fontWeight: 800,
-    fontSize: 12,
-    cursor: "pointer",
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sideEmpty: {
-    color: "#6B7280",
-    fontSize: 13,
-    fontWeight: 600,
-    padding: "10px 8px",
-  },
-  main: {
-    flex: 1,
-    minWidth: 0,
-    width: 0,
-    height: "100%",
-    padding: 12,
-    paddingBottom: 82,
-    boxSizing: "border-box",
-    overflowY: "auto",
-    overflowX: "hidden",
-    overscrollBehavior: "contain",
-  },
-  mainNoScroll: {
-    overflowY: "hidden",
-    paddingBottom: 12,
-  },
-  footer: {
-    position: "fixed",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    minHeight: 44,
-    background: "#17143A",
-    borderTop: "2px solid #6E4CCB",
-    color: "#E5E7EB",
-    zIndex: 1200,
-    display: "flex",
-    alignItems: "center",
-  },
-  footerContent: {
-    width: "100%",
-    display: "flex",
-    justifyContent: "flex-end",
-    alignItems: "center",
-    padding: "10px 24px",
-    fontSize: 12,
-    fontWeight: 600,
-    boxSizing: "border-box",
-    gap: 12,
-    flexWrap: "wrap",
-  },
-  footerRightGroup: {
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
-    marginLeft: "auto",
-  },
-  footerUserInfoBox: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "flex-end",
-    gap: 2,
-  },
-  footerLogoutButton: {
-    border: "none",
-    background: "#F5A623",
-    color: "#17143A",
-    padding: "6px 10px",
-    borderRadius: 7,
-    cursor: "pointer",
-    fontWeight: 800,
-    fontSize: 11,
-  },
-  footerMenuButton: {
-    border: "none",
-    background: "#F5A623",
-    color: "#17143A",
-    width: 28,
-    height: 28,
-    padding: 0,
-    borderRadius: 7,
-    cursor: "pointer",
-    fontWeight: 800,
-    fontSize: 11,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  menuToggleIcon: {
-    width: 14,
-    height: 14,
-    display: "block",
-  },
-};
+function getSidebarPrimaryIcon(value: string) {
+  return getMenuIconComponent({ nombreMenu: value });
+}

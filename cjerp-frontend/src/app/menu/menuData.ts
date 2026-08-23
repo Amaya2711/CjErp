@@ -122,4 +122,12 @@ export const menuDashboard: DashboardGroup[] = [
       { label: "Reportes", path: "/arrendamientos/reportes" },
     ],
   },
+  {
+    titulo: "Monitoreo",
+    subtitulo: "SQL Server y DBA",
+    color: "#7C3AED",
+    tiles: [
+      { label: "SQL Monitor", path: "/sqlmonitor" },
+    ],
+  },
 ];

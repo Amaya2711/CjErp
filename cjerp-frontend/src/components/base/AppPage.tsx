@@ -1,4 +1,12 @@
-import React from "react";
+import React, { createContext, useContext, useEffect } from "react";
+
+type PageTitleContextValue = {
+  setPageTitle: (title: string | null) => void;
+};
+
+export const PageTitleContext = createContext<PageTitleContextValue>({
+  setPageTitle: () => undefined,
+});
 
 interface AppPageProps {
   title?: string;
@@ -13,24 +21,44 @@ interface AppPageProps {
  * Usar en todas las páginas principales.
  */
 const AppPage: React.FC<AppPageProps> = ({ title, actions, children, style, fillHeight = false }) => {
+  const { setPageTitle } = useContext(PageTitleContext);
+
+  useEffect(() => {
+    setPageTitle(title?.trim() ? title : null);
+
+    return () => {
+      setPageTitle(null);
+    };
+  }, [setPageTitle, title]);
+
   return (
     <div
       style={{
         padding: 24,
-        minHeight: "calc(100vh - 120px)",
         ...(fillHeight
           ? {
               display: "flex",
               flexDirection: "column",
+              height: "100%",
+              minHeight: 0,
+              overflow: "hidden",
             }
-          : {}),
+          : {
+              minHeight: "calc(100vh - 120px)",
+            }),
         ...style,
       }}
     >
-      {(title || actions) && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
-          <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>{title}</h1>
-          {actions && <div>{actions}</div>}
+      {actions && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            marginBottom: 18,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{actions}</div>
         </div>
       )}
       <div style={fillHeight ? { flex: 1, minHeight: 0 } : undefined}>{children}</div>
