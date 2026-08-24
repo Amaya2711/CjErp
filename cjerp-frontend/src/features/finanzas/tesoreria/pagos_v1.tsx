@@ -1581,7 +1581,6 @@ export default function PagosV1Page() {
                   <InfoField label="Tipo trabajo" value={detalleOcActiva.tipoTrabajo} />
                   <InfoField label="Tarea" value={detalleOcActiva.tarea} />
                   <InfoField label="Fecha" value={formatDate(detalleOcActiva.fecha)} />
-                  <InfoField label="Validador" value={detalleOcActiva.validador || "-"} />
                 </div>
 
                 <div style={styles.ocMetricsStrip}>
