@@ -44,6 +44,12 @@ type PagoRow = {
   responsable: string;
   validador: string;
   moneda: string;
+  montoOc2?: string;
+  conPagado?: number;
+  conPagadoDisplay?: string;
+  subOc?: number;
+  adelaFic?: number;
+  porcentajeFic?: number;
   subtotal: number;
   igv: number;
   total: number;
@@ -466,6 +472,51 @@ function formatCurrency(value: number, currency: string) {
   return `${getCurrencySymbol(currency)} ${formatMoney(value)}`;
 }
 
+function formatPercent(value: number) {
+  return Number.isFinite(value) ? `${value.toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%` : "0.00%";
+}
+
+function parseNumericValue(value?: string | number | null): number {
+  if (value == null) {
+    return 0;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  const raw = String(value).trim();
+  if (!raw) {
+    return 0;
+  }
+
+  const normalized = raw.replace(/[^\d.,-]/g, "");
+  if (!normalized) {
+    return 0;
+  }
+
+  const stripped = normalized.replace(/^[^0-9-]+/, "");
+  if (!stripped) {
+    return 0;
+  }
+
+  const hasComma = stripped.includes(",");
+  const hasDot = stripped.includes(".");
+  let cleaned = stripped;
+
+  if (hasComma && hasDot) {
+    const lastComma = stripped.lastIndexOf(",");
+    const lastDot = stripped.lastIndexOf(".");
+    cleaned = lastComma > lastDot ? stripped.replace(/\./g, "").replace(",", ".") : stripped.replace(/,/g, "");
+  } else if (hasComma) {
+    const parts = stripped.split(",");
+    cleaned = parts.length === 2 && parts[1].length <= 2 ? stripped.replace(",", ".") : stripped.replace(/,/g, "");
+  }
+
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function formatDate(value: string) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
@@ -601,6 +652,12 @@ function mapPlanillaConsultaRowToPagoRow(
       "nombreAprobador"
     ),
     moneda: getRecordString(row, "Moneda", "moneda", "TipoMoneda", "tipoMoneda"),
+    montoOc2: getRecordString(row, "MontoOc2", "montoOc2", "MontoOC2", "montoOC2"),
+    conPagado: getRecordNumber(row, "ConPagado", "conPagado", "ConPagadoSoles", "conPagadoSoles") ?? undefined,
+    conPagadoDisplay: getRecordString(row, "ConPagado", "conPagado", "ConPagadoSoles", "conPagadoSoles"),
+    subOc: getRecordNumber(row, "SubOc", "subOc") ?? undefined,
+    adelaFic: getRecordNumber(row, "AdelaFic", "adelaFic") ?? undefined,
+    porcentajeFic: getRecordNumber(row, "PorcentajeFic", "porcentajeFic") ?? undefined,
     subtotal: Number.isFinite(subtotal) ? subtotal : 0,
     igv: Number.isFinite(igv) ? igv : 0,
     total: Number.isFinite(total) ? total : 0,
@@ -929,8 +986,17 @@ export default function PagosV1Page() {
     (row: PagoRow) => {
       const normalizedOt = normalizeRecordKey(row.ot || row.correlativo);
       const sameOtRows = filteredRows.filter((item) => normalizeRecordKey(item.ot || item.correlativo) === normalizedOt);
-      const totalAcumuladoOt = sameOtRows.reduce((acc, item) => acc + item.subtotal, 0);
-      const montoOc = sameOtRows.reduce((acc, item) => acc + item.total, 0) || row.total;
+      const montoOcTexto = row.montoOc2?.trim() || "";
+      const montoOc = parseNumericValue(montoOcTexto) || row.total;
+      const conPagadoCampo = parseNumericValue(row.conPagadoDisplay ?? row.conPagado);
+      const totalAcumuladoOt = conPagadoCampo > 0 ? conPagadoCampo : sameOtRows.reduce((acc, item) => acc + item.total, 0);
+      const subOc = Number.isFinite(row.subOc ?? NaN) ? Number(row.subOc ?? 0) : sameOtRows.reduce((acc, item) => acc + item.subtotal, 0);
+      const adelaFic = Number.isFinite(row.adelaFic ?? NaN) ? Number(row.adelaFic ?? 0) : 0;
+      const porcentajeFic = Number.isFinite(row.porcentajeFic ?? NaN)
+        ? Number(row.porcentajeFic ?? 0)
+        : montoOc > 0
+          ? (totalAcumuladoOt / montoOc) * 100
+          : 0;
       const disponible = Math.max(montoOc - totalAcumuladoOt, 0);
       const porcentaje = montoOc > 0 ? Math.min(100, Math.round((totalAcumuladoOt / montoOc) * 100)) : 0;
 
@@ -945,6 +1011,11 @@ export default function PagosV1Page() {
         pagado: Math.max(totalAcumuladoOt - montoOc, 0),
         solicitado: totalAcumuladoOt,
         pendiente: Math.max(montoOc - totalAcumuladoOt, 0),
+        subOc,
+        adelaFic,
+        porcentajeFic,
+        montoOcAdelanto: adelaFic,
+        porcentajeOcAdelanto: montoOc > 0 ? (adelaFic / montoOc) * 100 : 0,
       };
     },
     [filteredRows]
@@ -1530,21 +1601,37 @@ export default function PagosV1Page() {
                   <InfoField label="Validador" value={detalleOcActiva.validador || "-"} />
                 </div>
 
-                <div style={styles.detailInfoGrid}>
-                  <InfoField label="Monto OT" value={formatCurrency(detalleOcActiva.montoOc, detalleOcActiva.moneda)} />
-                  <InfoField
-                    label="Pagado"
-                    value={formatCurrency(detalleOcActiva.pagado, detalleOcActiva.moneda)}
-                  />
-                  <InfoField label="Saldo" value={formatCurrency(detalleOcActiva.disponible, detalleOcActiva.moneda)} />
-                  <InfoField
-                    label="Solicitado"
-                    value={formatCurrency(detalleOcActiva.solicitado, detalleOcActiva.moneda)}
-                  />
-                  <InfoField
-                    label="Pendiente"
-                    value={formatCurrency(detalleOcActiva.pendiente, detalleOcActiva.moneda)}
-                  />
+                <div style={styles.ocMetricsStrip}>
+                  <div style={styles.ocMetricCard}>
+                    <div style={styles.ocMetricLabel}>Monto Oc</div>
+                    <div style={{ ...styles.ocMetricValue, color: currentTheme.accent }}>
+                      {formatCurrency(detalleOcActiva.montoOc, detalleOcActiva.moneda)}
+                    </div>
+                  </div>
+                  <div style={styles.ocMetricCard}>
+                    <div style={styles.ocMetricLabel}>Total acumulado por sitio</div>
+                    <div style={{ ...styles.ocMetricValue, color: currentTheme.accent }}>
+                      {formatCurrency(detalleOcActiva.totalAcumuladoOt, detalleOcActiva.moneda)}
+                    </div>
+                  </div>
+                  <div style={styles.ocMetricCard}>
+                    <div style={styles.ocMetricLabel}>Porcentaje referenciado</div>
+                    <div style={{ ...styles.ocMetricValue, color: currentTheme.accent }}>
+                      {formatPercent(detalleOcActiva.porcentaje)}
+                    </div>
+                  </div>
+                  <div style={styles.ocMetricCard}>
+                    <div style={styles.ocMetricLabel}>Saldo referencial</div>
+                    <div style={{ ...styles.ocMetricValue, color: currentTheme.accent }}>
+                      {formatCurrency(detalleOcActiva.disponible, detalleOcActiva.moneda)}
+                    </div>
+                  </div>
+                  <div style={styles.ocMetricCard}>
+                    <div style={styles.ocMetricLabel}>Adelanto Fic</div>
+                    <div style={{ ...styles.ocMetricValue, color: currentTheme.accent }}>
+                      {formatCurrency(detalleOcActiva.adelaFic ?? 0, detalleOcActiva.moneda)}
+                    </div>
+                  </div>
                 </div>
 
                 <div style={styles.ocProgressCard}>
@@ -1553,7 +1640,7 @@ export default function PagosV1Page() {
                       <div style={styles.ocMetricLabel}>Consumo de la OT</div>
                       <div style={styles.ocProgressSubtitle}>Acumulado sobre el monto total de la OT</div>
                     </div>
-                    <div style={styles.ocProgressValue}>{`${detalleOcActiva.porcentaje}%`}</div>
+                    <div style={styles.ocProgressValue}>{formatPercent(detalleOcActiva.porcentaje)}</div>
                   </div>
                   <div style={styles.progressTrack}>
                     <div
@@ -1568,6 +1655,29 @@ export default function PagosV1Page() {
                     <span>Disponible: {formatCurrency(detalleOcActiva.disponible, detalleOcActiva.moneda)}</span>
                     <span>Total OT: {formatCurrency(detalleOcActiva.totalAcumuladoOt, detalleOcActiva.moneda)}</span>
                   </div>
+                </div>
+
+                <div style={styles.detailInfoGrid}>
+                  <InfoField
+                    label="SubOc"
+                    value={formatCurrency(detalleOcActiva.subOc ?? 0, detalleOcActiva.moneda)}
+                  />
+                  <InfoField
+                    label="Adelanto Fic"
+                    value={formatCurrency(detalleOcActiva.adelaFic ?? 0, detalleOcActiva.moneda)}
+                  />
+                  <InfoField
+                    label="Pagado"
+                    value={formatCurrency(detalleOcActiva.pagado, detalleOcActiva.moneda)}
+                  />
+                  <InfoField
+                    label="Solicitado"
+                    value={formatCurrency(detalleOcActiva.solicitado, detalleOcActiva.moneda)}
+                  />
+                  <InfoField
+                    label="Pendiente"
+                    value={formatCurrency(detalleOcActiva.pendiente, detalleOcActiva.moneda)}
+                  />
                 </div>
               </>
             ) : (
@@ -2324,6 +2434,12 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     justifyContent: "space-between",
+    minHeight: 84,
+  },
+  ocMetricsStrip: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: 10,
   },
   ocMetricLabel: {
     fontSize: 11,
