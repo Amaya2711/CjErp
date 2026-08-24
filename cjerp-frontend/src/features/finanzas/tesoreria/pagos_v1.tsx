@@ -784,6 +784,22 @@ export default function PagosV1Page() {
     return ids;
   }, [groupedRows, collapsedGroups]);
 
+  const allGroupsExpanded = useMemo(
+    () => groupedRows.length > 0 && groupedRows.every((group) => !(collapsedGroups[group.key] ?? false)),
+    [groupedRows, collapsedGroups]
+  );
+
+  const toggleAllGroups = () => {
+    setCollapsedGroups((prev) => {
+      const next = { ...prev };
+      const shouldCollapse = groupedRows.some((group) => !(prev[group.key] ?? false));
+      groupedRows.forEach((group) => {
+        next[group.key] = shouldCollapse;
+      });
+      return next;
+    });
+  };
+
   const selectAllRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -1106,18 +1122,34 @@ export default function PagosV1Page() {
               <table style={styles.table}>
                 <thead>
                   <tr>
-                    <th style={{ ...styles.th, width: 44, textAlign: "center" }}>
-                      <input
-                        ref={selectAllRef}
-                        type="checkbox"
-                        aria-label="Seleccionar todas las filas visibles"
-                        onChange={(event) => {
-                          const nextIds = event.target.checked ? visibleRowIds : [];
-                          setCheckedIds(nextIds);
-                        }}
-                        onClick={(event) => event.stopPropagation()}
-                        style={{ accentColor: currentTheme.accent }}
-                      />
+                    <th style={{ ...styles.th, width: 108, textAlign: "center" }}>
+                      <div style={styles.headerSelectionTools}>
+                        <input
+                          ref={selectAllRef}
+                          type="checkbox"
+                          aria-label="Seleccionar todas las filas visibles"
+                          onChange={(event) => {
+                            const nextIds = event.target.checked ? visibleRowIds : [];
+                            setCheckedIds(nextIds);
+                          }}
+                          onClick={(event) => event.stopPropagation()}
+                          style={{ accentColor: currentTheme.accent }}
+                        />
+                        <button
+                          type="button"
+                          onClick={toggleAllGroups}
+                          aria-label={allGroupsExpanded ? "Contraer todos los segmentos" : "Desplegar todos los segmentos"}
+                          title={allGroupsExpanded ? "Contraer todos los segmentos" : "Desplegar todos los segmentos"}
+                          style={{
+                            ...styles.headerToggleAllButton,
+                            borderColor: currentTheme.border,
+                            color: currentTheme.accent,
+                            background: currentTheme.soft,
+                          }}
+                        >
+                          {allGroupsExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                        </button>
+                      </div>
                     </th>
                     <th style={{ ...styles.th, width: 94 }}>Correlativo</th>
                     <th style={{ ...styles.th, width: 90 }}>Responsable</th>
@@ -1940,6 +1972,25 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 900,
     color: "#334155",
     whiteSpace: "nowrap",
+  },
+  headerSelectionTools: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    width: "100%",
+  },
+  headerToggleAllButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 8,
+    border: "1px solid",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    padding: 0,
+    flexShrink: 0,
   },
   td: {
     borderBottom: "1px solid #E2E8F0",
