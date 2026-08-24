@@ -951,23 +951,6 @@ export default function PagosV1Page() {
   );
 
   const filaActiva = selectedRow;
-  const otActivaKey = useMemo(() => {
-    if (!filaActiva) {
-      return "";
-    }
-
-    return normalizeRecordKey(filaActiva.ot || filaActiva.correlativo);
-  }, [filaActiva]);
-
-  const filasOtActiva = useMemo(() => {
-    if (!otActivaKey) {
-      return [];
-    }
-
-    return filteredRows.filter((row) => normalizeRecordKey(row.ot || row.correlativo) === otActivaKey);
-  }, [filteredRows, otActivaKey]);
-
-  const filaOtActiva = filasOtActiva[0] ?? filaActiva;
 
   const tabStats = useMemo(() => {
     const counts = {
@@ -1021,8 +1004,8 @@ export default function PagosV1Page() {
     [filteredRows]
   );
 
-  const detalleOcActiva = useMemo(() => (filaOtActiva ? mapearDatosOc(filaOtActiva) : null), [filaOtActiva, mapearDatosOc]);
-  const ocSnapshot = detalleOcActiva;
+  const detalleOcActiva = useMemo(() => (filaActiva ? mapearDatosOc(filaActiva) : null), [filaActiva, mapearDatosOc]);
+  const resumenOcTitulo = detalleOcActiva?.ot || detalleOcActiva?.correlativo || filaActiva?.ot || filaActiva?.correlativo || "";
 
   const totalsByCurrency = useMemo(() => {
     return filteredRows.reduce<Record<string, { subtotal: number; igv: number; total: number }>>((acc, row) => {
@@ -1576,7 +1559,7 @@ export default function PagosV1Page() {
                 <div style={styles.ocDataHeader}>
                   <div>
                     <div style={{ ...styles.sectionKicker, color: currentTheme.accent }}>Resumen financiero</div>
-                    
+                    <h2 style={styles.detailTitleSmall}>OT N° {resumenOcTitulo || "-"}</h2>
                   </div>
                   <span
                     style={{
