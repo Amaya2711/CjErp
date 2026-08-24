@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -32,6 +32,7 @@ type PagoEstado = Exclude<PagoTabKey, "resumen">;
 type PagoRow = {
   id: number;
   correlativo: string;
+  ot: string;
   cliente: string;
   proyecto: string;
   siteId: string;
@@ -41,6 +42,7 @@ type PagoRow = {
   fecha: string;
   solicitante: string;
   responsable: string;
+  validador: string;
   moneda: string;
   subtotal: number;
   igv: number;
@@ -136,6 +138,7 @@ const PAYMENT_ROWS: PagoRow[] = [
   {
     id: 1,
     correlativo: "126249",
+    ot: "OT-126249",
     cliente: "AMX",
     proyecto: "DENSIFICACION",
     siteId: "L11084",
@@ -145,6 +148,7 @@ const PAYMENT_ROWS: PagoRow[] = [
     fecha: "2026-08-14",
     solicitante: "AGUILAR MENDOZA JESUS MIGUEL",
     responsable: "TORRES SANCHEZ R.",
+    validador: "TORRES SANCHEZ R.",
     moneda: "Soles",
     subtotal: 9555.45,
     igv: 229.49,
@@ -158,6 +162,7 @@ const PAYMENT_ROWS: PagoRow[] = [
   {
     id: 2,
     correlativo: "126250",
+    ot: "OT-126250",
     cliente: "AMX",
     proyecto: "DENSIFICACION",
     siteId: "L16447",
@@ -167,6 +172,7 @@ const PAYMENT_ROWS: PagoRow[] = [
     fecha: "2026-08-13",
     solicitante: "AGUILAR MENDOZA JESUS MIGUEL",
     responsable: "CASTILLO HINOSTROZA",
+    validador: "CASTILLO HINOSTROZA",
     moneda: "Soles",
     subtotal: 1462.00,
     igv: 262.16,
@@ -180,6 +186,7 @@ const PAYMENT_ROWS: PagoRow[] = [
   {
     id: 3,
     correlativo: "126274",
+    ot: "OT-126274",
     cliente: "SDP_INTEGRATEL",
     proyecto: "ROLL OUT",
     siteId: "L16039",
@@ -189,6 +196,7 @@ const PAYMENT_ROWS: PagoRow[] = [
     fecha: "2026-08-08",
     solicitante: "EVELIN OLARTE BERROCAL",
     responsable: "PEDROZA SIERRA R.",
+    validador: "PEDROZA SIERRA R.",
     moneda: "Soles",
     subtotal: 2200.0,
     igv: 396.0,
@@ -202,6 +210,7 @@ const PAYMENT_ROWS: PagoRow[] = [
   {
     id: 4,
     correlativo: "126275",
+    ot: "OT-126275",
     cliente: "SDP_INTEGRATEL",
     proyecto: "ROLL OUT",
     siteId: "TA0338",
@@ -211,6 +220,7 @@ const PAYMENT_ROWS: PagoRow[] = [
     fecha: "2026-08-11",
     solicitante: "EVELIN OLARTE BERROCAL",
     responsable: "CMG CHAVEZ SAC",
+    validador: "CMG CHAVEZ SAC",
     moneda: "Soles",
     subtotal: 4965.20,
     igv: 0,
@@ -224,6 +234,7 @@ const PAYMENT_ROWS: PagoRow[] = [
   {
     id: 5,
     correlativo: "126278",
+    ot: "OT-126278",
     cliente: "CJ TELECOM",
     proyecto: "MANTENIMIENTO",
     siteId: "100010",
@@ -233,6 +244,7 @@ const PAYMENT_ROWS: PagoRow[] = [
     fecha: "2026-08-12",
     solicitante: "CLAUDIA ESCUDERO",
     responsable: "CONTRATISTAS GEN...",
+    validador: "CONTRATISTAS GEN...",
     moneda: "Soles",
     subtotal: 5000.0,
     igv: 0,
@@ -246,6 +258,7 @@ const PAYMENT_ROWS: PagoRow[] = [
   {
     id: 6,
     correlativo: "126279",
+    ot: "OT-126279",
     cliente: "AMX",
     proyecto: "PEX",
     siteId: "TJS180",
@@ -255,6 +268,7 @@ const PAYMENT_ROWS: PagoRow[] = [
     fecha: "2026-08-10",
     solicitante: "ELVIS SARAVIAS...",
     responsable: "SG NATCLAR S.A.C.",
+    validador: "SG NATCLAR S.A.C.",
     moneda: "Soles",
     subtotal: 1412.46,
     igv: 0,
@@ -268,6 +282,7 @@ const PAYMENT_ROWS: PagoRow[] = [
   {
     id: 7,
     correlativo: "126280",
+    ot: "OT-126280",
     cliente: "SITES_DOMINICANA",
     proyecto: "MANTENIMIENTO",
     siteId: "D001309",
@@ -277,6 +292,7 @@ const PAYMENT_ROWS: PagoRow[] = [
     fecha: "2026-08-09",
     solicitante: "ELVIS SARAVIAS...",
     responsable: "KELLY ALESSANDRA ...",
+    validador: "KELLY ALESSANDRA ...",
     moneda: "Soles",
     subtotal: 198.36,
     igv: 0,
@@ -290,6 +306,7 @@ const PAYMENT_ROWS: PagoRow[] = [
   {
     id: 8,
     correlativo: "126281",
+    ot: "OT-126281",
     cliente: "SDP",
     proyecto: "ROLL OUT",
     siteId: "LA3181",
@@ -299,6 +316,7 @@ const PAYMENT_ROWS: PagoRow[] = [
     fecha: "2026-08-07",
     solicitante: "JUAN CARLOS GUEVARA ESCRIBA",
     responsable: "MIGUEL RIVEROS",
+    validador: "MIGUEL RIVEROS",
     moneda: "Soles",
     subtotal: 10000.0,
     igv: 0,
@@ -312,6 +330,7 @@ const PAYMENT_ROWS: PagoRow[] = [
   {
     id: 9,
     correlativo: "126282",
+    ot: "OT-126282",
     cliente: "SITES_DOMINICANA",
     proyecto: "MANTENIMIENTO",
     siteId: "D000051",
@@ -321,6 +340,7 @@ const PAYMENT_ROWS: PagoRow[] = [
     fecha: "2026-08-05",
     solicitante: "ANGELLO ALDAIR CUENCA PILACA",
     responsable: "KELLY ALESSANDRA ...",
+    validador: "KELLY ALESSANDRA ...",
     moneda: "Soles",
     subtotal: 90.82,
     igv: 0,
@@ -334,6 +354,7 @@ const PAYMENT_ROWS: PagoRow[] = [
   {
     id: 10,
     correlativo: "126283",
+    ot: "OT-126283",
     cliente: "SITES_DOMINICANA",
     proyecto: "MANTENIMIENTO",
     siteId: "638",
@@ -343,6 +364,7 @@ const PAYMENT_ROWS: PagoRow[] = [
     fecha: "2026-08-04",
     solicitante: "ANGELLO ALDAIR CUENCA PILACA",
     responsable: "KELLY ALESSANDRA ...",
+    validador: "KELLY ALESSANDRA ...",
     moneda: "Soles",
     subtotal: 198.36,
     igv: 0,
@@ -356,6 +378,7 @@ const PAYMENT_ROWS: PagoRow[] = [
   {
     id: 11,
     correlativo: "126284",
+    ot: "OT-126284",
     cliente: "SITES_DOMINICANA",
     proyecto: "MANTENIMIENTO",
     siteId: "D000219",
@@ -365,6 +388,7 @@ const PAYMENT_ROWS: PagoRow[] = [
     fecha: "2026-08-04",
     solicitante: "ANGELLO ALDAIR CUENCA PILACA",
     responsable: "KELLY ALESSANDRA ...",
+    validador: "KELLY ALESSANDRA ...",
     moneda: "Soles",
     subtotal: 90.82,
     igv: 0,
@@ -378,6 +402,7 @@ const PAYMENT_ROWS: PagoRow[] = [
   {
     id: 12,
     correlativo: "126285",
+    ot: "OT-126285",
     cliente: "CJ TELECOM",
     proyecto: "MANTENIMIENTO",
     siteId: "D000041",
@@ -387,6 +412,7 @@ const PAYMENT_ROWS: PagoRow[] = [
     fecha: "2026-08-04",
     solicitante: "ANGELLO ALDAIR CUENCA PILACA",
     responsable: "KELLY ALESSANDRA ...",
+    validador: "KELLY ALESSANDRA ...",
     moneda: "Soles",
     subtotal: 91.20,
     igv: 0,
@@ -553,6 +579,7 @@ function mapPlanillaConsultaRowToPagoRow(
   return {
     id: getRecordNumber(row, "Id", "id", "CorrelativoPlanilla", "correlativoPlanilla") ?? index + 1,
     correlativo,
+    ot: getRecordString(row, "OT", "ot", "OrdenTrabajo", "ordenTrabajo"),
     cliente: getRecordString(row, "Cliente", "cliente", "NombreCliente", "nombreCliente"),
     proyecto: getRecordString(row, "Proyecto", "proyecto", "NombreProyecto", "nombreProyecto"),
     siteId: getRecordString(row, "SiteId", "siteId", "IdSite", "idSite"),
@@ -562,6 +589,17 @@ function mapPlanillaConsultaRowToPagoRow(
     fecha: getRecordString(row, "Fecha", "fecha", "FecIngreso", "fecIngreso", "FechaIngreso", "fechaIngreso"),
     solicitante: getRecordString(row, "Solicitante", "solicitante", "NombreSolicitante", "nombreSolicitante"),
     responsable: getRecordString(row, "Responsable", "responsable", "NombreResponsable", "nombreResponsable"),
+    validador: getRecordString(
+      row,
+      "Validador",
+      "validador",
+      "NombreValidador",
+      "nombreValidador",
+      "Aprobador",
+      "aprobador",
+      "NombreAprobador",
+      "nombreAprobador"
+    ),
     moneda: getRecordString(row, "Moneda", "moneda", "TipoMoneda", "tipoMoneda"),
     subtotal: Number.isFinite(subtotal) ? subtotal : 0,
     igv: Number.isFinite(igv) ? igv : 0,
@@ -724,6 +762,7 @@ export default function PagosV1Page() {
               row.tarea,
               row.solicitante,
               row.responsable,
+              row.validador,
               row.observacion,
               row.detalle,
               row.documento,
@@ -800,6 +839,17 @@ export default function PagosV1Page() {
     });
   };
 
+  const toggleGroupSelection = (groupIds: number[], checked: boolean) => {
+    setCheckedIds((prev) => {
+      if (checked) {
+        return Array.from(new Set([...prev, ...groupIds]));
+      }
+
+      const idsToRemove = new Set(groupIds);
+      return prev.filter((id) => !idsToRemove.has(id));
+    });
+  };
+
   const selectAllRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -843,6 +893,25 @@ export default function PagosV1Page() {
     [filteredRows, selectedId]
   );
 
+  const filaActiva = selectedRow;
+  const otActivaKey = useMemo(() => {
+    if (!filaActiva) {
+      return "";
+    }
+
+    return normalizeRecordKey(filaActiva.ot || filaActiva.correlativo);
+  }, [filaActiva]);
+
+  const filasOtActiva = useMemo(() => {
+    if (!otActivaKey) {
+      return [];
+    }
+
+    return filteredRows.filter((row) => normalizeRecordKey(row.ot || row.correlativo) === otActivaKey);
+  }, [filteredRows, otActivaKey]);
+
+  const filaOtActiva = filasOtActiva[0] ?? filaActiva;
+
   const tabStats = useMemo(() => {
     const counts = {
       aprobar: rowsByTab.aprobar.length,
@@ -856,27 +925,33 @@ export default function PagosV1Page() {
   }, [rowsByTab]);
 
   const currentTheme = TAB_THEME[activeTab];
-  const ocSnapshot = useMemo(() => {
-    if (!selectedRow) {
-      return null;
-    }
+  const mapearDatosOc = useCallback(
+    (row: PagoRow) => {
+      const normalizedOt = normalizeRecordKey(row.ot || row.correlativo);
+      const sameOtRows = filteredRows.filter((item) => normalizeRecordKey(item.ot || item.correlativo) === normalizedOt);
+      const totalAcumuladoOt = sameOtRows.reduce((acc, item) => acc + item.subtotal, 0);
+      const montoOc = sameOtRows.reduce((acc, item) => acc + item.total, 0) || row.total;
+      const disponible = Math.max(montoOc - totalAcumuladoOt, 0);
+      const porcentaje = montoOc > 0 ? Math.min(100, Math.round((totalAcumuladoOt / montoOc) * 100)) : 0;
 
-    const sameSiteRows = filteredRows.filter(
-      (row) => row.siteId === selectedRow.siteId && row.site === selectedRow.site
-    );
-    const totalAcumuladoSitio = sameSiteRows.reduce((acc, row) => acc + row.subtotal, 0);
-    const montoOc = selectedRow.total;
-    const disponible = Math.max(montoOc - totalAcumuladoSitio, 0);
-    const porcentaje = montoOc > 0 ? Math.min(100, Math.round((totalAcumuladoSitio / montoOc) * 100)) : 0;
+      return {
+        ...row,
+        ot: row.ot || row.correlativo,
+        sameOtRows,
+        totalAcumuladoOt,
+        montoOc,
+        disponible,
+        porcentaje,
+        pagado: Math.max(totalAcumuladoOt - montoOc, 0),
+        solicitado: totalAcumuladoOt,
+        pendiente: Math.max(montoOc - totalAcumuladoOt, 0),
+      };
+    },
+    [filteredRows]
+  );
 
-    return {
-      sameSiteRows,
-      totalAcumuladoSitio,
-      montoOc,
-      disponible,
-      porcentaje,
-    };
-  }, [filteredRows, selectedRow]);
+  const detalleOcActiva = useMemo(() => (filaOtActiva ? mapearDatosOc(filaOtActiva) : null), [filaOtActiva, mapearDatosOc]);
+  const ocSnapshot = detalleOcActiva;
 
   const totalsByCurrency = useMemo(() => {
     return filteredRows.reduce<Record<string, { subtotal: number; igv: number; total: number }>>((acc, row) => {
@@ -890,6 +965,32 @@ export default function PagosV1Page() {
       return acc;
     }, {});
   }, [filteredRows]);
+
+  const selectedRows = useMemo(() => {
+    if (!checkedIds.length) {
+      return [] as PagoRow[];
+    }
+
+    const selectedSet = new Set(checkedIds);
+    return filteredRows.filter((row) => selectedSet.has(row.id));
+  }, [checkedIds, filteredRows]);
+
+  const selectedTotalsByCurrency = useMemo(() => {
+    return selectedRows.reduce<Record<string, { subtotal: number; igv: number; total: number }>>((acc, row) => {
+      const key = (row.moneda || "Sin moneda").trim();
+      if (!acc[key]) {
+        acc[key] = { subtotal: 0, igv: 0, total: 0 };
+      }
+      acc[key].subtotal += row.subtotal;
+      acc[key].igv += row.igv;
+      acc[key].total += row.total;
+      return acc;
+    }, {});
+  }, [selectedRows]);
+
+  const summaryTotalsByCurrency = checkedIds.length > 0 ? selectedTotalsByCurrency : totalsByCurrency;
+  const summaryRowCount = checkedIds.length > 0 ? selectedRows.length : filteredRows.length;
+  const summaryLabel = checkedIds.length > 0 ? "Seleccionados" : "Mostrando";
 
   const actionConfig = useMemo(() => {
     switch (activeTab) {
@@ -974,6 +1075,7 @@ export default function PagosV1Page() {
   function handleExport() {
     const rows = filteredRows.map((row) => [
       row.correlativo,
+      row.ot,
       row.cliente,
       row.proyecto,
       row.siteId,
@@ -994,6 +1096,7 @@ export default function PagosV1Page() {
       `pagos_v1_${activeTab}_${new Date().toISOString().slice(0, 10)}.csv`,
       [
         "Correlativo",
+        "OT",
         "Cliente",
         "Proyecto",
         "Site ID",
@@ -1003,6 +1106,7 @@ export default function PagosV1Page() {
         "Fecha",
         "Solicitante",
         "Responsable",
+        "Validador",
         "Estado",
         "Moneda",
         "Subtotal",
@@ -1062,6 +1166,7 @@ export default function PagosV1Page() {
                 soft="#FFFBEB"
                 border="#FCD34D"
                 icon={<ReceiptText size={16} />}
+                selected={activeTab === "aprobar"}
                 onClick={() => setActiveTab("aprobar")}
               />
               <KpiCard
@@ -1071,6 +1176,7 @@ export default function PagosV1Page() {
                 soft="#EFF6FF"
                 border="#93C5FD"
                 icon={<RotateCcw size={16} />}
+                selected={activeTab === "reaprobar"}
                 onClick={() => setActiveTab("reaprobar")}
               />
               <KpiCard
@@ -1080,6 +1186,7 @@ export default function PagosV1Page() {
                 soft="#F0FDF4"
                 border="#86EFAC"
                 icon={<HandCoins size={16} />}
+                selected={activeTab === "hormiga"}
                 onClick={() => setActiveTab("hormiga")}
               />
               <KpiCard
@@ -1089,6 +1196,7 @@ export default function PagosV1Page() {
                 soft="#FEF2F2"
                 border="#FCA5A5"
                 icon={<AlertTriangle size={16} />}
+                selected={activeTab === "observadas"}
                 onClick={() => setActiveTab("observadas")}
               />
               <KpiCard
@@ -1098,6 +1206,7 @@ export default function PagosV1Page() {
                 soft="#F5F3FF"
                 border="#C4B5FD"
                 icon={<ShieldCheck size={16} />}
+                selected={activeTab === "resumen"}
                 onClick={() => setActiveTab("resumen")}
               />
             </div>
@@ -1152,7 +1261,9 @@ export default function PagosV1Page() {
                       </div>
                     </th>
                     <th style={{ ...styles.th, width: 94 }}>Correlativo</th>
+                    <th style={{ ...styles.th, width: 88 }}>OT</th>
                     <th style={{ ...styles.th, width: 90 }}>Responsable</th>
+                    <th style={{ ...styles.th, width: 110 }}>Validador</th>
                     <th style={{ ...styles.th, width: 90 }}>Subtotal</th>
                     <th style={{ ...styles.th, width: 90 }}>IGV</th>
                     <th style={{ ...styles.th, width: 100 }}>Total</th>
@@ -1183,12 +1294,28 @@ export default function PagosV1Page() {
                   ) : (
                     groupedRows.map((group) => {
                       const isCollapsed = collapsedGroups[group.key] ?? false;
+                      const groupRowIds = group.rows.map((row) => row.id);
+                      const groupAllChecked = groupRowIds.length > 0 && groupRowIds.every((id) => checkedIds.includes(id));
+                      const groupSomeChecked = groupRowIds.some((id) => checkedIds.includes(id));
                       const groupTheme = getStateColor(activeTab === "resumen" ? group.rows[0]?.estado ?? "aprobar" : activeTab);
                       return (
                         <React.Fragment key={group.key}>
                           <tr style={styles.groupRow}>
                             <td colSpan={tableColSpan} style={styles.groupCell}>
                               <div style={styles.groupBar}>
+                                <input
+                                  type="checkbox"
+                                  aria-label={`Seleccionar registros del solicitante ${group.label}`}
+                                  checked={groupAllChecked}
+                                  ref={(el) => {
+                                    if (el) {
+                                      el.indeterminate = !groupAllChecked && groupSomeChecked;
+                                    }
+                                  }}
+                                  onChange={(event) => toggleGroupSelection(groupRowIds, event.target.checked)}
+                                  onClick={(event) => event.stopPropagation()}
+                                  style={{ accentColor: groupTheme.accent }}
+                                />
                                 <button
                                   type="button"
                                   onClick={() =>
@@ -1252,7 +1379,9 @@ export default function PagosV1Page() {
                                     />
                                   </td>
                                   <td style={styles.td}>{row.correlativo}</td>
+                                  <td style={styles.td}>{row.ot || "-"}</td>
                                   <td style={styles.td}>{row.responsable}</td>
+                                  <td style={styles.td}>{row.validador || "-"}</td>
                                   <td style={styles.td}>{formatCurrency(row.subtotal, row.moneda)}</td>
                                   <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
                                   <td style={{ ...styles.td, fontWeight: 900 }}>{formatCurrency(row.total, row.moneda)}</td>
@@ -1291,10 +1420,10 @@ export default function PagosV1Page() {
 
             <div style={styles.gridFooter}>
               <div style={styles.gridFooterText}>
-                Mostrando {filteredRows.length} registros de {rowsByTab.resumen.length}
+                {summaryLabel} {summaryRowCount} registros de {rowsByTab.resumen.length}
               </div>
               <div style={styles.gridFooterTotals}>
-                {Object.entries(totalsByCurrency).map(([currency, amounts]) => (
+                {Object.entries(summaryTotalsByCurrency).map(([currency, amounts]) => (
                     <span key={currency}>
                       {currency}:{" "}
                       <strong>
@@ -1302,6 +1431,7 @@ export default function PagosV1Page() {
                     </strong>
                   </span>
                 ))}
+                {checkedIds.length === 0 ? null : <span style={{ color: currentTheme.accent }}>Solo sobre registros seleccionados</span>}
               </div>
             </div>
             </div>
@@ -1329,13 +1459,13 @@ export default function PagosV1Page() {
           </div>
 
           <aside style={styles.detailCard}>
-            {selectedRow ? (
+            {filaActiva ? (
               <>
                 <div style={styles.detailHeader}>
                   <div>
                     <div style={{ ...styles.sectionKicker, color: currentTheme.accent }}>Detalle de la orden seleccionada</div>
                     <div style={styles.detailTitleRow}>
-                      <h2 style={styles.detailTitleSmall}>Orden de Pago N° {selectedRow.correlativo}</h2>
+                      <h2 style={styles.detailTitleSmall}>Orden de Pago N° {filaActiva.correlativo}</h2>
                       <span
                         style={{
                           ...styles.detailStatus,
@@ -1344,17 +1474,17 @@ export default function PagosV1Page() {
                           borderColor: currentTheme.border,
                         }}
                       >
-                        {getStatusLabel(selectedRow.estado)}
+                        {getStatusLabel(filaActiva.estado)}
                       </span>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
                       <div style={styles.noteCard}>
                         <div style={styles.noteTitle}>Comentario</div>
-                        <p style={styles.noteText}>{selectedRow.detalle}</p>
+                        <p style={styles.noteText}>{filaActiva.detalle}</p>
                       </div>
                       <div style={styles.noteCard}>
                         <div style={styles.noteTitle}>Observación</div>
-                        <p style={styles.noteText}>{selectedRow.observacion}</p>
+                        <p style={styles.noteText}>{filaActiva.observacion}</p>
                       </div>
                     </div>
                   </div>
@@ -1370,60 +1500,73 @@ export default function PagosV1Page() {
           </aside>
 
           <aside style={styles.ocDataCard}>
-            {selectedRow ? (
+            {filaActiva && detalleOcActiva ? (
               <>
                 <div style={styles.ocDataHeader}>
                   <div>
                     <div style={{ ...styles.sectionKicker, color: currentTheme.accent }}>Resumen financiero</div>
-                    <div style={styles.ocDataTitleRow}>
-                      <h2 style={styles.ocDataTitle}>Control de la orden</h2>
-                    </div>
-                    <div style={styles.detailSubtitle}>
-                      Información complementaria del acumulado por sitio para la orden seleccionada.
-                    </div>
+                    
                   </div>
+                  <span
+                    style={{
+                      ...styles.detailStatus,
+                      color: currentTheme.accent,
+                      background: currentTheme.soft,
+                      borderColor: currentTheme.border,
+                    }}
+                  >
+                    {getStatusLabel(filaActiva.estado)}
+                  </span>
+                </div>
+
+                <div style={styles.ocTopGrid}>
+                  <InfoField label="OT N°" value={detalleOcActiva.ot || detalleOcActiva.correlativo} />
+                  <InfoField label="Cliente" value={detalleOcActiva.cliente} />
+                  <InfoField label="Proyecto" value={detalleOcActiva.proyecto} />
+                  <InfoField label="Site" value={detalleOcActiva.site} />
+                  <InfoField label="Tipo trabajo" value={detalleOcActiva.tipoTrabajo} />
+                  <InfoField label="Tarea" value={detalleOcActiva.tarea} />
+                  <InfoField label="Fecha" value={formatDate(detalleOcActiva.fecha)} />
+                  <InfoField label="Validador" value={detalleOcActiva.validador || "-"} />
                 </div>
 
                 <div style={styles.detailInfoGrid}>
-                  <InfoField label="Monto OC" value={formatCurrency(selectedRow.total, selectedRow.moneda)} />
+                  <InfoField label="Monto OT" value={formatCurrency(detalleOcActiva.montoOc, detalleOcActiva.moneda)} />
                   <InfoField
                     label="Pagado"
-                    value={formatCurrency(ocSnapshot ? Math.max(ocSnapshot.totalAcumuladoSitio - selectedRow.total, 0) : 0, selectedRow.moneda)}
+                    value={formatCurrency(detalleOcActiva.pagado, detalleOcActiva.moneda)}
                   />
-                  <InfoField label="Saldo" value={formatCurrency(ocSnapshot ? ocSnapshot.disponible : 0, selectedRow.moneda)} />
+                  <InfoField label="Saldo" value={formatCurrency(detalleOcActiva.disponible, detalleOcActiva.moneda)} />
                   <InfoField
                     label="Solicitado"
-                    value={formatCurrency(ocSnapshot ? ocSnapshot.totalAcumuladoSitio : selectedRow.total, selectedRow.moneda)}
+                    value={formatCurrency(detalleOcActiva.solicitado, detalleOcActiva.moneda)}
                   />
                   <InfoField
                     label="Pendiente"
-                    value={formatCurrency(
-                      ocSnapshot ? Math.max(selectedRow.total - ocSnapshot.totalAcumuladoSitio, 0) : 0,
-                      selectedRow.moneda
-                    )}
+                    value={formatCurrency(detalleOcActiva.pendiente, detalleOcActiva.moneda)}
                   />
                 </div>
 
                 <div style={styles.ocProgressCard}>
                   <div style={styles.ocProgressTopRow}>
                     <div>
-                      <div style={styles.ocMetricLabel}>Consumo del sitio</div>
-                      <div style={styles.ocProgressSubtitle}>Acumulado sobre el monto total de la orden</div>
+                      <div style={styles.ocMetricLabel}>Consumo de la OT</div>
+                      <div style={styles.ocProgressSubtitle}>Acumulado sobre el monto total de la OT</div>
                     </div>
-                    <div style={styles.ocProgressValue}>{ocSnapshot ? `${ocSnapshot.porcentaje}%` : "0%"}</div>
+                    <div style={styles.ocProgressValue}>{`${detalleOcActiva.porcentaje}%`}</div>
                   </div>
                   <div style={styles.progressTrack}>
                     <div
                       style={{
                         ...styles.progressFill,
-                        width: `${ocSnapshot ? ocSnapshot.porcentaje : 0}%`,
+                        width: `${detalleOcActiva.porcentaje}%`,
                         background: currentTheme.accent,
                       }}
                     />
                   </div>
                   <div style={styles.ocProgressFooter}>
-                    <span>Disponible: {formatCurrency(ocSnapshot ? ocSnapshot.disponible : 0, selectedRow.moneda)}</span>
-                    <span>Total sitio: {formatCurrency(ocSnapshot ? ocSnapshot.totalAcumuladoSitio : selectedRow.total, selectedRow.moneda)}</span>
+                    <span>Disponible: {formatCurrency(detalleOcActiva.disponible, detalleOcActiva.moneda)}</span>
+                    <span>Total OT: {formatCurrency(detalleOcActiva.totalAcumuladoOt, detalleOcActiva.moneda)}</span>
                   </div>
                 </div>
               </>
@@ -1448,6 +1591,7 @@ function KpiCard({
   soft,
   border,
   icon,
+  selected = false,
   onClick,
 }: {
   label: string;
@@ -1456,6 +1600,7 @@ function KpiCard({
   soft: string;
   border: string;
   icon: React.ReactNode;
+  selected?: boolean;
   onClick?: () => void;
 }) {
   return (
@@ -1464,11 +1609,14 @@ function KpiCard({
       onClick={onClick}
       style={{
         ...styles.kpiCard,
-        borderColor: border,
-        background: "#FFFFFF",
+        borderColor: selected ? accent : border,
+        background: selected ? soft : "#FFFFFF",
         cursor: onClick ? "pointer" : "default",
         textAlign: "left",
         width: "100%",
+        boxShadow: selected ? `0 10px 24px ${accent}22` : "none",
+        transform: selected ? "translateY(-2px)" : "none",
+        borderWidth: selected ? 2 : 1,
       }}
     >
       <div style={{ ...styles.kpiIcon, color: accent, background: soft, borderColor: border }}>
