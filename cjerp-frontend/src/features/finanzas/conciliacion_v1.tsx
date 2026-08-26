@@ -68,6 +68,7 @@ type ConciliacionSortKey =
   | "bancoPlanilla"
   | "seriePlanilla"
   | "detallePlanilla"
+  | "idOc"
   | "correlativoPlanilla";
 
 type ConciliacionSortDirection = "asc" | "desc";
@@ -225,6 +226,7 @@ const DEFAULT_CONCILIACION_FILTERS: ConciliacionFilterState = {
   bancoPlanilla: "",
   seriePlanilla: "",
   detallePlanilla: "",
+  idOc: "",
   correlativoPlanilla: "",
 };
 const EXECUTIVE_PIE_COLORS = [
@@ -288,6 +290,7 @@ const DETAIL_CONCILIACION_SEARCH_KEYS: ConciliacionSortKey[] = [
   "bancoPlanilla",
   "seriePlanilla",
   "detallePlanilla",
+  "idOc",
   "correlativoPlanilla",
 ];
 
@@ -385,6 +388,56 @@ function normalizeTotalPagarForComparison(value?: number | null): number | null 
   }
 
   return value > 0 ? -Math.abs(value) : value;
+}
+
+function getPlanillaAmountForComparison(row: ConciliacionBcpConciliarPlanillaRegistro): number | null {
+  return normalizeTotalPagarForComparison(row.totalPagar);
+}
+
+function getConciliacionPlanillaAggregationKey(row: ConciliacionBcpConciliarPlanillaRegistro): string {
+  const tipoCoincidencia = row.tipoCoincidencia?.trim();
+  const nroOperacionPlanilla = row.nroOperacionPlanilla?.trim();
+  if (tipoCoincidencia || nroOperacionPlanilla) {
+    return [
+      `tipoCoincidencia:${normalizeText(tipoCoincidencia ?? "")}`,
+      `nroOperacionPlanilla:${normalizeText(nroOperacionPlanilla ?? "")}`,
+    ].join("|");
+  }
+
+  const idRegistroPlanilla = row.idRegistroPlanilla?.toString().trim();
+  if (idRegistroPlanilla) {
+    return `idRegistroPlanilla:${idRegistroPlanilla}`;
+  }
+
+  const correlativoPlanilla = row.correlativoPlanilla?.trim();
+  if (correlativoPlanilla) {
+    return `correlativoPlanilla:${normalizeText(correlativoPlanilla)}`;
+  }
+
+  return `movimiento:${row.idMovimientoBanco}`;
+}
+
+function getConciliacionRowsForSummary(rows: ConciliacionBcpConciliarPlanillaRegistro[]): ConciliacionBcpConciliarPlanillaRegistro[] {
+  const rowsByKey = new Map<string, ConciliacionBcpConciliarPlanillaRegistro>();
+
+  rows.forEach((row) => {
+    const key = getConciliacionPlanillaAggregationKey(row);
+    const current = rowsByKey.get(key);
+
+    if (!current) {
+      rowsByKey.set(key, row);
+      return;
+    }
+
+    const currentAmount = getPlanillaAmountForComparison(current);
+    const newAmount = getPlanillaAmountForComparison(row);
+
+    if (currentAmount == null && newAmount != null) {
+      rowsByKey.set(key, row);
+    }
+  });
+
+  return Array.from(rowsByKey.values());
 }
 
 function calculateMontoDiferencia(
@@ -580,11 +633,11 @@ function getConciliacionDisplayValue(row: ConciliacionBcpConciliarPlanillaRegist
     case "monto":
       return row.monto != null ? formatNumber(row.monto) : "";
     case "totalPagar": {
-      const totalPagar = normalizeTotalPagarForComparison(row.totalPagar);
+      const totalPagar = getPlanillaAmountForComparison(row);
       return totalPagar != null ? formatNumber(totalPagar) : "";
     }
     case "diferencia": {
-      const totalPagar = normalizeTotalPagarForComparison(row.totalPagar);
+      const totalPagar = getPlanillaAmountForComparison(row);
       const diferencia = calculateMontoDiferencia(row.monto, totalPagar);
       return diferencia != null ? formatNumber(diferencia) : "";
     }
@@ -642,6 +695,8 @@ function getConciliacionDisplayValue(row: ConciliacionBcpConciliarPlanillaRegist
       return row.seriePlanilla || "";
     case "detallePlanilla":
       return row.detallePlanilla || "";
+    case "idOc":
+      return row.idOc || "";
     case "correlativoPlanilla":
       return row.correlativoPlanilla || "";
     default:
@@ -713,9 +768,9 @@ function getConciliacionSortValue(row: ConciliacionBcpConciliarPlanillaRegistro,
     case "monto":
       return row.monto ?? null;
     case "totalPagar":
-      return normalizeTotalPagarForComparison(row.totalPagar);
+      return getPlanillaAmountForComparison(row);
     case "diferencia":
-      return calculateMontoDiferencia(row.monto, normalizeTotalPagarForComparison(row.totalPagar));
+      return calculateMontoDiferencia(row.monto, getPlanillaAmountForComparison(row));
     case "empresa":
       return row.empresa?.trim().toLowerCase() ?? "";
     case "cuenta":
@@ -778,6 +833,8 @@ function getConciliacionSortValue(row: ConciliacionBcpConciliarPlanillaRegistro,
       return row.seriePlanilla?.trim().toLowerCase() ?? "";
     case "detallePlanilla":
       return row.detallePlanilla?.trim().toLowerCase() ?? "";
+    case "idOc":
+      return row.idOc?.trim().toLowerCase() ?? "";
     case "correlativoPlanilla":
       return row.correlativoPlanilla?.trim().toLowerCase() ?? "";
     default:
@@ -1993,9 +2050,10 @@ export default function ConciliacionBcpPage() {
     const byMoneda = new Map<string, { totalPagar: number; cantidad: number; resultados: Map<string, ConciliacionResultadoResumen> }>();
     let registrosConTotalPagar = 0;
     let registrosSinTotalPagar = 0;
+    const summaryRows = getConciliacionRowsForSummary(filteredConciliacionRegistros);
 
-    filteredConciliacionRegistros.forEach((row) => {
-      const totalPagar = normalizeTotalPagarForComparison(row.totalPagar);
+    summaryRows.forEach((row) => {
+      const totalPagar = getPlanillaAmountForComparison(row);
       if (totalPagar == null) {
         registrosSinTotalPagar += 1;
         return;
@@ -2061,19 +2119,21 @@ export default function ConciliacionBcpPage() {
       return true;
     });
 
-    const rowsWithTotal = visibleRows.filter((row) => normalizeTotalPagarForComparison(row.totalPagar) !== null);
-    const rowsWithoutTotal = visibleRows.filter((row) => normalizeTotalPagarForComparison(row.totalPagar) === null);
-    const rowsSinCoincidencia = visibleRows.filter((row) => {
+    const summaryRows = getConciliacionRowsForSummary(visibleRows);
+
+    const rowsWithTotal = summaryRows.filter((row) => getPlanillaAmountForComparison(row) !== null);
+    const rowsWithoutTotal = summaryRows.filter((row) => getPlanillaAmountForComparison(row) === null);
+    const rowsSinCoincidencia = summaryRows.filter((row) => {
       const resultado = row.resultadoConciliacion?.trim() || "Sin resultado";
       return normalizeText(resultado).includes("SIN COINCIDENCIA");
     });
 
     const grouped = new Map<string, ConciliacionExecutiveChartDatum>();
 
-    visibleRows.forEach((row) => {
+    summaryRows.forEach((row) => {
       const rawLabel = getConciliacionExecutivePieLabel(row, conciliacionExecutivePieLevel);
       const label = rawLabel.trim() || "Sin clasificar";
-      const totalPagar = Math.abs(normalizeTotalPagarForComparison(row.totalPagar) ?? row.monto ?? 0);
+      const totalPagar = Math.abs(getPlanillaAmountForComparison(row) ?? row.monto ?? 0);
 
       const current =
         grouped.get(label) ??
@@ -2106,7 +2166,7 @@ export default function ConciliacionBcpPage() {
       rowsWithTotal: rowsWithTotal.length,
       rowsWithoutTotal: rowsWithoutTotal.length,
       rowsSinCoincidencia: rowsSinCoincidencia.length,
-      visibleRows: visibleRows.length,
+      visibleRows: summaryRows.length,
     };
   }, [filteredConciliacionRegistros, conciliacionExecutivePieLevel, conciliacionExecutivePiePath]);
 
@@ -3430,8 +3490,8 @@ export default function ConciliacionBcpPage() {
       Cuenta: row.cuenta || "",
       Moneda: row.moneda || "",
       Monto: row.monto ?? "",
-      TotalPagar: normalizeTotalPagarForComparison(row.totalPagar) ?? "",
-      Diferencia: calculateMontoDiferencia(row.monto, normalizeTotalPagarForComparison(row.totalPagar)) ?? "",
+      TotalPagar: getPlanillaAmountForComparison(row) ?? "",
+      Diferencia: calculateMontoDiferencia(row.monto, getPlanillaAmountForComparison(row)) ?? "",
       NroOperacion: row.nroOperacion || "",
       DescripcionOperacion: row.descripcionOperacion || "",
       Comentario: row.comentario || "",
@@ -3459,6 +3519,7 @@ export default function ConciliacionBcpPage() {
       Banco: row.bancoPlanilla || "",
       Serie: row.seriePlanilla || "",
       Detalle: row.detallePlanilla || "",
+      OC: row.idOc || "",
       Correlativo: row.correlativoPlanilla || "",
     }));
 
@@ -4543,6 +4604,7 @@ export default function ConciliacionBcpPage() {
                   <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Banco", "bancoPlanilla")}</th>
                   <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Serie", "seriePlanilla")}</th>
                   <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Detalle", "detallePlanilla")}</th>
+                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("OC", "idOc")}</th>
                   <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Correlativo", "correlativoPlanilla")}</th>
                 </tr>
                 <tr>
@@ -4802,6 +4864,7 @@ export default function ConciliacionBcpPage() {
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "bancoPlanilla")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "seriePlanilla")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "detallePlanilla")}</td>
+                      <td style={styles.td}>{getConciliacionDisplayValue(row, "idOc")}</td>
                       <td
                         style={{
                           ...styles.td,

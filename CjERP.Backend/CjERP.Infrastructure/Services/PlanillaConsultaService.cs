@@ -22,6 +22,7 @@ namespace CjERP.Infrastructure.Services
         private const string StoredProcedureVacacionesTotal = "dbo.sp_EmpleadoOtros_ListarVacacionesTotal";
         private const string StoredProcedurePagadosDashboard = "dbo.sp_Planilla_ConsultarPagados_Dsh";
         private const string StoredProcedureImportarConsultaDsh = "dbo.sp_Importar_ConsultaDsh";
+        private const string StoredProcedureImportarResumenOT = "dbo.sp_Importar_ResumenOT";
         private const string StoredProcedureMovimientosGastosIngresos = "dbo.sp_Movimientos_Consulta_GastosIngresos";
         private const string StoredProcedureGastosPagados = "dbo.sp_Planilla_Consulta_Gastos_Pagados";
         private const string QueryClientesActivos = "clientes-activos";
@@ -299,6 +300,7 @@ namespace CjERP.Infrastructure.Services
                 "vacaciones-total" => StoredProcedureVacacionesTotal,
                 "pagados-dashboard" => StoredProcedurePagadosDashboard,
                 "importar-consulta-dsh" => StoredProcedureImportarConsultaDsh,
+                "importar-resumen-ot" => StoredProcedureImportarResumenOT,
                 "movimientos-gastos-ingresos" => StoredProcedureMovimientosGastosIngresos,
                 "clientes-activos" => QueryClientesActivos,
                 "proyectos-activos" => QueryProyectosActivos,
@@ -668,6 +670,23 @@ WHERE Correlativo IN @Correlativos";
                 {
                     // Este SP no recibe parámetros.
                     return Enumerable.Empty<PlanillaConsultaParametroDto>();
+                }
+
+                if (string.Equals(storedProcedureName, StoredProcedureImportarResumenOT, StringComparison.OrdinalIgnoreCase))
+                {
+                    var allowedParametersImportarResumenOT = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        "OT",
+                        "IdCliente",
+                        "IdProyecto",
+                        "IdSite",
+                        "Correlativo",
+                        "TipoTrabajo"
+                    };
+
+                    return parametros.Where(parametro =>
+                        !string.IsNullOrWhiteSpace(parametro.Nombre) &&
+                        allowedParametersImportarResumenOT.Contains(parametro.Nombre.Trim().TrimStart('@')));
                 }
 
                 return parametros;
@@ -1089,3 +1108,5 @@ WHERE Codigo = @CodigoBanco
         }
     }
 }
+
+

@@ -24,6 +24,15 @@ namespace CjERP.Api.Controllers
         private static readonly string[] RequiredParametersVacaciones = [];
         private static readonly string[] RequiredParametersGastosFechaDeposito = ["Estados", "FechaDeposito"];
         private static readonly string[] RequiredParametersGastosRango = ["Estados", "FechaInicio", "FechaFin"];
+        private static readonly string[] RequiredParametersImportarResumenOT =
+        [
+            "OT",
+            "IdCliente",
+            "IdProyecto",
+            "IdSite",
+            "Correlativo",
+            "TipoTrabajo"
+        ];
         private static readonly string[] RequiredParametersPagadosDashboard = [];
         private static readonly string[] RequiredParametersImportarConsultaDsh = [];
         private static readonly string[] RequiredParametersMovimientosGastosIngresos = [];
@@ -89,6 +98,8 @@ namespace CjERP.Api.Controllers
                             ? RequiredParametersImportarConsultaDsh
                         : string.Equals(consulta, "movimientos-gastos-ingresos", StringComparison.OrdinalIgnoreCase)
                             ? RequiredParametersMovimientosGastosIngresos
+                        : string.Equals(consulta, "importar-resumen-ot", StringComparison.OrdinalIgnoreCase)
+                            ? RequiredParametersImportarResumenOT
                 : RequiredParameters;
 
             if (string.Equals(consulta, "gastos", StringComparison.OrdinalIgnoreCase))
@@ -349,6 +360,7 @@ namespace CjERP.Api.Controllers
                 "vacaciones" => "sp_EmpleadoOtros_ListarVacaciones",
                 "pagados-dashboard" => "sp_Planilla_ConsultarPagados_Dsh",
                 "importar-consulta-dsh" => "sp_Importar_ConsultaDsh",
+                "importar-resumen-ot" => "sp_Importar_ResumenOT",
                 "movimientos-gastos-ingresos" => "sp_Movimientos_Consulta_GastosIngresos",
                 "clientes-activos" => "clientes-activos",
                 "proyectos-activos" => "proyectos-activos",
@@ -416,3 +428,4 @@ namespace CjERP.Api.Controllers
         }
     }
 }
+

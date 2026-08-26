@@ -158,7 +158,7 @@ export default function CierreContablePage() {
             .filter((parametro) => parametro.nombre.trim())
             .map(({ nombre, valor, tipo }) => ({
               nombre: nombre.trim(),
-              valor: valor.trim(),
+              valor: (valor ?? "").trim(),
               tipo,
             }))
         ),
@@ -209,7 +209,7 @@ export default function CierreContablePage() {
 
               <input
                 type="text"
-                value={parametro.valor}
+                value={parametro.valor ?? ""}
                 onChange={(event) => actualizarParametro(parametro.id, "valor", event.target.value)}
                 placeholder="Valor"
                 style={styles.input}

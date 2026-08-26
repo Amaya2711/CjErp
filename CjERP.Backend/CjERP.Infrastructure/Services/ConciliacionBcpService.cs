@@ -1504,6 +1504,10 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         var descripcionOperacion = NormalizeText(GetDictionaryString(row, "DescripcionOperacion"))
             ?? NormalizeText(GetDictionaryString(row, "Detalle"));
         var detalle = NormalizeText(GetDictionaryString(row, "Detalle"));
+        var idOc = NormalizeText(GetDictionaryString(row, "Idoc"))
+            ?? NormalizeText(GetDictionaryString(row, "IdOC"))
+            ?? NormalizeText(GetDictionaryString(row, "IdOc"))
+            ?? NormalizeText(GetDictionaryString(row, "OC"));
 
         return new PlanillaConciliacionRow
         {
@@ -1522,6 +1526,7 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
             Serie = serie,
             DescripcionOperacion = descripcionOperacion,
             Detalle = detalle,
+            IdOc = idOc,
             CuentaNumerica = ExtractDigits(cuenta),
             CuentaInterNumerica = ExtractDigits(cuentaInter),
             Corre = GetDictionaryInt(row, "Corre"),
@@ -1697,6 +1702,9 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
             : esBancoConAgrupacionPorOperacion && planillaRowsParaMostrar.Count > 0
                 ? planillaRowsParaMostrar[0].TotalPagar
                 : candidate?.Planilla.TotalPagar;
+        var totalPlanillaBase = esDescripcionNoConciliable
+            ? null
+            : totalPagar;
         var correlativoPlanilla = esDescripcionNoConciliable
             ? null
             : esBancoConAgrupacionPorOperacion && scotiabankSummary is not null
@@ -1766,8 +1774,10 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
             BancoPlanilla = candidate?.Planilla.Banco,
             SeriePlanilla = candidate?.Planilla.Serie,
             DetallePlanilla = candidate?.Planilla.Detalle,
+            IdOc = candidate?.Planilla.IdOc,
             CorrelativoPlanilla = correlativoPlanilla,
             IdRegistroPlanilla = candidate?.Planilla.Corre,
+            TotalPlanillaBase = totalPlanillaBase,
             TotalPagar = totalPagar,
             Comentario = movimiento.Comentario,
             ObservacionConciliacion = esDescripcionNoConciliable
@@ -1877,7 +1887,7 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                 TipoCoincidencia = "NRO OPERACION",
                 Planilla = planilla,
                 ObservacionConciliacion = esBancoConAgrupacionPorOperacion && rowsForComparison.Count > 1
-                    ? $"Coincidencia por NroOperacion con {rowsForComparison.Count} registro(s) válidos sumados."
+                    ? $"Coincidencia por NroOperacion con {rowsForComparison.Count} registro(s) válidos relacionados."
                     : $"Coincidencia exacta por NroOperacion: {planilla.NroOperacion}",
                 OrdenPlanilla = planilla.Corre ?? 0,
                 DiferenciaMontoAbs = amountDifference,
@@ -4607,8 +4617,9 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
     {
         var rowsToUse = rows.ToList();
         var totalPagarAgrupado = rowsToUse
-            .Select(row => row.TotalPagar ?? 0m)
-            .Sum();
+            .Select(row => row.TotalPagar)
+            .FirstOrDefault(value => value.HasValue)
+            ?? 0m;
         var correlativos = rowsToUse
             .Select(row => row.CorreTexto ?? row.Corre?.ToString(CultureInfo.InvariantCulture))
             .Where(value => !string.IsNullOrWhiteSpace(value))
@@ -5997,6 +6008,7 @@ ORDER BY p.parameter_id;";
         public string? Serie { get; set; }
         public string? DescripcionOperacion { get; set; }
         public string? Detalle { get; set; }
+        public string? IdOc { get; set; }
         public string CuentaNumerica { get; set; } = string.Empty;
         public string CuentaInterNumerica { get; set; } = string.Empty;
         public int? Corre { get; set; }

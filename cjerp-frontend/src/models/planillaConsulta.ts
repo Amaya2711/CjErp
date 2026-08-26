@@ -10,7 +10,7 @@ export type PlanillaConsultaParametroTipo =
 
 export type PlanillaConsultaParametro = {
   nombre: string;
-  valor: string;
+  valor: string | null;
   tipo: PlanillaConsultaParametroTipo;
 };
 

@@ -47,40 +47,57 @@ function getJwtClaimValue(
   return undefined;
 }
 
-export function buildPlanillaConsultaEstadosBaseParams(): PlanillaConsultaParametro[] {
+type PlanillaConsultaEstadosBaseParamOverrides = {
+  idCargo?: string | null;
+  idEmpleado?: string | null;
+};
+
+type PlanillaConsultaEstadosRequestOptions = {
+  baseParams?: PlanillaConsultaEstadosBaseParamOverrides;
+};
+
+export function buildPlanillaConsultaEstadosBaseParams(
+  overrides: PlanillaConsultaEstadosBaseParamOverrides = {}
+): PlanillaConsultaParametro[] {
   const authUser = getAuthUser();
   const jwtPayload = authUser?.token ? parseJwtPayload(authUser.token) : null;
-  const idCargo = getFirstPositiveIntegerString(
-    authUser?.idCargo,
-    authUser?.idrol,
-    (authUser as Record<string, unknown> | null)?.IdRol,
-    getJwtClaimValue(
-      jwtPayload,
-      "IdCargo",
-      "idCargo",
-      "IdRol",
-      "idRol",
-      "idrol",
-      "role"
-    )
-  );
-  const idEmpleado = getFirstPositiveIntegerString(
-    authUser?.idEmpleado,
-    authUser?.codEmp,
-    authUser?.empleado,
-    (authUser as Record<string, unknown> | null)?.IdEmpleado,
-    getJwtClaimValue(
-      jwtPayload,
-      "IdEmpleado",
-      "idEmpleado",
-      "CodEmp",
-      "codEmp",
-      "CodEmpleadoMostrar",
-      "nameid",
-      "sub",
-      "IdUsuario"
-    )
-  );
+  const idCargo =
+    overrides.idCargo !== undefined
+      ? overrides.idCargo
+      : getFirstPositiveIntegerString(
+          authUser?.idCargo,
+          authUser?.idrol,
+          (authUser as Record<string, unknown> | null)?.IdRol,
+          getJwtClaimValue(
+            jwtPayload,
+            "IdCargo",
+            "idCargo",
+            "IdRol",
+            "idRol",
+            "idrol",
+            "role"
+          )
+        );
+  const idEmpleado =
+    overrides.idEmpleado !== undefined
+      ? overrides.idEmpleado
+      : getFirstPositiveIntegerString(
+          authUser?.idEmpleado,
+          authUser?.codEmp,
+          authUser?.empleado,
+          (authUser as Record<string, unknown> | null)?.IdEmpleado,
+          getJwtClaimValue(
+            jwtPayload,
+            "IdEmpleado",
+            "idEmpleado",
+            "CodEmp",
+            "codEmp",
+            "CodEmpleadoMostrar",
+            "nameid",
+            "sub",
+            "IdUsuario"
+          )
+        );
 
   console.log(
     "[PlanillaConsulta] codigoidrol",
@@ -114,9 +131,13 @@ export function buildPlanillaConsultaEstadosBaseParams(): PlanillaConsultaParame
 }
 
 export function buildPlanillaConsultaEstadosRequest(
-  parametros: PlanillaConsultaParametro[]
+  parametros: PlanillaConsultaParametro[],
+  options?: PlanillaConsultaEstadosRequestOptions
 ): PlanillaConsultaEstadosRequest {
-  const merged = [...buildPlanillaConsultaEstadosBaseParams(), ...parametros];
+  const merged = [
+    ...buildPlanillaConsultaEstadosBaseParams(options?.baseParams),
+    ...parametros,
+  ];
   const deduped = new Map<string, PlanillaConsultaParametro>();
 
   for (const parametro of merged) {

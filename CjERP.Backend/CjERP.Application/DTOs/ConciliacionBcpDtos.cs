@@ -357,9 +357,13 @@ public sealed class ConciliacionBcpConciliarPlanillaRegistroDto
 
     public string? DetallePlanilla { get; set; }
 
+    public string? IdOc { get; set; }
+
     public string? CorrelativoPlanilla { get; set; }
 
     public int? IdRegistroPlanilla { get; set; }
+
+    public decimal? TotalPlanillaBase { get; set; }
 
     public decimal? TotalPagar { get; set; }
 

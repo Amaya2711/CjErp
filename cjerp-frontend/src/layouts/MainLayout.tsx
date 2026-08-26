@@ -539,7 +539,9 @@ export default function MainLayout() {
 
         <main
           className={`flex-1 min-w-0 w-0 h-full p-3 box-border overflow-x-hidden ${
-            isEmployeesPage ? "overflow-y-hidden pb-3" : "overflow-y-auto pb-20"
+            isEmployeesPage || location.pathname.startsWith("/finanzas/tesoreria/pagos_v1")
+              ? "overflow-y-hidden pb-3"
+              : "overflow-y-auto pb-20"
           }`}
         >
           <Outlet />

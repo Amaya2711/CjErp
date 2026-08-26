@@ -158,8 +158,10 @@ export type ConciliacionBcpConciliarPlanillaRegistro = {
   bancoPlanilla?: string | null;
   seriePlanilla?: string | null;
   detallePlanilla?: string | null;
+  idOc?: string | null;
   correlativoPlanilla?: string | null;
   idRegistroPlanilla?: number | null;
+  totalPlanillaBase?: number | null;
   totalPagar?: number | null;
   comentario?: string | null;
   observacionConciliacion?: string | null;
