@@ -1851,6 +1851,7 @@ export default function PagosV1Page() {
         };
     }
   }, [activeTab]);
+  const isResumenTab = activeTab === "resumen";
   const showEstadoOc = activeTab === "resumen";
   const tableColSpan = showEstadoOc ? 18 : 17;
 
@@ -2403,18 +2404,35 @@ export default function PagosV1Page() {
             <section style={styles.actionsBar}>
                 <div style={styles.actionsCard}>
                       <div style={styles.actionsRow}>
-                  <ActionButton config={actionConfig.primary} onClick={() => handleAction(actionConfig.primary.label)} />
-                  <ActionButton config={actionConfig.secondary} onClick={() => handleAction(actionConfig.secondary.label)} />
-                  {actionConfig.tertiary.label !== "Ver PDF" ? (
-                    <ActionButton config={actionConfig.tertiary} onClick={() => handleAction(actionConfig.tertiary.label)} />
-                  ) : null}
-                  {actionConfig.quaternary.label !== "Ver PDF" ? (
-                    <ActionButton config={actionConfig.quaternary} onClick={() => handleAction(actionConfig.quaternary.label)} />
-                  ) : null}
-                  <button type="button" style={{ ...styles.slimActionButton, borderColor: currentTheme.border, color: currentTheme.accent }} onClick={handleExport}>
-                    <Download size={16} />
-                    Exportar
-                  </button>
+                  {isResumenTab ? (
+                    <button
+                      type="button"
+                      style={{ ...styles.slimActionButton, borderColor: currentTheme.border, color: currentTheme.accent }}
+                      onClick={handleExport}
+                    >
+                      <Download size={16} />
+                      Exportar
+                    </button>
+                  ) : (
+                    <>
+                      <ActionButton config={actionConfig.primary} onClick={() => handleAction(actionConfig.primary.label)} />
+                      <ActionButton config={actionConfig.secondary} onClick={() => handleAction(actionConfig.secondary.label)} />
+                      {actionConfig.tertiary.label !== "Ver PDF" ? (
+                        <ActionButton config={actionConfig.tertiary} onClick={() => handleAction(actionConfig.tertiary.label)} />
+                      ) : null}
+                      {actionConfig.quaternary.label !== "Ver PDF" ? (
+                        <ActionButton config={actionConfig.quaternary} onClick={() => handleAction(actionConfig.quaternary.label)} />
+                      ) : null}
+                      <button
+                        type="button"
+                        style={{ ...styles.slimActionButton, borderColor: currentTheme.border, color: currentTheme.accent }}
+                        onClick={handleExport}
+                      >
+                        <Download size={16} />
+                        Exportar
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </section>
