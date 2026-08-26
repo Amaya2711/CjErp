@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import * as XLSX from "xlsx";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -10,11 +11,13 @@ import {
   FileText,
   Filter,
   HandCoins,
+  Maximize2,
   Printer,
   ReceiptText,
   RotateCcw,
   Search,
   ShieldCheck,
+  Minimize2,
   XCircle,
 } from "lucide-react";
 import AppPage from "../../../components/base/AppPage";
@@ -22,10 +25,10 @@ import {
   buildPlanillaConsultaEstadosRequest,
   consultarPlanillaEstados,
 } from "../../../api/planillaConsultaService";
-import type { PlanillaConsultaParametro } from "../../../models/planillaConsulta";
+import type { PlanillaConsultaEstadosRequest, PlanillaConsultaParametro } from "../../../models/planillaConsulta";
 
 type PagoTabKey = "aprobar" | "reaprobar" | "hormiga" | "observadas" | "resumen";
-type DetailTabKey = "resumen" | "historial";
+type DetailTabKey = "orden" | "resumen" | "historial" | "historial-oc";
 
 type PagoEstado = Exclude<PagoTabKey, "resumen">;
 
@@ -33,6 +36,9 @@ type PagoRow = {
   id: number;
   correlativo: string;
   ot: string;
+  fila?: string;
+  idCliente?: number;
+  idProyecto?: number;
   cliente: string;
   proyecto: string;
   siteId: string;
@@ -44,7 +50,10 @@ type PagoRow = {
   responsable: string;
   validador: string;
   moneda: string;
+  corSite?: string;
   montoOc2?: string;
+  montoPlanillaPagado?: number;
+  montoPlanillaPagadoDisplay?: string;
   conPagado?: number;
   conPagadoDisplay?: string;
   subOc?: number;
@@ -57,6 +66,7 @@ type PagoRow = {
   diasEstado: number;
   observacion: string;
   detalle: string;
+  idOc?: string;
   documento: string;
 };
 
@@ -93,6 +103,35 @@ type GroupRow = {
   totalsByCurrency: Record<string, { subtotal: number; igv: number; total: number }>;
 };
 
+type ResumenOtDetalle = {
+  ot: string;
+  correlativo: string;
+  idCliente?: number;
+  idProyecto?: number;
+  idSite?: string;
+  fila?: string;
+  cliente: string;
+  proyecto: string;
+  site: string;
+  tipoTrabajo: string;
+  moneda: string;
+  montoOc: number;
+  totalAcumuladoOt: number;
+  disponible: number;
+  porcentaje: number;
+  porcentajeMontoBck?: number;
+  subOc: number;
+  montoPlanilla?: number;
+  montoPlanillaPagado?: number;
+  pagado?: number;
+  disponibleOc?: number;
+  porcentajeOc?: number;
+  adelaFic: number;
+  porcentajeFic: number;
+  montoOcAdelanto: number;
+  porcentajeOcAdelanto: number;
+};
+
 const TAB_ORDER: PagoTabKey[] = ["aprobar", "reaprobar", "hormiga", "observadas", "resumen"];
 
 const TAB_ESTADOS: Record<Exclude<PagoTabKey, "resumen">, string> = {
@@ -101,6 +140,29 @@ const TAB_ESTADOS: Record<Exclude<PagoTabKey, "resumen">, string> = {
   hormiga: "10",
   observadas: "2",
 };
+
+const TAB_ESTADOS_CON_FECHA = Object.values(TAB_ESTADOS).join(",");
+
+function createEmptyRowsByTab(): Record<PagoTabKey, PagoRow[]> {
+  return {
+    aprobar: [],
+    reaprobar: [],
+    hormiga: [],
+    observadas: [],
+    resumen: [],
+  };
+}
+
+function groupRowsByEstado(rows: PagoRow[]): Record<PagoTabKey, PagoRow[]> {
+  const grouped = createEmptyRowsByTab();
+
+  for (const row of rows) {
+    grouped[row.estado].push(row);
+  }
+
+  grouped.resumen = [...grouped.aprobar, ...grouped.reaprobar, ...grouped.hormiga, ...grouped.observadas];
+  return grouped;
+}
 
 const TAB_THEME: Record<PagoTabKey, TabTheme> = {
   aprobar: {
@@ -112,9 +174,9 @@ const TAB_THEME: Record<PagoTabKey, TabTheme> = {
   },
   reaprobar: {
     label: "Re-aprobar",
-    accent: "#7C3AED",
-    soft: "#F5F3FF",
-    border: "#C4B5FD",
+    accent: "#2563EB",
+    soft: "#EFF6FF",
+    border: "#93C5FD",
     icon: <RotateCcw size={16} strokeWidth={2.2} />,
   },
   hormiga: {
@@ -133,9 +195,9 @@ const TAB_THEME: Record<PagoTabKey, TabTheme> = {
   },
   resumen: {
     label: "Resumen",
-    accent: "#0F766E",
-    soft: "#F0FDFA",
-    border: "#5EEAD4",
+    accent: "#7C3AED",
+    soft: "#F5F3FF",
+    border: "#C4B5FD",
     icon: <ShieldCheck size={16} strokeWidth={2.2} />,
   },
 };
@@ -431,20 +493,33 @@ const PAYMENT_ROWS: PagoRow[] = [
   },
 ];
 
-const INITIAL_FILTERS: FilterState = {
-  cliente: "",
-  proyecto: "",
-  site: "",
-  tipoTrabajo: "",
-  tarea: "",
-  solicitante: "",
-  responsable: "",
-  estado: "",
-  correlativo: "",
-  fechaDesde: "",
-  fechaHasta: "",
-  query: "",
-};
+function formatDateInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getDefaultFilterState(): FilterState {
+  const fechaHasta = new Date();
+  const fechaDesde = new Date(fechaHasta);
+  fechaDesde.setDate(fechaDesde.getDate() - 8);
+
+  return {
+    cliente: "",
+    proyecto: "",
+    site: "",
+    tipoTrabajo: "",
+    tarea: "",
+    solicitante: "",
+    responsable: "",
+    estado: "",
+    correlativo: "",
+    fechaDesde: formatDateInputValue(fechaDesde),
+    fechaHasta: formatDateInputValue(fechaHasta),
+    query: "",
+  };
+}
 
 function formatMoney(value: number) {
   return value.toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -458,7 +533,7 @@ function getCurrencySymbol(currency: string) {
   }
 
   if (normalized.includes("eur") || normalized.includes("euro")) {
-    return "€";
+    return "â‚¬";
   }
 
   if (normalized.includes("peso dominicano") || normalized.includes("rd$") || normalized === "dop" || normalized.includes("dominicano")) {
@@ -474,6 +549,32 @@ function formatCurrency(value: number, currency: string) {
 
 function formatPercent(value: number) {
   return Number.isFinite(value) ? `${value.toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%` : "0.00%";
+}
+
+function getConsumptionBarColor(percent: number) {
+  if (!Number.isFinite(percent)) {
+    return "#22C55E";
+  }
+
+  if (percent < 50) {
+    return "#22C55E";
+  }
+
+  if (percent <= 70) {
+    return "#EAB308";
+  }
+
+  return "#EF4444";
+}
+
+function getConsumptionPercent(total: number, disponible: number) {
+  if (!Number.isFinite(total) || total <= 0) {
+    return 0;
+  }
+
+  const safeDisponible = Number.isFinite(disponible) ? Math.max(disponible, 0) : 0;
+  const percent = 1 - safeDisponible / total;
+  return Math.max(0, Math.min(100, Math.round(percent * 100)));
 }
 
 function parseNumericValue(value?: string | number | null): number {
@@ -525,6 +626,74 @@ function formatDate(value: string) {
   return parsed.toLocaleDateString("es-PE");
 }
 
+function formatDateParam(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const direct = trimmed.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(direct)) {
+    return direct;
+  }
+
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    return direct;
+  }
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function toComparableDateKey(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const direct = trimmed.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(direct)) {
+    return direct;
+  }
+
+  const dateMatch = trimmed.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if (dateMatch) {
+    const [, first, second, year] = dateMatch;
+    const firstNumber = Number(first);
+    const secondNumber = Number(second);
+
+    let day = firstNumber;
+    let month = secondNumber;
+
+    // Soportar tanto DD/MM/YYYY como MM/DD/YYYY.
+    // Si uno de los dos componentes supera 12, la interpretación queda clara.
+    if (firstNumber <= 12 && secondNumber > 12) {
+      month = firstNumber;
+      day = secondNumber;
+    } else if (firstNumber > 12 && secondNumber <= 12) {
+      day = firstNumber;
+      month = secondNumber;
+    }
+
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    }
+  }
+
+  const parsed = new Date(trimmed);
+  if (!Number.isNaN(parsed.getTime())) {
+    const year = parsed.getFullYear();
+    const month = String(parsed.getMonth() + 1).padStart(2, "0");
+    const day = String(parsed.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  return direct;
+}
+
 function normalizeText(value: string) {
   return value
     .normalize("NFD")
@@ -542,8 +711,67 @@ function matchesTextFilter(rowValue: string, filterValue: string) {
   return normalizedValue.includes(normalizedFilter);
 }
 
+function matchesQuickSearch(row: PagoRow, query: string) {
+  const normalizedQuery = normalizeText(query);
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  const tokens = normalizedQuery
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  if (tokens.length === 0) {
+    return true;
+  }
+
+  const haystack = normalizeText(
+    [
+      row.correlativo,
+      row.ot,
+      row.idOc,
+      row.fila,
+      row.documento,
+      row.cliente,
+      row.proyecto,
+      row.siteId,
+      row.corSite,
+      row.site,
+      row.tipoTrabajo,
+      row.tarea,
+      row.solicitante,
+      row.responsable,
+      row.validador,
+      row.observacion,
+      row.detalle,
+      row.estado,
+    ]
+      .filter((value) => value !== null && value !== undefined && String(value).trim() !== "")
+      .join(" ")
+  );
+
+  return tokens.every((token) => haystack.includes(token));
+}
+
 function normalizeRecordKey(key: string) {
   return normalizeText(key).replace(/[^a-z0-9]/g, "");
+}
+
+function getValidOtValue(value: string | null | undefined) {
+  const normalized = normalizeText(value || "");
+  if (!normalized || normalized === "0" || normalized === "-" || normalized === "null") {
+    return "";
+  }
+  return String(value).trim();
+}
+
+function getValidOcValue(value: string | null | undefined) {
+  const normalized = normalizeText(value || "");
+  if (!normalized || normalized === "0" || normalized === "-" || normalized === "null") {
+    return "";
+  }
+  return String(value).trim();
 }
 
 function findRecordValue(row: Record<string, unknown>, key: string) {
@@ -618,7 +846,7 @@ function mapPlanillaConsultaRowToPagoRow(
   index: number,
   fallbackEstado: PagoEstado
 ): PagoRow {
-  const correlativo = getRecordString(row, "Correlativo", "correlativo", "Corre", "Id", "id") || String(index + 1);
+  const correlativo = getRecordString(row, "CORRE", "Corre", "corre", "Correlativo", "correlativo") || String(index + 1);
   const subtotal = getRecordNumber(row, "Subtotal", "subtotal", "Monto", "monto") ?? 0;
   const igv = getRecordNumber(row, "IGV", "Igv", "igv") ?? 0;
   const total = getRecordNumber(row, "Total", "total", "TotalPagar", "totalPagar") ?? subtotal + igv;
@@ -631,6 +859,35 @@ function mapPlanillaConsultaRowToPagoRow(
     id: getRecordNumber(row, "Id", "id", "CorrelativoPlanilla", "correlativoPlanilla") ?? index + 1,
     correlativo,
     ot: getRecordString(row, "OT", "ot", "OrdenTrabajo", "ordenTrabajo"),
+    fila: getRecordString(row, "FILA", "Fila", "fila"),
+    idCliente:
+      getRecordNumber(
+        row,
+        "IdCliente",
+        "idCliente",
+        "ClienteId",
+        "clienteId",
+        "IdClienteCj",
+        "idClienteCj",
+        "ClienteCj",
+        "clienteCj",
+        "IdClienteImportar",
+        "idClienteImportar"
+      ) ?? undefined,
+    idProyecto:
+      getRecordNumber(
+        row,
+        "IdProyecto",
+        "idProyecto",
+        "ProyectoId",
+        "proyectoId",
+        "IdProyectoCj",
+        "idProyectoCj",
+        "ProyectoCj",
+        "proyectoCj",
+        "IdProyectoImportar",
+        "idProyectoImportar"
+      ) ?? undefined,
     cliente: getRecordString(row, "Cliente", "cliente", "NombreCliente", "nombreCliente"),
     proyecto: getRecordString(row, "Proyecto", "proyecto", "NombreProyecto", "nombreProyecto"),
     siteId: getRecordString(row, "SiteId", "siteId", "IdSite", "idSite"),
@@ -652,10 +909,34 @@ function mapPlanillaConsultaRowToPagoRow(
       "nombreAprobador"
     ),
     moneda: getRecordString(row, "Moneda", "moneda", "TipoMoneda", "tipoMoneda"),
+    corSite: getRecordString(row, "CorSite", "COR_SITE", "Cor_Site", "corSite"),
     montoOc2: getRecordString(row, "MontoOc2", "montoOc2", "MontoOC2", "montoOC2"),
-    conPagado: getRecordNumber(row, "ConPagado", "conPagado", "ConPagadoSoles", "conPagadoSoles") ?? undefined,
-    conPagadoDisplay: getRecordString(row, "ConPagado", "conPagado", "ConPagadoSoles", "conPagadoSoles"),
-    subOc: getRecordNumber(row, "SubOc", "subOc") ?? undefined,
+    montoPlanillaPagado:
+      getRecordNumber(
+        row,
+        "MontoPlanilla",
+        "montoPlanilla",
+        "MontoPlanillaPagado",
+        "montoPlanillaPagado",
+        "ConPagado",
+        "conPagado",
+        "ConPagadoSoles",
+        "conPagadoSoles"
+      ) ?? undefined,
+    montoPlanillaPagadoDisplay: getRecordString(
+      row,
+      "MontoPlanilla",
+      "montoPlanilla",
+      "MontoPlanillaPagado",
+      "montoPlanillaPagado",
+      "ConPagado",
+      "conPagado",
+      "ConPagadoSoles",
+      "conPagadoSoles"
+    ),
+    conPagado: getRecordNumber(row, "MontoPlanilla", "montoPlanilla", "MontoPlanillaPagado", "montoPlanillaPagado", "ConPagado", "conPagado", "ConPagadoSoles", "conPagadoSoles") ?? undefined,
+    conPagadoDisplay: getRecordString(row, "MontoPlanilla", "montoPlanilla", "MontoPlanillaPagado", "montoPlanillaPagado", "ConPagado", "conPagado", "ConPagadoSoles", "conPagadoSoles"),
+    subOc: getRecordNumber(row, "SubOc", "SubTotalOc", "SubtotalOc", "SubtotalOC", "subOc") ?? undefined,
     adelaFic: getRecordNumber(row, "AdelaFic", "adelaFic") ?? undefined,
     porcentajeFic: getRecordNumber(row, "PorcentajeFic", "porcentajeFic") ?? undefined,
     subtotal: Number.isFinite(subtotal) ? subtotal : 0,
@@ -665,24 +946,236 @@ function mapPlanillaConsultaRowToPagoRow(
     diasEstado: getRecordNumber(row, "DiasEstado", "diasEstado") ?? 0,
     observacion: getRecordString(row, "Observacion", "observacion", "Comentario", "comentario"),
     detalle: getRecordString(row, "Detalle", "detalle"),
-    documento: getRecordString(row, "Documento", "documento", "OC", "Oc"),
+    idOc: getRecordString(row, "IdOc", "IdOC", "Idoc", "OC", "Oc"),
+    documento: getRecordString(row, "Documento", "documento"),
   };
 }
 
-function exportToCsv(fileName: string, headers: string[], rows: Array<Array<string | number>>) {
-  const csv = [headers, ...rows]
-    .map((row) => row.map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`).join(","))
-    .join("\r\n");
+function buildResumenOtRequest(row: PagoRow): PlanillaConsultaEstadosRequest | null {
+  const ot = getValidOtValue(row.ot);
+  const correlativo = row.corSite?.trim();
+  const idCliente = row.idCliente ?? 0;
+  const idProyecto = row.idProyecto ?? 0;
+  const idSite = row.siteId.trim();
+  const tipoTrabajo = row.tipoTrabajo.trim();
 
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  if (!ot || !correlativo || !idSite || !tipoTrabajo || idCliente <= 0 || idProyecto <= 0) {
+    return null;
+  }
+
+  return {
+    ...buildPlanillaConsultaEstadosRequest([
+      { nombre: "OT", valor: ot, tipo: "string" },
+      { nombre: "IdCliente", valor: String(Math.trunc(idCliente)), tipo: "int" },
+      { nombre: "IdProyecto", valor: String(Math.trunc(idProyecto)), tipo: "int" },
+      { nombre: "IdSite", valor: idSite, tipo: "string" },
+      { nombre: "Correlativo", valor: correlativo, tipo: "int" },
+      { nombre: "TipoTrabajo", valor: tipoTrabajo, tipo: "string" },
+    ], {
+      baseParams: {
+        idCargo: null,
+        idEmpleado: null,
+      },
+    }),
+    consulta: "importar-resumen-ot",
+  };
+}
+
+function getEstadoCodigoParaHistorial(row: PagoRow, activeTab: PagoTabKey): string {
+  const estadoDesdeFila = TAB_ESTADOS[row.estado as Exclude<PagoTabKey, "resumen">] ?? "";
+  const estadoDesdeTab = activeTab !== "resumen" ? TAB_ESTADOS[activeTab] : "";
+
+  return estadoDesdeFila || estadoDesdeTab || "";
+}
+
+function buildHistorialRequest(row: PagoRow, activeTab: PagoTabKey): PlanillaConsultaEstadosRequest | null {
+  const ot = getValidOtValue(row?.ot);
+  const idSite = row?.siteId?.trim();
+  const corSite = row?.corSite?.trim();
+  const estados = getEstadoCodigoParaHistorial(row, activeTab);
+
+  if (!ot || !idSite || !corSite || !estados) {
+    return null;
+  }
+
+  return {
+    parametros: [
+      { nombre: "Estados", valor: estados, tipo: "string" },
+      { nombre: "OT", valor: ot, tipo: "string" },
+      { nombre: "IdSite", valor: idSite, tipo: "string" },
+      { nombre: "CorSite", valor: corSite, tipo: "int" },
+    ],
+  };
+}
+
+function buildHistorialOcRequest(row: PagoRow): PlanillaConsultaEstadosRequest | null {
+  const idoc = getValidOcValue(row?.idOc ?? row?.documento);
+  const fila = row?.fila?.trim();
+
+  if (!idoc || !fila) {
+    return null;
+  }
+
+  return {
+    parametros: [
+      { nombre: "Estados", valor: "4", tipo: "string" },
+      { nombre: "idoc", valor: idoc, tipo: "string" },
+      { nombre: "fila", valor: fila, tipo: "string" },
+    ],
+  };
+}
+
+function mapResumenOtResponseRowToDetalle(
+  row: Record<string, unknown>,
+  fallback: PagoRow
+): ResumenOtDetalle {
+  const ot = getRecordString(row, "OT", "ot", "OrdenTrabajo", "ordenTrabajo") || fallback.ot || fallback.correlativo;
+  const correlativo = getRecordString(row, "Correlativo", "correlativo", "CORRE", "Corre") || fallback.correlativo;
+  const cliente = getRecordString(row, "Cliente", "cliente", "NombreCliente", "nombreCliente") || fallback.cliente;
+  const proyecto = getRecordString(row, "Proyecto", "proyecto", "NombreProyecto", "nombreProyecto") || fallback.proyecto;
+  const site = getRecordString(row, "Site", "site", "NombreSite", "nombreSite") || fallback.site;
+  const tipoTrabajo =
+    getRecordString(row, "TipoTrabajo", "tipoTrabajo", "Tipo_Trabajo", "tipo_trabajo") || fallback.tipoTrabajo;
+  const moneda = getRecordString(row, "Moneda", "moneda", "TipoMoneda", "tipoMoneda") || fallback.moneda;
+
+  const montoOc =
+    getRecordNumber(
+      row,
+      "MontoOc",
+      "MontoOC",
+      "montoOc",
+      "montoOC",
+      "MontoOc2",
+      "MontoOC2",
+      "TotalOc",
+      "totalOc",
+      "MontoOt",
+      "montoOt"
+    ) ?? (parseNumericValue(fallback.montoOc2) || fallback.total);
+
+  const montoPlanilla =
+    getRecordNumber(
+      row,
+      "MontoPlanilla",
+      "montoPlanilla",
+      "MontoPlanillaPagado",
+      "montoPlanillaPagado",
+      "ConPagado",
+      "conPagado"
+    ) ?? 0;
+
+  const montoPlanillaPagado =
+    getRecordNumber(
+      row,
+      "MontoPlanillaPagado",
+      "montoPlanillaPagado",
+      "MontoPlanilla_Pagado",
+      "montoPlanilla_Pagado"
+    ) ?? montoPlanilla;
+
+  const totalAcumuladoOt =
+    getRecordNumber(
+      row,
+      "Monto_Bck",
+      "monto_bck",
+      "MontoBck",
+      "montoBck",
+      "TotalAcumuladoOt",
+      "totalAcumuladoOt",
+      "TotalAcumulado",
+      "totalAcumulado",
+      "ConPagado",
+      "conPagado",
+      "TotalPagar",
+      "totalPagar",
+      "Solicitado",
+      "solicitado"
+    ) ?? fallback.total;
+
+  const disponible =
+    getRecordNumber(
+      row,
+      "SaldoMontoBck",
+      "saldoMontoBck",
+      "SaldoMonto_Bck",
+      "saldoMonto_Bck",
+      "Disponible",
+      "disponible",
+      "Saldo",
+      "saldo",
+      "SaldoReferencial",
+      "saldoReferencial"
+    ) ??
+    Math.max(montoOc - totalAcumuladoOt, 0);
+
+  const porcentaje = getConsumptionPercent(montoOc, disponible);
+  const porcentajeMontoBck =
+    getRecordNumber(
+      row,
+      "PorcentajeMontoBck",
+      "porcentajeMontoBck",
+      "PorcentajeMonto_Bck",
+      "porcentajeMonto_Bck",
+      "Porcentaje_Monto_Bck",
+      "porcentaje_Monto_Bck"
+    ) ?? porcentaje;
+
+  const subOc =
+    getRecordNumber(
+      row,
+      "SubOc",
+      "subOc",
+      "SubTotalOc",
+      "subTotalOc",
+      "SubtotalOc",
+      "subtotalOc",
+      "SubtotalOC",
+      "subtotalOC"
+    ) ?? (fallback.subOc ?? 0);
+
+  const adelaFic = getRecordNumber(row, "AdelaFic", "adelaFic", "AdelantoFic", "adelantoFic") ?? (fallback.adelaFic ?? 0);
+  const porcentajeFic =
+    getRecordNumber(row, "PorcentajeFic", "porcentajeFic") ??
+    (montoOc > 0 ? (adelaFic / montoOc) * 100 : 0);
+  const montoOcAdelanto =
+    getRecordNumber(row, "MontoOcAdelanto", "montoOcAdelanto", "Adelantos", "adelantos") ?? adelaFic;
+  const porcentajeOcAdelanto =
+    getRecordNumber(row, "PorcentajeOcAdelanto", "porcentajeOcAdelanto") ??
+    (montoOc > 0 ? (montoOcAdelanto / montoOc) * 100 : 0);
+
+    return {
+      ot,
+      correlativo,
+      idCliente: fallback.idCliente,
+      idProyecto: fallback.idProyecto,
+      idSite: fallback.siteId,
+      fila: fallback.fila,
+      cliente,
+      proyecto,
+      site,
+      tipoTrabajo,
+      moneda,
+      montoOc,
+      totalAcumuladoOt,
+      disponible,
+      porcentaje,
+      subOc,
+      montoPlanilla,
+      montoPlanillaPagado,
+      adelaFic,
+      porcentajeFic,
+      montoOcAdelanto,
+      porcentajeOcAdelanto,
+    };
+}
+
+function exportToExcel(fileName: string, headers: string[], rows: Array<Array<string | number>>) {
+  const worksheetData = [headers, ...rows];
+  const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+  const workbook = XLSX.utils.book_new();
+
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Pagos");
+  XLSX.writeFile(workbook, fileName, { compression: true });
 }
 
 function getStatusLabel(tab: Exclude<PagoTabKey, "resumen">) {
@@ -696,7 +1189,8 @@ function getStateColor(tab: Exclude<PagoTabKey, "resumen">) {
 export default function PagosV1Page() {
   const [activeTab, setActiveTab] = useState<PagoTabKey>("aprobar");
   const [detailTab, setDetailTab] = useState<DetailTabKey>("resumen");
-  const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
+  const [filters, setFilters] = useState<FilterState>(() => getDefaultFilterState());
+  const [appliedFilters, setAppliedFilters] = useState<FilterState>(() => getDefaultFilterState());
   const [rowsByTab, setRowsByTab] = useState<Record<PagoTabKey, PagoRow[]>>({
     aprobar: [],
     reaprobar: [],
@@ -709,7 +1203,13 @@ export default function PagosV1Page() {
   const [checkedIds, setCheckedIds] = useState<number[]>([]);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [filtersVisible, setFiltersVisible] = useState(true);
+  const [isHistorialPopupOpen, setIsHistorialPopupOpen] = useState(false);
+  const [isHistorialOcPopupOpen, setIsHistorialOcPopupOpen] = useState(false);
   const [message, setMessage] = useState<string>("");
+  const [resumenOtDetalle, setResumenOtDetalle] = useState<ResumenOtDetalle | null>(null);
+  const [historialRows, setHistorialRows] = useState<PagoRow[]>([]);
+  const [historialOcRows, setHistorialOcRows] = useState<PagoRow[]>([]);
+  const resumenOtCacheRef = useRef<Map<string, ResumenOtDetalle>>(new Map());
 
   useEffect(() => {
     let cancelled = false;
@@ -718,58 +1218,93 @@ export default function PagosV1Page() {
       setLoadingData(true);
 
       try {
-        const tabEntries: Array<[Exclude<PagoTabKey, "resumen">, string]> = [
-          ["aprobar", TAB_ESTADOS.aprobar],
-          ["reaprobar", TAB_ESTADOS.reaprobar],
-          ["hormiga", TAB_ESTADOS.hormiga],
-          ["observadas", TAB_ESTADOS.observadas],
-        ];
+        const fechaInicio = formatDateParam(appliedFilters.fechaDesde);
+        const fechaFin = formatDateParam(appliedFilters.fechaHasta);
+        const tieneFiltroFechas = Boolean(fechaInicio || fechaFin);
 
-        const loaded = await Promise.all(
-          tabEntries.map(async ([tab, estado]) => {
-            const parametros: PlanillaConsultaParametro[] = [
-              { nombre: "Estados", valor: estado, tipo: "string" },
-            ];
+        let nextRowsByTab: Record<PagoTabKey, PagoRow[]>;
 
-            const response = await consultarPlanillaEstados(
-              buildPlanillaConsultaEstadosRequest(parametros),
-              { timeoutMs: 120000 }
-            );
+        if (tieneFiltroFechas) {
+          const parametros: PlanillaConsultaParametro[] = [
+            { nombre: "Estados", valor: TAB_ESTADOS_CON_FECHA, tipo: "string" },
+          ];
 
-            const rows = Array.isArray(response.rows) ? response.rows : [];
-            return [tab, rows.map((row, index) => mapPlanillaConsultaRowToPagoRow(row, index, tab))] as const;
-          })
-        );
+          if (fechaInicio) {
+            parametros.push({ nombre: "FechaInicio", valor: fechaInicio, tipo: "date" });
+          }
+
+          if (fechaFin) {
+            parametros.push({ nombre: "FechaFin", valor: fechaFin, tipo: "date" });
+          }
+
+          const response = await consultarPlanillaEstados(
+            buildPlanillaConsultaEstadosRequest(parametros, {
+              baseParams: {
+                idCargo: null,
+                idEmpleado: null,
+              },
+            }),
+            { timeoutMs: 120000 }
+          );
+
+          const rows = Array.isArray(response.rows) ? response.rows : [];
+          const mappedRows = rows.map((row, index) =>
+            mapPlanillaConsultaRowToPagoRow(row, index, mapPlanillaEstadoToPagoEstado(
+              getRecordNumber(row, "Estado", "estado") ?? getRecordString(row, "EstadoNombre", "estadoNombre"),
+              "aprobar"
+            ))
+          );
+          nextRowsByTab = groupRowsByEstado(mappedRows);
+        } else {
+          const tabEntries: Array<[Exclude<PagoTabKey, "resumen">, string]> = [
+            ["aprobar", TAB_ESTADOS.aprobar],
+            ["reaprobar", TAB_ESTADOS.reaprobar],
+            ["hormiga", TAB_ESTADOS.hormiga],
+            ["observadas", TAB_ESTADOS.observadas],
+          ];
+
+          const loaded = await Promise.all(
+            tabEntries.map(async ([tab, estado]) => {
+              const parametros: PlanillaConsultaParametro[] = [
+                { nombre: "Estados", valor: estado, tipo: "string" },
+              ];
+
+              const response = await consultarPlanillaEstados(
+                buildPlanillaConsultaEstadosRequest(parametros, {
+                  baseParams: {
+                    idCargo: null,
+                    idEmpleado: null,
+                  },
+                }),
+                { timeoutMs: 120000 }
+              );
+
+              const rows = Array.isArray(response.rows) ? response.rows : [];
+              return [tab, rows.map((row, index) => mapPlanillaConsultaRowToPagoRow(row, index, tab))] as const;
+            })
+          );
+
+          if (cancelled) {
+            return;
+          }
+
+          nextRowsByTab = loaded.reduce<Record<PagoTabKey, PagoRow[]>>(
+            (acc, [tab, rows]) => {
+              acc[tab] = rows;
+              return acc;
+            },
+            createEmptyRowsByTab()
+          );
+        }
 
         if (cancelled) {
           return;
         }
 
-        const nextRowsByTab = loaded.reduce<Record<PagoTabKey, PagoRow[]>>(
-          (acc, [tab, rows]) => {
-            acc[tab] = rows;
-            return acc;
-          },
-          {
-            aprobar: [],
-            reaprobar: [],
-            hormiga: [],
-            observadas: [],
-            resumen: [],
-          }
-        );
-
-        nextRowsByTab.resumen = [
-          ...nextRowsByTab.aprobar,
-          ...nextRowsByTab.reaprobar,
-          ...nextRowsByTab.hormiga,
-          ...nextRowsByTab.observadas,
-        ];
-
         setRowsByTab(nextRowsByTab);
       } catch {
         if (!cancelled) {
-          setMessage("No se pudieron cargar las órdenes desde Planilla.");
+          setMessage("No se pudieron cargar las Órdenes desde Planilla.");
         }
       } finally {
         if (!cancelled) {
@@ -783,7 +1318,7 @@ export default function PagosV1Page() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [appliedFilters.fechaDesde, appliedFilters.fechaHasta]);
 
   const activeRows = useMemo(
     () => (activeTab === "resumen" ? rowsByTab.resumen : rowsByTab[activeTab]),
@@ -792,43 +1327,26 @@ export default function PagosV1Page() {
 
   const filteredRows = useMemo(() => {
     return activeRows.filter((row) => {
-      const rowDate = row.fecha.slice(0, 10);
-      const query = normalizeText(filters.query);
+      const rowDate = toComparableDateKey(row.fecha);
+      const fechaDesde = formatDateParam(appliedFilters.fechaDesde);
+      const fechaHasta = formatDateParam(appliedFilters.fechaHasta);
 
       return (
-        matchesTextFilter(row.cliente, filters.cliente) &&
-        matchesTextFilter(row.proyecto, filters.proyecto) &&
-        matchesTextFilter(row.site, filters.site) &&
-        matchesTextFilter(row.tipoTrabajo, filters.tipoTrabajo) &&
-        matchesTextFilter(row.tarea, filters.tarea) &&
-        matchesTextFilter(row.solicitante, filters.solicitante) &&
-        matchesTextFilter(row.responsable, filters.responsable) &&
-        matchesTextFilter(row.correlativo, filters.correlativo) &&
-        (!filters.estado || row.estado === filters.estado) &&
-        (!filters.fechaDesde || rowDate >= filters.fechaDesde) &&
-        (!filters.fechaHasta || rowDate <= filters.fechaHasta) &&
-        (!query ||
-          normalizeText(
-            [
-              row.correlativo,
-              row.cliente,
-              row.proyecto,
-              row.siteId,
-              row.site,
-              row.tipoTrabajo,
-              row.tarea,
-              row.solicitante,
-              row.responsable,
-              row.validador,
-              row.observacion,
-              row.detalle,
-              row.documento,
-              row.estado,
-            ].join(" ")
-          ).includes(query))
+        matchesTextFilter(row.cliente, appliedFilters.cliente) &&
+        matchesTextFilter(row.proyecto, appliedFilters.proyecto) &&
+        matchesTextFilter(row.site, appliedFilters.site) &&
+        matchesTextFilter(row.tipoTrabajo, appliedFilters.tipoTrabajo) &&
+        matchesTextFilter(row.tarea, appliedFilters.tarea) &&
+        matchesTextFilter(row.solicitante, appliedFilters.solicitante) &&
+        matchesTextFilter(row.responsable, appliedFilters.responsable) &&
+        matchesTextFilter(row.correlativo, appliedFilters.correlativo) &&
+        (!appliedFilters.estado || row.estado === appliedFilters.estado) &&
+        (!fechaDesde || rowDate >= fechaDesde) &&
+        (!fechaHasta || rowDate <= fechaHasta) &&
+        matchesQuickSearch(row, appliedFilters.query)
       );
     });
-  }, [activeRows, filters]);
+  }, [activeRows, appliedFilters]);
 
   const groupedRows = useMemo<GroupRow[]>(() => {
     const map = new Map<string, GroupRow>();
@@ -967,45 +1485,288 @@ export default function PagosV1Page() {
   const currentTheme = TAB_THEME[activeTab];
   const mapearDatosOc = useCallback(
     (row: PagoRow) => {
-      const normalizedOt = normalizeRecordKey(row.ot || row.correlativo);
-      const sameOtRows = filteredRows.filter((item) => normalizeRecordKey(item.ot || item.correlativo) === normalizedOt);
+      const ot = getValidOtValue(row.ot);
+      const oc = getValidOcValue(row.idOc ?? row.documento);
+      const normalizedOt = ot ? normalizeRecordKey(ot) : "";
+      const sameOtRows = ot
+        ? filteredRows.filter((item) => getValidOtValue(item.ot) === ot || normalizeRecordKey(getValidOtValue(item.ot)) === normalizedOt)
+        : [];
       const montoOcTexto = row.montoOc2?.trim() || "";
-      const montoOc = parseNumericValue(montoOcTexto) || row.total;
-      const conPagadoCampo = parseNumericValue(row.conPagadoDisplay ?? row.conPagado);
-      const totalAcumuladoOt = conPagadoCampo > 0 ? conPagadoCampo : sameOtRows.reduce((acc, item) => acc + item.total, 0);
+      const montoOc = ot ? (parseNumericValue(montoOcTexto) || row.total) : 0;
+      const montoPlanillaPagadoCampo = parseNumericValue(
+        row.montoPlanillaPagadoDisplay ?? row.montoPlanillaPagado ?? row.conPagadoDisplay ?? row.conPagado
+      );
+      const totalAcumuladoOt =
+        ot
+          ? montoPlanillaPagadoCampo > 0
+            ? montoPlanillaPagadoCampo
+            : sameOtRows.reduce((acc, item) => acc + item.total, 0)
+          : 0;
       const subOc = Number.isFinite(row.subOc ?? NaN) ? Number(row.subOc ?? 0) : sameOtRows.reduce((acc, item) => acc + item.subtotal, 0);
       const adelaFic = Number.isFinite(row.adelaFic ?? NaN) ? Number(row.adelaFic ?? 0) : 0;
       const porcentajeFic = Number.isFinite(row.porcentajeFic ?? NaN)
         ? Number(row.porcentajeFic ?? 0)
-        : montoOc > 0
+        : ot && montoOc > 0
           ? (totalAcumuladoOt / montoOc) * 100
           : 0;
-      const disponible = Math.max(montoOc - totalAcumuladoOt, 0);
-      const porcentaje = montoOc > 0 ? Math.min(100, Math.round((totalAcumuladoOt / montoOc) * 100)) : 0;
+      const disponible = ot ? Math.max(montoOc - totalAcumuladoOt, 0) : 0;
+      const porcentaje = ot ? getConsumptionPercent(montoOc, disponible) : 0;
+      const solicitadoOc = oc ? (Number.isFinite(row.subtotal ?? NaN) ? Number(row.subtotal ?? 0) : row.subtotal) : 0;
+      const pagadoOc = 0;
+      const totalOc = oc ? subOc : 0;
+      const disponibleOc = oc ? Math.max(totalOc - (pagadoOc + solicitadoOc), 0) : 0;
+      const porcentajeOc = oc ? getConsumptionPercent(totalOc, disponibleOc) : 0;
 
       return {
         ...row,
-        ot: row.ot || row.correlativo,
+        ot,
         sameOtRows,
         totalAcumuladoOt,
         montoOc,
         disponible,
         porcentaje,
-        pagado: Math.max(totalAcumuladoOt - montoOc, 0),
-        solicitado: totalAcumuladoOt,
-        pendiente: Math.max(montoOc - totalAcumuladoOt, 0),
-        subOc,
+        pagado: ot ? (montoPlanillaPagadoCampo > 0 ? montoPlanillaPagadoCampo : totalAcumuladoOt) : 0,
+        pendiente: ot ? Math.max(montoOc - totalAcumuladoOt, 0) : 0,
+        subOc: totalOc,
+        montoPlanilla: montoPlanillaPagadoCampo > 0 ? montoPlanillaPagadoCampo : undefined,
         adelaFic,
         porcentajeFic,
-        montoOcAdelanto: adelaFic,
-        porcentajeOcAdelanto: montoOc > 0 ? (adelaFic / montoOc) * 100 : 0,
+        porcentajeMontoBck: undefined,
+        solicitado: solicitadoOc,
+        porcentajeOc,
+        disponibleOc,
+        montoOcAdelanto: oc ? adelaFic : 0,
+        porcentajeOcAdelanto: oc && montoOc > 0 ? (adelaFic / montoOc) * 100 : 0,
+        idSite: row.siteId,
       };
     },
     [filteredRows]
   );
 
-  const detalleOcActiva = useMemo(() => (filaActiva ? mapearDatosOc(filaActiva) : null), [filaActiva, mapearDatosOc]);
+  const detalleOcBase = useMemo(() => (filaActiva ? mapearDatosOc(filaActiva) : null), [filaActiva, mapearDatosOc]);
+  const historialOtSeleccionada = getValidOtValue(filaActiva?.ot);
+  const historialOcSeleccionada = getValidOcValue(filaActiva?.idOc ?? filaActiva?.documento);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const cargarResumenOt = async () => {
+      if (!filaActiva) {
+        setResumenOtDetalle(null);
+        return;
+      }
+
+      const request = buildResumenOtRequest(filaActiva);
+      if (!request) {
+        setResumenOtDetalle(null);
+        return;
+      }
+
+      const cacheKey = [
+        filaActiva.ot || filaActiva.correlativo || "",
+        String(filaActiva.idCliente ?? ""),
+        String(filaActiva.idProyecto ?? ""),
+        filaActiva.siteId || "",
+        filaActiva.correlativo || "",
+        filaActiva.tipoTrabajo || "",
+      ].join("|");
+
+      const cached = resumenOtCacheRef.current.get(cacheKey);
+      if (cached) {
+        if (!cancelled) {
+          setResumenOtDetalle(cached);
+        }
+        return;
+      }
+
+      try {
+        const response = await consultarPlanillaEstados(request, { timeoutMs: 120000 });
+        const row = Array.isArray(response.rows) && response.rows.length > 0 ? response.rows[0] : null;
+
+        if (!row) {
+          if (!cancelled) {
+            setResumenOtDetalle(null);
+          }
+          return;
+        }
+
+        const mapped = mapResumenOtResponseRowToDetalle(row, filaActiva);
+        resumenOtCacheRef.current.set(cacheKey, mapped);
+
+        if (!cancelled) {
+          setResumenOtDetalle(mapped);
+        }
+      } catch {
+        if (!cancelled) {
+          setResumenOtDetalle(null);
+        }
+      }
+    };
+
+    void cargarResumenOt();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [filaActiva]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadHistorial = async () => {
+      if (detailTab !== "historial") {
+        return;
+      }
+
+      if (!filaActiva) {
+        setHistorialRows([]);
+        return;
+      }
+
+      const request = buildHistorialRequest(filaActiva, activeTab);
+      if (!request) {
+        setHistorialRows([]);
+        return;
+      }
+
+      try {
+        const response = await consultarPlanillaEstados(request, { timeoutMs: 120000 });
+        if (cancelled) {
+          return;
+        }
+
+        const rows = Array.isArray(response.rows) ? response.rows : [];
+        setHistorialRows(rows.map((row, index) => mapPlanillaConsultaRowToPagoRow(row, index, filaActiva.estado)));
+      } catch {
+        if (!cancelled) {
+          setHistorialRows([]);
+        }
+      }
+    };
+
+    void loadHistorial();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [detailTab, filaActiva, activeTab]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadHistorialOc = async () => {
+      if (!filaActiva) {
+        setHistorialOcRows([]);
+        return;
+      }
+
+      const request = buildHistorialOcRequest(filaActiva);
+      if (!request) {
+        setHistorialOcRows([]);
+        return;
+      }
+
+      try {
+        const response = await consultarPlanillaEstados(request, { timeoutMs: 120000 });
+        if (cancelled) {
+          return;
+        }
+
+        const rows = Array.isArray(response.rows) ? response.rows : [];
+        setHistorialOcRows(rows.map((row, index) => mapPlanillaConsultaRowToPagoRow(row, index, filaActiva.estado)));
+      } catch {
+        if (!cancelled) {
+          setHistorialOcRows([]);
+        }
+      }
+    };
+
+    void loadHistorialOc();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [detailTab, filaActiva]);
+
+  useEffect(() => {
+    if (detailTab !== "historial") {
+      setIsHistorialPopupOpen(false);
+    }
+  }, [detailTab]);
+
+  useEffect(() => {
+    if (detailTab !== "historial-oc") {
+      setIsHistorialOcPopupOpen(false);
+    }
+  }, [detailTab]);
+
+  const detalleOcActiva = useMemo(() => {
+    if (!detalleOcBase) {
+      return null;
+    }
+
+    if (!resumenOtDetalle) {
+      return detalleOcBase;
+    }
+
+    return {
+      ...detalleOcBase,
+      ...resumenOtDetalle,
+      ot: resumenOtDetalle.ot || detalleOcBase.ot,
+      correlativo: resumenOtDetalle.correlativo || detalleOcBase.correlativo,
+      idCliente: resumenOtDetalle.idCliente ?? detalleOcBase.idCliente,
+      idProyecto: resumenOtDetalle.idProyecto ?? detalleOcBase.idProyecto,
+      idSite: resumenOtDetalle.idSite || detalleOcBase.idSite,
+      fila: resumenOtDetalle.fila || detalleOcBase.fila,
+      cliente: resumenOtDetalle.cliente || detalleOcBase.cliente,
+      proyecto: resumenOtDetalle.proyecto || detalleOcBase.proyecto,
+      site: resumenOtDetalle.site || detalleOcBase.site,
+      tipoTrabajo: resumenOtDetalle.tipoTrabajo || detalleOcBase.tipoTrabajo,
+      moneda: resumenOtDetalle.moneda || detalleOcBase.moneda,
+      porcentaje: getConsumptionPercent(
+        parseNumericValue(resumenOtDetalle.montoOc ?? detalleOcBase.montoOc ?? 0),
+        parseNumericValue(resumenOtDetalle.disponible ?? detalleOcBase.disponible ?? 0)
+      ),
+      pagado: resumenOtDetalle.montoPlanillaPagado ?? detalleOcBase.pagado,
+      montoPlanilla: resumenOtDetalle.montoPlanilla ?? detalleOcBase.montoPlanilla,
+      montoPlanillaPagado: resumenOtDetalle.montoPlanillaPagado ?? detalleOcBase.montoPlanillaPagado,
+      totalAcumuladoOt: resumenOtDetalle.totalAcumuladoOt ?? detalleOcBase.totalAcumuladoOt,
+      porcentajeMontoBck:
+        resumenOtDetalle.porcentajeMontoBck ??
+        getConsumptionPercent(
+          parseNumericValue(resumenOtDetalle.montoOc ?? detalleOcBase.montoOc ?? 0),
+          parseNumericValue(resumenOtDetalle.disponible ?? detalleOcBase.disponible ?? 0)
+        ),
+      porcentajeOc: getConsumptionPercent(
+        parseNumericValue(resumenOtDetalle.subOc ?? detalleOcBase.subOc ?? 0),
+        parseNumericValue(resumenOtDetalle.disponibleOc ?? detalleOcBase.disponibleOc ?? 0)
+      ),
+    };
+  }, [detalleOcBase, resumenOtDetalle]);
   const resumenOcTitulo = detalleOcActiva?.ot || detalleOcActiva?.correlativo || filaActiva?.ot || filaActiva?.correlativo || "";
+  const consumoOtPercent = detalleOcActiva
+    ? Number.isFinite(detalleOcActiva.porcentajeMontoBck ?? NaN)
+      ? Number(detalleOcActiva.porcentajeMontoBck ?? 0)
+      : getConsumptionPercent(parseNumericValue(detalleOcActiva.montoOc), parseNumericValue(detalleOcActiva.disponible))
+    : 0;
+  const consumoOcPercent = detalleOcActiva
+    ? getConsumptionPercent(parseNumericValue(detalleOcActiva.subOc), parseNumericValue(detalleOcActiva.disponibleOc ?? 0))
+    : 0;
+  const montoPlanillaPagadoOc = useMemo(() => {
+    const rowConMontoPagado = historialOcRows.find((row) => Number.isFinite(row.montoPlanillaPagado ?? NaN));
+
+    if (!rowConMontoPagado) {
+      return 0;
+    }
+
+    return parseNumericValue(rowConMontoPagado.montoPlanillaPagado);
+  }, [historialOcRows]);
+  const pagadoOcAmount = Math.max(montoPlanillaPagadoOc, 0);
+  const solicitadoOcAmount = Math.max(parseNumericValue(detalleOcActiva?.solicitado ?? 0), 0);
+  const totalOcAmount = Math.max(parseNumericValue(detalleOcActiva?.subOc ?? 0), 0);
+  const pagadoOcPercent = totalOcAmount > 0 ? Math.min((pagadoOcAmount / totalOcAmount) * 100, 100) : 0;
+  const solicitadoOcPercent = totalOcAmount > 0 ? Math.min((solicitadoOcAmount / totalOcAmount) * 100, 100 - pagadoOcPercent) : 0;
+  const disponibleOcPercent = Math.max(100 - pagadoOcPercent - solicitadoOcPercent, 0);
 
   const totalsByCurrency = useMemo(() => {
     return filteredRows.reduce<Record<string, { subtotal: number; igv: number; total: number }>>((acc, row) => {
@@ -1045,6 +1806,10 @@ export default function PagosV1Page() {
   const summaryTotalsByCurrency = checkedIds.length > 0 ? selectedTotalsByCurrency : totalsByCurrency;
   const summaryRowCount = checkedIds.length > 0 ? selectedRows.length : filteredRows.length;
   const summaryLabel = checkedIds.length > 0 ? "Seleccionados" : "Mostrando";
+
+  useEffect(() => {
+    setDetailTab("resumen");
+  }, [selectedId, activeTab]);
 
   const actionConfig = useMemo(() => {
     switch (activeTab) {
@@ -1087,7 +1852,7 @@ export default function PagosV1Page() {
     }
   }, [activeTab]);
   const showEstadoOc = activeTab === "resumen";
-  const tableColSpan = showEstadoOc ? 16 : 15;
+  const tableColSpan = showEstadoOc ? 18 : 17;
 
   const handleAction = (label: string) => {
     if (label === "Exportar") {
@@ -1095,12 +1860,14 @@ export default function PagosV1Page() {
       return;
     }
     if (label === "Limpiar") {
-      setFilters(INITIAL_FILTERS);
+      const defaultFilters = getDefaultFilterState();
+      setFilters(defaultFilters);
+      setAppliedFilters(defaultFilters);
       setMessage("Filtros limpiados.");
       return;
     }
     if (label === "Ver detalle") {
-      setDetailTab("resumen");
+      setDetailTab("orden");
       return;
     }
     if (label === "Ver observaciÃ³n") {
@@ -1126,10 +1893,22 @@ export default function PagosV1Page() {
     setMessage(`${label} ejecutado en modo demo.`);
   };
 
+  const handleApplyFilters = () => {
+    setAppliedFilters(filters);
+    setMessage("Filtros aplicados.");
+  };
+
+  const handleQuickSearchChange = (value: string) => {
+    setFilters((prev) => ({ ...prev, query: value }));
+    setAppliedFilters((prev) => ({ ...prev, query: value }));
+  };
+
   function handleExport() {
     const rows = filteredRows.map((row) => [
       row.correlativo,
       row.ot,
+      row.idOc || row.documento,
+      row.fila ?? "",
       row.cliente,
       row.proyecto,
       row.siteId,
@@ -1146,13 +1925,15 @@ export default function PagosV1Page() {
       formatMoney(row.total),
     ]);
 
-    exportToCsv(
-      `pagos_v1_${activeTab}_${new Date().toISOString().slice(0, 10)}.csv`,
-      [
-        "Correlativo",
-        "OT",
-        "Cliente",
-        "Proyecto",
+    exportToExcel(
+      `pagos_v1_${activeTab}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+        [
+          "Correlativo",
+          "OT",
+          "OC",
+          "Fila",
+          "Cliente",
+          "Proyecto",
         "Site ID",
         "Site",
         "Tipo Trabajo",
@@ -1169,7 +1950,99 @@ export default function PagosV1Page() {
       ],
       rows
     );
-    setMessage("Exportacion lista.");
+    setMessage("Exportación a Excel lista.");
+  }
+
+  function handleExportHistorial() {
+    const rows = historialRows.map((row) => [
+      row.correlativo,
+      row.ot,
+      row.idOc || row.documento,
+      row.fila ?? "",
+      row.responsable,
+      row.validador || "-",
+      formatMoney(row.subtotal),
+      formatMoney(row.igv),
+      formatMoney(row.total),
+      formatDate(row.fecha),
+      row.cliente,
+      row.proyecto,
+      row.siteId,
+      row.corSite || "-",
+      row.site,
+      row.tipoTrabajo,
+      row.tarea,
+    ]);
+
+    exportToExcel(
+      `pagos_v1_historial_${historialOtSeleccionada || "ot"}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      [
+        "Correlativo",
+        "OT",
+        "OC",
+        "Fila",
+        "Responsable",
+        "Validador",
+        "Subtotal",
+        "IGV",
+        "Total",
+        "Fecha",
+        "Cliente",
+        "Proyecto",
+        "Site ID",
+        "CorSite",
+        "Site",
+        "Tipo Trabajo",
+        "Tarea",
+      ],
+      rows
+    );
+  }
+
+  function handleExportHistorialOc() {
+    const rows = historialOcRows.map((row) => [
+      row.correlativo,
+      row.ot,
+      row.idOc || row.documento,
+      row.fila ?? "",
+      row.responsable,
+      row.validador || "-",
+      formatMoney(row.subtotal),
+      formatMoney(row.igv),
+      formatMoney(row.total),
+      formatDate(row.fecha),
+      row.cliente,
+      row.proyecto,
+      row.siteId,
+      row.corSite || "-",
+      row.site,
+      row.tipoTrabajo,
+      row.tarea,
+    ]);
+
+    exportToExcel(
+      `pagos_v1_historial_oc_${historialOcSeleccionada || "oc"}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      [
+        "Correlativo",
+        "OT",
+        "OC",
+        "Fila",
+        "Responsable",
+        "Validador",
+        "Subtotal",
+        "IGV",
+        "Total",
+        "Fecha",
+        "Cliente",
+        "Proyecto",
+        "Site ID",
+        "CorSite",
+        "Site",
+        "Tipo Trabajo",
+        "Tarea",
+      ],
+      rows
+    );
   }
 
   const groupedCountText = groupedRows.length === 1 ? "1 grupo" : `${groupedRows.length} grupos`;
@@ -1196,18 +2069,53 @@ export default function PagosV1Page() {
                 </div>
                 <div>
                   <h1 style={styles.title}>Órdenes de Pago</h1>
-                  
                 </div>
               </div>
-              <div style={{ ...styles.quickSearchWrap, borderColor: currentTheme.border, background: "#FFFFFF" }}>
-                <Search size={16} color={currentTheme.accent} />
-                <input
-                  type="text"
-                  value={filters.query}
-                  onChange={(event) => setFilters((prev) => ({ ...prev, query: event.target.value }))}
-                  placeholder="Búsqueda rápida por correlativo, responsable, cliente o proyecto"
-                  style={styles.quickSearchInput}
-                />
+              <div style={styles.quickFiltersRow}>
+                <div style={{ ...styles.quickSearchWrap, borderColor: currentTheme.border, background: "#FFFFFF" }}>
+                  <Search size={16} color={currentTheme.accent} />
+                  <input
+                    type="text"
+                    value={filters.query}
+                    onChange={(event) => handleQuickSearchChange(event.target.value)}
+                    placeholder="Búsqueda rápida por correlativo, responsable, cliente o proyecto"
+                    style={styles.quickSearchInput}
+                  />
+                </div>
+
+                <div style={styles.quickDateFilters}>
+                  <div style={styles.quickDateField}>
+                    <span style={styles.quickDateLabel}>Fecha inicio</span>
+                    <input
+                      type="date"
+                      value={filters.fechaDesde}
+                      onChange={(event) => setFilters((prev) => ({ ...prev, fechaDesde: event.target.value }))}
+                      style={{ ...styles.quickDateInput, borderColor: currentTheme.border }}
+                    />
+                  </div>
+                  <div style={styles.quickDateField}>
+                    <span style={styles.quickDateLabel}>Fecha fin</span>
+                    <input
+                      type="date"
+                      value={filters.fechaHasta}
+                      onChange={(event) => setFilters((prev) => ({ ...prev, fechaHasta: event.target.value }))}
+                      style={{ ...styles.quickDateInput, borderColor: currentTheme.border }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleApplyFilters}
+                    style={{
+                      ...styles.applyFiltersButton,
+                      borderColor: currentTheme.border,
+                      background: currentTheme.accent,
+                      color: "#FFFFFF",
+                    }}
+                  >
+                    <Filter size={15} />
+                    Aplicar filtros
+                  </button>
+                </div>
               </div>
 
             </div>
@@ -1267,19 +2175,15 @@ export default function PagosV1Page() {
           </div>
         </section>
 
-        <section style={styles.mainGrid}>
+          <section
+          style={{
+            ...styles.mainGrid,
+            gridTemplateColumns: "minmax(0, 1fr) 580px",
+          }}
+        >
           <div style={styles.leftColumn}>
             <div style={styles.gridCard}>
-            <div style={styles.gridHeader}>
-              <div style={styles.gridHeaderTitleBlock}>
-                <div style={styles.gridHeaderKicker}>Agrupado por:</div>
-                <div style={styles.gridHeaderTitle}>Solicitante</div>
-              </div>
-              <div style={styles.gridHeaderMeta}>
-                <span>{groupedCountText}</span>
-                <span>Órdenes: <strong>{filteredRows.length}</strong></span>
-              </div>
-            </div>
+           
 
             <div style={styles.gridScrollable}>
               <table style={styles.table}>
@@ -1316,6 +2220,8 @@ export default function PagosV1Page() {
                     </th>
                     <th style={{ ...styles.th, width: 94 }}>Correlativo</th>
                     <th style={{ ...styles.th, width: 88 }}>OT</th>
+                    <th style={{ ...styles.th, width: 88 }}>OC</th>
+                    <th style={{ ...styles.th, width: 72 }}>Fila</th>
                     <th style={{ ...styles.th, width: 90 }}>Responsable</th>
                     <th style={{ ...styles.th, width: 110 }}>Validador</th>
                     <th style={{ ...styles.th, width: 90 }}>Subtotal</th>
@@ -1325,6 +2231,7 @@ export default function PagosV1Page() {
                     <th style={{ ...styles.th, width: 60 }}>Cliente</th>
                     <th style={{ ...styles.th, width: 20 }}>Proyecto</th>
                     <th style={{ ...styles.th, width: 60 }}>Site ID</th>
+                    <th style={{ ...styles.th, width: 60 }}>CorSite</th>
                     <th style={{ ...styles.th, width: 20 }}>Site</th>
                     <th style={{ ...styles.th, width: 20 }}>Tipo trabajo</th>
                     <th style={{ ...styles.th, width: 20 }}>Tarea</th>
@@ -1336,7 +2243,7 @@ export default function PagosV1Page() {
                   {loadingData ? (
                     <tr>
                       <td colSpan={tableColSpan} style={styles.emptyCell}>
-                        Cargando órdenes desde Planilla...
+                        Cargando Órdenes desde Planilla...
                       </td>
                     </tr>
                   ) : filteredRows.length === 0 ? (
@@ -1405,7 +2312,7 @@ export default function PagosV1Page() {
                             group.rows.map((row) => {
                               const rowTheme = getStateColor(row.estado);
                               const isSelected = row.id === selectedId;
-                              const percent = row.total > 0 ? Math.round((row.subtotal / row.total) * 100) : 0;
+                              const percent = row.subOc && row.subOc > 0 ? Math.round((row.subtotal / row.subOc) * 100) : 0;
 
                               return (
                                 <tr
@@ -1434,15 +2341,18 @@ export default function PagosV1Page() {
                                   </td>
                                   <td style={styles.td}>{row.correlativo}</td>
                                   <td style={styles.td}>{row.ot || "-"}</td>
+                                  <td style={styles.td}>{row.idOc || row.documento || "-"}</td>
+                                  <td style={styles.td}>{row.fila || "-"}</td>
                                   <td style={styles.td}>{row.responsable}</td>
                                   <td style={styles.td}>{row.validador || "-"}</td>
-                                  <td style={styles.td}>{formatCurrency(row.subtotal, row.moneda)}</td>
+                                  <td style={{ ...styles.td, fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
                                   <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
-                                  <td style={{ ...styles.td, fontWeight: 900 }}>{formatCurrency(row.total, row.moneda)}</td>
+                                  <td style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
                                   <td style={styles.td}>{formatDate(row.fecha)}</td>
                                   <td style={styles.td}>{row.cliente}</td>
                                   <td style={styles.td}>{row.proyecto}</td>
                                   <td style={styles.td}>{row.siteId}</td>
+                                  <td style={styles.td}>{row.corSite || "-"}</td>
                                   <td style={styles.td}>{row.site}</td>
                                   <td style={styles.td}>{row.tipoTrabajo}</td>
                                   <td style={styles.td}>{row.tarea}</td>
@@ -1491,75 +2401,32 @@ export default function PagosV1Page() {
             </div>
 
             <section style={styles.actionsBar}>
-              <div style={styles.actionsCard}>
-                <div style={styles.sectionKicker}>Acciones - {TAB_THEME[activeTab].label}</div>
-                <div style={styles.actionsRow}>
+                <div style={styles.actionsCard}>
+                      <div style={styles.actionsRow}>
                   <ActionButton config={actionConfig.primary} onClick={() => handleAction(actionConfig.primary.label)} />
                   <ActionButton config={actionConfig.secondary} onClick={() => handleAction(actionConfig.secondary.label)} />
-                  <ActionButton config={actionConfig.tertiary} onClick={() => handleAction(actionConfig.tertiary.label)} />
-                  <ActionButton config={actionConfig.quaternary} onClick={() => handleAction(actionConfig.quaternary.label)} />
+                  {actionConfig.tertiary.label !== "Ver PDF" ? (
+                    <ActionButton config={actionConfig.tertiary} onClick={() => handleAction(actionConfig.tertiary.label)} />
+                  ) : null}
+                  {actionConfig.quaternary.label !== "Ver PDF" ? (
+                    <ActionButton config={actionConfig.quaternary} onClick={() => handleAction(actionConfig.quaternary.label)} />
+                  ) : null}
                   <button type="button" style={{ ...styles.slimActionButton, borderColor: currentTheme.border, color: currentTheme.accent }} onClick={handleExport}>
                     <Download size={16} />
                     Exportar
                   </button>
-                  <button type="button" style={styles.slimActionButton} onClick={() => setDetailTab("historial")}>
-                    <FileText size={16} />
-                    Historial
-                  </button>
                 </div>
-                {message ? <div style={styles.notice}>{message}</div> : null}
               </div>
             </section>
           </div>
-
-          <aside style={styles.detailCard}>
-            {filaActiva ? (
-              <>
-                <div style={styles.detailHeader}>
-                  <div>
-                    <div style={{ ...styles.sectionKicker, color: currentTheme.accent }}>Detalle de la orden seleccionada</div>
-                    <div style={styles.detailTitleRow}>
-                      <h2 style={styles.detailTitleSmall}>Orden de Pago N° {filaActiva.correlativo}</h2>
-                      <span
-                        style={{
-                          ...styles.detailStatus,
-                          color: currentTheme.accent,
-                          background: currentTheme.soft,
-                          borderColor: currentTheme.border,
-                        }}
-                      >
-                        {getStatusLabel(filaActiva.estado)}
-                      </span>
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
-                      <div style={styles.noteCard}>
-                        <div style={styles.noteTitle}>Comentario</div>
-                        <p style={styles.noteText}>{filaActiva.detalle}</p>
-                      </div>
-                      <div style={styles.noteCard}>
-                        <div style={styles.noteTitle}>Observación</div>
-                        <p style={styles.noteText}>{filaActiva.observacion}</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div style={styles.emptyDetail}>
-                <ReceiptText size={32} strokeWidth={1.8} />
-                <strong>No hay registro seleccionado</strong>
-                <span>Elige una fila del listado para revisar su detalle.</span>
-              </div>
-            )}
-          </aside>
 
           <aside style={styles.ocDataCard}>
             {filaActiva && detalleOcActiva ? (
               <>
                 <div style={styles.ocDataHeader}>
                   <div>
-                    <div style={{ ...styles.sectionKicker, color: currentTheme.accent }}>Resumen financiero</div>
-                    <h2 style={styles.detailTitleSmall}>OT N° {resumenOcTitulo || "-"}</h2>
+                    <div style={{ ...styles.sectionKicker, color: currentTheme.accent }}>Detalles del registro</div>
+                    <h2 style={styles.detailTitleSmall}>Orden de Pago N° {filaActiva.correlativo}</h2>
                   </div>
                   <span
                     style={{
@@ -1573,104 +2440,594 @@ export default function PagosV1Page() {
                   </span>
                 </div>
 
-                <div style={styles.ocTopGrid}>
-                  <InfoField label="OT N°" value={detalleOcActiva.ot || detalleOcActiva.correlativo} />
-                  <InfoField label="Cliente" value={detalleOcActiva.cliente} />
-                  <InfoField label="Proyecto" value={detalleOcActiva.proyecto} />
-                  <InfoField label="Site" value={detalleOcActiva.site} />
-                  <InfoField label="Tipo trabajo" value={detalleOcActiva.tipoTrabajo} />
-                  <InfoField label="Tarea" value={detalleOcActiva.tarea} />
-                  <InfoField label="Fecha" value={formatDate(detalleOcActiva.fecha)} />
+                <div style={styles.detailTabs}>
+                  {[ 
+                    { key: 'orden' as DetailTabKey, label: 'Detalle' },
+                    { key: 'resumen' as DetailTabKey, label: 'Resumen' },
+                    { key: 'historial' as DetailTabKey, label: 'Historial OT' },
+                    { key: 'historial-oc' as DetailTabKey, label: 'Historial OC' },
+                  ].map((tab) => {
+                    const isActive = detailTab === tab.key;
+                    return (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        onClick={() => setDetailTab(tab.key)}
+                        style={{
+                          ...styles.detailTabButton,
+                          color: isActive ? currentTheme.accent : '#334155',
+                          background: isActive ? currentTheme.soft : '#FFFFFF',
+                          borderColor: isActive ? currentTheme.border : '#CBD5E1',
+                          boxShadow: isActive ? '0 6px 16px rgba(37, 99, 235, 0.10)' : 'none',
+                        }}
+                      >
+                        {tab.label}
+                      </button>
+                    );
+                  })}
                 </div>
 
-                <div style={styles.ocMetricsStrip}>
-                  <div style={styles.ocMetricCard}>
-                    <div style={styles.ocMetricLabel}>Monto Oc</div>
-                    <div style={{ ...styles.ocMetricValue, color: currentTheme.accent }}>
-                      {formatCurrency(detalleOcActiva.montoOc, detalleOcActiva.moneda)}
+                {detailTab === 'orden' ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={styles.detailTitleRow}>
+                     
+                     
+                    </div>
+                    <div style={styles.noteCard}>
+                      <div style={styles.noteTitle}>Comentario</div>
+                      <p style={styles.noteText}>{filaActiva.detalle}</p>
+                    </div>
+                    <div style={styles.noteCard}>
+                      <div style={styles.noteTitle}>ObservaciÃ³n</div>
+                      <p style={styles.noteText}>{filaActiva.observacion}</p>
                     </div>
                   </div>
-                  <div style={styles.ocMetricCard}>
-                    <div style={styles.ocMetricLabel}>Total acumulado por sitio</div>
-                    <div style={{ ...styles.ocMetricValue, color: currentTheme.accent }}>
-                      {formatCurrency(detalleOcActiva.totalAcumuladoOt, detalleOcActiva.moneda)}
-                    </div>
-                  </div>
-                  <div style={styles.ocMetricCard}>
-                    <div style={styles.ocMetricLabel}>Porcentaje referenciado</div>
-                    <div style={{ ...styles.ocMetricValue, color: currentTheme.accent }}>
-                      {formatPercent(detalleOcActiva.porcentaje)}
-                    </div>
-                  </div>
-                  <div style={styles.ocMetricCard}>
-                    <div style={styles.ocMetricLabel}>Saldo referencial</div>
-                    <div style={{ ...styles.ocMetricValue, color: currentTheme.accent }}>
-                      {formatCurrency(detalleOcActiva.disponible, detalleOcActiva.moneda)}
-                    </div>
-                  </div>
-                  <div style={styles.ocMetricCard}>
-                    <div style={styles.ocMetricLabel}>Adelanto Fic</div>
-                    <div style={{ ...styles.ocMetricValue, color: currentTheme.accent }}>
-                      {formatCurrency(detalleOcActiva.adelaFic ?? 0, detalleOcActiva.moneda)}
-                    </div>
-                  </div>
-                </div>
+                ) : null}
 
-                <div style={styles.ocProgressCard}>
-                  <div style={styles.ocProgressTopRow}>
-                    <div>
-                      <div style={styles.ocMetricLabel}>Consumo de la OT</div>
-                      <div style={styles.ocProgressSubtitle}>Acumulado sobre el monto total de la OT</div>
+                {detailTab === 'resumen' ? (
+                  <>
+                    <div style={styles.ocTopGrid}>
+                      <InfoField label="Cliente" value={detalleOcActiva.cliente} />
+                      <InfoField label="Proyecto" value={detalleOcActiva.proyecto} />
+                      <InfoField label="Site" value={detalleOcActiva.site} />
+                      <InfoField label="Tipo trabajo" value={detalleOcActiva.tipoTrabajo} />
                     </div>
-                    <div style={styles.ocProgressValue}>{formatPercent(detalleOcActiva.porcentaje)}</div>
-                  </div>
-                  <div style={styles.progressTrack}>
-                    <div
-                      style={{
-                        ...styles.progressFill,
-                        width: `${detalleOcActiva.porcentaje}%`,
-                        background: currentTheme.accent,
-                      }}
-                    />
-                  </div>
-                  <div style={styles.ocProgressFooter}>
-                    <span>Disponible: {formatCurrency(detalleOcActiva.disponible, detalleOcActiva.moneda)}</span>
-                    <span>Total OT: {formatCurrency(detalleOcActiva.totalAcumuladoOt, detalleOcActiva.moneda)}</span>
-                  </div>
-                </div>
 
-                <div style={styles.detailInfoGrid}>
-                  <InfoField
-                    label="SubOc"
-                    value={formatCurrency(detalleOcActiva.subOc ?? 0, detalleOcActiva.moneda)}
-                  />
-                  <InfoField
-                    label="Adelanto Fic"
-                    value={formatCurrency(detalleOcActiva.adelaFic ?? 0, detalleOcActiva.moneda)}
-                  />
-                  <InfoField
-                    label="Pagado"
-                    value={formatCurrency(detalleOcActiva.pagado, detalleOcActiva.moneda)}
-                  />
-                  <InfoField
-                    label="Solicitado"
-                    value={formatCurrency(detalleOcActiva.solicitado, detalleOcActiva.moneda)}
-                  />
-                  <InfoField
-                    label="Pendiente"
-                    value={formatCurrency(detalleOcActiva.pendiente, detalleOcActiva.moneda)}
-                  />
-                </div>
+                    <div style={styles.ocProgressPair}>
+                      <div style={styles.ocProgressCard}>
+                        <div style={styles.ocProgressTopRow}>
+                          <div>
+                            <div style={styles.ocConsumptionTitle}>
+                              {detalleOcActiva.ot
+                                ? `Consumo de la OT N° ${detalleOcActiva.ot}`
+                                : "Consumo de la OT"}
+                            </div>
+                           
+                          </div>
+                          <div style={styles.ocProgressValue}>{formatPercent(consumoOtPercent)}</div>
+                        </div>
+                        <div style={styles.progressTrack}>
+                          <div
+                            style={{
+                              ...styles.progressFill,
+                              width: `${consumoOtPercent}%`,
+                              background: getConsumptionBarColor(consumoOtPercent),
+                            }}
+                          />
+                        </div>
+                          <div style={styles.ocProgressFooter}>
+                          <div style={styles.ocProgressFooterLine}>
+                            <span>Pagado:</span>
+                            <span>{formatCurrency(detalleOcActiva.montoPlanilla ?? detalleOcActiva.pagado, detalleOcActiva.moneda)}</span>
+                          </div>
+                          <div style={styles.ocProgressFooterLine}>
+                            <span>Disponible:</span>
+                            <span>{formatCurrency(detalleOcActiva.disponible, detalleOcActiva.moneda)}</span>
+                          </div>
+                          <div style={styles.ocProgressFooterLine}>
+                            <span>Total OT:</span>
+                            <span>{formatCurrency(detalleOcActiva.totalAcumuladoOt, detalleOcActiva.moneda)}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={styles.ocProgressCard}>
+                        <div style={styles.ocProgressTopRow}>
+                          <div>
+                            <div style={styles.ocConsumptionTitle}>
+                              Consumo de la OC N° {filaActiva.idOc || filaActiva.documento || '-'}
+                            </div>
+                            
+                          </div>
+                          <div style={styles.ocProgressValue}>{formatPercent(consumoOcPercent)}</div>
+                        </div>
+                        <div style={styles.progressTrack}>
+                          <div style={styles.ocProgressSegments}>
+                            <div
+                              style={{
+                                ...styles.ocProgressSegment,
+                                width: `${pagadoOcPercent}%`,
+                                background: "#2563EB",
+                              }}
+                              title={`Pagado: ${formatCurrency(montoPlanillaPagadoOc, detalleOcActiva.moneda)}`}
+                            />
+                            <div
+                              style={{
+                                ...styles.ocProgressSegment,
+                                width: `${solicitadoOcPercent}%`,
+                                background: "#F59E0B",
+                              }}
+                              title={`Solicitado: ${formatCurrency(detalleOcActiva.solicitado ?? 0, detalleOcActiva.moneda)}`}
+                            />
+                            <div
+                              style={{
+                                ...styles.ocProgressSegment,
+                                width: `${disponibleOcPercent}%`,
+                                background: "#E5E7EB",
+                              }}
+                              title={`Disponible OC: ${formatCurrency(detalleOcActiva.disponibleOc ?? 0, detalleOcActiva.moneda)}`}
+                            />
+                          </div>
+                        </div>
+                        <div style={styles.ocProgressFooter}>
+                          <div style={styles.ocProgressFooterLine}>
+                            <span>Solicitado:</span>
+                            <span>{formatCurrency(detalleOcActiva.solicitado ?? 0, detalleOcActiva.moneda)}</span>
+                          </div>
+                          <div style={styles.ocProgressFooterLine}>
+                            <span>Pagado:</span>
+                            <span>{formatCurrency(montoPlanillaPagadoOc, detalleOcActiva.moneda)}</span>
+                          </div>
+                          <div style={styles.ocProgressFooterLine}>
+                            <span>Disponible OC:</span>
+                            <span>{formatCurrency(detalleOcActiva.disponibleOc ?? 0, detalleOcActiva.moneda)}</span>
+                          </div>
+                          <div style={styles.ocProgressFooterLine}>
+                            <span>Total OC:</span>
+                            <span>{formatCurrency(detalleOcActiva.subOc ?? 0, detalleOcActiva.moneda)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                  </>
+                ) : null}
+
+                {detailTab === 'historial' ? (
+                  <div style={styles.historyPanel}>
+                    <div style={styles.noteCard}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                        <div style={styles.noteTitle}>Historial de OT</div>
+                        <div style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                          <div
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              padding: "4px 10px",
+                              borderRadius: 999,
+                              border: "1px solid #DBEAFE",
+                              background: "#EFF6FF",
+                              color: "#1D4ED8",
+                              fontSize: 12,
+                              fontWeight: 800,
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            Registros: {historialRows.length}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleExportHistorial}
+                            style={{ ...styles.compactActionButton, borderColor: currentTheme.border, color: currentTheme.accent }}
+                          >
+                            <Download size={16} />
+                            Exportar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsHistorialPopupOpen(true)}
+                            style={{ ...styles.compactActionButton, borderColor: currentTheme.border, color: currentTheme.accent }}
+                            aria-label="Ampliar historial"
+                            title="Ampliar historial"
+                          >
+                            <Maximize2 size={16} />
+                            Ampliar
+                          </button>
+                        </div>
+                      </div>
+                      <p style={styles.noteText}>
+                        Se muestran los mismos registros del grid principal filtrados por la OT seleccionada:
+                        {historialOtSeleccionada ? (
+                          <>
+                            <strong> {historialOtSeleccionada}</strong>
+                          </>
+                        ) : null}
+                      </p>
+                    </div>
+
+                    <div style={styles.gridScrollable}>
+                      <table style={{ ...styles.table, minWidth: 1450, width: "max-content" }}>
+                        <thead>
+                          <tr>
+                            <th style={{ ...styles.th, width: 94 }}>Correlativo</th>
+                            <th style={{ ...styles.th, width: 88 }}>OT</th>
+                            <th style={{ ...styles.th, width: 88 }}>OC</th>
+                            <th style={{ ...styles.th, width: 72 }}>Fila</th>
+                            <th style={{ ...styles.th, width: 90 }}>Responsable</th>
+                            <th style={{ ...styles.th, width: 110 }}>Validador</th>
+                            <th style={{ ...styles.th, width: 90 }}>Subtotal</th>
+                            <th style={{ ...styles.th, width: 90 }}>IGV</th>
+                            <th style={{ ...styles.th, width: 100 }}>Total</th>
+                            <th style={{ ...styles.th, width: 80 }}>Fecha</th>
+                            <th style={{ ...styles.th, width: 60 }}>Cliente</th>
+                            <th style={{ ...styles.th, width: 90 }}>Proyecto</th>
+                            <th style={{ ...styles.th, width: 60 }}>Site ID</th>
+                            <th style={{ ...styles.th, width: 60 }}>CorSite</th>
+                            <th style={{ ...styles.th, width: 90 }}>Site</th>
+                            <th style={{ ...styles.th, width: 90 }}>Tipo trabajo</th>
+                            <th style={{ ...styles.th, width: 90 }}>Tarea</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {historialRows.length === 0 ? (
+                            <tr>
+                              <td colSpan={17} style={styles.emptyCell}>
+                                No hay registros para la OT seleccionada.
+                              </td>
+                            </tr>
+                          ) : (
+                            historialRows.map((row) => (
+                              <tr key={`hist-${row.id}`}>
+                                <td style={styles.td}>{row.correlativo}</td>
+                                <td style={styles.td}>{row.ot || '-'}</td>
+                                <td style={styles.td}>{row.idOc || row.documento || '-'}</td>
+                                <td style={styles.td}>{row.fila || '-'}</td>
+                                <td style={styles.td}>{row.responsable}</td>
+                                <td style={styles.td}>{row.validador || '-'}</td>
+                                <td style={{ ...styles.td, fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
+                                <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
+                                <td style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
+                                <td style={styles.td}>{formatDate(row.fecha)}</td>
+                                <td style={styles.td}>{row.cliente}</td>
+                                <td style={styles.td}>{row.proyecto}</td>
+                                <td style={styles.td}>{row.siteId}</td>
+                                <td style={styles.td}>{row.corSite || '-'}</td>
+                                <td style={styles.td}>{row.site}</td>
+                                <td style={styles.td}>{row.tipoTrabajo}</td>
+                                <td style={styles.td}>{row.tarea}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : null}
+
+                {detailTab === 'historial-oc' ? (
+                  <div style={styles.historyPanel}>
+                    <div style={styles.noteCard}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                        <div style={styles.noteTitle}>Historial OC</div>
+                        <div style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                          <div
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              padding: "4px 10px",
+                              borderRadius: 999,
+                              border: "1px solid #DBEAFE",
+                              background: "#EFF6FF",
+                              color: "#1D4ED8",
+                              fontSize: 12,
+                              fontWeight: 800,
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            Registros: {historialOcRows.length}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleExportHistorialOc}
+                            style={{ ...styles.compactActionButton, borderColor: currentTheme.border, color: currentTheme.accent }}
+                          >
+                            <Download size={16} />
+                            Exportar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsHistorialOcPopupOpen(true)}
+                            style={{ ...styles.compactActionButton, borderColor: currentTheme.border, color: currentTheme.accent }}
+                            aria-label="Ampliar historial OC"
+                            title="Ampliar historial OC"
+                          >
+                            <Maximize2 size={16} />
+                            Ampliar
+                          </button>
+                        </div>
+                      </div>
+                      <p style={styles.noteText}>
+                        Se muestran los mismos registros del grid principal filtrados por la OC seleccionada:
+                        <strong> {historialOcSeleccionada || '-'}</strong>
+                      </p>
+                    </div>
+
+                    <div style={styles.gridScrollable}>
+                      <table style={{ ...styles.table, minWidth: 1450, width: "max-content" }}>
+                        <thead>
+                          <tr>
+                            <th style={{ ...styles.th, width: 94 }}>Correlativo</th>
+                            <th style={{ ...styles.th, width: 88 }}>OT</th>
+                            <th style={{ ...styles.th, width: 88 }}>OC</th>
+                            <th style={{ ...styles.th, width: 72 }}>Fila</th>
+                            <th style={{ ...styles.th, width: 90 }}>Responsable</th>
+                            <th style={{ ...styles.th, width: 110 }}>Validador</th>
+                            <th style={{ ...styles.th, width: 90 }}>Subtotal</th>
+                            <th style={{ ...styles.th, width: 90 }}>IGV</th>
+                            <th style={{ ...styles.th, width: 100 }}>Total</th>
+                            <th style={{ ...styles.th, width: 80 }}>Fecha</th>
+                            <th style={{ ...styles.th, width: 60 }}>Cliente</th>
+                            <th style={{ ...styles.th, width: 90 }}>Proyecto</th>
+                            <th style={{ ...styles.th, width: 60 }}>Site ID</th>
+                            <th style={{ ...styles.th, width: 60 }}>CorSite</th>
+                            <th style={{ ...styles.th, width: 90 }}>Site</th>
+                            <th style={{ ...styles.th, width: 90 }}>Tipo trabajo</th>
+                            <th style={{ ...styles.th, width: 90 }}>Tarea</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {historialOcRows.length === 0 ? (
+                            <tr>
+                              <td colSpan={17} style={styles.emptyCell}>
+                                No hay registros para la OC seleccionada.
+                              </td>
+                            </tr>
+                          ) : (
+                            historialOcRows.map((row) => (
+                              <tr key={`hist-oc-${row.id}`}>
+                                <td style={styles.td}>{row.correlativo}</td>
+                                <td style={styles.td}>{row.ot || '-'}</td>
+                                <td style={styles.td}>{row.idOc || row.documento || '-'}</td>
+                                <td style={styles.td}>{row.fila || '-'}</td>
+                                <td style={styles.td}>{row.responsable}</td>
+                                <td style={styles.td}>{row.validador || '-'}</td>
+                                <td style={{ ...styles.td, fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
+                                <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
+                                <td style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
+                                <td style={styles.td}>{formatDate(row.fecha)}</td>
+                                <td style={styles.td}>{row.cliente}</td>
+                                <td style={styles.td}>{row.proyecto}</td>
+                                <td style={styles.td}>{row.siteId}</td>
+                                <td style={styles.td}>{row.corSite || '-'}</td>
+                                <td style={styles.td}>{row.site}</td>
+                                <td style={styles.td}>{row.tipoTrabajo}</td>
+                                <td style={styles.td}>{row.tarea}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : null}
               </>
             ) : (
               <div style={styles.emptyDetail}>
                 <ReceiptText size={32} strokeWidth={1.8} />
-                <strong>No hay resumen disponible</strong>
-                <span>Selecciona una orden para ver su información financiera.</span>
+                <strong>No hay detalle disponible</strong>
+                <span>Selecciona una orden para ver sus pestañas de información.</span>
               </div>
             )}
           </aside>
         </section>
+        {detailTab === "historial" && isHistorialPopupOpen ? (
+          <div
+            style={styles.popupOverlay}
+            onClick={() => setIsHistorialPopupOpen(false)}
+            role="presentation"
+          >
+            <div
+              style={styles.popupCard}
+              onClick={(event) => event.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Historial de OT"
+            >
+              <div style={styles.popupHeader}>
+                <div>
+                  <div style={{ ...styles.sectionKicker, color: currentTheme.accent }}>Historial de OT</div>
+                  <h3 style={styles.popupTitle}>Orden de Pago N° {filaActiva?.correlativo || "-"}</h3>
+                  <p style={styles.popupSubtitle}>
+                    {historialOtSeleccionada
+                      ? (
+                        <>
+                          Se muestran los mismos registros del grid principal filtrados por la OT seleccionada:{" "}
+                          <strong>{historialOtSeleccionada}</strong>
+                        </>
+                      )
+                      : "No hay una OT válida seleccionada para mostrar historial."}
+                  </p>
+                </div>
+                <div style={styles.popupHeaderActions}>
+                  <button
+                    type="button"
+                    onClick={handleExportHistorial}
+                    style={{ ...styles.slimActionButton, borderColor: currentTheme.border, color: currentTheme.accent }}
+                  >
+                    <Download size={16} />
+                    Exportar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsHistorialPopupOpen(false)}
+                    style={{ ...styles.slimActionButton, borderColor: currentTheme.border, color: "#EF4444" }}
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              </div>
+              <div style={styles.popupBody}>
+                <div style={styles.gridScrollable}>
+                  <table style={{ ...styles.table, minWidth: 1450, width: "max-content" }}>
+                    <thead>
+                      <tr>
+                        <th style={{ ...styles.th, width: 94 }}>Correlativo</th>
+                        <th style={{ ...styles.th, width: 88 }}>OT</th>
+                        <th style={{ ...styles.th, width: 88 }}>OC</th>
+                        <th style={{ ...styles.th, width: 72 }}>Fila</th>
+                        <th style={{ ...styles.th, width: 90 }}>Responsable</th>
+                        <th style={{ ...styles.th, width: 110 }}>Validador</th>
+                        <th style={{ ...styles.th, width: 90 }}>Subtotal</th>
+                        <th style={{ ...styles.th, width: 90 }}>IGV</th>
+                        <th style={{ ...styles.th, width: 100 }}>Total</th>
+                        <th style={{ ...styles.th, width: 80 }}>Fecha</th>
+                        <th style={{ ...styles.th, width: 60 }}>Cliente</th>
+                        <th style={{ ...styles.th, width: 90 }}>Proyecto</th>
+                        <th style={{ ...styles.th, width: 60 }}>Site ID</th>
+                        <th style={{ ...styles.th, width: 60 }}>CorSite</th>
+                        <th style={{ ...styles.th, width: 90 }}>Site</th>
+                        <th style={{ ...styles.th, width: 90 }}>Tipo trabajo</th>
+                        <th style={{ ...styles.th, width: 90 }}>Tarea</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {historialRows.length === 0 ? (
+                        <tr>
+                          <td colSpan={17} style={styles.emptyCell}>
+                            No hay registros para la OT seleccionada.
+                          </td>
+                        </tr>
+                      ) : (
+                        historialRows.map((row) => (
+                          <tr key={`popup-hist-${row.id}`}>
+                            <td style={styles.td}>{row.correlativo}</td>
+                            <td style={styles.td}>{row.ot || '-'}</td>
+                            <td style={styles.td}>{row.idOc || row.documento || '-'}</td>
+                            <td style={styles.td}>{row.fila || '-'}</td>
+                            <td style={styles.td}>{row.responsable}</td>
+                            <td style={styles.td}>{row.validador || '-'}</td>
+                            <td style={{ ...styles.td, fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
+                            <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
+                            <td style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
+                            <td style={styles.td}>{formatDate(row.fecha)}</td>
+                            <td style={styles.td}>{row.cliente}</td>
+                            <td style={styles.td}>{row.proyecto}</td>
+                            <td style={styles.td}>{row.siteId}</td>
+                            <td style={styles.td}>{row.corSite || '-'}</td>
+                            <td style={styles.td}>{row.site}</td>
+                            <td style={styles.td}>{row.tipoTrabajo}</td>
+                            <td style={styles.td}>{row.tarea}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {detailTab === "historial-oc" && isHistorialOcPopupOpen ? (
+          <div
+            style={styles.popupOverlay}
+            onClick={() => setIsHistorialOcPopupOpen(false)}
+            role="presentation"
+          >
+            <div
+              style={styles.popupCard}
+              onClick={(event) => event.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Historial de OC"
+            >
+              <div style={styles.popupHeader}>
+                <div>
+                  <div style={{ ...styles.sectionKicker, color: currentTheme.accent }}>Historial OC</div>
+                  <h3 style={styles.popupTitle}>Orden de Pago N° {filaActiva?.correlativo || "-"}</h3>
+                  <p style={styles.popupSubtitle}>
+                    Se muestran los mismos registros del grid principal filtrados por la OC seleccionada:{" "}
+                    <strong>{historialOcSeleccionada || "-"}</strong>
+                  </p>
+                </div>
+                <div style={styles.popupHeaderActions}>
+                  <button
+                    type="button"
+                    onClick={handleExportHistorialOc}
+                    style={{ ...styles.slimActionButton, borderColor: currentTheme.border, color: currentTheme.accent }}
+                  >
+                    <Download size={16} />
+                    Exportar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsHistorialOcPopupOpen(false)}
+                    style={{ ...styles.slimActionButton, borderColor: currentTheme.border, color: "#EF4444" }}
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              </div>
+              <div style={styles.popupBody}>
+                <div style={styles.gridScrollable}>
+                  <table style={{ ...styles.table, minWidth: 1450, width: "max-content" }}>
+                    <thead>
+                      <tr>
+                        <th style={{ ...styles.th, width: 94 }}>Correlativo</th>
+                        <th style={{ ...styles.th, width: 88 }}>OT</th>
+                        <th style={{ ...styles.th, width: 88 }}>OC</th>
+                        <th style={{ ...styles.th, width: 72 }}>Fila</th>
+                        <th style={{ ...styles.th, width: 90 }}>Responsable</th>
+                        <th style={{ ...styles.th, width: 110 }}>Validador</th>
+                        <th style={{ ...styles.th, width: 90 }}>Subtotal</th>
+                        <th style={{ ...styles.th, width: 90 }}>IGV</th>
+                        <th style={{ ...styles.th, width: 100 }}>Total</th>
+                        <th style={{ ...styles.th, width: 80 }}>Fecha</th>
+                        <th style={{ ...styles.th, width: 60 }}>Cliente</th>
+                        <th style={{ ...styles.th, width: 90 }}>Proyecto</th>
+                        <th style={{ ...styles.th, width: 60 }}>Site ID</th>
+                        <th style={{ ...styles.th, width: 60 }}>CorSite</th>
+                        <th style={{ ...styles.th, width: 90 }}>Site</th>
+                        <th style={{ ...styles.th, width: 90 }}>Tipo trabajo</th>
+                        <th style={{ ...styles.th, width: 90 }}>Tarea</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {historialOcRows.length === 0 ? (
+                        <tr>
+                          <td colSpan={17} style={styles.emptyCell}>
+                            No hay registros para la OC seleccionada.
+                          </td>
+                        </tr>
+                      ) : (
+                        historialOcRows.map((row) => (
+                          <tr key={`popup-hist-oc-${row.id}`}>
+                            <td style={styles.td}>{row.correlativo}</td>
+                            <td style={styles.td}>{row.ot || '-'}</td>
+                            <td style={styles.td}>{row.idOc || row.documento || '-'}</td>
+                            <td style={styles.td}>{row.fila || '-'}</td>
+                            <td style={styles.td}>{row.responsable}</td>
+                            <td style={styles.td}>{row.validador || '-'}</td>
+                            <td style={{ ...styles.td, fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
+                            <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
+                            <td style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
+                            <td style={styles.td}>{formatDate(row.fecha)}</td>
+                            <td style={styles.td}>{row.cliente}</td>
+                            <td style={styles.td}>{row.proyecto}</td>
+                            <td style={styles.td}>{row.siteId}</td>
+                            <td style={styles.td}>{row.corSite || '-'}</td>
+                            <td style={styles.td}>{row.site}</td>
+                            <td style={styles.td}>{row.tipoTrabajo}</td>
+                            <td style={styles.td}>{row.tarea}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </AppPage>
   );
@@ -1828,8 +3185,10 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     gap: 10,
-    height: "100%",
+    flex: 1,
     minHeight: 0,
+    height: "100%",
+    overflow: "hidden",
   },
   hero: {
     border: "1px solid #E2E8F0",
@@ -1839,8 +3198,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   heroTopRow: {
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 1fr)",
-    gap: 6,
+    gridTemplateColumns: "minmax(0, 1.45fr) minmax(0, 0.95fr)",
+    gap: 10,
     alignItems: "start",
   },
   heroTitleBlock: {
@@ -1894,12 +3253,72 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     gap: 10,
-    width: "100%",
-    maxWidth: 460,
+    width: "auto",
+    maxWidth: 360,
+    minWidth: 0,
+    flex: "1 1 360px",
     border: "1px solid",
     borderRadius: 12,
     padding: "5px 10px",
     boxShadow: "0 1px 4px rgba(15, 23, 42, 0.05)",
+  },
+  quickFiltersRow: {
+    marginTop: 4,
+    display: "flex",
+    alignItems: "flex-end",
+    gap: 8,
+    flexWrap: "nowrap",
+    width: "100%",
+    minWidth: 0,
+  },
+  quickDateFilters: {
+    display: "flex",
+    alignItems: "flex-end",
+    gap: 8,
+    flexWrap: "nowrap",
+    justifyContent: "flex-start",
+    minWidth: 0,
+    flex: "0 0 auto",
+  },
+  quickDateField: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    minWidth: 120,
+  },
+  quickDateLabel: {
+    fontSize: 11,
+    fontWeight: 800,
+    color: "#64748B",
+    textTransform: "uppercase",
+    letterSpacing: "0.02em",
+  },
+  quickDateInput: {
+    height: 34,
+    border: "1px solid",
+    borderRadius: 10,
+    padding: "0 10px",
+    fontSize: 12,
+    color: "#0F172A",
+    background: "#FFFFFF",
+    outline: "none",
+    boxShadow: "0 1px 4px rgba(15, 23, 42, 0.05)",
+  },
+  applyFiltersButton: {
+    height: 34,
+    border: "1px solid",
+    borderRadius: 10,
+    padding: "0 9px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    cursor: "pointer",
+    fontSize: 12,
+    fontWeight: 800,
+    whiteSpace: "nowrap",
+    boxShadow: "0 1px 4px rgba(15, 23, 42, 0.08)",
+    flexShrink: 0,
   },
   quickSearchInput: {
     border: "none",
@@ -1977,7 +3396,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "start",
   },
   actionsBar: {
-    marginTop: 2,
+    marginTop: 0,
   },
   filtersCard: {
     background: "#FFFFFF",
@@ -2080,17 +3499,17 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#FFFFFF",
     border: "1px solid #E2E8F0",
     borderRadius: 18,
-    padding: 16,
+    padding: "8px 12px",
     boxShadow: "0 1px 6px rgba(15, 23, 42, 0.05)",
   },
   actionsRow: {
     display: "flex",
     gap: 10,
-    marginTop: 12,
+    marginTop: 0,
     alignItems: "center",
     flexWrap: "nowrap",
     overflowX: "auto",
-    paddingBottom: 2,
+    paddingBottom: 0,
   },
   actionButton: {
     height: 42,
@@ -2118,6 +3537,22 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#334155",
     fontWeight: 800,
   },
+  compactActionButton: {
+    height: 28,
+    borderRadius: 9,
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    padding: "0 8px",
+    cursor: "pointer",
+    color: "#334155",
+    fontWeight: 800,
+    fontSize: 11,
+    lineHeight: 1,
+  },
   notice: {
     marginTop: 12,
     border: "1px solid #E2E8F0",
@@ -2130,15 +3565,16 @@ const styles: Record<string, React.CSSProperties> = {
   },
   mainGrid: {
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) 260px 260px",
+    gridTemplateColumns: "minmax(0, 1fr) 580px",
     gap: 0,
     minHeight: 0,
     flex: 1,
+    alignItems: "start",
   },
   leftColumn: {
     display: "flex",
     flexDirection: "column",
-    gap: 2,
+    gap: 0,
     minWidth: 0,
   },
   gridCard: {
@@ -2192,7 +3628,13 @@ const styles: Record<string, React.CSSProperties> = {
   gridScrollable: {
     flex: 1,
     minHeight: 0,
-    overflow: "auto",
+    maxWidth: "100%",
+    maxHeight: "100%",
+    overflowX: "scroll",
+    overflowY: "scroll",
+    overscrollBehavior: "contain",
+    WebkitOverflowScrolling: "touch",
+    scrollbarGutter: "stable both-edges",
   },
   table: {
     width: "100%",
@@ -2203,7 +3645,7 @@ const styles: Record<string, React.CSSProperties> = {
   th: {
     position: "sticky",
     top: 0,
-    zIndex: 2,
+    zIndex: 4,
     background: "#F8FAFC",
     borderBottom: "1px solid #E2E8F0",
     padding: "1px 8px",
@@ -2378,6 +3820,10 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     gap: 12,
+    minHeight: 0,
+    height: "auto",
+    alignSelf: "start",
+    overflow: "hidden",
   },
   ocDataHeader: {
     display: "flex",
@@ -2431,6 +3877,13 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: 0.35,
     marginBottom: 8,
   },
+  ocConsumptionTitle: {
+    fontSize: 14,
+    fontWeight: 900,
+    color: "#0F172A",
+    lineHeight: 1.2,
+    marginBottom: 4,
+  },
   ocMetricValue: {
     fontSize: 20,
     fontWeight: 900,
@@ -2444,6 +3897,12 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     gap: 10,
+  },
+  ocProgressPair: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    gap: 3,
+    marginTop: 2,
   },
   ocProgressTopRow: {
     display: "flex",
@@ -2474,13 +3933,33 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 999,
     background: "#2563EB",
   },
+  ocProgressSegments: {
+    display: "flex",
+    height: "100%",
+    width: "100%",
+    overflow: "hidden",
+    borderRadius: 999,
+    background: "#E5E7EB",
+  },
+  ocProgressSegment: {
+    height: "100%",
+    flexShrink: 0,
+  },
   ocProgressFooter: {
     display: "flex",
-    justifyContent: "space-between",
-    gap: 10,
+    flexDirection: "column",
+    gap: 4,
     fontSize: 12,
     fontWeight: 800,
     color: "#334155",
+  },
+  ocProgressFooterLine: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    width: "100%",
+    textAlign: "right",
   },
   ocAvailabilityCard: {
     border: "1px solid #BBF7D0",
@@ -2515,6 +3994,24 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1.1,
     color: "#0F172A",
     fontWeight: 900,
+  },
+  detailHeaderTools: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    flexShrink: 0,
+  },
+  detailExpandButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    border: "1px solid",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    padding: 0,
+    flexShrink: 0,
   },
   detailStatus: {
     display: "inline-flex",
@@ -2616,6 +4113,22 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1.5,
     color: "#475569",
   },
+  historyHeaderActions: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+  },
+  historyPanel: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    minHeight: 0,
+    flex: 1,
+    maxHeight: "none",
+    overflow: "hidden",
+  },
   historyBlock: {
     display: "flex",
     flexDirection: "column",
@@ -2678,7 +4191,67 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#FAFAFB",
     padding: 24,
   },
+  popupOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(15, 23, 42, 0.42)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16,
+    zIndex: 70,
+  },
+  popupCard: {
+    width: "min(1360px, calc(100vw - 32px))",
+    maxHeight: "min(86vh, 920px)",
+    background: "#FFFFFF",
+    borderRadius: 18,
+    border: "1px solid #DBEAFE",
+    boxShadow: "0 30px 80px rgba(15, 23, 42, 0.28)",
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+  },
+  popupHeader: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 16,
+    padding: "18px 18px 12px",
+    borderBottom: "1px solid #E2E8F0",
+    background: "linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%)",
+  },
+  popupHeaderActions: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    flexShrink: 0,
+  },
+  popupTitle: {
+    margin: "4px 0 0",
+    fontSize: 22,
+    lineHeight: 1.15,
+    color: "#0F172A",
+    fontWeight: 900,
+  },
+  popupSubtitle: {
+    margin: "6px 0 0",
+    fontSize: 13,
+    lineHeight: 1.45,
+    color: "#475569",
+  },
+  popupBody: {
+    flex: 1,
+    minHeight: 0,
+    display: "flex",
+    flexDirection: "column",
+    padding: 18,
+    overflow: "hidden",
+    background: "#FFFFFF",
+  },
 };
+
+
 
 
 
