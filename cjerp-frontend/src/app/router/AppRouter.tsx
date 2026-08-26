@@ -12,7 +12,7 @@ const SeguridadUsuariosPage = lazy(() => import("../../features/seguridad/pages/
 const SeguridadPerfilesPage = lazy(() => import("../../features/seguridad/pages/perfiles"));
 const SeguridadRolesPage = lazy(() => import("../../features/seguridad/pages/roles"));
 const SeguridadMenuPage = lazy(() => import("../../features/seguridad/pages/menu"));
-const SeguridadPermisosPage = lazy(() => import("../../features/seguridad/pages/permisos"));
+const SeguridadPermisosPage = lazy(() => import("../../features/seguridad/pages/menu/permisos"));
 const PerfilRolMenuPage = lazy(() => import("../../features/seguridad/pages/perfil-rol-menu"));
 const UsuarioPerfilRolMenu = lazy(() => import("../../features/seguridad/pages/usuario-perfil-rol-menu"));
 const AsistenciaPage = lazy(() => import("../../features/administracion/AsistenciaPage"));
@@ -308,6 +308,7 @@ export default function AppRouter() {
             <Route path="/seguridad/usuarios" element={<SeguridadUsuariosPage />} />
             <Route path="/seguridad/perfiles" element={<SeguridadPerfilesPage />} />
             <Route path="/seguridad/roles" element={<SeguridadRolesPage />} />
+            <Route path="/seguridad/menu/permisos" element={<SeguridadPermisosPage />} />
             <Route path="/seguridad/permisos" element={<SeguridadPermisosPage />} />
             <Route path="/seguridad/menu" element={<SeguridadMenuPage />} />
             <Route path="/seguridad/perfil-rol-menu" element={<PerfilRolMenuPage />} />

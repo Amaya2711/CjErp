@@ -400,6 +400,7 @@ namespace CjERP.Api.Controllers
                     codEmpleado,
                     usuario,
                     request?.IdRegularizar ?? 0,
+                    request?.Observacion,
                     cancellationToken);
 
                 var resumen = resultado.Resumen ?? new AprobacionResumenDto();

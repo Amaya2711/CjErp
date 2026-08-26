@@ -374,6 +374,7 @@ namespace CjERP.Infrastructure.Services
             int codEmpleado,
             string usuario,
             int idRegularizar,
+            string? observacion,
             CancellationToken cancellationToken = default)
         {
             if (registros is null || registros.Count == 0)
@@ -426,7 +427,7 @@ namespace CjERP.Infrastructure.Services
                 parameters.Add("@CodEmpleado", codEmpleado, DbType.Int32);
                 parameters.Add("@Usuario", usuarioLimpio, DbType.String);
                 parameters.Add("@NombreDispositivo", "WEB", DbType.String);
-                parameters.Add("@Observacion", null, DbType.String);
+                parameters.Add("@Observacion", string.IsNullOrWhiteSpace(observacion) ? null : observacion.Trim(), DbType.String);
                 parameters.Add("@IdRegularizar", idRegularizar > 0 ? 1 : 0, DbType.Int32);
 
                 _logger.LogInformation(

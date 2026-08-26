@@ -72,7 +72,7 @@ export const menuDashboard: DashboardGroup[] = [
       { label: "Perfiles", path: "/seguridad/perfiles" },
       { label: "Roles", path: "/seguridad/roles" },
       { label: "Menú", path: "/seguridad/menu" },
-      { label: "Permisos", path: "/seguridad/permisos" },
+      { label: "Permisos", path: "/seguridad/menu/permisos" },
     ],
   },
   {

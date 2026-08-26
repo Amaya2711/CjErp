@@ -217,6 +217,7 @@ builder.Services.AddScoped<ISegRolService, SegRolService>();
 builder.Services.AddScoped<ISegMenuService, SegMenuService>();
 builder.Services.AddScoped<ISegUsuarioService, SegUsuarioService>();
 builder.Services.AddScoped<ISegRolMenuPermisoService, SegRolMenuPermisoService>();
+builder.Services.AddScoped<ISegPermisoAccionService, SegPermisoAccionService>();
 builder.Services.AddScoped<ILookupService, LookupService>();
 builder.Services.AddHostedService<SqlMonitorWorker>();
 builder.Services.AddScoped<IEmpleadoCtaService, EmpleadoCtaService>();

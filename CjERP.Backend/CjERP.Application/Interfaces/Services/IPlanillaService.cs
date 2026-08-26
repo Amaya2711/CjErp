@@ -25,6 +25,7 @@ namespace CjERP.Application.Interfaces.Services
             int codEmpleado,
             string usuario,
             int idRegularizar,
+            string? observacion,
             CancellationToken cancellationToken = default);
     }
 }

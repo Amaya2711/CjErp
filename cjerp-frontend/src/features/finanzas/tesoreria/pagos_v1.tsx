@@ -93,8 +93,22 @@ type RechazoModalState = {
   error: string | null;
 };
 
+type ObservacionModalState = {
+  rows: PagoRow[];
+  observacion: string;
+  submitting: boolean;
+  error: string | null;
+};
+
 type RegularizarConfirmState = {
   rowsCount: number;
+};
+
+type AprobarConfirmState = {
+  rowsCount: number;
+  codEstado: number;
+  titulo: string;
+  mensaje: string;
 };
 
 type FilterState = {
@@ -1241,6 +1255,8 @@ export default function PagosV1Page() {
   const [isHistorialOcPopupOpen, setIsHistorialOcPopupOpen] = useState(false);
   const [message, setMessage] = useState<string>("");
   const [rechazoModal, setRechazoModal] = useState<RechazoModalState | null>(null);
+  const [observacionModal, setObservacionModal] = useState<ObservacionModalState | null>(null);
+  const [aprobarConfirm, setAprobarConfirm] = useState<AprobarConfirmState | null>(null);
   const [regularizarConfirm, setRegularizarConfirm] = useState<RegularizarConfirmState | null>(null);
   const [resumenOtDetalle, setResumenOtDetalle] = useState<ResumenOtDetalle | null>(null);
   const [historialRows, setHistorialRows] = useState<PagoRow[]>([]);
@@ -1866,16 +1882,16 @@ export default function PagosV1Page() {
         };
       case "hormiga":
         return {
-          primary: { label: "Hormiga", icon: <HandCoins size={18} />, color: "#B45309", soft: "#FFFBEB", border: "#FCD34D" },
-          secondary: { label: "Re-aprobar", icon: <RotateCcw size={18} />, color: "#7C3AED", soft: "#F5F3FF", border: "#C4B5FD" },
+          primary: { label: "Aprobar", icon: <CheckCircle2 size={18} />, color: "#1D4ED8", soft: "#EFF6FF", border: "#93C5FD" },
+          secondary: { label: "Rechazar", icon: <XCircle size={18} />, color: "#DC2626", soft: "#FEF2F2", border: "#FCA5A5" },
           tertiary: { label: "Observar", icon: <AlertTriangle size={18} />, color: "#DC2626", soft: "#FEF2F2", border: "#FCA5A5" },
           quaternary: { label: "Ver PDF", icon: <Printer size={18} />, color: "#334155", soft: "#FFFFFF", border: "#CBD5E1" },
         };
       case "observadas":
         return {
-          primary: { label: "Regularizar", icon: <ShieldCheck size={18} />, color: "#0F766E", soft: "#F0FDFA", border: "#5EEAD4" },
-          secondary: { label: "Ver observaciÃ³n", icon: <Eye size={18} />, color: "#F59E0B", soft: "#FFFBEB", border: "#FCD34D" },
-          tertiary: { label: "Aprobar", icon: <CheckCircle2 size={18} />, color: "#2563EB", soft: "#EFF6FF", border: "#93C5FD" },
+          primary: { label: "Aprobar", icon: <CheckCircle2 size={18} />, color: "#2563EB", soft: "#EFF6FF", border: "#93C5FD" },
+          secondary: { label: "Rechazar", icon: <XCircle size={18} />, color: "#DC2626", soft: "#FEF2F2", border: "#FCA5A5" },
+          tertiary: { label: "Ver PDF", icon: <Printer size={18} />, color: "#334155", soft: "#FFFFFF", border: "#CBD5E1" },
           quaternary: { label: "Ver PDF", icon: <Printer size={18} />, color: "#334155", soft: "#FFFFFF", border: "#CBD5E1" },
         };
       case "resumen":
@@ -1914,12 +1930,21 @@ export default function PagosV1Page() {
       setDetailTab("orden");
       return;
     }
-    if (label === "Ver observaciÃ³n" || label === "Observar") {
+    if (label === "Ver observaciÃ³n") {
       setDetailTab("historial");
       return;
     }
+    if (label === "Observar") {
+      openObservacionModal(selectedRows);
+      return;
+    }
     if (label === "Aprobar") {
-      void handleAprobarSeleccionados(0);
+      setAprobarConfirm({
+        rowsCount: selectedRows.length,
+        codEstado: activeTab === "hormiga" ? 1 : 10,
+        titulo: "Aprobar",
+        mensaje: `¿Desea aprobar ${selectedRows.length} registro(s) seleccionado(s)?`,
+      });
       return;
     }
     if (label === "Regularizar") {
@@ -1927,7 +1952,12 @@ export default function PagosV1Page() {
       return;
     }
     if (label === "Re-aprobar") {
-      setActiveTab("reaprobar");
+      setAprobarConfirm({
+        rowsCount: selectedRows.length,
+        codEstado: 6,
+        titulo: "Re-aprobar",
+        mensaje: `¿Desea re-aprobar ${selectedRows.length} registro(s) seleccionado(s)?`,
+      });
       return;
     }
     if (label === "Hormiga") {
@@ -1939,15 +1969,28 @@ export default function PagosV1Page() {
       return;
     }
     if (label === "Rechazar") {
-      setRechazoModal({
-        rows: selectedRows,
-        observacion: "",
-        submitting: false,
-        error: null,
-      });
+      openRechazoModal(selectedRows);
       return;
     }
     setMessage(`${label} ejecutado en modo demo.`);
+  };
+
+  const openRechazoModal = (rows: PagoRow[]) => {
+    setRechazoModal({
+      rows,
+      observacion: "",
+      submitting: false,
+      error: null,
+    });
+  };
+
+  const openObservacionModal = (rows: PagoRow[]) => {
+    setObservacionModal({
+      rows,
+      observacion: "",
+      submitting: false,
+      error: null,
+    });
   };
 
   const handleApplyFilters = () => {
@@ -1967,8 +2010,12 @@ export default function PagosV1Page() {
     setHistorialOcRows([]);
   };
 
-  const handleAprobarSeleccionados = async (idRegularizar: number = 0, omitirConfirmacion: boolean = false) => {
-    if (activeTab !== "aprobar") {
+  const handleAprobarSeleccionados = async (
+    idRegularizar: number = 0,
+    omitirConfirmacion: boolean = false,
+    codEstado: number = 10
+  ) => {
+    if (activeTab !== "aprobar" && activeTab !== "reaprobar" && activeTab !== "hormiga" && activeTab !== "observadas") {
       return;
     }
 
@@ -1991,7 +2038,7 @@ export default function PagosV1Page() {
     try {
       const response = await aprobarPlanillaMasiva(
         {
-          codEstado: 10,
+          codEstado,
           observacion: null,
           idRegularizar: Math.trunc(idRegularizar),
           registros: selectedRows.map((row) => ({
@@ -2088,6 +2135,85 @@ export default function PagosV1Page() {
 
   const handleCancelarRechazo = () => {
     setRechazoModal(null);
+  };
+
+  const handleObservarSeleccionados = async () => {
+    if (!observacionModal) {
+      return;
+    }
+
+    const observacion = observacionModal.observacion.trim();
+    if (!observacion) {
+      setObservacionModal((prev) =>
+        prev ? { ...prev, error: "Debe ingresar una observación para observar." } : prev
+      );
+      return;
+    }
+
+    if (observacionModal.rows.length === 0) {
+      setObservacionModal((prev) =>
+        prev ? { ...prev, error: "Seleccione al menos un registro para observar." } : prev
+      );
+      return;
+    }
+
+    try {
+      setObservacionModal((prev) => (prev ? { ...prev, submitting: true, error: null } : prev));
+
+      await aprobarPlanillaMasiva(
+        {
+          codEstado: 2,
+          observacion,
+          idRegularizar: 0,
+          registros: observacionModal.rows.map((row) => ({
+            correlativo: Math.trunc(Number(row.correlativo)),
+            idSite: row.siteId,
+            tipoMoneda: Math.trunc(Number(row.tipoMoneda ?? 0)),
+          })),
+        },
+        { timeoutMs: 120000 }
+      );
+
+      const total = observacionModal.rows.length;
+      resetDetailStateAfterMutation();
+      setCheckedIds([]);
+      setSelectedId(0);
+      setObservacionModal(null);
+      setMessage(
+        total === 1
+          ? "1 registro observado correctamente."
+          : `${total} registros observados correctamente.`
+      );
+      setRefreshTick((current) => current + 1);
+    } catch (error) {
+      setObservacionModal((prev) =>
+        prev
+          ? {
+              ...prev,
+              submitting: false,
+              error: getHttpErrorMessage(error, "No se pudo observar el registro."),
+            }
+          : prev
+      );
+    }
+  };
+
+  const handleCancelarObservacion = () => {
+    setObservacionModal(null);
+  };
+
+  const handleConfirmarAprobacion = async () => {
+    if (!aprobarConfirm) {
+      return;
+    }
+
+    const { codEstado } = aprobarConfirm;
+    setAprobarConfirm(null);
+    await handleAprobarSeleccionados(0, true, codEstado);
+  };
+
+  const handleCancelarAprobacion = () => {
+    setAprobarConfirm(null);
   };
 
   const handleConfirmarRegularizacion = async () => {
@@ -3209,6 +3335,116 @@ export default function PagosV1Page() {
                   disabled={rechazoModal.submitting}
                 >
                   {rechazoModal.submitting ? "Procesando..." : "Cancelar"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {observacionModal ? (
+          <div
+            style={styles.rejectModalOverlay}
+            onClick={() => {
+              if (!observacionModal.submitting) {
+                handleCancelarObservacion();
+              }
+            }}
+            role="presentation"
+          >
+            <div
+              style={styles.rejectModalCard}
+              onClick={(event) => event.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Observar registros"
+            >
+              <div style={styles.popupHeader}>
+                <div>
+                  <div style={{ ...styles.sectionKicker, color: "#F59E0B" }}>Observar registros</div>
+                  <h3 style={styles.popupTitle}>
+                    {observacionModal.rows.length} registro(s) seleccionado(s)
+                  </h3>
+                  <p style={styles.popupSubtitle}>
+                    Ingrese una observación obligatoria para continuar con la observación.
+                  </p>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <textarea
+                  value={observacionModal.observacion}
+                  onChange={(event) =>
+                    setObservacionModal((prev) =>
+                      prev
+                        ? { ...prev, observacion: event.target.value, error: null }
+                        : prev
+                    )
+                  }
+                  rows={4}
+                  placeholder="Escriba la observación"
+                  style={styles.rejectModalTextarea}
+                  disabled={observacionModal.submitting}
+                />
+                {observacionModal.error ? <div style={styles.errorBanner}>{observacionModal.error}</div> : null}
+              </div>
+
+              <div style={styles.rejectModalActions}>
+                <button
+                  type="button"
+                  style={{ ...styles.slimActionButton, borderColor: "#FCD34D", color: "#B45309" }}
+                  onClick={() => void handleObservarSeleccionados()}
+                  disabled={observacionModal.submitting}
+                >
+                  Observar
+                </button>
+                <button
+                  type="button"
+                  style={{ ...styles.slimActionButton, borderColor: "#93C5FD", color: "#1D4ED8" }}
+                  onClick={handleCancelarObservacion}
+                  disabled={observacionModal.submitting}
+                >
+                  {observacionModal.submitting ? "Procesando..." : "Cancelar"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {aprobarConfirm ? (
+          <div
+            style={styles.rejectModalOverlay}
+            onClick={() => {
+              handleCancelarAprobacion();
+            }}
+            role="presentation"
+          >
+            <div
+              style={styles.rejectModalCard}
+              onClick={(event) => event.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label={aprobarConfirm.titulo}
+            >
+              <div style={styles.popupHeader}>
+                <div>
+                  <div style={{ ...styles.sectionKicker, color: "#1D4ED8" }}>{aprobarConfirm.titulo}</div>
+                  <h3 style={styles.popupTitle}>Confirmación requerida</h3>
+                  <p style={styles.popupSubtitle}>{aprobarConfirm.mensaje}</p>
+                </div>
+              </div>
+
+              <div style={styles.rejectModalActions}>
+                <button
+                  type="button"
+                  style={{ ...styles.slimActionButton, borderColor: "#93C5FD", color: "#1D4ED8" }}
+                  onClick={() => void handleConfirmarAprobacion()}
+                >
+                  Sí
+                </button>
+                <button
+                  type="button"
+                  style={{ ...styles.slimActionButton, borderColor: "#CBD5E1", color: "#334155" }}
+                  onClick={handleCancelarAprobacion}
+                >
+                  No
                 </button>
               </div>
             </div>
