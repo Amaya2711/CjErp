@@ -107,6 +107,7 @@ type ConciliacionExecutiveChartDatum = {
 };
 type ConciliacionPlanillaTab = "revision" | "ejecutivo" | "detalle" | "gastos";
 type ConciliacionRevisionFilters = {
+  cuentaContable: string;
   areaFlujo: string;
   referencia: string;
   empresa: string;
@@ -243,6 +244,7 @@ const EXECUTIVE_PIE_COLORS = [
 ];
 const EMPTY_CONCILIACION_FILTER_VALUE = "__EMPTY__";
 const DEFAULT_CONCILIACION_REVISION_FILTERS: ConciliacionRevisionFilters = {
+  cuentaContable: "",
   areaFlujo: "",
   referencia: "",
   empresa: "",
@@ -618,6 +620,29 @@ function getReglaContableLabel(rule: ConciliacionReglaContableOption): string {
   return chunks.join(" | ");
 }
 
+function getCuentaContableLabel(
+  row: ConciliacionBcpConciliarPlanillaRegistro,
+  cuentasContables?: ConciliacionCuentaContableOption[]
+): string {
+  const cuentaContableResuelta = cuentasContables?.find((item) => item.idCuentaContable === row.idCuentaContable);
+  const codigoCuenta = cuentaContableResuelta?.codigoCuenta?.trim() || row.codigoCuenta?.trim() || "";
+  const nombreCuenta = cuentaContableResuelta?.nombreCuenta?.trim() || row.nombreCuenta?.trim() || "";
+  const cuentaContableTexto =
+    cuentaContableResuelta?.cuentaContableTexto?.trim() ||
+    row.cuentaContableTexto?.trim() ||
+    [codigoCuenta, nombreCuenta].filter(Boolean).join(" - ").trim();
+
+  if (cuentaContableTexto) {
+    return cuentaContableTexto;
+  }
+
+  if (row.idCuentaContable != null) {
+    return String(row.idCuentaContable);
+  }
+
+  return row.esConciliado ? "" : "PENDIENTE";
+}
+
 function getConciliacionDisplayValue(row: ConciliacionBcpConciliarPlanillaRegistro, key: ConciliacionSortKey): string {
   switch (key) {
     case "fecha":
@@ -676,7 +701,7 @@ function getConciliacionDisplayValue(row: ConciliacionBcpConciliarPlanillaRegist
     case "referencia":
       return getReferenciaLabel(row) || (row.esConciliado ? "" : "PENDIENTE");
     case "cuentaContable":
-      return row.cuentaContableTexto || (row.esConciliado ? "" : "PENDIENTE");
+      return getCuentaContableLabel(row);
     case "conciliado":
       return getConciliadoLabel(row);
     case "estadoConciliacionTexto":
@@ -1430,24 +1455,27 @@ function getRevisionPeriodoLabel(value?: string | null): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function getRevisionResumenLabel(row: ConciliacionBcpConciliarPlanillaRegistro): string {
-  const areaFlujo = row.nombreAreaFlujo?.trim() ?? "";
+function getRevisionResumenLabel(
+  row: ConciliacionBcpConciliarPlanillaRegistro,
+  cuentasContables?: ConciliacionCuentaContableOption[]
+): string {
+  const cuentaContable = getCuentaContableLabel(row, cuentasContables);
 
-  if (!areaFlujo) {
-    return "(sin area flujo)";
+  if (!cuentaContable) {
+    return "(sin cuenta contable)";
   }
 
-  return areaFlujo;
+  return cuentaContable;
 }
 
 function getRevisionResumenSortOrder(label: string): number {
   const normalized = normalizeText(label);
 
-  if (normalized === "SINAREAFLUJO" || normalized === "SINAREA" || normalized === "SINFLUJO") {
+  if (normalized === "SINCUENTACONTABLE") {
     return 999;
   }
 
-  return 3;
+  return 0;
 }
 
 function getDistinctSortedValues(values: string[]): string[] {
@@ -2174,6 +2202,7 @@ export default function ConciliacionBcpPage() {
     const registros = conciliacionPlanilla?.registros ?? [];
 
     return {
+      cuentaContable: getDistinctSortedValues(registros.map((row) => getCuentaContableLabel(row, clasificacionCombos?.cuentasContables))),
       areaFlujo: getDistinctSortedValues(registros.map((row) => row.nombreAreaFlujo?.trim() ?? "")),
       referencia: getDistinctSortedValues(registros.map((row) => getReferenciaLabel(row).trim())),
       empresa: getDistinctSortedValues(registros.map((row) => row.empresa?.trim() ?? "")),
@@ -2182,11 +2211,14 @@ export default function ConciliacionBcpPage() {
       cliente: getDistinctSortedValues(registros.map((row) => row.clientePlanilla?.trim() ?? "")),
       periodo: getDistinctSortedValues(registros.map((row) => getRevisionPeriodoLabel(row.fecha))),
     };
-  }, [conciliacionPlanilla?.registros]);
+  }, [clasificacionCombos?.cuentasContables, conciliacionPlanilla?.registros]);
   const revisionFilteredRows = useMemo(() => {
     const registros = conciliacionPlanilla?.registros ?? [];
 
     return registros.filter((row) => {
+      const cuentaContableLabel = getCuentaContableLabel(row, clasificacionCombos?.cuentasContables);
+      const matchesCuentaContable =
+        !revisionFilters.cuentaContable || cuentaContableLabel === revisionFilters.cuentaContable;
       const matchesAreaFlujo =
         !revisionFilters.areaFlujo || (row.nombreAreaFlujo?.trim() ?? "") === revisionFilters.areaFlujo;
       const matchesReferencia =
@@ -2198,6 +2230,7 @@ export default function ConciliacionBcpPage() {
       const matchesPeriodo = !revisionFilters.periodo || getRevisionPeriodoLabel(row.fecha) === revisionFilters.periodo;
 
       return (
+        matchesCuentaContable &&
         matchesAreaFlujo &&
         matchesReferencia &&
         matchesEmpresa &&
@@ -2207,13 +2240,13 @@ export default function ConciliacionBcpPage() {
         matchesPeriodo
       );
     });
-  }, [conciliacionPlanilla?.registros, revisionFilters]);
+  }, [clasificacionCombos?.cuentasContables, conciliacionPlanilla?.registros, revisionFilters]);
   const revisionResumenRows = useMemo(() => {
     const grouped = new Map<string, ConciliacionRevisionResumen>();
     const tipoCambio = Number.isFinite(revisionTipoCambioDiario) && revisionTipoCambioDiario > 0 ? revisionTipoCambioDiario : DEFAULT_TIPO_CAMBIO_DIARIO;
 
     revisionFilteredRows.forEach((row) => {
-      const resumen = getRevisionResumenLabel(row);
+      const resumen = getRevisionResumenLabel(row, clasificacionCombos?.cuentasContables);
       const current =
         grouped.get(resumen) ??
         {
@@ -2246,7 +2279,7 @@ export default function ConciliacionBcpPage() {
 
       return left.resumen.localeCompare(right.resumen, "es", { sensitivity: "base", numeric: true });
     });
-  }, [revisionFilteredRows, revisionTipoCambioDiario]);
+  }, [revisionFilteredRows, revisionTipoCambioDiario, clasificacionCombos?.cuentasContables]);
   const revisionResumenTotals = useMemo(() => {
     return revisionResumenRows.reduce(
       (accumulator, item) => ({
@@ -3563,6 +3596,43 @@ export default function ConciliacionBcpPage() {
     }
   };
 
+  const handleExportRevisionResumen = async () => {
+    if (revisionResumenRows.length === 0) {
+      setError("No hay resumenes visibles en la pestaña Reporte revision para exportar.");
+      return;
+    }
+
+    try {
+      const XLSX = await import("xlsx");
+      const exportRows = [
+        ...revisionResumenRows.map((item) => ({
+          Resumen: item.resumen,
+          "Saldo MN": item.saldoMn,
+          "Saldo ME": item.saldoMe,
+          "ME - CON": item.saldoMeConvertido,
+          "Total MN": item.totalMn,
+        })),
+        {
+          Resumen: "TOTAL",
+          "Saldo MN": revisionResumenTotals.saldoMn,
+          "Saldo ME": revisionResumenTotals.saldoMe,
+          "ME - CON": revisionResumenTotals.saldoMeConvertido,
+          "Total MN": revisionResumenTotals.totalMn,
+        },
+      ];
+
+      const worksheet = XLSX.utils.json_to_sheet(exportRows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Reporte revision");
+      XLSX.writeFile(
+        workbook,
+        `conciliacion_reporte_revision_${new Date().toISOString().slice(0, 10)}.xlsx`
+      );
+    } catch (exportError) {
+      setError(getHttpErrorMessage(exportError, "No se pudo exportar el reporte revision."));
+    }
+  };
+
   const handleConciliarPlanillaV1 = async () => {
     if (!conciliacionFiltros.idCargo.trim() || !conciliacionFiltros.idEmpleado.trim() || !conciliacionFiltros.estados.trim()) {
       setError("Completa IdCargo, IdEmpleado y Estados antes de ejecutar la conciliacion_v1.");
@@ -4163,20 +4233,32 @@ export default function ConciliacionBcpPage() {
               {conciliacionPlanillaTab === "revision" ? (
                 <div style={styles.revisionBoard}>
                   <div style={styles.revisionHeader}>
-                      <div>
+                    <div>
                       <div style={styles.revisionTitle}>Reporte revision</div>
                       <div style={styles.revisionText}>
-                        Resumen relacionado con conciliacion planilla, agrupado por area flujo y filtrable por las dimensiones principales.
+                        Resumen relacionado con conciliacion planilla, agrupado por cuenta contable y filtrable por las dimensiones principales.
                       </div>
                     </div>
-                    <div style={styles.revisionMeta}>
-                      Registros visibles: {revisionFilteredRows.length} | Resumenes: {revisionResumenRows.length}
+                    <div style={styles.revisionHeaderActions}>
+                      <div style={styles.revisionMeta}>
+                        Registros visibles: {revisionFilteredRows.length} | Resumenes: {revisionResumenRows.length}
+                      </div>
+                      <button
+                        type="button"
+                        style={styles.iconActionButton}
+                        onClick={() => void handleExportRevisionResumen()}
+                        aria-label="Exportar reporte revision a Excel"
+                        title="Exportar reporte revision a Excel"
+                      >
+                        <FileDown size={16} />
+                      </button>
                     </div>
                   </div>
 
                   <div style={styles.revisionFilterGrid}>
                     {(
                       [
+                        ["cuentaContable", "CUENTA CONTABLE"],
                         ["areaFlujo", "AREA_FLUJO"],
                         ["empresa", "EMPRESA"],
                         ["banco", "BANCO MOVIMIENTO"],
@@ -6169,6 +6251,13 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
     fontWeight: 800,
     color: "#0F766E",
+  },
+  revisionHeaderActions: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
   },
   revisionFilterGrid: {
     display: "grid",
