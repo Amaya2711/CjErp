@@ -16,6 +16,7 @@ namespace CjERP.Infrastructure.Services
         private const string InsertStoredProcedureName = "dbo.sp_Planilla_Insertar";
         private const string UpdateStoredProcedureName = "dbo.sp_Planilla_Actualizar";
         private const string UpdateStatusStoredProcedureName = "dbo.sp_Planilla_ActualizarEstado";
+        private const string ProcessApprovalStoredProcedureName = "dbo.sp_Planilla_ProcesarAprobacionMasiva";
 
         private readonly ISqlCommandFactory _sqlCommandFactory;
         private readonly IAuditoriaCambiosService _auditoriaCambiosService;
@@ -364,6 +365,126 @@ namespace CjERP.Infrastructure.Services
                     CommandType.StoredProcedure,
                     cancellationToken,
                     commandTimeout: 120));
+        }
+
+        public async Task<PlanillaProcesarAprobacionMasivaResponseDto> ProcesarAprobacionMasivaAsync(
+            IReadOnlyList<PlanillaProcesarAprobacionItemDto> registros,
+            int codEstado,
+            int idEmpleadoCj,
+            int codEmpleado,
+            string usuario,
+            int idRegularizar,
+            CancellationToken cancellationToken = default)
+        {
+            if (registros is null || registros.Count == 0)
+            {
+                throw new InvalidOperationException("Debe seleccionar al menos un registro para aprobar.");
+            }
+
+            if (idEmpleadoCj <= 0)
+            {
+                throw new InvalidOperationException("No se pudo resolver el IdEmpleadoCj del usuario autenticado.");
+            }
+
+            var registrosNormalizados = registros
+                .Select(registro => new PlanillaProcesarAprobacionItemDto
+                {
+                    Correlativo = registro.Correlativo,
+                    IdSite = registro.IdSite?.Trim() ?? string.Empty,
+                    TipoMoneda = registro.TipoMoneda
+                })
+                .Where(registro => registro.Correlativo > 0 && !string.IsNullOrWhiteSpace(registro.IdSite))
+                .DistinctBy(registro => (registro.Correlativo, registro.IdSite, registro.TipoMoneda))
+                .ToList();
+
+            if (registrosNormalizados.Count == 0)
+            {
+                throw new InvalidOperationException("Debe seleccionar al menos un registro válido para aprobar.");
+            }
+
+            if (registrosNormalizados.Count != registros.Count)
+            {
+                _logger.LogWarning(
+                    "[PlanillaService] Se detectaron registros duplicados o inválidos en la aprobacion masiva. Originales={Originales} Normalizados={Normalizados}",
+                    registros.Count,
+                    registrosNormalizados.Count);
+            }
+
+            var usuarioLimpio = string.IsNullOrWhiteSpace(usuario) ? "SISTEMA" : usuario.Trim();
+            var codEstadoAplicado = codEmpleado == 77 ? 1 : (codEstado > 0 ? codEstado : 10);
+            var tvp = BuildAprobacionTvp(registrosNormalizados);
+
+            await using var connection = _sqlCommandFactory.CreateConnection();
+            await connection.OpenAsync(cancellationToken);
+
+            try
+            {
+                var parameters = new DynamicParameters();
+                parameters.Add("@Registros", tvp.AsTableValuedParameter("dbo.TVP_Planilla_Aprobacion"));
+                parameters.Add("@CodEstado", codEstadoAplicado, DbType.Int32);
+                parameters.Add("@IdEmpleadoCj", idEmpleadoCj, DbType.Int32);
+                parameters.Add("@CodEmpleado", codEmpleado, DbType.Int32);
+                parameters.Add("@Usuario", usuarioLimpio, DbType.String);
+                parameters.Add("@NombreDispositivo", "WEB", DbType.String);
+                parameters.Add("@Observacion", null, DbType.String);
+                parameters.Add("@IdRegularizar", idRegularizar > 0 ? 1 : 0, DbType.Int32);
+
+                _logger.LogInformation(
+                    "[PlanillaService] Ejecutando aprobacion masiva con {Registros} registro(s), estado {CodEstado}, idEmpleadoCj {IdEmpleadoCj}, codEmpleado {CodEmpleado}, usuario {Usuario}",
+                    registrosNormalizados.Count,
+                    codEstadoAplicado,
+                    idEmpleadoCj,
+                    codEmpleado,
+                    usuarioLimpio);
+
+                var command = new CommandDefinition(
+                    ProcessApprovalStoredProcedureName,
+                    parameters,
+                    commandType: CommandType.StoredProcedure,
+                    commandTimeout: 120,
+                    cancellationToken: cancellationToken);
+
+                PlanillaProcesarAprobacionMasivaResponseDto resultado;
+                using (var multi = await connection.QueryMultipleAsync(command))
+                {
+                    var detalle = (await multi.ReadAsync<AprobacionResultadoDto>()).ToList();
+                    var resumen = await multi.ReadSingleOrDefaultAsync<AprobacionResumenDto>();
+
+                    resultado = new PlanillaProcesarAprobacionMasivaResponseDto
+                    {
+                        Detalle = detalle,
+                        Resumen = resumen
+                    };
+                }
+
+                return resultado;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "[PlanillaService] Error ejecutando aprobacion masiva para {Registros} registro(s).",
+                    registrosNormalizados.Count);
+                throw;
+            }
+        }
+
+        private static DataTable BuildAprobacionTvp(IEnumerable<PlanillaProcesarAprobacionItemDto> registros)
+        {
+            var table = new DataTable();
+            table.Columns.Add("Correlativo", typeof(int));
+            table.Columns.Add("IdSite", typeof(string));
+            table.Columns.Add("TipoMoneda", typeof(int));
+
+            foreach (var item in registros)
+            {
+                table.Rows.Add(
+                    item.Correlativo,
+                    item.IdSite?.Trim() ?? string.Empty,
+                    item.TipoMoneda);
+            }
+
+            return table;
         }
 
         private static DynamicParameters BuildPlanillaParameters(PlanillaInsertRequestDto request)

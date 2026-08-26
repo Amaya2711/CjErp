@@ -352,6 +352,210 @@ namespace CjERP.Api.Controllers
             }
         }
 
+        [HttpPost("aprobar-masivo")]
+        public async Task<IActionResult> AprobarMasivo(
+            [FromBody] PlanillaProcesarAprobacionMasivaRequestDto request,
+            CancellationToken cancellationToken)
+        {
+            var registros = (request?.Registros ?? []).Where(item => item is not null).ToList();
+
+            if (registros.Count == 0)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "Debe seleccionar al menos un registro para aprobar."
+                });
+            }
+
+            var idEmpleadoCj = ResolveIdEmpleadoCj();
+            if (idEmpleadoCj <= 0)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "No se pudo resolver el IdEmpleadoCj del usuario autenticado."
+                });
+            }
+
+            var codEmpleado = ResolveCodEmpleado();
+            if (codEmpleado <= 0)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "No se pudo resolver el CodEmpleado del usuario autenticado."
+                });
+            }
+
+            var usuario = ResolveUsuarioAccion();
+            var codEstado = ResolveCodEstadoAprobacion(request?.CodEstado ?? 0, codEmpleado);
+
+            try
+            {
+                var resultado = await _planillaService.ProcesarAprobacionMasivaAsync(
+                    registros,
+                    codEstado,
+                    idEmpleadoCj,
+                    codEmpleado,
+                    usuario,
+                    request?.IdRegularizar ?? 0,
+                    cancellationToken);
+
+                var resumen = resultado.Resumen ?? new AprobacionResumenDto();
+                var mensajes = new List<string>();
+
+                if (resumen.EnviadosSegundaAprobacion > 0)
+                {
+                    mensajes.Add($"{resumen.EnviadosSegundaAprobacion} registro(s) fueron enviados a segunda aprobación.");
+                }
+
+                if (resumen.NoProcesados > 0)
+                {
+                    mensajes.Add($"{resumen.NoProcesados} registro(s) no pudieron ser procesados.");
+                }
+
+                if (mensajes.Count == 0)
+                {
+                    mensajes.Add("Operación realizada correctamente.");
+                }
+
+                return Ok(new
+                {
+                    success = true,
+                    message = string.Join(" ", mensajes),
+                    detalle = resultado.Detalle,
+                    resumen
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = ex.Message
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "[PlanillaConsulta] Error ejecutando aprobacion masiva. Registros={Registros}",
+                    string.Join(", ", registros.Select(item => $"{item.Correlativo}:{item.IdSite}")));
+
+                throw;
+            }
+        }
+
+        [HttpPost("{correlativo:int}/rechazar")]
+        public async Task<IActionResult> Rechazar(
+            int correlativo,
+            [FromBody] PlanillaActualizarEstadoRequestDto request,
+            CancellationToken cancellationToken)
+        {
+            if (correlativo <= 0)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "El correlativo debe ser mayor que cero."
+                });
+            }
+
+            if (request is null)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "La información del rechazo es obligatoria."
+                });
+            }
+
+            if (string.IsNullOrWhiteSpace(request.IdSite))
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "El IdSite del registro es obligatorio para rechazar."
+                });
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Observacion))
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "Debe ingresar una observación para rechazar."
+                });
+            }
+
+            try
+            {
+                var idAprobador = ResolveIdEmpleadoCj();
+                if (idAprobador <= 0)
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "No se pudo resolver el aprobador del rechazo."
+                    });
+                }
+
+                await _planillaService.ActualizarEstadoPlanillaAsync(
+                    new PlanillaActualizarEstadoRequestDto
+                    {
+                        Correlativo = correlativo,
+                        CodEstado = 3,
+                        IdSite = request.IdSite.Trim(),
+                        IdAprobador = idAprobador,
+                        Observacion = request.Observacion.Trim()
+                    },
+                    cancellationToken);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Registro rechazado correctamente."
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = ex.Message
+                });
+            }
+            catch (SqlException ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "[PlanillaConsulta] Error SQL rechazando planilla {Correlativo}",
+                    correlativo);
+
+                return StatusCode(500, new
+                {
+                    success = false,
+                    message = ex.Message,
+                    detail = ex.ToString()
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "[PlanillaConsulta] Error rechazando planilla {Correlativo}",
+                    correlativo);
+
+                return StatusCode(500, new
+                {
+                    success = false,
+                    message = ex.Message,
+                    detail = ex.ToString()
+                });
+            }
+        }
+
         private static string GetStoredProcedureLabel(string? consulta)
         {
             return (consulta ?? string.Empty).Trim().ToLowerInvariant() switch
@@ -425,6 +629,40 @@ namespace CjERP.Api.Controllers
                 ?? User.FindFirstValue(ClaimTypes.Name)
                 ?? User.Identity?.Name
                 ?? "SISTEMA";
+        }
+
+        private int ResolveIdEmpleadoCj()
+        {
+            var resolved = ResolveNumericClaimValue(
+                User.FindFirstValue("IdEmpleado"),
+                User.FindFirstValue("IdEmpleadoCj"),
+                User.FindFirstValue("CodEmp"),
+                User.FindFirstValue("codEmp"),
+                User.FindFirstValue("CodEmpleadoMostrar"),
+                User.FindFirstValue(ClaimTypes.NameIdentifier),
+                User.FindFirstValue("IdUsuario"));
+
+            return int.TryParse(resolved, out var idEmpleadoCj) ? idEmpleadoCj : 0;
+        }
+
+        private int ResolveCodEmpleado()
+        {
+            var resolved = ResolveNumericClaimValue(
+                User.FindFirstValue("CodEmpleado"),
+                User.FindFirstValue("codEmpleado"),
+                User.FindFirstValue("CodEmp"),
+                User.FindFirstValue("codEmp"),
+                User.FindFirstValue("IdUsuario"),
+                User.FindFirstValue(ClaimTypes.NameIdentifier),
+                User.FindFirstValue("IdEmpleado"));
+
+            return int.TryParse(resolved, out var codEmpleado) ? codEmpleado : 0;
+        }
+
+        private static int ResolveCodEstadoAprobacion(int codEstadoSolicitado, int codEmpleado)
+        {
+            var codEstado = codEstadoSolicitado > 0 ? codEstadoSolicitado : 10;
+            return codEmpleado == 77 ? 1 : codEstado;
         }
     }
 }

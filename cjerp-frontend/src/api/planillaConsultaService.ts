@@ -1,8 +1,11 @@
 import httpClient from "./httpClient";
 import type {
+  PlanillaAprobacionMasivaRequest,
+  PlanillaAprobacionMasivaResponse,
   PlanillaConsultaParametro,
   PlanillaConsultaEstadosRequest,
   PlanillaConsultaEstadosResponse,
+  PlanillaRechazoRequest,
 } from "../models/planillaConsulta";
 import { getAuthUser } from "../utils/authStorage";
 import { parseJwtPayload } from "../utils/jwt";
@@ -208,6 +211,45 @@ export async function actualizarPlanillaTarea(
     {
       timeout: options?.timeoutMs,
     },
+  );
+}
+
+export async function aprobarPlanillaMasiva(
+  request: PlanillaAprobacionMasivaRequest,
+  options?: { timeoutMs?: number }
+): Promise<PlanillaAprobacionMasivaResponse> {
+  return httpClient.post<PlanillaAprobacionMasivaResponse>(
+    `${PLANILLA_CONSULTA_API_URL}/aprobar-masivo`,
+    {
+      codEstado: Math.trunc(request.codEstado),
+      observacion: request.observacion ?? null,
+      idRegularizar: Math.trunc(request.idRegularizar),
+      registros: request.registros.map((item) => ({
+        correlativo: Math.trunc(item.correlativo),
+        idSite: item.idSite,
+        tipoMoneda: Math.trunc(item.tipoMoneda),
+      })),
+    },
+    {
+      timeout: options?.timeoutMs,
+    }
+  );
+}
+
+export async function rechazarPlanilla(
+  request: PlanillaRechazoRequest,
+  options?: { timeoutMs?: number }
+): Promise<void> {
+  await httpClient.post(
+    `${PLANILLA_CONSULTA_API_URL}/${encodeURIComponent(String(Math.trunc(request.correlativo)))}/rechazar`,
+    {
+      idSite: request.idSite,
+      observacion: request.observacion,
+      idAprobador: request.idAprobador ?? null,
+    },
+    {
+      timeout: options?.timeoutMs,
+    }
   );
 }
 

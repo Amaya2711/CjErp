@@ -36,6 +36,58 @@ export type PlanillaConsultaEstadosResponse = {
   message?: string | null;
 };
 
+export type PlanillaAprobacionMasivaRegistroRequest = {
+  correlativo: number;
+  idSite: string;
+  tipoMoneda: number;
+};
+
+export type PlanillaAprobacionMasivaRequest = {
+  codEstado: number;
+  observacion?: string | null;
+  idRegularizar: number;
+  registros: PlanillaAprobacionMasivaRegistroRequest[];
+};
+
+export type PlanillaRechazoRequest = {
+  correlativo: number;
+  idSite: string;
+  observacion: string;
+  idAprobador?: number;
+};
+
+export type AprobacionResultadoDto = {
+  exito: boolean;
+  correlativo: number;
+  idSite: string;
+  tipoMoneda: number;
+  moneda?: string | null;
+  total: number;
+  idResponsable?: number | null;
+  estadoAnterior?: number | null;
+  estadoSolicitado: number;
+  estadoAplicado: number;
+  requiereSegundaAprobacion: boolean;
+  limiteSegundaAprobacion?: number | null;
+  mensaje?: string | null;
+};
+
+export type AprobacionResumenDto = {
+  totalSeleccionados: number;
+  procesados: number;
+  noProcesados: number;
+  enviadosSegundaAprobacion: number;
+  aprobados: number;
+  primeraAprobacion: number;
+  observados: number;
+  rechazados: number;
+};
+
+export type PlanillaAprobacionMasivaResponse = {
+  detalle: AprobacionResultadoDto[];
+  resumen: AprobacionResumenDto | null;
+};
+
 export type StoredProcedureGridColumnConfig = {
   key: string;
   header?: string;

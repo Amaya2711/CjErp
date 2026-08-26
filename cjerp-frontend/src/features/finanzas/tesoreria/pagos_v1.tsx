@@ -23,9 +23,15 @@ import {
 import AppPage from "../../../components/base/AppPage";
 import {
   buildPlanillaConsultaEstadosRequest,
+  aprobarPlanillaMasiva,
   consultarPlanillaEstados,
+  rechazarPlanilla,
 } from "../../../api/planillaConsultaService";
-import type { PlanillaConsultaEstadosRequest, PlanillaConsultaParametro } from "../../../models/planillaConsulta";
+import type {
+  PlanillaConsultaEstadosRequest,
+  PlanillaConsultaParametro,
+} from "../../../models/planillaConsulta";
+import { getHttpErrorMessage } from "../../../utils/httpError";
 
 type PagoTabKey = "aprobar" | "reaprobar" | "hormiga" | "observadas" | "resumen";
 type DetailTabKey = "orden" | "resumen" | "historial" | "historial-oc";
@@ -49,6 +55,7 @@ type PagoRow = {
   solicitante: string;
   responsable: string;
   validador: string;
+  tipoMoneda?: number;
   moneda: string;
   corSite?: string;
   montoOc2?: string;
@@ -59,6 +66,7 @@ type PagoRow = {
   subOc?: number;
   adelaFic?: number;
   porcentajeFic?: number;
+  disponibleOc?: number;
   subtotal: number;
   igv: number;
   total: number;
@@ -76,6 +84,17 @@ type TabTheme = {
   soft: string;
   border: string;
   icon: React.ReactNode;
+};
+
+type RechazoModalState = {
+  rows: PagoRow[];
+  observacion: string;
+  submitting: boolean;
+  error: string | null;
+};
+
+type RegularizarConfirmState = {
+  rowsCount: number;
 };
 
 type FilterState = {
@@ -908,7 +927,11 @@ function mapPlanillaConsultaRowToPagoRow(
       "NombreAprobador",
       "nombreAprobador"
     ),
-    moneda: getRecordString(row, "Moneda", "moneda", "TipoMoneda", "tipoMoneda"),
+    tipoMoneda: getRecordNumber(row, "TipoMoneda", "tipoMoneda", "IdMoneda", "idMoneda") ?? undefined,
+    moneda:
+      getRecordString(row, "Moneda", "moneda", "NombreMoneda", "nombreMoneda", "MonedaLabel", "monedaLabel") ||
+      getRecordString(row, "TipoMoneda", "tipoMoneda") ||
+      "",
     corSite: getRecordString(row, "CorSite", "COR_SITE", "Cor_Site", "corSite"),
     montoOc2: getRecordString(row, "MontoOc2", "montoOc2", "MontoOC2", "montoOC2"),
     montoPlanillaPagado:
@@ -1133,6 +1156,15 @@ function mapResumenOtResponseRowToDetalle(
       "subtotalOC"
     ) ?? (fallback.subOc ?? 0);
 
+  const disponibleOc =
+    getRecordNumber(
+      row,
+      "SaldoOCDisponible",
+      "saldoOCDisponible",
+      "SaldoOcDisponible",
+      "saldoOcDisponible"
+    ) ?? fallback.disponibleOc;
+
   const adelaFic = getRecordNumber(row, "AdelaFic", "adelaFic", "AdelantoFic", "adelantoFic") ?? (fallback.adelaFic ?? 0);
   const porcentajeFic =
     getRecordNumber(row, "PorcentajeFic", "porcentajeFic") ??
@@ -1160,6 +1192,7 @@ function mapResumenOtResponseRowToDetalle(
       disponible,
       porcentaje,
       subOc,
+      disponibleOc,
       montoPlanilla,
       montoPlanillaPagado,
       adelaFic,
@@ -1201,11 +1234,14 @@ export default function PagosV1Page() {
   const [loadingData, setLoadingData] = useState(true);
   const [selectedId, setSelectedId] = useState<number>(0);
   const [checkedIds, setCheckedIds] = useState<number[]>([]);
+  const [refreshTick, setRefreshTick] = useState(0);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [filtersVisible, setFiltersVisible] = useState(true);
   const [isHistorialPopupOpen, setIsHistorialPopupOpen] = useState(false);
   const [isHistorialOcPopupOpen, setIsHistorialOcPopupOpen] = useState(false);
   const [message, setMessage] = useState<string>("");
+  const [rechazoModal, setRechazoModal] = useState<RechazoModalState | null>(null);
+  const [regularizarConfirm, setRegularizarConfirm] = useState<RegularizarConfirmState | null>(null);
   const [resumenOtDetalle, setResumenOtDetalle] = useState<ResumenOtDetalle | null>(null);
   const [historialRows, setHistorialRows] = useState<PagoRow[]>([]);
   const [historialOcRows, setHistorialOcRows] = useState<PagoRow[]>([]);
@@ -1318,7 +1354,7 @@ export default function PagosV1Page() {
     return () => {
       cancelled = true;
     };
-  }, [appliedFilters.fechaDesde, appliedFilters.fechaHasta]);
+  }, [appliedFilters.fechaDesde, appliedFilters.fechaHasta, refreshTick]);
 
   const activeRows = useMemo(
     () => (activeTab === "resumen" ? rowsByTab.resumen : rowsByTab[activeTab]),
@@ -1496,6 +1532,7 @@ export default function PagosV1Page() {
       const montoPlanillaPagadoCampo = parseNumericValue(
         row.montoPlanillaPagadoDisplay ?? row.montoPlanillaPagado ?? row.conPagadoDisplay ?? row.conPagado
       );
+      const saldoOCDisponible = getRecordNumber(row, "SaldoOCDisponible", "saldoOCDisponible", "SaldoOcDisponible", "saldoOcDisponible");
       const totalAcumuladoOt =
         ot
           ? montoPlanillaPagadoCampo > 0
@@ -1514,7 +1551,7 @@ export default function PagosV1Page() {
       const solicitadoOc = oc ? (Number.isFinite(row.subtotal ?? NaN) ? Number(row.subtotal ?? 0) : row.subtotal) : 0;
       const pagadoOc = 0;
       const totalOc = oc ? subOc : 0;
-      const disponibleOc = oc ? Math.max(totalOc - (pagadoOc + solicitadoOc), 0) : 0;
+      const disponibleOc = oc ? (saldoOCDisponible ?? Math.max(totalOc - (pagadoOc + solicitadoOc), 0)) : 0;
       const porcentajeOc = oc ? getConsumptionPercent(totalOc, disponibleOc) : 0;
 
       return {
@@ -1831,7 +1868,7 @@ export default function PagosV1Page() {
         return {
           primary: { label: "Hormiga", icon: <HandCoins size={18} />, color: "#B45309", soft: "#FFFBEB", border: "#FCD34D" },
           secondary: { label: "Re-aprobar", icon: <RotateCcw size={18} />, color: "#7C3AED", soft: "#F5F3FF", border: "#C4B5FD" },
-          tertiary: { label: "Observadas", icon: <AlertTriangle size={18} />, color: "#DC2626", soft: "#FEF2F2", border: "#FCA5A5" },
+          tertiary: { label: "Observar", icon: <AlertTriangle size={18} />, color: "#DC2626", soft: "#FEF2F2", border: "#FCA5A5" },
           quaternary: { label: "Ver PDF", icon: <Printer size={18} />, color: "#334155", soft: "#FFFFFF", border: "#CBD5E1" },
         };
       case "observadas":
@@ -1853,13 +1890,19 @@ export default function PagosV1Page() {
   }, [activeTab]);
   const isResumenTab = activeTab === "resumen";
   const showEstadoOc = activeTab === "resumen";
-  const tableColSpan = showEstadoOc ? 18 : 17;
+  const tableColSpan = showEstadoOc ? 19 : 18;
 
   const handleAction = (label: string) => {
     if (label === "Exportar") {
       handleExport();
       return;
     }
+
+    if (checkedIds.length === 0) {
+      setMessage("No exiten registros seleccionados");
+      return;
+    }
+
     if (label === "Limpiar") {
       const defaultFilters = getDefaultFilterState();
       setFilters(defaultFilters);
@@ -1871,12 +1914,16 @@ export default function PagosV1Page() {
       setDetailTab("orden");
       return;
     }
-    if (label === "Ver observaciÃ³n") {
+    if (label === "Ver observaciÃ³n" || label === "Observar") {
       setDetailTab("historial");
       return;
     }
     if (label === "Aprobar") {
-      setActiveTab("aprobar");
+      void handleAprobarSeleccionados(0);
+      return;
+    }
+    if (label === "Regularizar") {
+      setRegularizarConfirm({ rowsCount: selectedRows.length });
       return;
     }
     if (label === "Re-aprobar") {
@@ -1891,6 +1938,15 @@ export default function PagosV1Page() {
       setActiveTab("observadas");
       return;
     }
+    if (label === "Rechazar") {
+      setRechazoModal({
+        rows: selectedRows,
+        observacion: "",
+        submitting: false,
+        error: null,
+      });
+      return;
+    }
     setMessage(`${label} ejecutado en modo demo.`);
   };
 
@@ -1902,6 +1958,149 @@ export default function PagosV1Page() {
   const handleQuickSearchChange = (value: string) => {
     setFilters((prev) => ({ ...prev, query: value }));
     setAppliedFilters((prev) => ({ ...prev, query: value }));
+  };
+
+  const resetDetailStateAfterMutation = () => {
+    resumenOtCacheRef.current.clear();
+    setResumenOtDetalle(null);
+    setHistorialRows([]);
+    setHistorialOcRows([]);
+  };
+
+  const handleAprobarSeleccionados = async (idRegularizar: number = 0, omitirConfirmacion: boolean = false) => {
+    if (activeTab !== "aprobar") {
+      return;
+    }
+
+    if (selectedRows.length === 0) {
+      setMessage("Seleccione al menos un registro para aprobar.");
+      return;
+    }
+
+    if (!omitirConfirmacion) {
+      const confirmacion = window.confirm(
+        `¿Desea aprobar ${selectedRows.length} registro(s) seleccionado(s)?`
+      );
+
+      if (!confirmacion) {
+        setMessage("Aprobación cancelada.");
+        return;
+      }
+    }
+
+    try {
+      const response = await aprobarPlanillaMasiva(
+        {
+          codEstado: 10,
+          observacion: null,
+          idRegularizar: Math.trunc(idRegularizar),
+          registros: selectedRows.map((row) => ({
+            correlativo: Math.trunc(Number(row.correlativo)),
+            idSite: row.siteId,
+            tipoMoneda: Math.trunc(Number(row.tipoMoneda ?? 0)),
+          })),
+        },
+        { timeoutMs: 120000 }
+      );
+
+      const resumen = response?.resumen;
+      const mensajes: string[] = [];
+
+      if (resumen?.enviadosSegundaAprobacion && resumen.enviadosSegundaAprobacion > 0) {
+        mensajes.push(`${resumen.enviadosSegundaAprobacion} registro(s) fueron enviados a segunda aprobación.`);
+      }
+
+      if (resumen?.noProcesados && resumen.noProcesados > 0) {
+        mensajes.push(`${resumen.noProcesados} registro(s) no pudieron ser procesados.`);
+      }
+
+      if (mensajes.length === 0) {
+        mensajes.push("Operación realizada correctamente.");
+      }
+
+      resetDetailStateAfterMutation();
+      setCheckedIds([]);
+      setSelectedId(0);
+      setMessage(mensajes.join(" "));
+      setRefreshTick((current) => current + 1);
+    } catch (error) {
+      setMessage(getHttpErrorMessage(error, "No se pudo completar la aprobación."));
+    }
+  };
+
+  const handleRechazarSeleccionados = async () => {
+    if (!rechazoModal) {
+      return;
+    }
+
+    const observacion = rechazoModal.observacion.trim();
+    if (!observacion) {
+      setRechazoModal((prev) =>
+        prev ? { ...prev, error: "Debe ingresar una observación para rechazar." } : prev
+      );
+      return;
+    }
+
+    if (rechazoModal.rows.length === 0) {
+      setRechazoModal((prev) =>
+        prev ? { ...prev, error: "Seleccione al menos un registro para rechazar." } : prev
+      );
+      return;
+    }
+
+    try {
+      setRechazoModal((prev) => (prev ? { ...prev, submitting: true, error: null } : prev));
+
+      for (const row of rechazoModal.rows) {
+        await rechazarPlanilla(
+          {
+            correlativo: Math.trunc(Number(row.correlativo)),
+            idSite: row.siteId,
+            observacion,
+          },
+          { timeoutMs: 120000 }
+        );
+      }
+
+      const total = rechazoModal.rows.length;
+      resetDetailStateAfterMutation();
+      setCheckedIds([]);
+      setSelectedId(0);
+      setRechazoModal(null);
+      setMessage(
+        total === 1
+          ? "1 registro rechazado correctamente."
+          : `${total} registros rechazados correctamente.`
+      );
+      setRefreshTick((current) => current + 1);
+    } catch (error) {
+      setRechazoModal((prev) =>
+        prev
+          ? {
+              ...prev,
+              submitting: false,
+              error: getHttpErrorMessage(error, "No se pudo rechazar el registro."),
+            }
+          : prev
+      );
+    }
+  };
+
+  const handleCancelarRechazo = () => {
+    setRechazoModal(null);
+  };
+
+  const handleConfirmarRegularizacion = async () => {
+    if (!regularizarConfirm) {
+      return;
+    }
+
+    setRegularizarConfirm(null);
+    await handleAprobarSeleccionados(1, true);
+  };
+
+  const handleCancelarRegularizacion = () => {
+    setRegularizarConfirm(null);
   };
 
   function handleExport() {
@@ -2236,6 +2435,7 @@ export default function PagosV1Page() {
                     <th style={{ ...styles.th, width: 20 }}>Site</th>
                     <th style={{ ...styles.th, width: 20 }}>Tipo trabajo</th>
                     <th style={{ ...styles.th, width: 20 }}>Tarea</th>
+                    <th style={{ ...styles.th, width: 80 }}>Moneda</th>
                     {showEstadoOc ? <th style={{ ...styles.th, width: 118 }}>Estado OC</th> : null}
                     <th style={{ ...styles.th, width: 60 }}>%</th>
                   </tr>
@@ -2357,6 +2557,7 @@ export default function PagosV1Page() {
                                   <td style={styles.td}>{row.site}</td>
                                   <td style={styles.td}>{row.tipoTrabajo}</td>
                                   <td style={styles.td}>{row.tarea}</td>
+                                  <td style={styles.td}>{row.moneda || "-"}</td>
                                   {showEstadoOc ? (
                                     <td style={styles.td}>
                                       <span
@@ -2941,6 +3142,118 @@ export default function PagosV1Page() {
                     </tbody>
                   </table>
                 </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {rechazoModal ? (
+          <div
+            style={styles.rejectModalOverlay}
+            onClick={() => {
+              if (!rechazoModal.submitting) {
+                handleCancelarRechazo();
+              }
+            }}
+            role="presentation"
+          >
+            <div
+              style={styles.rejectModalCard}
+              onClick={(event) => event.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Rechazar registros"
+            >
+              <div style={styles.popupHeader}>
+                <div>
+                  <div style={{ ...styles.sectionKicker, color: "#DC2626" }}>Rechazar registros</div>
+                  <h3 style={styles.popupTitle}>
+                    {rechazoModal.rows.length} registro(s) seleccionado(s)
+                  </h3>
+                  <p style={styles.popupSubtitle}>
+                    Ingrese una observación obligatoria para continuar con el rechazo.
+                  </p>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <textarea
+                  value={rechazoModal.observacion}
+                  onChange={(event) =>
+                    setRechazoModal((prev) =>
+                      prev
+                        ? { ...prev, observacion: event.target.value, error: null }
+                        : prev
+                    )
+                  }
+                  rows={4}
+                  placeholder="Escriba la observación del rechazo"
+                  style={styles.rejectModalTextarea}
+                  disabled={rechazoModal.submitting}
+                />
+                {rechazoModal.error ? <div style={styles.errorBanner}>{rechazoModal.error}</div> : null}
+              </div>
+
+              <div style={styles.rejectModalActions}>
+                <button
+                  type="button"
+                  style={{ ...styles.slimActionButton, borderColor: "#FCA5A5", color: "#B91C1C" }}
+                  onClick={() => void handleRechazarSeleccionados()}
+                  disabled={rechazoModal.submitting}
+                >
+                  Rechazar
+                </button>
+                <button
+                  type="button"
+                  style={{ ...styles.slimActionButton, borderColor: "#93C5FD", color: "#1D4ED8" }}
+                  onClick={handleCancelarRechazo}
+                  disabled={rechazoModal.submitting}
+                >
+                  {rechazoModal.submitting ? "Procesando..." : "Cancelar"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {regularizarConfirm ? (
+          <div
+            style={styles.rejectModalOverlay}
+            onClick={() => {
+              handleCancelarRegularizacion();
+            }}
+            role="presentation"
+          >
+            <div
+              style={styles.rejectModalCard}
+              onClick={(event) => event.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Confirmar regularizacion"
+            >
+              <div style={styles.popupHeader}>
+                <div>
+                  <div style={{ ...styles.sectionKicker, color: "#B45309" }}>Regularizar</div>
+                  <h3 style={styles.popupTitle}>Confirmación requerida</h3>
+                  <p style={styles.popupSubtitle}>
+                    Este proceso solo REGULARIZA pago, no va generar un DEPOSITO. ¿Continua?
+                  </p>
+                </div>
+              </div>
+
+              <div style={styles.rejectModalActions}>
+                <button
+                  type="button"
+                  style={{ ...styles.slimActionButton, borderColor: "#93C5FD", color: "#1D4ED8" }}
+                  onClick={() => void handleConfirmarRegularizacion()}
+                >
+                  Sí
+                </button>
+                <button
+                  type="button"
+                  style={{ ...styles.slimActionButton, borderColor: "#CBD5E1", color: "#334155" }}
+                  onClick={handleCancelarRegularizacion}
+                >
+                  No
+                </button>
               </div>
             </div>
           </div>
@@ -4266,6 +4579,56 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 18,
     overflow: "hidden",
     background: "#FFFFFF",
+  },
+  rejectModalOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(15, 23, 42, 0.48)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16,
+    zIndex: 90,
+  },
+  rejectModalCard: {
+    width: "min(680px, calc(100vw - 32px))",
+    background: "#FFFFFF",
+    borderRadius: 18,
+    border: "1px solid #FCA5A5",
+    boxShadow: "0 30px 80px rgba(15, 23, 42, 0.28)",
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+  },
+  rejectModalTextarea: {
+    width: "100%",
+    minHeight: 128,
+    resize: "vertical",
+    borderRadius: 12,
+    border: "1px solid #CBD5E1",
+    padding: "12px 14px",
+    fontSize: 14,
+    color: "#0F172A",
+    background: "#FFFFFF",
+    outline: "none",
+    boxSizing: "border-box",
+  },
+  rejectModalActions: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 10,
+    padding: "0 18px 18px",
+    flexWrap: "wrap",
+  },
+  errorBanner: {
+    border: "1px solid #FCA5A5",
+    background: "#FEF2F2",
+    color: "#B91C1C",
+    borderRadius: 12,
+    padding: "10px 12px",
+    fontSize: 13,
+    fontWeight: 700,
   },
 };
 

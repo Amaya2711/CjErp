@@ -18,5 +18,13 @@ namespace CjERP.Application.Interfaces.Services
             string usuarioAccion,
             CancellationToken cancellationToken = default);
         Task ActualizarEstadoPlanillaAsync(PlanillaActualizarEstadoRequestDto request, CancellationToken cancellationToken = default);
+        Task<PlanillaProcesarAprobacionMasivaResponseDto> ProcesarAprobacionMasivaAsync(
+            IReadOnlyList<PlanillaProcesarAprobacionItemDto> registros,
+            int codEstado,
+            int idEmpleadoCj,
+            int codEmpleado,
+            string usuario,
+            int idRegularizar,
+            CancellationToken cancellationToken = default);
     }
 }
