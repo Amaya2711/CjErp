@@ -1532,15 +1532,16 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
             Corre = GetDictionaryInt(row, "Corre"),
             CorreTexto = NormalizeText(GetDictionaryString(row, "Corre")),
             FechaDeposito = GetDictionaryDate(row, "FechaDeposito"),
+            TotalPagar = GetDictionaryDecimal(row, "TotalPagarOriginal")
+                ?? GetDictionaryDecimal(row, "TotalPagar")
+                ?? GetDictionaryDecimal(row, "total")
+                ?? GetDictionaryDecimal(row, "Monto")
+                ?? GetDictionaryDecimal(row, "Importe"),
             TotalPlanillaBase = GetDictionaryDecimal(row, "TotalPlanillaBase")
                 ?? GetDictionaryDecimal(row, "Total")
                 ?? GetDictionaryDecimal(row, "Monto")
                 ?? GetDictionaryDecimal(row, "Importe")
                 ?? GetDictionaryDecimal(row, "TotalPagar"),
-            TotalPagar = GetDictionaryDecimal(row, "TotalPagar")
-                ?? GetDictionaryDecimal(row, "total")
-                ?? GetDictionaryDecimal(row, "Monto")
-                ?? GetDictionaryDecimal(row, "Importe")
         };
     }
 
@@ -1668,7 +1669,10 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
 
         if (esBancoConAgrupacionPorOperacion && !esDescripcionNoConciliable)
         {
-            if (!string.IsNullOrWhiteSpace(nroOperacionMovimientoNormalizado) &&
+            var requiresDateMatch = RequiresDateMatchForOperacion(movimiento.DescripcionOperacion);
+
+            if (!requiresDateMatch &&
+                !string.IsNullOrWhiteSpace(nroOperacionMovimientoNormalizado) &&
                 bancoOperationSummaries.TryGetValue(nroOperacionMovimientoNormalizado, out var summaryByMovimiento))
             {
                 scotiabankSummary = summaryByMovimiento;
@@ -1678,10 +1682,16 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                 nroOperacionPlanillaNormalizado,
                 nroOperacionMovimientoNormalizado,
                 planillaRows,
-                planillaRowsByNroOperacion);
+                planillaRowsByNroOperacion,
+                movimiento.Fecha,
+                requiresDateMatch);
             if (rowsScotiabank.Count > 0)
             {
-                scotiabankSummary ??= BuildScotiabankOperationSummary(rowsScotiabank);
+                if (requiresDateMatch || scotiabankSummary is null)
+                {
+                    scotiabankSummary = BuildScotiabankOperationSummary(rowsScotiabank);
+                }
+
                 planillaRowsParaMostrar = rowsScotiabank
                     .OrderBy(row => row.Corre ?? int.MaxValue)
                     .ToList();
@@ -1858,14 +1868,22 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                 planilla.NroOperacionNormalizado,
                 nroOperacionNormalizado,
                 allPlanillaRows,
-                planillaRowsByNroOperacion);
+                planillaRowsByNroOperacion,
+                movimiento.Fecha,
+                RequiresDateMatchForOperacion(movimiento.DescripcionOperacion));
             var rowsForComparison = sameNroRows;
-            var groupTotal = bancoOperationSummaries.TryGetValue(nroOperacionNormalizado, out var summary)
+            var requiresDateMatch = RequiresDateMatchForOperacion(movimiento.DescripcionOperacion);
+            var groupTotal = requiresDateMatch
+                ? rowsForComparison.Count > 0
+                    ? BuildScotiabankOperationSummary(rowsForComparison).TotalPagar
+                    : 0m
+                : bancoOperationSummaries.TryGetValue(nroOperacionNormalizado, out var summary)
                 ? summary.TotalPagar
                 : rowsForComparison.Count > 0
                     ? BuildScotiabankOperationSummary(rowsForComparison).TotalPagar
                     : 0m;
             var amountDifference = CalculateAmountDifferenceAbsolute(movimiento.Monto, groupTotal);
+            var dateDifferenceDays = CalculateDateDifferenceDays(movimiento.Fecha, planilla.FechaDeposito);
 
             if (esBancoConAgrupacionPorOperacion)
             {
@@ -1880,6 +1898,11 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                 }
             }
 
+            if (requiresDateMatch && dateDifferenceDays != 0)
+            {
+                return null;
+            }
+
             return new ConciliacionCandidate
             {
                 Prioridad = amountDifference == 0 ? 0 : 1,
@@ -1887,11 +1910,11 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                 TipoCoincidencia = "NRO OPERACION",
                 Planilla = planilla,
                 ObservacionConciliacion = esBancoConAgrupacionPorOperacion && rowsForComparison.Count > 1
-                    ? $"Coincidencia por NroOperacion con {rowsForComparison.Count} registro(s) válidos relacionados."
+                ? $"Coincidencia por NroOperacion con {rowsForComparison.Count} registro(s) válidos relacionados."
                     : $"Coincidencia exacta por NroOperacion: {planilla.NroOperacion}",
                 OrdenPlanilla = planilla.Corre ?? 0,
                 DiferenciaMontoAbs = amountDifference,
-                DiferenciaFechaDias = CalculateDateDifferenceDays(movimiento.Fecha, planilla.FechaDeposito),
+                DiferenciaFechaDias = dateDifferenceDays,
                 CoincidenciaMontoExacta = amountDifference == 0
             };
         }
@@ -1960,6 +1983,14 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         }
 
         return Math.Abs((fechaMovimiento.Value.Date - fechaPlanilla.Value.Date).Days);
+    }
+
+    private static bool RequiresDateMatchForOperacion(string? descripcionOperacion)
+    {
+        return string.Equals(
+            NormalizeKey(descripcionOperacion),
+            "pagodecheque",
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ExtractDigits(string? value)
@@ -4617,9 +4648,7 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
     {
         var rowsToUse = rows.ToList();
         var totalPagarAgrupado = rowsToUse
-            .Select(row => row.TotalPagar)
-            .FirstOrDefault(value => value.HasValue)
-            ?? 0m;
+            .Sum(row => row.TotalPagar ?? 0m);
         var correlativos = rowsToUse
             .Select(row => row.CorreTexto ?? row.Corre?.ToString(CultureInfo.InvariantCulture))
             .Where(value => !string.IsNullOrWhiteSpace(value))
@@ -4640,9 +4669,12 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
         string? nroOperacionPlanillaNormalizado,
         string? nroOperacionMovimientoNormalizado,
         IReadOnlyList<PlanillaConciliacionRow> allPlanillaRows,
-        IReadOnlyDictionary<string, List<PlanillaConciliacionRow>> planillaRowsByNroOperacion)
+        IReadOnlyDictionary<string, List<PlanillaConciliacionRow>> planillaRowsByNroOperacion,
+        DateTime? fechaMovimiento = null,
+        bool requiereCoincidenciaFecha = false)
     {
         var rows = new List<PlanillaConciliacionRow>();
+        var fechaMovimientoNormalizada = fechaMovimiento?.Date;
         AddRowsFromAllRows(nroOperacionPlanillaNormalizado);
         AddRowsFromAllRows(nroOperacionMovimientoNormalizado);
         AddRows(nroOperacionPlanillaNormalizado);
@@ -4663,6 +4695,11 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
 
             foreach (var row in allPlanillaRows.Where(row => string.Equals(row.NroOperacionNormalizado, key, StringComparison.OrdinalIgnoreCase)))
             {
+                if (requiereCoincidenciaFecha && (!fechaMovimientoNormalizada.HasValue || !row.FechaDeposito.HasValue || row.FechaDeposito.Value.Date != fechaMovimientoNormalizada.Value))
+                {
+                    continue;
+                }
+
                 if (rows.Any(existing => string.Equals(existing.RowKey, row.RowKey, StringComparison.OrdinalIgnoreCase)))
                 {
                     continue;
@@ -4681,6 +4718,11 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
 
             foreach (var row in matchingRows)
             {
+                if (requiereCoincidenciaFecha && (!fechaMovimientoNormalizada.HasValue || !row.FechaDeposito.HasValue || row.FechaDeposito.Value.Date != fechaMovimientoNormalizada.Value))
+                {
+                    continue;
+                }
+
                 if (rows.Any(existing => string.Equals(existing.RowKey, row.RowKey, StringComparison.OrdinalIgnoreCase)))
                 {
                     continue;
