@@ -35,8 +35,8 @@ export default function SelectBase({
         }}
       >
         <option value="">{placeholder}</option>
-        {options.map((option) => (
-          <option key={String(option.value)} value={option.value}>
+        {options.map((option, index) => (
+          <option key={`${String(option.value)}-${index}`} value={option.value}>
             {option.label}
           </option>
         ))}

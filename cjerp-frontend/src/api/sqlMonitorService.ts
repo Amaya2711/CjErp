@@ -230,4 +230,8 @@ export const sqlMonitorService = {
   async analizarQuery(id: number): Promise<SqlMonitorAnalisis> {
     return httpClient.post<SqlMonitorAnalisis>(`/sqlmonitor/analizar/${id}`);
   },
+
+  async cancelarSesion(sessionId: number): Promise<void> {
+    await httpClient.post(`/sqlmonitor/cancelar/${sessionId}`);
+  },
 };

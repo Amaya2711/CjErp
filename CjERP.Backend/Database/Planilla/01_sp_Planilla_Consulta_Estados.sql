@@ -5,6 +5,11 @@ ALTER PROCEDURE [dbo].[sp_Planilla_Consulta_Estados]
     @IdValidador    INT = NULL,
     @IdBanco        INT = NULL,
     @Estados        VARCHAR(50),
+    @OT             VARCHAR(50) = NULL,
+    @IdOc           VARCHAR(50) = NULL,
+    @Fila           VARCHAR(50) = NULL,
+    @IdSite         VARCHAR(50) = NULL,
+    @CorSite        VARCHAR(50) = NULL,
     @FechaInicio    DATE = NULL,
     @FechaFin       DATE = NULL,
     @FechaDeposito  DATE = NULL
@@ -292,6 +297,26 @@ BEGIN
         )
     )
     AND (
+        @OT IS NULL
+        OR LTRIM(RTRIM(ISNULL(a.Ot, ''))) = LTRIM(RTRIM(@OT))
+    )
+    AND (
+        @IdOc IS NULL
+        OR LTRIM(RTRIM(ISNULL(a.IdOc, ''))) = LTRIM(RTRIM(@IdOc))
+    )
+    AND (
+        @Fila IS NULL
+        OR LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), a.Fila), ''))) = LTRIM(RTRIM(@Fila))
+    )
+    AND (
+        @IdSite IS NULL
+        OR LTRIM(RTRIM(ISNULL(a.IdSite, ''))) = LTRIM(RTRIM(@IdSite))
+    )
+    AND (
+        @CorSite IS NULL
+        OR a.CorreSite = TRY_CONVERT(INT, @CorSite)
+    )
+    AND (
         @FiltrarPorSolicitante = 0
         OR (
             ISNULL(a.IdWeb, 0) = 1
@@ -306,5 +331,6 @@ BEGIN
             )
         )
     )
-    ORDER BY a.Correlativo DESC;
+    ORDER BY a.Correlativo DESC
+    OPTION (RECOMPILE);
 END;

@@ -112,4 +112,20 @@ public class SqlMonitorController : ControllerBase
         var data = await _sqlMonitorService.AnalizarQueryAsync(id, usuario, cancellationToken);
         return Ok(new { success = true, message = "Analisis generado correctamente.", data });
     }
+
+    [HttpPost("cancelar/{sessionId:int}")]
+    public async Task<IActionResult> CancelarSesion(int sessionId, CancellationToken cancellationToken)
+    {
+        if (sessionId <= 0)
+        {
+            return BadRequest(new { success = false, message = "SessionId invalido." });
+        }
+
+        await _sqlMonitorService.CancelarSesionAsync(sessionId, cancellationToken);
+        return Ok(new
+        {
+            success = true,
+            message = $"Se solicito la cancelacion de la sesion {sessionId}."
+        });
+    }
 }

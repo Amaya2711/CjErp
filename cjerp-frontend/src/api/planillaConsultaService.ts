@@ -57,6 +57,8 @@ type PlanillaConsultaEstadosBaseParamOverrides = {
 
 type PlanillaConsultaEstadosRequestOptions = {
   baseParams?: PlanillaConsultaEstadosBaseParamOverrides;
+  timeoutMs?: number;
+  signal?: AbortSignal;
 };
 
 export function buildPlanillaConsultaEstadosBaseParams(
@@ -119,18 +121,25 @@ export function buildPlanillaConsultaEstadosBaseParams(
     IdEmpleado: idEmpleado,
   });
 
-  return [
-    {
+  const baseParams: PlanillaConsultaParametro[] = [];
+
+  if (idCargo) {
+    baseParams.push({
       nombre: "IdCargo",
       valor: idCargo,
       tipo: "int",
-    },
-    {
+    });
+  }
+
+  if (idEmpleado) {
+    baseParams.push({
       nombre: "IdEmpleado",
       valor: idEmpleado,
       tipo: "int",
-    },
-  ];
+    });
+  }
+
+  return baseParams;
 }
 
 export function buildPlanillaConsultaEstadosRequest(
@@ -167,10 +176,11 @@ export function buildPlanillaConsultaEstadosRequest(
 
 export async function consultarPlanillaEstados(
   request: PlanillaConsultaEstadosRequest,
-  options?: { timeoutMs?: number }
+  options?: { timeoutMs?: number; signal?: AbortSignal }
 ): Promise<PlanillaConsultaEstadosResponse> {
   return httpClient.post<PlanillaConsultaEstadosResponse>(PLANILLA_CONSULTA_API_URL, request, {
     timeout: options?.timeoutMs,
+    signal: options?.signal,
   });
 }
 

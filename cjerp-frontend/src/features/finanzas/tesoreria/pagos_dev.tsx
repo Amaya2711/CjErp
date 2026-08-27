@@ -1,5 +1,6 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
+import "devextreme/dist/css/dx.light.css";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -20,6 +21,19 @@ import {
   Minimize2,
   XCircle,
 } from "lucide-react";
+import DataGrid, {
+  Column,
+  FilterRow,
+  GroupPanel,
+  Grouping,
+  HeaderFilter,
+  Pager,
+  Paging,
+  SearchPanel,
+  Selection,
+  Scrolling,
+  Sorting,
+} from "devextreme-react/data-grid";
 import AppPage from "../../../components/base/AppPage";
 import {
   buildPlanillaConsultaEstadosRequest,
@@ -598,6 +612,15 @@ function getConsumptionBarColor(percent: number) {
   }
 
   return "#EF4444";
+}
+
+function getAdvancePaidRatio(totalAmount: number, paidAmount: number) {
+  if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+    return 0;
+  }
+
+  const safePaid = Math.max(Number.isFinite(paidAmount) ? paidAmount : 0, 0);
+  return Math.min((safePaid / totalAmount) * 100, 100);
 }
 
 function getConsumptionPercent(total: number, disponible: number) {
@@ -1241,8 +1264,6 @@ export default function PagosV1Page() {
     resumen: [],
   });
   const [loadingData, setLoadingData] = useState(true);
-  const [loadingStage, setLoadingStage] = useState<string>("Iniciando carga...");
-  const [loadTrace, setLoadTrace] = useState<string[]>([]);
   const [selectedId, setSelectedId] = useState<number>(0);
   const [checkedIds, setCheckedIds] = useState<number[]>([]);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -1264,147 +1285,103 @@ export default function PagosV1Page() {
   const resumenOtCacheRef = useRef<Map<string, ResumenOtDetalle>>(new Map());
   const historialCacheRef = useRef<Map<string, PagoRow[]>>(new Map());
   const historialOcCacheRef = useRef<Map<string, PagoRow[]>>(new Map());
-  const loadTimeoutMs = 15000;
-
-  const pushLoadTrace = useCallback((entry: string) => {
-    setLoadTrace((prev) => [...prev, entry]);
-    console.info(`[PagosV1] ${entry}`);
-  }, []);
-
-  const runTrackedRequest = useCallback(
-    async <T,>(label: string, runner: () => Promise<T>, signal?: AbortSignal) => {
-      const startedAt = performance.now();
-      let timeoutTriggered = false;
-
-      const timeoutId = window.setTimeout(() => {
-        if (signal?.aborted) {
-          return;
-        }
-        timeoutTriggered = true;
-        const message = `${label}: sigue en curso después de ${Math.round(loadTimeoutMs / 1000)}s`;
-        setLoadingStage(message);
-        pushLoadTrace(message);
-      }, loadTimeoutMs);
-
-      try {
-        return await runner();
-      } finally {
-        window.clearTimeout(timeoutId);
-        if (signal?.aborted) {
-          return;
-        }
-        const elapsedMs = Math.round(performance.now() - startedAt);
-        pushLoadTrace(
-          timeoutTriggered
-            ? `${label}: finalizó en ${elapsedMs} ms luego del aviso de demora`
-            : `${label}: ${elapsedMs} ms`
-        );
-      }
-    },
-    [pushLoadTrace]
-  );
 
   useEffect(() => {
-    const controller = new AbortController();
     let cancelled = false;
 
-    const load = async (signal: AbortSignal) => {
+    const load = async () => {
       setLoadingData(true);
-      setLoadingStage("Preparando consulta de órdenes...");
-      setLoadTrace([]);
-      const loadStart = performance.now();
 
       try {
-        if (signal.aborted) {
-          return;
-        }
-
         const fechaInicio = formatDateParam(appliedFilters.fechaDesde);
         const fechaFin = formatDateParam(appliedFilters.fechaHasta);
         const tieneFiltroFechas = Boolean(fechaInicio || fechaFin);
 
         let nextRowsByTab: Record<PagoTabKey, PagoRow[]>;
-        setLoadingStage(
-          tieneFiltroFechas
-            ? "Consultando órdenes por rango de fechas..."
-            : "Consultando órdenes consolidadas por estados..."
-        );
 
-        const parametros: PlanillaConsultaParametro[] = [
-          { nombre: "Estados", valor: TAB_ESTADOS_CON_FECHA, tipo: "string" },
-        ];
+        if (tieneFiltroFechas) {
+          const parametros: PlanillaConsultaParametro[] = [
+            { nombre: "Estados", valor: TAB_ESTADOS_CON_FECHA, tipo: "string" },
+          ];
 
-        if (fechaInicio) {
-          parametros.push({ nombre: "FechaInicio", valor: fechaInicio, tipo: "date" });
-        }
+          if (fechaInicio) {
+            parametros.push({ nombre: "FechaInicio", valor: fechaInicio, tipo: "date" });
+          }
 
-        if (fechaFin) {
-          parametros.push({ nombre: "FechaFin", valor: fechaFin, tipo: "date" });
-        }
+          if (fechaFin) {
+            parametros.push({ nombre: "FechaFin", valor: fechaFin, tipo: "date" });
+          }
 
-        const requestBuildStart = performance.now();
-        const request = buildPlanillaConsultaEstadosRequest(parametros);
-        pushLoadTrace(`Armado de request: ${(performance.now() - requestBuildStart).toFixed(0)} ms`);
-        setLoadingStage("Enviando consulta a la API...");
+          const response = await consultarPlanillaEstados(
+            buildPlanillaConsultaEstadosRequest(parametros),
+            { timeoutMs: 120000 }
+          );
 
-        const response = await runTrackedRequest(
-          tieneFiltroFechas ? "Consulta por fechas" : "Consulta consolidada",
-          () => consultarPlanillaEstados(request, { timeoutMs: 120000, signal }),
-          signal
-        );
-
-        if (signal.aborted || cancelled) {
-          return;
-        }
-
-        if (!response) {
-          return;
-        }
-
-        pushLoadTrace(`Respuesta API: ${Array.isArray(response.rows) ? response.rows.length : 0} registros`);
-
-        const mapStart = performance.now();
-        const rows = Array.isArray(response.rows) ? response.rows : [];
-        const mappedRows = rows.map((row, index) =>
-          mapPlanillaConsultaRowToPagoRow(
-            row,
-            index,
-            mapPlanillaEstadoToPagoEstado(
+          const rows = Array.isArray(response.rows) ? response.rows : [];
+          const mappedRows = rows.map((row, index) =>
+            mapPlanillaConsultaRowToPagoRow(row, index, mapPlanillaEstadoToPagoEstado(
               getRecordNumber(row, "Estado", "estado") ?? getRecordString(row, "EstadoNombre", "estadoNombre"),
               "aprobar"
-            )
-          )
-        );
-        pushLoadTrace(`Mapeo de registros: ${(performance.now() - mapStart).toFixed(0)} ms`);
+            ))
+          );
+          nextRowsByTab = groupRowsByEstado(mappedRows);
+        } else {
+          const tabEntries: Array<[Exclude<PagoTabKey, "resumen">, string]> = [
+            ["aprobar", TAB_ESTADOS.aprobar],
+            ["reaprobar", TAB_ESTADOS.reaprobar],
+            ["hormiga", TAB_ESTADOS.hormiga],
+            ["observadas", TAB_ESTADOS.observadas],
+          ];
 
-        const groupStart = performance.now();
-        nextRowsByTab = groupRowsByEstado(mappedRows);
-        pushLoadTrace(`Agrupación de registros: ${(performance.now() - groupStart).toFixed(0)} ms`);
+          const loaded = await Promise.all(
+            tabEntries.map(async ([tab, estado]) => {
+              const parametros: PlanillaConsultaParametro[] = [
+                { nombre: "Estados", valor: estado, tipo: "string" },
+              ];
+
+              const response = await consultarPlanillaEstados(
+                buildPlanillaConsultaEstadosRequest(parametros),
+                { timeoutMs: 120000 }
+              );
+
+              const rows = Array.isArray(response.rows) ? response.rows : [];
+              return [tab, rows.map((row, index) => mapPlanillaConsultaRowToPagoRow(row, index, tab))] as const;
+            })
+          );
+
+          if (cancelled) {
+            return;
+          }
+
+          nextRowsByTab = loaded.reduce<Record<PagoTabKey, PagoRow[]>>(
+            (acc, [tab, rows]) => {
+              acc[tab] = rows;
+              return acc;
+            },
+            createEmptyRowsByTab()
+          );
+        }
 
         if (cancelled) {
           return;
         }
 
-        pushLoadTrace(`Carga total: ${(performance.now() - loadStart).toFixed(0)} ms`);
         setRowsByTab(nextRowsByTab);
-      } catch (error) {
-        if (!cancelled && !controller.signal.aborted) {
+      } catch {
+        if (!cancelled) {
           setMessage("No se pudieron cargar las Órdenes desde Planilla.");
-          console.error("[PagosV1] Error al cargar órdenes", error);
         }
       } finally {
-        if (!cancelled && !controller.signal.aborted) {
-          setLoadingStage("Carga finalizada.");
+        if (!cancelled) {
           setLoadingData(false);
         }
       }
     };
 
-    void load(controller.signal);
+    void load();
 
     return () => {
       cancelled = true;
-      controller.abort();
     };
   }, [appliedFilters.fechaDesde, appliedFilters.fechaHasta, refreshTick]);
 
@@ -1642,17 +1619,20 @@ export default function PagosV1Page() {
 
     const cargarResumenOt = async (signal: AbortSignal) => {
       if (detailTab !== "resumen") {
+        setResumenOtLoading(false);
         return;
       }
 
       if (!filaActiva) {
         setResumenOtDetalle(null);
+        setResumenOtLoading(false);
         return;
       }
 
       const request = buildResumenOtRequest(filaActiva);
       if (!request) {
         setResumenOtDetalle(null);
+        setResumenOtLoading(false);
         return;
       }
 
@@ -1693,10 +1673,9 @@ export default function PagosV1Page() {
         const mapped = mapResumenOtResponseRowToDetalle(row, filaActiva);
         resumenOtCacheRef.current.set(cacheKey, mapped);
         setResumenOtDetalle(mapped);
-      } catch (error) {
+      } catch {
         if (!cancelled && !signal.aborted) {
           setResumenOtDetalle(null);
-          console.error("[PagosV1] Error al cargar resumen OT", error);
         }
       } finally {
         if (!cancelled && !signal.aborted) {
@@ -1766,10 +1745,9 @@ export default function PagosV1Page() {
         const mappedRows = rows.map((row, index) => mapPlanillaConsultaRowToPagoRow(row, index, filaActiva.estado));
         historialCacheRef.current.set(cacheKey, mappedRows);
         setHistorialRows(mappedRows);
-      } catch (error) {
+      } catch {
         if (!cancelled && !signal.aborted) {
           setHistorialRows([]);
-          console.error("[PagosV1] Error al cargar historial OT", error);
         }
       } finally {
         if (!cancelled && !signal.aborted) {
@@ -1837,10 +1815,9 @@ export default function PagosV1Page() {
         const mappedRows = rows.map((row, index) => mapPlanillaConsultaRowToPagoRow(row, index, filaActiva.estado));
         historialOcCacheRef.current.set(cacheKey, mappedRows);
         setHistorialOcRows(mappedRows);
-      } catch (error) {
+      } catch {
         if (!cancelled && !signal.aborted) {
           setHistorialOcRows([]);
-          console.error("[PagosV1] Error al cargar historial OC", error);
         }
       } finally {
         if (!cancelled && !signal.aborted) {
@@ -1921,6 +1898,13 @@ export default function PagosV1Page() {
   const consumoOcPercent = detalleOcActiva
     ? getConsumptionPercent(parseNumericValue(detalleOcActiva.subOc), parseNumericValue(detalleOcActiva.disponibleOc ?? 0))
     : 0;
+  const montoPlanillaPagadoOt = Math.max(
+    parseNumericValue(detalleOcActiva?.montoPlanillaPagado ?? detalleOcActiva?.pagado ?? 0),
+    0
+  );
+  const totalOtAmount = Math.max(parseNumericValue(detalleOcActiva?.totalAcumuladoOt ?? 0), 0);
+  const pagadoOtPercent = getAdvancePaidRatio(totalOtAmount, montoPlanillaPagadoOt);
+  const consumoOtColor = getConsumptionBarColor(consumoOtPercent);
   const montoPlanillaPagadoOc = useMemo(() => {
     const rowConMontoPagado = historialOcRows.find((row) => Number.isFinite(row.montoPlanillaPagado ?? NaN));
 
@@ -2023,6 +2007,101 @@ export default function PagosV1Page() {
   const isResumenTab = activeTab === "resumen";
   const showEstadoOc = activeTab === "resumen";
   const tableColSpan = showEstadoOc ? 19 : 18;
+  const gridColumns = useMemo(
+    () => [
+      {
+        key: "solicitante",
+        dataField: "solicitante",
+        caption: "Solicitante",
+        groupIndex: 0,
+        visible: false,
+      },
+      { key: "correlativo", dataField: "correlativo", caption: "Correlativo", width: 100 },
+      { key: "ot", dataField: "ot", caption: "OT", width: 95 },
+      {
+        key: "oc",
+        caption: "OC",
+        width: 95,
+        cellRender: ({ data }: { data: PagoRow }) => <span>{data.idOc || data.documento || "-"}</span>,
+      },
+      { key: "fila", dataField: "fila", caption: "Fila", width: 80 },
+      { key: "responsable", dataField: "responsable", caption: "Responsable", width: 130 },
+      { key: "validador", dataField: "validador", caption: "Validador", width: 130 },
+      {
+        key: "subtotal",
+        caption: "Subtotal",
+        width: 120,
+        cellRender: ({ data }: { data: PagoRow }) => (
+          <span style={{ display: "block", textAlign: "right" }}>{formatCurrency(data.subtotal, data.moneda)}</span>
+        ),
+      },
+      {
+        key: "igv",
+        caption: "IGV",
+        width: 110,
+        cellRender: ({ data }: { data: PagoRow }) => (
+          <span style={{ display: "block", textAlign: "right" }}>{formatCurrency(data.igv, data.moneda)}</span>
+        ),
+      },
+      {
+        key: "total",
+        caption: "Total",
+        width: 120,
+        cellRender: ({ data }: { data: PagoRow }) => (
+          <strong style={{ display: "block", textAlign: "right" }}>{formatCurrency(data.total, data.moneda)}</strong>
+        ),
+      },
+      {
+        key: "fecha",
+        dataField: "fecha",
+        caption: "Fecha",
+        width: 100,
+        cellRender: ({ data }: { data: PagoRow }) => <span>{formatDate(data.fecha)}</span>,
+      },
+      { key: "cliente", dataField: "cliente", caption: "Cliente", width: 120 },
+      { key: "proyecto", dataField: "proyecto", caption: "Proyecto", width: 160 },
+      { key: "siteId", dataField: "siteId", caption: "Site ID", width: 100 },
+      { key: "corSite", dataField: "corSite", caption: "CorSite", width: 100 },
+      { key: "site", dataField: "site", caption: "Site", width: 180 },
+      { key: "tipoTrabajo", dataField: "tipoTrabajo", caption: "Tipo trabajo", width: 140 },
+      { key: "tarea", dataField: "tarea", caption: "Tarea", width: 150 },
+      { key: "moneda", dataField: "moneda", caption: "Moneda", width: 100 },
+      ...(showEstadoOc
+        ? [
+            {
+              key: "estadoOc",
+              caption: "Estado OC",
+              width: 140,
+              cellRender: ({ data }: { data: PagoRow }) => {
+                const rowTheme = getStateColor(data.estado);
+                return (
+                  <span
+                    style={{
+                      ...styles.stateBadge,
+                      color: rowTheme.accent,
+                      background: rowTheme.soft,
+                      borderColor: rowTheme.border,
+                    }}
+                  >
+                    {getStatusLabel(data.estado)}
+                  </span>
+                );
+              },
+            },
+          ]
+        : []),
+      {
+        key: "porcentaje",
+        caption: "%",
+        width: 90,
+        cellRender: ({ data }: { data: PagoRow }) => {
+          const percent = data.subOc && data.subOc > 0 ? Math.round((data.subtotal / data.subOc) * 100) : 0;
+          return <span style={{ display: "block", textAlign: "right" }}>{percent}%</span>;
+        },
+      },
+    ],
+    [showEstadoOc]
+  );
 
   const handleAction = (label: string) => {
     if (label === "Exportar") {
@@ -2126,6 +2205,7 @@ export default function PagosV1Page() {
     setResumenOtDetalle(null);
     setHistorialRows([]);
     setHistorialOcRows([]);
+    setResumenOtLoading(false);
     setHistorialLoading(false);
     setHistorialOcLoading(false);
   };
@@ -2564,47 +2644,6 @@ export default function PagosV1Page() {
                 </div>
               </div>
 
-              {(loadingData || loadTrace.length > 0) ? (
-                <div
-                  style={{
-                    marginTop: 10,
-                    border: "1px solid #DBEAFE",
-                    background: "#EFF6FF",
-                    borderRadius: 12,
-                    padding: "8px 12px",
-                    color: "#1D4ED8",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 6,
-                  }}
-                >
-                  <div>{loadingStage}</div>
-                  {loadTrace.length > 0 ? (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                      {loadTrace.map((entry, index) => (
-                        <span
-                          key={`${entry}-${index}`}
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            padding: "3px 8px",
-                            borderRadius: 999,
-                            background: "#FFFFFF",
-                            border: "1px solid #BFDBFE",
-                            color: "#1E40AF",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {entry}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-
             </div>
 
             <div style={styles.metricsStrip}>
@@ -2673,226 +2712,59 @@ export default function PagosV1Page() {
            
 
             <div style={styles.gridScrollable}>
-              <table style={styles.table}>
-                <thead>
-                  <tr>
-                    <th style={{ ...styles.th, width: 108, textAlign: "center" }}>
-                      <div style={styles.headerSelectionTools}>
-                        <input
-                          ref={selectAllRef}
-                          type="checkbox"
-                          aria-label="Seleccionar todas las filas visibles"
-                          onChange={(event) => {
-                            const nextIds = event.target.checked ? visibleRowIds : [];
-                            setCheckedIds(nextIds);
-                          }}
-                          onClick={(event) => event.stopPropagation()}
-                          style={{ accentColor: currentTheme.accent }}
-                        />
-                        <button
-                          type="button"
-                          onClick={toggleAllGroups}
-                          aria-label={allGroupsExpanded ? "Contraer todos los segmentos" : "Desplegar todos los segmentos"}
-                          title={allGroupsExpanded ? "Contraer todos los segmentos" : "Desplegar todos los segmentos"}
-                          style={{
-                            ...styles.headerToggleAllButton,
-                            borderColor: currentTheme.border,
-                            color: currentTheme.accent,
-                            background: currentTheme.soft,
-                          }}
-                        >
-                          {allGroupsExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                        </button>
-                      </div>
-                    </th>
-                    <th style={{ ...styles.th, width: 94 }}>Correlativo</th>
-                    <th style={{ ...styles.th, width: 88 }}>OT</th>
-                    <th style={{ ...styles.th, width: 88 }}>OC</th>
-                    <th style={{ ...styles.th, width: 72 }}>Fila</th>
-                    <th style={{ ...styles.th, width: 90 }}>Responsable</th>
-                    <th style={{ ...styles.th, width: 110 }}>Validador</th>
-                    <th style={{ ...styles.th, width: 90 }}>Subtotal</th>
-                    <th style={{ ...styles.th, width: 90 }}>IGV</th>
-                    <th style={{ ...styles.th, width: 100 }}>Total</th>
-                    <th style={{ ...styles.th, width: 80 }}>Fecha</th>
-                    <th style={{ ...styles.th, width: 60 }}>Cliente</th>
-                    <th style={{ ...styles.th, width: 20 }}>Proyecto</th>
-                    <th style={{ ...styles.th, width: 60 }}>Site ID</th>
-                    <th style={{ ...styles.th, width: 60 }}>CorSite</th>
-                    <th style={{ ...styles.th, width: 20 }}>Site</th>
-                    <th style={{ ...styles.th, width: 20 }}>Tipo trabajo</th>
-                    <th style={{ ...styles.th, width: 20 }}>Tarea</th>
-                    <th style={{ ...styles.th, width: 80 }}>Moneda</th>
-                    {showEstadoOc ? <th style={{ ...styles.th, width: 118 }}>Estado OC</th> : null}
-                    <th style={{ ...styles.th, width: 60 }}>%</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loadingData ? (
-                    <tr>
-                      <td colSpan={tableColSpan} style={styles.emptyCell}>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                          <span>{loadingStage || "Cargando Órdenes desde Planilla..."}</span>
-                          {loadTrace.length > 0 ? (
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "center" }}>
-                              {loadTrace.map((entry, index) => (
-                                <span
-                                  key={`${entry}-${index}`}
-                                  style={{
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    padding: "3px 8px",
-                                    borderRadius: 999,
-                                    background: "#FFFFFF",
-                                    border: "1px solid #BFDBFE",
-                                    color: "#1E40AF",
-                                    whiteSpace: "nowrap",
-                                    fontSize: 11,
-                                  }}
-                                >
-                                  {entry}
-                                </span>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      </td>
-                    </tr>
-                  ) : filteredRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={tableColSpan} style={styles.emptyCell}>
-                        No se encontraron registros con los filtros seleccionados.
-                      </td>
-                    </tr>
-                  ) : (
-                    groupedRows.map((group) => {
-                      const isCollapsed = collapsedGroups[group.key] ?? false;
-                      const groupRowIds = group.rows.map((row) => row.id);
-                      const groupAllChecked = groupRowIds.length > 0 && groupRowIds.every((id) => checkedIds.includes(id));
-                      const groupSomeChecked = groupRowIds.some((id) => checkedIds.includes(id));
-                      const groupTheme = getStateColor(activeTab === "resumen" ? group.rows[0]?.estado ?? "aprobar" : activeTab);
-                      return (
-                        <React.Fragment key={group.key}>
-                          <tr style={styles.groupRow}>
-                            <td colSpan={tableColSpan} style={styles.groupCell}>
-                              <div style={styles.groupBar}>
-                                <input
-                                  type="checkbox"
-                                  aria-label={`Seleccionar registros del solicitante ${group.label}`}
-                                  checked={groupAllChecked}
-                                  ref={(el) => {
-                                    if (el) {
-                                      el.indeterminate = !groupAllChecked && groupSomeChecked;
-                                    }
-                                  }}
-                                  onChange={(event) => toggleGroupSelection(groupRowIds, event.target.checked)}
-                                  onClick={(event) => event.stopPropagation()}
-                                  style={{ accentColor: groupTheme.accent }}
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setCollapsedGroups((prev) => ({ ...prev, [group.key]: !isCollapsed }))
-                                  }
-                                  style={{
-                                    ...styles.groupToggle,
-                                    borderColor: groupTheme.border,
-                                    background: groupTheme.soft,
-                                    color: groupTheme.accent,
-                                  }}
-                                  aria-label={isCollapsed ? "Expandir grupo" : "Contraer grupo"}
-                                >
-                                  {isCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-                                </button>
-                                <strong style={styles.groupTitle}>Solicitante: {group.label}</strong>
-                                <span style={styles.groupCount}>{group.count}</span>
-                                <div style={styles.groupCurrencyStack}>
-                                  {Object.entries(group.totalsByCurrency).map(([currency, amounts]) => (
-                                    <div key={currency} style={styles.groupCurrencyLine}>
-                                      <span style={styles.groupCurrencyLabel}>{currency}:</span>
-                                      <strong>
-                                        Subtotal {formatCurrency(amounts.subtotal, currency)} | IGV {formatCurrency(amounts.igv, currency)} | Total {formatCurrency(amounts.total, currency)}
-                                      </strong>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
+              <DataGrid
+                dataSource={loadingData ? [] : filteredRows}
+                keyExpr="id"
+                height={640}
+                showBorders
+                rowAlternationEnabled
+                hoverStateEnabled
+                allowColumnResizing
+                columnResizingMode="widget"
+                wordWrapEnabled
+                noDataText={loadingData ? "Cargando Órdenes desde Planilla..." : "No se encontraron registros con los filtros seleccionados."}
+                selectedRowKeys={checkedIds}
+                onSelectionChanged={(event) => {
+                  const nextIds = (event.selectedRowKeys ?? [])
+                    .map((key) => Number(key))
+                    .filter((value) => Number.isFinite(value));
+                  setCheckedIds(nextIds);
 
-                          {!isCollapsed &&
-                            group.rows.map((row) => {
-                              const rowTheme = getStateColor(row.estado);
-                              const isSelected = row.id === selectedId;
-                              const percent = row.subOc && row.subOc > 0 ? Math.round((row.subtotal / row.subOc) * 100) : 0;
-
-                              return (
-                                <tr
-                                  key={row.id}
-                                  onClick={() => setSelectedId(row.id)}
-                                  style={{
-                                    cursor: "pointer",
-                                    background: isSelected ? "#EEF2FF" : "#FFFFFF",
-                                  }}
-                                >
-                                  <td style={styles.td}>
-                                    <input
-                                      type="checkbox"
-                                      checked={checkedIds.includes(row.id)}
-                                      onChange={(event) => {
-                                        event.stopPropagation();
-                                        setCheckedIds((prev) =>
-                                          event.target.checked
-                                            ? Array.from(new Set([...prev, row.id]))
-                                            : prev.filter((id) => id !== row.id)
-                                        );
-                                      }}
-                                      onClick={(event) => event.stopPropagation()}
-                                      style={{ accentColor: rowTheme.accent }}
-                                    />
-                                  </td>
-                                  <td style={styles.td}>{row.correlativo}</td>
-                                  <td style={styles.td}>{row.ot || "-"}</td>
-                                  <td style={styles.td}>{row.idOc || row.documento || "-"}</td>
-                                  <td style={styles.td}>{row.fila || "-"}</td>
-                                  <td style={styles.td}>{row.responsable}</td>
-                                  <td style={styles.td}>{row.validador || "-"}</td>
-                                  <td style={{ ...styles.td, fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
-                                  <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
-                                  <td style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
-                                  <td style={styles.td}>{formatDate(row.fecha)}</td>
-                                  <td style={styles.td}>{row.cliente}</td>
-                                  <td style={styles.td}>{row.proyecto}</td>
-                                  <td style={styles.td}>{row.siteId}</td>
-                                  <td style={styles.td}>{row.corSite || "-"}</td>
-                                  <td style={styles.td}>{row.site}</td>
-                                  <td style={styles.td}>{row.tipoTrabajo}</td>
-                                  <td style={styles.td}>{row.tarea}</td>
-                                  <td style={styles.td}>{row.moneda || "-"}</td>
-                                  {showEstadoOc ? (
-                                    <td style={styles.td}>
-                                      <span
-                                        style={{
-                                          ...styles.stateBadge,
-                                          color: rowTheme.accent,
-                                          background: rowTheme.soft,
-                                          borderColor: rowTheme.border,
-                                        }}
-                                      >
-                                        {getStatusLabel(row.estado)}
-                                      </span>
-                                    </td>
-                                  ) : null}
-                                  <td style={styles.td}>{percent}%</td>
-                                </tr>
-                              );
-                            })}
-                        </React.Fragment>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+                  if (event.currentSelectedRowKeys?.length) {
+                    const nextSelectedId = Number(event.currentSelectedRowKeys[0]);
+                    if (Number.isFinite(nextSelectedId)) {
+                      setSelectedId(nextSelectedId);
+                    }
+                  }
+                }}
+                onRowClick={(event) => {
+                  const nextId = Number(event.data?.id ?? 0);
+                  if (Number.isFinite(nextId) && nextId > 0) {
+                    setSelectedId(nextId);
+                  }
+                }}
+              >
+                <Selection mode="multiple" showCheckBoxesMode="always" selectAllMode="allPages" />
+                <SearchPanel visible highlightCaseSensitive={false} placeholder="Buscar en la grilla" />
+                <FilterRow visible />
+                <HeaderFilter visible />
+                <Sorting mode="multiple" />
+                <Grouping autoExpandAll={false} />
+                <GroupPanel visible />
+                <Scrolling mode="virtual" />
+                <Paging defaultPageSize={20} />
+                <Pager
+                  visible
+                  showInfo
+                  showNavigationButtons
+                  showPageSizeSelector
+                  allowedPageSizes={[10, 20, 50, 100]}
+                />
+                {gridColumns.map((column) => {
+                  const { key, ...columnProps } = column;
+                  return <Column key={key} {...columnProps} />;
+                })}
+              </DataGrid>
             </div>
 
             <div style={styles.gridFooter}>
@@ -3053,13 +2925,36 @@ export default function PagosV1Page() {
                           <div style={styles.ocProgressValue}>{formatPercent(consumoOtPercent)}</div>
                         </div>
                         <div style={styles.progressTrack}>
-                          <div
-                            style={{
-                              ...styles.progressFill,
-                              width: `${consumoOtPercent}%`,
-                              background: getConsumptionBarColor(consumoOtPercent),
-                            }}
-                          />
+                          {montoPlanillaPagadoOt > 0 ? (
+                            <div style={styles.ocProgressSegments}>
+                              <div
+                                style={{
+                                  ...styles.ocProgressSegment,
+                                  width: `${Math.min(pagadoOtPercent, consumoOtPercent)}%`,
+                                  background: "#2563EB",
+                                }}
+                                title={`Pagado: ${formatCurrency(montoPlanillaPagadoOt, detalleOcActiva.moneda)}`}
+                              />
+                              <div
+                                style={{
+                                  ...styles.ocProgressSegment,
+                                  width: `${Math.max(consumoOtPercent - Math.min(pagadoOtPercent, consumoOtPercent), 0)}%`,
+                                  background: consumoOtColor,
+                                }}
+                                title={`Avance restante: ${formatPercent(
+                                  Math.max(consumoOtPercent - Math.min(pagadoOtPercent, consumoOtPercent), 0)
+                                )}`}
+                              />
+                            </div>
+                          ) : (
+                            <div
+                              style={{
+                                ...styles.progressFill,
+                                width: `${consumoOtPercent}%`,
+                                background: consumoOtColor,
+                              }}
+                            />
+                          )}
                         </div>
                           <div style={styles.ocProgressFooter}>
                           <div style={styles.ocProgressFooterLine}>
@@ -3207,60 +3102,11 @@ export default function PagosV1Page() {
                     ) : null}
 
                     <div style={styles.gridScrollable}>
-                      <table style={{ ...styles.table, minWidth: 1450, width: "max-content" }}>
-                        <thead>
-                          <tr>
-                            <th style={{ ...styles.th, width: 94 }}>Correlativo</th>
-                            <th style={{ ...styles.th, width: 88 }}>OT</th>
-                            <th style={{ ...styles.th, width: 88 }}>OC</th>
-                            <th style={{ ...styles.th, width: 72 }}>Fila</th>
-                            <th style={{ ...styles.th, width: 90 }}>Responsable</th>
-                            <th style={{ ...styles.th, width: 110 }}>Validador</th>
-                            <th style={{ ...styles.th, width: 90 }}>Subtotal</th>
-                            <th style={{ ...styles.th, width: 90 }}>IGV</th>
-                            <th style={{ ...styles.th, width: 100 }}>Total</th>
-                            <th style={{ ...styles.th, width: 80 }}>Fecha</th>
-                            <th style={{ ...styles.th, width: 60 }}>Cliente</th>
-                            <th style={{ ...styles.th, width: 90 }}>Proyecto</th>
-                            <th style={{ ...styles.th, width: 60 }}>Site ID</th>
-                            <th style={{ ...styles.th, width: 60 }}>CorSite</th>
-                            <th style={{ ...styles.th, width: 90 }}>Site</th>
-                            <th style={{ ...styles.th, width: 90 }}>Tipo trabajo</th>
-                            <th style={{ ...styles.th, width: 90 }}>Tarea</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {historialRows.length === 0 ? (
-                            <tr>
-                              <td colSpan={17} style={styles.emptyCell}>
-                                No hay registros para la OT seleccionada.
-                              </td>
-                            </tr>
-                          ) : (
-                            historialRows.map((row) => (
-                              <tr key={`hist-${row.id}`}>
-                                <td style={styles.td}>{row.correlativo}</td>
-                                <td style={styles.td}>{row.ot || '-'}</td>
-                                <td style={styles.td}>{row.idOc || row.documento || '-'}</td>
-                                <td style={styles.td}>{row.fila || '-'}</td>
-                                <td style={styles.td}>{row.responsable}</td>
-                                <td style={styles.td}>{row.validador || '-'}</td>
-                                <td style={{ ...styles.td, fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
-                                <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
-                                <td style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
-                                <td style={styles.td}>{formatDate(row.fecha)}</td>
-                                <td style={styles.td}>{row.cliente}</td>
-                                <td style={styles.td}>{row.proyecto}</td>
-                                <td style={styles.td}>{row.siteId}</td>
-                                <td style={styles.td}>{row.corSite || '-'}</td>
-                                <td style={styles.td}>{row.site}</td>
-                                <td style={styles.td}>{row.tipoTrabajo}</td>
-                                <td style={styles.td}>{row.tarea}</td>
-                              </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
+                      <HistoryGrid
+                        rows={historialRows}
+                        emptyText="No hay registros para la OT seleccionada."
+                        height={420}
+                      />
                     </div>
                   </div>
                 ) : null}
@@ -3329,60 +3175,11 @@ export default function PagosV1Page() {
                     ) : null}
 
                     <div style={styles.gridScrollable}>
-                      <table style={{ ...styles.table, minWidth: 1450, width: "max-content" }}>
-                        <thead>
-                          <tr>
-                            <th style={{ ...styles.th, width: 94 }}>Correlativo</th>
-                            <th style={{ ...styles.th, width: 88 }}>OT</th>
-                            <th style={{ ...styles.th, width: 88 }}>OC</th>
-                            <th style={{ ...styles.th, width: 72 }}>Fila</th>
-                            <th style={{ ...styles.th, width: 90 }}>Responsable</th>
-                            <th style={{ ...styles.th, width: 110 }}>Validador</th>
-                            <th style={{ ...styles.th, width: 90 }}>Subtotal</th>
-                            <th style={{ ...styles.th, width: 90 }}>IGV</th>
-                            <th style={{ ...styles.th, width: 100 }}>Total</th>
-                            <th style={{ ...styles.th, width: 80 }}>Fecha</th>
-                            <th style={{ ...styles.th, width: 60 }}>Cliente</th>
-                            <th style={{ ...styles.th, width: 90 }}>Proyecto</th>
-                            <th style={{ ...styles.th, width: 60 }}>Site ID</th>
-                            <th style={{ ...styles.th, width: 60 }}>CorSite</th>
-                            <th style={{ ...styles.th, width: 90 }}>Site</th>
-                            <th style={{ ...styles.th, width: 90 }}>Tipo trabajo</th>
-                            <th style={{ ...styles.th, width: 90 }}>Tarea</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {historialOcRows.length === 0 ? (
-                            <tr>
-                              <td colSpan={17} style={styles.emptyCell}>
-                                No hay registros para la OC seleccionada.
-                              </td>
-                            </tr>
-                          ) : (
-                            historialOcRows.map((row) => (
-                              <tr key={`hist-oc-${row.id}`}>
-                                <td style={styles.td}>{row.correlativo}</td>
-                                <td style={styles.td}>{row.ot || '-'}</td>
-                                <td style={styles.td}>{row.idOc || row.documento || '-'}</td>
-                                <td style={styles.td}>{row.fila || '-'}</td>
-                                <td style={styles.td}>{row.responsable}</td>
-                                <td style={styles.td}>{row.validador || '-'}</td>
-                                <td style={{ ...styles.td, fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
-                                <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
-                                <td style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
-                                <td style={styles.td}>{formatDate(row.fecha)}</td>
-                                <td style={styles.td}>{row.cliente}</td>
-                                <td style={styles.td}>{row.proyecto}</td>
-                                <td style={styles.td}>{row.siteId}</td>
-                                <td style={styles.td}>{row.corSite || '-'}</td>
-                                <td style={styles.td}>{row.site}</td>
-                                <td style={styles.td}>{row.tipoTrabajo}</td>
-                                <td style={styles.td}>{row.tarea}</td>
-                              </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
+                      <HistoryGrid
+                        rows={historialOcRows}
+                        emptyText="No hay registros para la OC seleccionada."
+                        height={420}
+                      />
                     </div>
                   </div>
                 ) : null}
@@ -3444,60 +3241,11 @@ export default function PagosV1Page() {
               </div>
               <div style={styles.popupBody}>
                 <div style={styles.gridScrollable}>
-                  <table style={{ ...styles.table, minWidth: 1450, width: "max-content" }}>
-                    <thead>
-                      <tr>
-                        <th style={{ ...styles.th, width: 94 }}>Correlativo</th>
-                        <th style={{ ...styles.th, width: 88 }}>OT</th>
-                        <th style={{ ...styles.th, width: 88 }}>OC</th>
-                        <th style={{ ...styles.th, width: 72 }}>Fila</th>
-                        <th style={{ ...styles.th, width: 90 }}>Responsable</th>
-                        <th style={{ ...styles.th, width: 110 }}>Validador</th>
-                        <th style={{ ...styles.th, width: 90 }}>Subtotal</th>
-                        <th style={{ ...styles.th, width: 90 }}>IGV</th>
-                        <th style={{ ...styles.th, width: 100 }}>Total</th>
-                        <th style={{ ...styles.th, width: 80 }}>Fecha</th>
-                        <th style={{ ...styles.th, width: 60 }}>Cliente</th>
-                        <th style={{ ...styles.th, width: 90 }}>Proyecto</th>
-                        <th style={{ ...styles.th, width: 60 }}>Site ID</th>
-                        <th style={{ ...styles.th, width: 60 }}>CorSite</th>
-                        <th style={{ ...styles.th, width: 90 }}>Site</th>
-                        <th style={{ ...styles.th, width: 90 }}>Tipo trabajo</th>
-                        <th style={{ ...styles.th, width: 90 }}>Tarea</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {historialRows.length === 0 ? (
-                        <tr>
-                          <td colSpan={17} style={styles.emptyCell}>
-                            No hay registros para la OT seleccionada.
-                          </td>
-                        </tr>
-                      ) : (
-                        historialRows.map((row) => (
-                          <tr key={`popup-hist-${row.id}`}>
-                            <td style={styles.td}>{row.correlativo}</td>
-                            <td style={styles.td}>{row.ot || '-'}</td>
-                            <td style={styles.td}>{row.idOc || row.documento || '-'}</td>
-                            <td style={styles.td}>{row.fila || '-'}</td>
-                            <td style={styles.td}>{row.responsable}</td>
-                            <td style={styles.td}>{row.validador || '-'}</td>
-                            <td style={{ ...styles.td, fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
-                            <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
-                            <td style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
-                            <td style={styles.td}>{formatDate(row.fecha)}</td>
-                            <td style={styles.td}>{row.cliente}</td>
-                            <td style={styles.td}>{row.proyecto}</td>
-                            <td style={styles.td}>{row.siteId}</td>
-                            <td style={styles.td}>{row.corSite || '-'}</td>
-                            <td style={styles.td}>{row.site}</td>
-                            <td style={styles.td}>{row.tipoTrabajo}</td>
-                            <td style={styles.td}>{row.tarea}</td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
+                  <HistoryGrid
+                    rows={historialRows}
+                    emptyText="No hay registros para la OT seleccionada."
+                    height={520}
+                  />
                 </div>
               </div>
             </div>
@@ -3767,60 +3515,11 @@ export default function PagosV1Page() {
               </div>
               <div style={styles.popupBody}>
                 <div style={styles.gridScrollable}>
-                  <table style={{ ...styles.table, minWidth: 1450, width: "max-content" }}>
-                    <thead>
-                      <tr>
-                        <th style={{ ...styles.th, width: 94 }}>Correlativo</th>
-                        <th style={{ ...styles.th, width: 88 }}>OT</th>
-                        <th style={{ ...styles.th, width: 88 }}>OC</th>
-                        <th style={{ ...styles.th, width: 72 }}>Fila</th>
-                        <th style={{ ...styles.th, width: 90 }}>Responsable</th>
-                        <th style={{ ...styles.th, width: 110 }}>Validador</th>
-                        <th style={{ ...styles.th, width: 90 }}>Subtotal</th>
-                        <th style={{ ...styles.th, width: 90 }}>IGV</th>
-                        <th style={{ ...styles.th, width: 100 }}>Total</th>
-                        <th style={{ ...styles.th, width: 80 }}>Fecha</th>
-                        <th style={{ ...styles.th, width: 60 }}>Cliente</th>
-                        <th style={{ ...styles.th, width: 90 }}>Proyecto</th>
-                        <th style={{ ...styles.th, width: 60 }}>Site ID</th>
-                        <th style={{ ...styles.th, width: 60 }}>CorSite</th>
-                        <th style={{ ...styles.th, width: 90 }}>Site</th>
-                        <th style={{ ...styles.th, width: 90 }}>Tipo trabajo</th>
-                        <th style={{ ...styles.th, width: 90 }}>Tarea</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {historialOcRows.length === 0 ? (
-                        <tr>
-                          <td colSpan={17} style={styles.emptyCell}>
-                            No hay registros para la OC seleccionada.
-                          </td>
-                        </tr>
-                      ) : (
-                        historialOcRows.map((row) => (
-                          <tr key={`popup-hist-oc-${row.id}`}>
-                            <td style={styles.td}>{row.correlativo}</td>
-                            <td style={styles.td}>{row.ot || '-'}</td>
-                            <td style={styles.td}>{row.idOc || row.documento || '-'}</td>
-                            <td style={styles.td}>{row.fila || '-'}</td>
-                            <td style={styles.td}>{row.responsable}</td>
-                            <td style={styles.td}>{row.validador || '-'}</td>
-                            <td style={{ ...styles.td, fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
-                            <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
-                            <td style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
-                            <td style={styles.td}>{formatDate(row.fecha)}</td>
-                            <td style={styles.td}>{row.cliente}</td>
-                            <td style={styles.td}>{row.proyecto}</td>
-                            <td style={styles.td}>{row.siteId}</td>
-                            <td style={styles.td}>{row.corSite || '-'}</td>
-                            <td style={styles.td}>{row.site}</td>
-                            <td style={styles.td}>{row.tipoTrabajo}</td>
-                            <td style={styles.td}>{row.tarea}</td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
+                  <HistoryGrid
+                    rows={historialOcRows}
+                    emptyText="No hay registros para la OC seleccionada."
+                    height={520}
+                  />
                 </div>
               </div>
             </div>
@@ -3920,6 +3619,84 @@ function FilterField({
         )}
       </div>
     </label>
+  );
+}
+
+function HistoryGrid({
+  rows,
+  emptyText,
+  height,
+}: {
+  rows: PagoRow[];
+  emptyText: string;
+  height: number;
+}) {
+  return (
+    <DataGrid
+      dataSource={rows}
+      keyExpr="id"
+      height={height}
+      showBorders
+      rowAlternationEnabled
+      hoverStateEnabled
+      allowColumnResizing
+      columnResizingMode="widget"
+      wordWrapEnabled
+      noDataText={emptyText}
+    >
+      <Sorting mode="multiple" />
+      <FilterRow visible />
+      <HeaderFilter visible />
+      <SearchPanel visible highlightCaseSensitive={false} placeholder="Buscar en historial" />
+      <Scrolling mode="standard" />
+      <Paging defaultPageSize={20} />
+      <Pager visible showInfo showNavigationButtons showPageSizeSelector allowedPageSizes={[10, 20, 50]} />
+      <Column dataField="correlativo" caption="Correlativo" width={94} />
+      <Column dataField="ot" caption="OT" width={88} />
+      <Column
+        caption="OC"
+        width={88}
+        cellRender={({ data }: { data: PagoRow }) => <span>{data.idOc || data.documento || "-"}</span>}
+      />
+      <Column dataField="fila" caption="Fila" width={72} />
+      <Column dataField="responsable" caption="Responsable" width={90} />
+      <Column dataField="validador" caption="Validador" width={110} />
+      <Column
+        caption="Subtotal"
+        width={110}
+        cellRender={({ data }: { data: PagoRow }) => (
+          <span style={{ display: "block", textAlign: "right", fontWeight: 700 }}>
+            {formatCurrency(data.subtotal, data.moneda)}
+          </span>
+        )}
+      />
+      <Column
+        caption="IGV"
+        width={100}
+        cellRender={({ data }: { data: PagoRow }) => (
+          <span style={{ display: "block", textAlign: "right" }}>{formatCurrency(data.igv, data.moneda)}</span>
+        )}
+      />
+      <Column
+        caption="Total"
+        width={110}
+        cellRender={({ data }: { data: PagoRow }) => (
+          <strong style={{ display: "block", textAlign: "right" }}>{formatCurrency(data.total, data.moneda)}</strong>
+        )}
+      />
+      <Column
+        caption="Fecha"
+        width={90}
+        cellRender={({ data }: { data: PagoRow }) => <span>{formatDate(data.fecha)}</span>}
+      />
+      <Column dataField="cliente" caption="Cliente" width={80} />
+      <Column dataField="proyecto" caption="Proyecto" width={120} />
+      <Column dataField="siteId" caption="Site ID" width={80} />
+      <Column dataField="corSite" caption="CorSite" width={80} />
+      <Column dataField="site" caption="Site" width={120} />
+      <Column dataField="tipoTrabajo" caption="Tipo trabajo" width={120} />
+      <Column dataField="tarea" caption="Tarea" width={120} />
+    </DataGrid>
   );
 }
 

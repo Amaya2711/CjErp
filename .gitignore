@@ -1,6 +1,7 @@
 # Build artifacts
 bin/
 obj/
+.codexbuild/
 
 # Visual Studio user/machine-specific files
 .vs/

@@ -513,4 +513,45 @@ public sealed class SqlMonitorService : ISqlMonitorService
             Observaciones = observaciones
         };
     }
+
+    public async Task CancelarSesionAsync(int sessionId, CancellationToken cancellationToken = default)
+    {
+        if (sessionId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(sessionId), "El SessionId debe ser mayor que cero.");
+        }
+
+        await using var connection = new SqlConnection(_monitorConnectionString);
+
+        var exists = await connection.ExecuteScalarAsync<int>(
+            _sqlCommandFactory.Create(
+                """
+                SELECT CASE
+                    WHEN EXISTS (
+                        SELECT 1
+                        FROM sys.dm_exec_sessions
+                        WHERE session_id = @SessionId
+                          AND session_id <> @@SPID
+                    )
+                    THEN 1
+                    ELSE 0
+                END
+                """,
+                new { SessionId = sessionId },
+                CommandType.Text,
+                cancellationToken,
+                commandTimeout: 30));
+
+        if (exists == 0)
+        {
+            throw new InvalidOperationException($"La sesion {sessionId} no existe o ya finalizo.");
+        }
+
+        await connection.ExecuteAsync(
+            _sqlCommandFactory.Create(
+                $"KILL {sessionId}",
+                commandType: CommandType.Text,
+                cancellationToken: cancellationToken,
+                commandTimeout: 30));
+    }
 }

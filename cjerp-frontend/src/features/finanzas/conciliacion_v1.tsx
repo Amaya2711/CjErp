@@ -914,7 +914,7 @@ function buildPreviewTextFromRow(values: unknown[] | undefined) {
 function buildOrderedMovementRow(row: Record<string, unknown>) {
   return MOVIMIENTOS_ORDENADOS_COLUMNS.map((column) => {
     if (column === "NroOperacion") {
-      return row.NroOperacion ?? row.nroOperacion ?? row.numeroOperacion ?? row.NumeroOperacion ?? row["NÂº operaciÃ³n"] ?? row["OperaciÃ³n - NÃºmero"] ?? "";
+      return row.NroOperacion ?? row.nroOperacion ?? row.numeroOperacion ?? row.NumeroOperacion ?? row["Nº operación"] ?? row["Operación - NÃºmero"] ?? "";
     }
 
     return row[column] ?? "";
@@ -1201,7 +1201,7 @@ function buildInsertBlockedMessage(analysis: ConciliacionBcpAnalizarResponse): s
 
   if (filesInReview.length > 0) {
     const names = filesInReview.map((item) => item.nombreArchivo).join(", ");
-    return `Carga no habilitada: ${filesInReview.length} archivo(s) requieren revisiÃ³n antes de insertar (${names}).`;
+    return `Carga no habilitada: ${filesInReview.length} archivo(s) requieren revisión antes de insertar (${names}).`;
   }
 
   return "Carga no habilitada: el anÃ¡lisis actual no cumple las condiciones para insertar.";
@@ -3439,7 +3439,7 @@ export default function ConciliacionBcpPage() {
             ? apiResponse
             : buildExportResponseFromAnalysisData(analysisToExport);
       } catch (exportError) {
-        console.warn("[ConciliacionBcp] Export remoto fallÃ³, se usarÃ¡ el respaldo local.", exportError);
+        console.warn("[ConciliacionBcp] Export remoto falló, se usarÃ¡ el respaldo local.", exportError);
         exportResponse = buildExportResponseFromAnalysisData(analysisToExport);
       }
 

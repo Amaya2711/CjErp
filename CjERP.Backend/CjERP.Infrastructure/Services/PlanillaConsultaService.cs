@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Globalization;
 using System.Linq;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Text.RegularExpressions;
@@ -11,6 +12,7 @@ using CjERP.Application.Interfaces.Services;
 using CjERP.Infrastructure.Persistence.Sql;
 using Dapper;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Logging;
 
 namespace CjERP.Infrastructure.Services
 {
@@ -28,10 +30,14 @@ namespace CjERP.Infrastructure.Services
         private const string QueryClientesActivos = "clientes-activos";
         private const string QueryProyectosActivos = "proyectos-activos";
         private readonly ISqlCommandFactory _sqlCommandFactory;
+        private readonly ILogger<PlanillaConsultaService> _logger;
 
-        public PlanillaConsultaService(ISqlCommandFactory sqlCommandFactory)
+        public PlanillaConsultaService(
+            ISqlCommandFactory sqlCommandFactory,
+            ILogger<PlanillaConsultaService> logger)
         {
             _sqlCommandFactory = sqlCommandFactory;
+            _logger = logger;
         }
 
         public async Task<PlanillaConsultaEstadosResponseDto> ConsultarEstadosAsync(
@@ -179,6 +185,7 @@ namespace CjERP.Infrastructure.Services
             var parametrosFiltrados = FilterParametersForStoredProcedure(storedProcedureName, parametrosList);
             var dynamicParameters = BuildParameters(parametrosFiltrados);
 
+            var queryStart = Stopwatch.StartNew();
             var rows = (await connection.QueryAsync(
                 _sqlCommandFactory.Create(
                     storedProcedureName,
@@ -188,6 +195,16 @@ namespace CjERP.Infrastructure.Services
                     commandTimeout: 120)))
                 .Select(MapRow)
                 .ToList();
+            queryStart.Stop();
+
+            _logger.LogInformation(
+                "[PlanillaConsulta] storedProcedure={StoredProcedure} queryMs={QueryMs} rows={Rows} parametros={Parametros}",
+                storedProcedureName,
+                queryStart.Elapsed.TotalMilliseconds,
+                rows.Count,
+                string.Join(
+                    ", ",
+                    parametrosFiltrados.Select(p => $"{p.Nombre}={p.Valor} ({p.Tipo})")));
 
             if (string.Equals(storedProcedureName, StoredProcedurePagadosDashboard, StringComparison.OrdinalIgnoreCase))
             {
@@ -218,10 +235,22 @@ namespace CjERP.Infrastructure.Services
                 .Take(normalizedPageSize)
                 .ToList();
 
+            var enrichElapsedMs = 0d;
             if (!limitExceeded)
             {
+                var enrichStart = Stopwatch.StartNew();
                 await EnrichRowsWithFacturaDataAsync(connection, pagedRows, cancellationToken);
+                enrichStart.Stop();
+                enrichElapsedMs = enrichStart.Elapsed.TotalMilliseconds;
             }
+
+            _logger.LogInformation(
+                "[PlanillaConsulta] storedProcedure={StoredProcedure} pagedRows={PagedRows} enrichMs={EnrichMs} totalRows={TotalRows} limitExceeded={LimitExceeded}",
+                storedProcedureName,
+                pagedRows.Count,
+                enrichElapsedMs,
+                totalRows,
+                limitExceeded);
 
             var columns = pagedRows
                 .SelectMany(row => row.Keys)
@@ -698,6 +727,11 @@ WHERE Correlativo IN @Correlativos";
                 "IdValidador",
                 "IdBanco",
                 "Estados",
+                "OT",
+                "IdOc",
+                "Fila",
+                "IdSite",
+                "CorSite",
                 "FechaInicio",
                 "FechaFin",
                 "FechaDeposito",

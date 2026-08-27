@@ -1,6 +1,9 @@
 ﻿import { Fragment, useEffect, useMemo, useState, type CSSProperties } from "react";
-import { Download, FileDown } from "lucide-react";
+import { Download, FileDown, X } from "lucide-react";
+import { useRef, type PointerEvent as ReactPointerEvent } from "react";
 import {
+  crearPagoArrendamientos,
+  listarArrendadoresArrendamientos,
   listarInquilinosArrendamientos,
   listarInmueblesArrendamientos,
   listarPagosDshResumenAnualArrendamientos,
@@ -100,6 +103,20 @@ type PendingDebtByTenantYear = {
   debe: number;
 };
 
+type QuickPagoForm = {
+  numeroOperacion: string;
+  fechaOperacion: string;
+  fechaContabilizacion: string;
+  idInquilino: string;
+  idArrendador: string;
+  estadoValidacion: string;
+  tipoPago: string;
+  conceptoPago: string;
+  monedaOperacion: string;
+  importeTransferido: string;
+  importeMaximo: string;
+};
+
 const YEAR_OPTIONS = Array.from({ length: 11 }, (_, index) => 2025 + index);
 const YEAR_FILTER_A_FECHA = "__A_FECHA__";
 
@@ -109,6 +126,7 @@ export default function ArrendamientosDshPagosPage() {
     idInquilino: "",
     anio: [YEAR_FILTER_A_FECHA],
   });
+  const [arrendadores, setArrendadores] = useState<LookupRow[]>([]);
   const [inmuebles, setInmuebles] = useState<LookupRow[]>([]);
   const [inquilinos, setInquilinos] = useState<LookupRow[]>([]);
   const [legendInquilinos, setLegendInquilinos] = useState<ArrendamientosDshPagosInquilino[]>([]);
@@ -121,13 +139,26 @@ export default function ArrendamientosDshPagosPage() {
   const [pendingTenantFilter, setPendingTenantFilter] = useState<string>("");
   const [isYearFilterOpen, setIsYearFilterOpen] = useState(false);
   const [yearFilterDraft, setYearFilterDraft] = useState<string[]>(filters.anio);
+  const [quickPagoOpen, setQuickPagoOpen] = useState(false);
+  const [quickPagoSaving, setQuickPagoSaving] = useState(false);
+  const [quickPagoError, setQuickPagoError] = useState<string | null>(null);
+  const [quickPagoSuccess, setQuickPagoSuccess] = useState<string | null>(null);
+  const [quickPagoForm, setQuickPagoForm] = useState<QuickPagoForm>(() => createQuickPagoForm());
+  const [quickPagoPosition, setQuickPagoPosition] = useState({ x: 0, y: 0 });
+  const quickPagoDragRef = useRef<{
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
 
   useEffect(() => {
     let alive = true;
 
     const cargar = async () => {
       try {
-        const [inmueblesData, inquilinosData, dshPagosData] = await Promise.all([
+        const [arrendadoresData, inmueblesData, inquilinosData, dshPagosData] = await Promise.all([
+          listarArrendadoresArrendamientos(),
           listarInmueblesArrendamientos(),
           listarInquilinosArrendamientos(),
           obtenerDshPagosArrendamientos({}),
@@ -137,6 +168,7 @@ export default function ArrendamientosDshPagosPage() {
           return;
         }
 
+        setArrendadores(arrendadoresData);
         setInmuebles(inmueblesData);
         setInquilinos(inquilinosData);
         setLegendInquilinos(dshPagosData.inquilinos ?? []);
@@ -147,6 +179,7 @@ export default function ArrendamientosDshPagosPage() {
           return;
         }
 
+        setArrendadores([]);
         setInmuebles([]);
         setInquilinos([]);
         setLegendInquilinos([]);
@@ -170,6 +203,38 @@ export default function ArrendamientosDshPagosPage() {
     // Carga inicial del store anual con los filtros vacÃ­os.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!quickPagoOpen) {
+      quickPagoDragRef.current = null;
+      setQuickPagoPosition({ x: 0, y: 0 });
+      return;
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const drag = quickPagoDragRef.current;
+      if (!drag) {
+        return;
+      }
+
+      setQuickPagoPosition({
+        x: drag.originX + (event.clientX - drag.startX),
+        y: drag.originY + (event.clientY - drag.startY),
+      });
+    };
+
+    const handlePointerUp = () => {
+      quickPagoDragRef.current = null;
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [quickPagoOpen]);
 
   const consultar = async (currentFilters: FilterState) => {
     try {
@@ -366,6 +431,73 @@ export default function ArrendamientosDshPagosPage() {
 
   const clearYearFilter = () => {
     setYearFilterDraft([]);
+  };
+
+  const abrirNuevoPago = (inquilino?: string, servicio?: string, debeMonto = 0, moneda = "PEN", periodoContabilizacion = "") => {
+    const inquilinoComercial = resolveCommercialTenantLabel(inquilino ?? "", legendInquilinos);
+    const inquilinoId = resolveQuickPagoInquilinoId(inquilino ?? "", inquilinos, legendInquilinos);
+    setQuickPagoForm(
+      createQuickPagoForm(
+        inquilinoComercial,
+        inquilinos,
+        "Cj Telecom",
+        arrendadores,
+        servicio ?? "",
+        debeMonto,
+        moneda,
+        periodoContabilizacion,
+        inquilinoId
+      )
+    );
+    setQuickPagoError(null);
+    setQuickPagoSuccess(null);
+    setQuickPagoSaving(false);
+    setQuickPagoPosition({ x: 0, y: 0 });
+    setQuickPagoOpen(true);
+  };
+
+  const cerrarQuickPago = () => {
+    setQuickPagoOpen(false);
+    setQuickPagoError(null);
+    setQuickPagoSuccess(null);
+  };
+
+  const startQuickPagoDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    quickPagoDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: quickPagoPosition.x,
+      originY: quickPagoPosition.y,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  };
+
+  const guardarQuickPago = async () => {
+    const validationError = validateQuickPagoForm(quickPagoForm);
+    if (validationError) {
+      setQuickPagoError(validationError);
+      return;
+    }
+
+    try {
+      setQuickPagoSaving(true);
+      setQuickPagoError(null);
+
+      const result = await crearPagoArrendamientos(buildQuickPagoPayload(quickPagoForm));
+      setQuickPagoOpen(false);
+    setQuickPagoForm(createQuickPagoForm());
+      setQuickPagoSuccess(result?.message || "Pago creado correctamente.");
+      await consultar(filters);
+    } catch (saveError) {
+      setQuickPagoError(saveError instanceof Error ? saveError.message : "No se pudo registrar el pago.");
+    } finally {
+      setQuickPagoSaving(false);
+    }
   };
 
   const toggleYearFilterValue = (year: string) => {
@@ -630,6 +762,7 @@ export default function ArrendamientosDshPagosPage() {
       <div style={styles.backgroundGlowB} />
 
       <div style={styles.shell}>
+        {quickPagoSuccess ? <div style={styles.quickPagoSuccessBanner}>{quickPagoSuccess}</div> : null}
         <header style={styles.hero}>
           <div style={styles.heroTitleBlock}>
             <p style={styles.eyebrow}>Arrendamientos</p>
@@ -1303,7 +1436,27 @@ export default function ArrendamientosDshPagosPage() {
                                                 key={`pendiente-${servicioBlock.servicio}-${metric}-${mes}`}
                                                 style={metric === "Debe" ? styles.matrixDebeValueCell : styles.matrixValueCell}
                                               >
-                                                {formatMoney(value, servicioBlock.moneda)}
+                                                {metric === "Debe" ? (
+                                                  <div style={styles.matrixDebeCellContent}>
+                                                    <span>{formatMoney(value, servicioBlock.moneda)}</span>
+                                                      <button
+                                                      type="button"
+                                                      onClick={() =>
+                                                        abrirNuevoPago(group.inquilino, servicioBlock.servicio, Number(value ?? 0), servicioBlock.moneda, mes)
+                                                      }
+                                                      style={{
+                                                        ...styles.matrixPayButton,
+                                                        ...(Number(value ?? 0) <= 0 ? styles.matrixPayButtonDisabled : {}),
+                                                      }}
+                                                      disabled={Number(value ?? 0) <= 0}
+                                                      title={Number(value ?? 0) > 0 ? "Registrar pago" : "No hay deuda para pagar"}
+                                                    >
+                                                      Pagar
+                                                    </button>
+                                                  </div>
+                                                ) : (
+                                                  formatMoney(value, servicioBlock.moneda)
+                                                )}
                                               </td>
                                             );
                                           })}
@@ -1343,8 +1496,361 @@ export default function ArrendamientosDshPagosPage() {
           </div>
         </section>
       </div>
+      {quickPagoOpen ? (
+        <div style={styles.quickPagoOverlay} role="dialog" aria-modal="true" aria-labelledby="quick-pago-title">
+          <div
+            style={{
+              ...styles.quickPagoDialog,
+              transform: `translate(calc(-50% + ${quickPagoPosition.x}px), calc(-50% + ${quickPagoPosition.y}px))`,
+            }}
+          >
+            <div style={styles.quickPagoHeader}>
+              <div onPointerDown={startQuickPagoDrag} style={styles.quickPagoDragHandle}>
+                <h2 id="quick-pago-title" style={styles.quickPagoTitle}>
+                  Nuevo pago
+                </h2>
+                <p style={styles.quickPagoSubtitle}>Solo identificación. Completa y guarda el pago desde esta misma pantalla.</p>
+              </div>
+              <button type="button" onClick={cerrarQuickPago} style={styles.quickPagoCloseButton} aria-label="Cerrar">
+                <X size={18} />
+              </button>
+            </div>
+
+            {quickPagoError ? <div style={styles.quickPagoError}>{quickPagoError}</div> : null}
+
+            <div style={styles.quickPagoGrid}>
+              <label style={styles.quickPagoField}>
+                <span style={styles.quickPagoFieldLabel}>Numero operacion</span>
+                <input
+                  value={quickPagoForm.numeroOperacion}
+                  readOnly
+                  disabled
+                  style={styles.quickPagoInputReadonly}
+                />
+              </label>
+              <label style={styles.quickPagoField}>
+                <span style={styles.quickPagoFieldLabel}>Estado validacion</span>
+                <input value={quickPagoForm.estadoValidacion} readOnly style={styles.quickPagoInputReadonly} />
+              </label>
+              <label style={styles.quickPagoField}>
+                <span style={styles.quickPagoFieldLabel}>Arrendador</span>
+                <select
+                  value={quickPagoForm.idArrendador}
+                  onChange={(event) => setQuickPagoForm((current) => ({ ...current, idArrendador: event.target.value }))}
+                  style={styles.quickPagoInputReadonly}
+                  disabled
+                >
+                  <option value="">Seleccione...</option>
+                  {arrendadores.map((item) => (
+                    <option key={String(item.id)} value={String(item.id ?? "")}>
+                      {item.nombre ?? item.codigo ?? `Arrendador ${item.id ?? ""}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={styles.quickPagoField}>
+                <span style={styles.quickPagoFieldLabel}>Inquilino</span>
+                <select
+                  value={quickPagoForm.idInquilino}
+                  onChange={(event) => setQuickPagoForm((current) => ({ ...current, idInquilino: event.target.value }))}
+                  style={styles.quickPagoInput}
+                >
+                  <option value="">Seleccione...</option>
+                  {inquilinos.map((item) => (
+                    <option key={String(item.id)} value={String(item.id ?? "")}>
+                      {buildInquilinoPopupLabel(item, legendInquilinos)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={styles.quickPagoField}>
+                <span style={styles.quickPagoFieldLabel}>Tipo de pago</span>
+                <select
+                  value={quickPagoForm.tipoPago}
+                  onChange={(event) => setQuickPagoForm((current) => ({ ...current, tipoPago: event.target.value }))}
+                  style={styles.quickPagoInput}
+                >
+                  <option value="COMPLETO">COMPLETO</option>
+                  <option value="PARCIAL">PARCIAL</option>
+                  <option value="EXONERADO">EXONERADO</option>
+                </select>
+              </label>
+              <label style={styles.quickPagoField}>
+                <span style={styles.quickPagoFieldLabel}>Concepto del pago</span>
+                <select
+                  value={quickPagoForm.conceptoPago}
+                  onChange={(event) => setQuickPagoForm((current) => ({ ...current, conceptoPago: event.target.value }))}
+                  style={styles.quickPagoInputReadonly}
+                  disabled
+                >
+                  <option value="ALQUILER">ALQUILER</option>
+                  <option value="MANTENIMIENTO">MANTENIMIENTO</option>
+                  <option value="COCHERA">COCHERA</option>
+                  <option value="OTRO">OTRO</option>
+                </select>
+              </label>
+              <label style={styles.quickPagoField}>
+                <span style={styles.quickPagoFieldLabel}>Fecha operacion</span>
+                <input
+                  type="date"
+                  value={quickPagoForm.fechaOperacion}
+                  onChange={(event) => setQuickPagoForm((current) => ({ ...current, fechaOperacion: event.target.value }))}
+                  style={styles.quickPagoInput}
+                />
+              </label>
+              <label style={styles.quickPagoField}>
+                <span style={styles.quickPagoFieldLabel}>Fecha contabilizacion</span>
+                <input
+                  type="date"
+                  value={quickPagoForm.fechaContabilizacion}
+                  readOnly
+                  disabled
+                  style={styles.quickPagoInputReadonly}
+                />
+              </label>
+              <label style={styles.quickPagoField}>
+                <span style={styles.quickPagoFieldLabel}>Moneda operacion</span>
+                <input value={quickPagoForm.monedaOperacion} readOnly style={styles.quickPagoInputReadonly} />
+              </label>
+              <label style={styles.quickPagoField}>
+                <span style={styles.quickPagoFieldLabel}>Importe transferido</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max={quickPagoForm.importeMaximo || undefined}
+                  value={quickPagoForm.importeTransferido}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setQuickPagoForm((current) => ({ ...current, importeTransferido: value }));
+
+                    const amount = Number(value);
+                    const amountMax = Number(quickPagoForm.importeMaximo || 0);
+                    if (Number.isFinite(amountMax) && amountMax > 0 && Number.isFinite(amount) && amount > amountMax) {
+                      setQuickPagoError(
+                        `El monto no es permitido. El importe transferido no puede ser mayor a ${formatMoney(
+                          amountMax,
+                          quickPagoForm.monedaOperacion || "PEN"
+                        )}.`
+                      );
+                      return;
+                    }
+
+                    setQuickPagoError((current) =>
+                      current && current.startsWith("El monto no es permitido.") ? null : current
+                    );
+                  }}
+                  style={styles.quickPagoInput}
+                />
+              </label>
+            </div>
+
+            <div style={styles.quickPagoFooter}>
+              <button type="button" onClick={cerrarQuickPago} style={styles.quickPagoSecondaryButton} disabled={quickPagoSaving}>
+                Cancelar
+              </button>
+              <button type="button" onClick={() => void guardarQuickPago()} style={styles.quickPagoPrimaryButton} disabled={quickPagoSaving}>
+                {quickPagoSaving ? "Guardando..." : "Guardar pago"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function dateInputValue(value: Date) {
+  return value.toISOString().slice(0, 10);
+}
+
+function generarCodigoPago() {
+  const now = new Date();
+  const pad = (value: number, size = 2) => String(value).padStart(size, "0");
+  const stamp = [now.getFullYear(), pad(now.getMonth() + 1), pad(now.getDate()), pad(now.getHours()), pad(now.getMinutes()), pad(now.getSeconds())].join("");
+  const suffix = pad(Math.floor(Math.random() * 1000), 3);
+  return `PAG-${stamp}-${suffix}`;
+}
+
+function resolveIdByLabel(label: string, items: LookupRow[], getLabel: (item: LookupRow) => string) {
+  const normalized = normalizeText(label);
+  if (!normalized) {
+    return "";
+  }
+
+  const match = items.find((item) => {
+    const candidate = normalizeText(getLabel(item));
+    return labelsMatch(normalized, candidate);
+  });
+  return match ? getItemId(match) : "";
+}
+
+function createQuickPagoForm(
+  inquilinoLabel = "",
+  inquilinos: LookupRow[] = [],
+  arrendadorLabel = "Cj Telecom",
+  arrendadores: LookupRow[] = [],
+  servicio = "",
+  debeMonto = 0,
+  monedaOperacion = "PEN",
+  periodoContabilizacion = "",
+  inquilinoIdOverride = ""
+): QuickPagoForm {
+  const importeTransferido = Number(debeMonto);
+  const resolvedInquilinoId = inquilinoIdOverride || resolveIdByLabel(inquilinoLabel, inquilinos, buildInquilinoLookupLabel);
+
+  return {
+    numeroOperacion: generarCodigoPago(),
+    fechaOperacion: dateInputValue(new Date()),
+    fechaContabilizacion: firstDayOfPeriodInputValue(periodoContabilizacion),
+    idInquilino: resolvedInquilinoId,
+    idArrendador: resolveIdByLabel(arrendadorLabel, arrendadores, buildLookupLabel),
+    estadoValidacion: "PENDIENTE",
+    tipoPago: "COMPLETO",
+    conceptoPago: resolveConceptoPago(servicio),
+    monedaOperacion: monedaOperacion || "PEN",
+    importeTransferido: Number.isFinite(importeTransferido) && importeTransferido > 0 ? importeTransferido.toFixed(2) : "",
+    importeMaximo: Number.isFinite(importeTransferido) && importeTransferido > 0 ? importeTransferido.toFixed(2) : "",
+  };
+}
+
+function normalizeText(value: string | null | undefined) {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function labelsMatch(left: string, right: string) {
+  if (!left || !right) {
+    return false;
+  }
+
+  if (left === right || left.includes(right) || right.includes(left)) {
+    return true;
+  }
+
+  const leftCompact = left.replace(/\s+/g, "");
+  const rightCompact = right.replace(/\s+/g, "");
+  if (leftCompact === rightCompact || leftCompact.includes(rightCompact) || rightCompact.includes(leftCompact)) {
+    return true;
+  }
+
+  const leftTokens = left.split(" ").filter(Boolean);
+  const rightTokens = right.split(" ").filter(Boolean);
+  if (leftTokens.length === 0 || rightTokens.length === 0) {
+    return false;
+  }
+
+  const rightTokenSet = new Set(rightTokens);
+  const leftTokenSet = new Set(leftTokens);
+  const leftContained = leftTokens.every((token) => rightTokenSet.has(token));
+  const rightContained = rightTokens.every((token) => leftTokenSet.has(token));
+  return leftContained || rightContained;
+}
+
+function buildLookupLabel(item: LookupRow) {
+  return (item.nombre ?? item.codigo ?? item.detalle ?? "").trim();
+}
+
+function buildInquilinoLookupLabel(item: LookupRow) {
+  return (item.nombreComercial ?? item.razonSocial ?? item.nombre ?? item.codigo ?? item.detalle ?? "").trim();
+}
+
+function buildInquilinoPopupLabel(item: LookupRow, legendInquilinos: ArrendamientosDshPagosInquilino[]) {
+  const legendMatch = legendInquilinos.find((legend) => String(legend.idInquilino) === String(item.id ?? ""));
+  if (legendMatch) {
+    return (legendMatch.nombreComercial ?? "").trim() || (legendMatch.razonSocial ?? "").trim() || buildInquilinoLookupLabel(item);
+  }
+
+  return buildInquilinoLookupLabel(item);
+}
+
+function getItemId(item: unknown) {
+  const typed = item as { id?: number; idEmpleado?: number };
+  return String(typed.id ?? typed.idEmpleado ?? "");
+}
+
+function resolveConceptoPago(servicio: string) {
+  const normalized = normalizeText(servicio);
+  if (normalized.includes("alquiler")) return "ALQUILER";
+  if (normalized.includes("mantenimiento")) return "MANTENIMIENTO";
+  if (normalized.includes("cochera")) return "COCHERA";
+  return "OTRO";
+}
+
+function firstDayOfCurrentMonthInputValue(value: Date) {
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
+function firstDayOfPeriodInputValue(periodo: string) {
+  const parsed = parsePeriodToDate(periodo);
+  if (!parsed) {
+    return firstDayOfCurrentMonthInputValue(new Date());
+  }
+
+  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
+function validateQuickPagoForm(form: QuickPagoForm): string | null {
+  if (!form.numeroOperacion.trim()) return "Ingrese el numero de operacion.";
+  if (!form.fechaOperacion) return "Seleccione la fecha de operacion.";
+  if (!form.fechaContabilizacion) return "Seleccione la fecha de contabilizacion.";
+  if (!form.idArrendador) return "Seleccione el arrendador.";
+  if (!form.idInquilino) return "Seleccione el inquilino.";
+  if (!form.tipoPago.trim()) return "Seleccione el tipo de pago.";
+  if (!form.conceptoPago.trim()) return "Seleccione el concepto del pago.";
+  if (!form.monedaOperacion.trim()) return "Seleccione la moneda.";
+  if (!form.importeTransferido && form.importeTransferido !== "0") return "Ingrese el importe transferido.";
+  const importe = Number(form.importeTransferido);
+  const importeMaximo = Number(form.importeMaximo || 0);
+  if (importe <= 0 && form.tipoPago !== "EXONERADO") return "Ingrese un importe transferido mayor a cero.";
+  if (Number.isFinite(importeMaximo) && importeMaximo > 0 && importe > importeMaximo) {
+    return `El importe transferido no puede ser mayor a ${formatMoney(importeMaximo, form.monedaOperacion || "PEN")}.`;
+  }
+
+  return null;
+}
+
+function buildQuickPagoPayload(form: QuickPagoForm) {
+  const importe = Number(form.importeTransferido || 0);
+
+  return {
+    idPago: null,
+    numeroOperacion: form.numeroOperacion.trim(),
+    fechaOperacion: form.fechaOperacion,
+    fechaContabilizacion: form.fechaContabilizacion || null,
+    idInquilino: Number(form.idInquilino),
+    idArrendador: Number(form.idArrendador),
+    idEmpleadoRegistrador: null,
+    cuentaOrigen: null,
+    cuentaDestino: null,
+    banco: null,
+    monedaOperacion: form.monedaOperacion.trim(),
+    tipoPago: form.tipoPago.trim().toUpperCase(),
+    conceptoPago: form.conceptoPago.trim().toUpperCase(),
+    estadoValidacion: form.estadoValidacion.trim().toUpperCase(),
+    tipoCambio: null,
+    importeTransferido: importe,
+    comisionBancaria: 0,
+    itf: 0,
+    importeTotalCargado: importe,
+    importeOriginal: importe,
+    importeConvertido: importe,
+    diferenciaCambio: 0,
+    tipoTransferencia: null,
+    conceptoBanco: null,
+    observacion: null,
+    voucherNombre: null,
+    voucherExtension: null,
+    voucherTamanoBytes: null,
+    voucherRuta: null,
+    voucherUrl: null,
+  };
 }
 
 async function consultarResumen(
@@ -1894,8 +2400,7 @@ function resolveCommercialTenantLabel(rawLabel: string, lookupRows: Arrendamient
   const match = lookupRows.find((item) => {
     const razonSocial = normalizeGroupKey(item.razonSocial ?? "");
     const nombreComercial = normalizeGroupKey(item.nombreComercial ?? "");
-
-    return target === nombreComercial || target === razonSocial;
+    return labelsMatch(target, nombreComercial) || labelsMatch(target, razonSocial);
   });
 
   if (!match) {
@@ -1903,6 +2408,75 @@ function resolveCommercialTenantLabel(rawLabel: string, lookupRows: Arrendamient
   }
 
   return (match.nombreComercial ?? "").trim() || rawLabel;
+}
+
+function resolveQuickPagoInquilinoId(
+  rawLabel: string,
+  inquilinos: LookupRow[],
+  legendInquilinos: ArrendamientosDshPagosInquilino[]
+) {
+  const candidateLabels = [
+    rawLabel,
+    resolveCommercialTenantLabel(rawLabel, legendInquilinos),
+    rawLabel.replace(/\s+-\s+.*$/, "").trim(),
+  ].filter(Boolean);
+
+  let bestId = "";
+  let bestScore = 0;
+
+  for (const item of inquilinos) {
+    const labels = [
+      buildInquilinoLookupLabel(item),
+      buildInquilinoLabel(item),
+      buildLookupLabel(item),
+    ].filter(Boolean);
+
+    for (const candidateLabel of candidateLabels) {
+      for (const itemLabel of labels) {
+        const score = labelMatchScore(candidateLabel, itemLabel);
+        if (score > bestScore) {
+          bestScore = score;
+          bestId = getItemId(item);
+        }
+      }
+    }
+  }
+
+  return bestScore >= 30 ? bestId : "";
+}
+
+function labelMatchScore(left: string, right: string) {
+  const normalizedLeft = normalizeText(left);
+  const normalizedRight = normalizeText(right);
+  if (!normalizedLeft || !normalizedRight) {
+    return 0;
+  }
+
+  if (normalizedLeft === normalizedRight) {
+    return 100;
+  }
+
+  if (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft)) {
+    return 90;
+  }
+
+  const leftTokens = normalizedLeft.split(" ").filter(Boolean);
+  const rightTokens = normalizedRight.split(" ").filter(Boolean);
+  const rightTokenSet = new Set(rightTokens);
+  let shared = 0;
+
+  for (const token of leftTokens) {
+    if (rightTokenSet.has(token)) {
+      shared += 1;
+    }
+  }
+
+  if (shared === 0) {
+    return 0;
+  }
+
+  const longest = Math.max(leftTokens.length, rightTokens.length, 1);
+  return Math.round((shared / longest) * 70);
 }
 
 function normalizeServiceName(value?: string | null): string {
@@ -2316,6 +2890,154 @@ const styles: Record<string, CSSProperties> = {
     cursor: "pointer",
     boxShadow: "0 8px 18px rgba(124,58,237,0.12)",
   },
+  quickPagoSuccessBanner: {
+    padding: "10px 14px",
+    borderRadius: 14,
+    border: "1px solid #86EFAC",
+    background: "#F0FDF4",
+    color: "#166534",
+    fontSize: 13,
+    fontWeight: 700,
+  },
+  quickPagoOverlay: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 80,
+    background: "rgba(15, 23, 42, 0.56)",
+    display: "grid",
+    placeItems: "center",
+    padding: 20,
+  },
+  quickPagoDialog: {
+    position: "fixed",
+    left: "50%",
+    top: "50%",
+    width: "min(1040px, 100%)",
+    maxHeight: "calc(100vh - 40px)",
+    overflow: "auto",
+    borderRadius: 20,
+    border: "1px solid #E2E8F0",
+    background: "#FFFFFF",
+    boxShadow: "0 30px 80px rgba(15, 23, 42, 0.28)",
+    padding: 18,
+    display: "grid",
+    gap: 16,
+  },
+  quickPagoHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 16,
+  },
+  quickPagoDragHandle: {
+    cursor: "grab",
+    userSelect: "none",
+    touchAction: "none",
+    minWidth: 0,
+  },
+  quickPagoTitle: {
+    margin: 0,
+    fontSize: 24,
+    lineHeight: 1.1,
+    color: "#111827",
+    fontWeight: 900,
+  },
+  quickPagoSubtitle: {
+    margin: "6px 0 0",
+    fontSize: 13,
+    color: "#64748B",
+    fontWeight: 600,
+  },
+  quickPagoCloseButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    color: "#334155",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    flexShrink: 0,
+  },
+  quickPagoError: {
+    padding: "10px 12px",
+    borderRadius: 14,
+    border: "1px solid #FECACA",
+    background: "#FEF2F2",
+    color: "#991B1B",
+    fontSize: 13,
+    fontWeight: 700,
+  },
+  quickPagoGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: 12,
+  },
+  quickPagoField: {
+    display: "grid",
+    gap: 6,
+    minWidth: 0,
+  },
+  quickPagoFieldLabel: {
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#475569",
+  },
+  quickPagoInput: {
+    width: "100%",
+    minHeight: 44,
+    boxSizing: "border-box",
+    borderRadius: 14,
+    border: "1px solid #D1D5DB",
+    background: "#FFFFFF",
+    color: "#111827",
+    padding: "0 14px",
+    outline: "none",
+    fontSize: 14,
+  },
+  quickPagoInputReadonly: {
+    width: "100%",
+    minHeight: 44,
+    boxSizing: "border-box",
+    borderRadius: 14,
+    border: "1px solid #E2E8F0",
+    background: "#F8FAFC",
+    color: "#475569",
+    padding: "0 14px",
+    outline: "none",
+    fontSize: 14,
+  },
+  quickPagoFooter: {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  quickPagoSecondaryButton: {
+    minHeight: 42,
+    padding: "0 16px",
+    borderRadius: 12,
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    color: "#334155",
+    fontSize: 14,
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  quickPagoPrimaryButton: {
+    minHeight: 42,
+    padding: "0 18px",
+    borderRadius: 12,
+    border: "1px solid #1D4ED8",
+    background: "linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)",
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: 800,
+    cursor: "pointer",
+    boxShadow: "0 10px 22px rgba(37, 99, 235, 0.2)",
+  },
   kpiGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
@@ -2557,6 +3279,21 @@ const styles: Record<string, CSSProperties> = {
     color: "#2563EB",
     textDecoration: "underline",
   },
+  pendingDebtPayButton: {
+    border: "1px solid #2563EB",
+    background: "linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)",
+    color: "#FFFFFF",
+    borderRadius: 999,
+    padding: "8px 14px",
+    fontSize: 12,
+    lineHeight: 1,
+    fontWeight: 900,
+    letterSpacing: "0.04em",
+    textTransform: "uppercase",
+    cursor: "pointer",
+    boxShadow: "0 8px 18px rgba(37, 99, 235, 0.22)",
+    whiteSpace: "nowrap",
+  },
   pendingDebtBarRow: {
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr) auto",
@@ -2791,6 +3528,33 @@ const styles: Record<string, CSSProperties> = {
     background: "#FFF1F2",
     position: "relative",
     zIndex: 1,
+  },
+  matrixDebeCellContent: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: 6,
+  },
+  matrixPayButton: {
+    border: "1px solid #2563EB",
+    background: "linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)",
+    color: "#FFFFFF",
+    borderRadius: 999,
+    padding: "6px 12px",
+    fontSize: 11,
+    lineHeight: 1,
+    fontWeight: 900,
+    letterSpacing: "0.04em",
+    textTransform: "uppercase",
+    cursor: "pointer",
+    boxShadow: "0 8px 18px rgba(37, 99, 235, 0.18)",
+  },
+  matrixPayButtonDisabled: {
+    border: "1px solid #CBD5E1",
+    background: "#E2E8F0",
+    color: "#64748B",
+    boxShadow: "none",
+    cursor: "not-allowed",
   },
   matrixTotalCell: {
     padding: "10px 10px",

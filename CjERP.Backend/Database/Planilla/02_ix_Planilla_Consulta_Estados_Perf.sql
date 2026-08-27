@@ -118,6 +118,71 @@ GO
 IF NOT EXISTS (
     SELECT 1
     FROM sys.indexes
+    WHERE name = 'IX_Planilla_Estado_Ot_Site_CorSite'
+      AND object_id = OBJECT_ID('dbo.Planilla')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX IX_Planilla_Estado_Ot_Site_CorSite
+    ON dbo.Planilla (Estado, Ot, IdSite, CorreSite, Correlativo DESC)
+    INCLUDE (
+        IdSolicitante,
+        IdWeb,
+        FechaDeposito,
+        FecIngreso,
+        IdProyecto,
+        IdResponsable,
+        Usuario,
+        IdCliente,
+        IdOc,
+        Fila,
+        IdBanco,
+        IdTipoPago,
+        TipoMoneda,
+        IdTarea,
+        TotalPagar,
+        Subtotal,
+        Igv,
+        Total
+    );
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IX_Planilla_Estado_IdOc_Fila'
+      AND object_id = OBJECT_ID('dbo.Planilla')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX IX_Planilla_Estado_IdOc_Fila
+    ON dbo.Planilla (Estado, IdOc, Fila, Correlativo DESC)
+    INCLUDE (
+        IdSolicitante,
+        IdWeb,
+        FechaDeposito,
+        FecIngreso,
+        Ot,
+        IdSite,
+        CorreSite,
+        IdProyecto,
+        IdResponsable,
+        Usuario,
+        IdCliente,
+        IdBanco,
+        IdTipoPago,
+        TipoMoneda,
+        IdTarea,
+        TotalPagar,
+        Subtotal,
+        Igv,
+        Total
+    );
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
     WHERE name = 'IX_Empleado_IdEmpleadoCj'
       AND object_id = OBJECT_ID('dbo.Empleado')
 )

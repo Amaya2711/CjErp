@@ -14,6 +14,8 @@
   "dependencies": {
     "autoprefixer": "^10.5.0",
     "axios": "^1.13.6",
+    "devextreme": "26.1.4",
+    "devextreme-react": "26.1.4",
     "jspdf": "^3.0.3",
     "jspdf-autotable": "^5.0.2",
     "lucide-react": "^1.7.0",

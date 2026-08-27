@@ -270,7 +270,9 @@ export default function MainLayout() {
   }, [isSidebarCollapsed, location.pathname]);
 
   useEffect(() => {
-    const isPagosV1Page = location.pathname.startsWith("/finanzas/tesoreria/pagos_v1");
+    const isPagosV1Page =
+      location.pathname.startsWith("/finanzas/tesoreria/pagos_v1") ||
+      location.pathname.startsWith("/finanzas/tesoreria/pagos_dev");
 
     if (isPagosV1Page) {
       if (!pagosV1SidebarStateRef.current?.active) {
@@ -539,7 +541,8 @@ export default function MainLayout() {
 
         <main
           className={`flex-1 min-w-0 w-0 h-full p-3 box-border overflow-x-hidden ${
-            isEmployeesPage || location.pathname.startsWith("/finanzas/tesoreria/pagos_v1")
+        isEmployeesPage || location.pathname.startsWith("/finanzas/tesoreria/pagos_v1")
+            || location.pathname.startsWith("/finanzas/tesoreria/pagos_dev")
               ? "overflow-y-hidden pb-3"
               : "overflow-y-auto pb-20"
           }`}

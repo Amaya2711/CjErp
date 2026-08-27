@@ -222,6 +222,7 @@ export default function SqlMonitorPage() {
   const [sessions, setSessions] = useState<SqlMonitorSesionActiva[]>([]);
   const [sessionSortKey, setSessionSortKey] = useState<keyof SqlMonitorSesionActiva>("sessionId");
   const [sessionSortDirection, setSessionSortDirection] = useState<"asc" | "desc">("asc");
+  const [cancelingSessionId, setCancelingSessionId] = useState<number | null>(null);
 
   const selectedQueryId = Number(params.id ?? 0);
 
@@ -315,6 +316,18 @@ export default function SqlMonitorPage() {
     }
   }, [setTabLoading]);
 
+  const loadSessions = useCallback(async () => {
+    setSessionsLoading(true);
+    setSessionsError(null);
+    try {
+      setSessions(await sqlMonitorService.obtenerSesionesActivas());
+    } catch (loadError) {
+      setSessionsError(getHttpErrorMessage(loadError, "No se pudieron cargar las sesiones activas."));
+    } finally {
+      setSessionsLoading(false);
+    }
+  }, []);
+
   const loadCurrentTab = useCallback(async () => {
     setError(null);
 
@@ -394,16 +407,46 @@ export default function SqlMonitorPage() {
 
   const openSessionsPanel = useCallback(async () => {
     setSessionsVisible(true);
-    setSessionsError(null);
-    setSessionsLoading(true);
-    try {
-      setSessions(await sqlMonitorService.obtenerSesionesActivas());
-    } catch (loadError) {
-      setSessionsError(getHttpErrorMessage(loadError, "No se pudieron cargar las sesiones activas."));
-    } finally {
-      setSessionsLoading(false);
-    }
-  }, []);
+    await loadSessions();
+  }, [loadSessions]);
+
+  const cancelSession = useCallback(
+    async (sessionId: number) => {
+      if (!sessionId || cancelingSessionId === sessionId) {
+        return;
+      }
+
+      const confirmed = window.confirm(
+        `¿Desea cancelar la sesión ${sessionId}? ` +
+          "Esto envía un KILL a esa sesión y puede provocar rollback de su transacción."
+      );
+
+      if (!confirmed) {
+        return;
+      }
+
+      setError(null);
+      setSessionsError(null);
+      setCancelingSessionId(sessionId);
+
+      try {
+        await sqlMonitorService.cancelarSesion(sessionId);
+
+        if (activeTab === "queries") {
+          await loadQueries();
+        }
+
+        if (sessionsVisible) {
+          await loadSessions();
+        }
+      } catch (loadError) {
+        setError(getHttpErrorMessage(loadError, `No se pudo cancelar la sesion ${sessionId}.`));
+      } finally {
+        setCancelingSessionId(null);
+      }
+    },
+    [activeTab, cancelingSessionId, loadQueries, loadSessions, sessionsVisible]
+  );
 
   const closeDetail = useCallback(() => {
     setDetailVisible(false);
@@ -741,6 +784,16 @@ export default function SqlMonitorPage() {
               <BrainCircuit size={14} />
               Analizar con IA
             </button>
+            {row.sessionId ? (
+              <button
+                style={styles.smallButtonDanger}
+                onClick={() => void cancelSession(row.sessionId ?? 0)}
+                disabled={cancelingSessionId === row.sessionId}
+              >
+                <ShieldAlert size={14} />
+                {cancelingSessionId === row.sessionId ? "Cancelando..." : "Cancelar"}
+              </button>
+            ) : null}
           </div>
         )}
       />
@@ -1079,6 +1132,20 @@ export default function SqlMonitorPage() {
                 loadingMessage="Cargando sesiones activas..."
                 emptyMessage="No hay sesiones activas para mostrar."
                 getRowKey={(row) => row.id}
+                rowActions={(row) =>
+                  row.sessionId ? (
+                    <div style={styles.rowActions}>
+                      <button
+                        style={styles.smallButtonDanger}
+                        onClick={() => void cancelSession(row.sessionId ?? 0)}
+                        disabled={cancelingSessionId === row.sessionId}
+                      >
+                        <ShieldAlert size={14} />
+                        {cancelingSessionId === row.sessionId ? "Cancelando..." : "Cancelar"}
+                      </button>
+                    </div>
+                  ) : null
+                }
                 sortKey={sessionSortKey}
                 sortDirection={sessionSortDirection}
                 onSortChange={handleSessionSortChange}
@@ -1281,6 +1348,19 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #7C3AED",
     background: "#7C3AED",
     color: "#FFF",
+    borderRadius: 10,
+    padding: "7px 10px",
+    fontSize: 12,
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  smallButtonDanger: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    border: "1px solid #EF4444",
+    background: "#FFF",
+    color: "#DC2626",
     borderRadius: 10,
     padding: "7px 10px",
     fontSize: 12,

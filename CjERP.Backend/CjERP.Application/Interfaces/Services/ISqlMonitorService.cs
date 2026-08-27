@@ -19,6 +19,7 @@ public interface ISqlMonitorService
     Task<SqlMonitorOverheadDto> ObtenerOverheadAsync(CancellationToken cancellationToken = default);
     Task<SqlMonitorQueryDetalleDto?> ObtenerQueryDetalleAsync(long id, CancellationToken cancellationToken = default);
     Task<SqlMonitorAnalisisDto> AnalizarQueryAsync(long id, string? usuario = null, CancellationToken cancellationToken = default);
+    Task CancelarSesionAsync(int sessionId, CancellationToken cancellationToken = default);
 
     Task Capturar30SegundosAsync(CancellationToken cancellationToken = default);
     Task Capturar1MinutoAsync(CancellationToken cancellationToken = default);
