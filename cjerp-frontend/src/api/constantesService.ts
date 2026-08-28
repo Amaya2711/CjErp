@@ -6,9 +6,15 @@ function extraerArray<T>(value: unknown): T[] {
 }
 
 function mapConstanteToOption(item: ConstanteLookupDto): ConstanteOption {
+  const campoNormalizado = String(item.campo ?? "").trim().toLowerCase();
+  const label =
+    campoNormalizado === "estado_cheque"
+      ? (item.valorIni ?? item.descripcion ?? "")
+      : (item.descripcion ?? "");
+
   return {
     value: item.valor ?? "",
-    label: item.descripcion ?? "",
+    label,
     codigo: item.codigo,
     valor: item.valor,
     campo: item.campo,

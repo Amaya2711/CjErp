@@ -268,16 +268,13 @@ export default function TesoreriaChequesPage() {
   const archivoRutaInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const camposConstantes = useMemo(
-    () => ["tipo_moneda", "estado_cheque", "tipo_estado"],
+    () => ["tipo_moneda", "estado_cheque"],
     []
   );
   const { constantesPorCampo } = useConstantesPorCampo(camposConstantes);
   const monedaOptions = constantesPorCampo.tipo_moneda ?? [];
   const defaultMonedaId = useMemo(() => resolveDefaultMonedaId(monedaOptions), [monedaOptions]);
-  const estadoOptions =
-    constantesPorCampo.estado_cheque?.length
-      ? constantesPorCampo.estado_cheque
-      : constantesPorCampo.tipo_estado ?? [];
+  const estadoOptions = constantesPorCampo.estado_cheque ?? [];
   const estadoEditOptions = useMemo(
     () => estadoOptions.filter((option) => !isEstadoAnuladoOption(option)),
     [estadoOptions]
@@ -1192,9 +1189,9 @@ export default function TesoreriaChequesPage() {
                   setForm((prev) => ({ ...prev, idEstado: event.target.value }))
                 }
                 style={styles.input}
-                disabled={!form.idCheque}
+                disabled={false}
               >
-                {form.idCheque ? <option value="">Seleccione</option> : null}
+                <option value="">Seleccione</option>
                 {(form.idCheque ? estadoEditOptions : estadoOptions).map((option) => (
                   <option
                     key={`estado-${normalizeOptionValue(option)}-${option.label}`}
@@ -1214,7 +1211,7 @@ export default function TesoreriaChequesPage() {
                 }
                 style={styles.input}
                 placeholder="Id estado"
-                readOnly={!form.idCheque}
+                readOnly={false}
               />
             )}
           </Field>
