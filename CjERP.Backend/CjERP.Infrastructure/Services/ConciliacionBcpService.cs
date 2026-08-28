@@ -713,6 +713,9 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
             }
 
             registro.ResultadoConciliacion = "COINCIDENCIA POR AJUSTE";
+            registro.EsConciliado = true;
+            registro.EstadoConciliacionTexto = "CONCILIADO";
+            registro.EstadoOperativoConciliacion = "CONCILIADO";
         }
     }
 

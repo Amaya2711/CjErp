@@ -329,6 +329,13 @@ export default function MainLayout() {
     }
   }, [isSidebarCollapsed, location.pathname]);
 
+  useEffect(() => {
+    const isDashboardPage = location.pathname.startsWith("/admin/DashboardPage");
+    const shouldCollapse = !isDashboardPage;
+
+    setIsSidebarCollapsed((prev) => (prev === shouldCollapse ? prev : shouldCollapse));
+  }, [location.pathname]);
+
   const cerrarSesion = async () => {
     if (logoutRef.current) {
       return;
