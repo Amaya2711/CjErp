@@ -97,6 +97,10 @@ export default function MainLayout() {
     active: boolean;
     previousCollapsed: boolean;
   } | null>(null);
+  const conciliacionV1SidebarStateRef = useRef<{
+    active: boolean;
+    previousCollapsed: boolean;
+  } | null>(null);
 
   const usuarioMostrar = (authUser?.usuario || "").toUpperCase();
   const empleadoMostrar = (authUser?.nombre || authUser?.nombreEmpleado || "").toUpperCase();
@@ -291,6 +295,33 @@ export default function MainLayout() {
     const savedState = pagosV1SidebarStateRef.current;
     if (savedState?.active) {
       pagosV1SidebarStateRef.current = null;
+
+      if (savedState.previousCollapsed !== isSidebarCollapsed) {
+        setIsSidebarCollapsed(savedState.previousCollapsed);
+      }
+    }
+  }, [isSidebarCollapsed, location.pathname]);
+
+  useEffect(() => {
+    const isConciliacionV1Page = location.pathname.startsWith("/finanzas/conciliacion_v1");
+
+    if (isConciliacionV1Page) {
+      if (!conciliacionV1SidebarStateRef.current?.active) {
+        conciliacionV1SidebarStateRef.current = {
+          active: true,
+          previousCollapsed: isSidebarCollapsed,
+        };
+
+        if (!isSidebarCollapsed) {
+          setIsSidebarCollapsed(true);
+        }
+      }
+      return;
+    }
+
+    const savedState = conciliacionV1SidebarStateRef.current;
+    if (savedState?.active) {
+      conciliacionV1SidebarStateRef.current = null;
 
       if (savedState.previousCollapsed !== isSidebarCollapsed) {
         setIsSidebarCollapsed(savedState.previousCollapsed);

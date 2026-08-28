@@ -3,6 +3,9 @@ export interface ConstanteLookupDto {
   codigo: string;
   descripcion: string;
   valor: string;
+  valorIni?: string | null;
+  valorFin?: string | null;
+  detalle?: string | null;
   orden: number;
 }
 

@@ -23,6 +23,7 @@ public sealed class ConciliacionBcpService : IConciliacionBcpService
     private const string StoredProcedureBuscarMovimientos = "dbo.sp_MovimientosBcp_Buscar";
     private const string StoredProcedureBuscarMovimientosConciliacion = "dbo.sp_MovimientosConciliacion_Buscar";
     private const string StoredProcedurePlanillaEstados = "dbo.sp_Planilla_Consulta_Estados";
+    private const string StoredProcedureConstantes = "dbo.sp_Constante_ListarPorCampo";
     private const string StoredProcedureCombosClasificacionContable = "dbo.sp_MovimientosBcp_ObtenerCombosClasificacionContable";
     private const string StoredProcedureActualizarClasificacionContable = "dbo.sp_MovimientosBcp_ActualizarClasificacionContable";
     private const string StoredProcedureActualizarClasificacionContableConciliacion = "dbo.sp_MovimientosConciliacion_ActualizarClasificacionContable";
@@ -510,12 +511,24 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         string? usuario,
         CancellationToken cancellationToken = default)
     {
-        return await ConciliarPlanillaAsyncCore(
+        var response = await ConciliarPlanillaAsyncCore(
             request,
             usuario,
             cancellationToken,
             StoredProcedureBuscarMovimientosConciliacion,
             "MovimientosConciliacion vs Planilla");
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        var constantesOperacion = await LoadOperacionConstantesAsync(connection, cancellationToken);
+        if (constantesOperacion.Count > 0 && response.Registros.Count > 0)
+        {
+            ApplyOperacionAjustes(response.Registros, constantesOperacion);
+            RecalculateConciliacionResumen(response, "MovimientosConciliacion vs Planilla");
+        }
+
+        return response;
     }
 
     private async Task<ConciliacionBcpConciliarPlanillaResponseDto> ConciliarPlanillaAsyncCore(
@@ -637,6 +650,229 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
             SinCoincidencia = sinCoincidencia,
             Registros = registros
         };
+    }
+
+    private async Task<List<OperacionConstanteLookupRow>> LoadOperacionConstantesAsync(
+        SqlConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var rows = await connection.QueryAsync(
+            _sqlCommandFactory.Create(
+                StoredProcedureConstantes,
+                new { Campo = "OPERACION" },
+                CommandType.StoredProcedure,
+                cancellationToken));
+
+        return rows
+            .Select(MapOperacionConstante)
+            .Where(item => !string.IsNullOrWhiteSpace(item.ValorIni))
+            .ToList();
+    }
+
+    private static OperacionConstanteLookupRow MapOperacionConstante(dynamic row)
+    {
+        var data = (IDictionary<string, object>)row;
+
+        return new OperacionConstanteLookupRow
+        {
+            ValorIni = GetRawDictionaryString(data, "ValorIni", "valorIni") ?? string.Empty,
+            ValorFin = GetRawDictionaryString(data, "ValorFin", "valorFin") ?? string.Empty,
+            Detalle = GetRawDictionaryString(data, "Detalle", "detalle") ?? string.Empty
+        };
+    }
+
+    private static void ApplyOperacionAjustes(
+        ICollection<ConciliacionBcpConciliarPlanillaRegistroDto> registros,
+        IReadOnlyList<OperacionConstanteLookupRow> constantesOperacion)
+    {
+        foreach (var registro in registros)
+        {
+            var constante = constantesOperacion.FirstOrDefault(item => MatchesOperacionConstant(registro.DescripcionOperacion, item));
+            if (constante is null)
+            {
+                continue;
+            }
+
+            var detalle = SplitOperacionDetalle(constante.Detalle);
+            if (!string.IsNullOrWhiteSpace(detalle.AreaFlujo))
+            {
+                registro.NombreAreaFlujo = detalle.AreaFlujo;
+                registro.DescripcionAreaFlujo = detalle.AreaFlujo;
+            }
+
+            if (!string.IsNullOrWhiteSpace(detalle.Referencia))
+            {
+                registro.CodigoReferencia = detalle.Referencia;
+                registro.NombreReferencia = detalle.Referencia;
+                registro.DescripcionReferencia = detalle.Referencia;
+            }
+
+            if (!string.IsNullOrWhiteSpace(detalle.CuentaContable))
+            {
+                registro.CuentaContableTexto = detalle.CuentaContable;
+            }
+
+            registro.ResultadoConciliacion = "COINCIDENCIA POR AJUSTE";
+        }
+    }
+
+    private static void RecalculateConciliacionResumen(
+        ConciliacionBcpConciliarPlanillaResponseDto response,
+        string etiquetaResumen)
+    {
+        var registros = response.Registros ?? [];
+        var coincidenciasPorNroOperacion = registros.Count(item =>
+            string.Equals(item.TipoCoincidencia, "NRO OPERACION", StringComparison.OrdinalIgnoreCase));
+        var coincidenciasPorCuenta = registros.Count(item =>
+            string.Equals(item.TipoCoincidencia, "CUENTA", StringComparison.OrdinalIgnoreCase));
+        var coincidenciasPorCuentaInter = registros.Count(item =>
+            string.Equals(item.TipoCoincidencia, "CUENTA INTER", StringComparison.OrdinalIgnoreCase));
+        var coincidenciasPorAjuste = registros.Count(item =>
+            string.Equals(item.ResultadoConciliacion, "COINCIDENCIA POR AJUSTE", StringComparison.OrdinalIgnoreCase));
+        var sinCoincidencia = registros.Count(item =>
+            string.Equals(item.ResultadoConciliacion, "SIN COINCIDENCIA", StringComparison.OrdinalIgnoreCase));
+
+        response.TotalMovimientos = registros.Count;
+        response.CoincidenciasPorNroOperacion = coincidenciasPorNroOperacion;
+        response.CoincidenciasPorCuenta = coincidenciasPorCuenta + coincidenciasPorAjuste;
+        response.CoincidenciasPorCuentaInter = coincidenciasPorCuentaInter;
+        response.SinCoincidencia = sinCoincidencia;
+        response.Resumen =
+            $"Conciliación {etiquetaResumen} ejecutada sobre {registros.Count} movimiento(s): " +
+            $"{coincidenciasPorNroOperacion} por Nro. Operación, " +
+            $"{coincidenciasPorCuenta} por Cuenta, " +
+            $"{coincidenciasPorCuentaInter} por Cuenta Inter, " +
+            $"{coincidenciasPorAjuste} por Ajuste y " +
+            $"{sinCoincidencia} sin coincidencia.";
+    }
+
+    private static bool MatchesOperacionConstant(string? descripcionOperacion, OperacionConstanteLookupRow constante)
+    {
+        var descripcionNormalizada = NormalizeOperacionComparisonText(descripcionOperacion);
+        var valorIniNormalizado = NormalizeOperacionComparisonText(constante.ValorIni);
+
+        if (string.IsNullOrWhiteSpace(descripcionNormalizada) || string.IsNullOrWhiteSpace(valorIniNormalizado))
+        {
+            return false;
+        }
+
+        var valorFinNormalizado = NormalizeKey(constante.ValorFin);
+
+        return valorFinNormalizado switch
+        {
+            "eq" => string.Equals(descripcionNormalizada, valorIniNormalizado, StringComparison.Ordinal),
+            "cp" => descripcionNormalizada.Contains(valorIniNormalizado, StringComparison.Ordinal)
+                    || valorIniNormalizado.Contains(descripcionNormalizada, StringComparison.Ordinal)
+                    || ContainsTokensInOrder(descripcionNormalizada, valorIniNormalizado),
+            _ => false
+        };
+    }
+
+    private static bool ContainsTokensInOrder(string descripcionNormalizada, string valorIniNormalizado)
+    {
+        var tokens = valorIniNormalizado
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(token => !string.IsNullOrWhiteSpace(token))
+            .ToArray();
+
+        if (tokens.Length == 0)
+        {
+            return false;
+        }
+
+        var searchStart = 0;
+
+        foreach (var token in tokens)
+        {
+            var tokenIndex = descripcionNormalizada.IndexOf(token, searchStart, StringComparison.Ordinal);
+            if (tokenIndex < 0)
+            {
+                return false;
+            }
+
+            searchStart = tokenIndex + token.Length;
+        }
+
+        return true;
+    }
+
+    private static string NormalizeOperacionComparisonText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder(value.Length);
+        var previousWasSpace = false;
+
+        foreach (var character in value.Normalize(NormalizationForm.FormD))
+        {
+            var category = CharUnicodeInfo.GetUnicodeCategory(character);
+            if (category == UnicodeCategory.NonSpacingMark)
+            {
+                continue;
+            }
+
+            if (char.IsWhiteSpace(character))
+            {
+                if (!previousWasSpace)
+                {
+                    builder.Append(' ');
+                    previousWasSpace = true;
+                }
+
+                continue;
+            }
+
+            builder.Append(char.ToUpperInvariant(character));
+            previousWasSpace = false;
+        }
+
+        return builder.ToString().Trim();
+    }
+
+    private static OperacionDetalleParseado SplitOperacionDetalle(string? detalle)
+    {
+        if (string.IsNullOrWhiteSpace(detalle))
+        {
+            return new OperacionDetalleParseado();
+        }
+
+        var parts = detalle
+            .Split('/', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => part.Trim())
+            .Where(part => !string.IsNullOrWhiteSpace(part))
+            .ToArray();
+
+        return new OperacionDetalleParseado
+        {
+            AreaFlujo = parts.ElementAtOrDefault(0),
+            Referencia = parts.ElementAtOrDefault(1),
+            CuentaContable = parts.Length > 2 ? string.Join("/", parts.Skip(2)) : null
+        };
+    }
+
+    private static string? GetRawDictionaryString(IDictionary<string, object> data, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            foreach (var pair in data)
+            {
+                if (!string.Equals(pair.Key, key, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var text = pair.Value?.ToString()?.Trim();
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    return text;
+                }
+            }
+        }
+
+        return null;
     }
 
     public async Task<ConciliacionBcpConciliarPlanillaRegistroDto> ActualizarComentarioMovimientoAsync(
@@ -5897,6 +6133,24 @@ ORDER BY p.parameter_id;";
         public bool EsSalida => IsOutput;
 
         public bool TieneDefault => HasDefaultValue;
+    }
+
+    private sealed class OperacionConstanteLookupRow
+    {
+        public string ValorIni { get; set; } = string.Empty;
+
+        public string ValorFin { get; set; } = string.Empty;
+
+        public string Detalle { get; set; } = string.Empty;
+    }
+
+    private sealed class OperacionDetalleParseado
+    {
+        public string? AreaFlujo { get; set; }
+
+        public string? Referencia { get; set; }
+
+        public string? CuentaContable { get; set; }
     }
 
     private sealed class OpenAiResponsesRequest

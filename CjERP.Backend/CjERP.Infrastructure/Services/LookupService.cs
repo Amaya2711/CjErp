@@ -257,6 +257,9 @@ namespace CjERP.Infrastructure.Services
                 Codigo = codigo ?? string.Empty,
                 Descripcion = descripcion ?? string.Empty,
                 Valor = valor ?? string.Empty,
+                ValorIni = GetStringAllowEmpty(data, "ValorIni", "valorIni"),
+                ValorFin = GetStringAllowEmpty(data, "ValorFin", "valorFin"),
+                Detalle = GetStringAllowEmpty(data, "Detalle", "detalle"),
                 Orden = GetInt(data, "Orden", "orden", "correlativo", "Correlativo")
             };
         }

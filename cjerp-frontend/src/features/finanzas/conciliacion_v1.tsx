@@ -29,7 +29,7 @@ import type {
 } from "../../models/conciliacionBcp";
 import type { PlanillaConsultaParametro } from "../../models/planillaConsulta";
 import { getHttpErrorMessage } from "../../utils/httpError";
-import { ArrowUpDown, ChevronDown, ChevronRight, FileDown } from "lucide-react";
+import { ArrowUpDown, ChevronDown, ChevronRight, FileDown, Maximize2, Minimize2, Search } from "lucide-react";
 
 const MAX_FILE_SIZE_BYTES = 15_000_000;
 type ConciliacionSortKey =
@@ -1641,6 +1641,7 @@ export default function ConciliacionBcpPage() {
   const [clasificacionModal, setClasificacionModal] = useState<ConciliacionClasificacionForm | null>(null);
   const [clasificacionSaving, setClasificacionSaving] = useState(false);
   const [detalleScrollContentWidth, setDetalleScrollContentWidth] = useState(0);
+  const [detalleExpandedPopupOpen, setDetalleExpandedPopupOpen] = useState(false);
 
   const fechaDepositoInicioGastos = useMemo(() => conciliacionFiltros.fechaInicio.trim(), [conciliacionFiltros.fechaInicio]);
   const fechaDepositoFinGastos = useMemo(() => conciliacionFiltros.fechaFin.trim(), [conciliacionFiltros.fechaFin]);
@@ -1768,6 +1769,25 @@ export default function ConciliacionBcpPage() {
     document.addEventListener("mousedown", handleDocumentClick);
     return () => document.removeEventListener("mousedown", handleDocumentClick);
   }, [isResultadoFilterOpen]);
+
+  useEffect(() => {
+    if (conciliacionPlanillaTab !== "detalle") {
+      setDetalleExpandedPopupOpen(false);
+    }
+  }, [conciliacionPlanillaTab]);
+
+  useEffect(() => {
+    if (!detalleExpandedPopupOpen) {
+      return;
+    }
+
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [detalleExpandedPopupOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2525,6 +2545,10 @@ export default function ConciliacionBcpPage() {
     if (tab === "gastos") {
       setGastosPlanillaQuickSearch("");
     }
+  };
+
+  const toggleDetalleExpandedPopup = () => {
+    setDetalleExpandedPopupOpen((current) => !current);
   };
 
   useEffect(() => {
@@ -4630,6 +4654,17 @@ export default function ConciliacionBcpPage() {
                             Exportar
                           </span>
                         </button>
+                        <button
+                          type="button"
+                          style={styles.gridToolbarButton}
+                          onClick={toggleDetalleExpandedPopup}
+                          aria-label={detalleExpandedPopupOpen ? "Contraer detalle" : "Expandir detalle"}
+                        >
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                            {detalleExpandedPopupOpen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                            {detalleExpandedPopupOpen ? "Contraer" : "Expandir"}
+                          </span>
+                        </button>
                       </div>
                     </div>
                     <div style={styles.gastosSearchWrap}>
@@ -4980,6 +5015,381 @@ export default function ConciliacionBcpPage() {
             </table>
                     </div>
           </div>
+                {detalleExpandedPopupOpen ? (
+                  <div style={styles.detailPopupOverlay} onClick={() => setDetalleExpandedPopupOpen(false)}>
+                    <div style={styles.detailPopupCard} onClick={(event) => event.stopPropagation()}>
+                      <div style={styles.detailPopupHeader}>
+                        <div style={styles.detailPopupHeaderLeft}>
+                          <h3 style={styles.detailPopupHeaderTitle}>Detalle expandido</h3>
+                          <p style={styles.detailPopupHeaderText}>Búsqueda rápida y grid completo en pantalla completa.</p>
+                        </div>
+                        <button type="button" style={styles.gridToolbarButton} onClick={toggleDetalleExpandedPopup}>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                            <Minimize2 size={14} />
+                            Contraer
+                          </span>
+                        </button>
+                      </div>
+
+                      <div style={styles.detailPopupBody}>
+                        <div style={styles.detailPopupToolbar}>
+                          <div style={styles.detailPopupSearchWrap}>
+                            <div style={{ position: "relative" }}>
+                              <Search
+                                size={14}
+                                style={{
+                                  position: "absolute",
+                                  left: 12,
+                                  top: "50%",
+                                  transform: "translateY(-50%)",
+                                  color: "#94A3B8",
+                                }}
+                              />
+                              <input
+                                type="text"
+                                value={detalleQuickSearch}
+                                onChange={(event) => setDetalleQuickSearch(event.target.value)}
+                                placeholder="Busqueda rapida por cualquier columna visible del grid"
+                                style={{
+                                  ...styles.gastosSearchInput,
+                                  paddingLeft: 34,
+                                }}
+                              />
+                            </div>
+                          </div>
+                          <div style={styles.gridToolbarCount}>
+                            Registros: {detalleTablaRegistros.length} de {executiveFilteredConciliacionRegistros.length}
+                            {executiveSelectionLabel ? ` | Ejecutivo: ${executiveSelectionLabel}` : ""}
+                          </div>
+                        </div>
+
+                        <div style={styles.detailPopupTableWrap}>
+                          <div className="employee-grid-scroll" style={styles.detailPopupTableScroll}>
+                            <table style={styles.mappingTable}>
+                              <thead>
+                                <tr>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh, ...getConciliacionDetailStickyColumnStyle("fecha", "header") }}>{renderSortHeader("Fecha", "fecha")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh, ...getConciliacionDetailStickyColumnStyle("codigoBanco", "header") }}>{renderSortHeader("Banco Movimiento", "codigoBanco")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh, ...getConciliacionDetailStickyColumnStyle("empresa", "header") }}>{renderSortHeader("Empresa", "empresa")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh, ...getConciliacionDetailStickyColumnStyle("cuenta", "header") }}>{renderSortHeader("Cuenta", "cuenta")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh, ...getConciliacionDetailStickyColumnStyle("moneda", "header") }}>{renderSortHeader("Moneda", "moneda")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh, ...getConciliacionDetailStickyColumnStyle("monto", "header") }}>{renderSortHeader("Monto", "monto")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh, ...getConciliacionDetailStickyColumnStyle("totalPagar", "header") }}>{renderSortHeader("TotalPagar", "totalPagar")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Diferencia", "diferencia")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("NroOperacion", "nroOperacion")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("DescripcionOperacion", "descripcionOperacion")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Comentario", "comentario")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Resultado", "resultadoConciliacion")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Tipo", "tipoCoincidencia")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("NroOperacionPlanilla", "nroOperacionPlanilla")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("CuentaPlanilla", "cuentaPlanilla")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("CuentaInterPlanilla", "cuentaInterPlanilla")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Cliente", "clientePlanilla")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Proyecto", "proyectoPlanilla")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Site", "sitePlanilla")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Tipo_Trabajo", "tipoTrabajoPlanilla")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Tarea", "tareaPlanilla")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Responsable", "responsablePlanilla")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Comprobante", "comprobantePlanilla")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Area Flujo", "areaFlujo")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Referencia", "referencia")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Cuenta Contable", "cuentaContable")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Conciliado", "conciliado")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Estado Conciliacion", "estadoConciliacionTexto")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Estado Operativo", "estadoOperativoConciliacion")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Fecha Conciliacion", "fechaConciliacion")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Usuario Conciliacion", "usuarioConciliacion")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Obs. Conciliacion", "observacionConciliacionMovimiento")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Banco", "bancoPlanilla")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Serie", "seriePlanilla")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Detalle", "detallePlanilla")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("OC", "idOc")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Correlativo", "correlativoPlanilla")}</th>
+                                </tr>
+                                <tr>
+                                  {(
+                                    [
+                                      "fecha",
+                                      "codigoBanco",
+                                      "empresa",
+                                      "cuenta",
+                                      "moneda",
+                                      "monto",
+                                      "totalPagar",
+                                      "diferencia",
+                                      "nroOperacion",
+                                      "descripcionOperacion",
+                                      "comentario",
+                                      "resultadoConciliacion",
+                                      "tipoCoincidencia",
+                                      "nroOperacionPlanilla",
+                                      "cuentaPlanilla",
+                                      "cuentaInterPlanilla",
+                                      "clientePlanilla",
+                                      "proyectoPlanilla",
+                                      "sitePlanilla",
+                                      "tipoTrabajoPlanilla",
+                                      "tareaPlanilla",
+                                      "responsablePlanilla",
+                                      "comprobantePlanilla",
+                                      "areaFlujo",
+                                      "referencia",
+                                      "cuentaContable",
+                                      "conciliado",
+                                      "estadoConciliacionTexto",
+                                      "estadoOperativoConciliacion",
+                                      "fechaConciliacion",
+                                      "usuarioConciliacion",
+                                      "observacionConciliacionMovimiento",
+                                      "bancoPlanilla",
+                                      "seriePlanilla",
+                                      "detallePlanilla",
+                                      "correlativoPlanilla",
+                                    ] as ConciliacionSortKey[]
+                                  ).map((key) => (
+                                    <th key={`popup-filter-${key}`} style={{ ...styles.filterTh, ...styles.detailStickyFilterTh, ...getConciliacionDetailStickyColumnStyle(key, "filter") }}>
+                                      {key === "resultadoConciliacion" ? (
+                                        <div ref={resultadoFilterDropdownRef} style={styles.multiFilterWrap}>
+                                          <button
+                                            type="button"
+                                            style={styles.multiFilterButton}
+                                            onClick={() => setIsResultadoFilterOpen((current) => !current)}
+                                            aria-label="Filtrar por resultado"
+                                          >
+                                            <span style={styles.multiFilterButtonText}>{resultadoConciliacionFilterLabel}</span>
+                                            <ChevronDown size={14} />
+                                          </button>
+                                          {isResultadoFilterOpen ? (
+                                            <div style={styles.multiFilterDropdown}>
+                                              {conciliacionFilterOptions[key].map((optionValue) => {
+                                                const checked = resultadoConciliacionSelectedFilters.includes(optionValue);
+                                                return (
+                                                  <label key={`popup-${key}-${optionValue}`} style={styles.multiFilterOption}>
+                                                    <input
+                                                      type="checkbox"
+                                                      checked={checked}
+                                                      onChange={() => handleResultadoConciliacionFilterToggle(optionValue)}
+                                                    />
+                                                    <span>{optionValue === EMPTY_CONCILIACION_FILTER_VALUE ? "(VacÃ­o)" : optionValue}</span>
+                                                  </label>
+                                                );
+                                              })}
+                                            </div>
+                                          ) : null}
+                                        </div>
+                                      ) : key === "descripcionOperacion" ? (
+                                        <input
+                                          type="text"
+                                          value={Array.isArray(conciliacionGridFilters[key]) ? "" : conciliacionGridFilters[key]}
+                                          onChange={(event) => handleConciliacionFilterChange(key, event.target.value)}
+                                          style={styles.filterInput}
+                                          placeholder="Buscar..."
+                                          aria-label="Filtrar por descripcion operacion"
+                                        />
+                                      ) : (
+                                        <select
+                                          value={Array.isArray(conciliacionGridFilters[key]) ? "" : conciliacionGridFilters[key]}
+                                          onChange={(event) => handleConciliacionFilterChange(key, event.target.value)}
+                                          style={styles.filterSelect}
+                                          aria-label={`Filtrar por ${key}`}
+                                        >
+                                          <option value="">Todos</option>
+                                          {conciliacionFilterOptions[key].map((optionValue) => (
+                                            <option key={`popup-${key}-${optionValue}`} value={optionValue}>
+                                              {optionValue === EMPTY_CONCILIACION_FILTER_VALUE ? "(VacÃ­o)" : optionValue}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      )}
+                                    </th>
+                                  ))}
+                                  <th style={{ ...styles.filterTh, ...styles.detailStickyFilterTh }} />
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {detalleTablaRegistros.length > 0 ? (
+                                  detalleTablaRegistros.map((row) => (
+                                    <tr key={`popup-conciliacion-${row.idMovimientoBanco}`}>
+                                      <td style={{ ...styles.td, ...getConciliacionDetailStickyColumnStyle("fecha", "body") }}>{getConciliacionDisplayValue(row, "fecha")}</td>
+                                      <td style={{ ...styles.td, ...getConciliacionDetailStickyColumnStyle("codigoBanco", "body") }}>{getConciliacionDisplayValue(row, "codigoBanco")}</td>
+                                      <td style={{ ...styles.td, ...getConciliacionDetailStickyColumnStyle("empresa", "body") }}>{getConciliacionDisplayValue(row, "empresa")}</td>
+                                      <td style={{ ...styles.td, ...getConciliacionDetailStickyColumnStyle("cuenta", "body") }}>{getConciliacionDisplayValue(row, "cuenta")}</td>
+                                      <td style={{ ...styles.td, ...getConciliacionDetailStickyColumnStyle("moneda", "body") }}>{getConciliacionDisplayValue(row, "moneda")}</td>
+                                      <td style={{ ...styles.td, ...getConciliacionDetailStickyColumnStyle("monto", "body") }}>{getConciliacionDisplayValue(row, "monto")}</td>
+                                      <td style={{ ...styles.td, ...getConciliacionDetailStickyColumnStyle("totalPagar", "body") }}>{getConciliacionDisplayValue(row, "totalPagar")}</td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "diferencia")}</td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "nroOperacion")}</td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "descripcionOperacion")}</td>
+                                      <td style={styles.td}>
+                                        <div style={styles.commentCellWrap}>
+                                          <textarea
+                                            value={comentarioDrafts[row.idMovimientoBanco] ?? row.comentario ?? ""}
+                                            onChange={(event) => handleComentarioDraftChange(row.idMovimientoBanco, event.target.value)}
+                                            onBlur={() => void handleComentarioBlur(row)}
+                                            style={styles.commentCellTextarea}
+                                            rows={2}
+                                            placeholder="Agregar comentario"
+                                            disabled={Boolean(comentarioSavingIds[row.idMovimientoBanco])}
+                                          />
+                                          {comentarioSavingIds[row.idMovimientoBanco] ? (
+                                            <span style={styles.commentCellStatus}>Guardando...</span>
+                                          ) : null}
+                                        </div>
+                                      </td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "resultadoConciliacion")}</td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "tipoCoincidencia")}</td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "nroOperacionPlanilla")}</td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "cuentaPlanilla")}</td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "cuentaInterPlanilla")}</td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "clientePlanilla")}</td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "proyectoPlanilla")}</td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "sitePlanilla")}</td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "tipoTrabajoPlanilla")}</td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "tareaPlanilla")}</td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "responsablePlanilla")}</td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "comprobantePlanilla")}</td>
+                                      <td style={styles.td}>
+                                        <div style={styles.inlineEditableCellWrap}>
+                                          <select
+                                            value={areaFlujoDrafts[row.idMovimientoBanco] ?? (row.idAreaFlujo ? String(row.idAreaFlujo) : "")}
+                                            onChange={(event) => void handleAreaFlujoInlineChange(row, event.target.value)}
+                                            style={styles.inlineEditableSelect}
+                                            disabled={
+                                              clasificacionCombosLoading ||
+                                              Boolean(areaFlujoSavingIds[row.idMovimientoBanco]) ||
+                                              !isConciliacionMovimientoActivo(row)
+                                            }
+                                            aria-label={`Editar Area Flujo del movimiento ${row.idMovimientoBanco}`}
+                                          >
+                                            <option value="">{row.nombreAreaFlujo || "PENDIENTE"}</option>
+                                            {(clasificacionCombos?.areasFlujo ?? []).map((option) => (
+                                              <option key={`popup-area-${option.idAreaFlujo}`} value={String(option.idAreaFlujo)}>
+                                                {option.nombreAreaFlujo}
+                                              </option>
+                                            ))}
+                                          </select>
+                                          {areaFlujoSavingIds[row.idMovimientoBanco] ? <span style={styles.inlineEditableStatus}>Guardando...</span> : null}
+                                        </div>
+                                      </td>
+                                      <td style={styles.td}>
+                                        <div style={styles.inlineEditableCellWrap}>
+                                          <select
+                                            value={referenciaDrafts[row.idMovimientoBanco] ?? (row.idReferencia ? String(row.idReferencia) : "")}
+                                            onChange={(event) => void handleReferenciaInlineChange(row, event.target.value)}
+                                            style={styles.inlineEditableSelect}
+                                            disabled={
+                                              clasificacionCombosLoading ||
+                                              Boolean(referenciaSavingIds[row.idMovimientoBanco]) ||
+                                              !isConciliacionMovimientoActivo(row) ||
+                                              !row.idAreaFlujo ||
+                                              getReferenciasClasificacionInlineDisponibles(row.idAreaFlujo).length === 0
+                                            }
+                                            aria-label={`Editar Referencia del movimiento ${row.idMovimientoBanco}`}
+                                          >
+                                            <option value="">{getReferenciaLabel(row) || "PENDIENTE"}</option>
+                                            {getReferenciasClasificacionInlineDisponibles(row.idAreaFlujo).map((option) => (
+                                              <option key={`popup-ref-${option.idReferencia}`} value={String(option.idReferencia)}>
+                                                {option.codigoReferencia} - {option.nombreReferencia}
+                                              </option>
+                                            ))}
+                                          </select>
+                                          {referenciaSavingIds[row.idMovimientoBanco] ? (
+                                            <span style={styles.inlineEditableStatus}>Guardando...</span>
+                                          ) : !row.idAreaFlujo ? (
+                                            <span style={styles.inlineEditableStatus}>Depende de Area Flujo</span>
+                                          ) : null}
+                                        </div>
+                                      </td>
+                                      <td style={styles.td}>
+                                        <div style={styles.inlineEditableCellWrap}>
+                                          <select
+                                            value={
+                                              cuentaContableDrafts[row.idMovimientoBanco] ??
+                                              (row.idCuentaContable ? String(row.idCuentaContable) : "")
+                                            }
+                                            onChange={(event) => void handleCuentaContableInlineChange(row, event.target.value)}
+                                            style={styles.inlineEditableSelect}
+                                            disabled={
+                                              clasificacionCombosLoading ||
+                                              Boolean(cuentaContableSavingIds[row.idMovimientoBanco]) ||
+                                              !isConciliacionMovimientoActivo(row) ||
+                                              !row.idAreaFlujo ||
+                                              !row.idReferencia ||
+                                              getCuentasClasificacionInlineDisponibles(row.idAreaFlujo, row.idReferencia).length === 0
+                                            }
+                                            aria-label={`Editar Cuenta Contable del movimiento ${row.idMovimientoBanco}`}
+                                          >
+                                            <option value="">{row.cuentaContableTexto || "PENDIENTE"}</option>
+                                            {getCuentasClasificacionInlineDisponibles(row.idAreaFlujo, row.idReferencia).map((option) => (
+                                              <option key={`popup-cuenta-${option.idCuentaContable}`} value={String(option.idCuentaContable)}>
+                                                {option.cuentaContableTexto}
+                                              </option>
+                                            ))}
+                                          </select>
+                                          {cuentaContableSavingIds[row.idMovimientoBanco] ? (
+                                            <span style={styles.inlineEditableStatus}>Guardando...</span>
+                                          ) : !row.idAreaFlujo || !row.idReferencia ? (
+                                            <span style={styles.inlineEditableStatus}>Depende de Area Flujo y Referencia</span>
+                                          ) : null}
+                                        </div>
+                                      </td>
+                                      <td style={styles.td}>
+                                        <span style={{ ...styles.statusBadge, ...getClasificacionBadgeStyle(getConciliadoLabel(row)) }}>
+                                          {getConciliadoLabel(row)}
+                                        </span>
+                                      </td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "estadoConciliacionTexto") || "PENDIENTE"}</td>
+                                      <td style={styles.td}>
+                                        {getConciliacionDisplayValue(row, "estadoOperativoConciliacion") ? (
+                                          <span
+                                            style={{
+                                              ...styles.statusBadge,
+                                              ...getClasificacionBadgeStyle(getConciliacionDisplayValue(row, "estadoOperativoConciliacion")),
+                                            }}
+                                          >
+                                            {getConciliacionDisplayValue(row, "estadoOperativoConciliacion")}
+                                          </span>
+                                        ) : (
+                                          "PENDIENTE"
+                                        )}
+                                      </td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "fechaConciliacion")}</td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "usuarioConciliacion")}</td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "observacionConciliacionMovimiento")}</td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "bancoPlanilla")}</td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "seriePlanilla")}</td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "detallePlanilla")}</td>
+                                      <td style={styles.td}>{getConciliacionDisplayValue(row, "idOc")}</td>
+                                      <td
+                                        style={{
+                                          ...styles.td,
+                                          whiteSpace: "normal",
+                                          wordBreak: "break-word",
+                                          minWidth: 180,
+                                        }}
+                                        title={getConciliacionDisplayValue(row, "correlativoPlanilla")}
+                                      >
+                                        {getConciliacionDisplayValue(row, "correlativoPlanilla")}
+                                      </td>
+                                    </tr>
+                                  ))
+                                ) : (
+                                  <tr>
+                                    <td style={styles.td} colSpan={35}>
+                                      {detalleQuickSearch.trim()
+                                        ? "No se encontraron movimientos que coincidan con la búsqueda."
+                                        : "No se encontraron movimientos para los filtros ingresados."}
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
                 </>
               ) : (
                 <div style={styles.helperText}>
@@ -6496,6 +6906,91 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "flex-end",
     gap: 10,
     flexWrap: "wrap",
+  },
+  detailPopupOverlay: {
+    position: "fixed",
+    top: "calc(56px + 12px)",
+    left: 12,
+    right: 12,
+    bottom: "calc(44px + 12px)",
+    background: "rgba(15, 23, 42, 0.56)",
+    zIndex: 1190,
+    boxSizing: "border-box",
+  },
+  detailPopupCard: {
+    width: "100%",
+    height: "100%",
+    background: "#FFFFFF",
+    borderRadius: 18,
+    boxShadow: "0 24px 60px rgba(15, 23, 42, 0.28)",
+    border: "1px solid #E2E8F0",
+    display: "flex",
+    flexDirection: "column",
+    minHeight: 0,
+    overflow: "hidden",
+  },
+  detailPopupHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    padding: "14px 16px",
+    borderBottom: "1px solid #E2E8F0",
+    background: "#F8FAFC",
+    flexShrink: 0,
+  },
+  detailPopupHeaderLeft: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    minWidth: 0,
+  },
+  detailPopupHeaderTitle: {
+    margin: 0,
+    fontSize: 20,
+    fontWeight: 900,
+    color: "#0F172A",
+  },
+  detailPopupHeaderText: {
+    margin: 0,
+    fontSize: 12,
+    color: "#64748B",
+    fontWeight: 700,
+  },
+  detailPopupBody: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+    padding: 16,
+    flex: 1,
+    minHeight: 0,
+    overflow: "hidden",
+  },
+  detailPopupToolbar: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    flexWrap: "wrap",
+  },
+  detailPopupSearchWrap: {
+    flex: 1,
+    minWidth: 280,
+  },
+  detailPopupTableWrap: {
+    flex: 1,
+    minHeight: 0,
+    overflow: "hidden",
+    border: "1px solid #E2E8F0",
+    borderRadius: 14,
+  },
+  detailPopupTableScroll: {
+    overflowX: "auto",
+    overflowY: "auto",
+    height: "100%",
+    minHeight: 0,
+    position: "relative",
+    scrollbarGutter: "stable",
   },
 };
 
