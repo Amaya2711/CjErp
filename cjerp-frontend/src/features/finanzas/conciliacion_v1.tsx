@@ -3539,9 +3539,16 @@ export default function ConciliacionBcpPage() {
       Tipo_Trabajo: row.tipoTrabajoPlanilla || "",
       Tarea: row.tareaPlanilla || "",
       Responsable: row.responsablePlanilla || "",
-      AreaFlujo: row.nombreAreaFlujo || "",
-      Referencia: getReferenciaLabel(row),
-      CuentaContable: row.cuentaContableTexto || "",
+      AreaFlujo:
+        clasificacionCombos?.areasFlujo.find((option) => option.idAreaFlujo === row.idAreaFlujo)?.nombreAreaFlujo?.trim() ||
+        row.nombreAreaFlujo?.trim() ||
+        (row.esConciliado ? "" : "PENDIENTE"),
+      Referencia:
+        clasificacionCombos?.referencias.find((option) => option.idReferencia === row.idReferencia)
+          ? `${clasificacionCombos.referencias.find((option) => option.idReferencia === row.idReferencia)?.codigoReferencia?.trim() || ""}${clasificacionCombos.referencias.find((option) => option.idReferencia === row.idReferencia)?.nombreReferencia?.trim() ? ` - ${clasificacionCombos.referencias.find((option) => option.idReferencia === row.idReferencia)?.nombreReferencia?.trim()}` : ""}`.trim()
+          : getReferenciaLabel(row) || (row.esConciliado ? "" : "PENDIENTE"),
+      CuentaContable:
+        getCuentaContableLabel(row, clasificacionCombos?.cuentasContables) || (row.esConciliado ? "" : "PENDIENTE"),
       Conciliado: getConciliadoLabel(row),
       EstadoConciliacionTexto: row.estadoConciliacionTexto || "",
       EstadoOperativoConciliacion: row.estadoOperativoConciliacion || "",

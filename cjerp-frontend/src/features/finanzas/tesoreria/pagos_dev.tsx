@@ -2014,7 +2014,7 @@ export default function PagosV1Page() {
         dataField: "solicitante",
         caption: "Solicitante",
         groupIndex: 0,
-        visible: false,
+        showWhenGrouped: true,
       },
       { key: "correlativo", dataField: "correlativo", caption: "Correlativo", width: 100 },
       { key: "ot", dataField: "ot", caption: "OT", width: 95 },
@@ -2719,6 +2719,7 @@ export default function PagosV1Page() {
                 showBorders
                 rowAlternationEnabled
                 hoverStateEnabled
+                allowColumnReordering
                 allowColumnResizing
                 columnResizingMode="widget"
                 wordWrapEnabled
@@ -2749,9 +2750,9 @@ export default function PagosV1Page() {
                 <FilterRow visible />
                 <HeaderFilter visible />
                 <Sorting mode="multiple" />
-                <Grouping autoExpandAll={false} />
-                <GroupPanel visible />
-                <Scrolling mode="virtual" />
+                <Grouping autoExpandAll={false} allowCollapsing contextMenuEnabled expandMode="buttonClick" />
+                <GroupPanel visible allowColumnDragging />
+                <Scrolling mode="standard" />
                 <Paging defaultPageSize={20} />
                 <Pager
                   visible

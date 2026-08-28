@@ -1013,30 +1013,28 @@ function buildResumenOtRequest(row: PagoRow): PlanillaConsultaEstadosRequest | n
   };
 }
 
-function getEstadoCodigoParaHistorial(row: PagoRow, activeTab: PagoTabKey): string {
-  const estadoDesdeFila = TAB_ESTADOS[row.estado as Exclude<PagoTabKey, "resumen">] ?? "";
-  const estadoDesdeTab = activeTab !== "resumen" ? TAB_ESTADOS[activeTab] : "";
-
-  return estadoDesdeFila || estadoDesdeTab || "";
-}
-
-function buildHistorialRequest(row: PagoRow, activeTab: PagoTabKey): PlanillaConsultaEstadosRequest | null {
+function buildHistorialOtRequest(row: PagoRow): PlanillaConsultaEstadosRequest | null {
   const ot = getValidOtValue(row?.ot);
+  const idCliente = row?.idCliente;
+  const idProyecto = row?.idProyecto;
   const idSite = row?.siteId?.trim();
   const corSite = row?.corSite?.trim();
-  const estados = getEstadoCodigoParaHistorial(row, activeTab);
+  const tipoTrabajo = row?.tipoTrabajo?.trim();
 
-  if (!ot || !idSite || !corSite || !estados) {
+  if (!ot || idCliente == null || idProyecto == null || !idSite || !corSite || !tipoTrabajo) {
     return null;
   }
 
   return {
-    parametros: [
-      { nombre: "Estados", valor: estados, tipo: "string" },
+    ...buildPlanillaConsultaEstadosRequest([
+      { nombre: "Estados", valor: "4", tipo: "string" },
       { nombre: "OT", valor: ot, tipo: "string" },
       { nombre: "IdSite", valor: idSite, tipo: "string" },
-      { nombre: "CorSite", valor: corSite, tipo: "string" },
-    ],
+      { nombre: "CorSite", valor: corSite, tipo: "int" },
+      { nombre: "IdCliente", valor: String(Math.trunc(idCliente)), tipo: "int" },
+      { nombre: "IdProyecto", valor: String(Math.trunc(idProyecto)), tipo: "int" },
+      { nombre: "Tipo_Trabajo", valor: tipoTrabajo, tipo: "string" },
+    ]),
   };
 }
 
@@ -1229,8 +1227,9 @@ function getStateColor(tab: Exclude<PagoTabKey, "resumen">) {
 }
 
 export default function PagosV1Page() {
-  const [activeTab, setActiveTab] = useState<PagoTabKey>("aprobar");
+  const [activeTab, setActiveTab] = useState<PagoTabKey>("resumen");
   const [detailTab, setDetailTab] = useState<DetailTabKey>("resumen");
+  const [isDetailPanelOpen, setIsDetailPanelOpen] = useState(false);
   const [filters, setFilters] = useState<FilterState>(() => getDefaultFilterState());
   const [appliedFilters, setAppliedFilters] = useState<FilterState>(() => getDefaultFilterState());
   const [rowsByTab, setRowsByTab] = useState<Record<PagoTabKey, PagoRow[]>>({
@@ -1241,8 +1240,7 @@ export default function PagosV1Page() {
     resumen: [],
   });
   const [loadingData, setLoadingData] = useState(true);
-  const [loadingStage, setLoadingStage] = useState<string>("Iniciando carga...");
-  const [loadTrace, setLoadTrace] = useState<string[]>([]);
+  const [, setLoadingStage] = useState<string>("Iniciando carga...");
   const [selectedId, setSelectedId] = useState<number>(0);
   const [checkedIds, setCheckedIds] = useState<number[]>([]);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -1267,7 +1265,6 @@ export default function PagosV1Page() {
   const loadTimeoutMs = 15000;
 
   const pushLoadTrace = useCallback((entry: string) => {
-    setLoadTrace((prev) => [...prev, entry]);
     console.info(`[PagosV1] ${entry}`);
   }, []);
 
@@ -1311,7 +1308,6 @@ export default function PagosV1Page() {
     const load = async (signal: AbortSignal) => {
       setLoadingData(true);
       setLoadingStage("Preparando consulta de órdenes...");
-      setLoadTrace([]);
       const loadStart = performance.now();
 
       try {
@@ -1394,7 +1390,7 @@ export default function PagosV1Page() {
         }
       } finally {
         if (!cancelled && !controller.signal.aborted) {
-          setLoadingStage("Carga finalizada.");
+          setLoadingStage("");
           setLoadingData(false);
         }
       }
@@ -1406,18 +1402,18 @@ export default function PagosV1Page() {
       cancelled = true;
       controller.abort();
     };
-  }, [appliedFilters.fechaDesde, appliedFilters.fechaHasta, refreshTick]);
+  }, [refreshTick]);
 
   const activeRows = useMemo(
     () => (activeTab === "resumen" ? rowsByTab.resumen : rowsByTab[activeTab]),
     [activeTab, rowsByTab]
   );
 
-  const filteredRows = useMemo(() => {
-    return activeRows.filter((row) => {
+  const matchesAppliedFilters = useCallback(
+    (row: PagoRow, includeDateFilters: boolean) => {
+      const fechaDesde = includeDateFilters ? formatDateParam(appliedFilters.fechaDesde) : "";
+      const fechaHasta = includeDateFilters ? formatDateParam(appliedFilters.fechaHasta) : "";
       const rowDate = toComparableDateKey(row.fecha);
-      const fechaDesde = formatDateParam(appliedFilters.fechaDesde);
-      const fechaHasta = formatDateParam(appliedFilters.fechaHasta);
 
       return (
         matchesTextFilter(row.cliente, appliedFilters.cliente) &&
@@ -1433,8 +1429,13 @@ export default function PagosV1Page() {
         (!fechaHasta || rowDate <= fechaHasta) &&
         matchesQuickSearch(row, appliedFilters.query)
       );
-    });
-  }, [activeRows, appliedFilters]);
+    },
+    [appliedFilters]
+  );
+
+  const filteredRows = useMemo(() => {
+    return activeRows.filter((row) => matchesAppliedFilters(row, activeTab === "aprobar"));
+  }, [activeRows, activeTab, matchesAppliedFilters]);
 
   const groupedRows = useMemo<GroupRow[]>(() => {
     const map = new Map<string, GroupRow>();
@@ -1560,15 +1561,19 @@ export default function PagosV1Page() {
 
   const tabStats = useMemo(() => {
     const counts = {
-      aprobar: rowsByTab.aprobar.length,
-      reaprobar: rowsByTab.reaprobar.length,
-      hormiga: rowsByTab.hormiga.length,
-      observadas: rowsByTab.observadas.length,
-      resumen: rowsByTab.resumen.length,
+      aprobar: rowsByTab.aprobar.filter((row) => matchesAppliedFilters(row, true)).length,
+      reaprobar: rowsByTab.reaprobar.filter((row) => matchesAppliedFilters(row, false)).length,
+      hormiga: rowsByTab.hormiga.filter((row) => matchesAppliedFilters(row, false)).length,
+      observadas: rowsByTab.observadas.filter((row) => matchesAppliedFilters(row, false)).length,
+      resumen:
+        rowsByTab.aprobar.filter((row) => matchesAppliedFilters(row, true)).length +
+        rowsByTab.reaprobar.filter((row) => matchesAppliedFilters(row, false)).length +
+        rowsByTab.hormiga.filter((row) => matchesAppliedFilters(row, false)).length +
+        rowsByTab.observadas.filter((row) => matchesAppliedFilters(row, false)).length,
     };
 
     return counts;
-  }, [rowsByTab]);
+  }, [rowsByTab, matchesAppliedFilters]);
 
   const currentTheme = TAB_THEME[activeTab];
   const mapearDatosOc = useCallback(
@@ -1614,10 +1619,9 @@ export default function PagosV1Page() {
         montoOc,
         disponible,
         porcentaje,
-        pagado: ot ? (montoPlanillaPagadoCampo > 0 ? montoPlanillaPagadoCampo : totalAcumuladoOt) : 0,
+        pagado: ot ? parseNumericValue(row.montoPlanillaPagado ?? row.montoPlanillaPagadoDisplay ?? 0) : 0,
         pendiente: ot ? Math.max(montoOc - totalAcumuladoOt, 0) : 0,
         subOc: totalOc,
-        montoPlanilla: montoPlanillaPagadoCampo > 0 ? montoPlanillaPagadoCampo : undefined,
         adelaFic,
         porcentajeFic,
         porcentajeMontoBck: undefined,
@@ -1729,20 +1733,14 @@ export default function PagosV1Page() {
         return;
       }
 
-      const request = buildHistorialRequest(filaActiva, activeTab);
+      const request = buildHistorialOtRequest(filaActiva);
       if (!request) {
         setHistorialRows([]);
         setHistorialLoading(false);
         return;
       }
 
-      const cacheKey = [
-        filaActiva.ot || "",
-        filaActiva.siteId || "",
-        filaActiva.corSite || "",
-        filaActiva.estado || "",
-        activeTab,
-      ].join("|");
+      const cacheKey = [filaActiva.ot || ""].join("|");
 
       const cachedRows = historialCacheRef.current.get(cacheKey);
       if (cachedRows) {
@@ -1784,7 +1782,7 @@ export default function PagosV1Page() {
       cancelled = true;
       controller.abort();
     };
-  }, [detailTab, filaActiva, activeTab]);
+  }, [detailTab, filaActiva]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1896,8 +1894,7 @@ export default function PagosV1Page() {
         parseNumericValue(resumenOtDetalle.montoOc ?? detalleOcBase.montoOc ?? 0),
         parseNumericValue(resumenOtDetalle.disponible ?? detalleOcBase.disponible ?? 0)
       ),
-      pagado: resumenOtDetalle.montoPlanillaPagado ?? detalleOcBase.pagado,
-      montoPlanilla: resumenOtDetalle.montoPlanilla ?? detalleOcBase.montoPlanilla,
+      pagado: detalleOcBase.pagado,
       montoPlanillaPagado: resumenOtDetalle.montoPlanillaPagado ?? detalleOcBase.montoPlanillaPagado,
       totalAcumuladoOt: resumenOtDetalle.totalAcumuladoOt ?? detalleOcBase.totalAcumuladoOt,
       porcentajeMontoBck:
@@ -1921,15 +1918,10 @@ export default function PagosV1Page() {
   const consumoOcPercent = detalleOcActiva
     ? getConsumptionPercent(parseNumericValue(detalleOcActiva.subOc), parseNumericValue(detalleOcActiva.disponibleOc ?? 0))
     : 0;
-  const montoPlanillaPagadoOc = useMemo(() => {
-    const rowConMontoPagado = historialOcRows.find((row) => Number.isFinite(row.montoPlanillaPagado ?? NaN));
-
-    if (!rowConMontoPagado) {
-      return 0;
-    }
-
-    return parseNumericValue(rowConMontoPagado.montoPlanillaPagado);
-  }, [historialOcRows]);
+  const montoPlanillaPagadoOc = useMemo(
+    () => parseNumericValue(filaActiva?.montoPlanillaPagado ?? filaActiva?.montoPlanillaPagadoDisplay ?? 0),
+    [filaActiva?.montoPlanillaPagado, filaActiva?.montoPlanillaPagadoDisplay]
+  );
   const pagadoOcAmount = Math.max(montoPlanillaPagadoOc, 0);
   const solicitadoOcAmount = Math.max(parseNumericValue(detalleOcActiva?.solicitado ?? 0), 0);
   const totalOcAmount = Math.max(parseNumericValue(detalleOcActiva?.subOc ?? 0), 0);
@@ -1977,8 +1969,13 @@ export default function PagosV1Page() {
   const summaryLabel = checkedIds.length > 0 ? "Seleccionados" : "Mostrando";
 
   useEffect(() => {
-    setDetailTab("orden");
+    setDetailTab("resumen");
   }, [selectedId, activeTab]);
+
+  useEffect(() => {
+    setResumenOtDetalle(null);
+    setResumenOtLoading(false);
+  }, [selectedId]);
 
   const actionConfig = useMemo(() => {
     switch (activeTab) {
@@ -2022,7 +2019,35 @@ export default function PagosV1Page() {
   }, [activeTab]);
   const isResumenTab = activeTab === "resumen";
   const showEstadoOc = activeTab === "resumen";
-  const tableColSpan = showEstadoOc ? 19 : 18;
+  const tableColSpan = showEstadoOc ? 22 : 21;
+  const stickyColumnWidths = [108, 94, 88, 88, 72, 90, 110, 44, 90];
+  const stickyColumnLefts = stickyColumnWidths.reduce<number[]>((acc, _width, index) => {
+    const previousLeft = acc[index - 1] ?? 0;
+    const previousWidth = index === 0 ? 0 : stickyColumnWidths[index - 1];
+    acc.push(previousLeft + previousWidth);
+    return acc;
+  }, []);
+
+  const getStickyCellStyle = (index: number, background: string, zIndex: number): React.CSSProperties => ({
+    position: "sticky",
+    left: stickyColumnLefts[index],
+    minWidth: stickyColumnWidths[index],
+    width: stickyColumnWidths[index],
+    maxWidth: stickyColumnWidths[index],
+    background,
+    zIndex,
+  });
+
+  const toggleDetailForRow = (row: PagoRow) => {
+    setSelectedId(row.id);
+    setIsDetailPanelOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        setDetailTab("resumen");
+      }
+      return next;
+    });
+  };
 
   const handleAction = (label: string) => {
     if (label === "Exportar") {
@@ -2043,7 +2068,8 @@ export default function PagosV1Page() {
       return;
     }
     if (label === "Ver detalle") {
-      setDetailTab("orden");
+      setIsDetailPanelOpen(true);
+      setDetailTab("resumen");
       return;
     }
     if (label === "Ver observaciÃ³n") {
@@ -2111,6 +2137,9 @@ export default function PagosV1Page() {
 
   const handleApplyFilters = () => {
     setAppliedFilters(filters);
+    if (filters.fechaDesde || filters.fechaHasta) {
+      setActiveTab("aprobar");
+    }
     setMessage("Filtros aplicados.");
   };
 
@@ -2564,47 +2593,6 @@ export default function PagosV1Page() {
                 </div>
               </div>
 
-              {(loadingData || loadTrace.length > 0) ? (
-                <div
-                  style={{
-                    marginTop: 10,
-                    border: "1px solid #DBEAFE",
-                    background: "#EFF6FF",
-                    borderRadius: 12,
-                    padding: "8px 12px",
-                    color: "#1D4ED8",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 6,
-                  }}
-                >
-                  <div>{loadingStage}</div>
-                  {loadTrace.length > 0 ? (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                      {loadTrace.map((entry, index) => (
-                        <span
-                          key={`${entry}-${index}`}
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            padding: "3px 8px",
-                            borderRadius: 999,
-                            background: "#FFFFFF",
-                            border: "1px solid #BFDBFE",
-                            color: "#1E40AF",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {entry}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-
             </div>
 
             <div style={styles.metricsStrip}>
@@ -2663,11 +2651,11 @@ export default function PagosV1Page() {
         </section>
 
           <section
-          style={{
-            ...styles.mainGrid,
-            gridTemplateColumns: "minmax(0, 1fr) 580px",
-          }}
-        >
+            style={{
+              ...styles.mainGrid,
+              gridTemplateColumns: isDetailPanelOpen ? "minmax(0, 1fr) 580px" : "minmax(0, 1fr)",
+            }}
+          >
           <div style={styles.leftColumn}>
             <div style={styles.gridCard}>
            
@@ -2676,7 +2664,7 @@ export default function PagosV1Page() {
               <table style={styles.table}>
                 <thead>
                   <tr>
-                    <th style={{ ...styles.th, width: 108, textAlign: "center" }}>
+                    <th style={{ ...styles.th, ...getStickyCellStyle(0, "#F8FAFC", 6), textAlign: "center" }}>
                       <div style={styles.headerSelectionTools}>
                         <input
                           ref={selectAllRef}
@@ -2705,13 +2693,14 @@ export default function PagosV1Page() {
                         </button>
                       </div>
                     </th>
-                    <th style={{ ...styles.th, width: 94 }}>Correlativo</th>
-                    <th style={{ ...styles.th, width: 88 }}>OT</th>
-                    <th style={{ ...styles.th, width: 88 }}>OC</th>
-                    <th style={{ ...styles.th, width: 72 }}>Fila</th>
-                    <th style={{ ...styles.th, width: 90 }}>Responsable</th>
-                    <th style={{ ...styles.th, width: 110 }}>Validador</th>
-                    <th style={{ ...styles.th, width: 90 }}>Subtotal</th>
+                    <th style={{ ...styles.th, ...getStickyCellStyle(1, "#F8FAFC", 6) }}>Correlativo</th>
+                    <th style={{ ...styles.th, ...getStickyCellStyle(2, "#F8FAFC", 6) }}>OT</th>
+                    <th style={{ ...styles.th, ...getStickyCellStyle(3, "#F8FAFC", 6) }}>OC</th>
+                    <th style={{ ...styles.th, ...getStickyCellStyle(4, "#F8FAFC", 6) }}>Fila</th>
+                    <th style={{ ...styles.th, ...getStickyCellStyle(5, "#F8FAFC", 6) }}>Responsable</th>
+                    <th style={{ ...styles.th, ...getStickyCellStyle(6, "#F8FAFC", 6) }}>Validador</th>
+                    <th style={{ ...styles.th, ...getStickyCellStyle(7, "#F8FAFC", 6), textAlign: "center" }}> </th>
+                    <th style={{ ...styles.th, ...getStickyCellStyle(8, "#F8FAFC", 6) }}>Subtotal</th>
                     <th style={{ ...styles.th, width: 90 }}>IGV</th>
                     <th style={{ ...styles.th, width: 100 }}>Total</th>
                     <th style={{ ...styles.th, width: 80 }}>Fecha</th>
@@ -2732,29 +2721,7 @@ export default function PagosV1Page() {
                     <tr>
                       <td colSpan={tableColSpan} style={styles.emptyCell}>
                         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                          <span>{loadingStage || "Cargando Órdenes desde Planilla..."}</span>
-                          {loadTrace.length > 0 ? (
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "center" }}>
-                              {loadTrace.map((entry, index) => (
-                                <span
-                                  key={`${entry}-${index}`}
-                                  style={{
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    padding: "3px 8px",
-                                    borderRadius: 999,
-                                    background: "#FFFFFF",
-                                    border: "1px solid #BFDBFE",
-                                    color: "#1E40AF",
-                                    whiteSpace: "nowrap",
-                                    fontSize: 11,
-                                  }}
-                                >
-                                  {entry}
-                                </span>
-                              ))}
-                            </div>
-                          ) : null}
+                          <span>Cargando Órdenes desde Planilla...</span>
                         </div>
                       </td>
                     </tr>
@@ -2765,6 +2732,7 @@ export default function PagosV1Page() {
                       </td>
                     </tr>
                   ) : (
+                    // TEMP-MARKER: bloque de agrupadores en revisión para posible revertir este ultimo cambio
                     groupedRows.map((group) => {
                       const isCollapsed = collapsedGroups[group.key] ?? false;
                       const groupRowIds = group.rows.map((row) => row.id);
@@ -2835,7 +2803,7 @@ export default function PagosV1Page() {
                                     background: isSelected ? "#EEF2FF" : "#FFFFFF",
                                   }}
                                 >
-                                  <td style={styles.td}>
+                                  <td style={{ ...styles.td, ...getStickyCellStyle(0, isSelected ? "#EEF2FF" : "#FFFFFF", 4), textAlign: "center" }}>
                                     <input
                                       type="checkbox"
                                       checked={checkedIds.includes(row.id)}
@@ -2851,13 +2819,35 @@ export default function PagosV1Page() {
                                       style={{ accentColor: rowTheme.accent }}
                                     />
                                   </td>
-                                  <td style={styles.td}>{row.correlativo}</td>
-                                  <td style={styles.td}>{row.ot || "-"}</td>
-                                  <td style={styles.td}>{row.idOc || row.documento || "-"}</td>
-                                  <td style={styles.td}>{row.fila || "-"}</td>
-                                  <td style={styles.td}>{row.responsable}</td>
-                                  <td style={styles.td}>{row.validador || "-"}</td>
-                                  <td style={{ ...styles.td, fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
+                                  <td style={{ ...styles.td, ...getStickyCellStyle(1, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.correlativo}</td>
+                                  <td style={{ ...styles.td, ...getStickyCellStyle(2, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.ot || "-"}</td>
+                                  <td style={{ ...styles.td, ...getStickyCellStyle(3, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.idOc || row.documento || "-"}</td>
+                                  <td style={{ ...styles.td, ...getStickyCellStyle(4, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.fila || "-"}</td>
+                                  <td style={{ ...styles.td, ...getStickyCellStyle(5, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.responsable}</td>
+                                  <td style={{ ...styles.td, ...getStickyCellStyle(6, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.validador || "-"}</td>
+                                  <td style={{ ...styles.td, ...getStickyCellStyle(7, isSelected ? "#EEF2FF" : "#FFFFFF", 3), textAlign: "center" }}>
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        toggleDetailForRow(row);
+                                      }}
+                                      style={{
+                                        ...styles.compactActionButton,
+                                        width: 30,
+                                        height: 30,
+                                        padding: 0,
+                                        color: currentTheme.accent,
+                                        borderColor: currentTheme.border,
+                                        background: currentTheme.soft,
+                                      }}
+                                      aria-label={`Ver detalle de la orden ${row.correlativo}`}
+                                      title="Ver detalle"
+                                      >
+                                        <Eye size={10} />
+                                      </button>
+                                  </td>
+                                  <td style={{ ...styles.td, ...getStickyCellStyle(8, isSelected ? "#EEF2FF" : "#FFFFFF", 3), fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
                                   <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
                                   <td style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
                                   <td style={styles.td}>{formatDate(row.fecha)}</td>
@@ -2950,6 +2940,7 @@ export default function PagosV1Page() {
             </section>
           </div>
 
+          {isDetailPanelOpen ? (
           <aside style={styles.ocDataCard}>
             {filaActiva && detalleOcActiva ? (
               <>
@@ -2958,16 +2949,32 @@ export default function PagosV1Page() {
                     <div style={{ ...styles.sectionKicker, color: currentTheme.accent }}>Detalles del registro</div>
                     <h2 style={styles.detailTitleSmall}>Orden de Pago N° {filaActiva.correlativo}</h2>
                   </div>
-                  <span
-                    style={{
-                      ...styles.detailStatus,
-                      color: currentTheme.accent,
-                      background: currentTheme.soft,
-                      borderColor: currentTheme.border,
-                    }}
-                  >
-                    {getStatusLabel(filaActiva.estado)}
-                  </span>
+                  <div style={styles.detailHeaderTools}>
+                    <span
+                      style={{
+                        ...styles.detailStatus,
+                        color: currentTheme.accent,
+                        background: currentTheme.soft,
+                        borderColor: currentTheme.border,
+                      }}
+                    >
+                      {getStatusLabel(filaActiva.estado)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsDetailPanelOpen(false)}
+                      style={{
+                        ...styles.detailExpandButton,
+                        color: currentTheme.accent,
+                        background: "#FFFFFF",
+                        borderColor: currentTheme.border,
+                      }}
+                      aria-label="Contraer detalle"
+                      title="Contraer detalle"
+                    >
+                      <Minimize2 size={16} />
+                    </button>
+                  </div>
                 </div>
 
                 <div style={styles.detailTabs}>
@@ -3064,7 +3071,7 @@ export default function PagosV1Page() {
                           <div style={styles.ocProgressFooter}>
                           <div style={styles.ocProgressFooterLine}>
                             <span>Pagado:</span>
-                            <span>{formatCurrency(detalleOcActiva.montoPlanilla ?? detalleOcActiva.pagado, detalleOcActiva.moneda)}</span>
+                            <span>{formatCurrency(montoPlanillaPagadoOc, detalleOcActiva.moneda)}</span>
                           </div>
                           <div style={styles.ocProgressFooterLine}>
                             <span>Disponible:</span>
@@ -3395,6 +3402,7 @@ export default function PagosV1Page() {
               </div>
             )}
           </aside>
+          ) : null}
         </section>
         {detailTab === "historial" && isHistorialPopupOpen ? (
           <div
@@ -4368,6 +4376,7 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: 0,
     flex: 1,
     alignItems: "start",
+    position: "relative",
   },
   leftColumn: {
     display: "flex",
@@ -4492,15 +4501,20 @@ const styles: Record<string, React.CSSProperties> = {
   groupCell: {
     padding: 0,
     borderBottom: "1px solid #E2E8F0",
+    background: "#FAFAFB",
   },
   groupBar: {
     display: "flex",
     alignItems: "center",
     gap: 10,
     padding: "10px 14px",
-    background: "#FFFFFF",
+    background: "#FAFAFB",
     borderBottom: "1px solid #EEF2F7",
     flexWrap: "wrap",
+    width: "100%",
+    minWidth: "100%",
+    boxSizing: "border-box",
+    justifyContent: "flex-start",
   },
   groupToggle: {
     width: 28,
@@ -4620,6 +4634,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 12,
     minHeight: 0,
     height: "auto",
+    maxHeight: "calc(100vh - 178px)",
     alignSelf: "start",
     overflow: "hidden",
   },
@@ -4924,7 +4939,8 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 10,
     minHeight: 0,
     flex: 1,
-    maxHeight: "none",
+    height: "100%",
+    maxHeight: "100%",
     overflow: "hidden",
   },
   historyBlock: {
@@ -5001,7 +5017,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   popupCard: {
     width: "min(1360px, calc(100vw - 32px))",
-    maxHeight: "min(86vh, 920px)",
+    maxHeight: "calc(100vh - 32px)",
     background: "#FFFFFF",
     borderRadius: 18,
     border: "1px solid #DBEAFE",
