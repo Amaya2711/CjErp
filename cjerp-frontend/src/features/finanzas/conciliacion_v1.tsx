@@ -1,6 +1,7 @@
 ﻿import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Cell, Label, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { API_BASE_URL } from "../../api/httpClient";
+import httpClient from "../../api/httpClient";
 import {
   actualizarClasificacionMovimientoConciliacionV1,
   actualizarComentarioMovimientoConciliacionV1,
@@ -15,6 +16,7 @@ import {
   actualizarPlanillaNroOperacion,
   consultarPlanillaEstados,
 } from "../../api/planillaConsultaService";
+import { getAuthUser } from "../../utils/authStorage";
 import type {
   ConciliacionBcpAnalizarResponse,
   ConciliacionBcpArchivoAnalisis,
@@ -29,7 +31,7 @@ import type {
 } from "../../models/conciliacionBcp";
 import type { PlanillaConsultaParametro } from "../../models/planillaConsulta";
 import { getHttpErrorMessage } from "../../utils/httpError";
-import { ArrowUpDown, ChevronDown, ChevronRight, FileDown, Maximize2, Minimize2, Search } from "lucide-react";
+import { ArrowUpDown, ChevronDown, ChevronRight, Eye, FileDown, Maximize2, Minimize2, Search } from "lucide-react";
 
 const MAX_FILE_SIZE_BYTES = 15_000_000;
 type ConciliacionSortKey =
@@ -137,6 +139,15 @@ type ConciliacionClasificacionForm = {
   idCuentaContable: string;
   idReglaContable: string;
   observacionConciliacion: string;
+};
+
+type ConciliacionMontoDiferenciaForm = {
+  idMovimientoBanco: number;
+  montoOriginal: number;
+  montoDiferencia: string;
+  moneda: string | null;
+  nroOperacionPlanilla: string | null;
+  fecha: string | null;
 };
 
 const DETAIL_STICKY_COLUMN_KEYS: ConciliacionSortKey[] = [
@@ -453,6 +464,36 @@ function calculateMontoDiferencia(
   return monto - totalPagar;
 }
 
+function parseNumericValue(value?: string | number | null): number {
+  if (value === null || value === undefined) {
+    return Number.NaN;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : Number.NaN;
+  }
+
+  const normalized = value.toString().replace(/,/g, "").trim();
+  if (!normalized) {
+    return Number.NaN;
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+function roundCurrencyValue(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function getConciliacionMontoDiferenciaValue(row: ConciliacionBcpConciliarPlanillaRegistro): number | null {
+  if (row.diferenciaAjustada !== undefined && row.diferenciaAjustada !== null) {
+    return row.diferenciaAjustada;
+  }
+
+  return calculateMontoDiferencia(row.monto, getPlanillaAmountForComparison(row));
+}
+
 function normalizeComentarioValue(value?: string | null): string {
   return value?.trim() ?? "";
 }
@@ -493,6 +534,38 @@ function normalizeText(value?: string | null): string {
     .replace(/[\u0300-\u036f]/g, "")
     .toUpperCase()
     .trim();
+}
+
+function resolveTipoMonedaPlanilla(moneda?: string | null): string {
+  const normalized = normalizeText(moneda);
+
+  if (!normalized) {
+    return "0";
+  }
+
+  if (/^\d+$/.test(normalized)) {
+    return normalized;
+  }
+
+  if (
+    normalized.includes("SOLES") ||
+    normalized === "SOL" ||
+    normalized === "PEN" ||
+    normalized === "MN"
+  ) {
+    return "1";
+  }
+
+  if (
+    normalized.includes("DOLAR") ||
+    normalized === "USD" ||
+    normalized === "ME" ||
+    normalized.includes("DOL")
+  ) {
+    return "2";
+  }
+
+  return "0";
 }
 
 function isScotiabankBankCode(codigoBanco?: string | null): boolean {
@@ -589,6 +662,12 @@ function getConciliadoLabel(row: ConciliacionBcpConciliarPlanillaRegistro): stri
   return row.esConciliado ? "CONCILIADO" : "PENDIENTE";
 }
 
+function isConciliacionDetalleActionEnabled(row: ConciliacionBcpConciliarPlanillaRegistro): boolean {
+  const resultado = normalizeText(getConciliacionDisplayValue(row, "resultadoConciliacion"));
+  const diferencia = getConciliacionMontoDiferenciaValue(row);
+  return resultado === "SIN COINCIDENCIA" && diferencia !== null;
+}
+
 function getClasificacionBadgeStyle(status: string): React.CSSProperties {
   const normalized = status.trim().toUpperCase();
 
@@ -662,8 +741,7 @@ function getConciliacionDisplayValue(row: ConciliacionBcpConciliarPlanillaRegist
       return totalPagar != null ? formatNumber(totalPagar) : "";
     }
     case "diferencia": {
-      const totalPagar = getPlanillaAmountForComparison(row);
-      const diferencia = calculateMontoDiferencia(row.monto, totalPagar);
+      const diferencia = getConciliacionMontoDiferenciaValue(row);
       return diferencia != null ? formatNumber(diferencia) : "";
     }
     case "nroOperacion":
@@ -795,7 +873,7 @@ function getConciliacionSortValue(row: ConciliacionBcpConciliarPlanillaRegistro,
     case "totalPagar":
       return getPlanillaAmountForComparison(row);
     case "diferencia":
-      return calculateMontoDiferencia(row.monto, getPlanillaAmountForComparison(row));
+      return getConciliacionMontoDiferenciaValue(row);
     case "empresa":
       return row.empresa?.trim().toLowerCase() ?? "";
     case "cuenta":
@@ -1640,8 +1718,12 @@ export default function ConciliacionBcpPage() {
   const [clasificacionCombosLoading, setClasificacionCombosLoading] = useState(false);
   const [clasificacionModal, setClasificacionModal] = useState<ConciliacionClasificacionForm | null>(null);
   const [clasificacionSaving, setClasificacionSaving] = useState(false);
+  const [montoDiferenciaModal, setMontoDiferenciaModal] = useState<ConciliacionMontoDiferenciaForm | null>(null);
+  const [montoDiferenciaSaving, setMontoDiferenciaSaving] = useState(false);
+  const [montoDiferenciaError, setMontoDiferenciaError] = useState("");
   const [detalleScrollContentWidth, setDetalleScrollContentWidth] = useState(0);
   const [detalleExpandedPopupOpen, setDetalleExpandedPopupOpen] = useState(false);
+  const authUser = getAuthUser();
 
   const fechaDepositoInicioGastos = useMemo(() => conciliacionFiltros.fechaInicio.trim(), [conciliacionFiltros.fechaInicio]);
   const fechaDepositoFinGastos = useMemo(() => conciliacionFiltros.fechaFin.trim(), [conciliacionFiltros.fechaFin]);
@@ -3030,6 +3112,185 @@ export default function ConciliacionBcpPage() {
   const closeClasificacionModal = () => {
     if (!clasificacionSaving) {
       setClasificacionModal(null);
+    }
+  };
+
+  const closeMontoDiferenciaModal = () => {
+    if (!montoDiferenciaSaving) {
+      setMontoDiferenciaModal(null);
+      setMontoDiferenciaError("");
+    }
+  };
+
+  const openClasificacionModal = (row: ConciliacionBcpConciliarPlanillaRegistro) => {
+    setClasificacionModal({
+      idMovimientoBanco: row.idMovimientoBanco,
+      idAreaFlujo: row.idAreaFlujo ? String(row.idAreaFlujo) : "",
+      idReferencia: row.idReferencia ? String(row.idReferencia) : "",
+      idCuentaContable: row.idCuentaContable ? String(row.idCuentaContable) : "",
+      idReglaContable: row.idReglaContable ? String(row.idReglaContable) : "",
+      observacionConciliacion: row.observacionConciliacionMovimiento?.trim() || "",
+    });
+  };
+
+  const openMontoDiferenciaModal = (row: ConciliacionBcpConciliarPlanillaRegistro) => {
+    const diferenciaActual = getConciliacionMontoDiferenciaValue(row);
+
+    setMontoDiferenciaModal({
+      idMovimientoBanco: row.idMovimientoBanco,
+      montoOriginal: diferenciaActual ?? 0,
+      montoDiferencia: diferenciaActual != null ? formatNumber(diferenciaActual) : "",
+      moneda: row.moneda ?? null,
+      nroOperacionPlanilla: row.nroOperacionPlanilla ?? null,
+      fecha: row.fecha ?? null,
+    });
+    setMontoDiferenciaError("");
+  };
+
+  const handleMontoDiferenciaChange = (value: string) => {
+    setMontoDiferenciaModal((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const nextNumericValue = parseNumericValue(value);
+      const originalRounded = roundCurrencyValue(current.montoOriginal);
+      const nextRounded = roundCurrencyValue(nextNumericValue);
+
+      if (Number.isFinite(nextNumericValue) && nextRounded > originalRounded) {
+        setMontoDiferenciaError(
+          `El monto ingresado no puede ser mayor a la diferencia original (${formatNumber(originalRounded)}).`
+        );
+      } else {
+        setMontoDiferenciaError("");
+      }
+
+      return { ...current, montoDiferencia: value };
+    });
+  };
+
+  const handleGuardarMontoDiferencia = async () => {
+    if (!montoDiferenciaModal) {
+      return;
+    }
+
+    const nextMonto = parseNumericValue(montoDiferenciaModal.montoDiferencia);
+    if (!Number.isFinite(nextMonto)) {
+      setMontoDiferenciaError("Ingresa un monto de diferencia valido.");
+      return;
+    }
+
+    if (roundCurrencyValue(nextMonto) > roundCurrencyValue(montoDiferenciaModal.montoOriginal)) {
+      setMontoDiferenciaError("El monto de diferencia solo puede reducirse, no incrementarse.");
+      return;
+    }
+
+    const shouldSave = window.confirm("¿Desea crear registro para compensar valor?");
+    if (!shouldSave) {
+      return;
+    }
+
+    setMontoDiferenciaSaving(true);
+    setMontoDiferenciaError("");
+
+    try {
+      const moneda = resolveTipoMonedaPlanilla(montoDiferenciaModal.moneda);
+      if (moneda === "0") {
+        setMontoDiferenciaError("No se pudo determinar la moneda del registro seleccionado.");
+        return;
+      }
+
+      if (!montoDiferenciaModal.nroOperacionPlanilla?.trim()) {
+        setMontoDiferenciaError("No se pudo obtener el NroOperacionPlanilla del registro seleccionado.");
+        return;
+      }
+
+      const fechaEmision = normalizeIsoDateValue(montoDiferenciaModal.fecha ?? "");
+      if (!fechaEmision) {
+        setMontoDiferenciaError("No se pudo obtener la fecha del registro seleccionado.");
+        return;
+      }
+
+      const usuarioAccion =
+        authUser?.usuario?.trim() ||
+        authUser?.userName?.trim() ||
+        authUser?.username?.trim() ||
+        authUser?.nombre?.trim() ||
+        authUser?.nombreEmpleado?.trim() ||
+        "SYSTEM";
+
+      const payload = {
+        filtroOperativoKey: "COMPENSACION_MANUAL_MONTOS",
+        responsable: "0",
+        idBancoCta: 0,
+        idProyecto: 29,
+        idSite: "100010",
+        correSite: 1,
+        idTarea: 0,
+        idCliente: 1,
+        cuenta: ".",
+        cuentaNumero: ".",
+        cuentaInter: ".",
+        nombreCta: ".",
+        ruc: ".",
+        tipoPago: "0",
+        tipoPagoLabel: "0",
+        monto: nextMonto,
+        subtotal: nextMonto,
+        total: nextMonto,
+        igv: 0,
+        idRendicion: 0,
+        detalle: "Compensacion manual de montos minimos",
+        comentario: "Compensacion manual de montos minimos",
+        fechaVencimiento: "",
+        fecIngreso: "",
+        fechaEmision,
+        solicitante: "0",
+        solicitanteLabel: "0",
+        gestor: "0",
+        gestorLabel: "0",
+        validador: "0",
+        validadorLabel: "0",
+        moneda,
+        monedaLabel: montoDiferenciaModal.moneda ?? "",
+        bien: "0",
+        bienLabel: "0",
+        comprobante: "0",
+        comprobanteLabel: "0",
+        serie: ".",
+        facturaUrl: "",
+        facturaPath: "",
+        tipoTrabajo: "ADMINISTRATIVO",
+        siteNombre: "ADMINISTRACIÓN",
+        usuario: usuarioAccion,
+        ot: montoDiferenciaModal.nroOperacionPlanilla.trim(),
+        tipoCambio: 3.5,
+        idUsuarioFactura: undefined,
+      };
+
+      await httpClient.post("/tesoreria/gastos", payload);
+
+      setConciliacionPlanilla((current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          ...current,
+          registros: current.registros.map((item) =>
+            item.idMovimientoBanco === montoDiferenciaModal.idMovimientoBanco
+              ? { ...item, diferenciaAjustada: nextMonto }
+              : item
+          ),
+        };
+      });
+
+      setMessage("Registro de compensación creado correctamente.");
+      setMontoDiferenciaModal(null);
+    } catch (error) {
+      setMontoDiferenciaError(getHttpErrorMessage(error, "No se pudo crear el registro de compensación."));
+    } finally {
+      setMontoDiferenciaSaving(false);
     }
   };
 
@@ -4701,6 +4962,7 @@ export default function ConciliacionBcpPage() {
                   <th style={{ ...styles.th, ...styles.detailStickyHeaderTh, ...getConciliacionDetailStickyColumnStyle("monto", "header") }}>{renderSortHeader("Monto", "monto")}</th>
                   <th style={{ ...styles.th, ...styles.detailStickyHeaderTh, ...getConciliacionDetailStickyColumnStyle("totalPagar", "header") }}>{renderSortHeader("TotalPagar", "totalPagar")}</th>
                   <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Diferencia", "diferencia")}</th>
+                  <th style={{ ...styles.th, ...styles.detailActionHeaderTh }} />
                   <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("NroOperacion", "nroOperacion")}</th>
                   <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("DescripcionOperacion", "descripcionOperacion")}</th>
                   <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Comentario", "comentario")}</th>
@@ -4770,10 +5032,18 @@ export default function ConciliacionBcpPage() {
                       "seriePlanilla",
                       "detallePlanilla",
                       "correlativoPlanilla",
-                    ] as ConciliacionSortKey[]
-                  ).map((key) => (
-                    <th key={`filter-${key}`} style={{ ...styles.filterTh, ...styles.detailStickyFilterTh, ...getConciliacionDetailStickyColumnStyle(key, "filter") }}>
-                      {key === "resultadoConciliacion" ? (
+                      "__detalleAccion",
+                    ] as Array<ConciliacionSortKey | "__detalleAccion">
+                   ).map((key) => (
+                    <th
+                      key={`filter-${key}`}
+                      style={
+                        key === "__detalleAccion"
+                          ? { ...styles.filterTh, ...styles.detailActionFilterTh }
+                          : { ...styles.filterTh, ...styles.detailStickyFilterTh, ...getConciliacionDetailStickyColumnStyle(key, "filter") }
+                      }
+                    >
+                      {key === "__detalleAccion" ? null : key === "resultadoConciliacion" ? (
                         <div ref={resultadoFilterDropdownRef} style={styles.multiFilterWrap}>
                           <button
                             type="button"
@@ -4845,6 +5115,23 @@ export default function ConciliacionBcpPage() {
                         {getConciliacionDisplayValue(row, "totalPagar")}
                       </td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "diferencia")}</td>
+                      <td style={{ ...styles.td, ...styles.detailActionCell }}>
+                        {(() => {
+                          const habilitarDetalle = isConciliacionDetalleActionEnabled(row);
+                          return (
+                        <button
+                          type="button"
+                          style={habilitarDetalle ? styles.detailRowActionButton : styles.detailRowActionButtonDisabled}
+                          onClick={() => openMontoDiferenciaModal(row)}
+                          aria-label={`Ajustar monto de diferencia del movimiento ${row.idMovimientoBanco}`}
+                          title="Ajustar monto de diferencia"
+                          disabled={!habilitarDetalle}
+                        >
+                          <Eye size={13} />
+                        </button>
+                          );
+                        })()}
+                      </td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "nroOperacion")}</td>
                       <td style={styles.td}>{getConciliacionDisplayValue(row, "descripcionOperacion")}</td>
                       <td style={styles.td}>
@@ -5004,7 +5291,7 @@ export default function ConciliacionBcpPage() {
                   ))
                 ) : (
                   <tr>
-                    <td style={styles.td} colSpan={35}>
+                    <td style={styles.td} colSpan={36}>
                       {detalleQuickSearch.trim()
                         ? "No se encontraron movimientos que coincidan con la búsqueda."
                         : "No se encontraron movimientos para los filtros ingresados."}
@@ -5076,6 +5363,7 @@ export default function ConciliacionBcpPage() {
                                   <th style={{ ...styles.th, ...styles.detailStickyHeaderTh, ...getConciliacionDetailStickyColumnStyle("monto", "header") }}>{renderSortHeader("Monto", "monto")}</th>
                                   <th style={{ ...styles.th, ...styles.detailStickyHeaderTh, ...getConciliacionDetailStickyColumnStyle("totalPagar", "header") }}>{renderSortHeader("TotalPagar", "totalPagar")}</th>
                                   <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Diferencia", "diferencia")}</th>
+                                  <th style={{ ...styles.th, ...styles.detailActionHeaderTh }} />
                                   <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("NroOperacion", "nroOperacion")}</th>
                                   <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("DescripcionOperacion", "descripcionOperacion")}</th>
                                   <th style={{ ...styles.th, ...styles.detailStickyHeaderTh }}>{renderSortHeader("Comentario", "comentario")}</th>
@@ -5117,6 +5405,7 @@ export default function ConciliacionBcpPage() {
                                       "monto",
                                       "totalPagar",
                                       "diferencia",
+                                      "__detalleAccion",
                                       "nroOperacion",
                                       "descripcionOperacion",
                                       "comentario",
@@ -5145,10 +5434,17 @@ export default function ConciliacionBcpPage() {
                                       "seriePlanilla",
                                       "detallePlanilla",
                                       "correlativoPlanilla",
-                                    ] as ConciliacionSortKey[]
+                                    ] as Array<ConciliacionSortKey | "__detalleAccion">
                                   ).map((key) => (
-                                    <th key={`popup-filter-${key}`} style={{ ...styles.filterTh, ...styles.detailStickyFilterTh, ...getConciliacionDetailStickyColumnStyle(key, "filter") }}>
-                                      {key === "resultadoConciliacion" ? (
+                                    <th
+                                      key={`popup-filter-${key}`}
+                                      style={
+                                        key === "__detalleAccion"
+                                          ? { ...styles.filterTh, ...styles.detailActionFilterTh }
+                                          : { ...styles.filterTh, ...styles.detailStickyFilterTh, ...getConciliacionDetailStickyColumnStyle(key, "filter") }
+                                      }
+                                    >
+                                      {key === "__detalleAccion" ? null : key === "resultadoConciliacion" ? (
                                         <div ref={resultadoFilterDropdownRef} style={styles.multiFilterWrap}>
                                           <button
                                             type="button"
@@ -5218,6 +5514,23 @@ export default function ConciliacionBcpPage() {
                                       <td style={{ ...styles.td, ...getConciliacionDetailStickyColumnStyle("monto", "body") }}>{getConciliacionDisplayValue(row, "monto")}</td>
                                       <td style={{ ...styles.td, ...getConciliacionDetailStickyColumnStyle("totalPagar", "body") }}>{getConciliacionDisplayValue(row, "totalPagar")}</td>
                                       <td style={styles.td}>{getConciliacionDisplayValue(row, "diferencia")}</td>
+                                      <td style={{ ...styles.td, ...styles.detailActionCell }}>
+                                        {(() => {
+                                          const habilitarDetalle = isConciliacionDetalleActionEnabled(row);
+                                          return (
+                                            <button
+                                              type="button"
+                                              style={habilitarDetalle ? styles.detailRowActionButton : styles.detailRowActionButtonDisabled}
+                                              onClick={() => openMontoDiferenciaModal(row)}
+                                              aria-label={`Ajustar monto de diferencia del movimiento ${row.idMovimientoBanco}`}
+                                              title="Ajustar monto de diferencia"
+                                              disabled={!habilitarDetalle}
+                                            >
+                                              <Eye size={13} />
+                                            </button>
+                                          );
+                                        })()}
+                                      </td>
                                       <td style={styles.td}>{getConciliacionDisplayValue(row, "nroOperacion")}</td>
                                       <td style={styles.td}>{getConciliacionDisplayValue(row, "descripcionOperacion")}</td>
                                       <td style={styles.td}>
@@ -5509,116 +5822,50 @@ export default function ConciliacionBcpPage() {
         </div>
       ) : null}
 
-      {clasificacionModal ? (
-        <div style={styles.modalOverlay} onClick={closeClasificacionModal}>
-          <div style={styles.modalCard} onClick={(event) => event.stopPropagation()}>
+      {montoDiferenciaModal ? (
+        <div style={styles.modalOverlay} onClick={closeMontoDiferenciaModal}>
+          <div style={{ ...styles.modalCard, width: "min(520px, calc(100vw - 40px))" }} onClick={(event) => event.stopPropagation()}>
             <div style={styles.modalHeader}>
               <div>
-                <h3 style={styles.modalTitle}>Clasificacion contable</h3>
-                <p style={styles.modalText}>Movimiento BCP #{clasificacionModal.idMovimientoBanco}</p>
+                <h3 style={styles.modalTitle}>Monto diferencia</h3>
+                <p style={styles.modalText}>Edita el monto solo si necesitas disminuirlo.</p>
               </div>
-              <button type="button" style={styles.modalCloseButton} onClick={closeClasificacionModal} disabled={clasificacionSaving}>
+              <button type="button" style={styles.modalCloseButton} onClick={closeMontoDiferenciaModal} disabled={montoDiferenciaSaving}>
                 Cerrar
               </button>
             </div>
 
-            <div style={styles.modalFormGrid}>
-              <label style={styles.fieldGroup}>
-                <span style={styles.fieldLabel}>Area Flujo</span>
-                <select
-                  value={clasificacionModal.idAreaFlujo}
-                  onChange={(event) => handleClasificacionFieldChange("idAreaFlujo", event.target.value)}
-                  style={styles.input}
-                  disabled={clasificacionSaving || clasificacionCombosLoading}
-                >
-                  <option value="">Selecciona</option>
-                  {(clasificacionCombos?.areasFlujo ?? []).map((option) => (
-                    <option key={option.idAreaFlujo} value={String(option.idAreaFlujo)}>
-                      {option.nombreAreaFlujo}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label style={styles.fieldGroup}>
-                <span style={styles.fieldLabel}>Referencia</span>
-                <select
-                  value={clasificacionModal.idReferencia}
-                  onChange={(event) => handleClasificacionFieldChange("idReferencia", event.target.value)}
-                  style={styles.input}
-                  disabled={clasificacionSaving || clasificacionCombosLoading}
-                >
-                  <option value="">Selecciona</option>
-                  {referenciasClasificacionDisponibles.map((option) => (
-                    <option key={option.idReferencia} value={String(option.idReferencia)}>
-                      {option.codigoReferencia} - {option.nombreReferencia}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label style={styles.fieldGroup}>
-                <span style={styles.fieldLabel}>Cuenta Contable</span>
-                <select
-                  value={clasificacionModal.idCuentaContable}
-                  onChange={(event) => handleClasificacionFieldChange("idCuentaContable", event.target.value)}
-                  style={styles.input}
-                  disabled={clasificacionSaving || clasificacionCombosLoading}
-                >
-                  <option value="">Selecciona</option>
-                  {cuentasClasificacionDisponibles.map((option) => (
-                    <option key={option.idCuentaContable} value={String(option.idCuentaContable)}>
-                      {option.cuentaContableTexto}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label style={styles.fieldGroup}>
-                <span style={styles.fieldLabel}>Regla Contable</span>
-                <select
-                  value={clasificacionModal.idReglaContable}
-                  onChange={(event) => handleClasificacionFieldChange("idReglaContable", event.target.value)}
-                  style={styles.input}
-                  disabled={clasificacionSaving || clasificacionCombosLoading}
-                >
-                  <option value="">Selecciona</option>
-                  {reglasClasificacionDisponibles.map((rule) => (
-                    <option key={rule.idReglaContable} value={String(rule.idReglaContable)}>
-                      {getReglaContableLabel(rule)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
             <label style={styles.fieldGroup}>
-              <span style={styles.fieldLabel}>Observacion Conciliacion</span>
-              <textarea
-                value={clasificacionModal.observacionConciliacion}
-                onChange={(event) => handleClasificacionFieldChange("observacionConciliacion", event.target.value)}
-                style={styles.modalTextarea}
-                rows={4}
-                placeholder="Comentario interno de clasificacion"
-                disabled={clasificacionSaving}
+              <span style={styles.fieldLabel}>Monto diferencia</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={montoDiferenciaModal.montoDiferencia}
+                onChange={(event) => handleMontoDiferenciaChange(event.target.value)}
+                style={styles.input}
+                placeholder="0.00"
+                disabled={montoDiferenciaSaving}
               />
             </label>
 
             <div style={styles.modalHelperRow}>
               <span style={styles.modalHelperText}>
-                Reglas disponibles: {reglasClasificacionDisponibles.length}
-              </span>
-              <span style={styles.modalHelperText}>
-                {clasificacionCombosLoading ? "Cargando combos..." : "La regla se autoselecciona si solo existe una opcion valida."}
+                El valor no puede ser mayor al monto original: {formatNumber(montoDiferenciaModal.montoOriginal)}
               </span>
             </div>
 
+            {montoDiferenciaError ? (
+              <div style={styles.modalErrorText}>{montoDiferenciaError}</div>
+            ) : (
+              <div style={styles.modalHelperText}>La diferencia solo se puede reducir.</div>
+            )}
+
             <div style={styles.modalActions}>
-              <button type="button" style={styles.secondaryButton} onClick={closeClasificacionModal} disabled={clasificacionSaving}>
+              <button type="button" style={styles.secondaryButton} onClick={closeMontoDiferenciaModal} disabled={montoDiferenciaSaving}>
                 Cancelar
               </button>
-              <button type="button" style={styles.primaryButton} onClick={() => void handleGuardarClasificacion()} disabled={clasificacionSaving}>
-                {clasificacionSaving ? "Guardando..." : "Guardar clasificacion"}
+              <button type="button" style={styles.primaryButton} onClick={() => void handleGuardarMontoDiferencia()} disabled={montoDiferenciaSaving}>
+                {montoDiferenciaSaving ? "Guardando..." : "Aceptar"}
               </button>
             </div>
           </div>
@@ -6425,6 +6672,52 @@ const styles: Record<string, React.CSSProperties> = {
     position: "relative",
     scrollbarGutter: "stable",
   },
+  detailActionHeaderTh: {
+    minWidth: 56,
+    width: 56,
+    maxWidth: 56,
+    textAlign: "center",
+  },
+  detailActionFilterTh: {
+    minWidth: 56,
+    width: 56,
+    maxWidth: 56,
+  },
+  detailActionCell: {
+    minWidth: 56,
+    width: 56,
+    maxWidth: 56,
+    textAlign: "center",
+  },
+  detailRowActionButton: {
+    border: "1px solid #93C5FD",
+    background: "#EFF6FF",
+    color: "#2563EB",
+    borderRadius: 999,
+    width: 28,
+    height: 28,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    padding: 0,
+    flexShrink: 0,
+  },
+  detailRowActionButtonDisabled: {
+    border: "1px solid #CBD5E1",
+    background: "#F8FAFC",
+    color: "#94A3B8",
+    borderRadius: 999,
+    width: 28,
+    height: 28,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "not-allowed",
+    padding: 0,
+    flexShrink: 0,
+    opacity: 0.7,
+  },
   gridActionButton: {
     border: "1px solid #0F766E",
     background: "#ECFDF5",
@@ -6833,7 +7126,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "center",
     padding: 20,
-    zIndex: 100,
+    zIndex: 1300,
   },
   modalCard: {
     width: "min(860px, 100%)",
@@ -6900,6 +7193,15 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
     color: "#64748B",
     fontWeight: 700,
+  },
+  modalErrorText: {
+    fontSize: 12,
+    color: "#B91C1C",
+    fontWeight: 800,
+    background: "#FEF2F2",
+    border: "1px solid #FCA5A5",
+    borderRadius: 10,
+    padding: "10px 12px",
   },
   modalActions: {
     display: "flex",

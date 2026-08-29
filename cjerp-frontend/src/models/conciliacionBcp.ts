@@ -163,6 +163,7 @@ export type ConciliacionBcpConciliarPlanillaRegistro = {
   idRegistroPlanilla?: number | null;
   totalPlanillaBase?: number | null;
   totalPagar?: number | null;
+  diferenciaAjustada?: number | null;
   comentario?: string | null;
   observacionConciliacion?: string | null;
 };
