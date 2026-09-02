@@ -77,6 +77,15 @@ type ServiceTenantItem = {
   widthPct: number;
 };
 
+type PendingClientSummary = {
+  cliente: string;
+  moneda: string;
+  alquiler: number;
+  cochera: number;
+  mantenimiento: number;
+  total: number;
+};
+
 type MonthlyServiceMatrixCell = {
   contrato: number;
   pagado: number;
@@ -94,13 +103,6 @@ type MonthlyServiceMatrixGroup = {
   inquilino: string;
   meses: string[];
   servicios: MonthlyServiceMatrixService[];
-};
-
-type PendingDebtByTenantYear = {
-  inquilino: string;
-  anio: string;
-  moneda: string;
-  debe: number;
 };
 
 type QuickPagoForm = {
@@ -620,6 +622,10 @@ export default function ArrendamientosDshPagosPage() {
   );
   const executiveProgress = useMemo(() => buildServiceProgress(rows, legendInquilinos), [rows, legendInquilinos]);
   const executiveLegend = useMemo(() => buildTenantLegend(rows, legendInquilinos), [rows, legendInquilinos]);
+  const pendingClientSummary = useMemo(
+    () => buildPendingClientSummary(rows, legendInquilinos),
+    [rows, legendInquilinos]
+  );
   const stateSummary = useMemo(() => buildStateSummary(rows, monedaBase), [rows, monedaBase]);
   const pendingMonthlyMatrixGroups = useMemo(() => {
     return monthlyMatrix.filter((group) =>
@@ -649,113 +655,6 @@ export default function ArrendamientosDshPagosPage() {
       )
     );
   }, [pendingMonthlyMatrixGroupsFiltered, monthlyMatrixMonths]);
-  const pendingDebtByTenantYear = useMemo<PendingDebtByTenantYear[]>(() => {
-    const grouped = new Map<string, PendingDebtByTenantYear>();
-
-    for (const row of rows) {
-      const debe = Number(computeSaldoReal(row));
-      if (debe <= 0) {
-        continue;
-      }
-
-      const period = getRowPeriodYearMonth(row);
-      if (!period) {
-        continue;
-      }
-
-      const inquilino = (row.inquilino ?? row.nombre ?? "Sin inquilino").trim() || "Sin inquilino";
-      const moneda = normalizeCurrency(row.moneda ?? monedaBase);
-      const anio = String(period.year);
-      const key = `${normalizeGroupKey(inquilino)}::${anio}::${moneda}`;
-      const current = grouped.get(key) ?? { inquilino, anio, moneda, debe: 0 };
-      current.debe += debe;
-      grouped.set(key, current);
-    }
-
-    return Array.from(grouped.values()).sort((left, right) => {
-      const tenantCompare = left.inquilino.localeCompare(right.inquilino, "es", { sensitivity: "base" });
-      if (tenantCompare !== 0) {
-        return tenantCompare;
-      }
-
-      const yearCompare = Number(left.anio) - Number(right.anio);
-      if (yearCompare !== 0) {
-        return yearCompare;
-      }
-
-      return left.moneda.localeCompare(right.moneda, "es", { sensitivity: "base" });
-    });
-  }, [rows, monedaBase]);
-  const pendingDebtMax = useMemo(() => {
-    return pendingDebtByTenantYear.reduce((max, item) => Math.max(max, item.debe), 0);
-  }, [pendingDebtByTenantYear]);
-  const pendingDebtByTenantGroups = useMemo(() => {
-    const grouped = new Map<string, { inquilino: string; items: PendingDebtByTenantYear[] }>();
-
-    for (const item of pendingDebtByTenantYear) {
-      const key = normalizeGroupKey(item.inquilino);
-      const current = grouped.get(key);
-      if (current) {
-        current.items.push(item);
-      } else {
-        grouped.set(key, {
-          inquilino: item.inquilino,
-          items: [item],
-        });
-      }
-    }
-
-    return Array.from(grouped.values())
-      .map((group) => ({
-        ...group,
-        items: group.items.slice().sort((left, right) => {
-          const yearCompare = Number(left.anio) - Number(right.anio);
-          if (yearCompare !== 0) {
-            return yearCompare;
-          }
-
-          return left.moneda.localeCompare(right.moneda, "es", { sensitivity: "base" });
-        }),
-      }))
-      .sort((left, right) => left.inquilino.localeCompare(right.inquilino, "es", { sensitivity: "base" }));
-  }, [pendingDebtByTenantYear]);
-  const pendingDebtServiceByTenantGroups = useMemo(() => {
-    return pendingMonthlyMatrixGroups
-      .map((group) => ({
-        inquilino: group.inquilino,
-        items: group.servicios
-          .map((servicioBlock) => {
-            const debe = monthlyMatrixMonths.reduce((sum, mes) => {
-              const cell = servicioBlock.celdas.get(mes) ?? { contrato: 0, pagado: 0, exonerada: 0, debe: 0 };
-              return sum + Number(cell.debe ?? 0);
-            }, 0);
-
-            return {
-              servicio: servicioBlock.servicio,
-              moneda: servicioBlock.moneda,
-              debe,
-            };
-          })
-          .filter((item) => item.debe > 0)
-          .sort((left, right) => {
-            const serviceCompare = left.servicio.localeCompare(right.servicio, "es", { sensitivity: "base" });
-            if (serviceCompare !== 0) {
-              return serviceCompare;
-            }
-
-            return left.moneda.localeCompare(right.moneda, "es", { sensitivity: "base" });
-          }),
-      }))
-      .filter((group) => group.items.length > 0)
-      .sort((left, right) => left.inquilino.localeCompare(right.inquilino, "es", { sensitivity: "base" }));
-  }, [pendingMonthlyMatrixGroups, monthlyMatrixMonths]);
-  const pendingDebtServiceMax = useMemo(() => {
-    return pendingDebtServiceByTenantGroups.reduce((max, group) => {
-      const groupMax = group.items.reduce((innerMax, item) => Math.max(innerMax, item.debe), 0);
-      return Math.max(max, groupMax);
-    }, 0);
-  }, [pendingDebtServiceByTenantGroups]);
-
   return (
     <div style={styles.page}>
       <div style={styles.backgroundGlowA} />
@@ -1272,90 +1171,16 @@ export default function ArrendamientosDshPagosPage() {
             )}
 
             {activeTab === "estado" && (
-              <div style={styles.matrixShell}>
-                {pendingDebtByTenantYear.length > 0 ? (
-                  <div style={styles.pendingDebtShell}>
-                    <div style={styles.pendingDebtTenantGroups}>
-                      {pendingDebtByTenantGroups.map((group) => (
-                        <div key={group.inquilino} style={styles.pendingDebtTenantGroup}>
-                          <div style={styles.pendingDebtTenantHeader}>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setPendingTenantFilter((current) =>
-                                  normalizeGroupKey(current) === normalizeGroupKey(group.inquilino) ? "" : group.inquilino
-                                )
-                              }
-                              style={{
-                                ...styles.pendingDebtTenantNameButton,
-                                ...(normalizeGroupKey(pendingTenantFilter) === normalizeGroupKey(group.inquilino)
-                                  ? styles.pendingDebtTenantNameButtonActive
-                                  : {}),
-                              }}
-                            >
-                              {group.inquilino}
-                            </button>
-                          </div>
-                          <div style={styles.pendingDebtTenantContent}>
-                            <div style={styles.pendingDebtPanel}>
-                              <div style={styles.pendingDebtPanelTitle}>Por servicio</div>
-                              <div style={styles.pendingDebtBars}>
-                                {(pendingDebtServiceByTenantGroups.find((item) => normalizeGroupKey(item.inquilino) === normalizeGroupKey(group.inquilino))?.items ?? []).map((item) => {
-                                  const width = pendingDebtServiceMax > 0 ? Math.max((item.debe / pendingDebtServiceMax) * 100, 4) : 0;
-                                  return (
-                                    <div key={`${group.inquilino}-${item.servicio}-${item.moneda}`} style={styles.pendingDebtServiceRow}>
-                                      <div style={styles.pendingDebtServiceRowTop}>
-                                        <div style={styles.pendingDebtServiceName}>{item.servicio}</div>
-                                        <div style={styles.pendingDebtValueInline}>
-                                          <span style={styles.pendingDebtValue}>{formatMoney(item.debe, item.moneda)}</span>
-                                          <span style={styles.pendingDebtValueCurrency}>{item.moneda}</span>
-                                        </div>
-                                      </div>
-                                      <div style={styles.pendingDebtTrack}>
-                                        <div
-                                          style={{
-                                            ...styles.pendingDebtFill,
-                                            width: `${width}%`,
-                                          }}
-                                        />
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                            <div style={styles.pendingDebtPanel}>
-                              <div style={styles.pendingDebtPanelTitle}>Por año</div>
-                              <div style={styles.pendingDebtBars}>
-                                {group.items.map((item) => {
-                                  const width = pendingDebtMax > 0 ? Math.max((item.debe / pendingDebtMax) * 100, 4) : 0;
-                                  return (
-                                    <div key={`${item.inquilino}-${item.anio}-${item.moneda}`} style={styles.pendingDebtBarRow}>
-                                      <div style={styles.pendingDebtTrack}>
-                                        <div
-                                          style={{
-                                            ...styles.pendingDebtFill,
-                                            width: `${width}%`,
-                                          }}
-                                        />
-                                      </div>
-                                      <div style={styles.pendingDebtValueBlock}>
-                                        <div style={styles.pendingDebtValue}>{formatMoney(item.debe, item.moneda)}</div>
-                                        <div style={styles.pendingDebtValueSubtitle}>
-                                          {item.anio} · {item.moneda}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
+                <div style={styles.matrixShell}>
+                <PendingClientSummaryChart
+                  items={pendingClientSummary}
+                  selectedClient={pendingTenantFilter}
+                  onSelectClient={(client) =>
+                    setPendingTenantFilter((current) =>
+                      normalizeGroupKey(current) === normalizeGroupKey(client) ? "" : client
+                    )
+                  }
+                />
                 {monthlyMatrix.length === 0 ? (
                   <div style={styles.stateBox}>
                     <strong style={styles.stateTitle}>No hay registros para mostrar.</strong>
@@ -1594,8 +1419,9 @@ export default function ArrendamientosDshPagosPage() {
                 <input
                   type="date"
                   value={quickPagoForm.fechaOperacion}
-                  onChange={(event) => setQuickPagoForm((current) => ({ ...current, fechaOperacion: event.target.value }))}
-                  style={styles.quickPagoInput}
+                  readOnly
+                  disabled
+                  style={styles.quickPagoInputReadonly}
                 />
               </label>
               <label style={styles.quickPagoField}>
@@ -1603,9 +1429,8 @@ export default function ArrendamientosDshPagosPage() {
                 <input
                   type="date"
                   value={quickPagoForm.fechaContabilizacion}
-                  readOnly
-                  disabled
-                  style={styles.quickPagoInputReadonly}
+                  onChange={(event) => setQuickPagoForm((current) => ({ ...current, fechaContabilizacion: event.target.value }))}
+                  style={styles.quickPagoInput}
                 />
               </label>
               <label style={styles.quickPagoField}>
@@ -1618,27 +1443,29 @@ export default function ArrendamientosDshPagosPage() {
                   type="number"
                   step="0.01"
                   min="0"
-                  max={quickPagoForm.importeMaximo || undefined}
+                  max={quickPagoForm.tipoPago === "PARCIAL" ? quickPagoForm.importeMaximo || undefined : undefined}
                   value={quickPagoForm.importeTransferido}
                   onChange={(event) => {
                     const value = event.target.value;
                     setQuickPagoForm((current) => ({ ...current, importeTransferido: value }));
 
                     const amount = Number(value);
-                    const amountMax = Number(quickPagoForm.importeMaximo || 0);
-                    if (Number.isFinite(amountMax) && amountMax > 0 && Number.isFinite(amount) && amount > amountMax) {
-                      setQuickPagoError(
-                        `El monto no es permitido. El importe transferido no puede ser mayor a ${formatMoney(
-                          amountMax,
-                          quickPagoForm.monedaOperacion || "PEN"
-                        )}.`
+                    if (value.trim() && Number.isFinite(amount)) {
+                      const amountError = validateQuickPagoAmount(
+                        quickPagoForm.tipoPago,
+                        amount,
+                        Number(quickPagoForm.importeMaximo || 0),
+                        quickPagoForm.monedaOperacion || "PEN"
                       );
-                      return;
+                      if (amountError) {
+                        setQuickPagoError(amountError);
+                        return;
+                      }
                     }
 
-                    setQuickPagoError((current) =>
-                      current && current.startsWith("El monto no es permitido.") ? null : current
-                    );
+                    if (quickPagoError?.startsWith("El monto no es permitido.")) {
+                      setQuickPagoError(null);
+                    }
                   }}
                   style={styles.quickPagoInput}
                 />
@@ -1701,8 +1528,8 @@ function createQuickPagoForm(
 
   return {
     numeroOperacion: generarCodigoPago(),
-    fechaOperacion: dateInputValue(new Date()),
-    fechaContabilizacion: firstDayOfPeriodInputValue(periodoContabilizacion),
+    fechaOperacion: firstDayOfPeriodInputValue(periodoContabilizacion),
+    fechaContabilizacion: dateInputValue(new Date()),
     idInquilino: resolvedInquilinoId,
     idArrendador: resolveIdByLabel(arrendadorLabel, arrendadores, buildLookupLabel),
     estadoValidacion: "PENDIENTE",
@@ -1758,7 +1585,8 @@ function buildLookupLabel(item: LookupRow) {
 }
 
 function buildInquilinoLookupLabel(item: LookupRow) {
-  return (item.nombreComercial ?? item.razonSocial ?? item.nombre ?? item.codigo ?? item.detalle ?? "").trim();
+  // El endpoint de la maestra expone NombreComercial como Codigo y RazonSocial como Nombre.
+  return (item.nombreComercial ?? item.codigo ?? item.razonSocial ?? item.nombre ?? item.detalle ?? "").trim();
 }
 
 function buildInquilinoPopupLabel(item: LookupRow, legendInquilinos: ArrendamientosDshPagosInquilino[]) {
@@ -1809,8 +1637,26 @@ function validateQuickPagoForm(form: QuickPagoForm): string | null {
   const importe = Number(form.importeTransferido);
   const importeMaximo = Number(form.importeMaximo || 0);
   if (importe <= 0 && form.tipoPago !== "EXONERADO") return "Ingrese un importe transferido mayor a cero.";
-  if (Number.isFinite(importeMaximo) && importeMaximo > 0 && importe > importeMaximo) {
-    return `El importe transferido no puede ser mayor a ${formatMoney(importeMaximo, form.monedaOperacion || "PEN")}.`;
+  const amountError = validateQuickPagoAmount(form.tipoPago, importe, importeMaximo, form.monedaOperacion || "PEN");
+  if (amountError) return amountError;
+
+  return null;
+}
+
+function validateQuickPagoAmount(tipoPago: string, importe: number, cuota: number, moneda: string): string | null {
+  if (!Number.isFinite(cuota) || cuota <= 0 || !Number.isFinite(importe)) {
+    return null;
+  }
+
+  const tipo = tipoPago.trim().toUpperCase();
+  const cuotaFormateada = formatMoney(cuota, moneda);
+
+  if (tipo === "COMPLETO" && importe < cuota) {
+    return `El monto no es permitido. Para un pago COMPLETO, el importe transferido no puede ser menor a la cuota asignada de ${cuotaFormateada}.`;
+  }
+
+  if (tipo === "PARCIAL" && importe >= cuota) {
+    return `El monto no es permitido. Para un pago PARCIAL, el importe transferido debe ser menor a la cuota asignada de ${cuotaFormateada}.`;
   }
 
   return null;
@@ -2275,6 +2121,148 @@ function normalizeServiceKey(value: string): string {
   return normalizeServiceName(value).trim().toUpperCase();
 }
 
+function PendingClientSummaryChart({
+  items,
+  selectedClient,
+  onSelectClient,
+}: {
+  items: PendingClientSummary[];
+  selectedClient?: string;
+  onSelectClient?: (client: string) => void;
+}) {
+  const usdItems = items.filter((item) => item.moneda === "USD");
+  const penItems = items.filter((item) => item.moneda === "PEN");
+
+  return (
+    <section style={styles.pendingSummaryGrid} aria-label="Pendiente por cliente">
+      <PendingClientSummaryPanel
+        title="Pendiente por cliente - USD"
+        items={usdItems}
+        selectedClient={selectedClient}
+        onSelectClient={onSelectClient}
+        series={[
+          { key: "alquiler", label: "Alquiler", color: "#1261D6" },
+          { key: "cochera", label: "Cochera", color: "#6336C5" },
+        ]}
+      />
+      <PendingClientSummaryPanel
+        title="Pendiente por cliente - PEN"
+        items={penItems}
+        selectedClient={selectedClient}
+        onSelectClient={onSelectClient}
+        series={[{ key: "mantenimiento", label: "Mantenimiento", color: "#0C9F9A" }]}
+      />
+    </section>
+  );
+}
+
+function PendingClientSummaryPanel({
+  title,
+  items,
+  series,
+  selectedClient,
+  onSelectClient,
+}: {
+  title: string;
+  items: PendingClientSummary[];
+  series: { key: "alquiler" | "cochera" | "mantenimiento"; label: string; color: string }[];
+  selectedClient?: string;
+  onSelectClient?: (client: string) => void;
+}) {
+  const maxTotal = Math.max(...items.map((item) => item.total), 1);
+
+  return (
+    <article style={styles.pendingSummaryPanel}>
+      <h2 style={styles.pendingSummaryTitle}>{title}</h2>
+      <div style={styles.pendingSummaryLegend}>
+        {series.map((item) => (
+          <span key={item.key} style={styles.pendingSummaryLegendItem}>
+            <span style={{ ...styles.pendingSummaryLegendSwatch, background: item.color }} />
+            {item.label}
+          </span>
+        ))}
+      </div>
+      {items.length === 0 ? (
+        <div style={styles.pendingSummaryEmpty}>No hay saldos pendientes.</div>
+      ) : (
+        <div style={styles.pendingSummaryRows}>
+          {items.map((item) => (
+            <button
+              key={`${item.moneda}-${item.cliente}`}
+              type="button"
+              onClick={() => onSelectClient?.(item.cliente)}
+              style={{
+                ...styles.pendingSummaryRow,
+                ...styles.pendingSummaryRowButton,
+                ...(normalizeGroupKey(selectedClient ?? "") === normalizeGroupKey(item.cliente)
+                  ? styles.pendingSummaryRowSelected
+                  : {}),
+              }}
+              title={`Filtrar pendientes de ${item.cliente}`}
+            >
+              <span style={styles.pendingSummaryClient}>{item.cliente}</span>
+              <div style={styles.pendingSummaryBarTrack}>
+                <div style={{ ...styles.pendingSummaryBar, width: `${Math.max((item.total / maxTotal) * 100, 2)}%` }}>
+                  {series.map((serie) => {
+                    const amount = item[serie.key];
+                    if (amount <= 0) return null;
+                    return (
+                      <span
+                        key={serie.key}
+                        style={{
+                          ...styles.pendingSummarySegment,
+                          width: `${(amount / item.total) * 100}%`,
+                          background: serie.color,
+                        }}
+                      >
+                        {formatCompactAmount(amount)}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+              <strong style={styles.pendingSummaryTotal}>{formatMoney(item.total, item.moneda)}</strong>
+            </button>
+          ))}
+        </div>
+      )}
+    </article>
+  );
+}
+
+function buildPendingClientSummary(
+  rows: ArrendamientosFila[],
+  lookupRows: ArrendamientosDshPagosInquilino[]
+): PendingClientSummary[] {
+  const grouped = new Map<string, PendingClientSummary>();
+
+  for (const row of rows) {
+    const moneda = normalizeCurrency(row.moneda ?? "PEN");
+    const servicio = normalizeServiceKey(row.concepto ?? row.detalle ?? row.nombre ?? "");
+    const amount = Math.max(computeSaldoReal(row), 0);
+    if (amount <= 0 || !["PEN", "USD"].includes(moneda)) continue;
+
+    const rawClient = (row.inquilino ?? row.nombre ?? "Sin inquilino").trim() || "Sin inquilino";
+    const cliente = resolveCommercialTenantLabel(rawClient, lookupRows);
+    const key = `${moneda}::${normalizeGroupKey(cliente)}`;
+    const current = grouped.get(key) ?? { cliente, moneda, alquiler: 0, cochera: 0, mantenimiento: 0, total: 0 };
+
+    if (servicio === "ALQUILER") current.alquiler += amount;
+    if (servicio === "COCHERA") current.cochera += amount;
+    if (servicio === "MANTENIMIENTO") current.mantenimiento += amount;
+    current.total = current.alquiler + current.cochera + current.mantenimiento;
+    grouped.set(key, current);
+  }
+
+  return Array.from(grouped.values())
+    .filter((item) => item.total > 0)
+    .sort((left, right) => right.total - left.total || left.cliente.localeCompare(right.cliente, "es"));
+}
+
+function formatCompactAmount(value: number) {
+  return Math.round(value).toLocaleString("en-US");
+}
+
 function normalizeStateName(value?: string | null): string {
   const text = (value ?? "").trim();
   if (!text) {
@@ -2621,10 +2609,9 @@ function getTenantColor(value: string): string {
 }
 
 function buildInquilinoLabel(item: LookupRow): string {
-  const nombre = (item.nombre ?? "").trim();
+  const nombre = (item.nombreComercial ?? item.codigo ?? item.nombre ?? "").trim();
   const detalle = (item.detalle ?? "").trim();
-  const codigo = (item.codigo ?? "").trim();
-  return [nombre || codigo || "Inquilino", detalle].filter(Boolean).join(" - ");
+  return [nombre || "Inquilino", detalle].filter(Boolean).join(" - ");
 }
 
 function getPillStyle(value?: string | null): CSSProperties {
@@ -3038,6 +3025,112 @@ const styles: Record<string, CSSProperties> = {
     cursor: "pointer",
     boxShadow: "0 10px 22px rgba(37, 99, 235, 0.2)",
   },
+  pendingSummaryGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: 14,
+  },
+  pendingSummaryPanel: {
+    minWidth: 0,
+    padding: "14px 16px 16px",
+    border: "1px solid #E2E8F0",
+    borderRadius: 14,
+    background: "#FFFFFF",
+    boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)",
+  },
+  pendingSummaryTitle: {
+    margin: 0,
+    color: "#172554",
+    fontSize: 16,
+    fontWeight: 900,
+  },
+  pendingSummaryLegend: {
+    display: "flex",
+    gap: 18,
+    margin: "10px 0 12px",
+    flexWrap: "wrap",
+  },
+  pendingSummaryLegendItem: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 7,
+    color: "#1F2937",
+    fontSize: 12,
+    fontWeight: 700,
+  },
+  pendingSummaryLegendSwatch: {
+    width: 14,
+    height: 11,
+    borderRadius: 2,
+  },
+  pendingSummaryRows: {
+    display: "grid",
+    gap: 10,
+  },
+  pendingSummaryRow: {
+    display: "grid",
+    gridTemplateColumns: "82px minmax(0, 1fr) auto",
+    alignItems: "center",
+    gap: 8,
+    minWidth: 0,
+  },
+  pendingSummaryRowButton: {
+    width: "100%",
+    padding: 0,
+    border: 0,
+    background: "transparent",
+    color: "inherit",
+    textAlign: "left",
+    cursor: "pointer",
+    font: "inherit",
+  },
+  pendingSummaryRowSelected: {
+    filter: "brightness(0.94)",
+  },
+  pendingSummaryClient: {
+    overflow: "hidden",
+    color: "#1F2937",
+    fontSize: 12,
+    fontWeight: 700,
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  pendingSummaryBarTrack: {
+    height: 28,
+    overflow: "hidden",
+    borderRadius: 2,
+    background: "repeating-linear-gradient(to right, transparent 0, transparent 24.5%, #E5E7EB 25%, transparent 25.5%)",
+  },
+  pendingSummaryBar: {
+    display: "flex",
+    height: "100%",
+    overflow: "hidden",
+    borderRadius: "2px 0 0 2px",
+    transition: "width 180ms ease",
+  },
+  pendingSummarySegment: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 0,
+    overflow: "hidden",
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: 800,
+    whiteSpace: "nowrap",
+  },
+  pendingSummaryTotal: {
+    minWidth: 72,
+    color: "#111827",
+    fontSize: 12,
+    textAlign: "right",
+    whiteSpace: "nowrap",
+  },
+  pendingSummaryEmpty: {
+    padding: "18px 0 4px",
+    color: "#64748B",
+    fontSize: 12,
+  },
   kpiGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
@@ -3225,7 +3318,7 @@ const styles: Record<string, CSSProperties> = {
   },
   pendingDebtTenantGroups: {
     display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
     gap: 8,
   },
   pendingDebtTenantGroup: {
@@ -3238,7 +3331,7 @@ const styles: Record<string, CSSProperties> = {
   },
   pendingDebtTenantContent: {
     display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gridTemplateColumns: "minmax(0, 1fr)",
     gap: 10,
   },
   pendingDebtPanel: {

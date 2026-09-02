@@ -100,7 +100,7 @@ const visibleColumns = [
   { key: "comentario", label: "Comentario", width: "240px" },
 ] as const;
 
-const actionColumnWidth = "160px";
+const actionColumnWidth = "190px";
 
 // Estilos para botones deshabilitados
 const disabledButtonStyle = {
@@ -515,6 +515,7 @@ export default function AprobarCampoPage() {
   const [columnFilterSearch, setColumnFilterSearch] = useState("");
   const [filtrosColumnas, setFiltrosColumnas] = useState<Record<string, string[]>>({});
   const [sort, setSort] = useState<SortState | null>(null);
+  const [selectedRecordKeys, setSelectedRecordKeys] = useState<Set<string>>(new Set());
   const filtroColumnaMenuRef = useRef<HTMLDivElement | null>(null);
   const sortableColumns = ["responsable", "nombreempleado", "estado", "fechaasistencia", "hora", "horasalida"];
 
@@ -676,6 +677,8 @@ export default function AprobarCampoPage() {
     const start = (safePage - 1) * pageSize;
     return filteredRows.slice(start, start + pageSize);
   }, [currentPage, filteredRows, pageSize, totalPages]);
+
+  const allPagedRowsSelected = pagedRows.length > 0 && pagedRows.every((row) => selectedRecordKeys.has(buildRowKey(row)));
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -877,6 +880,46 @@ export default function AprobarCampoPage() {
     }
   };
 
+  const handleBulkApprove = async (type: "aprobar-ingreso" | "aprobar-salida") => {
+    const selectedRows = rows.filter((row) => selectedRecordKeys.has(buildRowKey(row)));
+    const eligibleRows = selectedRows.filter((row) =>
+      type === "aprobar-ingreso" ? canApproveIngreso(row) : canApproveSalida(row)
+    );
+
+    if (eligibleRows.length === 0) {
+      setError("Seleccione al menos un registro válido para la aprobación seleccionada.");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+
+    try {
+      for (const row of eligibleRows) {
+        const payload: AprobarCampoAccionRequest = {
+          ...buildClaveFromRow(row),
+          observacion: "",
+          idAprobador,
+          usuarioAccion,
+        };
+
+        if (type === "aprobar-ingreso") {
+          await aprobarIngresoAprobarCampo(payload);
+        } else {
+          await aprobarSalidaAprobarCampo(payload);
+        }
+      }
+
+      await loadRows();
+      setSelectedRecordKeys(new Set());
+    } catch (err) {
+      setError(getHttpErrorMessage(err, "No se pudieron aprobar todos los registros seleccionados."));
+      await loadRows();
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleOpenMap = (title: string, lat: string, lng: string) => {
     if (!hasCoordinates(lat, lng)) return;
     setMediaViewer({ type: "map", title, lat, lng });
@@ -989,6 +1032,24 @@ export default function AprobarCampoPage() {
           </button>
           <button
             type="button"
+            style={selectedRecordKeys.size > 0 ? styles.successButton : styles.disabledSecondaryButton}
+            onClick={() => void handleBulkApprove("aprobar-ingreso")}
+            disabled={saving || selectedRecordKeys.size === 0}
+            title="Aprobar ingreso de los registros seleccionados"
+          >
+            Aprobar ingreso
+          </button>
+          <button
+            type="button"
+            style={selectedRecordKeys.size > 0 ? styles.successButton : styles.disabledSecondaryButton}
+            onClick={() => void handleBulkApprove("aprobar-salida")}
+            disabled={saving || selectedRecordKeys.size === 0}
+            title="Aprobar salida de los registros seleccionados"
+          >
+            Aprobar salida
+          </button>
+          <button
+            type="button"
             style={canReturnToAsistencia ? styles.secondaryButton : styles.disabledSecondaryButton}
             onClick={() => {
               if (!canReturnToAsistencia) {
@@ -1059,7 +1120,27 @@ export default function AprobarCampoPage() {
           <table style={styles.table}>
             <thead>
               <tr>
-                <th style={{ ...styles.th, minWidth: actionColumnWidth }}>Acciones</th>
+                <th style={{ ...styles.th, minWidth: actionColumnWidth }}>
+                  <label style={styles.selectionHeaderLabel}>
+                    <input
+                      type="checkbox"
+                      checked={allPagedRowsSelected}
+                      onChange={(event) => {
+                        setSelectedRecordKeys((current) => {
+                          const next = new Set(current);
+                          pagedRows.forEach((row) => {
+                            const key = buildRowKey(row);
+                            if (event.target.checked) next.add(key);
+                            else next.delete(key);
+                          });
+                          return next;
+                        });
+                      }}
+                      aria-label="Seleccionar todos los registros de la página"
+                    />
+                    Acciones
+                  </label>
+                </th>
                 {visibleColumns.map((column) => (
                   <th key={column.key} style={{ ...styles.th, minWidth: column.width }}>
                     <div style={styles.thContent}>
@@ -1145,6 +1226,20 @@ export default function AprobarCampoPage() {
                   <tr key={buildRowKey(row)}>
                     <td style={styles.td}>
                       <div style={styles.rowActions}>
+                        <input
+                          type="checkbox"
+                          checked={selectedRecordKeys.has(buildRowKey(row))}
+                          onChange={(event) => {
+                            const key = buildRowKey(row);
+                            setSelectedRecordKeys((current) => {
+                              const next = new Set(current);
+                              if (event.target.checked) next.add(key);
+                              else next.delete(key);
+                              return next;
+                            });
+                          }}
+                          aria-label={`Seleccionar registro ${buildRowKey(row)}`}
+                        />
                         {/* Botón Editar eliminado por requerimiento */}
                         <button
                           type="button"
@@ -1599,12 +1694,6 @@ export default function AprobarCampoPage() {
                   Cerrar
                 </button>
               </div>
-            // ---
-            // ¿Cómo agregar más estados para habilitar el botón?
-            // Cambia la condición de 'faltaAprobarSelected' por:
-            // const estadosReporte = ["FALTA APROBAR", "OTRO_ESTADO", ...];
-            // const puedeEnviarReporte = estadosReporte.includes(filters.estado.trim().toUpperCase());
-            // Y usa 'puedeEnviarReporte' en lugar de 'faltaAprobarSelected' en el botón.
             </div>
 
             {responsablesResumenLoading ? (
@@ -1786,6 +1875,15 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "10px 16px",
     cursor: "pointer",
   },
+  successButton: {
+    border: "1px solid #86EFAC",
+    borderRadius: 12,
+    background: "#DCFCE7",
+    color: "#166534",
+    fontWeight: 700,
+    padding: "10px 16px",
+    cursor: "pointer",
+  },
   secondaryButton: {
     border: "1px solid #CBD5E1",
     borderRadius: 12,
@@ -1811,9 +1909,9 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#F0FDF4",
     color: "#166534",
     fontWeight: 700,
-    padding: "8px 10px",
+    padding: "6px 8px",
     cursor: "pointer",
-    fontSize: 12,
+    fontSize: 11,
   },
   secondaryTinyButton: {
     border: "1px solid #BFDBFE",
@@ -1821,9 +1919,9 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#EFF6FF",
     color: "#1D4ED8",
     fontWeight: 700,
-    padding: "8px 10px",
+    padding: "6px 8px",
     cursor: "pointer",
-    fontSize: 12,
+    fontSize: 11,
   },
   dangerTinyButton: {
     border: "1px solid #FECACA",
@@ -1831,9 +1929,9 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#FEF2F2",
     color: "#B91C1C",
     fontWeight: 700,
-    padding: "8px 10px",
+    padding: "6px 8px",
     cursor: "pointer",
-    fontSize: 12,
+    fontSize: 11,
   },
   filtersGrid: {
     display: "grid",
@@ -1915,6 +2013,12 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     gap: 8,
   },
+  selectionHeaderLabel: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    cursor: "pointer",
+  },
   td: {
     padding: "14px 12px",
     borderBottom: "1px solid #F1F5F9",
@@ -1985,8 +2089,10 @@ const styles: Record<string, React.CSSProperties> = {
   },
   rowActions: {
     display: "flex",
-    flexWrap: "wrap",
+    flexWrap: "nowrap",
+    alignItems: "center",
     gap: 4,
+    whiteSpace: "nowrap",
   },
   linkButton: {
     border: "none",
