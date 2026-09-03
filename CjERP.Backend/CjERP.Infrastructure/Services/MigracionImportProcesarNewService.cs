@@ -26,7 +26,10 @@ public sealed class MigracionImportProcesarNewService : IMigracionImportProcesar
         }
 
         var accionNormalizada = NormalizarAccion(accion);
-        var table = CrearTabla(datos);
+        var datosParaProcesar = accionNormalizada == "ACTUALIZAR"
+            ? ConsolidarActualizaciones(datos)
+            : datos;
+        var table = CrearTabla(datosParaProcesar);
 
         await using var connection = _sqlCommandFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -146,6 +149,49 @@ public sealed class MigracionImportProcesarNewService : IMigracionImportProcesar
 
         return table;
     }
+
+    private static IReadOnlyCollection<MigracionImportProcesarNewFilaDto> ConsolidarActualizaciones(
+        IReadOnlyCollection<MigracionImportProcesarNewFilaDto> datos)
+    {
+        var grupos = new Dictionary<string, MigracionImportProcesarNewFilaDto>(StringComparer.OrdinalIgnoreCase);
+        var sumas = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        var tieneMonto = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var fila in datos)
+        {
+            var llave = CrearLlave(fila);
+            if (!grupos.ContainsKey(llave))
+            {
+                grupos[llave] = fila;
+            }
+
+            if (fila.Monto_Bck.HasValue)
+            {
+                sumas[llave] = sumas.GetValueOrDefault(llave) + fila.Monto_Bck.Value;
+                tieneMonto.Add(llave);
+            }
+        }
+
+        foreach (var (llave, fila) in grupos)
+        {
+            fila.Monto_Bck = tieneMonto.Contains(llave) ? sumas[llave] : null;
+        }
+
+        return grupos.Values.ToList();
+    }
+
+    private static string CrearLlave(MigracionImportProcesarNewFilaDto fila)
+        => string.Join("||", NormalizarLlave(fila.Cliente), NormalizarLlave(fila.Proyecto),
+            NormalizarLlave(fila.IdSite), NormalizarLlave(fila.Site),
+            NormalizarLlave(fila.AnoGestion), NormalizarLlave(fila.TipoTrabajo));
+
+    private static string NormalizarLlave(object? valor)
+        => valor switch
+        {
+            null => string.Empty,
+            decimal numero => numero.ToString("0.################", System.Globalization.CultureInfo.InvariantCulture),
+            _ => valor.ToString()?.Trim().ToUpperInvariant() ?? string.Empty
+        };
 
     private static object ToDbValue<T>(T? value)
         where T : struct

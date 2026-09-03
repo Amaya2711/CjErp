@@ -381,15 +381,15 @@ function formatAmountValue(value: number) {
 
 function consolidateWorkbookRows(headers: string[], rows: string[][]) {
   const index = createHeaderIndex(headers);
-  const keyColumns = ["CLIENTE", "PROYECTO", "CODIGO", "SITE", "OT", "AÑO_OP.", "TIPO_TRABAJO", "NRO_OC", "POS"]
+  const keyColumns = ["CLIENTE", "PROYECTO", "CODIGO", "SITE", "AÑO_OP.", "TIPO_TRABAJO"]
     .map((label) => headers[resolveHeaderIndex(index, { label })])
     .filter((header): header is string => Boolean(header));
   const keyIndexes = keyColumns
     .map((header) => headers.findIndex((item) => normalizeHeader(item) === normalizeHeader(header)))
     .filter((position) => position >= 0);
-  const montoOcIndex = resolveHeaderIndex(index, { label: "MONTO_OC" });
+  const montoBckIndex = resolveHeaderIndex(index, { label: "MONTO_BCK" });
 
-  if (keyIndexes.length < 9 || montoOcIndex === -1) {
+  if (keyIndexes.length < 6 || montoBckIndex === -1) {
     return rows;
   }
 
@@ -404,12 +404,12 @@ function consolidateWorkbookRows(headers: string[], rows: string[][]) {
       return;
     }
 
-    existing[montoOcIndex] = formatAmountValue(
-      parseAmountValue(existing[montoOcIndex]) + parseAmountValue(row[montoOcIndex])
+    existing[montoBckIndex] = formatAmountValue(
+      parseAmountValue(existing[montoBckIndex]) + parseAmountValue(row[montoBckIndex])
     );
 
     row.forEach((value, columnIndex) => {
-      if (columnIndex === montoOcIndex) {
+      if (columnIndex === montoBckIndex) {
         return;
       }
 
@@ -1029,7 +1029,7 @@ export default function MImportarPage() {
                 {duplicatedRowsCount > 0 && (
                   <AppStatusMessage tone="success">
                     Se consolidaron {duplicatedRowsCount} filas duplicadas usando la clave
-                    cliente + proyecto + codigo + site + año_op. + tipo_trabajo + nro_oc + pos y se sumó el campo MONTO_OC.
+                    cliente + proyecto + idsite + site + anogestion + tipo_trabajo y se sumó el campo MONTO_BCK.
                   </AppStatusMessage>
                 )}
               </div>

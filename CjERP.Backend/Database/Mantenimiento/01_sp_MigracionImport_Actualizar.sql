@@ -48,7 +48,7 @@ BEGIN
             s.TipoTrabajoKey,
             s.AnoGestionKey,
             MAX(s.IdMoneda) AS IdMoneda,
-            MAX(s.MontoBck) AS MontoBck
+            SUM(s.MontoBck) AS MontoBck
         INTO #Matched
         FROM #Src s
         INNER JOIN dbo.importar i

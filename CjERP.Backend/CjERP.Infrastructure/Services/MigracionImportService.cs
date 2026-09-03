@@ -21,11 +21,8 @@ public sealed class MigracionImportService : IMigracionImportService
         "PROYECTO",
         "CODIGO",
         "SITE",
-        "OT",
         "AÑO_OP.",
-        "TIPO_TRABAJO",
-        "NRO_OC",
-        "POS"
+        "TIPO_TRABAJO"
     ];
 
     public MigracionImportService(ISqlCommandFactory sqlCommandFactory)
@@ -351,7 +348,7 @@ public sealed class MigracionImportService : IMigracionImportService
         var keyIndexes = ClavesAgrupacion
             .Select(clave => FindHeaderIndex(headers, clave))
             .ToArray();
-        var montoIndex = FindHeaderIndex(headers, "MONTO_OC");
+        var montoIndex = FindHeaderIndex(headers, "MONTO_BCK");
 
         if (keyIndexes.Any(index => index < 0) || montoIndex < 0)
         {
