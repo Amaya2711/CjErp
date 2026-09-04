@@ -1452,7 +1452,7 @@ export default function ContratosPage() {
           FechaFinLaboral: formatContractWordDateFromDate(effectiveEndDate),
           "FECHA INICIO": formatContractWordDate(fechaInicioLaboral),
           "FECHA FINAL": formatContractWordDateFromDate(effectiveEndDate),
-          PLAZO: mesesContrato,
+          PLAZO_C: mesesContrato,
           N_FECHAINILABORAL: formatContractWordDateFromDate(nextStartDate),
           N_FechaIniLaboral: formatContractWordDateFromDate(nextStartDate),
           N_fechainilaboral: formatContractWordDateFromDate(nextStartDate),
