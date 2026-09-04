@@ -15,6 +15,7 @@ const SeguridadMenuPage = lazy(() => import("../../features/seguridad/pages/menu
 const SeguridadPermisosPage = lazy(() => import("../../features/seguridad/pages/menu/permisos"));
 const PerfilRolMenuPage = lazy(() => import("../../features/seguridad/pages/perfil-rol-menu"));
 const UsuarioPerfilRolMenu = lazy(() => import("../../features/seguridad/pages/usuario-perfil-rol-menu"));
+const UsuarioRolPage = lazy(() => import("../../features/seguridad/pages/usuariorol"));
 const AsistenciaPage = lazy(() => import("../../features/administracion/AsistenciaPage"));
 const MarcacionPage = lazy(() => import("../../features/administracion/MarcacionPage"));
 const PendientesPage = lazy(() => import("../../features/administracion/pendientes"));
@@ -315,6 +316,7 @@ export default function AppRouter() {
             <Route path="/seguridad/menu" element={<SeguridadMenuPage />} />
             <Route path="/seguridad/perfil-rol-menu" element={<PerfilRolMenuPage />} />
             <Route path="/seguridad/usuario-perfil-rol-menu" element={<UsuarioPerfilRolMenu />} />
+            <Route path="/seguridad/usuariorol" element={<UsuarioRolPage />} />
 
             <Route path="/seguridad/:autoPage" element={<AutoSecurityRoute />} />
 

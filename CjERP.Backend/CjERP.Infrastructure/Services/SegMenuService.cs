@@ -203,6 +203,38 @@ public class SegMenuService : ISegMenuService
             .ToList();
     }
 
+    public async Task<IEnumerable<UsuarioPerfilRolDto>> ListarPerfilRolPorUsuarioAsync(string idUsuario)
+    {
+        await using var connection = CreateConnection();
+
+        return await connection.QueryAsync<UsuarioPerfilRolDto>(
+            _sqlCommandFactory.Create(
+                """
+                SELECT DISTINCT
+                    u.IdUsuario,
+                    p.IdPerfil,
+                    p.NombrePerfil,
+                    r.IdRol,
+                    r.NombreRol
+                FROM dbo.Usuario u
+                INNER JOIN dbo.SegUsuarioPerfilRol upr
+                    ON upr.IdUsuario = u.IdUsuario
+                   AND ISNULL(upr.EsActivo, 1) = 1
+                INNER JOIN dbo.SegPerfilRol pr
+                    ON pr.IdPerfilRol = upr.IdPerfilRol
+                   AND ISNULL(pr.EsActivo, 1) = 1
+                INNER JOIN dbo.SegPerfil p
+                    ON p.IdPerfil = pr.IdPerfil
+                   AND ISNULL(p.EsActivo, 1) = 1
+                INNER JOIN dbo.SegRol r
+                    ON r.IdRol = pr.IdRol
+                   AND ISNULL(r.EsActivo, 1) = 1
+                WHERE u.IdUsuario = @IdUsuario
+                ORDER BY p.NombrePerfil, r.NombreRol;
+                """,
+                new { IdUsuario = idUsuario.Trim() }));
+    }
+
     public async Task<int> CrearMenuAsync(CrearMenuPrincipalRequest request, string usuario)
     {
         await using var connection = CreateConnection();

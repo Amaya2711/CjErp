@@ -117,6 +117,16 @@ public class SegMenuController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("usuario/{idUsuario}/perfil-rol")]
+    public async Task<IActionResult> ListarPerfilRolPorUsuario(string idUsuario)
+    {
+        if (string.IsNullOrWhiteSpace(idUsuario))
+            return BadRequest(new { message = "El usuario es obligatorio." });
+
+        var result = await _segMenuService.ListarPerfilRolPorUsuarioAsync(idUsuario.Trim());
+        return Ok(result);
+    }
+
     [HttpPost("principal")]
     public async Task<IActionResult> CrearMenuPrincipal([FromBody] CrearMenuPrincipalRequest request)
     {

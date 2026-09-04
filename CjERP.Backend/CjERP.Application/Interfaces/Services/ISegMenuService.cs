@@ -22,6 +22,7 @@ public interface ISegMenuService
     Task GuardarUsuarioPerfilRolAsync(string idUsuario, int idPerfil, int idRol, string usuario);
     Task<int> SincronizarPerfilUsuarioAsync(int idPerfil, string idUsuario);
     Task<IEnumerable<MenuDto>> ListarMenuDinamicoAsync(string? idUsuario, int? idPerfil, int? idRol);
+    Task<IEnumerable<UsuarioPerfilRolDto>> ListarPerfilRolPorUsuarioAsync(string idUsuario);
 
     /// <summary>
     /// Verifica si existe una relación activa usuario-perfil.

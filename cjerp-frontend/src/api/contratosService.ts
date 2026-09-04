@@ -7,6 +7,7 @@ export type ContratoEmpleadoDetalle = {
   nroDocumento: string;
   correo: string;
   telefono: string;
+  direccion: string;
   empresa: string;
   cliente: string;
   area: string;

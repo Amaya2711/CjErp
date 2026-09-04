@@ -901,7 +901,7 @@ export default function ContratosPage() {
       fechaFinLaboral: getFichaValue(row, "FechaFinLaboral", "FechaFinlaboral", "fechaFinLaboral", "fechafinlaboral", "fechfinlaboral") || "",
       nFechaIniLaboral: getFichaValue(row, "n_FechaIniLaboral", "N_FechaIniLaboral", "n_fechainilaboral", "nfechainilaboral") || "",
       mesesN: getFichaValue(row, "Meses_N", "MesesN", "meses_n", "Meses", "meses") || "",
-      cargoPrint: getFichaValue(row, "CargoPrint", "cargoPrint", "Cargo", "cargo") || "",
+      cargoPrint: getFichaValue(row, "CargoPrint", "cargoPrint") || "",
       fechaInicio: getFichaValue(row, "FechaIniLaboral", "fechaIniLaboral", "fechainilaboral") || "-",
       fechaFin: getFichaValue(row, "FechaFinLaboral", "FechaFinlaboral", "fechaFinLaboral", "fechafinlaboral", "fechfinlaboral") || "-",
       nuevaFechaFinLaboral: getFichaValue(row, "NuevaFechaFinLaboral", "nuevaFechaFinLaboral"),
@@ -1151,11 +1151,13 @@ export default function ContratosPage() {
     nextEndDate,
     fechaIniLaboral,
     observationText,
+    motivoMovimiento = "RENOVACION",
   }: {
     idEmpleado: number;
     nextEndDate: string;
     fechaIniLaboral?: string;
     observationText?: string;
+    motivoMovimiento?: string;
   }) => {
     if (!idEmpleado || idEmpleado <= 0) {
       setError("Debe seleccionar un empleado.");
@@ -1183,7 +1185,7 @@ export default function ContratosPage() {
       const response = await renovarContratoEmpleado({
         idEmpleado,
         nuevaFechaFinLaboral: nextEndDate,
-        motivoMovimiento: "RENOVACION",
+        motivoMovimiento,
         observacion: (observationText ?? observation).trim(),
       });
 
@@ -1196,8 +1198,12 @@ export default function ContratosPage() {
       await loadRelationRows();
       setSuccess(
         response.actualizoSolicitudPendiente
-          ? "La fecha fin propuesta fue actualizada en la solicitud pendiente."
-          : "La fecha fue registrada con 1ra aprobacion y quedo pendiente de 2 validaciones."
+          ? motivoMovimiento === "NUEVO_CONTRATO"
+            ? "La solicitud de nuevo contrato fue actualizada en la solicitud pendiente."
+            : "La fecha fin propuesta fue actualizada en la solicitud pendiente."
+          : motivoMovimiento === "NUEVO_CONTRATO"
+            ? "El nuevo contrato fue registrado con 1ra aprobacion y quedo pendiente de 2 validaciones."
+            : "La fecha fue registrada con 1ra aprobacion y quedo pendiente de 2 validaciones."
       );
       return true;
     } catch (err) {
@@ -1391,8 +1397,25 @@ export default function ContratosPage() {
     setSuccess("");
 
     try {
-      const contractEndDate = parseContractDate(item.fechaFin);
-      const nextStartDate = parseContractDate(item.nFechaIniLaboral) ?? addDaysToDate(item.fechaFin, 1);
+      // La relacion es un resumen; la plantilla debe usar la ficha completa del empleado.
+      const employeeId = item.idEmpleado ?? 0;
+      if (employeeId <= 0) {
+        throw new Error("No se pudo identificar al empleado para generar la plantilla.");
+      }
+
+      const employeeResponse = await obtenerContratoEmpleado(employeeId);
+      const employeeData = employeeResponse.empleado;
+      const nombreEmpleado = employeeData?.nombreEmpleado || item.nombreEmpleado || "";
+      const nroDocumento = employeeData?.nroDocumento || item.nroDocumento || "";
+      const direccion = employeeData?.direccion || item.direccion || "";
+      const area = employeeData?.area || item.area || "";
+      const cliente = employeeData?.cliente || item.cliente || "";
+      const ubicacion = employeeData?.ubicacion || item.ubicacion || "";
+      const cargoPrint = employeeData?.cargoPrint || item.cargoPrint || "";
+      const fechaInicioLaboral = employeeData?.fechaIniLaboral || item.fechaIniLaboral;
+      const fechaFinLaboral = employeeData?.fechaFinLaboral || item.fechaFin;
+      const contractEndDate = parseContractDate(fechaFinLaboral);
+      const nextStartDate = parseContractDate(item.nFechaIniLaboral) ?? addDaysToDate(fechaFinLaboral, 1);
       const proposalEndDate = parseContractDate(getRelationProposalEndDate(item));
       const effectiveEndDate = proposalEndDate ?? contractEndDate;
       const mesesContrato = item.mesesN.trim() || getMonthsDifference(nextStartDate, effectiveEndDate);
@@ -1401,29 +1424,45 @@ export default function ContratosPage() {
         documentPath,
         fileName: outputFileName,
         replacements: {
-          NOMBREEMPLEADO: item.nombreEmpleado || "",
-          NombreEmpleado: item.nombreEmpleado || "",
-          NRODOCUMENTO: item.nroDocumento || "",
-          NroDocumento: item.nroDocumento || "",
-          DIRECCION: item.direccion || "",
-          Direccion: item.direccion || "",
-          AREA: item.area || "",
-          Area: item.area || "",
-          CLIENTE: item.cliente || "",
-          Cliente: item.cliente || "",
-          UBICACION: item.ubicacion || "",
-          Ubicacion: item.ubicacion || "",
-          CargoPrint: item.cargoPrint || "",
-          FECHAINILABORAL: formatContractWordDate(item.fechaIniLaboral),
-          FechaIniLaboral: formatContractWordDate(item.fechaIniLaboral),
+          NOMBREEMPLEADO: nombreEmpleado,
+          NombreEmpleado: nombreEmpleado,
+          "NOMBRES Y APELLIDOS": nombreEmpleado,
+          "APELLIDOS Y NOMBRES": nombreEmpleado,
+          NOMBRES_APELLIDOS: nombreEmpleado,
+          APELLIDOS_NOMBRES: nombreEmpleado,
+          NRODOCUMENTO: nroDocumento,
+          NroDocumento: nroDocumento,
+          DIRECCION: direccion,
+          Direccion: direccion,
+          AREA: area,
+          Area: area,
+          CLIENTE: cliente,
+          Cliente: cliente,
+          UBICACION: ubicacion,
+          Ubicacion: ubicacion,
+          CargoPrint: cargoPrint,
+          cargoPrint: cargoPrint,
+          "PUESTO LABORAL": cargoPrint,
+          "PUESTO LABORAL ": cargoPrint,
+          CONSIGNAR: area,
+          " CONSIGNAR ": area,
+          FECHAINILABORAL: formatContractWordDate(fechaInicioLaboral),
+          FechaIniLaboral: formatContractWordDate(fechaInicioLaboral),
           FECHAFINLABORAL: formatContractWordDateFromDate(effectiveEndDate),
           FechaFinLaboral: formatContractWordDateFromDate(effectiveEndDate),
+          "FECHA INICIO": formatContractWordDate(fechaInicioLaboral),
+          "FECHA FINAL": formatContractWordDateFromDate(effectiveEndDate),
+          PLAZO: mesesContrato,
           N_FECHAINILABORAL: formatContractWordDateFromDate(nextStartDate),
           N_FechaIniLaboral: formatContractWordDateFromDate(nextStartDate),
           N_fechainilaboral: formatContractWordDateFromDate(nextStartDate),
           N_FECHAFINLABORAL: formatContractWordDateFromDate(effectiveEndDate),
           N_FechaFinLaboral: formatContractWordDateFromDate(effectiveEndDate),
           N_FechaFinalLaboral: formatContractWordDateFromDate(effectiveEndDate),
+          "FECHA INICIAL CONTRATO": formatContractWordDate(fechaInicioLaboral),
+          "FECHA INICI AL CONTRATO": formatContractWordDate(fechaInicioLaboral),
+          "FECHA INICIO RENOV CONTRATO": formatContractWordDateFromDate(nextStartDate),
+          "FECHA FINAL RENOV CONTRATO": formatContractWordDateFromDate(effectiveEndDate),
           MESES_N: mesesContrato,
           Meses_N: mesesContrato,
         },
@@ -1516,6 +1555,37 @@ export default function ContratosPage() {
       idEmpleado: currentEmployee.idEmpleado,
       nextEndDate: newEndDate,
       fechaIniLaboral: currentEmployee.fechaIniLaboral,
+      motivoMovimiento: "RENOVACION",
+    });
+  };
+
+  const handleNewContract = async () => {
+    if (saving || autoSaveInProgressRef.current) {
+      return;
+    }
+
+    if (!employee) {
+      setError("Debe seleccionar un empleado.");
+      setSuccess("");
+      return;
+    }
+
+    if (!newEndDate.trim()) {
+      setError("Debe registrar una fecha fin para el nuevo contrato.");
+      setSuccess("");
+      return;
+    }
+
+    const shouldSave = window.confirm("¿Desea registrar un contrato nuevo con los datos actuales?");
+    if (!shouldSave) {
+      return;
+    }
+
+    await saveContractChange({
+      idEmpleado: employee.idEmpleado,
+      nextEndDate: newEndDate,
+      fechaIniLaboral: employee.fechaIniLaboral,
+      motivoMovimiento: "NUEVO_CONTRATO",
     });
   };
 
@@ -1539,6 +1609,7 @@ export default function ContratosPage() {
           idEmpleado: employee.idEmpleado,
           nextEndDate: currentValue,
           fechaIniLaboral: employee.fechaIniLaboral,
+          motivoMovimiento: "RENOVACION",
         });
       } finally {
         autoSaveInProgressRef.current = false;
@@ -2162,8 +2233,20 @@ export default function ContratosPage() {
                 <div style={styles.formActions}>
                   <button type="submit" style={styles.primaryButton} disabled={saving}>
                     <Save size={16} />
-                    {saving ? "Guardando..." : "Registrar 1ra aprobacion"}
+                    {saving ? "Guardando..." : "Renovación"}
                   </button>
+                  <button
+                    type="button"
+                    style={styles.secondaryActionButton}
+                    disabled={saving}
+                    onClick={() => void handleNewContract()}
+                  >
+                    <FileDown size={16} />
+                    {saving ? "Guardando..." : "Contrato nuevo"}
+                  </button>
+                </div>
+                <div style={styles.modeHintBox}>
+                  Renovación y contrato nuevo son acciones independientes. Ambas usan la información base del empleado seleccionado.
                 </div>
               </form>
             </div>
@@ -2783,8 +2866,34 @@ const styles: Record<string, CSSProperties> = {
   },
   formActions: {
     display: "flex",
+    alignItems: "center",
+    gap: 12,
     justifyContent: "flex-end",
     marginTop: 16,
+    flexWrap: "wrap",
+  },
+  modeHintBox: {
+    marginTop: 10,
+    padding: "10px 12px",
+    borderRadius: 10,
+    border: "1px solid #bfdbfe",
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    fontSize: 13,
+    fontWeight: 600,
+  },
+  secondaryActionButton: {
+    height: 44,
+    borderRadius: 10,
+    border: "1px solid #16a34a",
+    background: "#ecfdf5",
+    color: "#15803d",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "0 18px",
+    cursor: "pointer",
+    fontWeight: 700,
   },
   primaryButton: {
     height: 44,

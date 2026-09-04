@@ -14,6 +14,14 @@ export interface MenuDto {
   acceso?: number | boolean | string | null;
 }
 
+export interface UsuarioPerfilRolDto {
+  idUsuario: string;
+  idPerfil: number;
+  nombrePerfil: string;
+  idRol: number;
+  nombreRol: string;
+}
+
 export interface ExisteUsuarioPerfilRequest {
   idUsuario: string;
   idPerfil: number;
@@ -214,6 +222,13 @@ export const menuService = {
     );
 
     return extraerArray<MenuDto>(response);
+  },
+
+  async obtenerPerfilRolPorUsuario(idUsuario: string): Promise<UsuarioPerfilRolDto[]> {
+    const response = await httpClient.get<UsuarioPerfilRolDto[]>(
+      `${BASE_URL}/usuario/${encodeURIComponent(idUsuario)}/perfil-rol`
+    );
+    return extraerArray<UsuarioPerfilRolDto>(response);
   },
 
   async crearMenuPrincipal(payload: CrearMenuPrincipalRequest) {
