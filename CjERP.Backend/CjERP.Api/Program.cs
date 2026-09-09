@@ -226,6 +226,7 @@ builder.Services.AddScoped<IPlanillaService, PlanillaService>();
 builder.Services.AddScoped<IPlanillaBoletaService, PlanillaBoletaService>();
 builder.Services.AddScoped<PlanillaBoletaPdfGenerator>();
 builder.Services.AddScoped<IPlanillaConsultaService, PlanillaConsultaService>();
+builder.Services.AddScoped<PagoTesoreriaService>();
 builder.Services.AddScoped<IMigracionImportService, MigracionImportService>();
 builder.Services.AddScoped<IMigracionImportProcesarNewService, MigracionImportProcesarNewService>();
 builder.Services.AddHttpClient<IConciliacionBcpService, ConciliacionBcpService>(client =>
