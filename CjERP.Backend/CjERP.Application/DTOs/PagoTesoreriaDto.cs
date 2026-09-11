@@ -2,6 +2,20 @@ using System.ComponentModel.DataAnnotations;
 
 namespace CjERP.Application.DTOs;
 
+public sealed class PagoRevisionDto
+{
+    [Required] public PagoTesoreriaItemDto Item { get; set; } = new();
+    public int? IdAnticipo { get; set; }
+    [StringLength(50)] public string? NroOperacion { get; set; }
+    public int? IdComprobante { get; set; }
+    public int? IdTipoPago { get; set; }
+    [StringLength(2500)] public string? ImgFactura { get; set; }
+    public int Estado { get; set; } = 1;
+    public bool ConfirmarCambioEstado { get; set; }
+}
+
+public sealed record PagoRevisionPermisos(bool PuedeEditar, bool PuedeEditarOperacion, bool PuedeEditarEstado, int? IdEmpleado);
+
 public sealed class PagoTesoreriaItemDto
 {
     [Range(1, int.MaxValue)] public int Correlativo { get; set; }

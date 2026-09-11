@@ -8,6 +8,7 @@ import {
 } from "react";
 import {
   Banknote,
+  BarChart3,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -38,10 +39,12 @@ import type {
   PagoOpcion,
   PagoTesoreriaRequest,
   PagoTesoreriaRow,
+  PagoRevisionPermisos,
 } from "../../../api/pagoTesoreriaService";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 import "./pagartesoreria.css";
-import PagoEtapaForm from "./PagoEtapaForm";
+import PagoEtapaForm, { PagoEtapaActions } from "./PagoEtapaForm";
+import PagoRevisionCells, { FacturaLink } from "./PagoRevisionCells";
 
 const hoy = () =>
   new Intl.DateTimeFormat("en-CA", {
@@ -63,6 +66,8 @@ const sum = (
   field: "totalPagar" | "total" | "montoRetencion" = "totalPagar",
 ) => rows.reduce((s, r) => s + Math.round((r[field] ?? 0) * 100), 0) / 100;
 const emptyCatalogos: PagoCatalogos = {
+  anticipos: [],
+  estados: [],
   ejecutores: [],
   bancos: [],
   transferencias: [],
@@ -75,11 +80,13 @@ const emptyCatalogos: PagoCatalogos = {
 const tabs = [
   { estado: 1, label: "Revisión", icon: ShieldCheck },
   { estado: 9, label: "Contabilidad", icon: ReceiptText },
-  { estado: 8, label: "Programado", icon: Wallet },
   { estado: 5, label: "Administrativo", icon: Landmark },
+  { estado: 8, label: "Programado", icon: Wallet },
   { estado: 4, label: "Rendición", icon: History },
   { estado: 2, label: "Observada", icon: Eye },
+  { estado: 99, label: "Reporte", icon: BarChart3 },
 ];
+const REPORT_STATES = [1, 9, 8, 5, 4, 2];
 const initialForm = () => ({
   idEjecutor: "",
   idTransferencia: "",
@@ -129,6 +136,10 @@ function SelectField({
 export default function PagarTesoreriaPage() {
   const [estado, setEstado] = useState(1);
   const esPago = estado === 5 || estado === 8;
+  // Se conserva el flujo de registro para una futura habilitación, pero no se
+  // encuentra disponible en Programado ni Administrativo por el momento.
+  const registroPagoDisponible = false;
+  const esReporte = estado === 99;
   const [rows, setRows] = useState<PagoTesoreriaRow[]>([]);
   const [catalogos, setCatalogos] = useState(emptyCatalogos);
   const [puedePagar, setPuedePagar] = useState(false);
@@ -149,7 +160,13 @@ export default function PagarTesoreriaPage() {
   const [groupBy, setGroupBy] = useState("comprobante");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [form, setForm] = useState(initialForm);
-  const [saving, setSaving] = useState(false);
+  const [operationSaving, setSaving] = useState(false);
+  const [editingRevision, setEditingRevision] = useState(false);
+  const saving = operationSaving || editingRevision;
+  const [permisosRevision, setPermisosRevision] = useState<PagoRevisionPermisos>({
+    puedeEditar: false, puedeEditarOperacion: false, puedeEditarEstado: false,
+  });
+  const columnCount = estado === 1 ? 16 : estado === 9 ? 10 : 9;
   const [confirmation, setConfirmation] = useState<PagoTesoreriaRequest | null>(
     null,
   );
@@ -175,8 +192,16 @@ export default function PagarTesoreriaPage() {
     try {
       const result = await obtenerCatalogosPago(signal);
       if (!signal?.aborted) {
-        setCatalogos(result.catalogos);
+        setCatalogos({ ...emptyCatalogos, ...result.catalogos });
         setPuedePagar(result.puedePagar);
+        setPermisosRevision(result.permisosRevision ?? {
+          puedeEditar: false, puedeEditarOperacion: false, puedeEditarEstado: false,
+        });
+        if (!result.permisosRevision) {
+          setCatalogError("La API en ejecución todavía no incluye la edición de Revisión. Reinicie y recompile el backend; después pulse Reintentar catálogos.");
+        } else if (!result.permisosRevision.puedeEditar) {
+          setCatalogError("La edición de Revisión está deshabilitada porque el usuario no tiene un empleado asociado válido. Revise su vinculación en Seguridad / Usuarios.");
+        }
       }
     } catch (e) {
       if (!signal?.aborted) {
@@ -207,12 +232,14 @@ export default function PagarTesoreriaPage() {
       setError("");
       setLoading(true);
       try {
-        const result = await listarPagosTesoreria(
-          status,
-          start,
-          end,
-          controller.signal,
-        );
+        const result = status === 99
+          ? (await Promise.all(REPORT_STATES.map((reportState) =>
+              listarPagosTesoreria(
+                reportState,
+                reportState === 4 ? `${hoy().slice(0, 7)}-01` : "",
+                reportState === 4 ? hoy() : "",
+                controller.signal)))).flat()
+          : await listarPagosTesoreria(status, start, end, controller.signal);
         if (!controller.signal.aborted) setRows(result);
       } catch (e) {
         if (!controller.signal.aborted)
@@ -316,6 +343,25 @@ export default function PagarTesoreriaPage() {
       })),
     [visibleRows],
   );
+  const reportMetrics = useMemo(() => {
+    const stages = [
+      { label: "Revisión", states: [1] },
+      { label: "Contabilidad", states: [9] },
+      { label: "Programado", states: [8] },
+      { label: "Administrativo", states: [5] },
+      { label: "Rendición", states: [4] },
+      { label: "Observadas", states: [2, 7] },
+    ];
+    return stages.map((stage) => {
+      const items = rows.filter((row) => stage.states.includes(row.estado));
+      const currencies = [...new Set(items.map((item) => item.tipoMoneda))].map((currencyId) => ({
+        name: items.find((item) => item.tipoMoneda === currencyId)?.moneda || `Moneda ${currencyId}`,
+        amount: sum(items.filter((item) => item.tipoMoneda === currencyId)),
+      }));
+      return { ...stage, count: items.length, currencies };
+    });
+  }, [rows]);
+  const reportMaxCount = Math.max(1, ...reportMetrics.map((metric) => metric.count));
   const groups = useMemo(() => {
     const result = new Map<string, PagoTesoreriaRow[]>();
     for (const r of visibleRows) {
@@ -371,6 +417,30 @@ export default function PagarTesoreriaPage() {
     setExpanded(new Set());
     setSuccess("");
     void load(next, start, end);
+  };
+  useEffect(() => {
+    if (!editingRevision) return;
+    const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); };
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => window.removeEventListener("beforeunload", beforeUnload);
+  }, [editingRevision]);
+  const refreshRevision = async () => {
+    setSaving(true);
+    setSuccess("Cambios del recibo guardados correctamente.");
+    setError("");
+    setSelected(new Set());
+    try {
+      const result = await listarPagosTesoreria(1, desde, hasta);
+      setRows(result);
+      // Conservar los grupos abiertos y mostrar el nuevo grupo si cambió el comprobante.
+      setExpanded(new Set(result.map(r => {
+        const label = `${r.revisionPm?.trim() || "Sin revisión"} · ${r.comprobante || "Sin comprobante"} · ${r.moneda || `Moneda ${r.tipoMoneda}`}${groupBy === "responsable" ? ` · ${r.responsable || "Sin responsable"}` : ""}`;
+        return `${r.tipoMoneda}:${label}`;
+      })));
+    } catch (e) {
+      setRows([]);
+      setError(getHttpErrorMessage(e, "El recibo se guardó, pero no se pudo actualizar la lista. Pulse Consultar."));
+    } finally { setSaving(false); }
   };
   const medio =
     catalogos.transferencias
@@ -522,7 +592,7 @@ export default function PagarTesoreriaPage() {
             </button>
           ))}
         </nav>
-        <form
+        {!esReporte && <form
           className="pt-filters"
           onSubmit={(e) => {
             e.preventDefault();
@@ -586,7 +656,7 @@ export default function PagarTesoreriaPage() {
               <RefreshCw size={16} />
             </button>
           </fieldset>
-        </form>
+        </form>}
         {catalogError && (
           <div className="pt-alert" role="alert">
             {catalogError}
@@ -612,9 +682,53 @@ export default function PagarTesoreriaPage() {
             {success}
           </div>
         )}
-        <div className="pt-workspace">
+        <div className={`pt-workspace${estado === 1 ? " pt-workspace-review" : ""}`}>
           <section className="pt-list">
-            <div className="pt-list-toolbar">
+            {esReporte && (
+              <div className="pt-report" aria-label="Reporte de tesorería">
+                {loading ? (
+                  <div className="pt-report-loading" role="status">
+                    <LoaderCircle className="pt-spin" size={24} />
+                    <span>Cargando reporte…</span>
+                  </div>
+                ) : <>
+                <div className="pt-report-heading">
+                  <div>
+                    <h2>Reporte de tesorería</h2>
+                    <p>Consolidado de los recibos en todas las etapas del flujo.</p>
+                  </div>
+                  <span>Actualizado al {fecha(hoy())}</span>
+                </div>
+                <div className="pt-report-summary">
+                <div className="pt-report-kpis">
+                  {reportMetrics.map((metric) => (
+                    <div key={metric.label}>
+                      <span>{metric.label}</span>
+                      <strong>{metric.count} registros</strong>
+                      <div className="pt-report-currencies">
+                        {metric.currencies.length ? metric.currencies.map((currency) => (
+                          <small key={currency.name}>{currency.name}: <b>{money(currency.amount)}</b></small>
+                        )) : <small>Sin registros</small>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="pt-report-chart">
+                  <div className="pt-report-chart-title">Registros por etapa</div>
+                  {reportMetrics.map((metric) => (
+                    <div className="pt-report-bar" key={metric.label}>
+                      <span>{metric.label}</span>
+                      <div><i style={{ width: `${(metric.count / reportMaxCount) * 100}%` }} /></div>
+                      <strong>{metric.count}</strong>
+                      <small>registros</small>
+                    </div>
+                  ))}
+                </div>
+                </div>
+                </>}
+              </div>
+            )}
+            {!esReporte && <div className="pt-list-toolbar">
               <div>
                 <h2>
                   {tabs.find((t) => t.estado === estado)?.label} · Recibos
@@ -631,7 +745,8 @@ export default function PagarTesoreriaPage() {
                 <Download size={15} />
                 Excel
               </button>
-            </div>
+            </div>}
+            {!esReporte && <>
             <fieldset className="pt-local-filters" disabled={saving}>
               <select
                 aria-label="Filtrar por cliente"
@@ -766,12 +881,16 @@ export default function PagarTesoreriaPage() {
                       {estado === 4 ? "Pagado" : "A pagar"}
                     </th>
                     <th>Detalle</th>
+                    {estado === 1 && <>
+                      <th>Anticipo</th><th>NroOperacion</th><th>Comprobante</th><th>TipoPago</th>
+                      <th>View factura</th><th className="pt-revision-actions">Edición</th>
+                    </>}
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={estado === 1 || estado === 9 ? 10 : 9}>
+                      <td colSpan={columnCount}>
                         <div className="pt-empty">
                           <LoaderCircle className="pt-spin" size={28} />
                           <strong>Cargando recibos…</strong>
@@ -780,7 +899,7 @@ export default function PagarTesoreriaPage() {
                     </tr>
                   ) : !visibleRows.length ? (
                     <tr>
-                      <td colSpan={estado === 1 || estado === 9 ? 10 : 9}>
+                      <td colSpan={columnCount}>
                         <div className="pt-empty">
                           <ReceiptText size={36} />
                           <strong>
@@ -834,6 +953,7 @@ export default function PagarTesoreriaPage() {
                           </td>
                           <td colSpan={estado === 1 || estado === 9 ? 7 : 6}>
                             <button
+                              disabled={saving}
                               onClick={() =>
                                 setExpanded((prev) => {
                                   const next = new Set(prev);
@@ -854,7 +974,7 @@ export default function PagarTesoreriaPage() {
                             </button>
                           </td>
                           <td className="numeric">{money(sum(g.items))}</td>
-                          <td />
+                          <td colSpan={estado === 1 ? 7 : 1} />
                         </tr>
                         {expanded.has(g.id) &&
                           g.items.map((r) => (
@@ -949,6 +1069,9 @@ export default function PagarTesoreriaPage() {
                                   <Eye size={16} />
                                 </button>
                               </td>
+                              {estado === 1 && <PagoRevisionCells row={r} catalogos={catalogos}
+                                permisos={permisosRevision} disabled={saving || loading || !puedePagar}
+                                onEditing={setEditingRevision} onSaved={refreshRevision} />}
                             </tr>
                           ))}
                       </Fragment>
@@ -968,11 +1091,36 @@ export default function PagarTesoreriaPage() {
                 </button>
               )}
             </footer>
+            {!esReporte && <div className="pt-grid-actions" role="group" aria-label={`Acciones de ${tabs.find(t => t.estado === estado)?.label}`}>
+              {esPago && (
+                <button className="pt-primary" type="submit" form="pt-register-payment"
+                  disabled={!registroPagoDisponible || saving || loading || !puedePagar || !selectedRows.length || selectedRows.length > 500 || selectedCurrencies.size !== 1}>
+                  {operationSaving ? "Registrando pago…" : "Registrar pago"}
+                </button>
+              )}
+              <PagoEtapaActions estado={estado} formId={`pt-stage-${estado}`}
+                disabled={saving || loading || !puedePagar || !selectedRows.length || selectedRows.length > 500} />
+            </div>}
+            </>}
+            {estado === 1 && (
+              <PagoEtapaForm
+                key={estado}
+                formId={`pt-stage-${estado}`}
+                estado={estado}
+                rows={selectedRows}
+                catalogos={catalogos}
+                disabled={saving || loading || !puedePagar}
+                onBusy={setSaving}
+                onRefresh={() => load(estado, desde, hasta)}
+                onMessage={(message, isError) => isError ? setError(message) : setSuccess(message)}
+              />
+            )}
           </section>
-          {
+          {estado !== 1 && !esReporte && (
             <aside className="pt-payment">
               {!esPago && (
                 <PagoEtapaForm
+                  formId={`pt-stage-${estado}`}
                   key={estado}
                   estado={estado}
                   rows={selectedRows}
@@ -1026,6 +1174,7 @@ export default function PagarTesoreriaPage() {
                     </p>
                   )}
                   <form
+                    id="pt-register-payment"
                     onSubmit={(e) => {
                       e.preventDefault();
                       review();
@@ -1137,36 +1286,18 @@ export default function PagarTesoreriaPage() {
                           placeholder="Observaciones del pago"
                         />
                       </label>
-                      <button
-                        className="pt-primary pt-pay-button"
-                        disabled={
-                          !selectedRows.length ||
-                          selectedRows.length > 500 ||
-                          selectedCurrencies.size !== 1 ||
-                          saving
-                        }
-                        type="submit"
-                      >
-                        {saving ? (
-                          <LoaderCircle size={18} className="pt-spin" />
-                        ) : (
-                          <ShieldCheck size={18} />
-                        )}
-                        {saving
-                          ? "Registrando pago…"
-                          : "Revisar y registrar pago"}
-                      </button>
                     </fieldset>
                   </form>
                   <p className="pt-footnote">
                     Los datos se aplicarán a todos los recibos seleccionados.
                   </p>
-                  <details key={estado} className="pt-other-actions">
-                    <summary>
+                  <div key={estado} className="pt-other-actions">
+                    <h3>
                       Otras acciones de{" "}
                       {estado === 5 ? "Administrativo" : "Programado"}
-                    </summary>
+                    </h3>
                     <PagoEtapaForm
+                      formId={`pt-stage-${estado}`}
                       key={estado}
                       estado={estado}
                       rows={selectedRows}
@@ -1178,11 +1309,11 @@ export default function PagarTesoreriaPage() {
                         isError ? setError(message) : setSuccess(message)
                       }
                     />
-                  </details>
+                  </div>
                 </>
               )}
             </aside>
-          }
+          )}
         </div>
         <dialog
           ref={dialog}
@@ -1348,15 +1479,7 @@ export default function PagarTesoreriaPage() {
                   <p className="pt-preserve">{detail.observacion}</p>
                 </div>
               )}
-              {detail.imgFactura?.startsWith("https://") && (
-                <a
-                  href={detail.imgFactura}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Abrir comprobante adjunto
-                </a>
-              )}
+              <FacturaLink referencia={detail.imgFactura} correlativo={detail.correlativo} />
               <p className="pt-preserve">{detail.detalle || "Sin detalle"}</p>
               {detail.comentarioAdicional && (
                 <p className="pt-preserve">{detail.comentarioAdicional}</p>

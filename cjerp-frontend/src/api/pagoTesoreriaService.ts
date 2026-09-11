@@ -1,6 +1,7 @@
 import httpClient from "./httpClient";
 
 export type PagoTesoreriaRow = {
+  idAnticipo: number | null;
   correlativo: number;
   idSite: string;
   estado: number;
@@ -54,6 +55,8 @@ export type PagoOpcion = {
   porcentaje?: number | null;
 };
 export type PagoCatalogos = {
+  anticipos: PagoOpcion[];
+  estados: PagoOpcion[];
   ejecutores: PagoOpcion[];
   bancos: PagoOpcion[];
   transferencias: PagoOpcion[];
@@ -76,8 +79,29 @@ export type PagoTesoreriaRequest = {
   items: PagoAccionItem[];
 };
 const url = "/tesoreria/pagos";
+export type PagoRevisionPermisos = { puedeEditar: boolean; puedeEditarOperacion: boolean; puedeEditarEstado: boolean };
+export type PagoRevisionRequest = Pick<PagoTesoreriaRow, "idAnticipo" | "nroOperacion" | "idComprobante" | "idTipoPago" | "imgFactura" | "estado"> & {
+  item: PagoAccionItem;
+  confirmarCambioEstado: boolean;
+};
+export const guardarRevisionTesoreria = (request: PagoRevisionRequest) =>
+  httpClient.put<{ procesados: number }>(`${url}/revision`, request);
+
+export const descargarFacturaRevision = (correlativo: number) =>
+  httpClient.get<Blob>(`${url}/revision/${correlativo}/factura`, { responseType: "blob" });
+
+// Mismo endpoint y almacenamiento que la página Gastos.
+export const subirFacturaRevision = (archivo: File, row: PagoTesoreriaRow) => {
+  const data = new FormData();
+  data.append("archivo", archivo);
+  data.append("gastoId", String(row.correlativo));
+  if (row.serie) data.append("serie", row.serie);
+  if (row.responsable) data.append("responsable", row.responsable);
+  return httpClient.post<{ fileUrl: string; storagePath: string }>("/tesoreria/gastos/upload-factura", data);
+};
+
 export const obtenerCatalogosPago = (signal?: AbortSignal) =>
-  httpClient.get<{ catalogos: PagoCatalogos; puedePagar: boolean }>(
+  httpClient.get<{ catalogos: PagoCatalogos; puedePagar: boolean; permisosRevision: PagoRevisionPermisos }>(
     `${url}/catalogos`,
     { signal },
   );

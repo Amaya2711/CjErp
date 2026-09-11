@@ -16,8 +16,8 @@ import { getHttpErrorMessage } from "../../../utils/httpError";
 
 const acciones: Record<number, { key: PagoAccion; label: string }[]> = {
   1: [
-    { key: "revisar", label: "Revisar y enviar a Contabilidad" },
-    { key: "observar", label: "Observar recibos" },
+    { key: "revisar", label: "Contabilidad" },
+    { key: "observar", label: "Observar" },
   ],
   9: [
     { key: "contabilidad-programar", label: "Guardar y enviar a Programado" },
@@ -41,6 +41,20 @@ const acciones: Record<number, { key: PagoAccion; label: string }[]> = {
     { key: "subsanar", label: "Subsanar y devolver al flujo" },
   ],
 };
+export function PagoEtapaActions({ estado, formId, disabled }: {
+  estado: number;
+  formId: string;
+  disabled: boolean;
+}) {
+  return <>{acciones[estado].map((accion, index) => (
+    <button type="submit" form={formId} key={accion.key} value={accion.key}
+      className={index === 0 ? "pt-primary" : ""}
+      disabled={disabled || (estado === 9 && accion.key === "contabilidad-programar")}
+      title={estado === 9 && accion.key === "contabilidad-programar" ? "Acción no habilitada actualmente" : undefined}>
+      {accion.label}
+    </button>
+  ))}</>;
+}
 const textos: Record<PagoAccion, string> = {
   revisar:
     "Se registrarán la fecha y el turno AM/PM de Lima y los recibos pasarán a Contabilidad.",
@@ -91,6 +105,7 @@ const inicial = () => ({
 });
 
 export default function PagoEtapaForm({
+  formId,
   estado,
   rows,
   catalogos,
@@ -99,6 +114,7 @@ export default function PagoEtapaForm({
   onRefresh,
   onMessage,
 }: {
+  formId: string;
   estado: number;
   rows: PagoTesoreriaRow[];
   catalogos: PagoCatalogos;
@@ -115,7 +131,9 @@ export default function PagoEtapaForm({
   const lock = useRef(false);
   const editar = estado === 4 || estado === 2;
   useEffect(() => {
-    if (pending) ref.current?.showModal();
+    if (pending) {
+      if (!ref.current?.open) ref.current?.showModal();
+    }
     else ref.current?.close();
   }, [pending]);
   const field = <K extends keyof ReturnType<typeof inicial>>(
@@ -202,13 +220,17 @@ export default function PagoEtapaForm({
     const accion = (
       (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null
     )?.value as PagoAccion;
-    if (!acciones[estado]?.some((a) => a.key === accion) || busy) return;
+    if (!acciones[estado]?.some((a) => a.key === accion) || busy || disabled) return;
     if (!rows.length || rows.length > 500) {
       setError("Seleccione entre 1 y 500 recibos.");
       return;
     }
+    if (accion === "observar") {
+      setPending({ accion, items: crearItemsTesoreria(rows), observacion: "" });
+      return;
+    }
     if (
-      ["observar", "corregir", "subsanar"].includes(accion) &&
+      ["corregir", "subsanar"].includes(accion) &&
       !form.observacion.trim()
     ) {
       setError("Ingrese el motivo o el detalle de la corrección.");
@@ -328,11 +350,12 @@ export default function PagoEtapaForm({
   };
   const save = async () => {
     if (!pending || lock.current) return;
+    if (pending.accion === "observar" && !pending.observacion.trim()) return;
     lock.current = true;
     setBusy(true);
     onBusy(true);
     try {
-      const result = await ejecutarAccionTesoreria(pending);
+      const result = await ejecutarAccionTesoreria({ ...pending, observacion: pending.observacion.trim() });
       setPending(null);
       setForm(inicial());
       await onRefresh();
@@ -356,11 +379,10 @@ export default function PagoEtapaForm({
     }
   };
   return (
-    <section className="pt-stage-form">
+    <section className={estado === 1 ? "pt-stage-dialogs" : "pt-stage-form"}>
+      {estado !== 1 && <>
       <h2>
-        {estado === 1
-          ? "Registrar revisión"
-          : estado === 9
+        {estado === 9
             ? "Validación contable"
             : estado === 4
               ? "Actualizar rendición"
@@ -371,21 +393,16 @@ export default function PagoEtapaForm({
       <p className="pt-footnote">
         {rows.length} recibos seleccionados · Máximo 500 por lote
       </p>
-      {estado === 1 && (
-        <p>
-          La fecha y el turno de revisión se registran automáticamente al
-          confirmar.
-        </p>
-      )}
       {estado === 2 && rows.length === 1 && (
         <div className="pt-inline-alert">
           <strong>Observación actual</strong>
           <p>{rows[0].observacion || "Sin motivo registrado"}</p>
         </div>
       )}
-      <form onSubmit={revisar}>
+      </>}
+      <form id={formId} onSubmit={revisar} hidden={estado === 1}>
         <fieldset disabled={disabled || busy}>
-          {(editar || estado === 9) && (
+          {editar && (
             <button
               type="button"
               disabled={rows.length !== 1}
@@ -547,17 +564,6 @@ export default function PagoEtapaForm({
               {error}
             </p>
           )}
-          {acciones[estado].map((a, i) => (
-            <button
-              type="submit"
-              key={a.key}
-              value={a.key}
-              className={i === 0 ? "pt-primary" : ""}
-              disabled={!rows.length || rows.length > 500 || busy}
-            >
-              {a.label}
-            </button>
-          ))}
         </fieldset>
       </form>
       <dialog
@@ -570,7 +576,7 @@ export default function PagoEtapaForm({
         }}
       >
         <div className="pt-dialog-heading">
-          <h2 id="pt-stage-confirm">Confirmar actualización</h2>
+          <h2 id="pt-stage-confirm">{pending?.accion === "observar" ? "Observar recibos" : "Confirmar actualización"}</h2>
           <button
             disabled={busy}
             aria-label="Cerrar confirmación de etapa"
@@ -591,6 +597,22 @@ export default function PagoEtapaForm({
               <strong>{pending.items.length} recibos:</strong>{" "}
               {pending.items.map((i) => i.correlativo).join(", ")}
             </p>
+            {pending.accion === "observar" && (
+              <label className="pt-field">
+                <span>Motivo de la observación *</span>
+                <textarea
+                  autoFocus
+                  required
+                  rows={4}
+                  maxLength={500}
+                  disabled={busy}
+                  value={pending.observacion}
+                  placeholder="Ingrese el motivo de la observación"
+                  onChange={(e) => setPending({ ...pending, observacion: e.target.value })}
+                />
+                <small>El motivo se aplicará a los recibos seleccionados.</small>
+              </label>
+            )}
             <dl className="pt-detail-grid">
               {pending.idRetencion !== undefined && (
                 <div>
@@ -684,22 +706,22 @@ export default function PagoEtapaForm({
                   <dd>{pending.imgFactura}</dd>
                 </div>
               )}
-              <div>
+              {pending.accion !== "observar" && <div>
                 <dt>Observación</dt>
                 <dd>{pending.observacion || "Sin observación"}</dd>
-              </div>
+              </div>}
             </dl>
             <div className="pt-dialog-actions">
               <button disabled={busy} onClick={() => setPending(null)}>
-                Volver
+                {pending.accion === "observar" ? "Cancelar" : "Volver"}
               </button>
               <button
                 className="pt-primary"
-                disabled={busy}
+                disabled={busy || (pending.accion === "observar" && !pending.observacion.trim())}
                 onClick={() => void save()}
               >
                 <CheckCircle2 size={16} />
-                {busy ? "Guardando…" : "Confirmar actualización"}
+                {busy ? "Guardando…" : pending.accion === "observar" ? "Aceptar" : "Confirmar actualización"}
               </button>
             </div>
           </>

@@ -1317,6 +1317,9 @@ export default function PagosV1Page() {
 
         const fechaInicio = formatDateParam(appliedFilters.fechaDesde);
         const fechaFin = formatDateParam(appliedFilters.fechaHasta);
+        const textoBusqueda = appliedFilters.query.trim();
+        const buscarEnTotal = Boolean(textoBusqueda);
+        const correlativoBusqueda = /^\d+$/.test(textoBusqueda) ? textoBusqueda : "";
         const tieneFiltroFechas = Boolean(fechaInicio || fechaFin);
 
         let nextRowsByTab: Record<PagoTabKey, PagoRow[]>;
@@ -1330,12 +1333,22 @@ export default function PagosV1Page() {
           { nombre: "Estados", valor: TAB_ESTADOS_CON_FECHA, tipo: "string" },
         ];
 
-        if (fechaInicio) {
+        // La búsqueda rápida se resuelve en Planilla sobre todos los registros,
+        // sin restringirla al rango que estaba cargado antes en el navegador.
+        if (fechaInicio && !buscarEnTotal) {
           parametros.push({ nombre: "FechaInicio", valor: fechaInicio, tipo: "date" });
         }
 
-        if (fechaFin) {
+        if (fechaFin && !buscarEnTotal) {
           parametros.push({ nombre: "FechaFin", valor: fechaFin, tipo: "date" });
+        }
+
+        if (textoBusqueda) {
+          parametros.push(
+            correlativoBusqueda
+              ? { nombre: "Correlativo", valor: correlativoBusqueda, tipo: "int" }
+              : { nombre: "TextoBusqueda", valor: textoBusqueda, tipo: "string" }
+          );
         }
 
         const requestBuildStart = performance.now();
@@ -1344,7 +1357,7 @@ export default function PagosV1Page() {
         setLoadingStage("Enviando consulta a la API...");
 
         const response = await runTrackedRequest(
-          tieneFiltroFechas ? "Consulta por fechas" : "Consulta consolidada",
+          buscarEnTotal ? "Búsqueda global en Planilla" : tieneFiltroFechas ? "Consulta por fechas" : "Consulta consolidada",
           () => consultarPlanillaEstados(request, { timeoutMs: 120000, signal }),
           signal
         );
@@ -1402,7 +1415,7 @@ export default function PagosV1Page() {
       cancelled = true;
       controller.abort();
     };
-  }, [refreshTick]);
+  }, [appliedFilters.fechaDesde, appliedFilters.fechaHasta, appliedFilters.query, refreshTick, runTrackedRequest]);
 
   const activeRows = useMemo(
     () => (activeTab === "resumen" ? rowsByTab.resumen : rowsByTab[activeTab]),
@@ -1413,6 +1426,7 @@ export default function PagosV1Page() {
     (row: PagoRow, includeDateFilters: boolean) => {
       const fechaDesde = includeDateFilters ? formatDateParam(appliedFilters.fechaDesde) : "";
       const fechaHasta = includeDateFilters ? formatDateParam(appliedFilters.fechaHasta) : "";
+      const buscarEnTotal = Boolean(appliedFilters.query.trim());
       const rowDate = toComparableDateKey(row.fecha);
 
       return (
@@ -1425,8 +1439,8 @@ export default function PagosV1Page() {
         matchesTextFilter(row.responsable, appliedFilters.responsable) &&
         matchesTextFilter(row.correlativo, appliedFilters.correlativo) &&
         (!appliedFilters.estado || row.estado === appliedFilters.estado) &&
-        (!fechaDesde || rowDate >= fechaDesde) &&
-        (!fechaHasta || rowDate <= fechaHasta) &&
+        (buscarEnTotal || !fechaDesde || rowDate >= fechaDesde) &&
+        (buscarEnTotal || !fechaHasta || rowDate <= fechaHasta) &&
         matchesQuickSearch(row, appliedFilters.query)
       );
     },
@@ -2137,16 +2151,27 @@ export default function PagosV1Page() {
 
   const handleApplyFilters = () => {
     setAppliedFilters(filters);
-    if (filters.fechaDesde || filters.fechaHasta) {
-      setActiveTab("aprobar");
-    }
-    setMessage("Filtros aplicados.");
+    setMessage("Filtros aplicados. Actualizando registros...");
   };
 
   const handleQuickSearchChange = (value: string) => {
     setFilters((prev) => ({ ...prev, query: value }));
-    setAppliedFilters((prev) => ({ ...prev, query: value }));
   };
+
+  useEffect(() => {
+    const correlativo = filters.query.trim();
+
+    if (!/^\d{6,}$/.test(correlativo) || correlativo === appliedFilters.query.trim()) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setAppliedFilters((prev) => ({ ...prev, query: correlativo }));
+      setMessage(`Buscando el correlativo ${correlativo} en Planilla...`);
+    }, 350);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [filters.query, appliedFilters.query]);
 
   const resetDetailStateAfterMutation = () => {
     resumenOtCacheRef.current.clear();
@@ -2550,10 +2575,16 @@ export default function PagosV1Page() {
                 <div style={{ ...styles.quickSearchWrap, borderColor: currentTheme.border, background: "#FFFFFF" }}>
                   <Search size={16} color={currentTheme.accent} />
                   <input
-                    type="text"
-                    value={filters.query}
-                    onChange={(event) => handleQuickSearchChange(event.target.value)}
-                    placeholder="Búsqueda rápida por correlativo, responsable, cliente o proyecto"
+                     type="text"
+                     value={filters.query}
+                     onChange={(event) => handleQuickSearchChange(event.target.value)}
+                     onKeyDown={(event) => {
+                       if (event.key === "Enter") {
+                         event.preventDefault();
+                         handleApplyFilters();
+                       }
+                     }}
+                     placeholder="Búsqueda rápida por correlativo, responsable, cliente o proyecto"
                     style={styles.quickSearchInput}
                   />
                 </div>
@@ -2613,8 +2644,7 @@ export default function PagosV1Page() {
                 soft="#EFF6FF"
                 border="#93C5FD"
                 icon={<RotateCcw size={16} />}
-                selected={activeTab === "reaprobar"}
-                onClick={() => setActiveTab("reaprobar")}
+                disabled
               />
               <KpiCard
                 label="Hormiga"
@@ -2623,8 +2653,7 @@ export default function PagosV1Page() {
                 soft="#F0FDF4"
                 border="#86EFAC"
                 icon={<HandCoins size={16} />}
-                selected={activeTab === "hormiga"}
-                onClick={() => setActiveTab("hormiga")}
+                disabled
               />
               <KpiCard
                 label="Observadas"
@@ -2633,8 +2662,7 @@ export default function PagosV1Page() {
                 soft="#FEF2F2"
                 border="#FCA5A5"
                 icon={<AlertTriangle size={16} />}
-                selected={activeTab === "observadas"}
-                onClick={() => setActiveTab("observadas")}
+                disabled
               />
               <KpiCard
                 label="Total Órdenes"
@@ -2887,7 +2915,7 @@ export default function PagosV1Page() {
 
             <div style={styles.gridFooter}>
               <div style={styles.gridFooterText}>
-                {summaryLabel} {summaryRowCount} registros de {rowsByTab.resumen.length}
+                {summaryLabel} {summaryRowCount} registros de {activeRows.length} en {TAB_THEME[activeTab].label}
               </div>
               <div style={styles.gridFooterTotals}>
                 {Object.entries(summaryTotalsByCurrency).map(([currency, amounts]) => (
@@ -3847,6 +3875,7 @@ function KpiCard({
   border,
   icon,
   selected = false,
+  disabled = false,
   onClick,
 }: {
   label: string;
@@ -3856,17 +3885,20 @@ function KpiCard({
   border: string;
   icon: React.ReactNode;
   selected?: boolean;
+  disabled?: boolean;
   onClick?: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       style={{
         ...styles.kpiCard,
         borderColor: selected ? accent : border,
         background: selected ? soft : "#FFFFFF",
-        cursor: onClick ? "pointer" : "default",
+        cursor: disabled ? "not-allowed" : onClick ? "pointer" : "default",
+        opacity: disabled ? 0.58 : 1,
         textAlign: "left",
         width: "100%",
         boxShadow: selected ? `0 10px 24px ${accent}22` : "none",

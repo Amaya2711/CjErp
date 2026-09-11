@@ -13,7 +13,8 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
         await using var cn = factory.CreateConnection();
         var ejecutores = await cn.QueryAsync(factory.Create("SELECT IdEmpleado AS Id, NombreEmpleado AS Nombre FROM Empleado WHERE IdCargo=14 AND IdEstado=1 ORDER BY NombreEmpleado", cancellationToken: ct));
         var constantes = (await cn.QueryAsync(factory.Create("SELECT Correlativo AS Id, ValorIni AS Nombre, TRY_CONVERT(decimal(18,4),ValorFin) AS Porcentaje, Campo FROM Constante WHERE Sociedad='PE01' AND Programa='PLANTILLA' AND Campo IN ('BANCO','TIPO_TRANSFERENCIA','TIPO_MONEDA','TIPO_COMPROBANTE','TIPO_PAGO','RENDICION','DETRACCION') AND Correlativo>=0 ORDER BY Correlativo", cancellationToken: ct))).ToList();
-        return new { ejecutores, bancos = constantes.Where(x => x.Campo == "BANCO"), transferencias = constantes.Where(x => x.Campo == "TIPO_TRANSFERENCIA"), monedas = constantes.Where(x => x.Campo == "TIPO_MONEDA"), comprobantes = constantes.Where(x => x.Campo == "TIPO_COMPROBANTE"), tiposPago = constantes.Where(x => x.Campo == "TIPO_PAGO"), rendiciones = constantes.Where(x => x.Campo == "RENDICION"), retenciones = constantes.Where(x => string.Equals((string)x.Campo,"DETRACCION",StringComparison.OrdinalIgnoreCase)) };
+        var maestros = (await cn.QueryAsync(factory.Create("SELECT Correlativo AS Id, ValorIni AS Nombre, Campo FROM Constante WHERE Sociedad='PE01' AND Programa='MAESTRO' AND Campo IN ('ANTICIPO','ESTADO') AND Correlativo>=0 ORDER BY Correlativo", cancellationToken: ct))).ToList();
+        return new { ejecutores, anticipos = maestros.Where(x => x.Campo == "ANTICIPO"), estados = maestros.Where(x => x.Campo == "ESTADO"), bancos = constantes.Where(x => x.Campo == "BANCO"), transferencias = constantes.Where(x => x.Campo == "TIPO_TRANSFERENCIA"), monedas = constantes.Where(x => x.Campo == "TIPO_MONEDA"), comprobantes = constantes.Where(x => x.Campo == "TIPO_COMPROBANTE"), tiposPago = constantes.Where(x => x.Campo == "TIPO_PAGO"), rendiciones = constantes.Where(x => x.Campo == "RENDICION"), retenciones = constantes.Where(x => string.Equals((string)x.Campo,"DETRACCION",StringComparison.OrdinalIgnoreCase)) };
     }
 
     public async Task<object> ListarAsync(int estado, DateTime? desde, DateTime? hasta, CancellationToken ct)
@@ -26,7 +27,7 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
         return await cn.QueryAsync(factory.Create($"""
             SELECT a.Correlativo, a.IdSite, a.Estado, a.TipoMoneda, a.IdResponsable,
                 {VersionSql} AS Version,
-                a.IdComprobante, a.IdTipoPago, a.Ruc, fechas.Emision AS FecEmision, a.IdRendicion, a.IdRetencion,
+                a.IdAnticipo, a.IdComprobante, a.IdTipoPago, a.Ruc, fechas.Emision AS FecEmision, a.IdRendicion, a.IdRetencion,
                 a.IdBanco, a.IdTransferencia, a.IdMoneda2, a.RevisionPm, a.FechaRevision, a.Observacion, a.ImgFactura,
                 a.RevisionPmAprobar, a.FechaRevisionAprobar, ren.ValorIni AS Rendicion,
                 fechas.Ingreso AS Fecha, fechas.Deposito AS FechaDeposito, a.OT, a.Detalle, a.Serie,

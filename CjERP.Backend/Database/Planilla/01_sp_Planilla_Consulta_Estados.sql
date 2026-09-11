@@ -12,7 +12,9 @@ ALTER PROCEDURE [dbo].[sp_Planilla_Consulta_Estados]
     @CorSite        VARCHAR(50) = NULL,
     @FechaInicio    DATE = NULL,
     @FechaFin       DATE = NULL,
-    @FechaDeposito  DATE = NULL
+    @FechaDeposito  DATE = NULL,
+    @TextoBusqueda  VARCHAR(200) = NULL,
+    @Correlativo    INT = NULL
 )
 AS
 BEGIN
@@ -259,12 +261,16 @@ BEGIN
         FROM @EstadosFiltro estadoFiltro
         WHERE estadoFiltro.Estado = a.Estado
     )
+    AND (@Correlativo IS NULL OR a.Correlativo = @Correlativo)
     AND (@IdValidador IS NULL OR a.IdValidador = @IdValidador)
     AND (
         @IdBanco IS NULL
         OR a.IdBanco = @IdBanco
     )
     AND (
+        @Correlativo IS NOT NULL
+        OR NULLIF(LTRIM(RTRIM(@TextoBusqueda)), '') IS NOT NULL
+        OR
         @FechaInicio IS NULL
         OR (
             @IncluyeEstado4 = 1
@@ -277,6 +283,9 @@ BEGIN
         )
     )
     AND (
+        @Correlativo IS NOT NULL
+        OR NULLIF(LTRIM(RTRIM(@TextoBusqueda)), '') IS NOT NULL
+        OR
         @FechaFin IS NULL
         OR (
             @IncluyeEstado4 = 1
@@ -315,6 +324,18 @@ BEGIN
     AND (
         @CorSite IS NULL
         OR a.CorreSite = TRY_CONVERT(INT, @CorSite)
+    )
+    AND (
+        NULLIF(LTRIM(RTRIM(@TextoBusqueda)), '') IS NULL
+        OR CONVERT(VARCHAR(20), a.Correlativo) LIKE '%' + LTRIM(RTRIM(@TextoBusqueda)) + '%'
+        OR LTRIM(RTRIM(ISNULL(a.Ot, ''))) LIKE '%' + LTRIM(RTRIM(@TextoBusqueda)) + '%'
+        OR LTRIM(RTRIM(ISNULL(a.IdOc, ''))) LIKE '%' + LTRIM(RTRIM(@TextoBusqueda)) + '%'
+        OR LTRIM(RTRIM(ISNULL(f_emp.NombreEmpleado, ''))) LIKE '%' + LTRIM(RTRIM(@TextoBusqueda)) + '%'
+        OR LTRIM(RTRIM(ISNULL(g.NombreCliente, ''))) LIKE '%' + LTRIM(RTRIM(@TextoBusqueda)) + '%'
+        OR LTRIM(RTRIM(ISNULL(b.NombreProyecto, ''))) LIKE '%' + LTRIM(RTRIM(@TextoBusqueda)) + '%'
+        OR LTRIM(RTRIM(ISNULL(c.NombreSite, ''))) LIKE '%' + LTRIM(RTRIM(@TextoBusqueda)) + '%'
+        OR LTRIM(RTRIM(ISNULL(a.Tipo_Trabajo, ''))) LIKE '%' + LTRIM(RTRIM(@TextoBusqueda)) + '%'
+        OR LTRIM(RTRIM(ISNULL(e.ValorIni, ''))) LIKE '%' + LTRIM(RTRIM(@TextoBusqueda)) + '%'
     )
     AND (
         @FiltrarPorSolicitante = 0

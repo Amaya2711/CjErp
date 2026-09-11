@@ -39,6 +39,35 @@ var results=new List<ValidationResult>();
 var invalidItem=new PagoTesoreriaItemDto{Correlativo=1,IdSite="S1",Version="incorrecta"};
 if(Validator.TryValidateObject(invalidItem,new ValidationContext(invalidItem),results,true))throw new Exception("Se aceptó una huella inválida");
 checks++;
+// La identidad de Usuario usa Empleado, mientras el permiso de Estado usa EmpleadoCj.
+foreach (var id in new[] { 633, 313, 310, 299 }) {
+    var permiso = PagoTesoreriaService.PermisosRevision(id, 77);
+    if (!permiso.PuedeEditar || !permiso.PuedeEditarOperacion || !permiso.PuedeEditarEstado)
+        throw new Exception("Editar debe habilitar NroOperacion, conservando el permiso especial de Estado");
+    checks++;
+}
+if (PagoTesoreriaService.PermisosRevision(77, 100).PuedeEditarEstado)
+    throw new Exception("Se confundió el identificador Empleado con EmpleadoCj");
+checks++;
+if (PagoTesoreriaService.PermisosRevision(null, 77).PuedeEditar)
+    throw new Exception("Se habilitó edición sin empleado asociado");
+checks++;
+var normal = PagoTesoreriaService.PermisosRevision(100, 100);
+var especial = PagoTesoreriaService.PermisosRevision(100, 77);
+PagoRevisionDto Revision(int estado = 1) => new() { Item = Item(1), Estado = estado };
+PagoTesoreriaService.ValidarRevision(Revision(), normal); checks++;
+foreach (var estado in new[] { 0, 2, 4, 5, 9 }) {
+    var request = Revision(estado); request.ConfirmarCambioEstado = true;
+    await Rejected(() => { PagoTesoreriaService.ValidarRevision(request, normal); return Task.CompletedTask; });
+}
+await Rejected(() => { PagoTesoreriaService.ValidarRevision(Revision(9), especial); return Task.CompletedTask; });
+var confirmado = Revision(9); confirmado.ConfirmarCambioEstado = true;
+PagoTesoreriaService.ValidarRevision(confirmado, especial); checks++;
+var pagado = Revision(); pagado.Item = Item(4);
+await Rejected(() => { PagoTesoreriaService.ValidarRevision(pagado, especial); return Task.CompletedTask; });
+var versionInvalida = Revision(); versionInvalida.Item.Version = new string('X', 64);
+await Rejected(() => { PagoTesoreriaService.ValidarRevision(versionInvalida, normal); return Task.CompletedTask; });
+Console.WriteLine("PASS: permisos de Revisión, identidad antigua, estado de origen, confirmación y versión.");
 Console.WriteLine($"PASS: {checks} verificaciones de transiciones, bloqueo de pago desde Contabilidad, validación de bloques y datos. Sin conexión a la base de datos.");
 
 sealed class NoDatabaseFactory:ISqlCommandFactory {

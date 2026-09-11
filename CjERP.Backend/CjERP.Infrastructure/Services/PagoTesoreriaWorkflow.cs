@@ -12,7 +12,7 @@ public sealed partial class PagoTesoreriaService
         CONVERT(varchar(64),HASHBYTES('SHA2_256',(SELECT a.Estado,a.TipoMoneda,a.Total,a.TotalPagar,a.MontoRetencion,
         a.IdRetencion,a.IdComprobante,a.IdTipoPago,a.Ruc,a.Serie,a.FecEmision,a.IdRendicion,a.IdBanco,a.IdMoneda2,
         a.FechaDeposito,a.IdTransferencia,a.NroOperacion,a.Cheque,a.IdEjecutor,a.Observacion,a.Comentario,
-        a.RevisionPm,a.FechaRevision,a.ImgFactura,a.IdResponsable,a.IdSolicitante,a.IdCliente,a.IdProyecto,
+        a.RevisionPm,a.FechaRevision,a.ImgFactura,a.IdAnticipo,a.IdResponsable,a.IdSolicitante,a.IdCliente,a.IdProyecto,
         a.IdSite,a.CorreSite,a.RevisionPmAprobar,a.FechaRevisionAprobar,CONVERT(varchar(max),a.Detalle) AS Detalle
         FOR JSON PATH,WITHOUT_ARRAY_WRAPPER,INCLUDE_NULL_VALUES)),2)
         """;
@@ -174,7 +174,7 @@ public sealed partial class PagoTesoreriaService
                 Observacion,Detalle,Usuario,FechaCreacion,HoraCreacion,Comentario)
             SELECT Correlativo,IdCliente,IdProyecto,IdSite,IdTipoTrabajo,IdTarea,Estado,Total,IdRetencion,
                 IdComprobante,IdTipoPago,Ruc,Serie,FecEmision,IdRendicion,IdBanco,IdMoneda2,FechaDeposito,IdTransferencia,NroOperacion,
-                Observacion,CONCAT('Comprobante adjunto: ',ImgFactura,CHAR(10),'Detalle: ',CONVERT(varchar(max),Detalle)),@usuario,CONVERT(varchar(10),@ahora,23),CONVERT(varchar(23),@ahora,121),
+                Observacion,CONCAT('Anticipo: ',IdAnticipo,CHAR(10),'Comprobante adjunto: ',ImgFactura,CHAR(10),'Detalle: ',CONVERT(varchar(max),Detalle)),@usuario,CONVERT(varchar(10),@ahora,23),CONVERT(varchar(23),@ahora,121),
                 LEFT(CONCAT(@accion,'; retención=',MontoRetencion,'; neto=',TotalPagar,'; revisión=',RevisionPm,'; fecha=',FechaRevision),500)
             FROM Planilla WHERE Correlativo IN @ids
             """, new { ids, usuario, accion, ahora }, tx, cancellationToken: ct));
