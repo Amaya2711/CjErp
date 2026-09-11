@@ -14,10 +14,13 @@ public sealed class PagoTesoreriaController(PagoTesoreriaService service, ISegMe
     private async Task<bool> PuedeAsync()
     {
         var usuario = User.FindFirstValue("IdUsuario") ?? User.FindFirstValue(ClaimTypes.Name);
-        if (string.IsNullOrWhiteSpace(usuario) || !int.TryParse(User.FindFirstValue("IdRol"), out var rol) ||
-            !int.TryParse(User.FindFirstValue("IdPerfil"), out var perfil)) return false;
-        var opciones = await menus.ListarMenuDinamicoAsync(usuario, perfil, rol);
-        return opciones.Any(p => p.Acceso == 1 &&
+        if (string.IsNullOrWhiteSpace(usuario)) return false;
+
+        // Debe coincidir con la fuente usada para construir el menú lateral.
+        // El SP dinámico antiguo puede no devolver páginas asignadas mediante
+        // SegPerfilRolMenu, aun cuando el usuario las tiene visibles.
+        var opciones = await menus.ListarPorUsuarioAsync(usuario);
+        return opciones.Any(p =>
             string.Equals(p.Ruta?.Trim().TrimEnd('/'), "/finanzas/tesoreria/pagartesoreria", StringComparison.OrdinalIgnoreCase));
     }
 
