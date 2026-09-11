@@ -872,19 +872,6 @@ export default function PagarTesoreriaPage() {
                     ))}
                 </div>
               </details>
-              <select
-                aria-label="Agrupar recibos"
-                value={groupBy}
-                onChange={(e) => {
-                  setGroupBy(e.target.value as typeof groupBy);
-                  setExpanded(new Set());
-                }}
-              >
-                <option value="comprobante">Agrupar por comprobante</option>
-                <option value="proyecto-site">Agrupar por PROYECTO/SITE</option>
-                <option value="responsable">Agrupar por responsable</option>
-                <option value="banco">Agrupar por banco</option>
-              </select>
               <details className="pt-comprobante-filter">
                 <summary>
                   Todos los responsables
@@ -965,6 +952,19 @@ export default function PagarTesoreriaPage() {
                   ))}
                 </select>
               )}
+              <select
+                aria-label="Agrupar recibos"
+                value={groupBy}
+                onChange={(e) => {
+                  setGroupBy(e.target.value as typeof groupBy);
+                  setExpanded(new Set());
+                }}
+              >
+                <option value="comprobante">Agrupar por comprobante</option>
+                <option value="proyecto-site">Agrupar por PROYECTO/SITE</option>
+                <option value="responsable">Agrupar por responsable</option>
+                <option value="banco">Agrupar por banco</option>
+              </select>
             </fieldset>
             <div className="pt-table-wrap" aria-busy={loading}>
               <table className="pt-table">
