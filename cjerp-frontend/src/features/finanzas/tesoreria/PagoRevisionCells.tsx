@@ -92,7 +92,6 @@ export default function PagoRevisionCells({ row, catalogos, permisos, disabled, 
       : row.nroOperacion || "—"}</td>
     <td className="pt-revision-cell">{select("idComprobante", "Comprobante", catalogos.comprobantes)}</td>
     <td className="pt-revision-cell">{select("idTipoPago", "TipoPago", catalogos.tiposPago)}</td>
-    <td><FacturaLink referencia={draft ? draft.imgFactura : row.imgFactura} correlativo={row.correlativo} /></td>
     <td className="pt-revision-actions">{draft ? <>
       <button type="button" className="pt-primary" title="Guardar cambios" aria-label={`Guardar cambios del recibo ${row.correlativo}`}
         disabled={busy} onClick={() => void save()}>{busy ? <LoaderCircle className="pt-spin" size={16} /> : <Save size={16} />}</button>

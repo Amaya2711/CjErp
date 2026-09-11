@@ -41,15 +41,16 @@ const acciones: Record<number, { key: PagoAccion; label: string }[]> = {
     { key: "subsanar", label: "Subsanar y devolver al flujo" },
   ],
 };
-export function PagoEtapaActions({ estado, formId, disabled }: {
+export function PagoEtapaActions({ estado, formId, disabled, programarDisabled = false }: {
   estado: number;
   formId: string;
   disabled: boolean;
+  programarDisabled?: boolean;
 }) {
   return <>{acciones[estado].map((accion, index) => (
     <button type="submit" form={formId} key={accion.key} value={accion.key}
       className={index === 0 ? "pt-primary" : ""}
-      disabled={disabled || (estado === 9 && accion.key === "contabilidad-programar")}
+      disabled={disabled || (estado === 9 && accion.key === "contabilidad-programar") || (accion.key === "programar" && programarDisabled)}
       title={estado === 9 && accion.key === "contabilidad-programar" ? "Acción no habilitada actualmente" : undefined}>
       {accion.label}
     </button>
@@ -113,6 +114,9 @@ export default function PagoEtapaForm({
   onBusy,
   onRefresh,
   onMessage,
+  programarListo,
+  onProgramarIncompleto,
+  ocultarFormulario = false,
 }: {
   formId: string;
   estado: number;
@@ -122,6 +126,9 @@ export default function PagoEtapaForm({
   onBusy: (busy: boolean) => void;
   onRefresh: () => Promise<void>;
   onMessage: (message: string, error?: boolean) => void;
+  programarListo?: boolean;
+  onProgramarIncompleto?: () => void;
+  ocultarFormulario?: boolean;
 }) {
   const [form, setForm] = useState(inicial);
   const [pending, setPending] = useState<PagoAccionRequest | null>(null);
@@ -227,6 +234,11 @@ export default function PagoEtapaForm({
     }
     if (accion === "observar") {
       setPending({ accion, items: crearItemsTesoreria(rows), observacion: "" });
+      return;
+    }
+    if (accion === "programar" && !programarListo) {
+      onProgramarIncompleto?.();
+      setError("Complete los datos obligatorios de Registrar pago antes de enviar a Programado.");
       return;
     }
     if (
@@ -380,7 +392,7 @@ export default function PagoEtapaForm({
   };
   return (
     <section className={estado === 1 ? "pt-stage-dialogs" : "pt-stage-form"}>
-      {estado !== 1 && <>
+      {!ocultarFormulario && estado !== 1 && <>
       <h2>
         {estado === 9
             ? "Validación contable"
@@ -400,7 +412,7 @@ export default function PagoEtapaForm({
         </div>
       )}
       </>}
-      <form id={formId} onSubmit={revisar} hidden={estado === 1}>
+      <form id={formId} onSubmit={revisar} hidden={estado === 1 || ocultarFormulario}>
         <fieldset disabled={disabled || busy}>
           {editar && (
             <button

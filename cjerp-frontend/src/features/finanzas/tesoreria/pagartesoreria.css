@@ -52,6 +52,25 @@
   display: flex;
   flex-direction: column;
 }
+.pt-payment-register-content { display: grid; gap: 10px; }
+.pt-register-payment-toggle {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #2563eb;
+  font-weight: 600;
+  padding: 10px;
+  cursor: pointer;
+}
+.pt-register-payment-hide {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: #2563eb;
+  font-size: 11px;
+  cursor: pointer;
+}
 .pt-page {
   height: 100%;
   min-height: 0;
@@ -346,6 +365,51 @@
   font-size: 11px;
   padding: 6px;
 }
+.pt-comprobante-filter {
+  position: relative;
+  flex: 1;
+  min-width: 160px;
+  font-size: 11px;
+}
+.pt-comprobante-filter summary {
+  box-sizing: border-box;
+  min-height: 31px;
+  padding: 7px 28px 7px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  background: #fff;
+  color: #475569;
+  cursor: pointer;
+  list-style: none;
+}
+.pt-comprobante-filter summary::-webkit-details-marker { display: none; }
+.pt-comprobante-filter summary::after {
+  content: "⌄";
+  position: absolute;
+  right: 10px;
+  color: #64748b;
+}
+.pt-comprobante-options {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 4px);
+  width: 100%;
+  max-height: 220px;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  background: #fff;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, .14);
+}
+.pt-comprobante-options label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 4px;
+  cursor: pointer;
+}
 .pt-table-wrap {
   overflow: auto;
   flex: 1;
@@ -423,6 +487,27 @@
   border: 0;
   padding: 0;
   background: transparent;
+}
+.pt-page .pt-copy-value {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #1d4ed8;
+  font: inherit;
+  cursor: copy;
+}
+.pt-page .pt-copy-value:hover,
+.pt-page .pt-copy-value:focus-visible {
+  color: #1e40af;
+  text-decoration: underline;
+}
+.pt-page .pt-copy-truncate {
+  display: block;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
 }
 .pt-amount {
   font-weight: 700;

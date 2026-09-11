@@ -40,6 +40,10 @@ export type PagoTesoreriaRow = {
   rendicion: string | null;
   idRetencion: number | null;
   idBanco: number | null;
+  idBancoCta: number | null;
+  cuenta: string | null;
+  cuentaInter: string | null;
+  nombreCta: string | null;
   idMoneda2: number | null;
   idTransferencia: number | null;
   revisionPm: string | null;

@@ -151,22 +151,24 @@ export default function PagarTesoreriaPage() {
   const [query, setQuery] = useState("");
   const [cliente, setCliente] = useState("");
   const [moneda, setMoneda] = useState("");
-  const [comprobante, setComprobante] = useState("");
+  const [comprobantesFiltro, setComprobantesFiltro] = useState<string[]>([]);
+  const [bancosCtaFiltro, setBancosCtaFiltro] = useState<number[]>([]);
   const [responsable, setResponsable] = useState("");
   const [solicitante, setSolicitante] = useState("");
   const [rendicion, setRendicion] = useState("");
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
-  const [groupBy, setGroupBy] = useState("comprobante");
+  const [comprobantesAgrupados, setComprobantesAgrupados] = useState<string[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [form, setForm] = useState(initialForm);
   const [operationSaving, setSaving] = useState(false);
   const [editingRevision, setEditingRevision] = useState(false);
+  const [registroPagoAbierto, setRegistroPagoAbierto] = useState(false);
   const saving = operationSaving || editingRevision;
   const [permisosRevision, setPermisosRevision] = useState<PagoRevisionPermisos>({
     puedeEditar: false, puedeEditarOperacion: false, puedeEditarEstado: false,
   });
-  const columnCount = estado === 1 ? 16 : estado === 9 ? 10 : 9;
+  const columnCount = estado === 1 ? 21 : estado === 9 ? 16 : 15;
   const [confirmation, setConfirmation] = useState<PagoTesoreriaRequest | null>(
     null,
   );
@@ -299,7 +301,9 @@ export default function PagarTesoreriaPage() {
         (!rendicion || String(r.idRendicion) === rendicion) &&
         (!cliente || r.cliente === cliente) &&
         (!moneda || String(r.tipoMoneda) === moneda) &&
-        (!comprobante || r.comprobante === comprobante) &&
+        (!comprobantesFiltro.length || comprobantesFiltro.includes(r.comprobante ?? "")) &&
+        (!bancosCtaFiltro.length || (r.idBancoCta != null && bancosCtaFiltro.includes(r.idBancoCta))) &&
+        (!comprobantesAgrupados.length || comprobantesAgrupados.includes(r.comprobante ?? "")) &&
         (!search ||
           [
             r.correlativo,
@@ -322,7 +326,9 @@ export default function PagarTesoreriaPage() {
     query,
     cliente,
     moneda,
-    comprobante,
+    comprobantesFiltro,
+    bancosCtaFiltro,
+    comprobantesAgrupados,
     responsable,
     solicitante,
     rendicion,
@@ -365,7 +371,7 @@ export default function PagarTesoreriaPage() {
   const groups = useMemo(() => {
     const result = new Map<string, PagoTesoreriaRow[]>();
     for (const r of visibleRows) {
-      const label = `${r.revisionPm?.trim() || "Sin revisión"} · ${r.comprobante || "Sin comprobante"} · ${r.moneda || `Moneda ${r.tipoMoneda}`}${groupBy === "responsable" ? ` · ${r.responsable || "Sin responsable"}` : ""}`;
+      const label = `${estado === 5 ? "" : `${r.revisionPm?.trim() || "Sin revisión"} · `}${r.comprobante || "Sin comprobante"} · ${r.moneda || `Moneda ${r.tipoMoneda}`}`;
       const id = `${r.tipoMoneda}:${label}`;
       const group = result.get(id);
       if (group) group.push(r);
@@ -376,7 +382,7 @@ export default function PagarTesoreriaPage() {
       label: id.slice(id.indexOf(":") + 1),
       items,
     }));
-  }, [visibleRows, groupBy, estado]);
+  }, [visibleRows, estado]);
   const selectable = visibleRows.filter(
     (r) => r.correlativo > 0 && r.idSite && r.version,
   );
@@ -388,6 +394,17 @@ export default function PagarTesoreriaPage() {
   const changeFilter = (setter: (v: string) => void, value: string) => {
     setter(value);
     setSelected(new Set());
+  };
+  const copiarDatoCuenta = async (value: string | null, label: string) => {
+    const text = value?.trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setError("");
+      setSuccess(`${label} copiada al portapapeles.`);
+    } catch {
+      setError(`No se pudo copiar la ${label.toLowerCase()}.`);
+    }
   };
   const toggleRows = (items: PagoTesoreriaRow[], checked: boolean) =>
     setSelected((prev) => {
@@ -409,11 +426,13 @@ export default function PagarTesoreriaPage() {
     setQuery("");
     setCliente("");
     setMoneda("");
-    setComprobante("");
+    setComprobantesFiltro([]);
+    setBancosCtaFiltro([]);
     setResponsable("");
     setSolicitante("");
     setRendicion("");
     setForm(initialForm());
+    setRegistroPagoAbierto(false);
     setExpanded(new Set());
     setSuccess("");
     void load(next, start, end);
@@ -434,7 +453,7 @@ export default function PagarTesoreriaPage() {
       setRows(result);
       // Conservar los grupos abiertos y mostrar el nuevo grupo si cambió el comprobante.
       setExpanded(new Set(result.map(r => {
-        const label = `${r.revisionPm?.trim() || "Sin revisión"} · ${r.comprobante || "Sin comprobante"} · ${r.moneda || `Moneda ${r.tipoMoneda}`}${groupBy === "responsable" ? ` · ${r.responsable || "Sin responsable"}` : ""}`;
+        const label = `${estado === 5 ? "" : `${r.revisionPm?.trim() || "Sin revisión"} · `}${r.comprobante || "Sin comprobante"} · ${r.moneda || `Moneda ${r.tipoMoneda}`}`;
         return `${r.tipoMoneda}:${label}`;
       })));
     } catch (e) {
@@ -448,9 +467,30 @@ export default function PagarTesoreriaPage() {
       ?.nombre.toUpperCase() || "";
   const isCheque = medio.includes("CHEQUE");
   const isEfectivo = medio.includes("EFECTIVO");
+  const datosRegistroPagoCompletos = Boolean(
+    form.idEjecutor &&
+      form.idTransferencia &&
+      form.idBanco &&
+      form.idMoneda2 &&
+      form.fechaDeposito &&
+      form.fechaDeposito <= hoy() &&
+      (isCheque ? form.cheque.trim() : isEfectivo || form.nroOperacion.trim()),
+  );
+  const datosCuentaProgramacionCompletos =
+    selectedRows.length > 0 &&
+    selectedRows.every((row) =>
+      row.idBancoCta != null &&
+      Boolean(row.cuenta?.trim()) &&
+      Boolean(row.cuentaInter?.trim()) &&
+      Boolean(row.nombreCta?.trim()),
+    );
   const review = () => {
     setError("");
     setSuccess("");
+    if (!registroPagoDisponible) {
+      setError("El registro de pago no está habilitado en esta etapa.");
+      return;
+    }
     if (!esPago || selectedRows.some((r) => r.totalPagar <= 0)) {
       setError(
         "Solo se pueden pagar recibos de Administrativo o Programado con importe neto positivo.",
@@ -642,7 +682,8 @@ export default function PagarTesoreriaPage() {
                 setQuery("");
                 setCliente("");
                 setMoneda("");
-                setComprobante("");
+                setComprobantesFiltro([]);
+                setBancosCtaFiltro([]);
                 setResponsable("");
                 setSolicitante("");
                 setRendicion("");
@@ -682,7 +723,7 @@ export default function PagarTesoreriaPage() {
             {success}
           </div>
         )}
-        <div className={`pt-workspace${estado === 1 ? " pt-workspace-review" : ""}`}>
+        <div className={`pt-workspace${estado === 1 || (esPago && !registroPagoAbierto) ? " pt-workspace-review" : ""}`}>
           <section className="pt-list">
             {esReporte && (
               <div className="pt-report" aria-label="Reporte de tesorería">
@@ -774,31 +815,83 @@ export default function PagarTesoreriaPage() {
                   </option>
                 ))}
               </select>
-              <select
-                aria-label="Filtrar por comprobante"
-                value={comprobante}
-                onChange={(e) => changeFilter(setComprobante, e.target.value)}
-              >
-                <option value="">Todos los comprobantes</option>
-                {[...new Set(rows.map((r) => r.comprobante).filter(Boolean))]
-                  .sort()
-                  .map((c) => (
-                    <option key={c} value={c!}>
-                      {c}
-                    </option>
-                  ))}
-              </select>
-              <select
-                aria-label="Agrupar recibos"
-                value={groupBy}
-                onChange={(e) => {
-                  setGroupBy(e.target.value);
-                  setExpanded(new Set());
-                }}
-              >
-                <option value="comprobante">Agrupar por comprobante</option>
-                <option value="responsable">Agrupar por responsable</option>
-              </select>
+              <details className="pt-comprobante-filter">
+                <summary>
+                  Todos los comprobantes
+                  {comprobantesFiltro.length > 0 && ` (${comprobantesFiltro.length})`}
+                </summary>
+                <div className="pt-comprobante-options" aria-label="Filtrar por comprobante">
+                  {[...new Set(rows.map((r) => r.comprobante).filter(Boolean))]
+                    .sort((a, b) => a!.localeCompare(b!))
+                    .map((item) => (
+                      <label key={item}>
+                        <input
+                          type="checkbox"
+                          checked={comprobantesFiltro.includes(item!)}
+                          onChange={(e) => {
+                            setComprobantesFiltro((current) => e.target.checked
+                              ? [...current, item!]
+                              : current.filter((value) => value !== item));
+                            setSelected(new Set());
+                          }}
+                        />
+                        {item}
+                      </label>
+                    ))}
+                </div>
+              </details>
+              <details className="pt-comprobante-filter">
+                <summary>
+                  Todos los bancos de cuenta
+                  {bancosCtaFiltro.length > 0 && ` (${bancosCtaFiltro.length})`}
+                </summary>
+                <div className="pt-comprobante-options" aria-label="Filtrar por IdBancoCta">
+                  {[...new Set(rows.map((r) => r.idBancoCta).filter((id): id is number => id != null))]
+                    .sort((a, b) => a - b)
+                    .map((id) => (
+                      <label key={id}>
+                        <input
+                          type="checkbox"
+                          checked={bancosCtaFiltro.includes(id)}
+                          onChange={(e) => {
+                            setBancosCtaFiltro((current) => e.target.checked
+                              ? [...current, id]
+                              : current.filter((value) => value !== id));
+                            setSelected(new Set());
+                          }}
+                        />
+                        {id} · {catalogos.bancos.find((b) => b.id === id)?.nombre || "Banco no encontrado"}
+                      </label>
+                    ))}
+                </div>
+              </details>
+              <details className="pt-comprobante-filter">
+                <summary>
+                  Agrupar por comprobante
+                  {comprobantesAgrupados.length > 0 && ` (${comprobantesAgrupados.length})`}
+                </summary>
+                <div className="pt-comprobante-options" aria-label="Filtrar comprobantes para agrupar">
+                  {[...new Set(rows.map((r) => r.comprobante).filter(Boolean))]
+                    .sort((a, b) => a!.localeCompare(b!))
+                    .map((item) => (
+                      <label key={item}>
+                        <input
+                          type="checkbox"
+                          checked={comprobantesAgrupados.includes(item!)}
+                          onChange={(e) => {
+                            setComprobantesAgrupados((current) =>
+                              e.target.checked
+                                ? [...current, item!]
+                                : current.filter((value) => value !== item),
+                            );
+                            setExpanded(new Set());
+                          }}
+                        />
+                        {item}
+                      </label>
+                    ))}
+                </div>
+              </details>
               <select
                 aria-label="Filtrar por responsable"
                 value={responsable}
@@ -871,6 +964,7 @@ export default function PagarTesoreriaPage() {
                     <th>Recibo / OT</th>
                     <th>Responsable / Solicitante</th>
                     <th>Proyecto / Site</th>
+                    <th>Site + Detalle</th>
                     <th>Fecha</th>
                     {(estado === 1 || estado === 9) && (
                       <th title="RevisionPmAprobar: revisión de la aprobación previa">Revisión de aprobación</th>
@@ -881,9 +975,14 @@ export default function PagarTesoreriaPage() {
                       {estado === 4 ? "Pagado" : "A pagar"}
                     </th>
                     <th>Detalle</th>
+                    <th>View factura</th>
+                    <th>IdBancoCta</th>
+                    <th>Cuenta</th>
+                    <th>CuentaInter</th>
+                    <th>NombreCta</th>
                     {estado === 1 && <>
                       <th>Anticipo</th><th>NroOperacion</th><th>Comprobante</th><th>TipoPago</th>
-                      <th>View factura</th><th className="pt-revision-actions">Edición</th>
+                      <th className="pt-revision-actions">Edición</th>
                     </>}
                   </tr>
                 </thead>
@@ -951,7 +1050,7 @@ export default function PagarTesoreriaPage() {
                               />
                             }
                           </td>
-                          <td colSpan={estado === 1 || estado === 9 ? 7 : 6}>
+                          <td colSpan={estado === 1 || estado === 9 ? 8 : 7}>
                             <button
                               disabled={saving}
                               onClick={() =>
@@ -974,7 +1073,7 @@ export default function PagarTesoreriaPage() {
                             </button>
                           </td>
                           <td className="numeric">{money(sum(g.items))}</td>
-                          <td colSpan={estado === 1 ? 7 : 1} />
+                          <td colSpan={estado === 1 ? 11 : 7} />
                         </tr>
                         {expanded.has(g.id) &&
                           g.items.map((r) => (
@@ -1042,6 +1141,18 @@ export default function PagarTesoreriaPage() {
                                 </small>
                               </td>
                               <td>
+                                <button
+                                  className="pt-copy-value pt-copy-truncate"
+                                  onClick={() => void copiarDatoCuenta(
+                                    [r.idSite, r.site, r.detalle].filter(Boolean).join(" / "),
+                                    "Site y detalle",
+                                  )}
+                                  title="Copiar Site y detalle completos"
+                                >
+                                  {[r.idSite, r.site, r.detalle].filter(Boolean).join(" / ") || "—"}
+                                </button>
+                              </td>
+                              <td>
                                 {fecha(
                                   estado === 4 ? r.fechaDeposito : r.fecha,
                                 )}
@@ -1069,6 +1180,35 @@ export default function PagarTesoreriaPage() {
                                   <Eye size={16} />
                                 </button>
                               </td>
+                              <td><FacturaLink referencia={r.imgFactura} correlativo={r.correlativo} /></td>
+                              <td>
+                                {r.idBancoCta == null
+                                  ? "â€”"
+                                  : `${r.idBancoCta} · ${catalogos.bancos.find((b) => b.id === r.idBancoCta)?.nombre || "Banco no encontrado"}`}
+                              </td>
+                              <td>
+                                {r.cuenta ? (
+                                  <button
+                                    className="pt-copy-value"
+                                    onClick={() => void copiarDatoCuenta(r.cuenta, "Cuenta")}
+                                    title="Copiar cuenta"
+                                  >
+                                    {r.cuenta}
+                                  </button>
+                                ) : "â€”"}
+                              </td>
+                              <td>
+                                {r.cuentaInter ? (
+                                  <button
+                                    className="pt-copy-value"
+                                    onClick={() => void copiarDatoCuenta(r.cuentaInter, "CuentaInter")}
+                                    title="Copiar cuenta interbancaria"
+                                  >
+                                    {r.cuentaInter}
+                                  </button>
+                                ) : "â€”"}
+                              </td>
+                              <td>{r.nombreCta || "â€”"}</td>
                               {estado === 1 && <PagoRevisionCells row={r} catalogos={catalogos}
                                 permisos={permisosRevision} disabled={saving || loading || !puedePagar}
                                 onEditing={setEditingRevision} onSaved={refreshRevision} />}
@@ -1093,13 +1233,15 @@ export default function PagarTesoreriaPage() {
             </footer>
             {!esReporte && <div className="pt-grid-actions" role="group" aria-label={`Acciones de ${tabs.find(t => t.estado === estado)?.label}`}>
               {esPago && (
-                <button className="pt-primary" type="submit" form="pt-register-payment"
-                  disabled={!registroPagoDisponible || saving || loading || !puedePagar || !selectedRows.length || selectedRows.length > 500 || selectedCurrencies.size !== 1}>
-                  {operationSaving ? "Registrando pago…" : "Registrar pago"}
+                <button className="pt-primary" type="button"
+                  disabled={saving || loading}
+                  onClick={() => setRegistroPagoAbierto(true)}>
+                  Registrar pago
                 </button>
               )}
               <PagoEtapaActions estado={estado} formId={`pt-stage-${estado}`}
-                disabled={saving || loading || !puedePagar || !selectedRows.length || selectedRows.length > 500} />
+                disabled={saving || loading || !puedePagar || !selectedRows.length || selectedRows.length > 500}
+                programarDisabled={estado === 5 && !datosCuentaProgramacionCompletos} />
             </div>}
             </>}
             {estado === 1 && (
@@ -1115,8 +1257,22 @@ export default function PagarTesoreriaPage() {
                 onMessage={(message, isError) => isError ? setError(message) : setSuccess(message)}
               />
             )}
+            {esPago && !registroPagoAbierto && (
+              <PagoEtapaForm
+                formId={`pt-stage-${estado}`}
+                estado={estado}
+                rows={selectedRows}
+                catalogos={catalogos}
+                disabled={saving || loading || !puedePagar}
+                onBusy={setSaving}
+                onRefresh={() => load(estado, desde, hasta)}
+                onMessage={(message, isError) => isError ? setError(message) : setSuccess(message)}
+                programarListo={datosCuentaProgramacionCompletos}
+                ocultarFormulario
+              />
+            )}
           </section>
-          {estado !== 1 && !esReporte && (
+          {estado !== 1 && !esReporte && (!esPago || registroPagoAbierto) && (
             <aside className="pt-payment">
               {!esPago && (
                 <PagoEtapaForm
@@ -1135,6 +1291,17 @@ export default function PagarTesoreriaPage() {
               )}
               {esPago && (
                 <>
+                  {!registroPagoAbierto && (
+                    <button
+                      type="button"
+                      className="pt-register-payment-toggle"
+                      onClick={() => setRegistroPagoAbierto(true)}
+                    >
+                      Registrar pago
+                    </button>
+                  )}
+                  {registroPagoAbierto && (
+                  <section className="pt-payment-register">
                   <div className="pt-payment-title">
                     <span className="pt-icon">
                       <Landmark size={21} />
@@ -1143,7 +1310,15 @@ export default function PagarTesoreriaPage() {
                       <h2>Registrar pago</h2>
                       <span>Completa los datos del lote</span>
                     </div>
+                    <button
+                      type="button"
+                      className="pt-register-payment-hide"
+                      onClick={() => setRegistroPagoAbierto(false)}
+                    >
+                      Ocultar
+                    </button>
                   </div>
+                  <div className="pt-payment-register-content">
                   <div className="pt-selection">
                     <span>{selectedRows.length} recibos seleccionados</span>
                     {[...selectedCurrencies].map((id) => (
@@ -1291,6 +1466,9 @@ export default function PagarTesoreriaPage() {
                   <p className="pt-footnote">
                     Los datos se aplicarán a todos los recibos seleccionados.
                   </p>
+                  </div>
+                  </section>
+                  )}
                   <div key={estado} className="pt-other-actions">
                     <h3>
                       Otras acciones de{" "}
@@ -1308,6 +1486,8 @@ export default function PagarTesoreriaPage() {
                       onMessage={(message, isError) =>
                         isError ? setError(message) : setSuccess(message)
                       }
+                      programarListo={datosCuentaProgramacionCompletos}
+                      onProgramarIncompleto={() => setRegistroPagoAbierto(true)}
                     />
                   </div>
                 </>
@@ -1461,6 +1641,15 @@ export default function PagarTesoreriaPage() {
                   ["Ingreso", fecha(detail.fecha)],
                   ["Depósito", fecha(detail.fechaDeposito)],
                   ["Banco del pago", detail.banco],
+                  [
+                    "IdBancoCta",
+                    detail.idBancoCta == null
+                      ? null
+                      : `${detail.idBancoCta} · ${catalogos.bancos.find((b) => b.id === detail.idBancoCta)?.nombre || "Banco no encontrado"}`,
+                  ],
+                  ["Cuenta", detail.cuenta],
+                  ["CuentaInter", detail.cuentaInter],
+                  ["NombreCta", detail.nombreCta],
                   [
                     "Operación / Cheque",
                     `${detail.nroOperacion || "—"} / ${detail.cheque || "—"}`,

@@ -67,11 +67,14 @@ public sealed partial class PagoTesoreriaService
         await using var tx = (SqlTransaction)await cn.BeginTransactionAsync(ct);
         var ids = request.Items.Select(i => i.Correlativo).OrderBy(i => i).ToArray();
         var actuales = (await cn.QueryAsync<PagoActual>(new CommandDefinition($"""
-            SELECT a.Correlativo,a.IdSite,a.Estado,a.TipoMoneda,a.TotalPagar,{VersionSql} AS Version
+            SELECT a.Correlativo,a.IdSite,a.Estado,a.TipoMoneda,a.TotalPagar,a.IdBancoCta,a.Cuenta,a.CuentaInter,a.NombreCta,{VersionSql} AS Version
             FROM Planilla a WITH (UPDLOCK,HOLDLOCK) WHERE a.Correlativo IN @ids ORDER BY a.Correlativo
             """, new { ids }, tx, cancellationToken: ct))).ToList();
         if (actuales.Count != request.Items.Count || actuales.Any(a => !request.Items.Any(i => i.Correlativo == a.Correlativo && i.IdSite.Trim() == a.IdSite.Trim() && i.Estado == a.Estado && i.Version == a.Version)))
             throw new InvalidOperationException("Uno o más recibos cambiaron desde la consulta. Actualice la lista y revise nuevamente el lote.");
+
+        if (request.Accion == "programar" && actuales.Any(a => a.IdBancoCta is null || string.IsNullOrWhiteSpace(a.Cuenta) || string.IsNullOrWhiteSpace(a.CuentaInter) || string.IsNullOrWhiteSpace(a.NombreCta)))
+            throw new ArgumentException("Complete IdBancoCta, Cuenta, CuentaInter y NombreCta en todos los recibos antes de enviar a Programado.");
 
         async Task<string> ValidarCatalogo(string campo, int? id)
         {
