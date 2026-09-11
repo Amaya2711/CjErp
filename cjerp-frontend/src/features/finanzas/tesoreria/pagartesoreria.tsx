@@ -153,12 +153,14 @@ export default function PagarTesoreriaPage() {
   const [moneda, setMoneda] = useState("");
   const [comprobantesFiltro, setComprobantesFiltro] = useState<string[]>([]);
   const [bancosCtaFiltro, setBancosCtaFiltro] = useState<number[]>([]);
-  const [responsable, setResponsable] = useState("");
-  const [solicitante, setSolicitante] = useState("");
+  const [responsablesFiltro, setResponsablesFiltro] = useState<string[]>([]);
+  const [busquedaResponsable, setBusquedaResponsable] = useState("");
+  const [solicitantesFiltro, setSolicitantesFiltro] = useState<string[]>([]);
+  const [busquedaSolicitante, setBusquedaSolicitante] = useState("");
   const [rendicion, setRendicion] = useState("");
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
-  const [comprobantesAgrupados, setComprobantesAgrupados] = useState<string[]>([]);
+  const [groupBy, setGroupBy] = useState<"comprobante" | "proyecto-site" | "responsable" | "banco">("comprobante");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [form, setForm] = useState(initialForm);
   const [operationSaving, setSaving] = useState(false);
@@ -296,14 +298,13 @@ export default function PagarTesoreriaPage() {
     const search = query.trim().toLocaleLowerCase();
     return rows.filter(
       (r) =>
-        (!responsable || r.responsable === responsable) &&
-        (!solicitante || r.solicitante === solicitante) &&
+        (!responsablesFiltro.length || responsablesFiltro.includes(r.responsable ?? "")) &&
+        (!solicitantesFiltro.length || solicitantesFiltro.includes(r.solicitante ?? "")) &&
         (!rendicion || String(r.idRendicion) === rendicion) &&
         (!cliente || r.cliente === cliente) &&
         (!moneda || String(r.tipoMoneda) === moneda) &&
         (!comprobantesFiltro.length || comprobantesFiltro.includes(r.comprobante ?? "")) &&
         (!bancosCtaFiltro.length || (r.idBancoCta != null && bancosCtaFiltro.includes(r.idBancoCta))) &&
-        (!comprobantesAgrupados.length || comprobantesAgrupados.includes(r.comprobante ?? "")) &&
         (!search ||
           [
             r.correlativo,
@@ -328,9 +329,8 @@ export default function PagarTesoreriaPage() {
     moneda,
     comprobantesFiltro,
     bancosCtaFiltro,
-    comprobantesAgrupados,
-    responsable,
-    solicitante,
+    responsablesFiltro,
+    solicitantesFiltro,
     rendicion,
   ]);
   const selectedRows = useMemo(
@@ -371,7 +371,14 @@ export default function PagarTesoreriaPage() {
   const groups = useMemo(() => {
     const result = new Map<string, PagoTesoreriaRow[]>();
     for (const r of visibleRows) {
-      const label = `${estado === 5 ? "" : `${r.revisionPm?.trim() || "Sin revisión"} · `}${r.comprobante || "Sin comprobante"} · ${r.moneda || `Moneda ${r.tipoMoneda}`}`;
+      const groupLabel = groupBy === "proyecto-site"
+        ? `${r.proyecto || "Sin proyecto"} · ${r.idSite || "Sin site"}${r.site ? ` · ${r.site}` : ""}`
+        : groupBy === "responsable"
+          ? r.responsable || "Sin responsable"
+          : groupBy === "banco"
+            ? `${r.idBancoCta ?? "Sin banco"} · ${r.idBancoCta == null ? "Sin banco" : catalogos.bancos.find((b) => b.id === r.idBancoCta)?.nombre || "Banco no encontrado"}`
+            : `${estado === 5 ? "" : `${r.revisionPm?.trim() || "Sin revisión"} · `}${r.comprobante || "Sin comprobante"}`;
+      const label = `${groupLabel} · ${r.moneda || `Moneda ${r.tipoMoneda}`}`;
       const id = `${r.tipoMoneda}:${label}`;
       const group = result.get(id);
       if (group) group.push(r);
@@ -382,7 +389,7 @@ export default function PagarTesoreriaPage() {
       label: id.slice(id.indexOf(":") + 1),
       items,
     }));
-  }, [visibleRows, estado]);
+  }, [visibleRows, estado, groupBy, catalogos.bancos]);
   const selectable = visibleRows.filter(
     (r) => r.correlativo > 0 && r.idSite && r.version,
   );
@@ -428,8 +435,10 @@ export default function PagarTesoreriaPage() {
     setMoneda("");
     setComprobantesFiltro([]);
     setBancosCtaFiltro([]);
-    setResponsable("");
-    setSolicitante("");
+    setResponsablesFiltro([]);
+    setBusquedaResponsable("");
+    setSolicitantesFiltro([]);
+    setBusquedaSolicitante("");
     setRendicion("");
     setForm(initialForm());
     setRegistroPagoAbierto(false);
@@ -451,11 +460,7 @@ export default function PagarTesoreriaPage() {
     try {
       const result = await listarPagosTesoreria(1, desde, hasta);
       setRows(result);
-      // Conservar los grupos abiertos y mostrar el nuevo grupo si cambió el comprobante.
-      setExpanded(new Set(result.map(r => {
-        const label = `${estado === 5 ? "" : `${r.revisionPm?.trim() || "Sin revisión"} · `}${r.comprobante || "Sin comprobante"} · ${r.moneda || `Moneda ${r.tipoMoneda}`}`;
-        return `${r.tipoMoneda}:${label}`;
-      })));
+      setExpanded(new Set());
     } catch (e) {
       setRows([]);
       setError(getHttpErrorMessage(e, "El recibo se guardó, pero no se pudo actualizar la lista. Pulse Consultar."));
@@ -684,8 +689,10 @@ export default function PagarTesoreriaPage() {
                 setMoneda("");
                 setComprobantesFiltro([]);
                 setBancosCtaFiltro([]);
-                setResponsable("");
-                setSolicitante("");
+                setResponsablesFiltro([]);
+                setBusquedaResponsable("");
+                setSolicitantesFiltro([]);
+                setBusquedaSolicitante("");
                 setRendicion("");
                 setSelected(new Set());
                 void load(estado, desde, hasta);
@@ -865,26 +872,45 @@ export default function PagarTesoreriaPage() {
                     ))}
                 </div>
               </details>
+              <select
+                aria-label="Agrupar recibos"
+                value={groupBy}
+                onChange={(e) => {
+                  setGroupBy(e.target.value as typeof groupBy);
+                  setExpanded(new Set());
+                }}
+              >
+                <option value="comprobante">Agrupar por comprobante</option>
+                <option value="proyecto-site">Agrupar por PROYECTO/SITE</option>
+                <option value="responsable">Agrupar por responsable</option>
+                <option value="banco">Agrupar por banco</option>
+              </select>
               <details className="pt-comprobante-filter">
                 <summary>
-                  Agrupar por comprobante
-                  {comprobantesAgrupados.length > 0 && ` (${comprobantesAgrupados.length})`}
+                  Todos los responsables
+                  {responsablesFiltro.length > 0 && ` (${responsablesFiltro.length})`}
                 </summary>
-                <div className="pt-comprobante-options" aria-label="Filtrar comprobantes para agrupar">
-                  {[...new Set(rows.map((r) => r.comprobante).filter(Boolean))]
+                <div className="pt-comprobante-options" aria-label="Filtrar por responsable">
+                  <input
+                    className="pt-filter-search"
+                    type="search"
+                    placeholder="Escriba un responsable"
+                    value={busquedaResponsable}
+                    onChange={(e) => setBusquedaResponsable(e.target.value)}
+                  />
+                  {[...new Set(rows.map((r) => r.responsable).filter(Boolean))]
+                    .filter((item) => item!.toLocaleLowerCase().includes(busquedaResponsable.trim().toLocaleLowerCase()))
                     .sort((a, b) => a!.localeCompare(b!))
                     .map((item) => (
                       <label key={item}>
                         <input
                           type="checkbox"
-                          checked={comprobantesAgrupados.includes(item!)}
+                          checked={responsablesFiltro.includes(item!)}
                           onChange={(e) => {
-                            setComprobantesAgrupados((current) =>
-                              e.target.checked
-                                ? [...current, item!]
-                                : current.filter((value) => value !== item),
-                            );
-                            setExpanded(new Set());
+                            setResponsablesFiltro((current) => e.target.checked
+                              ? [...current, item!]
+                              : current.filter((value) => value !== item));
+                            setSelected(new Set());
                           }}
                         />
                         {item}
@@ -892,34 +918,39 @@ export default function PagarTesoreriaPage() {
                     ))}
                 </div>
               </details>
-              <select
-                aria-label="Filtrar por responsable"
-                value={responsable}
-                onChange={(e) => changeFilter(setResponsable, e.target.value)}
-              >
-                <option value="">Todos los responsables</option>
-                {[...new Set(rows.map((r) => r.responsable).filter(Boolean))]
-                  .sort()
-                  .map((v) => (
-                    <option key={v} value={v!}>
-                      {v}
-                    </option>
-                  ))}
-              </select>
-              <select
-                aria-label="Filtrar por solicitante"
-                value={solicitante}
-                onChange={(e) => changeFilter(setSolicitante, e.target.value)}
-              >
-                <option value="">Todos los solicitantes</option>
-                {[...new Set(rows.map((r) => r.solicitante).filter(Boolean))]
-                  .sort()
-                  .map((v) => (
-                    <option key={v} value={v!}>
-                      {v}
-                    </option>
-                  ))}
-              </select>
+              <details className="pt-comprobante-filter">
+                <summary>
+                  Todos los solicitantes
+                  {solicitantesFiltro.length > 0 && ` (${solicitantesFiltro.length})`}
+                </summary>
+                <div className="pt-comprobante-options" aria-label="Filtrar por solicitante">
+                  <input
+                    className="pt-filter-search"
+                    type="search"
+                    placeholder="Escriba un solicitante"
+                    value={busquedaSolicitante}
+                    onChange={(e) => setBusquedaSolicitante(e.target.value)}
+                  />
+                  {[...new Set(rows.map((r) => r.solicitante).filter(Boolean))]
+                    .filter((item) => item!.toLocaleLowerCase().includes(busquedaSolicitante.trim().toLocaleLowerCase()))
+                    .sort((a, b) => a!.localeCompare(b!))
+                    .map((item) => (
+                      <label key={item}>
+                        <input
+                          type="checkbox"
+                          checked={solicitantesFiltro.includes(item!)}
+                          onChange={(e) => {
+                            setSolicitantesFiltro((current) => e.target.checked
+                              ? [...current, item!]
+                              : current.filter((value) => value !== item));
+                            setSelected(new Set());
+                          }}
+                        />
+                        {item}
+                      </label>
+                    ))}
+                </div>
+              </details>
               {estado === 4 && (
                 <select
                   aria-label="Filtrar por rendición"

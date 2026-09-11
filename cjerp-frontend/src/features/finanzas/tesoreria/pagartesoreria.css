@@ -410,6 +410,15 @@
   padding: 5px 4px;
   cursor: pointer;
 }
+.pt-filter-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 4px;
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font: inherit;
+}
 .pt-table-wrap {
   overflow: auto;
   flex: 1;
