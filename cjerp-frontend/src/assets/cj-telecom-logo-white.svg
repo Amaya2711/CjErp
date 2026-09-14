@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="260" height="150" viewBox="0 0 260 150" role="img" aria-labelledby="title desc">
+  <title id="title">CJ telecom</title>
+  <desc id="desc">Logotipo CJ telecom sobre fondo blanco</desc>
+  <rect width="260" height="150" fill="#ffffff"/>
+  <defs>
+    <linearGradient id="cGradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffd58e"/>
+      <stop offset="0.55" stop-color="#f3b6d2"/>
+      <stop offset="1" stop-color="#b58bd4"/>
+    </linearGradient>
+    <linearGradient id="jGradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8db8df"/>
+      <stop offset="0.55" stop-color="#83b7d9"/>
+      <stop offset="1" stop-color="#81d6dc"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(48 12)">
+    <path fill="url(#cGradient)" d="M43 11c-18 0-32 13-32 29s14 29 32 29c10 0 19-4 25-11L56 47c-3 3-7 5-12 5-7 0-12-5-12-12s5-12 12-12c5 0 9 2 12 5l12-11C62 15 53 11 43 11Z"/>
+    <path fill="url(#jGradient)" d="M89 11v28c0 8-4 13-12 13-5 0-9-2-13-6L52 58c6 8 15 12 26 12 19 0 31-11 31-30V11H89Z"/>
+    <circle cx="48" cy="40" r="7" fill="#ffffff" opacity=".92"/>
+    <circle cx="72" cy="52" r="7" fill="#ffffff" opacity=".9"/>
+  </g>
+  <text x="130" y="122" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="32" font-weight="600" fill="#858595">telecom</text>
+</svg>

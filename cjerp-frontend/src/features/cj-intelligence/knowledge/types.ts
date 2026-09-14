@@ -1,0 +1,30 @@
+export type KnowledgeMemory = {
+  idMemoria: number;
+  idUsuario: number | null;
+  tipo: string;
+  modulo: string | null;
+  clave: string | null;
+  contenido: string;
+  importancia: number | null;
+  confianza: number | null;
+  origen: string | null;
+  origenDetalle: string | null;
+  estadoConocimiento: string;
+  aprobadoPor: number | null;
+  fechaAprobacion: string | null;
+  observacionRevision: string | null;
+  cantidadUsos: number;
+  fechaCreacion: string;
+  fechaUltimoUso: string | null;
+  fechaUltimaModificacion: string | null;
+  modificadoPor: number | null;
+  idActivo: boolean;
+  posibleContradiccion: boolean;
+  posibleDuplicado: boolean;
+};
+
+export type KnowledgeStats = { total: number; aprobadas: number; pendientes: number; observadas: number; rechazadas: number; activas: number; inactivas: number; inferenciasIa: number; conocimientoConfirmado: number };
+export type KnowledgePayload = { memories: KnowledgeMemory[]; stats: KnowledgeStats };
+export type MemoryHistory = { idHistorial: number; idMemoria: number; contenidoAnterior: string | null; contenidoNuevo: string | null; estadoAnterior: string | null; estadoNuevo: string | null; confianzaAnterior: number | null; confianzaNueva: number | null; idUsuario: number | null; fecha: string; motivo: string | null };
+export type CatalogEntry = { idCatalogo: number; esquema: string; tabla: string; columna: string | null; descripcion: string; reglaNegocio: string | null; relacionTabla: string | null; relacionColumna: string | null; confianza: number | null; origen: string | null; fechaCreacion: string; fechaActualizacion: string; idActivo: boolean };
+export type CatalogForm = Omit<CatalogEntry, "idCatalogo" | "fechaCreacion" | "fechaActualizacion" | "idActivo"> & { idCatalogo?: number };

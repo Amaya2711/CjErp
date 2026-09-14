@@ -277,7 +277,9 @@ namespace CjERP.Infrastructure.Services
                     "Nombre", "nombre",
                     "Descripcion", "descripcion",
                     "Texto", "texto"
-                ) ?? string.Empty
+                ) ?? string.Empty,
+                ResponsableCj = GetStringAllowEmpty(data,
+                    "ResponsableCj", "responsableCj", "NombreResponsableCj", "nombreResponsableCj") ?? string.Empty
             };
         }
 

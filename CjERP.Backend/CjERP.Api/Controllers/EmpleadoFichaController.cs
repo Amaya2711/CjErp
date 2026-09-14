@@ -136,7 +136,9 @@ ORDER BY p.parameter_id
             return parameters;
         }
 
-        if ((idEmpleado is null or <= 0) && string.IsNullOrWhiteSpace(nombreEmpleado))
+        if ((idEmpleado is null or <= 0)
+            && string.IsNullOrWhiteSpace(nombreEmpleado)
+            && (idCargo is null or <= 0))
         {
             return parameters;
         }

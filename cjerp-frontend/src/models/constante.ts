@@ -16,4 +16,5 @@ export interface ConstanteOption {
   valor: string;
   campo: string;
   orden: number;
+  responsableCj?: string;
 }

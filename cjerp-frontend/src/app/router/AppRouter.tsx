@@ -38,6 +38,7 @@ const ConciliacionBcpPage = lazy(() => import("../../features/finanzas/conciliac
 const ConciliacionBcpV1Page = lazy(() => import("../../features/finanzas/conciliacion_v1"));
 const ActFacturaPage = lazy(() => import("../../features/finanzas/facturacionfinanciera/actfactura"));
 const OcPage = lazy(() => import("../../features/finanzas/facturacionfinanciera/oc"));
+const OcV1Page = lazy(() => import("../../features/finanzas/facturacionfinanciera/oc_v1"));
 const AsientosPage = lazy(() => import("../../features/finanzas/contabilidad/asientos"));
 const CierreContablePage = lazy(() => import("../../features/finanzas/contabilidad/cierrecontable"));
 const LibroDiarioPage = lazy(() => import("../../features/finanzas/contabilidad/librodiario"));
@@ -95,6 +96,8 @@ const RptAsistenciaPage = lazy(() => import("../../features/reportes/rptasistenc
 const RptAsistenciaEmpleadoPage = lazy(() => import("../../features/reportes/rptasistenciaempleado"));
 const ClaudeiaPage = lazy(() => import("../../features/reportes/administrativo/claudeia"));
 const IaChatPage = lazy(() => import("../../features/reportes/administrativo/iachat"));
+const CjIntelligencePage = lazy(() => import("../../features/cj-intelligence/CjIntelligencePage"));
+const KnowledgePage = lazy(() => import("../../features/cj-intelligence/knowledge/KnowledgePage"));
 const ArrendamientosDashboardPage = lazy(() => import("../../features/arrendamientos/pages/dashboard"));
 const ArrendamientosMaestrosPage = lazy(() => import("../../features/arrendamientos/pages/maestros"));
 const ArrendamientosArrendadoresPage = lazy(() => import("../../features/arrendamientos/pages/arrendadores"));
@@ -231,6 +234,8 @@ export default function AppRouter() {
             <Route path="/reportes/administrativo/claudeia" element={<ClaudeiaPage />} />
             <Route path="/reporte/administrativo/iachat" element={<IaChatPage />} />
             <Route path="/reportes/administrativo/iachat" element={<IaChatPage />} />
+            <Route path="/cj-intelligence" element={<CjIntelligencePage />} />
+            <Route path="/cj-intelligence/knowledge" element={<KnowledgePage />} />
             <Route path="/reporte/financiero" element={<FinancieroPage />} />
             <Route path="/reporte/gerencial" element={<GerencialPage />} />
             <Route path="/gerencial/dashboard1" element={<Dashboard1Page />} />
@@ -299,6 +304,7 @@ export default function AppRouter() {
               element={<ActFacturaPage />}
             />
             <Route path="/finanzas/facturacionfinanciera/oc" element={<OcPage />} />
+            <Route path="/finanzas/facturacionfinanciera/oc_v1" element={<OcV1Page />} />
 
             <Route
               path="/finanzas/contabilidad"

@@ -15,10 +15,17 @@ export type OrdenCompraCabeceraDto = {
   idAprobador2?: number | null;
   idAprobador3?: number | null;
   idValidador?: number | null;
+  validador?: string | null;
+  validador2?: string | null;
+  validador3?: string | null;
   estado: string;
   nroDocumento?: string;
   fecha?: string | null;
   idEstado?: number | null;
+  idSite?: string;
+  nombreSite?: string;
+  nombreCliente?: string;
+  nombreProyecto?: string;
 };
 
 export type OrdenCompraDetalleDto = {
@@ -49,6 +56,21 @@ export type OrdenCompraDetalleDto = {
   correlativo?: number | null;
   estado?: string;
   gestor?: string;
+  rutaImagen?: string;
+  imgOc?: string;
+  imgPresupuesto?: string;
+  ocAdela?: string;
+  ocPor?: string;
+  cuenta?: string;
+  cuentaInter?: string;
+  nombreCta?: string;
+  banco?: string;
+  idBanco?: number | null;
+  idComprobante?: number | null;
+  ocAdeMon?: number;
+  ocPorAde?: number;
+  monFic?: number;
+  porFict?: number;
 };
 
 export type OrdenCompraConsultaParams = {
@@ -67,9 +89,17 @@ export type OrdenCompraInsertDetallePayload = {
   idCliente: number;
   idProyecto: number;
   idSite: string;
+  correlativo?: number | null;
+  tipoTrabajo?: string;
+  idTarea?: number | null;
+  ot?: string;
   detalle: string;
   cantidad: number;
   precioUnitario: number;
+  idComprobante?: number | null;
+  imgOc?: string;
+  imgPresupuesto?: string;
+  peso?: number;
 };
 
 export type OrdenCompraInsertPayload = {
@@ -98,6 +128,94 @@ export type OrdenCompraRechazoMasivoPayload = {
   idAprobador?: number;
 };
 
+export type OrdenCompraAprobarPayload = {
+  idsOc: number[];
+  nivel?: number;
+  idAprobador?: number;
+  observacion?: string;
+};
+
+export type OrdenCompraAprobacionResult = {
+  idOc: number;
+  nivel: number;
+  idAprobador: number;
+};
+
+export type OrdenCompraEditarDetallePayload = {
+  idOc: number;
+  idSite: string;
+  correlativo?: number | null;
+  fila?: number | null;
+  campo: string;
+  valor?: string | null;
+  idUsuario?: number | null;
+  usuarioAccion?: string;
+};
+
+export type OrdenCompraReciboDto = {
+  correlativo: number;
+  fecIngreso?: string | null;
+  subtotal?: number;
+  igv?: number;
+  total?: number;
+  moneda?: string;
+  detalle?: string;
+  rutaImagen?: string;
+  idCliente?: number | null;
+  idProyecto?: number | null;
+  idSite?: string;
+  correSite?: number | null;
+  tipoTrabajo?: string;
+  comprobante?: string;
+  responsable?: string;
+  nroDocumento?: string;
+  estado?: string;
+  tarea?: string;
+  fila?: number | null;
+  idOc?: number | null;
+};
+
+export type OrdenCompraRecibosParams = {
+  idOc: number;
+  fila?: number | null;
+};
+
+export type OrdenCompraAsociarRecibosPayload = {
+  idOc: number;
+  fila?: number | null;
+  nivel?: number;
+  correlativos: number[];
+};
+
+export type OrdenCompraAsociarRecibosResult = {
+  idOc: number;
+  solicitados: number;
+  asociados: number;
+};
+
+export type OrdenCompraMontoOcDto = {
+  idOc?: number | null;
+  idCliente?: number | null;
+  idProyecto?: number | null;
+  correlativo?: number | null;
+  nombreCliente?: string;
+  nombreProyecto?: string;
+  tipoTrabajo?: string;
+  idSite?: string;
+  nombreSite?: string;
+  montoOc?: number;
+  pagadoFic?: number;
+  avanceFic?: number;
+  pagado?: number;
+  avance?: number;
+  saldo?: number;
+  detalle?: string;
+  estado?: string;
+  fila?: number | null;
+  solicitante?: string;
+};
+
+
 export async function buscarOrdenCompraCabecera(params?: OrdenCompraConsultaParams) {
   return await httpClient.get<OrdenCompraCabeceraDto[]>("/facturacionfinanciera/oc/cabecera", { params });
 }
@@ -113,3 +231,45 @@ export async function insertarOrdenCompra(payload: OrdenCompraInsertPayload) {
 export async function rechazarOrdenCompraMasivo(payload: OrdenCompraRechazoMasivoPayload) {
   return await httpClient.post("/facturacionfinanciera/oc/rechazar-masivo", payload);
 }
+
+export async function aprobarOrdenCompra(payload: OrdenCompraAprobarPayload) {
+  return await httpClient.post<OrdenCompraAprobacionResult[]>("/facturacionfinanciera/oc/aprobar", payload);
+}
+
+export async function editarDetalleOrdenCompra(payload: OrdenCompraEditarDetallePayload) {
+  return await httpClient.post("/facturacionfinanciera/oc/detalle/editar", payload);
+}
+
+export async function buscarRecibosAsociadosOrdenCompra(params: OrdenCompraRecibosParams) {
+  return await httpClient.get<OrdenCompraReciboDto[]>("/facturacionfinanciera/oc/recibos/asociados", { params });
+}
+
+export async function buscarRecibosSinAsociarOrdenCompra(params: OrdenCompraRecibosParams) {
+  return await httpClient.get<OrdenCompraReciboDto[]>("/facturacionfinanciera/oc/recibos/sin-asociar", { params });
+}
+
+export async function asociarRecibosOrdenCompra(payload: OrdenCompraAsociarRecibosPayload) {
+  return await httpClient.post<OrdenCompraAsociarRecibosResult>("/facturacionfinanciera/oc/recibos/asociar", payload);
+}
+
+export async function buscarMontoOcOrdenCompra(params: OrdenCompraRecibosParams) {
+  return await httpClient.get<OrdenCompraMontoOcDto[]>("/facturacionfinanciera/oc/monto-oc", { params });
+}
+
+export const descargarOrdenCompraPdf = (idOc: number) =>
+  httpClient.get<Blob>(`/facturacionfinanciera/oc/${idOc}/pdf`, {
+    responseType: "blob",
+  });
+
+export async function subirArchivoOrdenCompra(file: File, codigoReferencia = "1") {
+  const data = new FormData();
+  data.append("archivo", file);
+  data.append("codigoReferencia", codigoReferencia);
+  return await httpClient.post<{ codigo: string }>("/facturacionfinanciera/oc/archivo", data);
+}
+
+export const descargarArchivoOrdenCompra = (codigo: string) =>
+  httpClient.get<Blob>(`/facturacionfinanciera/oc/archivo/${encodeURIComponent(codigo)}`, {
+    responseType: "blob",
+  });
+

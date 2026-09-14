@@ -160,17 +160,18 @@ export default function PagarTesoreriaPage() {
   const [rendicion, setRendicion] = useState("");
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
-  const [groupBy, setGroupBy] = useState<"comprobante" | "proyecto-site" | "responsable" | "banco">("comprobante");
+  const [groupBy, setGroupBy] = useState<"comprobante" | "proyecto-site" | "responsable" | "banco" | "serie-view-detalle">("comprobante");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [form, setForm] = useState(initialForm);
   const [operationSaving, setSaving] = useState(false);
   const [editingRevision, setEditingRevision] = useState(false);
   const [registroPagoAbierto, setRegistroPagoAbierto] = useState(false);
+  const [contabilidadValida, setContabilidadValida] = useState(false);
   const saving = operationSaving || editingRevision;
   const [permisosRevision, setPermisosRevision] = useState<PagoRevisionPermisos>({
     puedeEditar: false, puedeEditarOperacion: false, puedeEditarEstado: false,
   });
-  const columnCount = estado === 1 ? 21 : estado === 9 ? 16 : 15;
+  const columnCount = estado === 1 ? 22 : estado === 9 ? 16 : 15;
   const [confirmation, setConfirmation] = useState<PagoTesoreriaRequest | null>(
     null,
   );
@@ -333,21 +334,36 @@ export default function PagarTesoreriaPage() {
     solicitantesFiltro,
     rendicion,
   ]);
+  const rowsForFilterOption = (exclude: string) => {
+    const search = query.trim().toLocaleLowerCase();
+    return rows.filter((r) =>
+      (exclude === "responsable" || !responsablesFiltro.length || responsablesFiltro.includes(r.responsable ?? "")) &&
+      (exclude === "solicitante" || !solicitantesFiltro.length || solicitantesFiltro.includes(r.solicitante ?? "")) &&
+      (exclude === "rendicion" || !rendicion || String(r.idRendicion) === rendicion) &&
+      (exclude === "cliente" || !cliente || r.cliente === cliente) &&
+      (exclude === "moneda" || !moneda || String(r.tipoMoneda) === moneda) &&
+      (exclude === "comprobante" || !comprobantesFiltro.length || comprobantesFiltro.includes(r.comprobante ?? "")) &&
+      (exclude === "banco" || !bancosCtaFiltro.length || (r.idBancoCta != null && bancosCtaFiltro.includes(r.idBancoCta))) &&
+      (!search || [r.correlativo, r.responsable, r.solicitante, r.cliente, r.proyecto, r.site, r.idSite, r.ot, r.detalle, r.nroOperacion]
+        .join(" ").toLocaleLowerCase().includes(search)),
+    );
+  };
   const selectedRows = useMemo(
     () => visibleRows.filter((r) => selected.has(key(r))),
     [visibleRows, selected],
   );
+  const kpiRows = estado === 1 && selectedRows.length > 0 ? selectedRows : visibleRows;
   const selectedCurrencies = new Set(selectedRows.map((r) => r.tipoMoneda));
   const totals = useMemo(
     () =>
-      [...new Set(visibleRows.map((r) => r.tipoMoneda))].map((id) => ({
+      [...new Set(kpiRows.map((r) => r.tipoMoneda))].map((id) => ({
         id,
         nombre:
-          visibleRows.find((r) => r.tipoMoneda === id)?.moneda ||
+          kpiRows.find((r) => r.tipoMoneda === id)?.moneda ||
           `Moneda ${id}`,
-        total: sum(visibleRows.filter((r) => r.tipoMoneda === id)),
+        total: sum(kpiRows.filter((r) => r.tipoMoneda === id)),
       })),
-    [visibleRows],
+    [kpiRows],
   );
   const reportMetrics = useMemo(() => {
     const stages = [
@@ -375,6 +391,8 @@ export default function PagarTesoreriaPage() {
         ? `${r.proyecto || "Sin proyecto"} · ${r.idSite || "Sin site"}${r.site ? ` · ${r.site}` : ""}`
         : groupBy === "responsable"
           ? r.responsable || "Sin responsable"
+          : groupBy === "serie-view-detalle"
+            ? `${r.serie?.trim() || "Sin serie"} · ${r.imgFactura?.trim() ? "Con documento adjunto" : "Sin documento adjunto"}`
           : groupBy === "banco"
             ? `${r.idBancoCta ?? "Sin banco"} · ${r.idBancoCta == null ? "Sin banco" : catalogos.bancos.find((b) => b.id === r.idBancoCta)?.nombre || "Banco no encontrado"}`
             : `${estado === 5 ? "" : `${r.revisionPm?.trim() || "Sin revisión"} · `}${r.comprobante || "Sin comprobante"}`;
@@ -440,8 +458,10 @@ export default function PagarTesoreriaPage() {
     setSolicitantesFiltro([]);
     setBusquedaSolicitante("");
     setRendicion("");
+    if (next !== 1 && groupBy === "serie-view-detalle") setGroupBy("comprobante");
     setForm(initialForm());
     setRegistroPagoAbierto(false);
+    setContabilidadValida(false);
     setExpanded(new Set());
     setSuccess("");
     void load(next, start, end);
@@ -481,14 +501,16 @@ export default function PagarTesoreriaPage() {
       form.fechaDeposito <= hoy() &&
       (isCheque ? form.cheque.trim() : isEfectivo || form.nroOperacion.trim()),
   );
-  const datosCuentaProgramacionCompletos =
-    selectedRows.length > 0 &&
-    selectedRows.every((row) =>
-      row.idBancoCta != null &&
-      Boolean(row.cuenta?.trim()) &&
-      Boolean(row.cuentaInter?.trim()) &&
-      Boolean(row.nombreCta?.trim()),
-    );
+  // En Administrativo, enviar a Programado depende de los datos registrados
+  // en el bloque Registrar pago, no de las cuentas de cada recibo.
+  const datosCuentaProgramacionCompletos = Boolean(
+    form.idEjecutor &&
+      form.idTransferencia &&
+      form.idBanco &&
+      form.idMoneda2 &&
+      form.fechaDeposito &&
+      form.fechaDeposito <= hoy(),
+  );
   const review = () => {
     setError("");
     setSuccess("");
@@ -586,6 +608,59 @@ export default function PagarTesoreriaPage() {
     XLSX.utils.book_append_sheet(book, sheet, "Recibos");
     XLSX.writeFile(book, `tesoreria-${estado}-${hoy()}.xlsx`);
   };
+  const exportarPaolo = () => {
+    const agrupados = new Map<string, {
+      Cliente: string;
+      Responsable: string;
+      Tarea: string;
+      Solicitante: string;
+      Cuenta: string;
+      "Suma de Total": number;
+      "Suma de Retencion": number;
+      "Suma de TotalPagar": number;
+    }>();
+    for (const r of visibleRows) {
+      const values = {
+        Cliente: r.cliente || "",
+        Responsable: r.responsable || "",
+        Tarea: r.tarea || "",
+        Solicitante: r.solicitante || "",
+        Cuenta: r.cuenta || "",
+      };
+      const id = [values.Cliente, values.Responsable, values.Tarea, values.Solicitante, values.Cuenta].join("\u001f");
+      const actual = agrupados.get(id);
+      if (actual) {
+        actual["Suma de Total"] += r.total || 0;
+        actual["Suma de Retencion"] += r.montoRetencion || 0;
+        actual["Suma de TotalPagar"] += r.totalPagar || 0;
+      } else {
+        agrupados.set(id, {
+          ...values,
+          "Suma de Total": r.total || 0,
+          "Suma de Retencion": r.montoRetencion || 0,
+          "Suma de TotalPagar": r.totalPagar || 0,
+        });
+      }
+    }
+    const data = [...agrupados.values()].sort((a, b) =>
+      [a.Cliente, a.Responsable, a.Tarea, a.Solicitante, a.Cuenta]
+        .join(" ").localeCompare([b.Cliente, b.Responsable, b.Tarea, b.Solicitante, b.Cuenta].join(" ")),
+    );
+    const sheet = XLSX.utils.json_to_sheet(data, {
+      header: ["Cliente", "Responsable", "Tarea", "Solicitante", "Cuenta", "Suma de Total", "Suma de Retencion", "Suma de TotalPagar"],
+    });
+    XLSX.utils.sheet_add_aoa(sheet, [[
+      "Total general", "", "", "", "",
+      data.reduce((total, row) => total + row["Suma de Total"], 0),
+      data.reduce((total, row) => total + row["Suma de Retencion"], 0),
+      data.reduce((total, row) => total + row["Suma de TotalPagar"], 0),
+    ]], { origin: -1 });
+    sheet["!cols"] = [13, 30, 36, 38, 18, 16, 20, 22].map((wch) => ({ wch }));
+    sheet["!autofilter"] = { ref: `A1:H${data.length + 1}` };
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book, sheet, "Paolo");
+    XLSX.writeFile(book, `programado-paolo-${hoy()}.xlsx`);
+  };
 
   return (
     <AppPage title="Pagos de tesorería" fillHeight>
@@ -609,7 +684,7 @@ export default function PagarTesoreriaPage() {
           <div className="pt-metrics">
             <div>
               <span>Recibos en consulta</span>
-              <strong>{loading ? "—" : visibleRows.length}</strong>
+              <strong>{loading ? "—" : kpiRows.length}</strong>
             </div>
             {totals.map((t) => (
               <div key={t.id}>
@@ -793,6 +868,16 @@ export default function PagarTesoreriaPage() {
                 <Download size={15} />
                 Excel
               </button>
+              {estado === 8 && (
+                <button
+                  disabled={!visibleRows.length || saving}
+                  onClick={exportarPaolo}
+                  title="Exportar formato Paolo"
+                >
+                  <Download size={15} />
+                  Paolo
+                </button>
+              )}
             </div>}
             {!esReporte && <>
             <fieldset className="pt-local-filters" disabled={saving}>
@@ -802,7 +887,7 @@ export default function PagarTesoreriaPage() {
                 onChange={(e) => changeFilter(setCliente, e.target.value)}
               >
                 <option value="">Todos los clientes</option>
-                {[...new Set(rows.map((r) => r.cliente).filter(Boolean))]
+                 {[...new Set(rowsForFilterOption("cliente").map((r) => r.cliente).filter(Boolean))]
                   .sort()
                   .map((c) => (
                     <option key={c} value={c!}>
@@ -816,7 +901,7 @@ export default function PagarTesoreriaPage() {
                 onChange={(e) => changeFilter(setMoneda, e.target.value)}
               >
                 <option value="">Todas las monedas</option>
-                {[...new Set(rows.map((r) => r.tipoMoneda))].map((id) => (
+                 {[...new Set(rowsForFilterOption("moneda").map((r) => r.tipoMoneda))].map((id) => (
                   <option key={id} value={id}>
                     {rows.find((r) => r.tipoMoneda === id)?.moneda || id}
                   </option>
@@ -828,7 +913,7 @@ export default function PagarTesoreriaPage() {
                   {comprobantesFiltro.length > 0 && ` (${comprobantesFiltro.length})`}
                 </summary>
                 <div className="pt-comprobante-options" aria-label="Filtrar por comprobante">
-                  {[...new Set(rows.map((r) => r.comprobante).filter(Boolean))]
+                     {[...new Set(rowsForFilterOption("comprobante").map((r) => r.comprobante).filter(Boolean))]
                     .sort((a, b) => a!.localeCompare(b!))
                     .map((item) => (
                       <label key={item}>
@@ -853,7 +938,7 @@ export default function PagarTesoreriaPage() {
                   {bancosCtaFiltro.length > 0 && ` (${bancosCtaFiltro.length})`}
                 </summary>
                 <div className="pt-comprobante-options" aria-label="Filtrar por IdBancoCta">
-                  {[...new Set(rows.map((r) => r.idBancoCta).filter((id): id is number => id != null))]
+                   {[...new Set(rowsForFilterOption("banco").map((r) => r.idBancoCta).filter((id): id is number => id != null))]
                     .sort((a, b) => a - b)
                     .map((id) => (
                       <label key={id}>
@@ -885,7 +970,7 @@ export default function PagarTesoreriaPage() {
                     value={busquedaResponsable}
                     onChange={(e) => setBusquedaResponsable(e.target.value)}
                   />
-                  {[...new Set(rows.map((r) => r.responsable).filter(Boolean))]
+                   {[...new Set(rowsForFilterOption("responsable").map((r) => r.responsable).filter(Boolean))]
                     .filter((item) => item!.toLocaleLowerCase().includes(busquedaResponsable.trim().toLocaleLowerCase()))
                     .sort((a, b) => a!.localeCompare(b!))
                     .map((item) => (
@@ -918,7 +1003,7 @@ export default function PagarTesoreriaPage() {
                     value={busquedaSolicitante}
                     onChange={(e) => setBusquedaSolicitante(e.target.value)}
                   />
-                  {[...new Set(rows.map((r) => r.solicitante).filter(Boolean))]
+                   {[...new Set(rowsForFilterOption("solicitante").map((r) => r.solicitante).filter(Boolean))]
                     .filter((item) => item!.toLocaleLowerCase().includes(busquedaSolicitante.trim().toLocaleLowerCase()))
                     .sort((a, b) => a!.localeCompare(b!))
                     .map((item) => (
@@ -964,6 +1049,7 @@ export default function PagarTesoreriaPage() {
                 <option value="proyecto-site">Agrupar por PROYECTO/SITE</option>
                 <option value="responsable">Agrupar por responsable</option>
                 <option value="banco">Agrupar por banco</option>
+                {estado === 1 && <option value="serie-view-detalle">Agrupar por serie / view detalle</option>}
               </select>
             </fieldset>
             <div className="pt-table-wrap" aria-busy={loading}>
@@ -993,6 +1079,7 @@ export default function PagarTesoreriaPage() {
                       }
                     </th>
                     <th>Recibo / OT</th>
+                    {estado === 1 && <th>Serie</th>}
                     <th>Responsable / Solicitante</th>
                     <th>Proyecto / Site</th>
                     <th>Site + Detalle</th>
@@ -1081,7 +1168,7 @@ export default function PagarTesoreriaPage() {
                               />
                             }
                           </td>
-                          <td colSpan={estado === 1 || estado === 9 ? 8 : 7}>
+                          <td colSpan={estado === 1 ? 9 : estado === 9 ? 8 : 7}>
                             <button
                               disabled={saving}
                               onClick={() =>
@@ -1140,6 +1227,7 @@ export default function PagarTesoreriaPage() {
                                 </button>
                                 <small>OT {r.ot || "—"}</small>
                               </td>
+                              {estado === 1 && <td>{r.serie || "—"}</td>}
                               <td>
                                 <strong>
                                   {r.responsable || "Sin responsable"}
@@ -1272,7 +1360,10 @@ export default function PagarTesoreriaPage() {
               )}
               <PagoEtapaActions estado={estado} formId={`pt-stage-${estado}`}
                 disabled={saving || loading || !puedePagar || !selectedRows.length || selectedRows.length > 500}
-                programarDisabled={estado === 5 && !datosCuentaProgramacionCompletos} />
+                 // En Administrativo la acción se ejecuta desde Registrar pago.
+                 programarDisabled={estado === 5}
+                 ocultarProgramar={estado === 5}
+                 contabilidadDisabled={estado === 9 && !contabilidadValida} />
             </div>}
             </>}
             {estado === 1 && (
@@ -1285,8 +1376,8 @@ export default function PagarTesoreriaPage() {
                 disabled={saving || loading || !puedePagar}
                 onBusy={setSaving}
                 onRefresh={() => load(estado, desde, hasta)}
-                onMessage={(message, isError) => isError ? setError(message) : setSuccess(message)}
-              />
+                   onMessage={(message, isError) => isError ? setError(message) : setSuccess(message)}
+                 />
             )}
             {esPago && !registroPagoAbierto && (
               <PagoEtapaForm
@@ -1315,10 +1406,11 @@ export default function PagarTesoreriaPage() {
                   disabled={saving || loading || !puedePagar}
                   onBusy={setSaving}
                   onRefresh={() => load(estado, desde, hasta)}
-                  onMessage={(message, isError) =>
-                    isError ? setError(message) : setSuccess(message)
-                  }
-                />
+                   onMessage={(message, isError) =>
+                     isError ? setError(message) : setSuccess(message)
+                   }
+                   onContabilidadValida={setContabilidadValida}
+                 />
               )}
               {esPago && (
                 <>
@@ -1348,6 +1440,17 @@ export default function PagarTesoreriaPage() {
                     >
                       Ocultar
                     </button>
+                    {estado === 5 && (
+                      <button
+                        type="submit"
+                        form={`pt-stage-${estado}`}
+                        className="pt-primary"
+                        disabled={saving || loading || !puedePagar || !selectedRows.length || selectedRows.length > 500 || !datosCuentaProgramacionCompletos}
+                        title={!datosCuentaProgramacionCompletos ? "Complete los datos de Registrar pago" : "Enviar a Programado"}
+                      >
+                        Enviar a Programado
+                      </button>
+                    )}
                   </div>
                   <div className="pt-payment-register-content">
                   <div className="pt-selection">

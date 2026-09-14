@@ -36,8 +36,10 @@ export async function obtenerFichaEmpleado(idEmpleado: number): Promise<FichaEmp
   };
 }
 
-export async function listarFichaEmpleados(): Promise<FichaEmpleadoResponse> {
-  const response = await httpClient.get<FichaEmpleadoResponse>("/empleado/ficha");
+export async function listarFichaEmpleados(idCargo = 50): Promise<FichaEmpleadoResponse> {
+  const response = await httpClient.get<FichaEmpleadoResponse>("/empleado/ficha", {
+    params: { idCargo },
+  });
 
   return {
     rows: Array.isArray(response.rows) ? response.rows : [],

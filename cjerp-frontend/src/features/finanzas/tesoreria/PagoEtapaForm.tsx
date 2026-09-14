@@ -41,16 +41,21 @@ const acciones: Record<number, { key: PagoAccion; label: string }[]> = {
     { key: "subsanar", label: "Subsanar y devolver al flujo" },
   ],
 };
-export function PagoEtapaActions({ estado, formId, disabled, programarDisabled = false }: {
+export function PagoEtapaActions({ estado, formId, disabled, programarDisabled = false, ocultarProgramar = false, contabilidadDisabled = false }: {
   estado: number;
   formId: string;
   disabled: boolean;
   programarDisabled?: boolean;
+  ocultarProgramar?: boolean;
+  contabilidadDisabled?: boolean;
 }) {
-  return <>{acciones[estado].map((accion, index) => (
+  const accionesVisibles = (acciones[estado] ?? []).filter(
+    (accion) => !(ocultarProgramar && accion.key === "programar"),
+  );
+  return <>{accionesVisibles.map((accion, index) => (
     <button type="submit" form={formId} key={accion.key} value={accion.key}
       className={index === 0 ? "pt-primary" : ""}
-      disabled={disabled || (estado === 9 && accion.key === "contabilidad-programar") || (accion.key === "programar" && programarDisabled)}
+      disabled={disabled || (estado === 9 && accion.key.startsWith("contabilidad-") && contabilidadDisabled) || (accion.key === "programar" && programarDisabled)}
       title={estado === 9 && accion.key === "contabilidad-programar" ? "Acción no habilitada actualmente" : undefined}>
       {accion.label}
     </button>
@@ -116,6 +121,7 @@ export default function PagoEtapaForm({
   onMessage,
   programarListo,
   onProgramarIncompleto,
+  onContabilidadValida,
   ocultarFormulario = false,
 }: {
   formId: string;
@@ -128,6 +134,7 @@ export default function PagoEtapaForm({
   onMessage: (message: string, error?: boolean) => void;
   programarListo?: boolean;
   onProgramarIncompleto?: () => void;
+  onContabilidadValida?: (valid: boolean) => void;
   ocultarFormulario?: boolean;
 }) {
   const [form, setForm] = useState(inicial);
@@ -137,6 +144,9 @@ export default function PagoEtapaForm({
   const ref = useRef<HTMLDialogElement>(null);
   const lock = useRef(false);
   const editar = estado === 4 || estado === 2;
+  useEffect(() => {
+    if (estado === 9) onContabilidadValida?.(rows.length > 0 && Boolean(form.idRetencion));
+  }, [estado, form.idRetencion, rows.length, onContabilidadValida]);
   useEffect(() => {
     if (pending) {
       if (!ref.current?.open) ref.current?.showModal();
@@ -588,7 +598,7 @@ export default function PagoEtapaForm({
         }}
       >
         <div className="pt-dialog-heading">
-          <h2 id="pt-stage-confirm">{pending?.accion === "observar" ? "Observar recibos" : "Confirmar actualización"}</h2>
+          <h2 id="pt-stage-confirm">{pending?.accion === "observar" ? "Observar recibos" : "¿Confirmar cambio de estado?"}</h2>
           <button
             disabled={busy}
             aria-label="Cerrar confirmación de etapa"
@@ -605,6 +615,7 @@ export default function PagoEtapaForm({
               </strong>
             </p>
             <p>{textos[pending.accion]}</p>
+            {pending.accion !== "observar" && <p>¿Desea continuar? El estado solo cambiará si confirma esta acción.</p>}
             <p>
               <strong>{pending.items.length} recibos:</strong>{" "}
               {pending.items.map((i) => i.correlativo).join(", ")}

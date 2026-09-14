@@ -21,6 +21,7 @@ function mapSolicitanteToOption(item: SolicitanteLookupDto): ConstanteOption {
     valor: codigo,
     campo: "solicitante",
     orden: 0,
+    responsableCj: item.responsableCj ?? "",
   };
 }
 

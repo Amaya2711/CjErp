@@ -15,16 +15,21 @@ import {
 } from "../../services/seguridadPermisosAccionesService";
 import { getHttpErrorMessage } from "../../../../utils/httpError";
 import { getAuthUser } from "../../../../utils/authStorage";
-import { listarEmpleadosCta } from "../../../../api/empleadoService";
-import type { EmpleadoCta } from "../../../../models/empleadoCta";
+import { listarFichaEmpleados, type FichaEmpleadoRow } from "../../../../api/fichaService";
 
 type SubjectType = "rol" | "empleado";
 type FormMode = "nuevo" | "editar";
 
+type EmpleadoPermiso = {
+  idEmpleado: number;
+  nombreEmpleado: string;
+  idUsuario: string;
+};
+
 type PermisoAccionForm = {
   idPermisoAccion: number | null;
   rutaPagina: string;
-  claveAccion: string;
+  clavesAccion: string[];
   etiqueta: string;
   tipoElemento: TipoElementoPermiso;
   subjectType: SubjectType;
@@ -37,7 +42,7 @@ type PermisoAccionForm = {
 const formInicial: PermisoAccionForm = {
   idPermisoAccion: null,
   rutaPagina: "",
-  claveAccion: "",
+  clavesAccion: [],
   etiqueta: "",
   tipoElemento: "button",
   subjectType: "rol",
@@ -53,6 +58,11 @@ const tipoElementoOptions: { value: TipoElementoPermiso; label: string }[] = [
   { value: "button", label: "Boton" },
   { value: "system", label: "Sistema" },
 ];
+
+type ElementoOption = {
+  value: string;
+  label: string;
+};
 
 function normalizeText(value: unknown): string {
   return String(value ?? "").trim();
@@ -80,7 +90,7 @@ export default function SeguridadPermisosAccionesPage() {
 
   const [menus, setMenus] = useState<MenuDto[]>([]);
   const [roles, setRoles] = useState<RolDto[]>([]);
-  const [empleados, setEmpleados] = useState<EmpleadoCta[]>([]);
+  const [empleados, setEmpleados] = useState<EmpleadoPermiso[]>([]);
   const [permisos, setPermisos] = useState<PermisoAccionDto[]>([]);
 
   const [filtroRuta, setFiltroRuta] = useState("");
@@ -90,6 +100,7 @@ export default function SeguridadPermisosAccionesPage() {
   const [filtroSubjectId, setFiltroSubjectId] = useState(
     authUser?.idrol ? String(authUser.idrol) : authUser?.idEmpleado ? String(authUser.idEmpleado) : ""
   );
+  const [empleadoBusqueda, setEmpleadoBusqueda] = useState("");
   const [filtroTipoElemento, setFiltroTipoElemento] = useState<string>("");
 
   const [panelAbierto, setPanelAbierto] = useState(false);
@@ -120,9 +131,91 @@ export default function SeguridadPermisosAccionesPage() {
     () =>
       empleados.map((empleado) => ({
         value: String(empleado.idEmpleado),
-        label: `${empleado.nombreEmpleado} (#${empleado.idEmpleado})`,
+        label: empleado.idUsuario
+          ? `${empleado.nombreEmpleado} (${empleado.idUsuario})`
+          : empleado.nombreEmpleado,
       })),
     [empleados]
+  );
+
+  const elementoOptions = useMemo((): ElementoOption[] => {
+    if (!form.rutaPagina || !form.tipoElemento) {
+      return [];
+    }
+
+    if (form.tipoElemento === "menu") {
+      const pagina = menus.find((menu) => normalizeText(menu.ruta) === form.rutaPagina);
+      if (!pagina) {
+        return [];
+      }
+
+      const idsIncluidos = new Set<number>([pagina.idMenu]);
+      let agregoHijo = true;
+      while (agregoHijo) {
+        agregoHijo = false;
+        menus.forEach((menu) => {
+          if (menu.idMenuPadre != null && idsIncluidos.has(menu.idMenuPadre) && !idsIncluidos.has(menu.idMenu)) {
+            idsIncluidos.add(menu.idMenu);
+            agregoHijo = true;
+          }
+        });
+      }
+
+      return menus
+        .filter((menu) => idsIncluidos.has(menu.idMenu))
+        .map((menu) => ({
+          value: menu.codigoMenu?.trim() || `menu.${menu.idMenu}`,
+          label: menu.nombreMenu,
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label));
+    }
+
+    if (form.tipoElemento === "tab" && form.rutaPagina.endsWith("/pagos_v1")) {
+      return [
+        { value: "tab.resumen", label: "Total Ordenes" },
+        { value: "tab.aprobar", label: "Aprobar" },
+        { value: "tab.reaprobar", label: "Re-aprobar" },
+        { value: "tab.hormiga", label: "Hormiga" },
+        { value: "tab.observadas", label: "Observadas" },
+      ];
+    }
+
+    if (form.tipoElemento === "button" && form.rutaPagina.endsWith("/pagos_v1")) {
+      return [
+        { value: "button.aplicar_filtros", label: "Aplicar filtros" },
+        { value: "button.exportar", label: "Exportar" },
+        { value: "button.aprobar", label: "Aprobar" },
+        { value: "button.rechazar", label: "Rechazar" },
+        { value: "button.observar", label: "Observar" },
+        { value: "button.regularizar", label: "Regularizar" },
+        { value: "button.historial_ot", label: "Historial OT" },
+        { value: "button.historial_oc", label: "Historial OC" },
+        { value: "button.ver_detalle", label: "Ver detalle" },
+      ];
+    }
+
+    if (form.tipoElemento === "system") {
+      return [{ value: "system.access", label: "Acceso general a la pagina" }];
+    }
+
+    return [];
+  }, [form.rutaPagina, form.tipoElemento, menus]);
+
+  const elementoOptionsConValorActual = useMemo(() => {
+    if (form.clavesAccion.length === 0) {
+      return elementoOptions;
+    }
+
+    const opcionesActuales = form.clavesAccion
+      .filter((clave) => !elementoOptions.some((option) => option.value === clave))
+      .map((clave) => ({ value: clave, label: clave }));
+
+    return [...opcionesActuales, ...elementoOptions];
+  }, [elementoOptions, form.clavesAccion]);
+
+  const empleadoSeleccionadoLabel = useMemo(
+    () => employeeOptions.find((option) => option.value === filtroSubjectId)?.label ?? "",
+    [employeeOptions, filtroSubjectId]
   );
 
   const filteredPermisos = useMemo(() => {
@@ -154,7 +247,9 @@ export default function SeguridadPermisosAccionesPage() {
 
     const empleado = empleados.find((item) => String(item.idEmpleado) === filtroSubjectId);
     return empleado
-      ? `${empleado.nombreEmpleado} (#${empleado.idEmpleado})`
+      ? empleado.idUsuario
+        ? `${empleado.nombreEmpleado} (${empleado.idUsuario})`
+        : empleado.nombreEmpleado
       : filtroSubjectId
         ? `Empleado #${filtroSubjectId}`
         : "Sin empleado";
@@ -182,7 +277,7 @@ export default function SeguridadPermisosAccionesPage() {
       const [menuData, rolesData, empleadosData] = await Promise.allSettled([
         menuService.obtenerCompleto(),
         rolesService.listarRoles(),
-        listarEmpleadosCta(),
+        listarFichaEmpleados(50),
       ]);
 
       if (menuData.status === "fulfilled") {
@@ -194,7 +289,15 @@ export default function SeguridadPermisosAccionesPage() {
       }
 
       if (empleadosData.status === "fulfilled") {
-        setEmpleados(Array.isArray(empleadosData.value) ? empleadosData.value : []);
+        setEmpleados(
+          empleadosData.value.rows
+            .map((row: FichaEmpleadoRow) => ({
+              idEmpleado: Number(row.IdEmpleado ?? row.idEmpleado ?? 0),
+              nombreEmpleado: normalizeText(row.NombreEmpleado ?? row.nombreEmpleado),
+              idUsuario: normalizeText(row.IdUsuario ?? row.idUsuario),
+            }))
+            .filter((empleado) => empleado.idEmpleado > 0 && empleado.nombreEmpleado)
+        );
       }
 
       if (
@@ -268,7 +371,7 @@ export default function SeguridadPermisosAccionesPage() {
     setForm({
       idPermisoAccion: permiso.idPermisoAccion,
       rutaPagina: permiso.rutaPagina,
-      claveAccion: permiso.claveAccion,
+      clavesAccion: [permiso.claveAccion],
       etiqueta: permiso.etiqueta ?? "",
       tipoElemento: (permiso.tipoElemento as TipoElementoPermiso) ?? "button",
       subjectType: permiso.idRol ? "rol" : "empleado",
@@ -292,8 +395,8 @@ export default function SeguridadPermisosAccionesPage() {
       nextError.push("La pagina es obligatoria.");
     }
 
-    if (!form.claveAccion.trim()) {
-      nextError.push("La clave de accion es obligatoria.");
+    if (form.clavesAccion.length === 0) {
+      nextError.push("Debe seleccionar al menos una opcion.");
     }
 
     if (!form.tipoElemento) {
@@ -323,27 +426,30 @@ export default function SeguridadPermisosAccionesPage() {
       setError("");
       setMensaje("");
 
-      const payload = {
-        idPermisoAccion: form.idPermisoAccion,
-        rutaPagina: form.rutaPagina.trim(),
-        claveAccion: form.claveAccion.trim(),
-        etiqueta: form.etiqueta.trim(),
-        tipoElemento: form.tipoElemento,
-        idRol: form.subjectType === "rol" ? Number(form.subjectId) : null,
-        idEmpleado: form.subjectType === "empleado" ? Number(form.subjectId) : null,
-        puedeVer: form.puedeVer,
-        puedeEjecutar: form.puedeEjecutar,
-        esActivo: form.esActivo,
-        usuario: usuarioEjecucion,
-      };
+      for (const [index, claveAccion] of form.clavesAccion.entries()) {
+        const opcion = elementoOptions.find((item) => item.value === claveAccion);
+        const payload = {
+          idPermisoAccion: index === 0 ? form.idPermisoAccion : null,
+          rutaPagina: form.rutaPagina.trim(),
+          claveAccion: claveAccion.trim(),
+          etiqueta: form.etiqueta.trim() || opcion?.label || claveAccion,
+          tipoElemento: form.tipoElemento,
+          idRol: form.subjectType === "rol" ? Number(form.subjectId) : null,
+          idEmpleado: form.subjectType === "empleado" ? Number(form.subjectId) : null,
+          puedeVer: form.puedeVer,
+          puedeEjecutar: form.puedeEjecutar,
+          esActivo: form.esActivo,
+          usuario: usuarioEjecucion,
+        };
 
-      if (form.idPermisoAccion) {
-        await seguridadPermisosAccionesService.actualizar(form.idPermisoAccion, payload);
-        setMensaje("Permiso actualizado correctamente.");
-      } else {
-        await seguridadPermisosAccionesService.guardar(payload);
-        setMensaje("Permiso creado correctamente.");
+        if (index === 0 && form.idPermisoAccion) {
+          await seguridadPermisosAccionesService.actualizar(form.idPermisoAccion, payload);
+        } else {
+          await seguridadPermisosAccionesService.guardar(payload);
+        }
       }
+
+      setMensaje(form.idPermisoAccion ? "Permiso actualizado correctamente." : "Permisos creados correctamente.");
 
       setPanelAbierto(false);
       limpiarFormulario();
@@ -416,12 +522,13 @@ export default function SeguridadPermisosAccionesPage() {
           <SelectBase
             label="Sujeto"
             value={filtroSubjectType}
-            onChange={(event) => {
-              const nextType = event.target.value as SubjectType;
-              setFiltroSubjectType(nextType);
-              setFiltroSubjectId("");
-              setPermisos([]);
-            }}
+              onChange={(event) => {
+                const nextType = event.target.value as SubjectType;
+                setFiltroSubjectType(nextType);
+                setFiltroSubjectId("");
+                setEmpleadoBusqueda("");
+                setPermisos([]);
+              }}
             options={[
               { value: "rol", label: "Rol" },
               { value: "empleado", label: "Empleado" },
@@ -440,14 +547,29 @@ export default function SeguridadPermisosAccionesPage() {
               style={{ flex: "1 1 260px" }}
             />
           ) : (
-            <SelectBase
-              label="Empleado"
-              value={filtroSubjectId}
-              onChange={(event) => setFiltroSubjectId(event.target.value)}
-              options={employeeOptions}
-              placeholder="Seleccione un empleado"
-              style={{ flex: "1 1 260px" }}
-            />
+            <>
+              <InputBase
+                label="Empleado"
+                value={empleadoBusqueda || empleadoSeleccionadoLabel}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  const selected = employeeOptions.find(
+                    (option) => option.label.toLowerCase() === value.trim().toLowerCase()
+                  );
+                  setEmpleadoBusqueda(value);
+                  setFiltroSubjectId(selected ? String(selected.value) : "");
+                }}
+                list="empleados-permisos-options"
+                autoComplete="off"
+                placeholder="Seleccione un empleado"
+                style={{ flex: "1 1 260px" }}
+              />
+              <datalist id="empleados-permisos-options">
+                {employeeOptions.map((option) => (
+                  <option key={String(option.value)} value={option.label} />
+                ))}
+              </datalist>
+            </>
           )}
 
           <SelectBase
@@ -582,7 +704,14 @@ export default function SeguridadPermisosAccionesPage() {
               <SelectBase
                 label="Pagina"
                 value={form.rutaPagina}
-                onChange={(event) => setForm((prev) => ({ ...prev, rutaPagina: event.target.value }))}
+                onChange={(event) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    rutaPagina: event.target.value,
+                    clavesAccion: [],
+                    etiqueta: "",
+                  }))
+                }
                 options={menuOptions}
                 placeholder="Seleccione una pagina"
               />
@@ -621,27 +750,35 @@ export default function SeguridadPermisosAccionesPage() {
                 />
               )}
 
-              <InputBase
-                label="Clave de accion"
-                value={form.claveAccion}
-                onChange={(event) => setForm((prev) => ({ ...prev, claveAccion: event.target.value }))}
-                placeholder="button.aprobar.ejecutar"
-              />
-
-              <InputBase
-                label="Etiqueta"
-                value={form.etiqueta}
-                onChange={(event) => setForm((prev) => ({ ...prev, etiqueta: event.target.value }))}
-                placeholder="Aprobar"
-              />
-
               <SelectBase
                 label="Tipo elemento"
                 value={form.tipoElemento}
                 onChange={(event) =>
-                  setForm((prev) => ({ ...prev, tipoElemento: event.target.value as TipoElementoPermiso }))
+                  setForm((prev) => ({
+                    ...prev,
+                    tipoElemento: event.target.value as TipoElementoPermiso,
+                    clavesAccion: [],
+                    etiqueta: "",
+                  }))
                 }
                 options={tipoElementoOptions}
+              />
+
+              <SelectBase
+                label="Opcion"
+                value={form.clavesAccion}
+                onChange={(event) => {
+                  const selectedValues = Array.from(event.target.selectedOptions, (option) => option.value);
+                  setForm((prev) => ({
+                    ...prev,
+                    clavesAccion: selectedValues,
+                  }));
+                }}
+                options={elementoOptionsConValorActual}
+                placeholder={elementoOptions.length > 0 ? "Seleccione una opcion" : "No hay opciones"}
+                disabled={elementoOptions.length === 0}
+                multiple
+                size={Math.min(Math.max(elementoOptionsConValorActual.length, 3), 7)}
               />
 
               <div style={styles.checkboxGroup}>
