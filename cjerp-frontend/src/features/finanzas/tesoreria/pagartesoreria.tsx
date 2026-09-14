@@ -20,6 +20,7 @@ import {
   LoaderCircle,
   ReceiptText,
   RefreshCw,
+  Printer,
   Search,
   ShieldCheck,
   Wallet,
@@ -58,6 +59,12 @@ const money = (value: number | null | undefined) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value ?? 0);
+const currencySymbol = (currency: string | null | undefined) => {
+  const value = (currency || "").toLocaleLowerCase();
+  if (value.includes("dolar") || value.includes("dólar") || value.includes("usd")) return "$";
+  if (value.includes("peso") || value.includes("dominican") || value.includes("dop")) return "RD$";
+  return "S/";
+};
 const fecha = (value: string | null) =>
   value ? value.slice(0, 10).split("-").reverse().join("/") : "—";
 const key = (r: PagoTesoreriaRow) => `${r.correlativo}:${r.idSite}`;
@@ -77,6 +84,13 @@ const emptyCatalogos: PagoCatalogos = {
   tiposPago: [],
   rendiciones: [],
 };
+type ProgramadoSubtab = "recibos" | "paolo" | "chucky" | "resumen";
+const programadoSubtabs: { key: ProgramadoSubtab; label: string }[] = [
+  { key: "recibos", label: "Recibos" },
+  { key: "paolo", label: "Gerencia" },
+  { key: "chucky", label: "Bancos" },
+  { key: "resumen", label: "Resumen" },
+];
 const tabs = [
   { estado: 1, label: "Revisión", icon: ShieldCheck },
   { estado: 9, label: "Contabilidad", icon: ReceiptText },
@@ -135,6 +149,12 @@ function SelectField({
 
 export default function PagarTesoreriaPage() {
   const [estado, setEstado] = useState(1);
+  const [programadoSubtab, setProgramadoSubtab] = useState<ProgramadoSubtab>("recibos");
+  const [paoloGroupMode, setPaoloGroupMode] = useState<"cliente" | "moneda" | "solicitante">("cliente");
+  const [paoloSolicitanteFilter, setPaoloSolicitanteFilter] = useState("");
+  const [paoloCollapsed, setPaoloCollapsed] = useState<Set<string>>(new Set());
+  const [chuckyGroupMode, setChuckyGroupMode] = useState<"banco" | "responsable" | "moneda">("banco");
+  const [chuckyCollapsed, setChuckyCollapsed] = useState<Set<string>>(new Set());
   const esPago = estado === 5 || estado === 8;
   // Se conserva el flujo de registro para una futura habilitación, pero no se
   // encuentra disponible en Programado ni Administrativo por el momento.
@@ -334,6 +354,115 @@ export default function PagarTesoreriaPage() {
     solicitantesFiltro,
     rendicion,
   ]);
+  const paoloGroups = useMemo(() => {
+    const groups = new Map<string, PagoTesoreriaRow[]>();
+    for (const row of rows.filter((item) => !paoloSolicitanteFilter || item.solicitante === paoloSolicitanteFilter)) {
+      const label = paoloGroupMode === "moneda"
+        ? row.moneda || "Sin moneda"
+        : paoloGroupMode === "solicitante"
+          ? row.solicitante || "Sin solicitante"
+          : row.cliente || "Sin cliente";
+      const currency = row.moneda || "Sin moneda";
+      const groupKey = `${label}\u001f${currency}`;
+      const list = groups.get(groupKey) ?? [];
+      list.push(row);
+      groups.set(groupKey, list);
+    }
+    return [...groups.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([groupKey, items]) => ({
+        cliente: groupKey.split("\u001f")[0],
+        moneda: groupKey.split("\u001f")[1] || "Sin moneda",
+        items: [...items].sort((a, b) =>
+          [a.responsable, a.tarea, a.solicitante, a.cuenta]
+            .map((value) => value || "")
+            .join(" ")
+            .localeCompare([b.responsable, b.tarea, b.solicitante, b.cuenta].map((value) => value || "").join(" ")),
+        ),
+        total: sum(items, "total"),
+      }));
+  }, [rows, paoloGroupMode, paoloSolicitanteFilter]);
+  const paoloSolicitantes = useMemo(
+    () => [...new Set(rows.map((row) => row.solicitante).filter(Boolean))].sort((a, b) => a!.localeCompare(b!)),
+    [rows],
+  );
+  const paoloAllCollapsed = paoloGroups.length > 0 && paoloGroups.every((group) => paoloCollapsed.has(`${group.cliente}-${group.moneda}`));
+  const chuckyGroups = useMemo(() => {
+    const groups = new Map<string, PagoTesoreriaRow[]>();
+    for (const row of rows) {
+      const primary = chuckyGroupMode === "banco" ? (row.idBancoCta == null ? "Sin banco" : String(row.idBancoCta)) : chuckyGroupMode === "responsable" ? (row.responsable || "Sin responsable") : (row.moneda || "Sin moneda");
+      const key = `${primary}\u001f${row.moneda || "Sin moneda"}`;
+      groups.set(key, [...(groups.get(key) ?? []), row]);
+    }
+    return [...groups.entries()].map(([key, items]) => {
+      const responsables = new Map<string, PagoTesoreriaRow>();
+      for (const item of items) {
+        const responsableKey = item.responsable || "Sin responsable";
+        const actual = responsables.get(responsableKey);
+        if (actual) actual.total += item.total || 0;
+        else responsables.set(responsableKey, { ...item });
+      }
+      const consolidado = [...responsables.values()];
+      return { label: key.split("\u001f")[0], moneda: key.split("\u001f")[1], items: consolidado, total: sum(consolidado, "total") };
+    });
+  }, [rows, chuckyGroupMode]);
+  const resumenBancos = useMemo(() => {
+    const map = new Map<string, { banco: string; moneda: string; total: number }>();
+    for (const row of rows) {
+      const banco = row.idBancoCta == null ? "Sin banco" : catalogos.bancos.find((item) => item.id === row.idBancoCta)?.nombre || "Banco no encontrado";
+      const moneda = row.moneda || "Sin moneda";
+      const key = `${banco}\u001f${moneda}`;
+      const actual = map.get(key);
+      if (actual) actual.total += row.totalPagar || 0;
+      else map.set(key, { banco, moneda, total: row.totalPagar || 0 });
+    }
+    return [...map.values()].sort((a, b) => `${a.banco} ${a.moneda}`.localeCompare(`${b.banco} ${b.moneda}`));
+  }, [rows, catalogos.bancos]);
+  useEffect(() => {
+    if (estado !== 8 || programadoSubtab !== "paolo") return;
+    setPaoloCollapsed(new Set(paoloGroups.map((group) => `${group.cliente}-${group.moneda}`)));
+  }, [estado, programadoSubtab, rows, paoloGroupMode]);
+  useEffect(() => {
+    if (estado !== 8 || programadoSubtab !== "chucky") return;
+    setChuckyCollapsed(new Set(chuckyGroups.map((group) => `${group.label}-${group.moneda}`)));
+  }, [estado, programadoSubtab, rows, chuckyGroupMode]);
+  const exportarChucky = () => {
+    const agrupados = new Map<string, { IdBancoCta: number | string; Banco: string; Responsable: string; Cuenta: string; Moneda: string; Total: number }>();
+    for (const row of rows) {
+      const banco = row.idBancoCta == null ? "Sin banco" : catalogos.bancos.find((item) => item.id === row.idBancoCta)?.nombre || "Banco no encontrado";
+      const key = `${row.idBancoCta ?? ""}\u001f${row.responsable || "Sin responsable"}\u001f${row.moneda || "Sin moneda"}`;
+      const actual = agrupados.get(key);
+      if (actual) actual.Total += row.total || 0;
+      else agrupados.set(key, { IdBancoCta: row.idBancoCta ?? "", Banco: banco, Responsable: row.responsable || "Sin responsable", Cuenta: row.cuenta || "", Moneda: row.moneda || "Sin moneda", Total: row.total || 0 });
+    }
+    const data = [...agrupados.values()];
+    const sheet = XLSX.utils.json_to_sheet(data); sheet["!cols"] = [14, 32, 24, 14, 16].map((wch) => ({ wch }));
+    const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, "Bancos"); XLSX.writeFile(book, `programado-bancos-${hoy()}.xlsx`);
+  };
+  const exportarResumen = () => {
+    const data = resumenBancos.map((item) => ({ BancoCta: item.banco, Moneda: item.moneda, SumaTotalPagar: item.total }));
+    const sheet = XLSX.utils.json_to_sheet(data); sheet["!cols"] = [{ wch: 24 }, { wch: 14 }, { wch: 20 }];
+    const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, "Resumen"); XLSX.writeFile(book, `programado-resumen-${hoy()}.xlsx`);
+  };
+  const exportarResumenPdf = async () => {
+    const [{ default: jsPDF }, autoTableModule] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    doc.setFontSize(15); doc.text("Resumen de Programado", 14, 18);
+    const horaDocumento = new Intl.DateTimeFormat("es-PE", { timeZone: "America/Lima", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date());
+    doc.setFontSize(9); doc.text(`Fecha del documento: ${fecha(hoy())}  Hora: ${horaDocumento}`, 14, 25);
+    const autoTable = autoTableModule.default;
+    autoTable(doc, { startY: 31, head: [["BancoCta", "Moneda", "Suma de TotalPagar"]], body: resumenBancos.map((item) => [item.banco, item.moneda, `${currencySymbol(item.moneda)} ${money(item.total)}`]), foot: [["Total general", "", `${currencySymbol(resumenBancos[0]?.moneda)} ${money(resumenBancos.reduce((total, item) => total + item.total, 0))}`]], styles: { fontSize: 9 }, headStyles: { fillColor: [219, 234, 247], textColor: [31, 41, 55] }, footStyles: { fillColor: [219, 234, 247], textColor: [31, 41, 55], fontStyle: "bold" } });
+    let y = ((doc as any).lastAutoTable?.finalY ?? 31) + 12;
+    doc.setFontSize(11); doc.text("Montos por banco", 14, y); y += 7;
+    const max = Math.max(...resumenBancos.map((item) => item.total), 1);
+    for (const item of resumenBancos) {
+      doc.setFontSize(8); doc.text(`${item.banco} · ${item.moneda}`, 14, y + 3);
+      doc.setFillColor(226, 232, 240); doc.rect(68, y, 95, 5, "F");
+      doc.setFillColor(37, 99, 235); doc.rect(68, y, Math.max((item.total / max) * 95, 1), 5, "F");
+      doc.text(`${currencySymbol(item.moneda)} ${money(item.total)}`, 166, y + 3); y += 9;
+    }
+    doc.save(`programado-resumen-${hoy()}.pdf`);
+  };
   const rowsForFilterOption = (exclude: string) => {
     const search = query.trim().toLocaleLowerCase();
     return rows.filter((r) =>
@@ -446,6 +575,7 @@ export default function PagarTesoreriaPage() {
     const start = next === 4 ? `${hoy().slice(0, 7)}-01` : "";
     const end = next === 4 ? hoy() : "";
     setEstado(next);
+    setProgramadoSubtab("recibos");
     setDesde(start);
     setHasta(end);
     setQuery("");
@@ -615,6 +745,7 @@ export default function PagarTesoreriaPage() {
       Tarea: string;
       Solicitante: string;
       Cuenta: string;
+      Moneda: string;
       "Suma de Total": number;
       "Suma de Retencion": number;
       "Suma de TotalPagar": number;
@@ -626,8 +757,9 @@ export default function PagarTesoreriaPage() {
         Tarea: r.tarea || "",
         Solicitante: r.solicitante || "",
         Cuenta: r.cuenta || "",
+        Moneda: r.moneda || "",
       };
-      const id = [values.Cliente, values.Responsable, values.Tarea, values.Solicitante, values.Cuenta].join("\u001f");
+      const id = [values.Cliente, values.Responsable, values.Tarea, values.Solicitante, values.Cuenta, values.Moneda].join("\u001f");
       const actual = agrupados.get(id);
       if (actual) {
         actual["Suma de Total"] += r.total || 0;
@@ -646,20 +778,55 @@ export default function PagarTesoreriaPage() {
       [a.Cliente, a.Responsable, a.Tarea, a.Solicitante, a.Cuenta]
         .join(" ").localeCompare([b.Cliente, b.Responsable, b.Tarea, b.Solicitante, b.Cuenta].join(" ")),
     );
-    const sheet = XLSX.utils.json_to_sheet(data, {
-      header: ["Cliente", "Responsable", "Tarea", "Solicitante", "Cuenta", "Suma de Total", "Suma de Retencion", "Suma de TotalPagar"],
+    const exportRows: typeof data = [];
+    const rowLevels: { level: number }[] = [];
+    for (const cliente of [...new Set(data.map((row) => row.Cliente))]) {
+      const items = data.filter((row) => row.Cliente === cliente);
+      exportRows.push(...items);
+      rowLevels.push(...items.map(() => ({ level: 1 })));
+      exportRows.push({
+        Cliente: `Total ${cliente || "sin cliente"}`,
+        Responsable: "",
+        Tarea: "",
+        Solicitante: "",
+        Cuenta: "",
+        Moneda: "",
+        "Suma de Total": items.reduce((total, row) => total + row["Suma de Total"], 0),
+        "Suma de Retencion": items.reduce((total, row) => total + row["Suma de Retencion"], 0),
+        "Suma de TotalPagar": items.reduce((total, row) => total + row["Suma de TotalPagar"], 0),
+      });
+      rowLevels.push({ level: 0 });
+    }
+    const sheet = XLSX.utils.json_to_sheet(exportRows, {
+       header: ["Cliente", "Responsable", "Tarea", "Solicitante", "Cuenta", "Moneda", "Suma de Total", "Suma de Retencion", "Suma de TotalPagar"],
     });
+    const totalGeneral = {
+      Cliente: "Total general",
+      Responsable: "",
+      Tarea: "",
+      Solicitante: "",
+      Cuenta: "",
+      Moneda: "",
+      "Suma de Total": data.reduce((total, row) => total + row["Suma de Total"], 0),
+      "Suma de Retencion": data.reduce((total, row) => total + row["Suma de Retencion"], 0),
+      "Suma de TotalPagar": data.reduce((total, row) => total + row["Suma de TotalPagar"], 0),
+    };
     XLSX.utils.sheet_add_aoa(sheet, [[
-      "Total general", "", "", "", "",
-      data.reduce((total, row) => total + row["Suma de Total"], 0),
-      data.reduce((total, row) => total + row["Suma de Retencion"], 0),
-      data.reduce((total, row) => total + row["Suma de TotalPagar"], 0),
+      totalGeneral.Cliente, "", "", "", "", "", totalGeneral["Suma de Total"],
+      totalGeneral["Suma de Retencion"], totalGeneral["Suma de TotalPagar"],
     ]], { origin: -1 });
-    sheet["!cols"] = [13, 30, 36, 38, 18, 16, 20, 22].map((wch) => ({ wch }));
-    sheet["!autofilter"] = { ref: `A1:H${data.length + 1}` };
+    sheet["!rows"] = [...rowLevels, { level: 0 }];
+    for (let row = 2; row <= exportRows.length + 2; row += 1) {
+      for (const column of ["G", "H", "I"]) {
+        const cell = sheet[`${column}${row}`];
+        if (cell) cell.z = '"S/" #,##0.00';
+      }
+    }
+    sheet["!cols"] = [13, 30, 36, 38, 18, 12, 16, 20, 22].map((wch) => ({ wch }));
+    sheet["!autofilter"] = { ref: `A1:I${exportRows.length + 1}` };
     const book = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(book, sheet, "Paolo");
-    XLSX.writeFile(book, `programado-paolo-${hoy()}.xlsx`);
+    XLSX.utils.book_append_sheet(book, sheet, "Gerencia");
+    XLSX.writeFile(book, `programado-gerencia-${hoy()}.xlsx`);
   };
 
   return (
@@ -712,6 +879,26 @@ export default function PagarTesoreriaPage() {
             </button>
           ))}
         </nav>
+        {estado === 8 && (
+          <nav className="pt-subtabs" aria-label="Vistas de Programado">
+            {programadoSubtabs.map((subtab) => (
+              <button
+                key={subtab.key}
+                type="button"
+                className={programadoSubtab === subtab.key ? "active" : ""}
+                aria-current={programadoSubtab === subtab.key ? "page" : undefined}
+                onClick={() => {
+                  setProgramadoSubtab(subtab.key);
+                  setSelected(new Set());
+                  setExpanded(new Set());
+                  setDetail(null);
+                }}
+              >
+                {subtab.label}
+              </button>
+            ))}
+          </nav>
+        )}
         {!esReporte && <form
           className="pt-filters"
           onSubmit={(e) => {
@@ -806,7 +993,7 @@ export default function PagarTesoreriaPage() {
           </div>
         )}
         <div className={`pt-workspace${estado === 1 || (esPago && !registroPagoAbierto) ? " pt-workspace-review" : ""}`}>
-          <section className="pt-list">
+          <section className={`pt-list${estado === 8 && programadoSubtab !== "recibos" ? " pt-programado-hidden" : ""}`}>
             {esReporte && (
               <div className="pt-report" aria-label="Reporte de tesorería">
                 {loading ? (
@@ -872,10 +1059,10 @@ export default function PagarTesoreriaPage() {
                 <button
                   disabled={!visibleRows.length || saving}
                   onClick={exportarPaolo}
-                  title="Exportar formato Paolo"
+                  title="Exportar formato Gerencia"
                 >
                   <Download size={15} />
-                  Paolo
+                  Gerencia
                 </button>
               )}
             </div>}
@@ -1394,7 +1581,81 @@ export default function PagarTesoreriaPage() {
               />
             )}
           </section>
-          {estado !== 1 && !esReporte && (!esPago || registroPagoAbierto) && (
+          {estado === 8 && programadoSubtab !== "recibos" && (
+            <section className="pt-programado-view" aria-label={`Programado · ${programadoSubtabs.find((item) => item.key === programadoSubtab)?.label}`}>
+              <div className="pt-list-toolbar">
+                <div>
+                  <h2>Programado · {programadoSubtabs.find((item) => item.key === programadoSubtab)?.label}</h2>
+                  <span>{rows.length} recibos disponibles</span>
+                </div>
+                {programadoSubtab === "paolo" && (
+                  <label className="pt-paolo-group-select">
+                    <span>Modalidad de agrupamiento</span>
+                    <select value={paoloGroupMode} onChange={(event) => setPaoloGroupMode(event.target.value as typeof paoloGroupMode)}>
+                      <option value="cliente">Agrupar por cliente</option>
+                      <option value="moneda">Agrupar por moneda</option>
+                      <option value="solicitante">Agrupar por solicitante</option>
+                    </select>
+                  </label>
+                )}
+                {programadoSubtab === "paolo" && paoloGroupMode === "solicitante" && (
+                  <label className="pt-paolo-group-select">
+                    <span>Solicitante</span>
+                    <select value={paoloSolicitanteFilter} onChange={(event) => setPaoloSolicitanteFilter(event.target.value)}>
+                      <option value="">Todos los solicitantes</option>
+                      {paoloSolicitantes.map((solicitante) => <option key={solicitante} value={solicitante!}>{solicitante}</option>)}
+                    </select>
+                  </label>
+                )}
+                {programadoSubtab === "paolo" && paoloGroups.length > 0 && (
+                  <button type="button" className="pt-paolo-collapse" onClick={() => setPaoloCollapsed(paoloAllCollapsed ? new Set() : new Set(paoloGroups.map((group) => `${group.cliente}-${group.moneda}`)))}>
+                    {paoloAllCollapsed ? "Expandir grupos" : "Comprimir grupos"}
+                  </button>
+                )}
+                {programadoSubtab === "chucky" && <label className="pt-paolo-group-select"><span>Agrupar por</span><select value={chuckyGroupMode} onChange={(e) => setChuckyGroupMode(e.target.value as typeof chuckyGroupMode)}><option value="banco">Agrupar por banco</option><option value="responsable">Agrupar por responsable</option><option value="moneda">Agrupar por moneda</option></select></label>}
+                {programadoSubtab === "chucky" && <button type="button" className="pt-paolo-collapse" onClick={() => setChuckyCollapsed(chuckyCollapsed.size ? new Set() : new Set(chuckyGroups.map((g) => `${g.label}-${g.moneda}`)))}>{chuckyCollapsed.size ? "Expandir grupos" : "Comprimir grupos"}</button>}
+                {programadoSubtab === "chucky" && <button type="button" disabled={!rows.length || saving} onClick={exportarChucky}><Download size={15} /> Excel</button>}
+                {programadoSubtab === "resumen" && <button type="button" disabled={!rows.length || saving} onClick={exportarResumen}><Download size={15} /> Excel</button>}
+                {programadoSubtab === "resumen" && <button type="button" disabled={!rows.length || saving} onClick={() => void exportarResumenPdf()} title="Exportar resumen a PDF"><Printer size={15} /> PDF</button>}
+                {programadoSubtab === "paolo" && (
+                  <button type="button" disabled={!visibleRows.length || saving} onClick={exportarPaolo} title="Exportar formato Paolo">
+                    <Download size={15} /> Excel
+                  </button>
+                )}
+              </div>
+              {programadoSubtab === "resumen" ? (
+                <div className="pt-resumen-content"><div className="pt-paolo-table-wrap"><table className="pt-paolo-table pt-resumen-table"><thead><tr><th>BancoCta</th><th>Moneda</th><th>Suma de TotalPagar</th></tr></thead><tbody>{resumenBancos.map((item) => <tr key={`${item.banco}-${item.moneda}`}><td>{item.banco}</td><td>{item.moneda}</td><td className="pt-paolo-number">{currencySymbol(item.moneda)} {money(item.total)}</td></tr>)}<tr className="pt-paolo-total"><td colSpan={2}>Total general</td><td className="pt-paolo-number">{currencySymbol(resumenBancos[0]?.moneda)} {money(resumenBancos.reduce((total, item) => total + item.total, 0))}</td></tr></tbody></table></div><div className="pt-resumen-bars" aria-label="Montos por banco"><h3>Montos por banco</h3>{resumenBancos.map((item) => { const max = Math.max(...resumenBancos.map((value) => value.total), 1); return <div className="pt-resumen-bar-row" key={`bar-${item.banco}-${item.moneda}`}><span>{item.banco} · {item.moneda}</span><div><i style={{ width: `${(item.total / max) * 100}%` }} /></div><strong>{currencySymbol(item.moneda)} {money(item.total)}</strong></div>; })}</div></div>
+              ) : programadoSubtab === "chucky" ? (
+                <div className="pt-paolo-table-wrap"><table className="pt-paolo-table"><thead><tr><th>IdBancoCta · Banco</th><th>Responsable</th><th>Cuenta</th><th>Moneda</th><th>Suma de Total</th></tr></thead><tbody>{chuckyGroups.map((group) => { const id = `${group.label}-${group.moneda}`; const bancoGrupo = group.items[0]?.idBancoCta == null ? "Sin banco" : catalogos.bancos.find((item) => item.id === group.items[0]?.idBancoCta)?.nombre || "Banco no encontrado"; return <Fragment key={id}><tr className="pt-paolo-group-header"><td colSpan={5}><button type="button" onClick={() => setChuckyCollapsed((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; })}>{chuckyCollapsed.has(id) ? "▶" : "▼"} {group.label} · {bancoGrupo} · {group.moneda}</button></td></tr>{!chuckyCollapsed.has(id) && group.items.map((row, i) => { const banco = row.idBancoCta == null ? "Sin banco" : catalogos.bancos.find((item) => item.id === row.idBancoCta)?.nombre || "Banco no encontrado"; return <tr key={`${id}-${row.correlativo}-${i}`}><td>{row.idBancoCta == null ? "Sin banco" : `${row.idBancoCta} · ${banco}`}</td><td>{row.responsable || ""}</td><td>{row.cuenta || ""}</td><td>{row.moneda || ""}</td><td className="pt-paolo-number">{currencySymbol(row.moneda)} {money(row.total)}</td></tr>; })}<tr className="pt-paolo-subtotal"><td colSpan={4}>TOTAL</td><td className="pt-paolo-number">{currencySymbol(group.moneda)} {money(group.total)}</td></tr></Fragment>})}</tbody></table></div>
+              ) : programadoSubtab === "paolo" && (
+                <div className="pt-paolo-table-wrap">
+                  <table className="pt-paolo-table">
+                    <thead><tr><th>Cliente</th><th>Responsable</th><th>Tarea</th><th>Solicitante</th><th>Cuenta</th><th>Moneda</th><th>Suma de Total</th></tr></thead>
+                    <tbody>
+                      {paoloGroups.map((group) => (
+                        <Fragment key={group.cliente}>
+                          <tr className="pt-paolo-group-header"><td colSpan={7}><button type="button" onClick={() => setPaoloCollapsed((current) => { const next = new Set(current); if (next.has(`${group.cliente}-${group.moneda}`)) next.delete(`${group.cliente}-${group.moneda}`); else next.add(`${group.cliente}-${group.moneda}`); return next; })}>{paoloCollapsed.has(`${group.cliente}-${group.moneda}`) ? "▶" : "▼"} {group.cliente} · {group.moneda} ({group.items.length})</button></td></tr>
+                          {!paoloCollapsed.has(`${group.cliente}-${group.moneda}`) && group.items.map((row, index) => (
+                            <tr key={`${group.cliente}-${row.correlativo}-${row.idSite}-${index}`}>
+                              <td>{index === 0 ? group.cliente : ""}</td><td>{row.responsable || ""}</td><td>{row.tarea || ""}</td><td>{row.solicitante || ""}</td><td>{row.cuenta || ""}</td><td>{row.moneda || ""}</td><td className="pt-paolo-number">{currencySymbol(row.moneda)} {money(row.total)}</td>
+                            </tr>
+                          ))}
+                          <tr className="pt-paolo-subtotal"><td colSpan={5}>Total {group.cliente}</td><td>{group.moneda}</td><td className="pt-paolo-number">{currencySymbol(group.moneda)} {money(group.total)}</td></tr>
+                        </Fragment>
+                      ))}
+                      {!(paoloGroupMode === "solicitante" && paoloSolicitanteFilter) && <tr className="pt-paolo-total"><td colSpan={6}>Total general</td><td className="pt-paolo-number">S/ {money(sum(rows, "total"))}</td></tr>}
+                    </tbody>
+                  </table>
+                  {!paoloGroups.length && <div className="pt-programado-view-empty"><strong>Sin registros</strong><span>No hay recibos que coincidan con los filtros.</span></div>}
+                </div>
+              )}
+              {programadoSubtab !== "paolo" && programadoSubtab !== "chucky" && programadoSubtab !== "resumen" && <div className="pt-programado-view-empty">
+                <strong>Vista {programadoSubtabs.find((item) => item.key === programadoSubtab)?.label}</strong>
+                <span>Seleccione esta pestaña para consultar la información correspondiente.</span>
+              </div>}
+            </section>
+          )}
+          {estado !== 1 && !esReporte && (!esPago || registroPagoAbierto) && (estado !== 8 || programadoSubtab === "recibos") && (
             <aside className="pt-payment">
               {!esPago && (
                 <PagoEtapaForm
