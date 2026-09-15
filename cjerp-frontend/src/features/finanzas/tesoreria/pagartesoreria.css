@@ -291,7 +291,8 @@
   font-size: 16px;
 }
 .pt-paolo-table-wrap { overflow-x: auto; }
-.pt-paolo-group-select { display: flex; flex-direction: column; gap: 4px; min-width: 190px; margin-left: auto; }
+.pt-paolo-group-select { display: flex; flex-direction: column; gap: 4px; min-width: 190px; margin-left: 0; }
+.pt-list-toolbar > .pt-paolo-group-select:first-of-type { margin-left: auto; }
 .pt-paolo-group-select span { color: #607089; font-size: 10px; font-weight: 600; }
 .pt-paolo-group-select select { border: 1px solid #cbd5e1; border-radius: 6px; padding: 7px 9px; background: #fff; color: #1f2937; font-size: 12px; }
 .pt-paolo-collapse { align-self: flex-end; padding: 7px 10px; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; color: #334155; font-size: 12px; }
