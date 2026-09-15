@@ -27,6 +27,7 @@ namespace CjERP.Infrastructure.Services
         private const string StoredProcedureImportarResumenOT = "dbo.sp_Importar_ResumenOT";
         private const string StoredProcedureMovimientosGastosIngresos = "dbo.sp_Movimientos_Consulta_GastosIngresos";
         private const string StoredProcedureGastosPagados = "dbo.sp_Planilla_Consulta_Gastos_Pagados";
+        private const string StoredProcedureAnalisisGastos = "dbo.sp_Planilla_Consulta_Gastos_Estados";
         private const string QueryClientesActivos = "clientes-activos";
         private const string QueryProyectosActivos = "proyectos-activos";
         private readonly ISqlCommandFactory _sqlCommandFactory;
@@ -331,6 +332,7 @@ namespace CjERP.Infrastructure.Services
                 "importar-consulta-dsh" => StoredProcedureImportarConsultaDsh,
                 "importar-resumen-ot" => StoredProcedureImportarResumenOT,
                 "movimientos-gastos-ingresos" => StoredProcedureMovimientosGastosIngresos,
+                "analisis-gastos" => StoredProcedureAnalisisGastos,
                 "clientes-activos" => QueryClientesActivos,
                 "proyectos-activos" => QueryProyectosActivos,
                 _ => StoredProcedureEstados
@@ -649,6 +651,13 @@ WHERE Correlativo IN @Correlativos";
         {
             if (!string.Equals(storedProcedureName, StoredProcedureAprobar, StringComparison.OrdinalIgnoreCase))
             {
+                if (string.Equals(storedProcedureName, StoredProcedureAnalisisGastos, StringComparison.OrdinalIgnoreCase))
+                {
+                    var allowedParametersAnalisis = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    { "pProyecto", "Ano", "Id", "IdResponsable", "IdCliente", "IdProyecto", "IdSite", "Estados" };
+                    return parametros.Where(parametro => !string.IsNullOrWhiteSpace(parametro.Nombre) && allowedParametersAnalisis.Contains(parametro.Nombre.Trim().TrimStart('@')));
+                }
+
                 if (string.Equals(storedProcedureName, StoredProcedureVacaciones, StringComparison.OrdinalIgnoreCase))
                 {
                     var allowedParametersVacaciones = new HashSet<string>(StringComparer.OrdinalIgnoreCase)

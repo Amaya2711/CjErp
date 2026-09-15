@@ -34,6 +34,7 @@ import type { EmpleadoCta } from "../../../models/empleadoCta";
 import type { FiltroOperativoValue } from "../../../models/filtroOperativo";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 import { FileDown } from "lucide-react";
+import { buildPlanillaConsultaEstadosRequest, consultarPlanillaEstados } from "../../../api/planillaConsultaService";
 
 type ColumnFilterDropdownProps = {
   header: { key: string; label: string };
@@ -451,6 +452,8 @@ export default function OcV1Page() {
   const [montoOcRows, setMontoOcRows] = useState<OrdenCompraMontoOcDto[]>([]);
   const [montoOcLoading, setMontoOcLoading] = useState(false);
   const [reporteDetalles, setReporteDetalles] = useState<OrdenCompraDetalleDto[]>([]);
+  const [reportePlanillaRows, setReportePlanillaRows] = useState<Record<string, unknown>[]>([]);
+  const [reportePlanillaColumns, setReportePlanillaColumns] = useState<string[]>([]);
   const [reporteConsultado, setReporteConsultado] = useState(false);
   const [pdfExportingOc, setPdfExportingOc] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
@@ -467,6 +470,7 @@ export default function OcV1Page() {
   const [busqueda, setBusqueda] = useState("");
   const [estadoVista, setEstadoVista] = useState<EstadoVista>("todos");
   const [vistaOc, setVistaOc] = useState<VistaOc>("aprobacion");
+  const [reporteSubtab, setReporteSubtab] = useState<"listado" | "oc-gastos" | "resumen">("listado");
   const [nivelAprobacion, setNivelAprobacion] = useState<1 | 2 | 3>(1);
   const [filtroValidadorAprobacion, setFiltroValidadorAprobacion] = useState<string[]>([]);
   const [detalleOcTab, setDetalleOcTab] = useState<DetalleOcTab>("detalle");
@@ -635,6 +639,21 @@ export default function OcV1Page() {
     setReporteConsultado(true);
     setError("");
     try {
+      if (reporteSubtab === "oc-gastos") {
+        const responsableNombre = responsablesReporteFiltro[0] ?? "";
+        const responsableId = responsableNombre
+          ? cabeceras.find((item) => item.responsable === responsableNombre)?.idResponsable
+          : undefined;
+        const request = buildPlanillaConsultaEstadosRequest([
+          { nombre: "Estados", valor: reporteFiltros.estado || "0,2,3,4,6", tipo: "string" },
+          ...(responsableId ? [{ nombre: "IdResponsable", valor: String(responsableId), tipo: "int" as const }] : []),
+        ]);
+        request.consulta = "analisis-gastos";
+        const response = await consultarPlanillaEstados(request, { timeoutMs: 60000 });
+        setReportePlanillaRows(Array.isArray(response?.rows) ? response.rows : []);
+        setReportePlanillaColumns(Array.isArray(response?.columns) ? response.columns : []);
+        return;
+      }
       const response = await buscarOrdenCompraDetalle();
       setReporteDetalles(Array.isArray(response) ? response : []);
     } catch (err) {
@@ -654,7 +673,7 @@ export default function OcV1Page() {
     if (vistaOc === "reporte" && tieneFiltro && !reporteConsultado && !reporteLoading) {
       void loadReporteDetalles();
     }
-  }, [reporteConsultado, reporteFiltros, reporteLoading, vistaOc]);
+  }, [reporteConsultado, reporteFiltros, reporteLoading, reporteSubtab, vistaOc]);
 
   useEffect(() => {
     if (!columnaFiltroAbierta) return;
@@ -1840,7 +1859,12 @@ export default function OcV1Page() {
 
       {vistaOc === "reporte" ? (
         <section style={ocV1Styles.view}>
-          <div style={styles.card}>
+          <nav style={{ display: "flex", gap: 6, marginBottom: 12, borderBottom: "1px solid #DDE3E1" }} aria-label="Vistas de reporte">
+            {[{ key: "listado", label: "Listado" }, { key: "oc-gastos", label: "OC/Gastos" }, { key: "resumen", label: "Resumen" }].map((tab) => (
+              <button key={tab.key} type="button" onClick={() => { setReporteSubtab(tab.key as typeof reporteSubtab); setReporteConsultado(false); }} style={{ ...ocV1Styles.viewTab, ...(reporteSubtab === tab.key ? ocV1Styles.viewTabActive : {}) }}>{tab.label}</button>
+            ))}
+          </nav>
+          <div style={{ ...styles.card, display: reporteSubtab === "listado" || reporteSubtab === "oc-gastos" ? undefined : "none" }}>
             <div style={styles.sectionHeader}>
               <div>
                 <h2 style={styles.sectionTitle}>Reporte y trazabilidad</h2>
@@ -1942,7 +1966,7 @@ export default function OcV1Page() {
               <table style={styles.table}>
                 <thead>
                   <tr>
-                    <th style={{ ...styles.th, width: 52 }} aria-label="Exportar PDF"></th>
+                    {String(reporteSubtab) === "oc-gastos" ? reportePlanillaColumns.map((column) => <th key={`pla-head-${column}`} style={styles.th}>{column}</th>) : <th style={{ ...styles.th, width: 52 }} aria-label="Exportar PDF"></th>}
                     <th style={styles.th}>OC</th>
                     <th style={styles.th}>Fecha</th>
                     <th style={styles.th}>Solicitante</th>
@@ -1960,19 +1984,19 @@ export default function OcV1Page() {
                   </tr>
                 </thead>
                 <tbody>
-                  {!reporteConsultado ? (
+                  {String(reporteSubtab) === "oc-gastos" ? (reportePlanillaRows.length === 0 ? <tr><td style={styles.td} colSpan={Math.max(reportePlanillaColumns.length, 1)}>{!reporteConsultado ? "Seleccione al menos un filtro para consultar los gastos." : reporteLoading ? "Cargando datos..." : "No hay registros de Planilla."}</td></tr> : reportePlanillaRows.map((row, index) => <tr key={`pla-${String(row.ID ?? row.Correlativo ?? index)}`} style={styles.tr}>{reportePlanillaColumns.map((column) => <td key={`${index}-${column}`} style={styles.td}>{String(row[column] ?? "—")}</td>)}</tr>)) : String(reporteSubtab) !== "oc-gastos" && !reporteConsultado ? (
                     <tr>
                       <td style={styles.td} colSpan={15}>
                         Seleccione al menos un filtro para consultar la trazabilidad.
                       </td>
                     </tr>
-                  ) : reporteRowsFiltradas.length === 0 ? (
+                  ) : String(reporteSubtab) !== "oc-gastos" && reporteRowsFiltradas.length === 0 ? (
                     <tr>
                       <td style={styles.td} colSpan={15}>
                         {reporteLoading ? "Cargando datos del reporte..." : "No hay ordenes de compra para los filtros seleccionados."}
                       </td>
                     </tr>
-                  ) : reporteRowsFiltradas.map((item) => (
+                  ) : String(reporteSubtab) !== "oc-gastos" ? reporteRowsFiltradas.map((item) => (
                     <tr key={`rep-${item.idOc}`} style={styles.tr}>
                       <td style={styles.td}>
                         <button
@@ -2001,11 +2025,12 @@ export default function OcV1Page() {
                       <td style={styles.td}><ValidationBadge value={item.idAprobador2} /></td>
                       <td style={styles.td}><ValidationBadge value={item.idAprobador3} /></td>
                     </tr>
-                  ))}
+                  )) : null}
                 </tbody>
               </table>
             </div>
           </div>
+          {reporteSubtab === "resumen" && <div style={{ ...styles.card, padding: 32, textAlign: "center", color: "#607089" }}><h2 style={styles.sectionTitle}>Resumen</h2><p style={styles.sectionText}>Seleccione los filtros para consultar esta vista.</p></div>}
         </section>
       ) : null}
 

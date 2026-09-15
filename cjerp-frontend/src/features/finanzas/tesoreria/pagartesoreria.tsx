@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Download,
   Eye,
+  FilePlus2,
   Filter,
   History,
   Landmark,
@@ -32,7 +33,7 @@ import {
   listarPagosTesoreria,
   obtenerCatalogosPago,
   obtenerCuentasPago,
-  registrarPagosTesoreria,
+  registrarPagosTesoreria, grabarPagoTesoreria,
   crearItemsTesoreria,
 } from "../../../api/pagoTesoreriaService";
 import type {
@@ -92,6 +93,7 @@ const programadoSubtabs: { key: ProgramadoSubtab; label: string }[] = [
   { key: "resumen", label: "Resumen" },
 ];
 const tabs = [
+  { estado: 0, label: "Creado", icon: FilePlus2 },
   { estado: 1, label: "Revisión", icon: ShieldCheck },
   { estado: 9, label: "Contabilidad", icon: ReceiptText },
   { estado: 5, label: "Administrativo", icon: Landmark },
@@ -100,7 +102,7 @@ const tabs = [
   { estado: 2, label: "Observada", icon: Eye },
   { estado: 99, label: "Reporte", icon: BarChart3 },
 ];
-const REPORT_STATES = [1, 9, 8, 5, 4, 2];
+const REPORT_STATES = [0, 1, 9, 8, 5, 4, 2];
 const initialForm = () => ({
   idEjecutor: "",
   idTransferencia: "",
@@ -148,7 +150,7 @@ function SelectField({
 }
 
 export default function PagarTesoreriaPage() {
-  const [estado, setEstado] = useState(1);
+  const [estado, setEstado] = useState(0);
   const [programadoSubtab, setProgramadoSubtab] = useState<ProgramadoSubtab>("recibos");
   const [paoloGroupMode, setPaoloGroupMode] = useState<"cliente" | "moneda" | "solicitante">("cliente");
   const [paoloSolicitanteFilter, setPaoloSolicitanteFilter] = useState("");
@@ -278,7 +280,7 @@ export default function PagarTesoreriaPage() {
     [],
   );
   useEffect(() => {
-    void load(1, "", "");
+    void load(0, "", "");
     return () => fetchRef.current?.abort();
   }, [load]);
   useEffect(() => {
@@ -690,6 +692,12 @@ export default function PagarTesoreriaPage() {
       items: crearItemsTesoreria(selectedRows),
     });
   };
+  const grabar = async () => {
+    if (!selectedRows.length || !datosRegistroPagoCompletos) { setError("Complete los datos del pago y seleccione al menos un recibo."); return; }
+    setSaving(true); setError("");
+    try { const result = await grabarPagoTesoreria({ ...form, idEjecutor: Number(form.idEjecutor), idTransferencia: Number(form.idTransferencia), idBanco: Number(form.idBanco), idMoneda2: Number(form.idMoneda2), items: crearItemsTesoreria(selectedRows) }); setSuccess(`${result.procesados} recibo(s) guardado(s) sin cambiar de estado.`); await load(estado, desde, hasta); }
+    catch (e) { setError(getHttpErrorMessage(e, "No se pudo grabar la información del pago.")); } finally { setSaving(false); }
+  };
   const save = async () => {
     if (!confirmation || submitting.current) return;
     submitting.current = true;
@@ -927,7 +935,7 @@ export default function PagarTesoreriaPage() {
               />
             </label>
             <label className="pt-field">
-              <span>{estado === 4 ? "Depósito desde" : "Ingreso desde"}</span>
+              <span>{estado === 4 ? "Depósito desde" : estado === 0 ? "Creado desde" : "Ingreso desde"}</span>
               <input
                 type="date"
                 required={estado === 4}
@@ -970,6 +978,20 @@ export default function PagarTesoreriaPage() {
               title="Actualizar recibos y catálogos"
             >
               <RefreshCw size={16} />
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => {
+                setQuery(""); setDesde(""); setHasta(""); setCliente(""); setMoneda("");
+                setComprobantesFiltro([]); setBancosCtaFiltro([]); setResponsablesFiltro([]);
+                setBusquedaResponsable(""); setSolicitantesFiltro([]); setBusquedaSolicitante("");
+                setRendicion(""); setSelected(new Set());
+                void load(estado, "", "");
+              }}
+              title="Limpiar filtros"
+            >
+              Limpiar filtros
             </button>
           </fieldset>
         </form>}
@@ -1545,11 +1567,20 @@ export default function PagarTesoreriaPage() {
             </footer>
             {!esReporte && <div className="pt-grid-actions" role="group" aria-label={`Acciones de ${tabs.find(t => t.estado === estado)?.label}`}>
               {esPago && (
-                <button className="pt-primary" type="button"
-                  disabled={saving || loading}
-                  onClick={() => setRegistroPagoAbierto(true)}>
-                  Registrar pago
-                </button>
+                <>
+                  <button className="pt-primary" type="button"
+                    disabled={saving || loading || registroPagoAbierto}
+                    onClick={() => setRegistroPagoAbierto(true)}>
+                    Registrar pago
+                  </button>
+                  {estado === 5 && (
+                    <button className="pt-primary" type="submit" form={`pt-stage-${estado}`}
+                      disabled={saving || loading || !puedePagar || !selectedRows.length || selectedRows.length > 500}
+                      title="Enviar a Programado">
+                      Enviar a Programado
+                    </button>
+                  )}
+                </>
               )}
               <PagoEtapaActions estado={estado} formId={`pt-stage-${estado}`}
                 disabled={saving || loading || !puedePagar || !selectedRows.length || selectedRows.length > 500}
@@ -1707,17 +1738,9 @@ export default function PagarTesoreriaPage() {
                     >
                       Ocultar
                     </button>
-                    {estado === 5 && (
-                      <button
-                        type="submit"
-                        form={`pt-stage-${estado}`}
-                        className="pt-primary"
-                        disabled={saving || loading || !puedePagar || !selectedRows.length || selectedRows.length > 500 || !datosCuentaProgramacionCompletos}
-                        title={!datosCuentaProgramacionCompletos ? "Complete los datos de Registrar pago" : "Enviar a Programado"}
-                      >
-                        Enviar a Programado
-                      </button>
-                    )}
+                    <button type="button" className="pt-register-payment-hide" disabled={saving || loading} onClick={() => void grabar()}>
+                      Grabar
+                    </button>
                   </div>
                   <div className="pt-payment-register-content">
                   <div className="pt-selection">

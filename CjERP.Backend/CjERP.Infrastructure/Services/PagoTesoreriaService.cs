@@ -25,7 +25,7 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
 
     public async Task<object> ListarAsync(int estado, DateTime? desde, DateTime? hasta, CancellationToken ct)
     {
-        if (estado is not (1 or 9 or 8 or 5 or 4 or 2)) throw new ArgumentException("Estado de consulta inválido.");
+        if (estado is not (0 or 1 or 9 or 8 or 5 or 4 or 2)) throw new ArgumentException("Estado de consulta inválido.");
         if (desde > hasta) throw new ArgumentException("La fecha inicial no puede superar la final.");
         if (estado == 4 && (desde is null || hasta is null)) throw new ArgumentException("Indique el rango de fechas del historial.");
         await using var cn = factory.CreateConnection();
@@ -144,6 +144,21 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
         if (pagados != ids.Length) throw new InvalidOperationException("El procedimiento no confirmó todos los pagos. La operación se revirtió.");
         await tx.CommitAsync(ct);
         return pagados;
+    }
+
+    public async Task<int> GrabarAsync(PagoTesoreriaGrabarDto request, CancellationToken ct)
+    {
+        await using var cn = factory.CreateConnection();
+        var ids = request.Items.Select(x => x.Correlativo).Distinct().ToArray();
+        return await cn.ExecuteAsync(factory.Create("""
+            UPDATE Planilla SET IdEjecutor=@IdEjecutor, IdTransferencia=@IdTransferencia,
+                IdBanco=@IdBanco, IdMoneda2=@IdMoneda2, FechaDeposito=@FechaDeposito,
+                Cheque=@Cheque, NroOperacion=@NroOperacion,
+                Comentario=CASE WHEN NULLIF(LTRIM(RTRIM(@Comentario)), '') IS NULL THEN Comentario
+                    ELSE LEFT(CONCAT(ISNULL(Comentario,''), CASE WHEN ISNULL(Comentario,'')='' THEN '' ELSE ' - ' END, @Comentario), 500) END
+            WHERE Correlativo IN @ids AND Estado=5;
+            """, new { request.IdEjecutor, request.IdTransferencia, request.IdBanco, request.IdMoneda2,
+                request.FechaDeposito, request.Cheque, request.NroOperacion, request.Comentario, ids }, cancellationToken: ct));
     }
 
     private sealed class PagoActual

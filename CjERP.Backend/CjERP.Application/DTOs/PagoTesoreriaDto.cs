@@ -39,6 +39,19 @@ public sealed class PagoTesoreriaRequestDto
     [Required, MinLength(1), MaxLength(500)] public List<PagoTesoreriaItemDto> Items { get; set; } = [];
 }
 
+public sealed class PagoTesoreriaGrabarDto
+{
+    [Required, MinLength(1), MaxLength(500)] public List<PagoTesoreriaItemDto> Items { get; set; } = [];
+    public int IdEjecutor { get; set; }
+    public int IdTransferencia { get; set; }
+    public int IdBanco { get; set; }
+    public int IdMoneda2 { get; set; }
+    public DateTime FechaDeposito { get; set; }
+    public string Cheque { get; set; } = "";
+    public string NroOperacion { get; set; } = "";
+    public string Comentario { get; set; } = "";
+}
+
 public sealed class PagoTesoreriaAccionDto
 {
     [Required] public string Accion { get; set; } = "";

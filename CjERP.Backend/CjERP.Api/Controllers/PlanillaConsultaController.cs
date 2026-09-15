@@ -90,6 +90,8 @@ namespace CjERP.Api.Controllers
                   )
                 : string.Equals(consulta, "aprobar", StringComparison.OrdinalIgnoreCase)
                 ? RequiredParametersAprobar
+                : string.Equals(consulta, "analisis-gastos", StringComparison.OrdinalIgnoreCase)
+                    ? Array.Empty<string>()
                 : string.Equals(consulta, "vacaciones", StringComparison.OrdinalIgnoreCase)
                     ? RequiredParametersVacaciones
                 : string.Equals(consulta, "pagados-dashboard", StringComparison.OrdinalIgnoreCase)

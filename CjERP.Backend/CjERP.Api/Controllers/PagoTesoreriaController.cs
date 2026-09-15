@@ -134,6 +134,14 @@ public sealed class PagoTesoreriaController(PagoTesoreriaService service, ISegMe
         }
     }
 
+    [HttpPost("grabar")]
+    public async Task<IActionResult> Grabar(PagoTesoreriaGrabarDto request, CancellationToken ct)
+    {
+        if (!await PuedeAsync()) return SinAcceso();
+        try { return Ok(new { procesados = await service.GrabarAsync(request, ct) }); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogError(ex, "Error grabando datos de pago"); return StatusCode(500, new { message = "No se pudo grabar la información del pago." }); }
+    }
+
     [HttpPost("acciones")]
     public async Task<IActionResult> Accion(PagoTesoreriaAccionDto request, CancellationToken ct)
     {

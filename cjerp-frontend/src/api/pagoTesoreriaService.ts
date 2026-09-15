@@ -134,6 +134,8 @@ export const obtenerCuentasPago = (
   >(`${url}/cuentas/${idResponsable}`, { signal });
 export const registrarPagosTesoreria = (request: PagoTesoreriaRequest) =>
   httpClient.post<{ procesados: number }>(url, request, { timeout: 210000 });
+export const grabarPagoTesoreria = (request: Omit<PagoTesoreriaRequest, "estadoOrigen">) =>
+  httpClient.post<{ procesados: number }>(`${url}/grabar`, request, { timeout: 60000 });
 
 export type PagoAccionItem = {
   correlativo: number;
