@@ -1472,7 +1472,7 @@ export default function OcV1Page() {
       <div style={ocV1Styles.viewTabs}>
         <button type="button" style={{ ...ocV1Styles.viewTab, ...(vistaOc === "registro" ? ocV1Styles.viewTabActive : {}) }} onClick={() => { setVistaOc("registro"); openNuevo(); }}>Registro</button>
         <button type="button" style={{ ...ocV1Styles.viewTab, ...(vistaOc === "aprobacion" ? ocV1Styles.viewTabActive : {}) }} onClick={() => { setVistaOc("aprobacion"); setPanelOpen(false); }}>Bandeja de aprobación</button>
-        <button type="button" style={{ ...ocV1Styles.viewTab, ...(vistaOc === "reporte" ? ocV1Styles.viewTabActive : {}) }} onClick={() => { setVistaOc("reporte"); setPanelOpen(false); }}>Reporte y trazabilidad</button>
+        <button type="button" style={{ ...ocV1Styles.viewTab, ...(vistaOc === "reporte" ? ocV1Styles.viewTabActive : {}) }} onClick={() => { setVistaOc("reporte"); setPanelOpen(false); }}>Seguimiento de pagos</button>
       </div>
       {vistaOc === "registro" ? (
         <section style={ocV1Styles.view}>
@@ -1872,8 +1872,7 @@ export default function OcV1Page() {
           <div style={{ ...styles.card, display: reporteSubtab === "listado" || reporteSubtab === "oc-gastos" ? undefined : "none" }}>
             <div style={styles.sectionHeader}>
               <div>
-                <h2 style={styles.sectionTitle}>Reporte y trazabilidad</h2>
-                <p style={styles.sectionText}>Seguimiento de estados y niveles de validación de las ordenes de compra.</p>
+                <h2 style={styles.sectionTitle}>Seguimiento de pagos</h2>
               </div>
               <span style={styles.counterPill}>
                 {reporteLoading ? "Cargando detalle..." : reporteConsultado ? `${String(reporteSubtab) === "oc-gastos" ? reportePlanillaRows.length : reporteRowsFiltradas.length} registros` : "Seleccione filtros"}
