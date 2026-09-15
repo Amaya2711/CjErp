@@ -863,6 +863,32 @@ export default function PagarTesoreriaPage() {
     XLSX.utils.book_append_sheet(book, sheet, "Gerencia");
     XLSX.writeFile(book, `programado-gerencia-${hoy()}.xlsx`);
   };
+  const exportarPaoloPdf = async () => {
+    const [{ default: jsPDF }, autoTableModule] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    const autoTable = autoTableModule.default;
+    const body: string[][] = [];
+    for (const group of paoloGroups) {
+      const key = `${group.cliente}-${group.moneda}`;
+      const collapsed = paoloCollapsed.has(key);
+      body.push([`${collapsed ? "▶" : "▼"} ${group.cliente} · ${group.moneda} (${group.items.length})`, "", "", "", "", "", ""]);
+      if (!collapsed) {
+        body.push(...group.items.map((item) => [
+          item.cliente || "", item.responsable || "", item.tarea || "", item.solicitante || "",
+          item.cuenta || "", item.moneda || "", `${currencySymbol(item.moneda)} ${money(item.total)}`,
+        ]));
+      }
+      body.push([`Total ${group.cliente}`, "", "", "", "", "", `${currencySymbol(group.moneda)} ${money(group.total)}`]);
+    }
+    body.push(["Total general", "", "", "", "", "", `${currencySymbol(paoloGroups[0]?.moneda)} ${money(paoloGroups.reduce((total, group) => total + group.total, 0))}`]);
+    autoTable(doc, {
+      head: [["Cliente", "Responsable", "Tarea", "Solicitante", "Cuenta", "Moneda", "Suma de Total"]],
+      body,
+      styles: { fontSize: 7, cellPadding: 2 },
+      headStyles: { fillColor: [219, 234, 247], textColor: [31, 41, 55] },
+    });
+    doc.save(`programado-gerencia-${hoy()}.pdf`);
+  };
 
   return (
     <AppPage title="Pagos de tesorería" fillHeight>
@@ -878,10 +904,7 @@ export default function PagarTesoreriaPage() {
               </span>
               Pagos de tesorería
             </h1>
-            <p>
-              Gestiona la revisión, contabilidad, pago y rendición de los
-              recibos.
-            </p>
+            
           </div>
           <div className="pt-metrics">
             <div>
@@ -1680,6 +1703,11 @@ export default function PagarTesoreriaPage() {
                 {programadoSubtab === "paolo" && (
                   <button type="button" disabled={!visibleRows.length || saving} onClick={exportarPaolo} title="Exportar formato Paolo">
                     <Download size={15} /> Excel
+                  </button>
+                )}
+                {programadoSubtab === "paolo" && (
+                  <button type="button" disabled={!visibleRows.length || saving} onClick={() => void exportarPaoloPdf()} title="Exportar formato Gerencia a PDF">
+                    <Printer size={15} /> PDF
                   </button>
                 )}
               </div>
