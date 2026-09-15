@@ -457,6 +457,20 @@ export default function OcV1Page() {
   const [reporteDetalles, setReporteDetalles] = useState<OrdenCompraDetalleDto[]>([]);
   const [reportePlanillaRows, setReportePlanillaRows] = useState<Record<string, unknown>[]>([]);
   const [reportePlanillaColumns, setReportePlanillaColumns] = useState<string[]>([]);
+  const [reportePlanillaSort, setReportePlanillaSort] = useState<{ column: string; direction: "asc" | "desc" }>({ column: "", direction: "asc" });
+  const reportePlanillaRowsOrdenadas = useMemo(() => {
+    if (!reportePlanillaSort.column) return reportePlanillaRows;
+    const getValue = (row: Record<string, unknown>) => {
+      const key = Object.keys(row).find((item) => item.toLowerCase() === reportePlanillaSort.column.toLowerCase());
+      return key ? row[key] : "";
+    };
+    return [...reportePlanillaRows].sort((a, b) => {
+      const av = getValue(a); const bv = getValue(b);
+      const an = Number(av); const bn = Number(bv);
+      const comparison = !Number.isNaN(an) && !Number.isNaN(bn) ? an - bn : String(av ?? "").localeCompare(String(bv ?? ""), undefined, { numeric: true, sensitivity: "base" });
+      return reportePlanillaSort.direction === "asc" ? comparison : -comparison;
+    });
+  }, [reportePlanillaRows, reportePlanillaSort]);
   const [reporteConsultado, setReporteConsultado] = useState(false);
   const [pdfExportingOc, setPdfExportingOc] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
@@ -1993,7 +2007,7 @@ export default function OcV1Page() {
               <table className={String(reporteSubtab) === "oc-gastos" ? "oc-gastos-grid" : undefined} style={String(reporteSubtab) === "oc-gastos" ? { ...styles.table, width: "max-content", minWidth: "100%" } : styles.table}>
                 <thead>
                   <tr>
-                    {String(reporteSubtab) === "oc-gastos" ? reportePlanillaColumns.map((column, index) => <th key={`pla-head-${column}`} style={{ ...styles.th, width: 110, minWidth: 80, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", ...(index < 4 ? { position: "sticky", left: index * 110, zIndex: 3, background: "#fff" } : {}) }} title={column}>{column}</th>) : <th style={{ ...styles.th, width: 52 }} aria-label="Exportar PDF"></th>}
+                    {String(reporteSubtab) === "oc-gastos" ? reportePlanillaColumns.map((column, index) => <th key={`pla-head-${column}`} style={{ ...styles.th, width: 110, minWidth: 80, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer", ...(index < 4 ? { position: "sticky", left: index * 110, zIndex: 3, background: "#fff" } : {}) }} title={`Ordenar por ${column}`} onClick={() => setReportePlanillaSort((current) => ({ column, direction: current.column === column && current.direction === "asc" ? "desc" : "asc" }))}>{column}{reportePlanillaSort.column === column ? (reportePlanillaSort.direction === "asc" ? " ▲" : " ▼") : ""}</th>) : <th style={{ ...styles.th, width: 52 }} aria-label="Exportar PDF"></th>}
                     <th style={styles.th}>OC</th>
                     <th style={styles.th}>Fecha</th>
                     <th style={styles.th}>Solicitante</th>
@@ -2011,7 +2025,7 @@ export default function OcV1Page() {
                   </tr>
                 </thead>
                 <tbody>
-                  {String(reporteSubtab) === "oc-gastos" ? (reportePlanillaRows.length === 0 ? <tr><td style={styles.td} colSpan={Math.max(reportePlanillaColumns.length, 1)}>{!reporteConsultado ? "Seleccione al menos un filtro para consultar los gastos." : reporteLoading ? "Cargando datos..." : "No hay registros de Planilla."}</td></tr> : reportePlanillaRows.map((row, index) => { const read = (column: string) => { if (column.toLowerCase() === "totaloc") { const precio = Number(row[Object.keys(row).find((key) => key.toLowerCase() === "preciounioc") ?? ""] ?? 0); const cantidad = Number(row[Object.keys(row).find((key) => key.toLowerCase() === "cantoc") ?? ""] ?? 0); return precio && cantidad ? (precio * cantidad).toFixed(2) : "—"; } const found = Object.keys(row).find((key) => key.toLowerCase() === column.toLowerCase()); return String(found ? row[found] ?? "—" : "—"); }; return <tr key={`pla-${read("ID") || index}`} style={styles.tr}>{reportePlanillaColumns.map((column, columnIndex) => { const value = read(column); return <td key={`${index}-${column}`} style={{ ...styles.td, width: 110, minWidth: 80, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer", ...(columnIndex < 4 ? { position: "sticky", left: columnIndex * 110, zIndex: 2, background: "#fff" } : {}) }} title={value} onClick={(event) => { const cell = event.currentTarget; if (cell.style.whiteSpace === "normal") cell.style.whiteSpace = "nowrap"; else if (cell.scrollWidth > cell.clientWidth) cell.style.whiteSpace = "normal"; }}>{value}</td>; })}</tr>; })) : String(reporteSubtab) !== "oc-gastos" && !reporteConsultado ? (
+                  {String(reporteSubtab) === "oc-gastos" ? (reportePlanillaRows.length === 0 ? <tr><td style={styles.td} colSpan={Math.max(reportePlanillaColumns.length, 1)}>{!reporteConsultado ? "Seleccione al menos un filtro para consultar los gastos." : reporteLoading ? "Cargando datos..." : "No hay registros de Planilla."}</td></tr> : reportePlanillaRowsOrdenadas.map((row, index) => { const read = (column: string) => { if (column.toLowerCase() === "totaloc") { const precio = Number(row[Object.keys(row).find((key) => key.toLowerCase() === "preciounioc") ?? ""] ?? 0); const cantidad = Number(row[Object.keys(row).find((key) => key.toLowerCase() === "cantoc") ?? ""] ?? 0); return precio && cantidad ? (precio * cantidad).toFixed(2) : "—"; } const found = Object.keys(row).find((key) => key.toLowerCase() === column.toLowerCase()); return String(found ? row[found] ?? "—" : "—"); }; return <tr key={`pla-${read("ID") || index}`} style={styles.tr}>{reportePlanillaColumns.map((column, columnIndex) => { const value = read(column); return <td key={`${index}-${column}`} style={{ ...styles.td, width: 110, minWidth: 80, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer", ...(columnIndex < 4 ? { position: "sticky", left: columnIndex * 110, zIndex: 2, background: "#fff" } : {}) }} title={value} onClick={(event) => { const cell = event.currentTarget; if (cell.style.whiteSpace === "normal") cell.style.whiteSpace = "nowrap"; else if (cell.scrollWidth > cell.clientWidth) cell.style.whiteSpace = "normal"; }}>{value}</td>; })}</tr>; })) : String(reporteSubtab) !== "oc-gastos" && !reporteConsultado ? (
                     <tr>
                       <td style={styles.td} colSpan={15}>
                         Seleccione al menos un filtro para consultar la trazabilidad.
