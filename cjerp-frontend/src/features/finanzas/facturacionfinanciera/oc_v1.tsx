@@ -168,6 +168,7 @@ type ReporteFiltros = {
   site: string;
   estado: string;
   idOc: string;
+  tipoOc: "con" | "todos";
   fechaDesde: string;
   fechaHasta: string;
 };
@@ -508,6 +509,7 @@ export default function OcV1Page() {
     site: "",
     estado: "",
     idOc: "",
+    tipoOc: "con",
     fechaDesde: "",
     fechaHasta: "",
   });
@@ -654,7 +656,15 @@ export default function OcV1Page() {
         ]);
         request.consulta = "analisis-gastos";
         const response = await consultarPlanillaEstados(request, { timeoutMs: 60000 });
-        setReportePlanillaRows(Array.isArray(response?.rows) ? response.rows : []);
+        const rows = Array.isArray(response?.rows) ? response.rows : [];
+        const rowsFiltradas = reporteFiltros.tipoOc === "con"
+          ? rows.filter((row) => {
+            const key = Object.keys(row).find((item) => item.toLowerCase() === "idoc");
+            const value = key ? row[key] : null;
+            return value !== null && value !== undefined && String(value).trim() !== "" && Number(value) !== 0;
+          })
+          : rows;
+        setReportePlanillaRows(rowsFiltradas);
         const storeColumns = Array.isArray(response?.columns) ? response.columns : [];
         setReportePlanillaColumns(storeColumns.length ? OC_GASTOS_COLUMNAS_INICIALES.filter((column) => column === "TotalOc" || storeColumns.some((available) => available.toLowerCase() === column.toLowerCase())) : OC_GASTOS_COLUMNAS_INICIALES);
         return;
@@ -1888,6 +1898,17 @@ export default function OcV1Page() {
                   style={styles.input}
                 />
               </Field>
+              {reporteSubtab === "oc-gastos" && <Field>
+                <Label>Órdenes de compra</Label>
+                <select
+                  value={reporteFiltros.tipoOc}
+                  onChange={(event) => setReporteFiltros((prev) => ({ ...prev, tipoOc: event.target.value as ReporteFiltros["tipoOc"] }))}
+                  style={styles.input}
+                >
+                  <option value="con">Con IdOc</option>
+                  <option value="todos">Todos</option>
+                </select>
+              </Field>}
               <Field>
                 <Label>Fecha desde</Label>
                 <input
@@ -1957,7 +1978,7 @@ export default function OcV1Page() {
                   type="button"
                   style={styles.secondaryButton}
                   onClick={() => {
-                    setReporteFiltros({ solicitante: "", responsable: "", cliente: "", proyecto: "", site: "", estado: "", idOc: "", fechaDesde: "", fechaHasta: "" }); setResponsablesReporteFiltro([]); setBusquedaResponsableReporte(""); setSolicitantesReporteFiltro([]); setBusquedaSolicitanteReporte(""); setSitesReporteFiltro([]); setBusquedaSiteReporte("");
+                    setReporteFiltros({ solicitante: "", responsable: "", cliente: "", proyecto: "", site: "", estado: "", idOc: "", tipoOc: "con", fechaDesde: "", fechaHasta: "" }); setResponsablesReporteFiltro([]); setBusquedaResponsableReporte(""); setSolicitantesReporteFiltro([]); setBusquedaSolicitanteReporte(""); setSitesReporteFiltro([]); setBusquedaSiteReporte("");
                     setReporteDetalles([]);
                     setReporteConsultado(false);
                   }}
