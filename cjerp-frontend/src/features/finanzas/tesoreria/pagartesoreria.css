@@ -391,7 +391,7 @@
 }
 .pt-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   flex: 1;
   min-height: 420px;
@@ -775,7 +775,7 @@
 }
 @media (min-width: 1450px) {
   .pt-workspace {
-    grid-template-columns: minmax(0, 1fr) 355px;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 @media (max-width: 1100px) {
