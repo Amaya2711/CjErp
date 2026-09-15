@@ -419,10 +419,11 @@
 .pt-list-toolbar {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 12px;
   padding: 16px;
 }
+.pt-list-toolbar > div:first-child { margin-right: auto; }
 .pt-list-toolbar > button:first-of-type { margin-left: 0; }
 .pt-list-toolbar > button + button { margin-left: 0; }
 .pt-list-toolbar span,
