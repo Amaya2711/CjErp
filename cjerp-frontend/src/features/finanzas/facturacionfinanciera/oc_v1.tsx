@@ -36,6 +36,8 @@ import { getHttpErrorMessage } from "../../../utils/httpError";
 import { FileDown } from "lucide-react";
 import { buildPlanillaConsultaEstadosRequest, consultarPlanillaEstados } from "../../../api/planillaConsultaService";
 
+const OC_GASTOS_COLUMNAS_INICIALES = ["FecIngreso", "Detalle", "Comprobante", "Serie", "Moneda", "Subtotal", "Igv", "Total", "MontoRetencion", "TotalPagar", "Observacion", "Comentario", "Solicitante", "Gestor", "Validador", "Ejecutor", "FechaDeposito", "Corre", "EstadoPla", "IdSite", "Usuario", "Ot", "NroOperacion", "NombreProyecto", "Site", "Tipo_Trabajo", "Tarea", "Responsable", "Cliente", "PrecioUniOc", "CantOc", "IdEstadoOc", "IdOc"];
+
 type ColumnFilterDropdownProps = {
   header: { key: string; label: string };
   filtroColumnaMenuRef: React.RefObject<HTMLDivElement | null>;
@@ -651,7 +653,8 @@ export default function OcV1Page() {
         request.consulta = "analisis-gastos";
         const response = await consultarPlanillaEstados(request, { timeoutMs: 60000 });
         setReportePlanillaRows(Array.isArray(response?.rows) ? response.rows : []);
-        setReportePlanillaColumns(Array.isArray(response?.columns) ? response.columns : []);
+        const storeColumns = Array.isArray(response?.columns) ? response.columns : [];
+        setReportePlanillaColumns(storeColumns.length ? OC_GASTOS_COLUMNAS_INICIALES.filter((column) => storeColumns.some((available) => available.toLowerCase() === column.toLowerCase())) : OC_GASTOS_COLUMNAS_INICIALES);
         return;
       }
       const response = await buscarOrdenCompraDetalle();
@@ -1871,7 +1874,7 @@ export default function OcV1Page() {
                 <p style={styles.sectionText}>Seguimiento de estados y niveles de validación de las ordenes de compra.</p>
               </div>
               <span style={styles.counterPill}>
-                {reporteLoading ? "Cargando detalle..." : reporteConsultado ? `${reporteRowsFiltradas.length} registros` : "Seleccione filtros"}
+                {reporteLoading ? "Cargando detalle..." : reporteConsultado ? `${String(reporteSubtab) === "oc-gastos" ? reportePlanillaRows.length : reporteRowsFiltradas.length} registros` : "Seleccione filtros"}
               </span>
             </div>
             <div style={styles.reportFilters}>
@@ -1963,10 +1966,11 @@ export default function OcV1Page() {
               </div>
             </div>
             <div style={styles.tableWrap}>
-              <table style={styles.table}>
+              {String(reporteSubtab) === "oc-gastos" && <style>{`.oc-gastos-grid th:nth-child(n+34), .oc-gastos-grid td:nth-child(n+34) { display: none; }`}</style>}
+              <table className={String(reporteSubtab) === "oc-gastos" ? "oc-gastos-grid" : undefined} style={styles.table}>
                 <thead>
                   <tr>
-                    {String(reporteSubtab) === "oc-gastos" ? reportePlanillaColumns.map((column) => <th key={`pla-head-${column}`} style={styles.th}>{column}</th>) : <th style={{ ...styles.th, width: 52 }} aria-label="Exportar PDF"></th>}
+                    {String(reporteSubtab) === "oc-gastos" ? reportePlanillaColumns.map((column) => <th key={`pla-head-${column}`} style={{ ...styles.th, width: 150, minWidth: 110, maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={column}>{column}</th>) : <th style={{ ...styles.th, width: 52 }} aria-label="Exportar PDF"></th>}
                     <th style={styles.th}>OC</th>
                     <th style={styles.th}>Fecha</th>
                     <th style={styles.th}>Solicitante</th>
@@ -1984,7 +1988,7 @@ export default function OcV1Page() {
                   </tr>
                 </thead>
                 <tbody>
-                  {String(reporteSubtab) === "oc-gastos" ? (reportePlanillaRows.length === 0 ? <tr><td style={styles.td} colSpan={Math.max(reportePlanillaColumns.length, 1)}>{!reporteConsultado ? "Seleccione al menos un filtro para consultar los gastos." : reporteLoading ? "Cargando datos..." : "No hay registros de Planilla."}</td></tr> : reportePlanillaRows.map((row, index) => <tr key={`pla-${String(row.ID ?? row.Correlativo ?? index)}`} style={styles.tr}>{reportePlanillaColumns.map((column) => <td key={`${index}-${column}`} style={styles.td}>{String(row[column] ?? "—")}</td>)}</tr>)) : String(reporteSubtab) !== "oc-gastos" && !reporteConsultado ? (
+                  {String(reporteSubtab) === "oc-gastos" ? (reportePlanillaRows.length === 0 ? <tr><td style={styles.td} colSpan={Math.max(reportePlanillaColumns.length, 1)}>{!reporteConsultado ? "Seleccione al menos un filtro para consultar los gastos." : reporteLoading ? "Cargando datos..." : "No hay registros de Planilla."}</td></tr> : reportePlanillaRows.map((row, index) => { const read = (column: string) => { const found = Object.keys(row).find((key) => key.toLowerCase() === column.toLowerCase()); return String(found ? row[found] ?? "—" : "—"); }; return <tr key={`pla-${read("ID") || index}`} style={styles.tr}>{reportePlanillaColumns.map((column) => { const value = read(column); return <td key={`${index}-${column}`} style={{ ...styles.td, width: 150, minWidth: 110, maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer" }} title={value} onClick={(event) => { const cell = event.currentTarget; if (cell.scrollWidth > cell.clientWidth) cell.style.whiteSpace = "normal"; }}>{value}</td>; })}</tr>; })) : String(reporteSubtab) !== "oc-gastos" && !reporteConsultado ? (
                     <tr>
                       <td style={styles.td} colSpan={15}>
                         Seleccione al menos un filtro para consultar la trazabilidad.

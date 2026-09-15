@@ -193,7 +193,7 @@ export default function PagarTesoreriaPage() {
   const [permisosRevision, setPermisosRevision] = useState<PagoRevisionPermisos>({
     puedeEditar: false, puedeEditarOperacion: false, puedeEditarEstado: false,
   });
-  const columnCount = estado === 1 ? 22 : estado === 9 ? 16 : 15;
+  const columnCount = estado === 1 ? 22 : estado === 9 ? 16 : estado === 4 ? 18 : 15;
   const [confirmation, setConfirmation] = useState<PagoTesoreriaRequest | null>(
     null,
   );
@@ -735,15 +735,25 @@ export default function PagarTesoreriaPage() {
       visibleRows.map((r) => ({
         Recibo: r.correlativo,
         ot: r.ot,
+        ...(estado === 4 ? { Serie: r.serie, Transferencia: r.transferencia || r.idTransferencia, Banco: r.banco || r.idBanco } : {}),
         responsable: r.responsable,
+        solicitante: r.solicitante,
         cliente: r.cliente,
         proyecto: r.proyecto,
         site: r.site,
+        detalle: r.detalle,
+        fecha: fecha(estado === 4 ? r.fechaDeposito : r.fecha),
         comprobante: r.comprobante,
         moneda: r.moneda,
+        subtotal: r.subtotal,
+        igv: r.igv,
         total: r.total,
         Retención: r.montoRetencion,
         "Total a pagar": r.totalPagar,
+        IdBancoCta: r.idBancoCta,
+        Cuenta: r.cuenta,
+        CuentaInter: r.cuentaInter,
+        NombreCta: r.nombreCta,
         "Fecha de depósito": fecha(r.fechaDeposito),
         Operación: r.nroOperacion,
       })),
@@ -1313,6 +1323,7 @@ export default function PagarTesoreriaPage() {
                     <th>Cuenta</th>
                     <th>CuentaInter</th>
                     <th>NombreCta</th>
+                    {estado === 4 && <><th>Serie</th><th>Transferencia</th><th>Banco</th></>}
                     {estado === 1 && <>
                       <th>Anticipo</th><th>NroOperacion</th><th>Comprobante</th><th>TipoPago</th>
                       <th className="pt-revision-actions">Edición</th>
@@ -1406,7 +1417,7 @@ export default function PagarTesoreriaPage() {
                             </button>
                           </td>
                           <td className="numeric">{money(sum(g.items))}</td>
-                          <td colSpan={estado === 1 ? 11 : 7} />
+                          <td colSpan={estado === 1 ? 11 : estado === 4 ? 10 : 7} />
                         </tr>
                         {expanded.has(g.id) &&
                           g.items.map((r) => (
@@ -1543,6 +1554,7 @@ export default function PagarTesoreriaPage() {
                                 ) : "â€”"}
                               </td>
                               <td>{r.nombreCta || "â€”"}</td>
+                              {estado === 4 && <><td>{r.serie || "—"}</td><td>{r.transferencia || (r.idTransferencia != null ? String(r.idTransferencia) : "—")}</td><td>{r.banco || (r.idBanco != null ? String(r.idBanco) : "—")}</td></>}
                               {estado === 1 && <PagoRevisionCells row={r} catalogos={catalogos}
                                 permisos={permisosRevision} disabled={saving || loading || !puedePagar}
                                 onEditing={setEditingRevision} onSaved={refreshRevision} />}
