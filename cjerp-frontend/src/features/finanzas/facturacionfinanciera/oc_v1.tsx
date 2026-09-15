@@ -663,7 +663,7 @@ export default function OcV1Page() {
           ? cabeceras.find((item) => item.responsable === responsableNombre)?.idResponsable
           : undefined;
         const request = buildPlanillaConsultaEstadosRequest([
-          ...(reporteFiltros.estado ? [{ nombre: "EstadosOc", valor: reporteFiltros.estado, tipo: "string" as const }] : []),
+          ...(reporteFiltros.estado && /^\d+(,\d+)*$/.test(reporteFiltros.estado.trim()) ? [{ nombre: "Estados", valor: reporteFiltros.estado, tipo: "string" as const }] : []),
           ...(reporteFiltros.fechaDesde ? [{ nombre: "FechaInicio", valor: reporteFiltros.fechaDesde, tipo: "date" as const }] : []),
           ...(reporteFiltros.fechaHasta ? [{ nombre: "FechaFin", valor: reporteFiltros.fechaHasta, tipo: "date" as const }] : []),
           ...(responsableId ? [{ nombre: "IdResponsable", valor: String(responsableId), tipo: "int" as const }] : []),

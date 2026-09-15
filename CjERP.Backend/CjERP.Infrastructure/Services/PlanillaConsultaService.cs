@@ -27,7 +27,7 @@ namespace CjERP.Infrastructure.Services
         private const string StoredProcedureImportarResumenOT = "dbo.sp_Importar_ResumenOT";
         private const string StoredProcedureMovimientosGastosIngresos = "dbo.sp_Movimientos_Consulta_GastosIngresos";
         private const string StoredProcedureGastosPagados = "dbo.sp_Planilla_Consulta_Gastos_Pagados";
-        private const string StoredProcedureAnalisisGastos = "dbo.sp_Planilla_Consulta_Gastos_Estados";
+        private const string StoredProcedureAnalisisGastos = "dbo.sp_OrdenCompra_Consulta_Analisis";
         private const string QueryClientesActivos = "clientes-activos";
         private const string QueryProyectosActivos = "proyectos-activos";
         private readonly ISqlCommandFactory _sqlCommandFactory;
@@ -654,7 +654,7 @@ WHERE Correlativo IN @Correlativos";
                 if (string.Equals(storedProcedureName, StoredProcedureAnalisisGastos, StringComparison.OrdinalIgnoreCase))
                 {
                     var allowedParametersAnalisis = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                    { "IdOc", "IdCliente", "IdProyecto", "IdSite", "IdResponsable", "EstadosOc", "FechaInicio", "FechaFin" };
+                    { "pProyecto", "Ano", "Id", "IdResponsable", "IdCliente", "IdProyecto", "IdSite", "Estados", "FechaInicio", "FechaFin" };
                     return parametros.Where(parametro => !string.IsNullOrWhiteSpace(parametro.Nombre) && allowedParametersAnalisis.Contains(parametro.Nombre.Trim().TrimStart('@')));
                 }
 
