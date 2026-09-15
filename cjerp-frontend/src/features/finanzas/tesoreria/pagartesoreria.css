@@ -793,7 +793,8 @@
   }
   .pt-list {
     min-height: 420px;
-    max-height: 650px;
+    max-height: none;
+    overflow: visible;
   }
   .pt-payment {
     overflow: visible;
