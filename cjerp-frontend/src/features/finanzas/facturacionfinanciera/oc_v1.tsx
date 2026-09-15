@@ -1968,9 +1968,9 @@ export default function OcV1Page() {
                 {reporteSubtab === "oc-gastos" && <button type="button" style={styles.primaryButton} disabled={reporteLoading} onClick={() => { setReportePlanillaRows([]); void loadReporteDetalles(); }}>Aplicar filtros</button>}
               </div>
             </div>
-            <div style={styles.tableWrap}>
+            <div style={String(reporteSubtab) === "oc-gastos" ? { ...styles.tableWrap, width: "100%", maxWidth: "100%", minWidth: 0 } : styles.tableWrap}>
               {String(reporteSubtab) === "oc-gastos" && <style>{`.oc-gastos-grid th:nth-child(n+35), .oc-gastos-grid td:nth-child(n+35) { display: none; }`}</style>}
-              <table className={String(reporteSubtab) === "oc-gastos" ? "oc-gastos-grid" : undefined} style={styles.table}>
+              <table className={String(reporteSubtab) === "oc-gastos" ? "oc-gastos-grid" : undefined} style={String(reporteSubtab) === "oc-gastos" ? { ...styles.table, width: "max-content", minWidth: "100%" } : styles.table}>
                 <thead>
                   <tr>
                     {String(reporteSubtab) === "oc-gastos" ? reportePlanillaColumns.map((column, index) => <th key={`pla-head-${column}`} style={{ ...styles.th, width: 110, minWidth: 80, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", ...(index < 4 ? { position: "sticky", left: index * 110, zIndex: 3, background: "#fff" } : {}) }} title={column}>{column}</th>) : <th style={{ ...styles.th, width: 52 }} aria-label="Exportar PDF"></th>}
