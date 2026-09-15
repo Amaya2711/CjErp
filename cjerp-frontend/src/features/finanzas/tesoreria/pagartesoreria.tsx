@@ -890,9 +890,9 @@ export default function PagarTesoreriaPage() {
         if (data.section !== "body" || data.column.index !== 0) return;
         const label = String(data.cell.raw || "");
         if (label === "Total general") {
-          data.row.cells.forEach((cell) => { cell.styles.fillColor = [191, 219, 254]; cell.styles.fontStyle = "bold"; });
+          Object.values(data.row.cells).forEach((cell) => { cell.styles.fillColor = [191, 219, 254]; cell.styles.fontStyle = "bold"; });
         } else if (label.startsWith("Total ")) {
-          data.row.cells.forEach((cell) => { cell.styles.fillColor = [226, 232, 240]; cell.styles.fontStyle = "bold"; });
+          Object.values(data.row.cells).forEach((cell) => { cell.styles.fillColor = [226, 232, 240]; cell.styles.fontStyle = "bold"; });
         }
       },
     });
@@ -1715,7 +1715,7 @@ export default function PagarTesoreriaPage() {
                   </button>
                 )}
                 {programadoSubtab === "paolo" && (
-                  <button type="button" disabled={!visibleRows.length || saving} onClick={() => void exportarPaoloPdf()} title="Exportar formato Gerencia a PDF">
+                  <button type="button" disabled={!paoloGroups.length || saving} onClick={() => void exportarPaoloPdf()} title="Exportar formato Gerencia a PDF">
                     <Printer size={15} /> PDF
                   </button>
                 )}
