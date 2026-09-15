@@ -886,6 +886,15 @@ export default function PagarTesoreriaPage() {
       body,
       styles: { fontSize: 7, cellPadding: 2 },
       headStyles: { fillColor: [219, 234, 247], textColor: [31, 41, 55] },
+      didParseCell: (data) => {
+        if (data.section !== "body" || data.column.index !== 0) return;
+        const label = String(data.cell.raw || "");
+        if (label === "Total general") {
+          data.row.cells.forEach((cell) => { cell.styles.fillColor = [191, 219, 254]; cell.styles.fontStyle = "bold"; });
+        } else if (label.startsWith("Total ")) {
+          data.row.cells.forEach((cell) => { cell.styles.fillColor = [226, 232, 240]; cell.styles.fontStyle = "bold"; });
+        }
+      },
     });
     doc.save(`programado-gerencia-${hoy()}.pdf`);
   };
