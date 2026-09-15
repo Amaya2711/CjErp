@@ -373,7 +373,13 @@ export default function PagarTesoreriaPage() {
       .map(([groupKey, items]) => ({
         cliente: groupKey.split("\u001f")[0],
         moneda: groupKey.split("\u001f")[1] || "Sin moneda",
-        items: [...items].sort((a, b) =>
+        items: [...items.reduce((acc, item) => {
+          const key = `${item.responsable || "Sin responsable"}\u001f${item.tarea || ""}\u001f${item.solicitante || ""}\u001f${item.moneda || "Sin moneda"}`;
+          const current = acc.get(key);
+          if (current) current.total += item.total || 0;
+          else acc.set(key, { ...item });
+          return acc;
+        }, new Map<string, PagoTesoreriaRow>()).values()].sort((a, b) =>
           [a.responsable, a.tarea, a.solicitante, a.cuenta]
             .map((value) => value || "")
             .join(" ")
@@ -1637,7 +1643,7 @@ export default function PagarTesoreriaPage() {
                           <tr className="pt-paolo-group-header"><td colSpan={7}><button type="button" onClick={() => setPaoloCollapsed((current) => { const next = new Set(current); if (next.has(`${group.cliente}-${group.moneda}`)) next.delete(`${group.cliente}-${group.moneda}`); else next.add(`${group.cliente}-${group.moneda}`); return next; })}>{paoloCollapsed.has(`${group.cliente}-${group.moneda}`) ? "▶" : "▼"} {group.cliente} · {group.moneda} ({group.items.length})</button></td></tr>
                           {!paoloCollapsed.has(`${group.cliente}-${group.moneda}`) && group.items.map((row, index) => (
                             <tr key={`${group.cliente}-${row.correlativo}-${row.idSite}-${index}`}>
-                              <td>{index === 0 ? group.cliente : ""}</td><td>{row.responsable || ""}</td><td>{row.tarea || ""}</td><td>{row.solicitante || ""}</td><td>{row.cuenta || ""}</td><td>{row.moneda || ""}</td><td className="pt-paolo-number">{currencySymbol(row.moneda)} {money(row.total)}</td>
+                              <td>{index === 0 ? group.cliente : ""}</td><td>{index === 0 || group.items[index - 1]?.responsable !== row.responsable ? row.responsable || "" : ""}</td><td>{row.tarea || ""}</td><td>{row.solicitante || ""}</td><td>{row.cuenta || ""}</td><td>{row.moneda || ""}</td><td className="pt-paolo-number">{currencySymbol(row.moneda)} {money(row.total)}</td>
                             </tr>
                           ))}
                           <tr className="pt-paolo-subtotal"><td colSpan={5}>Total {group.cliente}</td><td>{group.moneda}</td><td className="pt-paolo-number">{currencySymbol(group.moneda)} {money(group.total)}</td></tr>

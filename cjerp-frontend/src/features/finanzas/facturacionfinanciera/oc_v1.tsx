@@ -505,6 +505,12 @@ export default function OcV1Page() {
     fechaDesde: "",
     fechaHasta: "",
   });
+  const [responsablesReporteFiltro, setResponsablesReporteFiltro] = useState<string[]>([]);
+  const [busquedaResponsableReporte, setBusquedaResponsableReporte] = useState("");
+  const [solicitantesReporteFiltro, setSolicitantesReporteFiltro] = useState<string[]>([]);
+  const [busquedaSolicitanteReporte, setBusquedaSolicitanteReporte] = useState("");
+  const [sitesReporteFiltro, setSitesReporteFiltro] = useState<string[]>([]);
+  const [busquedaSiteReporte, setBusquedaSiteReporte] = useState("");
 
   const camposConstantes = useMemo(
     () => ["tipo_moneda", "tipo_comprobante", "tipo_pago"],
@@ -912,11 +918,11 @@ export default function OcV1Page() {
   const reporteRowsFiltradas = useMemo(() => {
     const idOcFiltro = reporteFiltros.idOc.trim();
     return reporteRows.filter((item) => {
-      if (reporteFiltros.solicitante && item.solicitante !== reporteFiltros.solicitante) return false;
-      if (reporteFiltros.responsable && item.responsable !== reporteFiltros.responsable) return false;
+      if (solicitantesReporteFiltro.length && !solicitantesReporteFiltro.includes(item.solicitante)) return false;
+      if (responsablesReporteFiltro.length && !responsablesReporteFiltro.includes(item.responsable)) return false;
       if (reporteFiltros.cliente && !item.clientes.includes(reporteFiltros.cliente)) return false;
       if (reporteFiltros.proyecto && !item.proyectos.includes(reporteFiltros.proyecto)) return false;
-      if (reporteFiltros.site && !item.sites.includes(reporteFiltros.site)) return false;
+      if (sitesReporteFiltro.length && !item.sites.some((site) => sitesReporteFiltro.includes(site))) return false;
       if (reporteFiltros.estado && item.estado !== reporteFiltros.estado) return false;
       if (idOcFiltro && !String(item.idOc).includes(idOcFiltro)) return false;
       const fechaItem = item.fecha ? item.fecha.slice(0, 10) : "";
@@ -924,7 +930,7 @@ export default function OcV1Page() {
       if (reporteFiltros.fechaHasta && (!fechaItem || fechaItem > reporteFiltros.fechaHasta)) return false;
       return true;
     });
-  }, [reporteFiltros, reporteRows]);
+  }, [reporteFiltros, reporteRows, responsablesReporteFiltro, solicitantesReporteFiltro, sitesReporteFiltro]);
 
   const exportReporteOcPdf = useCallback(async (item: (typeof reporteRows)[number]) => {
     setPdfExportingOc(item.idOc);
@@ -1872,27 +1878,17 @@ export default function OcV1Page() {
                   style={styles.input}
                 />
               </Field>
+              <Field><Label>Solicitante</Label><details style={{ position: "relative" }}><summary style={{ ...styles.input, display: "flex", alignItems: "center", cursor: "pointer" }}>Todos{solicitantesReporteFiltro.length > 0 && ` (${solicitantesReporteFiltro.length})`}</summary><div style={{ position: "absolute", zIndex: 20, top: "100%", left: 0, right: 0, maxHeight: 240, overflowY: "auto", padding: 8, background: "#fff", border: "1px solid #D1D5DB", borderRadius: 8 }}><input value={busquedaSolicitanteReporte} onChange={(e) => setBusquedaSolicitanteReporte(e.target.value)} placeholder="Escriba un solicitante..." style={styles.input} /><label style={{ display: "flex", gap: 6, padding: "6px 2px", fontSize: 12, fontWeight: 600 }}><input type="checkbox" onChange={(e) => { const disponibles = reporteOptions.solicitantes.filter((item) => item.toLocaleLowerCase().includes(busquedaSolicitanteReporte.toLocaleLowerCase())); const values = e.target.checked ? [...new Set([...solicitantesReporteFiltro, ...disponibles])] : solicitantesReporteFiltro.filter((v) => !disponibles.includes(v)); setSolicitantesReporteFiltro(values); setReporteFiltros((p) => ({ ...p, solicitante: values.join(",") })); }} />Marcar / desmarcar todos</label>{reporteOptions.solicitantes.filter((item) => item.toLocaleLowerCase().includes(busquedaSolicitanteReporte.toLocaleLowerCase())).map((item) => <label key={`rep-sol-${item}`} style={{ display: "flex", gap: 6, padding: "4px 2px", fontSize: 12 }}><input type="checkbox" checked={solicitantesReporteFiltro.includes(item)} onChange={(e) => { const values = e.target.checked ? [...solicitantesReporteFiltro, item] : solicitantesReporteFiltro.filter((v) => v !== item); setSolicitantesReporteFiltro(values); setReporteFiltros((p) => ({ ...p, solicitante: values.join(",") })); }} />{item}</label>)}</div></details></Field>
               <Field>
-                <Label>Solicitante</Label>
-                <select
-                  value={reporteFiltros.solicitante}
-                  onChange={(event) => setReporteFiltros((prev) => ({ ...prev, solicitante: event.target.value }))}
-                  style={styles.input}
-                >
-                  <option value="">Todos</option>
-                  {reporteOptions.solicitantes.map((item) => <option key={`rep-sol-${item}`} value={item}>{item}</option>)}
-                </select>
-              </Field>
-              <Field>
-                <Label>Responsable</Label>
-                <select
-                  value={reporteFiltros.responsable}
-                  onChange={(event) => setReporteFiltros((prev) => ({ ...prev, responsable: event.target.value }))}
-                  style={styles.input}
-                >
-                  <option value="">Todos</option>
-                  {reporteOptions.responsables.map((item) => <option key={`rep-res-${item}`} value={item}>{item}</option>)}
-                </select>
+              <Label>Responsable</Label>
+              <details className="oc-reporte-multi-filter" style={{ position: "relative", minWidth: 180 }}>
+                <summary style={{ ...styles.input, display: "flex", alignItems: "center", cursor: "pointer" }}>Todos{responsablesReporteFiltro.length > 0 && ` (${responsablesReporteFiltro.length})`}</summary>
+                <div className="oc-reporte-multi-options" style={{ position: "absolute", zIndex: 20, top: "100%", left: 0, right: 0, maxHeight: 240, overflowY: "auto", padding: 8, background: "#fff", border: "1px solid #D1D5DB", borderRadius: 8, boxShadow: "0 6px 16px rgba(15,23,42,.12)" }}>
+                  <input value={busquedaResponsableReporte} onChange={(event) => setBusquedaResponsableReporte(event.target.value)} placeholder="Escriba un responsable..." style={styles.input} />
+                  <label style={{ display: "flex", gap: 6, alignItems: "center", padding: "6px 2px", fontSize: 12, fontWeight: 600, borderBottom: "1px solid #E5E7EB" }}><input type="checkbox" checked={reporteOptions.responsables.filter((item) => item.toLocaleLowerCase().includes(busquedaResponsableReporte.toLocaleLowerCase())).every((item) => responsablesReporteFiltro.includes(item)) && reporteOptions.responsables.length > 0} onChange={(event) => { const disponibles = reporteOptions.responsables.filter((item) => item.toLocaleLowerCase().includes(busquedaResponsableReporte.toLocaleLowerCase())); const values = event.target.checked ? [...new Set([...responsablesReporteFiltro, ...disponibles])] : responsablesReporteFiltro.filter((value) => !disponibles.includes(value)); setResponsablesReporteFiltro(values); setReporteFiltros((prev) => ({ ...prev, responsable: values.join(",") })); }} />Marcar / desmarcar todos</label>
+                  {reporteOptions.responsables.filter((item) => item.toLocaleLowerCase().includes(busquedaResponsableReporte.toLocaleLowerCase())).map((item) => <label key={`rep-res-${item}`} style={{ display: "flex", gap: 6, alignItems: "center", padding: "4px 2px", fontSize: 12 }}><input type="checkbox" checked={responsablesReporteFiltro.includes(item)} onChange={(event) => { const values = event.target.checked ? [...responsablesReporteFiltro, item] : responsablesReporteFiltro.filter((value) => value !== item); setResponsablesReporteFiltro(values); setReporteFiltros((prev) => ({ ...prev, responsable: values.join(",") })); }} />{item}</label>)}
+                </div>
+              </details>
               </Field>
               <Field>
                 <Label>Cliente</Label>
@@ -1916,17 +1912,7 @@ export default function OcV1Page() {
                   {reporteOptions.proyectos.map((item) => <option key={`rep-pro-${item}`} value={item}>{item}</option>)}
                 </select>
               </Field>
-              <Field>
-                <Label>Site</Label>
-                <select
-                  value={reporteFiltros.site}
-                  onChange={(event) => setReporteFiltros((prev) => ({ ...prev, site: event.target.value }))}
-                  style={styles.input}
-                >
-                  <option value="">Todos</option>
-                  {reporteOptions.sites.map((item) => <option key={`rep-site-${item}`} value={item}>{item}</option>)}
-                </select>
-              </Field>
+              <Field><Label>Site</Label><details style={{ position: "relative" }}><summary style={{ ...styles.input, display: "flex", alignItems: "center", cursor: "pointer" }}>Todos{sitesReporteFiltro.length > 0 && ` (${sitesReporteFiltro.length})`}</summary><div style={{ position: "absolute", zIndex: 20, top: "100%", left: 0, right: 0, maxHeight: 240, overflowY: "auto", padding: 8, background: "#fff", border: "1px solid #D1D5DB", borderRadius: 8 }}><input value={busquedaSiteReporte} onChange={(e) => setBusquedaSiteReporte(e.target.value)} placeholder="Escriba un site..." style={styles.input} /><label style={{ display: "flex", gap: 6, padding: "6px 2px", fontSize: 12, fontWeight: 600 }}><input type="checkbox" onChange={(e) => { const disponibles = reporteOptions.sites.filter((item) => item.toLocaleLowerCase().includes(busquedaSiteReporte.toLocaleLowerCase())); const values = e.target.checked ? [...new Set([...sitesReporteFiltro, ...disponibles])] : sitesReporteFiltro.filter((v) => !disponibles.includes(v)); setSitesReporteFiltro(values); setReporteFiltros((p) => ({ ...p, site: values.join(",") })); }} />Marcar / desmarcar todos</label>{reporteOptions.sites.filter((item) => item.toLocaleLowerCase().includes(busquedaSiteReporte.toLocaleLowerCase())).map((item) => <label key={`rep-site-${item}`} style={{ display: "flex", gap: 6, padding: "4px 2px", fontSize: 12 }}><input type="checkbox" checked={sitesReporteFiltro.includes(item)} onChange={(e) => { const values = e.target.checked ? [...sitesReporteFiltro, item] : sitesReporteFiltro.filter((v) => v !== item); setSitesReporteFiltro(values); setReporteFiltros((p) => ({ ...p, site: values.join(",") })); }} />{item}</label>)}</div></details></Field>
               <Field>
                 <Label>Estado</Label>
                 <select
@@ -1943,7 +1929,7 @@ export default function OcV1Page() {
                   type="button"
                   style={styles.secondaryButton}
                   onClick={() => {
-                    setReporteFiltros({ solicitante: "", responsable: "", cliente: "", proyecto: "", site: "", estado: "", idOc: "", fechaDesde: "", fechaHasta: "" });
+                    setReporteFiltros({ solicitante: "", responsable: "", cliente: "", proyecto: "", site: "", estado: "", idOc: "", fechaDesde: "", fechaHasta: "" }); setResponsablesReporteFiltro([]); setBusquedaResponsableReporte(""); setSolicitantesReporteFiltro([]); setBusquedaSolicitanteReporte(""); setSitesReporteFiltro([]); setBusquedaSiteReporte("");
                     setReporteDetalles([]);
                     setReporteConsultado(false);
                   }}
