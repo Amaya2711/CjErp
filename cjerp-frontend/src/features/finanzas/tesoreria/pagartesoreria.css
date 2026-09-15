@@ -878,6 +878,9 @@
   border-top: 1px solid #e8edf4;
   background: #f8fafc;
   flex-shrink: 0;
+  position: sticky;
+  bottom: 0;
+  z-index: 6;
 }
 .pt-workspace.pt-workspace-review {
   grid-template-columns: minmax(0, 1fr);
