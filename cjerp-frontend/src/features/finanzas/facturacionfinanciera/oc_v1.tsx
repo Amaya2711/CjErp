@@ -36,7 +36,7 @@ import { getHttpErrorMessage } from "../../../utils/httpError";
 import { FileDown } from "lucide-react";
 import { buildPlanillaConsultaEstadosRequest, consultarPlanillaEstados } from "../../../api/planillaConsultaService";
 
-const OC_GASTOS_COLUMNAS_INICIALES = ["Corre", "IdOc", "Usuario", "Solicitante", "FecIngreso", "EstadoPla", "Detalle", "Comprobante", "Serie", "Moneda", "Subtotal", "Igv", "Total", "MontoRetencion", "TotalPagar", "Observacion", "Comentario", "Gestor", "Validador", "Ejecutor", "FechaDeposito", "IdSite", "Ot", "NroOperacion", "NombreProyecto", "Site", "Tipo_Trabajo", "Tarea", "Responsable", "Cliente", "PrecioUniOc", "CantOc", "TotalOc", "IdEstadoOc"];
+const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "Cliente", "NombreProyecto", "Site", "FechaOc", "PrecioUniOc", "CantOc", "TotalOc", "IdEstadoOc", "TienePlanilla", "CantidadPlanillas", "TieneImportar", "CantidadImportar", "SubtotalPlanilla", "IgvPlanilla", "TotalPlanilla", "MontoRetencionPlanilla", "TotalPagarPlanilla", "PrimeraFechaIngreso", "UltimaFechaIngreso", "PrimeraFechaDeposito", "UltimaFechaDeposito", "CantidadResponsables", "SaldoOcVsPlanilla", "PorcentajeConsumidoOc", "EstadoRelacion", "IdCliente", "IdProyecto", "IdSite", "CorSite"];
 
 type ColumnFilterDropdownProps = {
   header: { key: string; label: string };
@@ -663,7 +663,7 @@ export default function OcV1Page() {
           ? cabeceras.find((item) => item.responsable === responsableNombre)?.idResponsable
           : undefined;
         const request = buildPlanillaConsultaEstadosRequest([
-          { nombre: "Estados", valor: reporteFiltros.estado || "0,2,3,4,6", tipo: "string" },
+          ...(reporteFiltros.estado ? [{ nombre: "EstadosOc", valor: reporteFiltros.estado, tipo: "string" as const }] : []),
           ...(reporteFiltros.fechaDesde ? [{ nombre: "FechaInicio", valor: reporteFiltros.fechaDesde, tipo: "date" as const }] : []),
           ...(reporteFiltros.fechaHasta ? [{ nombre: "FechaFin", valor: reporteFiltros.fechaHasta, tipo: "date" as const }] : []),
           ...(responsableId ? [{ nombre: "IdResponsable", valor: String(responsableId), tipo: "int" as const }] : []),
