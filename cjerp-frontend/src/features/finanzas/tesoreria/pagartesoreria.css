@@ -216,7 +216,8 @@
   gap: 5px;
   border-bottom: 1px solid #e2e8f0;
   flex-shrink: 0;
-  overflow: auto;
+  flex-wrap: wrap;
+  overflow: visible;
 }
 .pt-tabs button {
   border: 0;
@@ -225,6 +226,8 @@
   padding: 12px 18px;
   font-weight: 600;
   background: transparent;
+  flex: 1 1 auto;
+  min-width: max-content;
 }
 .pt-tabs button.active {
   color: #2563eb;
@@ -242,7 +245,8 @@
   gap: 6px;
   padding: 10px 0 2px;
   border-bottom: 1px solid #e2e8f0;
-  overflow-x: auto;
+  flex-wrap: wrap;
+  overflow: visible;
 }
 .pt-subtabs button {
   border: 1px solid #d7e0ea;
@@ -253,6 +257,7 @@
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
+  flex: 0 0 auto;
 }
 .pt-subtabs button.active {
   color: #0f766e;
