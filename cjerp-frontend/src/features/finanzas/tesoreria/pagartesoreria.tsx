@@ -731,6 +731,17 @@ export default function PagarTesoreriaPage() {
     }
   };
   const exportar = () => {
+    if (estado === 4) {
+      const sheet = XLSX.utils.json_to_sheet(visibleRows.map((r) => ({
+        Recibo: r.correlativo, OT: r.ot, Responsable: r.responsable, Detalle: r.detalle,
+        Cliente: r.cliente, Proyecto: r.proyecto, Site: r.site, Solicitante: r.solicitante,
+        Comprobante: r.comprobante, Serie: r.serie, Moneda: r.moneda, Subtotal: r.subtotal,
+        IGV: r.igv, Total: r.total, Retencion: r.montoRetencion, TotalPagar: r.totalPagar,
+        FechaDeposito: fecha(r.fechaDeposito), Transferencia: r.transferencia || r.idTransferencia,
+        Banco: r.banco || r.idBanco, Operacion: r.nroOperacion,
+      })));
+      const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, "Rendicion"); XLSX.writeFile(book, `tesoreria-rendicion-${hoy()}.xlsx`); return;
+    }
     const sheet = XLSX.utils.json_to_sheet(
       visibleRows.map((r) => ({
         Recibo: r.correlativo,
