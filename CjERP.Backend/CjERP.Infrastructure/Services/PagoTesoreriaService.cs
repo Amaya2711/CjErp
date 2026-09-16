@@ -23,9 +23,10 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
         return new { ejecutores, anticipos = maestros.Where(x => x.Campo == "ANTICIPO"), estados = maestros.Where(x => x.Campo == "ESTADO"), bancos, transferencias = constantes.Where(x => x.Campo == "TIPO_TRANSFERENCIA"), monedas = constantes.Where(x => x.Campo == "TIPO_MONEDA"), comprobantes = constantes.Where(x => x.Campo == "TIPO_COMPROBANTE"), tiposPago = constantes.Where(x => x.Campo == "TIPO_PAGO"), rendiciones = constantes.Where(x => x.Campo == "RENDICION"), retenciones = constantes.Where(x => string.Equals((string)x.Campo,"DETRACCION",StringComparison.OrdinalIgnoreCase)) };
     }
 
-    public async Task<object> ListarAsync(int estado, DateTime? desde, DateTime? hasta, CancellationToken ct)
+    public async Task<object> ListarAsync(int estado, DateTime? desde, DateTime? hasta, int? correlativo, CancellationToken ct)
     {
-        if (estado is not (0 or 1 or 9 or 8 or 5 or 4 or 2)) throw new ArgumentException("Estado de consulta inválido.");
+        if (estado is not (0 or 1 or 9 or 8 or 5 or 4 or 2 or 100)) throw new ArgumentException("Estado de consulta inválido.");
+        if (estado == 100 && (!correlativo.HasValue || correlativo.Value <= 0)) throw new ArgumentException("Indique un correlativo válido para realizar la búsqueda.");
         if (desde > hasta) throw new ArgumentException("La fecha inicial no puede superar la final.");
         if (estado == 4 && (desde is null || hasta is null)) throw new ArgumentException("Indique el rango de fechas del historial.");
         await using var cn = factory.CreateConnection();
@@ -62,11 +63,11 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
             LEFT JOIN Constante mon ON mon.Sociedad='PE01' AND mon.Programa='PLANTILLA' AND mon.Campo='TIPO_MONEDA' AND mon.Correlativo=a.TipoMoneda
             LEFT JOIN Constante ban ON ban.Sociedad='PE01' AND ban.Programa='PLANTILLA' AND ban.Campo='BANCO' AND ban.Correlativo=a.IdBanco
             LEFT JOIN Constante trans ON trans.Sociedad='PE01' AND trans.Programa='PLANTILLA' AND trans.Campo='TIPO_TRANSFERENCIA' AND trans.Correlativo=a.IdTransferencia
-            WHERE (a.Estado=@estado OR (@estado=2 AND a.Estado=7))
+            WHERE (@estado=100 AND a.Correlativo=@correlativo) OR (@estado<>100 AND (a.Estado=@estado OR (@estado=2 AND a.Estado=7)))
                 AND (@desde IS NULL OR (CASE WHEN @estado=4 THEN fechas.Deposito ELSE fechas.Ingreso END)>=@desde)
                 AND (@hasta IS NULL OR (CASE WHEN @estado=4 THEN fechas.Deposito ELSE fechas.Ingreso END)<=@hasta)
             ORDER BY a.Correlativo DESC
-            """, new { estado, desde = desde?.Date, hasta = hasta?.Date }, cancellationToken: ct));
+            """, new { estado, correlativo, desde = desde?.Date, hasta = hasta?.Date }, cancellationToken: ct));
     }
 
     public async Task<object> CuentasAsync(int responsable, CancellationToken ct)

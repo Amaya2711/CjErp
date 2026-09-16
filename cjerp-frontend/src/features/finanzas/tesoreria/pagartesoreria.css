@@ -439,6 +439,17 @@
   padding: 0 16px 12px !important;
   flex-wrap: wrap;
 }
+.pt-local-filters-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  background: #f1f5f9;
+  pointer-events: none;
+}
+.pt-local-filters-disabled select,
+.pt-local-filters-disabled summary,
+.pt-local-filters-disabled input {
+  cursor: not-allowed;
+}
 .pt-local-filters select {
   width: auto;
   flex: 1;
@@ -891,7 +902,8 @@
   bottom: 0;
   z-index: 6;
 }
-.pt-workspace.pt-workspace-review {
+.pt-workspace.pt-workspace-review,
+.pt-workspace.pt-workspace-search {
   grid-template-columns: minmax(0, 1fr);
 }
 .pt-stage-dialogs {

@@ -104,10 +104,10 @@ public sealed class PagoTesoreriaController(PagoTesoreriaService service, ISegMe
     };
 
     [HttpGet]
-    public async Task<IActionResult> Listar([FromQuery] int estado = 5, [FromQuery] DateTime? desde = null, [FromQuery] DateTime? hasta = null, CancellationToken ct = default)
+    public async Task<IActionResult> Listar([FromQuery] int estado = 5, [FromQuery] DateTime? desde = null, [FromQuery] DateTime? hasta = null, [FromQuery] int? correlativo = null, CancellationToken ct = default)
     {
         if (!await PuedeAsync()) return SinAcceso();
-        try { return Ok(await service.ListarAsync(estado, desde, hasta, ct)); }
+        try { return Ok(await service.ListarAsync(estado, desde, hasta, correlativo, ct)); }
         catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
     }
 

@@ -114,9 +114,10 @@ export const listarPagosTesoreria = (
   desde: string,
   hasta: string,
   signal?: AbortSignal,
+  correlativo?: number,
 ) =>
   httpClient.get<PagoTesoreriaRow[]>(url, {
-    params: { estado, desde: desde || undefined, hasta: hasta || undefined },
+    params: { estado, desde: desde || undefined, hasta: hasta || undefined, correlativo: correlativo || undefined },
     signal,
     timeout: 90000,
   });

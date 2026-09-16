@@ -100,6 +100,7 @@ const tabs = [
   { estado: 8, label: "Programado", icon: Wallet },
   { estado: 4, label: "Rendición", icon: History },
   { estado: 2, label: "Observada", icon: Eye },
+  { estado: 100, label: "Búsqueda", icon: Search },
   { estado: 99, label: "Reporte", icon: BarChart3 },
 ];
 const REPORT_STATES = [0, 1, 9, 8, 5, 4, 2];
@@ -171,6 +172,7 @@ export default function PagarTesoreriaPage() {
   const [success, setSuccess] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
+  const [correlativoBusqueda, setCorrelativoBusqueda] = useState("");
   const [cliente, setCliente] = useState("");
   const [moneda, setMoneda] = useState("");
   const [comprobantesFiltro, setComprobantesFiltro] = useState<string[]>([]);
@@ -193,7 +195,7 @@ export default function PagarTesoreriaPage() {
   const [permisosRevision, setPermisosRevision] = useState<PagoRevisionPermisos>({
     puedeEditar: false, puedeEditarOperacion: false, puedeEditarEstado: false,
   });
-  const columnCount = estado === 1 ? 22 : estado === 9 ? 16 : estado === 4 ? 18 : 15;
+  const columnCount = estado === 1 ? 22 : estado === 9 ? 16 : estado === 4 ? 18 : estado === 100 ? 16 : 15;
   const [confirmation, setConfirmation] = useState<PagoTesoreriaRequest | null>(
     null,
   );
@@ -249,7 +251,7 @@ export default function PagarTesoreriaPage() {
   }, [loadCatalogos]);
 
   const load = useCallback(
-    async (status: number, start: string, end: string) => {
+    async (status: number, start: string, end: string, correlativo?: number) => {
       fetchRef.current?.abort();
       const controller = new AbortController();
       fetchRef.current = controller;
@@ -259,12 +261,14 @@ export default function PagarTesoreriaPage() {
       setError("");
       setLoading(true);
       try {
-        const result = status === 99
+        const result = status === 100
+          ? await listarPagosTesoreria(100, "", "", controller.signal, correlativo)
+          : status === 99
           ? (await Promise.all(REPORT_STATES.map((reportState) =>
               listarPagosTesoreria(
                 reportState,
-                reportState === 4 ? `${hoy().slice(0, 7)}-01` : "",
-                reportState === 4 ? hoy() : "",
+                reportState === 4 ? (start || `${hoy().slice(0, 7)}-01`) : start,
+                reportState === 4 ? (end || hoy()) : end,
                 controller.signal)))).flat()
           : await listarPagosTesoreria(status, start, end, controller.signal);
         if (!controller.signal.aborted) setRows(result);
@@ -318,6 +322,7 @@ export default function PagarTesoreriaPage() {
   }, [detail]);
 
   const visibleRows = useMemo(() => {
+    if (estado === 100 && !correlativoBusqueda.trim()) return [];
     const search = query.trim().toLocaleLowerCase();
     return rows.filter(
       (r) =>
@@ -355,6 +360,8 @@ export default function PagarTesoreriaPage() {
     responsablesFiltro,
     solicitantesFiltro,
     rendicion,
+    estado,
+    correlativoBusqueda,
   ]);
   const paoloGroups = useMemo(() => {
     const groups = new Map<string, PagoTesoreriaRow[]>();
@@ -587,6 +594,7 @@ export default function PagarTesoreriaPage() {
     setDesde(start);
     setHasta(end);
     setQuery("");
+    setCorrelativoBusqueda("");
     setCliente("");
     setMoneda("");
     setComprobantesFiltro([]);
@@ -602,7 +610,12 @@ export default function PagarTesoreriaPage() {
     setContabilidadValida(false);
     setExpanded(new Set());
     setSuccess("");
-    void load(next, start, end);
+    if (next === 100) {
+      setRows([]);
+      setLoading(false);
+    } else {
+      void load(next, start, end);
+    }
   };
   useEffect(() => {
     if (!editingRevision) return;
@@ -931,7 +944,7 @@ export default function PagarTesoreriaPage() {
           </div>
         </header>
         <nav className="pt-tabs" aria-label="Estado de los pagos">
-          {tabs.map((tab) => (
+          {tabs.filter((tab) => tab.estado !== 0).map((tab) => (
             <button
               key={tab.estado}
               type="button"
@@ -942,7 +955,7 @@ export default function PagarTesoreriaPage() {
             >
               <tab.icon size={17} />
               {tab.label}
-              {estado === tab.estado && <span>{rows.length}</span>}
+              {estado === tab.estado && <span>{estado === 100 && !correlativoBusqueda.trim() ? 0 : rows.length}</span>}
             </button>
           ))}
         </nav>
@@ -966,7 +979,7 @@ export default function PagarTesoreriaPage() {
             ))}
           </nav>
         )}
-        {!esReporte && <form
+        {!esReporte && estado !== 100 && <form
           className="pt-filters"
           onSubmit={(e) => {
             e.preventDefault();
@@ -1048,6 +1061,35 @@ export default function PagarTesoreriaPage() {
             </button>
           </fieldset>
         </form>}
+        {estado === 100 && (
+          <form className="pt-filters" onSubmit={(e) => {
+            e.preventDefault();
+            const parsed = Number(correlativoBusqueda.trim());
+            if (!Number.isInteger(parsed) || parsed <= 0) {
+              setError("Indique un correlativo válido para realizar la búsqueda.");
+              return;
+            }
+            void load(100, "", "", parsed);
+          }}>
+            <fieldset disabled={saving}>
+              <label className="pt-field">
+                <span>Correlativo</span>
+                <input
+                  type="number"
+                  min="1"
+                  required
+                  placeholder="Ingrese el correlativo"
+                  value={correlativoBusqueda}
+                  onChange={(e) => { setCorrelativoBusqueda(e.target.value); setRows([]); setError(""); }}
+                />
+              </label>
+              <button className="pt-primary" type="submit" disabled={loading}>
+                <Search size={15} />
+                Buscar
+              </button>
+            </fieldset>
+          </form>
+        )}
         {catalogError && (
           <div className="pt-alert" role="alert">
             {catalogError}
@@ -1073,7 +1115,7 @@ export default function PagarTesoreriaPage() {
             {success}
           </div>
         )}
-        <div className={`pt-workspace${estado === 1 || (esPago && !registroPagoAbierto) ? " pt-workspace-review" : ""}`}>
+        <div className={`pt-workspace${estado === 1 || (esPago && !registroPagoAbierto) ? " pt-workspace-review" : estado === 100 ? " pt-workspace-search" : ""}`}>
           <section className={`pt-list${estado === 8 && programadoSubtab !== "recibos" ? " pt-programado-hidden" : ""}`}>
             {esReporte && (
               <div className="pt-report" aria-label="Reporte de tesorería">
@@ -1148,7 +1190,7 @@ export default function PagarTesoreriaPage() {
               )}
             </div>}
             {!esReporte && <>
-            <fieldset className="pt-local-filters" disabled={saving}>
+            <fieldset className={`pt-local-filters${estado === 100 ? " pt-local-filters-disabled" : ""}`} disabled={saving || estado === 100}>
               <select
                 aria-label="Filtrar por cliente"
                 value={cliente}
@@ -1347,6 +1389,7 @@ export default function PagarTesoreriaPage() {
                       }
                     </th>
                     <th>Recibo / OT</th>
+                    {estado === 100 && <th>Estado</th>}
                     {estado === 1 && <th>Serie</th>}
                     <th>Responsable / Solicitante</th>
                     <th>Proyecto / Site</th>
@@ -1437,7 +1480,7 @@ export default function PagarTesoreriaPage() {
                               />
                             }
                           </td>
-                          <td colSpan={estado === 1 ? 9 : estado === 9 ? 8 : 7}>
+                          <td colSpan={estado === 1 ? 9 : estado === 9 ? 8 : estado === 100 ? 8 : 7}>
                             <button
                               disabled={saving}
                               onClick={() =>
@@ -1460,7 +1503,7 @@ export default function PagarTesoreriaPage() {
                             </button>
                           </td>
                           <td className="numeric">{money(sum(g.items))}</td>
-                          <td colSpan={estado === 1 ? 11 : estado === 4 ? 10 : 7} />
+                          <td colSpan={estado === 1 ? 11 : estado === 4 ? 10 : estado === 100 ? 8 : 7} />
                         </tr>
                         {expanded.has(g.id) &&
                           g.items.map((r) => (
@@ -1496,6 +1539,7 @@ export default function PagarTesoreriaPage() {
                                 </button>
                                 <small>OT {r.ot || "—"}</small>
                               </td>
+                              {estado === 100 && <td>{catalogos.estados.find((item) => item.id === r.estado)?.nombre || r.estado}</td>}
                               {estado === 1 && <td>{r.serie || "—"}</td>}
                               <td>
                                 <strong>
@@ -1752,7 +1796,7 @@ export default function PagarTesoreriaPage() {
               </div>}
             </section>
           )}
-          {estado !== 1 && !esReporte && (!esPago || registroPagoAbierto) && (estado !== 8 || programadoSubtab === "recibos") && (
+          {estado !== 1 && estado !== 100 && !esReporte && (!esPago || registroPagoAbierto) && (estado !== 8 || programadoSubtab === "recibos") && (
             <aside className="pt-payment">
               {!esPago && (
                 <PagoEtapaForm
