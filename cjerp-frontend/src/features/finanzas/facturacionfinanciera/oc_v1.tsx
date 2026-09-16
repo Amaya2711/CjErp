@@ -527,12 +527,22 @@ export default function OcV1Page() {
     fechaDesde: "",
     fechaHasta: "",
   });
+  const [reporteFiltrosPorTab, setReporteFiltrosPorTab] = useState<Record<string, ReporteFiltros>>({});
   const [responsablesReporteFiltro, setResponsablesReporteFiltro] = useState<string[]>([]);
   const [busquedaResponsableReporte, setBusquedaResponsableReporte] = useState("");
   const [solicitantesReporteFiltro, setSolicitantesReporteFiltro] = useState<string[]>([]);
   const [busquedaSolicitanteReporte, setBusquedaSolicitanteReporte] = useState("");
   const [sitesReporteFiltro, setSitesReporteFiltro] = useState<string[]>([]);
   const [busquedaSiteReporte, setBusquedaSiteReporte] = useState("");
+  const cambiarReporteSubtab = (tab: string) => {
+    setReporteFiltrosPorTab((prev) => ({ ...prev, [String(reporteSubtab)]: reporteFiltros }));
+    const guardados = reporteFiltrosPorTab[tab];
+    if (guardados) setReporteFiltros(guardados);
+    else setReporteFiltros({ solicitante: "", responsable: "", cliente: "", proyecto: "", site: "", estado: "", idOc: "", tipoOc: "con", fechaDesde: "", fechaHasta: "" });
+    setReporteSubtab(tab as typeof reporteSubtab);
+    setReporteConsultado(false);
+    setReportePlanillaRows([]);
+  };
 
   const camposConstantes = useMemo(
     () => ["tipo_moneda", "tipo_comprobante", "tipo_pago"],
@@ -1889,7 +1899,7 @@ export default function OcV1Page() {
         <section style={ocV1Styles.view}>
           <nav style={{ display: "flex", gap: 6, marginBottom: 12, borderBottom: "1px solid #DDE3E1" }} aria-label="Vistas de reporte">
             {[{ key: "listado", label: "Listado" }, { key: "oc-gastos", label: "OC/Gastos" }, { key: "resumen", label: "Resumen" }].map((tab) => (
-              <button key={tab.key} type="button" onClick={() => { setReporteSubtab(tab.key as typeof reporteSubtab); setReporteConsultado(false); }} style={{ ...ocV1Styles.viewTab, ...(reporteSubtab === tab.key ? ocV1Styles.viewTabActive : {}) }}>{tab.label}</button>
+              <button key={tab.key} type="button" onClick={() => cambiarReporteSubtab(tab.key)} style={{ ...ocV1Styles.viewTab, ...(reporteSubtab === tab.key ? ocV1Styles.viewTabActive : {}) }}>{tab.label}</button>
             ))}
           </nav>
           <div style={{ ...styles.card, display: reporteSubtab === "listado" || reporteSubtab === "oc-gastos" ? undefined : "none" }}>
