@@ -698,7 +698,7 @@ export default function OcV1Page() {
 
   useEffect(() => {
     const tieneFiltro = Object.values(reporteFiltros).some((value) => value.trim().length > 0);
-    if (vistaOc === "reporte" && reporteSubtab !== "oc-gastos" && tieneFiltro && !reporteConsultado && !reporteLoading) {
+    if (vistaOc === "reporte" && !["oc-gastos", "listado"].includes(String(reporteSubtab)) && tieneFiltro && !reporteConsultado && !reporteLoading) {
       void loadReporteDetalles();
     }
   }, [reporteConsultado, reporteFiltros, reporteLoading, reporteSubtab, vistaOc]);
@@ -1998,6 +1998,7 @@ export default function OcV1Page() {
                 >
                   Limpiar filtros
                 </button>
+                {reporteSubtab === "listado" && <button type="button" style={styles.primaryButton} disabled={reporteLoading} onClick={() => { setReporteConsultado(false); void loadReporteDetalles(); }}>Agregar filtro</button>}
                 {reporteSubtab === "oc-gastos" && <button type="button" style={styles.primaryButton} disabled={reporteLoading} onClick={() => { setReportePlanillaRows([]); void loadReporteDetalles(); }}>Aplicar filtros</button>}
               </div>
             </div>
