@@ -680,7 +680,12 @@ export default function OcV1Page() {
         ]);
         request.consulta = "analisis-gastos";
         const response = await consultarPlanillaEstados(request, { timeoutMs: 60000 });
-        const rows = Array.isArray(response?.rows) ? response.rows : [];
+        const rows = (Array.isArray(response?.rows) ? response.rows : []).map((row) => {
+          // Mantener el alias del nuevo store aunque el serializador omita valores NULL.
+          // Así no se utiliza CorSite (correlativo del site) como sustituto.
+          const correlativoKey = Object.keys(row).find((key) => key.toLowerCase() === "correlativoplanilla");
+          return correlativoKey ? row : { ...row, CorrelativoPlanilla: null };
+        });
         const rowsFiltradas = reporteFiltros.tipoOc === "con"
           ? rows.filter((row) => {
             const key = Object.keys(row).find((item) => item.toLowerCase() === "idoc");
