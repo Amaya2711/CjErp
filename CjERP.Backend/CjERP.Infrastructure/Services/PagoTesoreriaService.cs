@@ -153,7 +153,8 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
         return await cn.ExecuteAsync(factory.Create("""
             UPDATE Planilla SET IdEjecutor=@IdEjecutor, IdTransferencia=@IdTransferencia,
                 IdBanco=@IdBanco, IdMoneda2=@IdMoneda2, FechaDeposito=@FechaDeposito,
-                Cheque=@Cheque, NroOperacion=@NroOperacion, Estado=4,
+                Cheque=@Cheque, NroOperacion=@NroOperacion,
+                Estado=CASE WHEN Estado=8 THEN 4 ELSE Estado END,
                 Comentario=CASE WHEN NULLIF(LTRIM(RTRIM(@Comentario)), '') IS NULL THEN Comentario
                     ELSE LEFT(CONCAT(ISNULL(Comentario,''), CASE WHEN ISNULL(Comentario,'')='' THEN '' ELSE ' - ' END, @Comentario), 500) END
             WHERE Correlativo IN @ids AND Estado IN (5,8);

@@ -695,7 +695,7 @@ export default function PagarTesoreriaPage() {
   const grabar = async () => {
     if (!selectedRows.length || !datosRegistroPagoCompletos) { setError("Complete los datos del pago y seleccione al menos un recibo."); return; }
     setSaving(true); setError("");
-    try { const result = await grabarPagoTesoreria({ ...form, idEjecutor: Number(form.idEjecutor), idTransferencia: Number(form.idTransferencia), idBanco: Number(form.idBanco), idMoneda2: Number(form.idMoneda2), items: crearItemsTesoreria(selectedRows) }); setSuccess(`${result.procesados} recibo(s) guardado(s) y marcado(s) como pagado(s).`); await load(estado, desde, hasta); }
+    try { const result = await grabarPagoTesoreria({ ...form, idEjecutor: Number(form.idEjecutor), idTransferencia: Number(form.idTransferencia), idBanco: Number(form.idBanco), idMoneda2: Number(form.idMoneda2), items: crearItemsTesoreria(selectedRows) }); setSuccess(estado === 8 ? `${result.procesados} recibo(s) guardado(s) y marcado(s) como pagado(s).` : `${result.procesados} recibo(s) guardado(s) sin cambiar de estado.`); await load(estado, desde, hasta); }
     catch (e) { setError(getHttpErrorMessage(e, "No se pudo grabar la información del pago.")); } finally { setSaving(false); }
   };
   const save = async () => {
