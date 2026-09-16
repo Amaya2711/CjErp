@@ -268,13 +268,14 @@ export default function TesoreriaChequesPage() {
   const archivoRutaInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const camposConstantes = useMemo(
-    () => ["tipo_moneda", "estado_cheque"],
+    () => ["tipo_moneda", "estado_cheque", "banco"],
     []
   );
   const { constantesPorCampo } = useConstantesPorCampo(camposConstantes);
   const monedaOptions = constantesPorCampo.tipo_moneda ?? [];
   const defaultMonedaId = useMemo(() => resolveDefaultMonedaId(monedaOptions), [monedaOptions]);
   const estadoOptions = constantesPorCampo.estado_cheque ?? [];
+  const bancoOptions = constantesPorCampo.banco ?? [];
   const estadoEditOptions = useMemo(
     () => estadoOptions.filter((option) => !isEstadoAnuladoOption(option)),
     [estadoOptions]
@@ -314,17 +315,15 @@ export default function TesoreriaChequesPage() {
 
   const bancosUnicos = useMemo(() => {
     const map = new Map<number, { id: number; nombre: string }>();
-    empleados.forEach((item) => {
-      const nombreBanco = item.nombreBanco?.trim();
-      if (item.idBancoCta != null && nombreBanco && !map.has(item.idBancoCta)) {
-        map.set(item.idBancoCta, {
-          id: item.idBancoCta,
-          nombre: nombreBanco,
-        });
+    bancoOptions.forEach((option) => {
+      const id = Number(option.codigo);
+      const nombre = id === 0 ? " " : (option.label || option.valor || "").trim();
+      if (Number.isFinite(id) && (id === 0 || nombre) && !map.has(id)) {
+        map.set(id, { id, nombre });
       }
     });
     return Array.from(map.values()).sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
-  }, [empleados]);
+  }, [bancoOptions]);
 
   const employeeById = useMemo(() => {
     const map = new Map<number, EmpleadoCta>();

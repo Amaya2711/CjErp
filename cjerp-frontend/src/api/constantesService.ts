@@ -7,13 +7,16 @@ function extraerArray<T>(value: unknown): T[] {
 
 function mapConstanteToOption(item: ConstanteLookupDto): ConstanteOption {
   const campoNormalizado = String(item.campo ?? "").trim().toLowerCase();
-  const label =
-    campoNormalizado === "estado_cheque"
-      ? (item.valorIni ?? item.descripcion ?? "")
+  const firstNonEmpty = (...values: Array<string | null | undefined>) =>
+    values.find((value) => String(value ?? "").trim())?.trim() ?? "";
+  const label = campoNormalizado === "estado_cheque"
+    ? firstNonEmpty(item.valorIni, item.descripcion)
+    : campoNormalizado === "banco"
+      ? firstNonEmpty(item.valorIni, item.descripcion, item.detalle, item.valor)
       : (item.descripcion ?? "");
 
   return {
-    value: item.valor ?? "",
+    value: campoNormalizado === "banco" ? item.codigo : (item.valor ?? ""),
     label,
     codigo: item.codigo,
     valor: item.valor,

@@ -46,6 +46,11 @@ function isDuplicateOcId(rows: Record<string, unknown>[], index: number): boolea
   return Boolean(currentKey && previousKey && String(rows[index][currentKey] ?? "") === String(rows[index - 1][previousKey] ?? ""));
 }
 
+function getReporteRowIdOc(row: Record<string, unknown>): string {
+  const key = Object.keys(row).find((name) => name.toLowerCase() === "idoc");
+  return key ? String(row[key] ?? "").trim() : "";
+}
+
 type ColumnFilterDropdownProps = {
   header: { key: string; label: string };
   filtroColumnaMenuRef: React.RefObject<HTMLDivElement | null>;
@@ -462,8 +467,24 @@ export default function OcV1Page() {
   const [asociandoRecibos, setAsociandoRecibos] = useState(false);
   const [montoOcRows, setMontoOcRows] = useState<OrdenCompraMontoOcDto[]>([]);
   const [montoOcLoading, setMontoOcLoading] = useState(false);
+  const montoOcKpis = useMemo(() => {
+    const montosCliente = Array.from(new Set(
+      montoOcRows
+        .map((row) => toNumber(row.montoOc))
+        .filter((value) => value !== 0)
+    ));
+    return {
+      montoCliente: montosCliente[0] ?? 0,
+      pagadoFic: montoOcRows.reduce((total, row) => total + toNumber(row.pagadoFic), 0),
+      avanceFic: montoOcRows.reduce((total, row) => total + toNumber(row.avanceFic), 0),
+    };
+  }, [montoOcRows]);
   const [reporteDetalles, setReporteDetalles] = useState<OrdenCompraDetalleDto[]>([]);
   const [reportePlanillaRows, setReportePlanillaRows] = useState<Record<string, unknown>[]>([]);
+  const reportePlanillaIdOcUnicos = useMemo(
+    () => new Set(reportePlanillaRows.map(getReporteRowIdOc).filter(Boolean)).size,
+    [reportePlanillaRows]
+  );
   const [reportePlanillaColumns, setReportePlanillaColumns] = useState<string[]>([]);
   const [reportePlanillaSort, setReportePlanillaSort] = useState<{ column: string; direction: "asc" | "desc" }>({ column: "", direction: "asc" });
   const reportePlanillaRowsOrdenadas = useMemo(() => {
@@ -1709,11 +1730,19 @@ export default function OcV1Page() {
             </p>
           </div>
           {selectedCabecera ? (
-            <div style={styles.summaryInline}>
-              <span>Subtotal: {formatMoney(selectedCabecera?.subtotal)}</span>
-              <span>IGV: {formatMoney(selectedCabecera?.igv)}</span>
-              <span>Total: {formatMoney(selectedCabecera?.total)}</span>
-            </div>
+            detalleOcTab === "montoOc" ? (
+              <div style={{ ...styles.summaryInline, gap: 8 }}>
+                <SummaryCard label="Monto cliente" value={formatMoney(montoOcKpis.montoCliente)} />
+                <SummaryCard label="Pagado Fic" value={formatMoney(montoOcKpis.pagadoFic)} />
+                <SummaryCard label="Avance Fic" value={formatPercent(montoOcKpis.avanceFic)} />
+              </div>
+            ) : (
+              <div style={styles.summaryInline}>
+                <span>Subtotal: {formatMoney(selectedCabecera?.subtotal)}</span>
+                <span>IGV: {formatMoney(selectedCabecera?.igv)}</span>
+                <span>Total: {formatMoney(selectedCabecera?.total)}</span>
+              </div>
+            )
           ) : null}
         </div>
         <div style={styles.detailTabs}>
@@ -1920,9 +1949,20 @@ export default function OcV1Page() {
               <div>
                 <h2 style={styles.sectionTitle}>Seguimiento de pagos</h2>
               </div>
-              <span style={styles.counterPill}>
-                {reporteLoading ? "Cargando detalle..." : reporteConsultado ? `${String(reporteSubtab) === "oc-gastos" ? reportePlanillaRows.length : reporteRowsFiltradas.length} registros` : "Seleccione filtros"}
-              </span>
+              {reporteSubtab === "oc-gastos" ? (
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <span style={styles.counterPill}>
+                    {reporteLoading ? "Cargando detalle..." : reporteConsultado ? `${reportePlanillaRows.length} registros` : "Seleccione filtros"}
+                  </span>
+                  {reporteConsultado && !reporteLoading && (
+                    <span style={styles.counterPill}>{reportePlanillaIdOcUnicos} IdOc únicos</span>
+                  )}
+                </div>
+              ) : (
+                <span style={styles.counterPill}>
+                  {reporteLoading ? "Cargando detalle..." : reporteConsultado ? `${reporteRowsFiltradas.length} registros` : "Seleccione filtros"}
+                </span>
+              )}
             </div>
             <div style={styles.reportFilters}>
               <Field>
