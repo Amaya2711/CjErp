@@ -43,7 +43,7 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
                 CASE WHEN ISNULL(a.IdWeb,0)=1 THEN sc.NombreEmpleado ELSE s.NombreEmpleado END AS Solicitante,
                 c.NombreCliente AS Cliente, p.NombreProyecto AS Proyecto, si.NombreSite AS Site,
                 a.Tipo_Trabajo AS TipoTrabajo, tarea.ValorIni AS Tarea, doc.ValorIni AS Comprobante,
-                mon.ValorIni AS Moneda, ban.ValorIni AS Banco, trans.ValorIni AS Transferencia
+                mon.ValorIni AS Moneda, ban.ValorIni AS Banco, bcta.ValorIni AS BancoCta, trans.ValorIni AS Transferencia
             FROM Planilla a
             CROSS APPLY (SELECT
                 COALESCE(TRY_CONVERT(date,NULLIF(LTRIM(RTRIM(a.FecEmision)),''),23), TRY_CONVERT(date,NULLIF(LTRIM(RTRIM(a.FecEmision)),''),101), TRY_CONVERT(date,NULLIF(LTRIM(RTRIM(a.FecEmision)),''),103)) AS Emision,
@@ -61,6 +61,7 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
             LEFT JOIN Constante doc ON doc.Sociedad='PE01' AND doc.Programa='PLANTILLA' AND doc.Campo='TIPO_COMPROBANTE' AND doc.Correlativo=a.IdComprobante
             LEFT JOIN Constante mon ON mon.Sociedad='PE01' AND mon.Programa='PLANTILLA' AND mon.Campo='TIPO_MONEDA' AND mon.Correlativo=a.TipoMoneda
             LEFT JOIN Constante ban ON ban.Sociedad='PE01' AND ban.Programa='PLANTILLA' AND ban.Campo='BANCO' AND ban.Correlativo=a.IdBanco
+            LEFT JOIN Constante bcta ON bcta.Sociedad='PE01' AND bcta.Programa='PLANTILLA' AND bcta.Campo='BANCO_EMP' AND bcta.Correlativo=a.IdBancoCta
             LEFT JOIN Constante trans ON trans.Sociedad='PE01' AND trans.Programa='PLANTILLA' AND trans.Campo='TIPO_TRANSFERENCIA' AND trans.Correlativo=a.IdTransferencia
             WHERE (@estado=100 AND (@correlativo IS NULL OR a.Correlativo=@correlativo)) OR (@estado<>100 AND (a.Estado=@estado OR (@estado=2 AND a.Estado=7)))
                 AND (@desde IS NULL OR (CASE WHEN @estado=4 THEN fechas.Deposito ELSE fechas.Ingreso END)>=@desde)

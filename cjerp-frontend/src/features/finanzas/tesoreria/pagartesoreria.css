@@ -439,6 +439,17 @@
   padding: 0 16px 12px !important;
   flex-wrap: wrap;
 }
+
+/* En Búsqueda, el botón se presenta después de todos los filtros. */
+.pt-local-filters > .pt-primary {
+  order: 99;
+}
+
+.pt-register-payment-entry,
+.pt-register-payment-toggle,
+.pt-payment-title > .pt-register-payment-hide:first-of-type {
+  display: none;
+}
 .pt-local-filters-disabled {
   opacity: 0.55;
   cursor: not-allowed;

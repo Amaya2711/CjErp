@@ -184,6 +184,7 @@ export default function PagarTesoreriaPage() {
   const [solicitantesFiltro, setSolicitantesFiltro] = useState<string[]>([]);
   const [busquedaSolicitante, setBusquedaSolicitante] = useState("");
   const [rendicion, setRendicion] = useState("");
+  const [estadoBusqueda, setEstadoBusqueda] = useState("");
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
   const [groupBy, setGroupBy] = useState<"comprobante" | "proyecto-site" | "responsable" | "banco" | "serie-view-detalle">("comprobante");
@@ -192,6 +193,9 @@ export default function PagarTesoreriaPage() {
   const [operationSaving, setSaving] = useState(false);
   const [editingRevision, setEditingRevision] = useState(false);
   const [registroPagoAbierto, setRegistroPagoAbierto] = useState(false);
+  useEffect(() => {
+    if (estado === 5) setRegistroPagoAbierto(selected.size > 0);
+  }, [estado, selected]);
   const [contabilidadValida, setContabilidadValida] = useState(false);
   const saving = operationSaving || editingRevision;
   const [permisosRevision, setPermisosRevision] = useState<PagoRevisionPermisos>({
@@ -264,7 +268,7 @@ export default function PagarTesoreriaPage() {
       setLoading(true);
       try {
         const result = status === 100
-          ? await listarPagosTesoreria(100, "", "", controller.signal, correlativo)
+          ? await listarPagosTesoreria(100, start, end, controller.signal, correlativo)
           : status === 99
           ? (await Promise.all(REPORT_STATES.map((reportState) =>
               listarPagosTesoreria(
@@ -324,17 +328,18 @@ export default function PagarTesoreriaPage() {
   }, [detail]);
 
   const visibleRows = useMemo(() => {
-    if (estado === 100 && !correlativoBusqueda.trim()) return [];
+    if (estado === 100 && !correlativoBusqueda.trim() && !desde && !hasta && !estadoBusqueda) return [];
     const search = query.trim().toLocaleLowerCase();
     return rows.filter(
       (r) =>
         (!responsablesFiltro.length || responsablesFiltro.includes(r.responsable ?? "")) &&
         (!solicitantesFiltro.length || solicitantesFiltro.includes(r.solicitante ?? "")) &&
         (!rendicion || String(r.idRendicion) === rendicion) &&
+        (estado !== 100 || !estadoBusqueda || String(r.estado) === estadoBusqueda) &&
         (!cliente || r.cliente === cliente) &&
         (!moneda || String(r.tipoMoneda) === moneda) &&
         (!comprobantesFiltro.length || comprobantesFiltro.includes(r.comprobante ?? "")) &&
-        (!bancosCtaFiltro.length || bancosCtaFiltro.includes(r.banco ?? "")) &&
+        (!bancosCtaFiltro.length || bancosCtaFiltro.includes((estado === 4 ? r.bancoCta : r.banco) ?? "")) &&
         (!search ||
           [
             r.correlativo,
@@ -497,7 +502,7 @@ export default function PagarTesoreriaPage() {
       (exclude === "cliente" || !cliente || r.cliente === cliente) &&
       (exclude === "moneda" || !moneda || String(r.tipoMoneda) === moneda) &&
       (exclude === "comprobante" || !comprobantesFiltro.length || comprobantesFiltro.includes(r.comprobante ?? "")) &&
-      (exclude === "banco" || !bancosCtaFiltro.length || bancosCtaFiltro.includes(r.banco ?? "")) &&
+      (exclude === "banco" || !bancosCtaFiltro.length || bancosCtaFiltro.includes((estado === 4 ? r.bancoCta : r.banco) ?? "")) &&
       (!search || [r.correlativo, r.responsable, r.solicitante, r.cliente, r.proyecto, r.site, r.idSite, r.ot, r.detalle, r.nroOperacion]
         .join(" ").toLocaleLowerCase().includes(search)),
     );
@@ -992,7 +997,7 @@ export default function PagarTesoreriaPage() {
             ))}
           </nav>
         )}
-        {!esReporte && estado !== 100 && <form
+            {!esReporte && <form
           className="pt-filters"
           onSubmit={(e) => {
             e.preventDefault();
@@ -1206,6 +1211,7 @@ export default function PagarTesoreriaPage() {
             {!esReporte && <>
             <fieldset className="pt-local-filters" disabled={saving}>
               {estado === 100 && <><label className="pt-field"><span>Correlativo</span><input type="number" min="1" placeholder="Ingrese el correlativo" value={correlativoBusqueda} onChange={(e) => { setCorrelativoBusqueda(e.target.value); setRows([]); }} /></label><button className="pt-primary" type="button" disabled={loading} onClick={() => { const parsed = Number(correlativoBusqueda.trim()); const hasFilter = (Number.isInteger(parsed) && parsed > 0) || cliente || moneda || comprobantesFiltro.length || bancosCtaFiltro.length || responsablesFiltro.length || solicitantesFiltro.length; if (!hasFilter) { setError("Seleccione al menos un filtro para realizar la búsqueda."); return; } void load(100, "", "", Number.isInteger(parsed) && parsed > 0 ? parsed : undefined); }}><Search size={15} /> Buscar</button></>}
+              {estado === 100 && <select value={estadoBusqueda} onChange={(e) => setEstadoBusqueda(e.target.value)}><option value="">Todos los estados</option>{catalogos.estados.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select>}
               <select
                 aria-label="Filtrar por cliente"
                 value={cliente}
@@ -1263,7 +1269,7 @@ export default function PagarTesoreriaPage() {
                   {bancosCtaFiltro.length > 0 && ` (${bancosCtaFiltro.length})`}
                 </summary>
                 <div className="pt-comprobante-options" aria-label="Filtrar por banco">
-                   {[...new Set(rowsForFilterOption("banco").map((r) => r.banco).filter((banco): banco is string => Boolean(banco)))]
+                   {[...new Set(rowsForFilterOption("banco").map((r) => estado === 4 ? r.bancoCta : r.banco).filter((banco): banco is string => Boolean(banco)))]
                     .sort((a, b) => a.localeCompare(b))
                     .map((banco) => (
                       <label key={banco}>
@@ -1698,11 +1704,11 @@ export default function PagarTesoreriaPage() {
             {!esReporte && <div className="pt-grid-actions" role="group" aria-label={`Acciones de ${tabs.find(t => t.estado === estado)?.label}`}>
               {esPago && (
                 <>
-                  <button className="pt-primary" type="button"
+                  {false && <button className="pt-primary pt-register-payment-entry" type="button"
                     disabled={saving || loading || registroPagoAbierto}
                     onClick={() => setRegistroPagoAbierto(true)}>
                     Registrar pago
-                  </button>
+                  </button>}
                   {estado === 5 && (
                     <button className="pt-primary" type="submit" form={`pt-stage-${estado}`}
                       disabled={saving || loading || !puedePagar || !selectedRows.length || selectedRows.length > 500}
@@ -1869,6 +1875,7 @@ export default function PagarTesoreriaPage() {
                     <button
                       type="button"
                       className="pt-register-payment-hide"
+                      disabled={saving || loading || registroPagoAbierto}
                       onClick={() => setRegistroPagoAbierto(false)}
                     >
                       Ocultar
