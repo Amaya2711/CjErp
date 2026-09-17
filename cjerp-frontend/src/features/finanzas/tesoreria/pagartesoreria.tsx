@@ -718,7 +718,8 @@ export default function PagarTesoreriaPage() {
     });
   };
   const grabar = async () => {
-    if (!selectedRows.length || !datosRegistroPagoCompletos) { setError("Complete los datos del pago y seleccione al menos un recibo."); return; }
+    if (!selectedRows.length) { setError("No existen registros seleccionados"); return; }
+    if (!datosRegistroPagoCompletos) { setError("Complete los datos del pago y seleccione al menos un recibo."); return; }
     setSaving(true); setError("");
     try { const result = await grabarPagoTesoreria({ ...form, idEjecutor: Number(form.idEjecutor), idTransferencia: Number(form.idTransferencia), idBanco: Number(form.idBanco), idMoneda2: Number(form.idMoneda2), items: crearItemsTesoreria(selectedRows) }); setSuccess(estado === 8 ? `${result.procesados} recibo(s) guardado(s) y marcado(s) como pagado(s).` : `${result.procesados} recibo(s) guardado(s) sin cambiar de estado.`); await load(estado, desde, hasta); }
     catch (e) { setError(getHttpErrorMessage(e, "No se pudo grabar la información del pago.")); } finally { setSaving(false); }
@@ -1419,6 +1420,7 @@ export default function PagarTesoreriaPage() {
                     </th>
                     <th>Detalle</th>
                     <th>View factura</th>
+                    {(estado === 1 || estado === 9 || estado === 5 || estado === 2) && <th>Banco</th>}
                     <th>IdBancoCta</th>
                     <th>Cuenta</th>
                     <th>CuentaInter</th>
@@ -1627,6 +1629,7 @@ export default function PagarTesoreriaPage() {
                                 </button>
                               </td>
                               <td><FacturaLink referencia={r.imgFactura} correlativo={r.correlativo} /></td>
+                              {(estado === 1 || estado === 9 || estado === 5 || estado === 2) && <td>{r.banco || "—"}</td>}
                               <td>
                                 {r.idBancoCta == null
                                   ? "â€”"
@@ -1710,7 +1713,7 @@ export default function PagarTesoreriaPage() {
                 </>
               )}
               <PagoEtapaActions estado={estado} formId={`pt-stage-${estado}`}
-                disabled={saving || loading || !puedePagar || !selectedRows.length || selectedRows.length > 500}
+                disabled={saving || loading || !puedePagar || selectedRows.length > 500}
                  // En Administrativo la acción se ejecuta desde Registrar pago.
                  programarDisabled={estado === 5}
                  ocultarProgramar={estado === 5}

@@ -238,7 +238,11 @@ export default function PagoEtapaForm({
       (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null
     )?.value as PagoAccion;
     if (!acciones[estado]?.some((a) => a.key === accion) || busy || disabled) return;
-    if (!rows.length || rows.length > 500) {
+    if (!rows.length) {
+      setError("No existen registros seleccionados");
+      return;
+    }
+    if (rows.length > 500) {
       setError("Seleccione entre 1 y 500 recibos.");
       return;
     }
