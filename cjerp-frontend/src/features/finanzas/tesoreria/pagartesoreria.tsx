@@ -178,7 +178,7 @@ export default function PagarTesoreriaPage() {
   const [cliente, setCliente] = useState("");
   const [moneda, setMoneda] = useState("");
   const [comprobantesFiltro, setComprobantesFiltro] = useState<string[]>([]);
-  const [bancosCtaFiltro, setBancosCtaFiltro] = useState<number[]>([]);
+  const [bancosCtaFiltro, setBancosCtaFiltro] = useState<string[]>([]);
   const [responsablesFiltro, setResponsablesFiltro] = useState<string[]>([]);
   const [busquedaResponsable, setBusquedaResponsable] = useState("");
   const [solicitantesFiltro, setSolicitantesFiltro] = useState<string[]>([]);
@@ -334,7 +334,7 @@ export default function PagarTesoreriaPage() {
         (!cliente || r.cliente === cliente) &&
         (!moneda || String(r.tipoMoneda) === moneda) &&
         (!comprobantesFiltro.length || comprobantesFiltro.includes(r.comprobante ?? "")) &&
-        (!bancosCtaFiltro.length || (r.idBancoCta != null && bancosCtaFiltro.includes(r.idBancoCta))) &&
+        (!bancosCtaFiltro.length || bancosCtaFiltro.includes(r.banco ?? "")) &&
         (!search ||
           [
             r.correlativo,
@@ -497,7 +497,7 @@ export default function PagarTesoreriaPage() {
       (exclude === "cliente" || !cliente || r.cliente === cliente) &&
       (exclude === "moneda" || !moneda || String(r.tipoMoneda) === moneda) &&
       (exclude === "comprobante" || !comprobantesFiltro.length || comprobantesFiltro.includes(r.comprobante ?? "")) &&
-      (exclude === "banco" || !bancosCtaFiltro.length || (r.idBancoCta != null && bancosCtaFiltro.includes(r.idBancoCta))) &&
+      (exclude === "banco" || !bancosCtaFiltro.length || bancosCtaFiltro.includes(r.banco ?? "")) &&
       (!search || [r.correlativo, r.responsable, r.solicitante, r.cliente, r.proyecto, r.site, r.idSite, r.ot, r.detalle, r.nroOperacion]
         .join(" ").toLocaleLowerCase().includes(search)),
     );
@@ -548,7 +548,7 @@ export default function PagarTesoreriaPage() {
           : groupBy === "serie-view-detalle"
             ? `${r.serie?.trim() || "Sin serie"} · ${r.imgFactura?.trim() ? "Con documento adjunto" : "Sin documento adjunto"}`
           : groupBy === "banco"
-            ? `${r.idBancoCta ?? "Sin banco"} · ${r.idBancoCta == null ? "Sin banco" : catalogos.bancos.find((b) => b.id === r.idBancoCta)?.nombre || "Banco no encontrado"}`
+            ? (r.banco || "Sin banco")
             : `${estado === 5 ? "" : `${r.revisionPm?.trim() || "Sin revisión"} · `}${r.comprobante || "Sin comprobante"}`;
       const label = `${groupLabel} · ${r.moneda || `Moneda ${r.tipoMoneda}`}`;
       const id = `${r.tipoMoneda}:${label}`;
@@ -1261,22 +1261,22 @@ export default function PagarTesoreriaPage() {
                   Todos los bancos de cuenta
                   {bancosCtaFiltro.length > 0 && ` (${bancosCtaFiltro.length})`}
                 </summary>
-                <div className="pt-comprobante-options" aria-label="Filtrar por IdBancoCta">
-                   {[...new Set(rowsForFilterOption("banco").map((r) => r.idBancoCta).filter((id): id is number => id != null))]
-                    .sort((a, b) => a - b)
-                    .map((id) => (
-                      <label key={id}>
+                <div className="pt-comprobante-options" aria-label="Filtrar por banco">
+                   {[...new Set(rowsForFilterOption("banco").map((r) => r.banco).filter((banco): banco is string => Boolean(banco)))]
+                    .sort((a, b) => a.localeCompare(b))
+                    .map((banco) => (
+                      <label key={banco}>
                         <input
                           type="checkbox"
-                          checked={bancosCtaFiltro.includes(id)}
+                          checked={bancosCtaFiltro.includes(banco)}
                           onChange={(e) => {
                             setBancosCtaFiltro((current) => e.target.checked
-                              ? [...current, id]
-                              : current.filter((value) => value !== id));
+                              ? [...current, banco]
+                              : current.filter((value) => value !== banco));
                             setSelected(new Set());
                           }}
                         />
-                        {id} · {catalogos.bancos.find((b) => b.id === id)?.nombre || "Banco no encontrado"}
+                        {banco}
                       </label>
                     ))}
                 </div>
