@@ -450,6 +450,7 @@
 .pt-local-filters-disabled input {
   cursor: not-allowed;
 }
+.pt-search-only { display: none; }
 .pt-local-filters select {
   width: auto;
   flex: 1;
@@ -624,6 +625,10 @@
   color: #8391a6;
   border-top: 1px solid #e8edf4;
 }
+.pt-pagination { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.pt-pagination label { display: flex; align-items: center; gap: 6px; }
+.pt-pagination select { padding: 4px 6px; }
+.pt-pagination button { padding: 4px 8px; }
 .pt-empty {
   min-height: 250px;
   display: flex;

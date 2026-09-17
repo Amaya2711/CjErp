@@ -21,7 +21,8 @@ public sealed class PagoTesoreriaController(PagoTesoreriaService service, ISegMe
         // SegPerfilRolMenu, aun cuando el usuario las tiene visibles.
         var opciones = await menus.ListarPorUsuarioAsync(usuario);
         return opciones.Any(p =>
-            string.Equals(p.Ruta?.Trim().TrimEnd('/'), "/finanzas/tesoreria/pagartesoreria", StringComparison.OrdinalIgnoreCase));
+            string.Equals(p.Ruta?.Trim().TrimEnd('/'), "/finanzas/tesoreria/pagartesoreria", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(p.Ruta?.Trim().TrimEnd('/'), "/finanzas/tesoreria/pagartesoreria_v1", StringComparison.OrdinalIgnoreCase));
     }
 
     private ObjectResult SinAcceso() => StatusCode(403, new { message = "No tiene acceso a Pagos de tesorería. Asigne esta página al perfil y rol correspondiente en Seguridad / Menú." });
@@ -33,6 +34,13 @@ public sealed class PagoTesoreriaController(PagoTesoreriaService service, ISegMe
         var usuario = User.FindFirstValue("IdUsuario") ?? User.FindFirstValue(ClaimTypes.Name)!;
         return Ok(new { catalogos = await service.CatalogosAsync(ct), puedePagar = true,
             permisosRevision = await service.PermisosRevisionAsync(usuario, ct) });
+    }
+
+    [HttpGet("v1")]
+    public async Task<IActionResult> ListarV1([FromQuery] int? idEstado = null, [FromQuery] DateTime? fechaInicio = null, [FromQuery] DateTime? fechaFin = null, CancellationToken ct = default)
+    {
+        if (!await PuedeAsync()) return SinAcceso();
+        return Ok(await service.ListarConsultaIniAsync(idEstado, fechaInicio, fechaFin, ct));
     }
 
     [HttpPut("revision")]

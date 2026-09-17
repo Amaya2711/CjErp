@@ -30,7 +30,7 @@ import {
 import * as XLSX from "xlsx";
 import AppPage from "../../../components/base/AppPage";
 import {
-  listarPagosTesoreria,
+  listarPagosTesoreriaV1 as listarPagosTesoreria,
   obtenerCatalogosPago,
   obtenerCuentasPago,
   registrarPagosTesoreria, grabarPagoTesoreria,
@@ -150,7 +150,7 @@ function SelectField({
   );
 }
 
-export default function PagarTesoreriaPage() {
+export default function PagarTesoreriaV1Page() {
   const [estado, setEstado] = useState(0);
   const [programadoSubtab, setProgramadoSubtab] = useState<ProgramadoSubtab>("recibos");
   const [paoloGroupMode, setPaoloGroupMode] = useState<"cliente" | "moneda" | "solicitante">("cliente");
@@ -1203,6 +1203,11 @@ export default function PagarTesoreriaPage() {
               )}
             </div>}
             {!esReporte && <>
+            {estado === 4 && desde && hasta && (
+              <div className="pt-success" role="status">
+                Se esta filtrando por el rango de fechas : {fecha(desde)} - {fecha(hasta)}
+              </div>
+            )}
             <fieldset className="pt-local-filters" disabled={saving}>
               {estado === 100 && <><label className="pt-field"><span>Correlativo</span><input type="number" min="1" placeholder="Ingrese el correlativo" value={correlativoBusqueda} onChange={(e) => { setCorrelativoBusqueda(e.target.value); setRows([]); }} /></label><button className="pt-primary" type="button" disabled={loading} onClick={() => { const parsed = Number(correlativoBusqueda.trim()); const hasFilter = (Number.isInteger(parsed) && parsed > 0) || cliente || moneda || comprobantesFiltro.length || bancosCtaFiltro.length || responsablesFiltro.length || solicitantesFiltro.length; if (!hasFilter) { setError("Seleccione al menos un filtro para realizar la búsqueda."); return; } void load(100, "", "", Number.isInteger(parsed) && parsed > 0 ? parsed : undefined); }}><Search size={15} /> Buscar</button></>}
               <select

@@ -7,6 +7,12 @@ namespace CjERP.Infrastructure.Services;
 
 public sealed partial class PagoTesoreriaService
 {
+    public async Task<IEnumerable<dynamic>> ListarConsultaIniAsync(int? idEstado, DateTime? fechaInicio, DateTime? fechaFin, CancellationToken ct)
+    {
+        await using var cn = factory.CreateConnection();
+        return await cn.QueryAsync(factory.Create(
+            "dbo.sp_Planilla_ConsultaIni", new { IdEstado = idEstado, FechaInicio = fechaInicio, FechaFin = fechaFin }, CommandType.StoredProcedure, ct));
+    }
     // La misma huella se entrega al consultar y se compara bajo bloqueo antes de escribir.
     private const string VersionSql = """
         CONVERT(varchar(64),HASHBYTES('SHA2_256',(SELECT a.Estado,a.TipoMoneda,a.Total,a.TotalPagar,a.MontoRetencion,

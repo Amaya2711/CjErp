@@ -26,7 +26,6 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
     public async Task<object> ListarAsync(int estado, DateTime? desde, DateTime? hasta, int? correlativo, CancellationToken ct)
     {
         if (estado is not (0 or 1 or 9 or 8 or 5 or 4 or 2 or 100)) throw new ArgumentException("Estado de consulta inválido.");
-        if (estado == 100 && (!correlativo.HasValue || correlativo.Value <= 0)) throw new ArgumentException("Indique un correlativo válido para realizar la búsqueda.");
         if (desde > hasta) throw new ArgumentException("La fecha inicial no puede superar la final.");
         if (estado == 4 && (desde is null || hasta is null)) throw new ArgumentException("Indique el rango de fechas del historial.");
         await using var cn = factory.CreateConnection();
@@ -63,7 +62,7 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
             LEFT JOIN Constante mon ON mon.Sociedad='PE01' AND mon.Programa='PLANTILLA' AND mon.Campo='TIPO_MONEDA' AND mon.Correlativo=a.TipoMoneda
             LEFT JOIN Constante ban ON ban.Sociedad='PE01' AND ban.Programa='PLANTILLA' AND ban.Campo='BANCO' AND ban.Correlativo=a.IdBanco
             LEFT JOIN Constante trans ON trans.Sociedad='PE01' AND trans.Programa='PLANTILLA' AND trans.Campo='TIPO_TRANSFERENCIA' AND trans.Correlativo=a.IdTransferencia
-            WHERE (@estado=100 AND a.Correlativo=@correlativo) OR (@estado<>100 AND (a.Estado=@estado OR (@estado=2 AND a.Estado=7)))
+            WHERE (@estado=100 AND (@correlativo IS NULL OR a.Correlativo=@correlativo)) OR (@estado<>100 AND (a.Estado=@estado OR (@estado=2 AND a.Estado=7)))
                 AND (@desde IS NULL OR (CASE WHEN @estado=4 THEN fechas.Deposito ELSE fechas.Ingreso END)>=@desde)
                 AND (@hasta IS NULL OR (CASE WHEN @estado=4 THEN fechas.Deposito ELSE fechas.Ingreso END)<=@hasta)
             ORDER BY a.Correlativo DESC
@@ -151,6 +150,7 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
     {
         await using var cn = factory.CreateConnection();
         var ids = request.Items.Select(x => x.Correlativo).Distinct().ToArray();
+        var fechaDepositoIso = request.FechaDeposito.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
         return await cn.ExecuteAsync(factory.Create("""
             UPDATE Planilla SET IdEjecutor=@IdEjecutor, IdTransferencia=@IdTransferencia,
                 IdBanco=@IdBanco, IdMoneda2=@IdMoneda2, FechaDeposito=@FechaDeposito,
@@ -160,7 +160,7 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
                     ELSE LEFT(CONCAT(ISNULL(Comentario,''), CASE WHEN ISNULL(Comentario,'')='' THEN '' ELSE ' - ' END, @Comentario), 500) END
             WHERE Correlativo IN @ids AND Estado IN (5,8);
             """, new { request.IdEjecutor, request.IdTransferencia, request.IdBanco, request.IdMoneda2,
-                request.FechaDeposito, request.Cheque, request.NroOperacion, request.Comentario, ids }, cancellationToken: ct));
+                FechaDeposito = fechaDepositoIso, request.Cheque, request.NroOperacion, request.Comentario, ids }, cancellationToken: ct));
     }
 
     private sealed class PagoActual

@@ -33,6 +33,7 @@ const TesoreriaGastosPage = lazy(() => import("../../features/finanzas/tesoreria
 const TesoreriaGastosAprobarPage = lazy(() => import("../../features/finanzas/tesoreria/gastosaprobar"));
 const TesoreriaPagosV1Page = lazy(() => import("../../features/finanzas/tesoreria/pagos_v1"));
 const TesoreriaPagarPage = lazy(() => import("../../features/finanzas/tesoreria/pagartesoreria"));
+const TesoreriaPagarV1Page = lazy(() => import("../../features/finanzas/tesoreria/pagartesoreria_v1"));
 const TesoreriaPagosDevPage = lazy(() => import("../../features/finanzas/tesoreria/pagos_dev"));
 const ConciliacionBcpPage = lazy(() => import("../../features/finanzas/conciliacion"));
 const ConciliacionBcpV1Page = lazy(() => import("../../features/finanzas/conciliacion_v1"));
@@ -291,6 +292,7 @@ export default function AppRouter() {
             <Route path="/finanzas/tesoreria/gastosaprobar" element={<TesoreriaGastosAprobarPage />} />
             <Route path="/finanzas/tesoreria/pagos_v1" element={<TesoreriaPagosV1Page />} />
             <Route path="/finanzas/tesoreria/pagartesoreria" element={<TesoreriaPagarPage />} />
+            <Route path="/finanzas/tesoreria/pagartesoreria_v1" element={<TesoreriaPagarV1Page />} />
             <Route path="/finanzas/tesoreria/pagos_dev" element={<TesoreriaPagosDevPage />} />
             <Route path="/finanzas/conciliacion" element={<ConciliacionBcpPage />} />
             <Route path="/finanzas/conciliacion_v1" element={<ConciliacionBcpV1Page />} />
