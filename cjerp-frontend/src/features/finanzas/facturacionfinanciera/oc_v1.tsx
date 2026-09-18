@@ -36,15 +36,8 @@ import { getHttpErrorMessage } from "../../../utils/httpError";
 import { FileDown } from "lucide-react";
 import { buildPlanillaConsultaEstadosRequest, consultarPlanillaEstados } from "../../../api/planillaConsultaService";
 
-const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "ResponsableOc", "SubtotalOc", "IgvOc", "TotalOc", "Cliente", "NombreProyecto", "IdSite", "Site", "FechaOc", "PrecioUniOc", "CantOc", "EstadoOc", "MontoDetalleOc", "CorrelativoPlanilla", "EstadoPlanilla", "SubtotalPlanilla", "IgvPlanilla", "TotalPlanilla", "MontoRetencionPlanilla", "TotalPagarPlanilla", "UltimaFechaDeposito", "SaldoOcVsPlanilla", "PorcentajeConsumidoOc"];
-
-function isDuplicateOcId(rows: Record<string, unknown>[], index: number): boolean {
-  if (index < 1) return false;
-  const key = (row: Record<string, unknown>) => Object.keys(row).find((name) => name.toLowerCase() === "idoc");
-  const currentKey = key(rows[index]);
-  const previousKey = key(rows[index - 1]);
-  return Boolean(currentKey && previousKey && String(rows[index][currentKey] ?? "") === String(rows[index - 1][previousKey] ?? ""));
-}
+const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "ResponsableOc", "MonedaOc", "SubtotalOc", "Cliente", "NombreProyecto", "IdSite", "Site", "FechaOc", "PrecioUniOc", "CantOc", "EstadoOc", "MontoDetalleOc", "CorrelativoPlanilla", "EstadoPlanilla", "SolicitantePlanilla", "MonedaPlanilla", "SubtotalPlanilla", "UltimaFechaDeposito", "SaldoOcVsPlanilla", "PorcentajeConsumidoOc"];
+const OC_GASTOS_MAX_COLUMNAS_VISIBLES = 24;
 
 function getReporteRowIdOc(row: Record<string, unknown>): string {
   const key = Object.keys(row).find((name) => name.toLowerCase() === "idoc");
@@ -181,7 +174,6 @@ type ReporteFiltros = {
   site: string;
   estado: string;
   idOc: string;
-  tipoOc: "con" | "todos";
   fechaDesde: string;
   fechaHasta: string;
 };
@@ -254,11 +246,12 @@ const detalleColumns = [
 
 const reciboColumns = [
   { key: "seleccion", label: "", width: "44px" },
-  { key: "correlativo", label: "Item", width: "80px" },
+  { key: "correlativo", label: "Correlativo", width: "100px" },
   { key: "fecIngreso", label: "Fecha", width: "95px" },
   { key: "subtotal", label: "Subtotal", width: "90px" },
   { key: "igv", label: "IGV", width: "80px" },
   { key: "total", label: "Total", width: "90px" },
+  { key: "moneda", label: "Moneda", width: "90px" },
   { key: "detalle", label: "Detalle", width: "260px" },
   { key: "comprobante", label: "Comprobante", width: "120px" },
   { key: "responsable", label: "Responsable", width: "180px" },
@@ -269,6 +262,7 @@ const reciboColumns = [
 
 const montoOcColumns = [
   { key: "idOc", label: "IdOC", width: "80px" },
+  { key: "fechaOc", label: "Fecha OC", width: "105px" },
   { key: "idSite", label: "IdSite", width: "90px" },
   { key: "tipoTrabajo", label: "Tipo Trabajo", width: "130px" },
   { key: "montoOc", label: "Monto Cliente", width: "120px" },
@@ -391,6 +385,34 @@ function getEstadoVista(item: OrdenCompraCabeceraDto): Exclude<EstadoVista, "tod
   return "pendientes";
 }
 
+type EstadoOcReporte = "ACEPTADO" | "RECHAZADO" | "EN PROCESO";
+const ESTADOS_OC_GASTOS_POR_DEFECTO = "ACEPTADO,EN PROCESO";
+
+function clasificarEstadoOc(value: unknown): EstadoOcReporte | "" {
+  const estadoOc = Number(value);
+  if (estadoOc === 1) return "ACEPTADO";
+  if (estadoOc === 6) return "RECHAZADO";
+  if (estadoOc >= 90 && estadoOc <= 99) return "EN PROCESO";
+  const texto = String(value ?? "").trim().toUpperCase();
+  if (texto.includes("APROB") || texto.includes("ACEPT")) return "ACEPTADO";
+  if (texto.includes("RECHAZ")) return "RECHAZADO";
+  if (texto.includes("PEND") || texto.includes("PROCES")) return "EN PROCESO";
+  return "";
+}
+
+function getEstadoOcRowValue(row: Record<string, unknown>): unknown {
+  const idKey = Object.keys(row).find((key) => key.toLowerCase() === "idestadooc");
+  if (idKey) return row[idKey];
+  const estadoKey = Object.keys(row).find((key) => key.toLowerCase() === "estadooc");
+  return estadoKey ? row[estadoKey] : undefined;
+}
+
+function getEstadosOcSeleccionados(value: string): EstadoOcReporte[] {
+  return value
+    .split(",")
+    .filter((estado): estado is EstadoOcReporte => ["ACEPTADO", "RECHAZADO", "EN PROCESO"].includes(estado));
+}
+
 function formatValidadorNivel(value: number | null | undefined) {
   return value && value > 0 ? `Registrado (${value})` : "Pendiente";
 }
@@ -414,22 +436,39 @@ function distinctCabecerasPorOc(items: OrdenCompraCabeceraDto[]) {
 
   return Array.from(porOc.values());
 }
-function exportToCsv(fileName: string, headers: string[], rows: Array<Array<string | number>>) {
-  const csv = [headers, ...rows]
-    .map((row) => row.map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`).join(","))
-    .join("\r\n");
+async function exportToExcel(fileName: string, headers: string[], rows: Array<Array<string | number>>) {
+  const XLSX = await import("xlsx");
+  const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  worksheet["!cols"] = headers.map((header, index) => {
+    const maxLength = Math.max(String(header).length, ...rows.map((row) => String(row[index] ?? "").length));
+    return { wch: Math.min(Math.max(maxLength + 2, 12), 40) };
+  });
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "OC y gastos");
+  XLSX.writeFile(workbook, fileName);
+}
 
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  setTimeout(() => {
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  }, 0);
+function getReportePlanillaColumnValue(row: Record<string, unknown>, column: string): string {
+  const aliases: Record<string, string[]> = {
+    EstadoOc: ["EstadoOc", "IdEstadoOc"],
+    CorrelativoPlanilla: ["CorrelativoPlanilla"],
+    EstadoPlanilla: ["EstadoPlanilla", "ValidacionResponsable", "EstadoRelacion"],
+  };
+  if (column.toLowerCase() === "montodetalleoc") {
+    const precioKey = Object.keys(row).find((key) => key.toLowerCase() === "preciounioc");
+    const cantidadKey = Object.keys(row).find((key) => key.toLowerCase() === "cantoc");
+    const precio = Number(precioKey ? row[precioKey] : 0);
+    const cantidad = Number(cantidadKey ? row[cantidadKey] : 0);
+    return precio && cantidad ? (precio * cantidad).toFixed(2) : "—";
+  }
+  const names = aliases[column] ?? [column];
+  const key = Object.keys(row).find((item) => names.some((name) => item.toLowerCase() === name.toLowerCase()));
+  const value = key ? row[key] : undefined;
+  if (column.toLowerCase() === "porcentajeconsumidooc" && value !== null && value !== undefined && value !== "") {
+    const porcentaje = Number(value);
+    return Number.isFinite(porcentaje) ? porcentaje.toFixed(2) : String(value);
+  }
+  return String(value ?? "—");
 }
 
 function downloadBlob(blob: Blob, fileName: string) {
@@ -485,6 +524,44 @@ export default function OcV1Page() {
     () => new Set(reportePlanillaRows.map(getReporteRowIdOc).filter(Boolean)).size,
     [reportePlanillaRows]
   );
+  const reportePlanillaKpis = useMemo(() => {
+    const getValue = (row: Record<string, unknown>, column: string) => {
+      const key = Object.keys(row).find((item) => item.toLowerCase() === column.toLowerCase());
+      return key ? row[key] : undefined;
+    };
+    const addAmount = (totales: Map<string, number>, moneda: unknown, monto: unknown) => {
+      const monedaNombre = String(moneda ?? "").trim() || "Sin moneda";
+      const montoNumerico = typeof monto === "string" || typeof monto === "number" ? monto : null;
+      totales.set(monedaNombre, (totales.get(monedaNombre) ?? 0) + toNumber(montoNumerico));
+    };
+    const subtotalesOc = new Map<string, number>();
+    const subtotalesPlanilla = new Map<string, number>();
+    const idsOcProcesados = new Set<string>();
+
+    reportePlanillaRows.forEach((row, index) => {
+      const idOc = getReporteRowIdOc(row);
+      const claveOc = idOc || `fila-${index}`;
+      if (!idsOcProcesados.has(claveOc)) {
+        idsOcProcesados.add(claveOc);
+        addAmount(subtotalesOc, getValue(row, "MonedaOc"), getValue(row, "SubtotalOc"));
+      }
+      addAmount(subtotalesPlanilla, getValue(row, "MonedaPlanilla"), getValue(row, "SubtotalPlanilla"));
+    });
+
+    const toKpis = (totales: Map<string, number>) => Array.from(totales, ([moneda, total]) => ({ moneda, total }))
+      .sort((left, right) => left.moneda.localeCompare(right.moneda));
+    const subtotalesOcKpi = toKpis(subtotalesOc);
+    const subtotalesPlanillaKpi = toKpis(subtotalesPlanilla);
+    const totalPlanillaPorMoneda = new Map<string, number>(
+      subtotalesPlanillaKpi.map((kpi): [string, number] => [kpi.moneda, kpi.total])
+    );
+    const avances = subtotalesOcKpi.map((kpi) => ({
+      moneda: kpi.moneda,
+      porcentaje: kpi.total === 0 ? 0 : (totalPlanillaPorMoneda.get(kpi.moneda) ?? 0) / kpi.total,
+    }));
+
+    return { subtotalesOc: subtotalesOcKpi, subtotalesPlanilla: subtotalesPlanillaKpi, avances };
+  }, [reportePlanillaRows]);
   const [reportePlanillaColumns, setReportePlanillaColumns] = useState<string[]>([]);
   const [reportePlanillaSort, setReportePlanillaSort] = useState<{ column: string; direction: "asc" | "desc" }>({ column: "", direction: "asc" });
   const reportePlanillaRowsOrdenadas = useMemo(() => {
@@ -509,6 +586,23 @@ export default function OcV1Page() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [selectedOcId, setSelectedOcId] = useState<number | null>(null);
+  const recibosAsociadosKpis = useMemo(() => {
+    const cabeceraActual = cabeceras.find((item) => item.idOc === selectedOcId);
+    const totalesPorMoneda = new Map<string, number>();
+    recibosAsociados.forEach((recibo) => {
+      const moneda = recibo.moneda?.trim() || "Sin moneda";
+      totalesPorMoneda.set(moneda, (totalesPorMoneda.get(moneda) ?? 0) + toNumber(recibo.total));
+    });
+
+    return {
+      montoOc: {
+        moneda: cabeceraActual?.moneda?.trim() || "Sin moneda",
+        total: toNumber(cabeceraActual?.total),
+      },
+      recibos: Array.from(totalesPorMoneda, ([moneda, total]) => ({ moneda, total }))
+        .sort((left, right) => left.moneda.localeCompare(right.moneda)),
+    };
+  }, [cabeceras, recibosAsociados, selectedOcId]);
   const [panelOpen, setPanelOpen] = useState(false);
   const [draft, setDraft] = useState<OrdenCompraDraft>(createInitialDraft);
   const [detalleForm, setDetalleForm] = useState<OrdenCompraDraftDetalle>(createEmptyDetalle);
@@ -518,6 +612,8 @@ export default function OcV1Page() {
   const [vistaOc, setVistaOc] = useState<VistaOc>("aprobacion");
   const [reporteSubtab, setReporteSubtab] = useState<"listado" | "oc-gastos" | "resumen">("listado");
   const [nivelAprobacion, setNivelAprobacion] = useState<1 | 2 | 3>(1);
+  const [fechaCreacionDesde, setFechaCreacionDesde] = useState(`${today.slice(0, 4)}-01-01`);
+  const [fechaCreacionHasta, setFechaCreacionHasta] = useState(today);
   const [filtroValidadorAprobacion, setFiltroValidadorAprobacion] = useState<string[]>([]);
   const [detalleOcTab, setDetalleOcTab] = useState<DetalleOcTab>("detalle");
   const [selectedOcIds, setSelectedOcIds] = useState<number[]>([]);
@@ -552,7 +648,6 @@ export default function OcV1Page() {
     site: "",
     estado: "",
     idOc: "",
-    tipoOc: "con",
     fechaDesde: "",
     fechaHasta: "",
   });
@@ -567,7 +662,7 @@ export default function OcV1Page() {
     setReporteFiltrosPorTab((prev) => ({ ...prev, [String(reporteSubtab)]: reporteFiltros }));
     const guardados = reporteFiltrosPorTab[tab];
     if (guardados) setReporteFiltros(guardados);
-    else setReporteFiltros({ solicitante: "", responsable: "", cliente: "", proyecto: "", site: "", estado: "", idOc: "", tipoOc: "con", fechaDesde: "", fechaHasta: "" });
+    else setReporteFiltros({ solicitante: "", responsable: "", cliente: "", proyecto: "", site: "", estado: tab === "oc-gastos" ? ESTADOS_OC_GASTOS_POR_DEFECTO : "", idOc: "", fechaDesde: "", fechaHasta: "" });
     setReporteSubtab(tab as typeof reporteSubtab);
     setReporteConsultado(false);
     setReportePlanillaRows([]);
@@ -702,10 +797,10 @@ export default function OcV1Page() {
           ? cabeceras.find((item) => item.responsable === responsableNombre)?.idResponsable
           : undefined;
         const request = buildPlanillaConsultaEstadosRequest([
-          ...(reporteFiltros.estado && /^\d+(,\d+)*$/.test(reporteFiltros.estado.trim()) ? [{ nombre: "Estados", valor: reporteFiltros.estado, tipo: "string" as const }] : []),
           ...(reporteFiltros.fechaDesde ? [{ nombre: "FechaInicio", valor: reporteFiltros.fechaDesde, tipo: "date" as const }] : []),
           ...(reporteFiltros.fechaHasta ? [{ nombre: "FechaFin", valor: reporteFiltros.fechaHasta, tipo: "date" as const }] : []),
           ...(responsableId ? [{ nombre: "IdResponsable", valor: String(responsableId), tipo: "int" as const }] : []),
+          ...(sitesReporteFiltro.length ? [{ nombre: "IdSite", valor: sitesReporteFiltro.join(","), tipo: "string" as const }] : []),
         ]);
         request.consulta = "analisis-gastos";
         const response = await consultarPlanillaEstados(request, { timeoutMs: 60000 });
@@ -715,13 +810,13 @@ export default function OcV1Page() {
           const correlativoKey = Object.keys(row).find((key) => key.toLowerCase() === "correlativoplanilla");
           return correlativoKey ? row : { ...row, CorrelativoPlanilla: null };
         });
-        const rowsFiltradas = reporteFiltros.tipoOc === "con"
+        const estadosOcSeleccionados = getEstadosOcSeleccionados(reporteFiltros.estado);
+        const rowsPorEstado = estadosOcSeleccionados.length
           ? rows.filter((row) => {
-            const key = Object.keys(row).find((item) => item.toLowerCase() === "idoc");
-            const value = key ? row[key] : null;
-            return value !== null && value !== undefined && String(value).trim() !== "" && Number(value) !== 0;
+            return estadosOcSeleccionados.includes(clasificarEstadoOc(getEstadoOcRowValue(row)) as EstadoOcReporte);
           })
           : rows;
+        const rowsFiltradas = rowsPorEstado;
         setReportePlanillaRows(rowsFiltradas);
         setReportePlanillaColumns(OC_GASTOS_COLUMNAS_INICIALES);
         return;
@@ -825,6 +920,15 @@ export default function OcV1Page() {
     [cabecerasBaseFiltradas, estadoVista]
   );
 
+  const cabecerasAprobacionFiltradas = useMemo(() =>
+    cabecerasFiltradas.filter((item) => {
+      const fechaCreacion = item.fecha?.slice(0, 10) ?? "";
+      if (fechaCreacionDesde && (!fechaCreacion || fechaCreacion < fechaCreacionDesde)) return false;
+      if (fechaCreacionHasta && (!fechaCreacion || fechaCreacion > fechaCreacionHasta)) return false;
+      return true;
+    }),
+  [cabecerasFiltradas, fechaCreacionDesde, fechaCreacionHasta]);
+
   const resumenCabeceras = useMemo(() => {
     const total = cabecerasBaseFiltradas.length;
     const pendientes = cabecerasBaseFiltradas.filter((item) => getEstadoVista(item) === "pendientes").length;
@@ -862,24 +966,24 @@ export default function OcV1Page() {
 
   const conteoNiveles = useMemo(
     () => ({
-      nivel1: cabecerasFiltradas.filter((item) => getNivelPendiente(item) === 1).length,
-      nivel2: cabecerasFiltradas.filter((item) => getNivelPendiente(item) === 2).length,
-      nivel3: cabecerasFiltradas.filter((item) => getNivelPendiente(item) === 3).length,
-      cerradas: cabecerasFiltradas.filter((item) => getNivelPendiente(item) === 4).length,
+      nivel1: cabecerasAprobacionFiltradas.filter((item) => getNivelPendiente(item) === 1).length,
+      nivel2: cabecerasAprobacionFiltradas.filter((item) => getNivelPendiente(item) === 2).length,
+      nivel3: cabecerasAprobacionFiltradas.filter((item) => getNivelPendiente(item) === 3).length,
+      cerradas: cabecerasAprobacionFiltradas.filter((item) => getNivelPendiente(item) === 4).length,
     }),
-    [cabecerasFiltradas]
+    [cabecerasAprobacionFiltradas]
   );
 
   const validadorFiltroOptions = useMemo(
     () => Array.from(
       new Set(
-        cabecerasFiltradas
+        cabecerasAprobacionFiltradas
           .filter((item) => getNivelPendiente(item) === nivelAprobacion)
           .map((item) => getValidadorAgrupacion(item))
           .filter(Boolean)
       )
     ).sort((left, right) => left.localeCompare(right, "es", { sensitivity: "base" })),
-    [cabecerasFiltradas, getValidadorAgrupacion, nivelAprobacion]
+    [cabecerasAprobacionFiltradas, getValidadorAgrupacion, nivelAprobacion]
   );
 
   useEffect(() => {
@@ -889,10 +993,10 @@ export default function OcV1Page() {
   }, [filtroValidadorAprobacion, validadorFiltroOptions]);
 
   const cabecerasBandeja = useMemo(
-    () => cabecerasFiltradas
+    () => cabecerasAprobacionFiltradas
       .filter((item) => getNivelPendiente(item) === nivelAprobacion)
       .filter((item) => filtroValidadorAprobacion.length === 0 || filtroValidadorAprobacion.includes(getValidadorAgrupacion(item))),
-    [cabecerasFiltradas, filtroValidadorAprobacion, getValidadorAgrupacion, nivelAprobacion]
+    [cabecerasAprobacionFiltradas, filtroValidadorAprobacion, getValidadorAgrupacion, nivelAprobacion]
   );
 
   const cabecerasBandejaIds = useMemo(
@@ -1003,25 +1107,41 @@ export default function OcV1Page() {
     clientes: getUniqueSorted(cabeceras.map((item) => item.nombreCliente ?? "")),
     proyectos: getUniqueSorted(cabeceras.map((item) => item.nombreProyecto ?? "")),
     sites: getUniqueSorted(cabeceras.map((item) => item.nombreSite || item.idSite || "")),
-    estados: getUniqueSorted(cabeceras.map((item) => item.estado)),
+    estados: ["ACEPTADO", "RECHAZADO", "EN PROCESO"],
   }), [cabeceras]);
+
+  const reporteSiteOptions = useMemo(() => {
+    const sites = new Map<string, string>();
+    cabeceras.forEach((item) => {
+      const idSite = String(item.idSite ?? "").trim();
+      if (idSite) sites.set(idSite, item.nombreSite?.trim() || idSite);
+    });
+    return Array.from(sites, ([idSite, nombreSite]) => ({ idSite, nombreSite }))
+      .sort((left, right) => left.nombreSite.localeCompare(right.nombreSite));
+  }, [cabeceras]);
 
   const reporteRowsFiltradas = useMemo(() => {
     const idOcFiltro = reporteFiltros.idOc.trim();
+    const estadosOcSeleccionados = getEstadosOcSeleccionados(reporteFiltros.estado);
     return reporteRows.filter((item) => {
       if (solicitantesReporteFiltro.length && !solicitantesReporteFiltro.includes(item.solicitante)) return false;
       if (responsablesReporteFiltro.length && !responsablesReporteFiltro.includes(item.responsable)) return false;
       if (reporteFiltros.cliente && !item.clientes.includes(reporteFiltros.cliente)) return false;
       if (reporteFiltros.proyecto && !item.proyectos.includes(reporteFiltros.proyecto)) return false;
-      if (sitesReporteFiltro.length && !item.sites.some((site) => sitesReporteFiltro.includes(site))) return false;
-      if (reporteFiltros.estado && item.estado !== reporteFiltros.estado) return false;
+      if (sitesReporteFiltro.length) {
+        const nombresSitesSeleccionados = reporteSiteOptions
+          .filter((site) => sitesReporteFiltro.includes(site.idSite))
+          .map((site) => site.nombreSite);
+        if (!item.sites.some((site) => nombresSitesSeleccionados.includes(site))) return false;
+      }
+      if (estadosOcSeleccionados.length && !estadosOcSeleccionados.includes(clasificarEstadoOc(item.estadoOc ?? item.idEstado) as EstadoOcReporte)) return false;
       if (idOcFiltro && !String(item.idOc).includes(idOcFiltro)) return false;
       const fechaItem = item.fecha ? item.fecha.slice(0, 10) : "";
       if (reporteFiltros.fechaDesde && (!fechaItem || fechaItem < reporteFiltros.fechaDesde)) return false;
       if (reporteFiltros.fechaHasta && (!fechaItem || fechaItem > reporteFiltros.fechaHasta)) return false;
       return true;
     });
-  }, [reporteFiltros, reporteRows, responsablesReporteFiltro, solicitantesReporteFiltro, sitesReporteFiltro]);
+  }, [reporteFiltros, reporteRows, responsablesReporteFiltro, solicitantesReporteFiltro, sitesReporteFiltro, reporteSiteOptions]);
 
   const exportReporteOcPdf = useCallback(async (item: (typeof reporteRows)[number]) => {
     setPdfExportingOc(item.idOc);
@@ -1520,18 +1640,29 @@ export default function OcV1Page() {
           </div>
           <div style={ocV1Styles.actions}>
             <button type="button" style={styles.secondaryButton} onClick={() => { setVistaOc("reporte"); setPanelOpen(false); }}>Reporte</button>
-            <button type="button" style={styles.secondaryButton} onClick={() => exportToCsv(
-              `ordenes_compra_${today}.csv`,
-              cabeceraColumns.map((column) => column.label),
-              cabecerasFiltradas.map((item) => [
-                item.idOc,
-                item.fecha ? new Date(item.fecha).toLocaleDateString("es-PE") : "",
-                item.responsable,
-                item.comprobante,
-                formatMoney(item.total),
-                item.moneda,
-              ])
-            )}>Exportar Excel</button>
+            <button type="button" style={styles.secondaryButton} onClick={() => {
+              if (vistaOc === "reporte" && reporteSubtab === "oc-gastos") {
+                const columns = reportePlanillaColumns.slice(0, OC_GASTOS_MAX_COLUMNAS_VISIBLES);
+                void exportToExcel(
+                  `oc_gastos_${today}.xlsx`,
+                  columns,
+                  reportePlanillaRowsOrdenadas.map((row) => columns.map((column) => getReportePlanillaColumnValue(row, column)))
+                );
+                return;
+              }
+              void exportToExcel(
+                `ordenes_compra_${today}.xlsx`,
+                cabeceraColumns.map((column) => column.label),
+                cabecerasFiltradas.map((item) => [
+                  item.idOc,
+                  item.fecha ? new Date(item.fecha).toLocaleDateString("es-PE") : "",
+                  item.responsable,
+                  item.comprobante,
+                  formatMoney(item.total),
+                  item.moneda,
+                ])
+              );
+            }}>Exportar Excel</button>
             <button type="button" style={styles.primaryButton} onClick={openNuevo}>Nueva OC</button>
           </div>
         </div>
@@ -1592,6 +1723,26 @@ export default function OcV1Page() {
           </button>
         </div>
         <div style={ocV1Styles.stageSearchActions}>
+          <label style={ocV1Styles.stageDateFilter}>
+            <span>Fecha creación desde</span>
+            <input
+              type="date"
+              value={fechaCreacionDesde}
+              max={fechaCreacionHasta || undefined}
+              onChange={(event) => setFechaCreacionDesde(event.target.value)}
+              style={ocV1Styles.stageDateInput}
+            />
+          </label>
+          <label style={ocV1Styles.stageDateFilter}>
+            <span>Fecha creación hasta</span>
+            <input
+              type="date"
+              value={fechaCreacionHasta}
+              min={fechaCreacionDesde || undefined}
+              onChange={(event) => setFechaCreacionHasta(event.target.value)}
+              style={ocV1Styles.stageDateInput}
+            />
+          </label>
           <ApprovalQuickSearch
             value={busqueda}
             onChange={setBusqueda}
@@ -1708,8 +1859,9 @@ export default function OcV1Page() {
                       <span style={styles.approvalOc}>OC-{item.idOc}</span>
                       <span style={styles.approvalCardMeta}>{item.fecha ? new Date(item.fecha).toLocaleDateString("es-PE") : "-"}</span>
                       <span style={styles.approvalCardMeta} title={item.responsable || ""}>{item.responsable || "-"}</span>
+                      <span style={styles.approvalCardMeta} title={item.nombreCliente || ""}>{item.nombreCliente || "-"}</span>
                       <span style={styles.approvalCardTitle} title={item.comprobante || ""}>{item.comprobante || "-"}</span>
-                      <span style={styles.approvalAmount}>{formatMoney(item.total)}</span>
+                      <span style={styles.approvalAmount}>{formatMoney(item.subtotal)}</span>
                       <span style={styles.approvalCardMeta}>{item.moneda || "-"}</span>
                     </div>
                   </div>
@@ -1735,6 +1887,20 @@ export default function OcV1Page() {
                 <SummaryCard label="Monto cliente" value={formatMoney(montoOcKpis.montoCliente)} />
                 <SummaryCard label="Pagado Fic" value={formatMoney(montoOcKpis.pagadoFic)} />
                 <SummaryCard label="Avance Fic" value={formatPercent(montoOcKpis.avanceFic)} />
+              </div>
+            ) : detalleOcTab === "recibosAsociados" ? (
+              <div style={{ ...styles.summaryInline, gap: 8 }}>
+                <SummaryCard
+                  label={`Monto de la OC · ${recibosAsociadosKpis.montoOc.moneda}`}
+                  value={formatMoney(recibosAsociadosKpis.montoOc.total)}
+                />
+                {recibosAsociadosKpis.recibos.map((kpi) => (
+                  <SummaryCard
+                    key={`recibos-asociados-${kpi.moneda}`}
+                    label={`Suma de recibos · ${kpi.moneda}`}
+                    value={formatMoney(kpi.total)}
+                  />
+                ))}
               </div>
             ) : (
               <div style={styles.summaryInline}>
@@ -1905,6 +2071,7 @@ export default function OcV1Page() {
                     montoOcRows.map((item, index) => (
                       <tr key={`${item.idOc}-${item.idSite}-${item.fila}-${item.tipoTrabajo}-${index}`} style={styles.tr}>
                         <td style={styles.td}>{item.idOc ?? "-"}</td>
+                        <td style={styles.td}>{formatDate(item.fechaOc)}</td>
                         <td style={styles.td}>{item.idSite || "-"}</td>
                         <td style={styles.td} title={item.tipoTrabajo || ""}>{item.tipoTrabajo || "-"}</td>
                         <td style={styles.tdRight}>{formatMoney(item.montoOc)}</td>
@@ -1964,6 +2131,19 @@ export default function OcV1Page() {
                 </span>
               )}
             </div>
+            {reporteSubtab === "oc-gastos" && reporteConsultado && !reporteLoading && (
+              <div style={{ ...styles.summaryInline, marginBottom: 12, gap: 8 }}>
+                {reportePlanillaKpis.subtotalesOc.map((kpi) => (
+                  <SummaryCard key={`subtotal-oc-${kpi.moneda}`} label={`Subtotal OC · ${kpi.moneda}`} value={formatMoney(kpi.total)} />
+                ))}
+                {reportePlanillaKpis.subtotalesPlanilla.map((kpi) => (
+                  <SummaryCard key={`subtotal-planilla-${kpi.moneda}`} label={`Subtotal planilla · ${kpi.moneda}`} value={formatMoney(kpi.total)} />
+                ))}
+                {reportePlanillaKpis.avances.map((kpi) => (
+                  <SummaryCard key={`avance-oc-${kpi.moneda}`} label={`Avance OC · ${kpi.moneda}`} value={formatPercent(kpi.porcentaje)} />
+                ))}
+              </div>
+            )}
             <div style={styles.reportFilters}>
               <Field>
                 <Label>Nro OC</Label>
@@ -1974,17 +2154,6 @@ export default function OcV1Page() {
                   style={styles.input}
                 />
               </Field>
-              {reporteSubtab === "oc-gastos" && <Field>
-                <Label>Órdenes de compra</Label>
-                <select
-                  value={reporteFiltros.tipoOc}
-                  onChange={(event) => setReporteFiltros((prev) => ({ ...prev, tipoOc: event.target.value as ReporteFiltros["tipoOc"] }))}
-                  style={styles.input}
-                >
-                  <option value="con">Con IdOc</option>
-                  <option value="todos">Todos</option>
-                </select>
-              </Field>}
               <Field>
                 <Label>Fecha desde</Label>
                 <input
@@ -2037,41 +2206,86 @@ export default function OcV1Page() {
                   {reporteOptions.proyectos.map((item) => <option key={`rep-pro-${item}`} value={item}>{item}</option>)}
                 </select>
               </Field>
-              <Field><Label>Site</Label><details style={{ position: "relative" }}><summary style={{ ...styles.input, display: "flex", alignItems: "center", cursor: "pointer" }}>Todos{sitesReporteFiltro.length > 0 && ` (${sitesReporteFiltro.length})`}</summary><div style={{ position: "absolute", zIndex: 20, top: "100%", left: 0, right: 0, maxHeight: 240, overflowY: "auto", padding: 8, background: "#fff", border: "1px solid #D1D5DB", borderRadius: 8 }}><input value={busquedaSiteReporte} onChange={(e) => setBusquedaSiteReporte(e.target.value)} placeholder="Escriba un site..." style={styles.input} /><label style={{ display: "flex", gap: 6, padding: "6px 2px", fontSize: 12, fontWeight: 600 }}><input type="checkbox" onChange={(e) => { const disponibles = reporteOptions.sites.filter((item) => item.toLocaleLowerCase().includes(busquedaSiteReporte.toLocaleLowerCase())); const values = e.target.checked ? [...new Set([...sitesReporteFiltro, ...disponibles])] : sitesReporteFiltro.filter((v) => !disponibles.includes(v)); setSitesReporteFiltro(values); setReporteFiltros((p) => ({ ...p, site: values.join(",") })); }} />Marcar / desmarcar todos</label>{reporteOptions.sites.filter((item) => item.toLocaleLowerCase().includes(busquedaSiteReporte.toLocaleLowerCase())).map((item) => <label key={`rep-site-${item}`} style={{ display: "flex", gap: 6, padding: "4px 2px", fontSize: 12 }}><input type="checkbox" checked={sitesReporteFiltro.includes(item)} onChange={(e) => { const values = e.target.checked ? [...sitesReporteFiltro, item] : sitesReporteFiltro.filter((v) => v !== item); setSitesReporteFiltro(values); setReporteFiltros((p) => ({ ...p, site: values.join(",") })); }} />{item}</label>)}</div></details></Field>
+              <Field>
+                <Label>Site</Label>
+                <details style={{ position: "relative" }}>
+                  <summary style={{ ...styles.input, display: "flex", alignItems: "center", cursor: "pointer" }}>
+                    Todos{sitesReporteFiltro.length > 0 && ` (${sitesReporteFiltro.length})`}
+                  </summary>
+                  <div style={{ position: "absolute", zIndex: 20, top: "100%", left: 0, right: 0, maxHeight: 240, overflowY: "auto", padding: 8, background: "#fff", border: "1px solid #D1D5DB", borderRadius: 8 }}>
+                    <input value={busquedaSiteReporte} onChange={(event) => setBusquedaSiteReporte(event.target.value)} placeholder="Escriba un site..." style={styles.input} />
+                    <label style={{ display: "flex", gap: 6, padding: "6px 2px", fontSize: 12, fontWeight: 600 }}>
+                      <input type="checkbox" onChange={(event) => {
+                        const disponibles = reporteSiteOptions.filter((site) => `${site.idSite} ${site.nombreSite}`.toLocaleLowerCase().includes(busquedaSiteReporte.toLocaleLowerCase())).map((site) => site.idSite);
+                        const values = event.target.checked ? [...new Set([...sitesReporteFiltro, ...disponibles])] : sitesReporteFiltro.filter((idSite) => !disponibles.includes(idSite));
+                        setSitesReporteFiltro(values);
+                        setReporteFiltros((prev) => ({ ...prev, site: values.join(",") }));
+                      }} />
+                      Marcar / desmarcar todos
+                    </label>
+                    {reporteSiteOptions.filter((site) => `${site.idSite} ${site.nombreSite}`.toLocaleLowerCase().includes(busquedaSiteReporte.toLocaleLowerCase())).map((site) => (
+                      <label key={`rep-site-${site.idSite}`} style={{ display: "flex", gap: 6, padding: "4px 2px", fontSize: 12 }}>
+                        <input type="checkbox" checked={sitesReporteFiltro.includes(site.idSite)} onChange={(event) => {
+                          const values = event.target.checked ? [...sitesReporteFiltro, site.idSite] : sitesReporteFiltro.filter((idSite) => idSite !== site.idSite);
+                          setSitesReporteFiltro(values);
+                          setReporteFiltros((prev) => ({ ...prev, site: values.join(",") }));
+                        }} />
+                        {site.nombreSite} ({site.idSite})
+                      </label>
+                    ))}
+                  </div>
+                </details>
+              </Field>
               <Field>
                 <Label>Estado</Label>
-                <select
-                  value={reporteFiltros.estado}
-                  onChange={(event) => setReporteFiltros((prev) => ({ ...prev, estado: event.target.value }))}
-                  style={styles.input}
-                >
-                  <option value="">Todos</option>
-                  {reporteOptions.estados.map((item) => <option key={`rep-est-${item}`} value={item}>{item}</option>)}
-                </select>
+                <details style={{ position: "relative" }}>
+                  <summary style={{ ...styles.input, display: "flex", alignItems: "center", cursor: "pointer" }}>
+                    {getEstadosOcSeleccionados(reporteFiltros.estado).length
+                      ? `Estados (${getEstadosOcSeleccionados(reporteFiltros.estado).length})`
+                      : "Todos los estados"}
+                  </summary>
+                  <div style={{ position: "absolute", zIndex: 20, top: "100%", left: 0, right: 0, padding: 8, background: "#fff", border: "1px solid #D1D5DB", borderRadius: 8 }}>
+                    {reporteOptions.estados.map((item) => {
+                      const selected = getEstadosOcSeleccionados(reporteFiltros.estado);
+                      return <label key={`rep-est-${item}`} style={{ display: "flex", gap: 6, padding: "4px 2px", fontSize: 12 }}>
+                        <input
+                          type="checkbox"
+                          checked={selected.includes(item as EstadoOcReporte)}
+                          onChange={(event) => {
+                            const values = event.target.checked ? [...selected, item as EstadoOcReporte] : selected.filter((value) => value !== item);
+                            setReporteFiltros((prev) => ({ ...prev, estado: values.join(",") }));
+                          }}
+                        />
+                        {item}
+                      </label>;
+                    })}
+                  </div>
+                </details>
               </Field>
-              <div style={{ display: "flex", alignItems: "flex-end" }}>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 6, alignSelf: "end", justifySelf: "start" }}>
                 <button
                   type="button"
-                  style={styles.secondaryButton}
+                  style={{ ...styles.secondaryButton, height: 34, minWidth: 76, padding: "0 10px", fontSize: 11, lineHeight: 1.2, whiteSpace: "normal" }}
                   onClick={() => {
-                    setReporteFiltros({ solicitante: "", responsable: "", cliente: "", proyecto: "", site: "", estado: "", idOc: "", tipoOc: "con", fechaDesde: "", fechaHasta: "" }); setResponsablesReporteFiltro([]); setBusquedaResponsableReporte(""); setSolicitantesReporteFiltro([]); setBusquedaSolicitanteReporte(""); setSitesReporteFiltro([]); setBusquedaSiteReporte("");
+                    setReporteFiltros({ solicitante: "", responsable: "", cliente: "", proyecto: "", site: "", estado: reporteSubtab === "oc-gastos" ? ESTADOS_OC_GASTOS_POR_DEFECTO : "", idOc: "", fechaDesde: "", fechaHasta: "" }); setResponsablesReporteFiltro([]); setBusquedaResponsableReporte(""); setSolicitantesReporteFiltro([]); setBusquedaSolicitanteReporte(""); setSitesReporteFiltro([]); setBusquedaSiteReporte("");
                     setReporteDetalles([]);
                     setReporteConsultado(false);
                   }}
                 >
                   Limpiar filtros
                 </button>
-                {reporteSubtab === "listado" && <button type="button" style={styles.primaryButton} disabled={reporteLoading} onClick={() => { setReporteConsultado(false); void loadReporteDetalles(); }}>Agregar filtro</button>}
-                {reporteSubtab === "oc-gastos" && <button type="button" style={styles.primaryButton} disabled={reporteLoading} onClick={() => { setReportePlanillaRows([]); void loadReporteDetalles(); }}>Aplicar filtros</button>}
+                {reporteSubtab === "listado" && <button type="button" style={{ ...styles.primaryButton, height: 34, minWidth: 76, padding: "0 10px", fontSize: 11, lineHeight: 1.2, whiteSpace: "normal" }} disabled={reporteLoading} onClick={() => { setReporteConsultado(false); void loadReporteDetalles(); }}>Aplicar filtros</button>}
+                {reporteSubtab === "oc-gastos" && <button type="button" style={{ ...styles.primaryButton, height: 34, minWidth: 76, padding: "0 10px", fontSize: 11, lineHeight: 1.2, whiteSpace: "normal" }} disabled={reporteLoading} onClick={() => { setReportePlanillaRows([]); void loadReporteDetalles(); }}>Aplicar filtros</button>}
               </div>
             </div>
             <div style={String(reporteSubtab) === "oc-gastos" ? { ...styles.tableWrap, width: "100%", maxWidth: "100%", minWidth: 0 } : styles.tableWrap}>
-              {String(reporteSubtab) === "oc-gastos" && <style>{`.oc-gastos-grid th:nth-child(n+25), .oc-gastos-grid td:nth-child(n+25) { display: none; }`}</style>}
+              {String(reporteSubtab) === "oc-gastos" && <style>{`.oc-gastos-grid th:nth-child(n+${OC_GASTOS_MAX_COLUMNAS_VISIBLES + 1}), .oc-gastos-grid td:nth-child(n+${OC_GASTOS_MAX_COLUMNAS_VISIBLES + 1}) { display: none; }`}</style>}
               <table className={String(reporteSubtab) === "oc-gastos" ? "oc-gastos-grid" : undefined} style={String(reporteSubtab) === "oc-gastos" ? { ...styles.table, width: "max-content", minWidth: "100%" } : styles.table}>
                 <thead>
                   <tr>
                     {String(reporteSubtab) === "oc-gastos" ? reportePlanillaColumns.map((column, index) => <th key={`pla-head-${column}`} style={{ ...styles.th, width: 110, minWidth: 80, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer", ...(index < 4 ? { position: "sticky", left: index * 110, zIndex: 3, background: "#fff" } : {}) }} title={`Ordenar por ${column}`} onClick={() => setReportePlanillaSort((current) => ({ column, direction: current.column === column && current.direction === "asc" ? "desc" : "asc" }))}>{column}{reportePlanillaSort.column === column ? (reportePlanillaSort.direction === "asc" ? " ▲" : " ▼") : ""}</th>) : <th style={{ ...styles.th, width: 52 }} aria-label="Exportar PDF"></th>}
-                    <th style={styles.th}>OC</th>
+                    {String(reporteSubtab) !== "oc-gastos" && <>
+                      <th style={styles.th}>OC</th>
                     <th style={styles.th}>Fecha</th>
                     <th style={styles.th}>Solicitante</th>
                     <th style={styles.th}>Responsable</th>
@@ -2085,10 +2299,11 @@ export default function OcV1Page() {
                     <th style={styles.th}>1ra validación</th>
                     <th style={styles.th}>2da validación</th>
                     <th style={styles.th}>3ra validación</th>
+                    </>}
                   </tr>
                 </thead>
                 <tbody>
-                  {String(reporteSubtab) === "oc-gastos" ? (reportePlanillaRows.length === 0 ? <tr><td style={styles.td} colSpan={Math.max(reportePlanillaColumns.length, 1)}>{!reporteConsultado ? "Seleccione al menos un filtro para consultar los gastos." : reporteLoading ? "Cargando datos..." : "No hay registros de Planilla."}</td></tr> : reportePlanillaRowsOrdenadas.map((row, index) => { const read = (column: string) => { const aliases: Record<string, string[]> = { EstadoOc: ["EstadoOc", "IdEstadoOc"], CorrelativoPlanilla: ["CorrelativoPlanilla"], EstadoPlanilla: ["EstadoPlanilla", "ValidacionResponsable", "EstadoRelacion"] }; const names = aliases[column] || [column]; if (column.toLowerCase() === "montodetalleoc") { const precio = Number(row[Object.keys(row).find((key) => key.toLowerCase() === "preciounioc") ?? ""] ?? 0); const cantidad = Number(row[Object.keys(row).find((key) => key.toLowerCase() === "cantoc") ?? ""] ?? 0); return precio && cantidad ? (precio * cantidad).toFixed(2) : "—"; } const found = Object.keys(row).find((key) => names.some((name) => key.toLowerCase() === name.toLowerCase())); return String(found ? row[found] ?? "—" : "—"); }; const filaRechazada = read("EstadoPlanilla").trim().toUpperCase() === "RECHAZADO" || Number(read("IdEstadoOc")) === 6; return <tr key={`pla-${read("IdOc") || index}`} style={{ ...styles.tr, ...(filaRechazada ? { background: "#fce7f3" } : {}) }}>{reportePlanillaColumns.map((column, columnIndex) => { const value = column.toLowerCase() === "idoc" && reportePlanillaSort.column.toLowerCase() === "idoc" && isDuplicateOcId(reportePlanillaRowsOrdenadas, index) ? "" : read(column); return <td key={`${index}-${column}`} style={{ ...styles.td, width: 110, minWidth: 80, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer", ...(columnIndex < 4 ? { position: "sticky", left: columnIndex * 110, zIndex: 2, background: filaRechazada ? "#fce7f3" : "#fff" } : {}) }} title={value} onClick={(event) => { const cell = event.currentTarget; if (cell.style.whiteSpace === "normal") cell.style.whiteSpace = "nowrap"; else if (cell.scrollWidth > cell.clientWidth) cell.style.whiteSpace = "normal"; }}>{value}</td>; })}</tr>; })) : String(reporteSubtab) !== "oc-gastos" && !reporteConsultado ? (
+                  {String(reporteSubtab) === "oc-gastos" ? (reportePlanillaRows.length === 0 ? <tr><td style={styles.td} colSpan={Math.max(reportePlanillaColumns.length, 1)}>{!reporteConsultado ? "Seleccione al menos un filtro para consultar los gastos." : reporteLoading ? "Cargando datos..." : "No hay registros de Planilla."}</td></tr> : reportePlanillaRowsOrdenadas.map((row, index) => { const read = (column: string) => { const aliases: Record<string, string[]> = { EstadoOc: ["EstadoOc", "IdEstadoOc"], CorrelativoPlanilla: ["CorrelativoPlanilla"], EstadoPlanilla: ["EstadoPlanilla", "ValidacionResponsable", "EstadoRelacion"] }; const names = aliases[column] || [column]; if (column.toLowerCase() === "montodetalleoc") { const precio = Number(row[Object.keys(row).find((key) => key.toLowerCase() === "preciounioc") ?? ""] ?? 0); const cantidad = Number(row[Object.keys(row).find((key) => key.toLowerCase() === "cantoc") ?? ""] ?? 0); return precio && cantidad ? (precio * cantidad).toFixed(2) : "—"; } const found = Object.keys(row).find((key) => names.some((name) => key.toLowerCase() === name.toLowerCase())); return String(found ? row[found] ?? "—" : "—"); }; const filaRechazada = read("EstadoPlanilla").trim().toUpperCase() === "RECHAZADO" || Number(read("IdEstadoOc")) === 6; return <tr key={`pla-${read("IdOc") || "sin-oc"}-${read("CorrelativoPlanilla")}-${read("IdSite")}-${read("PrecioUniOc")}-${read("CantOc")}-${index}`} style={{ ...styles.tr, ...(filaRechazada ? { background: "#fce7f3" } : {}) }}>{reportePlanillaColumns.map((column, columnIndex) => { const rawValue = read(column); const value = column.toLowerCase() === "porcentajeconsumidooc" && Number.isFinite(Number(rawValue)) ? Number(rawValue).toFixed(2) : rawValue; return <td key={`${index}-${column}`} style={{ ...styles.td, width: 110, minWidth: 80, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer", ...(columnIndex < 4 ? { position: "sticky", left: columnIndex * 110, zIndex: 2, background: filaRechazada ? "#fce7f3" : "#fff" } : {}) }} title={value} onClick={(event) => { const cell = event.currentTarget; if (cell.style.whiteSpace === "normal") cell.style.whiteSpace = "nowrap"; else if (cell.scrollWidth > cell.clientWidth) cell.style.whiteSpace = "normal"; }}>{value}</td>; })}</tr>; })) : String(reporteSubtab) !== "oc-gastos" && !reporteConsultado ? (
                     <tr>
                       <td style={styles.td} colSpan={15}>
                         Seleccione al menos un filtro para consultar la trazabilidad.
@@ -2731,6 +2946,7 @@ function RecibosOrdenCompraTable({
                 <td style={styles.td}>{formatMoney(item.subtotal)}</td>
                 <td style={styles.td}>{formatMoney(item.igv)}</td>
                 <td style={styles.td}>{formatMoney(item.total)}</td>
+                <td style={styles.td}>{item.moneda || "-"}</td>
                 <td style={styles.td}>
                   <button
                     type="button"
@@ -3586,12 +3802,31 @@ const ocV1Styles: Record<string, React.CSSProperties> = {
   },
   stageSearchActions: {
     display: "flex",
-    alignItems: "center",
+    alignItems: "flex-end",
     justifyContent: "flex-end",
     gap: 8,
     flex: "0 0 auto",
     flexWrap: "nowrap",
     whiteSpace: "nowrap",
+  },
+  stageDateFilter: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    color: "#475569",
+    fontSize: 10,
+    fontWeight: 700,
+  },
+  stageDateInput: {
+    width: 132,
+    height: 28,
+    borderRadius: 7,
+    border: "1px solid #D1D5DB",
+    padding: "0 7px",
+    color: "#0F172A",
+    background: "#FFFFFF",
+    boxSizing: "border-box",
+    fontSize: 11,
   },
   stageSearch: {
     width: 300,
@@ -3902,7 +4137,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   approvalCardLine: {
     display: "grid",
-    gridTemplateColumns: "20px 90px 110px minmax(150px, 0.8fr) 86px 92px 75px",
+    gridTemplateColumns: "20px 90px 110px minmax(130px, 0.65fr) minmax(150px, 0.8fr) 86px 92px 75px",
     alignItems: "center",
     columnGap: 4,
     rowGap: 8,

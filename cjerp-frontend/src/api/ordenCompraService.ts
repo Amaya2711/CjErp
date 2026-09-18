@@ -22,6 +22,7 @@ export type OrdenCompraCabeceraDto = {
   nroDocumento?: string;
   fecha?: string | null;
   idEstado?: number | null;
+  estadoOc?: number | null;
   idSite?: string;
   nombreSite?: string;
   nombreCliente?: string;
@@ -195,6 +196,7 @@ export type OrdenCompraAsociarRecibosResult = {
 
 export type OrdenCompraMontoOcDto = {
   idOc?: number | null;
+  fechaOc?: string | null;
   idCliente?: number | null;
   idProyecto?: number | null;
   correlativo?: number | null;

@@ -36,6 +36,7 @@ public class OrdenCompraCabeceraDto
     public string NroDocumento { get; set; } = string.Empty;
     public DateTime? Fecha { get; set; }
     public int? IdEstado { get; set; }
+    public int? EstadoOc { get; set; }
     public string IdSite { get; set; } = string.Empty;
     public string NombreSite { get; set; } = string.Empty;
     public string NombreCliente { get; set; } = string.Empty;
@@ -206,6 +207,7 @@ public class OrdenCompraAsociarRecibosResultDto
 public class OrdenCompraMontoOcDto
 {
     public int? IdOc { get; set; }
+    public DateTime? FechaOc { get; set; }
     public int? IdCliente { get; set; }
     public int? IdProyecto { get; set; }
     public int? Correlativo { get; set; }

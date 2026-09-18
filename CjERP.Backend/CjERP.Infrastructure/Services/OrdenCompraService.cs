@@ -64,7 +64,7 @@ public class OrdenCompraService : IOrdenCompraService
         """;
     private const string BuscarRecibosAsociadosSql = """
         SELECT
-            a.CorreSite AS Correlativo,
+            a.Correlativo,
             a.FecIngreso,
             a.Subtotal,
             a.Igv,
@@ -171,6 +171,7 @@ public class OrdenCompraService : IOrdenCompraService
         )
         SELECT
             f.IdOc,
+            cab.FechaCreacion AS FechaOc,
             f.IdCliente,
             f.IdProyecto,
             f.Correlativo,
