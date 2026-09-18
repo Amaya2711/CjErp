@@ -221,7 +221,7 @@ const cabeceraColumns = [
     { key: "fecha", label: "Fecha", width: "120px" },
   { key: "responsable", label: "Responsable", width: "150px" },
   { key: "comprobante", label: "Tipo documento", width: "86px" },
-  { key: "total", label: "Monto", width: "92px" },
+  { key: "subtotal", label: "Subtotal", width: "92px" },
   { key: "moneda", label: "Moneda", width: "75px" },
 ] as const;
 
@@ -588,18 +588,18 @@ export default function OcV1Page() {
   const [selectedOcId, setSelectedOcId] = useState<number | null>(null);
   const recibosAsociadosKpis = useMemo(() => {
     const cabeceraActual = cabeceras.find((item) => item.idOc === selectedOcId);
-    const totalesPorMoneda = new Map<string, number>();
+    const subtotalesPorMoneda = new Map<string, number>();
     recibosAsociados.forEach((recibo) => {
       const moneda = recibo.moneda?.trim() || "Sin moneda";
-      totalesPorMoneda.set(moneda, (totalesPorMoneda.get(moneda) ?? 0) + toNumber(recibo.total));
+      subtotalesPorMoneda.set(moneda, (subtotalesPorMoneda.get(moneda) ?? 0) + toNumber(recibo.subtotal));
     });
 
     return {
       montoOc: {
         moneda: cabeceraActual?.moneda?.trim() || "Sin moneda",
-        total: toNumber(cabeceraActual?.total),
+        total: toNumber(cabeceraActual?.subtotal),
       },
-      recibos: Array.from(totalesPorMoneda, ([moneda, total]) => ({ moneda, total }))
+      recibos: Array.from(subtotalesPorMoneda, ([moneda, total]) => ({ moneda, total }))
         .sort((left, right) => left.moneda.localeCompare(right.moneda)),
     };
   }, [cabeceras, recibosAsociados, selectedOcId]);
@@ -1658,7 +1658,7 @@ export default function OcV1Page() {
                   item.fecha ? new Date(item.fecha).toLocaleDateString("es-PE") : "",
                   item.responsable,
                   item.comprobante,
-                  formatMoney(item.total),
+                  formatMoney(item.subtotal),
                   item.moneda,
                 ])
               );
@@ -2007,6 +2007,7 @@ export default function OcV1Page() {
               loading={recibosLoading}
               emptyText={selectedCabecera ? "No hay recibos asociados para la posición seleccionada." : "Seleccione una cabecera para visualizar los recibos asociados."}
               selectable={false}
+              hideIgvAndTotal
               selectedIds={[]}
               onToggle={() => undefined}
               onDetalleClick={setDetalleCompleto}
@@ -2294,7 +2295,7 @@ export default function OcV1Page() {
                     <th style={styles.th}>Site</th>
                     <th style={styles.th}>Comprobante</th>
                     <th style={styles.th}>Moneda</th>
-                    <th style={styles.th}>Total</th>
+                    <th style={styles.th}>Subtotal</th>
                     <th style={styles.th}>Estado</th>
                     <th style={styles.th}>1ra validación</th>
                     <th style={styles.th}>2da validación</th>
@@ -2338,7 +2339,7 @@ export default function OcV1Page() {
                       <td style={styles.td} title={item.sites.join(" / ")}>{item.siteResumen || "-"}</td>
                       <td style={styles.td}>{item.comprobante}</td>
                       <td style={styles.td}>{item.moneda}</td>
-                      <td style={styles.td}>{formatMoney(item.total)}</td>
+                      <td style={styles.td}>{formatMoney(item.subtotal)}</td>
                       <td style={styles.td}>{item.estado}</td>
                       <td style={styles.td}><ValidationBadge value={item.idAprobador1} /></td>
                       <td style={styles.td}><ValidationBadge value={item.idAprobador2} /></td>
@@ -2899,6 +2900,7 @@ function RecibosOrdenCompraTable({
   loading,
   emptyText,
   selectable,
+  hideIgvAndTotal = false,
   selectedIds,
   onToggle,
   onDetalleClick,
@@ -2907,16 +2909,21 @@ function RecibosOrdenCompraTable({
   loading: boolean;
   emptyText: string;
   selectable: boolean;
+  hideIgvAndTotal?: boolean;
   selectedIds: number[];
   onToggle: (correlativo: number, checked: boolean) => void;
   onDetalleClick: (detalle: string) => void;
 }) {
+  const columns = hideIgvAndTotal
+    ? reciboColumns.filter((column) => column.key !== "igv" && column.key !== "total")
+    : reciboColumns;
+
   return (
     <div style={styles.tableWrap}>
       <table style={styles.receiptTable}>
         <thead>
           <tr>
-            {reciboColumns.map((column) => (
+            {columns.map((column) => (
               <th key={column.key} style={{ ...styles.th, width: column.width }}>
                 {column.key === "seleccion" && selectable ? "" : column.label}
               </th>
@@ -2925,9 +2932,9 @@ function RecibosOrdenCompraTable({
         </thead>
         <tbody>
           {loading ? (
-            <tr><td style={styles.td} colSpan={reciboColumns.length}>Cargando recibos...</td></tr>
+            <tr><td style={styles.td} colSpan={columns.length}>Cargando recibos...</td></tr>
           ) : rows.length === 0 ? (
-            <tr><td style={styles.td} colSpan={reciboColumns.length}>{emptyText}</td></tr>
+            <tr><td style={styles.td} colSpan={columns.length}>{emptyText}</td></tr>
           ) : (
             rows.map((item) => (
               <tr key={item.correlativo} style={styles.tr}>
@@ -2944,8 +2951,8 @@ function RecibosOrdenCompraTable({
                 <td style={styles.td}>{item.correlativo}</td>
                 <td style={styles.td}>{item.fecIngreso ? new Date(item.fecIngreso).toLocaleDateString("es-PE") : ""}</td>
                 <td style={styles.td}>{formatMoney(item.subtotal)}</td>
-                <td style={styles.td}>{formatMoney(item.igv)}</td>
-                <td style={styles.td}>{formatMoney(item.total)}</td>
+                {!hideIgvAndTotal ? <td style={styles.td}>{formatMoney(item.igv)}</td> : null}
+                {!hideIgvAndTotal ? <td style={styles.td}>{formatMoney(item.total)}</td> : null}
                 <td style={styles.td}>{item.moneda || "-"}</td>
                 <td style={styles.td}>
                   <button
