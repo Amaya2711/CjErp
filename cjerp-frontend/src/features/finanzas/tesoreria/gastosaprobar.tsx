@@ -3141,7 +3141,7 @@ export default function GastosAprobarPage() {
   );
   useEffect(() => {
     if (detalleOcActiva) {
-      console.log("[GastosAprobar] Detalle OC calculado", JSON.stringify(detalleOcActiva, null, 2));
+      // No exponer el detalle calculado de OC en consola.
     }
   }, [detalleOcActiva]);
   const handleRowClick = React.useCallback((gasto: GastoForm, rowKey: string) => {
@@ -3149,14 +3149,14 @@ export default function GastosAprobarPage() {
     setFilaActiva(gasto);
     setFilaActivaKey(rowKey);
     setResumenOcMinimizado(false);
-    console.log("[GastosAprobar] Registro seleccionado", JSON.stringify(gasto, null, 2));
+    // No exponer el registro seleccionado en consola.
   }, []);
   const abrirDrawerOc = React.useCallback((gasto: GastoForm, rowKey: string) => {
     setFilaActiva(gasto);
     setFilaActivaKey(rowKey);
     setResumenOcMinimizado(false);
     setDrawerOcAbierto(true);
-    console.log("[GastosAprobar] Detalle OC abierto", JSON.stringify(mapearDatosOc(gasto), null, 2));
+    // No exponer el detalle de OC abierto en consola.
   }, []);
   const cerrarResumenOc = React.useCallback(() => {
     setDrawerOcAbierto(false);

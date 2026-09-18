@@ -20,6 +20,7 @@ namespace CjERP.Api.Controllers
     public class PlanillaConsultaController : ControllerBase
     {
         private static readonly string[] RequiredParameters = ["IdCargo", "IdEmpleado"];
+        private static readonly string[] RequiredParametersPagosV1 = [];
         private static readonly string[] RequiredParametersAprobar = ["IdCargo", "IdEmpleado", "Estados"];
         private static readonly string[] RequiredParametersVacaciones = [];
         private static readonly string[] RequiredParametersGastosFechaDeposito = ["Estados", "FechaDeposito"];
@@ -98,10 +99,12 @@ namespace CjERP.Api.Controllers
                     ? RequiredParametersPagadosDashboard
                     : string.Equals(consulta, "importar-consulta-dsh", StringComparison.OrdinalIgnoreCase)
                             ? RequiredParametersImportarConsultaDsh
-                        : string.Equals(consulta, "movimientos-gastos-ingresos", StringComparison.OrdinalIgnoreCase)
+                : string.Equals(consulta, "movimientos-gastos-ingresos", StringComparison.OrdinalIgnoreCase)
                             ? RequiredParametersMovimientosGastosIngresos
                         : string.Equals(consulta, "importar-resumen-ot", StringComparison.OrdinalIgnoreCase)
                             ? RequiredParametersImportarResumenOT
+                : string.Equals(consulta, "pagos-v1", StringComparison.OrdinalIgnoreCase)
+                    ? RequiredParametersPagosV1
                 : RequiredParameters;
 
             if (string.Equals(consulta, "gastos", StringComparison.OrdinalIgnoreCase))
@@ -582,7 +585,7 @@ namespace CjERP.Api.Controllers
                 return;
             }
 
-            if (!providedParameters.TryGetValue("IdEmpleado", out var idEmpleado) || string.IsNullOrWhiteSpace(idEmpleado))
+            if (!providedParameters.ContainsKey("IdEmpleado"))
             {
                 var resolvedIdEmpleado = ResolveNumericClaimValue(
                     User.FindFirstValue("IdEmpleado"),
@@ -597,7 +600,7 @@ namespace CjERP.Api.Controllers
                 }
             }
 
-            if (!providedParameters.TryGetValue("IdCargo", out var idCargo) || string.IsNullOrWhiteSpace(idCargo))
+            if (!providedParameters.ContainsKey("IdCargo"))
             {
                 var resolvedIdCargo = ResolveNumericClaimValue(
                     User.FindFirstValue("IdCargo"),

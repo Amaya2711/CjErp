@@ -275,11 +275,11 @@ BEGIN
         OR (
             @IncluyeEstado4 = 1
             AND a.FechaDeposito IS NOT NULL
-            AND COALESCE(TRY_CONVERT(DATE, a.FechaDeposito, 103), TRY_CONVERT(DATE, a.FechaDeposito, 23), TRY_CONVERT(DATE, a.FechaDeposito, 120), TRY_CONVERT(DATE, a.FechaDeposito, 126)) >= @FechaInicio
+            AND COALESCE(TRY_CONVERT(DATE, a.FechaDeposito, 101), TRY_CONVERT(DATE, a.FechaDeposito, 103), TRY_CONVERT(DATE, a.FechaDeposito, 23), TRY_CONVERT(DATE, a.FechaDeposito, 120), TRY_CONVERT(DATE, a.FechaDeposito, 126)) >= @FechaInicio
         )
         OR (
             @IncluyeEstado4 = 0
-            AND COALESCE(TRY_CONVERT(DATE, a.FecIngreso, 103), TRY_CONVERT(DATE, a.FecIngreso, 23), TRY_CONVERT(DATE, a.FecIngreso, 120), TRY_CONVERT(DATE, a.FecIngreso, 126)) >= @FechaInicio
+            AND COALESCE(TRY_CONVERT(DATE, a.FecIngreso, 101), TRY_CONVERT(DATE, a.FecIngreso, 103), TRY_CONVERT(DATE, a.FecIngreso, 23), TRY_CONVERT(DATE, a.FecIngreso, 120), TRY_CONVERT(DATE, a.FecIngreso, 126)) >= @FechaInicio
         )
     )
     AND (
@@ -290,19 +290,19 @@ BEGIN
         OR (
             @IncluyeEstado4 = 1
             AND a.FechaDeposito IS NOT NULL
-            AND COALESCE(TRY_CONVERT(DATE, a.FechaDeposito, 103), TRY_CONVERT(DATE, a.FechaDeposito, 23), TRY_CONVERT(DATE, a.FechaDeposito, 120), TRY_CONVERT(DATE, a.FechaDeposito, 126)) < DATEADD(DAY, 1, @FechaFin)
+            AND COALESCE(TRY_CONVERT(DATE, a.FechaDeposito, 101), TRY_CONVERT(DATE, a.FechaDeposito, 103), TRY_CONVERT(DATE, a.FechaDeposito, 23), TRY_CONVERT(DATE, a.FechaDeposito, 120), TRY_CONVERT(DATE, a.FechaDeposito, 126)) < DATEADD(DAY, 1, @FechaFin)
         )
         OR (
             @IncluyeEstado4 = 0
-            AND COALESCE(TRY_CONVERT(DATE, a.FecIngreso, 103), TRY_CONVERT(DATE, a.FecIngreso, 23), TRY_CONVERT(DATE, a.FecIngreso, 120), TRY_CONVERT(DATE, a.FecIngreso, 126)) < DATEADD(DAY, 1, @FechaFin)
+            AND COALESCE(TRY_CONVERT(DATE, a.FecIngreso, 101), TRY_CONVERT(DATE, a.FecIngreso, 103), TRY_CONVERT(DATE, a.FecIngreso, 23), TRY_CONVERT(DATE, a.FecIngreso, 120), TRY_CONVERT(DATE, a.FecIngreso, 126)) < DATEADD(DAY, 1, @FechaFin)
         )
     )
     AND (
         @FechaDeposito IS NULL
         OR (
             a.FechaDeposito IS NOT NULL
-            AND COALESCE(TRY_CONVERT(DATE, a.FechaDeposito, 103), TRY_CONVERT(DATE, a.FechaDeposito, 23), TRY_CONVERT(DATE, a.FechaDeposito, 120), TRY_CONVERT(DATE, a.FechaDeposito, 126)) >= @FechaDeposito
-            AND COALESCE(TRY_CONVERT(DATE, a.FechaDeposito, 103), TRY_CONVERT(DATE, a.FechaDeposito, 23), TRY_CONVERT(DATE, a.FechaDeposito, 120), TRY_CONVERT(DATE, a.FechaDeposito, 126)) < DATEADD(DAY, 1, @FechaDeposito)
+            AND COALESCE(TRY_CONVERT(DATE, a.FechaDeposito, 101), TRY_CONVERT(DATE, a.FechaDeposito, 103), TRY_CONVERT(DATE, a.FechaDeposito, 23), TRY_CONVERT(DATE, a.FechaDeposito, 120), TRY_CONVERT(DATE, a.FechaDeposito, 126)) >= @FechaDeposito
+            AND COALESCE(TRY_CONVERT(DATE, a.FechaDeposito, 101), TRY_CONVERT(DATE, a.FechaDeposito, 103), TRY_CONVERT(DATE, a.FechaDeposito, 23), TRY_CONVERT(DATE, a.FechaDeposito, 120), TRY_CONVERT(DATE, a.FechaDeposito, 126)) < DATEADD(DAY, 1, @FechaDeposito)
         )
     )
     AND (

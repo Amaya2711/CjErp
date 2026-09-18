@@ -503,7 +503,8 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
             usuario,
             cancellationToken,
             StoredProcedureBuscarMovimientos,
-            "Movimientos BCP vs Planilla");
+            "Movimientos BCP vs Planilla",
+            requireFechaForTotalPagar: false);
     }
 
     public async Task<ConciliacionBcpConciliarPlanillaResponseDto> ConciliarPlanillaV1Async(
@@ -516,7 +517,10 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
             usuario,
             cancellationToken,
             StoredProcedureBuscarMovimientosConciliacion,
-            "MovimientosConciliacion vs Planilla");
+            "MovimientosConciliacion vs Planilla",
+            // REVERSA-CONCILIACION-V1-FECHA-TOTALPAGAR:
+            // Cambiar a false o retirar este argumento para restaurar la suma histórica por NroOperacion sin fecha.
+            requireFechaForTotalPagar: true);
 
         await using var connection = _sqlCommandFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -536,7 +540,8 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         string? usuario,
         CancellationToken cancellationToken,
         string storedProcedureMovimientos,
-        string etiquetaResumen)
+        string etiquetaResumen,
+        bool requireFechaForTotalPagar)
     {
         if (!request.IdCargo.HasValue || !request.IdEmpleado.HasValue || string.IsNullOrWhiteSpace(request.Estados))
         {
@@ -618,7 +623,11 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
             })
             .ToList();
 
-        var registros = BuildConciliacionRegistros(movimientos, planilla, request.CodigoBanco)
+        var registros = BuildConciliacionRegistros(
+                movimientos,
+                planilla,
+                request.CodigoBanco,
+                requireFechaForTotalPagar)
             .OrderByDescending(item => item.Fecha)
             .ThenBy(item => item.Empresa)
             .ThenBy(item => item.Moneda)
@@ -1787,7 +1796,8 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
     private static List<ConciliacionBcpConciliarPlanillaRegistroDto> BuildConciliacionRegistros(
         IReadOnlyList<MovimientoBcpBusquedaRow> movimientos,
         IReadOnlyList<PlanillaConciliacionRow> planillaRows,
-        string? codigoBanco)
+        string? codigoBanco,
+        bool requireFechaForTotalPagar)
     {
         var esBancoConAgrupacionPorOperacion = IsBancoConAgrupacionPorOperacion(codigoBanco)
             || planillaRows.Any(planilla => IsBancoConAgrupacionPorOperacion(planilla.Banco));
@@ -1811,7 +1821,7 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                 var candidates = descripcionNoConciliable
                     ? []
                     : planillaRows
-                        .Select(planilla => BuildConciliacionCandidate(movimiento, nroOperacionNormalizado, descripcionNumerica, planilla, esBancoConAgrupacionPorOperacion, planillaRows, planillaRowsByNroOperacion, bancoOperationSummaries))
+                        .Select(planilla => BuildConciliacionCandidate(movimiento, nroOperacionNormalizado, descripcionNumerica, planilla, esBancoConAgrupacionPorOperacion, planillaRows, planillaRowsByNroOperacion, bancoOperationSummaries, requireFechaForTotalPagar))
                         .Where(candidate => candidate is not null)
                         .Select(candidate => candidate!)
                         .ToList();
@@ -1854,10 +1864,11 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                     ? assignedCandidates
                     : [],
                 context.Candidates.Count > 0,
-                esBancoConAgrupacionPorOperacion,
-                planillaRows,
-                planillaRowsByNroOperacion,
-                bancoOperationSummaries))
+                 esBancoConAgrupacionPorOperacion,
+                 planillaRows,
+                 planillaRowsByNroOperacion,
+                bancoOperationSummaries,
+                requireFechaForTotalPagar))
             .ToList();
     }
 
@@ -1883,7 +1894,8 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         bool esBancoConAgrupacionPorOperacion,
         IReadOnlyList<PlanillaConciliacionRow> planillaRows,
         IReadOnlyDictionary<string, List<PlanillaConciliacionRow>> planillaRowsByNroOperacion,
-        IReadOnlyDictionary<string, ScotiabankOperationSummary> bancoOperationSummaries)
+        IReadOnlyDictionary<string, ScotiabankOperationSummary> bancoOperationSummaries,
+        bool requireFechaForTotalPagar)
     {
         var esDescripcionNoConciliable = IsDescripcionOperacionDescartable(movimiento.DescripcionOperacion);
         var nroOperacionMovimientoNormalizado = NormalizeOperationNumber(movimiento.NroOperacion);
@@ -1908,7 +1920,8 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
 
         if (esBancoConAgrupacionPorOperacion && !esDescripcionNoConciliable)
         {
-            var requiresDateMatch = RequiresDateMatchForOperacion(movimiento.DescripcionOperacion);
+            // REVERSA-CONCILIACION-V1-FECHA-TOTALPAGAR: fecha forma parte de la agrupación de TotalPagar en v1.
+            var requiresDateMatch = requireFechaForTotalPagar || RequiresDateMatchForOperacion(movimiento.DescripcionOperacion);
 
             if (!requiresDateMatch &&
                 !string.IsNullOrWhiteSpace(nroOperacionMovimientoNormalizado) &&
@@ -2098,7 +2111,8 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         bool esBancoConAgrupacionPorOperacion,
         IReadOnlyList<PlanillaConciliacionRow> allPlanillaRows,
         IReadOnlyDictionary<string, List<PlanillaConciliacionRow>> planillaRowsByNroOperacion,
-        IReadOnlyDictionary<string, ScotiabankOperationSummary> bancoOperationSummaries)
+        IReadOnlyDictionary<string, ScotiabankOperationSummary> bancoOperationSummaries,
+        bool requireFechaForTotalPagar)
     {
         if (!string.IsNullOrWhiteSpace(nroOperacionNormalizado) &&
             string.Equals(planilla.NroOperacionNormalizado, nroOperacionNormalizado, StringComparison.OrdinalIgnoreCase))
@@ -2109,9 +2123,10 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                 allPlanillaRows,
                 planillaRowsByNroOperacion,
                 movimiento.Fecha,
-                RequiresDateMatchForOperacion(movimiento.DescripcionOperacion));
+                requireFechaForTotalPagar || RequiresDateMatchForOperacion(movimiento.DescripcionOperacion));
             var rowsForComparison = sameNroRows;
-            var requiresDateMatch = RequiresDateMatchForOperacion(movimiento.DescripcionOperacion);
+            // REVERSA-CONCILIACION-V1-FECHA-TOTALPAGAR: solo v1 suma TotalPagar por NroOperacion y fecha.
+            var requiresDateMatch = requireFechaForTotalPagar || RequiresDateMatchForOperacion(movimiento.DescripcionOperacion);
             var groupTotal = requiresDateMatch
                 ? rowsForComparison.Count > 0
                     ? BuildScotiabankOperationSummary(rowsForComparison).TotalPagar

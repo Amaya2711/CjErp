@@ -75,7 +75,7 @@ export default function LoginPage() {
 
       navigate("/admin/dashboardPage", { replace: true });
     } catch (error: unknown) {
-      console.error("Error al iniciar sesión:", error);
+      // No exponer errores de autenticación en consola.
       setMensaje(getHttpErrorMessage(error, "No se pudo iniciar sesión."));
     } finally {
       setCargando(false);

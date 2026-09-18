@@ -244,7 +244,7 @@ export default function SeguridadPerfilRolMenu() {
         setRolId("");
         setSelectedIds(new Set());
       } catch (err: unknown) {
-        console.error(err);
+        // El error se muestra en la interfaz; no se expone en consola.
         setError(getHttpErrorMessage(err, "No se pudieron cargar todos los roles."));
         setRoles([]);
         setRolId("");
@@ -312,7 +312,7 @@ export default function SeguridadPerfilRolMenu() {
       });
       setExpandedIds(allExpanded);
     } catch (err: unknown) {
-      console.error(err);
+      // El error se muestra en la interfaz; no se expone en consola.
       setError(getHttpErrorMessage(err, "No se pudieron cargar perfiles y menú."));
     } finally {
       setCargando(false);
@@ -336,7 +336,7 @@ export default function SeguridadPerfilRolMenu() {
       setRolId("");
       setSelectedIds(new Set());
     } catch (err: unknown) {
-      console.error(err);
+      // El error se muestra en la interfaz; no se expone en consola.
       setError(getHttpErrorMessage(err, "No se pudieron cargar los roles del perfil."));
       setRoles([]);
       setRolId("");
@@ -396,7 +396,7 @@ export default function SeguridadPerfilRolMenu() {
       });
       setExpandedIds(expanded);
     } catch (err: unknown) {
-      console.error(err);
+      // El error se muestra en la interfaz; no se expone en consola.
       setError(getHttpErrorMessage(err, "No se pudo cargar el menú asignado al rol."));
       setSelectedIds(new Set());
     } finally {
@@ -523,7 +523,7 @@ export default function SeguridadPerfilRolMenu() {
 
       setMensaje("Asignación de menú guardada correctamente.");
     } catch (err: unknown) {
-      console.error(err);
+      // El error se muestra en la interfaz; no se expone en consola.
       setError(getHttpErrorMessage(err, "No se pudo guardar la asignación de menú."));
       setMensaje("");
     } finally {

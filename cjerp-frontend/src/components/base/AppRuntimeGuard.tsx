@@ -41,7 +41,7 @@ class AppErrorBoundary extends React.Component<AppErrorBoundaryProps, AppErrorBo
 
   componentDidCatch(error: Error) {
     this.props.onError(error);
-    console.error("[AppErrorBoundary]", error);
+    // El error se presenta mediante la pantalla de recuperación, sin exponerlo en consola.
   }
 
   render() {
@@ -81,13 +81,13 @@ export default function AppRuntimeGuard({ children }: AppRuntimeGuardProps) {
   useEffect(() => {
     const handleWindowError = (event: ErrorEvent) => {
       const message = formatErrorMessage(event.error ?? event.message);
-      console.error("[window.onerror]", event.error ?? event.message, event);
+      // La pantalla de recuperación gestiona el error; no se expone información en consola.
       setRuntimeError(message);
     };
 
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
       const message = formatErrorMessage(event.reason);
-      console.error("[unhandledrejection]", event.reason);
+      // La pantalla de recuperación gestiona el rechazo; no se expone información en consola.
       setRuntimeError(message);
     };
 

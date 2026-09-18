@@ -319,7 +319,7 @@ export default function SeguridadPerfilRolMenu() {
       });
       setExpandedIds(allExpanded);
     } catch (err: unknown) {
-      console.error(err);
+      // El error se muestra en la interfaz; no se expone en consola.
       setError(getHttpErrorMessage(err, "No se pudieron cargar perfiles y menú."));
     } finally {
       setCargando(false);
@@ -343,7 +343,7 @@ export default function SeguridadPerfilRolMenu() {
       setRolId("");
       setSelectedIds(new Set());
     } catch (err: unknown) {
-      console.error(err);
+      // El error se muestra en la interfaz; no se expone en consola.
       setError(getHttpErrorMessage(err, "No se pudieron cargar los roles del perfil."));
       setRoles([]);
       setRolId("");
@@ -384,7 +384,7 @@ export default function SeguridadPerfilRolMenu() {
       });
       setExpandedIds(expanded);
     } catch (err: unknown) {
-      console.error(err);
+      // El error se muestra en la interfaz; no se expone en consola.
       setError(getHttpErrorMessage(err, "No se pudo cargar el menú asignado al rol."));
       setSelectedIds(new Set());
     } finally {
@@ -458,8 +458,7 @@ export default function SeguridadPerfilRolMenu() {
 
    const guardarAsignacion = async () => {
 
-      console.log("Usuario enviado (raw):", usuarioFiltro);
-      console.log("Usuario enviado (ID limpio):", usuarioIdSeleccionado);
+      // No exponer datos de usuario en consola.
 
     if (!usuarioIdSeleccionado) {
       setError("Debe seleccionar un usuario válido.");
@@ -567,7 +566,7 @@ export default function SeguridadPerfilRolMenu() {
       await recargar();
       setMensaje("Nodo principal creado correctamente.");
     } catch (err: unknown) {
-      console.error(err);
+      // El error se muestra en la interfaz; no se expone en consola.
       setError(getHttpErrorMessage(err, "No se pudo crear el nodo principal."));
       setMensaje("");
     } finally {
@@ -630,8 +629,7 @@ export default function SeguridadPerfilRolMenu() {
 
             const idUsuarioExtraido = value.split("-")[0].trim();
 
-            console.log("Usuario escrito:", value);
-            console.log("ID usuario extraído:", idUsuarioExtraido);
+            // No exponer datos de usuario en consola.
 
             setUsuarioIdSeleccionado(idUsuarioExtraido);
           }}

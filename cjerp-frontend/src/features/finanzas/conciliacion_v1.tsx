@@ -1954,19 +1954,7 @@ export default function ConciliacionBcpPage() {
         ],
       };
 
-      console.log("[Conciliacion_v1] Ejecutando sp_Planilla_Consulta_Estados (consulta directa)", {
-        estados: "4",
-        filtroFechaDeposito: {
-          desde: fechaInicio,
-          hasta: fechaFin,
-        },
-        filtroFechaDepositoIso: {
-          desde: fechaInicioIso,
-          hasta: fechaFinIso,
-        },
-        consulta: request.consulta,
-        parametros: request.parametros,
-      });
+      // No exponer store ni parámetros de Planilla en consola.
 
       const response = await consultarPlanillaEstados(request, { timeoutMs: 120000 });
 
@@ -1975,28 +1963,7 @@ export default function ConciliacionBcpPage() {
       }
 
       const rows = Array.isArray(response.rows) ? response.rows : [];
-      console.log("[Conciliacion_v1] Respuesta sp_Planilla_Consulta_Estados", {
-        registros: rows.length,
-        mensaje: response.message ?? "",
-        columnas: Array.isArray(response.columns) ? response.columns.length : 0,
-      });
-
-      if (rows.length === 0) {
-        console.error("[Conciliacion_v1] sp_Planilla_Consulta_Estados devolvio 0 registros", {
-          motivo: "No hubo coincidencias para los filtros enviados",
-          estados: "4",
-          filtroFechaDeposito: {
-            desde: fechaInicio,
-            hasta: fechaFin,
-          },
-          filtroFechaDepositoIso: {
-            desde: fechaInicioIso,
-            hasta: fechaFinIso,
-          },
-          consulta: request.consulta,
-          parametros: request.parametros,
-        });
-      }
+      // El resultado se muestra en la interfaz, sin detalles de la consulta en consola.
 
       setGastosPlanillaRows(rows);
       setGastosPlanillaMessage(
@@ -2007,7 +1974,7 @@ export default function ConciliacionBcpPage() {
       );
     } catch (gastosError) {
       if (!cancelToken?.cancelled) {
-        console.error("[Conciliacion_v1] Error al consultar sp_Planilla_Consulta_Estados", gastosError);
+        // No exponer errores ni detalles del store en consola.
         setGastosPlanillaRows([]);
         setGastosPlanillaMessage("");
         setGastosPlanillaError(getHttpErrorMessage(gastosError, "No se pudo consultar el store de gastos."));
@@ -3724,7 +3691,7 @@ export default function ConciliacionBcpPage() {
             ? apiResponse
             : buildExportResponseFromAnalysisData(analysisToExport);
       } catch (exportError) {
-        console.warn("[ConciliacionBcp] Export remoto falló, se usarÃ¡ el respaldo local.", exportError);
+        // Se utiliza el respaldo local sin exponer detalles del error en consola.
         exportResponse = buildExportResponseFromAnalysisData(analysisToExport);
       }
 

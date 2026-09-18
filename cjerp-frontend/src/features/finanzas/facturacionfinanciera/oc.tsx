@@ -721,7 +721,7 @@ export default function OcPage() {
     setSaving(true);
     setError("");
     try {
-      console.log("[OrdenCompra][Insertar] payload", payload);
+      // No exponer el payload de inserción de OC en consola.
       const response = await insertarOrdenCompra(payload);
       setMessage(`Orden de compra ${response.idOc} creada correctamente.`);
       closePanel();
@@ -790,7 +790,7 @@ export default function OcPage() {
         observacion: motivoRechazo.trim(),
         idRechazador: userId > 0 ? userId : undefined,
       };
-      console.log('[OC] Params enviados a rechazarOrdenCompraMasivo:', params);
+      // No exponer parámetros de rechazo masivo en consola.
       await rechazarOrdenCompraMasivo(params);
 
       const totalRechazadas = idsOcRechazo.length;

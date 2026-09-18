@@ -308,7 +308,7 @@ export default function SeguridadPermisosAccionesPage() {
         setError("No se pudieron cargar completamente los catalogos de seguridad.");
       }
     } catch (err: unknown) {
-      console.error(err);
+      // El error se muestra en la interfaz; no se expone en consola.
       setError(getHttpErrorMessage(err, "No se pudieron cargar los catalogos."));
     } finally {
       setCargandoCatalogos(false);
@@ -334,7 +334,7 @@ export default function SeguridadPermisosAccionesPage() {
 
       setPermisos(Array.isArray(permisosData) ? permisosData : []);
     } catch (err: unknown) {
-      console.error(err);
+      // El error se muestra en la interfaz; no se expone en consola.
       setPermisos([]);
       setError(getHttpErrorMessage(err, "No se pudieron cargar los permisos."));
     } finally {
@@ -455,7 +455,7 @@ export default function SeguridadPermisosAccionesPage() {
       limpiarFormulario();
       await cargarPermisos();
     } catch (err: unknown) {
-      console.error(err);
+      // El error se muestra en la interfaz; no se expone en consola.
       setError(getHttpErrorMessage(err, "No se pudo guardar el permiso."));
     } finally {
       setGuardando(false);
@@ -480,7 +480,7 @@ export default function SeguridadPermisosAccionesPage() {
       setIdEliminar(null);
       await cargarPermisos();
     } catch (err: unknown) {
-      console.error(err);
+      // El error se muestra en la interfaz; no se expone en consola.
       setError(getHttpErrorMessage(err, "No se pudo eliminar el permiso."));
     } finally {
       setGuardando(false);

@@ -579,7 +579,7 @@ export default function EnvioMensajesPage() {
         })),
       };
 
-      console.log("[EnvioMensajes] Payload enviado al endpoint /reportes-whatsapp/enviar-mensaje-manual", payload);
+      // No exponer el payload de envío de mensajes en consola.
 
       const response = await reportesWhatsappService.enviarMensajeManual(payload);
       setSendResults(response.resultados ?? []);

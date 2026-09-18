@@ -285,7 +285,7 @@ export default function PerfilRolMenuPage() {
       });
       setExpandedIds(allExpanded);
     } catch (err: unknown) {
-      console.error(err);
+      // El error se muestra en la interfaz; no se expone en consola.
       setError(getHttpErrorMessage(err, "No se pudieron cargar perfiles y menú."));
     } finally {
       setCargando(false);
@@ -309,7 +309,7 @@ export default function PerfilRolMenuPage() {
       setRolId("");
       setSelectedIds(new Set());
     } catch (err: unknown) {
-      console.error(err);
+      // El error se muestra en la interfaz; no se expone en consola.
       setError(getHttpErrorMessage(err, "No se pudieron cargar los roles del perfil."));
       setRoles([]);
       setRolId("");
@@ -369,7 +369,7 @@ export default function PerfilRolMenuPage() {
       });
       setExpandedIds(expanded);
     } catch (err: unknown) {
-      console.error(err);
+      // El error se muestra en la interfaz; no se expone en consola.
       setError(getHttpErrorMessage(err, "No se pudo cargar el menú asignado al rol."));
       setSelectedIds(new Set());
     } finally {
@@ -494,7 +494,7 @@ export default function PerfilRolMenuPage() {
 
       setMensaje("Asignación de menú guardada correctamente.");
     } catch (err: unknown) {
-      console.error(err);
+      // El error se muestra en la interfaz; no se expone en consola.
       setError(getHttpErrorMessage(err, "No se pudo guardar la asignación de menú."));
       setMensaje("");
     } finally {

@@ -1048,7 +1048,7 @@ function logVacacionesAprobacionDebug(entry: {
     `[Vacaciones] SP aprobar -> ${entry.nombreEmpleado ?? entry.idEmpleadoCj}`
   );
   console.table(payload);
-  console.log(buildVacacionesAprobacionSqlScript(payload));
+  // No exponer scripts SQL ni parámetros de aprobación en consola.
   console.groupEnd();
 }
 
@@ -3178,7 +3178,7 @@ export default function RecursosHumanosVacacionesPage() {
     setSelectedRowKey(rowKey);
     setFilaActiva(gasto);
     setFilaActivaKey(rowKey);
-    console.log("[GastosAprobar] Registro seleccionado", JSON.stringify(gasto, null, 2));
+    // No exponer el registro seleccionado en consola.
   }, [puedeSeleccionarRegistros]);
   const editarFilaActiva = React.useCallback(() => {
     if (!filaActiva) {

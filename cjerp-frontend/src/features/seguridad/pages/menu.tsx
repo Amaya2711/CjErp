@@ -106,7 +106,7 @@ export default function SeguridadMenuPage() {
 
       setExpandedIds(createExpandedMenuSet(menuTree));
     } catch (err: unknown) {
-      console.error(err);
+      // El error se muestra en la interfaz; no se expone en consola.
       setError(getHttpErrorMessage(err, "No se pudo cargar el menú."));
     } finally {
       setCargando(false);
@@ -208,7 +208,7 @@ export default function SeguridadMenuPage() {
       await recargar();
       setMensaje("Nodo creado correctamente.");
     } catch (err: unknown) {
-      console.error(err);
+      // El error se muestra en la interfaz; no se expone en consola.
       setError(getHttpErrorMessage(err, "No se pudo crear el nodo."));
       setMensaje("");
     } finally {

@@ -16,8 +16,8 @@ export default defineConfig({
         timeout: 60000,
         proxyTimeout: 60000,
         configure: (proxy) => {
-          proxy.on('error', (error) => {
-            console.error('[vite-proxy] error', error.message)
+          proxy.on('error', () => {
+            // No exponer detalles de proxy en la consola de desarrollo.
           })
         },
       },

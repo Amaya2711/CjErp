@@ -690,8 +690,8 @@ export default function OcV1Page() {
         ]);
         if (solicitantes.status === "fulfilled") setSolicitanteOptions(solicitantes.value);
         if (responsables.status === "fulfilled") setResponsableOptions(responsables.value);
-      } catch (err) {
-        console.warn("No se pudieron cargar los catálogos auxiliares.", err);
+      } catch {
+        // No exponer información de catálogos ni errores de consulta en consola.
       }
     };
 
@@ -718,9 +718,9 @@ export default function OcV1Page() {
           validador: validadores[0] ? normalizeOptionValue(validadores[0]) : "",
         };
       });
-    } catch (err) {
+    } catch {
       if (requestId !== opcionesDependientesRequestRef.current) return;
-      console.warn("No se pudieron cargar los gestores y validadores del solicitante.", err);
+      // No exponer detalles de gestores y validadores en consola.
     }
   };
 
@@ -756,7 +756,7 @@ export default function OcV1Page() {
     } catch (err) {
       // Es una carga secundaria del panel derecho; no debe mostrar un error
       // global si la OC ya cambi� o el usuario cambi� de pesta�a.
-      console.warn("No se pudo cargar el detalle de la orden de compra.", err);
+      // No exponer detalles de la consulta de OC en consola.
       setDetalles([]);
       setDetalleSeleccionado(null);
     } finally {
@@ -776,7 +776,7 @@ export default function OcV1Page() {
       setRecibosAsociados(Array.isArray(asociados) ? asociados : []);
       setRecibosSinAsociar(Array.isArray(sinAsociar) ? sinAsociar : []);
     } catch (err) {
-      console.warn("No se pudo cargar los recibos de la orden de compra.", err);
+      // No exponer detalles de la consulta de recibos en consola.
       setRecibosAsociados([]);
       setRecibosSinAsociar([]);
     } finally {
@@ -790,7 +790,7 @@ export default function OcV1Page() {
       const data = await buscarMontoOcOrdenCompra({ idOc, fila: fila ?? null });
       setMontoOcRows(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.warn("No se pudo cargar el monto de la OC.", err);
+      // No exponer detalles de la consulta de monto en consola.
       setMontoOcRows([]);
     } finally {
       setMontoOcLoading(false);
@@ -1523,7 +1523,7 @@ export default function OcV1Page() {
       })),
     };
 
-      console.log("[OrdenCompra][Insertar] payload", payload);
+      // No exponer el payload de inserción de OC en consola.
       const response = await insertarOrdenCompra(payload);
       setMessage(`Orden de compra ${response.idOc} creada correctamente.`);
       closePanel();
@@ -1592,7 +1592,7 @@ export default function OcV1Page() {
         observacion: motivoRechazo.trim(),
         idAprobador: userId > 0 ? userId : undefined,
       };
-      console.log('[OC] Params enviados a rechazarOrdenCompraMasivo:', params);
+      // No exponer parámetros de rechazo masivo en consola.
       await rechazarOrdenCompraMasivo(params);
 
       const totalRechazadas = idsOcRechazo.length;

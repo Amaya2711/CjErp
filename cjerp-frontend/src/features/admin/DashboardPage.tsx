@@ -225,7 +225,6 @@ export default function DashboardPage() {
           menu.filter(
             (m) =>
               Number(m.acceso) === 1 &&
-              Number(m.nivelMenu ?? 0) > 0 &&
               getMenuRoute(m) !== "" &&
               getMenuRoute(m) !== CLAUDEIA_RUTA
           )

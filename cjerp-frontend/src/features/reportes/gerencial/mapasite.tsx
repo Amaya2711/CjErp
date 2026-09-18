@@ -505,7 +505,7 @@ function buildMarkerIcon(color: string) {
 
 async function loadGoogleMaps(apiKey: string) {
   if (window.google?.maps && typeof window.google.maps.importLibrary === "function") {
-    console.info("[mapasite] Google Maps ya estaba disponible con importLibrary.");
+    // No registrar estado del mapa en consola.
     return;
   }
 
@@ -538,7 +538,7 @@ async function loadGoogleMaps(apiKey: string) {
             a.src = `https://maps.${c}apis.com/maps/api/js?${e.toString()}`;
             mapsNamespace[q] = () => innerResolve();
             a.onerror = () => {
-              console.error("[mapasite] Error al cargar el bootstrap moderno de Google Maps.");
+              // No exponer detalles de carga del mapa en consola.
               googleMapsLoadPromise = null;
               innerReject(new Error("No se pudo cargar Google Maps."));
             };
@@ -556,7 +556,7 @@ async function loadGoogleMaps(apiKey: string) {
         mapsNamespace[l]("marker"),
       ])
         .then(() => {
-          console.info("[mapasite] Bootstrap moderno de Google Maps cargado correctamente.");
+          // No registrar estado del mapa en consola.
           resolve();
         })
         .catch((error) => {
@@ -1258,9 +1258,7 @@ export default function MapaSitePage() {
     }
 
     if (!mapId) {
-      console.warn(
-        "[mapasite] Falta VITE_GOOGLE_MAPS_MAP_ID. Se usara DEMO_MAP_ID para mantener el flujo moderno, pero conviene configurar un Map ID real.",
-      );
+      // La interfaz conserva el flujo con DEMO_MAP_ID sin exponer configuración en consola.
     }
 
     let cancelled = false;
@@ -1907,15 +1905,10 @@ export default function MapaSitePage() {
         status: "Mapa creado, esperando tiles",
       }));
 
-      console.info("[mapasite] Estado del contenedor del mapa:", {
-        width: Math.round(containerRect.width),
-        height: Math.round(containerRect.height),
-        visiblePoints: visiblePoints.length,
-        mapId,
-      });
+      // No exponer estado ni configuración del mapa en consola.
 
       const tilesLoadedListener = map.addListener?.("tilesloaded", () => {
-        console.info("[mapasite] Google Maps termino de cargar tiles.");
+        // No registrar eventos del mapa en consola.
         setMapTilesReady(true);
         setMapDiagnostics((current) => ({
           ...current,
@@ -1929,18 +1922,13 @@ export default function MapaSitePage() {
       });
 
       const idleListener = map.addListener?.("idle", () => {
-        console.info("[mapasite] Google Maps quedo en estado idle.");
+        // No registrar eventos del mapa en consola.
       });
 
       mapLoadTimeout = window.setTimeout(() => {
         const mapDiv = map.getDiv?.();
         const mapDivRect = mapDiv?.getBoundingClientRect?.();
-        console.warn("[mapasite] Tiempo de espera del mapa superado.", {
-          mapWidth: Math.round(mapDivRect?.width ?? 0),
-          mapHeight: Math.round(mapDivRect?.height ?? 0),
-          containerWidth: Math.round(containerRect.width),
-          containerHeight: Math.round(containerRect.height),
-        });
+        // El estado de espera se controla en interfaz, sin exponer diagnósticos en consola.
       }, 6000);
 
       markersRef.current.forEach((marker) => {
@@ -2196,11 +2184,11 @@ export default function MapaSitePage() {
             idleListener.remove?.();
           };
         })
-        .catch((error: unknown) => {
+        .catch(() => {
           if (!cancelled) {
             setPhotoPreviewLoading(false);
             setPhotoPreviewError("No se pudo cargar la vista satelital.");
-            console.error("[mapasite] Error al cargar la vista satelital.", error);
+            // No exponer errores de la vista satelital en consola.
           }
         });
 

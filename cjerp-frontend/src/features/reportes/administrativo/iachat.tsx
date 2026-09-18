@@ -3229,20 +3229,7 @@ export default function IaChatPage() {
           : null,
       };
 
-      console.log("[IA Chat] API Payload", {
-        ...requestPayload,
-        attachment: requestPayload.attachment
-          ? {
-              fileName: requestPayload.attachment.fileName,
-              mimeType: requestPayload.attachment.mimeType,
-              hasBase64Data: Boolean(requestPayload.attachment.base64Data),
-            }
-          : null,
-      });
-      console.log(
-        "[IA Chat] SQL Preview estimado (frontend, antes del parseo backend)\n%s",
-        buildFrontendStorePreview(requestPayload),
-      );
+      // No exponer payloads ni vistas previas de SQL en la consola del navegador.
 
       const response = await consultarIaChat(requestPayload);
 
@@ -3250,11 +3237,8 @@ export default function IaChatPage() {
         throw new Error("El asistente no devolvio una respuesta valida.");
       }
 
-      console.log("[IA Chat] Response", response);
       const executedSqlPreview = response.interpretedFilters?.executedSqlPreview;
-      if (typeof executedSqlPreview === "string" && executedSqlPreview.trim()) {
-        console.log("[IA Chat] SQL Real ejecutado por backend\n%s", executedSqlPreview);
-      }
+      // La vista SQL se usa únicamente en la interfaz autorizada; no se imprime en consola.
 
       const assistantMessage: IaChatMessage = {
         id: `assistant-${Date.now()}`,

@@ -640,7 +640,7 @@ export function RptWupModulePage({
     }
 
     lastErrorLogSignatureRef.current = nextSignature;
-    console.warn(
+    /* console.warn(
       `[RptWup:${tipoApi}] Errores recientes detectados`,
       failedLogs.map((row) => ({
         idLog: row.idLog,
@@ -661,7 +661,7 @@ export function RptWupModulePage({
           body: buildPostmanPayload(row.requestJson),
         },
       }))
-    );
+    ); */
   }, [dashboard?.logs, tipoApi]);
 
   const columns = useMemo<DataGridColumn<ReporteWhatsappLog>[]>(

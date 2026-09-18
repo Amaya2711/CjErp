@@ -132,8 +132,7 @@ namespace CjERP.Infrastructure.Services
             parameters.Add("@UsarOt", usarOt, DbType.Boolean);
             parameters.Add("@TipoCambio", tipoCambio, DbType.Decimal);
 
-            Console.WriteLine(
-                $"[LookupService] sp_Finanzas_CargarValoresGasto => IdCliente={idCliente}, IdProyecto={idProyecto}, IdSite={idSite}, Correlativo={correlativo}, TipoTrabajo={tipoTrabajo}, Ot={ot}, UsarOt={usarOt}, TipoCambio={tipoCambio}");
+            // No registrar parámetros de procedimientos almacenados en la consola.
 
             var row = await connection.QueryFirstOrDefaultAsync(
                 _sqlCommandFactory.Create(

@@ -55,7 +55,7 @@ export function useCrudForm<T, TPayload = Partial<T>>(
       await load();
       return true;
     } catch (err: unknown) {
-      console.error("[useCrudForm] Error al guardar", err);
+      // El error se propaga a la interfaz; no se expone en consola.
       setError(getHttpErrorMessage(err, "Error al guardar"));
       return false;
     } finally {

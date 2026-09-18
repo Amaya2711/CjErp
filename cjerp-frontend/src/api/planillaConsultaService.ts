@@ -104,22 +104,7 @@ export function buildPlanillaConsultaEstadosBaseParams(
           )
         );
 
-  console.log(
-    "[PlanillaConsulta] codigoidrol",
-    authUser?.idrol ?? (authUser as Record<string, unknown> | null)?.IdRol ?? ""
-  );
-  console.log(
-    "[PlanillaConsulta] codigoEmpleadoMostrar",
-    authUser?.idEmpleado ??
-      authUser?.codEmp ??
-      authUser?.empleado ??
-      (authUser as Record<string, unknown> | null)?.IdEmpleado ??
-      ""
-  );
-  console.log("[PlanillaConsulta] parametros base", {
-    IdCargo: idCargo,
-    IdEmpleado: idEmpleado,
-  });
+  // No exponer cargo, empleado ni parámetros de consultas en la consola del navegador.
 
   const baseParams: PlanillaConsultaParametro[] = [];
 
@@ -169,7 +154,7 @@ export function buildPlanillaConsultaEstadosRequest(
     parametros: Array.from(deduped.values()),
   };
 
-  console.log("[PlanillaConsulta] request final", request);
+  // No exponer la solicitud ni parámetros de stores en la consola del navegador.
 
   return request;
 }

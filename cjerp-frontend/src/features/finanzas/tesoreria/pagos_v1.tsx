@@ -32,6 +32,11 @@ import type {
   PlanillaConsultaParametro,
 } from "../../../models/planillaConsulta";
 import { getHttpErrorMessage } from "../../../utils/httpError";
+import { getAuthUser, hasFullPageActionAccess } from "../../../utils/authStorage";
+import {
+  seguridadPermisosAccionesService,
+  type PermisoAccionDto,
+} from "../../seguridad/services/seguridadPermisosAccionesService";
 
 type PagoTabKey = "aprobar" | "reaprobar" | "hormiga" | "observadas" | "resumen";
 type DetailTabKey = "orden" | "resumen" | "historial" | "historial-oc";
@@ -233,6 +238,13 @@ const TAB_THEME: Record<PagoTabKey, TabTheme> = {
     border: "#C4B5FD",
     icon: <ShieldCheck size={16} strokeWidth={2.2} />,
   },
+};
+
+const TAB_ACTION_KEYS: Record<PagoEstado, string> = {
+  aprobar: "tab.aprobar",
+  reaprobar: "tab.reaprobar",
+  hormiga: "tab.hormiga",
+  observadas: "tab.observadas",
 };
 
 const PAYMENT_ROWS: PagoRow[] = [
@@ -988,6 +1000,20 @@ function mapPlanillaConsultaRowToPagoRow(
   };
 }
 
+function buildPagosV1PlanillaRequest(
+  parametros: PlanillaConsultaParametro[],
+  consulta = "pagos-v1"
+): PlanillaConsultaEstadosRequest {
+  return {
+    ...buildPlanillaConsultaEstadosRequest([
+      ...parametros,
+      { nombre: "IdCargo", valor: null, tipo: "int" },
+      { nombre: "IdEmpleado", valor: null, tipo: "int" },
+    ]),
+    consulta,
+  };
+}
+
 function buildResumenOtRequest(row: PagoRow): PlanillaConsultaEstadosRequest | null {
   const ot = getValidOtValue(row.ot);
   const correlativo = row.corSite?.trim();
@@ -1000,17 +1026,14 @@ function buildResumenOtRequest(row: PagoRow): PlanillaConsultaEstadosRequest | n
     return null;
   }
 
-  return {
-    ...buildPlanillaConsultaEstadosRequest([
+  return buildPagosV1PlanillaRequest([
       { nombre: "OT", valor: ot, tipo: "string" },
       { nombre: "IdCliente", valor: String(Math.trunc(idCliente)), tipo: "int" },
       { nombre: "IdProyecto", valor: String(Math.trunc(idProyecto)), tipo: "int" },
       { nombre: "IdSite", valor: idSite, tipo: "string" },
       { nombre: "Correlativo", valor: correlativo, tipo: "int" },
       { nombre: "TipoTrabajo", valor: tipoTrabajo, tipo: "string" },
-    ]),
-    consulta: "importar-resumen-ot",
-  };
+    ], "importar-resumen-ot");
 }
 
 function buildHistorialOtRequest(row: PagoRow): PlanillaConsultaEstadosRequest | null {
@@ -1025,8 +1048,7 @@ function buildHistorialOtRequest(row: PagoRow): PlanillaConsultaEstadosRequest |
     return null;
   }
 
-  return {
-    ...buildPlanillaConsultaEstadosRequest([
+  return buildPagosV1PlanillaRequest([
       { nombre: "Estados", valor: "4", tipo: "string" },
       { nombre: "OT", valor: ot, tipo: "string" },
       { nombre: "IdSite", valor: idSite, tipo: "string" },
@@ -1034,8 +1056,7 @@ function buildHistorialOtRequest(row: PagoRow): PlanillaConsultaEstadosRequest |
       { nombre: "IdCliente", valor: String(Math.trunc(idCliente)), tipo: "int" },
       { nombre: "IdProyecto", valor: String(Math.trunc(idProyecto)), tipo: "int" },
       { nombre: "Tipo_Trabajo", valor: tipoTrabajo, tipo: "string" },
-    ]),
-  };
+    ]);
 }
 
 function buildHistorialOcRequest(row: PagoRow): PlanillaConsultaEstadosRequest | null {
@@ -1046,13 +1067,11 @@ function buildHistorialOcRequest(row: PagoRow): PlanillaConsultaEstadosRequest |
     return null;
   }
 
-  return {
-    parametros: [
+  return buildPagosV1PlanillaRequest([
       { nombre: "Estados", valor: "4", tipo: "string" },
       { nombre: "IdOc", valor: idoc, tipo: "string" },
       { nombre: "Fila", valor: fila, tipo: "string" },
-    ],
-  };
+    ]);
 }
 
 function mapResumenOtResponseRowToDetalle(
@@ -1240,6 +1259,7 @@ export default function PagosV1Page() {
     resumen: [],
   });
   const [loadingData, setLoadingData] = useState(true);
+  const [tabPermissions, setTabPermissions] = useState<Record<string, boolean>>({});
   const [, setLoadingStage] = useState<string>("Iniciando carga...");
   const [selectedId, setSelectedId] = useState<number>(0);
   const [checkedIds, setCheckedIds] = useState<number[]>([]);
@@ -1264,8 +1284,77 @@ export default function PagosV1Page() {
   const historialOcCacheRef = useRef<Map<string, PagoRow[]>>(new Map());
   const loadTimeoutMs = 15000;
 
+  useEffect(() => {
+    const authUser = getAuthUser();
+    if (hasFullPageActionAccess(authUser)) {
+      setTabPermissions(
+        Object.values(TAB_ACTION_KEYS).reduce<Record<string, boolean>>((result, actionKey) => {
+          result[actionKey] = true;
+          return result;
+        }, {})
+      );
+      return;
+    }
+
+    // SegPermisoAccion referencia EmpleadoCj (el código mostrado en sesión),
+    // mientras algunas sesiones también incluyen un IdEmpleado alterno.
+    const employeeIds = [...new Set([authUser?.codEmp, authUser?.idEmpleado]
+      .map((value) => Number(value ?? 0))
+      .filter((value) => Number.isFinite(value) && value > 0)
+      .map((value) => Math.trunc(value)))];
+    let cancelled = false;
+
+    const loadTabPermissions = async () => {
+      if (employeeIds.length === 0) {
+        return;
+      }
+
+      try {
+        const permissionSets = await Promise.all(
+          employeeIds.map((idEmpleado) =>
+            seguridadPermisosAccionesService.listar({
+              rutaPagina: "/finanzas/tesoreria/pagos_v1",
+              idEmpleado,
+              tipoElemento: "tab",
+            })
+          )
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        const allowed = permissionSets.flat().reduce<Record<string, boolean>>((result, permiso: PermisoAccionDto) => {
+          const key = permiso.claveAccion?.trim().toLowerCase();
+          if (key) {
+            result[key] = Boolean(result[key] || (permiso.esActivo && permiso.puedeVer && permiso.puedeEjecutar));
+          }
+          return result;
+        }, {});
+
+        setTabPermissions(allowed);
+      } catch {
+        if (!cancelled) {
+          setTabPermissions({});
+        }
+      }
+    };
+
+    void loadTabPermissions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const canUseTab = useCallback(
+    (tab: PagoEstado) => Boolean(tabPermissions[TAB_ACTION_KEYS[tab]]),
+    [tabPermissions]
+  );
+
   const pushLoadTrace = useCallback((entry: string) => {
-    console.info(`[PagosV1] ${entry}`);
+    // No exponer trazas de consultas ni tiempos de carga en consola.
+    void entry;
   }, []);
 
   const runTrackedRequest = useCallback(
@@ -1352,7 +1441,7 @@ export default function PagosV1Page() {
         }
 
         const requestBuildStart = performance.now();
-        const request = buildPlanillaConsultaEstadosRequest(parametros);
+        const request = buildPagosV1PlanillaRequest(parametros);
         pushLoadTrace(`Armado de request: ${(performance.now() - requestBuildStart).toFixed(0)} ms`);
         setLoadingStage("Enviando consulta a la API...");
 
@@ -1399,7 +1488,7 @@ export default function PagosV1Page() {
       } catch (error) {
         if (!cancelled && !controller.signal.aborted) {
           setMessage("No se pudieron cargar las Órdenes desde Planilla.");
-          console.error("[PagosV1] Error al cargar órdenes", error);
+          // No exponer errores ni detalles de consultas de órdenes en consola.
         }
       } finally {
         if (!cancelled && !controller.signal.aborted) {
@@ -1714,7 +1803,7 @@ export default function PagosV1Page() {
       } catch (error) {
         if (!cancelled && !signal.aborted) {
           setResumenOtDetalle(null);
-          console.error("[PagosV1] Error al cargar resumen OT", error);
+          // No exponer errores ni detalles de consultas de OT en consola.
         }
       } finally {
         if (!cancelled && !signal.aborted) {
@@ -1781,7 +1870,7 @@ export default function PagosV1Page() {
       } catch (error) {
         if (!cancelled && !signal.aborted) {
           setHistorialRows([]);
-          console.error("[PagosV1] Error al cargar historial OT", error);
+          // No exponer errores ni detalles de consultas de historial en consola.
         }
       } finally {
         if (!cancelled && !signal.aborted) {
@@ -1852,7 +1941,7 @@ export default function PagosV1Page() {
       } catch (error) {
         if (!cancelled && !signal.aborted) {
           setHistorialOcRows([]);
-          console.error("[PagosV1] Error al cargar historial OC", error);
+          // No exponer errores ni detalles de consultas de historial en consola.
         }
       } finally {
         if (!cancelled && !signal.aborted) {
@@ -2034,7 +2123,7 @@ export default function PagosV1Page() {
   const isResumenTab = activeTab === "resumen";
   const showEstadoOc = activeTab === "resumen";
   const tableColSpan = showEstadoOc ? 22 : 21;
-  const stickyColumnWidths = [108, 94, 88, 88, 72, 90, 110, 44, 90];
+  const stickyColumnWidths = [108, 94, 88, 88, 72, 90, 110, 44, 130];
   const stickyColumnLefts = stickyColumnWidths.reduce<number[]>((acc, _width, index) => {
     const previousLeft = acc[index - 1] ?? 0;
     const previousWidth = index === 0 ? 0 : stickyColumnWidths[index - 1];
@@ -2635,7 +2724,8 @@ export default function PagosV1Page() {
                 border="#FCD34D"
                 icon={<ReceiptText size={16} />}
                 selected={activeTab === "aprobar"}
-                onClick={() => setActiveTab("aprobar")}
+                disabled={!canUseTab("aprobar")}
+                onClick={() => canUseTab("aprobar") && setActiveTab("aprobar")}
               />
               <KpiCard
                 label="Re-aprobar"
@@ -2644,7 +2734,9 @@ export default function PagosV1Page() {
                 soft="#EFF6FF"
                 border="#93C5FD"
                 icon={<RotateCcw size={16} />}
-                disabled
+                selected={activeTab === "reaprobar"}
+                disabled={!canUseTab("reaprobar")}
+                onClick={() => canUseTab("reaprobar") && setActiveTab("reaprobar")}
               />
               <KpiCard
                 label="Hormiga"
@@ -2653,7 +2745,9 @@ export default function PagosV1Page() {
                 soft="#F0FDF4"
                 border="#86EFAC"
                 icon={<HandCoins size={16} />}
-                disabled
+                selected={activeTab === "hormiga"}
+                disabled={!canUseTab("hormiga")}
+                onClick={() => canUseTab("hormiga") && setActiveTab("hormiga")}
               />
               <KpiCard
                 label="Observadas"
@@ -2662,7 +2756,9 @@ export default function PagosV1Page() {
                 soft="#FEF2F2"
                 border="#FCA5A5"
                 icon={<AlertTriangle size={16} />}
-                disabled
+                selected={activeTab === "observadas"}
+                disabled={!canUseTab("observadas")}
+                onClick={() => canUseTab("observadas") && setActiveTab("observadas")}
               />
               <KpiCard
                 label="Total Órdenes"
@@ -2847,12 +2943,12 @@ export default function PagosV1Page() {
                                       style={{ accentColor: rowTheme.accent }}
                                     />
                                   </td>
-                                  <td style={{ ...styles.td, ...getStickyCellStyle(1, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.correlativo}</td>
-                                  <td style={{ ...styles.td, ...getStickyCellStyle(2, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.ot || "-"}</td>
-                                  <td style={{ ...styles.td, ...getStickyCellStyle(3, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.idOc || row.documento || "-"}</td>
-                                  <td style={{ ...styles.td, ...getStickyCellStyle(4, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.fila || "-"}</td>
-                                  <td style={{ ...styles.td, ...getStickyCellStyle(5, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.responsable}</td>
-                                  <td style={{ ...styles.td, ...getStickyCellStyle(6, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.validador || "-"}</td>
+                                  <td title={row.correlativo} style={{ ...styles.td, ...getStickyCellStyle(1, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.correlativo}</td>
+                                  <td title={row.ot || "-"} style={{ ...styles.td, ...getStickyCellStyle(2, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.ot || "-"}</td>
+                                  <td title={row.idOc || row.documento || "-"} style={{ ...styles.td, ...getStickyCellStyle(3, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.idOc || row.documento || "-"}</td>
+                                  <td title={row.fila || "-"} style={{ ...styles.td, ...getStickyCellStyle(4, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.fila || "-"}</td>
+                                  <td title={row.responsable || "-"} style={{ ...styles.td, ...getStickyCellStyle(5, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.responsable}</td>
+                                  <td title={row.validador || "-"} style={{ ...styles.td, ...getStickyCellStyle(6, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.validador || "-"}</td>
                                   <td style={{ ...styles.td, ...getStickyCellStyle(7, isSelected ? "#EEF2FF" : "#FFFFFF", 3), textAlign: "center" }}>
                                     <button
                                       type="button"
@@ -2875,21 +2971,22 @@ export default function PagosV1Page() {
                                         <Eye size={10} />
                                       </button>
                                   </td>
-                                  <td style={{ ...styles.td, ...getStickyCellStyle(8, isSelected ? "#EEF2FF" : "#FFFFFF", 3), fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
-                                  <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
-                                  <td style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
-                                  <td style={styles.td}>{formatDate(row.fecha)}</td>
-                                  <td style={styles.td}>{row.cliente}</td>
-                                  <td style={styles.td}>{row.proyecto}</td>
-                                  <td style={styles.td}>{row.siteId}</td>
-                                  <td style={styles.td}>{row.corSite || "-"}</td>
-                                  <td style={styles.td}>{row.site}</td>
-                                  <td style={styles.td}>{row.tipoTrabajo}</td>
-                                  <td style={styles.td}>{row.tarea}</td>
-                                  <td style={styles.td}>{row.moneda || "-"}</td>
+                                  <td title={formatCurrency(row.subtotal, row.moneda)} style={{ ...styles.td, ...getStickyCellStyle(8, isSelected ? "#EEF2FF" : "#FFFFFF", 3), fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
+                                  <td title={formatCurrency(row.igv, row.moneda)} style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
+                                  <td title={formatCurrency(row.total, row.moneda)} style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
+                                  <td title={formatDate(row.fecha)} style={styles.td}>{formatDate(row.fecha)}</td>
+                                  <td title={row.cliente || "-"} style={styles.td}>{row.cliente}</td>
+                                  <td title={row.proyecto || "-"} style={styles.td}>{row.proyecto}</td>
+                                  <td title={row.siteId || "-"} style={styles.td}>{row.siteId}</td>
+                                  <td title={row.corSite || "-"} style={styles.td}>{row.corSite || "-"}</td>
+                                  <td title={row.site || "-"} style={styles.td}>{row.site}</td>
+                                  <td title={row.tipoTrabajo || "-"} style={styles.td}>{row.tipoTrabajo}</td>
+                                  <td title={row.tarea || "-"} style={styles.td}>{row.tarea}</td>
+                                  <td title={row.moneda || "-"} style={styles.td}>{row.moneda || "-"}</td>
                                   {showEstadoOc ? (
                                     <td style={styles.td}>
                                       <span
+                                        title={getStatusLabel(row.estado)}
                                         style={{
                                           ...styles.stateBadge,
                                           color: rowTheme.accent,

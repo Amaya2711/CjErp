@@ -44,6 +44,11 @@ export function clearAuthUser() {
   sessionStorage.clear();
 }
 
+/** Perfil 8 y rol 5 omiten restricciones de acciones internas de las páginas. */
+export function hasFullPageActionAccess(user: AuthUser | null = getAuthUser()): boolean {
+  return Number(user?.idperfil) === 8 && Number(user?.idrol) === 5;
+}
+
 export function markAuthActivity(timestamp = Date.now()) {
   localStorage.setItem(LAST_ACTIVITY_KEY, timestamp.toString());
 }
