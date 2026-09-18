@@ -32,7 +32,7 @@ import type { ConstanteOption } from "../../../models/constante";
 import type { EmpleadoCta } from "../../../models/empleadoCta";
 import type { FiltroOperativoValue } from "../../../models/filtroOperativo";
 import { getHttpErrorMessage } from "../../../utils/httpError";
-import { FileDown } from "lucide-react";
+import { ChevronDown, ChevronUp, ChevronsDown, ChevronsUp, FileDown } from "lucide-react";
 import { buildPlanillaConsultaEstadosRequest, consultarPlanillaEstados } from "../../../api/planillaConsultaService";
 
 const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "ResponsableOc", "MonedaOc", "SubtotalOc", "Cliente", "NombreProyecto", "IdSite", "Site", "FechaOc", "PrecioUniOc", "CantOc", "EstadoOc", "MontoDetalleOc", "CorrelativoPlanilla", "EstadoPlanilla", "SolicitantePlanilla", "MonedaPlanilla", "SubtotalPlanilla", "UltimaFechaDeposito", "SaldoOcVsPlanilla", "PorcentajeConsumidoOc"];
@@ -615,6 +615,7 @@ export default function OcV1Page() {
   const [filtroValidadorAprobacion, setFiltroValidadorAprobacion] = useState<string[]>([]);
   const [detalleOcTab, setDetalleOcTab] = useState<DetalleOcTab>("detalle");
   const [selectedOcIds, setSelectedOcIds] = useState<number[]>([]);
+  const [gruposAprobacionContraidos, setGruposAprobacionContraidos] = useState<Record<string, boolean>>({});
   const [filtrosColumnas, setFiltrosColumnas] = useState<Record<string, string[]>>({});
   const [columnaFiltroAbierta, setColumnaFiltroAbierta] = useState<string | null>(null);
   const [filtroBusqueda, setFiltroBusqueda] = useState("");
@@ -1075,10 +1076,18 @@ export default function OcV1Page() {
     return Array.from(grupos.entries())
       .map(([key, items]) => {
         const [solicitante, validador] = key.split("|||");
+        const totalesPorMoneda = new Map<string, number>();
+        items.forEach((item) => {
+          const moneda = item.moneda?.trim() || "Sin moneda";
+          totalesPorMoneda.set(moneda, (totalesPorMoneda.get(moneda) ?? 0) + toNumber(item.subtotal));
+        });
         return {
+          key,
           solicitante,
           validador,
           items: items.sort((left, right) => left.idOc - right.idOc),
+          totalesPorMoneda: Array.from(totalesPorMoneda.entries())
+            .sort(([monedaA], [monedaB]) => monedaA.localeCompare(monedaB, "es", { sensitivity: "base" })),
         };
       })
       .sort((left, right) => {
@@ -1087,6 +1096,24 @@ export default function OcV1Page() {
         return left.validador.localeCompare(right.validador, "es", { sensitivity: "base" });
       });
   }, [cabecerasBandeja, getValidadorAgrupacion]);
+
+  const todosLosGruposVisiblesContraidos = useMemo(
+    () => cabecerasBandejaAgrupadas.length > 0 && cabecerasBandejaAgrupadas.every(
+      (grupo) => gruposAprobacionContraidos[`${nivelAprobacion}-${grupo.key}`] ?? true
+    ),
+    [cabecerasBandejaAgrupadas, gruposAprobacionContraidos, nivelAprobacion]
+  );
+
+  const cambiarVisibilidadTodosLosGrupos = useCallback(() => {
+    const contraer = !todosLosGruposVisiblesContraidos;
+    setGruposAprobacionContraidos((prev) => {
+      const next = { ...prev };
+      cabecerasBandejaAgrupadas.forEach((grupo) => {
+        next[`${nivelAprobacion}-${grupo.key}`] = contraer;
+      });
+      return next;
+    });
+  }, [cabecerasBandejaAgrupadas, nivelAprobacion, todosLosGruposVisiblesContraidos]);
 
   const opcionesFiltroPorColumna = useMemo(() => {
     const result: Record<string, string[]> = {};
@@ -1838,19 +1865,50 @@ export default function OcV1Page() {
                 Limpiar
               </button>
             ) : null}
+            <button
+              type="button"
+              style={{ ...styles.approvalGroupToggle, marginLeft: "auto" }}
+              disabled={cabecerasBandejaAgrupadas.length === 0}
+              onClick={cambiarVisibilidadTodosLosGrupos}
+              title={todosLosGruposVisiblesContraidos ? "Desplegar todos los grupos" : "Contraer todos los grupos"}
+              aria-label={todosLosGruposVisiblesContraidos ? "Desplegar todos los grupos" : "Contraer todos los grupos"}
+            >
+              {todosLosGruposVisiblesContraidos ? <ChevronsDown size={16} /> : <ChevronsUp size={16} />}
+            </button>
           </div>
           {loading ? (
             <div style={styles.approvalEmpty}>Cargando cabeceras...</div>
           ) : cabecerasBandejaAgrupadas.length === 0 ? (
             <div style={styles.approvalEmpty}>No hay ordenes pendientes para este nivel.</div>
           ) : (
-            cabecerasBandejaAgrupadas.map((grupo) => (
-              <div key={`grupo-${nivelAprobacion}-${grupo.solicitante}-${grupo.validador}`} style={styles.approvalGroup}>
+            cabecerasBandejaAgrupadas.map((grupo) => {
+              const groupId = `${nivelAprobacion}-${grupo.key}`;
+              const contraido = gruposAprobacionContraidos[groupId] ?? true;
+
+              return (
+              <div key={`grupo-${groupId}`} style={styles.approvalGroup}>
                 <div style={styles.approvalGroupHeader}>
-                  <strong>{grupo.solicitante} - {grupo.validador}</strong>
-                  <span>{grupo.items.length}</span>
+                  <div style={styles.approvalGroupSummary}>
+                    <strong>{grupo.solicitante} - {grupo.validador}</strong>
+                    <span style={styles.approvalGroupSubtotal}>
+                      Subtotal: {grupo.totalesPorMoneda.map(([moneda, total]) => `${moneda} ${formatMoney(total)}`).join(" · ")}
+                    </span>
+                  </div>
+                  <div style={styles.approvalGroupActions}>
+                    <span>{grupo.items.length}</span>
+                    <button
+                      type="button"
+                      style={styles.approvalGroupToggle}
+                      onClick={() => setGruposAprobacionContraidos((prev) => ({ ...prev, [groupId]: !contraido }))}
+                      aria-expanded={!contraido}
+                      aria-label={`${contraido ? "Desplegar" : "Contraer"} grupo ${grupo.solicitante} - ${grupo.validador}`}
+                      title={contraido ? "Desplegar grupo" : "Contraer grupo"}
+                    >
+                      {contraido ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+                    </button>
+                  </div>
                 </div>
-                {grupo.items.map((item) => {
+                {!contraido && grupo.items.map((item) => {
                   const isChecked = selectedOcIds.includes(item.idOc);
                   return (
                   <div
@@ -1893,7 +1951,8 @@ export default function OcV1Page() {
                   </div>
                 )})}
               </div>
-            ))
+              );
+            })
           )}
         </div>      </section>
 
@@ -4260,6 +4319,35 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#F2F4F3",
     color: "#00172D",
     fontSize: 14,
+  },
+  approvalGroupSummary: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 3,
+    minWidth: 0,
+  },
+  approvalGroupSubtotal: {
+    color: "#52667A",
+    fontSize: 11,
+    fontWeight: 700,
+  },
+  approvalGroupActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+  },
+  approvalGroupToggle: {
+    border: "1px solid #B9C6C1",
+    borderRadius: 5,
+    background: "#FFFFFF",
+    color: "#005C4B",
+    width: 28,
+    height: 26,
+    padding: 0,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
   },
   approvalCard: {
     display: "block",
