@@ -25,8 +25,7 @@ import {
 } from "../../../api/ordenCompraService";
 import { useConstantesPorCampo } from "../../../hooks/useConstantesPorCampo";
 import { listarSolicitanteOptions } from "../../../api/solicitanteService";
-import { listarGestorOptions } from "../../../api/gestorService";
-import { listarValidadorOptions } from "../../../api/validadorService";
+import { listarGestorValidadorOptions } from "../../../api/gestorService";
 import { listarEmpleadosCta } from "../../../api/empleadoService";
 import { getAuthUser } from "../../../utils/authStorage";
 import type { ConstanteOption } from "../../../models/constante";
@@ -226,7 +225,6 @@ const cabeceraColumns = [
 ] as const;
 
 const detalleColumns = [
-  { key: "acciones", label: "Acciones", width: "120px" },
   { key: "fila", label: "Fila", width: "70px" },
   { key: "nombreCliente", label: "Cliente", width: "180px" },
   { key: "nombreProyecto", label: "Proyecto", width: "180px" },
@@ -629,13 +627,15 @@ export default function OcV1Page() {
   const precioUnitarioInputRef = useRef("");
   const pesoInputRef = useRef("");
   const [solicitanteOptions, setSolicitanteOptions] = useState<ConstanteOption[]>([]);
-  const [gestorOptions, setGestorOptions] = useState<ConstanteOption[]>([]);
+  const [, setGestorOptions] = useState<ConstanteOption[]>([]);
   const [validadorOptions, setValidadorOptions] = useState<ConstanteOption[]>([]);
   const [responsableOptions, setResponsableOptions] = useState<EmpleadoCta[]>([]);
+  const opcionesDependientesRequestRef = useRef(0);
   const [mostrarConfirmacionRechazo, setMostrarConfirmacionRechazo] = useState(false);
   const [mostrarMotivoRechazo, setMostrarMotivoRechazo] = useState(false);
   const [motivoRechazo, setMotivoRechazo] = useState("");
   const [detalleCompleto, setDetalleCompleto] = useState<string | null>(null);
+  const [reciboVisualizado, setReciboVisualizado] = useState<OrdenCompraReciboDto | null>(null);
   const [rechazoError, setRechazoError] = useState("");
   const [rechazando, setRechazando] = useState(false);
   const [idsOcRechazo, setIdsOcRechazo] = useState<number[]>([]);
@@ -680,18 +680,14 @@ export default function OcV1Page() {
   useEffect(() => {
     const loadOptions = async () => {
       try {
-        const [solicitantes, gestores, validadores, responsables] = await Promise.allSettled([
+        const [solicitantes, responsables] = await Promise.allSettled([
           listarSolicitanteOptions({
             idCargo: userCargoId > 0 ? userCargoId : null,
             idEmpleado: userId > 0 ? userId : null,
           }),
-          listarGestorOptions(),
-          listarValidadorOptions(),
           listarEmpleadosCta(),
         ]);
         if (solicitantes.status === "fulfilled") setSolicitanteOptions(solicitantes.value);
-        if (gestores.status === "fulfilled") setGestorOptions(gestores.value);
-        if (validadores.status === "fulfilled") setValidadorOptions(validadores.value);
         if (responsables.status === "fulfilled") setResponsableOptions(responsables.value);
       } catch (err) {
         console.warn("No se pudieron cargar los catálogos auxiliares.", err);
@@ -700,6 +696,32 @@ export default function OcV1Page() {
 
     void loadOptions();
   }, [userCargoId, userId]);
+
+  const cargarOpcionesDependientesSolicitante = async (idSolicitante: number) => {
+    const requestId = ++opcionesDependientesRequestRef.current;
+    setGestorOptions([]);
+    setValidadorOptions([]);
+
+    try {
+      const { gestores, validadores } = await listarGestorValidadorOptions(idSolicitante);
+
+      if (requestId !== opcionesDependientesRequestRef.current) return;
+      setGestorOptions(gestores);
+      setValidadorOptions(validadores);
+      setDraft((prev) => {
+        if (Number(prev.solicitante) !== idSolicitante) return prev;
+
+        return {
+          ...prev,
+          gestor: gestores[0] ? normalizeOptionValue(gestores[0]) : "",
+          validador: validadores[0] ? normalizeOptionValue(validadores[0]) : "",
+        };
+      });
+    } catch (err) {
+      if (requestId !== opcionesDependientesRequestRef.current) return;
+      console.warn("No se pudieron cargar los gestores y validadores del solicitante.", err);
+    }
+  };
 
   const loadCabeceras = async () => {
     setLoading(true);
@@ -796,9 +818,11 @@ export default function OcV1Page() {
         const responsableId = responsableNombre
           ? cabeceras.find((item) => item.responsable === responsableNombre)?.idResponsable
           : undefined;
+        const idOcFiltro = reporteFiltros.idOc.trim();
         const request = buildPlanillaConsultaEstadosRequest([
           ...(reporteFiltros.fechaDesde ? [{ nombre: "FechaInicio", valor: reporteFiltros.fechaDesde, tipo: "date" as const }] : []),
           ...(reporteFiltros.fechaHasta ? [{ nombre: "FechaFin", valor: reporteFiltros.fechaHasta, tipo: "date" as const }] : []),
+          ...(idOcFiltro ? [{ nombre: "Id", valor: idOcFiltro, tipo: "int" as const }] : []),
           ...(responsableId ? [{ nombre: "IdResponsable", valor: String(responsableId), tipo: "int" as const }] : []),
           ...(sitesReporteFiltro.length ? [{ nombre: "IdSite", valor: sitesReporteFiltro.join(","), tipo: "string" as const }] : []),
         ]);
@@ -810,12 +834,15 @@ export default function OcV1Page() {
           const correlativoKey = Object.keys(row).find((key) => key.toLowerCase() === "correlativoplanilla");
           return correlativoKey ? row : { ...row, CorrelativoPlanilla: null };
         });
+        const rowsPorIdOc = idOcFiltro
+          ? rows.filter((row) => getReporteRowIdOc(row) === idOcFiltro)
+          : rows;
         const estadosOcSeleccionados = getEstadosOcSeleccionados(reporteFiltros.estado);
         const rowsPorEstado = estadosOcSeleccionados.length
-          ? rows.filter((row) => {
+          ? rowsPorIdOc.filter((row) => {
             return estadosOcSeleccionados.includes(clasificarEstadoOc(getEstadoOcRowValue(row)) as EstadoOcReporte);
           })
-          : rows;
+          : rowsPorIdOc;
         const rowsFiltradas = rowsPorEstado;
         setReportePlanillaRows(rowsFiltradas);
         setReportePlanillaColumns(OC_GASTOS_COLUMNAS_INICIALES);
@@ -1263,7 +1290,6 @@ export default function OcV1Page() {
 
   const openNuevo = () => {
     const solicitanteDefault = userId > 0 ? String(userId) : "";
-    const gestorDefault = gestorOptions[0] ? normalizeOptionValue(gestorOptions[0]) : "";
     const validadorDefault = validadorOptions[0] ? normalizeOptionValue(validadorOptions[0]) : "";
     const responsableDefault =
       responsableOptions.find((item) => item.idEmpleado === userId)?.idEmpleado ??
@@ -1274,7 +1300,7 @@ export default function OcV1Page() {
       ...createInitialDraft(),
       fechaOrden: today, // Siempre la fecha actual
       solicitante: solicitanteDefault,
-      gestor: gestorDefault,
+      gestor: "",
       validador: validadorDefault,
       responsable: responsableDefault ? String(responsableDefault) : "",
     });
@@ -1956,7 +1982,7 @@ export default function OcV1Page() {
                       style={{ ...styles.tr, ...(detalleActivo ? styles.trActive : {}) }}
                       onClick={() => setDetalleSeleccionado(item)}
                     >
-                      <td style={styles.td}>
+                      <td style={{ ...styles.td, display: "none" }}>
                         <div style={{ display: "flex", gap: 8 }}>
                           <button type="button" style={styles.smallActionButton} onClick={() => setMessage("La ediciÃ³n detallada queda habilitada desde el segmento Nueva orden.")}>Editar</button>
                         </div>
@@ -2011,6 +2037,7 @@ export default function OcV1Page() {
               selectedIds={[]}
               onToggle={() => undefined}
               onDetalleClick={setDetalleCompleto}
+              onCorrelativoClick={setReciboVisualizado}
             />
           </div>
         ) : null}
@@ -2395,6 +2422,13 @@ export default function OcV1Page() {
         </div>
       ) : null}
 
+      {reciboVisualizado ? (
+        <ReciboDetallePanel
+          recibo={reciboVisualizado}
+          onClose={() => setReciboVisualizado(null)}
+        />
+      ) : null}
+
       {mostrarMotivoRechazo && idsOcRechazo.length > 0 ? (
         <div style={styles.modalOverlay}>
           <div style={styles.modalCard}>
@@ -2468,32 +2502,23 @@ export default function OcV1Page() {
                 options={solicitanteOptions}
                 selectedValue={draft.solicitante}
                 onSelect={(value) => {
-                  const solicitante = solicitanteOptions.find((option) => normalizeOptionValue(option) === value);
-                  const responsableCj = solicitante?.responsableCj?.trim().toLowerCase();
-                  const gestor = gestorOptions.find((option) => option.label.trim().toLowerCase() === responsableCj);
-                  const validador = validadorOptions.find((option) => option.label.trim().toLowerCase() === responsableCj);
                   setDraft((prev) => ({
                     ...prev,
                     solicitante: value,
-                    ...(gestor ? { gestor: normalizeOptionValue(gestor) } : {}),
-                    ...(validador ? { validador: normalizeOptionValue(validador) } : {}),
+                    gestor: "",
+                    validador: "",
                   }));
+                  const idSolicitante = Number(value);
+                  if (Number.isFinite(idSolicitante) && idSolicitante > 0) {
+                    void cargarOpcionesDependientesSolicitante(idSolicitante);
+                  }
                 }}
                 placeholder="Seleccione..."
               />
             </Field>
             <Field>
-              <Label>Gestor</Label>
-              <select value={draft.gestor} onChange={(event) => setDraft((prev) => ({ ...prev, gestor: event.target.value }))} style={styles.input}>
-                <option value="">Seleccione...</option>
-                {gestorOptions.map((option) => (
-                  <option key={`ges-${normalizeOptionValue(option)}`} value={normalizeOptionValue(option)}>{option.label}</option>
-                ))}
-              </select>
-            </Field>
-            <Field>
               <Label>Validador</Label>
-              <select value={draft.validador} onChange={(event) => setDraft((prev) => ({ ...prev, validador: event.target.value }))} style={styles.input}>
+              <select disabled={!draft.solicitante} value={draft.validador} onChange={(event) => setDraft((prev) => ({ ...prev, validador: event.target.value }))} style={styles.input}>
                 <option value="">Seleccione...</option>
                 {validadorOptions.map((option) => (
                   <option key={`val-${normalizeOptionValue(option)}`} value={normalizeOptionValue(option)}>{option.label}</option>
@@ -2904,6 +2929,7 @@ function RecibosOrdenCompraTable({
   selectedIds,
   onToggle,
   onDetalleClick,
+  onCorrelativoClick,
 }: {
   rows: OrdenCompraReciboDto[];
   loading: boolean;
@@ -2913,6 +2939,7 @@ function RecibosOrdenCompraTable({
   selectedIds: number[];
   onToggle: (correlativo: number, checked: boolean) => void;
   onDetalleClick: (detalle: string) => void;
+  onCorrelativoClick?: (recibo: OrdenCompraReciboDto) => void;
 }) {
   const columns = hideIgvAndTotal
     ? reciboColumns.filter((column) => column.key !== "igv" && column.key !== "total")
@@ -2948,7 +2975,21 @@ function RecibosOrdenCompraTable({
                     />
                   ) : null}
                 </td>
-                <td style={styles.td}>{item.correlativo}</td>
+                <td style={styles.td}>
+                  {onCorrelativoClick ? (
+                    <a
+                      href={`#recibo-${item.correlativo}`}
+                      style={styles.correlativoLink}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        onCorrelativoClick(item);
+                      }}
+                      aria-label={`Visualizar gasto ${item.correlativo}`}
+                    >
+                      {item.correlativo}
+                    </a>
+                  ) : item.correlativo}
+                </td>
                 <td style={styles.td}>{item.fecIngreso ? new Date(item.fecIngreso).toLocaleDateString("es-PE") : ""}</td>
                 <td style={styles.td}>{formatMoney(item.subtotal)}</td>
                 {!hideIgvAndTotal ? <td style={styles.td}>{formatMoney(item.igv)}</td> : null}
@@ -2974,6 +3015,70 @@ function RecibosOrdenCompraTable({
           )}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function ReciboDetallePanel({
+  recibo,
+  onClose,
+}: {
+  recibo: OrdenCompraReciboDto;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  const fields = [
+    ["Fecha de ingreso", formatDate(recibo.fecIngreso)],
+    ["Responsable", recibo.responsable || "-"],
+    ["Comprobante", recibo.comprobante || "-"],
+    ["Nro. documento", recibo.nroDocumento || "-"],
+    ["Estado", recibo.estado || "-"],
+    ["Moneda", recibo.moneda || "-"],
+    ["Subtotal", formatMoney(recibo.subtotal)],
+    ["IGV", formatMoney(recibo.igv)],
+    ["Total", formatMoney(recibo.total)],
+    ["Tarea", recibo.tarea || "-"],
+  ];
+
+  return (
+    <div style={styles.sidePanelOverlay} onMouseDown={onClose}>
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="recibo-detalle-title"
+        style={{ ...styles.card, ...styles.receiptDetailPanel }}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div style={styles.sectionHeader}>
+          <div>
+            <h2 id="recibo-detalle-title" style={styles.sectionTitle}>Visualizar gasto</h2>
+            <p style={styles.sectionText}>Correlativo {recibo.correlativo}</p>
+          </div>
+          <button type="button" style={styles.secondaryButton} onClick={onClose}>Cerrar</button>
+        </div>
+        <div style={styles.receiptDetailGrid}>
+          {fields.map(([label, value]) => (
+            <div key={label} style={styles.receiptDetailField}>
+              <span style={styles.summaryLabel}>{label}</span>
+              <strong style={styles.receiptDetailValue}>{value}</strong>
+            </div>
+          ))}
+        </div>
+        <div style={styles.receiptDetailDescription}>
+          <span style={styles.summaryLabel}>Detalle</span>
+          <p>{recibo.detalle || "Sin detalle registrado."}</p>
+        </div>
+      </aside>
     </div>
   );
 }
@@ -4019,6 +4124,42 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: "-8px 0 24px rgba(0,0,0,0.12)",
     overflowY: "auto",
   },
+  receiptDetailPanel: {
+    width: 640,
+    maxWidth: "100%",
+    height: "100%",
+    borderRadius: 0,
+    overflowY: "auto",
+    padding: 24,
+  },
+  receiptDetailGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: 12,
+  },
+  receiptDetailField: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 5,
+    padding: 12,
+    border: "1px solid #DDE3E1",
+    borderRadius: 8,
+    background: "#F8FAFC",
+  },
+  receiptDetailValue: {
+    color: "#17212B",
+    fontSize: 13,
+    overflowWrap: "anywhere",
+  },
+  receiptDetailDescription: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    padding: 12,
+    border: "1px solid #DDE3E1",
+    borderRadius: 8,
+    background: "#F8FAFC",
+  },
   registrationInline: {
     width: "100%",
     marginTop: 12,
@@ -4200,6 +4341,13 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 800,
     cursor: "pointer",
     padding: 0,
+  },
+  correlativoLink: {
+    color: "#0E6E5C",
+    fontSize: 12,
+    fontWeight: 800,
+    textDecoration: "underline",
+    cursor: "pointer",
   },
   tableWrap: {
     overflowX: "auto",

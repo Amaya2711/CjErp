@@ -164,9 +164,7 @@ export default function PagarTesoreriaV1Page() {
   const [chuckyGroupMode, setChuckyGroupMode] = useState<"banco" | "responsable" | "moneda">("banco");
   const [chuckyCollapsed, setChuckyCollapsed] = useState<Set<string>>(new Set());
   const esPago = estado === 5 || estado === 8;
-  // Se conserva el flujo de registro para una futura habilitación, pero no se
-  // encuentra disponible en Programado ni Administrativo por el momento.
-  const registroPagoDisponible = false;
+  const registroPagoDisponible = estado === 8;
   const esReporte = estado === 99;
   const [rows, setRows] = useState<PagoTesoreriaRow[]>([]);
   const [catalogos, setCatalogos] = useState(emptyCatalogos);
@@ -201,6 +199,8 @@ export default function PagarTesoreriaV1Page() {
   const [registroPagoAbierto, setRegistroPagoAbierto] = useState(false);
   useEffect(() => {
     if (estado === 5) setRegistroPagoAbierto(selected.size > 0);
+    else if (estado === 8 && selected.size === 0) setRegistroPagoAbierto(false);
+    else if (estado !== 8) setRegistroPagoAbierto(false);
   }, [estado, selected]);
   const [contabilidadValida, setContabilidadValida] = useState(false);
   const saving = operationSaving || editingRevision;
@@ -1731,10 +1731,10 @@ export default function PagarTesoreriaV1Page() {
             {!esReporte && <div className="pt-grid-actions" role="group" aria-label={`Acciones de ${tabs.find(t => t.estado === estado)?.label}`}>
               {esPago && (
                 <>
-                  {false && <button className="pt-primary pt-register-payment-entry" type="button"
+                  {estado === 8 && selectedRows.length > 0 && <button className="pt-primary pt-register-payment-entry" type="button"
                     disabled={saving || loading || registroPagoAbierto}
                     onClick={() => setRegistroPagoAbierto(true)}>
-                    Registrar pago
+                    Registrar pago ({selectedRows.length})
                   </button>}
                   {estado === 5 && (
                     <button className="pt-primary" type="submit" form={`pt-stage-${estado}`}

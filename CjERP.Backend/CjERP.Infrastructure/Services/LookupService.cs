@@ -183,30 +183,79 @@ namespace CjERP.Infrastructure.Services
             return rows.Select(MapSolicitanteLookup).Cast<SolicitanteLookupDto>();
         }
 
-        public async Task<IEnumerable<SolicitanteLookupDto>> ListarGestoresAsync(CancellationToken cancellationToken = default)
+        public async Task<IEnumerable<SolicitanteLookupDto>> ListarGestoresAsync(int? idEmpleado = null, CancellationToken cancellationToken = default)
         {
             await using var connection = _sqlCommandFactory.CreateConnection();
 
             var rows = await connection.QueryAsync(
                 _sqlCommandFactory.Create(
                     "dbo.sp_ListarGestor",
+                    new { idempleado = idEmpleado },
                     commandType: CommandType.StoredProcedure,
                     cancellationToken: cancellationToken));
 
             return rows.Select(MapSolicitanteLookup).Cast<SolicitanteLookupDto>();
         }
 
-        public async Task<IEnumerable<SolicitanteLookupDto>> ListarValidadoresAsync(CancellationToken cancellationToken = default)
+        public async Task<IEnumerable<SolicitanteLookupDto>> ListarValidadoresAsync(int? idEmpleado = null, CancellationToken cancellationToken = default)
         {
             await using var connection = _sqlCommandFactory.CreateConnection();
 
             var rows = await connection.QueryAsync(
                 _sqlCommandFactory.Create(
                     "dbo.sp_ListarValidador",
+                    new { idempleado = idEmpleado },
                     commandType: CommandType.StoredProcedure,
                     cancellationToken: cancellationToken));
 
             return rows.Select(MapSolicitanteLookup).Cast<SolicitanteLookupDto>();
+        }
+
+        public async Task<GestorValidadorLookupDto> ListarGestorValidadorAsync(int idEmpleadoCj, CancellationToken cancellationToken = default)
+        {
+            await using var connection = _sqlCommandFactory.CreateConnection();
+            var rows = await connection.QueryAsync(
+                _sqlCommandFactory.Create(
+                    "dbo.sp_Empleado_Listar_GestorValidador",
+                    new { IdEmpleadoCj = idEmpleadoCj },
+                    CommandType.StoredProcedure,
+                    cancellationToken));
+
+            var gestores = new Dictionary<int, SolicitanteLookupDto>();
+            var validadores = new Dictionary<int, SolicitanteLookupDto>();
+
+            foreach (var row in rows)
+            {
+                var data = (IDictionary<string, object>)row;
+                AddEmpleadoLookup(gestores, data,
+                    ["IdGestor", "idGestor", "IdEmpleadoGestor", "idEmpleadoGestor", "GestorId", "gestorId"],
+                    ["Gestor", "gestor", "NombreGestor", "nombreGestor", "NombreEmpleadoGestor", "nombreEmpleadoGestor"]);
+                AddEmpleadoLookup(validadores, data,
+                    ["IdValidador", "idValidador", "IdEmpleadoValidador", "idEmpleadoValidador", "ValidadorId", "validadorId"],
+                    ["Validador", "validador", "NombreValidador", "nombreValidador", "NombreEmpleadoValidador", "nombreEmpleadoValidador"]);
+
+                // sp_Empleado_Listar_GestorValidador devuelve el responsable CJ asociado
+                // en una sola pareja de columnas. Este responsable aplica tanto para
+                // el filtro de gestor como para el de validador.
+                AddEmpleadoLookup(gestores, data,
+                    ["IdResponsableCj", "idResponsableCj"],
+                    ["NombreEmpleado", "nombreEmpleado"]);
+                AddEmpleadoLookup(validadores, data,
+                    ["IdResponsableCj", "idResponsableCj"],
+                    ["NombreEmpleado", "nombreEmpleado"]);
+
+                var tipo = GetStringAllowEmpty(data, "Tipo", "tipo", "Rol", "rol", "Cargo", "cargo") ?? string.Empty;
+                if (tipo.Contains("GESTOR", StringComparison.OrdinalIgnoreCase))
+                    AddEmpleadoLookup(gestores, data, ["IdEmpleado", "idEmpleado", "Id", "id"], ["NombreEmpleado", "nombreEmpleado", "Nombre", "nombre"]);
+                else if (tipo.Contains("VALIDADOR", StringComparison.OrdinalIgnoreCase))
+                    AddEmpleadoLookup(validadores, data, ["IdEmpleado", "idEmpleado", "Id", "id"], ["NombreEmpleado", "nombreEmpleado", "Nombre", "nombre"]);
+            }
+
+            return new GestorValidadorLookupDto
+            {
+                Gestores = gestores.Values.OrderBy(item => item.Nombre).ToList(),
+                Validadores = validadores.Values.OrderBy(item => item.Nombre).ToList()
+            };
         }
 
         public async Task<IEnumerable<UbigeoLookupDto>> ListarUbigeosAsync(CancellationToken cancellationToken = default)
@@ -281,6 +330,18 @@ namespace CjERP.Infrastructure.Services
                 ResponsableCj = GetStringAllowEmpty(data,
                     "ResponsableCj", "responsableCj", "NombreResponsableCj", "nombreResponsableCj") ?? string.Empty
             };
+        }
+
+        private static void AddEmpleadoLookup(
+            IDictionary<int, SolicitanteLookupDto> target,
+            IDictionary<string, object> data,
+            string[] idNames,
+            string[] nombreNames)
+        {
+            var id = GetInt(data, idNames);
+            var nombre = GetStringAllowEmpty(data, nombreNames) ?? string.Empty;
+            if (id > 0 && !string.IsNullOrWhiteSpace(nombre))
+                target[id] = new SolicitanteLookupDto { Id = id, Nombre = nombre };
         }
 
         private static ValoresGastoDto MapValoresGasto(dynamic row)

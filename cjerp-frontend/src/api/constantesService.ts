@@ -27,7 +27,8 @@ function mapConstanteToOption(item: ConstanteLookupDto): ConstanteOption {
 
 export async function getConstantesPorCampo(campo: string): Promise<ConstanteLookupDto[]> {
   const response = await httpClient.get<ConstanteLookupDto[]>("/lookup/constantes", {
-    params: { campo },
+    params: { campo, cacheBust: Date.now() },
+    headers: { "Cache-Control": "no-cache" },
   });
 
   return extraerArray<ConstanteLookupDto>(response);

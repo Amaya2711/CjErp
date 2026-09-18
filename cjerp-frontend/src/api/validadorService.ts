@@ -19,8 +19,10 @@ function mapValidadorToOption(item: SolicitanteLookupDto): ConstanteOption {
   };
 }
 
-export async function listarValidadorOptions(): Promise<ConstanteOption[]> {
-  const response = await httpClient.get<SolicitanteLookupDto[]>("/lookup/validador");
+export async function listarValidadorOptions(idEmpleado?: number | null): Promise<ConstanteOption[]> {
+  const response = await httpClient.get<SolicitanteLookupDto[]>("/lookup/validador", {
+    params: { idEmpleado: idEmpleado && idEmpleado > 0 ? idEmpleado : undefined },
+  });
 
   return extraerArray<SolicitanteLookupDto>(response)
     .map(mapValidadorToOption)

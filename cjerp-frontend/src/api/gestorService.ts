@@ -20,10 +20,36 @@ function mapGestorToOption(item: SolicitanteLookupDto): ConstanteOption {
 }
 
 export async function listarGestorOptions(
+  idEmpleado?: number | null
 ): Promise<ConstanteOption[]> {
-  const response = await httpClient.get<SolicitanteLookupDto[]>("/lookup/gestores");
+  const response = await httpClient.get<SolicitanteLookupDto[]>("/lookup/gestores", {
+    params: { idEmpleado: idEmpleado && idEmpleado > 0 ? idEmpleado : undefined },
+  });
 
   return extraerArray<SolicitanteLookupDto>(response)
     .map(mapGestorToOption)
     .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+export type GestorValidadorOptions = {
+  gestores: ConstanteOption[];
+  validadores: ConstanteOption[];
+};
+
+export async function listarGestorValidadorOptions(
+  idEmpleadoCj: number
+): Promise<GestorValidadorOptions> {
+  const response = await httpClient.get<{
+    gestores?: SolicitanteLookupDto[];
+    validadores?: SolicitanteLookupDto[];
+  }>("/lookup/gestor-validador", { params: { idEmpleadoCj } });
+
+  return {
+    gestores: extraerArray<SolicitanteLookupDto>(response?.gestores)
+      .map(mapGestorToOption)
+      .sort((a, b) => a.label.localeCompare(b.label)),
+    validadores: extraerArray<SolicitanteLookupDto>(response?.validadores)
+      .map((item) => ({ ...mapGestorToOption(item), campo: "validador" }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+  };
 }

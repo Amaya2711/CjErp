@@ -30,8 +30,9 @@ namespace CjERP.Application.Interfaces
             CancellationToken cancellationToken = default);
         Task<IEnumerable<ConstanteLookupDto>> ListarConstantesPorCampoAsync(string campo, CancellationToken cancellationToken = default);
         Task<IEnumerable<SolicitanteLookupDto>> ListarSolicitantesAsync(int? idCargo, int? idEmpleado, CancellationToken cancellationToken = default);
-        Task<IEnumerable<SolicitanteLookupDto>> ListarGestoresAsync(CancellationToken cancellationToken = default);
-        Task<IEnumerable<SolicitanteLookupDto>> ListarValidadoresAsync(CancellationToken cancellationToken = default);
+        Task<IEnumerable<SolicitanteLookupDto>> ListarGestoresAsync(int? idEmpleado = null, CancellationToken cancellationToken = default);
+        Task<IEnumerable<SolicitanteLookupDto>> ListarValidadoresAsync(int? idEmpleado = null, CancellationToken cancellationToken = default);
+        Task<GestorValidadorLookupDto> ListarGestorValidadorAsync(int idEmpleadoCj, CancellationToken cancellationToken = default);
         Task<IEnumerable<UbigeoLookupDto>> ListarUbigeosAsync(CancellationToken cancellationToken = default);
     }
 }

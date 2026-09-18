@@ -99,7 +99,7 @@ namespace CjERP.Api.Controllers
         }
 
         [HttpGet("~/api/lookup/constantes")]
-        [ResponseCache(Duration = 600, Location = ResponseCacheLocation.Client, VaryByQueryKeys = new[] { "campo" })]
+        [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
         public async Task<IActionResult> GetConstantes([FromQuery] string campo, CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(campo))
@@ -124,18 +124,28 @@ namespace CjERP.Api.Controllers
 
         [HttpGet("~/api/lookup/gestores")]
         [ResponseCache(Duration = 300, Location = ResponseCacheLocation.Client)]
-        public async Task<IActionResult> GetGestores(CancellationToken cancellationToken)
+        public async Task<IActionResult> GetGestores([FromQuery] int? idEmpleado, CancellationToken cancellationToken)
         {
-            var result = await _lookupService.ListarGestoresAsync(cancellationToken);
+            var result = await _lookupService.ListarGestoresAsync(idEmpleado.GetValueOrDefault() > 0 ? idEmpleado : null, cancellationToken);
             return Ok(result);
         }
 
         [HttpGet("~/api/lookup/validador")]
         [ResponseCache(Duration = 300, Location = ResponseCacheLocation.Client)]
-        public async Task<IActionResult> GetValidador(CancellationToken cancellationToken)
+        public async Task<IActionResult> GetValidador([FromQuery] int? idEmpleado, CancellationToken cancellationToken)
         {
-            var result = await _lookupService.ListarValidadoresAsync(cancellationToken);
+            var result = await _lookupService.ListarValidadoresAsync(idEmpleado.GetValueOrDefault() > 0 ? idEmpleado : null, cancellationToken);
             return Ok(result);
+        }
+
+        [HttpGet("~/api/lookup/gestor-validador")]
+        [ResponseCache(Duration = 300, Location = ResponseCacheLocation.Client, VaryByQueryKeys = new[] { "idEmpleadoCj" })]
+        public async Task<IActionResult> GetGestorValidador([FromQuery] int idEmpleadoCj, CancellationToken cancellationToken)
+        {
+            if (idEmpleadoCj <= 0)
+                return BadRequest("idEmpleadoCj es requerido.");
+
+            return Ok(await _lookupService.ListarGestorValidadorAsync(idEmpleadoCj, cancellationToken));
         }
 
         [HttpGet("~/api/lookup/ubigeos")]
@@ -161,8 +171,8 @@ namespace CjERP.Api.Controllers
                 idCargo.GetValueOrDefault() <= 0 ? null : idCargo,
                 idEmpleado.GetValueOrDefault() <= 0 ? null : idEmpleado,
                 cancellationToken);
-            var gestoresTask = _lookupService.ListarGestoresAsync(cancellationToken);
-            var validadoresTask = _lookupService.ListarValidadoresAsync(cancellationToken);
+            var gestoresTask = _lookupService.ListarGestoresAsync(cancellationToken: cancellationToken);
+            var validadoresTask = _lookupService.ListarValidadoresAsync(cancellationToken: cancellationToken);
             var tareasTask = _lookupService.ListarTareasAsync(cancellationToken);
 
             await Task.WhenAll(
