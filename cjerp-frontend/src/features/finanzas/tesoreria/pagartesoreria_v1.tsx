@@ -31,6 +31,7 @@ import * as XLSX from "xlsx";
 import AppPage from "../../../components/base/AppPage";
 import {
   listarPagosTesoreriaV1 as listarPagosTesoreria,
+  obtenerReporteResumenTesoreria,
   obtenerCatalogosPago,
   obtenerCuentasPago,
   registrarPagosTesoreria, grabarPagoTesoreria,
@@ -55,6 +56,7 @@ const hoy = () =>
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
+const inicioMesActual = () => `${hoy().slice(0, 7)}-01`;
 const money = (value: number | null | undefined) =>
   new Intl.NumberFormat("es-PE", {
     minimumFractionDigits: 2,
@@ -74,10 +76,13 @@ const sum = (
   field: "totalPagar" | "total" | "montoRetencion" = "totalPagar",
 ) => rows.reduce((s, r) => s + Math.round((r[field] ?? 0) * 100), 0) / 100;
 const emptyCatalogos: PagoCatalogos = {
+  clientes: [],
   anticipos: [],
   estados: [],
   ejecutores: [],
+  responsables: [],
   bancos: [],
+  bancosCuenta: [],
   transferencias: [],
   monedas: [],
   retenciones: [],
@@ -176,17 +181,18 @@ export default function PagarTesoreriaV1Page() {
   const [currentPage, setCurrentPage] = useState(1);
   const [correlativoBusqueda, setCorrelativoBusqueda] = useState("");
   const [cliente, setCliente] = useState("");
-  const [moneda, setMoneda] = useState("");
+  const [monedasFiltro, setMonedasFiltro] = useState<string[]>([]);
   const [comprobantesFiltro, setComprobantesFiltro] = useState<string[]>([]);
   const [bancosCtaFiltro, setBancosCtaFiltro] = useState<string[]>([]);
+  const [bancosPagoFiltro, setBancosPagoFiltro] = useState<string[]>([]);
   const [responsablesFiltro, setResponsablesFiltro] = useState<string[]>([]);
   const [busquedaResponsable, setBusquedaResponsable] = useState("");
   const [solicitantesFiltro, setSolicitantesFiltro] = useState<string[]>([]);
   const [busquedaSolicitante, setBusquedaSolicitante] = useState("");
   const [rendicion, setRendicion] = useState("");
   const [estadoBusqueda, setEstadoBusqueda] = useState("");
-  const [desde, setDesde] = useState("");
-  const [hasta, setHasta] = useState("");
+  const [desde, setDesde] = useState(inicioMesActual);
+  const [hasta, setHasta] = useState(hoy);
   const [groupBy, setGroupBy] = useState<"comprobante" | "proyecto-site" | "responsable" | "banco" | "serie-view-detalle">("comprobante");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [form, setForm] = useState(initialForm);
@@ -201,7 +207,7 @@ export default function PagarTesoreriaV1Page() {
   const [permisosRevision, setPermisosRevision] = useState<PagoRevisionPermisos>({
     puedeEditar: false, puedeEditarOperacion: false, puedeEditarEstado: false,
   });
-  const columnCount = estado === 1 ? 22 : estado === 9 ? 16 : estado === 4 ? 18 : estado === 100 ? 16 : 15;
+  const columnCount = estado === 1 ? 22 : estado === 9 ? 16 : estado === 4 ? 18 : estado === 100 ? 17 : 15;
   const [confirmation, setConfirmation] = useState<PagoTesoreriaRequest | null>(
     null,
   );
@@ -268,14 +274,12 @@ export default function PagarTesoreriaV1Page() {
       setLoading(true);
       try {
         const result = status === 100
-          ? await listarPagosTesoreria(100, start, end, controller.signal, correlativo, estadoBusqueda ? Number(estadoBusqueda) : undefined)
+          ? await listarPagosTesoreria(100, start, end, controller.signal, correlativo, estadoBusqueda ? Number(estadoBusqueda) : undefined, bancosPagoFiltro.length ? { idBancos: bancosPagoFiltro.map(Number) } : {})
           : status === 99
-          ? (await Promise.all(REPORT_STATES.map((reportState) =>
-              listarPagosTesoreria(
-                reportState,
-                reportState === 4 ? (start || `${hoy().slice(0, 7)}-01`) : start,
-                reportState === 4 ? (end || hoy()) : end,
-                controller.signal)))).flat()
+          ? (await obtenerReporteResumenTesoreria(start, end, controller.signal)).map((raw) => {
+              const r = raw as Record<string, unknown>;
+              return { correlativo: 0, idSite: "reporte", estado: Number(r.Estado ?? r.estado ?? 0), tipoMoneda: Number(r.TipoMoneda ?? r.tipoMoneda ?? 0), idResponsable: 0, cantidadRegistros: Number(r.CantidadRegistros ?? r.cantidadRegistros ?? 0), totalPagar: Number(r.TotalPagar ?? r.totalPagar ?? 0), montoRetencion: Number(r.MontoRetencion ?? r.montoRetencion ?? 0), total: Number(r.TotalNeto ?? r.totalNeto ?? 0), moneda: String(r.Moneda ?? r.moneda ?? ""), version: "reporte" } as PagoTesoreriaRow;
+            })
           : await listarPagosTesoreria(status, start, end, controller.signal);
         if (!controller.signal.aborted) setRows(result);
       } catch (e) {
@@ -287,7 +291,7 @@ export default function PagarTesoreriaV1Page() {
         if (!controller.signal.aborted) setLoading(false);
       }
     },
-    [estadoBusqueda],
+    [estadoBusqueda, bancosPagoFiltro],
   );
   useEffect(() => () => fetchRef.current?.abort(), []);
   useEffect(() => {
@@ -334,9 +338,12 @@ export default function PagarTesoreriaV1Page() {
         (!rendicion || String(r.idRendicion) === rendicion) &&
         (estado !== 100 || !estadoBusqueda || String(r.estado) === estadoBusqueda) &&
         (!cliente || r.cliente === cliente) &&
-        (!moneda || String(r.tipoMoneda) === moneda) &&
+        (!monedasFiltro.length || monedasFiltro.includes(String(r.tipoMoneda))) &&
         (!comprobantesFiltro.length || comprobantesFiltro.includes(r.comprobante ?? "")) &&
-        (!bancosCtaFiltro.length || bancosCtaFiltro.includes((estado === 4 ? r.bancoCta : r.banco) ?? "")) &&
+        (!bancosCtaFiltro.length || bancosCtaFiltro.includes(r.bancoCta ?? "")) &&
+        (!bancosPagoFiltro.length || bancosPagoFiltro.some((id) =>
+          String(r.idBanco) === id ||
+          catalogos.bancos.find((banco) => String(banco.id) === id)?.nombre.trim().toLocaleUpperCase() === (r.banco ?? "").trim().toLocaleUpperCase())) &&
         (!search ||
           [
             r.correlativo,
@@ -358,19 +365,24 @@ export default function PagarTesoreriaV1Page() {
     rows,
     query,
     cliente,
-    moneda,
+    monedasFiltro,
     comprobantesFiltro,
     bancosCtaFiltro,
+    bancosPagoFiltro,
+    catalogos.bancos,
     responsablesFiltro,
     solicitantesFiltro,
     rendicion,
     estado,
     correlativoBusqueda,
   ]);
-  const pageCount = Math.max(1, Math.ceil(visibleRows.length / pageSize));
+  const requierePaginacion = visibleRows.length > 1000;
+  const pageCount = requierePaginacion ? Math.max(1, Math.ceil(visibleRows.length / pageSize)) : 1;
   const pagedRows = useMemo(
-    () => visibleRows.slice((currentPage - 1) * pageSize, currentPage * pageSize),
-    [visibleRows, currentPage, pageSize]
+    () => requierePaginacion
+      ? visibleRows.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+      : visibleRows,
+    [visibleRows, currentPage, pageSize, requierePaginacion]
   );
   useEffect(() => {
     setCurrentPage((page) => Math.min(page, pageCount));
@@ -497,9 +509,9 @@ export default function PagarTesoreriaV1Page() {
       (exclude === "solicitante" || !solicitantesFiltro.length || solicitantesFiltro.includes(r.solicitante ?? "")) &&
       (exclude === "rendicion" || !rendicion || String(r.idRendicion) === rendicion) &&
       (exclude === "cliente" || !cliente || r.cliente === cliente) &&
-      (exclude === "moneda" || !moneda || String(r.tipoMoneda) === moneda) &&
+      (exclude === "moneda" || !monedasFiltro.length || monedasFiltro.includes(String(r.tipoMoneda))) &&
       (exclude === "comprobante" || !comprobantesFiltro.length || comprobantesFiltro.includes(r.comprobante ?? "")) &&
-      (exclude === "banco" || !bancosCtaFiltro.length || bancosCtaFiltro.includes((estado === 4 ? r.bancoCta : r.banco) ?? "")) &&
+      (exclude === "banco" || !bancosCtaFiltro.length || bancosCtaFiltro.includes(r.bancoCta ?? "")) &&
       (!search || [r.correlativo, r.responsable, r.solicitante, r.cliente, r.proyecto, r.site, r.idSite, r.ot, r.detalle, r.nroOperacion]
         .join(" ").toLocaleLowerCase().includes(search)),
     );
@@ -536,7 +548,7 @@ export default function PagarTesoreriaV1Page() {
         name: items.find((item) => item.tipoMoneda === currencyId)?.moneda || `Moneda ${currencyId}`,
         amount: sum(items.filter((item) => item.tipoMoneda === currencyId)),
       }));
-      return { ...stage, count: items.length, currencies };
+      return { ...stage, count: items.reduce((total, item) => total + (item.cantidadRegistros ?? 1), 0), currencies };
     });
   }, [rows]);
   const reportMaxCount = Math.max(1, ...reportMetrics.map((metric) => metric.count));
@@ -600,8 +612,8 @@ export default function PagarTesoreriaV1Page() {
     });
   const changeTab = (next: number) => {
     if (saving) return;
-    const start = next === 4 ? `${hoy().slice(0, 7)}-01` : "";
-    const end = next === 4 ? hoy() : "";
+    const start = next === 4 || next === 100 ? inicioMesActual() : "";
+    const end = next === 4 || next === 100 ? hoy() : "";
     setEstado(next);
     setCurrentPage(1);
     setProgramadoSubtab("recibos");
@@ -609,10 +621,12 @@ export default function PagarTesoreriaV1Page() {
     setHasta(end);
     setQuery("");
     setCorrelativoBusqueda("");
+    setEstadoBusqueda("");
     setCliente("");
-    setMoneda("");
+    setMonedasFiltro([]);
     setComprobantesFiltro([]);
     setBancosCtaFiltro([]);
+    setBancosPagoFiltro([]);
     setResponsablesFiltro([]);
     setBusquedaResponsable("");
     setSolicitantesFiltro([]);
@@ -787,14 +801,14 @@ export default function PagarTesoreriaV1Page() {
         subtotal: r.subtotal,
         igv: r.igv,
         total: r.total,
-        Retención: r.montoRetencion,
+        "Retención": r.montoRetencion,
         "Total a pagar": r.totalPagar,
         IdBancoCta: r.idBancoCta,
         Cuenta: r.cuenta,
         CuentaInter: r.cuentaInter,
         NombreCta: r.nombreCta,
         "Fecha de depósito": fecha(r.fechaDeposito),
-        Operación: r.nroOperacion,
+        "Operación": r.nroOperacion,
       })),
     );
     const book = XLSX.utils.book_new();
@@ -899,7 +913,7 @@ export default function PagarTesoreriaV1Page() {
     for (const group of paoloGroups) {
       const key = `${group.cliente}-${group.moneda}`;
       const collapsed = paoloCollapsed.has(key);
-      body.push([`${collapsed ? "▶" : "▼"} ${group.cliente} · ${group.moneda} (${group.items.length})`, "", "", "", "", "", ""]);
+      body.push([`${collapsed ? "â–¶" : "â–¼"} ${group.cliente} · ${group.moneda} (${group.items.length})`, "", "", "", "", "", ""]);
       if (!collapsed) {
         body.push(...group.items.map((item) => [
           item.cliente || "", item.responsable || "", item.tarea || "", item.solicitante || "",
@@ -933,7 +947,7 @@ export default function PagarTesoreriaV1Page() {
         <header className="pt-hero">
           <div className="pt-heading">
             <span className="pt-kicker">
-              <ReceiptText size={14} /> FINANZAS / TESORERÍA
+              <ReceiptText size={14} /> FINANZAS / TESORERÃA
             </span>
             <h1>
               <span className="pt-icon">
@@ -1034,53 +1048,42 @@ export default function PagarTesoreriaV1Page() {
                 onChange={(e) => setHasta(e.target.value)}
               />
             </label>
-            <button className="pt-primary" type="submit" disabled={loading}>
+            {estado !== 100 && <button className="pt-primary" type="submit" disabled={loading}>
               <Filter size={15} />
               Consultar
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setQuery("");
-                setCliente("");
-                setMoneda("");
-                setComprobantesFiltro([]);
-                setBancosCtaFiltro([]);
-                setResponsablesFiltro([]);
-                setBusquedaResponsable("");
-                setSolicitantesFiltro([]);
-                setBusquedaSolicitante("");
-                setRendicion("");
-                setSelected(new Set());
-                void load(estado, desde, hasta);
-                void loadCatalogos();
-              }}
-              disabled={loading}
-              title="Actualizar recibos y catálogos"
-            >
-              <RefreshCw size={16} />
-            </button>
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => {
-                setQuery(""); setDesde(""); setHasta(""); setCliente(""); setMoneda("");
-                setComprobantesFiltro([]); setBancosCtaFiltro([]); setResponsablesFiltro([]);
-                setBusquedaResponsable(""); setSolicitantesFiltro([]); setBusquedaSolicitante("");
-                setRendicion(""); setSelected(new Set());
-                void load(estado, "", "");
-              }}
-              title="Limpiar filtros"
-            >
-              Limpiar filtros
-            </button>
+            </button>}
+					<button
+						type="button"
+						disabled={loading}
+						onClick={() => {
+							setQuery("");
+							setDesde("");
+							setHasta("");
+							setCliente("");
+							setMonedasFiltro([]);
+							setComprobantesFiltro([]);
+							setBancosCtaFiltro([]);
+							setBancosPagoFiltro([]);
+							setResponsablesFiltro([]);
+							setBusquedaResponsable("");
+							setSolicitantesFiltro([]);
+							setBusquedaSolicitante("");
+							setRendicion("");
+							setSelected(new Set());
+							void load(estado, "", "");
+						}}
+						title="Limpiar filtros"
+						aria-label="Limpiar filtros"
+					>
+						<RefreshCw size={16} />
+					</button>
           </fieldset>
         </form>}
         {estado === 100 && (
           <form className="pt-filters pt-search-only" onSubmit={(e) => {
             e.preventDefault();
-            const parsed = Number(correlativoBusqueda.trim());
-            const hasFilter = (Number.isInteger(parsed) && parsed > 0) || estadoBusqueda || desde || hasta || cliente || moneda || comprobantesFiltro.length || bancosCtaFiltro.length || responsablesFiltro.length || solicitantesFiltro.length;
+            if (!desde || !hasta) { setError("Ingrese la fecha de inicio y la fecha fin para realizar la búsqueda."); return; } const parsed = Number(correlativoBusqueda.trim());
+            const hasFilter = (Number.isInteger(parsed) && parsed > 0) || estadoBusqueda || desde || hasta || cliente || monedasFiltro.length || comprobantesFiltro.length || bancosCtaFiltro.length || bancosPagoFiltro.length || responsablesFiltro.length || solicitantesFiltro.length;
             if (!hasFilter) {
               setError("Seleccione al menos un filtro para realizar la búsqueda.");
               return;
@@ -1089,7 +1092,7 @@ export default function PagarTesoreriaV1Page() {
           }}>
             <fieldset disabled={saving}>
               <label className="pt-field">
-                <span>Correlativo</span>
+                
                 <input
                   type="number"
                   min="1"
@@ -1212,7 +1215,7 @@ export default function PagarTesoreriaV1Page() {
               </div>
             )}
             <fieldset className="pt-local-filters" disabled={saving}>
-              {estado === 100 && <><label className="pt-field"><span>Correlativo</span><input type="number" min="1" placeholder="Ingrese el correlativo" value={correlativoBusqueda} onChange={(e) => { setCorrelativoBusqueda(e.target.value); setRows([]); }} /></label><button className="pt-primary" type="button" disabled={loading} onClick={() => { const parsed = Number(correlativoBusqueda.trim()); const hasFilter = (Number.isInteger(parsed) && parsed > 0) || cliente || moneda || comprobantesFiltro.length || bancosCtaFiltro.length || responsablesFiltro.length || solicitantesFiltro.length; if (!hasFilter) { setError("Seleccione al menos un filtro para realizar la búsqueda."); return; } void load(100, "", "", Number.isInteger(parsed) && parsed > 0 ? parsed : undefined); }}><Search size={15} /> Buscar</button></>}
+              {estado === 100 && <><label className="pt-field"><input type="number" min="1" placeholder="Ingrese el correlativo" value={correlativoBusqueda} onChange={(e) => { setCorrelativoBusqueda(e.target.value); setRows([]); }} /></label><button className="pt-primary" type="button" disabled={loading} onClick={() => { if (!desde || !hasta) { setError("Ingrese la fecha de inicio y la fecha fin para realizar la búsqueda."); return; } const parsed = Number(correlativoBusqueda.trim()); const hasFilter = (Number.isInteger(parsed) && parsed > 0) || estadoBusqueda || desde || hasta || cliente || monedasFiltro.length || comprobantesFiltro.length || bancosCtaFiltro.length || bancosPagoFiltro.length || responsablesFiltro.length || solicitantesFiltro.length; if (!hasFilter) { setError("Seleccione al menos un filtro para realizar la búsqueda."); return; } void load(100, desde, hasta, Number.isInteger(parsed) && parsed > 0 ? parsed : undefined); }}><Search size={15} /> Buscar</button></>}
               {estado === 100 && <select value={estadoBusqueda} onChange={(e) => setEstadoBusqueda(e.target.value)}><option value="">Todos los estados</option>{catalogos.estados.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select>}
               <select
                 aria-label="Filtrar por cliente"
@@ -1220,7 +1223,7 @@ export default function PagarTesoreriaV1Page() {
                 onChange={(e) => changeFilter(setCliente, e.target.value)}
               >
                 <option value="">Todos los clientes</option>
-                 {[...new Set(rowsForFilterOption("cliente").map((r) => r.cliente).filter(Boolean))]
+                 {(estado === 100 ? catalogos.clientes.map((item) => item.nombre) : [...new Set(rowsForFilterOption("cliente").map((r) => r.cliente).filter(Boolean))])
                   .sort()
                   .map((c) => (
                     <option key={c} value={c!}>
@@ -1228,39 +1231,59 @@ export default function PagarTesoreriaV1Page() {
                     </option>
                   ))}
               </select>
-              <select
-                aria-label="Filtrar por moneda"
-                value={moneda}
-                onChange={(e) => changeFilter(setMoneda, e.target.value)}
-              >
-                <option value="">Todas las monedas</option>
-                 {[...new Set(rowsForFilterOption("moneda").map((r) => r.tipoMoneda))].map((id) => (
-                  <option key={id} value={id}>
-                    {rows.find((r) => r.tipoMoneda === id)?.moneda || id}
-                  </option>
-                ))}
-              </select>
+              <details className="pt-comprobante-filter">
+                <summary>Todas las monedas{monedasFiltro.length > 0 && ` (${monedasFiltro.length})`}</summary>
+                <div className="pt-comprobante-options" aria-label="Filtrar por monedas">
+                  {catalogos.monedas.map((item) => (
+                    <label key={item.id}>
+                      <input
+                        type="checkbox"
+                        checked={monedasFiltro.includes(String(item.id))}
+                        onChange={(e) => {
+                          setMonedasFiltro((actual) => e.target.checked
+                            ? [...actual, String(item.id)]
+                            : actual.filter((id) => id !== String(item.id)));
+                          setSelected(new Set());
+                        }}
+                      />
+                      {item.nombre}
+                    </label>
+                  ))}
+                </div>
+              </details>
+              <details className="pt-comprobante-filter">
+                <summary>Todos los bancos pago{bancosPagoFiltro.length > 0 && ` (${bancosPagoFiltro.length})`}</summary>
+                <div className="pt-comprobante-options" aria-label="Filtrar por bancos de pago">
+                  {catalogos.bancos.map((item) => (
+                    <label key={item.id}>
+                      <input type="checkbox" checked={bancosPagoFiltro.includes(String(item.id))} onChange={(e) => {
+                        setBancosPagoFiltro((actual) => e.target.checked ? [...actual, String(item.id)] : actual.filter((id) => id !== String(item.id)));
+                        setSelected(new Set());
+                      }} />
+                      {item.nombre}
+                    </label>
+                  ))}
+                </div>
+              </details>
               <details className="pt-comprobante-filter">
                 <summary>
                   Todos los comprobantes
                   {comprobantesFiltro.length > 0 && ` (${comprobantesFiltro.length})`}
                 </summary>
                 <div className="pt-comprobante-options" aria-label="Filtrar por comprobante">
-                     {[...new Set(rowsForFilterOption("comprobante").map((r) => r.comprobante).filter(Boolean))]
-                    .sort((a, b) => a!.localeCompare(b!))
-                    .map((item) => (
-                      <label key={item}>
+                    {catalogos.comprobantes.map((item) => (
+                      <label key={item.id}>
                         <input
                           type="checkbox"
-                          checked={comprobantesFiltro.includes(item!)}
+                          checked={comprobantesFiltro.includes(item.nombre)}
                           onChange={(e) => {
                             setComprobantesFiltro((current) => e.target.checked
-                              ? [...current, item!]
-                              : current.filter((value) => value !== item));
+                              ? [...current, item.nombre]
+                              : current.filter((value) => value !== item.nombre));
                             setSelected(new Set());
                           }}
                         />
-                        {item}
+                        {item.nombre}
                       </label>
                     ))}
                 </div>
@@ -1271,21 +1294,19 @@ export default function PagarTesoreriaV1Page() {
                   {bancosCtaFiltro.length > 0 && ` (${bancosCtaFiltro.length})`}
                 </summary>
                 <div className="pt-comprobante-options" aria-label="Filtrar por banco">
-                   {[...new Set(rowsForFilterOption("banco").map((r) => estado === 4 ? r.bancoCta : r.banco).filter((banco): banco is string => Boolean(banco)))]
-                    .sort((a, b) => a.localeCompare(b))
-                    .map((banco) => (
-                      <label key={banco}>
+                   {catalogos.bancosCuenta.map((item) => (
+                      <label key={item.id}>
                         <input
                           type="checkbox"
-                          checked={bancosCtaFiltro.includes(banco)}
+                          checked={bancosCtaFiltro.includes(item.nombre)}
                           onChange={(e) => {
                             setBancosCtaFiltro((current) => e.target.checked
-                              ? [...current, banco]
-                              : current.filter((value) => value !== banco));
+                              ? [...current, item.nombre]
+                              : current.filter((value) => value !== item.nombre));
                             setSelected(new Set());
                           }}
                         />
-                        {banco}
+                        {item.nombre}
                       </label>
                     ))}
                 </div>
@@ -1303,22 +1324,21 @@ export default function PagarTesoreriaV1Page() {
                     value={busquedaResponsable}
                     onChange={(e) => setBusquedaResponsable(e.target.value)}
                   />
-                   {[...new Set(rowsForFilterOption("responsable").map((r) => r.responsable).filter(Boolean))]
-                    .filter((item) => item!.toLocaleLowerCase().includes(busquedaResponsable.trim().toLocaleLowerCase()))
-                    .sort((a, b) => a!.localeCompare(b!))
+                   {catalogos.responsables
+                    .filter((item) => item.nombre.toLocaleLowerCase().includes(busquedaResponsable.trim().toLocaleLowerCase()))
                     .map((item) => (
-                      <label key={item}>
+                      <label key={item.id}>
                         <input
                           type="checkbox"
-                          checked={responsablesFiltro.includes(item!)}
+                          checked={responsablesFiltro.includes(item.nombre)}
                           onChange={(e) => {
                             setResponsablesFiltro((current) => e.target.checked
-                              ? [...current, item!]
-                              : current.filter((value) => value !== item));
+                              ? [...current, item.nombre]
+                              : current.filter((value) => value !== item.nombre));
                             setSelected(new Set());
                           }}
                         />
-                        {item}
+                        {item.nombre}
                       </label>
                     ))}
                 </div>
@@ -1385,6 +1405,11 @@ export default function PagarTesoreriaV1Page() {
                 {estado === 1 && <option value="serie-view-detalle">Agrupar por serie / view detalle</option>}
               </select>
             </fieldset>
+            {requierePaginacion && (
+              <div className="pt-pagination-notice" role="status">
+                Se encontraron {visibleRows.length.toLocaleString("es-PE")} registros. No se están visualizando todos los datos; agregue filtros de búsqueda para reducir el universo de datos.
+              </div>
+            )}
             <div className="pt-table-wrap" aria-busy={loading}>
               <table className="pt-table">
                 <thead>
@@ -1428,11 +1453,11 @@ export default function PagarTesoreriaV1Page() {
                     </th>
                     <th>Detalle</th>
                     <th>View factura</th>
-                    {(estado === 1 || estado === 9 || estado === 5 || estado === 2) && <th>Banco</th>}
-                    <th>IdBancoCta</th>
+                    {(estado === 1 || estado === 9 || estado === 5 || estado === 2 || estado === 100) && <th>Banco</th>}
                     <th>Cuenta</th>
                     <th>CuentaInter</th>
                     <th>NombreCta</th>
+                    <th>IdBancoCta</th>
                     {estado === 4 && <><th>Serie</th><th>Transferencia</th><th>Banco</th></>}
                     {estado === 1 && <>
                       <th>Anticipo</th><th>NroOperacion</th><th>Comprobante</th><th>TipoPago</th>
@@ -1637,12 +1662,7 @@ export default function PagarTesoreriaV1Page() {
                                 </button>
                               </td>
                               <td><FacturaLink referencia={r.imgFactura} correlativo={r.correlativo} /></td>
-                              {(estado === 1 || estado === 9 || estado === 5 || estado === 2) && <td>{r.banco || "—"}</td>}
-                              <td>
-                                {r.idBancoCta == null
-                                  ? "â€”"
-                                  : `${r.idBancoCta} · ${catalogos.bancos.find((b) => b.id === r.idBancoCta)?.nombre || "Banco no encontrado"}`}
-                              </td>
+                              {(estado === 1 || estado === 9 || estado === 5 || estado === 2 || estado === 100) && <td>{r.banco || "—"}</td>}
                               <td>
                                 {r.cuenta ? (
                                   <button
@@ -1652,7 +1672,7 @@ export default function PagarTesoreriaV1Page() {
                                   >
                                     {r.cuenta}
                                   </button>
-                                ) : "â€”"}
+                                ) : "Ã¢â‚¬â€"}
                               </td>
                               <td>
                                 {r.cuentaInter ? (
@@ -1663,9 +1683,14 @@ export default function PagarTesoreriaV1Page() {
                                   >
                                     {r.cuentaInter}
                                   </button>
-                                ) : "â€”"}
+                                ) : "Ã¢â‚¬â€"}
                               </td>
-                              <td>{r.nombreCta || "â€”"}</td>
+                              <td>{r.nombreCta || "Ã¢â‚¬â€"}</td>
+                              <td>
+                                {r.idBancoCta == null
+                                  ? "Ã¢â‚¬â€"
+                                  : `${r.idBancoCta} · ${catalogos.bancosCuenta.find((b) => b.id === r.idBancoCta)?.nombre || "Banco no encontrado"}`}
+                              </td>
                               {estado === 4 && <><td>{r.serie || "—"}</td><td>{r.transferencia || (r.idTransferencia != null ? String(r.idTransferencia) : "—")}</td><td>{r.banco || (r.idBanco != null ? String(r.idBanco) : "—")}</td></>}
                               {estado === 1 && <PagoRevisionCells row={r} catalogos={catalogos}
                                 permisos={permisosRevision} disabled={saving || loading || !puedePagar}
@@ -1680,13 +1705,13 @@ export default function PagarTesoreriaV1Page() {
             </div>
             <footer className="pt-table-footer">
               <span>Mostrando {pagedRows.length} de {visibleRows.length} registros · Importes en la moneda original del recibo</span>
-              {visibleRows.length > 0 && (
+              {requierePaginacion && (
                 <div className="pt-pagination" aria-label="Paginación de registros">
                   <label>Registros por página
                     <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }} disabled={saving}>
-                      <option value={100}>100</option>
+                      <option value={20}>20</option>
                       <option value={50}>50</option>
-                      <option value={25}>25</option>
+                      <option value={100}>100</option>
                     </select>
                   </label>
                   <button type="button" onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={saving || currentPage <= 1}>Anterior</button>
@@ -1713,6 +1738,7 @@ export default function PagarTesoreriaV1Page() {
                   </button>}
                   {estado === 5 && (
                     <button className="pt-primary" type="submit" form={`pt-stage-${estado}`}
+                      value="programar"
                       disabled={saving || loading || !puedePagar || !selectedRows.length || selectedRows.length > 500}
                       title="Enviar a Programado">
                       Enviar a Programado
@@ -1806,7 +1832,7 @@ export default function PagarTesoreriaV1Page() {
               {programadoSubtab === "resumen" ? (
                 <div className="pt-resumen-content"><div className="pt-paolo-table-wrap"><table className="pt-paolo-table pt-resumen-table"><thead><tr><th>BancoCta</th><th>Moneda</th><th>Suma de TotalPagar</th></tr></thead><tbody>{resumenBancos.map((item) => <tr key={`${item.banco}-${item.moneda}`}><td>{item.banco}</td><td>{item.moneda}</td><td className="pt-paolo-number">{currencySymbol(item.moneda)} {money(item.total)}</td></tr>)}<tr className="pt-paolo-total"><td colSpan={2}>Total general</td><td className="pt-paolo-number">{currencySymbol(resumenBancos[0]?.moneda)} {money(resumenBancos.reduce((total, item) => total + item.total, 0))}</td></tr></tbody></table></div><div className="pt-resumen-bars" aria-label="Montos por banco"><h3>Montos por banco</h3>{resumenBancos.map((item) => { const max = Math.max(...resumenBancos.map((value) => value.total), 1); return <div className="pt-resumen-bar-row" key={`bar-${item.banco}-${item.moneda}`}><span>{item.banco} · {item.moneda}</span><div><i style={{ width: `${(item.total / max) * 100}%` }} /></div><strong>{currencySymbol(item.moneda)} {money(item.total)}</strong></div>; })}</div></div>
               ) : programadoSubtab === "chucky" ? (
-                <div className="pt-paolo-table-wrap"><table className="pt-paolo-table"><thead><tr><th>IdBancoCta · Banco</th><th>Responsable</th><th>Cuenta</th><th>Moneda</th><th>Suma de Total</th></tr></thead><tbody>{chuckyGroups.map((group) => { const id = `${group.label}-${group.moneda}`; const bancoGrupo = group.items[0]?.idBancoCta == null ? "Sin banco" : catalogos.bancos.find((item) => item.id === group.items[0]?.idBancoCta)?.nombre || "Banco no encontrado"; return <Fragment key={id}><tr className="pt-paolo-group-header"><td colSpan={5}><button type="button" onClick={() => setChuckyCollapsed((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; })}>{chuckyCollapsed.has(id) ? "▶" : "▼"} {group.label} · {bancoGrupo} · {group.moneda}</button></td></tr>{!chuckyCollapsed.has(id) && group.items.map((row, i) => { const banco = row.idBancoCta == null ? "Sin banco" : catalogos.bancos.find((item) => item.id === row.idBancoCta)?.nombre || "Banco no encontrado"; return <tr key={`${id}-${row.correlativo}-${i}`}><td>{row.idBancoCta == null ? "Sin banco" : `${row.idBancoCta} · ${banco}`}</td><td>{row.responsable || ""}</td><td>{row.cuenta || ""}</td><td>{row.moneda || ""}</td><td className="pt-paolo-number">{currencySymbol(row.moneda)} {money(row.total)}</td></tr>; })}<tr className="pt-paolo-subtotal"><td colSpan={4}>TOTAL</td><td className="pt-paolo-number">{currencySymbol(group.moneda)} {money(group.total)}</td></tr></Fragment>})}</tbody></table></div>
+                <div className="pt-paolo-table-wrap"><table className="pt-paolo-table"><thead><tr><th>IdBancoCta · Banco</th><th>Responsable</th><th>Cuenta</th><th>Moneda</th><th>Suma de Total</th></tr></thead><tbody>{chuckyGroups.map((group) => { const id = `${group.label}-${group.moneda}`; const bancoGrupo = group.items[0]?.idBancoCta == null ? "Sin banco" : catalogos.bancos.find((item) => item.id === group.items[0]?.idBancoCta)?.nombre || "Banco no encontrado"; return <Fragment key={id}><tr className="pt-paolo-group-header"><td colSpan={5}><button type="button" onClick={() => setChuckyCollapsed((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; })}>{chuckyCollapsed.has(id) ? "â–¶" : "â–¼"} {group.label} · {bancoGrupo} · {group.moneda}</button></td></tr>{!chuckyCollapsed.has(id) && group.items.map((row, i) => { const banco = row.idBancoCta == null ? "Sin banco" : catalogos.bancos.find((item) => item.id === row.idBancoCta)?.nombre || "Banco no encontrado"; return <tr key={`${id}-${row.correlativo}-${i}`}><td>{row.idBancoCta == null ? "Sin banco" : `${row.idBancoCta} · ${banco}`}</td><td>{row.responsable || ""}</td><td>{row.cuenta || ""}</td><td>{row.moneda || ""}</td><td className="pt-paolo-number">{currencySymbol(row.moneda)} {money(row.total)}</td></tr>; })}<tr className="pt-paolo-subtotal"><td colSpan={4}>TOTAL</td><td className="pt-paolo-number">{currencySymbol(group.moneda)} {money(group.total)}</td></tr></Fragment>})}</tbody></table></div>
               ) : programadoSubtab === "paolo" && (
                 <div className="pt-paolo-table-wrap">
                   <table className="pt-paolo-table">
@@ -1814,7 +1840,7 @@ export default function PagarTesoreriaV1Page() {
                     <tbody>
                       {paoloGroups.map((group) => (
                         <Fragment key={group.cliente}>
-                          <tr className="pt-paolo-group-header"><td colSpan={7}><button type="button" onClick={() => setPaoloCollapsed((current) => { const next = new Set(current); if (next.has(`${group.cliente}-${group.moneda}`)) next.delete(`${group.cliente}-${group.moneda}`); else next.add(`${group.cliente}-${group.moneda}`); return next; })}>{paoloCollapsed.has(`${group.cliente}-${group.moneda}`) ? "▶" : "▼"} {group.cliente} · {group.moneda} ({group.items.length})</button></td></tr>
+                          <tr className="pt-paolo-group-header"><td colSpan={7}><button type="button" onClick={() => setPaoloCollapsed((current) => { const next = new Set(current); if (next.has(`${group.cliente}-${group.moneda}`)) next.delete(`${group.cliente}-${group.moneda}`); else next.add(`${group.cliente}-${group.moneda}`); return next; })}>{paoloCollapsed.has(`${group.cliente}-${group.moneda}`) ? "â–¶" : "â–¼"} {group.cliente} · {group.moneda} ({group.items.length})</button></td></tr>
                           {!paoloCollapsed.has(`${group.cliente}-${group.moneda}`) && group.items.map((row, index) => (
                             <tr key={`${group.cliente}-${row.correlativo}-${row.idSite}-${index}`}>
                               <td>{index === 0 ? group.cliente : ""}</td><td>{index === 0 || group.items[index - 1]?.responsable !== row.responsable ? row.responsable || "" : ""}</td><td>{row.tarea || ""}</td><td>{row.solicitante || ""}</td><td>{row.cuenta || ""}</td><td>{row.moneda || ""}</td><td className="pt-paolo-number">{currencySymbol(row.moneda)} {money(row.total)}</td>
@@ -1992,7 +2018,7 @@ export default function PagarTesoreriaV1Page() {
                             onChange={(e) =>
                               setForm((p) => ({ ...p, cheque: e.target.value }))
                             }
-                            placeholder="N.º de cheque"
+                            placeholder="N.Âº de cheque"
                           />
                         </label>
                       )}

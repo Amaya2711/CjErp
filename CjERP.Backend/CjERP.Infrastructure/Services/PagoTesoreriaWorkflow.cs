@@ -7,11 +7,56 @@ namespace CjERP.Infrastructure.Services;
 
 public sealed partial class PagoTesoreriaService
 {
-    public async Task<IEnumerable<dynamic>> ListarConsultaIniAsync(int? idEstado, DateTime? fechaInicio, DateTime? fechaFin, CancellationToken ct)
+    public async Task<IEnumerable<dynamic>> ReporteResumenAsync(DateTime? fechaInicio, DateTime? fechaFin, CancellationToken ct)
     {
         await using var cn = factory.CreateConnection();
         return await cn.QueryAsync(factory.Create(
-            "dbo.sp_Planilla_ConsultaIni", new { IdEstado = idEstado, FechaInicio = fechaInicio, FechaFin = fechaFin }, CommandType.StoredProcedure, ct));
+            "dbo.sp_Planilla_ReporteResumen", new { FechaInicio = fechaInicio, FechaFin = fechaFin }, CommandType.StoredProcedure, ct));
+    }
+
+    public async Task<IEnumerable<dynamic>> ListarConsultaIniAsync(int? correlativo, int? idEstado, int? idCliente, int? tipoMoneda, int? idComprobante, int[]? idBancos, int? idResponsable, int? idSolicitante, DateTime? fechaInicio, DateTime? fechaFin, CancellationToken ct)
+    {
+        await using var cn = factory.CreateConnection();
+        var bancos = idBancos?.Distinct().ToArray();
+        var rows = new List<dynamic>();
+        async Task ConsultarAsync(int? idBanco)
+        {
+            var result = await cn.QueryAsync(factory.Create(
+                "dbo.sp_Planilla_ConsultaIni", new { Correlativo = correlativo, IdEstado = idEstado, IdCliente = idCliente, TipoMoneda = tipoMoneda, IdComprobante = idComprobante, IdBanco = idBanco, IdResponsable = idResponsable, IdSolicitante = idSolicitante, FechaInicio = fechaInicio, FechaFin = fechaFin }, CommandType.StoredProcedure, ct));
+            rows.AddRange(result);
+        }
+        if (bancos is { Length: > 0 })
+            foreach (var banco in bancos) await ConsultarAsync(banco);
+        else
+            await ConsultarAsync(null);
+        var ids = rows
+            .OfType<IDictionary<string, object>>()
+            .Select(row => row.FirstOrDefault(item => string.Equals(item.Key, "Correlativo", StringComparison.OrdinalIgnoreCase) || string.Equals(item.Key, "Corre", StringComparison.OrdinalIgnoreCase)).Value)
+            .Where(value => value is not null && int.TryParse(value!.ToString(), out _))
+            .Select(value => int.Parse(value!.ToString()!))
+            .Distinct()
+            .ToArray();
+        if (ids.Length == 0) return rows;
+
+        // Dapper expande IN @ids a un parámetro por correlativo. SQL Server admite
+        // como máximo 2,100 parámetros por solicitud, por eso se consulta en lotes.
+        var versiones = new Dictionary<int, string>();
+        foreach (var lote in ids.Chunk(1000))
+        {
+            var resultado = await cn.QueryAsync<(int Correlativo, string Version)>(new CommandDefinition($"""
+                SELECT a.Correlativo, {VersionSql} AS Version
+                FROM Planilla a
+                WHERE a.Correlativo IN @ids
+                """, new { ids = lote }, cancellationToken: ct));
+            foreach (var item in resultado) versiones[item.Correlativo] = item.Version;
+        }
+        foreach (var row in rows.OfType<IDictionary<string, object>>())
+        {
+            var value = row.FirstOrDefault(item => string.Equals(item.Key, "Correlativo", StringComparison.OrdinalIgnoreCase) || string.Equals(item.Key, "Corre", StringComparison.OrdinalIgnoreCase)).Value;
+            if (value is not null && int.TryParse(value.ToString(), out var id) && versiones.TryGetValue(id, out var version))
+                row["Version"] = version;
+        }
+        return rows;
     }
     // La misma huella se entrega al consultar y se compara bajo bloqueo antes de escribir.
     private const string VersionSql = """

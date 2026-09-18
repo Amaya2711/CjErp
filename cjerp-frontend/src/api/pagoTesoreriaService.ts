@@ -1,6 +1,7 @@
 import httpClient from "./httpClient";
 
 export type PagoTesoreriaRow = {
+  cantidadRegistros?: number;
   idAnticipo: number | null;
   correlativo: number;
   idSite: string;
@@ -60,10 +61,13 @@ export type PagoOpcion = {
   porcentaje?: number | null;
 };
 export type PagoCatalogos = {
+  clientes: PagoOpcion[];
   anticipos: PagoOpcion[];
   estados: PagoOpcion[];
   ejecutores: PagoOpcion[];
+  responsables: PagoOpcion[];
   bancos: PagoOpcion[];
+  bancosCuenta: PagoOpcion[];
   transferencias: PagoOpcion[];
   monedas: PagoOpcion[];
   retenciones: PagoOpcion[];
@@ -116,17 +120,21 @@ export const listarPagosTesoreria = (
   hasta: string,
   signal?: AbortSignal,
   correlativo?: number,
+  idBancos?: number[],
 ) =>
   httpClient.get<PagoTesoreriaRow[]>(url, {
-    params: { estado, desde: desde || undefined, hasta: hasta || undefined, correlativo: correlativo || undefined },
+    params: { estado, desde: desde || undefined, hasta: hasta || undefined, correlativo: correlativo || undefined, idBancos: idBancos?.length ? idBancos.join(",") : undefined },
     signal,
     timeout: 90000,
   });
-export const listarPagosTesoreriaV1 = (estado: number, _desde = "", _hasta = "", signal?: AbortSignal, correlativoFiltro?: number, idEstadoFiltro?: number) =>
-  httpClient.get<Record<string, unknown>[]>(`${url}/v1`, { params: { idEstado: estado === 100 ? idEstadoFiltro : estado, fechaInicio: _desde || undefined, fechaFin: _hasta || undefined }, signal, timeout: 90000 }).then((rows) => (Array.isArray(rows) ? rows : []).map((raw) => { const r = new Proxy(raw, { get: (target, prop: string) => target[prop] ?? target[Object.keys(target).find((key) => key.toLowerCase() === prop.toLowerCase()) ?? ""] }); return ({
+export type PagoBusquedaFiltros = { idCliente?: number; tipoMoneda?: number; idComprobante?: number; idBancos?: number[]; idResponsable?: number; idSolicitante?: number };
+export const listarPagosTesoreriaV1 = (estado: number, _desde = "", _hasta = "", signal?: AbortSignal, correlativoFiltro?: number, idEstadoFiltro?: number, filtros: PagoBusquedaFiltros = {}) =>
+  httpClient.get<Record<string, unknown>[]>(`${url}/v1`, { params: { correlativo: correlativoFiltro || undefined, idEstado: estado === 100 ? idEstadoFiltro : estado, fechaInicio: _desde || undefined, fechaFin: _hasta || undefined, ...filtros, idBancos: filtros.idBancos?.length ? filtros.idBancos.join(",") : undefined }, signal, timeout: 90000 }).then((rows) => (Array.isArray(rows) ? rows : []).map((raw) => { const r = new Proxy(raw, { get: (target, prop: string) => target[prop] ?? target[Object.keys(target).find((key) => key.toLowerCase() === prop.toLowerCase()) ?? ""] }); return ({
     ...r,
-    correlativo: Number(r.Corre ?? r.correlativo ?? 0), idSite: String(r.IdSite ?? r.idSite ?? ""), estado: Number(r.Estado ?? r.estado ?? 0), tipoMoneda: Number(r.TipoMoneda ?? r.tipoMoneda ?? 0), idResponsable: Number(r.IdResponsable ?? 0), idAnticipo: r.IdAnticipo == null ? null : Number(r.IdAnticipo), fecha: String(r.FecIngreso ?? ""), fechaDeposito: String(r.FechaDeposito ?? ""), ot: String(r.Ot ?? ""), responsable: String(r.Responsable ?? r.NomResponsable ?? ""), solicitante: String(r.Solicitante ?? ""), cliente: String(r.Cliente ?? ""), proyecto: String(r.NombreProyecto ?? ""), site: String(r.Site ?? ""), tipoTrabajo: String(r.Tipo_Trabajo ?? ""), tarea: String(r.Tarea ?? ""), comprobante: String(r.Comprobante ?? ""), moneda: String(r.Moneda ?? ""), subtotal: Number(r.Subtotal ?? 0), igv: Number(r.IGV ?? 0), total: Number(r.Total ?? 0), montoRetencion: Number(r.MontoRetencion ?? 0), totalPagar: Number(r.TotalPagar ?? 0), detalle: String(r.Detalle ?? ""), serie: String(r.Serie ?? ""), banco: String(r.Banco ?? ""), bancoCta: String(r.BancoCta ?? ""), transferencia: String(r.Transferencia ?? ""), nroOperacion: String(r.NroOperacion ?? ""), cheque: String(r.IdCheque ?? ""), comentarioAdicional: String(r.Comentario ?? ""), idComprobante: r.IdComprobante == null ? null : Number(r.IdComprobante), idTipoPago: r.IdTipoPago == null ? null : Number(r.IdTipoPago), ruc: String(r.RUC ?? ""), fecEmision: String(r.FecEmision ?? ""), idRendicion: r.IdRendicion == null ? null : Number(r.IdRendicion), rendicion: String(r.Rendicion ?? ""), idRetencion: r.IdRetencion == null ? null : Number(r.IdRetencion), idBanco: r.IdBanco == null ? null : Number(r.IdBanco), idBancoCta: r.IdBancoCta == null ? null : Number(r.IdBancoCta), cuenta: String(r.Cuenta ?? ""), cuentaInter: String(r.CuentaInter ?? ""), nombreCta: String(r.NombreCta ?? ""), idMoneda2: r.IdMoneda2 == null ? null : Number(r.IdMoneda2), idTransferencia: r.IdTransferencia == null ? null : Number(r.IdTransferencia), revisionPm: String(r.RevisionPm ?? ""), revisionPmAprobar: String(r.RevisionPmAprobar ?? ""), fechaRevisionAprobar: String(r.FechaReAprobador ?? ""), fechaRevision: String(r.FechaAprobador ?? ""), observacion: String(r.Observacion ?? ""), imgFactura: String(r.imgfactura ?? r.ImgFactura ?? ""), version: "v1",
+    correlativo: Number(r.Corre ?? r.correlativo ?? 0), idSite: String(r.IdSite ?? r.idSite ?? ""), estado: Number(r.Estado ?? r.estado ?? 0), tipoMoneda: Number(r.TipoMoneda ?? r.tipoMoneda ?? 0), idResponsable: Number(r.IdResponsable ?? 0), idAnticipo: r.IdAnticipo == null ? null : Number(r.IdAnticipo), fecha: String(r.FecIngreso ?? ""), fechaDeposito: String(r.FechaDeposito ?? ""), ot: String(r.Ot ?? ""), responsable: String(r.Responsable ?? r.NomResponsable ?? ""), solicitante: String(r.Solicitante ?? ""), cliente: String(r.Cliente ?? ""), proyecto: String(r.NombreProyecto ?? ""), site: String(r.Site ?? ""), tipoTrabajo: String(r.Tipo_Trabajo ?? ""), tarea: String(r.Tarea ?? ""), comprobante: String(r.Comprobante ?? ""), moneda: String(r.Moneda ?? ""), subtotal: Number(r.Subtotal ?? 0), igv: Number(r.IGV ?? 0), total: Number(r.Total ?? 0), montoRetencion: Number(r.MontoRetencion ?? 0), totalPagar: Number(r.TotalPagar ?? 0), detalle: String(r.Detalle ?? ""), serie: String(r.Serie ?? ""), banco: String(r.Banco ?? ""), bancoCta: String(r.BancoCta ?? ""), transferencia: String(r.Transferencia ?? ""), nroOperacion: String(r.NroOperacion ?? ""), cheque: String(r.IdCheque ?? ""), comentarioAdicional: String(r.Comentario ?? ""), idComprobante: r.IdComprobante == null ? null : Number(r.IdComprobante), idTipoPago: r.IdTipoPago == null ? null : Number(r.IdTipoPago), ruc: String(r.RUC ?? ""), fecEmision: String(r.FecEmision ?? ""), idRendicion: r.IdRendicion == null ? null : Number(r.IdRendicion), rendicion: String(r.Rendicion ?? ""), idRetencion: r.IdRetencion == null ? null : Number(r.IdRetencion), idBanco: r.IdBanco == null ? null : Number(r.IdBanco), idBancoCta: r.IdBancoCta == null ? null : Number(r.IdBancoCta), cuenta: String(r.Cuenta ?? ""), cuentaInter: String(r.CuentaInter ?? ""), nombreCta: String(r.NombreCta ?? ""), idMoneda2: r.IdMoneda2 == null ? null : Number(r.IdMoneda2), idTransferencia: r.IdTransferencia == null ? null : Number(r.IdTransferencia), revisionPm: String(r.RevisionPm ?? ""), revisionPmAprobar: String(r.RevisionPmAprobar ?? ""), fechaRevisionAprobar: String(r.FechaReAprobador ?? ""), fechaRevision: String(r.FechaAprobador ?? ""), observacion: String(r.Observacion ?? ""), imgFactura: String(r.imgfactura ?? r.ImgFactura ?? ""), version: String(r.Version ?? r.version ?? ""),
   } as PagoTesoreriaRow); }).filter((r) => !correlativoFiltro || r.correlativo === correlativoFiltro));
+export const obtenerReporteResumenTesoreria = (fechaInicio = "", fechaFin = "", signal?: AbortSignal) =>
+  httpClient.get<Record<string, unknown>[]>(`${url}/reporte-resumen`, { params: { fechaInicio: fechaInicio || undefined, fechaFin: fechaFin || undefined }, signal });
 export const obtenerCuentasPago = (
   idResponsable: number,
   signal?: AbortSignal,

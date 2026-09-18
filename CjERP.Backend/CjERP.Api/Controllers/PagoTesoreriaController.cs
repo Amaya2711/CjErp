@@ -37,10 +37,17 @@ public sealed class PagoTesoreriaController(PagoTesoreriaService service, ISegMe
     }
 
     [HttpGet("v1")]
-    public async Task<IActionResult> ListarV1([FromQuery] int? idEstado = null, [FromQuery] DateTime? fechaInicio = null, [FromQuery] DateTime? fechaFin = null, CancellationToken ct = default)
+    public async Task<IActionResult> ListarV1([FromQuery] int? correlativo = null, [FromQuery] int? idEstado = null, [FromQuery] int? idCliente = null, [FromQuery] int? tipoMoneda = null, [FromQuery] int? idComprobante = null, [FromQuery] string? idBancos = null, [FromQuery] int? idResponsable = null, [FromQuery] int? idSolicitante = null, [FromQuery] DateTime? fechaInicio = null, [FromQuery] DateTime? fechaFin = null, CancellationToken ct = default)
     {
         if (!await PuedeAsync()) return SinAcceso();
-        return Ok(await service.ListarConsultaIniAsync(idEstado, fechaInicio, fechaFin, ct));
+        return Ok(await service.ListarConsultaIniAsync(correlativo, idEstado, idCliente, tipoMoneda, idComprobante, ParseIds(idBancos), idResponsable, idSolicitante, fechaInicio, fechaFin, ct));
+    }
+
+    [HttpGet("reporte-resumen")]
+    public async Task<IActionResult> ReporteResumen([FromQuery] DateTime? fechaInicio = null, [FromQuery] DateTime? fechaFin = null, CancellationToken ct = default)
+    {
+        if (!await PuedeAsync()) return SinAcceso();
+        return Ok(await service.ReporteResumenAsync(fechaInicio, fechaFin, ct));
     }
 
     [HttpPut("revision")]
@@ -112,11 +119,22 @@ public sealed class PagoTesoreriaController(PagoTesoreriaService service, ISegMe
     };
 
     [HttpGet]
-    public async Task<IActionResult> Listar([FromQuery] int estado = 5, [FromQuery] DateTime? desde = null, [FromQuery] DateTime? hasta = null, [FromQuery] int? correlativo = null, CancellationToken ct = default)
+    public async Task<IActionResult> Listar([FromQuery] int estado = 5, [FromQuery] DateTime? desde = null, [FromQuery] DateTime? hasta = null, [FromQuery] int? correlativo = null, [FromQuery] string? idBancos = null, CancellationToken ct = default)
     {
         if (!await PuedeAsync()) return SinAcceso();
-        try { return Ok(await service.ListarAsync(estado, desde, hasta, correlativo, ct)); }
+        try { return Ok(await service.ListarAsync(estado, desde, hasta, correlativo, ParseIds(idBancos), ct)); }
         catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+
+    private static int[]? ParseIds(string? values)
+    {
+        if (string.IsNullOrWhiteSpace(values)) return null;
+        var ids = values.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(value => int.TryParse(value, out var id) ? id : -1)
+            .Where(id => id >= 0)
+            .Distinct()
+            .ToArray();
+        return ids.Length == 0 ? null : ids;
     }
 
     [HttpGet("cuentas/{responsable:int}")]

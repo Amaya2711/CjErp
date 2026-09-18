@@ -12,18 +12,43 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
     {
         await using var cn = factory.CreateConnection();
         var ejecutores = await cn.QueryAsync(factory.Create("SELECT IdEmpleado AS Id, NombreEmpleado AS Nombre FROM Empleado WHERE IdCargo=14 AND IdEstado=1 ORDER BY NombreEmpleado", cancellationToken: ct));
-        var constantes = (await cn.QueryAsync(factory.Create("SELECT Correlativo AS Id, ValorIni AS Nombre, TRY_CONVERT(decimal(18,4),ValorFin) AS Porcentaje, Campo FROM Constante WHERE Sociedad='PE01' AND Programa='PLANTILLA' AND Campo IN ('TIPO_TRANSFERENCIA','TIPO_MONEDA','TIPO_COMPROBANTE','TIPO_PAGO','RENDICION','DETRACCION') AND Correlativo>=0 ORDER BY Correlativo", cancellationToken: ct))).ToList();
+        var responsables = (await cn.QueryAsync<EmpleadoCtaDto>(factory.Create(
+            "sp_Empleado_Cta_Listar", null, CommandType.StoredProcedure, ct)))
+            .Where(x => x.IdEmpleado > 0 && !string.IsNullOrWhiteSpace(x.NombreEmpleado))
+            .GroupBy(x => x.IdEmpleado)
+            .Select(group => new { Id = group.Key, Nombre = group.First().NombreEmpleado.Trim() })
+            .OrderBy(x => x.Nombre)
+            .ToList();
+        var constantes = (await cn.QueryAsync(factory.Create("SELECT Correlativo AS Id, ValorIni AS Nombre, TRY_CONVERT(decimal(18,4),ValorFin) AS Porcentaje, Campo FROM Constante WHERE Sociedad='PE01' AND Programa='PLANTILLA' AND Campo IN ('TIPO_TRANSFERENCIA','TIPO_PAGO','RENDICION','DETRACCION') AND Correlativo>=0 ORDER BY Correlativo", cancellationToken: ct))).ToList();
         // El catálogo del banco asociado a la cuenta se obtiene por el procedimiento vigente.
         var bancos = (await cn.QueryAsync<ConstanteBanco>(factory.Create(
             "sp_Constante_ListarPorCampo", new { Campo = "banco" }, CommandType.StoredProcedure, ct)))
             .Select(x => new { Id = x.Correlativo, Nombre = x.ValorIni ?? "" })
             .Where(x => x.Id >= 0)
             .ToList();
+        var bancosCuenta = (await cn.QueryAsync<ConstanteBanco>(factory.Create(
+            "sp_Constante_ListarPorCampo", new { Campo = "banco_emp" }, CommandType.StoredProcedure, ct)))
+            .Select(x => new { Id = x.Correlativo, Nombre = x.ValorIni ?? "" })
+            .Where(x => x.Id >= 0 && !string.IsNullOrWhiteSpace(x.Nombre))
+            .ToList();
+        var monedas = (await cn.QueryAsync<ConstanteBanco>(factory.Create(
+            "sp_Constante_ListarPorCampo", new { Campo = "tipo_moneda" }, CommandType.StoredProcedure, ct)))
+            .Select(x => new { Id = x.Correlativo, Nombre = x.ValorIni ?? "" })
+            .Where(x => x.Id >= 0 && !string.IsNullOrWhiteSpace(x.Nombre))
+            .ToList();
+        var comprobantes = (await cn.QueryAsync<ConstanteBanco>(factory.Create(
+            "sp_Constante_ListarPorCampo", new { Campo = "tipo_comprobante" }, CommandType.StoredProcedure, ct)))
+            .Select(x => new { Id = x.Correlativo, Nombre = x.ValorIni ?? "" })
+            .Where(x => x.Id >= 0 && !string.IsNullOrWhiteSpace(x.Nombre))
+            .ToList();
+        var clientes = (await cn.QueryAsync<ClienteCatalogo>(factory.Create("dbo.sp_Listar_Cliente", null, CommandType.StoredProcedure, ct)))
+            .Where(x => x.IdCliente.HasValue && !string.IsNullOrWhiteSpace(x.NombreCliente))
+            .Select(x => new { Id = x.IdCliente!.Value, Nombre = x.NombreCliente! }).ToList();
         var maestros = (await cn.QueryAsync(factory.Create("SELECT Correlativo AS Id, ValorIni AS Nombre, Campo FROM Constante WHERE Sociedad='PE01' AND Programa='MAESTRO' AND Campo IN ('ANTICIPO','ESTADO') AND Correlativo>=0 ORDER BY Correlativo", cancellationToken: ct))).ToList();
-        return new { ejecutores, anticipos = maestros.Where(x => x.Campo == "ANTICIPO"), estados = maestros.Where(x => x.Campo == "ESTADO"), bancos, transferencias = constantes.Where(x => x.Campo == "TIPO_TRANSFERENCIA"), monedas = constantes.Where(x => x.Campo == "TIPO_MONEDA"), comprobantes = constantes.Where(x => x.Campo == "TIPO_COMPROBANTE"), tiposPago = constantes.Where(x => x.Campo == "TIPO_PAGO"), rendiciones = constantes.Where(x => x.Campo == "RENDICION"), retenciones = constantes.Where(x => string.Equals((string)x.Campo,"DETRACCION",StringComparison.OrdinalIgnoreCase)) };
+        return new { ejecutores, responsables, clientes, anticipos = maestros.Where(x => x.Campo == "ANTICIPO"), estados = maestros.Where(x => x.Campo == "ESTADO"), bancos, bancosCuenta, transferencias = constantes.Where(x => x.Campo == "TIPO_TRANSFERENCIA"), monedas, comprobantes, tiposPago = constantes.Where(x => x.Campo == "TIPO_PAGO"), rendiciones = constantes.Where(x => x.Campo == "RENDICION"), retenciones = constantes.Where(x => string.Equals((string)x.Campo,"DETRACCION",StringComparison.OrdinalIgnoreCase)) };
     }
 
-    public async Task<object> ListarAsync(int estado, DateTime? desde, DateTime? hasta, int? correlativo, CancellationToken ct)
+    public async Task<object> ListarAsync(int estado, DateTime? desde, DateTime? hasta, int? correlativo, int[]? idBancos, CancellationToken ct)
     {
         if (estado is not (0 or 1 or 9 or 8 or 5 or 4 or 2 or 100)) throw new ArgumentException("Estado de consulta inválido.");
         if (desde > hasta) throw new ArgumentException("La fecha inicial no puede superar la final.");
@@ -63,11 +88,12 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
             LEFT JOIN Constante ban ON ban.Sociedad='PE01' AND ban.Programa='PLANTILLA' AND ban.Campo='BANCO' AND ban.Correlativo=a.IdBanco
             LEFT JOIN Constante bcta ON bcta.Sociedad='PE01' AND bcta.Programa='PLANTILLA' AND bcta.Campo='BANCO_EMP' AND bcta.Correlativo=a.IdBancoCta
             LEFT JOIN Constante trans ON trans.Sociedad='PE01' AND trans.Programa='PLANTILLA' AND trans.Campo='TIPO_TRANSFERENCIA' AND trans.Correlativo=a.IdTransferencia
-            WHERE (@estado=100 AND (@correlativo IS NULL OR a.Correlativo=@correlativo)) OR (@estado<>100 AND (a.Estado=@estado OR (@estado=2 AND a.Estado=7)))
+            WHERE ((@estado=100 AND (@correlativo IS NULL OR a.Correlativo=@correlativo)) OR (@estado<>100 AND (a.Estado=@estado OR (@estado=2 AND a.Estado=7))))
+                AND (@filtrarBancos=0 OR a.IdBanco IN @idBancos)
                 AND (@desde IS NULL OR (CASE WHEN @estado=4 THEN fechas.Deposito ELSE fechas.Ingreso END)>=@desde)
                 AND (@hasta IS NULL OR (CASE WHEN @estado=4 THEN fechas.Deposito ELSE fechas.Ingreso END)<=@hasta)
             ORDER BY a.Correlativo DESC
-            """, new { estado, correlativo, desde = desde?.Date, hasta = hasta?.Date }, cancellationToken: ct));
+            """, new { estado, correlativo, idBancos = idBancos ?? Array.Empty<int>(), filtrarBancos = idBancos is { Length: > 0 } ? 1 : 0, desde = desde?.Date, hasta = hasta?.Date }, cancellationToken: ct));
     }
 
     public async Task<object> CuentasAsync(int responsable, CancellationToken ct)
@@ -182,5 +208,11 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
     {
         public int Correlativo { get; set; }
         public string? ValorIni { get; set; }
+    }
+
+    private sealed class ClienteCatalogo
+    {
+        public int? IdCliente { get; set; }
+        public string? NombreCliente { get; set; }
     }
 }
