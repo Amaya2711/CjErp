@@ -851,9 +851,14 @@ function normalizeDateForInput(dateStr?: string | null): string {
 
   const slashMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T].*)?$/.exec(value);
   if (slashMatch) {
-    const day = Number(slashMatch[1]);
-    const month = Number(slashMatch[2]);
+    const first = Number(slashMatch[1]);
+    const second = Number(slashMatch[2]);
     const year = slashMatch[3];
+    // SQL/Dapper puede serializar fechas como MM/dd/yyyy (por ejemplo,
+    // 09/18/2026 para FecEmision), mientras que otros stores usan dd/MM/yyyy.
+    // El valor mayor que 12 identifica sin ambigüedad el día.
+    const month = first > 12 ? second : first;
+    const day = first > 12 ? first : second;
 
     if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
       return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
