@@ -1440,7 +1440,10 @@ export default function PagosV1Page() {
         const fechaInicio = formatDateParam(appliedFilters.fechaDesde);
         const fechaFin = formatDateParam(appliedFilters.fechaHasta);
         const textoBusqueda = appliedFilters.query.trim();
-        const buscarEnTotal = Boolean(textoBusqueda);
+        const correlativo = appliedFilters.correlativo.trim();
+        const correlativoNumero = Number(correlativo);
+        const buscarPorCorrelativo = Number.isInteger(correlativoNumero) && correlativoNumero > 0;
+        const buscarEnTotal = Boolean(textoBusqueda) || buscarPorCorrelativo;
         const tieneFiltroFechas = Boolean(fechaInicio || fechaFin);
 
         let nextRowsByTab: Record<PagoTabKey, PagoRow[]>;
@@ -1453,6 +1456,10 @@ export default function PagosV1Page() {
         // Total órdenes no limita estados: las bandejas operativas se forman
         // localmente y el resumen conserva también, por ejemplo, estado 1.
         const parametros: PlanillaConsultaParametro[] = [];
+
+        if (buscarPorCorrelativo) {
+          parametros.push({ nombre: "Correlativo", valor: String(correlativoNumero), tipo: "int" });
+        }
 
         // La búsqueda rápida se resuelve en Planilla sobre todos los registros,
         // sin restringirla al rango que estaba cargado antes en el navegador.
@@ -1531,7 +1538,7 @@ export default function PagosV1Page() {
       cancelled = true;
       controller.abort();
     };
-  }, [appliedFilters.fechaDesde, appliedFilters.fechaHasta, appliedFilters.query, refreshTick, runTrackedRequest]);
+  }, [appliedFilters.fechaDesde, appliedFilters.fechaHasta, appliedFilters.query, appliedFilters.correlativo, refreshTick, runTrackedRequest]);
 
   const activeRows = useMemo(
     () => (activeTab === "resumen" ? rowsByTab.resumen : rowsByTab[activeTab]),
@@ -2862,6 +2869,24 @@ export default function PagosV1Page() {
                         <option key={codigo} value={codigo}>{codigo} - {nombre}</option>
                       ))}
                     </select>
+                  </div>
+                  <div style={styles.quickDateField}>
+                    <span style={styles.quickDateLabel}>Correlativo (ID)</span>
+                    <input
+                      type="search"
+                      inputMode="numeric"
+                      value={filters.correlativo}
+                      onChange={(event) => setFilters((prev) => ({ ...prev, correlativo: event.target.value.replace(/\D/g, "") }))}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          handleApplyFilters();
+                        }
+                      }}
+                      placeholder="Ej. 130918"
+                      style={{ ...styles.quickDateInput, borderColor: currentTheme.border }}
+                      aria-label="Filtrar por correlativo"
+                    />
                   </div>
                   <details style={styles.multiFilter}>
                     <summary style={{ ...styles.multiFilterSummary, borderColor: currentTheme.border }}>
