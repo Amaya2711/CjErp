@@ -1304,6 +1304,7 @@ export default function PagosV1Page() {
   const [isHistorialPopupOpen, setIsHistorialPopupOpen] = useState(false);
   const [isHistorialOcPopupOpen, setIsHistorialOcPopupOpen] = useState(false);
   const [message, setMessage] = useState<string>("");
+  const [gastoPanelUrl, setGastoPanelUrl] = useState<string | null>(null);
   const [rechazoModal, setRechazoModal] = useState<RechazoModalState | null>(null);
   const [observacionModal, setObservacionModal] = useState<ObservacionModalState | null>(null);
   const [aprobarConfirm, setAprobarConfirm] = useState<AprobarConfirmState | null>(null);
@@ -2361,7 +2362,7 @@ export default function PagosV1Page() {
       return;
     }
 
-    window.location.assign(`/finanzas/tesoreria/gastos?correlativo=${correlativo}&modo=${modo}`);
+    setGastoPanelUrl(`/finanzas/tesoreria/gastos?correlativo=${correlativo}&modo=${modo}`);
   };
 
   const handleClearFilters = () => {
@@ -4004,6 +4005,34 @@ export default function PagosV1Page() {
                   </table>
                 </div>
               </div>
+            </div>
+          </div>
+        ) : null}
+        {gastoPanelUrl ? (
+          <div
+            role="presentation"
+            onClick={() => setGastoPanelUrl(null)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 90,
+              background: "rgba(15, 23, 42, 0.48)",
+              display: "flex",
+              justifyContent: "flex-end",
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Gasto"
+              onClick={(event) => event.stopPropagation()}
+              style={{ width: "min(100%, 960px)", height: "100%", background: "#FFFFFF", boxShadow: "-12px 0 36px rgba(15, 23, 42, 0.22)", display: "flex", flexDirection: "column" }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", borderBottom: "1px solid #E2E8F0" }}>
+                <strong style={{ color: "#1E293B" }}>Gasto</strong>
+                <button type="button" onClick={() => setGastoPanelUrl(null)} style={{ ...styles.slimActionButton, color: "#475569", borderColor: "#CBD5E1" }}>Cerrar</button>
+              </div>
+              <iframe title="Formulario de gasto" src={gastoPanelUrl} style={{ width: "100%", flex: 1, border: 0 }} />
             </div>
           </div>
         ) : null}
