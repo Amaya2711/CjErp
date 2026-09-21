@@ -44,6 +44,10 @@ public interface IOrdenCompraService
         OrdenCompraRecibosRequestDto request,
         CancellationToken cancellationToken = default);
 
+    Task<OrdenCompraConsumoDto?> BuscarConsumoAsync(
+        OrdenCompraRecibosRequestDto request,
+        CancellationToken cancellationToken = default);
+
     Task<OrdenCompraPdfResultDto> GenerarPdfAsync(
         int idOc,
         CancellationToken cancellationToken = default);

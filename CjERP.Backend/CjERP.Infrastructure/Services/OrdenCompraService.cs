@@ -232,6 +232,30 @@ public class OrdenCompraService : IOrdenCompraService
         WHERE ISNULL(f.IdEstado, 0) <> 6
         ORDER BY f.TipoTrabajo, f.IdOc, f.Fila;
         """;
+    private const string BuscarConsumoOcSql = """
+        SELECT TOP (1)
+            cab.IdOc,
+            @Fila AS Fila,
+            COALESCE(cab.Subtotal, 0) AS TotalOc,
+            COALESCE((
+                SELECT SUM(COALESCE(p.Subtotal, 0))
+                FROM dbo.Planilla p
+                WHERE TRY_CONVERT(INT, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), p.IdOc))), '')) = @IdOc
+                  AND (@Fila IS NULL OR p.Fila = @Fila)
+                  AND p.Estado = 4
+            ), 0) AS PagadoOc
+        FROM dbo.CabOrdenCompra cab
+        WHERE cab.IdOc = @IdOc
+          AND (
+              @Fila IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM dbo.DetOrdenCompra det
+                  WHERE det.IdOc = cab.IdOc
+                    AND det.Fila = @Fila
+              )
+          );
+        """;
     private readonly ISqlCommandFactory _sqlCommandFactory;
 
     public OrdenCompraService(ISqlCommandFactory sqlCommandFactory)
@@ -632,6 +656,20 @@ public class OrdenCompraService : IOrdenCompraService
         return await connection.QueryAsync<OrdenCompraMontoOcDto>(
             _sqlCommandFactory.Create(
                 BuscarMontoOcSql,
+                new { request.IdOc, request.Fila },
+                CommandType.Text,
+                cancellationToken,
+                commandTimeout: 120));
+    }
+
+    public async Task<OrdenCompraConsumoDto?> BuscarConsumoAsync(
+        OrdenCompraRecibosRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        return await connection.QueryFirstOrDefaultAsync<OrdenCompraConsumoDto>(
+            _sqlCommandFactory.Create(
+                BuscarConsumoOcSql,
                 new { request.IdOc, request.Fila },
                 CommandType.Text,
                 cancellationToken,

@@ -719,7 +719,9 @@ WHERE Correlativo IN @Correlativos";
                         "IdProyecto",
                         "IdSite",
                         "Correlativo",
-                        "TipoTrabajo"
+                        "TipoTrabajo",
+                        "IdOc",
+                        "Fila"
                     };
 
                     return parametros.Where(parametro =>

@@ -428,6 +428,20 @@ public class OrdenCompraController : ControllerBase
         }
     }
 
+    [HttpGet("consumo")]
+    public async Task<IActionResult> BuscarConsumo(
+        [FromQuery] OrdenCompraRecibosRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (request.IdOc <= 0)
+        {
+            return BadRequest(new { success = false, message = "Debe indicar una OC válida." });
+        }
+
+        var data = await _ordenCompraService.BuscarConsumoAsync(request, cancellationToken);
+        return Ok(new { success = true, message = "ok", data });
+    }
+
     [HttpGet("{idOc:int}/pdf")]
     public async Task<IActionResult> DescargarPdf(int idOc, CancellationToken cancellationToken)
     {

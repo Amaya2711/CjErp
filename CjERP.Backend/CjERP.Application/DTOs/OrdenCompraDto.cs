@@ -228,6 +228,14 @@ public class OrdenCompraMontoOcDto
     public string Solicitante { get; set; } = string.Empty;
 }
 
+public class OrdenCompraConsumoDto
+{
+    public int IdOc { get; set; }
+    public int? Fila { get; set; }
+    public decimal TotalOc { get; set; }
+    public decimal PagadoOc { get; set; }
+}
+
 public class OrdenCompraPdfMetadataDto
 {
     public DateTime? FechaOrden { get; set; }

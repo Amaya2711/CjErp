@@ -34,6 +34,14 @@ namespace CjERP.Api.Controllers
             "Correlativo",
             "TipoTrabajo"
         ];
+        private static readonly string[] RequiredParametersImportarResumenOTSinOt =
+        [
+            "IdCliente",
+            "IdProyecto",
+            "IdSite",
+            "Correlativo",
+            "TipoTrabajo"
+        ];
         private static readonly string[] RequiredParametersPagadosDashboard = [];
         private static readonly string[] RequiredParametersImportarConsultaDsh = [];
         private static readonly string[] RequiredParametersMovimientosGastosIngresos = [];
@@ -102,7 +110,9 @@ namespace CjERP.Api.Controllers
                 : string.Equals(consulta, "movimientos-gastos-ingresos", StringComparison.OrdinalIgnoreCase)
                             ? RequiredParametersMovimientosGastosIngresos
                         : string.Equals(consulta, "importar-resumen-ot", StringComparison.OrdinalIgnoreCase)
-                            ? RequiredParametersImportarResumenOT
+                            ? (providedNames.Contains("OT")
+                                ? RequiredParametersImportarResumenOT
+                                : RequiredParametersImportarResumenOTSinOt)
                 : string.Equals(consulta, "pagos-v1", StringComparison.OrdinalIgnoreCase)
                     ? RequiredParametersPagosV1
                 : RequiredParameters;
