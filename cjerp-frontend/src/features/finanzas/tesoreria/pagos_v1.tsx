@@ -92,6 +92,7 @@ type PagoRow = {
   detalle: string;
   idOc?: string;
   documento: string;
+  planillaRow?: Record<string, unknown>;
 };
 
 type TabTheme = {
@@ -1018,6 +1019,7 @@ function mapPlanillaConsultaRowToPagoRow(
     detalle: getRecordString(row, "Detalle", "detalle"),
     idOc: getRecordString(row, "IdOc", "IdOC", "Idoc", "OC", "Oc"),
     documento: getRecordString(row, "Documento", "documento"),
+    planillaRow: row,
   };
 }
 
@@ -2385,7 +2387,7 @@ export default function PagosV1Page() {
       return;
     }
 
-    setGastoEditorRequest({ correlativo, mode: modo });
+    setGastoEditorRequest({ correlativo, mode: modo, planillaRow: row.planillaRow });
   };
 
   const handleClearFilters = () => {

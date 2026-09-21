@@ -138,6 +138,8 @@ type GastoForm = {
 export type GastoEditorRequest = {
   correlativo: number;
   mode: "ver" | "editar";
+  /** Registro de Planilla ya obtenido por la pantalla invocadora. */
+  planillaRow?: Record<string, unknown>;
 };
 
 type GastosPageProps = {
@@ -2276,6 +2278,24 @@ export default function GastosPage({
     }
 
     if (externalEditorRequestKeyRef.current === requestKey) {
+      return;
+    }
+
+    const gastoDesdeOrigen = editorRequest.planillaRow
+      ? mapGastoDtoToView(mapPlanillaConsultaRowToGastoDto(editorRequest.planillaRow, 0))
+      : null;
+
+    if (gastoDesdeOrigen && Number(gastoDesdeOrigen.id) === correlativo) {
+      externalEditorRequestKeyRef.current = requestKey;
+      setExternalEditorLoading(false);
+      setExternalEditorError(null);
+
+      if (editorRequest.mode === "ver") {
+        abrirVisualizarRef.current(gastoDesdeOrigen);
+      } else {
+        abrirEditarRef.current(gastoDesdeOrigen);
+      }
+
       return;
     }
 
