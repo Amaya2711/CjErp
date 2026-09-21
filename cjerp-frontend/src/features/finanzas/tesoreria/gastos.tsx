@@ -205,7 +205,7 @@ type GastosHeaderFilters = {
 
 const GASTOS_HEADER_FILTERS_INITIAL: GastosHeaderFilters = {
   id: "",
-  fechaInicio: obtenerPrimerDiaMesActual(),
+  fechaInicio: obtenerFechaActual(),
   fechaFin: obtenerFechaActual(),
   estado: ["0", "2"],
   comprobante: [],
@@ -291,14 +291,15 @@ function extraerObjeto<T>(value: T): T {
 }
 
 function obtenerFechaActual(): string {
-  return new Date().toISOString().slice(0, 10);
-}
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Lima",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts();
+  const valueByType = new Map(parts.map((part) => [part.type, part.value]));
 
-function obtenerPrimerDiaMesActual(): string {
-  const hoy = new Date();
-  const year = hoy.getFullYear();
-  const month = String(hoy.getMonth() + 1).padStart(2, "0");
-  return `${year}-${month}-01`;
+  return `${valueByType.get("year")}-${valueByType.get("month")}-${valueByType.get("day")}`;
 }
 
 function toPositiveNumber(...values: Array<string | number | null | undefined>): number {
@@ -756,7 +757,7 @@ function formatDecimalValue(value: number): string {
 }
 
 function getFacturaDisplayPath(facturaPath?: string, facturaUrl?: string): string {
-  // Prioriza la URL pÃºblica de SharePoint si existe
+  // Prioriza la URL pública de SharePoint si existe
   return facturaUrl?.trim() || facturaPath?.trim() || "";
 }
 
@@ -787,6 +788,11 @@ function buildCuentaMetadata(empleado: EmpleadoCta) {
     nombreCta: empleado.nombreCta || "",
     ruc: empleado.nroDocumento || "",
   };
+}
+
+function getIdBancoCtaValue(empleado: EmpleadoCta): string {
+  const idBancoCta = Number(empleado.idBancoCta);
+  return Number.isInteger(idBancoCta) && idBancoCta > 0 ? String(idBancoCta) : "";
 }
 
 function extractCuentaResumenParts(cuentaResumen?: string) {
@@ -824,7 +830,13 @@ function normalizeDateForInput(dateStr?: string | null): string {
     return value;
   }
 
-  const slashMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(value);
+  const isoMatch = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T].*)?$/.exec(value);
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+
+  const slashMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T].*)?$/.exec(value);
   if (slashMatch) {
     const day = Number(slashMatch[1]);
     const month = Number(slashMatch[2]);
@@ -901,7 +913,7 @@ function getHttpMessage(error: unknown, fallback: string): string {
 
 function findRecordValue(row: Record<string, unknown>, ...keys: string[]): unknown {
   for (const key of keys) {
-    if (key in row) {
+    if (key in row && row[key] != null && (typeof row[key] !== "string" || row[key].trim() !== "")) {
       return row[key];
     }
   }
@@ -910,7 +922,7 @@ function findRecordValue(row: Record<string, unknown>, ...keys: string[]): unkno
 
   for (const key of keys) {
     const found = normalizedEntries.find(([entryKey]) => entryKey === key.toLowerCase());
-    if (found) {
+    if (found && found[1] != null && (typeof found[1] !== "string" || found[1].trim() !== "")) {
       return found[1];
     }
   }
@@ -992,7 +1004,15 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     detalle: getRecordString(row, "Detalle", "detalle"),
     comentario: getRecordString(row, "Observacion", "observacion", "Comentario", "comentario"),
     fechaDeposito: getRecordString(row, "FechaDeposito", "fechaDeposito"),
-    fechaVencimiento: getRecordString(row, "FechaDeposito", "fechaDeposito", "FechaVencimiento", "fechaVencimiento"),
+    fechaVencimiento: getRecordString(
+      row,
+      "FechaPagoCre",
+      "fechaPagoCre",
+      "FechaVencimiento",
+      "fechaVencimiento",
+      "FechaDeposito",
+      "fechaDeposito"
+    ),
     fecIngreso: getRecordString(
       row,
       "FecIngreso",
@@ -1003,15 +1023,15 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     ),
     fechaEmision: getRecordString(
       row,
+      "FecEmision",
+      "fecEmision",
+      "FechaEmision",
+      "fechaEmision",
       "FecIngreso",
       "fecIngreso",
       "fecingreso",
       "FechaIngreso",
-      "fechaIngreso",
-      "FechaEmision",
-      "fechaEmision",
-      "FecEmision",
-      "fecEmision"
+      "fechaIngreso"
     ),
     solicitante: getRecordString(row, "IdSolicitante", "idSolicitante"),
     solicitanteLabel: getRecordString(row, "Solicitante", "solicitante", "SolicitanteLabel", "solicitanteLabel"),
@@ -1265,6 +1285,7 @@ export default function GastosPage() {
   const idUsuarioFactura = getNumericUserId(
     String(authUser?.codEmp ?? authUser?.idEmpleado ?? authUser?.empleado ?? "")
   );
+  const [constantesRefreshKey, setConstantesRefreshKey] = useState(0);
   const camposConstantes = useMemo(
     () => ["tipo_bien", "tipo_comprobante", "tipo_pago", "tipo_moneda", "estado"],
     []
@@ -1273,7 +1294,7 @@ export default function GastosPage() {
     constantesPorCampo,
     loading: constantesLoading,
     error: constantesError,
-  } = useConstantesPorCampo(camposConstantes);
+  } = useConstantesPorCampo(camposConstantes, constantesRefreshKey);
 
   const tipoPagoOptions = constantesPorCampo.tipo_pago ?? [];
   const monedaOptions = constantesPorCampo.tipo_moneda ?? [];
@@ -1304,20 +1325,16 @@ export default function GastosPage() {
     [busqueda, filtrosCabecera]
   );
 
-  // Utilidad para formatear fecha a MM/DD/YYYY en zona horaria de PerÃº (UTC-5)
+  // Los controles de fecha entregan una fecha calendario (YYYY-MM-DD).
+  // Se conserva tal cual para Lima, Perú (UTC-5), sin convertirla a UTC y desplazar el día.
   function formatDateToMMDDYYYYPeru(dateStr?: string) {
-    if (!dateStr) return undefined;
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return undefined;
-    // Convertir a UTC-5 (hora de PerÃº)
-    // Obtener los componentes de la fecha en UTC-5
-    const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
-    // UTC-5 son -5 horas respecto a UTC
-    const peruOffsetMs = -5 * 60 * 60 * 1000;
-    const peruDate = new Date(utc + peruOffsetMs);
-    const mm = String(peruDate.getMonth() + 1).padStart(2, '0');
-    const dd = String(peruDate.getDate()).padStart(2, '0');
-    const yyyy = peruDate.getFullYear();
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr?.trim() ?? "");
+
+    if (!match) {
+      return undefined;
+    }
+
+    const [, yyyy, mm, dd] = match;
     return `${mm}/${dd}/${yyyy}`;
   }
 
@@ -1387,7 +1404,7 @@ export default function GastosPage() {
       imgFactura: form.facturaUrl || undefined,
     };
 
-    //console.log("[Gastos] ParÃ¡metros enviados a Guardar/Planilla", payload);
+    //console.log("[Gastos] Parámetros enviados a Guardar/Planilla", payload);
 
     return payload;
   };
@@ -1822,7 +1839,7 @@ export default function GastosPage() {
     const request = buildValoresGastoRequest(filtroOperativo);
 
     if (!request) {
-      //console.log("[Gastos] No se ejecuta sp_Finanzas_CargarValoresGasto porque faltan parÃ¡metros vÃ¡lidos.", {
+      //console.log("[Gastos] No se ejecuta sp_Finanzas_CargarValoresGasto porque faltan parámetros válidos.", {
       //  filtroOperativo,
       //});
       valoresGastoRequestRef.current += 1;
@@ -1831,7 +1848,7 @@ export default function GastosPage() {
       return;
     }
 
-    //console.log("[Gastos] ParÃ¡metros enviados a sp_Finanzas_CargarValoresGasto", request);
+    //console.log("[Gastos] Parámetros enviados a sp_Finanzas_CargarValoresGasto", request);
 
     const currentRequestId = valoresGastoRequestRef.current + 1;
     valoresGastoRequestRef.current = currentRequestId;
@@ -1940,6 +1957,7 @@ export default function GastosPage() {
 
   const abrirNuevo = () => {
     setModo("nuevo");
+    setConstantesRefreshKey((current) => current + 1);
     valoresGastoRequestRef.current += 1;
     setValoresGastoLoading(false);
     setValoresGasto(VALORES_GASTO_INICIALES);
@@ -1975,6 +1993,7 @@ export default function GastosPage() {
   };
 
   const abrirEditar = (gasto: GastoForm) => {
+    setConstantesRefreshKey((current) => current + 1);
     const tareaCorrelativo = gasto.filtroOperativo.tarea?.correlativo;
     const tareaNombre = getTareaLabelOrFallback(
       tareasCatalogo,
@@ -2060,14 +2079,13 @@ export default function GastosPage() {
     const responsableNombre =
       empleadoResponsable?.nombreEmpleado || gastoEditable.responsableLabel || "";
 
-    if (empleadoResponsable && !gastoEditable.cuenta) {
+    if (empleadoResponsable) {
       const cuentaMetadata = buildCuentaMetadata(empleadoResponsable);
-      gastoEditable.idBancoCta =
-        empleadoResponsable.idBancoCta != null ? String(empleadoResponsable.idBancoCta) : gastoEditable.idBancoCta;
-      gastoEditable.cuenta = buildCuentaResumen(empleadoResponsable);
-      gastoEditable.cuentaNumero = cuentaMetadata.cuentaNumero;
-      gastoEditable.cuentaInter = cuentaMetadata.cuentaInter;
-      gastoEditable.nombreCta = cuentaMetadata.nombreCta;
+      gastoEditable.idBancoCta = gastoEditable.idBancoCta || getIdBancoCtaValue(empleadoResponsable);
+      gastoEditable.cuenta = gastoEditable.cuenta || buildCuentaResumen(empleadoResponsable);
+      gastoEditable.cuentaNumero = gastoEditable.cuentaNumero || cuentaMetadata.cuentaNumero;
+      gastoEditable.cuentaInter = gastoEditable.cuentaInter || cuentaMetadata.cuentaInter;
+      gastoEditable.nombreCta = gastoEditable.nombreCta || cuentaMetadata.nombreCta;
       gastoEditable.ruc = gastoEditable.ruc || cuentaMetadata.ruc;
     }
 
@@ -2130,8 +2148,8 @@ export default function GastosPage() {
       nuevosErrores.tarea = "Seleccione una tarea.";
     }
 
-    if (form.responsable && !form.idBancoCta) {
-      nuevosErrores.responsable = "El responsable seleccionado no tiene una cuenta vÃ¡lida.";
+    if (form.responsable && Number(form.idBancoCta) <= 0) {
+      nuevosErrores.responsable = "El responsable seleccionado no tiene una cuenta válida.";
     }
 
     if (!form.tipoPago) {
@@ -2139,7 +2157,7 @@ export default function GastosPage() {
     }
 
     if (!form.monto || isNaN(Number(form.monto))) {
-      nuevosErrores.monto = "Ingrese un monto vÃ¡lido.";
+      nuevosErrores.monto = "Ingrese un monto válido.";
     }
 
     if (form.tipoPago && !esConstanteValida(tipoPagoOptions, form.tipoPago)) {
@@ -2433,7 +2451,7 @@ export default function GastosPage() {
         sorted.sort((a, b) => {
           let aValue = col.getValue(a);
           let bValue = col.getValue(b);
-          // Si es string, comparar insensible a mayÃºsculas
+          // Si es string, comparar insensible a mayúsculas
           if (typeof aValue === 'string' && typeof bValue === 'string') {
             aValue = aValue.toLowerCase();
             bValue = bValue.toLowerCase();
@@ -2446,7 +2464,7 @@ export default function GastosPage() {
         });
       }
     }
-    // Filtrar despuÃ©s de ordenar
+    // Filtrar después de ordenar
     return sorted
       .filter((gasto) => matchesCrudToolbarSearch(gasto, busqueda, camposBusquedaGastos))
       .filter((gasto) => {
@@ -2958,7 +2976,7 @@ export default function GastosPage() {
                     case "tarea":
                       return getTareaLabelOrFallback(tareasCatalogo, gasto.filtroOperativo.tarea?.correlativo, gasto.filtroOperativo.tarea?.tarea);
                     case "detalle":
-                      // Migrar el campo Detalle a una sola lÃ­nea, reemplazando saltos de lÃ­nea por espacio
+                      // Migrar el campo Detalle a una sola línea, reemplazando saltos de línea por espacio
                       return gasto.detalle ? String(gasto.detalle).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim() : "";
                     case "bien":
                       return getConstanteLabel(bienOptions, gasto.bien);
@@ -2984,7 +3002,7 @@ export default function GastosPage() {
                       return gasto.filtroOperativo.ot?.ot ?? "";
                     case "fecIngreso":
                       return formatInputDateForDisplay(gasto.fecIngreso);
-                    case "comentario":                      // Migrar el campo Comentario a una sola lÃ­nea, reemplazando saltos de lÃ­nea por espacio
+                    case "comentario":                      // Migrar el campo Comentario a una sola línea, reemplazando saltos de línea por espacio
                       return gasto.comentario ? String(gasto.comentario).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim() : "";
                     case "estado": {
                       return getEstadoLabel(estadoOptions, gasto.estado, gasto.estadoLabel);
@@ -3388,7 +3406,7 @@ export default function GastosPage() {
             fontWeight: 600,
           }}
         >
-          <span>MÃ¡s opciones</span>
+          <span>Más opciones</span>
           <button
             type="button"
             onClick={() => {
@@ -3418,7 +3436,7 @@ export default function GastosPage() {
             }}
           >
             <span>{mostrarFiltrosAdicionales ? "Ocultar filtros" : "Filtros adicionales"}</span>
-            <span style={{ color: "#6B7280", fontSize: 10 }}>{mostrarFiltrosAdicionales ? "Ã¢â€“Â²" : "Ã¢â€“Â¼"}</span>
+            <span style={{ color: "#6B7280", fontSize: 10 }}>{mostrarFiltrosAdicionales ? "▲" : "▼"}</span>
           </button>
         </div>
       </div>
@@ -3513,7 +3531,7 @@ export default function GastosPage() {
                         if (header.key === 'acciones') return;
                         setSortConfig((prev) => {
                           if (prev?.key === header.key) {
-                            // Alternar direcciÃ³n
+                            // Alternar dirección
                             return { key: header.key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
                           }
                           return { key: header.key, direction: 'asc' };
@@ -3649,10 +3667,14 @@ export default function GastosPage() {
               <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", width: "100%" }}>
                 <div>
                   <h2 style={{ margin: 0, fontSize: 24, color: "#17143A" }}>
-{modo === "nuevo" ? "Nuevo gasto" : modo === "ver" ? "Visualizar gasto" : "Editar gasto"}
+                    {modo === "nuevo"
+                      ? "Nuevo gasto"
+                      : modo === "ver"
+                        ? "Visualizar gasto"
+                        : `Editar gasto${form.id ? ` · ID: ${form.id}` : ""}`}
                   </h2>
                   <p style={{ marginTop: 8, marginBottom: 0, color: "#6B7280", fontSize: 13 }}>
-                    Complete la informaciÃ³n del gasto.
+                    Complete la información del gasto.
                   </p>
                   <p style={{ marginTop: 6, marginBottom: 0, color: "#475569", fontSize: 12 }}>
                     El sistema registra auditoria automatica por seccion al guardar o rechazar cambios.
@@ -3712,9 +3734,9 @@ export default function GastosPage() {
                     }}
                     onClick={cerrarPanel}
                   >
-                    Ã—
+                    ×
                   </button>
-                  {/* Eliminado: Etiqueta Utilidad bajo el botÃ³n */}
+                  {/* Eliminado: Etiqueta Utilidad bajo el botón */}
                 </div>
               </div>
             </div>
@@ -3811,7 +3833,7 @@ export default function GastosPage() {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "minmax(0, 1.25fr) minmax(260px, 1fr)",
+                  gridTemplateColumns: "minmax(0, 1fr)",
                   gap: 12,
                   alignItems: "start",
                 }}
@@ -3866,7 +3888,7 @@ export default function GastosPage() {
                               responsable: String(emp.idEmpleado),
                               responsableLabel: emp.nombreEmpleado,
                               idSuministroProvisional: "",
-                              idBancoCta: emp.idBancoCta != null ? String(emp.idBancoCta) : "",
+                              idBancoCta: getIdBancoCtaValue(emp),
                               cuenta: buildCuentaResumen(emp),
                               cuentaNumero: cuentaMetadata.cuentaNumero,
                               cuentaInter: cuentaMetadata.cuentaInter,
@@ -3925,7 +3947,7 @@ export default function GastosPage() {
                                 responsable: String(emp.idEmpleado),
                                 responsableLabel: emp.nombreEmpleado,
                                 idSuministroProvisional: "",
-                                idBancoCta: emp.idBancoCta != null ? String(emp.idBancoCta) : "",
+                                idBancoCta: getIdBancoCtaValue(emp),
                                 cuenta: buildCuentaResumen(emp),
                                 cuentaNumero: cuentaMetadata.cuentaNumero,
                                 cuentaInter: cuentaMetadata.cuentaInter,
@@ -3954,62 +3976,6 @@ export default function GastosPage() {
                   )}
                 </div>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>
-                    Suministro vigente
-                  </label>
-                  <select
-                    value={form.idSuministroProvisional}
-                    onChange={(e) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        idSuministroProvisional: e.target.value,
-                      }))
-                    }
-                    disabled={
-                      !requiereSuministroVigente(form.filtroOperativo.tarea?.correlativo) ||
-                      !form.filtroOperativo.filtro?.filtroKey ||
-                      suministrosVigentesLoading
-                    }
-                    style={{
-                      width: "100%",
-                      height: 42,
-                      borderRadius: 10,
-                      border: `1px solid ${errores.idSuministroProvisional ? "#F87171" : "#D1D5DB"}`,
-                      padding: "0 12px",
-                      fontSize: 11,
-                      boxSizing: "border-box",
-                      background: "#FFFFFF",
-                    }}
-                  >
-                    <option value="">
-                      {!requiereSuministroVigente(form.filtroOperativo.tarea?.correlativo)
-                        ? "No aplica"
-                        : suministrosVigentesLoading
-                        ? "Cargando..."
-                        : suministrosVigentes.length > 0
-                          ? "Seleccione..."
-                          : "Sin registros vigentes"}
-                    </option>
-                    {suministrosVigentes.map((item) => (
-                      <option key={item.idProvisional} value={String(item.idProvisional)}>
-                        {buildSuministroVigenteLabel(item)}
-                      </option>
-                    ))}
-                  </select>
-
-                  {errores.idSuministroProvisional && (
-                    <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>
-                      {errores.idSuministroProvisional}
-                    </div>
-                  )}
-
-                  {suministrosVigentesError && (
-                    <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>
-                      {suministrosVigentesError}
-                    </div>
-                  )}
-                </div>
               </div>
 
         <div
@@ -4247,7 +4213,7 @@ export default function GastosPage() {
         onChange={(e) => setForm((prev) => ({ ...prev, rendicion: e.target.checked }))}
         style={{ width: 16, height: 16 }}
       />
-      <label htmlFor="rendicion" style={{ fontSize: 11, fontWeight: 700, color: "#374151", cursor: "pointer" }}>RendiciÃ³n</label>
+      <label htmlFor="rendicion" style={{ fontSize: 11, fontWeight: 700, color: "#374151", cursor: "pointer" }}>Rendición</label>
     </div>
   </div>
 
@@ -4697,7 +4663,7 @@ export default function GastosPage() {
             </div>
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 10 }}>
-              {/* BotÃ³n de factura alineado a la izquierda */}
+              {/* Botón de factura alineado a la izquierda */}
               <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0, flex: 1 }}>
                 <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
                   <button
@@ -4793,7 +4759,7 @@ export default function GastosPage() {
                                 onClick={() => setShowFacturaViewer(false)}
                                 title="Cerrar"
                               >
-                                Ã—
+                                ×
                               </button>
                               {facturaDisplayPath.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
                                 <img
@@ -4959,10 +4925,10 @@ export default function GastosPage() {
             }}
           >
             <h3 style={{ marginTop: 0, marginBottom: 12, color: "#17143A" }}>
-              Confirmar eliminaciÃ³n
+              Confirmar eliminación
             </h3>
             <p style={{ marginTop: 0, color: "#4B5563", lineHeight: 1.6 }}>
-              Â¿Desea rechazar el gasto <strong>{gastoSeleccionadoEliminar?.id}</strong>?
+              ¿Desea rechazar el gasto <strong>{gastoSeleccionadoEliminar?.id}</strong>?
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 24 }}>
               <button
@@ -5024,7 +4990,7 @@ export default function GastosPage() {
               Motivo del rechazo
             </h3>
             <p style={{ marginTop: 0, color: "#4B5563", lineHeight: 1.6 }}>
-              Ingrese la observaciÃ³n que se enviarÃ¡ al rechazo del registro seleccionado.
+              Ingrese la observación que se enviará al rechazo del registro seleccionado.
             </p>
             <textarea
               value={motivoRechazo}

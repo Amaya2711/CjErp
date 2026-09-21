@@ -80,6 +80,10 @@ type PagoRow = {
   igv: number;
   total: number;
   estado: PagoEstado;
+  // Código/descripcion originales de Planilla. `estado` enruta únicamente
+  // las bandejas operativas; Total órdenes debe conservar todos los estados.
+  estadoCodigo?: string;
+  estadoNombre?: string;
   diasEstado: number;
   observacion: string;
   detalle: string;
@@ -203,10 +207,12 @@ function groupRowsByEstado(rows: PagoRow[]): Record<PagoTabKey, PagoRow[]> {
   const grouped = createEmptyRowsByTab();
 
   for (const row of rows) {
-    grouped[row.estado].push(row);
+    if (["0", "6", "10", "2"].includes(row.estadoCodigo ?? "")) {
+      grouped[row.estado].push(row);
+    }
   }
 
-  grouped.resumen = [...grouped.aprobar, ...grouped.reaprobar, ...grouped.hormiga, ...grouped.observadas];
+  grouped.resumen = rows;
   return grouped;
 }
 
@@ -905,10 +911,10 @@ function mapPlanillaConsultaRowToPagoRow(
   const subtotal = getRecordNumber(row, "Subtotal", "subtotal", "Monto", "monto") ?? 0;
   const igv = getRecordNumber(row, "IGV", "Igv", "igv") ?? 0;
   const total = getRecordNumber(row, "Total", "total", "TotalPagar", "totalPagar") ?? subtotal + igv;
-  const estado = mapPlanillaEstadoToPagoEstado(
-    getRecordNumber(row, "Estado", "estado") ?? getRecordString(row, "EstadoNombre", "estadoNombre"),
-    fallbackEstado
-  );
+  const estadoOriginal = getRecordNumber(row, "Estado", "estado") ?? getRecordString(row, "EstadoNombre", "estadoNombre");
+  const estadoCodigo = String(estadoOriginal ?? "").trim();
+  const estadoNombre = getRecordString(row, "NombreEstado", "nombreEstado", "EstadoNombre", "estadoNombre") || estadoCodigo || "Sin estado";
+  const estado = mapPlanillaEstadoToPagoEstado(estadoOriginal, fallbackEstado);
 
   return {
     id: getRecordNumber(row, "Id", "id", "CorrelativoPlanilla", "correlativoPlanilla") ?? index + 1,
@@ -1002,6 +1008,8 @@ function mapPlanillaConsultaRowToPagoRow(
     igv: Number.isFinite(igv) ? igv : 0,
     total: Number.isFinite(total) ? total : 0,
     estado,
+    estadoCodigo,
+    estadoNombre,
     diasEstado: getRecordNumber(row, "DiasEstado", "diasEstado") ?? 0,
     observacion: getRecordString(row, "Observacion", "observacion", "Comentario", "comentario"),
     detalle: getRecordString(row, "Detalle", "detalle"),
@@ -1442,9 +1450,9 @@ export default function PagosV1Page() {
             : "Consultando órdenes consolidadas por estados..."
         );
 
-        const parametros: PlanillaConsultaParametro[] = [
-          { nombre: "Estados", valor: TAB_ESTADOS_CON_FECHA, tipo: "string" },
-        ];
+        // Total órdenes no limita estados: las bandejas operativas se forman
+        // localmente y el resumen conserva también, por ejemplo, estado 1.
+        const parametros: PlanillaConsultaParametro[] = [];
 
         // La búsqueda rápida se resuelve en Planilla sobre todos los registros,
         // sin restringirla al rango que estaba cargado antes en el navegador.
@@ -1546,6 +1554,16 @@ export default function PagosV1Page() {
     () => Array.from(new Set(activeRows.map((row) => row.moneda.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
     [activeRows]
   );
+  const estadoOptions = useMemo(
+    () => Array.from(
+      new Map(
+        rowsByTab.resumen
+          .filter((row) => Boolean(row.estadoCodigo))
+          .map((row) => [row.estadoCodigo!, row.estadoNombre || `Estado ${row.estadoCodigo}`])
+      ).entries()
+    ).sort(([left], [right]) => left.localeCompare(right, undefined, { numeric: true })),
+    [rowsByTab.resumen]
+  );
 
   const matchesAppliedFilters = useCallback(
     (row: PagoRow, includeDateFilters: boolean) => {
@@ -1565,7 +1583,7 @@ export default function PagosV1Page() {
         matchesMultiTextFilter(row.validador, appliedFilters.validador) &&
         matchesMultiTextFilter(row.moneda, appliedFilters.moneda) &&
         matchesTextFilter(row.correlativo, appliedFilters.correlativo) &&
-        (!appliedFilters.estado || row.estado === appliedFilters.estado) &&
+        (!appliedFilters.estado || row.estadoCodigo === appliedFilters.estado) &&
         (buscarEnTotal || !fechaDesde || rowDate >= fechaDesde) &&
         (buscarEnTotal || !fechaHasta || rowDate <= fechaHasta) &&
         matchesQuickSearch(row, appliedFilters.query)
@@ -1707,11 +1725,7 @@ export default function PagosV1Page() {
       reaprobar: rowsByTab.reaprobar.filter((row) => matchesAppliedFilters(row, false)).length,
       hormiga: rowsByTab.hormiga.filter((row) => matchesAppliedFilters(row, false)).length,
       observadas: rowsByTab.observadas.filter((row) => matchesAppliedFilters(row, false)).length,
-      resumen:
-        rowsByTab.aprobar.filter((row) => matchesAppliedFilters(row, true)).length +
-        rowsByTab.reaprobar.filter((row) => matchesAppliedFilters(row, false)).length +
-        rowsByTab.hormiga.filter((row) => matchesAppliedFilters(row, false)).length +
-        rowsByTab.observadas.filter((row) => matchesAppliedFilters(row, false)).length,
+      resumen: rowsByTab.resumen.filter((row) => matchesAppliedFilters(row, false)).length,
     };
 
     return counts;
@@ -2835,6 +2849,20 @@ export default function PagosV1Page() {
                       style={{ ...styles.quickDateInput, borderColor: currentTheme.border }}
                     />
                   </div>
+                  <div style={styles.quickDateField}>
+                    <span style={styles.quickDateLabel}>Estado</span>
+                    <select
+                      value={filters.estado}
+                      onChange={(event) => setFilters((prev) => ({ ...prev, estado: event.target.value }))}
+                      style={{ ...styles.quickDateInput, borderColor: currentTheme.border }}
+                      aria-label="Filtrar por estado"
+                    >
+                      <option value="">Todos los estados</option>
+                      {estadoOptions.map(([codigo, nombre]) => (
+                        <option key={codigo} value={codigo}>{codigo} - {nombre}</option>
+                      ))}
+                    </select>
+                  </div>
                   <details style={styles.multiFilter}>
                     <summary style={{ ...styles.multiFilterSummary, borderColor: currentTheme.border }}>
                       Todos los solicitantes{filters.solicitante.length > 0 ? ` (${filters.solicitante.length})` : ""}
@@ -3262,7 +3290,7 @@ export default function PagosV1Page() {
                                   {showEstadoOc ? (
                                     <td style={styles.td}>
                                       <span
-                                        title={getStatusLabel(row.estado)}
+                                          title={row.estadoNombre || getStatusLabel(row.estado)}
                                         style={{
                                           ...styles.stateBadge,
                                           color: rowTheme.accent,
@@ -3270,7 +3298,7 @@ export default function PagosV1Page() {
                                           borderColor: rowTheme.border,
                                         }}
                                       >
-                                        {getStatusLabel(row.estado)}
+                                          {row.estadoNombre || getStatusLabel(row.estado)}
                                       </span>
                                     </td>
                                   ) : null}

@@ -284,7 +284,7 @@ namespace CjERP.Infrastructure.Services
                 "ValorIni", "valorIni",
                 "Valor", "valor");
 
-            var descripcion = GetStringAllowEmpty(
+            var descripcion = GetString(
                 data,
                 "Descripcion", "descripcion",
                 "Nombre", "nombre",
@@ -293,7 +293,7 @@ namespace CjERP.Infrastructure.Services
                 "Valor", "valor",
                 "ValorIni", "valorIni");
 
-            var valor = GetStringAllowEmpty(
+            var valor = GetString(
                 data,
                 "Valor", "valor",
                 "ValorFin", "valorFin",

@@ -237,7 +237,9 @@ namespace CjERP.Infrastructure.Services
                 .ToList();
 
             var enrichElapsedMs = 0d;
-            if (!limitExceeded)
+            // sp_Planilla_Consulta_Estados ya entrega Comentario e imgFactura.
+            // Evita consultas adicionales a Planilla en la carga inicial de Gastos.
+            if (!limitExceeded && !string.Equals(storedProcedureName, StoredProcedureEstados, StringComparison.OrdinalIgnoreCase))
             {
                 var enrichStart = Stopwatch.StartNew();
                 await EnrichRowsWithFacturaDataAsync(connection, pagedRows, cancellationToken);

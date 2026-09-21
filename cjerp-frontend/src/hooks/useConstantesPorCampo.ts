@@ -9,7 +9,10 @@ type UseConstantesPorCampoResult = {
   error: string | null;
 };
 
-export function useConstantesPorCampo(campos: string[]): UseConstantesPorCampoResult {
+export function useConstantesPorCampo(
+  campos: string[],
+  refreshKey = 0
+): UseConstantesPorCampoResult {
   const [constantesPorCampo, setConstantesPorCampo] = useState<Record<string, ConstanteOption[]>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,7 +71,7 @@ export function useConstantesPorCampo(campos: string[]): UseConstantesPorCampoRe
     return () => {
       cancelled = true;
     };
-  }, [camposKey]);
+  }, [camposKey, refreshKey]);
 
   return {
     constantesPorCampo,
