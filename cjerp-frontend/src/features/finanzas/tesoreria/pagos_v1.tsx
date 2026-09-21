@@ -5585,10 +5585,13 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "center",
     padding: 16,
-    zIndex: 70,
+    // Debe quedar sobre la barra superior de la aplicación; de lo contrario
+    // la cabecera del modal y sus acciones quedan parcialmente ocultas.
+    zIndex: 3000,
   },
   popupCard: {
     width: "min(1360px, calc(100vw - 32px))",
+    height: "min(900px, calc(100vh - 32px))",
     maxHeight: "calc(100vh - 32px)",
     background: "#FFFFFF",
     borderRadius: 18,
@@ -5604,6 +5607,7 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "space-between",
     gap: 16,
     padding: "18px 18px 12px",
+    flexShrink: 0,
     borderBottom: "1px solid #E2E8F0",
     background: "linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%)",
   },
