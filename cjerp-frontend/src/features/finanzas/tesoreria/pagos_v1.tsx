@@ -1817,10 +1817,13 @@ export default function PagosV1Page() {
     [historialRows]
   );
   const historialRowsFiltrados = useMemo(
-    () =>
-      historialResponsable
-        ? historialRows.filter((row) => row.responsable === historialResponsable)
-        : historialRows,
+    () => {
+      const criterio = normalizeText(historialResponsable);
+
+      return criterio
+        ? historialRows.filter((row) => normalizeText(row.responsable).includes(criterio))
+        : historialRows;
+    },
     [historialResponsable, historialRows]
   );
 
@@ -3673,17 +3676,20 @@ export default function PagosV1Page() {
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
                         <div style={styles.noteTitle}>Historial de OT</div>
                         <div style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                          <select
+                          <input
+                            type="search"
                             value={historialResponsable}
                             onChange={(event) => setHistorialResponsable(event.target.value)}
                             aria-label="Filtrar historial de OT por responsable"
+                            placeholder="Buscar responsable..."
+                            list="historial-ot-responsables"
                             style={{ ...styles.quickDateInput, minWidth: 180, height: 30, fontSize: 11 }}
-                          >
-                            <option value="">Todos los responsables</option>
+                          />
+                          <datalist id="historial-ot-responsables">
                             {historialResponsableOptions.map((responsable) => (
                               <option key={responsable} value={responsable}>{responsable}</option>
                             ))}
-                          </select>
+                          </datalist>
                           <div
                             style={{
                               display: "inline-flex",
@@ -3965,17 +3971,15 @@ export default function PagosV1Page() {
                   </p>
                 </div>
                 <div style={styles.popupHeaderActions}>
-                  <select
+                  <input
+                    type="search"
                     value={historialResponsable}
                     onChange={(event) => setHistorialResponsable(event.target.value)}
                     aria-label="Filtrar historial de OT por responsable"
+                    placeholder="Buscar responsable..."
+                    list="historial-ot-responsables"
                     style={{ ...styles.quickDateInput, minWidth: 180, height: 34, fontSize: 12 }}
-                  >
-                    <option value="">Todos los responsables</option>
-                    {historialResponsableOptions.map((responsable) => (
-                      <option key={responsable} value={responsable}>{responsable}</option>
-                    ))}
-                  </select>
+                  />
                   <button
                     type="button"
                     onClick={handleExportHistorial}
