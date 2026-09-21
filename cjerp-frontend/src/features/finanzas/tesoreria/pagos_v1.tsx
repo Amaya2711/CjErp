@@ -3189,7 +3189,7 @@ export default function PagosV1Page() {
                     <th style={{ ...styles.th, ...getStickyCellStyle(5, "#F8FAFC", 6) }}>Responsable</th>
                     <th style={{ ...styles.th, ...getStickyCellStyle(6, "#F8FAFC", 6) }}>Validador</th>
                     <th style={{ ...styles.th, ...getStickyCellStyle(7, "#F8FAFC", 6), textAlign: "center" }}>
-                      {isResumenTab ? "Acciones" : ""}
+                      Acciones
                     </th>
                     <th style={{ ...styles.th, ...getStickyCellStyle(8, "#F8FAFC", 6) }}>Subtotal</th>
                     <th style={{ ...styles.th, width: 90 }}>IGV</th>
@@ -3317,7 +3317,7 @@ export default function PagosV1Page() {
                                   <td title={row.responsable || "-"} style={{ ...styles.td, ...getStickyCellStyle(5, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.responsable}</td>
                                   <td title={row.validador || "-"} style={{ ...styles.td, ...getStickyCellStyle(6, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.validador || "-"}</td>
                                     <td style={{ ...styles.td, ...getStickyCellStyle(7, isSelected ? "#EEF2FF" : "#FFFFFF", 3), textAlign: "center" }}>
-                                      {isResumenTab ? (() => {
+                                      {(() => {
                                         // Solo se bloquea cuando el gasto está en un estado final o no editable.
                                         const accionesHabilitadas = !["99", "3", "4", "5", "8"].includes(row.estadoCodigo ?? "");
                                         const actionStyle = (enabled: boolean, color: string, background: string, border: string): React.CSSProperties => ({
@@ -3347,28 +3347,7 @@ export default function PagosV1Page() {
                                             </button>
                                           </div>
                                         );
-                                      })() : (
-                                        <button
-                                          type="button"
-                                          onClick={(event) => {
-                                            event.stopPropagation();
-                                            toggleDetailForRow(row);
-                                          }}
-                                          style={{
-                                            ...styles.compactActionButton,
-                                            width: 30,
-                                            height: 30,
-                                            padding: 0,
-                                            color: currentTheme.accent,
-                                            borderColor: currentTheme.border,
-                                            background: currentTheme.soft,
-                                          }}
-                                          aria-label={`Ver detalle de la orden ${row.correlativo}`}
-                                          title="Ver detalle"
-                                        >
-                                          <Eye size={10} />
-                                        </button>
-                                      )}
+                                      })()}
                                     </td>
                                   <td title={formatCurrency(row.subtotal, row.moneda)} style={{ ...styles.td, ...getStickyCellStyle(8, isSelected ? "#EEF2FF" : "#FFFFFF", 3), fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
                                   <td title={formatCurrency(row.igv, row.moneda)} style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
