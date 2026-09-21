@@ -3513,7 +3513,7 @@ export default function PagosV1Page() {
                      
                     </div>
                     <div style={styles.noteCard}>
-                      <div style={styles.noteTitle}>Comentario</div>
+                      <div style={styles.noteTitle}>Detalle</div>
                       <p style={styles.noteText}>{filaActiva.detalle}</p>
                     </div>
                     <div style={styles.noteCard}>
@@ -5493,6 +5493,10 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
     lineHeight: 1.5,
     color: "#475569",
+    // El detalle de Planilla conserva saltos de línea (CRLF). HTML los
+    // colapsa por defecto; esta regla mantiene la presentación del sistema anterior.
+    whiteSpace: "pre-wrap",
+    overflowWrap: "anywhere",
   },
   historyHeaderActions: {
     display: "inline-flex",

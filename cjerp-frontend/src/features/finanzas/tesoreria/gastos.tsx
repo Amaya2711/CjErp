@@ -2284,11 +2284,17 @@ export default function GastosPage({
     setExternalEditorLoading(true);
     setExternalEditorError(null);
 
-    void consultarPlanillaEstados(
-      buildPlanillaConsultaEstadosRequest([
-        { nombre: "Correlativo", valor: String(correlativo), tipo: "int" },
-      ])
-    )
+    const request = {
+      ...buildPlanillaConsultaEstadosRequest(
+        [{ nombre: "Correlativo", valor: String(correlativo), tipo: "int" }],
+        { baseParams: { idCargo: null, idEmpleado: null } }
+      ),
+      // Pagos v1 consulta Planilla sin los filtros implícitos del usuario.
+      // Se conserva ese mismo contrato al abrir el editor desde esa bandeja.
+      consulta: "pagos-v1",
+    };
+
+    void consultarPlanillaEstados(request, { timeoutMs: 120000 })
       .then((response) => {
         if (!active) return;
 
