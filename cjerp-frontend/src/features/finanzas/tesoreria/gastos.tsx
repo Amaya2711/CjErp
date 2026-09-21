@@ -1630,6 +1630,41 @@ export default function GastosPage({
   const [gastosGridScrollTop, setGastosGridScrollTop] = useState(0);
   const [gastosGridViewportHeight, setGastosGridViewportHeight] = useState(520);
 
+  // La consulta de Planilla conserva la cuenta, pero no siempre IdBancoCta.
+  // Al cargar el catálogo, completar sólo ese identificador para el gasto abierto.
+  useEffect(() => {
+    if (!form.responsable || Number(form.idBancoCta) > 0 || empleadosSafe.length === 0) {
+      return;
+    }
+
+    const empleadoResponsable = empleadosSafe.find(
+      (emp) => String(emp.idEmpleado) === String(form.responsable)
+    );
+    const idBancoCta = empleadoResponsable ? getIdBancoCtaValue(empleadoResponsable) : "";
+
+    if (!empleadoResponsable || !idBancoCta) {
+      return;
+    }
+
+    const cuentaMetadata = buildCuentaMetadata(empleadoResponsable);
+    setForm((previous) => {
+      if (String(previous.responsable) !== String(empleadoResponsable.idEmpleado) || Number(previous.idBancoCta) > 0) {
+        return previous;
+      }
+
+      return {
+        ...previous,
+        responsableLabel: previous.responsableLabel || empleadoResponsable.nombreEmpleado,
+        idBancoCta,
+        cuenta: previous.cuenta || buildCuentaResumen(empleadoResponsable),
+        cuentaNumero: previous.cuentaNumero || cuentaMetadata.cuentaNumero,
+        cuentaInter: previous.cuentaInter || cuentaMetadata.cuentaInter,
+        nombreCta: previous.nombreCta || cuentaMetadata.nombreCta,
+        ruc: previous.ruc || cuentaMetadata.ruc,
+      };
+    });
+  }, [empleadosSafe, form.idBancoCta, form.responsable, setForm]);
+
   const filteredResponsables =
     responsableInput.trim() === ""
       ? empleadosSafe
@@ -2176,7 +2211,10 @@ export default function GastosPage({
       nuevosErrores.tarea = "Seleccione una tarea.";
     }
 
-    if (form.responsable && Number(form.idBancoCta) <= 0) {
+    const tieneCuentaRegistrada = Boolean(
+      form.cuentaNumero?.trim() || form.cuenta?.trim() || form.cuentaInter?.trim()
+    );
+    if (form.responsable && Number(form.idBancoCta) <= 0 && !tieneCuentaRegistrada) {
       nuevosErrores.responsable = "El responsable seleccionado no tiene una cuenta válida.";
     }
 
