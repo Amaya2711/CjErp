@@ -13,10 +13,12 @@ import {
   HandCoins,
   Maximize2,
   Printer,
+  Pencil,
   ReceiptText,
   RotateCcw,
   Search,
   ShieldCheck,
+  Trash2,
   Minimize2,
   XCircle,
 } from "lucide-react";
@@ -2231,7 +2233,7 @@ export default function PagosV1Page() {
   const isResumenTab = activeTab === "resumen";
   const showEstadoOc = activeTab === "resumen";
   const tableColSpan = showEstadoOc ? 22 : 21;
-  const stickyColumnWidths = [108, 94, 88, 88, 72, 90, 110, 44, 130];
+  const stickyColumnWidths = [108, 94, 88, 88, 72, 90, 110, 112, 130];
   const stickyColumnLefts = stickyColumnWidths.reduce<number[]>((acc, _width, index) => {
     const previousLeft = acc[index - 1] ?? 0;
     const previousWidth = index === 0 ? 0 : stickyColumnWidths[index - 1];
@@ -2350,6 +2352,16 @@ export default function PagosV1Page() {
   const handleApplyFilters = () => {
     setAppliedFilters(filters);
     setMessage("Filtros aplicados. Actualizando registros...");
+  };
+
+  const abrirGasto = (row: PagoRow, modo: "ver" | "editar") => {
+    const correlativo = Math.trunc(Number(row.correlativo));
+    if (!Number.isFinite(correlativo) || correlativo <= 0) {
+      setMessage("No se pudo identificar el correlativo del gasto.");
+      return;
+    }
+
+    window.location.assign(`/finanzas/tesoreria/gastos?correlativo=${correlativo}&modo=${modo}`);
   };
 
   const handleClearFilters = () => {
@@ -3152,7 +3164,9 @@ export default function PagosV1Page() {
                     <th style={{ ...styles.th, ...getStickyCellStyle(4, "#F8FAFC", 6) }}>Fila</th>
                     <th style={{ ...styles.th, ...getStickyCellStyle(5, "#F8FAFC", 6) }}>Responsable</th>
                     <th style={{ ...styles.th, ...getStickyCellStyle(6, "#F8FAFC", 6) }}>Validador</th>
-                    <th style={{ ...styles.th, ...getStickyCellStyle(7, "#F8FAFC", 6), textAlign: "center" }}> </th>
+                    <th style={{ ...styles.th, ...getStickyCellStyle(7, "#F8FAFC", 6), textAlign: "center" }}>
+                      {isResumenTab ? "Acciones" : ""}
+                    </th>
                     <th style={{ ...styles.th, ...getStickyCellStyle(8, "#F8FAFC", 6) }}>Subtotal</th>
                     <th style={{ ...styles.th, width: 90 }}>IGV</th>
                     <th style={{ ...styles.th, width: 100 }}>Total</th>
@@ -3278,28 +3292,56 @@ export default function PagosV1Page() {
                                   <td title={row.fila || "-"} style={{ ...styles.td, ...getStickyCellStyle(4, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.fila || "-"}</td>
                                   <td title={row.responsable || "-"} style={{ ...styles.td, ...getStickyCellStyle(5, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.responsable}</td>
                                   <td title={row.validador || "-"} style={{ ...styles.td, ...getStickyCellStyle(6, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.validador || "-"}</td>
-                                  <td style={{ ...styles.td, ...getStickyCellStyle(7, isSelected ? "#EEF2FF" : "#FFFFFF", 3), textAlign: "center" }}>
-                                    <button
-                                      type="button"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        toggleDetailForRow(row);
-                                      }}
-                                      style={{
-                                        ...styles.compactActionButton,
-                                        width: 30,
-                                        height: 30,
-                                        padding: 0,
-                                        color: currentTheme.accent,
-                                        borderColor: currentTheme.border,
-                                        background: currentTheme.soft,
-                                      }}
-                                      aria-label={`Ver detalle de la orden ${row.correlativo}`}
-                                      title="Ver detalle"
-                                      >
-                                        <Eye size={10} />
-                                      </button>
-                                  </td>
+                                    <td style={{ ...styles.td, ...getStickyCellStyle(7, isSelected ? "#EEF2FF" : "#FFFFFF", 3), textAlign: "center" }}>
+                                      {isResumenTab ? (() => {
+                                        const accionesHabilitadas = row.estadoCodigo === "0" || row.estadoCodigo === "2";
+                                        const actionStyle = (enabled: boolean, color: string, background: string, border: string): React.CSSProperties => ({
+                                          ...styles.compactActionButton,
+                                          width: 28,
+                                          height: 28,
+                                          padding: 0,
+                                          color: enabled ? color : "#9CA3AF",
+                                          background: enabled ? background : "#F3F4F6",
+                                          borderColor: enabled ? border : "#E5E7EB",
+                                          opacity: enabled ? 1 : 0.65,
+                                          cursor: enabled ? "pointer" : "not-allowed",
+                                        });
+                                        return (
+                                          <div style={{ display: "flex", justifyContent: "center", gap: 4 }}>
+                                            <button type="button" title="Visualizar gasto" aria-label={`Visualizar gasto ${row.correlativo}`} onClick={(event) => { event.stopPropagation(); abrirGasto(row, "ver"); }} style={actionStyle(true, "#1D4ED8", "#EFF6FF", "#BFDBFE")}>
+                                              <Eye size={14} />
+                                            </button>
+                                            <button type="button" title={accionesHabilitadas ? "Modificar gasto" : "Modificar disponible solo para estados 0 y 2"} aria-label={`Modificar gasto ${row.correlativo}`} disabled={!accionesHabilitadas} onClick={(event) => { event.stopPropagation(); if (accionesHabilitadas) abrirGasto(row, "editar"); }} style={actionStyle(accionesHabilitadas, "#3730A3", "#EEF2FF", "#C7D2FE")}>
+                                              <Pencil size={14} />
+                                            </button>
+                                            <button type="button" title={accionesHabilitadas ? "Rechazar gasto" : "Rechazar disponible solo para estados 0 y 2"} aria-label={`Rechazar gasto ${row.correlativo}`} disabled={!accionesHabilitadas} onClick={(event) => { event.stopPropagation(); if (accionesHabilitadas) openRechazoModal([row]); }} style={actionStyle(accionesHabilitadas, "#B91C1C", "#FEF2F2", "#FECACA")}>
+                                              <Trash2 size={14} />
+                                            </button>
+                                          </div>
+                                        );
+                                      })() : (
+                                        <button
+                                          type="button"
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            toggleDetailForRow(row);
+                                          }}
+                                          style={{
+                                            ...styles.compactActionButton,
+                                            width: 30,
+                                            height: 30,
+                                            padding: 0,
+                                            color: currentTheme.accent,
+                                            borderColor: currentTheme.border,
+                                            background: currentTheme.soft,
+                                          }}
+                                          aria-label={`Ver detalle de la orden ${row.correlativo}`}
+                                          title="Ver detalle"
+                                        >
+                                          <Eye size={10} />
+                                        </button>
+                                      )}
+                                    </td>
                                   <td title={formatCurrency(row.subtotal, row.moneda)} style={{ ...styles.td, ...getStickyCellStyle(8, isSelected ? "#EEF2FF" : "#FFFFFF", 3), fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
                                   <td title={formatCurrency(row.igv, row.moneda)} style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
                                   <td title={formatCurrency(row.total, row.moneda)} style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>

@@ -1209,6 +1209,15 @@ const formularioInicial: GastoForm = {
 };
 
 export default function GastosPage() {
+  // Acciones iniciadas desde Total órdenes. Se consulta el correlativo de forma
+  // directa para no quedar condicionado por los filtros diarios de Gastos.
+  const accionDesdePagos = useMemo(() => {
+    const parametros = new URLSearchParams(window.location.search);
+    const correlativo = Number(parametros.get("correlativo"));
+    const modo = parametros.get("modo") === "ver" ? "ver" : "editar";
+    return Number.isInteger(correlativo) && correlativo > 0 ? { correlativo, modo } : null;
+  }, []);
+  const accionDesdePagosProcesadaRef = useRef<string | null>(null);
   // Estado para fila seleccionada
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [busqueda, setBusqueda] = useState("");
@@ -2104,6 +2113,54 @@ export default function GastosPage() {
     abrirEditar(gasto);
     setModo("ver");
   };
+
+  useEffect(() => {
+    if (!accionDesdePagos) {
+      return;
+    }
+
+    const accionKey = `${accionDesdePagos.correlativo}-${accionDesdePagos.modo}`;
+    if (accionDesdePagosProcesadaRef.current === accionKey) {
+      return;
+    }
+
+    accionDesdePagosProcesadaRef.current = accionKey;
+    let activo = true;
+
+    void consultarPlanillaEstados(
+      buildPlanillaConsultaEstadosRequest([
+        { nombre: "Correlativo", valor: String(accionDesdePagos.correlativo), tipo: "int" },
+      ])
+    )
+      .then((response) => {
+        if (!activo) {
+          return;
+        }
+
+        const registro = extraerArray<Record<string, unknown>>(response.rows)[0];
+        if (!registro) {
+          setMensajeFiltroCabecera(`No se encontró el gasto ${accionDesdePagos.correlativo}.`);
+          return;
+        }
+
+        const gasto = mapGastoDtoToView(mapPlanillaConsultaRowToGastoDto(registro, 0));
+        setBusqueda(String(accionDesdePagos.correlativo));
+        if (accionDesdePagos.modo === "ver") {
+          abrirVisualizar(gasto);
+        } else {
+          abrirEditar(gasto);
+        }
+      })
+      .catch(() => {
+        if (activo) {
+          setMensajeFiltroCabecera(`No se pudo cargar el gasto ${accionDesdePagos.correlativo}.`);
+        }
+      });
+
+    return () => {
+      activo = false;
+    };
+  }, [accionDesdePagos]);
 
   const cerrarPanel = () => {
     setPanelAbierto(false);
