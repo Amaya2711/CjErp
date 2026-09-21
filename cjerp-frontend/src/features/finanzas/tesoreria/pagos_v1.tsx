@@ -2727,13 +2727,13 @@ export default function PagosV1Page() {
       formatMoney(row.igv),
       formatMoney(row.total),
       formatDate(row.fecha),
-      row.cliente,
-      row.proyecto,
       row.siteId,
       row.corSite || "-",
+      row.tarea,
+      row.cliente,
+      row.proyecto,
       row.site,
       row.tipoTrabajo,
-      row.tarea,
     ]);
 
     exportToExcel(
@@ -2749,13 +2749,13 @@ export default function PagosV1Page() {
         "IGV",
         "Total",
         "Fecha",
-        "Cliente",
-        "Proyecto",
         "Site ID",
         "CorSite",
+        "Tarea",
+        "Cliente",
+        "Proyecto",
         "Site",
         "Tipo Trabajo",
-        "Tarea",
       ],
       rows
     );
@@ -3729,13 +3729,13 @@ export default function PagosV1Page() {
                             <th style={{ ...styles.th, width: 90 }}>IGV</th>
                             <th style={{ ...styles.th, width: 100 }}>Total</th>
                             <th style={{ ...styles.th, width: 80 }}>Fecha</th>
-                            <th style={{ ...styles.th, width: 60 }}>Cliente</th>
-                            <th style={{ ...styles.th, width: 90 }}>Proyecto</th>
                             <th style={{ ...styles.th, width: 60 }}>Site ID</th>
                             <th style={{ ...styles.th, width: 60 }}>CorSite</th>
+                            <th style={{ ...styles.th, width: 90 }}>Tarea</th>
+                            <th style={{ ...styles.th, width: 60 }}>Cliente</th>
+                            <th style={{ ...styles.th, width: 90 }}>Proyecto</th>
                             <th style={{ ...styles.th, width: 90 }}>Site</th>
                             <th style={{ ...styles.th, width: 90 }}>Tipo trabajo</th>
-                            <th style={{ ...styles.th, width: 90 }}>Tarea</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -3758,13 +3758,13 @@ export default function PagosV1Page() {
                                 <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
                                 <td style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
                                 <td style={styles.td}>{formatDate(row.fecha)}</td>
-                                <td style={styles.td}>{row.cliente}</td>
-                                <td style={styles.td}>{row.proyecto}</td>
                                 <td style={styles.td}>{row.siteId}</td>
                                 <td style={styles.td}>{row.corSite || '-'}</td>
+                                <td style={styles.td}>{row.tarea}</td>
+                                <td style={styles.td}>{row.cliente}</td>
+                                <td style={styles.td}>{row.proyecto}</td>
                                 <td style={styles.td}>{row.site}</td>
                                 <td style={styles.td}>{row.tipoTrabajo}</td>
-                                <td style={styles.td}>{row.tarea}</td>
                               </tr>
                             ))
                           )}
@@ -3967,13 +3967,13 @@ export default function PagosV1Page() {
                         <th style={{ ...styles.th, width: 90 }}>IGV</th>
                         <th style={{ ...styles.th, width: 100 }}>Total</th>
                         <th style={{ ...styles.th, width: 80 }}>Fecha</th>
-                        <th style={{ ...styles.th, width: 60 }}>Cliente</th>
-                        <th style={{ ...styles.th, width: 90 }}>Proyecto</th>
                         <th style={{ ...styles.th, width: 60 }}>Site ID</th>
                         <th style={{ ...styles.th, width: 60 }}>CorSite</th>
+                        <th style={{ ...styles.th, width: 90 }}>Tarea</th>
+                        <th style={{ ...styles.th, width: 60 }}>Cliente</th>
+                        <th style={{ ...styles.th, width: 90 }}>Proyecto</th>
                         <th style={{ ...styles.th, width: 90 }}>Site</th>
                         <th style={{ ...styles.th, width: 90 }}>Tipo trabajo</th>
-                        <th style={{ ...styles.th, width: 90 }}>Tarea</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -3996,13 +3996,13 @@ export default function PagosV1Page() {
                             <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
                             <td style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
                             <td style={styles.td}>{formatDate(row.fecha)}</td>
-                            <td style={styles.td}>{row.cliente}</td>
-                            <td style={styles.td}>{row.proyecto}</td>
                             <td style={styles.td}>{row.siteId}</td>
                             <td style={styles.td}>{row.corSite || '-'}</td>
+                            <td style={styles.td}>{row.tarea}</td>
+                            <td style={styles.td}>{row.cliente}</td>
+                            <td style={styles.td}>{row.proyecto}</td>
                             <td style={styles.td}>{row.site}</td>
                             <td style={styles.td}>{row.tipoTrabajo}</td>
-                            <td style={styles.td}>{row.tarea}</td>
                           </tr>
                         ))
                       )}
