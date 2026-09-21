@@ -3302,7 +3302,8 @@ export default function PagosV1Page() {
                                   <td title={row.validador || "-"} style={{ ...styles.td, ...getStickyCellStyle(6, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.validador || "-"}</td>
                                     <td style={{ ...styles.td, ...getStickyCellStyle(7, isSelected ? "#EEF2FF" : "#FFFFFF", 3), textAlign: "center" }}>
                                       {isResumenTab ? (() => {
-                                        const accionesHabilitadas = row.estadoCodigo === "0" || row.estadoCodigo === "2";
+                                        // Solo se bloquea cuando el gasto está en un estado final o no editable.
+                                        const accionesHabilitadas = !["99", "3", "4", "5", "8"].includes(row.estadoCodigo ?? "");
                                         const actionStyle = (enabled: boolean, color: string, background: string, border: string): React.CSSProperties => ({
                                           ...styles.compactActionButton,
                                           width: 28,
@@ -3322,10 +3323,10 @@ export default function PagosV1Page() {
                                             <button type="button" title="Visualizar gasto" aria-label={`Visualizar gasto ${row.correlativo}`} onClick={(event) => { event.stopPropagation(); abrirGasto(row, "ver"); }} style={actionStyle(true, "#1D4ED8", "#EFF6FF", "#BFDBFE")}>
                                               <Eye size={14} />
                                             </button>
-                                            <button type="button" title={accionesHabilitadas ? "Modificar gasto" : "Modificar disponible solo para estados 0 y 2"} aria-label={`Modificar gasto ${row.correlativo}`} disabled={!accionesHabilitadas} onClick={(event) => { event.stopPropagation(); if (accionesHabilitadas) abrirGasto(row, "editar"); }} style={actionStyle(accionesHabilitadas, "#3730A3", "#EEF2FF", "#C7D2FE")}>
+                                            <button type="button" title={accionesHabilitadas ? "Modificar gasto" : "Modificar no disponible para el estado actual"} aria-label={`Modificar gasto ${row.correlativo}`} disabled={!accionesHabilitadas} onClick={(event) => { event.stopPropagation(); if (accionesHabilitadas) abrirGasto(row, "editar"); }} style={actionStyle(accionesHabilitadas, "#3730A3", "#EEF2FF", "#C7D2FE")}>
                                               <Pencil size={14} />
                                             </button>
-                                            <button type="button" title={accionesHabilitadas ? "Rechazar gasto" : "Rechazar disponible solo para estados 0 y 2"} aria-label={`Rechazar gasto ${row.correlativo}`} disabled={!accionesHabilitadas} onClick={(event) => { event.stopPropagation(); if (accionesHabilitadas) openRechazoModal([row]); }} style={actionStyle(accionesHabilitadas, "#B91C1C", "#FEF2F2", "#FECACA")}>
+                                            <button type="button" title={accionesHabilitadas ? "Rechazar gasto" : "Rechazar no disponible para el estado actual"} aria-label={`Rechazar gasto ${row.correlativo}`} disabled={!accionesHabilitadas} onClick={(event) => { event.stopPropagation(); if (accionesHabilitadas) openRechazoModal([row]); }} style={actionStyle(accionesHabilitadas, "#B91C1C", "#FEF2F2", "#FECACA")}>
                                               <Trash2 size={14} />
                                             </button>
                                           </div>
