@@ -212,6 +212,11 @@ namespace CjERP.Infrastructure.Services
                 rows = ApplyPagadosDashboardFilters(rows, parametrosList);
             }
 
+            if (string.Equals(storedProcedureName, StoredProcedureAprobar, StringComparison.OrdinalIgnoreCase))
+            {
+                rows = ApplyCorrelativoFilter(rows, parametrosList);
+            }
+
             if (string.Equals(storedProcedureName, StoredProcedureImportarConsultaDsh, StringComparison.OrdinalIgnoreCase))
             {
                 rows = ApplyImportarConsultaDshFilters(rows, parametrosList);
@@ -432,6 +437,31 @@ namespace CjERP.Infrastructure.Services
                     }
 
                     return true;
+                })
+                .ToList();
+        }
+
+        private static List<Dictionary<string, object?>> ApplyCorrelativoFilter(
+            List<Dictionary<string, object?>> rows,
+            IEnumerable<PlanillaConsultaParametroDto> parametros)
+        {
+            var correlativo = GetIntParameterValue(parametros, "Correlativo");
+
+            if (!correlativo.HasValue)
+            {
+                return rows;
+            }
+
+            return rows
+                .Where(row =>
+                {
+                    var rowCorrelativo =
+                        TryGetInt(row, "Correlativo") ??
+                        TryGetInt(row, "Corre") ??
+                        TryGetInt(row, "CorSite") ??
+                        TryGetInt(row, "Id");
+
+                    return rowCorrelativo == correlativo.Value;
                 })
                 .ToList();
         }
@@ -748,6 +778,7 @@ WHERE Correlativo IN @Correlativos";
                 "FechaInicio",
                 "FechaFin",
                 "FechaDeposito",
+                "Correlativo",
                 "IncluirEstado99",
                 "TipoCambio"
             };

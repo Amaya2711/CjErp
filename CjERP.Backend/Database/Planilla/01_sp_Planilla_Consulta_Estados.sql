@@ -4,7 +4,7 @@ ALTER PROCEDURE [dbo].[sp_Planilla_Consulta_Estados]
     @IdEmpleado     INT = NULL,
     @IdValidador    INT = NULL,
     @IdBanco        INT = NULL,
-    @Estados        VARCHAR(50),
+    @Estados        VARCHAR(50) = NULL,
     @OT             VARCHAR(50) = NULL,
     @IdOc           VARCHAR(50) = NULL,
     @Fila           VARCHAR(50) = NULL,
@@ -256,10 +256,13 @@ BEGIN
         ON a.idprovisional = s1.idprovisional
     INNER JOIN Proyecto b
         ON a.IdProyecto = b.IdProyecto
-    WHERE EXISTS (
+    WHERE (
+        NULLIF(LTRIM(RTRIM(@Estados)), '') IS NULL
+        OR EXISTS (
         SELECT 1
         FROM @EstadosFiltro estadoFiltro
         WHERE estadoFiltro.Estado = a.Estado
+        )
     )
     AND (@Correlativo IS NULL OR a.Correlativo = @Correlativo)
     AND (@IdValidador IS NULL OR a.IdValidador = @IdValidador)
@@ -268,8 +271,7 @@ BEGIN
         OR a.IdBanco = @IdBanco
     )
     AND (
-        @Correlativo IS NOT NULL
-        OR NULLIF(LTRIM(RTRIM(@TextoBusqueda)), '') IS NOT NULL
+        NULLIF(LTRIM(RTRIM(@TextoBusqueda)), '') IS NOT NULL
         OR
         @FechaInicio IS NULL
         OR (
@@ -283,8 +285,7 @@ BEGIN
         )
     )
     AND (
-        @Correlativo IS NOT NULL
-        OR NULLIF(LTRIM(RTRIM(@TextoBusqueda)), '') IS NOT NULL
+        NULLIF(LTRIM(RTRIM(@TextoBusqueda)), '') IS NOT NULL
         OR
         @FechaFin IS NULL
         OR (

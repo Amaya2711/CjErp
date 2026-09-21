@@ -195,8 +195,6 @@ const TAB_ESTADOS: Record<Exclude<PagoTabKey, "resumen">, string> = {
   observadas: "2",
 };
 
-const TAB_ESTADOS_CON_FECHA = Object.values(TAB_ESTADOS).join(",");
-
 function createEmptyRowsByTab(): Record<PagoTabKey, PagoRow[]> {
   return {
     aprobar: [],
@@ -730,18 +728,9 @@ function toComparableDateKey(value: string) {
     const firstNumber = Number(first);
     const secondNumber = Number(second);
 
-    let day = firstNumber;
-    let month = secondNumber;
-
-    // Soportar tanto DD/MM/YYYY como MM/DD/YYYY.
-    // Si uno de los dos componentes supera 12, la interpretación queda clara.
-    if (firstNumber <= 12 && secondNumber > 12) {
-      month = firstNumber;
-      day = secondNumber;
-    } else if (firstNumber > 12 && secondNumber <= 12) {
-      day = firstNumber;
-      month = secondNumber;
-    }
+    // Planilla entrega estas fechas con formato MM/DD/YYYY.
+    const month = firstNumber;
+    const day = secondNumber;
 
     if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
       return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
@@ -1460,9 +1449,11 @@ export default function PagosV1Page() {
             : "Consultando órdenes consolidadas por estados..."
         );
 
-        // Total órdenes no limita estados: las bandejas operativas se forman
-        // localmente y el resumen conserva también, por ejemplo, estado 1.
         const parametros: PlanillaConsultaParametro[] = [];
+
+        if (activeTab !== "resumen") {
+          parametros.push({ nombre: "Estados", valor: TAB_ESTADOS[activeTab], tipo: "string" });
+        }
 
         if (buscarPorCorrelativo) {
           parametros.push({ nombre: "Correlativo", valor: String(correlativoNumero), tipo: "int" });
@@ -1470,11 +1461,11 @@ export default function PagosV1Page() {
 
         // La búsqueda rápida se resuelve en Planilla sobre todos los registros,
         // sin restringirla al rango que estaba cargado antes en el navegador.
-        if (fechaInicio && !buscarEnTotal) {
+        if (fechaInicio) {
           parametros.push({ nombre: "FechaInicio", valor: fechaInicio, tipo: "date" });
         }
 
-        if (fechaFin && !buscarEnTotal) {
+        if (fechaFin) {
           parametros.push({ nombre: "FechaFin", valor: fechaFin, tipo: "date" });
         }
 
@@ -1545,7 +1536,7 @@ export default function PagosV1Page() {
       cancelled = true;
       controller.abort();
     };
-  }, [appliedFilters.fechaDesde, appliedFilters.fechaHasta, appliedFilters.query, appliedFilters.correlativo, refreshTick, runTrackedRequest]);
+  }, [activeTab, appliedFilters.fechaDesde, appliedFilters.fechaHasta, appliedFilters.query, appliedFilters.correlativo, refreshTick, runTrackedRequest]);
 
   const activeRows = useMemo(
     () => (activeTab === "resumen" ? rowsByTab.resumen : rowsByTab[activeTab]),
