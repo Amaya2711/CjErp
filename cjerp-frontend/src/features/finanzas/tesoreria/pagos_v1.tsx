@@ -2241,7 +2241,7 @@ export default function PagosV1Page() {
   const isResumenTab = activeTab === "resumen";
   const showEstadoOc = activeTab === "resumen";
   const tableColSpan = showEstadoOc ? 22 : 21;
-  const stickyColumnWidths = [108, 94, 88, 88, 72, 90, 110, 112, 130];
+  const stickyColumnWidths = [108, 94, 88, 88, 72, 90, 110, 142, 130];
   const stickyColumnLefts = stickyColumnWidths.reduce<number[]>((acc, _width, index) => {
     const previousLeft = acc[index - 1] ?? 0;
     const previousWidth = index === 0 ? 0 : stickyColumnWidths[index - 1];
@@ -3316,6 +3316,9 @@ export default function PagosV1Page() {
                                         });
                                         return (
                                           <div style={{ display: "flex", justifyContent: "center", gap: 4 }}>
+                                            <button type="button" title="Ver detalle" aria-label={`Ver detalle de la orden ${row.correlativo}`} onClick={(event) => { event.stopPropagation(); toggleDetailForRow(row); }} style={actionStyle(true, "#475569", "#F8FAFC", "#CBD5E1")}>
+                                              <FileText size={14} />
+                                            </button>
                                             <button type="button" title="Visualizar gasto" aria-label={`Visualizar gasto ${row.correlativo}`} onClick={(event) => { event.stopPropagation(); abrirGasto(row, "ver"); }} style={actionStyle(true, "#1D4ED8", "#EFF6FF", "#BFDBFE")}>
                                               <Eye size={14} />
                                             </button>
