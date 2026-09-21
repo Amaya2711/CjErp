@@ -43,6 +43,7 @@ import {
   seguridadPermisosAccionesService,
   type PermisoAccionDto,
 } from "../../seguridad/services/seguridadPermisosAccionesService";
+import GastosPage, { type GastoEditorRequest } from "./gastos";
 
 type PagoTabKey = "aprobar" | "reaprobar" | "hormiga" | "observadas" | "resumen";
 type DetailTabKey = "orden" | "resumen" | "historial" | "historial-oc";
@@ -254,13 +255,6 @@ const TAB_THEME: Record<PagoTabKey, TabTheme> = {
     border: "#C4B5FD",
     icon: <ShieldCheck size={16} strokeWidth={2.2} />,
   },
-};
-
-type GastoDirectoPanelState = {
-  row: PagoRow;
-  modo: "ver" | "editar";
-  detalle: string;
-  comentario: string;
 };
 
 const TAB_ACTION_KEYS: Record<PagoEstado, string> = {
@@ -1311,7 +1305,7 @@ export default function PagosV1Page() {
   const [isHistorialPopupOpen, setIsHistorialPopupOpen] = useState(false);
   const [isHistorialOcPopupOpen, setIsHistorialOcPopupOpen] = useState(false);
   const [message, setMessage] = useState<string>("");
-  const [gastoDirectoPanel, setGastoDirectoPanel] = useState<GastoDirectoPanelState | null>(null);
+  const [gastoEditorRequest, setGastoEditorRequest] = useState<GastoEditorRequest | null>(null);
   const [rechazoModal, setRechazoModal] = useState<RechazoModalState | null>(null);
   const [observacionModal, setObservacionModal] = useState<ObservacionModalState | null>(null);
   const [aprobarConfirm, setAprobarConfirm] = useState<AprobarConfirmState | null>(null);
@@ -2369,7 +2363,7 @@ export default function PagosV1Page() {
       return;
     }
 
-    setGastoDirectoPanel({ row, modo, detalle: row.detalle, comentario: row.observacion });
+    setGastoEditorRequest({ correlativo, mode: modo });
   };
 
   const handleClearFilters = () => {
@@ -4019,47 +4013,15 @@ export default function PagosV1Page() {
             </div>
           </div>
         ) : null}
-        {gastoDirectoPanel ? (
-          <div
-            role="presentation"
-            onClick={() => setGastoDirectoPanel(null)}
-            style={{
-              position: "fixed",
-              inset: 0,
-              zIndex: 90,
-              background: "rgba(15, 23, 42, 0.48)",
-              display: "flex",
-              justifyContent: "flex-end",
+        {gastoEditorRequest ? (
+          <GastosPage
+            editorRequest={gastoEditorRequest}
+            onEditorClose={() => setGastoEditorRequest(null)}
+            onEditorUpdated={() => {
+              setRefreshTick((current) => current + 1);
+              setMessage("Gasto actualizado correctamente.");
             }}
-          >
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-label={gastoDirectoPanel.modo === "ver" ? "Visualizar gasto" : "Editar gasto"}
-              onClick={(event) => event.stopPropagation()}
-              style={{ width: "min(100%, 960px)", height: "100%", background: "#FFFFFF", boxShadow: "-12px 0 36px rgba(15, 23, 42, 0.22)", display: "flex", flexDirection: "column" }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "18px 24px 10px" }}>
-                <div>
-                  <strong style={{ color: "#1E293B", fontSize: 19, fontWeight: 500 }}>{gastoDirectoPanel.modo === "ver" ? "Visualizar gasto" : `Editar gasto · ID: ${gastoDirectoPanel.row.correlativo}`}</strong>
-                  <div style={{ color: "#64748B", fontSize: 11, marginTop: 8 }}>Complete la información del gasto.</div>
-                  <div style={{ color: "#475569", fontSize: 10, marginTop: 6 }}>El sistema registra auditoría automática por sección al guardar o rechazar cambios.</div>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 18 }}><strong style={{ fontSize: 13 }}>Porcentaje: <span style={{ color: "#EF4444" }}>0.00 %</span></strong><button type="button" onClick={() => setGastoDirectoPanel(null)} style={{ ...styles.slimActionButton, color: "#475569", borderColor: "#E2E8F0" }}>×</button></div>
-              </div>
-              <div style={{ padding: "4px 24px 22px", overflow: "auto", display: "grid", gap: 9, fontSize: 11 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 10 }}><label style={styles.quickDateField}><span style={styles.quickDateLabel}>Filtro</span><input value={`${gastoDirectoPanel.row.cliente} - ${gastoDirectoPanel.row.proyecto} - ${gastoDirectoPanel.row.site}`} readOnly style={styles.quickDateInput} /></label><label style={styles.quickDateField}><span style={styles.quickDateLabel}>Trabajo</span><input value={gastoDirectoPanel.row.tipoTrabajo} readOnly style={styles.quickDateInput} /></label><label style={styles.quickDateField}><span style={styles.quickDateLabel}>OT</span><input value={gastoDirectoPanel.row.ot} readOnly style={styles.quickDateInput} /></label></div>
-                <label style={{ ...styles.quickDateField, maxWidth: "52%" }}><span style={styles.quickDateLabel}>Tarea</span><input value={gastoDirectoPanel.row.tarea} readOnly style={styles.quickDateInput} /></label>
-                <label style={styles.quickDateField}><span style={styles.quickDateLabel}>Responsable</span><input value={gastoDirectoPanel.row.responsable} readOnly style={styles.quickDateInput} /></label>
-                <label style={styles.quickDateField}><span style={styles.quickDateLabel}>Cuenta</span><input value="Cuenta bancaria asociada" readOnly style={styles.quickDateInput} /></label>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}><label style={{ display: "grid", gap: 4 }}><span style={styles.quickDateLabel}>Detalle</span><textarea value={gastoDirectoPanel.detalle} readOnly={gastoDirectoPanel.modo === "ver"} onChange={(event) => setGastoDirectoPanel((actual) => actual ? { ...actual, detalle: event.target.value } : actual)} style={{ minHeight: 112, border: "1px solid #CBD5E1", borderRadius: 8, padding: 10, resize: "vertical" }} /></label><div style={{ display: "grid", gap: 8 }}><label style={{ display: "grid", gap: 4 }}><span style={styles.quickDateLabel}>Comentario</span><textarea value={gastoDirectoPanel.comentario} readOnly={gastoDirectoPanel.modo === "ver"} onChange={(event) => setGastoDirectoPanel((actual) => actual ? { ...actual, comentario: event.target.value } : actual)} style={{ minHeight: 70, border: "1px solid #CBD5E1", borderRadius: 8, padding: 10, resize: "vertical" }} /></label><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}><label style={styles.quickDateField}><span style={styles.quickDateLabel}>Fecha emisión</span><input value={formatDate(gastoDirectoPanel.row.fecha)} readOnly style={styles.quickDateInput} /></label><label style={styles.quickDateField}><span style={styles.quickDateLabel}>Fecha vencimiento</span><input value="" placeholder="dd/mm/aaaa" readOnly style={styles.quickDateInput} /></label></div></div></div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}><label style={styles.quickDateField}><span style={styles.quickDateLabel}>Bien</span><input value="-" readOnly style={styles.quickDateInput} /></label><label style={styles.quickDateField}><span style={styles.quickDateLabel}>Comprobante</span><input value="-" readOnly style={styles.quickDateInput} /></label><label style={styles.quickDateField}><span style={styles.quickDateLabel}>Serie</span><input value="" readOnly style={styles.quickDateInput} /></label><label style={styles.quickDateField}><span style={styles.quickDateLabel}>Rendición</span><input value="No" readOnly style={styles.quickDateInput} /></label></div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr", gap: 10 }}><label style={styles.quickDateField}><span style={styles.quickDateLabel}>Tipo de pago</span><input value="-" readOnly style={styles.quickDateInput} /></label><label style={styles.quickDateField}><span style={styles.quickDateLabel}>Subtotal</span><input value={formatCurrency(gastoDirectoPanel.row.subtotal, gastoDirectoPanel.row.moneda)} readOnly style={styles.quickDateInput} /></label><label style={styles.quickDateField}><span style={styles.quickDateLabel}>IGV</span><input value={formatCurrency(gastoDirectoPanel.row.igv, gastoDirectoPanel.row.moneda)} readOnly style={styles.quickDateInput} /></label><label style={styles.quickDateField}><span style={styles.quickDateLabel}>Total</span><input value={formatCurrency(gastoDirectoPanel.row.total, gastoDirectoPanel.row.moneda)} readOnly style={styles.quickDateInput} /></label><label style={styles.quickDateField}><span style={styles.quickDateLabel}>Moneda</span><input value={gastoDirectoPanel.row.moneda} readOnly style={styles.quickDateInput} /></label></div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}><label style={styles.quickDateField}><span style={styles.quickDateLabel}>Solicitante</span><input value={gastoDirectoPanel.row.solicitante} readOnly style={styles.quickDateInput} /></label><label style={styles.quickDateField}><span style={styles.quickDateLabel}>Gestor</span><input value="-" readOnly style={styles.quickDateInput} /></label><label style={styles.quickDateField}><span style={styles.quickDateLabel}>Validador</span><input value={gastoDirectoPanel.row.validador} readOnly style={styles.quickDateInput} /></label></div>
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 8 }}><button type="button" onClick={() => setGastoDirectoPanel(null)} style={{ ...styles.slimActionButton, color: "#334155", borderColor: "#CBD5E1" }}>Cancelar</button>{gastoDirectoPanel.modo === "editar" ? <button type="button" style={{ ...styles.slimActionButton, color: "#FFFFFF", background: "#6D46D8", borderColor: "#6D46D8" }}>Actualizar</button> : null}</div>
-              </div>
-            </div>
-          </div>
+          />
         ) : null}
         {rechazoModal ? (
           <div

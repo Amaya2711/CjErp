@@ -135,6 +135,17 @@ type GastoForm = {
   banco: string;
 };
 
+export type GastoEditorRequest = {
+  correlativo: number;
+  mode: "ver" | "editar";
+};
+
+type GastosPageProps = {
+  editorRequest?: GastoEditorRequest;
+  onEditorClose?: () => void;
+  onEditorUpdated?: () => void;
+};
+
 type GastoPayload = {
   idSuministroProvisional?: number;
   filtroOperativoKey: string;
@@ -1208,7 +1219,12 @@ const formularioInicial: GastoForm = {
   banco: "",
 };
 
-export default function GastosPage() {
+export default function GastosPage({
+  editorRequest,
+  onEditorClose,
+  onEditorUpdated,
+}: GastosPageProps = {}) {
+  const editorOnly = Boolean(editorRequest);
   // Estado para fila seleccionada
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [busqueda, setBusqueda] = useState("");
@@ -1276,6 +1292,9 @@ export default function GastosPage() {
   const [motivoRechazo, setMotivoRechazo] = useState("");
   const [rechazando, setRechazando] = useState(false);
   const [rechazoError, setRechazoError] = useState<string | null>(null);
+  const [externalEditorLoading, setExternalEditorLoading] = useState(false);
+  const [externalEditorError, setExternalEditorError] = useState<string | null>(null);
+  const externalEditorRequestKeyRef = useRef("");
   const archivoFacturaInputRef = useRef<HTMLInputElement | null>(null);
   const camaraFacturaInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -1411,6 +1430,10 @@ export default function GastosPage() {
 
   const gastosApi = {
     list: async () => {
+      if (editorOnly) {
+        return [];
+      }
+
       const filtrosConsulta = filtrosCabeceraAplicadosRef.current;
       const estadosSeleccionados = Array.from(
         new Set(
@@ -2131,6 +2154,9 @@ export default function GastosPage() {
     setErrores({});
     setShowFacturaSourceMenu(false);
     setFacturaUploadError(null);
+    if (editorOnly) {
+      onEditorClose?.();
+    }
   };
 
   const validar = () => {
@@ -2205,7 +2231,12 @@ export default function GastosPage() {
     setResponsableInput("");
     setShowFacturaSourceMenu(false);
     setFacturaUploadError(null);
-    await cargarGastos();
+    if (editorOnly) {
+      onEditorUpdated?.();
+      onEditorClose?.();
+    } else {
+      await cargarGastos();
+    }
   };
 
   const confirmarEliminar = (gasto: GastoForm, rowIndex: number) => {
@@ -2228,6 +2259,70 @@ export default function GastosPage() {
     abrirVisualizarRef.current = abrirVisualizar;
     confirmarEliminarRef.current = confirmarEliminar;
   }, [abrirEditar, abrirVisualizar, confirmarEliminar]);
+
+  useEffect(() => {
+    if (!editorRequest) {
+      externalEditorRequestKeyRef.current = "";
+      setExternalEditorLoading(false);
+      setExternalEditorError(null);
+      return;
+    }
+
+    const correlativo = Math.trunc(Number(editorRequest.correlativo));
+    const requestKey = `${correlativo}:${editorRequest.mode}`;
+    if (!Number.isFinite(correlativo) || correlativo <= 0) {
+      setExternalEditorError("No se pudo identificar el correlativo del gasto.");
+      return;
+    }
+
+    if (externalEditorRequestKeyRef.current === requestKey) {
+      return;
+    }
+
+    externalEditorRequestKeyRef.current = requestKey;
+    let active = true;
+    setExternalEditorLoading(true);
+    setExternalEditorError(null);
+
+    void consultarPlanillaEstados(
+      buildPlanillaConsultaEstadosRequest([
+        { nombre: "Correlativo", valor: String(correlativo), tipo: "int" },
+      ])
+    )
+      .then((response) => {
+        if (!active) return;
+
+        const gasto = extraerArray<Record<string, unknown>>(response.rows)
+          .map((row, index) => mapGastoDtoToView(mapPlanillaConsultaRowToGastoDto(row, index)))
+          .find((item) => Number(item.id) === correlativo);
+
+        if (!gasto) {
+          throw new Error(`No se encontró el gasto ${correlativo}.`);
+        }
+
+        if (editorRequest.mode === "ver") {
+          abrirVisualizarRef.current(gasto);
+        } else {
+          abrirEditarRef.current(gasto);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        externalEditorRequestKeyRef.current = "";
+        setExternalEditorError(
+          error instanceof Error && error.message
+            ? error.message
+            : "No se pudo cargar el gasto seleccionado."
+        );
+      })
+      .finally(() => {
+        if (active) setExternalEditorLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [editorRequest?.correlativo, editorRequest?.mode]);
 
   const cancelarRechazo = () => {
     setMostrarConfirmacionRechazo(false);
@@ -2920,7 +3015,8 @@ export default function GastosPage() {
 
   return (
     <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 5 }}>
-
+      {!editorOnly && (
+        <>
       <CrudToolbar
         searchValue={busqueda}
         onSearchChange={setBusqueda}
@@ -3638,6 +3734,46 @@ export default function GastosPage() {
           </span>
         </div>
       </div>
+        </>
+      )}
+
+      {editorOnly && (externalEditorLoading || externalEditorError) && !panelAbierto && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.35)",
+            display: "flex",
+            justifyContent: "flex-end",
+            zIndex: 3000,
+          }}
+        >
+          <div
+            style={{
+              width: 900,
+              maxWidth: "100%",
+              height: "100%",
+              background: "#FFFFFF",
+              padding: 24,
+              boxSizing: "border-box",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <strong style={{ color: "#17143A", fontSize: 20 }}>
+                {externalEditorLoading ? "Cargando gasto..." : externalEditorError}
+              </strong>
+              <button
+                type="button"
+                onClick={onEditorClose}
+                aria-label="Cerrar"
+                style={{ border: 0, borderRadius: 8, padding: "8px 12px", cursor: "pointer" }}
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {panelAbierto && (
         <div
