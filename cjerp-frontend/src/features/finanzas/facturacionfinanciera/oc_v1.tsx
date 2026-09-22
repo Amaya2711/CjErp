@@ -2544,7 +2544,6 @@ export default function OcV1Page() {
                 <SummaryCard label="Peso" value={formatMoney(draftTotals.peso)} />
               </div>
               <div style={{ display: "flex", gap: 10 }}>
-                <button type="button" onClick={closePanel} style={styles.secondaryButton}>Cerrar</button>
                 <button type="button" onClick={saveDraft} disabled={saving} style={styles.primaryButton}>
                   {saving ? "Guardando..." : "Guardar"}
                 </button>

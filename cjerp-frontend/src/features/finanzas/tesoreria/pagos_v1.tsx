@@ -35,10 +35,7 @@ import type {
 } from "../../../models/planillaConsulta";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 import { getAuthUser, hasFullPageActionAccess } from "../../../utils/authStorage";
-import {
-  buscarConsumoOrdenCompra,
-  type OrdenCompraConsumoDto,
-} from "../../../api/ordenCompraService";
+import { type OrdenCompraConsumoDto } from "../../../api/ordenCompraService";
 import {
   seguridadPermisosAccionesService,
   type PermisoAccionDto,
@@ -189,13 +186,6 @@ type ResumenOtDetalle = {
 };
 
 const TAB_ORDER: PagoTabKey[] = ["aprobar", "reaprobar", "hormiga", "observadas", "resumen"];
-
-const TAB_ESTADOS: Record<Exclude<PagoTabKey, "resumen">, string> = {
-  aprobar: "0",
-  reaprobar: "6",
-  hormiga: "10",
-  observadas: "2",
-};
 
 function createEmptyRowsByTab(): Record<PagoTabKey, PagoRow[]> {
   return {
@@ -1043,7 +1033,7 @@ function buildResumenOtRequest(row: PagoRow): PlanillaConsultaEstadosRequest | n
   const idSite = row.siteId.trim();
   const tipoTrabajo = row.tipoTrabajo.trim();
 
-  if (!correlativo || !idSite || !tipoTrabajo || idCliente <= 0 || idProyecto <= 0) {
+  if (!ot || !correlativo || !idSite || !tipoTrabajo || idCliente <= 0 || idProyecto <= 0) {
     return null;
   }
 
@@ -1051,7 +1041,7 @@ function buildResumenOtRequest(row: PagoRow): PlanillaConsultaEstadosRequest | n
       { nombre: "IdCliente", valor: String(Math.trunc(idCliente)), tipo: "int" },
       { nombre: "IdProyecto", valor: String(Math.trunc(idProyecto)), tipo: "int" },
       { nombre: "IdSite", valor: idSite, tipo: "string" },
-      { nombre: "Correlativo", valor: correlativo, tipo: "int" },
+      { nombre: "CorreSite", valor: correlativo, tipo: "int" },
       { nombre: "TipoTrabajo", valor: tipoTrabajo, tipo: "string" },
     ];
 
@@ -1062,21 +1052,23 @@ function buildResumenOtRequest(row: PagoRow): PlanillaConsultaEstadosRequest | n
     parametros.unshift({ nombre: "OT", valor: ot, tipo: "string" });
   }
 
-  return buildPagosV1PlanillaRequest(parametros, "importar-resumen-ot");
+  return buildPagosV1PlanillaRequest(parametros, "planilla-ot-resumen");
 }
 
 function buildHistorialOtRequest(row: PagoRow): PlanillaConsultaEstadosRequest | null {
+  const ot = getValidOtValue(row?.ot);
   const idCliente = row?.idCliente ?? 0;
   const idProyecto = row?.idProyecto ?? 0;
   const idSite = row?.siteId?.trim();
   const tipoTrabajo = row?.tipoTrabajo?.trim();
 
-  if (idCliente <= 0 || idProyecto <= 0 || !idSite || !tipoTrabajo) {
+  if (!ot || idCliente <= 0 || idProyecto <= 0 || !idSite || !tipoTrabajo) {
     return null;
   }
 
   return buildPagosV1PlanillaRequest([
       { nombre: "Estados", valor: "4", tipo: "string" },
+      { nombre: "OT", valor: ot, tipo: "string" },
       { nombre: "IdCliente", valor: String(Math.trunc(idCliente)), tipo: "int" },
       { nombre: "IdProyecto", valor: String(Math.trunc(idProyecto)), tipo: "int" },
       { nombre: "IdSite", valor: idSite, tipo: "string" },
@@ -1097,6 +1089,28 @@ function buildHistorialOcRequest(row: PagoRow): PlanillaConsultaEstadosRequest |
       { nombre: "IdOc", valor: idoc, tipo: "string" },
       { nombre: "Fila", valor: fila, tipo: "string" },
     ]);
+}
+
+function buildResumenOcRequest(row: PagoRow): PlanillaConsultaEstadosRequest | null {
+  const idOc = getValidOcValue(row.idOc ?? row.documento);
+  const idCliente = row.idCliente ?? 0;
+  const idProyecto = row.idProyecto ?? 0;
+  const idSite = row.siteId?.trim();
+  const correSite = row.corSite?.trim();
+  const tipoTrabajo = row.tipoTrabajo?.trim();
+
+  if (!idOc || idCliente <= 0 || idProyecto <= 0 || !idSite || !correSite || !tipoTrabajo) {
+    return null;
+  }
+
+  return buildPagosV1PlanillaRequest([
+    { nombre: "IdOc", valor: idOc, tipo: "int" },
+    { nombre: "IdCliente", valor: String(Math.trunc(idCliente)), tipo: "int" },
+    { nombre: "IdProyecto", valor: String(Math.trunc(idProyecto)), tipo: "int" },
+    { nombre: "IdSite", valor: idSite, tipo: "string" },
+    { nombre: "CorreSite", valor: correSite, tipo: "int" },
+    { nombre: "TipoTrabajo", valor: tipoTrabajo, tipo: "string" },
+  ], "planilla-oc-resumen");
 }
 
 function mapResumenOtResponseRowToDetalle(
@@ -1124,7 +1138,9 @@ function mapResumenOtResponseRowToDetalle(
       "TotalOc",
       "totalOc",
       "MontoOt",
-      "montoOt"
+      "montoOt",
+      "TotalMontoBckPorMoneda",
+      "totalMontoBckPorMoneda"
     ) ?? (parseNumericValue(fallback.montoOc2) || fallback.total);
 
   const montoPlanilla =
@@ -1135,7 +1151,9 @@ function mapResumenOtResponseRowToDetalle(
       "MontoPlanillaPagado",
       "montoPlanillaPagado",
       "ConPagado",
-      "conPagado"
+      "conPagado",
+      "TotalSubtotalPorMoneda",
+      "totalSubtotalPorMoneda"
     ) ?? 0;
 
   const montoPlanillaPagado =
@@ -1177,7 +1195,9 @@ function mapResumenOtResponseRowToDetalle(
       "Monto_Bck",
       "monto_bck",
       "MontoBck",
-      "montoBck"
+      "montoBck",
+      "TotalMontoBckPorMoneda",
+      "totalMontoBckPorMoneda"
     ) ?? 0;
 
   const disponible =
@@ -1324,6 +1344,7 @@ export default function PagosV1Page() {
   const [aprobarConfirm, setAprobarConfirm] = useState<AprobarConfirmState | null>(null);
   const [regularizarConfirm, setRegularizarConfirm] = useState<RegularizarConfirmState | null>(null);
   const [resumenOtDetalle, setResumenOtDetalle] = useState<ResumenOtDetalle | null>(null);
+  const [resumenOtMonedas, setResumenOtMonedas] = useState<ResumenOtDetalle[]>([]);
   const [resumenOtLoading, setResumenOtLoading] = useState(false);
   const [tipoCambio, setTipoCambio] = useState("3.50");
   const [consumoOc, setConsumoOc] = useState<OrdenCompraConsumoDto | null>(null);
@@ -1474,9 +1495,9 @@ export default function PagosV1Page() {
 
         const parametros: PlanillaConsultaParametro[] = [];
 
-        if (activeTab !== "resumen") {
-          parametros.push({ nombre: "Estados", valor: TAB_ESTADOS[activeTab], tipo: "string" });
-        }
+        // Se cargan todos los estados en una sola consulta para conservar los
+        // contadores de todos los KPIs al navegar entre pestañas. La pestaña
+        // activa solo determina qué grupo se muestra en el grid.
 
         if (buscarPorCorrelativo) {
           parametros.push({ nombre: "Correlativo", valor: String(correlativoNumero), tipo: "int" });
@@ -1559,7 +1580,7 @@ export default function PagosV1Page() {
       cancelled = true;
       controller.abort();
     };
-  }, [activeTab, appliedFilters.fechaDesde, appliedFilters.fechaHasta, appliedFilters.query, appliedFilters.correlativo, refreshTick, runTrackedRequest]);
+  }, [appliedFilters.fechaDesde, appliedFilters.fechaHasta, appliedFilters.query, appliedFilters.correlativo, refreshTick, runTrackedRequest]);
 
   const activeRows = useMemo(
     () => (activeTab === "resumen" ? rowsByTab.resumen : rowsByTab[activeTab]),
@@ -1838,6 +1859,7 @@ export default function PagosV1Page() {
         disponibleOc,
         montoPagadoOc: 0,
         subtotalCabOrdenCompra: 0,
+        montoPlanilla: undefined as number | undefined,
         montoPlanillaSoles: undefined as number | undefined,
         montoPlanillaDolares: undefined as number | undefined,
         montoOcAdelanto: oc ? adelaFic : 0,
@@ -1874,10 +1896,13 @@ export default function PagosV1Page() {
   }, [historialOtSeleccionada]);
 
   useEffect(() => {
-    const idOc = Number(historialOcSeleccionada);
-    const fila = filaActiva?.fila;
+    if (!filaActiva) {
+      setConsumoOc(null);
+      return;
+    }
 
-    if (!Number.isInteger(idOc) || idOc <= 0 || fila == null || !Number.isFinite(Number(fila))) {
+    const request = buildResumenOcRequest(filaActiva);
+    if (!request) {
       setConsumoOc(null);
       return;
     }
@@ -1886,10 +1911,16 @@ export default function PagosV1Page() {
     let cancelled = false;
     setConsumoOc(null);
 
-    void buscarConsumoOrdenCompra({ idOc, fila: Number(fila) }, { signal: controller.signal })
+    void consultarPlanillaEstados(request, { timeoutMs: 120000, signal: controller.signal })
       .then((response) => {
         if (!cancelled && !controller.signal.aborted) {
-          setConsumoOc(response);
+          const row = Array.isArray(response.rows) ? response.rows[0] : null;
+          setConsumoOc(row ? {
+            idOc: Number(filaActiva.idOc ?? filaActiva.documento) || 0,
+            fila: Number(filaActiva.fila) || null,
+            pagadoOc: getRecordNumber(row, "TotalSubPlanillaMoneda", "totalSubPlanillaMoneda") ?? 0,
+            totalOc: getRecordNumber(row, "TotalOCMoneda", "totalOCMoneda") ?? 0,
+          } : null);
         }
       })
       .catch(() => {
@@ -1902,7 +1933,7 @@ export default function PagosV1Page() {
       cancelled = true;
       controller.abort();
     };
-  }, [historialOcSeleccionada, filaActiva?.fila, filaActiva?.id]);
+  }, [filaActiva?.id, filaActiva?.idOc, filaActiva?.documento, filaActiva?.idCliente, filaActiva?.idProyecto, filaActiva?.siteId, filaActiva?.corSite, filaActiva?.tipoTrabajo]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1915,12 +1946,14 @@ export default function PagosV1Page() {
 
       if (!filaActiva) {
         setResumenOtDetalle(null);
+        setResumenOtMonedas([]);
         return;
       }
 
       const request = buildResumenOtRequest(filaActiva);
       if (!request) {
         setResumenOtDetalle(null);
+        setResumenOtMonedas([]);
         return;
       }
 
@@ -1937,6 +1970,7 @@ export default function PagosV1Page() {
       if (cached) {
         if (!cancelled && !signal.aborted) {
           setResumenOtDetalle(cached);
+          setResumenOtMonedas([cached]);
           setResumenOtLoading(false);
         }
         return;
@@ -1951,19 +1985,35 @@ export default function PagosV1Page() {
           return;
         }
 
-        const row = Array.isArray(response.rows) && response.rows.length > 0 ? response.rows[0] : null;
-
-        if (!row) {
+        const responseRows = Array.isArray(response.rows) ? response.rows : [];
+        if (responseRows.length === 0) {
           setResumenOtDetalle(null);
+          setResumenOtMonedas([]);
           return;
         }
 
-        const mapped = mapResumenOtResponseRowToDetalle(row, filaActiva);
+        const mappedRows = Array.from(
+          responseRows
+            .map((item) => mapResumenOtResponseRowToDetalle(item, filaActiva))
+            .reduce((byCurrency, item) => {
+              const currencyKey = normalizeText(item.moneda || "Sin moneda");
+              // El store puede repetir el acumulado de una moneda por cada
+              // registro base. Para el resumen se muestra una sola vez.
+              if (!byCurrency.has(currencyKey)) {
+                byCurrency.set(currencyKey, item);
+              }
+              return byCurrency;
+            }, new Map<string, ResumenOtDetalle>())
+            .values()
+        );
+        const mapped = mappedRows[0];
         resumenOtCacheRef.current.set(cacheKey, mapped);
         setResumenOtDetalle(mapped);
+        setResumenOtMonedas(mappedRows);
       } catch (error) {
         if (!cancelled && !signal.aborted) {
           setResumenOtDetalle(null);
+          setResumenOtMonedas([]);
           // No exponer errores ni detalles de consultas de OT en consola.
         }
       } finally {
@@ -2203,16 +2253,25 @@ export default function PagosV1Page() {
   const montoPlanillaDolaresOt = tieneDesgloseMonedaOt
     ? parseNumericValue(detalleOcActiva?.montoPlanillaDolares ?? 0)
     : (esDolarOt ? montoPlanillaOriginalOt : 0);
-  const montoPlanillaPagadoOt = montoPlanillaSolesOt + montoPlanillaDolaresOt * tipoCambioLocal;
+  const montoPlanillaPagadoOt = resumenOtMonedas.length > 0
+    ? parseNumericValue(detalleOcActiva?.montoPlanilla ?? 0)
+    : montoPlanillaSolesOt + montoPlanillaDolaresOt * tipoCambioLocal;
   const totalOtLocal = Math.max(parseNumericValue(detalleOcActiva?.totalAcumuladoOt ?? 0), 0);
   const disponibleOtLocal = Math.max(totalOtLocal - montoPlanillaPagadoOt, 0);
   const consumoOtPercent = getConsumptionPercent(totalOtLocal, disponibleOtLocal);
-  // Para clientes distintos de AMX el resumen puede identificarse sin OT.
-  // Una respuesta válida del resumen también habilita su visualización.
-  const tieneOtValida = Boolean(resumenOtDetalle || getValidOtValue(filaActiva?.ot));
+  const tieneOtValida = Boolean(getValidOtValue(filaActiva?.ot));
+  const estadoSeleccionadoOt = normalizeText(filaActiva?.estadoNombre || filaActiva?.estadoCodigo || "");
+  const esPagadoORechazadoOt =
+    estadoSeleccionadoOt.includes("pagado") ||
+    estadoSeleccionadoOt.includes("rechaz") ||
+    filaActiva?.estadoCodigo === "4" ||
+    filaActiva?.estadoCodigo === "2";
+  const solicitadoOtAmount = esPagadoORechazadoOt ? 0 : Math.max(parseNumericValue(filaActiva?.subtotal ?? 0), 0);
   const montoPlanillaPagadoOc = parseNumericValue(consumoOc?.pagadoOc ?? detalleOcActiva?.montoPagadoOc ?? 0);
   const pagadoOcAmount = Math.max(montoPlanillaPagadoOc, 0);
-  const solicitadoOcAmount = Math.max(parseNumericValue(detalleOcActiva?.solicitado ?? 0), 0);
+  const solicitadoOcAmount = esPagadoORechazadoOt
+    ? 0
+    : Math.max(parseNumericValue(detalleOcActiva?.solicitado ?? 0), 0);
   const totalOcAmount = Math.max(parseNumericValue(consumoOc?.totalOc ?? detalleOcActiva?.subtotalCabOrdenCompra ?? 0), 0);
   // El disponible de la OC no depende de un valor enviado por el store:
   // se obtiene de su total menos lo solicitado y lo ya pagado.
@@ -2910,19 +2969,6 @@ export default function PagosV1Page() {
                 <div>
                   <h1 style={styles.title}>Órdenes de Pago</h1>
                 </div>
-                <label style={styles.tipoCambioField}>
-                  <span style={styles.tipoCambioLabel}>Tipo de cambio (S/ por US$)</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    inputMode="decimal"
-                    value={tipoCambio}
-                    onChange={(event) => setTipoCambio(event.target.value)}
-                    style={styles.tipoCambioInput}
-                    aria-label="Tipo de cambio para convertir dólares a soles"
-                  />
-                </label>
               </div>
               <div style={styles.quickFiltersRow}>
                 <div style={{ ...styles.quickSearchWrap, borderColor: currentTheme.border, background: "#FFFFFF" }}>
@@ -3117,6 +3163,19 @@ export default function PagosV1Page() {
                         ))}
                     </div>
                   </details>
+                  <label style={styles.tipoCambioField}>
+                    <span style={styles.tipoCambioLabel}>Tipo de cambio (S/ por US$)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      inputMode="decimal"
+                      value={tipoCambio}
+                      onChange={(event) => setTipoCambio(event.target.value)}
+                      style={styles.tipoCambioInput}
+                      aria-label="Tipo de cambio para convertir dólares a soles"
+                    />
+                  </label>
                   <button
                     type="button"
                     onClick={handleApplyFilters}
@@ -3642,18 +3701,22 @@ export default function PagosV1Page() {
                         </div>
                           <div style={styles.ocProgressFooter}>
                           <div style={styles.ocProgressFooterLine}>
+                            <span>Solicitado:</span>
+                            <span>{tieneOtValida ? formatCurrency(solicitadoOtAmount, detalleOcActiva.moneda) : "-"}</span>
+                          </div>
+                          <div style={styles.ocProgressFooterLine}>
                             <span>Pagado:</span>
-                            <span>{tieneOtValida ? formatCurrency(montoPlanillaPagadoOt, "SOLES") : "-"}</span>
+                            <span>{tieneOtValida ? formatCurrency(montoPlanillaPagadoOt, detalleOcActiva.moneda) : "-"}</span>
                           </div>
                           <div style={styles.ocProgressFooterLine}>
                             <span>Disponible:</span>
-                            <span>{tieneOtValida ? formatCurrency(disponibleOtLocal, "SOLES") : "-"}</span>
+                            <span>{tieneOtValida ? formatCurrency(disponibleOtLocal, detalleOcActiva.moneda) : "-"}</span>
                           </div>
                           <div style={styles.ocProgressFooterLine}>
                             <span>Total OT:</span>
-                            <span>{tieneOtValida ? formatCurrency(totalOtLocal, "SOLES") : "-"}</span>
+                            <span>{tieneOtValida ? formatCurrency(totalOtLocal, detalleOcActiva.moneda) : "-"}</span>
                           </div>
-                          {tieneOtValida && (montoPlanillaSolesOt > 0 || montoPlanillaDolaresOt > 0) ? (
+                          {tieneOtValida && resumenOtMonedas.length === 0 && (montoPlanillaSolesOt > 0 || montoPlanillaDolaresOt > 0) ? (
                             <div style={styles.otConversionDetail}>
                               <span style={styles.otConversionTitle}>Detalle de conversión</span>
                               {montoPlanillaSolesOt > 0 ? (
@@ -3670,6 +3733,19 @@ export default function PagosV1Page() {
                               ) : null}
                             </div>
                           ) : null}
+                          {tieneOtValida && resumenOtMonedas.slice(1).map((resumen, index) => (
+                            <div key={`${resumen.moneda}-${index}`} style={styles.otConversionDetail}>
+                              <span style={styles.otConversionTitle}>{resumen.moneda || "Moneda"}</span>
+                              <div style={styles.ocProgressFooterLine}>
+                                <span>Pagado:</span>
+                                <span>{formatCurrency(resumen.montoPlanilla ?? 0, resumen.moneda)}</span>
+                              </div>
+                              <div style={styles.ocProgressFooterLine}>
+                                <span>Total OT:</span>
+                                <span>{formatCurrency(resumen.totalAcumuladoOt ?? 0, resumen.moneda)}</span>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
 
@@ -3838,7 +3914,9 @@ export default function PagosV1Page() {
                           {historialRowsFiltrados.length === 0 ? (
                             <tr>
                               <td colSpan={17} style={styles.emptyCell}>
-                                No hay registros para el cliente, proyecto, site y tipo de trabajo seleccionados.
+                                {tieneOtValida
+                                  ? "No hay registros para el cliente, proyecto, site y tipo de trabajo seleccionados."
+                                  : "La orden seleccionada no tiene una OT válida."}
                               </td>
                             </tr>
                           ) : (
@@ -4078,7 +4156,9 @@ export default function PagosV1Page() {
                       {historialRowsFiltrados.length === 0 ? (
                         <tr>
                           <td colSpan={17} style={styles.emptyCell}>
-                            No hay registros para el cliente, proyecto, site y tipo de trabajo seleccionados.
+                            {tieneOtValida
+                              ? "No hay registros para el cliente, proyecto, site y tipo de trabajo seleccionados."
+                              : "La orden seleccionada no tiene una OT válida."}
                           </td>
                         </tr>
                       ) : (
@@ -4663,7 +4743,6 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#0F172A",
   },
   tipoCambioField: {
-    marginLeft: "auto",
     display: "flex",
     flexDirection: "column",
     gap: 4,

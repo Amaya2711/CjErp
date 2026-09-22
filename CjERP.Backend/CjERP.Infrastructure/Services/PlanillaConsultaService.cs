@@ -25,6 +25,8 @@ namespace CjERP.Infrastructure.Services
         private const string StoredProcedurePagadosDashboard = "dbo.sp_Planilla_ConsultarPagados_Dsh";
         private const string StoredProcedureImportarConsultaDsh = "dbo.sp_Importar_ConsultaDsh";
         private const string StoredProcedureImportarResumenOT = "dbo.sp_Importar_ResumenOT";
+        private const string StoredProcedurePlanillaOtResumen = "dbo.sp_Planilla_OT_Resumen";
+        private const string StoredProcedurePlanillaOcResumen = "dbo.sp_Planilla_OC_Resumen";
         private const string StoredProcedureMovimientosGastosIngresos = "dbo.sp_Movimientos_Consulta_GastosIngresos";
         private const string StoredProcedureGastosPagados = "dbo.sp_Planilla_Consulta_Gastos_Pagados";
         private const string StoredProcedureAnalisisGastos = "dbo.sp_OrdenCompra_Consulta_Estados";
@@ -338,6 +340,8 @@ namespace CjERP.Infrastructure.Services
                 "pagados-dashboard" => StoredProcedurePagadosDashboard,
                 "importar-consulta-dsh" => StoredProcedureImportarConsultaDsh,
                 "importar-resumen-ot" => StoredProcedureImportarResumenOT,
+                "planilla-ot-resumen" => StoredProcedurePlanillaOtResumen,
+                "planilla-oc-resumen" => StoredProcedurePlanillaOcResumen,
                 "movimientos-gastos-ingresos" => StoredProcedureMovimientosGastosIngresos,
                 "analisis-gastos" => StoredProcedureAnalisisGastos,
                 "clientes-activos" => QueryClientesActivos,
@@ -759,6 +763,20 @@ WHERE Correlativo IN @Correlativos";
                     return parametros.Where(parametro =>
                         !string.IsNullOrWhiteSpace(parametro.Nombre) &&
                         allowedParametersImportarResumenOT.Contains(parametro.Nombre.Trim().TrimStart('@')));
+                }
+
+                if (string.Equals(storedProcedureName, StoredProcedurePlanillaOtResumen, StringComparison.OrdinalIgnoreCase))
+                {
+                    var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    { "OT", "IdCliente", "IdProyecto", "IdSite", "CorreSite", "TipoTrabajo" };
+                    return parametros.Where(p => !string.IsNullOrWhiteSpace(p.Nombre) && allowed.Contains(p.Nombre.Trim().TrimStart('@')));
+                }
+
+                if (string.Equals(storedProcedureName, StoredProcedurePlanillaOcResumen, StringComparison.OrdinalIgnoreCase))
+                {
+                    var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    { "IdOc", "IdCliente", "IdProyecto", "IdSite", "CorreSite", "TipoTrabajo" };
+                    return parametros.Where(p => !string.IsNullOrWhiteSpace(p.Nombre) && allowed.Contains(p.Nombre.Trim().TrimStart('@')));
                 }
 
                 return parametros;
@@ -1186,5 +1204,3 @@ WHERE Codigo = @CodigoBanco
         }
     }
 }
-
-

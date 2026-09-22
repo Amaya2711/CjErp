@@ -42,6 +42,10 @@ namespace CjERP.Api.Controllers
             "Correlativo",
             "TipoTrabajo"
         ];
+        private static readonly string[] RequiredParametersPlanillaOtResumen =
+        ["IdCliente", "IdProyecto", "IdSite", "CorreSite", "TipoTrabajo"];
+        private static readonly string[] RequiredParametersPlanillaOcResumen =
+        ["IdOc", "IdCliente", "IdProyecto", "IdSite", "CorreSite", "TipoTrabajo"];
         private static readonly string[] RequiredParametersPagadosDashboard = [];
         private static readonly string[] RequiredParametersImportarConsultaDsh = [];
         private static readonly string[] RequiredParametersMovimientosGastosIngresos = [];
@@ -109,10 +113,14 @@ namespace CjERP.Api.Controllers
                             ? RequiredParametersImportarConsultaDsh
                 : string.Equals(consulta, "movimientos-gastos-ingresos", StringComparison.OrdinalIgnoreCase)
                             ? RequiredParametersMovimientosGastosIngresos
-                        : string.Equals(consulta, "importar-resumen-ot", StringComparison.OrdinalIgnoreCase)
+                 : string.Equals(consulta, "importar-resumen-ot", StringComparison.OrdinalIgnoreCase)
                             ? (providedNames.Contains("OT")
                                 ? RequiredParametersImportarResumenOT
-                                : RequiredParametersImportarResumenOTSinOt)
+                                 : RequiredParametersImportarResumenOTSinOt)
+                : string.Equals(consulta, "planilla-ot-resumen", StringComparison.OrdinalIgnoreCase)
+                    ? RequiredParametersPlanillaOtResumen
+                : string.Equals(consulta, "planilla-oc-resumen", StringComparison.OrdinalIgnoreCase)
+                    ? RequiredParametersPlanillaOcResumen
                 : string.Equals(consulta, "pagos-v1", StringComparison.OrdinalIgnoreCase)
                     ? RequiredParametersPagosV1
                 : RequiredParameters;
