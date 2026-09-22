@@ -115,6 +115,7 @@ namespace CjERP.Infrastructure.Services
         {
             await using var connection = _sqlCommandFactory.CreateConnection();
 
+            await ResolverCodigosAprobadoresAsync(connection, request, cancellationToken);
             var parameters = BuildPlanillaParameters(request);
             parameters.Add("@Correlativo", request.Correlativo, DbType.Int32);
 
@@ -844,6 +845,59 @@ namespace CjERP.Infrastructure.Services
 
             throw new InvalidOperationException(
                 $"El campo {fieldName} debe enviarse como cÃ³digo numÃ©rico. Valor recibido: '{value ?? "null"}'.");
+        }
+
+        private async Task ResolverCodigosAprobadoresAsync(
+            SqlConnection connection,
+            PlanillaUpdateRequestDto request,
+            CancellationToken cancellationToken)
+        {
+            if (EsCodigoNumerico(request.Solicitante) &&
+                EsCodigoNumerico(request.Gestor) &&
+                EsCodigoNumerico(request.Validador))
+            {
+                return;
+            }
+
+            var actual = await connection.QuerySingleOrDefaultAsync<PlanillaAprobadoresRow>(
+                _sqlCommandFactory.Create(
+                    """
+                    SELECT IdSolicitante, IdGestor, IdValidador
+                    FROM dbo.Planilla
+                    WHERE Correlativo = @Correlativo;
+                    """,
+                    new { request.Correlativo },
+                    CommandType.Text,
+                    cancellationToken));
+
+            if (actual is null)
+            {
+                return;
+            }
+
+            if (!EsCodigoNumerico(request.Solicitante) && actual.IdSolicitante.HasValue)
+            {
+                request.Solicitante = actual.IdSolicitante.Value.ToString(CultureInfo.InvariantCulture);
+            }
+
+            if (!EsCodigoNumerico(request.Gestor) && actual.IdGestor.HasValue)
+            {
+                request.Gestor = actual.IdGestor.Value.ToString(CultureInfo.InvariantCulture);
+            }
+
+            if (!EsCodigoNumerico(request.Validador) && actual.IdValidador.HasValue)
+            {
+                request.Validador = actual.IdValidador.Value.ToString(CultureInfo.InvariantCulture);
+            }
+        }
+
+        private static bool EsCodigoNumerico(string? value) => int.TryParse(value, out _);
+
+        private sealed class PlanillaAprobadoresRow
+        {
+            public int? IdSolicitante { get; set; }
+            public int? IdGestor { get; set; }
+            public int? IdValidador { get; set; }
         }
         private sealed class PlanillaTareaAuditRow
         {

@@ -1546,6 +1546,8 @@ export default function GastosAprobarPage() {
       const estadosSeleccionados = filtrosCabecera.estado;
       const fechaInicio = filtrosCabecera.fechaInicio.trim();
       const fechaFin = filtrosCabecera.fechaFin.trim();
+      const correlativoConsulta = Number(filtrosCabecera.id.trim());
+      const buscarPorCorrelativo = Number.isInteger(correlativoConsulta) && correlativoConsulta > 0;
       const incluirEstado99 = !isEstadoPresetActive("reaprobar");
       const tipoCambioConsulta = Number(tipoCambio);
       const tipoCambioValido = Number.isFinite(tipoCambioConsulta) && tipoCambioConsulta > 0
@@ -1569,7 +1571,7 @@ export default function GastosAprobarPage() {
       setMensajeFiltroCabecera(null);
       setLimiteConsultaServidor(null);
 
-    const parametros: PlanillaConsultaParametro[] = [
+      const parametros: PlanillaConsultaParametro[] = [
       {
         nombre: "Estados",
         valor: estadosSeleccionados.join(","),
@@ -1587,7 +1589,17 @@ export default function GastosAprobarPage() {
         },
       ];
 
-      if (fechaInicio) {
+      // Al buscar un correlativo la consulta debe ser global: la fecha de ingreso
+      // del registro puede estar fuera del rango actualmente seleccionado.
+      if (buscarPorCorrelativo) {
+        parametros.push({
+          nombre: "Correlativo",
+          valor: String(correlativoConsulta),
+          tipo: "int",
+        });
+      }
+
+      if (fechaInicio && !buscarPorCorrelativo) {
         parametros.push({
           nombre: "FechaInicio",
           valor: fechaInicioParametro,
@@ -1595,7 +1607,7 @@ export default function GastosAprobarPage() {
         });
       }
 
-      if (fechaFin) {
+      if (fechaFin && !buscarPorCorrelativo) {
         parametros.push({
           nombre: "FechaFin",
           valor: fechaFinParametro,

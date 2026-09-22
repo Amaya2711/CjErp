@@ -496,16 +496,27 @@ function findConstanteOption(
     return undefined;
   }
 
+  const normalizedValue = normalizeSearchText(value);
+
   return options.find((option) =>
-    [option.codigo, option.value, option.label]
-      .map((candidate) => normalizeLookupToken(candidate))
-      .filter(Boolean)
-      .includes(value)
+    [option.codigo, option.value, option.label].some((candidate) => {
+      const candidateValue = normalizeLookupToken(candidate);
+      return candidateValue === value || normalizeSearchText(candidateValue) === normalizedValue;
+    })
   );
 }
 
 function normalizeConstanteValue(options: ConstanteOption[], selectedValue?: string | null): string {
   const match = findConstanteOption(options, selectedValue);
+  return match ? getConstanteStoredValue(match) : selectedValue?.trim() ?? "";
+}
+
+function resolveConstanteStoredValue(
+  options: ConstanteOption[],
+  selectedValue?: string | null,
+  fallbackLabel?: string | null
+): string {
+  const match = findConstanteOption(options, selectedValue) ?? findConstanteOption(options, fallbackLabel);
   return match ? getConstanteStoredValue(match) : selectedValue?.trim() ?? "";
 }
 
@@ -1053,8 +1064,11 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     ),
     solicitante: getRecordString(row, "IdSolicitante", "idSolicitante"),
     solicitanteLabel: getRecordString(row, "Solicitante", "solicitante", "SolicitanteLabel", "solicitanteLabel"),
-    gestor: getRecordString(row, "Gestor", "gestor"),
-    gestorLabel: getRecordString(row, "GestorLabel", "gestorLabel"),
+    // Planilla entrega el nombre en Gestor y el identificador en IdGestor.
+    // La actualización exige el identificador numérico, por lo que nunca se
+    // debe usar el nombre como valor del campo Gestor.
+    gestor: getRecordString(row, "IdGestor", "idGestor", "GestorId", "gestorId", "Gestor", "gestor"),
+    gestorLabel: getRecordString(row, "Gestor", "gestor", "GestorLabel", "gestorLabel"),
     validador: getRecordString(row, "IdValidador", "idValidador"),
     validadorLabel: getRecordString(row, "Validador", "validador", "ValidadorLabel", "validadorLabel"),
     moneda: getRecordString(row, "TipoMoneda", "tipoMoneda", "Moneda", "moneda"),
@@ -1399,13 +1413,15 @@ export default function GastosPage({
       comentario: form.comentario,
       fechaVencimiento: formatDateToMMDDYYYYPeru(form.fechaVencimiento),
       fechaEmision: formatDateToMMDDYYYYPeru(form.fechaEmision),
-      solicitante: normalizeConstanteValue(solicitanteOptions, form.solicitante) || undefined,
+      solicitante:
+        resolveConstanteStoredValue(solicitanteOptions, form.solicitante, form.solicitanteLabel) || undefined,
       solicitanteLabel:
         getConstanteLabelOrFallback(solicitanteOptions, form.solicitante, form.solicitanteLabel) ||
         undefined,
-      gestor: normalizeConstanteValue(gestorOptions, form.gestor) || undefined,
+      gestor: resolveConstanteStoredValue(gestorOptions, form.gestor, form.gestorLabel) || undefined,
       gestorLabel: getConstanteLabel(gestorOptions, form.gestor) || undefined,
-      validador: normalizeConstanteValue(validadorOptions, form.validador) || undefined,
+      validador:
+        resolveConstanteStoredValue(validadorOptions, form.validador, form.validadorLabel) || undefined,
       validadorLabel:
         getConstanteLabelOrFallback(validadorOptions, form.validador, form.validadorLabel) ||
         undefined,
@@ -1628,6 +1644,23 @@ export default function GastosPage({
       activo = false;
     };
   }, [idCargo, idEmpleado]);
+
+  // Algunos registros históricos llegan desde Planilla con el nombre del
+  // usuario. Al estar disponible el catálogo, se conserva la etiqueta y se
+  // reemplaza el valor enviado por su código numérico.
+  useEffect(() => {
+    setForm((prev) => {
+      const solicitante = resolveConstanteStoredValue(solicitanteOptions, prev.solicitante, prev.solicitanteLabel);
+      const gestor = resolveConstanteStoredValue(gestorOptions, prev.gestor, prev.gestorLabel);
+      const validador = resolveConstanteStoredValue(validadorOptions, prev.validador, prev.validadorLabel);
+
+      if (solicitante === prev.solicitante && gestor === prev.gestor && validador === prev.validador) {
+        return prev;
+      }
+
+      return { ...prev, solicitante, gestor, validador };
+    });
+  }, [gestorOptions, solicitanteOptions, setForm, validadorOptions]);
 
   const empleadosSafe = Array.isArray(empleados) ? empleados : [];
   const gastosSafe = Array.isArray(gastos) ? gastos : [];
@@ -2099,6 +2132,22 @@ export default function GastosPage({
       facturaPath: facturaEditFields.facturaPath,
     };
 
+    gastoEditable.solicitante = resolveConstanteStoredValue(
+      solicitanteOptions,
+      gastoEditable.solicitante,
+      gastoEditable.solicitanteLabel
+    );
+    gastoEditable.gestor = resolveConstanteStoredValue(
+      gestorOptions,
+      gastoEditable.gestor,
+      gastoEditable.gestorLabel
+    );
+    gastoEditable.validador = resolveConstanteStoredValue(
+      validadorOptions,
+      gastoEditable.validador,
+      gastoEditable.validadorLabel
+    );
+
     setModo("editar");
     preservarSuministroEdicionRef.current = Boolean(gastoEditable.idSuministroProvisional);
     valoresGastoRequestRef.current += 1;
@@ -2247,15 +2296,30 @@ export default function GastosPage({
       nuevosErrores.moneda = "Seleccione una moneda valida.";
     }
 
-    if (form.solicitante && !esConstanteValida(solicitanteOptions, form.solicitante)) {
+    const esValorLegadoEnEdicion = (value?: string | null, label?: string | null) =>
+      modo === "editar" && Boolean(value?.trim() || label?.trim());
+
+    if (
+      form.solicitante &&
+      !esConstanteValida(solicitanteOptions, form.solicitante) &&
+      !esValorLegadoEnEdicion(form.solicitante, form.solicitanteLabel)
+    ) {
       nuevosErrores.solicitante = "Seleccione un solicitante valido.";
     }
 
-    if (form.gestor && !esConstanteValida(gestorOptions, form.gestor)) {
+    if (
+      form.gestor &&
+      !esConstanteValida(gestorOptions, form.gestor) &&
+      !esValorLegadoEnEdicion(form.gestor, form.gestorLabel)
+    ) {
       nuevosErrores.gestor = "Seleccione un gestor valido.";
     }
 
-    if (form.validador && !esConstanteValida(validadorOptions, form.validador)) {
+    if (
+      form.validador &&
+      !esConstanteValida(validadorOptions, form.validador) &&
+      !esValorLegadoEnEdicion(form.validador, form.validadorLabel)
+    ) {
       nuevosErrores.validador = "Seleccione un validador valido.";
     }
 
