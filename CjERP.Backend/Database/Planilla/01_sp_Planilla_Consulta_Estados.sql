@@ -10,6 +10,9 @@ ALTER PROCEDURE [dbo].[sp_Planilla_Consulta_Estados]
     @Fila           VARCHAR(50) = NULL,
     @IdSite         VARCHAR(50) = NULL,
     @CorSite        VARCHAR(50) = NULL,
+    @IdCliente      INT = NULL,
+    @IdProyecto     INT = NULL,
+    @TipoTrabajo    VARCHAR(150) = NULL,
     @FechaInicio    DATE = NULL,
     @FechaFin       DATE = NULL,
     @FechaDeposito  DATE = NULL,
@@ -321,6 +324,18 @@ BEGIN
     AND (
         @IdSite IS NULL
         OR LTRIM(RTRIM(ISNULL(a.IdSite, ''))) = LTRIM(RTRIM(@IdSite))
+    )
+    AND (
+        @IdCliente IS NULL
+        OR a.IdCliente = @IdCliente
+    )
+    AND (
+        @IdProyecto IS NULL
+        OR a.IdProyecto = @IdProyecto
+    )
+    AND (
+        @TipoTrabajo IS NULL
+        OR LTRIM(RTRIM(ISNULL(a.Tipo_Trabajo, ''))) = LTRIM(RTRIM(@TipoTrabajo))
     )
     AND (
         @CorSite IS NULL

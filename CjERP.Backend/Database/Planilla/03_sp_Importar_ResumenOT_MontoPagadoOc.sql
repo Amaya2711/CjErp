@@ -57,6 +57,10 @@ BEGIN
         ISNULL(i.Monto_Bck, 0) AS Monto_Bck,
         ISNULL(i.CantidadRegistrosImportar, 0) AS CantidadRegistrosImportar,
         CAST(ISNULL(rel.MontoPlanilla, 0) AS DECIMAL(18,2)) AS MontoPlanilla,
+        -- Se conservan los importes nativos para que el cliente aplique el
+        -- tipo de cambio vigente y muestre el detalle de la conversión.
+        CAST(ISNULL(rel.MontoPlanillaSoles, 0) AS DECIMAL(18,2)) AS MontoPlanillaSoles,
+        CAST(ISNULL(rel.MontoPlanillaDolares, 0) AS DECIMAL(18,2)) AS MontoPlanillaDolares,
         ISNULL(rel.CantidadRegistrosPlanilla, 0) AS CantidadRegistrosPlanilla,
 
         -- Pago acumulado de la OC solicitada: misma OC, misma fila y solo estado 4.
@@ -93,14 +97,17 @@ BEGIN
     ) pagosOc
     OUTER APPLY
     (
-        SELECT SUM(ISNULL(p.Subtotal, 0)) AS MontoPlanilla, COUNT(*) AS CantidadRegistrosPlanilla
+        SELECT
+            SUM(ISNULL(p.Subtotal, 0)) AS MontoPlanilla,
+            SUM(CASE WHEN p.TipoMoneda = 1 THEN ISNULL(p.Subtotal, 0) ELSE 0 END) AS MontoPlanillaSoles,
+            SUM(CASE WHEN p.TipoMoneda <> 1 THEN ISNULL(p.Subtotal, 0) ELSE 0 END) AS MontoPlanillaDolares,
+            COUNT(*) AS CantidadRegistrosPlanilla
         FROM dbo.Planilla p
         WHERE p.IdCliente = i.IdCliente
           AND p.IdProyecto = i.IdProyecto
           AND p.IdSite = i.IdSite
           AND p.CorreSite = i.Correlativo
           AND (p.Tipo_Trabajo = i.TipoTrabajo OR (p.Tipo_Trabajo IS NULL AND i.TipoTrabajo IS NULL))
-          AND p.TipoMoneda = i.IdMoneda
           AND p.Estado = 4
     ) rel
     OUTER APPLY
