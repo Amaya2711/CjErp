@@ -66,7 +66,10 @@ type ImageViewerState = {
 } | null;
 
 function normalizeOptionValue(option: ConstanteOption): string {
-  return String(option.value || option.valor || option.codigo || "").trim();
+  // ChequeEmpleado persiste los Ids de Constante. Para tipo_moneda el campo
+  // `value` contiene el texto (por ejemplo, "SOLES"), que Number convierte en
+  // cero al armar el payload; el identificador válido es `codigo`.
+  return String(option.codigo || option.value || option.valor || "").trim();
 }
 
 function findConstanteOption(options: ConstanteOption[], selectedValue?: string | null) {
@@ -560,7 +563,7 @@ export default function TesoreriaChequesPage() {
     if (!form.fechaCheque) return "Ingrese la fecha del cheque.";
     if (!form.nroCheque.trim()) return "Ingrese el numero de cheque.";
     if (!form.importe || Number(form.importe) <= 0) return "Ingrese un importe valido.";
-    if (!form.idMoneda) return "Seleccione la moneda.";
+    if (!form.idMoneda || toNumber(form.idMoneda) <= 0) return "Seleccione la moneda.";
     if (!form.idEstado && form.idEstado !== "0") return "Seleccione el estado.";
     return null;
   };

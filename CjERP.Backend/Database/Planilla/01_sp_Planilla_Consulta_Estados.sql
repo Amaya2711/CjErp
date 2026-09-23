@@ -92,6 +92,40 @@ BEGIN
             UPPER(LTRIM(RTRIM(ISNULL(banAgrupado.ValorIni, '')))) LIKE '%SCOTI%'
             OR UPPER(LTRIM(RTRIM(ISNULL(banAgrupado.ValorIni, '')))) LIKE '%BCP%'
         GROUP BY LTRIM(RTRIM(p.NroOperacion))
+    ),
+    PlanillaOTTotales AS
+    (
+        SELECT
+            LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), p.OT), ''))) AS OT,
+            p.IdCliente, p.IdProyecto,
+            LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), p.IdSite), ''))) AS IdSite,
+            ISNULL(p.CorreSite, 0) AS CorreSite,
+            LTRIM(RTRIM(ISNULL(p.Tipo_Trabajo, ''))) AS TipoTrabajo,
+            p.TipoMoneda,
+            CAST(SUM(ISNULL(p.Subtotal, 0)) AS DECIMAL(18, 2)) AS TotalSubtotalPorMoneda
+        FROM dbo.Planilla p
+        WHERE p.Estado = 4
+          AND UPPER(LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), p.OT), '')))) NOT IN ('', '0', 'NULL')
+        GROUP BY LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), p.OT), ''))), p.IdCliente, p.IdProyecto,
+            LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), p.IdSite), ''))), ISNULL(p.CorreSite, 0),
+            LTRIM(RTRIM(ISNULL(p.Tipo_Trabajo, ''))), p.TipoMoneda
+    ),
+    ImportarOTTotales AS
+    (
+        SELECT
+            LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), imp.OT), ''))) AS OT,
+            imp.IdCliente, imp.IdProyecto,
+            LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), imp.IdSite), ''))) AS IdSite,
+            ISNULL(imp.Correlativo, 0) AS CorreSite,
+            LTRIM(RTRIM(ISNULL(imp.TipoTrabajo, ''))) AS TipoTrabajo,
+            imp.IdMoneda,
+            CAST(SUM(ISNULL(imp.Monto_Bck, 0)) AS DECIMAL(18, 2)) AS TotalMontoBckPorMoneda
+        FROM dbo.Importar imp
+        WHERE imp.IdEstado = 1
+          AND UPPER(LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), imp.OT), '')))) NOT IN ('', '0', 'NULL')
+        GROUP BY LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), imp.OT), ''))), imp.IdCliente, imp.IdProyecto,
+            LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), imp.IdSite), ''))), ISNULL(imp.Correlativo, 0),
+            LTRIM(RTRIM(ISNULL(imp.TipoTrabajo, ''))), imp.IdMoneda
     )
 
     SELECT DISTINCT
@@ -104,6 +138,8 @@ BEGIN
         ban.ValorIni AS Banco,
         f_emp.NroDocumento AS RUC,
         k.ValorIni AS Moneda,
+        CAST(ISNULL(pot.TotalSubtotalPorMoneda, 0) AS DECIMAL(18, 2)) AS TotalSubtotalPorMoneda,
+        CAST(ISNULL(iot.TotalMontoBckPorMoneda, 0) AS DECIMAL(18, 2)) AS TotalMontoBckPorMoneda,
         CASE
             WHEN a.TipoMoneda = 1 THEN a.Subtotal
             ELSE a.Subtotal * 3.8
@@ -210,6 +246,22 @@ BEGIN
        AND a.IdBanco = ban.Correlativo
         LEFT JOIN PlanillaBancoAgrupada pa
             ON pa.NroOperacion = LTRIM(RTRIM(a.NroOperacion))
+    LEFT JOIN PlanillaOTTotales pot
+        ON pot.OT = LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), a.OT), '')))
+       AND ISNULL(pot.IdCliente, 0) = ISNULL(a.IdCliente, 0)
+       AND ISNULL(pot.IdProyecto, 0) = ISNULL(a.IdProyecto, 0)
+       AND pot.IdSite = LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), a.IdSite), '')))
+       AND pot.CorreSite = ISNULL(a.CorreSite, 0)
+       AND pot.TipoTrabajo = LTRIM(RTRIM(ISNULL(a.Tipo_Trabajo, '')))
+       AND pot.TipoMoneda = a.TipoMoneda
+    LEFT JOIN ImportarOTTotales iot
+        ON iot.OT = LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), a.OT), '')))
+       AND ISNULL(iot.IdCliente, 0) = ISNULL(a.IdCliente, 0)
+       AND ISNULL(iot.IdProyecto, 0) = ISNULL(a.IdProyecto, 0)
+       AND iot.IdSite = LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), a.IdSite), '')))
+       AND iot.CorreSite = ISNULL(a.CorreSite, 0)
+       AND iot.TipoTrabajo = LTRIM(RTRIM(ISNULL(a.Tipo_Trabajo, '')))
+       AND iot.IdMoneda = a.TipoMoneda
     LEFT JOIN Constante j
         ON j.Sociedad = 'PE01'
        AND j.Programa = 'PLANTILLA'

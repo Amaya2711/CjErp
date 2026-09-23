@@ -76,6 +76,8 @@ type PagoRow = {
   adelaFic?: number;
   porcentajeFic?: number;
   disponibleOc?: number;
+  totalSubtotalPorMoneda?: number;
+  totalMontoBckPorMoneda?: number;
   subtotal: number;
   igv: number;
   total: number;
@@ -787,6 +789,7 @@ function matchesQuickSearch(row: PagoRow, query: string) {
       row.corSite,
       row.site,
       row.tipoTrabajo,
+      row.detalle,
       row.tarea,
       row.solicitante,
       row.responsable,
@@ -991,6 +994,8 @@ function mapPlanillaConsultaRowToPagoRow(
     subOc: getRecordNumber(row, "SubOc", "SubTotalOc", "SubtotalOc", "SubtotalOC", "subOc") ?? undefined,
     adelaFic: getRecordNumber(row, "AdelaFic", "adelaFic") ?? undefined,
     porcentajeFic: getRecordNumber(row, "PorcentajeFic", "porcentajeFic") ?? undefined,
+    totalSubtotalPorMoneda: getRecordNumber(row, "TotalSubtotalPorMoneda", "totalSubtotalPorMoneda") ?? undefined,
+    totalMontoBckPorMoneda: getRecordNumber(row, "TotalMontoBckPorMoneda", "totalMontoBckPorMoneda") ?? undefined,
     subtotal: Number.isFinite(subtotal) ? subtotal : 0,
     igv: Number.isFinite(igv) ? igv : 0,
     total: Number.isFinite(total) ? total : 0,
@@ -1215,6 +1220,8 @@ function mapResumenOtResponseRowToDetalle(
   const totalAcumuladoOt =
     getRecordNumber(
       row,
+      "TotalSubtotalPorMoneda",
+      "totalSubtotalPorMoneda",
       "Monto_Bck",
       "monto_bck",
       "MontoBck",
@@ -1859,9 +1866,12 @@ export default function PagosV1Page() {
         row.montoPlanillaPagadoDisplay ?? row.montoPlanillaPagado ?? row.conPagadoDisplay ?? row.conPagado
       );
       const saldoOCDisponible = getRecordNumber(row, "SaldoOCDisponible", "saldoOCDisponible", "SaldoOcDisponible", "saldoOcDisponible");
+      const totalSubtotalPorMoneda = row.totalSubtotalPorMoneda;
       const totalAcumuladoOt =
         ot
-          ? montoPlanillaPagadoCampo > 0
+          ? totalSubtotalPorMoneda != null
+            ? parseNumericValue(totalSubtotalPorMoneda)
+            : montoPlanillaPagadoCampo > 0
             ? montoPlanillaPagadoCampo
             : sameOtRows.reduce((acc, item) => acc + item.total, 0)
           : 0;
@@ -1980,7 +1990,17 @@ export default function PagosV1Page() {
     let cancelled = false;
 
     const cargarResumenOt = async (signal: AbortSignal) => {
-      if (detailTab !== "resumen" && detailTab !== "con-pagado") {
+      // En Resumen el Total OT ya llega en la fila seleccionada mediante
+      // TotalSubtotalPorMoneda. Evitamos una segunda consulta: el historial
+      // de OT es la única fuente adicional necesaria para obtener Pagado.
+      if (detailTab === "resumen") {
+        setResumenOtDetalle(null);
+        setResumenOtMonedas([]);
+        setResumenOtLoading(false);
+        return;
+      }
+
+      if (detailTab !== "con-pagado") {
         return;
       }
 
@@ -2085,7 +2105,10 @@ export default function PagosV1Page() {
     let cancelled = false;
 
     const loadHistorial = async (signal: AbortSignal) => {
-      if (detailTab !== "historial") {
+      // El resumen de consumo necesita el mismo historial de planillas pagadas
+      // que se muestra en Historial OT; cargarlo desde el inicio evita que
+      // "Pagado" quede en cero hasta que el usuario visite esa pestaña.
+      if (detailTab !== "historial" && detailTab !== "resumen") {
         setHistorialLoading(false);
         return;
       }
@@ -2400,9 +2423,19 @@ export default function PagosV1Page() {
   const montoPlanillaDolaresOt = tieneDesgloseMonedaOt
     ? parseNumericValue(detalleOcActiva?.montoPlanillaDolares ?? 0)
     : (esDolarOt ? montoPlanillaOriginalOt : 0);
-  const montoPlanillaPagadoOt = resumenOtMonedas.length > 0
-    ? parseNumericValue(detalleOcActiva?.montoPlanilla ?? 0)
-    : montoPlanillaSolesOt + montoPlanillaDolaresOt * tipoCambioLocal;
+  const historialOtRowsDeMoneda = historialRows.filter(
+    (row) => normalizeText(row.moneda || "Sin moneda") === normalizeText(detalleOcActiva?.moneda || "Sin moneda")
+  );
+  const montoPlanillaPagadoHistorialOt = historialOtRowsDeMoneda.reduce(
+    (total, row) => total + parseNumericValue(row.subtotal),
+    0
+  );
+  const montoPlanillaPagadoOt = historialOtRowsDeMoneda.length > 0
+    ? montoPlanillaPagadoHistorialOt
+    : resumenOtMonedas.length > 0
+      ? parseNumericValue(detalleOcActiva?.montoPlanilla ?? 0)
+      : montoPlanillaSolesOt + montoPlanillaDolaresOt * tipoCambioLocal;
+  const consumoOtLoading = Boolean(getValidOtValue(filaActiva?.ot)) && historialLoading;
   const totalOtLocal = Math.max(parseNumericValue(detalleOcActiva?.totalAcumuladoOt ?? 0), 0);
   const disponibleOtLocal = Math.max(totalOtLocal - montoPlanillaPagadoOt, 0);
   const consumoOtPercent = getConsumptionPercent(totalOtLocal, disponibleOtLocal);
@@ -2497,6 +2530,7 @@ export default function PagosV1Page() {
   useEffect(() => {
     setResumenOtDetalle(null);
     setResumenOtLoading(false);
+    setHistorialRows([]);
   }, [selectedId]);
 
   const actionConfig = useMemo(() => {
@@ -3066,6 +3100,7 @@ export default function PagosV1Page() {
         "Proyecto",
         "Site",
         "Tipo Trabajo",
+        "Detalle",
       ],
       rows
     );
@@ -3090,6 +3125,7 @@ export default function PagosV1Page() {
       row.site,
       row.tipoTrabajo,
       row.tarea,
+      row.detalle,
     ]);
 
     exportToExcel(
@@ -3112,6 +3148,7 @@ export default function PagosV1Page() {
         "Site",
         "Tipo Trabajo",
         "Tarea",
+        "Detalle",
       ],
       rows
     );
@@ -3576,6 +3613,11 @@ export default function PagosV1Page() {
                             group.rows.map((row) => {
                               const rowTheme = getStateColor(row.estado);
                               const isSelected = row.id === selectedId;
+                              const hasMontoBckExceeded =
+                                (row.totalSubtotalPorMoneda ?? 0) > (row.totalMontoBckPorMoneda ?? 0);
+                              const rowBackground = hasMontoBckExceeded
+                                ? (isSelected ? "#FEE2E2" : "#FFF1F2")
+                                : (isSelected ? "#EEF2FF" : "#FFFFFF");
                               const percent = row.subOc && row.subOc > 0 ? Math.round((row.subtotal / row.subOc) * 100) : 0;
 
                               return (
@@ -3584,10 +3626,10 @@ export default function PagosV1Page() {
                                   onClick={() => setSelectedId(row.id)}
                                   style={{
                                     cursor: "pointer",
-                                    background: isSelected ? "#EEF2FF" : "#FFFFFF",
+                                    background: rowBackground,
                                   }}
                                 >
-                                  <td style={{ ...styles.td, ...getStickyCellStyle(0, isSelected ? "#EEF2FF" : "#FFFFFF", 4), textAlign: "center" }}>
+                                  <td style={{ ...styles.td, ...getStickyCellStyle(0, rowBackground, 4), textAlign: "center" }}>
                                     <input
                                       type="checkbox"
                                       checked={checkedIds.includes(row.id)}
@@ -3603,13 +3645,13 @@ export default function PagosV1Page() {
                                       style={{ accentColor: rowTheme.accent }}
                                     />
                                   </td>
-                                  <td title={row.correlativo} style={{ ...styles.td, ...getStickyCellStyle(1, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.correlativo}</td>
-                                  <td title={row.ot || "-"} style={{ ...styles.td, ...getStickyCellStyle(2, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.ot || "-"}</td>
-                                  <td title={row.idOc || row.documento || "-"} style={{ ...styles.td, ...getStickyCellStyle(3, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.idOc || row.documento || "-"}</td>
-                                  <td title={row.fila || "-"} style={{ ...styles.td, ...getStickyCellStyle(4, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.fila || "-"}</td>
-                                  <td title={row.responsable || "-"} style={{ ...styles.td, ...getStickyCellStyle(5, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.responsable}</td>
-                                  <td title={row.validador || "-"} style={{ ...styles.td, ...getStickyCellStyle(6, isSelected ? "#EEF2FF" : "#FFFFFF", 3) }}>{row.validador || "-"}</td>
-                                    <td style={{ ...styles.td, ...getStickyCellStyle(7, isSelected ? "#EEF2FF" : "#FFFFFF", 3), textAlign: "center" }}>
+                                  <td title={row.correlativo} style={{ ...styles.td, ...getStickyCellStyle(1, rowBackground, 3) }}>{row.correlativo}</td>
+                                  <td title={row.ot || "-"} style={{ ...styles.td, ...getStickyCellStyle(2, rowBackground, 3) }}>{row.ot || "-"}</td>
+                                  <td title={row.idOc || row.documento || "-"} style={{ ...styles.td, ...getStickyCellStyle(3, rowBackground, 3) }}>{row.idOc || row.documento || "-"}</td>
+                                  <td title={row.fila || "-"} style={{ ...styles.td, ...getStickyCellStyle(4, rowBackground, 3) }}>{row.fila || "-"}</td>
+                                  <td title={row.responsable || "-"} style={{ ...styles.td, ...getStickyCellStyle(5, rowBackground, 3) }}>{row.responsable}</td>
+                                  <td title={row.validador || "-"} style={{ ...styles.td, ...getStickyCellStyle(6, rowBackground, 3) }}>{row.validador || "-"}</td>
+                                    <td style={{ ...styles.td, ...getStickyCellStyle(7, rowBackground, 3), textAlign: "center" }}>
                                       {(() => {
                                         // Solo se bloquea cuando el gasto está en un estado final o no editable.
                                         const accionesHabilitadas = !["99", "3", "4", "5", "8"].includes(row.estadoCodigo ?? "");
@@ -3642,7 +3684,7 @@ export default function PagosV1Page() {
                                         );
                                       })()}
                                     </td>
-                                  <td title={formatCurrency(row.subtotal, row.moneda)} style={{ ...styles.td, ...getStickyCellStyle(8, isSelected ? "#EEF2FF" : "#FFFFFF", 3), fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
+                                  <td title={formatCurrency(row.subtotal, row.moneda)} style={{ ...styles.td, ...getStickyCellStyle(8, rowBackground, 3), fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
                                   <td title={formatCurrency(row.igv, row.moneda)} style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
                                   <td title={formatCurrency(row.total, row.moneda)} style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
                                   <td title={formatDate(row.fecha)} style={styles.td}>{formatDate(row.fecha)}</td>
@@ -3854,13 +3896,13 @@ export default function PagosV1Page() {
                             </div>
                            
                           </div>
-                          <div style={styles.ocProgressValue}>{tieneOtValida ? formatPercent(consumoOtPercent) : "-"}</div>
+                          <div style={styles.ocProgressValue}>{tieneOtValida ? (consumoOtLoading ? "Cargando..." : formatPercent(consumoOtPercent)) : "-"}</div>
                         </div>
                         <div style={styles.progressTrack}>
                           <div
                             style={{
                               ...styles.progressFill,
-                              width: `${tieneOtValida ? consumoOtPercent : 0}%`,
+                              width: `${tieneOtValida && !consumoOtLoading ? consumoOtPercent : 0}%`,
                               background: getConsumptionBarColor(consumoOtPercent),
                             }}
                           />
@@ -3872,11 +3914,11 @@ export default function PagosV1Page() {
                           </div>
                           <div style={styles.ocProgressFooterLine}>
                             <span>Pagado:</span>
-                            <span>{tieneOtValida ? formatCurrency(montoPlanillaPagadoOt, detalleOcActiva.moneda) : "-"}</span>
+                            <span>{tieneOtValida ? (consumoOtLoading ? "Cargando..." : formatCurrency(montoPlanillaPagadoOt, detalleOcActiva.moneda)) : "-"}</span>
                           </div>
                           <div style={styles.ocProgressFooterLine}>
                             <span>Disponible:</span>
-                            <span>{tieneOtValida ? formatCurrency(disponibleOtLocal, detalleOcActiva.moneda) : "-"}</span>
+                            <span>{tieneOtValida ? (consumoOtLoading ? "Cargando..." : formatCurrency(disponibleOtLocal, detalleOcActiva.moneda)) : "-"}</span>
                           </div>
                           <div style={styles.ocProgressFooterLine}>
                             <span>Total OT:</span>
@@ -4196,12 +4238,13 @@ export default function PagosV1Page() {
                             <th style={{ ...styles.th, width: 90 }}>Proyecto</th>
                             <th style={{ ...styles.th, width: 90 }}>Site</th>
                             <th style={{ ...styles.th, width: 90 }}>Tipo trabajo</th>
+                            <th style={{ ...styles.th, width: 260 }}>Detalle</th>
                           </tr>
                         </thead>
                         <tbody>
                           {historialRowsFiltrados.length === 0 ? (
                             <tr>
-                              <td colSpan={17} style={styles.emptyCell}>
+                              <td colSpan={18} style={styles.emptyCell}>
                                 {tieneOtValida
                                   ? "No hay registros para el cliente, proyecto, site y tipo de trabajo seleccionados."
                                   : "La orden seleccionada no tiene una OT válida."}
@@ -4227,6 +4270,7 @@ export default function PagosV1Page() {
                                 <td style={styles.td}>{row.proyecto}</td>
                                 <td style={styles.td}>{row.site}</td>
                                 <td style={styles.td}>{row.tipoTrabajo}</td>
+                                <td style={styles.td}>{row.detalle || '-'}</td>
                               </tr>
                             ))
                           )}
@@ -4320,12 +4364,13 @@ export default function PagosV1Page() {
                             <th style={{ ...styles.th, width: 90 }}>Site</th>
                             <th style={{ ...styles.th, width: 90 }}>Tipo trabajo</th>
                             <th style={{ ...styles.th, width: 90 }}>Tarea</th>
+                            <th style={{ ...styles.th, width: 260 }}>Detalle</th>
                           </tr>
                         </thead>
                         <tbody>
                           {historialOcRows.length === 0 ? (
                             <tr>
-                              <td colSpan={17} style={styles.emptyCell}>
+                              <td colSpan={18} style={styles.emptyCell}>
                                 No hay registros para la OC seleccionada.
                               </td>
                             </tr>
@@ -4349,6 +4394,7 @@ export default function PagosV1Page() {
                                 <td style={styles.td}>{row.site}</td>
                                 <td style={styles.td}>{row.tipoTrabajo}</td>
                                 <td style={styles.td}>{row.tarea}</td>
+                                <td style={styles.td}>{row.detalle || '-'}</td>
                               </tr>
                             ))
                           )}
@@ -4527,12 +4573,13 @@ export default function PagosV1Page() {
                         <th style={{ ...styles.th, width: 90 }}>Proyecto</th>
                         <th style={{ ...styles.th, width: 90 }}>Site</th>
                         <th style={{ ...styles.th, width: 90 }}>Tipo trabajo</th>
+                        <th style={{ ...styles.th, width: 260 }}>Detalle</th>
                       </tr>
                     </thead>
                     <tbody>
                       {historialRowsFiltrados.length === 0 ? (
                         <tr>
-                          <td colSpan={17} style={styles.emptyCell}>
+                          <td colSpan={18} style={styles.emptyCell}>
                             {tieneOtValida
                               ? "No hay registros para el cliente, proyecto, site y tipo de trabajo seleccionados."
                               : "La orden seleccionada no tiene una OT válida."}
@@ -4558,6 +4605,7 @@ export default function PagosV1Page() {
                             <td style={styles.td}>{row.proyecto}</td>
                             <td style={styles.td}>{row.site}</td>
                             <td style={styles.td}>{row.tipoTrabajo}</td>
+                            <td style={styles.td}>{row.detalle || '-'}</td>
                           </tr>
                         ))
                       )}
@@ -4862,12 +4910,13 @@ export default function PagosV1Page() {
                         <th style={{ ...styles.th, width: 90 }}>Site</th>
                         <th style={{ ...styles.th, width: 90 }}>Tipo trabajo</th>
                         <th style={{ ...styles.th, width: 90 }}>Tarea</th>
+                        <th style={{ ...styles.th, width: 260 }}>Detalle</th>
                       </tr>
                     </thead>
                     <tbody>
                       {historialOcRows.length === 0 ? (
                         <tr>
-                          <td colSpan={17} style={styles.emptyCell}>
+                          <td colSpan={18} style={styles.emptyCell}>
                             No hay registros para la OC seleccionada.
                           </td>
                         </tr>
@@ -4891,6 +4940,7 @@ export default function PagosV1Page() {
                             <td style={styles.td}>{row.site}</td>
                             <td style={styles.td}>{row.tipoTrabajo}</td>
                             <td style={styles.td}>{row.tarea}</td>
+                            <td style={styles.td}>{row.detalle || '-'}</td>
                           </tr>
                         ))
                       )}
