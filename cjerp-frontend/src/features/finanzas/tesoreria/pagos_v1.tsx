@@ -1119,6 +1119,16 @@ function buildConPagadoRequest(row: PagoRow, idEmpleado: number): PlanillaConsul
   ]);
 }
 
+function buildHistorialOtCacheKey(row: PagoRow): string {
+  return [
+    getValidOtValue(row.ot),
+    String(row.idCliente ?? ""),
+    String(row.idProyecto ?? ""),
+    row.siteId?.trim() ?? "",
+    row.tipoTrabajo?.trim() ?? "",
+  ].join("|");
+}
+
 function buildResumenOcRequest(row: PagoRow): PlanillaConsultaEstadosRequest | null {
   const idOc = getValidOcValue(row.idOc ?? row.documento);
   const idCliente = row.idCliente ?? 0;
@@ -1220,14 +1230,14 @@ function mapResumenOtResponseRowToDetalle(
   const totalAcumuladoOt =
     getRecordNumber(
       row,
-      "TotalSubtotalPorMoneda",
-      "totalSubtotalPorMoneda",
+      "TotalMontoBckPorMoneda",
+      "totalMontoBckPorMoneda",
       "Monto_Bck",
       "monto_bck",
       "MontoBck",
       "montoBck",
-      "TotalMontoBckPorMoneda",
-      "totalMontoBckPorMoneda"
+      "TotalSubtotalPorMoneda",
+      "totalSubtotalPorMoneda"
     ) ?? 0;
 
   const disponible =
@@ -1388,6 +1398,7 @@ export default function PagosV1Page() {
   const [conPagadoRows, setConPagadoRows] = useState<PagoRow[]>([]);
   const [conPagadoLoading, setConPagadoLoading] = useState(false);
   const resumenOtCacheRef = useRef<Map<string, ResumenOtDetalle[]>>(new Map());
+  const historialOtCacheRef = useRef<Map<string, PagoRow[]>>(new Map());
   const historialOcCacheRef = useRef<Map<string, PagoRow[]>>(new Map());
   const loadTimeoutMs = 15000;
 
@@ -1866,11 +1877,13 @@ export default function PagosV1Page() {
         row.montoPlanillaPagadoDisplay ?? row.montoPlanillaPagado ?? row.conPagadoDisplay ?? row.conPagado
       );
       const saldoOCDisponible = getRecordNumber(row, "SaldoOCDisponible", "saldoOCDisponible", "SaldoOcDisponible", "saldoOcDisponible");
-      const totalSubtotalPorMoneda = row.totalSubtotalPorMoneda;
+      // El límite total de la OT se obtiene del monto de respaldo de su moneda.
+      // TotalSubtotalPorMoneda corresponde al subtotal solicitado, no al Total OT.
+      const totalMontoBckPorMoneda = row.totalMontoBckPorMoneda;
       const totalAcumuladoOt =
         ot
-          ? totalSubtotalPorMoneda != null
-            ? parseNumericValue(totalSubtotalPorMoneda)
+          ? totalMontoBckPorMoneda != null
+            ? parseNumericValue(totalMontoBckPorMoneda)
             : montoPlanillaPagadoCampo > 0
             ? montoPlanillaPagadoCampo
             : sameOtRows.reduce((acc, item) => acc + item.total, 0)
@@ -1990,17 +2003,11 @@ export default function PagosV1Page() {
     let cancelled = false;
 
     const cargarResumenOt = async (signal: AbortSignal) => {
-      // En Resumen el Total OT ya llega en la fila seleccionada mediante
-      // TotalSubtotalPorMoneda. Evitamos una segunda consulta: el historial
-      // de OT es la única fuente adicional necesaria para obtener Pagado.
-      if (detailTab === "resumen") {
-        setResumenOtDetalle(null);
-        setResumenOtMonedas([]);
-        setResumenOtLoading(false);
-        return;
-      }
-
-      if (detailTab !== "con-pagado") {
+      // En Resumen, Pagado y Disponible se calculan inmediatamente desde la
+      // fila seleccionada. Esta consulta solo aporta el desglose por moneda
+      // para "Detalle de conversión", sin sobrescribir dichos importes.
+      const isResumen = detailTab === "resumen";
+      if (!isResumen && detailTab !== "con-pagado") {
         return;
       }
 
@@ -2029,7 +2036,7 @@ export default function PagosV1Page() {
       const cached = resumenOtCacheRef.current.get(cacheKey);
       if (cached) {
         if (!cancelled && !signal.aborted) {
-          setResumenOtDetalle(cached[0] ?? null);
+          setResumenOtDetalle(isResumen ? null : cached[0] ?? null);
           setResumenOtMonedas(cached);
           setResumenOtLoading(false);
         }
@@ -2038,6 +2045,7 @@ export default function PagosV1Page() {
 
       setResumenOtLoading(true);
       setResumenOtDetalle(null);
+      setResumenOtMonedas([]);
 
       try {
         const response = await consultarPlanillaEstados(request, { timeoutMs: 120000, signal });
@@ -2068,7 +2076,7 @@ export default function PagosV1Page() {
         );
         const mapped = mappedRows[0];
         resumenOtCacheRef.current.set(cacheKey, mappedRows);
-        setResumenOtDetalle(mapped);
+        setResumenOtDetalle(isResumen ? null : mapped);
         setResumenOtMonedas(mappedRows);
       } catch (error) {
         if (!cancelled && !signal.aborted) {
@@ -2105,10 +2113,9 @@ export default function PagosV1Page() {
     let cancelled = false;
 
     const loadHistorial = async (signal: AbortSignal) => {
-      // El resumen de consumo necesita el mismo historial de planillas pagadas
-      // que se muestra en Historial OT; cargarlo desde el inicio evita que
-      // "Pagado" quede en cero hasta que el usuario visite esa pestaña.
-      if (detailTab !== "historial" && detailTab !== "resumen") {
+      // El historial se consulta únicamente al abrir su pestaña. El resumen
+      // obtiene Pagado directamente de TotalSubtotalPorMoneda de la fila.
+      if (detailTab !== "historial") {
         setHistorialLoading(false);
         return;
       }
@@ -2126,6 +2133,14 @@ export default function PagosV1Page() {
         return;
       }
 
+      const cacheKey = buildHistorialOtCacheKey(filaActiva);
+      const cachedRows = historialOtCacheRef.current.get(cacheKey);
+      if (cachedRows) {
+        setHistorialRows(cachedRows);
+        setHistorialLoading(false);
+        return;
+      }
+
       setHistorialLoading(true);
       setHistorialRows([]);
 
@@ -2137,6 +2152,7 @@ export default function PagosV1Page() {
 
         const rows = Array.isArray(response.rows) ? response.rows : [];
         const mappedRows = rows.map((row, index) => mapPlanillaConsultaRowToPagoRow(row, index, filaActiva.estado));
+        historialOtCacheRef.current.set(cacheKey, mappedRows);
         setHistorialRows(mappedRows);
       } catch (error) {
         if (!cancelled && !signal.aborted) {
@@ -2414,7 +2430,7 @@ export default function PagosV1Page() {
   const tipoCambioLocal = Math.max(parseNumericValue(tipoCambio), 0);
   const tieneDesgloseMonedaOt =
     detalleOcActiva?.montoPlanillaSoles != null || detalleOcActiva?.montoPlanillaDolares != null;
-  const montoPlanillaOriginalOt = parseNumericValue(detalleOcActiva?.montoPlanillaPagado ?? 0);
+  const montoPlanillaOriginalOt = parseNumericValue(filaActiva?.totalSubtotalPorMoneda ?? 0);
   const esDolarOt = normalizeText(detalleOcActiva?.moneda ?? "").includes("dolar") ||
     normalizeText(detalleOcActiva?.moneda ?? "").includes("usd");
   const montoPlanillaSolesOt = tieneDesgloseMonedaOt
@@ -2423,22 +2439,20 @@ export default function PagosV1Page() {
   const montoPlanillaDolaresOt = tieneDesgloseMonedaOt
     ? parseNumericValue(detalleOcActiva?.montoPlanillaDolares ?? 0)
     : (esDolarOt ? montoPlanillaOriginalOt : 0);
-  const historialOtRowsDeMoneda = historialRows.filter(
-    (row) => normalizeText(row.moneda || "Sin moneda") === normalizeText(detalleOcActiva?.moneda || "Sin moneda")
-  );
-  const montoPlanillaPagadoHistorialOt = historialOtRowsDeMoneda.reduce(
-    (total, row) => total + parseNumericValue(row.subtotal),
-    0
-  );
-  const montoPlanillaPagadoOt = historialOtRowsDeMoneda.length > 0
-    ? montoPlanillaPagadoHistorialOt
-    : resumenOtMonedas.length > 0
-      ? parseNumericValue(detalleOcActiva?.montoPlanilla ?? 0)
-      : montoPlanillaSolesOt + montoPlanillaDolaresOt * tipoCambioLocal;
-  const consumoOtLoading = Boolean(getValidOtValue(filaActiva?.ot)) && historialLoading;
+  // El total pagado es el subtotal acumulado por moneda enviado por el store.
+  // No depende del historial ni de consultas adicionales al seleccionar la fila.
+  const montoPlanillaPagadoOt = Math.max(montoPlanillaOriginalOt, 0);
+  const consumoOtLoading = false;
   const totalOtLocal = Math.max(parseNumericValue(detalleOcActiva?.totalAcumuladoOt ?? 0), 0);
-  const disponibleOtLocal = Math.max(totalOtLocal - montoPlanillaPagadoOt, 0);
+  const disponibleOtLocal = totalOtLocal - montoPlanillaPagadoOt;
   const consumoOtPercent = getConsumptionPercent(totalOtLocal, disponibleOtLocal);
+  const totalDetalleConversionSoles = resumenOtMonedas.reduce((total, resumen) => {
+    const montoNativo = parseNumericValue(resumen.montoPlanilla ?? 0);
+    const monedaNormalizada = normalizeText(resumen.moneda);
+    const esDolar = monedaNormalizada.includes("dolar") || monedaNormalizada.includes("usd");
+    return total + (esDolar ? montoNativo * tipoCambioLocal : montoNativo);
+  }, 0);
+  const disponibleDetalleConversionSoles = totalOtLocal - totalDetalleConversionSoles;
   const tieneOtValida = Boolean(getValidOtValue(filaActiva?.ot));
   const estadoOcSeleccionado = filaActiva?.planillaRow
     ? getRecordString(
@@ -2743,6 +2757,7 @@ export default function PagosV1Page() {
 
   const resetDetailStateAfterMutation = () => {
     resumenOtCacheRef.current.clear();
+    historialOtCacheRef.current.clear();
     historialOcCacheRef.current.clear();
     setResumenOtDetalle(null);
     setHistorialRows([]);
@@ -3941,19 +3956,51 @@ export default function PagosV1Page() {
                               ) : null}
                             </div>
                           ) : null}
-                          {tieneOtValida && resumenOtMonedas.slice(1).map((resumen, index) => (
-                            <div key={`${resumen.moneda}-${index}`} style={styles.otConversionDetail}>
-                              <span style={styles.otConversionTitle}>{resumen.moneda || "Moneda"}</span>
-                              <div style={styles.ocProgressFooterLine}>
-                                <span>Pagado:</span>
-                                <span>{formatCurrency(resumen.montoPlanilla ?? 0, resumen.moneda)}</span>
+                          {tieneOtValida && resumenOtMonedas.length > 0 ? (
+                            <div style={styles.otConversionDetail}>
+                              <span style={styles.otConversionTitle}>Detalle de conversión</span>
+                              {resumenOtMonedas.map((resumen, index) => {
+                                const montoNativo = parseNumericValue(resumen.montoPlanilla ?? 0);
+                                const esDolar = normalizeText(resumen.moneda).includes("dolar") ||
+                                  normalizeText(resumen.moneda).includes("usd");
+
+                                return (
+                                  <div key={`${resumen.moneda}-${index}`}>
+                                    <div style={styles.ocProgressFooterLine}>
+                                      <span>{esDolar ? "US$ — pagos nativos en dólares" : "S/ — pagos nativos en soles"}</span>
+                                      <span>{formatCurrency(montoNativo, resumen.moneda)}</span>
+                                    </div>
+                                    {esDolar ? (
+                                      <div style={styles.ocProgressFooterLine}>
+                                        <span>Equivalente en soles (TC {formatMoney(tipoCambioLocal)}):</span>
+                                        <span>{formatCurrency(montoNativo * tipoCambioLocal, "SOLES")}</span>
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                );
+                              })}
+                              <div
+                                style={{
+                                  ...styles.ocProgressFooterLine,
+                                  marginTop: 6,
+                                  paddingTop: 6,
+                                  borderTop: "1px solid #CBD5E1",
+                                  fontWeight: 900,
+                                }}
+                              >
+                                <span>Pagado convertido a soles:</span>
+                                <span>{formatCurrency(totalDetalleConversionSoles, "SOLES")}</span>
                               </div>
                               <div style={styles.ocProgressFooterLine}>
                                 <span>Total OT:</span>
-                                <span>{formatCurrency(resumen.totalAcumuladoOt ?? 0, resumen.moneda)}</span>
+                                <span>{formatCurrency(totalOtLocal, "SOLES")}</span>
+                              </div>
+                              <div style={styles.ocProgressFooterLine}>
+                                <span>Disponible convertido a soles:</span>
+                                <span>{formatCurrency(disponibleDetalleConversionSoles, "SOLES")}</span>
                               </div>
                             </div>
-                          ))}
+                          ) : null}
                         </div>
                       </div>
 
@@ -5115,7 +5162,9 @@ const styles: Record<string, React.CSSProperties> = {
     flex: 1,
     minHeight: 0,
     height: "100%",
-    overflow: "hidden",
+    overflowX: "hidden",
+    overflowY: "auto",
+    scrollbarGutter: "stable",
   },
   hero: {
     border: "1px solid #E2E8F0",

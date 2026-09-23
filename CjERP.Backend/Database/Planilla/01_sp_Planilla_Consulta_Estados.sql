@@ -106,6 +106,12 @@ BEGIN
         FROM dbo.Planilla p
         WHERE p.Estado = 4
           AND UPPER(LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), p.OT), '')))) NOT IN ('', '0', 'NULL')
+          AND (@OT IS NULL OR p.OT = @OT)
+          AND (@IdCliente IS NULL OR p.IdCliente = @IdCliente)
+          AND (@IdProyecto IS NULL OR p.IdProyecto = @IdProyecto)
+          AND (@IdSite IS NULL OR LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), p.IdSite), ''))) = LTRIM(RTRIM(@IdSite)))
+          AND (@CorSite IS NULL OR p.CorreSite = TRY_CONVERT(INT, @CorSite))
+          AND (@TipoTrabajo IS NULL OR LTRIM(RTRIM(ISNULL(p.Tipo_Trabajo, ''))) = LTRIM(RTRIM(@TipoTrabajo)))
         GROUP BY LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), p.OT), ''))), p.IdCliente, p.IdProyecto,
             LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), p.IdSite), ''))), ISNULL(p.CorreSite, 0),
             LTRIM(RTRIM(ISNULL(p.Tipo_Trabajo, ''))), p.TipoMoneda
@@ -123,6 +129,12 @@ BEGIN
         FROM dbo.Importar imp
         WHERE imp.IdEstado = 1
           AND UPPER(LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), imp.OT), '')))) NOT IN ('', '0', 'NULL')
+          AND (@OT IS NULL OR imp.OT = @OT)
+          AND (@IdCliente IS NULL OR imp.IdCliente = @IdCliente)
+          AND (@IdProyecto IS NULL OR imp.IdProyecto = @IdProyecto)
+          AND (@IdSite IS NULL OR LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), imp.IdSite), ''))) = LTRIM(RTRIM(@IdSite)))
+          AND (@CorSite IS NULL OR imp.Correlativo = TRY_CONVERT(INT, @CorSite))
+          AND (@TipoTrabajo IS NULL OR LTRIM(RTRIM(ISNULL(imp.TipoTrabajo, ''))) = LTRIM(RTRIM(@TipoTrabajo)))
         GROUP BY LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), imp.OT), ''))), imp.IdCliente, imp.IdProyecto,
             LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), imp.IdSite), ''))), ISNULL(imp.Correlativo, 0),
             LTRIM(RTRIM(ISNULL(imp.TipoTrabajo, ''))), imp.IdMoneda

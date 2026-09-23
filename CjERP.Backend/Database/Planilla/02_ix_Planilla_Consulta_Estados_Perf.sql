@@ -58,6 +58,19 @@ GO
 IF NOT EXISTS (
     SELECT 1
     FROM sys.indexes
+    WHERE name = 'IX_Importar_Estado_Ot_Contexto'
+      AND object_id = OBJECT_ID('dbo.Importar')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX IX_Importar_Estado_Ot_Contexto
+    ON dbo.Importar (IdEstado, OT, IdCliente, IdProyecto, IdSite, Correlativo, TipoTrabajo, IdMoneda)
+    INCLUDE (Monto_Bck);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
     WHERE name = 'IX_Planilla_Estado_FechaDeposito_Validador'
       AND object_id = OBJECT_ID('dbo.Planilla')
 )
