@@ -8,7 +8,6 @@ import {
   Download,
   Eye,
   FileDown,
-  FileText,
   Filter,
   HandCoins,
   Maximize2,
@@ -154,7 +153,7 @@ type GroupRow = {
   totalsByCurrency: Record<string, { subtotal: number; igv: number; total: number }>;
 };
 
-type PagoSortColumn = keyof Pick<PagoRow, "correlativo" | "ot" | "idOc" | "fila" | "responsable" | "validador" | "subtotal" | "igv" | "total" | "fecha" | "cliente" | "proyecto" | "siteId" | "corSite" | "site" | "tipoTrabajo" | "tarea" | "moneda">;
+type PagoSortColumn = keyof Pick<PagoRow, "correlativo" | "ot" | "idOc" | "fila" | "responsable" | "validador" | "subtotal" | "igv" | "total" | "fecha" | "cliente" | "proyecto" | "siteId" | "corSite" | "site" | "tipoTrabajo" | "tarea" | "moneda" | "detalle">;
 
 type ResumenOtDetalle = {
   ot: string;
@@ -1356,6 +1355,7 @@ export default function PagosV1Page() {
   const [isDetailPanelOpen, setIsDetailPanelOpen] = useState(false);
   const [filters, setFilters] = useState<FilterState>(() => getDefaultFilterState());
   const [sortConfig, setSortConfig] = useState<{ column: PagoSortColumn; direction: "asc" | "desc" } | null>(null);
+  const [historialSortConfig, setHistorialSortConfig] = useState<{ column: PagoSortColumn; direction: "asc" | "desc" } | null>(null);
   const [appliedFilters, setAppliedFilters] = useState<FilterState>(() => getDefaultFilterState());
   const [busquedaSolicitante, setBusquedaSolicitante] = useState("");
   const [busquedaResponsable, setBusquedaResponsable] = useState("");
@@ -1379,6 +1379,7 @@ export default function PagosV1Page() {
   const [isHistorialPopupOpen, setIsHistorialPopupOpen] = useState(false);
   const [isHistorialOcPopupOpen, setIsHistorialOcPopupOpen] = useState(false);
   const [isConPagadoPopupOpen, setIsConPagadoPopupOpen] = useState(false);
+  const [detallePopup, setDetallePopup] = useState<{ correlativo: string; detalle: string } | null>(null);
   const [message, setMessage] = useState<string>("");
   const [gastoEditorRequest, setGastoEditorRequest] = useState<GastoEditorRequest | null>(null);
   const [rechazoModal, setRechazoModal] = useState<RechazoModalState | null>(null);
@@ -1400,6 +1401,7 @@ export default function PagosV1Page() {
   const resumenOtCacheRef = useRef<Map<string, ResumenOtDetalle[]>>(new Map());
   const historialOtCacheRef = useRef<Map<string, PagoRow[]>>(new Map());
   const historialOcCacheRef = useRef<Map<string, PagoRow[]>>(new Map());
+  const preferredDetailTabRef = useRef<DetailTabKey | null>(null);
   const loadTimeoutMs = 15000;
 
   useEffect(() => {
@@ -1953,9 +1955,32 @@ export default function PagosV1Page() {
     },
     [historialResponsable, historialRows]
   );
+  const historialRowsOrdenados = useMemo(() => {
+    if (!historialSortConfig) return historialRowsFiltrados;
+
+    return [...historialRowsFiltrados].sort((left, right) => {
+      const leftValue = left[historialSortConfig.column] ?? "";
+      const rightValue = right[historialSortConfig.column] ?? "";
+      const result = typeof leftValue === "number" && typeof rightValue === "number"
+        ? leftValue - rightValue
+        : String(leftValue).localeCompare(String(rightValue), "es", { numeric: true });
+      return historialSortConfig.direction === "asc" ? result : -result;
+    });
+  }, [historialRowsFiltrados, historialSortConfig]);
+  const historialTotalesPorMoneda = useMemo(() => {
+    const totals = new Map<string, number>();
+
+    historialRowsFiltrados.forEach((row) => {
+      const moneda = row.moneda?.trim() || "SIN MONEDA";
+      totals.set(moneda, (totals.get(moneda) ?? 0) + (Number(row.subtotal) || 0));
+    });
+
+    return Array.from(totals, ([moneda, total]) => ({ moneda, total }));
+  }, [historialRowsFiltrados]);
 
   useEffect(() => {
     setHistorialResponsable("");
+    setHistorialSortConfig(null);
   }, [historialOtSeleccionada]);
 
   useEffect(() => {
@@ -2528,7 +2553,9 @@ export default function PagosV1Page() {
   const summaryLabel = checkedIds.length > 0 ? "Seleccionados" : "Mostrando";
 
   useEffect(() => {
-    setDetailTab("resumen");
+    const preferredTab = preferredDetailTabRef.current;
+    preferredDetailTabRef.current = null;
+    setDetailTab(preferredTab ?? "resumen");
   }, [selectedId, activeTab]);
 
   useEffect(() => {
@@ -2580,7 +2607,7 @@ export default function PagosV1Page() {
   const isResumenTab = activeTab === "resumen";
   const showEstadoOc = activeTab === "resumen";
   const tableColSpan = showEstadoOc ? 22 : 21;
-  const stickyColumnWidths = [108, 94, 88, 88, 72, 90, 110, 142, 80, 130];
+  const stickyColumnWidths = [108, 94];
   const stickyColumnLefts = stickyColumnWidths.reduce<number[]>((acc, _width, index) => {
     const previousLeft = acc[index - 1] ?? 0;
     const previousWidth = index === 0 ? 0 : stickyColumnWidths[index - 1];
@@ -2608,6 +2635,14 @@ export default function PagosV1Page() {
       }
       return next;
     });
+  };
+
+  const openHistorialOtForRow = (row: PagoRow) => {
+    preferredDetailTabRef.current = "historial";
+    setSelectedId(row.id);
+    setHistorialOcRows([]);
+    setIsDetailPanelOpen(true);
+    setDetailTab("historial");
   };
 
   const handleAction = (label: string) => {
@@ -2728,6 +2763,38 @@ export default function PagosV1Page() {
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
   }, [gastoEditorRequest]);
+
+  useEffect(() => {
+    if (!detallePopup) {
+      return;
+    }
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setDetallePopup(null);
+      }
+    };
+
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [detallePopup]);
+
+  useEffect(() => {
+    if (!isHistorialPopupOpen) {
+      return;
+    }
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setIsHistorialPopupOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [isHistorialPopupOpen]);
 
   const handleClearFilters = () => {
     const defaultFilters = getDefaultFilterState();
@@ -3168,8 +3235,16 @@ export default function PagosV1Page() {
     );
   };
 
+  const handleHistorialSortColumn = (column: PagoSortColumn) => {
+    setHistorialSortConfig((current) =>
+      current?.column === column
+        ? { column, direction: current.direction === "asc" ? "desc" : "asc" }
+        : { column, direction: "asc" }
+    );
+  };
+
   return (
-    <AppPage title="Órdenes de Pago" fillHeight>
+    <AppPage title="Pagos" fillHeight>
       <div style={styles.page}>
         <section
           style={{
@@ -3189,7 +3264,7 @@ export default function PagosV1Page() {
                   <ReceiptText size={22} strokeWidth={2.1} />
                 </div>
                 <div>
-                  <h1 style={styles.title}>Órdenes de Pago</h1>
+                  <h1 style={styles.title}>Pagos</h1>
                 </div>
               </div>
               <div style={styles.quickFiltersRow}>
@@ -3518,28 +3593,26 @@ export default function PagosV1Page() {
                       </div>
                     </th>
                     <th data-sort="correlativo" style={{ ...styles.th, ...getStickyCellStyle(1, "#F8FAFC", 6), cursor: "pointer" }}>Correlativo</th>
-                    <th data-sort="ot" style={{ ...styles.th, ...getStickyCellStyle(2, "#F8FAFC", 6), cursor: "pointer" }}>OT</th>
-                    <th data-sort="idOc" style={{ ...styles.th, ...getStickyCellStyle(3, "#F8FAFC", 6), cursor: "pointer" }}>OC</th>
-                    <th data-sort="fila" style={{ ...styles.th, ...getStickyCellStyle(4, "#F8FAFC", 6), cursor: "pointer" }}>Fila</th>
-                    <th data-sort="responsable" style={{ ...styles.th, ...getStickyCellStyle(5, "#F8FAFC", 6), cursor: "pointer" }}>Responsable</th>
-                    <th data-sort="validador" style={{ ...styles.th, ...getStickyCellStyle(6, "#F8FAFC", 6), cursor: "pointer" }}>Validador</th>
-                    <th style={{ ...styles.th, ...getStickyCellStyle(7, "#F8FAFC", 6), textAlign: "center" }}>
-                      Acciones
-                    </th>
-                    <th style={{ ...styles.th, ...getStickyCellStyle(8, "#F8FAFC", 6) }}>Moneda</th>
-                    <th data-sort="subtotal" style={{ ...styles.th, ...getStickyCellStyle(9, "#F8FAFC", 6), cursor: "pointer" }}>Subtotal</th>
+                    <th data-sort="fecha" style={{ ...styles.th, width: 80, cursor: "pointer" }}>Fecha</th>
+                    <th data-sort="cliente" style={{ ...styles.th, width: 60, cursor: "pointer" }}>Cliente</th>
+                    <th data-sort="proyecto" style={{ ...styles.th, width: 90, cursor: "pointer" }}>Proyecto</th>
+                    <th data-sort="site" style={{ ...styles.th, width: 150, cursor: "pointer" }}>Site</th>
+                    <th data-sort="tipoTrabajo" style={{ ...styles.th, width: 100, cursor: "pointer" }}>Tipo trabajo</th>
+                    <th data-sort="idOc" style={{ ...styles.th, width: 88, cursor: "pointer" }}>OC</th>
+                    <th data-sort="subtotal" style={{ ...styles.th, width: 130, cursor: "pointer" }}>Subtotal</th>
                     <th data-sort="igv" style={{ ...styles.th, width: 90, cursor: "pointer" }}>IGV</th>
                     <th data-sort="total" style={{ ...styles.th, width: 100, cursor: "pointer" }}>Total</th>
-                    <th data-sort="fecha" style={{ ...styles.th, width: 80, cursor: "pointer" }}>Fecha</th>
-                    <th style={{ ...styles.th, width: 60 }}>Cliente</th>
-                    <th style={{ ...styles.th, width: 20 }}>Proyecto</th>
-                    <th style={{ ...styles.th, width: 60 }}>Site ID</th>
-                    <th style={{ ...styles.th, width: 60 }}>CorSite</th>
-                    <th style={{ ...styles.th, width: 20 }}>Site</th>
-                    <th style={{ ...styles.th, width: 20 }}>Tipo trabajo</th>
-                    <th style={{ ...styles.th, width: 20 }}>Tarea</th>
+                    <th data-sort="moneda" style={{ ...styles.th, width: 80, cursor: "pointer" }}>Moneda</th>
+                    <th style={{ ...styles.th, width: 160 }}>Total Gastado</th>
+                    <th style={{ ...styles.th, width: 170 }}>Total Sitio</th>
+                    <th style={{ ...styles.th, width: 90 }}>% Avance</th>
+                    <th style={{ ...styles.th, width: 130 }}>Avance</th>
+                    <th data-sort="responsable" style={{ ...styles.th, width: 110, cursor: "pointer" }}>Responsable</th>
+                    <th style={{ ...styles.th, width: 180 }}>Detalle</th>
                     {showEstadoOc ? <th style={{ ...styles.th, width: 118 }}>Estado OC</th> : null}
-                    <th style={{ ...styles.th, width: 60 }}>%</th>
+                    <th data-sort="validador" style={{ ...styles.th, width: 110, cursor: "pointer" }}>Validador</th>
+                    <th data-sort="ot" style={{ ...styles.th, width: 88, cursor: "pointer" }}>OT</th>
+                    <th style={{ ...styles.th, textAlign: "center" }}>Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3623,7 +3696,13 @@ export default function PagosV1Page() {
                               const rowBackground = hasMontoBckExceeded
                                 ? (isSelected ? "#FECACA" : "#FFF1F2")
                                 : (isSelected ? "#DBEAFE" : "#FFFFFF");
-                              const percent = row.subOc && row.subOc > 0 ? Math.round((row.subtotal / row.subOc) * 100) : 0;
+                              const totalSubtotalPorMoneda = row.totalSubtotalPorMoneda ?? 0;
+                              const totalMontoBckPorMoneda = row.totalMontoBckPorMoneda ?? 0;
+                              const porcentajeAvance = totalMontoBckPorMoneda > 0
+                                ? (totalSubtotalPorMoneda / totalMontoBckPorMoneda) * 100
+                                : 0;
+                              const porcentajeAvanceBarra = Math.max(0, Math.min(porcentajeAvance, 100));
+                              const colorAvance = porcentajeAvance > 70 ? "#DC2626" : porcentajeAvance >= 50 ? "#CA8A04" : "#16A34A";
 
                               return (
                                 <tr
@@ -3657,56 +3736,59 @@ export default function PagosV1Page() {
                                     />
                                   </td>
                                   <td title={row.correlativo} style={{ ...styles.td, ...getStickyCellStyle(1, rowBackground, 3) }}>{row.correlativo}</td>
-                                  <td title={row.ot || "-"} style={{ ...styles.td, ...getStickyCellStyle(2, rowBackground, 3) }}>{row.ot || "-"}</td>
-                                  <td title={row.idOc || row.documento || "-"} style={{ ...styles.td, ...getStickyCellStyle(3, rowBackground, 3) }}>{row.idOc || row.documento || "-"}</td>
-                                  <td title={row.fila || "-"} style={{ ...styles.td, ...getStickyCellStyle(4, rowBackground, 3) }}>{row.fila || "-"}</td>
-                                  <td title={row.responsable || "-"} style={{ ...styles.td, ...getStickyCellStyle(5, rowBackground, 3) }}>{row.responsable}</td>
-                                  <td title={row.validador || "-"} style={{ ...styles.td, ...getStickyCellStyle(6, rowBackground, 3) }}>{row.validador || "-"}</td>
-                                    <td style={{ ...styles.td, ...getStickyCellStyle(7, rowBackground, 3), textAlign: "center" }}>
-                                      {(() => {
-                                        // Solo se bloquea cuando el gasto está en un estado final o no editable.
-                                        const accionesHabilitadas = !["99", "3", "4", "5", "8"].includes(row.estadoCodigo ?? "");
-                                        const actionStyle = (enabled: boolean, color: string, background: string, border: string): React.CSSProperties => ({
-                                          ...styles.compactActionButton,
-                                          width: 28,
-                                          height: 28,
-                                          padding: 0,
-                                          color: enabled ? color : "#9CA3AF",
-                                          background: enabled ? background : "#F3F4F6",
-                                          borderColor: enabled ? border : "#E5E7EB",
-                                          opacity: enabled ? 1 : 0.65,
-                                          cursor: enabled ? "pointer" : "not-allowed",
-                                        });
-                                        return (
-                                          <div style={{ display: "flex", justifyContent: "center", gap: 4 }}>
-                                            <button type="button" title="Ver detalle" aria-label={`Ver detalle de la orden ${row.correlativo}`} onClick={(event) => { event.stopPropagation(); toggleDetailForRow(row); }} style={actionStyle(true, "#475569", "#F8FAFC", "#CBD5E1")}>
-                                              <FileText size={14} />
-                                            </button>
-                                            <button type="button" title="Visualizar gasto" aria-label={`Visualizar gasto ${row.correlativo}`} onClick={(event) => { event.stopPropagation(); abrirGasto(row, "ver"); }} style={actionStyle(true, "#1D4ED8", "#EFF6FF", "#BFDBFE")}>
-                                              <Eye size={14} />
-                                            </button>
-                                            <button type="button" title={accionesHabilitadas ? "Modificar gasto" : "Modificar no disponible para el estado actual"} aria-label={`Modificar gasto ${row.correlativo}`} disabled={!accionesHabilitadas} onClick={(event) => { event.stopPropagation(); if (accionesHabilitadas) abrirGasto(row, "editar"); }} style={actionStyle(accionesHabilitadas, "#3730A3", "#EEF2FF", "#C7D2FE")}>
-                                              <Pencil size={14} />
-                                            </button>
-                                            <button type="button" title={accionesHabilitadas ? "Rechazar gasto" : "Rechazar no disponible para el estado actual"} aria-label={`Rechazar gasto ${row.correlativo}`} disabled={!accionesHabilitadas} onClick={(event) => { event.stopPropagation(); if (accionesHabilitadas) openRechazoModal([row]); }} style={actionStyle(accionesHabilitadas, "#B91C1C", "#FEF2F2", "#FECACA")}>
-                                              <Trash2 size={14} />
-                                            </button>
-                                          </div>
-                                        );
-                                      })()}
-                                    </td>
-                                  <td title={row.moneda || "-"} style={{ ...styles.td, ...getStickyCellStyle(8, rowBackground, 3) }}>{row.moneda || "-"}</td>
-                                  <td title={formatCurrency(row.subtotal, row.moneda)} style={{ ...styles.td, ...getStickyCellStyle(9, rowBackground, 3), fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
-                                  <td title={formatCurrency(row.igv, row.moneda)} style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
-                                  <td title={formatCurrency(row.total, row.moneda)} style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
                                   <td title={formatDate(row.fecha)} style={styles.td}>{formatDate(row.fecha)}</td>
                                   <td title={row.cliente || "-"} style={styles.td}>{row.cliente}</td>
                                   <td title={row.proyecto || "-"} style={styles.td}>{row.proyecto}</td>
-                                  <td title={row.siteId || "-"} style={styles.td}>{row.siteId}</td>
-                                  <td title={row.corSite || "-"} style={styles.td}>{row.corSite || "-"}</td>
                                   <td title={row.site || "-"} style={styles.td}>{row.site}</td>
                                   <td title={row.tipoTrabajo || "-"} style={styles.td}>{row.tipoTrabajo}</td>
-                                  <td title={row.tarea || "-"} style={styles.td}>{row.tarea}</td>
+                                  <td
+                                    title="Ver detalle de la orden"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      toggleDetailForRow(row);
+                                    }}
+                                    style={{ ...styles.td, color: "#2563EB", cursor: "pointer", textDecoration: "underline" }}
+                                  >
+                                    {row.idOc || row.documento || "-"}
+                                  </td>
+                                  <td title={formatCurrency(row.subtotal, row.moneda)} style={{ ...styles.td, fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
+                                  <td title={formatCurrency(row.igv, row.moneda)} style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
+                                  <td title={formatCurrency(row.total, row.moneda)} style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
+                                  <td title={row.moneda || "-"} style={styles.td}>{row.moneda || "-"}</td>
+                                  <td
+                                    title="Ver detalle de la orden"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      openHistorialOtForRow(row);
+                                    }}
+                                    style={{ ...styles.td, cursor: "pointer", color: "#2563EB", textDecoration: "underline" }}
+                                  >
+                                    {formatCurrency(totalSubtotalPorMoneda, row.moneda)}
+                                  </td>
+                                  <td title={formatCurrency(row.totalMontoBckPorMoneda ?? 0, row.moneda)} style={styles.td}>
+                                    {formatCurrency(totalMontoBckPorMoneda, row.moneda)}
+                                  </td>
+                                  <td style={{ ...styles.td, color: colorAvance }}>{formatPercent(porcentajeAvance)}</td>
+                                  <td style={{ ...styles.td, verticalAlign: "middle" }}>
+                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 28 }}>
+                                      <div title={formatPercent(porcentajeAvance)} style={{ width: 112, height: 8, borderRadius: 999, background: "#E2E8F0", overflow: "hidden" }}>
+                                        <div style={{ width: `${porcentajeAvanceBarra}%`, height: "100%", borderRadius: "inherit", background: colorAvance }} />
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td title={row.responsable || "-"} style={styles.td}>{row.responsable}</td>
+                                  <td
+                                    title="Ver detalle completo"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setDetallePopup({ correlativo: row.correlativo, detalle: row.detalle?.trim() || "-" });
+                                    }}
+                                    style={{ ...styles.td, cursor: "pointer", color: "#2563EB", textDecoration: "underline" }}
+                                  >
+                                    <span style={{ display: "block", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                      {row.detalle?.trim() || "-"}
+                                    </span>
+                                  </td>
                                   {showEstadoOc ? (
                                     <td style={styles.td}>
                                       <span
@@ -3722,7 +3804,37 @@ export default function PagosV1Page() {
                                       </span>
                                     </td>
                                   ) : null}
-                                  <td style={styles.td}>{percent}%</td>
+                                  <td title={row.validador || "-"} style={styles.td}>{row.validador || "-"}</td>
+                                  <td title={row.ot || "-"} style={styles.td}>{row.ot || "-"}</td>
+                                  <td style={{ ...styles.td, textAlign: "center" }}>
+                                    {(() => {
+                                      const accionesHabilitadas = !["99", "3", "4", "5", "8"].includes(row.estadoCodigo ?? "");
+                                      const actionStyle = (enabled: boolean, color: string, background: string, border: string): React.CSSProperties => ({
+                                        ...styles.compactActionButton,
+                                        width: 28,
+                                        height: 28,
+                                        padding: 0,
+                                        color: enabled ? color : "#9CA3AF",
+                                        background: enabled ? background : "#F3F4F6",
+                                        borderColor: enabled ? border : "#E5E7EB",
+                                        opacity: enabled ? 1 : 0.65,
+                                        cursor: enabled ? "pointer" : "not-allowed",
+                                      });
+                                      return (
+                                        <div style={{ display: "flex", justifyContent: "center", gap: 4 }}>
+                                          <button type="button" title="Visualizar gasto" aria-label={`Visualizar gasto ${row.correlativo}`} onClick={(event) => { event.stopPropagation(); abrirGasto(row, "ver"); }} style={actionStyle(true, "#1D4ED8", "#EFF6FF", "#BFDBFE")}>
+                                            <Eye size={14} />
+                                          </button>
+                                          <button type="button" title={accionesHabilitadas ? "Modificar gasto" : "Modificar no disponible para el estado actual"} aria-label={`Modificar gasto ${row.correlativo}`} disabled={!accionesHabilitadas} onClick={(event) => { event.stopPropagation(); if (accionesHabilitadas) abrirGasto(row, "editar"); }} style={actionStyle(accionesHabilitadas, "#3730A3", "#EEF2FF", "#C7D2FE")}>
+                                            <Pencil size={14} />
+                                          </button>
+                                          <button type="button" title={accionesHabilitadas ? "Rechazar gasto" : "Rechazar no disponible para el estado actual"} aria-label={`Rechazar gasto ${row.correlativo}`} disabled={!accionesHabilitadas} onClick={(event) => { event.stopPropagation(); if (accionesHabilitadas) openRechazoModal([row]); }} style={actionStyle(accionesHabilitadas, "#B91C1C", "#FEF2F2", "#FECACA")}>
+                                            <Trash2 size={14} />
+                                          </button>
+                                        </div>
+                                      );
+                                    })()}
+                                  </td>
                                 </tr>
                               );
                             })}
@@ -4233,58 +4345,55 @@ export default function PagosV1Page() {
 
                     <div style={styles.gridScrollable}>
                       <table style={{ ...styles.table, minWidth: 1450, width: "max-content" }}>
-                        <thead>
+                        <thead onClick={(event) => {
+                          const column = (event.target as HTMLElement).closest<HTMLElement>("th")?.dataset.historialSort as PagoSortColumn | undefined;
+                          if (column) handleHistorialSortColumn(column);
+                        }}>
                           <tr>
-                            <th style={{ ...styles.th, width: 94 }}>Correlativo</th>
-                            <th style={{ ...styles.th, width: 88 }}>OT</th>
-                            <th style={{ ...styles.th, width: 88 }}>OC</th>
-                            <th style={{ ...styles.th, width: 72 }}>Fila</th>
-                            <th style={{ ...styles.th, width: 90 }}>Responsable</th>
-                            <th style={{ ...styles.th, width: 110 }}>Validador</th>
-                            <th style={{ ...styles.th, width: 90 }}>Subtotal</th>
-                            <th style={{ ...styles.th, width: 90 }}>IGV</th>
-                            <th style={{ ...styles.th, width: 100 }}>Total</th>
-                            <th style={{ ...styles.th, width: 80 }}>Fecha</th>
-                            <th style={{ ...styles.th, width: 60 }}>Site ID</th>
-                            <th style={{ ...styles.th, width: 60 }}>CorSite</th>
-                            <th style={{ ...styles.th, width: 90 }}>Tarea</th>
-                            <th style={{ ...styles.th, width: 60 }}>Cliente</th>
-                            <th style={{ ...styles.th, width: 90 }}>Proyecto</th>
-                            <th style={{ ...styles.th, width: 90 }}>Site</th>
-                            <th style={{ ...styles.th, width: 90 }}>Tipo trabajo</th>
-                            <th style={{ ...styles.th, width: 260 }}>Detalle</th>
+                            <th data-historial-sort="correlativo" style={{ ...styles.th, width: 94, cursor: "pointer" }}>Correlativo</th>
+                            <th data-historial-sort="fecha" style={{ ...styles.th, width: 80, cursor: "pointer" }}>Fecha</th>
+                            <th data-historial-sort="cliente" style={{ ...styles.th, width: 60, cursor: "pointer" }}>Cliente</th>
+                            <th data-historial-sort="proyecto" style={{ ...styles.th, width: 90, cursor: "pointer" }}>Proyecto</th>
+                            <th data-historial-sort="site" style={{ ...styles.th, width: 140, cursor: "pointer" }}>Site</th>
+                            <th data-historial-sort="tipoTrabajo" style={{ ...styles.th, width: 90, cursor: "pointer" }}>Tipo trabajo</th>
+                            <th data-historial-sort="idOc" style={{ ...styles.th, width: 88, cursor: "pointer" }}>OC</th>
+                            <th data-historial-sort="subtotal" style={{ ...styles.th, width: 90, cursor: "pointer" }}>Subtotal</th>
+                            <th data-historial-sort="igv" style={{ ...styles.th, width: 90, cursor: "pointer" }}>IGV</th>
+                            <th data-historial-sort="total" style={{ ...styles.th, width: 100, cursor: "pointer" }}>Total</th>
+                            <th data-historial-sort="moneda" style={{ ...styles.th, width: 80, cursor: "pointer" }}>Moneda</th>
+                            <th data-historial-sort="responsable" style={{ ...styles.th, width: 110, cursor: "pointer" }}>Responsable</th>
+                            <th data-historial-sort="detalle" style={{ ...styles.th, width: 260, cursor: "pointer" }}>Detalle</th>
+                            <th data-historial-sort="validador" style={{ ...styles.th, width: 110, cursor: "pointer" }}>Validador</th>
+                            <th data-historial-sort="ot" style={{ ...styles.th, width: 88, cursor: "pointer" }}>OT</th>
                           </tr>
                         </thead>
                         <tbody>
                           {historialRowsFiltrados.length === 0 ? (
                             <tr>
-                              <td colSpan={18} style={styles.emptyCell}>
+                              <td colSpan={15} style={styles.emptyCell}>
                                 {tieneOtValida
                                   ? "No hay registros para el cliente, proyecto, site y tipo de trabajo seleccionados."
                                   : "La orden seleccionada no tiene una OT válida."}
                               </td>
                             </tr>
                           ) : (
-                            historialRowsFiltrados.map((row) => (
+                            historialRowsOrdenados.map((row) => (
                               <tr key={`hist-${row.id}`}>
                                 <td style={styles.td}>{row.correlativo}</td>
-                                <td style={styles.td}>{row.ot || '-'}</td>
-                                <td style={styles.td}>{row.idOc || row.documento || '-'}</td>
-                                <td style={styles.td}>{row.fila || '-'}</td>
-                                <td style={styles.td}>{row.responsable}</td>
-                                <td style={styles.td}>{row.validador || '-'}</td>
-                                <td style={{ ...styles.td, fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
-                                <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
-                                <td style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
                                 <td style={styles.td}>{formatDate(row.fecha)}</td>
-                                <td style={styles.td}>{row.siteId}</td>
-                                <td style={styles.td}>{row.corSite || '-'}</td>
-                                <td style={styles.td}>{row.tarea}</td>
                                 <td style={styles.td}>{row.cliente}</td>
                                 <td style={styles.td}>{row.proyecto}</td>
                                 <td style={styles.td}>{row.site}</td>
                                 <td style={styles.td}>{row.tipoTrabajo}</td>
+                                <td style={styles.td}>{row.idOc || row.documento || '-'}</td>
+                                <td style={{ ...styles.td, fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
+                                <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
+                                <td style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
+                                <td style={styles.td}>{row.moneda || '-'}</td>
+                                <td style={styles.td}>{row.responsable}</td>
                                 <td style={styles.td}>{row.detalle || '-'}</td>
+                                <td style={styles.td}>{row.validador || '-'}</td>
+                                <td style={styles.td}>{row.ot || '-'}</td>
                               </tr>
                             ))
                           )}
@@ -4428,6 +4537,38 @@ export default function PagosV1Page() {
           </aside>
           ) : null}
         </section>
+        {detallePopup ? (
+          <div
+            style={styles.popupOverlay}
+            onClick={() => setDetallePopup(null)}
+            role="presentation"
+          >
+            <div
+              style={{ ...styles.popupCard, width: "min(680px, calc(100vw - 32px))", height: "auto", maxHeight: "min(560px, calc(100vh - 32px))" }}
+              onClick={(event) => event.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label={`Detalle de la orden ${detallePopup.correlativo}`}
+            >
+              <div style={styles.popupHeader}>
+                <div>
+                  <div style={{ ...styles.sectionKicker, color: currentTheme.accent }}>Detalle completo</div>
+                  <h3 style={styles.popupTitle}>Orden de Pago N° {detallePopup.correlativo}</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDetallePopup(null)}
+                  style={{ ...styles.slimActionButton, borderColor: currentTheme.border, color: "#EF4444" }}
+                >
+                  Cerrar
+                </button>
+              </div>
+              <div style={{ ...styles.popupBody, overflowY: "auto", whiteSpace: "pre-wrap", lineHeight: 1.55, color: "#1E293B" }}>
+                {detallePopup.detalle}
+              </div>
+            </div>
+          </div>
+        ) : null}
         {detailTab === "con-pagado" && isConPagadoPopupOpen ? (
           <div
             style={styles.popupOverlay}
@@ -4566,60 +4707,76 @@ export default function PagosV1Page() {
                 </div>
               </div>
               <div style={styles.popupBody}>
+                {historialTotalesPorMoneda.length > 0 ? (
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+                    {historialTotalesPorMoneda.map(({ moneda, total }) => (
+                      <div
+                        key={moneda}
+                        style={{
+                          minWidth: 150,
+                          padding: "10px 12px",
+                          border: "1px solid #DBEAFE",
+                          borderRadius: 10,
+                          background: "#F8FBFF",
+                        }}
+                      >
+                        <div style={{ fontSize: 10, fontWeight: 800, color: "#64748B", textTransform: "uppercase" }}>{moneda}</div>
+                        <div style={{ marginTop: 3, fontSize: 16, fontWeight: 800, color: "#0F172A" }}>{formatCurrency(total, moneda)}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
                 <div style={styles.gridScrollable}>
                   <table style={{ ...styles.table, minWidth: 1450, width: "max-content" }}>
-                    <thead>
+                    <thead onClick={(event) => {
+                      const column = (event.target as HTMLElement).closest<HTMLElement>("th")?.dataset.historialSort as PagoSortColumn | undefined;
+                      if (column) handleHistorialSortColumn(column);
+                    }}>
                       <tr>
-                        <th style={{ ...styles.th, width: 94 }}>Correlativo</th>
-                        <th style={{ ...styles.th, width: 88 }}>OT</th>
-                        <th style={{ ...styles.th, width: 88 }}>OC</th>
-                        <th style={{ ...styles.th, width: 72 }}>Fila</th>
-                        <th style={{ ...styles.th, width: 90 }}>Responsable</th>
-                        <th style={{ ...styles.th, width: 110 }}>Validador</th>
-                        <th style={{ ...styles.th, width: 90 }}>Subtotal</th>
-                        <th style={{ ...styles.th, width: 90 }}>IGV</th>
-                        <th style={{ ...styles.th, width: 100 }}>Total</th>
-                        <th style={{ ...styles.th, width: 80 }}>Fecha</th>
-                        <th style={{ ...styles.th, width: 60 }}>Site ID</th>
-                        <th style={{ ...styles.th, width: 60 }}>CorSite</th>
-                        <th style={{ ...styles.th, width: 90 }}>Tarea</th>
-                        <th style={{ ...styles.th, width: 60 }}>Cliente</th>
-                        <th style={{ ...styles.th, width: 90 }}>Proyecto</th>
-                        <th style={{ ...styles.th, width: 90 }}>Site</th>
-                        <th style={{ ...styles.th, width: 90 }}>Tipo trabajo</th>
-                        <th style={{ ...styles.th, width: 260 }}>Detalle</th>
+                        <th data-historial-sort="correlativo" style={{ ...styles.th, width: 94, cursor: "pointer" }}>Correlativo</th>
+                        <th data-historial-sort="fecha" style={{ ...styles.th, width: 80, cursor: "pointer" }}>Fecha</th>
+                        <th data-historial-sort="cliente" style={{ ...styles.th, width: 60, cursor: "pointer" }}>Cliente</th>
+                        <th data-historial-sort="proyecto" style={{ ...styles.th, width: 90, cursor: "pointer" }}>Proyecto</th>
+                        <th data-historial-sort="site" style={{ ...styles.th, width: 140, cursor: "pointer" }}>Site</th>
+                        <th data-historial-sort="tipoTrabajo" style={{ ...styles.th, width: 90, cursor: "pointer" }}>Tipo trabajo</th>
+                        <th data-historial-sort="idOc" style={{ ...styles.th, width: 88, cursor: "pointer" }}>OC</th>
+                        <th data-historial-sort="subtotal" style={{ ...styles.th, width: 90, cursor: "pointer" }}>Subtotal</th>
+                        <th data-historial-sort="igv" style={{ ...styles.th, width: 90, cursor: "pointer" }}>IGV</th>
+                        <th data-historial-sort="total" style={{ ...styles.th, width: 100, cursor: "pointer" }}>Total</th>
+                        <th data-historial-sort="moneda" style={{ ...styles.th, width: 80, cursor: "pointer" }}>Moneda</th>
+                        <th data-historial-sort="responsable" style={{ ...styles.th, width: 110, cursor: "pointer" }}>Responsable</th>
+                        <th data-historial-sort="detalle" style={{ ...styles.th, width: 260, cursor: "pointer" }}>Detalle</th>
+                        <th data-historial-sort="validador" style={{ ...styles.th, width: 110, cursor: "pointer" }}>Validador</th>
+                        <th data-historial-sort="ot" style={{ ...styles.th, width: 88, cursor: "pointer" }}>OT</th>
                       </tr>
                     </thead>
                     <tbody>
                       {historialRowsFiltrados.length === 0 ? (
                         <tr>
-                          <td colSpan={18} style={styles.emptyCell}>
+                          <td colSpan={15} style={styles.emptyCell}>
                             {tieneOtValida
                               ? "No hay registros para el cliente, proyecto, site y tipo de trabajo seleccionados."
                               : "La orden seleccionada no tiene una OT válida."}
                           </td>
                         </tr>
                       ) : (
-                        historialRowsFiltrados.map((row) => (
+                        historialRowsOrdenados.map((row) => (
                           <tr key={`popup-hist-${row.id}`}>
                             <td style={styles.td}>{row.correlativo}</td>
-                            <td style={styles.td}>{row.ot || '-'}</td>
-                            <td style={styles.td}>{row.idOc || row.documento || '-'}</td>
-                            <td style={styles.td}>{row.fila || '-'}</td>
-                            <td style={styles.td}>{row.responsable}</td>
-                            <td style={styles.td}>{row.validador || '-'}</td>
-                            <td style={{ ...styles.td, fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
-                            <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
-                            <td style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
                             <td style={styles.td}>{formatDate(row.fecha)}</td>
-                            <td style={styles.td}>{row.siteId}</td>
-                            <td style={styles.td}>{row.corSite || '-'}</td>
-                            <td style={styles.td}>{row.tarea}</td>
                             <td style={styles.td}>{row.cliente}</td>
                             <td style={styles.td}>{row.proyecto}</td>
                             <td style={styles.td}>{row.site}</td>
                             <td style={styles.td}>{row.tipoTrabajo}</td>
+                            <td style={styles.td}>{row.idOc || row.documento || '-'}</td>
+                            <td style={{ ...styles.td, fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
+                            <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
+                            <td style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
+                            <td style={styles.td}>{row.moneda || '-'}</td>
+                            <td style={styles.td}>{row.responsable}</td>
                             <td style={styles.td}>{row.detalle || '-'}</td>
+                            <td style={styles.td}>{row.validador || '-'}</td>
+                            <td style={styles.td}>{row.ot || '-'}</td>
                           </tr>
                         ))
                       )}
