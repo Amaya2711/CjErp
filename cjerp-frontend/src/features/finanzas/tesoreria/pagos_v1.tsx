@@ -3927,18 +3927,6 @@ export default function PagosV1Page() {
                             <span>Solicitado:</span>
                             <span>{tieneOtValida ? formatCurrency(solicitadoOtAmount, detalleOcActiva.moneda) : "-"}</span>
                           </div>
-                          <div style={styles.ocProgressFooterLine}>
-                            <span>Pagado:</span>
-                            <span>{tieneOtValida ? (consumoOtLoading ? "Cargando..." : formatCurrency(montoPlanillaPagadoOt, detalleOcActiva.moneda)) : "-"}</span>
-                          </div>
-                          <div style={styles.ocProgressFooterLine}>
-                            <span>Disponible:</span>
-                            <span>{tieneOtValida ? (consumoOtLoading ? "Cargando..." : formatCurrency(disponibleOtLocal, detalleOcActiva.moneda)) : "-"}</span>
-                          </div>
-                          <div style={styles.ocProgressFooterLine}>
-                            <span>Total OT:</span>
-                            <span>{tieneOtValida ? formatCurrency(totalOtLocal, detalleOcActiva.moneda) : "-"}</span>
-                          </div>
                           {tieneOtValida && resumenOtMonedas.length === 0 && (montoPlanillaSolesOt > 0 || montoPlanillaDolaresOt > 0) ? (
                             <div style={styles.otConversionDetail}>
                               <span style={styles.otConversionTitle}>Detalle de conversión</span>
