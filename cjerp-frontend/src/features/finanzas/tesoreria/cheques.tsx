@@ -429,7 +429,10 @@ export default function TesoreriaChequesPage() {
       {
         key: "banco",
         label: "Banco",
-        getValue: (item) => item.nombreBanco || bankById.get(item.idBanco) || item.idBanco,
+        // El idBanco del cheque es la fuente de verdad. NombreBanco puede venir
+        // desfasado desde el listado, mientras que el catálogo ya refleja el banco
+        // que se muestra en el formulario de edición.
+        getValue: (item) => bankById.get(item.idBanco) || item.nombreBanco || item.idBanco,
       },
       { key: "importe", label: "Importe", getValue: (item) => item.importe },
       {
@@ -465,7 +468,7 @@ export default function TesoreriaChequesPage() {
               ""
             );
           case "banco":
-            return row.nombreBanco || bankById.get(row.idBanco) || "";
+            return bankById.get(row.idBanco) || row.nombreBanco || "";
           case "importe":
             return row.importe || 0;
           case "moneda":
@@ -970,7 +973,7 @@ export default function TesoreriaChequesPage() {
                           empleado?.nombreEmpleado ||
                           row.idEmpleado}
                       </td>
-                      <td style={styles.td}>{row.nombreBanco || bankById.get(row.idBanco) || row.idBanco}</td>
+                      <td style={styles.td}>{bankById.get(row.idBanco) || row.nombreBanco || row.idBanco}</td>
                       <td style={styles.td}>{formatMoney(row.importe)}</td>
                       <td style={styles.td}>{row.nombreMoneda || getConstanteLabel(monedaOptions, row.idMoneda)}</td>
                       <td style={styles.td}>{row.nombreEstado || getConstanteLabel(estadoOptions, row.idEstado)}</td>
