@@ -2428,17 +2428,7 @@ export default function PagosV1Page() {
   }, [conPagadoRows, detalleOcActiva?.montoPlanilla, detalleOcActiva?.totalAcumuladoOt, resumenOtMonedas]);
   const resumenOcTitulo = detalleOcActiva?.ot || detalleOcActiva?.correlativo || filaActiva?.ot || filaActiva?.correlativo || "";
   const tipoCambioLocal = Math.max(parseNumericValue(tipoCambio), 0);
-  const tieneDesgloseMonedaOt =
-    detalleOcActiva?.montoPlanillaSoles != null || detalleOcActiva?.montoPlanillaDolares != null;
   const montoPlanillaOriginalOt = parseNumericValue(filaActiva?.totalSubtotalPorMoneda ?? 0);
-  const esDolarOt = normalizeText(detalleOcActiva?.moneda ?? "").includes("dolar") ||
-    normalizeText(detalleOcActiva?.moneda ?? "").includes("usd");
-  const montoPlanillaSolesOt = tieneDesgloseMonedaOt
-    ? parseNumericValue(detalleOcActiva?.montoPlanillaSoles ?? 0)
-    : (esDolarOt ? 0 : montoPlanillaOriginalOt);
-  const montoPlanillaDolaresOt = tieneDesgloseMonedaOt
-    ? parseNumericValue(detalleOcActiva?.montoPlanillaDolares ?? 0)
-    : (esDolarOt ? montoPlanillaOriginalOt : 0);
   // El total pagado es el subtotal acumulado por moneda enviado por el store.
   // No depende del historial ni de consultas adicionales al seleccionar la fila.
   const montoPlanillaPagadoOt = Math.max(montoPlanillaOriginalOt, 0);
@@ -2590,7 +2580,7 @@ export default function PagosV1Page() {
   const isResumenTab = activeTab === "resumen";
   const showEstadoOc = activeTab === "resumen";
   const tableColSpan = showEstadoOc ? 22 : 21;
-  const stickyColumnWidths = [108, 94, 88, 88, 72, 90, 110, 142, 130];
+  const stickyColumnWidths = [108, 94, 88, 88, 72, 90, 110, 142, 80, 130];
   const stickyColumnLefts = stickyColumnWidths.reduce<number[]>((acc, _width, index) => {
     const previousLeft = acc[index - 1] ?? 0;
     const previousWidth = index === 0 ? 0 : stickyColumnWidths[index - 1];
@@ -3536,7 +3526,8 @@ export default function PagosV1Page() {
                     <th style={{ ...styles.th, ...getStickyCellStyle(7, "#F8FAFC", 6), textAlign: "center" }}>
                       Acciones
                     </th>
-                    <th data-sort="subtotal" style={{ ...styles.th, ...getStickyCellStyle(8, "#F8FAFC", 6), cursor: "pointer" }}>Subtotal</th>
+                    <th style={{ ...styles.th, ...getStickyCellStyle(8, "#F8FAFC", 6) }}>Moneda</th>
+                    <th data-sort="subtotal" style={{ ...styles.th, ...getStickyCellStyle(9, "#F8FAFC", 6), cursor: "pointer" }}>Subtotal</th>
                     <th data-sort="igv" style={{ ...styles.th, width: 90, cursor: "pointer" }}>IGV</th>
                     <th data-sort="total" style={{ ...styles.th, width: 100, cursor: "pointer" }}>Total</th>
                     <th data-sort="fecha" style={{ ...styles.th, width: 80, cursor: "pointer" }}>Fecha</th>
@@ -3547,7 +3538,6 @@ export default function PagosV1Page() {
                     <th style={{ ...styles.th, width: 20 }}>Site</th>
                     <th style={{ ...styles.th, width: 20 }}>Tipo trabajo</th>
                     <th style={{ ...styles.th, width: 20 }}>Tarea</th>
-                    <th style={{ ...styles.th, width: 80 }}>Moneda</th>
                     {showEstadoOc ? <th style={{ ...styles.th, width: 118 }}>Estado OC</th> : null}
                     <th style={{ ...styles.th, width: 60 }}>%</th>
                   </tr>
@@ -3631,8 +3621,8 @@ export default function PagosV1Page() {
                               const hasMontoBckExceeded =
                                 (row.totalSubtotalPorMoneda ?? 0) > (row.totalMontoBckPorMoneda ?? 0);
                               const rowBackground = hasMontoBckExceeded
-                                ? (isSelected ? "#FEE2E2" : "#FFF1F2")
-                                : (isSelected ? "#EEF2FF" : "#FFFFFF");
+                                ? (isSelected ? "#FECACA" : "#FFF1F2")
+                                : (isSelected ? "#DBEAFE" : "#FFFFFF");
                               const percent = row.subOc && row.subOc > 0 ? Math.round((row.subtotal / row.subOc) * 100) : 0;
 
                               return (
@@ -3642,9 +3632,15 @@ export default function PagosV1Page() {
                                   style={{
                                     cursor: "pointer",
                                     background: rowBackground,
+                                    boxShadow: isSelected ? "inset 0 0 0 2px #2563EB" : undefined,
                                   }}
                                 >
-                                  <td style={{ ...styles.td, ...getStickyCellStyle(0, rowBackground, 4), textAlign: "center" }}>
+                                  <td style={{
+                                    ...styles.td,
+                                    ...getStickyCellStyle(0, rowBackground, 4),
+                                    textAlign: "center",
+                                    boxShadow: isSelected ? "inset 4px 0 0 #1D4ED8" : undefined,
+                                  }}>
                                     <input
                                       type="checkbox"
                                       checked={checkedIds.includes(row.id)}
@@ -3699,7 +3695,8 @@ export default function PagosV1Page() {
                                         );
                                       })()}
                                     </td>
-                                  <td title={formatCurrency(row.subtotal, row.moneda)} style={{ ...styles.td, ...getStickyCellStyle(8, rowBackground, 3), fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
+                                  <td title={row.moneda || "-"} style={{ ...styles.td, ...getStickyCellStyle(8, rowBackground, 3) }}>{row.moneda || "-"}</td>
+                                  <td title={formatCurrency(row.subtotal, row.moneda)} style={{ ...styles.td, ...getStickyCellStyle(9, rowBackground, 3), fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
                                   <td title={formatCurrency(row.igv, row.moneda)} style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
                                   <td title={formatCurrency(row.total, row.moneda)} style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
                                   <td title={formatDate(row.fecha)} style={styles.td}>{formatDate(row.fecha)}</td>
@@ -3710,7 +3707,6 @@ export default function PagosV1Page() {
                                   <td title={row.site || "-"} style={styles.td}>{row.site}</td>
                                   <td title={row.tipoTrabajo || "-"} style={styles.td}>{row.tipoTrabajo}</td>
                                   <td title={row.tarea || "-"} style={styles.td}>{row.tarea}</td>
-                                  <td title={row.moneda || "-"} style={styles.td}>{row.moneda || "-"}</td>
                                   {showEstadoOc ? (
                                     <td style={styles.td}>
                                       <span
@@ -3927,27 +3923,10 @@ export default function PagosV1Page() {
                             <span>Solicitado:</span>
                             <span>{tieneOtValida ? formatCurrency(solicitadoOtAmount, detalleOcActiva.moneda) : "-"}</span>
                           </div>
-                          {tieneOtValida && resumenOtMonedas.length === 0 && (montoPlanillaSolesOt > 0 || montoPlanillaDolaresOt > 0) ? (
-                            <div style={styles.otConversionDetail}>
-                              <span style={styles.otConversionTitle}>Detalle de conversión</span>
-                              {montoPlanillaSolesOt > 0 ? (
-                                <div style={styles.ocProgressFooterLine}>
-                                  <span>S/ — pagos nativos en soles</span>
-                                  <span>{formatCurrency(montoPlanillaSolesOt, "SOLES")}</span>
-                                </div>
-                              ) : null}
-                              {montoPlanillaDolaresOt > 0 ? (
-                                <div style={styles.ocProgressFooterLine}>
-                                  <span>US$ × TC {formatMoney(tipoCambioLocal)}</span>
-                                  <span>{formatCurrency(montoPlanillaDolaresOt * tipoCambioLocal, "SOLES")}</span>
-                                </div>
-                              ) : null}
-                            </div>
-                          ) : null}
                           {tieneOtValida && resumenOtMonedas.length > 0 ? (
                             <div style={styles.otConversionDetail}>
                               <span style={styles.otConversionTitle}>Detalle de conversión</span>
-                              {resumenOtMonedas.map((resumen, index) => {
+                              {resumenOtMonedas.length > 1 ? resumenOtMonedas.map((resumen, index) => {
                                 const montoNativo = parseNumericValue(resumen.montoPlanilla ?? 0);
                                 const esDolar = normalizeText(resumen.moneda).includes("dolar") ||
                                   normalizeText(resumen.moneda).includes("usd");
@@ -3966,7 +3945,7 @@ export default function PagosV1Page() {
                                     ) : null}
                                   </div>
                                 );
-                              })}
+                              }) : null}
                               <div
                                 style={{
                                   ...styles.ocProgressFooterLine,
