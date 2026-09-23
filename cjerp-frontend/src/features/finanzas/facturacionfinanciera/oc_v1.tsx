@@ -27,7 +27,11 @@ import { useConstantesPorCampo } from "../../../hooks/useConstantesPorCampo";
 import { listarSolicitanteOptions } from "../../../api/solicitanteService";
 import { listarGestorValidadorOptions } from "../../../api/gestorService";
 import { listarEmpleadosCta } from "../../../api/empleadoService";
-import { getAuthUser } from "../../../utils/authStorage";
+import { getAuthUser, hasFullPageActionAccess } from "../../../utils/authStorage";
+import {
+  seguridadPermisosAccionesService,
+  type PermisoAccionDto,
+} from "../../seguridad/services/seguridadPermisosAccionesService";
 import type { ConstanteOption } from "../../../models/constante";
 import type { EmpleadoCta } from "../../../models/empleadoCta";
 import type { FiltroOperativoValue } from "../../../models/filtroOperativo";
@@ -37,6 +41,10 @@ import { buildPlanillaConsultaEstadosRequest, consultarPlanillaEstados } from ".
 
 const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "ResponsableOc", "MonedaOc", "SubtotalOc", "Cliente", "NombreProyecto", "IdSite", "Site", "FechaOc", "PrecioUniOc", "CantOc", "EstadoOc", "MontoDetalleOc", "CorrelativoPlanilla", "EstadoPlanilla", "SolicitantePlanilla", "MonedaPlanilla", "SubtotalPlanilla", "UltimaFechaDeposito", "SaldoOcVsPlanilla", "PorcentajeConsumidoOc"];
 const OC_GASTOS_MAX_COLUMNAS_VISIBLES = 24;
+const OC_APPROVAL_TAB_ACTION_KEYS = {
+  2: "tab.validacion_2",
+  3: "tab.validacion_3",
+} as const;
 
 function getReporteRowIdOc(row: Record<string, unknown>): string {
   const key = Object.keys(row).find((name) => name.toLowerCase() === "idoc");
@@ -610,6 +618,7 @@ export default function OcV1Page() {
   const [vistaOc, setVistaOc] = useState<VistaOc>("aprobacion");
   const [reporteSubtab, setReporteSubtab] = useState<"listado" | "oc-gastos" | "resumen">("listado");
   const [nivelAprobacion, setNivelAprobacion] = useState<1 | 2 | 3>(1);
+  const [approvalTabPermissions, setApprovalTabPermissions] = useState<Record<string, boolean>>({});
   const [fechaCreacionDesde, setFechaCreacionDesde] = useState(`${today.slice(0, 4)}-01-01`);
   const [fechaCreacionHasta, setFechaCreacionHasta] = useState(today);
   const [filtroValidadorAprobacion, setFiltroValidadorAprobacion] = useState<string[]>([]);
@@ -677,6 +686,55 @@ export default function OcV1Page() {
   const monedaOptions = constantesPorCampo.tipo_moneda ?? [];
   const comprobanteOptions = constantesPorCampo.tipo_comprobante ?? [];
   const tipoPagoOptions = constantesPorCampo.tipo_pago ?? [];
+
+  useEffect(() => {
+    if (hasFullPageActionAccess(authUser)) {
+      setApprovalTabPermissions({
+        [OC_APPROVAL_TAB_ACTION_KEYS[2]]: true,
+        [OC_APPROVAL_TAB_ACTION_KEYS[3]]: true,
+      });
+      return;
+    }
+
+    const employeeIds = [...new Set([authUser?.codEmp, authUser?.idEmpleado]
+      .map((value) => Number(value ?? 0))
+      .filter((value) => Number.isFinite(value) && value > 0)
+      .map((value) => Math.trunc(value)))];
+    let cancelled = false;
+
+    const loadApprovalTabPermissions = async () => {
+      if (employeeIds.length === 0) return;
+
+      try {
+        const permissionSets = await Promise.all(employeeIds.map((idEmpleado) =>
+          seguridadPermisosAccionesService.listar({
+            rutaPagina: "/finanzas/facturacionfinanciera/oc_v1",
+            idEmpleado,
+            tipoElemento: "tab",
+          })
+        ));
+
+        if (cancelled) return;
+
+        const allowed = permissionSets.flat().reduce<Record<string, boolean>>((result, permiso: PermisoAccionDto) => {
+          const key = permiso.claveAccion?.trim().toLowerCase();
+          if (key) result[key] = Boolean(result[key] || (permiso.esActivo && permiso.puedeVer && permiso.puedeEjecutar));
+          return result;
+        }, {});
+        setApprovalTabPermissions(allowed);
+      } catch {
+        if (!cancelled) setApprovalTabPermissions({});
+      }
+    };
+
+    void loadApprovalTabPermissions();
+    return () => { cancelled = true; };
+  }, [authUser?.codEmp, authUser?.idEmpleado, authUser?.idperfil, authUser?.idrol]);
+
+  const canUseApprovalTab = useCallback(
+    (nivel: 1 | 2 | 3) => nivel === 1 || Boolean(approvalTabPermissions[OC_APPROVAL_TAB_ACTION_KEYS[nivel as 2 | 3]]),
+    [approvalTabPermissions]
+  );
 
   useEffect(() => {
     const loadOptions = async () => {
@@ -1041,6 +1099,7 @@ export default function OcV1Page() {
     cabecerasBandejaIds.length > 0 && cabecerasBandejaIds.every((idOc) => selectedOcIds.includes(idOc));
 
   const cambiarNivelAprobacion = useCallback((nivel: 1 | 2 | 3) => {
+    if (!canUseApprovalTab(nivel)) return;
     setNivelAprobacion(nivel);
     setFiltroValidadorAprobacion([]);
     // Al cambiar de nivel no conservar la OC ni la informaci�n del panel
@@ -1054,7 +1113,7 @@ export default function OcV1Page() {
     setRecibosSeleccionados([]);
     setMontoOcRows([]);
     setDetalleOcTab("detalle");
-  }, []);
+  }, [canUseApprovalTab]);
 
   const validadorFiltroLabel = nivelAprobacion === 1
     ? "Validadores"
@@ -1768,10 +1827,10 @@ export default function OcV1Page() {
           <button type="button" style={{ ...ocV1Styles.stageButton, ...(nivelAprobacion === 1 ? ocV1Styles.stageButtonActive : {}) }} onClick={() => cambiarNivelAprobacion(1)}>
             1ra validación <span style={ocV1Styles.stageCount}>{conteoNiveles.nivel1}</span>
           </button>
-          <button type="button" style={{ ...ocV1Styles.stageButton, ...(nivelAprobacion === 2 ? ocV1Styles.stageButtonActive : {}) }} onClick={() => cambiarNivelAprobacion(2)}>
+          <button type="button" disabled={!canUseApprovalTab(2)} style={{ ...ocV1Styles.stageButton, ...(!canUseApprovalTab(2) ? ocV1Styles.stageButtonDisabled : {}), ...(nivelAprobacion === 2 ? ocV1Styles.stageButtonActive : {}) }} onClick={() => cambiarNivelAprobacion(2)}>
             2da validación <span style={ocV1Styles.stageCount}>{conteoNiveles.nivel2}</span>
           </button>
-          <button type="button" style={{ ...ocV1Styles.stageButton, ...(nivelAprobacion === 3 ? ocV1Styles.stageButtonActive : {}) }} onClick={() => cambiarNivelAprobacion(3)}>
+          <button type="button" disabled={!canUseApprovalTab(3)} style={{ ...ocV1Styles.stageButton, ...(!canUseApprovalTab(3) ? ocV1Styles.stageButtonDisabled : {}), ...(nivelAprobacion === 3 ? ocV1Styles.stageButtonActive : {}) }} onClick={() => cambiarNivelAprobacion(3)}>
             3ra validación <span style={ocV1Styles.stageCount}>{conteoNiveles.nivel3}</span>
           </button>
         </div>
@@ -3959,6 +4018,10 @@ const ocV1Styles: Record<string, React.CSSProperties> = {
     background: "#E4F0EC",
     borderColor: "#0E6E5C",
     color: "#0E6E5C",
+  },
+  stageButtonDisabled: {
+    cursor: "not-allowed",
+    opacity: 0.55,
   },
   stageCount: {
     display: "inline-flex",

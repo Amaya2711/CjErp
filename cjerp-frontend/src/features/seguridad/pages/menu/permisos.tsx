@@ -180,6 +180,13 @@ export default function SeguridadPermisosAccionesPage() {
       ];
     }
 
+    if (form.tipoElemento === "tab" && form.rutaPagina.endsWith("/facturacionfinanciera/oc_v1")) {
+      return [
+        { value: "tab.validacion_2", label: "2da validación" },
+        { value: "tab.validacion_3", label: "3ra validación" },
+      ];
+    }
+
     if (form.tipoElemento === "button" && form.rutaPagina.endsWith("/pagos_v1")) {
       return [
         { value: "button.aplicar_filtros", label: "Aplicar filtros" },
