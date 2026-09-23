@@ -43,7 +43,7 @@ import {
 import GastosPage, { type GastoEditorRequest } from "./gastos";
 
 type PagoTabKey = "aprobar" | "reaprobar" | "hormiga" | "observadas" | "resumen";
-type DetailTabKey = "orden" | "resumen" | "historial" | "historial-oc";
+type DetailTabKey = "orden" | "resumen" | "con-pagado" | "historial" | "historial-oc";
 
 type PagoEstado = Exclude<PagoTabKey, "resumen">;
 
@@ -151,6 +151,8 @@ type GroupRow = {
   count: number;
   totalsByCurrency: Record<string, { subtotal: number; igv: number; total: number }>;
 };
+
+type PagoSortColumn = keyof Pick<PagoRow, "correlativo" | "ot" | "idOc" | "fila" | "responsable" | "validador" | "subtotal" | "igv" | "total" | "fecha" | "cliente" | "proyecto" | "siteId" | "corSite" | "site" | "tipoTrabajo" | "tarea" | "moneda">;
 
 type ResumenOtDetalle = {
   ot: string;
@@ -1091,6 +1093,27 @@ function buildHistorialOcRequest(row: PagoRow): PlanillaConsultaEstadosRequest |
     ]);
 }
 
+function buildConPagadoRequest(row: PagoRow, idEmpleado: number): PlanillaConsultaEstadosRequest | null {
+  const idCliente = row.idCliente ?? 0;
+  const idProyecto = row.idProyecto ?? 0;
+  const idSite = row.siteId?.trim();
+  const corSite = row.corSite?.trim();
+  const tipoTrabajo = row.tipoTrabajo?.trim();
+
+  if (idEmpleado <= 0 || idCliente <= 0 || idProyecto <= 0 || !idSite || !corSite || !tipoTrabajo) {
+    return null;
+  }
+
+  return buildPagosV1PlanillaRequest([
+    { nombre: "IdEmpleado", valor: String(Math.trunc(idEmpleado)), tipo: "int" },
+    { nombre: "IdCliente", valor: String(Math.trunc(idCliente)), tipo: "int" },
+    { nombre: "IdProyecto", valor: String(Math.trunc(idProyecto)), tipo: "int" },
+    { nombre: "IdSite", valor: idSite, tipo: "string" },
+    { nombre: "CorSite", valor: corSite, tipo: "int" },
+    { nombre: "TipoTrabajo", valor: tipoTrabajo, tipo: "string" },
+  ]);
+}
+
 function buildResumenOcRequest(row: PagoRow): PlanillaConsultaEstadosRequest | null {
   const idOc = getValidOcValue(row.idOc ?? row.documento);
   const idCliente = row.idCliente ?? 0;
@@ -1315,6 +1338,7 @@ export default function PagosV1Page() {
   const [detailTab, setDetailTab] = useState<DetailTabKey>("resumen");
   const [isDetailPanelOpen, setIsDetailPanelOpen] = useState(false);
   const [filters, setFilters] = useState<FilterState>(() => getDefaultFilterState());
+  const [sortConfig, setSortConfig] = useState<{ column: PagoSortColumn; direction: "asc" | "desc" } | null>(null);
   const [appliedFilters, setAppliedFilters] = useState<FilterState>(() => getDefaultFilterState());
   const [busquedaSolicitante, setBusquedaSolicitante] = useState("");
   const [busquedaResponsable, setBusquedaResponsable] = useState("");
@@ -1337,6 +1361,7 @@ export default function PagosV1Page() {
   const [filtersVisible, setFiltersVisible] = useState(true);
   const [isHistorialPopupOpen, setIsHistorialPopupOpen] = useState(false);
   const [isHistorialOcPopupOpen, setIsHistorialOcPopupOpen] = useState(false);
+  const [isConPagadoPopupOpen, setIsConPagadoPopupOpen] = useState(false);
   const [message, setMessage] = useState<string>("");
   const [gastoEditorRequest, setGastoEditorRequest] = useState<GastoEditorRequest | null>(null);
   const [rechazoModal, setRechazoModal] = useState<RechazoModalState | null>(null);
@@ -1353,7 +1378,9 @@ export default function PagosV1Page() {
   const [historialResponsable, setHistorialResponsable] = useState("");
   const [historialOcRows, setHistorialOcRows] = useState<PagoRow[]>([]);
   const [historialOcLoading, setHistorialOcLoading] = useState(false);
-  const resumenOtCacheRef = useRef<Map<string, ResumenOtDetalle>>(new Map());
+  const [conPagadoRows, setConPagadoRows] = useState<PagoRow[]>([]);
+  const [conPagadoLoading, setConPagadoLoading] = useState(false);
+  const resumenOtCacheRef = useRef<Map<string, ResumenOtDetalle[]>>(new Map());
   const historialOcCacheRef = useRef<Map<string, PagoRow[]>>(new Map());
   const loadTimeoutMs = 15000;
 
@@ -1658,16 +1685,17 @@ export default function PagosV1Page() {
         matchesTextFilter(row.correlativo, appliedFilters.correlativo) &&
         (!appliedFilters.estado || row.estadoCodigo === appliedFilters.estado) &&
         (buscarEnTotal || !fechaDesde || rowDate >= fechaDesde) &&
-        (buscarEnTotal || !fechaHasta || rowDate <= fechaHasta) &&
-        matchesQuickSearch(row, appliedFilters.query)
+        (buscarEnTotal || !fechaHasta || rowDate <= fechaHasta)
       );
     },
     [appliedFilters]
   );
 
   const filteredRows = useMemo(() => {
-    return activeRows.filter((row) => matchesAppliedFilters(row, activeTab === "aprobar"));
-  }, [activeRows, activeTab, matchesAppliedFilters]);
+    return activeRows.filter(
+      (row) => matchesAppliedFilters(row, activeTab === "aprobar") && matchesQuickSearch(row, filters.query)
+    );
+  }, [activeRows, activeTab, filters.query, matchesAppliedFilters]);
 
   const groupedRows = useMemo<GroupRow[]>(() => {
     const map = new Map<string, GroupRow>();
@@ -1701,8 +1729,20 @@ export default function PagosV1Page() {
       group.totalsByCurrency[currencyKey].total += row.total;
     });
 
-    return Array.from(map.values());
-  }, [filteredRows]);
+    return Array.from(map.values()).map((group) => ({
+      ...group,
+      rows: sortConfig
+        ? [...group.rows].sort((left, right) => {
+            const leftValue = left[sortConfig.column] ?? "";
+            const rightValue = right[sortConfig.column] ?? "";
+            const result = typeof leftValue === "number" && typeof rightValue === "number"
+              ? leftValue - rightValue
+              : String(leftValue).localeCompare(String(rightValue), "es", { numeric: true });
+            return sortConfig.direction === "asc" ? result : -result;
+          })
+        : group.rows,
+    }));
+  }, [filteredRows, sortConfig]);
 
   const visibleRowIds = useMemo(() => {
     const ids: number[] = [];
@@ -1940,7 +1980,7 @@ export default function PagosV1Page() {
     let cancelled = false;
 
     const cargarResumenOt = async (signal: AbortSignal) => {
-      if (detailTab !== "resumen") {
+      if (detailTab !== "resumen" && detailTab !== "con-pagado") {
         return;
       }
 
@@ -1969,8 +2009,8 @@ export default function PagosV1Page() {
       const cached = resumenOtCacheRef.current.get(cacheKey);
       if (cached) {
         if (!cancelled && !signal.aborted) {
-          setResumenOtDetalle(cached);
-          setResumenOtMonedas([cached]);
+          setResumenOtDetalle(cached[0] ?? null);
+          setResumenOtMonedas(cached);
           setResumenOtLoading(false);
         }
         return;
@@ -2007,7 +2047,7 @@ export default function PagosV1Page() {
             .values()
         );
         const mapped = mappedRows[0];
-        resumenOtCacheRef.current.set(cacheKey, mapped);
+        resumenOtCacheRef.current.set(cacheKey, mappedRows);
         setResumenOtDetalle(mapped);
         setResumenOtMonedas(mappedRows);
       } catch (error) {
@@ -2099,6 +2139,74 @@ export default function PagosV1Page() {
     filaActiva?.idCliente,
     filaActiva?.idProyecto,
     filaActiva?.siteId,
+    filaActiva?.tipoTrabajo,
+  ]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let cancelled = false;
+
+    const loadConPagado = async (signal: AbortSignal) => {
+      if (detailTab !== "con-pagado") {
+        setConPagadoLoading(false);
+        return;
+      }
+
+      if (!filaActiva) {
+        setConPagadoRows([]);
+        setConPagadoLoading(false);
+        return;
+      }
+
+      const idEmpleado = getRecordNumber(
+        filaActiva.planillaRow ?? {},
+        "IDEMPLEADOSOLICITANTE",
+        "IdEmpleadoSolicitante",
+        "idEmpleadoSolicitante"
+      ) ?? 0;
+      const request = buildConPagadoRequest(filaActiva, Math.trunc(idEmpleado));
+
+      if (!request) {
+        setConPagadoRows([]);
+        setConPagadoLoading(false);
+        return;
+      }
+
+      setConPagadoLoading(true);
+      setConPagadoRows([]);
+
+      try {
+        const response = await consultarPlanillaEstados(request, { timeoutMs: 120000, signal });
+        if (cancelled || signal.aborted) {
+          return;
+        }
+
+        const rows = Array.isArray(response.rows) ? response.rows : [];
+        setConPagadoRows(rows.map((row, index) => mapPlanillaConsultaRowToPagoRow(row, index, filaActiva.estado)));
+      } catch {
+        if (!cancelled && !signal.aborted) {
+          setConPagadoRows([]);
+        }
+      } finally {
+        if (!cancelled && !signal.aborted) {
+          setConPagadoLoading(false);
+        }
+      }
+    };
+
+    void loadConPagado(controller.signal);
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [
+    detailTab,
+    filaActiva?.id,
+    filaActiva?.idCliente,
+    filaActiva?.idProyecto,
+    filaActiva?.siteId,
+    filaActiva?.corSite,
     filaActiva?.tipoTrabajo,
   ]);
 
@@ -2240,6 +2348,45 @@ export default function PagosV1Page() {
       ),
     };
   }, [detalleOcBase, resumenOtDetalle]);
+  const conPagadoResumenPorMoneda = useMemo(() => {
+    const subtotales = new Map<string, { moneda: string; subtotal: number }>();
+
+    for (const row of conPagadoRows) {
+      const moneda = row.moneda || "Sin moneda";
+      const key = normalizeText(moneda);
+      const current = subtotales.get(key) ?? { moneda, subtotal: 0 };
+      current.subtotal += parseNumericValue(row.subtotal);
+      subtotales.set(key, current);
+    }
+
+    return Array.from(subtotales.entries()).map(([key, item]) => {
+      const resumenMoneda = resumenOtMonedas.find(
+        (resumen) => normalizeText(resumen.moneda || "Sin moneda") === key
+      );
+      const totalOt = Math.max(
+        parseNumericValue(
+          resumenMoneda?.totalAcumuladoOt ??
+            (resumenOtMonedas.length <= 1 ? detalleOcActiva?.totalAcumuladoOt : 0) ??
+            0
+        ),
+        0
+      );
+      const pagadoOt = Math.max(
+        parseNumericValue(
+          resumenMoneda?.montoPlanilla ??
+            (resumenOtMonedas.length <= 1 ? detalleOcActiva?.montoPlanilla : 0) ??
+            0
+        ),
+        0
+      );
+      const pagadoPorcentaje = totalOt > 0 ? Math.min((pagadoOt / totalOt) * 100, 100) : 0;
+      const porcentaje = totalOt > 0
+        ? Math.min((item.subtotal / totalOt) * 100, Math.max(100 - pagadoPorcentaje, 0))
+        : 0;
+
+      return { ...item, totalOt, pagadoOt, pagadoPorcentaje, porcentaje };
+    });
+  }, [conPagadoRows, detalleOcActiva?.montoPlanilla, detalleOcActiva?.totalAcumuladoOt, resumenOtMonedas]);
   const resumenOcTitulo = detalleOcActiva?.ot || detalleOcActiva?.correlativo || filaActiva?.ot || filaActiva?.correlativo || "";
   const tipoCambioLocal = Math.max(parseNumericValue(tipoCambio), 0);
   const tieneDesgloseMonedaOt =
@@ -2260,10 +2407,33 @@ export default function PagosV1Page() {
   const disponibleOtLocal = Math.max(totalOtLocal - montoPlanillaPagadoOt, 0);
   const consumoOtPercent = getConsumptionPercent(totalOtLocal, disponibleOtLocal);
   const tieneOtValida = Boolean(getValidOtValue(filaActiva?.ot));
-  const estadoSeleccionadoOt = normalizeText(filaActiva?.estadoNombre || filaActiva?.estadoCodigo || "");
+  const estadoOcSeleccionado = filaActiva?.planillaRow
+    ? getRecordString(
+        filaActiva.planillaRow,
+        "EstadoOC",
+        "EstadoOc",
+        "Estado_Oc",
+        "Estado OC",
+        "EstadoOrdenCompra",
+        "NombreEstado"
+      )
+    : "";
+  const estadosOrigenSeleccionado = filaActiva?.planillaRow
+    ? Object.entries(filaActiva.planillaRow)
+        .filter(([key]) => normalizeText(key).includes("estado"))
+        .map(([, value]) => String(value ?? ""))
+        .join(" ")
+    : "";
+  const estadoSeleccionadoOt = normalizeText(
+    [filaActiva?.estadoNombre, filaActiva?.estadoCodigo, estadoOcSeleccionado, estadosOrigenSeleccionado]
+      .filter(Boolean)
+      .join(" ")
+  );
   const esPagadoORechazadoOt =
     estadoSeleccionadoOt.includes("pagado") ||
     estadoSeleccionadoOt.includes("rechaz") ||
+    /(^|\s)4(\s|$)/.test(estadoSeleccionadoOt) ||
+    /(^|\s)2(\s|$)/.test(estadoSeleccionadoOt) ||
     filaActiva?.estadoCodigo === "4" ||
     filaActiva?.estadoCodigo === "2";
   const solicitadoOtAmount = esPagadoORechazadoOt ? 0 : Math.max(parseNumericValue(filaActiva?.subtotal ?? 0), 0);
@@ -2271,7 +2441,7 @@ export default function PagosV1Page() {
   const pagadoOcAmount = Math.max(montoPlanillaPagadoOc, 0);
   const solicitadoOcAmount = esPagadoORechazadoOt
     ? 0
-    : Math.max(parseNumericValue(detalleOcActiva?.solicitado ?? 0), 0);
+    : Math.max(parseNumericValue(filaActiva?.subtotal ?? 0), 0);
   const totalOcAmount = Math.max(parseNumericValue(consumoOc?.totalOc ?? detalleOcActiva?.subtotalCabOrdenCompra ?? 0), 0);
   // El disponible de la OC no depende de un valor enviado por el store:
   // se obtiene de su total menos lo solicitado y lo ya pagado.
@@ -2503,6 +2673,24 @@ export default function PagosV1Page() {
     setGastoEditorRequest({ correlativo, mode: modo, planillaRow: row.planillaRow });
   };
 
+  useEffect(() => {
+    if (!gastoEditorRequest) {
+      return;
+    }
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      event.preventDefault();
+      setGastoEditorRequest(null);
+    };
+
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [gastoEditorRequest]);
+
   const handleClearFilters = () => {
     const defaultFilters = getDefaultFilterState();
     setFilters(defaultFilters);
@@ -2518,21 +2706,6 @@ export default function PagosV1Page() {
   const handleQuickSearchChange = (value: string) => {
     setFilters((prev) => ({ ...prev, query: value }));
   };
-
-  useEffect(() => {
-    const correlativo = filters.query.trim();
-
-    if (!/^\d{6,}$/.test(correlativo) || correlativo === appliedFilters.query.trim()) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setAppliedFilters((prev) => ({ ...prev, query: correlativo }));
-      setMessage(`Buscando el correlativo ${correlativo} en Planilla...`);
-    }, 350);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [filters.query, appliedFilters.query]);
 
   const resetDetailStateAfterMutation = () => {
     resumenOtCacheRef.current.clear();
@@ -2945,6 +3118,13 @@ export default function PagosV1Page() {
   }
 
   const groupedCountText = groupedRows.length === 1 ? "1 grupo" : `${groupedRows.length} grupos`;
+  const handleSortColumn = (column: PagoSortColumn) => {
+    setSortConfig((current) =>
+      current?.column === column
+        ? { column, direction: current.direction === "asc" ? "desc" : "asc" }
+        : { column, direction: "asc" }
+    );
+  };
 
   return (
     <AppPage title="Órdenes de Pago" fillHeight>
@@ -2983,7 +3163,7 @@ export default function PagosV1Page() {
                          handleApplyFilters();
                        }
                      }}
-                     placeholder="Búsqueda rápida por correlativo, OT, OC, responsable, cliente o proyecto"
+                      placeholder="Buscar por correlativo, OT, OC, cliente, proyecto, Site ID, Site o tipo de trabajo"
                     style={styles.quickSearchInput}
                   />
                 </div>
@@ -3020,24 +3200,6 @@ export default function PagosV1Page() {
                         <option key={codigo} value={codigo}>{codigo} - {nombre}</option>
                       ))}
                     </select>
-                  </div>
-                  <div style={styles.quickDateField}>
-                    <span style={styles.quickDateLabel}>Correlativo (ID)</span>
-                    <input
-                      type="search"
-                      inputMode="numeric"
-                      value={filters.correlativo}
-                      onChange={(event) => setFilters((prev) => ({ ...prev, correlativo: event.target.value.replace(/\D/g, "") }))}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          handleApplyFilters();
-                        }
-                      }}
-                      placeholder="Ej. 130918"
-                      style={{ ...styles.quickDateInput, borderColor: currentTheme.border }}
-                      aria-label="Filtrar por correlativo"
-                    />
                   </div>
                   <details style={styles.multiFilter}>
                     <summary style={{ ...styles.multiFilterSummary, borderColor: currentTheme.border }}>
@@ -3279,7 +3441,10 @@ export default function PagosV1Page() {
 
             <div style={styles.gridScrollable}>
               <table style={styles.table}>
-                <thead>
+                <thead onClick={(event) => {
+                  const column = (event.target as HTMLElement).closest<HTMLElement>("th")?.dataset.sort as PagoSortColumn | undefined;
+                  if (column) handleSortColumn(column);
+                }}>
                   <tr>
                     <th style={{ ...styles.th, ...getStickyCellStyle(0, "#F8FAFC", 6), textAlign: "center" }}>
                       <div style={styles.headerSelectionTools}>
@@ -3310,19 +3475,19 @@ export default function PagosV1Page() {
                         </button>
                       </div>
                     </th>
-                    <th style={{ ...styles.th, ...getStickyCellStyle(1, "#F8FAFC", 6) }}>Correlativo</th>
-                    <th style={{ ...styles.th, ...getStickyCellStyle(2, "#F8FAFC", 6) }}>OT</th>
-                    <th style={{ ...styles.th, ...getStickyCellStyle(3, "#F8FAFC", 6) }}>OC</th>
-                    <th style={{ ...styles.th, ...getStickyCellStyle(4, "#F8FAFC", 6) }}>Fila</th>
-                    <th style={{ ...styles.th, ...getStickyCellStyle(5, "#F8FAFC", 6) }}>Responsable</th>
-                    <th style={{ ...styles.th, ...getStickyCellStyle(6, "#F8FAFC", 6) }}>Validador</th>
+                    <th data-sort="correlativo" style={{ ...styles.th, ...getStickyCellStyle(1, "#F8FAFC", 6), cursor: "pointer" }}>Correlativo</th>
+                    <th data-sort="ot" style={{ ...styles.th, ...getStickyCellStyle(2, "#F8FAFC", 6), cursor: "pointer" }}>OT</th>
+                    <th data-sort="idOc" style={{ ...styles.th, ...getStickyCellStyle(3, "#F8FAFC", 6), cursor: "pointer" }}>OC</th>
+                    <th data-sort="fila" style={{ ...styles.th, ...getStickyCellStyle(4, "#F8FAFC", 6), cursor: "pointer" }}>Fila</th>
+                    <th data-sort="responsable" style={{ ...styles.th, ...getStickyCellStyle(5, "#F8FAFC", 6), cursor: "pointer" }}>Responsable</th>
+                    <th data-sort="validador" style={{ ...styles.th, ...getStickyCellStyle(6, "#F8FAFC", 6), cursor: "pointer" }}>Validador</th>
                     <th style={{ ...styles.th, ...getStickyCellStyle(7, "#F8FAFC", 6), textAlign: "center" }}>
                       Acciones
                     </th>
-                    <th style={{ ...styles.th, ...getStickyCellStyle(8, "#F8FAFC", 6) }}>Subtotal</th>
-                    <th style={{ ...styles.th, width: 90 }}>IGV</th>
-                    <th style={{ ...styles.th, width: 100 }}>Total</th>
-                    <th style={{ ...styles.th, width: 80 }}>Fecha</th>
+                    <th data-sort="subtotal" style={{ ...styles.th, ...getStickyCellStyle(8, "#F8FAFC", 6), cursor: "pointer" }}>Subtotal</th>
+                    <th data-sort="igv" style={{ ...styles.th, width: 90, cursor: "pointer" }}>IGV</th>
+                    <th data-sort="total" style={{ ...styles.th, width: 100, cursor: "pointer" }}>Total</th>
+                    <th data-sort="fecha" style={{ ...styles.th, width: 80, cursor: "pointer" }}>Fecha</th>
                     <th style={{ ...styles.th, width: 60 }}>Cliente</th>
                     <th style={{ ...styles.th, width: 20 }}>Proyecto</th>
                     <th style={{ ...styles.th, width: 60 }}>Site ID</th>
@@ -3614,6 +3779,7 @@ export default function PagosV1Page() {
                     { key: 'resumen' as DetailTabKey, label: 'Resumen' },
                     { key: 'historial' as DetailTabKey, label: 'Historial OT' },
                     { key: 'historial-oc' as DetailTabKey, label: 'Historial OC' },
+                    { key: 'con-pagado' as DetailTabKey, label: 'Con Pagado' },
                   ].map((tab) => {
                     const isActive = detailTab === tab.key;
                     return (
@@ -3809,6 +3975,128 @@ export default function PagosV1Page() {
                     </div>
 
                   </>
+                ) : null}
+
+                {detailTab === 'con-pagado' ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={styles.ocTopGrid}>
+                      <InfoField label="Cliente" value={filaActiva.cliente} />
+                      <InfoField label="Proyecto" value={filaActiva.proyecto} />
+                      <InfoField label="Site" value={filaActiva.site} />
+                      <InfoField label="Tipo trabajo" value={filaActiva.tipoTrabajo} />
+                    </div>
+                    <div style={styles.noteCard}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                        <div style={styles.noteTitle}>Con Pagado</div>
+                        <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 12, fontWeight: 800, color: "#475569" }}>
+                            Registros: {conPagadoRows.length}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setIsConPagadoPopupOpen(true)}
+                            style={{ ...styles.compactActionButton, borderColor: currentTheme.border, color: currentTheme.accent }}
+                            title="Ampliar Con Pagado"
+                          >
+                            <Maximize2 size={16} />
+                            Ampliar
+                          </button>
+                        </div>
+                      </div>
+                      <p style={styles.noteText}>
+                        Registros del cliente seleccionado para el proyecto, site y tipo de trabajo de la orden.
+                      </p>
+                      {conPagadoResumenPorMoneda.length > 0 ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 10,
+                            marginBottom: 14,
+                            padding: 12,
+                            border: "1px solid #DBEAFE",
+                            borderRadius: 10,
+                            background: "#F8FBFF",
+                          }}
+                        >
+                          <div style={{ fontSize: 12, fontWeight: 900, color: "#1E3A8A" }}>
+                            Subtotal acumulado vs. Total OT
+                          </div>
+                          {conPagadoResumenPorMoneda.map((item) => (
+                            <div key={item.moneda} style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 11, fontWeight: 800, color: "#334155" }}>
+                                <span>{item.moneda}</span>
+                                <span>Pagado: {formatPercent(item.pagadoPorcentaje)} · Solicitante: {formatPercent(item.porcentaje)}</span>
+                              </div>
+                              <div style={styles.progressTrack}>
+                                <div style={styles.ocProgressSegments}>
+                                  <div
+                                    style={{ ...styles.ocProgressSegment, width: `${item.pagadoPorcentaje}%`, background: "#2563EB" }}
+                                    title={`Pagado OT: ${formatCurrency(item.pagadoOt, item.moneda)}`}
+                                  />
+                                  <div
+                                    style={{
+                                      ...styles.ocProgressSegment,
+                                      width: `${item.porcentaje}%`,
+                                      background: "#F59E0B",
+                                    }}
+                                    title={`Subtotal solicitante: ${formatCurrency(item.subtotal, item.moneda)}`}
+                                  />
+                                </div>
+                              </div>
+                              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", fontSize: 11, color: "#475569" }}>
+                                <span>Subtotal solicitante: {formatCurrency(item.subtotal, item.moneda)}</span>
+                                <span>Pagado OT: {formatCurrency(item.pagadoOt, item.moneda)}</span>
+                                <span>Total OT: {item.totalOt > 0 ? formatCurrency(item.totalOt, item.moneda) : "-"}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                      {conPagadoLoading ? (
+                        <p style={styles.noteText}>Cargando registros...</p>
+                      ) : (
+                        <div style={styles.gridScrollable}>
+                          <table style={{ ...styles.table, minWidth: 980, width: "max-content" }}>
+                            <thead>
+                              <tr>
+                                <th style={styles.th}>Correlativo</th>
+                                <th style={styles.th}>Cliente</th>
+                                <th style={styles.th}>Proyecto</th>
+                                <th style={styles.th}>Site ID</th>
+                                <th style={styles.th}>Site</th>
+                                <th style={styles.th}>Tipo trabajo</th>
+                                <th style={styles.th}>Subtotal</th>
+                                <th style={styles.th}>Moneda</th>
+                                <th style={styles.th}>Solicitante</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {conPagadoRows.length === 0 ? (
+                                <tr>
+                                  <td colSpan={9} style={styles.emptyCell}>No hay registros para los criterios seleccionados.</td>
+                                </tr>
+                              ) : (
+                                conPagadoRows.map((row, index) => (
+                                  <tr key={`con-pagado-${row.id}-${index}`}>
+                                    <td style={styles.td}>{row.correlativo || "-"}</td>
+                                    <td style={styles.td}>{row.cliente || "-"}</td>
+                                    <td style={styles.td}>{row.proyecto || "-"}</td>
+                                    <td style={styles.td}>{row.siteId || "-"}</td>
+                                    <td style={styles.td}>{row.site || "-"}</td>
+                                    <td style={styles.td}>{row.tipoTrabajo || "-"}</td>
+                                    <td style={{ ...styles.td, fontWeight: 800 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
+                                    <td style={styles.td}>{row.moneda || "-"}</td>
+                                    <td style={styles.td}>{row.solicitante || "-"}</td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 ) : null}
 
                 {detailTab === 'historial' ? (
@@ -4080,6 +4368,95 @@ export default function PagosV1Page() {
           </aside>
           ) : null}
         </section>
+        {detailTab === "con-pagado" && isConPagadoPopupOpen ? (
+          <div
+            style={styles.popupOverlay}
+            onClick={() => setIsConPagadoPopupOpen(false)}
+            role="presentation"
+          >
+            <div
+              style={styles.popupCard}
+              onClick={(event) => event.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Con Pagado"
+            >
+              <div style={styles.popupHeader}>
+                <div>
+                  <div style={{ ...styles.sectionKicker, color: currentTheme.accent }}>Con Pagado</div>
+                  <h3 style={styles.popupTitle}>Orden de Pago N° {filaActiva?.correlativo || "-"}</h3>
+                  <p style={styles.popupSubtitle}>Subtotal del solicitante y pagos acumulados frente al Total OT.</p>
+                </div>
+                <div style={styles.popupHeaderActions}>
+                  <button
+                    type="button"
+                    onClick={() => setIsConPagadoPopupOpen(false)}
+                    style={{ ...styles.slimActionButton, borderColor: currentTheme.border, color: "#EF4444" }}
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              </div>
+              <div style={styles.popupBody}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+                  {conPagadoResumenPorMoneda.map((item) => (
+                    <div key={`popup-bar-${item.moneda}`} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontWeight: 900, fontSize: 13 }}>
+                        <span>{item.moneda}</span>
+                        <span>Pagado: {formatPercent(item.pagadoPorcentaje)} · Solicitante: {formatPercent(item.porcentaje)}</span>
+                      </div>
+                      <div style={styles.progressTrack}>
+                        <div style={styles.ocProgressSegments}>
+                          <div style={{ ...styles.ocProgressSegment, width: `${item.pagadoPorcentaje}%`, background: "#2563EB" }} />
+                          <div style={{ ...styles.ocProgressSegment, width: `${item.porcentaje}%`, background: "#F59E0B" }} />
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", fontSize: 12, color: "#475569" }}>
+                        <span>Subtotal solicitante: {formatCurrency(item.subtotal, item.moneda)}</span>
+                        <span>Pagado OT: {formatCurrency(item.pagadoOt, item.moneda)}</span>
+                        <span>Total OT: {item.totalOt > 0 ? formatCurrency(item.totalOt, item.moneda) : "-"}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={styles.gridScrollable}>
+                  <table style={{ ...styles.table, minWidth: 1100, width: "max-content" }}>
+                    <thead>
+                      <tr>
+                        <th style={styles.th}>Correlativo</th>
+                        <th style={styles.th}>Cliente</th>
+                        <th style={styles.th}>Proyecto</th>
+                        <th style={styles.th}>Site ID</th>
+                        <th style={styles.th}>Site</th>
+                        <th style={styles.th}>Tipo trabajo</th>
+                        <th style={styles.th}>Subtotal</th>
+                        <th style={styles.th}>Moneda</th>
+                        <th style={styles.th}>Solicitante</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {conPagadoRows.length === 0 ? (
+                        <tr><td colSpan={9} style={styles.emptyCell}>No hay registros para los criterios seleccionados.</td></tr>
+                      ) : conPagadoRows.map((row, index) => (
+                        <tr key={`popup-con-pagado-${row.id}-${index}`}>
+                          <td style={styles.td}>{row.correlativo || "-"}</td>
+                          <td style={styles.td}>{row.cliente || "-"}</td>
+                          <td style={styles.td}>{row.proyecto || "-"}</td>
+                          <td style={styles.td}>{row.siteId || "-"}</td>
+                          <td style={styles.td}>{row.site || "-"}</td>
+                          <td style={styles.td}>{row.tipoTrabajo || "-"}</td>
+                          <td style={{ ...styles.td, fontWeight: 800 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
+                          <td style={styles.td}>{row.moneda || "-"}</td>
+                          <td style={styles.td}>{row.solicitante || "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
         {detailTab === "historial" && isHistorialPopupOpen ? (
           <div
             style={styles.popupOverlay}
@@ -4779,7 +5156,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 10,
     width: "auto",
     maxWidth: 360,
-    minWidth: 0,
+    minWidth: 300,
     flex: "1 1 360px",
     border: "1px solid",
     borderRadius: 12,
@@ -4791,7 +5168,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "flex-end",
     gap: 8,
-    flexWrap: "nowrap",
+    flexWrap: "wrap",
     width: "100%",
     minWidth: 0,
   },

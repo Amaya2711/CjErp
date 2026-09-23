@@ -3939,7 +3939,7 @@ export default function GastosPage({
                     {modo === "nuevo"
                       ? "Nuevo gasto"
                       : modo === "ver"
-                        ? "Visualizar gasto"
+                        ? `Visualizar gasto${form.id || editorRequest?.correlativo ? ` · ID: ${form.id || editorRequest?.correlativo}` : ""}`
                         : `Editar gasto${form.id ? ` · ID: ${form.id}` : ""}`}
                   </h2>
                   <p style={{ marginTop: 8, marginBottom: 0, color: "#6B7280", fontSize: 13 }}>
