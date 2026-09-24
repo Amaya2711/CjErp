@@ -125,7 +125,8 @@ BEGIN
             ISNULL(imp.Correlativo, 0) AS CorreSite,
             LTRIM(RTRIM(ISNULL(imp.TipoTrabajo, ''))) AS TipoTrabajo,
             imp.IdMoneda,
-            CAST(SUM(ISNULL(imp.Monto_Bck, 0)) AS DECIMAL(18, 2)) AS TotalMontoBckPorMoneda
+            CAST(SUM(ISNULL(imp.Monto_Bck, 0)) AS DECIMAL(18, 2)) AS TotalMontoBckPorMoneda,
+            CAST(SUM(ISNULL(imp.Monto_Visible, 0)) AS DECIMAL(18, 2)) AS TotalMontoVisiblePorMoneda
         FROM dbo.Importar imp
         WHERE imp.IdEstado = 1
           AND UPPER(LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), imp.OT), '')))) NOT IN ('', '0', 'NULL')
@@ -152,6 +153,7 @@ BEGIN
         k.ValorIni AS Moneda,
         CAST(ISNULL(pot.TotalSubtotalPorMoneda, 0) AS DECIMAL(18, 2)) AS TotalSubtotalPorMoneda,
         CAST(ISNULL(iot.TotalMontoBckPorMoneda, 0) AS DECIMAL(18, 2)) AS TotalMontoBckPorMoneda,
+        CAST(ISNULL(iot.TotalMontoVisiblePorMoneda, 0) AS DECIMAL(18, 2)) AS TotalMontoVisiblePorMoneda,
         CASE
             WHEN a.TipoMoneda = 1 THEN a.Subtotal
             ELSE a.Subtotal * 3.8

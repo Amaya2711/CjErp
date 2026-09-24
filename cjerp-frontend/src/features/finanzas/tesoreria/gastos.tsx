@@ -47,6 +47,7 @@ type GastoDto = {
   subtotal?: number;
   total?: number;
   igv?: number;
+  totalMontoVisiblePorMoneda?: number;
   idRendicion?: number;
   detalle: string;
   comentario: string;
@@ -245,6 +246,8 @@ type GastosHeaderMultiFilterKey =
   | "validador";
 
 type GastosHeaderSearchableFilterKey = "cliente" | "proyecto" | "site" | "tipoTrabajo" | "solicitante" | "responsable" | "validador";
+type HistorialSitioView = "listado" | "resumen";
+type HistorialSitioSortKey = "correlativo" | "fecha" | "subtotal" | "moneda" | "solicitante";
 
 const GASTOS_HEADER_FILTER_SEARCH_INITIAL: Record<GastosHeaderSearchableFilterKey, string> = {
   cliente: "",
@@ -1042,14 +1045,18 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
       "FechaDeposito",
       "fechaDeposito"
     ),
-    fecIngreso: getRecordString(
+    fecIngreso: normalizeFecIngresoFromStore(getRecordString(
       row,
       "FecIngreso",
       "fecIngreso",
       "fecingreso",
       "FechaIngreso",
-      "fechaIngreso"
-    ),
+      "fechaIngreso",
+      "Fecha",
+      "fecha",
+      "FechaCreacion",
+      "fechaCreacion"
+    )),
     fechaEmision: getRecordString(
       row,
       "FecEmision",
@@ -1103,6 +1110,7 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     nroOperacion: getRecordString(row, "NroOperacion", "nroOperacion"),
     banco: getRecordString(row, "Banco", "banco"),
     tipoCambio: getRecordNumber(row, "TipoCambio", "tipoCambio") ?? undefined,
+    totalMontoVisiblePorMoneda: getRecordNumber(row, "TotalMontoVisiblePorMoneda", "totalMontoVisiblePorMoneda") ?? undefined,
     idUsuarioFactura: getRecordNumber(row, "IdUsuarioFactura", "idUsuarioFactura"),
     estado: getRecordNumber(row, "Estado", "estado") ?? 0,
     estadoLabel: getRecordString(
@@ -1265,8 +1273,18 @@ export default function GastosPage({
   const [valoresGasto, setValoresGasto] = useState<ValoresGastoResponse>(VALORES_GASTO_INICIALES);
   const [valoresGastoLoading, setValoresGastoLoading] = useState(false);
   const valoresGastoRequestRef = useRef(0);
-  const [showPorcentajePopup, setShowPorcentajePopup] = useState(false);
-  const porcentajeRef = useRef<HTMLSpanElement | null>(null);
+  const [gastoEditorTab, setGastoEditorTab] = useState<"principal" | "detalle-sitio">("principal");
+  const [historialSitioRows, setHistorialSitioRows] = useState<GastoDto[]>([]);
+  const [historialSitioLoading, setHistorialSitioLoading] = useState(false);
+  const [historialSitioExpanded, setHistorialSitioExpanded] = useState(false);
+  const [historialSitioView, setHistorialSitioView] = useState<HistorialSitioView>("listado");
+  const [historialSitioSolicitante, setHistorialSitioSolicitante] = useState("");
+  const [historialSitioDetalleActivo, setHistorialSitioDetalleActivo] = useState<string | null>(null);
+  const [historialSitioSort, setHistorialSitioSort] = useState<{ key: HistorialSitioSortKey; direction: "asc" | "desc" }>({ key: "fecha", direction: "desc" });
+  const historialSitioLastKeyRef = useRef("");
+  const cargaInicialGastosListaRef = useRef(false);
+  const constantesInicialesIniciadasRef = useRef(false);
+  const cargaInicialGastosSolicitadaRef = useRef(false);
   const sidePanelRef = useRef<HTMLDivElement | null>(null);
   const cabeceraFiltroMenuRef = useRef<HTMLDivElement | null>(null);
   const ultimoSuministroVigenteLookupKeyRef = useRef("");
@@ -1457,6 +1475,13 @@ export default function GastosPage({
         return [];
       }
 
+      // useCrudForm ejecuta su carga al montar. Se difiere hasta que las
+      // constantes iniciales estén listas para no consultar con filtros aún
+      // incompletos y terminar mostrando un grid vacío.
+      if (!cargaInicialGastosListaRef.current) {
+        return [];
+      }
+
       const filtrosConsulta = filtrosCabeceraAplicadosRef.current;
       const estadosSeleccionados = Array.from(
         new Set(
@@ -1556,36 +1581,190 @@ export default function GastosPage({
     load: cargarGastos,
   } = useCrudForm<GastoForm, GastoForm>(gastosApi, formularioInicial);
 
-  // Determinar color del porcentaje
-  const porcentajeValue = Number(valoresGasto?.porcentaje ?? 0);
-  let porcentajeColor = "#0F172A";
-  if (porcentajeValue <= 0 && Number(valoresGasto?.pagado ?? 0) > 0) {
-    porcentajeColor = "#DC2626"; // rojo si porcentaje <= 0 y pagado > 0
-  } else if (porcentajeValue > 95) {
-    porcentajeColor = "#DC2626"; // rojo
-  } else if (porcentajeValue > 75) {
-    porcentajeColor = "#EA580C"; // naranja
-  } else if (porcentajeValue > 65) {
-    porcentajeColor = "#FACC15"; // amarillo
-  }
+  useEffect(() => {
+    if (editorOnly) {
+      return;
+    }
 
-  // Eliminado: Mensaje de utilidad tipo popup
-  const porcentajeValores = useMemo(
-    () => [
-      { label: "Monto OC", value: formatDecimalValue(valoresGasto.aprobado) },
-      { label: "Pagado", value: formatDecimalValue(valoresGasto.pagado) },
-      { label: "Saldo", value: formatDecimalValue(valoresGasto.saldo2) }, // antes Pendiente
-      { label: "Solicitado", value: formatDecimalValue(valoresGasto.adelantado) },
-      { label: "Pendiente", value: formatDecimalValue(valoresGasto.saldo) }, // antes Saldo
-    ],
-    [valoresGasto]
-  );
+    if (constantesLoading) {
+      constantesInicialesIniciadasRef.current = true;
+      return;
+    }
+
+    if (!constantesInicialesIniciadasRef.current || cargaInicialGastosSolicitadaRef.current) {
+      return;
+    }
+
+    cargaInicialGastosSolicitadaRef.current = true;
+    cargaInicialGastosListaRef.current = true;
+    void cargarGastos();
+  }, [constantesLoading, editorOnly]);
+
+  const historialSitioFiltro = form.filtroOperativo.filtro;
+  const historialSitioIdCliente = toNumberOrZero(historialSitioFiltro?.idCliente);
+  const historialSitioIdProyecto = toNumberOrZero(historialSitioFiltro?.idProyecto);
+  const historialSitioIdSite = String(historialSitioFiltro?.idSite ?? "").trim();
+  const historialSitioTipoTrabajo = String(form.filtroOperativo.tipoTrabajo?.tipoTrabajo ?? "").trim();
+  const historialSitioOt = String(form.filtroOperativo.ot?.ot ?? "").trim();
+  const historialSitioKey = [
+    historialSitioIdCliente,
+    historialSitioIdProyecto,
+    historialSitioIdSite,
+    historialSitioTipoTrabajo,
+    historialSitioOt,
+  ].join("|");
+
+  const historialSitioRequest = useMemo(() => {
+    const idCliente = historialSitioIdCliente;
+    const idProyecto = historialSitioIdProyecto;
+    const idSite = historialSitioIdSite;
+    const tipoTrabajo = historialSitioTipoTrabajo;
+    const ot = historialSitioOt;
+
+    if (!idCliente || !idProyecto || !idSite || !tipoTrabajo || !ot) {
+      return null;
+    }
+
+    return buildPlanillaConsultaEstadosRequest([
+      { nombre: "Estados", valor: "4", tipo: "string" },
+      { nombre: "OT", valor: ot, tipo: "string" },
+      { nombre: "IdCliente", valor: String(idCliente), tipo: "int" },
+      { nombre: "IdProyecto", valor: String(idProyecto), tipo: "int" },
+      { nombre: "IdSite", valor: idSite, tipo: "string" },
+      { nombre: "TipoTrabajo", valor: tipoTrabajo, tipo: "string" },
+    ]);
+  }, [historialSitioIdCliente, historialSitioIdProyecto, historialSitioIdSite, historialSitioOt, historialSitioTipoTrabajo]);
+
+  useEffect(() => {
+    if (!panelAbierto || gastoEditorTab !== "principal" || !historialSitioRequest) {
+      if (historialSitioLastKeyRef.current) {
+        historialSitioLastKeyRef.current = "";
+        setHistorialSitioRows([]);
+        setHistorialSitioLoading(false);
+      }
+      return;
+    }
+
+    if (historialSitioLastKeyRef.current === historialSitioKey) {
+      return;
+    }
+
+    const controller = new AbortController();
+    historialSitioLastKeyRef.current = historialSitioKey;
+    setHistorialSitioLoading(true);
+    setHistorialSitioSolicitante("");
+    void consultarPlanillaEstados(historialSitioRequest, { timeoutMs: 120000, signal: controller.signal })
+      .then((response) => {
+        if (!controller.signal.aborted) {
+          const rows = extraerArray<Record<string, unknown>>(response.rows)
+            .map((row, index) => mapPlanillaConsultaRowToGastoDto(row, index));
+          setHistorialSitioRows(rows);
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setHistorialSitioRows([]);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setHistorialSitioLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [gastoEditorTab, historialSitioKey, historialSitioRequest, panelAbierto]);
+
+  const historialSitioRowsFiltrados = useMemo(() => {
+    const solicitante = historialSitioSolicitante.trim().toLocaleLowerCase();
+    return solicitante
+      ? historialSitioRows.filter((row) => (row.solicitanteLabel || row.solicitante || "").toLocaleLowerCase().includes(solicitante))
+      : historialSitioRows;
+  }, [historialSitioRows, historialSitioSolicitante]);
+
+  const historialSitioRowsOrdenados = useMemo(() => {
+    const factor = historialSitioSort.direction === "asc" ? 1 : -1;
+    return [...historialSitioRowsFiltrados].sort((left, right) => {
+      const leftValue = historialSitioSort.key === "correlativo"
+        ? Number(left.id ?? 0)
+        : historialSitioSort.key === "fecha"
+          ? normalizeFecIngresoFromStore(left.fecIngreso)
+          : historialSitioSort.key === "subtotal"
+            ? Number(left.subtotal ?? left.monto ?? 0)
+            : historialSitioSort.key === "moneda"
+              ? (left.monedaLabel || left.moneda || "")
+              : (left.solicitanteLabel || left.solicitante || "");
+      const rightValue = historialSitioSort.key === "correlativo"
+        ? Number(right.id ?? 0)
+        : historialSitioSort.key === "fecha"
+          ? normalizeFecIngresoFromStore(right.fecIngreso)
+          : historialSitioSort.key === "subtotal"
+            ? Number(right.subtotal ?? right.monto ?? 0)
+            : historialSitioSort.key === "moneda"
+              ? (right.monedaLabel || right.moneda || "")
+              : (right.solicitanteLabel || right.solicitante || "");
+
+      return typeof leftValue === "number" && typeof rightValue === "number"
+        ? factor * (leftValue - rightValue)
+        : factor * String(leftValue).localeCompare(String(rightValue), "es", { numeric: true, sensitivity: "base" });
+    });
+  }, [historialSitioRowsFiltrados, historialSitioSort]);
+
+  const ordenarHistorialSitio = (key: HistorialSitioSortKey) => {
+    setHistorialSitioSort((current) => ({
+      key,
+      direction: current.key === key && current.direction === "asc" ? "desc" : "asc",
+    }));
+  };
+
+  const historialSitioTotalesPorMoneda = useMemo(() => {
+    const totals = new Map<string, number>();
+    historialSitioRowsFiltrados.forEach((row) => {
+      const moneda = row.monedaLabel || row.moneda || "SIN MONEDA";
+      totals.set(moneda, (totals.get(moneda) ?? 0) + Number(row.subtotal ?? row.monto ?? 0));
+    });
+    return Array.from(totals, ([moneda, total]) => ({ moneda, total }));
+  }, [historialSitioRowsFiltrados]);
+
+  const historialSitioKpisPorMoneda = useMemo(() => {
+    const visibles = new Map<string, number>();
+    historialSitioRowsFiltrados.forEach((row) => {
+      const moneda = row.monedaLabel || row.moneda || "SIN MONEDA";
+      // El store repite el total por moneda en cada registro; se conserva el
+      // mayor valor para no duplicar el KPI al sumar las filas del listado.
+      visibles.set(moneda, Math.max(visibles.get(moneda) ?? 0, Number(row.totalMontoVisiblePorMoneda ?? 0)));
+    });
+
+    return historialSitioTotalesPorMoneda.map(({ moneda, total }) => {
+      const totalVisible = visibles.get(moneda) ?? 0;
+      const porcentaje = totalVisible > 0 ? total / totalVisible * 100 : 0;
+      return { moneda, total, totalVisible, porcentaje, porcentajeBarra: Math.max(0, Math.min(porcentaje, 100)) };
+    });
+  }, [historialSitioRowsFiltrados, historialSitioTotalesPorMoneda]);
+
+  const historialSitioResumenSolicitante = useMemo(() => {
+    const byCurrency = new Map<string, Map<string, number>>();
+    historialSitioRowsFiltrados.forEach((row) => {
+      const moneda = row.monedaLabel || row.moneda || "SIN MONEDA";
+      const solicitante = row.solicitanteLabel || row.solicitante || "SIN SOLICITANTE";
+      const items = byCurrency.get(moneda) ?? new Map<string, number>();
+      items.set(solicitante, (items.get(solicitante) ?? 0) + Number(row.subtotal ?? row.monto ?? 0));
+      byCurrency.set(moneda, items);
+    });
+    return Array.from(byCurrency, ([moneda, items]) => ({
+      moneda,
+      items: Array.from(items, ([solicitante, total]) => ({ solicitante, total }))
+        .sort((left, right) => right.total - left.total || left.solicitante.localeCompare(right.solicitante, "es")),
+    }));
+  }, [historialSitioRowsFiltrados]);
 
   // Detectar si la moneda seleccionada es SOLES
   const monedaSeleccionada = findConstanteOption(monedaOptions, form.moneda);
   const esSoles = monedaSeleccionada && (monedaSeleccionada.label?.toUpperCase() === "SOLES" || monedaSeleccionada.value === "SOLES" || monedaSeleccionada.codigo === "SOLES");
 
   useEffect(() => {
+    // Responsables, cuentas, solicitantes y tareas solo se requieren dentro
+    // del editor. Diferir esta consulta acelera la carga inicial del grid.
+    if (!panelAbierto) {
+      return;
+    }
+
     let activo = true;
 
     setEmpleadosLoading(true);
@@ -1643,7 +1822,7 @@ export default function GastosPage({
     return () => {
       activo = false;
     };
-  }, [idCargo, idEmpleado]);
+  }, [idCargo, idEmpleado, panelAbierto]);
 
   // Algunos registros históricos llegan desde Planilla con el nombre del
   // usuario. Al estar disponible el catálogo, se conserva la etiqueta y se
@@ -2055,6 +2234,11 @@ export default function GastosPage({
 
   const abrirNuevo = () => {
     setModo("nuevo");
+    setGastoEditorTab("principal");
+    setHistorialSitioExpanded(false);
+    setHistorialSitioView("listado");
+    setHistorialSitioSolicitante("");
+    setHistorialSitioDetalleActivo(null);
     setConstantesRefreshKey((current) => current + 1);
     valoresGastoRequestRef.current += 1;
     setValoresGastoLoading(false);
@@ -2091,6 +2275,11 @@ export default function GastosPage({
   };
 
   const abrirEditar = (gasto: GastoForm) => {
+    setGastoEditorTab("detalle-sitio");
+    setHistorialSitioExpanded(false);
+    setHistorialSitioView("listado");
+    setHistorialSitioSolicitante("");
+    setHistorialSitioDetalleActivo(null);
     setConstantesRefreshKey((current) => current + 1);
     const tareaCorrelativo = gasto.filtroOperativo.tarea?.correlativo;
     const tareaNombre = getTareaLabelOrFallback(
@@ -2221,6 +2410,10 @@ export default function GastosPage({
 
   const cerrarPanel = () => {
     setPanelAbierto(false);
+    setGastoEditorTab("principal");
+    setHistorialSitioExpanded(false);
+    setHistorialSitioSolicitante("");
+    setHistorialSitioDetalleActivo(null);
     valoresGastoRequestRef.current += 1;
     setValoresGastoLoading(false);
     setValoresGasto(VALORES_GASTO_INICIALES);
@@ -2249,6 +2442,40 @@ export default function GastosPage({
       onEditorClose?.();
     }
   };
+
+  useEffect(() => {
+    if (!panelAbierto) {
+      return;
+    }
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+    event.preventDefault();
+      if (historialSitioDetalleActivo !== null) {
+        setHistorialSitioDetalleActivo(null);
+        return;
+      }
+      if (historialSitioExpanded) {
+        setHistorialSitioExpanded(false);
+        return;
+      }
+      if (showFacturaViewer) {
+        setShowFacturaViewer(false);
+        return;
+      }
+      if (showFacturaSourceMenu) {
+        setShowFacturaSourceMenu(false);
+        return;
+      }
+      cerrarPanel();
+    };
+
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [historialSitioDetalleActivo, historialSitioExpanded, panelAbierto, showFacturaSourceMenu, showFacturaViewer]);
 
   const validar = () => {
     const nuevosErrores: Record<string, string> = {};
@@ -2515,6 +2742,9 @@ export default function GastosPage({
     if (!tieneFiltrosBusqueda) {
       return;
     }
+
+    cargaInicialGastosListaRef.current = true;
+    cargaInicialGastosSolicitadaRef.current = true;
 
     const snapshot: GastosHeaderFilters = {
       ...filtrosCabecera,
@@ -3173,7 +3403,7 @@ export default function GastosPage({
             label: "Exportar",
             title: "Exportar",
             iconOnly: true,
-            icon: "â¤“",
+            icon: "⇩",
             onClick: async () => {
               // Exportar a Excel los registros filtrados y columnas visibles
               const XLSX = await import("xlsx");
@@ -3444,7 +3674,7 @@ export default function GastosPage({
                 >
                   {summary}
                 </span>
-                <span style={{ color: "#6B7280", fontSize: 10 }}>{isOpen ? "â–²" : "â–¼"}</span>
+                <span style={{ color: "#6B7280", fontSize: 10 }}>{isOpen ? "▲" : "▼"}</span>
               </button>
 
               {isOpen && (
@@ -3883,7 +4113,7 @@ export default function GastosPage({
         >
           <div
             style={{
-              width: 900,
+              width: "min(1280px, 94vw)",
               maxWidth: "100%",
               height: "100%",
               background: "#FFFFFF",
@@ -3921,7 +4151,7 @@ export default function GastosPage({
         >
           <div
             style={{
-              width: 900,
+              width: "min(1280px, 94vw)",
               maxWidth: "100%",
               height: "100%",
               background: "#FFFFFF",
@@ -3950,45 +4180,6 @@ export default function GastosPage({
                   </p>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
-                  <span style={{ fontSize: 18, fontWeight: 700, color: "#374151" }}>Porcentaje:</span>
-                  <span
-                    ref={porcentajeRef}
-                    style={{ fontSize: 18, fontWeight: 700, color: porcentajeColor, minWidth: 40, cursor: "pointer", position: "relative" }}
-                    onClick={() => setShowPorcentajePopup((v) => !v)}
-                  >
-                    {valoresGastoLoading
-                      ? "Cargando..."
-                      : `${formatDecimalValue(valoresGasto.porcentaje)} %`}
-                    {/* Eliminado: Popup de utilidad */}
-                    {showPorcentajePopup && (
-                      <div
-                        style={{
-                          position: "absolute",
-                          top: 28,
-                          right: 0,
-                          background: "#fff",
-                          border: "1px solid #E5E7EB",
-                          borderRadius: 8,
-                          boxShadow: "0 4px 16px rgba(0,0,0,0.10)",
-                          padding: "20px 28px",
-                          zIndex: 4000,
-                          minWidth: 260,
-                        }}
-                      >
-                        {porcentajeValores.map((item) => (
-                          <React.Fragment key={item.label}>
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0", fontSize: 14 }}>
-                              <span style={{ color: "#374151", fontWeight: 600 }}>{item.label}</span>
-                              <span style={{ color: "#0F172A", fontWeight: 700 }}>{item.value}</span>
-                            </div>
-                            {item.label === "Saldo" && (
-                              <hr style={{ border: 0, borderTop: "1px solid #E5E7EB", margin: "6px 0" }} />
-                            )}
-                          </React.Fragment>
-                        ))}
-                      </div>
-                    )}
-                  </span>
                   <button
                     style={{
                       border: "none",
@@ -4069,13 +4260,141 @@ export default function GastosPage({
                 </div>
               )}
 
-              {errores.tarea && (
-                <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>
-                  {errores.tarea}
-                </div>
-              )}
+               {errores.tarea && (
+                 <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>
+                   {errores.tarea}
+                 </div>
+               )}
 
-              {constantesError ? (
+               <nav
+                 aria-label="Secciones del gasto"
+                  style={{ display: "flex", gap: 8, borderBottom: "1px solid #E2E8F0", marginTop: 8, marginBottom: 16, position: "relative", zIndex: 3, pointerEvents: "auto" }}
+               >
+                 {[
+                   { key: "principal" as const, label: "Datos principales" },
+                   { key: "detalle-sitio" as const, label: "Detalle del sitio" },
+                 ].map((tab) => {
+                   const active = gastoEditorTab === tab.key;
+                   return (
+                     <button
+                       key={tab.key}
+                        type="button"
+                        onClick={() => setGastoEditorTab(tab.key)}
+                        onMouseDown={(event) => { event.stopPropagation(); setGastoEditorTab(tab.key); }}
+                       style={{
+                         border: "none",
+                         borderBottom: `2px solid ${active ? "#6E4CCB" : "transparent"}`,
+                         background: "transparent",
+                         color: active ? "#5B35B5" : "#64748B",
+                         padding: "10px 14px",
+                         fontSize: 12,
+                         fontWeight: 700,
+                         cursor: "pointer",
+                       }}
+                     >
+                       {tab.label}
+                     </button>
+                   );
+                 })}
+               </nav>
+
+               {gastoEditorTab === "principal" && null /*
+                 <section
+                   aria-label="Datos principales del sitio"
+                   style={{ border: "1px solid #E2E8F0", borderRadius: 12, background: "#F8FAFC", padding: 18 }}
+                 >
+                   <h3 style={{ margin: "0 0 14px", fontSize: 14, color: "#17143A" }}>Sitio seleccionado</h3>
+                   <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
+                     {[
+                       ["Cliente", form.filtroOperativo.filtro?.nombreCliente],
+                       ["Proyecto", form.filtroOperativo.filtro?.nombreProyecto],
+                       ["Site", form.filtroOperativo.filtro?.nombreSite],
+                       ["Tipo de trabajo", form.filtroOperativo.tipoTrabajo?.tipoTrabajo],
+                       ["OT", form.filtroOperativo.ot?.ot],
+                       ["Tarea", form.filtroOperativo.tarea?.tarea],
+                     ].map(([label, value]) => (
+                       <div key={label} style={{ minWidth: 0 }}>
+                         <span style={{ display: "block", fontSize: 10, color: "#64748B", fontWeight: 700, marginBottom: 4 }}>{label}</span>
+                         <strong style={{ display: "block", fontSize: 12, color: "#1E293B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                           {value || "Sin seleccionar"}
+                         </strong>
+                       </div>
+                     ))}
+                   </div>
+                   <p style={{ margin: "16px 0 0", fontSize: 12, color: "#64748B" }}>
+                     Continúe en “Detalle del sitio” para completar responsable, cuenta, importes y demás datos del gasto.
+                   </p>
+                 </section>
+               */}
+
+               {gastoEditorTab === "principal" && (
+                 <section aria-label="Historial del sitio" style={{ border: "1px solid #DBEAFE", borderRadius: 12, background: "#F8FBFF", overflow: "hidden" }}>
+                   <div style={{ padding: "12px 14px", borderBottom: "1px solid #DBEAFE" }}>
+                     <div>
+                       <strong style={{ display: "block", color: "#0F172A", fontSize: 13 }}>Historial Sitio</strong>
+                       <span style={{ color: "#64748B", fontSize: 11 }}>Pagos del mismo cliente, proyecto, site y tipo de trabajo.</span>
+                     </div>
+                   </div>
+                   {!historialSitioRequest ? (
+                     <div style={{ padding: 16, color: "#64748B", fontSize: 12 }}>Seleccione Filtro, Trabajo, OT y Tarea para consultar el historial del sitio.</div>
+                   ) : historialSitioLoading ? (
+                     <div style={{ padding: 16, color: "#2563EB", fontSize: 12, fontWeight: 600 }}>Cargando historial del sitio…</div>
+                   ) : (
+                     <>
+                         {historialSitioKpisPorMoneda.length > 0 && (
+                           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "10px 14px 0" }}>
+                            {historialSitioKpisPorMoneda.flatMap(({ moneda, total, totalVisible, porcentaje, porcentajeBarra }) => [
+                              <div key={`${moneda}-pagado`} style={{ border: "1px solid #BFDBFE", borderRadius: 8, background: "#FFFFFF", padding: "7px 10px", minWidth: 110 }}><span style={{ display: "block", fontSize: 9, fontWeight: 800, color: "#64748B" }}>{moneda} · Pagado</span><strong style={{ fontSize: 12, color: "#0F172A" }}>{formatDecimalValue(total)}</strong></div>,
+                              <div key={`${moneda}-visible`} style={{ border: "1px solid #BFDBFE", borderRadius: 8, background: "#FFFFFF", padding: "7px 10px", minWidth: 125 }}><span style={{ display: "block", fontSize: 9, fontWeight: 800, color: "#64748B" }}>{moneda} · Total visible</span><strong style={{ fontSize: 12, color: "#0F172A" }}>{formatDecimalValue(totalVisible)}</strong></div>,
+                              <div key={`${moneda}-avance`} style={{ border: "1px solid #BFDBFE", borderRadius: 8, background: "#FFFFFF", padding: "7px 10px", minWidth: 145 }}><span style={{ display: "block", fontSize: 9, fontWeight: 800, color: "#64748B" }}>{moneda} · Avance</span><strong style={{ display: "block", fontSize: 12, color: "#0F172A", marginBottom: 5 }}>{porcentaje.toFixed(2)}%</strong><span style={{ display: "block", height: 7, borderRadius: 99, background: "#DBEAFE", overflow: "hidden" }}><i style={{ display: "block", width: `${porcentajeBarra}%`, height: "100%", borderRadius: 99, background: porcentaje > 70 ? "#DC2626" : porcentaje >= 50 ? "#CA8A04" : "#16A34A" }} /></span></div>,
+                            ])}
+                           </div>
+                         )}
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, borderBottom: "1px solid #DBEAFE", margin: "12px 14px 0" }}>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            {[{ key: "listado" as const, label: "Listado" }, { key: "resumen" as const, label: "Resumen por solicitante" }].map((tab) => (
+                              <button key={tab.key} type="button" onClick={() => setHistorialSitioView(tab.key)} style={{ border: "none", borderBottom: `2px solid ${historialSitioView === tab.key ? "#2563EB" : "transparent"}`, background: "transparent", color: historialSitioView === tab.key ? "#1D4ED8" : "#64748B", padding: "8px 10px", fontSize: 11, fontWeight: 800, cursor: "pointer" }}>
+                                {tab.label}
+                              </button>
+                            ))}
+                          </div>
+                          {historialSitioSolicitante && (
+                            <button type="button" aria-label="Limpiar filtro de solicitante" title="Limpiar filtro" onClick={() => setHistorialSitioSolicitante("")} style={{ alignSelf: "center", border: "1px solid #BFDBFE", borderRadius: 6, background: "#FFFFFF", color: "#2563EB", width: 26, height: 26, padding: 4, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v5M14 11v5" /></svg>
+                            </button>
+                          )}
+                        </div>
+                        {historialSitioView === "resumen" ? (
+                          <div style={{ display: "grid", gap: 10, maxHeight: 240, overflow: "auto", margin: 14 }}>
+                            {historialSitioResumenSolicitante.map(({ moneda, items }) => {
+                              const max = items[0]?.total || 0;
+                              return <div key={moneda}><strong style={{ display: "block", fontSize: 10, color: "#475569", marginBottom: 6 }}>{moneda}</strong>{items.map(({ solicitante, total }) => <button key={solicitante} type="button" onClick={() => { setHistorialSitioSolicitante(solicitante); setHistorialSitioView("listado"); }} style={{ width: "100%", border: "none", background: "transparent", display: "grid", gridTemplateColumns: "minmax(105px, .9fr) minmax(110px, 2fr) auto", alignItems: "center", gap: 8, padding: "4px 0", textAlign: "left", cursor: "pointer" }}><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10, color: "#334155" }}>{solicitante}</span><span style={{ height: 8, borderRadius: 99, background: "#DBEAFE", overflow: "hidden" }}><i style={{ display: "block", height: "100%", width: `${max ? Math.max(2, total / max * 100) : 0}%`, borderRadius: 99, background: "#3B82F6" }} /></span><strong style={{ fontSize: 10, color: "#0F172A" }}>{formatDecimalValue(total)}</strong></button>)}</div>;
+                            })}
+                            {!historialSitioResumenSolicitante.length && <div style={{ padding: 12, textAlign: "center", color: "#64748B", fontSize: 11 }}>No hay solicitudes para resumir.</div>}
+                          </div>
+                        ) : (
+                          <div style={{ maxHeight: 240, overflow: "auto", margin: 14 }}>
+                            <table style={{ width: "100%", minWidth: 700, borderCollapse: "collapse", fontSize: 10 }}>
+                              <thead><tr>{[
+                                { label: "Correlativo", key: "correlativo" as const }, { label: "Fecha", key: "fecha" as const }, { label: "Cliente" }, { label: "Proyecto" }, { label: "Site" }, { label: "Tipo trabajo" }, { label: "Subtotal", key: "subtotal" as const }, { label: "Moneda", key: "moneda" as const }, { label: "Solicitante", key: "solicitante" as const }, { label: "Detalle" },
+                              ].map((header) => <th key={header.label} style={{ textAlign: "left", padding: "7px 6px", color: "#475569", borderBottom: "1px solid #CBD5E1", whiteSpace: "nowrap" }}>{header.key ? <button type="button" onClick={() => ordenarHistorialSitio(header.key!)} style={{ border: "none", background: "transparent", color: historialSitioSort.key === header.key ? "#1D4ED8" : "inherit", font: "inherit", fontWeight: 800, padding: 0, cursor: "pointer" }}>{header.label} {historialSitioSort.key === header.key ? (historialSitioSort.direction === "asc" ? "↑" : "↓") : "↕"}</button> : header.label}</th>)}</tr></thead>
+                              <tbody>
+                                {historialSitioRowsOrdenados.map((row) => (
+                                  <tr key={`${row.id}-${row.idSite}-${row.correSite}`}>
+                                    <td style={{ padding: "6px", borderBottom: "1px solid #E2E8F0" }}>{row.id}</td><td style={{ padding: "6px", borderBottom: "1px solid #E2E8F0" }}>{formatDateToMMDDYYYYPeru(normalizeFecIngresoFromStore(row.fecIngreso)) || "-"}</td><td style={{ padding: "6px", borderBottom: "1px solid #E2E8F0" }}>{row.clienteNombre || "-"}</td><td style={{ padding: "6px", borderBottom: "1px solid #E2E8F0" }}>{row.nombreProyecto || "-"}</td><td style={{ padding: "6px", borderBottom: "1px solid #E2E8F0" }}>{row.siteNombre || "-"}</td><td style={{ padding: "6px", borderBottom: "1px solid #E2E8F0" }}>{row.tipoTrabajo || "-"}</td><td style={{ padding: "6px", borderBottom: "1px solid #E2E8F0", fontWeight: 700 }}>{formatDecimalValue(Number(row.subtotal ?? row.monto ?? 0))}</td><td style={{ padding: "6px", borderBottom: "1px solid #E2E8F0" }}>{row.monedaLabel || row.moneda || "-"}</td><td style={{ padding: "6px", borderBottom: "1px solid #E2E8F0" }}>{row.solicitanteLabel || row.solicitante || "-"}</td><td style={{ padding: "6px", borderBottom: "1px solid #E2E8F0", maxWidth: 170 }}><button type="button" title={row.detalle || ""} onClick={() => setHistorialSitioDetalleActivo(row.detalle || "Sin detalle registrado.")} style={{ border: "none", background: "transparent", color: "#1D4ED8", cursor: "pointer", padding: 0, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "left", textDecoration: "underline" }}>{row.detalle || "-"}</button></td>
+                                  </tr>
+                                ))}
+                                {!historialSitioRowsFiltrados.length && <tr><td colSpan={10} style={{ padding: 16, textAlign: "center", color: "#64748B" }}>{historialSitioSolicitante ? "No hay registros para el solicitante seleccionado." : "No hay registros pagados para el sitio seleccionado."}</td></tr>}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                     </>
+                   )}
+                 </section>
+               )}
+
+               {constantesError ? (
                 <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>
                   {constantesError}
                 </div>
@@ -4099,9 +4418,9 @@ export default function GastosPage({
                 </div>
               ) : null}
 
-              <div
-                style={{
-                  display: "grid",
+               <div
+                 style={{
+                   display: gastoEditorTab === "detalle-sitio" ? "grid" : "none",
                   gridTemplateColumns: "minmax(0, 1fr)",
                   gap: 12,
                   alignItems: "start",
@@ -4249,7 +4568,7 @@ export default function GastosPage({
 
         <div
   style={{
-    display: "grid",
+    display: gastoEditorTab === "detalle-sitio" ? "grid" : "none",
     gridTemplateColumns: "repeat(12, minmax(0, 1fr))",
     rowGap: 1.5,
     columnGap: 12,
@@ -4931,7 +5250,7 @@ export default function GastosPage({
 </div>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 10 }}>
+            <div style={{ display: gastoEditorTab === "detalle-sitio" ? "flex" : "none", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 10 }}>
               {/* Botón de factura alineado a la izquierda */}
               <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0, flex: 1 }}>
                 <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
@@ -5168,6 +5487,63 @@ export default function GastosPage({
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {historialSitioDetalleActivo !== null && (
+        <div role="presentation" onClick={() => setHistorialSitioDetalleActivo(null)} style={{ position: "fixed", inset: 0, zIndex: 4200, background: "rgba(15, 23, 42, 0.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
+          <section role="dialog" aria-modal="true" aria-label="Detalle del gasto" onClick={(event) => event.stopPropagation()} style={{ width: "min(620px, 100%)", maxHeight: "min(420px, 100%)", overflow: "auto", borderRadius: 12, background: "#FFFFFF", boxShadow: "0 18px 48px rgba(15,23,42,.28)", padding: 20 }}>
+            <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
+              <h3 style={{ margin: 0, color: "#0F172A", fontSize: 17 }}>Detalle del gasto</h3>
+              <button type="button" onClick={() => setHistorialSitioDetalleActivo(null)} style={{ border: "1px solid #CBD5E1", borderRadius: 8, padding: "6px 10px", background: "#FFFFFF", color: "#334155", cursor: "pointer", fontWeight: 700 }}>Cerrar</button>
+            </header>
+            <p style={{ margin: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere", color: "#334155", fontSize: 13, lineHeight: 1.55 }}>{historialSitioDetalleActivo}</p>
+          </section>
+        </div>
+      )}
+
+      {historialSitioExpanded && (
+        <div
+          role="presentation"
+          onClick={() => setHistorialSitioExpanded(false)}
+          style={{ position: "fixed", inset: 0, zIndex: 4100, background: "rgba(15, 23, 42, 0.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label="Historial Sitio"
+            onClick={(event) => event.stopPropagation()}
+            style={{ width: "min(1180px, 100%)", height: "min(760px, 100%)", background: "#FFFFFF", borderRadius: 14, boxShadow: "0 18px 48px rgba(15,23,42,.28)", display: "flex", flexDirection: "column", overflow: "hidden" }}
+          >
+            <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, padding: "18px 20px", borderBottom: "1px solid #E2E8F0" }}>
+              <div>
+                <span style={{ display: "block", fontSize: 10, fontWeight: 800, color: "#F59E0B", textTransform: "uppercase" }}>Historial Sitio</span>
+                <h3 style={{ margin: "4px 0", color: "#0F172A", fontSize: 19 }}>Registros pagados del sitio</h3>
+                <p style={{ margin: 0, color: "#64748B", fontSize: 12 }}>Mismo cliente, proyecto, site y tipo de trabajo seleccionados.</p>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {historialSitioSolicitante && <button type="button" onClick={() => setHistorialSitioSolicitante("")} style={{ border: "1px solid #CBD5E1", background: "#FFFFFF", color: "#475569", borderRadius: 8, padding: "8px 10px", cursor: "pointer", fontSize: 11 }}>Limpiar filtro</button>}
+                <button type="button" onClick={() => setHistorialSitioExpanded(false)} style={{ border: "1px solid #FCA5A5", background: "#FFFFFF", color: "#DC2626", borderRadius: 8, padding: "8px 10px", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>Cerrar</button>
+              </div>
+            </header>
+            <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 20 }}>
+              {historialSitioTotalesPorMoneda.length > 0 && <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
+                {historialSitioTotalesPorMoneda.map(({ moneda, total }) => <div key={moneda} style={{ minWidth: 130, border: "1px solid #DBEAFE", borderRadius: 10, padding: "9px 11px", background: "#F8FBFF" }}><span style={{ display: "block", fontSize: 10, color: "#64748B", fontWeight: 800 }}>{moneda}</span><strong style={{ color: "#0F172A", fontSize: 15 }}>{formatDecimalValue(total)}</strong></div>)}
+              </div>}
+              <div style={{ display: "flex", gap: 8, borderBottom: "1px solid #E2E8F0", marginBottom: 14 }}>
+                {[{ key: "listado" as const, label: "Listado" }, { key: "resumen" as const, label: "Resumen por solicitante" }].map((tab) => <button key={tab.key} type="button" onClick={() => setHistorialSitioView(tab.key)} style={{ border: "none", borderBottom: `3px solid ${historialSitioView === tab.key ? "#F59E0B" : "transparent"}`, background: "transparent", color: historialSitioView === tab.key ? "#B45309" : "#64748B", padding: "8px 12px", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>{tab.label}</button>)}
+              </div>
+              {historialSitioView === "resumen" ? (
+                historialSitioResumenSolicitante.length === 0 ? <div style={{ padding: 20, textAlign: "center", color: "#64748B" }}>No hay solicitudes para resumir.</div> :
+                <div style={{ display: "grid", gap: 16 }}>{historialSitioResumenSolicitante.map(({ moneda, items }) => {
+                  const max = items[0]?.total || 0;
+                  return <section key={moneda} style={{ border: "1px solid #DBEAFE", borderRadius: 12, padding: 14, background: "#F8FBFF" }}><strong style={{ color: "#0F172A", fontSize: 13 }}>{moneda}</strong><div style={{ display: "grid", gap: 9, marginTop: 12 }}>{items.map(({ solicitante, total }) => <button key={solicitante} type="button" onClick={() => { setHistorialSitioSolicitante(solicitante); setHistorialSitioView("listado"); }} style={{ border: "none", background: "transparent", display: "grid", gridTemplateColumns: "minmax(150px, .9fr) minmax(170px, 2fr) auto", alignItems: "center", gap: 12, textAlign: "left", cursor: "pointer" }}><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 700, color: "#334155" }}>{solicitante}</span><span style={{ height: 11, borderRadius: 99, background: "#E2E8F0", overflow: "hidden" }}><i style={{ display: "block", height: "100%", width: `${max ? Math.max(2, total / max * 100) : 0}%`, background: "#F59E0B", borderRadius: 99 }} /></span><strong style={{ fontSize: 12, color: "#0F172A" }}>{formatDecimalValue(total)}</strong></button>)}</div></section>;
+                })}</div>
+              ) : (
+                <div style={{ overflow: "auto" }}><table style={{ width: "100%", minWidth: 1040, borderCollapse: "collapse", fontSize: 11 }}><thead><tr>{["Correlativo", "Fecha", "Cliente", "Proyecto", "Site", "Tipo trabajo", "Subtotal", "IGV", "Total", "Moneda", "Solicitante", "Responsable", "Detalle"].map((header) => <th key={header} style={{ position: "sticky", top: 0, background: "#F8FAFC", textAlign: "left", padding: "8px 7px", borderBottom: "1px solid #CBD5E1", whiteSpace: "nowrap" }}>{header}</th>)}</tr></thead><tbody>{historialSitioRowsFiltrados.length ? historialSitioRowsFiltrados.map((row) => <tr key={`historial-sitio-${row.id}-${row.idSite}-${row.correSite}`}><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0" }}>{row.id}</td><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0" }}>{formatDateToMMDDYYYYPeru(row.fecIngreso)}</td><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0" }}>{row.clienteNombre || "-"}</td><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0" }}>{row.nombreProyecto || "-"}</td><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0" }}>{row.siteNombre || "-"}</td><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0" }}>{row.tipoTrabajo || "-"}</td><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0", fontWeight: 700 }}>{formatDecimalValue(Number(row.subtotal ?? row.monto ?? 0))}</td><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0" }}>{formatDecimalValue(Number(row.igv ?? 0))}</td><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0" }}>{formatDecimalValue(Number(row.total ?? row.totalPagar ?? 0))}</td><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0" }}>{row.monedaLabel || row.moneda || "-"}</td><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0" }}>{row.solicitanteLabel || row.solicitante || "-"}</td><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0" }}>{row.responsableLabel || "-"}</td><td title={row.detalle} style={{ padding: 7, borderBottom: "1px solid #E2E8F0", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.detalle || "-"}</td></tr>) : <tr><td colSpan={13} style={{ padding: 20, textAlign: "center", color: "#64748B" }}>{historialSitioSolicitante ? "No hay registros para el solicitante seleccionado." : "No hay registros para el sitio seleccionado."}</td></tr>}</tbody></table></div>
+              )}
+            </div>
+          </section>
         </div>
       )}
 

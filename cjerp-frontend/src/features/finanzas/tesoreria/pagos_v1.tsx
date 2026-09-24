@@ -77,6 +77,7 @@ type PagoRow = {
   disponibleOc?: number;
   totalSubtotalPorMoneda?: number;
   totalMontoBckPorMoneda?: number;
+  totalMontoVisiblePorMoneda?: number;
   totalPagadoConvertidoSoles?: number;
   subtotal: number;
   igv: number;
@@ -706,6 +707,7 @@ function mapPlanillaConsultaRowToPagoRow(
     porcentajeFic: getRecordNumber(row, "PorcentajeFic", "porcentajeFic") ?? undefined,
     totalSubtotalPorMoneda: getRecordNumber(row, "TotalSubtotalPorMoneda", "totalSubtotalPorMoneda") ?? undefined,
     totalMontoBckPorMoneda: getRecordNumber(row, "TotalMontoBckPorMoneda", "totalMontoBckPorMoneda") ?? undefined,
+    totalMontoVisiblePorMoneda: getRecordNumber(row, "TotalMontoVisiblePorMoneda", "totalMontoVisiblePorMoneda") ?? undefined,
     totalPagadoConvertidoSoles: getRecordNumber(
       row,
       "TotalpagadoConvertidoSoles",
@@ -2381,7 +2383,7 @@ export default function PagosV1Page() {
   }, [activeTab]);
   const isResumenTab = activeTab === "resumen";
   const showEstadoOc = activeTab === "resumen";
-  const tableColSpan = showEstadoOc ? 22 : 21;
+  const tableColSpan = showEstadoOc ? 23 : 22;
   const stickyColumnWidths = [108, 94];
   const stickyColumnLefts = stickyColumnWidths.reduce<number[]>((acc, _width, index) => {
     const previousLeft = acc[index - 1] ?? 0;
@@ -3432,6 +3434,7 @@ export default function PagosV1Page() {
                     <th data-sort="moneda" style={{ ...styles.th, width: 80, cursor: "pointer" }}>Moneda</th>
                     <th style={{ ...styles.th, width: 160 }}>Total Gastado</th>
                     <th style={{ ...styles.th, width: 170 }}>Total Sitio</th>
+                    <th style={{ ...styles.th, width: 170 }}>Total Visible</th>
                     <th style={{ ...styles.th, width: 90 }}>% Avance</th>
                     <th style={{ ...styles.th, width: 130 }}>Avance</th>
                     <th data-sort="responsable" style={{ ...styles.th, width: 110, cursor: "pointer" }}>Responsable</th>
@@ -3525,6 +3528,7 @@ export default function PagosV1Page() {
                                 : (isSelected ? "#DBEAFE" : "#FFFFFF");
                               const totalSubtotalPorMoneda = row.totalSubtotalPorMoneda ?? 0;
                               const totalMontoBckPorMoneda = row.totalMontoBckPorMoneda ?? 0;
+                              const totalMontoVisiblePorMoneda = row.totalMontoVisiblePorMoneda ?? 0;
                               const totalGastado = row.totalPagadoConvertidoSoles ?? 0;
                               const porcentajeAvance = totalMontoBckPorMoneda > 0
                                 ? (totalSubtotalPorMoneda / totalMontoBckPorMoneda) * 100
@@ -3603,6 +3607,9 @@ export default function PagosV1Page() {
                                   </td>
                                   <td title={formatCurrency(row.totalMontoBckPorMoneda ?? 0, row.moneda)} style={styles.td}>
                                     {formatCurrency(totalMontoBckPorMoneda, row.moneda)}
+                                  </td>
+                                  <td title={formatCurrency(row.totalMontoVisiblePorMoneda ?? 0, row.moneda)} style={styles.td}>
+                                    {formatCurrency(totalMontoVisiblePorMoneda, row.moneda)}
                                   </td>
                                   <td style={{ ...styles.td, color: colorAvance }}>{formatPercent(porcentajeAvance)}</td>
                                   <td style={{ ...styles.td, verticalAlign: "middle" }}>

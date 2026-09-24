@@ -75,6 +75,17 @@ export function useFiltroOperativoLookup(
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [value, setValueState] = useState<FiltroOperativoValue>(initialValue || {});
+  const initialValueKey = [
+    initialValue?.filtro?.filtroKey ?? '',
+    initialValue?.filtro?.idCliente ?? 0,
+    initialValue?.filtro?.idProyecto ?? 0,
+    initialValue?.filtro?.idSite ?? '',
+    initialValue?.filtro?.correlativo ?? 0,
+    initialValue?.tipoTrabajo?.tipoTrabajo ?? '',
+    initialValue?.ot?.ot ?? '',
+    initialValue?.tarea?.correlativo ?? 0,
+    initialValue?.tarea?.tarea ?? '',
+  ].join('|');
 
   useEffect(() => {
     const nextValue = initialValue || {};
@@ -82,7 +93,7 @@ export function useFiltroOperativoLookup(
     setValueState((prev) =>
       areFiltroOperativoValuesEqual(prev, nextValue) ? prev : nextValue
     );
-  }, [initialValue]);
+  }, [initialValueKey]);
 
   // 🔹 Cargar filtros y tareas al iniciar
   useEffect(() => {
@@ -186,11 +197,12 @@ export function useFiltroOperativoLookup(
                     normalizeLookupText(prev.ot?.ot ?? prev.filtro?.ot)
                 ) ?? prev.ot;
 
-              return {
+              const nextValue = {
                 ...prev,
                 tipoTrabajo: selectedTipoTrabajo,
                 ot: selectedOt,
               };
+              return areFiltroOperativoValuesEqual(prev, nextValue) ? prev : nextValue;
             });
             setError(null);
             return;
@@ -233,11 +245,12 @@ export function useFiltroOperativoLookup(
                   normalizeLookupText(prev.ot?.ot ?? prev.filtro?.ot)
               ) ?? prev.ot;
 
-            return {
+            const nextValue = {
               ...prev,
               tipoTrabajo: selectedTipoTrabajo,
               ot: selectedOt,
             };
+            return areFiltroOperativoValuesEqual(prev, nextValue) ? prev : nextValue;
           });
           setError(null);
         } catch (error: unknown) {
