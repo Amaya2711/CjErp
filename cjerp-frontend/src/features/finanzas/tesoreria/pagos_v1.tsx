@@ -1761,7 +1761,10 @@ export default function PagosV1Page() {
   }, [historialOtSeleccionada]);
 
   useEffect(() => {
-    if (!filaActiva) {
+    // El grid selecciona su primera fila al terminar de cargar. No consultar
+    // consumo de OC hasta que el usuario abra el panel de detalle: hacerlo
+    // aquí agregaba una llamada pesada a la carga inicial sin mostrar nada.
+    if (!isDetailPanelOpen || detailTab !== "resumen" || !filaActiva) {
       setConsumoOc(null);
       return;
     }
@@ -1798,7 +1801,7 @@ export default function PagosV1Page() {
       cancelled = true;
       controller.abort();
     };
-  }, [filaActiva?.id, filaActiva?.idOc, filaActiva?.documento, filaActiva?.idCliente, filaActiva?.idProyecto, filaActiva?.siteId, filaActiva?.corSite, filaActiva?.tipoTrabajo]);
+  }, [isDetailPanelOpen, detailTab, filaActiva?.id, filaActiva?.idOc, filaActiva?.documento, filaActiva?.idCliente, filaActiva?.idProyecto, filaActiva?.siteId, filaActiva?.corSite, filaActiva?.tipoTrabajo]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1809,6 +1812,10 @@ export default function PagosV1Page() {
       // fila seleccionada. Esta consulta solo aporta el desglose por moneda
       // para "Detalle de conversión", sin sobrescribir dichos importes.
       const isResumen = detailTab === "resumen";
+      if (!isDetailPanelOpen) {
+        setResumenOtLoading(false);
+        return;
+      }
       if (!isResumen && detailTab !== "con-pagado") {
         return;
       }
@@ -1900,6 +1907,7 @@ export default function PagosV1Page() {
       controller.abort();
     };
   }, [
+    isDetailPanelOpen,
     detailTab,
     filaActiva?.id,
     filaActiva?.ot,
@@ -1917,7 +1925,7 @@ export default function PagosV1Page() {
     const loadHistorial = async (signal: AbortSignal) => {
       // El historial se consulta únicamente al abrir su pestaña. El resumen
       // obtiene Pagado directamente de TotalSubtotalPorMoneda de la fila.
-      if (detailTab !== "historial") {
+      if (!isDetailPanelOpen || detailTab !== "historial") {
         setHistorialLoading(false);
         return;
       }
@@ -1975,6 +1983,7 @@ export default function PagosV1Page() {
       controller.abort();
     };
   }, [
+    isDetailPanelOpen,
     detailTab,
     filaActiva?.id,
     filaActiva?.idCliente,
@@ -1988,7 +1997,7 @@ export default function PagosV1Page() {
     let cancelled = false;
 
     const loadConPagado = async (signal: AbortSignal) => {
-      if (detailTab !== "con-pagado") {
+      if (!isDetailPanelOpen || detailTab !== "con-pagado") {
         setConPagadoLoading(false);
         return;
       }
@@ -2042,6 +2051,7 @@ export default function PagosV1Page() {
       controller.abort();
     };
   }, [
+    isDetailPanelOpen,
     detailTab,
     filaActiva?.id,
     filaActiva?.idCliente,
@@ -2056,10 +2066,9 @@ export default function PagosV1Page() {
     let cancelled = false;
 
     const loadHistorialOc = async (signal: AbortSignal) => {
-      // El resumen de consumo de la OC usa los pagos ya registrados para la
-      // misma OC/Fila; por ello esta consulta también debe ejecutarse al abrir
-      // la pestaña Resumen, no únicamente al visualizar el historial.
-      if (detailTab !== "historial-oc" && detailTab !== "resumen") {
+      // El resumen de consumo usa su consulta dedicada. Este listado pesado
+      // únicamente se necesita cuando el usuario abre Historial OC.
+      if (!isDetailPanelOpen || detailTab !== "historial-oc") {
         setHistorialOcLoading(false);
         return;
       }
@@ -2124,6 +2133,7 @@ export default function PagosV1Page() {
       controller.abort();
     };
   }, [
+    isDetailPanelOpen,
     detailTab,
     filaActiva?.id,
     filaActiva?.idOc,
