@@ -36,11 +36,24 @@ import type { ConstanteOption } from "../../../models/constante";
 import type { EmpleadoCta } from "../../../models/empleadoCta";
 import type { FiltroOperativoValue } from "../../../models/filtroOperativo";
 import { getHttpErrorMessage } from "../../../utils/httpError";
-import { ChevronDown, ChevronUp, ChevronsDown, ChevronsUp, FileDown } from "lucide-react";
-import { buildPlanillaConsultaEstadosRequest, consultarPlanillaEstados } from "../../../api/planillaConsultaService";
+import { ChevronDown, ChevronUp, ChevronsDown, ChevronsUp, Eye, FileDown } from "lucide-react";
+import { buildPlanillaConsultaEstadosRequest, consultarGastosPagadosPorId, consultarPlanillaEstados } from "../../../api/planillaConsultaService";
 
-const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "ResponsableOc", "MonedaOc", "SubtotalOc", "Cliente", "NombreProyecto", "IdSite", "Site", "FechaOc", "PrecioUniOc", "CantOc", "EstadoOc", "MontoDetalleOc", "CorrelativoPlanilla", "EstadoPlanilla", "SolicitantePlanilla", "MonedaPlanilla", "SubtotalPlanilla", "UltimaFechaDeposito", "SaldoOcVsPlanilla", "PorcentajeConsumidoOc"];
-const OC_GASTOS_MAX_COLUMNAS_VISIBLES = 24;
+const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "ResponsableOc", "MonedaOc", "SubtotalOc", "SubtotalPlanilla", "SaldoOcVsPlanilla", "PorcentajeConsumidoOc", "Cliente", "NombreProyecto", "IdSite", "Site", "FechaOc", "EstadoOc", "PrimeraValidacion", "SegundaValidacion", "TerceraValidacion", "CorrelativoPlanilla", "EstadoPlanilla", "SolicitantePlanilla", "MonedaPlanilla", "UltimaFechaDeposito"];
+const OC_GASTOS_MAX_COLUMNAS_VISIBLES = 22;
+const OC_GASTOS_COLUMNAS_NUMERICAS = new Set([
+  "SubtotalOc",
+  "PrecioUniOc",
+  "CantOc",
+  "MontoDetalleOc",
+  "SubtotalPlanilla",
+  "SaldoOcVsPlanilla",
+]);
+const OC_GASTOS_COLUMN_LABELS: Record<string, string> = {
+  PrimeraValidacion: "1ra validación",
+  SegundaValidacion: "2da validación",
+  TerceraValidacion: "3ra validación",
+};
 const OC_APPROVAL_TAB_ACTION_KEYS = {
   2: "tab.validacion_2",
   3: "tab.validacion_3",
@@ -341,6 +354,14 @@ function formatMoney(value: number | null | undefined) {
   return toNumber(value).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function formatOcGastosNumber(value: unknown) {
+  const text = String(value ?? "").trim();
+  if (!text || text === "—") return "—";
+
+  const numericValue = Number(text.replace(/,/g, ""));
+  return Number.isFinite(numericValue) ? formatMoney(numericValue) : text;
+}
+
 function formatPercent(value: number | null | undefined) {
   return `${(toNumber(value) * 100).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
 }
@@ -406,6 +427,19 @@ function clasificarEstadoOc(value: unknown): EstadoOcReporte | "" {
   return "";
 }
 
+function formatEstadoOcGrid(value: unknown) {
+  const numericValue = Number(value);
+  if (Number.isFinite(numericValue)) {
+    if (numericValue === 1) return "APROBADO";
+    if (numericValue === 6) return "RECHAZADO";
+    if (numericValue === 0) return "SIN ESTADO";
+    return "PENDIENTE";
+  }
+
+  const text = String(value ?? "").trim();
+  return text || "SIN ESTADO";
+}
+
 function getEstadoOcRowValue(row: Record<string, unknown>): unknown {
   const idKey = Object.keys(row).find((key) => key.toLowerCase() === "idestadooc");
   if (idKey) return row[idKey];
@@ -421,6 +455,46 @@ function getEstadosOcSeleccionados(value: string): EstadoOcReporte[] {
 
 function formatValidadorNivel(value: number | null | undefined) {
   return value && value > 0 ? `Registrado (${value})` : "Pendiente";
+}
+
+function ValidacionEstadoBadge({ value }: { value: string }) {
+  const registrado = value.trim().toLocaleLowerCase().startsWith("registrado");
+
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        minHeight: 20,
+        padding: "2px 8px",
+        borderRadius: 999,
+        fontSize: 10,
+        fontWeight: 800,
+        lineHeight: 1,
+        whiteSpace: "nowrap",
+        color: registrado ? "#047857" : "#9A6700",
+        background: registrado ? "#DCFCE7" : "#FEF3C7",
+      }}
+    >
+      {value}
+    </span>
+  );
+}
+
+function PorcentajeConsumidoBar({ value }: { value: number }) {
+  const porcentaje = Number.isFinite(value) ? Math.max(0, value) : 0;
+  const porcentajeVisible = Math.min(porcentaje, 100);
+  const color = porcentaje < 50 ? "#16A34A" : porcentaje <= 70 ? "#D97706" : "#DC2626";
+
+  return (
+    <div title={`${formatMoney(porcentaje)}%`} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, minWidth: 124 }}>
+      <div style={{ width: 64, height: 7, borderRadius: 999, overflow: "hidden", background: "#E2E8F0" }}>
+        <div style={{ width: `${porcentajeVisible}%`, height: "100%", borderRadius: 999, background: color, transition: "width 160ms ease" }} />
+      </div>
+      <span style={{ minWidth: 46, fontSize: 11, fontWeight: 700, color }}>{formatMoney(porcentaje)}%</span>
+    </div>
+  );
 }
 
 function getNivelPendiente(item: OrdenCompraCabeceraDto) {
@@ -673,19 +747,22 @@ export default function OcV1Page() {
     const guardados = reporteFiltrosPorTab[tab];
     if (guardados) setReporteFiltros(guardados);
     else setReporteFiltros({ solicitante: "", responsable: "", cliente: "", proyecto: "", site: "", estado: tab === "oc-gastos" ? ESTADOS_OC_GASTOS_POR_DEFECTO : "", idOc: "", fechaDesde: "", fechaHasta: "" });
-    setReporteSubtab(tab as typeof reporteSubtab);
-    setReporteConsultado(false);
-    setReportePlanillaRows([]);
+      setReporteSubtab(tab as typeof reporteSubtab);
+      setReporteConsultado(false);
+      setReportePlanillaRows([]);
+      setResponsablesReporteFiltro([]);
+      setBusquedaResponsableReporte("");
   };
 
   const camposConstantes = useMemo(
-    () => ["tipo_moneda", "tipo_comprobante", "tipo_pago"],
+    () => ["tipo_moneda", "tipo_comprobante", "tipo_pago", "estado"],
     []
   );
   const { constantesPorCampo } = useConstantesPorCampo(camposConstantes);
   const monedaOptions = constantesPorCampo.tipo_moneda ?? [];
   const comprobanteOptions = constantesPorCampo.tipo_comprobante ?? [];
   const tipoPagoOptions = constantesPorCampo.tipo_pago ?? [];
+  const estadoOptions = constantesPorCampo.estado ?? [];
 
   useEffect(() => {
     if (hasFullPageActionAccess(authUser)) {
@@ -873,21 +950,29 @@ export default function OcV1Page() {
     setError("");
     try {
       if (reporteSubtab === "oc-gastos") {
-        const responsableNombre = responsablesReporteFiltro[0] ?? "";
-        const responsableId = responsableNombre
-          ? cabeceras.find((item) => item.responsable === responsableNombre)?.idResponsable
-          : undefined;
+        // El store recibe un IdResponsable por consulta. Para una selección
+        // múltiple se ejecuta una consulta por código y se consolidan las filas.
+        const responsablesIds = [...new Set(
+          responsablesReporteFiltro
+            .map((value) => Number(value))
+            .filter((value) => Number.isInteger(value) && value > 0)
+        )];
         const idOcFiltro = reporteFiltros.idOc.trim();
-        const request = buildPlanillaConsultaEstadosRequest([
-          ...(reporteFiltros.fechaDesde ? [{ nombre: "FechaInicio", valor: reporteFiltros.fechaDesde, tipo: "date" as const }] : []),
-          ...(reporteFiltros.fechaHasta ? [{ nombre: "FechaFin", valor: reporteFiltros.fechaHasta, tipo: "date" as const }] : []),
-          ...(idOcFiltro ? [{ nombre: "Id", valor: idOcFiltro, tipo: "int" as const }] : []),
-          ...(responsableId ? [{ nombre: "IdResponsable", valor: String(responsableId), tipo: "int" as const }] : []),
-          ...(sitesReporteFiltro.length ? [{ nombre: "IdSite", valor: sitesReporteFiltro.join(","), tipo: "string" as const }] : []),
-        ]);
-        request.consulta = "analisis-gastos";
-        const response = await consultarPlanillaEstados(request, { timeoutMs: 60000 });
-        const rows = (Array.isArray(response?.rows) ? response.rows : []).map((row) => {
+        const responseRows = await Promise.all(
+          (responsablesIds.length ? responsablesIds : [null]).map(async (responsableId) => {
+            const request = buildPlanillaConsultaEstadosRequest([
+              ...(reporteFiltros.fechaDesde ? [{ nombre: "FechaInicio", valor: reporteFiltros.fechaDesde, tipo: "date" as const }] : []),
+              ...(reporteFiltros.fechaHasta ? [{ nombre: "FechaFin", valor: reporteFiltros.fechaHasta, tipo: "date" as const }] : []),
+              ...(idOcFiltro ? [{ nombre: "Id", valor: idOcFiltro, tipo: "int" as const }] : []),
+              ...(responsableId ? [{ nombre: "IdResponsable", valor: String(responsableId), tipo: "int" as const }] : []),
+              ...(sitesReporteFiltro.length ? [{ nombre: "IdSite", valor: sitesReporteFiltro.join(","), tipo: "string" as const }] : []),
+            ]);
+            request.consulta = "analisis-gastos";
+            const response = await consultarPlanillaEstados(request, { timeoutMs: 60000 });
+            return Array.isArray(response?.rows) ? response.rows : [];
+          })
+        );
+        const rows = responseRows.flat().map((row) => {
           // Mantener el alias del nuevo store aunque el serializador omita valores NULL.
           // Así no se utiliza CorSite (correlativo del site) como sustituto.
           const correlativoKey = Object.keys(row).find((key) => key.toLowerCase() === "correlativoplanilla");
@@ -1223,6 +1308,29 @@ export default function OcV1Page() {
     estados: ["ACEPTADO", "RECHAZADO", "EN PROCESO"],
   }), [cabeceras]);
 
+  const responsablesOcGastosOptions = useMemo(() => {
+    const responsables = new Map<number, string>();
+
+    cabeceras.forEach((item) => {
+      const idResponsable = Number(item.idResponsable) || 0;
+      if (idResponsable > 0) {
+        responsables.set(idResponsable, item.responsable?.trim() || `Responsable ${idResponsable}`);
+      }
+    });
+
+    return Array.from(responsables, ([id, nombre]) => ({
+      value: String(id),
+      label: `${nombre} (${id})`,
+    })).sort((left, right) => left.label.localeCompare(right.label, "es"));
+  }, [cabeceras]);
+
+  const responsableReporteOptions = useMemo(
+    () => reporteSubtab === "oc-gastos"
+      ? responsablesOcGastosOptions
+      : reporteOptions.responsables.map((nombre) => ({ value: nombre, label: nombre })),
+    [reporteOptions.responsables, reporteSubtab, responsablesOcGastosOptions]
+  );
+
   const reporteSiteOptions = useMemo(() => {
     const sites = new Map<string, string>();
     cabeceras.forEach((item) => {
@@ -1274,6 +1382,82 @@ export default function OcV1Page() {
       setPdfExportingOc(null);
     }
   }, []);
+
+  const visualizarReporteOcPdf = useCallback(async (idOc: number) => {
+    const previewWindow = window.open("", "_blank");
+    setPdfExportingOc(idOc);
+    setError("");
+
+    try {
+      const blob = await descargarOrdenCompraPdf(idOc);
+      if (!blob || blob.size === 0) {
+        throw new Error("El PDF generado no contiene datos.");
+      }
+
+      const url = URL.createObjectURL(blob);
+      if (previewWindow) {
+        previewWindow.location.href = url;
+        window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      } else {
+        downloadBlob(blob, `OC_${idOc}.pdf`);
+      }
+    } catch (err) {
+      previewWindow?.close();
+      setError(getHttpErrorMessage(err, "No se pudo visualizar el PDF de la orden de compra."));
+    } finally {
+      setPdfExportingOc(null);
+    }
+  }, []);
+
+  const visualizarGastoPorCorrelativo = useCallback(async (correlativo: number) => {
+    if (!Number.isInteger(correlativo) || correlativo <= 0) return;
+
+    setError("");
+    try {
+      const response = await consultarGastosPagadosPorId(correlativo, { timeoutMs: 60000 });
+      const row = Array.isArray(response?.rows) ? response.rows[0] : null;
+      if (!row) {
+        throw new Error("No se encontró información para el gasto seleccionado.");
+      }
+
+      const read = (...names: string[]) => {
+        const key = Object.keys(row).find((item) => names.some((name) => item.toLowerCase() === name.toLowerCase()));
+        return key ? row[key] : undefined;
+      };
+
+      setReciboVisualizado({
+        correlativo,
+        fecIngreso: String(read("FecIngreso", "Fecha", "FechaIngreso") ?? ""),
+        subtotal: Number(read("Subtotal") ?? 0),
+        igv: Number(read("IGV", "Igv") ?? 0),
+        total: Number(read("Total") ?? 0),
+        moneda: String(read("Moneda") ?? ""),
+        detalle: String(read("Detalle") ?? ""),
+        comprobante: String(read("Comprobante") ?? ""),
+        responsable: String(read("Responsable", "NomResponsable") ?? ""),
+        nroDocumento: String(read("NroDocumento", "NroOperacion", "NroComprobante") ?? ""),
+        estado: getOptionLabel(estadoOptions, String(read("EstadoNombre", "Estado", "EstadoPlanilla") ?? "")),
+        tarea: String(read("Tarea") ?? ""),
+        cliente: String(read("Cliente", "NombreCliente") ?? ""),
+        proyecto: String(read("Proyecto", "NombreProyecto") ?? ""),
+        site: String(read("Site", "NombreSite") ?? ""),
+        tipoTrabajo: String(read("TipoTrabajo", "Tipo_Trabajo") ?? ""),
+        ot: String(read("OT", "Ot") ?? ""),
+        cuenta: String(read("Cuenta", "CuentaInter") ?? ""),
+        comentario: String(read("Comentario") ?? ""),
+        bien: String(read("Bien") ?? ""),
+        serie: String(read("Serie") ?? ""),
+        tipoPago: String(read("TipoPago", "FormaPago") ?? ""),
+        solicitante: String(read("Solicitante", "NombreSolicitante") ?? ""),
+        gestor: String(read("Gestor", "NombreGestor") ?? ""),
+        validador: String(read("Validador", "NombreValidador") ?? ""),
+        fechaEmision: String(read("FecEmision", "FechaEmision") ?? ""),
+        fechaVencimiento: String(read("FechaVencimiento", "FecVencimiento") ?? ""),
+      });
+    } catch (err) {
+      setError(getHttpErrorMessage(err, "No se pudo cargar la información del gasto."));
+    }
+  }, [estadoOptions]);
 
   const selectedCabecera = useMemo(
     () => cabeceras.find((item) => item.idOc === selectedOcId) ?? null,
@@ -2325,8 +2509,39 @@ export default function OcV1Page() {
                 <summary style={{ ...styles.input, display: "flex", alignItems: "center", cursor: "pointer" }}>Todos{responsablesReporteFiltro.length > 0 && ` (${responsablesReporteFiltro.length})`}</summary>
                 <div className="oc-reporte-multi-options" style={{ position: "absolute", zIndex: 20, top: "100%", left: 0, right: 0, maxHeight: 240, overflowY: "auto", padding: 8, background: "#fff", border: "1px solid #D1D5DB", borderRadius: 8, boxShadow: "0 6px 16px rgba(15,23,42,.12)" }}>
                   <input value={busquedaResponsableReporte} onChange={(event) => setBusquedaResponsableReporte(event.target.value)} placeholder="Escriba un responsable..." style={styles.input} />
-                  <label style={{ display: "flex", gap: 6, alignItems: "center", padding: "6px 2px", fontSize: 12, fontWeight: 600, borderBottom: "1px solid #E5E7EB" }}><input type="checkbox" checked={reporteOptions.responsables.filter((item) => item.toLocaleLowerCase().includes(busquedaResponsableReporte.toLocaleLowerCase())).every((item) => responsablesReporteFiltro.includes(item)) && reporteOptions.responsables.length > 0} onChange={(event) => { const disponibles = reporteOptions.responsables.filter((item) => item.toLocaleLowerCase().includes(busquedaResponsableReporte.toLocaleLowerCase())); const values = event.target.checked ? [...new Set([...responsablesReporteFiltro, ...disponibles])] : responsablesReporteFiltro.filter((value) => !disponibles.includes(value)); setResponsablesReporteFiltro(values); setReporteFiltros((prev) => ({ ...prev, responsable: values.join(",") })); }} />Marcar / desmarcar todos</label>
-                  {reporteOptions.responsables.filter((item) => item.toLocaleLowerCase().includes(busquedaResponsableReporte.toLocaleLowerCase())).map((item) => <label key={`rep-res-${item}`} style={{ display: "flex", gap: 6, alignItems: "center", padding: "4px 2px", fontSize: 12 }}><input type="checkbox" checked={responsablesReporteFiltro.includes(item)} onChange={(event) => { const values = event.target.checked ? [...responsablesReporteFiltro, item] : responsablesReporteFiltro.filter((value) => value !== item); setResponsablesReporteFiltro(values); setReporteFiltros((prev) => ({ ...prev, responsable: values.join(",") })); }} />{item}</label>)}
+                  {reporteSubtab !== "oc-gastos" ? (
+                    <label style={{ display: "flex", gap: 6, alignItems: "center", padding: "6px 2px", fontSize: 12, fontWeight: 600, borderBottom: "1px solid #E5E7EB" }}>
+                      <input
+                        type="checkbox"
+                        checked={responsableReporteOptions.filter((item) => item.label.toLocaleLowerCase().includes(busquedaResponsableReporte.toLocaleLowerCase())).every((item) => responsablesReporteFiltro.includes(item.value)) && responsableReporteOptions.length > 0}
+                        onChange={(event) => {
+                          const disponibles = responsableReporteOptions.filter((item) => item.label.toLocaleLowerCase().includes(busquedaResponsableReporte.toLocaleLowerCase())).map((item) => item.value);
+                          const values = event.target.checked ? [...new Set([...responsablesReporteFiltro, ...disponibles])] : responsablesReporteFiltro.filter((value) => !disponibles.includes(value));
+                          setResponsablesReporteFiltro(values);
+                          setReporteFiltros((prev) => ({ ...prev, responsable: values.join(",") }));
+                        }}
+                      />
+                      Marcar / desmarcar todos
+                    </label>
+                  ) : null}
+                  {responsableReporteOptions
+                    .filter((item) => item.label.toLocaleLowerCase().includes(busquedaResponsableReporte.toLocaleLowerCase()))
+                    .map((item) => (
+                      <label key={`rep-res-${item.value}`} style={{ display: "flex", gap: 6, alignItems: "center", padding: "4px 2px", fontSize: 12 }}>
+                        <input
+                          type="checkbox"
+                          checked={responsablesReporteFiltro.includes(item.value)}
+                          onChange={(event) => {
+                            const values = event.target.checked
+                              ? [...new Set([...responsablesReporteFiltro, item.value])]
+                              : responsablesReporteFiltro.filter((value) => value !== item.value);
+                            setResponsablesReporteFiltro(values);
+                            setReporteFiltros((prev) => ({ ...prev, responsable: values.join(",") }));
+                          }}
+                        />
+                        {item.label}
+                      </label>
+                    ))}
                 </div>
               </details>
               </Field>
@@ -2429,7 +2644,10 @@ export default function OcV1Page() {
               <table className={String(reporteSubtab) === "oc-gastos" ? "oc-gastos-grid" : undefined} style={String(reporteSubtab) === "oc-gastos" ? { ...styles.table, width: "max-content", minWidth: "100%" } : styles.table}>
                 <thead>
                   <tr>
-                    {String(reporteSubtab) === "oc-gastos" ? reportePlanillaColumns.map((column, index) => <th key={`pla-head-${column}`} style={{ ...styles.th, width: 110, minWidth: 80, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer", ...(index < 4 ? { position: "sticky", left: index * 110, zIndex: 3, background: "#fff" } : {}) }} title={`Ordenar por ${column}`} onClick={() => setReportePlanillaSort((current) => ({ column, direction: current.column === column && current.direction === "asc" ? "desc" : "asc" }))}>{column}{reportePlanillaSort.column === column ? (reportePlanillaSort.direction === "asc" ? " ▲" : " ▼") : ""}</th>) : <th style={{ ...styles.th, width: 52 }} aria-label="Exportar PDF"></th>}
+                    {String(reporteSubtab) === "oc-gastos" ? <>
+                      <th style={{ ...styles.th, width: 52, minWidth: 52, position: "sticky", left: 0, zIndex: 4, background: "#fff" }} aria-label="Visualizar PDF">PDF</th>
+                      {reportePlanillaColumns.map((column, index) => <th key={`pla-head-${column}`} style={{ ...styles.th, width: 110, minWidth: 80, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer", ...(index < 4 ? { position: "sticky", left: 52 + index * 110, zIndex: 3, background: "#fff" } : {}) }} title={`Ordenar por ${OC_GASTOS_COLUMN_LABELS[column] ?? column}`} onClick={() => setReportePlanillaSort((current) => ({ column, direction: current.column === column && current.direction === "asc" ? "desc" : "asc" }))}>{OC_GASTOS_COLUMN_LABELS[column] ?? column}{reportePlanillaSort.column === column ? (reportePlanillaSort.direction === "asc" ? " ▲" : " ▼") : ""}</th>)}
+                    </> : <th style={{ ...styles.th, width: 52 }} aria-label="Exportar PDF"></th>}
                     {String(reporteSubtab) !== "oc-gastos" && <>
                       <th style={styles.th}>OC</th>
                     <th style={styles.th}>Fecha</th>
@@ -2449,7 +2667,87 @@ export default function OcV1Page() {
                   </tr>
                 </thead>
                 <tbody>
-                  {String(reporteSubtab) === "oc-gastos" ? (reportePlanillaRows.length === 0 ? <tr><td style={styles.td} colSpan={Math.max(reportePlanillaColumns.length, 1)}>{!reporteConsultado ? "Seleccione al menos un filtro para consultar los gastos." : reporteLoading ? "Cargando datos..." : "No hay registros de Planilla."}</td></tr> : reportePlanillaRowsOrdenadas.map((row, index) => { const read = (column: string) => { const aliases: Record<string, string[]> = { EstadoOc: ["EstadoOc", "IdEstadoOc"], CorrelativoPlanilla: ["CorrelativoPlanilla"], EstadoPlanilla: ["EstadoPlanilla", "ValidacionResponsable", "EstadoRelacion"] }; const names = aliases[column] || [column]; if (column.toLowerCase() === "montodetalleoc") { const precio = Number(row[Object.keys(row).find((key) => key.toLowerCase() === "preciounioc") ?? ""] ?? 0); const cantidad = Number(row[Object.keys(row).find((key) => key.toLowerCase() === "cantoc") ?? ""] ?? 0); return precio && cantidad ? (precio * cantidad).toFixed(2) : "—"; } const found = Object.keys(row).find((key) => names.some((name) => key.toLowerCase() === name.toLowerCase())); return String(found ? row[found] ?? "—" : "—"); }; const filaRechazada = read("EstadoPlanilla").trim().toUpperCase() === "RECHAZADO" || Number(read("IdEstadoOc")) === 6; return <tr key={`pla-${read("IdOc") || "sin-oc"}-${read("CorrelativoPlanilla")}-${read("IdSite")}-${read("PrecioUniOc")}-${read("CantOc")}-${index}`} style={{ ...styles.tr, ...(filaRechazada ? { background: "#fce7f3" } : {}) }}>{reportePlanillaColumns.map((column, columnIndex) => { const rawValue = read(column); const value = column.toLowerCase() === "porcentajeconsumidooc" && Number.isFinite(Number(rawValue)) ? Number(rawValue).toFixed(2) : rawValue; return <td key={`${index}-${column}`} style={{ ...styles.td, width: 110, minWidth: 80, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer", ...(columnIndex < 4 ? { position: "sticky", left: columnIndex * 110, zIndex: 2, background: filaRechazada ? "#fce7f3" : "#fff" } : {}) }} title={value} onClick={(event) => { const cell = event.currentTarget; if (cell.style.whiteSpace === "normal") cell.style.whiteSpace = "nowrap"; else if (cell.scrollWidth > cell.clientWidth) cell.style.whiteSpace = "normal"; }}>{value}</td>; })}</tr>; })) : String(reporteSubtab) !== "oc-gastos" && !reporteConsultado ? (
+                  {String(reporteSubtab) === "oc-gastos" ? (
+                    reportePlanillaRows.length === 0 ? (
+                      <tr><td style={styles.td} colSpan={Math.max(reportePlanillaColumns.length, 1)}>{!reporteConsultado ? "Seleccione al menos un filtro para consultar los gastos." : reporteLoading ? "Cargando datos..." : "No hay registros de Planilla."}</td></tr>
+                    ) : reportePlanillaRowsOrdenadas.map((row, index) => {
+                      const read = (column: string) => {
+                        const aliases: Record<string, string[]> = {
+                          EstadoOc: ["EstadoOc", "IdEstadoOc"],
+                          PrimeraValidacion: ["PrimeraValidacion", "IdAprobador1"],
+                          SegundaValidacion: ["SegundaValidacion", "IdAprobador2"],
+                          TerceraValidacion: ["TerceraValidacion", "IdAprobador3"],
+                          CorrelativoPlanilla: ["CorrelativoPlanilla"],
+                          EstadoPlanilla: ["EstadoPlanilla", "ValidacionResponsable", "EstadoRelacion"],
+                        };
+                        const names = aliases[column] || [column];
+                        if (column.toLowerCase() === "montodetalleoc") {
+                          const precio = Number(row[Object.keys(row).find((key) => key.toLowerCase() === "preciounioc") ?? ""] ?? 0);
+                          const cantidad = Number(row[Object.keys(row).find((key) => key.toLowerCase() === "cantoc") ?? ""] ?? 0);
+                          return precio && cantidad ? (precio * cantidad).toFixed(2) : "—";
+                        }
+                        const found = Object.keys(row).find((key) => names.some((name) => key.toLowerCase() === name.toLowerCase()));
+                        const rawValue = found ? row[found] : null;
+                        if (column === "EstadoOc") return formatEstadoOcGrid(rawValue);
+                        if (["PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"].includes(column)) {
+                          const text = String(rawValue ?? "").trim();
+                          return text && !/^\d+$/.test(text) ? text : formatValidadorNivel(Number(rawValue) || null);
+                        }
+                        return String(rawValue ?? "—");
+                      };
+                      const filaRechazada = read("EstadoPlanilla").trim().toUpperCase() === "RECHAZADO" || Number(read("IdEstadoOc")) === 6;
+
+                      return (
+                        <tr key={`pla-${read("IdOc") || "sin-oc"}-${read("CorrelativoPlanilla")}-${read("IdSite")}-${read("PrecioUniOc")}-${read("CantOc")}-${index}`} style={{ ...styles.tr, ...(filaRechazada ? { background: "#fce7f3" } : {}) }}>
+                          <td style={{ ...styles.td, width: 52, minWidth: 52, position: "sticky", left: 0, zIndex: 2, background: filaRechazada ? "#fce7f3" : "#fff" }}>
+                            <button
+                              type="button"
+                              style={pdfExportingOc === Number(read("IdOc")) ? styles.pdfIconButtonDisabled : styles.pdfIconButton}
+                              onClick={(event) => { event.stopPropagation(); void visualizarReporteOcPdf(Number(read("IdOc"))); }}
+                              disabled={pdfExportingOc === Number(read("IdOc")) || !Number(read("IdOc"))}
+                              title={`Visualizar PDF de la OC ${read("IdOc")}`}
+                              aria-label={`Visualizar PDF de la OC ${read("IdOc")}`}
+                            >
+                              <Eye size={15} strokeWidth={2.3} />
+                            </button>
+                          </td>
+                          {reportePlanillaColumns.map((column, columnIndex) => {
+                            const rawValue = read(column);
+                            const value = OC_GASTOS_COLUMNAS_NUMERICAS.has(column)
+                              ? formatOcGastosNumber(rawValue)
+                              : column.toLowerCase() === "porcentajeconsumidooc" && Number.isFinite(Number(rawValue))
+                                ? Number(rawValue).toFixed(2)
+                                : rawValue;
+                            const esValidacion = ["PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"].includes(column);
+                            const esPorcentajeConsumido = column === "PorcentajeConsumidoOc" && Number.isFinite(Number(rawValue));
+                            const correlativosPlanilla = column === "CorrelativoPlanilla"
+                              ? String(rawValue ?? "").split(",").map((item) => Number(item.trim())).filter((item) => Number.isInteger(item) && item > 0)
+                              : [];
+
+                            return (
+                              <td key={`${index}-${column}`} style={{ ...styles.td, width: 110, minWidth: 80, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer", ...(columnIndex < 4 ? { position: "sticky", left: 52 + columnIndex * 110, zIndex: 2, background: filaRechazada ? "#fce7f3" : "#fff" } : {}) }} title={value} onClick={(event) => { const cell = event.currentTarget; if (cell.style.whiteSpace === "normal") cell.style.whiteSpace = "nowrap"; else if (cell.scrollWidth > cell.clientWidth) cell.style.whiteSpace = "normal"; }}>
+                                {esValidacion ? <ValidacionEstadoBadge value={value} /> : esPorcentajeConsumido ? <PorcentajeConsumidoBar value={Number(rawValue)} /> : correlativosPlanilla.length ? (
+                                  <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 5 }}>
+                                    {correlativosPlanilla.map((correlativo) => (
+                                      <a
+                                        key={correlativo}
+                                        href={`#gasto-${correlativo}`}
+                                        style={styles.correlativoLink}
+                                        onClick={(event) => { event.preventDefault(); void visualizarGastoPorCorrelativo(correlativo); }}
+                                        aria-label={`Visualizar gasto ${correlativo}`}
+                                      >
+                                        {correlativo}
+                                      </a>
+                                    ))}
+                                  </span>
+                                ) : value}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })
+                  ) : String(reporteSubtab) !== "oc-gastos" && !reporteConsultado ? (
                     <tr>
                       <td style={styles.td} colSpan={15}>
                         Seleccione al menos un filtro para consultar la trazabilidad.
@@ -3154,18 +3452,11 @@ function ReciboDetallePanel({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
-  const fields = [
-    ["Fecha de ingreso", formatDate(recibo.fecIngreso)],
-    ["Responsable", recibo.responsable || "-"],
-    ["Comprobante", recibo.comprobante || "-"],
-    ["Nro. documento", recibo.nroDocumento || "-"],
-    ["Estado", recibo.estado || "-"],
-    ["Moneda", recibo.moneda || "-"],
-    ["Subtotal", formatMoney(recibo.subtotal)],
-    ["IGV", formatMoney(recibo.igv)],
-    ["Total", formatMoney(recibo.total)],
-    ["Tarea", recibo.tarea || "-"],
-  ];
+  const [activeTab, setActiveTab] = useState<"principal" | "detalle-sitio">("detalle-sitio");
+  const inputStyle: React.CSSProperties = { width: "100%", height: 38, padding: "0 10px", border: "1px solid #D1D5DB", borderRadius: 8, background: "#F8FAFC", color: "#334155", boxSizing: "border-box", fontSize: 11 };
+  const labelStyle: React.CSSProperties = { display: "block", marginBottom: 4, fontSize: 10, fontWeight: 800, color: "#475569" };
+  const valueOrDash = (value?: string | null) => value?.trim() || "-";
+  const filterLabel = [recibo.cliente, recibo.proyecto, recibo.site].filter(Boolean).join(" · ") || "-";
 
   return (
     <div style={styles.sidePanelOverlay} onMouseDown={onClose}>
@@ -3173,28 +3464,69 @@ function ReciboDetallePanel({
         role="dialog"
         aria-modal="true"
         aria-labelledby="recibo-detalle-title"
-        style={{ ...styles.card, ...styles.receiptDetailPanel }}
+        style={{ width: "min(1280px, 94vw)", maxWidth: "100%", height: "100%", padding: 24, background: "#FFFFFF", boxSizing: "border-box", overflowY: "auto", boxShadow: "-8px 0 24px rgba(0,0,0,0.12)" }}
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <div style={styles.sectionHeader}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 20 }}>
           <div>
-            <h2 id="recibo-detalle-title" style={styles.sectionTitle}>Visualizar gasto</h2>
-            <p style={styles.sectionText}>Correlativo {recibo.correlativo}</p>
+            <h2 id="recibo-detalle-title" style={{ margin: 0, fontSize: 24, color: "#17143A" }}>Visualizar gasto · ID: {recibo.correlativo}</h2>
+            <p style={{ margin: "8px 0 0", color: "#6B7280", fontSize: 13 }}>Complete la información del gasto.</p>
+            <p style={{ margin: "6px 0 0", color: "#475569", fontSize: 12 }}>El sistema registra auditoría automática por sección al guardar o rechazar cambios.</p>
           </div>
-          <button type="button" style={styles.secondaryButton} onClick={onClose}>Cerrar</button>
+          <button type="button" style={{ border: "none", background: "#F3F4F6", color: "#17143A", width: 34, height: 34, borderRadius: 8, cursor: "pointer", fontSize: 22, lineHeight: "22px" }} onClick={onClose} aria-label="Cerrar">×</button>
         </div>
-        <div style={styles.receiptDetailGrid}>
-          {fields.map(([label, value]) => (
-            <div key={label} style={styles.receiptDetailField}>
-              <span style={styles.summaryLabel}>{label}</span>
-              <strong style={styles.receiptDetailValue}>{value}</strong>
+
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 1.4fr) minmax(130px, .45fr) minmax(130px, .45fr)", gap: 10, alignItems: "end" }}>
+          <label><span style={labelStyle}>Filtro</span><input readOnly value={filterLabel} style={inputStyle} /></label>
+          <label><span style={labelStyle}>Trabajo</span><input readOnly value={valueOrDash(recibo.tipoTrabajo)} style={inputStyle} /></label>
+          <label><span style={labelStyle}>OT</span><input readOnly value={valueOrDash(recibo.ot)} style={inputStyle} /></label>
+          <label style={{ gridColumn: "1 / span 2" }}><span style={labelStyle}>Tarea</span><input readOnly value={valueOrDash(recibo.tarea)} style={inputStyle} /></label>
+        </div>
+
+        <nav aria-label="Secciones del gasto" style={{ display: "flex", gap: 8, borderBottom: "1px solid #E2E8F0", marginTop: 16, marginBottom: 16 }}>
+          {[{ key: "principal" as const, label: "Datos principales" }, { key: "detalle-sitio" as const, label: "Detalle del sitio" }].map((tab) => {
+            const active = activeTab === tab.key;
+            return <button key={tab.key} type="button" onClick={() => setActiveTab(tab.key)} style={{ border: "none", borderBottom: `2px solid ${active ? "#6E4CCB" : "transparent"}`, background: "transparent", color: active ? "#5B35B5" : "#64748B", padding: "10px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{tab.label}</button>;
+          })}
+        </nav>
+
+        {activeTab === "principal" ? (
+          <section style={{ border: "1px solid #E2E8F0", borderRadius: 12, background: "#F8FAFC", padding: 16 }}>
+            <h3 style={{ margin: "0 0 12px", fontSize: 14, color: "#17143A" }}>Datos principales</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
+              {[["Cliente", recibo.cliente], ["Proyecto", recibo.proyecto], ["Site", recibo.site], ["Fecha de ingreso", formatDate(recibo.fecIngreso)], ["Estado", recibo.estado], ["Nro. documento", recibo.nroDocumento]].map(([label, value]) => (
+                <div key={label}><span style={labelStyle}>{label}</span><strong style={{ fontSize: 12, color: "#1E293B" }}>{valueOrDash(value)}</strong></div>
+              ))}
             </div>
-          ))}
-        </div>
-        <div style={styles.receiptDetailDescription}>
-          <span style={styles.summaryLabel}>Detalle</span>
-          <p>{recibo.detalle || "Sin detalle registrado."}</p>
-        </div>
+          </section>
+        ) : (
+          <section style={{ display: "grid", gap: 12 }}>
+            <label><span style={labelStyle}>Responsable</span><input readOnly value={valueOrDash(recibo.responsable)} style={inputStyle} /></label>
+            <label><span style={labelStyle}>Cuenta</span><input readOnly value={valueOrDash(recibo.cuenta)} style={inputStyle} /></label>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>
+              <label><span style={labelStyle}>Detalle</span><textarea readOnly value={valueOrDash(recibo.detalle)} style={{ ...inputStyle, height: 110, padding: 10, resize: "none" }} /></label>
+              <label><span style={labelStyle}>Comentario</span><textarea readOnly value={valueOrDash(recibo.comentario)} style={{ ...inputStyle, height: 110, padding: 10, resize: "none" }} /></label>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+              <label><span style={labelStyle}>Bien</span><input readOnly value={valueOrDash(recibo.bien)} style={inputStyle} /></label>
+              <label><span style={labelStyle}>Comprobante</span><input readOnly value={valueOrDash(recibo.comprobante)} style={inputStyle} /></label>
+              <label><span style={labelStyle}>Serie</span><input readOnly value={valueOrDash(recibo.serie)} style={inputStyle} /></label>
+              <label><span style={labelStyle}>Tipo de pago</span><input readOnly value={valueOrDash(recibo.tipoPago)} style={inputStyle} /></label>
+              <label><span style={labelStyle}>Subtotal</span><input readOnly value={formatMoney(recibo.subtotal)} style={inputStyle} /></label>
+              <label><span style={labelStyle}>IGV</span><input readOnly value={formatMoney(recibo.igv)} style={inputStyle} /></label>
+              <label><span style={labelStyle}>Total</span><input readOnly value={formatMoney(recibo.total)} style={inputStyle} /></label>
+              <label><span style={labelStyle}>Moneda</span><input readOnly value={valueOrDash(recibo.moneda)} style={inputStyle} /></label>
+              <label><span style={labelStyle}>Estado</span><input readOnly value={valueOrDash(recibo.estado)} style={inputStyle} /></label>
+              <label><span style={labelStyle}>Fecha emisión</span><input readOnly value={formatDate(recibo.fechaEmision || recibo.fecIngreso)} style={inputStyle} /></label>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+              <label><span style={labelStyle}>Solicitante</span><input readOnly value={valueOrDash(recibo.solicitante)} style={inputStyle} /></label>
+              <label><span style={labelStyle}>Gestor</span><input readOnly value={valueOrDash(recibo.gestor)} style={inputStyle} /></label>
+              <label><span style={labelStyle}>Validador</span><input readOnly value={valueOrDash(recibo.validador)} style={inputStyle} /></label>
+            </div>
+          </section>
+        )}
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}><button type="button" style={styles.secondaryButton} onClick={onClose}>Cerrar</button></div>
       </aside>
     </div>
   );

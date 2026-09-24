@@ -174,6 +174,20 @@ export type OrdenCompraReciboDto = {
   tarea?: string;
   fila?: number | null;
   idOc?: number | null;
+  cliente?: string;
+  proyecto?: string;
+  site?: string;
+  ot?: string;
+  cuenta?: string;
+  comentario?: string;
+  bien?: string;
+  serie?: string;
+  tipoPago?: string;
+  solicitante?: string;
+  gestor?: string;
+  validador?: string;
+  fechaEmision?: string | null;
+  fechaVencimiento?: string | null;
 };
 
 export type OrdenCompraRecibosParams = {

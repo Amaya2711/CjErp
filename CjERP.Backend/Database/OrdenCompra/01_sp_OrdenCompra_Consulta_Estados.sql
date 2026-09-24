@@ -113,7 +113,29 @@ BEGIN
 
         a5.Cantidad AS CantOc,
 
+        a5.IdAprobador1,
+
+        a5.IdAprobador2,
+
         a5.IdAprobador3,
+
+        CASE
+            WHEN ISNULL(a5.IdAprobador1, 0) > 0
+                THEN CONCAT('Registrado (', CONVERT(VARCHAR(20), a5.IdAprobador1), ')')
+            ELSE 'Pendiente'
+        END AS PrimeraValidacion,
+
+        CASE
+            WHEN ISNULL(a5.IdAprobador2, 0) > 0
+                THEN CONCAT('Registrado (', CONVERT(VARCHAR(20), a5.IdAprobador2), ')')
+            ELSE 'Pendiente'
+        END AS SegundaValidacion,
+
+        CASE
+            WHEN ISNULL(a5.IdAprobador3, 0) > 0
+                THEN CONCAT('Registrado (', CONVERT(VARCHAR(20), a5.IdAprobador3), ')')
+            ELSE 'Pendiente'
+        END AS TerceraValidacion,
 
 
         /* ========================================================

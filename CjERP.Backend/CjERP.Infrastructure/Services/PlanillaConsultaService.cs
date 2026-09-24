@@ -187,18 +187,82 @@ namespace CjERP.Infrastructure.Services
                 cancellationToken);
             var parametrosFiltrados = FilterParametersForStoredProcedure(storedProcedureName, parametrosList);
             var dynamicParameters = BuildParameters(parametrosFiltrados);
+            var isPagosV1Consulta = string.Equals(
+                    storedProcedureName,
+                    StoredProcedureEstados,
+                    StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(consulta, "pagos-v1", StringComparison.OrdinalIgnoreCase);
+            var serviceStart = isPagosV1Consulta ? Stopwatch.StartNew() : null;
+
+            if (isPagosV1Consulta)
+            {
+                var openStart = Stopwatch.StartNew();
+                if (connection.State != ConnectionState.Open)
+                {
+                    await connection.OpenAsync(cancellationToken);
+                }
+                openStart.Stop();
+
+                _logger.LogInformation(
+                    "[PagosV1Timing] sqlOpenMs={OpenMs} server={Server} database={Database}",
+                    openStart.Elapsed.TotalMilliseconds,
+                    connection.DataSource,
+                    connection.Database);
+
+                var pingStart = Stopwatch.StartNew();
+                await connection.ExecuteScalarAsync<int>(
+                    _sqlCommandFactory.Create(
+                        "SELECT 1",
+                        null,
+                        CommandType.Text,
+                        cancellationToken,
+                        commandTimeout: 30));
+                pingStart.Stop();
+
+                _logger.LogInformation(
+                    "[PagosV1Timing] sqlPingMs={PingMs}",
+                    pingStart.Elapsed.TotalMilliseconds);
+            }
 
             var queryStart = Stopwatch.StartNew();
-            var rows = (await connection.QueryAsync(
-                _sqlCommandFactory.Create(
-                    storedProcedureName,
-                    dynamicParameters,
-                    CommandType.StoredProcedure,
-                    cancellationToken,
-                    commandTimeout: 120)))
-                .Select(MapRow)
-                .ToList();
+            IEnumerable<dynamic> queryRows;
+
+            try
+            {
+                queryRows = await connection.QueryAsync(
+                    _sqlCommandFactory.Create(
+                        storedProcedureName,
+                        dynamicParameters,
+                        CommandType.StoredProcedure,
+                        cancellationToken,
+                        commandTimeout: 120));
+            }
+            catch
+            {
+                queryStart.Stop();
+                if (isPagosV1Consulta)
+                {
+                    _logger.LogError(
+                        "[PagosV1Timing] storeFailedMs={StoreFailedMs}",
+                        queryStart.Elapsed.TotalMilliseconds);
+                }
+
+                throw;
+            }
             queryStart.Stop();
+
+            var materializationStart = Stopwatch.StartNew();
+            var rows = queryRows.Select(MapRow).ToList();
+            materializationStart.Stop();
+
+            if (isPagosV1Consulta)
+            {
+                _logger.LogInformation(
+                    "[PagosV1Timing] storeMs={StoreMs} materializationMs={MaterializationMs} rows={Rows}",
+                    queryStart.Elapsed.TotalMilliseconds,
+                    materializationStart.Elapsed.TotalMilliseconds,
+                    rows.Count);
+            }
 
             _logger.LogInformation(
                 "[PlanillaConsulta] storedProcedure={StoredProcedure} queryMs={QueryMs} rows={Rows} parametros={Parametros}",
@@ -267,6 +331,15 @@ namespace CjERP.Infrastructure.Services
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
+            if (serviceStart is not null)
+            {
+                serviceStart.Stop();
+                _logger.LogInformation(
+                    "[PagosV1Timing] serviceMs={ServiceMs} pagedRows={PagedRows}",
+                    serviceStart.Elapsed.TotalMilliseconds,
+                    pagedRows.Count);
+            }
+
             return new PlanillaConsultaEstadosResponseDto
             {
                 Columns = columns,
@@ -292,11 +365,13 @@ namespace CjERP.Infrastructure.Services
             await using var connection = _sqlCommandFactory.CreateConnection();
 
             var dynamicParameters = new DynamicParameters();
-            dynamicParameters.Add("@id", id, DbType.Int32);
+            dynamicParameters.Add("@Correlativo", id, DbType.Int32);
 
             var rows = (await connection.QueryAsync(
                 _sqlCommandFactory.Create(
-                    StoredProcedureGastosPagados,
+                    // La consulta por correlativo debe permitir visualizar el gasto
+                    // sin restringirlo al estado pagado (4).
+                    StoredProcedureEstados,
                     dynamicParameters,
                     CommandType.StoredProcedure,
                     cancellationToken,

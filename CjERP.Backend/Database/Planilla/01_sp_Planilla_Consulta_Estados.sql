@@ -181,6 +181,7 @@ BEGIN
         END AS Validador,
         CONVERT(VARCHAR(10), a.FechaDeposito, 103) AS FechaDeposito,
         a.Estado,
+        COALESCE(NULLIF(LTRIM(RTRIM(w.ValorIni)), ''), CONVERT(VARCHAR(20), a.Estado)) AS EstadoNombre,
         a.Correlativo AS Corre,
         a.IdProyecto,
         w.Correlativo,
