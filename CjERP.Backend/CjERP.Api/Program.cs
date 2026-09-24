@@ -3,6 +3,7 @@ using System.Threading.RateLimiting;
 using System.IO.Compression;
 using CjERP.Api.Configuration;
 using CjERP.Api.Health;
+using CjERP.Api.Jobs;
 using CjERP.Api.Middleware;
 using CjERP.Api.Services;
 using CjERP.Application.DTOs.ReportesWhatsapp;
@@ -245,10 +246,13 @@ builder.Services.AddScoped<IAuditoriaCambiosService, AuditoriaCambiosService>();
 builder.Services.AddScoped<IAsistenciaReporteService, AsistenciaReporteService>();
 builder.Services.AddScoped<IAsistenciaValidarCampoService, AsistenciaValidarCampoService>();
 builder.Services.AddScoped<IReporteRepository, ReporteRepository>();
+builder.Services.AddScoped<IAsistenciaSharePointRepository, AsistenciaSharePointRepository>();
+builder.Services.AddScoped<IAsistenciaSharePointService, AsistenciaSharePointService>();
 builder.Services.AddScoped<IPlanillaBoletaRepository, PlanillaBoletaRepository>();
 builder.Services.AddScoped<IReportePdfService, ReportePdfService>();
 builder.Services.AddScoped<IReporteAutomaticoService, ReporteAutomaticoService>();
 builder.Services.AddScoped<IReporteWhatsappJobScheduler, ReporteWhatsappJobScheduler>();
+builder.Services.AddScoped<IAsistenciaSharePointJobScheduler, AsistenciaSharePointJobScheduler>();
 builder.Services.AddScoped<IWhatsappInboundService, WhatsappInboundService>();
 builder.Services.AddScoped<IArrendamientosService, ArrendamientosService>();
 builder.Services.AddHttpClient<IMetaWhatsAppService, MetaWhatsAppService>(client =>
@@ -414,6 +418,8 @@ using (var scope = app.Services.CreateScope())
     var scheduler = scope.ServiceProvider.GetRequiredService<IReporteWhatsappJobScheduler>();
     await scheduler.ReprogramarAsync(ReporteWhatsappTipos.Operativo);
     await scheduler.ReprogramarAsync(ReporteWhatsappTipos.Gerencial);
+    var asistenciaSharePointScheduler = scope.ServiceProvider.GetRequiredService<IAsistenciaSharePointJobScheduler>();
+    await asistenciaSharePointScheduler.ReprogramarAsync();
 }
 
 app.Run();

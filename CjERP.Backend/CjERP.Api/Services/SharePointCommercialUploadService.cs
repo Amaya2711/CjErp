@@ -9,6 +9,14 @@ namespace CjERP.Api.Services;
 
 public interface ISharePointCommercialUploadService
 {
+    Task<SharePointCommercialUploadResult> UploadBytesAsync(
+        byte[] content,
+        string fileName,
+        string folderPath,
+        string contentType,
+        string? documentLibraryName = null,
+        CancellationToken cancellationToken = default);
+
     Task<SharePointCommercialUploadResult> UploadExpenseInvoiceAsync(
         IFormFile file,
         ExpenseInvoiceUploadContext context,
@@ -106,6 +114,65 @@ public sealed class SharePointCommercialUploadService : ISharePointCommercialUpl
         return new SharePointCommercialUploadResult(fileName, webUrl, storagePath);
     }
 
+    public async Task<SharePointCommercialUploadResult> UploadBytesAsync(
+        byte[] content,
+        string fileName,
+        string folderPath,
+        string contentType,
+        string? documentLibraryName = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (content is null || content.Length == 0)
+        {
+            throw new InvalidOperationException("El contenido a cargar en SharePoint esta vacio.");
+        }
+
+        if (string.IsNullOrWhiteSpace(fileName) || Path.GetFileName(fileName) != fileName)
+        {
+            throw new InvalidOperationException("El nombre del archivo de SharePoint no es valido.");
+        }
+
+        var resolvedLibraryName = string.IsNullOrWhiteSpace(documentLibraryName)
+            ? _options.DocumentLibraryName
+            : documentLibraryName.Trim();
+
+        ValidateConfiguration(resolvedLibraryName);
+        var accessToken = await GetAccessTokenAsync(cancellationToken);
+        var siteId = await GetSiteIdAsync(accessToken, cancellationToken);
+        var driveId = await GetDriveIdAsync(siteId, accessToken, cancellationToken, resolvedLibraryName);
+        var normalizedFolderPath = NormalizeFolderPath(folderPath);
+        var uploadPath = string.IsNullOrWhiteSpace(normalizedFolderPath)
+            ? EncodePathSegment(fileName)
+            : $"{EncodePath(normalizedFolderPath)}/{EncodePathSegment(fileName)}";
+        var requestUrl = $"https://graph.microsoft.com/v1.0/drives/{driveId}/root:/{uploadPath}:/content";
+
+        using var request = new HttpRequestMessage(HttpMethod.Put, requestUrl)
+        {
+            Content = new ByteArrayContent(content)
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(
+            string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType);
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(
+                $"No se pudo cargar el archivo a SharePoint. Detalle: {response.StatusCode} {responseContent}");
+        }
+
+        using var document = JsonDocument.Parse(responseContent);
+        var webUrl = document.RootElement.TryGetProperty("webUrl", out var webUrlProperty)
+            ? webUrlProperty.GetString() ?? string.Empty
+            : string.Empty;
+
+        return new SharePointCommercialUploadResult(
+            fileName,
+            webUrl,
+            BuildStoragePath(fileName, normalizedFolderPath, resolvedLibraryName));
+    }
+
     public async Task<byte[]> DownloadFileAsync(string filePath, CancellationToken cancellationToken = default)
     {
         ValidateConfiguration();
@@ -170,14 +237,14 @@ public sealed class SharePointCommercialUploadService : ISharePointCommercialUpl
         return await response.Content.ReadAsByteArrayAsync(cancellationToken);
     }
 
-    private void ValidateConfiguration()
+    private void ValidateConfiguration(string? documentLibraryName = null)
     {
         if (string.IsNullOrWhiteSpace(_options.TenantId) ||
             string.IsNullOrWhiteSpace(_options.ClientId) ||
             string.IsNullOrWhiteSpace(_options.ClientSecret) ||
             string.IsNullOrWhiteSpace(_options.HostName) ||
             string.IsNullOrWhiteSpace(_options.SitePath) ||
-            string.IsNullOrWhiteSpace(_options.DocumentLibraryName))
+            string.IsNullOrWhiteSpace(documentLibraryName ?? _options.DocumentLibraryName))
         {
             throw new InvalidOperationException(
                 "La integracion con SharePoint no esta configurada. Revise la seccion SharePoint en appsettings.");
@@ -264,8 +331,10 @@ public sealed class SharePointCommercialUploadService : ISharePointCommercialUpl
     private async Task<string> GetDriveIdAsync(
         string siteId,
         string accessToken,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? documentLibraryName = null)
     {
+        var resolvedLibraryName = documentLibraryName ?? _options.DocumentLibraryName;
         var requestUrl = $"https://graph.microsoft.com/v1.0/sites/{siteId}/drives";
         using var request = new HttpRequestMessage(HttpMethod.Get, requestUrl);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
@@ -280,7 +349,7 @@ public sealed class SharePointCommercialUploadService : ISharePointCommercialUpl
         }
 
         using var document = JsonDocument.Parse(responseContent);
-        var drives = document.RootElement.GetProperty("value").EnumerateArray();
+        var drives = document.RootElement.GetProperty("value").EnumerateArray().ToList();
 
         foreach (var drive in drives)
         {
@@ -288,7 +357,7 @@ public sealed class SharePointCommercialUploadService : ISharePointCommercialUpl
                 ? nameProperty.GetString()
                 : null;
 
-            if (!string.Equals(name, _options.DocumentLibraryName, StringComparison.OrdinalIgnoreCase))
+            if (!IsMatchingLibraryName(name, resolvedLibraryName))
             {
                 continue;
             }
@@ -297,13 +366,65 @@ public sealed class SharePointCommercialUploadService : ISharePointCommercialUpl
                 ?? throw new InvalidOperationException("La biblioteca de SharePoint no devolvio un id valido.");
         }
 
+        // SharePoint puede mostrar "Documentos compartidos" en la interfaz,
+        // pero Graph puede devolver "Documents" o "Shared Documents".
+        if (string.Equals(resolvedLibraryName, "Documentos compartidos", StringComparison.OrdinalIgnoreCase))
+        {
+            var defaultDriveId = await GetDefaultDriveIdAsync(siteId, accessToken, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(defaultDriveId))
+            {
+                return defaultDriveId;
+            }
+        }
+
+        var availableLibraries = string.Join(", ", drives
+            .Select(drive => drive.TryGetProperty("name", out var property) ? property.GetString() : null)
+            .Where(name => !string.IsNullOrWhiteSpace(name)));
+
         throw new InvalidOperationException(
-            $"No se encontro la biblioteca '{_options.DocumentLibraryName}' en SharePoint.");
+            $"No se encontro la biblioteca '{resolvedLibraryName}' en SharePoint. Bibliotecas devueltas por Graph: {availableLibraries}");
     }
 
-    private string BuildStoragePath(string fileName, string folderPath)
+    private async Task<string?> GetDefaultDriveIdAsync(
+        string siteId,
+        string accessToken,
+        CancellationToken cancellationToken)
     {
-        var segments = new List<string> { _options.DocumentLibraryName.Trim('/') };
+        var requestUrl = $"https://graph.microsoft.com/v1.0/sites/{siteId}/drive";
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUrl);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        using var document = JsonDocument.Parse(responseContent);
+        return document.RootElement.TryGetProperty("id", out var idProperty)
+            ? idProperty.GetString()
+            : null;
+    }
+
+    private static bool IsMatchingLibraryName(string? name, string requestedName)
+    {
+        if (string.Equals(name, requestedName, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return string.Equals(requestedName, "Documentos compartidos", StringComparison.OrdinalIgnoreCase)
+            && (string.Equals(name, "Documents", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(name, "Shared Documents", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private string BuildStoragePath(string fileName, string folderPath, string? documentLibraryName = null)
+    {
+        var segments = new List<string>
+        {
+            (documentLibraryName ?? _options.DocumentLibraryName).Trim('/')
+        };
 
         if (!string.IsNullOrWhiteSpace(folderPath))
         {

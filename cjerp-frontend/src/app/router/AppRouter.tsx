@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { Suspense, lazy } from "react";
+import { createElement, Suspense, lazy } from "react";
 import PrivateRoute from "./PrivateRoute";
 import AutoSecurityRoute from "./AutoSecurityRoute";
 import SessionManager from "../session/SessionManager";
@@ -17,6 +17,7 @@ const PerfilRolMenuPage = lazy(() => import("../../features/seguridad/pages/perf
 const UsuarioPerfilRolMenu = lazy(() => import("../../features/seguridad/pages/usuario-perfil-rol-menu"));
 const UsuarioRolPage = lazy(() => import("../../features/seguridad/pages/usuariorol"));
 const AsistenciaPage = lazy(() => import("../../features/administracion/AsistenciaPage"));
+const exportacionasistnciasharepointpage = lazy(() => import("../../features/administracion/exportacionasistnciasharepointpage"));
 const MarcacionPage = lazy(() => import("../../features/administracion/MarcacionPage"));
 const PendientesPage = lazy(() => import("../../features/administracion/pendientes"));
 const SolicitudAdministracionPage = lazy(() => import("../../features/administracion/solicitudadministracion"));
@@ -134,6 +135,8 @@ export default function AppRouter() {
             <Route path="/admin/DashboardPage" element={<DashboardPage />} />
 
             <Route path="/administracion/asistencia" element={<AsistenciaPage />} />
+            <Route path="/administracion/exportacion-asistencia" element={createElement(exportacionasistnciasharepointpage)} />
+            <Route path="/administracion/exportacionasistenciasharepointpage" element={createElement(exportacionasistnciasharepointpage)} />
             <Route path="/administracion/pendientes" element={<PendientesPage />} />
             <Route
               path="/administracion/solicitudadministracion"

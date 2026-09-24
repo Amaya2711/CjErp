@@ -13,4 +13,11 @@ public sealed class SharePointOptions
     public string ExpensesFolderPath { get; set; } = "GASTO_FOTOS";
     public string ReembolsosFolderPath { get; set; } = "REEMBOLSOS";
     public Dictionary<string, string> FolderPaths { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public SharePointAsistenciaOptions Asistencia { get; set; } = new();
+}
+
+public sealed class SharePointAsistenciaOptions
+{
+    public string DocumentLibraryName { get; set; } = "Documentos compartidos";
+    public string FolderPath { get; set; } = "Asistencia";
 }

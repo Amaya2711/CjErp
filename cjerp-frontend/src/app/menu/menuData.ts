@@ -55,6 +55,7 @@ export const menuDashboard: DashboardGroup[] = [
     color: "#22C55E",
     tiles: [
       { label: "Asistencia", path: "/administracion/asistencia" },
+      { label: "Exportación asistencia SharePoint", path: "/administracion/exportacionasistenciasharepointpage" },
       { label: "Pendientes", path: "/administracion/pendientes" },
       { label: "Vacaciones", path: "/administracion/vacaciones" },
       { label: "Descanso Médico", path: "/administracion/descanso" },
