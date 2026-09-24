@@ -71,7 +71,8 @@ namespace CjERP.Api.Controllers
             var userId = User.FindFirstValue("IdUsuario") ?? User.Identity?.Name;
             if (!string.IsNullOrWhiteSpace(userId))
             {
-                _activeUserSessionService.LogoutUser(userId);
+                var sessionId = User.FindFirstValue("SessionId");
+                if (!string.IsNullOrWhiteSpace(sessionId)) _activeUserSessionService.LogoutSession(userId, sessionId);
             }
 
             return Ok(new
@@ -95,7 +96,8 @@ namespace CjERP.Api.Controllers
 
             if (!string.IsNullOrWhiteSpace(userId))
             {
-                _activeUserSessionService.LogoutUser(userId);
+                var sessionId = principal?.FindFirstValue("SessionId");
+                if (!string.IsNullOrWhiteSpace(sessionId)) _activeUserSessionService.LogoutSession(userId, sessionId);
             }
 
             return Ok(new { success = true });

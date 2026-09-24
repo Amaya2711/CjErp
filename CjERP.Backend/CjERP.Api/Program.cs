@@ -13,6 +13,7 @@ using CjERP.Application.Interfaces.Repositories;
 using CjERP.Application.Interfaces.Services;
 using CjERP.Application.Interfaces.Services.Arrendamientos;
 using CjERP.Infrastructure.DependencyInjection;
+using CjERP.Infrastructure.Configuration;
 using CjERP.Infrastructure.Repositories;
 using CjERP.Infrastructure.Services;
 using CjERP.Infrastructure.Services.Arrendamientos;
@@ -39,6 +40,12 @@ builder.Services.Configure<SmtpSettings>(
     builder.Configuration.GetSection("SmtpSettings"));
 builder.Services.Configure<SharePointOptions>(
     builder.Configuration.GetSection(SharePointOptions.SectionName));
+builder.Services.Configure<MobilePushOptions>(
+    builder.Configuration.GetSection(MobilePushOptions.SectionName));
+builder.Services.Configure<MobileAppVersionOptions>(
+    builder.Configuration.GetSection(MobileAppVersionOptions.SectionName));
+builder.Services.Configure<MobileMonitorOptions>(
+    builder.Configuration.GetSection(MobileMonitorOptions.SectionName));
 builder.Services.Configure<PlanillaXmlOptions>(
     builder.Configuration.GetSection(PlanillaXmlOptions.SectionName));
 builder.Services.Configure<WupSettings>(
@@ -210,6 +217,14 @@ builder.Services.AddSwaggerGen(options =>
 builder.Services.AddInfrastructure(builder.Configuration);
 
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IMobileCommunicationService, MobileCommunicationService>();
+builder.Services.AddScoped<IMobileCommunicationPublisher, MobileCommunicationPublisher>();
+builder.Services.AddScoped<IMobileDeviceService, MobileDeviceService>();
+builder.Services.AddHttpClient<IMobilePushDispatchService, MobilePushDispatchService>(client =>
+{
+    client.BaseAddress = new Uri("https://exp.host/--/api/v2/push/");
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
 builder.Services.AddSingleton<IActiveUserSessionService, ActiveUserSessionService>();
 builder.Services.AddHostedService<ActiveUserSessionCleanupHostedService>();
 builder.Services.AddScoped<IJwtService, JwtService>();
@@ -420,6 +435,11 @@ using (var scope = app.Services.CreateScope())
     await scheduler.ReprogramarAsync(ReporteWhatsappTipos.Gerencial);
     var asistenciaSharePointScheduler = scope.ServiceProvider.GetRequiredService<IAsistenciaSharePointJobScheduler>();
     await asistenciaSharePointScheduler.ReprogramarAsync();
+    RecurringJob.AddOrUpdate<MobilePushDispatchJob>(
+        "mobile-push-dispatch",
+        job => job.EjecutarAsync(),
+        "*/5 * * * *",
+        new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
 }
 
 app.Run();

@@ -7,7 +7,7 @@ namespace CjERP.Infrastructure.Services;
 
 public class ActiveUserSessionService : IActiveUserSessionService
 {
-    private readonly ConcurrentDictionary<string, SessionState> _activeSessions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, SessionState>> _activeSessions = new(StringComparer.OrdinalIgnoreCase);
     private readonly TimeSpan _idleTimeout;
     private static readonly TimeSpan RefreshWriteThreshold = TimeSpan.FromMinutes(1);
 
@@ -24,7 +24,8 @@ public class ActiveUserSessionService : IActiveUserSessionService
             return;
         }
 
-        _activeSessions[userId.Trim()] = new SessionState(sessionId.Trim(), DateTimeOffset.UtcNow);
+        var sessions = _activeSessions.GetOrAdd(userId.Trim(), _ => new ConcurrentDictionary<string, SessionState>(StringComparer.Ordinal));
+        sessions[sessionId.Trim()] = new SessionState(DateTimeOffset.UtcNow);
     }
 
     public bool ValidateAndRefreshSession(string userId, string sessionId)
@@ -35,12 +36,8 @@ public class ActiveUserSessionService : IActiveUserSessionService
         }
 
         var trimmedUserId = userId.Trim();
-        if (!_activeSessions.TryGetValue(trimmedUserId, out var activeSession))
-        {
-            return false;
-        }
-
-        if (!string.Equals(activeSession.SessionId, sessionId.Trim(), StringComparison.Ordinal))
+        if (!_activeSessions.TryGetValue(trimmedUserId, out var sessions) ||
+            !sessions.TryGetValue(sessionId.Trim(), out var activeSession))
         {
             return false;
         }
@@ -48,13 +45,14 @@ public class ActiveUserSessionService : IActiveUserSessionService
         var utcNow = DateTimeOffset.UtcNow;
         if (utcNow - activeSession.LastActivityUtc > _idleTimeout)
         {
-            _activeSessions.TryRemove(trimmedUserId, out _);
+            sessions.TryRemove(sessionId.Trim(), out _);
+            RemoveUserIfNoSessions(trimmedUserId, sessions);
             return false;
         }
 
         if (utcNow - activeSession.LastActivityUtc >= RefreshWriteThreshold)
         {
-            _activeSessions[trimmedUserId] = activeSession with { LastActivityUtc = utcNow };
+            sessions[sessionId.Trim()] = activeSession with { LastActivityUtc = utcNow };
         }
 
         return true;
@@ -70,6 +68,14 @@ public class ActiveUserSessionService : IActiveUserSessionService
         _activeSessions.TryRemove(userId.Trim(), out _);
     }
 
+    public void LogoutSession(string userId, string sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(sessionId) ||
+            !_activeSessions.TryGetValue(userId.Trim(), out var sessions)) return;
+        sessions.TryRemove(sessionId.Trim(), out _);
+        RemoveUserIfNoSessions(userId.Trim(), sessions);
+    }
+
     public int PruneExpiredSessions()
     {
         if (_activeSessions.IsEmpty)
@@ -82,19 +88,20 @@ public class ActiveUserSessionService : IActiveUserSessionService
 
         foreach (var entry in _activeSessions)
         {
-            if (utcNow - entry.Value.LastActivityUtc <= _idleTimeout)
+            foreach (var session in entry.Value)
             {
-                continue;
+                if (utcNow - session.Value.LastActivityUtc > _idleTimeout && entry.Value.TryRemove(session.Key, out _)) removed++;
             }
-
-            if (_activeSessions.TryRemove(entry.Key, out _))
-            {
-                removed++;
-            }
+            RemoveUserIfNoSessions(entry.Key, entry.Value);
         }
 
         return removed;
     }
 
-    private sealed record SessionState(string SessionId, DateTimeOffset LastActivityUtc);
+    private void RemoveUserIfNoSessions(string userId, ConcurrentDictionary<string, SessionState> sessions)
+    {
+        if (sessions.IsEmpty) _activeSessions.TryRemove(userId, out _);
+    }
+
+    private sealed record SessionState(DateTimeOffset LastActivityUtc);
 }

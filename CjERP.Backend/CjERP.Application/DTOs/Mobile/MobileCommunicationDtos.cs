@@ -1,0 +1,14 @@
+using System.Text.Json.Serialization;
+
+namespace CjERP.Application.DTOs.Mobile;
+
+public sealed class MobileCommunicationListRequestDto { public int? Tipo { get; set; } public bool? SoloNoLeidos { get; set; } public int Pagina { get; set; } = 1; public int TamanoPagina { get; set; } = 20; }
+public sealed class MobileCommunicationDto { public long IdComunicacion { get; set; } public int Tipo { get; set; } public string Titulo { get; set; } = string.Empty; public string? Resumen { get; set; } public string? Mensaje { get; set; } public int Prioridad { get; set; } public int TipoPersistencia { get; set; } public DateTime FechaCreacion { get; set; } public string? Remitente { get; set; } public bool Leido { get; set; } public bool Confirmado { get; set; } public bool PermiteConfirmacion { get; set; } public DateTime? FechaLectura { get; set; } public DateTime? FechaConfirmacion { get; set; } }
+public sealed class MobilePagedResultDto<T> { public IReadOnlyList<T> Items { get; init; } = []; public int Pagina { get; init; } public int TamanoPagina { get; init; } public int Total { get; init; } }
+public sealed class MobileCommunicationActionRequestDto { public long? IdDispositivo { get; set; } }
+public sealed class MobileCommunicationCreateRequestDto { public int Tipo { get; set; } public string Titulo { get; set; } = string.Empty; public string Mensaje { get; set; } = string.Empty; public int Prioridad { get; set; } public int TipoPersistencia { get; set; } public DateTime? FechaProgramada { get; set; } public DateTime? FechaVencimiento { get; set; } public string? RutaDestino { get; set; } public long? IdReferencia { get; set; } public string? TipoReferencia { get; set; } public bool PermiteConfirmacion { get; set; } public List<int> Destinatarios { get; set; } = []; }
+public sealed class MobileCommunicationCreateResultDto { public long IdComunicacion { get; set; } public int Destinatarios { get; set; } }
+public sealed class MobileCommunicationRecipientDto { public int IdEmpleadoCj { get; set; } public string NombreEmpleado { get; set; } = string.Empty; public int? IdCargo { get; set; } public string? Correo { get; set; } }
+public sealed class MobileCommandResultDto { public int Resultado { get; set; } public string? Mensaje { get; set; } }
+public sealed class MobileNotificationSummaryDto { public int Total { get; set; } public int NoLeidas { get; set; } public int Alertas { get; set; } public int Comunicados { get; set; } public int Pendientes { get; set; } public int Obligatorias { get; set; } }
+public sealed class MobileCommunicationAttachmentDto { public long IdAdjunto { get; set; } public long IdComunicacion { get; set; } public string NombreArchivo { get; set; } = string.Empty; public string TipoContenido { get; set; } = "application/octet-stream"; public long TamanoBytes { get; set; } public DateTime FechaCreacion { get; set; } [JsonIgnore] public string RutaAlmacenamiento { get; set; } = string.Empty; }

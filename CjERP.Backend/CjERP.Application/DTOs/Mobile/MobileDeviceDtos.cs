@@ -1,0 +1,5 @@
+namespace CjERP.Application.DTOs.Mobile;
+
+public sealed class MobileDeviceRegistrationDto { public string PushToken { get; set; } = string.Empty; public string DeviceId { get; set; } = string.Empty; public string Plataforma { get; set; } = string.Empty; public string? Modelo { get; set; } public string? VersionSistema { get; set; } public string? VersionApp { get; set; } }
+public sealed class MobileDeviceDeactivateDto { public string DeviceId { get; set; } = string.Empty; }
+public sealed class MobileDeviceAdminDto { public long IdDispositivo { get; set; } public int IdEmpleadoCj { get; set; } public string NombreEmpleado { get; set; } = string.Empty; public string IdUsuario { get; set; } = string.Empty; public string Plataforma { get; set; } = string.Empty; public string? Modelo { get; set; } public string? VersionSistema { get; set; } public string? VersionApp { get; set; } public DateTime FechaRegistro { get; set; } public DateTime FechaUltimoAcceso { get; set; } public bool Activo { get; set; } }

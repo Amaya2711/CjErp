@@ -12,6 +12,7 @@ public sealed class SharePointOptions
     public string DocumentLibraryName { get; set; } = "APLICATIVOS EXTERNOS";
     public string ExpensesFolderPath { get; set; } = "GASTO_FOTOS";
     public string ReembolsosFolderPath { get; set; } = "REEMBOLSOS";
+    public string MobileCommunicationsFolderPath { get; set; } = "COMUNICACIONES";
     public Dictionary<string, string> FolderPaths { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public SharePointAsistenciaOptions Asistencia { get; set; } = new();
 }

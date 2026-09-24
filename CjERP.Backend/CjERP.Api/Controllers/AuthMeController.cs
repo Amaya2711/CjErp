@@ -19,6 +19,7 @@ namespace CjERP.Api.Controllers
                 NombreEmpleado = User.FindFirstValue("NombreEmpleado"),
                 Correo = User.FindFirstValue("Correo"),
                 CodEmp = ParseNullableInt(User.FindFirstValue("CodEmp")),
+                IdEmpleado = ParseNullableInt(User.FindFirstValue("IdEmpleado")),
                 CodVal = ParseNullableInt(User.FindFirstValue("CodVal")),
                 Cuadrilla = ParseNullableInt(User.FindFirstValue("Cuadrilla")),
                 IdPerfil = ParseNullableInt(User.FindFirstValue("IdPerfil")),

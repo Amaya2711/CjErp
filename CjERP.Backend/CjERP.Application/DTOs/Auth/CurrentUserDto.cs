@@ -6,6 +6,7 @@
         public string? NombreEmpleado { get; set; }
         public string? Correo { get; set; }
         public int? CodEmp { get; set; }
+        public int? IdEmpleado { get; set; }
         public int? CodVal { get; set; }
         public int? Cuadrilla { get; set; }
         public int? IdPerfil { get; set; }

@@ -8,6 +8,7 @@
         public string? NombreEmpleado { get; set; }
         public int? CodEmp { get; set; }
         public int? IdEmpleado { get; set; }
+        public int? IdEmpleadoCj { get; set; }
         public int? IdCargo { get; set; }
         public int? CodVal { get; set; }
 

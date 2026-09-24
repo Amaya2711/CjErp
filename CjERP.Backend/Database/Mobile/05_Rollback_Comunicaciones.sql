@@ -1,0 +1,14 @@
+SET XACT_ABORT ON;
+BEGIN TRANSACTION;
+IF OBJECT_ID(N'dbo.sp_DispositivoMovil_Desactivar',N'P') IS NOT NULL DROP PROCEDURE dbo.sp_DispositivoMovil_Desactivar;
+IF OBJECT_ID(N'dbo.sp_DispositivoMovil_Registrar',N'P') IS NOT NULL DROP PROCEDURE dbo.sp_DispositivoMovil_Registrar;
+IF OBJECT_ID(N'dbo.sp_Comunicacion_PendientesObligatorias',N'P') IS NOT NULL DROP PROCEDURE dbo.sp_Comunicacion_PendientesObligatorias;
+IF OBJECT_ID(N'dbo.sp_Comunicacion_Confirmar',N'P') IS NOT NULL DROP PROCEDURE dbo.sp_Comunicacion_Confirmar;
+IF OBJECT_ID(N'dbo.sp_Comunicacion_MarcarLeido',N'P') IS NOT NULL DROP PROCEDURE dbo.sp_Comunicacion_MarcarLeido;
+IF OBJECT_ID(N'dbo.sp_Comunicacion_Obtener',N'P') IS NOT NULL DROP PROCEDURE dbo.sp_Comunicacion_Obtener;
+IF OBJECT_ID(N'dbo.sp_Comunicacion_ListarPorEmpleado',N'P') IS NOT NULL DROP PROCEDURE dbo.sp_Comunicacion_ListarPorEmpleado;
+IF OBJECT_ID(N'dbo.ComunicacionEvento',N'U') IS NOT NULL DROP TABLE dbo.ComunicacionEvento;
+IF OBJECT_ID(N'dbo.DispositivoMovil',N'U') IS NOT NULL DROP TABLE dbo.DispositivoMovil;
+IF OBJECT_ID(N'dbo.ComunicacionDestinatario',N'U') IS NOT NULL DROP TABLE dbo.ComunicacionDestinatario;
+IF OBJECT_ID(N'dbo.Comunicacion',N'U') IS NOT NULL DROP TABLE dbo.Comunicacion;
+COMMIT TRANSACTION;

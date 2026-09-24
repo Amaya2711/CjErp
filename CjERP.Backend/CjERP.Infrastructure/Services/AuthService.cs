@@ -38,6 +38,10 @@ namespace CjERP.Infrastructure.Services
             if (!string.Equals(result.IdUsuario?.Trim(), requestedUser, StringComparison.OrdinalIgnoreCase))
                 return null;
 
+            // sp_ValidarUsuario already returns EmpleadoCj.IdEmpleado in CodEmp.
+            // Mobile authorization must use that corporate employee identifier directly.
+            result.IdEmpleadoCj = result.CodEmp;
+
             return result;
         }
     }

@@ -27,6 +27,8 @@ namespace CjERP.Infrastructure.Services
                 new Claim("NombreEmpleado", usuario.NombreEmpleado ?? string.Empty),
                 new Claim("Correo", usuario.Correo ?? string.Empty),
                 new Claim("CodEmp", usuario.CodEmp?.ToString() ?? string.Empty),
+                new Claim("IdEmpleadoCj", usuario.IdEmpleadoCj?.ToString() ?? string.Empty),
+                new Claim("IdCargo", usuario.IdCargo?.ToString() ?? string.Empty),
                 new Claim("CodVal", usuario.CodVal?.ToString() ?? string.Empty),
                 new Claim("Cuadrilla", usuario.Cuadrilla?.ToString() ?? string.Empty),
                 new Claim("IdPerfil", usuario.IdPerfil?.ToString() ?? string.Empty),

@@ -7,6 +7,8 @@ import MainLayout from "../../layouts/MainLayout";
 
 import LoginPage from "../../features/auth/pages/LoginPage";
 const DashboardPage = lazy(() => import("../../features/admin/DashboardPage"));
+const MobileCommunicationMonitorPage = lazy(() => import("../../features/admin/MobileCommunicationMonitorPage"));
+const MobileCommunicationComposerPage = lazy(() => import("../../features/admin/MobileCommunicationComposerPage"));
 const DynamicMenuRoutePage = lazy(() => import("../../pages/DynamicMenuRoutePage"));
 const SeguridadUsuariosPage = lazy(() => import("../../features/seguridad/pages/usuarios"));
 const SeguridadPerfilesPage = lazy(() => import("../../features/seguridad/pages/perfiles"));
@@ -133,6 +135,8 @@ export default function AppRouter() {
           <Route element={<PrivateRoute />}>
             <Route element={<MainLayout />}>
             <Route path="/admin/DashboardPage" element={<DashboardPage />} />
+            <Route path="/administracion/monitor-comunicaciones" element={<MobileCommunicationMonitorPage />} />
+            <Route path="/administracion/comunicaciones" element={<MobileCommunicationComposerPage />} />
 
             <Route path="/administracion/asistencia" element={<AsistenciaPage />} />
             <Route path="/administracion/exportacion-asistencia" element={createElement(exportacionasistnciasharepointpage)} />
