@@ -77,6 +77,7 @@ type PagoRow = {
   disponibleOc?: number;
   totalSubtotalPorMoneda?: number;
   totalMontoBckPorMoneda?: number;
+  totalPagadoConvertidoSoles?: number;
   subtotal: number;
   igv: number;
   total: number;
@@ -995,6 +996,13 @@ function mapPlanillaConsultaRowToPagoRow(
     porcentajeFic: getRecordNumber(row, "PorcentajeFic", "porcentajeFic") ?? undefined,
     totalSubtotalPorMoneda: getRecordNumber(row, "TotalSubtotalPorMoneda", "totalSubtotalPorMoneda") ?? undefined,
     totalMontoBckPorMoneda: getRecordNumber(row, "TotalMontoBckPorMoneda", "totalMontoBckPorMoneda") ?? undefined,
+    totalPagadoConvertidoSoles: getRecordNumber(
+      row,
+      "TotalpagadoConvertidoSoles",
+      "totalpagadoConvertidoSoles",
+      "TotalPagadoConvertidoSoles",
+      "totalPagadoConvertidoSoles"
+    ) ?? undefined,
     subtotal: Number.isFinite(subtotal) ? subtotal : 0,
     igv: Number.isFinite(igv) ? igv : 0,
     total: Number.isFinite(total) ? total : 0,
@@ -1389,7 +1397,10 @@ export default function PagosV1Page() {
   const [resumenOtDetalle, setResumenOtDetalle] = useState<ResumenOtDetalle | null>(null);
   const [resumenOtMonedas, setResumenOtMonedas] = useState<ResumenOtDetalle[]>([]);
   const [resumenOtLoading, setResumenOtLoading] = useState(false);
-  const [tipoCambio, setTipoCambio] = useState("3.50");
+  const [tipoCambioUsd, setTipoCambioUsd] = useState("3.50");
+  const [tipoCambioEur, setTipoCambioEur] = useState("3.80");
+  const [tipoCambioDop, setTipoCambioDop] = useState("0.057");
+  const [tipoCambioCop, setTipoCambioCop] = useState("0.0010");
   const [consumoOc, setConsumoOc] = useState<OrdenCompraConsumoDto | null>(null);
   const [historialRows, setHistorialRows] = useState<PagoRow[]>([]);
   const [historialLoading, setHistorialLoading] = useState(false);
@@ -1541,6 +1552,19 @@ export default function PagosV1Page() {
         );
 
         const parametros: PlanillaConsultaParametro[] = [];
+        // Los tipos de cambio se toman de los filtros principales y se
+        // envían únicamente cuando contienen un valor válido.
+        [
+          ["TipoCambioUSD", tipoCambioUsd],
+          ["TipoCambioEUR", tipoCambioEur],
+          ["TipoCambioDOP", tipoCambioDop],
+          ["TipoCambioCOP", tipoCambioCop],
+        ].forEach(([nombre, valor]) => {
+          const tipoCambioFiltro = parseNumericValue(valor);
+          if (tipoCambioFiltro > 0) {
+            parametros.push({ nombre, valor: String(tipoCambioFiltro), tipo: "decimal" });
+          }
+        });
 
         // Se cargan todos los estados en una sola consulta para conservar los
         // contadores de todos los KPIs al navegar entre pestañas. La pestaña
@@ -2452,7 +2476,7 @@ export default function PagosV1Page() {
     });
   }, [conPagadoRows, detalleOcActiva?.montoPlanilla, detalleOcActiva?.totalAcumuladoOt, resumenOtMonedas]);
   const resumenOcTitulo = detalleOcActiva?.ot || detalleOcActiva?.correlativo || filaActiva?.ot || filaActiva?.correlativo || "";
-  const tipoCambioLocal = Math.max(parseNumericValue(tipoCambio), 0);
+  const tipoCambioLocal = Math.max(parseNumericValue(tipoCambioUsd), 0);
   const montoPlanillaOriginalOt = parseNumericValue(filaActiva?.totalSubtotalPorMoneda ?? 0);
   // El total pagado es el subtotal acumulado por moneda enviado por el store.
   // No depende del historial ni de consultas adicionales al seleccionar la fila.
@@ -2736,6 +2760,11 @@ export default function PagosV1Page() {
     setMessage("Filtros aplicados. Actualizando registros...");
   };
 
+  const handleReloadWithExchangeRates = () => {
+    setRefreshTick((current) => current + 1);
+    setMessage("Actualizando todos los grids con los tipos de cambio ingresados...");
+  };
+
   const abrirGasto = (row: PagoRow, modo: "ver" | "editar") => {
     const correlativo = Math.trunc(Number(row.correlativo));
     if (!Number.isFinite(correlativo) || correlativo <= 0) {
@@ -2800,6 +2829,10 @@ export default function PagosV1Page() {
     const defaultFilters = getDefaultFilterState();
     setFilters(defaultFilters);
     setAppliedFilters(defaultFilters);
+    setTipoCambioUsd("3.50");
+    setTipoCambioEur("3.80");
+    setTipoCambioDop("0.057");
+    setTipoCambioCop("0.0010");
     setBusquedaSolicitante("");
     setBusquedaResponsable("");
     setBusquedaValidador("");
@@ -3246,6 +3279,18 @@ export default function PagosV1Page() {
   return (
     <AppPage title="Pagos" fillHeight>
       <div style={styles.page}>
+        <style>{`
+          .pagos-v1-selected-row > td {
+            border-top: 2px solid #2563EB !important;
+            border-bottom: 2px solid #2563EB !important;
+          }
+          .pagos-v1-selected-row > td:first-child {
+            border-left: 2px solid #2563EB !important;
+          }
+          .pagos-v1-selected-row > td:last-child {
+            border-right: 2px solid #2563EB !important;
+          }
+        `}</style>
         <section
           style={{
             ...styles.hero,
@@ -3283,6 +3328,46 @@ export default function PagosV1Page() {
                       placeholder="Buscar por correlativo, OT, OC, cliente, proyecto, Site ID, Site o tipo de trabajo"
                     style={styles.quickSearchInput}
                   />
+                </div>
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 8, flexWrap: "wrap" }}>
+                  {[
+                    { parametro: "USD", etiqueta: "TC S/ por US$", valor: tipoCambioUsd, setValor: setTipoCambioUsd },
+                    { parametro: "EUR", etiqueta: "TC S/ por EUR", valor: tipoCambioEur, setValor: setTipoCambioEur },
+                    { parametro: "DOP", etiqueta: "TC S/ por DOP", valor: tipoCambioDop, setValor: setTipoCambioDop },
+                    { parametro: "COP", etiqueta: "TC S/ por COP", valor: tipoCambioCop, setValor: setTipoCambioCop },
+                  ].map(({ parametro, etiqueta, valor, setValor }) => (
+                    <label key={parametro} style={styles.tipoCambioField}>
+                      <span style={styles.tipoCambioLabel}>{etiqueta}</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.0001"
+                        inputMode="decimal"
+                        value={valor}
+                        onChange={(event) => setValor(event.target.value)}
+                        style={styles.tipoCambioInput}
+                        aria-label={etiqueta}
+                      />
+                    </label>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={handleReloadWithExchangeRates}
+                    disabled={loadingData}
+                    title="Recargar todos los grids con los tipos de cambio ingresados"
+                    style={{
+                      ...styles.applyFiltersButton,
+                      height: 34,
+                      borderColor: currentTheme.border,
+                      background: currentTheme.accent,
+                      color: "#FFFFFF",
+                      opacity: loadingData ? 0.65 : 1,
+                      cursor: loadingData ? "wait" : "pointer",
+                    }}
+                  >
+                    <RotateCcw size={15} />
+                    Actualizar montos
+                  </button>
                 </div>
 
                 <div style={styles.quickDateFilters}>
@@ -3442,19 +3527,6 @@ export default function PagosV1Page() {
                         ))}
                     </div>
                   </details>
-                  <label style={styles.tipoCambioField}>
-                    <span style={styles.tipoCambioLabel}>Tipo de cambio (S/ por US$)</span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      inputMode="decimal"
-                      value={tipoCambio}
-                      onChange={(event) => setTipoCambio(event.target.value)}
-                      style={styles.tipoCambioInput}
-                      aria-label="Tipo de cambio para convertir dólares a soles"
-                    />
-                  </label>
                   <button
                     type="button"
                     onClick={handleApplyFilters}
@@ -3698,6 +3770,7 @@ export default function PagosV1Page() {
                                 : (isSelected ? "#DBEAFE" : "#FFFFFF");
                               const totalSubtotalPorMoneda = row.totalSubtotalPorMoneda ?? 0;
                               const totalMontoBckPorMoneda = row.totalMontoBckPorMoneda ?? 0;
+                              const totalGastado = row.totalPagadoConvertidoSoles ?? 0;
                               const porcentajeAvance = totalMontoBckPorMoneda > 0
                                 ? (totalSubtotalPorMoneda / totalMontoBckPorMoneda) * 100
                                 : 0;
@@ -3707,18 +3780,17 @@ export default function PagosV1Page() {
                               return (
                                 <tr
                                   key={row.id}
+                                  className={isSelected ? "pagos-v1-selected-row" : undefined}
                                   onClick={() => setSelectedId(row.id)}
                                   style={{
                                     cursor: "pointer",
                                     background: rowBackground,
-                                    boxShadow: isSelected ? "inset 0 0 0 2px #2563EB" : undefined,
                                   }}
                                 >
                                   <td style={{
                                     ...styles.td,
                                     ...getStickyCellStyle(0, rowBackground, 4),
                                     textAlign: "center",
-                                    boxShadow: isSelected ? "inset 4px 0 0 #1D4ED8" : undefined,
                                   }}>
                                     <input
                                       type="checkbox"
@@ -3735,7 +3807,16 @@ export default function PagosV1Page() {
                                       style={{ accentColor: rowTheme.accent }}
                                     />
                                   </td>
-                                  <td title={row.correlativo} style={{ ...styles.td, ...getStickyCellStyle(1, rowBackground, 3) }}>{row.correlativo}</td>
+                                  <td
+                                    title="Visualizar gasto"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      abrirGasto(row, "ver");
+                                    }}
+                                    style={{ ...styles.td, ...getStickyCellStyle(1, rowBackground, 3), color: "#2563EB", cursor: "pointer", textDecoration: "underline" }}
+                                  >
+                                    {row.correlativo}
+                                  </td>
                                   <td title={formatDate(row.fecha)} style={styles.td}>{formatDate(row.fecha)}</td>
                                   <td title={row.cliente || "-"} style={styles.td}>{row.cliente}</td>
                                   <td title={row.proyecto || "-"} style={styles.td}>{row.proyecto}</td>
@@ -3756,14 +3837,14 @@ export default function PagosV1Page() {
                                   <td title={formatCurrency(row.total, row.moneda)} style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
                                   <td title={row.moneda || "-"} style={styles.td}>{row.moneda || "-"}</td>
                                   <td
-                                    title="Ver detalle de la orden"
+                                    title={`Ver detalle de la orden — ${formatCurrency(totalGastado, "SOLES")}`}
                                     onClick={(event) => {
                                       event.stopPropagation();
                                       openHistorialOtForRow(row);
                                     }}
                                     style={{ ...styles.td, cursor: "pointer", color: "#2563EB", textDecoration: "underline" }}
                                   >
-                                    {formatCurrency(totalSubtotalPorMoneda, row.moneda)}
+                                    {formatCurrency(totalGastado, "SOLES")}
                                   </td>
                                   <td title={formatCurrency(row.totalMontoBckPorMoneda ?? 0, row.moneda)} style={styles.td}>
                                     {formatCurrency(totalMontoBckPorMoneda, row.moneda)}
@@ -3822,9 +3903,6 @@ export default function PagosV1Page() {
                                       });
                                       return (
                                         <div style={{ display: "flex", justifyContent: "center", gap: 4 }}>
-                                          <button type="button" title="Visualizar gasto" aria-label={`Visualizar gasto ${row.correlativo}`} onClick={(event) => { event.stopPropagation(); abrirGasto(row, "ver"); }} style={actionStyle(true, "#1D4ED8", "#EFF6FF", "#BFDBFE")}>
-                                            <Eye size={14} />
-                                          </button>
                                           <button type="button" title={accionesHabilitadas ? "Modificar gasto" : "Modificar no disponible para el estado actual"} aria-label={`Modificar gasto ${row.correlativo}`} disabled={!accionesHabilitadas} onClick={(event) => { event.stopPropagation(); if (accionesHabilitadas) abrirGasto(row, "editar"); }} style={actionStyle(accionesHabilitadas, "#3730A3", "#EEF2FF", "#C7D2FE")}>
                                             <Pencil size={14} />
                                           </button>
