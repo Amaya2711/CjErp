@@ -154,7 +154,7 @@ type GroupRow = {
   totalsByCurrency: Record<string, { subtotal: number; igv: number; total: number }>;
 };
 
-type PagoSortColumn = keyof Pick<PagoRow, "correlativo" | "ot" | "idOc" | "fila" | "responsable" | "validador" | "subtotal" | "igv" | "total" | "fecha" | "cliente" | "proyecto" | "siteId" | "corSite" | "site" | "tipoTrabajo" | "tarea" | "moneda" | "detalle">;
+type PagoSortColumn = keyof Pick<PagoRow, "correlativo" | "ot" | "idOc" | "fila" | "solicitante" | "responsable" | "validador" | "subtotal" | "igv" | "total" | "fecha" | "cliente" | "proyecto" | "siteId" | "corSite" | "site" | "tipoTrabajo" | "tarea" | "moneda" | "detalle">;
 
 type ResumenOtDetalle = {
   ot: string;
@@ -259,296 +259,6 @@ const TAB_ACTION_KEYS: Record<PagoEstado, string> = {
   observadas: "tab.observadas",
 };
 
-const PAYMENT_ROWS: PagoRow[] = [
-  {
-    id: 1,
-    correlativo: "126249",
-    ot: "OT-126249",
-    cliente: "AMX",
-    proyecto: "DENSIFICACION",
-    siteId: "L11084",
-    site: "NAT_PASAJE_39_RICARDO",
-    tipoTrabajo: "TI - TI",
-    tarea: "ENVIOS_RECOJOS",
-    fecha: "2026-08-14",
-    solicitante: "AGUILAR MENDOZA JESUS MIGUEL",
-    responsable: "TORRES SANCHEZ R.",
-    validador: "TORRES SANCHEZ R.",
-    moneda: "Soles",
-    subtotal: 9555.45,
-    igv: 229.49,
-    total: 10415.44,
-    estado: "aprobar",
-    diasEstado: 1,
-    observacion: "Pendiente de aprobacion de primer nivel.",
-    detalle: "Orden de pago con sustento completo y lista para validacion.",
-    documento: "OC-126249",
-  },
-  {
-    id: 2,
-    correlativo: "126250",
-    ot: "OT-126250",
-    cliente: "AMX",
-    proyecto: "DENSIFICACION",
-    siteId: "L16447",
-    site: "NAT_SOL_NACIENTE",
-    tipoTrabajo: "TI - TI",
-    tarea: "ENVIOS_RECOJOS",
-    fecha: "2026-08-13",
-    solicitante: "AGUILAR MENDOZA JESUS MIGUEL",
-    responsable: "CASTILLO HINOSTROZA",
-    validador: "CASTILLO HINOSTROZA",
-    moneda: "Soles",
-    subtotal: 1462.00,
-    igv: 262.16,
-    total: 1724.16,
-    estado: "aprobar",
-    diasEstado: 2,
-    observacion: "En cola de aprobacion.",
-    detalle: "Gasto operativo con evidencias asociadas a campo.",
-    documento: "OC-126250",
-  },
-  {
-    id: 3,
-    correlativo: "126274",
-    ot: "OT-126274",
-    cliente: "SDP_INTEGRATEL",
-    proyecto: "ROLL OUT",
-    siteId: "L16039",
-    site: "RINCONADA",
-    tipoTrabajo: "OBRAS CIVILES",
-    tarea: "CM_COMP_MATERIAL",
-    fecha: "2026-08-08",
-    solicitante: "EVELIN OLARTE BERROCAL",
-    responsable: "PEDROZA SIERRA R.",
-    validador: "PEDROZA SIERRA R.",
-    moneda: "Soles",
-    subtotal: 2200.0,
-    igv: 396.0,
-    total: 2596.0,
-    estado: "reaprobar",
-    diasEstado: 4,
-    observacion: "Debe corregirse el detalle observacion anterior.",
-    detalle: "Se modificaron cantidades y descripcion, requiere re-aprobacion.",
-    documento: "OC-126274",
-  },
-  {
-    id: 4,
-    correlativo: "126275",
-    ot: "OT-126275",
-    cliente: "SDP_INTEGRATEL",
-    proyecto: "ROLL OUT",
-    siteId: "TA0338",
-    site: "SANTA MARCOS",
-    tipoTrabajo: "OBRAS CIVILES",
-    tarea: "CM_COMP_MATERIAL",
-    fecha: "2026-08-11",
-    solicitante: "EVELIN OLARTE BERROCAL",
-    responsable: "CMG CHAVEZ SAC",
-    validador: "CMG CHAVEZ SAC",
-    moneda: "Soles",
-    subtotal: 4965.20,
-    igv: 0,
-    total: 4965.20,
-    estado: "reaprobar",
-    diasEstado: 5,
-    observacion: "Pendiente de validacion adicional.",
-    detalle: "Solicitud con respaldo incompleto para segunda revision.",
-    documento: "OC-126275",
-  },
-  {
-    id: 5,
-    correlativo: "126278",
-    ot: "OT-126278",
-    cliente: "CJ TELECOM",
-    proyecto: "MANTENIMIENTO",
-    siteId: "100010",
-    site: "ADMINISTRACION",
-    tipoTrabajo: "ADMINISTRATIVO",
-    tarea: "TALLER_ADECUACION",
-    fecha: "2026-08-12",
-    solicitante: "CLAUDIA ESCUDERO",
-    responsable: "CONTRATISTAS GEN...",
-    validador: "CONTRATISTAS GEN...",
-    moneda: "Soles",
-    subtotal: 5000.0,
-    igv: 0,
-    total: 5000.0,
-    estado: "hormiga",
-    diasEstado: 7,
-    observacion: "Prioridad media-alta.",
-    detalle: "Pago recurrente con continuidad operativa.",
-    documento: "OC-126278",
-  },
-  {
-    id: 6,
-    correlativo: "126279",
-    ot: "OT-126279",
-    cliente: "AMX",
-    proyecto: "PEX",
-    siteId: "TJS180",
-    site: "NAT_NUNBAMBA",
-    tipoTrabajo: "PEXT",
-    tarea: "REEMBOLSO_GASTOS",
-    fecha: "2026-08-10",
-    solicitante: "ELVIS SARAVIAS...",
-    responsable: "SG NATCLAR S.A.C.",
-    validador: "SG NATCLAR S.A.C.",
-    moneda: "Soles",
-    subtotal: 1412.46,
-    igv: 0,
-    total: 1412.46,
-    estado: "observadas",
-    diasEstado: 9,
-    observacion: "Falta conformidad del responsable.",
-    detalle: "Se devolvio el expediente para subsanar observaciones.",
-    documento: "OC-126279",
-  },
-  {
-    id: 7,
-    correlativo: "126280",
-    ot: "OT-126280",
-    cliente: "SITES_DOMINICANA",
-    proyecto: "MANTENIMIENTO",
-    siteId: "D001309",
-    site: "SANTA ROSA - BAN...",
-    tipoTrabajo: "MANTENIMIENTO",
-    tarea: "TALLER_ADECUACION",
-    fecha: "2026-08-09",
-    solicitante: "ELVIS SARAVIAS...",
-    responsable: "KELLY ALESSANDRA ...",
-    validador: "KELLY ALESSANDRA ...",
-    moneda: "Soles",
-    subtotal: 198.36,
-    igv: 0,
-    total: 198.36,
-    estado: "observadas",
-    diasEstado: 8,
-    observacion: "Pendiente de regularizacion.",
-    detalle: "Debe adjuntarse correccion documental.",
-    documento: "OC-126280",
-  },
-  {
-    id: 8,
-    correlativo: "126281",
-    ot: "OT-126281",
-    cliente: "SDP",
-    proyecto: "ROLL OUT",
-    siteId: "LA3181",
-    site: "CAHUIDE",
-    tipoTrabajo: "OBRAS CIVILES",
-    tarea: "ADICIONAL",
-    fecha: "2026-08-07",
-    solicitante: "JUAN CARLOS GUEVARA ESCRIBA",
-    responsable: "MIGUEL RIVEROS",
-    validador: "MIGUEL RIVEROS",
-    moneda: "Soles",
-    subtotal: 10000.0,
-    igv: 0,
-    total: 10000.0,
-    estado: "aprobar",
-    diasEstado: 3,
-    observacion: "En revision para aprobacion final.",
-    detalle: "Corresponde a expediente consolidado de la semana.",
-    documento: "OC-126281",
-  },
-  {
-    id: 9,
-    correlativo: "126282",
-    ot: "OT-126282",
-    cliente: "SITES_DOMINICANA",
-    proyecto: "MANTENIMIENTO",
-    siteId: "D000051",
-    site: "LA PERLA",
-    tipoTrabajo: "MANTENIMIENTO",
-    tarea: "TALLER_ADECUACION",
-    fecha: "2026-08-05",
-    solicitante: "ANGELLO ALDAIR CUENCA PILACA",
-    responsable: "KELLY ALESSANDRA ...",
-    validador: "KELLY ALESSANDRA ...",
-    moneda: "Soles",
-    subtotal: 90.82,
-    igv: 0,
-    total: 90.82,
-    estado: "hormiga",
-    diasEstado: 5,
-    observacion: "Seguimiento con prioridad operativa.",
-    detalle: "Orden de pago con control de detalle y trazabilidad.",
-    documento: "OC-126282",
-  },
-  {
-    id: 10,
-    correlativo: "126283",
-    ot: "OT-126283",
-    cliente: "SITES_DOMINICANA",
-    proyecto: "MANTENIMIENTO",
-    siteId: "638",
-    site: "PISANO",
-    tipoTrabajo: "INGENIERIA",
-    tarea: "TALLER_ADECUACION",
-    fecha: "2026-08-04",
-    solicitante: "ANGELLO ALDAIR CUENCA PILACA",
-    responsable: "KELLY ALESSANDRA ...",
-    validador: "KELLY ALESSANDRA ...",
-    moneda: "Soles",
-    subtotal: 198.36,
-    igv: 0,
-    total: 198.36,
-    estado: "observadas",
-    diasEstado: 11,
-    observacion: "Falta adjuntar sustento corregido.",
-    detalle: "Se encuentra a la espera de correcciones administrativas.",
-    documento: "OC-126283",
-  },
-  {
-    id: 11,
-    correlativo: "126284",
-    ot: "OT-126284",
-    cliente: "SITES_DOMINICANA",
-    proyecto: "MANTENIMIENTO",
-    siteId: "D000219",
-    site: "CEFUFA (LA CALET...)",
-    tipoTrabajo: "MANTENIMIENTO",
-    tarea: "TALLER_ADECUACION",
-    fecha: "2026-08-04",
-    solicitante: "ANGELLO ALDAIR CUENCA PILACA",
-    responsable: "KELLY ALESSANDRA ...",
-    validador: "KELLY ALESSANDRA ...",
-    moneda: "Soles",
-    subtotal: 90.82,
-    igv: 0,
-    total: 90.82,
-    estado: "observadas",
-    diasEstado: 11,
-    observacion: "Requiere cambio de soporte.",
-    detalle: "Correccion pendiente antes del reingreso al flujo.",
-    documento: "OC-126284",
-  },
-  {
-    id: 12,
-    correlativo: "126285",
-    ot: "OT-126285",
-    cliente: "CJ TELECOM",
-    proyecto: "MANTENIMIENTO",
-    siteId: "D000041",
-    site: "L & R COMERCIAL, ...",
-    tipoTrabajo: "EVALUACION EST...",
-    tarea: "TALLER_ADECUACION",
-    fecha: "2026-08-04",
-    solicitante: "ANGELLO ALDAIR CUENCA PILACA",
-    responsable: "KELLY ALESSANDRA ...",
-    validador: "KELLY ALESSANDRA ...",
-    moneda: "Soles",
-    subtotal: 91.20,
-    igv: 0,
-    total: 91.20,
-    estado: "aprobar",
-    diasEstado: 1,
-    observacion: "Lista para aprobar.",
-    detalle: "Expediente vigente con control completo de respaldo.",
-    documento: "OC-126285",
-  },
-];
 
 function formatDateInputValue(date: Date) {
   const year = date.getFullYear();
@@ -1385,6 +1095,8 @@ export default function PagosV1Page() {
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [filtersVisible, setFiltersVisible] = useState(true);
   const [isHistorialPopupOpen, setIsHistorialPopupOpen] = useState(false);
+  const [historialPopupView, setHistorialPopupView] = useState<"listado" | "resumen">("listado");
+  const [historialSolicitanteSeleccionado, setHistorialSolicitanteSeleccionado] = useState("");
   const [isHistorialOcPopupOpen, setIsHistorialOcPopupOpen] = useState(false);
   const [isConPagadoPopupOpen, setIsConPagadoPopupOpen] = useState(false);
   const [detallePopup, setDetallePopup] = useState<{ correlativo: string; detalle: string } | null>(null);
@@ -1991,6 +1703,25 @@ export default function PagosV1Page() {
       return historialSortConfig.direction === "asc" ? result : -result;
     });
   }, [historialRowsFiltrados, historialSortConfig]);
+  const historialPopupRowsFiltrados = useMemo(() => {
+    const solicitanteSeleccionado = normalizeText(historialSolicitanteSeleccionado);
+
+    return solicitanteSeleccionado
+      ? historialRowsFiltrados.filter((row) => normalizeText(row.solicitante).includes(solicitanteSeleccionado))
+      : historialRowsFiltrados;
+  }, [historialRowsFiltrados, historialSolicitanteSeleccionado]);
+  const historialPopupRowsOrdenados = useMemo(() => {
+    if (!historialSortConfig) return historialPopupRowsFiltrados;
+
+    return [...historialPopupRowsFiltrados].sort((left, right) => {
+      const leftValue = left[historialSortConfig.column] ?? "";
+      const rightValue = right[historialSortConfig.column] ?? "";
+      const result = typeof leftValue === "number" && typeof rightValue === "number"
+        ? leftValue - rightValue
+        : String(leftValue).localeCompare(String(rightValue), "es", { numeric: true });
+      return historialSortConfig.direction === "asc" ? result : -result;
+    });
+  }, [historialPopupRowsFiltrados, historialSortConfig]);
   const historialTotalesPorMoneda = useMemo(() => {
     const totals = new Map<string, number>();
 
@@ -2001,10 +1732,30 @@ export default function PagosV1Page() {
 
     return Array.from(totals, ([moneda, total]) => ({ moneda, total }));
   }, [historialRowsFiltrados]);
+  const historialSolicitudesPorMoneda = useMemo(() => {
+    const totalsByCurrency = new Map<string, Map<string, number>>();
+
+    historialRowsFiltrados.forEach((row) => {
+      const moneda = row.moneda?.trim() || "SIN MONEDA";
+      const solicitante = row.solicitante?.trim() || "SIN SOLICITANTE";
+      const totalSolicitado = Number(row.subtotal) || 0;
+      const totalsBySolicitante = totalsByCurrency.get(moneda) ?? new Map<string, number>();
+
+      totalsBySolicitante.set(solicitante, (totalsBySolicitante.get(solicitante) ?? 0) + totalSolicitado);
+      totalsByCurrency.set(moneda, totalsBySolicitante);
+    });
+
+    return Array.from(totalsByCurrency, ([moneda, totalsBySolicitante]) => ({
+      moneda,
+      items: Array.from(totalsBySolicitante, ([solicitante, total]) => ({ solicitante, total }))
+        .sort((left, right) => right.total - left.total || left.solicitante.localeCompare(right.solicitante, "es")),
+    }));
+  }, [historialRowsFiltrados]);
 
   useEffect(() => {
     setHistorialResponsable("");
     setHistorialSortConfig(null);
+    setHistorialSolicitanteSeleccionado("");
   }, [historialOtSeleccionada]);
 
   useEffect(() => {
@@ -2815,6 +2566,10 @@ export default function PagosV1Page() {
     }
 
     const handleEscape = (event: KeyboardEvent) => {
+      if (detallePopup) {
+        return;
+      }
+
       if (event.key === "Escape") {
         event.preventDefault();
         setIsHistorialPopupOpen(false);
@@ -2823,7 +2578,7 @@ export default function PagosV1Page() {
 
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
-  }, [isHistorialPopupOpen]);
+  }, [detallePopup, isHistorialPopupOpen]);
 
   const handleClearFilters = () => {
     const defaultFilters = getDefaultFilterState();
@@ -4020,9 +3775,8 @@ export default function PagosV1Page() {
                   {[ 
                     { key: 'orden' as DetailTabKey, label: 'Detalle' },
                     { key: 'resumen' as DetailTabKey, label: 'Resumen' },
-                    { key: 'historial' as DetailTabKey, label: 'Historial OT' },
+                    { key: 'historial' as DetailTabKey, label: 'Historial Sitio' },
                     { key: 'historial-oc' as DetailTabKey, label: 'Historial OC' },
-                    { key: 'con-pagado' as DetailTabKey, label: 'Con Pagado' },
                   ].map((tab) => {
                     const isActive = detailTab === tab.key;
                     return (
@@ -4349,13 +4103,13 @@ export default function PagosV1Page() {
                   <div style={styles.historyPanel}>
                     <div style={styles.noteCard}>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                        <div style={styles.noteTitle}>Historial de OT</div>
+                        <div style={styles.noteTitle}>Historial Sitio</div>
                         <div style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
                           <input
                             type="search"
                             value={historialResponsable}
                             onChange={(event) => setHistorialResponsable(event.target.value)}
-                            aria-label="Filtrar historial de OT por responsable"
+                            aria-label="Filtrar historial de sitio por responsable"
                             placeholder="Buscar responsable..."
                             list="historial-ot-responsables"
                             style={{ ...styles.quickDateInput, minWidth: 180, height: 30, fontSize: 11 }}
@@ -4391,7 +4145,10 @@ export default function PagosV1Page() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => setIsHistorialPopupOpen(true)}
+                            onClick={() => {
+                              setHistorialPopupView("listado");
+                              setIsHistorialPopupOpen(true);
+                            }}
                             style={{ ...styles.compactActionButton, borderColor: currentTheme.border, color: currentTheme.accent }}
                             aria-label="Ampliar historial"
                             title="Ampliar historial"
@@ -4416,13 +4173,13 @@ export default function PagosV1Page() {
                           marginBottom: 10,
                         }}
                       >
-                        <div style={styles.noteTitle}>Cargando historial OT</div>
+                        <div style={styles.noteTitle}>Cargando historial Sitio</div>
                           <p style={styles.noteText}>Se está consultando el historial del cliente, proyecto, site y tipo de trabajo seleccionados.</p>
                       </div>
                     ) : null}
 
                     <div style={styles.gridScrollable}>
-                      <table style={{ ...styles.table, minWidth: 1450, width: "max-content" }}>
+                      <table style={{ ...styles.table, minWidth: 1570, width: "max-content" }}>
                         <thead onClick={(event) => {
                           const column = (event.target as HTMLElement).closest<HTMLElement>("th")?.dataset.historialSort as PagoSortColumn | undefined;
                           if (column) handleHistorialSortColumn(column);
@@ -4439,6 +4196,7 @@ export default function PagosV1Page() {
                             <th data-historial-sort="igv" style={{ ...styles.th, width: 90, cursor: "pointer" }}>IGV</th>
                             <th data-historial-sort="total" style={{ ...styles.th, width: 100, cursor: "pointer" }}>Total</th>
                             <th data-historial-sort="moneda" style={{ ...styles.th, width: 80, cursor: "pointer" }}>Moneda</th>
+                            <th data-historial-sort="solicitante" style={{ ...styles.th, width: 150, cursor: "pointer" }}>Solicitante</th>
                             <th data-historial-sort="responsable" style={{ ...styles.th, width: 110, cursor: "pointer" }}>Responsable</th>
                             <th data-historial-sort="detalle" style={{ ...styles.th, width: 260, cursor: "pointer" }}>Detalle</th>
                             <th data-historial-sort="validador" style={{ ...styles.th, width: 110, cursor: "pointer" }}>Validador</th>
@@ -4448,7 +4206,7 @@ export default function PagosV1Page() {
                         <tbody>
                           {historialRowsFiltrados.length === 0 ? (
                             <tr>
-                              <td colSpan={15} style={styles.emptyCell}>
+                              <td colSpan={16} style={styles.emptyCell}>
                                 {tieneOtValida
                                   ? "No hay registros para el cliente, proyecto, site y tipo de trabajo seleccionados."
                                   : "La orden seleccionada no tiene una OT válida."}
@@ -4468,8 +4226,17 @@ export default function PagosV1Page() {
                                 <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
                                 <td style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
                                 <td style={styles.td}>{row.moneda || '-'}</td>
+                                <td style={styles.td}>{row.solicitante || '-'}</td>
                                 <td style={styles.td}>{row.responsable}</td>
-                                <td style={styles.td}>{row.detalle || '-'}</td>
+                                <td
+                                  title="Ver detalle completo"
+                                  onClick={() => setDetallePopup({ correlativo: row.correlativo, detalle: row.detalle?.trim() || "-" })}
+                                  style={{ ...styles.td, cursor: "pointer", color: "#2563EB", textDecoration: "underline" }}
+                                >
+                                  <span style={{ display: "block", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                    {row.detalle?.trim() || '-'}
+                                  </span>
+                                </td>
                                 <td style={styles.td}>{row.validador || '-'}</td>
                                 <td style={styles.td}>{row.ot || '-'}</td>
                               </tr>
@@ -4617,7 +4384,7 @@ export default function PagosV1Page() {
         </section>
         {detallePopup ? (
           <div
-            style={styles.popupOverlay}
+            style={{ ...styles.popupOverlay, zIndex: 3100 }}
             onClick={() => setDetallePopup(null)}
             role="presentation"
           >
@@ -4747,11 +4514,11 @@ export default function PagosV1Page() {
               onClick={(event) => event.stopPropagation()}
               role="dialog"
               aria-modal="true"
-              aria-label="Historial de OT"
+              aria-label="Historial Sitio"
             >
               <div style={styles.popupHeader}>
                 <div>
-                  <div style={{ ...styles.sectionKicker, color: currentTheme.accent }}>Historial de OT</div>
+                  <div style={{ ...styles.sectionKicker, color: currentTheme.accent }}>Historial Sitio</div>
                   <h3 style={styles.popupTitle}>Orden de Pago N° {filaActiva?.correlativo || "-"}</h3>
                   <p style={styles.popupSubtitle}>
                     Se muestran los registros pagados del mismo cliente, proyecto, site y tipo de trabajo.
@@ -4762,11 +4529,34 @@ export default function PagosV1Page() {
                     type="search"
                     value={historialResponsable}
                     onChange={(event) => setHistorialResponsable(event.target.value)}
-                    aria-label="Filtrar historial de OT por responsable"
+                    aria-label="Filtrar historial de sitio por responsable"
                     placeholder="Buscar responsable..."
                     list="historial-ot-responsables"
                     style={{ ...styles.quickDateInput, minWidth: 180, height: 34, fontSize: 12 }}
                   />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHistorialResponsable("");
+                      setHistorialSolicitanteSeleccionado("");
+                    }}
+                    disabled={!historialResponsable && !historialSolicitanteSeleccionado}
+                    aria-label="Limpiar filtros del historial"
+                    title="Limpiar filtros"
+                    style={{
+                      ...styles.slimActionButton,
+                      minWidth: 34,
+                      width: 34,
+                      height: 34,
+                      padding: 0,
+                      justifyContent: "center",
+                      borderColor: "#CBD5E1",
+                      color: "#475569",
+                      opacity: !historialResponsable && !historialSolicitanteSeleccionado ? 0.45 : 1,
+                    }}
+                  >
+                    <RotateCcw size={16} />
+                  </button>
                   <button
                     type="button"
                     onClick={handleExportHistorial}
@@ -4802,10 +4592,103 @@ export default function PagosV1Page() {
                         <div style={{ marginTop: 3, fontSize: 16, fontWeight: 800, color: "#0F172A" }}>{formatCurrency(total, moneda)}</div>
                       </div>
                     ))}
+                    {historialSolicitanteSeleccionado ? (
+                      <div
+                        title={historialSolicitanteSeleccionado}
+                        style={{
+                          minWidth: 180,
+                          maxWidth: 280,
+                          padding: "10px 12px",
+                          border: "1px solid #BFDBFE",
+                          borderRadius: 10,
+                          background: "#EFF6FF",
+                        }}
+                      >
+                        <div style={{ fontSize: 10, fontWeight: 800, color: "#1D4ED8", textTransform: "uppercase" }}>Solicitante seleccionado</div>
+                        <div style={{ marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, fontWeight: 800, color: "#0F172A" }}>
+                          {historialSolicitanteSeleccionado}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
+                <div style={{ display: "flex", gap: 8, marginBottom: 14, borderBottom: "1px solid #E2E8F0" }}>
+                  {[
+                    { key: "listado" as const, label: "Listado" },
+                    { key: "resumen" as const, label: "Resumen por solicitante" },
+                  ].map((tab) => {
+                    const isActive = historialPopupView === tab.key;
+                    return (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        onClick={() => setHistorialPopupView(tab.key)}
+                        style={{
+                          border: "none",
+                          borderBottom: `3px solid ${isActive ? currentTheme.accent : "transparent"}`,
+                          background: "transparent",
+                          padding: "8px 12px",
+                          color: isActive ? currentTheme.accent : "#64748B",
+                          cursor: "pointer",
+                          fontSize: 12,
+                          fontWeight: 800,
+                        }}
+                      >
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {historialPopupView === "resumen" ? (
+                  historialSolicitudesPorMoneda.length === 0 ? (
+                    <div style={styles.emptyCell}>No hay solicitudes para resumir.</div>
+                  ) : (
+                    <div style={{ display: "grid", gap: 18 }}>
+                      {historialSolicitudesPorMoneda.map(({ moneda, items }) => {
+                        const mayorSolicitud = items[0]?.total || 0;
+
+                        return (
+                          <section key={moneda} style={{ border: "1px solid #DBEAFE", borderRadius: 12, padding: 16, background: "#F8FBFF" }}>
+                            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
+                              <strong style={{ color: "#0F172A", fontSize: 14 }}>{moneda}</strong>
+                              <span style={{ color: "#64748B", fontSize: 11 }}>Solicitado por solicitante</span>
+                            </div>
+                            <div style={{ display: "grid", gap: 10 }}>
+                              {items.map(({ solicitante, total }) => {
+                                const porcentaje = mayorSolicitud > 0 ? Math.max(2, (total / mayorSolicitud) * 100) : 0;
+
+                                return (
+                                  <button
+                                    key={solicitante}
+                                    type="button"
+                                    onClick={() => {
+                                      setHistorialSolicitanteSeleccionado(solicitante);
+                                      setHistorialPopupView("listado");
+                                    }}
+                                    title={`Ver registros de ${solicitante}`}
+                                    style={{ display: "grid", gridTemplateColumns: "minmax(180px, 0.9fr) minmax(220px, 2fr) auto", alignItems: "center", gap: 12, width: "100%", border: "none", borderRadius: 8, padding: "5px 6px", background: "transparent", cursor: "pointer", textAlign: "left" }}
+                                  >
+                                    <span title={solicitante} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#334155", fontSize: 12, fontWeight: 700 }}>
+                                      {solicitante}
+                                    </span>
+                                    <div style={{ height: 12, borderRadius: 999, overflow: "hidden", background: "#E2E8F0" }}>
+                                      <div style={{ width: `${porcentaje}%`, height: "100%", borderRadius: "inherit", background: currentTheme.accent }} />
+                                    </div>
+                                    <strong style={{ minWidth: 112, textAlign: "right", color: "#0F172A", fontSize: 12 }}>
+                                      {formatCurrency(total, moneda)}
+                                    </strong>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </section>
+                        );
+                      })}
+                    </div>
+                  )
+                ) : (
                 <div style={styles.gridScrollable}>
-                  <table style={{ ...styles.table, minWidth: 1450, width: "max-content" }}>
+                  <table style={{ ...styles.table, minWidth: 1690, width: "max-content" }}>
                     <thead onClick={(event) => {
                       const column = (event.target as HTMLElement).closest<HTMLElement>("th")?.dataset.historialSort as PagoSortColumn | undefined;
                       if (column) handleHistorialSortColumn(column);
@@ -4822,6 +4705,7 @@ export default function PagosV1Page() {
                         <th data-historial-sort="igv" style={{ ...styles.th, width: 90, cursor: "pointer" }}>IGV</th>
                         <th data-historial-sort="total" style={{ ...styles.th, width: 100, cursor: "pointer" }}>Total</th>
                         <th data-historial-sort="moneda" style={{ ...styles.th, width: 80, cursor: "pointer" }}>Moneda</th>
+                        <th data-historial-sort="solicitante" style={{ ...styles.th, width: 150, cursor: "pointer" }}>Solicitante</th>
                         <th data-historial-sort="responsable" style={{ ...styles.th, width: 110, cursor: "pointer" }}>Responsable</th>
                         <th data-historial-sort="detalle" style={{ ...styles.th, width: 260, cursor: "pointer" }}>Detalle</th>
                         <th data-historial-sort="validador" style={{ ...styles.th, width: 110, cursor: "pointer" }}>Validador</th>
@@ -4829,16 +4713,18 @@ export default function PagosV1Page() {
                       </tr>
                     </thead>
                     <tbody>
-                      {historialRowsFiltrados.length === 0 ? (
+                      {historialPopupRowsFiltrados.length === 0 ? (
                         <tr>
-                          <td colSpan={15} style={styles.emptyCell}>
-                            {tieneOtValida
+                          <td colSpan={16} style={styles.emptyCell}>
+                            {historialSolicitanteSeleccionado
+                              ? "No hay registros para el solicitante seleccionado."
+                              : tieneOtValida
                               ? "No hay registros para el cliente, proyecto, site y tipo de trabajo seleccionados."
                               : "La orden seleccionada no tiene una OT válida."}
                           </td>
                         </tr>
                       ) : (
-                        historialRowsOrdenados.map((row) => (
+                        historialPopupRowsOrdenados.map((row) => (
                           <tr key={`popup-hist-${row.id}`}>
                             <td style={styles.td}>{row.correlativo}</td>
                             <td style={styles.td}>{formatDate(row.fecha)}</td>
@@ -4851,8 +4737,17 @@ export default function PagosV1Page() {
                             <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
                             <td style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
                             <td style={styles.td}>{row.moneda || '-'}</td>
+                            <td style={styles.td}>{row.solicitante || '-'}</td>
                             <td style={styles.td}>{row.responsable}</td>
-                            <td style={styles.td}>{row.detalle || '-'}</td>
+                            <td
+                              title="Ver detalle completo"
+                              onClick={() => setDetallePopup({ correlativo: row.correlativo, detalle: row.detalle?.trim() || "-" })}
+                              style={{ ...styles.td, cursor: "pointer", color: "#2563EB", textDecoration: "underline" }}
+                            >
+                              <span style={{ display: "block", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {row.detalle?.trim() || '-'}
+                              </span>
+                            </td>
                             <td style={styles.td}>{row.validador || '-'}</td>
                             <td style={styles.td}>{row.ot || '-'}</td>
                           </tr>
@@ -4861,6 +4756,7 @@ export default function PagosV1Page() {
                     </tbody>
                   </table>
                 </div>
+                )}
               </div>
             </div>
           </div>
@@ -5424,7 +5320,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     gap: 4,
-    minWidth: 148,
+    minWidth: 60,
   },
   tipoCambioLabel: {
     fontSize: 10,
