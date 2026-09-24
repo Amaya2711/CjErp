@@ -170,6 +170,8 @@ export default function PagarTesoreriaV1Page() {
   const [catalogos, setCatalogos] = useState(emptyCatalogos);
   const [puedePagar, setPuedePagar] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [tabCounts, setTabCounts] = useState<Record<number, number>>({});
+  const [tabCountsLoading, setTabCountsLoading] = useState(true);
   const [error, setError] = useState("");
   const [catalogError, setCatalogError] = useState("");
   const [success, setSuccess] = useState("");
@@ -261,6 +263,37 @@ export default function PagarTesoreriaV1Page() {
     void loadCatalogos(controller.signal);
     return () => controller.abort();
   }, [loadCatalogos]);
+
+  // El reporte ya consolida las etapas en una sola ejecución. Se usa para que
+  // cada pestaña muestre su cantidad sin descargar seis listados completos.
+  const loadTabCounts = useCallback(async (signal?: AbortSignal) => {
+    setTabCountsLoading(true);
+    try {
+      const summary = await obtenerReporteResumenTesoreria(undefined, undefined, signal);
+      if (signal?.aborted) return;
+
+      const counts = summary.reduce<Record<number, number>>((result, raw) => {
+        const item = raw as Record<string, unknown>;
+        const estadoItem = Number(item.Estado ?? item.estado ?? 0);
+        const cantidad = Number(item.CantidadRegistros ?? item.cantidadRegistros ?? 0);
+        result[estadoItem] = (result[estadoItem] ?? 0) + cantidad;
+        return result;
+      }, {});
+      // La pestaña Observada reúne ambos estados del flujo.
+      counts[2] = (counts[2] ?? 0) + (counts[7] ?? 0);
+      setTabCounts(counts);
+    } catch {
+      // Los listados siguen disponibles aunque el resumen de contadores falle.
+      if (!signal?.aborted) setTabCounts({});
+    } finally {
+      if (!signal?.aborted) setTabCountsLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadTabCounts(controller.signal);
+    return () => controller.abort();
+  }, [loadTabCounts]);
 
   const load = useCallback(
     async (status: number, start: string, end: string, correlativo?: number) => {
@@ -984,7 +1017,9 @@ export default function PagarTesoreriaV1Page() {
             >
               <tab.icon size={17} />
               {tab.label}
-              {estado === tab.estado && <span>{estado === 100 && !correlativoBusqueda.trim() ? 0 : rows.length}</span>}
+              {tab.estado >= 0 && tab.estado !== 99 && tab.estado !== 100
+                ? <span>{tabCountsLoading ? "…" : (tabCounts[tab.estado] ?? 0)}</span>
+                : estado === tab.estado && <span>{estado === 100 && !correlativoBusqueda.trim() ? 0 : rows.length}</span>}
             </button>
           ))}
         </nav>
