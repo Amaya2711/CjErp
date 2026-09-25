@@ -206,7 +206,26 @@ type ReporteFiltros = {
   fechaHasta: string;
 };
 
-const today = new Date().toISOString().slice(0, 10);
+function getLimaNow() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Lima",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "00";
+
+  return {
+    fecha: `${part("year")}-${part("month")}-${part("day")}`,
+    hora: `${part("hour")}:${part("minute")}:${part("second")}`,
+  };
+}
+
+const today = getLimaNow().fecha;
 const archivoOcAccept = ".jpg,.jpeg,.png,.bmp,.gif,.pdf,.xls,.xlsx";
 
 const createEmptyDetalle = (): OrdenCompraDraftDetalle => ({
@@ -344,6 +363,18 @@ function resolveBufferedValue(bufferValue: string, stateValue: string) {
 function toNumber(value: string | number | null | undefined) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function sameFiltroOperativoValue(
+  left?: FiltroOperativoValue,
+  right?: FiltroOperativoValue,
+) {
+  return (
+    (left?.filtro?.filtroKey ?? "") === (right?.filtro?.filtroKey ?? "") &&
+    (left?.tipoTrabajo?.tipoTrabajo ?? "") === (right?.tipoTrabajo?.tipoTrabajo ?? "") &&
+    (left?.ot?.ot ?? "") === (right?.ot?.ot ?? "") &&
+    (left?.tarea?.correlativo ?? 0) === (right?.tarea?.correlativo ?? 0)
+  );
 }
 
 function toPositiveNumber(...values: Array<string | number | null | undefined>): number {
@@ -721,7 +752,7 @@ export default function OcV1Page() {
   const precioUnitarioInputRef = useRef("");
   const pesoInputRef = useRef("");
   const [solicitanteOptions, setSolicitanteOptions] = useState<ConstanteOption[]>([]);
-  const [, setGestorOptions] = useState<ConstanteOption[]>([]);
+  const [gestorOptions, setGestorOptions] = useState<ConstanteOption[]>([]);
   const [validadorOptions, setValidadorOptions] = useState<ConstanteOption[]>([]);
   const [responsableOptions, setResponsableOptions] = useState<EmpleadoCta[]>([]);
   const opcionesDependientesRequestRef = useRef(0);
@@ -854,6 +885,7 @@ export default function OcV1Page() {
             const asignadosNoIncluidos = prev.filter((option) => !existentes.has(normalizeOptionValue(option)));
             return [...gestores.value, ...asignadosNoIncluidos];
           });
+          setGestorOptions(gestores.value);
         }
       } catch {
         // No exponer información de catálogos ni errores de consulta en consola.
@@ -889,7 +921,11 @@ export default function OcV1Page() {
 
         return {
           ...prev,
-          gestor: gestores[0] ? normalizeOptionValue(gestores[0]) : "",
+          gestor: gestores[0]
+            ? normalizeOptionValue(gestores[0])
+            : validadores[0]
+              ? normalizeOptionValue(validadores[0])
+              : prev.responsable,
           // El primer validador corresponde al valor actual definido para el
           // solicitante. El usuario puede cambiarlo con el catálogo completo.
           validador: validadores[0] ? normalizeOptionValue(validadores[0]) : "",
@@ -1588,7 +1624,11 @@ export default function OcV1Page() {
   }, [draft.detalles]);
 
   const handleFiltroOperativoChange = useCallback((value: FiltroOperativoValue) => {
-    setDetalleForm((prev) => ({ ...prev, filtroOperativo: value }));
+    setDetalleForm((prev) =>
+      sameFiltroOperativoValue(prev.filtroOperativo, value)
+        ? prev
+        : { ...prev, filtroOperativo: value },
+    );
   }, []);
 
   const handleDetalleInputChange = useCallback((value: string) => {
@@ -1640,7 +1680,9 @@ export default function OcV1Page() {
       ...createInitialDraft(),
       fechaOrden: today, // Siempre la fecha actual
       solicitante: solicitanteDefault,
-      gestor: "",
+      gestor: gestorOptions[0]
+        ? normalizeOptionValue(gestorOptions[0])
+        : validadorDefault || (responsableDefault ? String(responsableDefault) : ""),
       validador: validadorDefault,
       responsable: responsableDefault ? String(responsableDefault) : "",
     });
@@ -1712,7 +1754,7 @@ export default function OcV1Page() {
         diasPago: String(oc.diasPago ?? ""),
         cantidad: String(item.cantidad ?? ""),
         precioUnitario: String(item.precioUnitario ?? ""),
-        peso: String(item.peso ?? ""),
+        peso: "",
         tieneOcCliente: Boolean(item.imgOc),
         tienePresupuesto: Boolean(item.imgPresupuesto),
         ocClienteNombre: item.imgOc ?? "",
@@ -1838,7 +1880,8 @@ export default function OcV1Page() {
   }, [editingDetalleId, isAccepted, editingOcId]);
 
   const validateDraft = () => {
-    if (!draft.solicitante || !draft.gestor || !draft.validador || !draft.responsable) {
+    const gestorEfectivo = draft.gestor || draft.validador || draft.responsable;
+    if (!draft.solicitante || !gestorEfectivo || !draft.validador || !draft.responsable) {
       setError("Complete solicitante, gestor, validador y responsable.");
       return false;
     }
@@ -1881,6 +1924,7 @@ export default function OcV1Page() {
         }))
       );
 
+    const limaNow = getLimaNow();
     const payload: OrdenCompraInsertPayload = {
       idSolicitante: Number(draft.solicitante),
       idResponsable: Number(draft.responsable),
@@ -1888,13 +1932,13 @@ export default function OcV1Page() {
       fechaOrden: draft.fechaOrden,
       observacion: draft.observacion.trim(),
       usuarioCreacion: userName,
-      fechaCreacion: today,
-      horaCreacion: new Date().toTimeString().slice(0, 8),
+      fechaCreacion: limaNow.fecha,
+      horaCreacion: limaNow.hora,
       idMoneda: Number(draft.moneda),
       idComprobante: Number(draft.comprobante),
       idEstado: 1,
       idValidador: Number(draft.validador),
-      idGestor: Number(draft.gestor),
+      idGestor: Number(draft.gestor || draft.validador || draft.responsable),
       idFormaPago: Number(draft.formaPago),
       diasPago: Number(resolveBufferedValue(diasPagoInputRef.current, draft.diasPago) || 0),
       peso: draftTotals.peso,
@@ -3133,6 +3177,20 @@ export default function OcV1Page() {
                 }}
                 placeholder="Seleccione..."
               />
+            </Field>
+            <Field style={{ display: "none" }}>
+              <Label>Gestor</Label>
+              <select
+                disabled={!draft.solicitante}
+                value={draft.gestor}
+                onChange={(event) => setDraft((prev) => ({ ...prev, gestor: event.target.value }))}
+                style={styles.input}
+              >
+                <option value="">Seleccione...</option>
+                {gestorOptions.map((option) => (
+                  <option key={`gest-${normalizeOptionValue(option)}`} value={normalizeOptionValue(option)}>{option.label}</option>
+                ))}
+              </select>
             </Field>
             <Field>
               <Label>Validador</Label>

@@ -240,10 +240,34 @@ public class OrdenCompraService : IOrdenCompraService
         FROM dbo.CabOrdenCompra
         WHERE IdOc = @IdOc;
         """;
+    private const string ActualizarDatosOperativosInsertSql = """
+        ;WITH DetalleOrdenado AS (
+            SELECT
+                IdOc,
+                Fila,
+                ROW_NUMBER() OVER (PARTITION BY IdOc ORDER BY Fila) AS Posicion
+            FROM dbo.DetOrdenCompra
+            WHERE IdOc = @IdOc
+        )
+        UPDATE det
+        SET Correlativo = @Correlativo,
+            TipoTrabajo = @TipoTrabajo,
+            IdTarea = @IdTarea,
+            Ot = @Ot
+        FROM dbo.DetOrdenCompra det
+        INNER JOIN DetalleOrdenado ordenado
+            ON ordenado.IdOc = det.IdOc
+           AND ordenado.Fila = det.Fila
+        WHERE det.IdOc = @IdOc
+          AND ordenado.Posicion = @Posicion;
+        """;
     private const string ActualizarCabeceraEdicionSql = """
         UPDATE dbo.CabOrdenCompra
         SET IdSolicitante = @IdSolicitante,
             IdResponsable = @IdResponsable,
+            UsuarioCreacion = @UsuarioCreacion,
+            FechaCreacion = @FechaCreacion,
+            HoraCreacion = @HoraCreacion,
             Observacion = @Observacion,
             IdMoneda = @IdMoneda,
             IdComprobante = @IdComprobante,
@@ -284,14 +308,14 @@ public class OrdenCompraService : IOrdenCompraService
             det.IdProyecto,
             pro.NombreProyecto,
             det.IdSite,
-            sit.NombreSite,
-            det.TipoTrabajo,
-            det.IdTarea,
-            COALESCE(tarea.ValorIni, '') AS Tarea,
+            COALESCE(NULLIF(sit.NombreSite, ''), NULLIF(imp.Site, ''), '') AS NombreSite,
+            COALESCE(NULLIF(det.TipoTrabajo, ''), NULLIF(planilla.TipoTrabajo, ''), NULLIF(imp.TipoTrabajo, ''), '') AS TipoTrabajo,
+            COALESCE(NULLIF(det.IdTarea, 0), planilla.IdTarea) AS IdTarea,
+            COALESCE(NULLIF(tarea.ValorIni, ''), '') AS Tarea,
             det.Detalle,
             det.Cantidad,
             det.PrecioUnitario,
-            det.Ot,
+            COALESCE(NULLIF(det.Ot, ''), NULLIF(planilla.Ot, ''), NULLIF(imp.Ot, ''), '') AS Ot,
             det.Fila,
             det.Correlativo,
             det.ImgOc,
@@ -301,8 +325,31 @@ public class OrdenCompraService : IOrdenCompraService
         INNER JOIN dbo.CabOrdenCompra cab ON cab.IdOc = det.IdOc
         LEFT JOIN dbo.Cliente cli ON cli.IdCliente = det.IdCliente
         LEFT JOIN dbo.Proyecto pro ON pro.IdProyecto = det.IdProyecto
-        LEFT JOIN dbo.Site sit ON sit.IdSite = det.IdSite AND sit.Correlativo = det.Correlativo
-        LEFT JOIN dbo.Constante tarea ON tarea.Correlativo = det.IdTarea
+        OUTER APPLY (
+            SELECT TOP 1 site.NombreSite
+            FROM dbo.Site site
+            WHERE site.IdSite = det.IdSite
+            ORDER BY CASE WHEN site.Correlativo = det.Correlativo THEN 0 ELSE 1 END, site.Correlativo
+        ) sit
+        OUTER APPLY (
+            SELECT TOP 1
+                p.Tipo_Trabajo AS TipoTrabajo,
+                p.IdTarea,
+                p.Ot
+            FROM dbo.Planilla p
+            WHERE TRY_CONVERT(int, NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), p.IdOc))), '')) = det.IdOc
+              AND (p.Fila = det.Fila OR det.Fila IS NULL)
+            ORDER BY CASE WHEN p.Fila = det.Fila THEN 0 ELSE 1 END, p.Correlativo DESC
+        ) planilla
+        OUTER APPLY (
+            SELECT TOP 1 i.Site, i.TipoTrabajo, i.Ot
+            FROM dbo.Importar i
+            WHERE i.IdCliente = det.IdCliente
+              AND i.IdProyecto = det.IdProyecto
+              AND i.IdSite = det.IdSite
+            ORDER BY CASE WHEN i.Correlativo = det.Correlativo THEN 0 ELSE 1 END, i.Correlativo
+        ) imp
+        LEFT JOIN dbo.Constante tarea ON tarea.Correlativo = COALESCE(NULLIF(det.IdTarea, 0), planilla.IdTarea)
             AND LOWER(tarea.Campo) IN ('tarea', 'tipo_tarea')
         WHERE det.IdOc = @IdOc
         ORDER BY det.Fila;
@@ -414,6 +461,17 @@ public class OrdenCompraService : IOrdenCompraService
         CancellationToken cancellationToken = default)
     {
         await using var connection = _sqlCommandFactory.CreateConnection();
+        if (int.TryParse(request.IdOc, NumberStyles.Integer, CultureInfo.InvariantCulture, out var idOc) && idOc > 0)
+        {
+            return await connection.QueryAsync<OrdenCompraDetalleDto>(
+                _sqlCommandFactory.Create(
+                    BuscarEdicionDetalleSql,
+                    new { IdOc = idOc },
+                    CommandType.Text,
+                    cancellationToken,
+                    commandTimeout: 120));
+        }
+
         return await connection.QueryAsync<OrdenCompraDetalleDto>(
             _sqlCommandFactory.Create(
                 BuscarDetalleSp,
@@ -485,6 +543,34 @@ public class OrdenCompraService : IOrdenCompraService
                     commandTimeout: 120));
         }
 
+        // El store legado inserta el detalle, pero en algunas versiones no
+        // materializa TipoTrabajo ni IdTarea recibidos en el JSON. Se persisten
+        // explícitamente por posición para que la OC pueda reutilizar su filtro
+        // operativo al consultarla o editarla.
+        if (idOc > 0)
+        {
+            var posicion = 0;
+            foreach (var item in request.Detalle)
+            {
+                posicion++;
+                await connection.ExecuteAsync(
+                    _sqlCommandFactory.Create(
+                        ActualizarDatosOperativosInsertSql,
+                        new
+                        {
+                            IdOc = idOc,
+                            Posicion = posicion,
+                            Correlativo = item.Correlativo,
+                            TipoTrabajo = NullIfWhiteSpace(item.TipoTrabajo),
+                            IdTarea = item.IdTarea,
+                            Ot = NullIfWhiteSpace(item.Ot),
+                        },
+                        CommandType.Text,
+                        cancellationToken,
+                        commandTimeout: 120));
+            }
+        }
+
         return idOc;
     }
 
@@ -537,6 +623,9 @@ public class OrdenCompraService : IOrdenCompraService
                     request.IdSolicitante,
                     request.IdResponsable,
                     FechaOrden = request.FechaOrden.Date,
+                    UsuarioCreacion = NullIfWhiteSpace(request.UsuarioCreacion),
+                    FechaCreacion = request.FechaCreacion.Date,
+                    HoraCreacion = request.HoraCreacion,
                     Observacion = NullIfWhiteSpace(request.Observacion),
                     request.IdMoneda,
                     request.IdComprobante,

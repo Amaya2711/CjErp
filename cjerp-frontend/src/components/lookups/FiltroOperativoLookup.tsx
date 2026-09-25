@@ -38,8 +38,11 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
   const otsSafe = Array.isArray(ots) ? ots : [];
   const tareasSafe = Array.isArray(tareas) ? tareas : [];
   const tareasDisponibles = tareaFilter ? tareasSafe.filter(tareaFilter) : tareasSafe;
-  const currentTipoTrabajo = safeValue?.tipoTrabajo?.tipoTrabajo ?? "";
-  const currentOt = safeValue?.ot?.ot ?? "";
+  // Los selectores se controlan con el estado del hook. De esta forma no
+  // vuelven momentáneamente al valor anterior mientras el padre recibe el
+  // cambio mediante onChange.
+  const currentTipoTrabajo = lookupValue?.tipoTrabajo?.tipoTrabajo ?? "";
+  const currentOt = lookupValue?.ot?.ot ?? "";
   const tipoTrabajoMissing = currentTipoTrabajo && !tipoTrabajosSafe.some((t) => t.tipoTrabajo === currentTipoTrabajo);
   const otMissing = currentOt && !otsSafe.some((o) => o.ot === currentOt);
 
@@ -282,7 +285,7 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
                         tipoTrabajosSafe.find((t) => t.tipoTrabajo === e.target.value) ?? undefined,
                     })
                   }
-                  value={safeValue?.tipoTrabajo?.tipoTrabajo || ""}
+                  value={lookupValue?.tipoTrabajo?.tipoTrabajo || ""}
                   style={{
                     fontSize: "11px",
                     fontFamily: "Arial, sans-serif",
@@ -318,7 +321,7 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
                     ot: otsSafe.find((o) => o.ot === e.target.value) ?? undefined,
                   })
                 }
-                value={safeValue?.ot?.ot || ""}
+                value={lookupValue?.ot?.ot || ""}
                 style={{
                   fontSize: "11px",
                   fontFamily: "Arial, sans-serif",
@@ -345,13 +348,13 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
           {showTarea ? (
             tareaInputMode === "select" ? (
               <TareaSelect
-                value={safeValue}
+                value={lookupValue}
                 tareas={tareasDisponibles}
                 handleTareaChange={handleTareaChange}
               />
             ) : (
               <TareaAutocomplete
-                value={safeValue}
+                value={lookupValue}
                 tareas={tareasDisponibles}
                 handleTareaChange={handleTareaChange}
               />
