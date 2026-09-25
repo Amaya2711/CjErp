@@ -87,6 +87,13 @@ BEGIN
 
         RespOc.NombreEmpleado AS ResponsableOc,
 
+        a6.IdValidador AS IdValidadorOc,
+
+        CASE
+            WHEN ISNULL(a6.IdWeb, 0) = 1 THEN ValidadorOcCj.NombreEmpleado
+            ELSE ValidadorOc.NombreEmpleado
+        END AS ValidadorOc,
+
 
         /* ========================================================
            MONEDA ORDEN DE COMPRA
@@ -436,6 +443,19 @@ BEGIN
 
     LEFT JOIN dbo.Empleado RespOc
         ON RespOc.IdEmpleado = a6.IdResponsable
+
+
+    /* ============================================================
+       VALIDADOR OC
+       ============================================================ */
+
+    LEFT JOIN dbo.EmpleadoCj ValidadorOcCj
+        ON ValidadorOcCj.IdEmpleado = a6.IdValidador
+       AND ISNULL(a6.IdWeb, 0) = 1
+
+    LEFT JOIN dbo.Empleado ValidadorOc
+        ON ValidadorOc.IdEmpleado = a6.IdValidador
+       AND ISNULL(a6.IdWeb, 0) <> 1
 
 
     /* ============================================================

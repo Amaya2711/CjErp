@@ -97,6 +97,8 @@ public class OrdenCompraDetalleDto
 
 public class OrdenCompraInsertDetalleDto
 {
+    // Se conserva al editar una OC ya registrada. Si no viene, la posición es nueva.
+    public int? Fila { get; set; }
     public int IdCliente { get; set; }
     public int IdProyecto { get; set; }
     public string IdSite { get; set; } = string.Empty;
@@ -132,6 +134,28 @@ public class OrdenCompraInsertRequestDto
     public int DiasPago { get; set; }
     public decimal Peso { get; set; }
     public List<OrdenCompraInsertDetalleDto> Detalle { get; set; } = [];
+}
+
+public class OrdenCompraActualizarRequestDto : OrdenCompraInsertRequestDto
+{
+    public int IdOc { get; set; }
+}
+
+public class OrdenCompraEdicionDto
+{
+    public int IdOc { get; set; }
+    public int IdSolicitante { get; set; }
+    public int IdResponsable { get; set; }
+    public int IdValidador { get; set; }
+    public int IdGestor { get; set; }
+    public int IdMoneda { get; set; }
+    public int IdComprobante { get; set; }
+    public int IdFormaPago { get; set; }
+    public int DiasPago { get; set; }
+    public decimal Peso { get; set; }
+    public DateTime? FechaOrden { get; set; }
+    public string Observacion { get; set; } = string.Empty;
+    public List<OrdenCompraDetalleDto> Detalle { get; set; } = [];
 }
 
 public class OrdenCompraRechazoMasivoRequestDto

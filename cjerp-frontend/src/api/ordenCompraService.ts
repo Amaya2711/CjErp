@@ -88,6 +88,7 @@ export type OrdenCompraConsultaParams = {
 };
 
 export type OrdenCompraInsertDetallePayload = {
+  fila?: number | null;
   idCliente: number;
   idProyecto: number;
   idSite: string;
@@ -191,6 +192,26 @@ export type OrdenCompraReciboDto = {
   fechaVencimiento?: string | null;
 };
 
+export type OrdenCompraActualizarPayload = OrdenCompraInsertPayload & {
+  idOc: number;
+};
+
+export type OrdenCompraEdicionDto = {
+  idOc: number;
+  idSolicitante: number;
+  idResponsable: number;
+  idValidador: number;
+  idGestor: number;
+  idMoneda: number;
+  idComprobante: number;
+  idFormaPago: number;
+  diasPago: number;
+  peso: number;
+  fechaOrden?: string | null;
+  observacion?: string;
+  detalle: OrdenCompraDetalleDto[];
+};
+
 export type OrdenCompraRecibosParams = {
   idOc: number;
   fila?: number | null;
@@ -250,6 +271,14 @@ export async function buscarOrdenCompraDetalle(params?: OrdenCompraConsultaParam
 
 export async function insertarOrdenCompra(payload: OrdenCompraInsertPayload) {
   return await httpClient.post<{ idOc: number }>("/facturacionfinanciera/oc", payload);
+}
+
+export async function obtenerOrdenCompraEdicion(idOc: number) {
+  return await httpClient.get<OrdenCompraEdicionDto>(`/facturacionfinanciera/oc/${idOc}/edicion`);
+}
+
+export async function actualizarOrdenCompra(payload: OrdenCompraActualizarPayload) {
+  return await httpClient.put<{ idOc: number }>(`/facturacionfinanciera/oc/${payload.idOc}`, payload);
 }
 
 export async function rechazarOrdenCompraMasivo(payload: OrdenCompraRechazoMasivoPayload) {

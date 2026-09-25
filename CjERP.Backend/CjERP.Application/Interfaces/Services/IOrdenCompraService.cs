@@ -16,6 +16,14 @@ public interface IOrdenCompraService
         OrdenCompraInsertRequestDto request,
         CancellationToken cancellationToken = default);
 
+    Task<OrdenCompraEdicionDto?> ObtenerEdicionAsync(
+        int idOc,
+        CancellationToken cancellationToken = default);
+
+    Task ActualizarAsync(
+        OrdenCompraActualizarRequestDto request,
+        CancellationToken cancellationToken = default);
+
     Task RechazarMasivoAsync(
         OrdenCompraRechazoMasivoRequestDto request,
         CancellationToken cancellationToken = default);

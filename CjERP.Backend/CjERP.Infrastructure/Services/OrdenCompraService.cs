@@ -27,7 +27,7 @@ public class OrdenCompraService : IOrdenCompraService
         """;
     private const string BuscarPdfMetadataSql = """
         SELECT TOP 1
-            cab.FechaOrden,
+            cab.FechaCreacion AS FechaOrden,
             COALESCE(forma.ValorIni, '') AS FormaPago,
             cab.DiasPago
         FROM dbo.CabOrdenCompra cab
@@ -232,6 +232,89 @@ public class OrdenCompraService : IOrdenCompraService
         WHERE ISNULL(f.IdEstado, 0) <> 6
         ORDER BY f.TipoTrabajo, f.IdOc, f.Fila;
         """;
+    private const string BuscarEdicionCabeceraSql = """
+        SELECT TOP 1
+            IdOc, IdSolicitante, IdResponsable, IdValidador, IdGestor,
+            IdMoneda, IdComprobante, IdFormaPago, DiasPago,
+            FechaCreacion AS FechaOrden, ISNULL(Observacion, '') AS Observacion
+        FROM dbo.CabOrdenCompra
+        WHERE IdOc = @IdOc;
+        """;
+    private const string ActualizarCabeceraEdicionSql = """
+        UPDATE dbo.CabOrdenCompra
+        SET IdSolicitante = @IdSolicitante,
+            IdResponsable = @IdResponsable,
+            Observacion = @Observacion,
+            IdMoneda = @IdMoneda,
+            IdComprobante = @IdComprobante,
+            IdValidador = @IdValidador,
+            IdGestor = @IdGestor,
+            IdFormaPago = @IdFormaPago,
+            DiasPago = @DiasPago,
+            Subtotal = @Subtotal,
+            Igv = @Igv,
+            Total = @Total
+        WHERE IdOc = @IdOc;
+        """;
+    private const string ActualizarDetalleEdicionSql = """
+        UPDATE dbo.DetOrdenCompra
+        SET IdCliente = COALESCE(NULLIF(@IdCliente, 0), IdCliente),
+            IdProyecto = COALESCE(NULLIF(@IdProyecto, 0), IdProyecto),
+            IdSite = COALESCE(NULLIF(@IdSite, ''), IdSite),
+            Correlativo = COALESCE(NULLIF(@Correlativo, 0), Correlativo),
+            TipoTrabajo = COALESCE(NULLIF(@TipoTrabajo, ''), TipoTrabajo),
+            IdTarea = COALESCE(NULLIF(@IdTarea, 0), IdTarea),
+            Ot = COALESCE(NULLIF(@Ot, ''), Ot),
+            Detalle = @Detalle,
+            Cantidad = @Cantidad,
+            PrecioUnitario = @PrecioUnitario,
+            IdComprobante = @IdComprobante,
+            ImgOc = @ImgOc,
+            ImgPresupuesto = @ImgPresupuesto
+        WHERE IdOc = @IdOc AND Fila = @Fila;
+        """;
+    private const string BuscarEdicionDetalleSql = """
+        SELECT
+            det.IdOc,
+            cab.IdSolicitante,
+            cab.IdResponsable,
+            cab.IdMoneda,
+            det.IdCliente,
+            cli.NombreCliente,
+            det.IdProyecto,
+            pro.NombreProyecto,
+            det.IdSite,
+            sit.NombreSite,
+            det.TipoTrabajo,
+            det.IdTarea,
+            COALESCE(tarea.ValorIni, '') AS Tarea,
+            det.Detalle,
+            det.Cantidad,
+            det.PrecioUnitario,
+            det.Ot,
+            det.Fila,
+            det.Correlativo,
+            det.ImgOc,
+            det.ImgPresupuesto,
+            det.IdComprobante
+        FROM dbo.DetOrdenCompra det
+        INNER JOIN dbo.CabOrdenCompra cab ON cab.IdOc = det.IdOc
+        LEFT JOIN dbo.Cliente cli ON cli.IdCliente = det.IdCliente
+        LEFT JOIN dbo.Proyecto pro ON pro.IdProyecto = det.IdProyecto
+        LEFT JOIN dbo.Site sit ON sit.IdSite = det.IdSite AND sit.Correlativo = det.Correlativo
+        LEFT JOIN dbo.Constante tarea ON tarea.Correlativo = det.IdTarea
+            AND LOWER(tarea.Campo) IN ('tarea', 'tipo_tarea')
+        WHERE det.IdOc = @IdOc
+        ORDER BY det.Fila;
+        """;
+    private const string InsertarDetalleEdicionSql = """
+        INSERT INTO dbo.DetOrdenCompra
+            (IdOc, Fila, IdCliente, IdProyecto, IdSite, Correlativo, TipoTrabajo, IdTarea, Ot,
+             Detalle, Cantidad, PrecioUnitario, IdComprobante, ImgOc, ImgPresupuesto)
+        VALUES
+            (@IdOc, @Fila, @IdCliente, @IdProyecto, @IdSite, @Correlativo, @TipoTrabajo, @IdTarea, @Ot,
+             @Detalle, @Cantidad, @PrecioUnitario, @IdComprobante, @ImgOc, @ImgPresupuesto);
+        """;
     private const string BuscarConsumoOcSql = """
         SELECT TOP (1)
             cab.IdOc,
@@ -268,13 +351,62 @@ public class OrdenCompraService : IOrdenCompraService
         CancellationToken cancellationToken = default)
     {
         await using var connection = _sqlCommandFactory.CreateConnection();
-        return await connection.QueryAsync<OrdenCompraCabeceraDto>(
+        var cabeceras = (await connection.QueryAsync<OrdenCompraCabeceraDto>(
             _sqlCommandFactory.Create(
                 BuscarCabeceraSp,
                 BuildConsultaParameters(request),
                 CommandType.StoredProcedure,
                 cancellationToken,
+                commandTimeout: 120))).ToList();
+
+        // sp_OrdenCompra_BuscarCabecera puede devolver un nombre histórico en
+        // Validador. La bandeja debe agrupar por el validador vigente de la OC,
+        // igual que sp_OrdenCompra_Consulta_Estados: CabOrdenCompra.IdValidador.
+        var idsOc = cabeceras
+            .Select(item => item.IdOc)
+            .Where(idOc => idOc > 0)
+            .Distinct()
+            .ToArray();
+
+        if (idsOc.Length == 0)
+            return cabeceras;
+
+        var validadores = await connection.QueryAsync<ValidadorOcLookup>(
+            new CommandDefinition(
+                """
+                SELECT cab.IdOc,
+                       CASE
+                           WHEN ISNULL(cab.IdWeb, 0) = 1 THEN empCj.NombreEmpleado
+                           ELSE emp.NombreEmpleado
+                       END AS Nombre
+                FROM dbo.CabOrdenCompra cab
+                LEFT JOIN dbo.EmpleadoCj empCj
+                    ON empCj.IdEmpleado = cab.IdValidador
+                   AND ISNULL(cab.IdWeb, 0) = 1
+                LEFT JOIN dbo.Empleado emp
+                    ON emp.IdEmpleado = cab.IdValidador
+                   AND ISNULL(cab.IdWeb, 0) <> 1
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM STRING_SPLIT(@IdsOcCsv, ',') ids
+                    WHERE TRY_CONVERT(int, LTRIM(RTRIM(ids.value))) = cab.IdOc
+                );
+                """,
+                new { IdsOcCsv = string.Join(',', idsOc) },
+                cancellationToken: cancellationToken,
                 commandTimeout: 120));
+
+        var nombrePorOc = validadores
+            .Where(item => !string.IsNullOrWhiteSpace(item.Nombre))
+            .ToDictionary(item => item.IdOc, item => item.Nombre!.Trim());
+
+        foreach (var cabecera in cabeceras)
+        {
+            if (nombrePorOc.TryGetValue(cabecera.IdOc, out var nombre))
+                cabecera.Validador = nombre;
+        }
+
+        return cabeceras;
     }
 
     public async Task<IEnumerable<OrdenCompraDetalleDto>> BuscarDetalleAsync(
@@ -354,6 +486,144 @@ public class OrdenCompraService : IOrdenCompraService
         }
 
         return idOc;
+    }
+
+    public async Task<OrdenCompraEdicionDto?> ObtenerEdicionAsync(
+        int idOc,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        var cabecera = await connection.QuerySingleOrDefaultAsync<OrdenCompraEdicionDto>(
+            _sqlCommandFactory.Create(
+                BuscarEdicionCabeceraSql,
+                new { IdOc = idOc },
+                CommandType.Text,
+                cancellationToken,
+                commandTimeout: 120));
+
+        if (cabecera is null)
+        {
+            return null;
+        }
+
+        var detalle = await connection.QueryAsync<OrdenCompraDetalleDto>(
+            _sqlCommandFactory.Create(
+                BuscarEdicionDetalleSql,
+                new { IdOc = idOc },
+                CommandType.Text,
+                cancellationToken,
+                commandTimeout: 120));
+        cabecera.Detalle = detalle.ToList();
+        return cabecera;
+    }
+
+    public async Task ActualizarAsync(
+        OrdenCompraActualizarRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        try
+        {
+            var subtotal = request.Detalle.Sum(item => item.Cantidad * item.PrecioUnitario);
+            var igv = request.IdComprobante is 2 or 6 ? subtotal * 0.18m : 0m;
+            var headerAffected = await connection.ExecuteAsync(new CommandDefinition(
+                ActualizarCabeceraEdicionSql,
+                new
+                {
+                    request.IdOc,
+                    request.IdSolicitante,
+                    request.IdResponsable,
+                    FechaOrden = request.FechaOrden.Date,
+                    Observacion = NullIfWhiteSpace(request.Observacion),
+                    request.IdMoneda,
+                    request.IdComprobante,
+                    request.IdValidador,
+                    request.IdGestor,
+                    request.IdFormaPago,
+                    request.DiasPago,
+                    request.Peso,
+                    Subtotal = subtotal,
+                    Igv = igv,
+                    Total = subtotal + igv,
+                }, transaction, cancellationToken: cancellationToken));
+
+            if (headerAffected == 0)
+            {
+                throw new InvalidOperationException("No se encontró la orden de compra a actualizar.");
+            }
+
+            var nextFila = await connection.ExecuteScalarAsync<int>(new CommandDefinition(
+                "SELECT ISNULL(MAX(Fila), 0) FROM dbo.DetOrdenCompra WHERE IdOc = @IdOc;",
+                new { request.IdOc }, transaction, cancellationToken: cancellationToken));
+
+            foreach (var item in request.Detalle)
+            {
+                var parameters = new
+                {
+                    request.IdOc,
+                    Fila = item.Fila.GetValueOrDefault(),
+                    item.IdCliente,
+                    item.IdProyecto,
+                    item.IdSite,
+                    item.Correlativo,
+                    item.TipoTrabajo,
+                    item.IdTarea,
+                    item.Ot,
+                    item.Detalle,
+                    item.Cantidad,
+                    item.PrecioUnitario,
+                    item.IdComprobante,
+                    ImgOc = NullIfWhiteSpace(item.ImgOc),
+                    ImgPresupuesto = NullIfWhiteSpace(item.ImgPresupuesto),
+                    item.Peso,
+                };
+
+                if (item.Fila is > 0)
+                {
+                    var updated = await connection.ExecuteAsync(new CommandDefinition(
+                        ActualizarDetalleEdicionSql, parameters, transaction, cancellationToken: cancellationToken));
+                    if (updated == 0)
+                    {
+                        throw new InvalidOperationException($"No se encontró la posición {item.Fila} de la OC {request.IdOc}.");
+                    }
+                }
+                else
+                {
+                    nextFila++;
+                    var insertParameters = new
+                    {
+                        request.IdOc,
+                        Fila = nextFila,
+                        item.IdCliente,
+                        item.IdProyecto,
+                        item.IdSite,
+                        item.Correlativo,
+                        item.TipoTrabajo,
+                        item.IdTarea,
+                        item.Ot,
+                        item.Detalle,
+                        item.Cantidad,
+                        item.PrecioUnitario,
+                        item.IdComprobante,
+                        ImgOc = NullIfWhiteSpace(item.ImgOc),
+                        ImgPresupuesto = NullIfWhiteSpace(item.ImgPresupuesto),
+                        item.Peso,
+                    };
+                    await connection.ExecuteAsync(new CommandDefinition(
+                        InsertarDetalleEdicionSql, insertParameters, transaction, cancellationToken: cancellationToken));
+                }
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            throw;
+        }
     }
 
     public async Task RechazarMasivoAsync(
@@ -850,6 +1120,12 @@ public class OrdenCompraService : IOrdenCompraService
         public int? IdAprobador2 { get; set; }
         public int? IdAprobador3 { get; set; }
         public int? IdEstado { get; set; }
+    }
+
+    private sealed class ValidadorOcLookup
+    {
+        public int IdOc { get; set; }
+        public string? Nombre { get; set; }
     }
 
     private sealed class OrdenCompraDetalleEditSnapshot

@@ -103,15 +103,11 @@ public class OrdenCompraController : ControllerBase
                 ?? "sistema";
         }
 
-        if (request.FechaCreacion == default)
-        {
-            request.FechaCreacion = DateTime.Now;
-        }
-
-        if (request.HoraCreacion == default)
-        {
-            request.HoraCreacion = DateTime.Now.TimeOfDay;
-        }
+        // La creación de la OC se fecha en el servidor con hora Perú, sin
+        // depender de la zona horaria del navegador, contenedor o servidor.
+        var fechaHoraPeru = ObtenerFechaHoraPeru();
+        request.FechaCreacion = fechaHoraPeru.Date;
+        request.HoraCreacion = fechaHoraPeru.TimeOfDay;
 
         if (request.IdEstado <= 0)
         {
@@ -125,6 +121,56 @@ public class OrdenCompraController : ControllerBase
             BuildInsertAuditEntries(request, idOc),
             cancellationToken);
         return Ok(new { success = true, message = "Orden de compra creada correctamente.", data = new { idOc } });
+    }
+
+    [HttpGet("{idOc:int}/edicion")]
+    public async Task<IActionResult> ObtenerEdicion(int idOc, CancellationToken cancellationToken)
+    {
+        if (idOc <= 0)
+        {
+            return BadRequest(new { success = false, message = "La orden de compra no es válida." });
+        }
+
+        var data = await _ordenCompraService.ObtenerEdicionAsync(idOc, cancellationToken);
+        return data is null
+            ? NotFound(new { success = false, message = "No se encontró la orden de compra." })
+            : Ok(new { success = true, message = "ok", data });
+    }
+
+    [HttpPut("{idOc:int}")]
+    public async Task<IActionResult> Actualizar(
+        int idOc,
+        [FromBody] OrdenCompraActualizarRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (idOc <= 0 || request.IdOc != idOc)
+        {
+            return BadRequest(new { success = false, message = "La orden de compra no es válida." });
+        }
+
+        if (request.IdSolicitante <= 0 || request.IdResponsable <= 0 || request.IdValidador <= 0 || request.IdGestor <= 0 ||
+            request.IdMoneda <= 0 || request.IdComprobante <= 0 || request.IdFormaPago <= 0 || request.Detalle is null || request.Detalle.Count == 0)
+        {
+            return BadRequest(new { success = false, message = "La cabecera y las posiciones de la orden de compra están incompletas." });
+        }
+
+        foreach (var item in request.Detalle)
+        {
+            var esNuevaPosicion = item.Fila is null or <= 0;
+            var datosOperativosIncompletos = item.IdCliente <= 0 || item.IdProyecto <= 0 ||
+                string.IsNullOrWhiteSpace(item.IdSite) || string.IsNullOrWhiteSpace(item.TipoTrabajo) ||
+                item.IdTarea is null or <= 0;
+
+            if (item.Cantidad <= 0 || item.PrecioUnitario <= 0 || string.IsNullOrWhiteSpace(item.Detalle) ||
+                (esNuevaPosicion && datosOperativosIncompletos))
+            {
+                return BadRequest(new { success = false, message = "Cada posición debe tener sus datos operativos y montos válidos." });
+            }
+        }
+
+        request.IdWeb = 1;
+        await _ordenCompraService.ActualizarAsync(request, cancellationToken);
+        return Ok(new { success = true, message = "Orden de compra actualizada correctamente.", data = new { idOc } });
     }
 
     [HttpPost("archivo")]
@@ -712,6 +758,29 @@ public class OrdenCompraController : ControllerBase
     }
 
     private static string LimpiarRespuesta(string value) => value.Replace("\r", "").Replace("\n", "").Trim().Trim('"');
+
+    private static DateTime ObtenerFechaHoraPeru()
+    {
+        foreach (var timeZoneId in new[] { "SA Pacific Standard Time", "America/Lima" })
+        {
+            try
+            {
+                return TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(timeZoneId)).DateTime;
+            }
+            catch (TimeZoneNotFoundException)
+            {
+                // Se prueba el identificador de la otra plataforma.
+            }
+            catch (InvalidTimeZoneException)
+            {
+                // Se prueba el identificador de la otra plataforma.
+            }
+        }
+
+        // Perú opera en UTC-5 sin horario de verano. Este respaldo evita usar
+        // la hora UTC si el contenedor no expone zonas horarias.
+        return DateTime.UtcNow.AddHours(-5);
+    }
 
     private static string ObtenerTipoContenido(string fileName) => Path.GetExtension(fileName).ToLowerInvariant() switch
     {

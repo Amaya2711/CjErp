@@ -6,6 +6,7 @@ import {
 import { FiltroOperativoLookup } from "../../../components/lookups/FiltroOperativoLookup";
 import {
   aprobarOrdenCompra,
+  actualizarOrdenCompra,
   asociarRecibosOrdenCompra,
   buscarOrdenCompraCabecera,
   buscarOrdenCompraDetalle,
@@ -15,6 +16,7 @@ import {
   descargarArchivoOrdenCompra,
   descargarOrdenCompraPdf,
   insertarOrdenCompra,
+  obtenerOrdenCompraEdicion,
   rechazarOrdenCompraMasivo,
   subirArchivoOrdenCompra,
   type OrdenCompraCabeceraDto,
@@ -25,7 +27,7 @@ import {
 } from "../../../api/ordenCompraService";
 import { useConstantesPorCampo } from "../../../hooks/useConstantesPorCampo";
 import { listarSolicitanteOptions } from "../../../api/solicitanteService";
-import { listarGestorValidadorOptions } from "../../../api/gestorService";
+import { listarGestorOptions, listarGestorValidadorOptions } from "../../../api/gestorService";
 import { listarEmpleadosCta } from "../../../api/empleadoService";
 import { getAuthUser, hasFullPageActionAccess } from "../../../utils/authStorage";
 import {
@@ -155,6 +157,7 @@ function ColumnFilterDropdown({
 
 type OrdenCompraDraftDetalle = {
   tempId: string;
+  fila?: number | null;
   filtroOperativo: FiltroOperativoValue;
   detalle: string;
   comprobante: string;
@@ -668,6 +671,8 @@ export default function OcV1Page() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [reporteLoading, setReporteLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editingOcId, setEditingOcId] = useState<number | null>(null);
+  const [loadingOcForEdit, setLoadingOcForEdit] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [selectedOcId, setSelectedOcId] = useState<number | null>(null);
@@ -827,15 +832,29 @@ export default function OcV1Page() {
   useEffect(() => {
     const loadOptions = async () => {
       try {
-        const [solicitantes, responsables] = await Promise.allSettled([
+        const [solicitantes, responsables, gestores] = await Promise.allSettled([
           listarSolicitanteOptions({
             idCargo: userCargoId > 0 ? userCargoId : null,
             idEmpleado: userId > 0 ? userId : null,
           }),
           listarEmpleadosCta(),
+          // El selector de validador debe permitir cambiar al gestor asignado
+          // inicialmente por el solicitante. Se carga el catálogo completo desde
+          // dbo.sp_ListarGestor; el valor por defecto se conserva más abajo.
+          listarGestorOptions(),
         ]);
         if (solicitantes.status === "fulfilled") setSolicitanteOptions(solicitantes.value);
         if (responsables.status === "fulfilled") setResponsableOptions(responsables.value);
+        if (gestores.status === "fulfilled") {
+          // La respuesta puede terminar después de haber seleccionado un
+          // solicitante. Conservamos el validador sugerido ya agregado para no
+          // perder el valor que quedó seleccionado en el formulario.
+          setValidadorOptions((prev) => {
+            const existentes = new Set(gestores.value.map((option) => normalizeOptionValue(option)));
+            const asignadosNoIncluidos = prev.filter((option) => !existentes.has(normalizeOptionValue(option)));
+            return [...gestores.value, ...asignadosNoIncluidos];
+          });
+        }
       } catch {
         // No exponer información de catálogos ni errores de consulta en consola.
       }
@@ -847,20 +866,32 @@ export default function OcV1Page() {
   const cargarOpcionesDependientesSolicitante = async (idSolicitante: number) => {
     const requestId = ++opcionesDependientesRequestRef.current;
     setGestorOptions([]);
-    setValidadorOptions([]);
+    // No limpiar este catálogo: contiene todos los gestores cargados desde
+    // dbo.sp_ListarGestor y debe seguir disponible al cambiar solicitante.
+    // Solo se actualiza el valor seleccionado con el validador sugerido.
 
     try {
       const { gestores, validadores } = await listarGestorValidadorOptions(idSolicitante);
 
       if (requestId !== opcionesDependientesRequestRef.current) return;
       setGestorOptions(gestores);
-      setValidadorOptions(validadores);
+      // No limitar el selector a los validadores retornados para el solicitante:
+      // conserva el catálogo completo de dbo.sp_ListarGestor. Si el valor
+      // asignado no viniera en ese catálogo, se agrega para que siga visible.
+      setValidadorOptions((prev) => {
+        const catalogo = prev.length > 0 ? prev : validadores;
+        const existentes = new Set(catalogo.map((option) => normalizeOptionValue(option)));
+        const faltantes = validadores.filter((option) => !existentes.has(normalizeOptionValue(option)));
+        return faltantes.length > 0 ? [...catalogo, ...faltantes] : catalogo;
+      });
       setDraft((prev) => {
         if (Number(prev.solicitante) !== idSolicitante) return prev;
 
         return {
           ...prev,
           gestor: gestores[0] ? normalizeOptionValue(gestores[0]) : "",
+          // El primer validador corresponde al valor actual definido para el
+          // solicitante. El usuario puede cambiarlo con el catálogo completo.
           validador: validadores[0] ? normalizeOptionValue(validadores[0]) : "",
         };
       });
@@ -1620,6 +1651,7 @@ export default function OcV1Page() {
     precioUnitarioInputRef.current = "";
     pesoInputRef.current = "";
     setEditingDetalleId(null);
+    setEditingOcId(null);
     setMessage("");
     setError("");
     setPanelOpen(true);
@@ -1635,6 +1667,85 @@ export default function OcV1Page() {
     precioUnitarioInputRef.current = "";
     pesoInputRef.current = "";
     setEditingDetalleId(null);
+    setEditingOcId(null);
+  };
+
+  const abrirEdicionOc = async () => {
+    if (!selectedCabecera?.idOc || loadingOcForEdit) return;
+
+    setLoadingOcForEdit(true);
+    setError("");
+    try {
+      const [oc, gestores] = await Promise.all([
+        obtenerOrdenCompraEdicion(selectedCabecera.idOc),
+        listarGestorOptions(),
+      ]);
+      setGestorOptions(gestores);
+      const fechaOrden = oc.fechaOrden ? oc.fechaOrden.slice(0, 10) : today;
+      const detallesCargados: OrdenCompraDraftDetalle[] = oc.detalle.map((item, index) => ({
+        ...createEmptyDetalle(),
+        tempId: `oc-${oc.idOc}-${item.fila ?? index + 1}`,
+        fila: item.fila ?? null,
+        filtroOperativo: {
+          filtro: {
+            filtroKey: `${item.idCliente ?? 0}-${item.idProyecto ?? 0}-${item.idSite ?? ""}-${item.correlativo ?? 0}`,
+            idCliente: Number(item.idCliente ?? 0),
+            idProyecto: Number(item.idProyecto ?? 0),
+            idSite: item.idSite ?? "",
+            correlativo: Number(item.correlativo ?? 0),
+            nroInterno: 0,
+            nombreCliente: item.nombreCliente ?? "",
+            nombreProyecto: item.nombreProyecto ?? "",
+            nombreSite: item.nombreSite ?? "",
+            tipoTrabajo: item.tipoTrabajo ?? "",
+            ot: item.ot ?? "",
+            fecAsignacion: null,
+          },
+          tipoTrabajo: { tipoTrabajo: item.tipoTrabajo ?? "" },
+          ot: { ot: item.ot ?? "", fecAsignacion: null },
+          tarea: { correlativo: Number(item.idTarea ?? 0), tarea: item.tarea ?? "" },
+        },
+        detalle: item.detalle ?? "",
+        comprobante: String(item.idComprobante ?? oc.idComprobante ?? ""),
+        formaPago: String(oc.idFormaPago ?? ""),
+        moneda: String(item.idMoneda ?? oc.idMoneda ?? ""),
+        diasPago: String(oc.diasPago ?? ""),
+        cantidad: String(item.cantidad ?? ""),
+        precioUnitario: String(item.precioUnitario ?? ""),
+        peso: String(item.peso ?? ""),
+        tieneOcCliente: Boolean(item.imgOc),
+        tienePresupuesto: Boolean(item.imgPresupuesto),
+        ocClienteNombre: item.imgOc ?? "",
+        presupuestoNombre: item.imgPresupuesto ?? "",
+        imgOc: item.imgOc ?? "",
+        imgPresupuesto: item.imgPresupuesto ?? "",
+      }));
+
+      setDraft({
+        fechaOrden,
+        solicitante: String(oc.idSolicitante),
+        gestor: String(oc.idGestor),
+        validador: String(oc.idValidador),
+        responsable: String(oc.idResponsable),
+        observacion: oc.observacion ?? "",
+        moneda: String(oc.idMoneda),
+        comprobante: String(oc.idComprobante),
+        formaPago: String(oc.idFormaPago),
+        diasPago: String(oc.diasPago ?? ""),
+        detalles: detallesCargados,
+      });
+      diasPagoInputRef.current = String(oc.diasPago ?? "");
+      setDetalleForm(createEmptyDetalle());
+      setEditingDetalleId(null);
+      setEditingOcId(oc.idOc);
+      setVistaOc("registro");
+      setPanelOpen(true);
+      setMessage("");
+    } catch (err) {
+      setError(getHttpErrorMessage(err, "No se pudo cargar la orden de compra para editar."));
+    } finally {
+      setLoadingOcForEdit(false);
+    }
   };
 
   const validateDetalleForm = (detalleActual: OrdenCompraDraftDetalle) => {
@@ -1714,7 +1825,7 @@ export default function OcV1Page() {
   }, []);
 
   const removeDetalle = useCallback((tempId: string) => {
-    if (isAccepted) return;
+    if (isAccepted || editingOcId) return;
     setDraft((prev) => ({ ...prev, detalles: prev.detalles.filter((item) => item.tempId !== tempId) }));
     if (editingDetalleId === tempId) {
       setDetalleForm(createEmptyDetalle());
@@ -1724,7 +1835,7 @@ export default function OcV1Page() {
       pesoInputRef.current = "";
       setEditingDetalleId(null);
     }
-  }, [editingDetalleId, isAccepted]);
+  }, [editingDetalleId, isAccepted, editingOcId]);
 
   const validateDraft = () => {
     if (!draft.solicitante || !draft.gestor || !draft.validador || !draft.responsable) {
@@ -1788,6 +1899,7 @@ export default function OcV1Page() {
       diasPago: Number(resolveBufferedValue(diasPagoInputRef.current, draft.diasPago) || 0),
       peso: draftTotals.peso,
       detalle: detallesConArchivos.map((item) => ({
+        fila: item.fila ?? null,
         idCliente: Number(item.filtroOperativo.filtro?.idCliente ?? 0),
         idProyecto: Number(item.filtroOperativo.filtro?.idProyecto ?? 0),
         idSite: String(item.filtroOperativo.filtro?.idSite ?? ""),
@@ -1806,9 +1918,14 @@ export default function OcV1Page() {
     };
 
       // No exponer el payload de inserción de OC en consola.
-      const response = await insertarOrdenCompra(payload);
-      setMessage(`Orden de compra ${response.idOc} creada correctamente.`);
-      closePanel();
+      const response = editingOcId
+        ? await actualizarOrdenCompra({ ...payload, idOc: editingOcId })
+        : await insertarOrdenCompra(payload);
+      setMessage(`Orden de compra ${response.idOc} ${editingOcId ? "actualizada" : "creada"} correctamente.`);
+      // Mantiene la confirmación en Registro junto con el formulario y sus
+      // catálogos, para permitir revisar o crear otra OC.
+      setVistaOc("registro");
+      setPanelOpen(true);
       setSaving(false);
 
       // La OC ya fue confirmada por el servidor. La recarga del listado puede
@@ -1821,7 +1938,7 @@ export default function OcV1Page() {
             await loadDetalles(response.idOc);
           }
         } catch (refreshError) {
-          setError(getHttpErrorMessage(refreshError, "La OC fue creada, pero no se pudo actualizar el listado."));
+          setError(getHttpErrorMessage(refreshError, "La OC fue guardada, pero no se pudo actualizar el listado."));
         }
       })();
     } catch (err) {
@@ -2017,6 +2134,7 @@ export default function OcV1Page() {
         <button type="button" style={{ ...ocV1Styles.viewTab, ...(vistaOc === "aprobacion" ? ocV1Styles.viewTabActive : {}) }} onClick={() => { setVistaOc("aprobacion"); setPanelOpen(false); }}>Bandeja de aprobación</button>
         <button type="button" style={{ ...ocV1Styles.viewTab, ...(vistaOc === "reporte" ? ocV1Styles.viewTabActive : {}) }} onClick={() => { setVistaOc("reporte"); setPanelOpen(false); }}>Seguimiento de pagos</button>
       </div>
+      {message ? <div style={styles.successBanner}>{message}</div> : null}
       {vistaOc === "registro" ? (
         <section style={ocV1Styles.view}>
           <div style={styles.workspaceGrid}>
@@ -2133,8 +2251,6 @@ export default function OcV1Page() {
 
       {/* Solo mostrar error general si NO estÒ�� �"Ò�a�¡ abierto el panel de nueva orden */}
       {!panelOpen && error ? <div style={styles.errorBanner}>{error}</div> : null}
-      {message ? <div style={styles.successBanner}>{message}</div> : null}
-
       <div style={styles.workspaceGrid}>
       <section style={{ ...styles.card, ...styles.masterCard }}>
         
@@ -2286,6 +2402,16 @@ export default function OcV1Page() {
                 <span>Total: {formatMoney(selectedCabecera?.total)}</span>
               </div>
             )
+          ) : null}
+          {selectedCabecera ? (
+            <button
+              type="button"
+              style={styles.secondaryButton}
+              onClick={() => void abrirEdicionOc()}
+              disabled={loadingOcForEdit}
+            >
+              {loadingOcForEdit ? "Cargando..." : "Modificar OC"}
+            </button>
           ) : null}
         </div>
         <div style={styles.detailTabs}>
@@ -2763,7 +2889,12 @@ export default function OcV1Page() {
                         if (column === "EstadoOc") return formatEstadoOcGrid(rawValue);
                         if (["PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"].includes(column)) {
                           const text = String(rawValue ?? "").trim();
-                          return text && !/^\d+$/.test(text) ? text : formatValidadorNivel(Number(rawValue) || null);
+                          const registrado = /^registrado/i.test(text) || Number(rawValue) > 0;
+                          if (!registrado) return "Pendiente";
+
+                          const validadorKey = Object.keys(row).find((key) => key.toLowerCase() === "validadoroc");
+                          const validador = String(validadorKey ? row[validadorKey] ?? "" : "").trim();
+                          return validador ? `Registrado (${validador})` : (text && !/^\d+$/.test(text) ? text : formatValidadorNivel(Number(rawValue) || null));
                         }
                         return String(rawValue ?? "—");
                       };
@@ -2959,8 +3090,8 @@ export default function OcV1Page() {
               {error ? <div style={styles.errorBanner}>{error}</div> : null}
           <div style={styles.sectionHeader}>
             <div>
-              <h2 style={styles.sectionTitle}>Nueva orden de compra</h2>
-              <p style={styles.sectionText}>Registre la cabecera y las posiciones antes de guardar.</p>
+              <h2 style={styles.sectionTitle}>{editingOcId ? `Modificar orden de compra ${editingOcId}` : "Nueva orden de compra"}</h2>
+              <p style={styles.sectionText}>{editingOcId ? "Actualice la cabecera y las posiciones registradas." : "Registre la cabecera y las posiciones antes de guardar."}</p>
               <p style={{ ...styles.sectionText, fontSize: 12, color: "#475569" }}>
                 El sistema registra auditoria automatica de cabecera y posiciones al guardar cambios.
               </p>
@@ -2974,7 +3105,7 @@ export default function OcV1Page() {
               </div>
               <div style={{ display: "flex", gap: 10 }}>
                 <button type="button" onClick={saveDraft} disabled={saving} style={styles.primaryButton}>
-                  {saving ? "Guardando..." : "Guardar"}
+                  {saving ? "Guardando..." : editingOcId ? "Actualizar" : "Guardar"}
                 </button>
               </div>
             </div>
@@ -3298,7 +3429,7 @@ export default function OcV1Page() {
                         <td style={styles.td}>
                           <div style={{ display: "flex", gap: 8 }}>
                             <button type="button" style={styles.smallActionButton} onClick={() => editDetalle(item)}>Editar</button>
-                            <button type="button" style={styles.smallDangerButton} disabled={isAccepted} onClick={() => removeDetalle(item.tempId)}>Rechazar</button>
+                            <button type="button" style={styles.smallDangerButton} disabled={isAccepted || Boolean(editingOcId)} onClick={() => removeDetalle(item.tempId)}>Rechazar</button>
                           </div>
                         </td>
                         <td style={styles.td}>{index + 1}</td>
@@ -3331,7 +3462,7 @@ export default function OcV1Page() {
           <DraftDetalleTable
             detalles={draft.detalles}
             editingDetalleId={editingDetalleId}
-            isAccepted={isAccepted}
+            isAccepted={isAccepted || Boolean(editingOcId)}
             comprobanteOptions={comprobanteOptions}
             tipoPagoOptions={tipoPagoOptions}
             monedaOptions={monedaOptions}
