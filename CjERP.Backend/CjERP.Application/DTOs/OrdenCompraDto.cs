@@ -39,6 +39,7 @@ public class OrdenCompraCabeceraDto
     public int? EstadoOc { get; set; }
     public string IdSite { get; set; } = string.Empty;
     public string NombreSite { get; set; } = string.Empty;
+    public int? IdProyecto { get; set; }
     public string NombreCliente { get; set; } = string.Empty;
     public string NombreProyecto { get; set; } = string.Empty;
 }

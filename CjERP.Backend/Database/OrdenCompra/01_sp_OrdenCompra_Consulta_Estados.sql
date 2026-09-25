@@ -13,9 +13,10 @@ ALTER PROCEDURE [dbo].[sp_OrdenCompra_Consulta_Estados]
     @pProyecto      VARCHAR(200) = NULL,
     @Ano            INT = NULL,
     @Id             INT = NULL,
-    @IdResponsable  INT = NULL,
+    @IdResponsable  VARCHAR(MAX) = NULL,
     @IdCliente      INT = NULL,
-    @IdProyecto     INT = NULL,
+    @IdProyecto     VARCHAR(MAX) = NULL,
+    @IdSolicitante  VARCHAR(MAX) = NULL,
     @IdSite         VARCHAR(MAX) = NULL,
     @Estados        VARCHAR(200) = NULL,
     @FechaInicio    DATE = NULL,
@@ -40,16 +41,34 @@ BEGIN
     IF @Id = 0
         SET @Id = NULL;
 
-    IF @IdResponsable = 0
-        SET @IdResponsable = NULL;
+    SET @IdResponsable = NULLIF(LTRIM(RTRIM(@IdResponsable)), '');
 
     IF @IdCliente = 0
         SET @IdCliente = NULL;
 
-    IF @IdProyecto = 0
-        SET @IdProyecto = NULL;
+    SET @IdProyecto = NULLIF(LTRIM(RTRIM(@IdProyecto)), '');
+    SET @IdSolicitante = NULLIF(LTRIM(RTRIM(@IdSolicitante)), '');
 
     SET @IdSite = NULLIF(LTRIM(RTRIM(@IdSite)), '');
+
+    DECLARE @Responsables TABLE (IdResponsable INT NOT NULL PRIMARY KEY);
+    DECLARE @Proyectos TABLE (IdProyecto INT NOT NULL PRIMARY KEY);
+    DECLARE @Solicitantes TABLE (IdSolicitante INT NOT NULL PRIMARY KEY);
+
+    INSERT INTO @Responsables (IdResponsable)
+    SELECT DISTINCT TRY_CONVERT(INT, LTRIM(RTRIM(value)))
+    FROM STRING_SPLIT(ISNULL(@IdResponsable, ''), ',')
+    WHERE TRY_CONVERT(INT, LTRIM(RTRIM(value))) > 0;
+
+    INSERT INTO @Proyectos (IdProyecto)
+    SELECT DISTINCT TRY_CONVERT(INT, LTRIM(RTRIM(value)))
+    FROM STRING_SPLIT(ISNULL(@IdProyecto, ''), ',')
+    WHERE TRY_CONVERT(INT, LTRIM(RTRIM(value))) > 0;
+
+    INSERT INTO @Solicitantes (IdSolicitante)
+    SELECT DISTINCT TRY_CONVERT(INT, LTRIM(RTRIM(value)))
+    FROM STRING_SPLIT(ISNULL(@IdSolicitante, ''), ',')
+    WHERE TRY_CONVERT(INT, LTRIM(RTRIM(value))) > 0;
 
 
     /* ============================================================
@@ -219,7 +238,10 @@ BEGIN
 
         pl.IdSolicitantePlanilla,
 
-        SolPla.NombreEmpleado AS SolicitantePlanilla,
+        COALESCE(
+            NULLIF(pl.SolicitantesPlanilla, ''),
+            SolPla.NombreEmpleado
+        ) AS SolicitantePlanilla,
 
         ISNULL(
             pl.CantidadSolicitantes,
@@ -541,6 +563,42 @@ BEGIN
 
             END AS IdSolicitantePlanilla,
 
+            /* Todos los solicitantes de los pagos asociados al detalle OC/site. */
+            (
+                SELECT STRING_AGG(CAST(solicitante.NombreEmpleado AS VARCHAR(MAX)), ', ')
+                FROM
+                (
+                    SELECT DISTINCT
+                        NULLIF(
+                            LTRIM(RTRIM(
+                                CASE
+                                    WHEN ISNULL(planillaSolicitante.IdWeb, 0) = 1
+                                        THEN empSolicitanteCj.NombreEmpleado
+                                    ELSE empSolicitante.NombreEmpleado
+                                END
+                            )),
+                            ''
+                        ) AS NombreEmpleado
+                    FROM dbo.Planilla planillaSolicitante
+                    LEFT JOIN dbo.Empleado empSolicitante
+                        ON empSolicitante.IdEmpleado = planillaSolicitante.IdSolicitante
+                       AND ISNULL(planillaSolicitante.IdWeb, 0) <> 1
+                    LEFT JOIN dbo.EmpleadoCj empSolicitanteCj
+                        ON empSolicitanteCj.IdEmpleado = planillaSolicitante.IdSolicitante
+                       AND ISNULL(planillaSolicitante.IdWeb, 0) = 1
+                    WHERE planillaSolicitante.IdOc = a5.IdOc
+                      AND planillaSolicitante.IdCliente = a5.IdCliente
+                      AND planillaSolicitante.IdProyecto = a5.IdProyecto
+                      AND planillaSolicitante.IdSite = a5.IdSite
+                      AND planillaSolicitante.CorreSite = a5.Correlativo
+                      AND (
+                            NOT EXISTS (SELECT 1 FROM @Solicitantes)
+                            OR EXISTS (SELECT 1 FROM @Solicitantes filtroSolicitante WHERE filtroSolicitante.IdSolicitante = planillaSolicitante.IdSolicitante)
+                          )
+                      AND NULLIF(LTRIM(RTRIM(CASE WHEN ISNULL(planillaSolicitante.IdWeb, 0) = 1 THEN empSolicitanteCj.NombreEmpleado ELSE empSolicitante.NombreEmpleado END)), '') IS NOT NULL
+                ) solicitante
+            ) AS SolicitantesPlanilla,
+
 
             /* ====================================================
                MONEDA PLANILLA
@@ -825,9 +883,10 @@ BEGIN
 
             AND p.IdProyecto = a5.IdProyecto
 
-            AND p.IdSite = a5.IdSite
+             AND p.IdSite = a5.IdSite
 
-            AND p.CorreSite = a5.Correlativo
+             AND p.CorreSite = a5.Correlativo
+
 
     ) pl
 
@@ -955,8 +1014,8 @@ BEGIN
 
       AND
       (
-            @IdResponsable IS NULL
-            OR a6.IdResponsable = @IdResponsable
+            NOT EXISTS (SELECT 1 FROM @Responsables)
+            OR EXISTS (SELECT 1 FROM @Responsables filtroResponsable WHERE filtroResponsable.IdResponsable = a6.IdResponsable)
       )
 
 
@@ -977,8 +1036,14 @@ BEGIN
 
       AND
       (
-            @IdProyecto IS NULL
-            OR a5.IdProyecto = @IdProyecto
+            NOT EXISTS (SELECT 1 FROM @Proyectos)
+            OR EXISTS (SELECT 1 FROM @Proyectos filtroProyecto WHERE filtroProyecto.IdProyecto = a5.IdProyecto)
+      )
+
+      AND
+      (
+            NOT EXISTS (SELECT 1 FROM @Solicitantes)
+            OR EXISTS (SELECT 1 FROM @Solicitantes filtroSolicitante WHERE filtroSolicitante.IdSolicitante = a6.IdSolicitante)
       )
 
 
@@ -1102,3 +1167,7 @@ BEGIN
 
 END
 GO
+    INSERT INTO @Responsables (IdResponsable)
+    SELECT DISTINCT TRY_CONVERT(INT, LTRIM(RTRIM(value)))
+    FROM STRING_SPLIT(ISNULL(@IdResponsable, ''), ',')
+    WHERE TRY_CONVERT(INT, LTRIM(RTRIM(value))) > 0;

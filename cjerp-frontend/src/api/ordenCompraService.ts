@@ -25,6 +25,7 @@ export type OrdenCompraCabeceraDto = {
   estadoOc?: number | null;
   idSite?: string;
   nombreSite?: string;
+  idProyecto?: number | null;
   nombreCliente?: string;
   nombreProyecto?: string;
 };

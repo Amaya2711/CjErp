@@ -77,13 +77,31 @@ public sealed class MigracionImportService : IMigracionImportService
             Ot = GetCellValue(row, headerIndex, "OT"),
             Cliente = GetCellValue(row, headerIndex, "CLIENTE"),
             Proyecto = GetCellValue(row, headerIndex, "PROYECTO"),
-            IdSite = GetCellValue(row, headerIndex, "CODIGO"),
-            TipoTrabajo = GetCellValue(row, headerIndex, "TIPO_TRABAJO"),
-            AnoGestion = ParseNullableInt(GetCellValue(row, headerIndex, "AÑO_OP.")),
+            IdSite = GetCellValue(row, headerIndex, "CODIGO", "IDSITE", "ID_SITE"),
+            TipoTrabajo = GetCellValue(row, headerIndex, "TIPO_TRABAJO", "TIPOTRABAJO"),
+            AnoGestion = ParseNullableInt(GetCellValue(row, headerIndex, "AÑO_OP.", "ANOGESTION")),
             Moneda = GetCellValue(row, headerIndex, "MONEDA"),
-            IdMoneda = ParseNullableInt(GetCellValue(row, headerIndex, "ID_MONEDA")),
+            IdMoneda = ParseNullableInt(GetCellValue(row, headerIndex, "ID_MONEDA", "IDMONEDA")),
             MontoBck = ParseNullableDecimal(GetCellValue(row, headerIndex, "MONTO_BCK")),
             Site = GetCellValue(row, headerIndex, "SITE"),
+            Correlativo = ParseNullableInt(GetCellValue(row, headerIndex, "CORRELATIVO")),
+            IdZona = ParseNullableInt(GetCellValue(row, headerIndex, "IDZONA", "ID_ZONA")),
+            Zona = GetCellValue(row, headerIndex, "ZONA"),
+            Work = GetCellValue(row, headerIndex, "WORK"),
+            Empleado = GetCellValue(row, headerIndex, "COORD", "EMPLEADO"),
+            Mes = ParseNullableInt(GetCellValue(row, headerIndex, "MES_ASIG", "MES")),
+            Ano = ParseNullableInt(GetCellValue(row, headerIndex, "AÑO_ASIG", "ANO_ASIG", "ANO")),
+            EstadoOc = GetCellValue(row, headerIndex, "ESTADO_OC", "ESTADO OC"),
+            NroOc = GetCellValue(row, headerIndex, "NRO_OC", "NRO OC"),
+            Posicion = GetCellValue(row, headerIndex, "POS", "POSICION"),
+            MontoOc = ParseNullableDecimal(GetCellValue(row, headerIndex, "MONTO_OC", "MONTOOC")),
+            MontoLiq = ParseNullableDecimal(GetCellValue(row, headerIndex, "MONTO_LIQ", "MONTOLIQ")),
+            Porcentaje = ParseNullableDecimal(GetCellValue(row, headerIndex, "PORCENTAJE")),
+            Esting = GetCellValue(row, headerIndex, "ESTUDIOS_ING", "ESTING"),
+            Plano = GetCellValue(row, headerIndex, "PLANOS", "PLANO"),
+            Valmet = GetCellValue(row, headerIndex, "VALORIZACION", "VALMET"),
+            StatusCw = GetCellValue(row, headerIndex, "OT_CW", "STATUS_CW"),
+            StatusRini = GetCellValue(row, headerIndex, "RNI", "STATUS_RINI"),
             IdActualizar = 0,
             Fecha = DateTime.Now,
             Hora = DateTime.Now
@@ -113,6 +131,24 @@ public sealed class MigracionImportService : IMigracionImportService
                     Moneda,
                     IdMoneda,
                     MontoBck,
+                    Correlativo,
+                    IdZona,
+                    Zona,
+                    Work,
+                    Empleado,
+                    Mes,
+                    Ano,
+                    Estado_Oc,
+                    Nro_Oc,
+                    Posicion,
+                    MontoOc,
+                    MontoLiq,
+                    Porcentaje,
+                    Esting,
+                    Plano,
+                    Valmet,
+                    StatusCw,
+                    StatusRini,
                     Fecha,
                     Hora,
                     IdActualizar,
@@ -128,6 +164,24 @@ public sealed class MigracionImportService : IMigracionImportService
                     @Moneda,
                     @IdMoneda,
                     @MontoBck,
+                    @Correlativo,
+                    @IdZona,
+                    @Zona,
+                    @Work,
+                    @Empleado,
+                    @Mes,
+                    @Ano,
+                    @EstadoOc,
+                    @NroOc,
+                    @Posicion,
+                    @MontoOc,
+                    @MontoLiq,
+                    @Porcentaje,
+                    @Esting,
+                    @Plano,
+                    @Valmet,
+                    @StatusCw,
+                    @StatusRini,
                     @Fecha,
                     @Hora,
                     @IdActualizar,
@@ -480,12 +534,21 @@ public sealed class MigracionImportService : IMigracionImportService
         return index;
     }
 
-    private static string GetCellValue(IReadOnlyList<string?> row, IReadOnlyDictionary<string, int> index, string headerName)
+    private static string GetCellValue(
+        IReadOnlyList<string?> row,
+        IReadOnlyDictionary<string, int> index,
+        params string[] headerNames)
     {
-        var resolvedIndex = FindHeaderIndex(index, headerName);
-        return resolvedIndex >= 0 && resolvedIndex < row.Count
-            ? row[resolvedIndex] ?? string.Empty
-            : string.Empty;
+        foreach (var headerName in headerNames)
+        {
+            var resolvedIndex = FindHeaderIndex(index, headerName);
+            if (resolvedIndex >= 0 && resolvedIndex < row.Count)
+            {
+                return row[resolvedIndex] ?? string.Empty;
+            }
+        }
+
+        return string.Empty;
     }
 
     private static int FindHeaderIndex(IReadOnlyDictionary<string, int> index, string headerName)

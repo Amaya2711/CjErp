@@ -765,7 +765,7 @@ WHERE Correlativo IN @Correlativos";
                 if (string.Equals(storedProcedureName, StoredProcedureAnalisisGastos, StringComparison.OrdinalIgnoreCase))
                 {
                     var allowedParametersAnalisis = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                    { "pProyecto", "Ano", "Id", "IdResponsable", "IdCliente", "IdProyecto", "IdSite", "Estados", "FechaInicio", "FechaFin" };
+                    { "pProyecto", "Ano", "Id", "IdResponsable", "IdSolicitante", "IdCliente", "IdProyecto", "IdSite", "Estados", "FechaInicio", "FechaFin" };
                     return parametros.Where(parametro => !string.IsNullOrWhiteSpace(parametro.Nombre) && allowedParametersAnalisis.Contains(parametro.Nombre.Trim().TrimStart('@')));
                 }
 

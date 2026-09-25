@@ -64,6 +64,11 @@ function getReporteRowIdOc(row: Record<string, unknown>): string {
   return key ? String(row[key] ?? "").trim() : "";
 }
 
+function getReporteRowIdProyecto(row: Record<string, unknown>): string {
+  const key = Object.keys(row).find((name) => name.toLowerCase() === "idproyecto");
+  return key ? String(row[key] ?? "").trim() : "";
+}
+
 type ColumnFilterDropdownProps = {
   header: { key: string; label: string };
   filtroColumnaMenuRef: React.RefObject<HTMLDivElement | null>;
@@ -740,6 +745,8 @@ export default function OcV1Page() {
   const [busquedaResponsableReporte, setBusquedaResponsableReporte] = useState("");
   const [solicitantesReporteFiltro, setSolicitantesReporteFiltro] = useState<string[]>([]);
   const [busquedaSolicitanteReporte, setBusquedaSolicitanteReporte] = useState("");
+  const [proyectosReporteFiltro, setProyectosReporteFiltro] = useState<string[]>([]);
+  const [busquedaProyectoReporte, setBusquedaProyectoReporte] = useState("");
   const [sitesReporteFiltro, setSitesReporteFiltro] = useState<string[]>([]);
   const [busquedaSiteReporte, setBusquedaSiteReporte] = useState("");
   const cambiarReporteSubtab = (tab: string) => {
@@ -752,6 +759,10 @@ export default function OcV1Page() {
       setReportePlanillaRows([]);
       setResponsablesReporteFiltro([]);
       setBusquedaResponsableReporte("");
+      setSolicitantesReporteFiltro([]);
+      setBusquedaSolicitanteReporte("");
+      setProyectosReporteFiltro([]);
+      setBusquedaProyectoReporte("");
   };
 
   const camposConstantes = useMemo(
@@ -950,29 +961,45 @@ export default function OcV1Page() {
     setError("");
     try {
       if (reporteSubtab === "oc-gastos") {
-        // El store recibe un IdResponsable por consulta. Para una selección
-        // múltiple se ejecuta una consulta por código y se consolidan las filas.
         const responsablesIds = [...new Set(
           responsablesReporteFiltro
             .map((value) => Number(value))
             .filter((value) => Number.isInteger(value) && value > 0)
         )];
         const idOcFiltro = reporteFiltros.idOc.trim();
-        const responseRows = await Promise.all(
-          (responsablesIds.length ? responsablesIds : [null]).map(async (responsableId) => {
-            const request = buildPlanillaConsultaEstadosRequest([
-              ...(reporteFiltros.fechaDesde ? [{ nombre: "FechaInicio", valor: reporteFiltros.fechaDesde, tipo: "date" as const }] : []),
-              ...(reporteFiltros.fechaHasta ? [{ nombre: "FechaFin", valor: reporteFiltros.fechaHasta, tipo: "date" as const }] : []),
-              ...(idOcFiltro ? [{ nombre: "Id", valor: idOcFiltro, tipo: "int" as const }] : []),
-              ...(responsableId ? [{ nombre: "IdResponsable", valor: String(responsableId), tipo: "int" as const }] : []),
-              ...(sitesReporteFiltro.length ? [{ nombre: "IdSite", valor: sitesReporteFiltro.join(","), tipo: "string" as const }] : []),
-            ]);
-            request.consulta = "analisis-gastos";
-            const response = await consultarPlanillaEstados(request, { timeoutMs: 60000 });
-            return Array.isArray(response?.rows) ? response.rows : [];
-          })
-        );
-        const rows = responseRows.flat().map((row) => {
+        const proyectoSeleccionado = reporteFiltros.proyecto.trim();
+        const idProyectoFiltro = [...new Set(
+          proyectoSeleccionado
+            .split(",")
+            .map((value) => value.trim())
+            .filter(Boolean)
+            .flatMap((proyecto) => {
+              const idDirecto = Number(proyecto);
+              if (Number.isInteger(idDirecto) && idDirecto > 0) return [String(idDirecto)];
+              return cabeceras
+                .filter((item) => item.nombreProyecto?.trim().localeCompare(proyecto, undefined, { sensitivity: "accent" }) === 0)
+                .map((item) => String(item.idProyecto ?? "").trim())
+                .filter(Boolean);
+            })
+        )].join(",");
+        const idsSolicitanteFiltro = [...new Set(
+          solicitantesReporteFiltro
+            .map((value) => Number(value))
+            .filter((id) => Number.isInteger(id) && id > 0)
+            .map(String)
+        )];
+        const request = buildPlanillaConsultaEstadosRequest([
+          ...(reporteFiltros.fechaDesde ? [{ nombre: "FechaInicio", valor: reporteFiltros.fechaDesde, tipo: "date" as const }] : []),
+          ...(reporteFiltros.fechaHasta ? [{ nombre: "FechaFin", valor: reporteFiltros.fechaHasta, tipo: "date" as const }] : []),
+          ...(idOcFiltro ? [{ nombre: "Id", valor: idOcFiltro, tipo: "int" as const }] : []),
+          ...(idProyectoFiltro ? [{ nombre: "IdProyecto", valor: idProyectoFiltro, tipo: "string" as const }] : []),
+          ...(idsSolicitanteFiltro.length ? [{ nombre: "IdSolicitante", valor: idsSolicitanteFiltro.join(","), tipo: "string" as const }] : []),
+          ...(responsablesIds.length ? [{ nombre: "IdResponsable", valor: responsablesIds.join(","), tipo: "string" as const }] : []),
+          ...(sitesReporteFiltro.length ? [{ nombre: "IdSite", valor: sitesReporteFiltro.join(","), tipo: "string" as const }] : []),
+        ]);
+        request.consulta = "analisis-gastos";
+        const response = await consultarPlanillaEstados(request, { timeoutMs: 60000 });
+        const rows = (Array.isArray(response?.rows) ? response.rows : []).map((row) => {
           // Mantener el alias del nuevo store aunque el serializador omita valores NULL.
           // Así no se utiliza CorSite (correlativo del site) como sustituto.
           const correlativoKey = Object.keys(row).find((key) => key.toLowerCase() === "correlativoplanilla");
@@ -981,12 +1008,15 @@ export default function OcV1Page() {
         const rowsPorIdOc = idOcFiltro
           ? rows.filter((row) => getReporteRowIdOc(row) === idOcFiltro)
           : rows;
+        const rowsPorProyecto = idProyectoFiltro
+          ? rowsPorIdOc.filter((row) => idProyectoFiltro.split(",").includes(getReporteRowIdProyecto(row)))
+          : rowsPorIdOc;
         const estadosOcSeleccionados = getEstadosOcSeleccionados(reporteFiltros.estado);
         const rowsPorEstado = estadosOcSeleccionados.length
-          ? rowsPorIdOc.filter((row) => {
+          ? rowsPorProyecto.filter((row) => {
             return estadosOcSeleccionados.includes(clasificarEstadoOc(getEstadoOcRowValue(row)) as EstadoOcReporte);
           })
-          : rowsPorIdOc;
+          : rowsPorProyecto;
         const rowsFiltradas = rowsPorEstado;
         setReportePlanillaRows(rowsFiltradas);
         setReportePlanillaColumns(OC_GASTOS_COLUMNAS_INICIALES);
@@ -1307,6 +1337,15 @@ export default function OcV1Page() {
     sites: getUniqueSorted(cabeceras.map((item) => item.nombreSite || item.idSite || "")),
     estados: ["ACEPTADO", "RECHAZADO", "EN PROCESO"],
   }), [cabeceras]);
+
+  const solicitanteReporteOptions = useMemo(
+    () => reporteSubtab === "oc-gastos"
+      ? solicitanteOptions
+        .map((item) => ({ value: String(item.value ?? item.codigo ?? "").trim(), label: String(item.label ?? "").trim() }))
+        .filter((item) => item.value && item.label)
+      : reporteOptions.solicitantes.map((nombre) => ({ value: nombre, label: nombre })),
+    [reporteOptions.solicitantes, reporteSubtab, solicitanteOptions]
+  );
 
   const responsablesOcGastosOptions = useMemo(() => {
     const responsables = new Map<number, string>();
@@ -1770,11 +1809,21 @@ export default function OcV1Page() {
       const response = await insertarOrdenCompra(payload);
       setMessage(`Orden de compra ${response.idOc} creada correctamente.`);
       closePanel();
-      await loadCabeceras();
-      if (response.idOc) {
-        setSelectedOcId(response.idOc);
-        await loadDetalles(response.idOc);
-      }
+      setSaving(false);
+
+      // La OC ya fue confirmada por el servidor. La recarga del listado puede
+      // tardar más que la inserción; no debe mantener el formulario bloqueado.
+      void (async () => {
+        try {
+          await loadCabeceras();
+          if (response.idOc) {
+            setSelectedOcId(response.idOc);
+            await loadDetalles(response.idOc);
+          }
+        } catch (refreshError) {
+          setError(getHttpErrorMessage(refreshError, "La OC fue creada, pero no se pudo actualizar el listado."));
+        }
+      })();
     } catch (err) {
       setError(getHttpErrorMessage(err, "No se pudo registrar la orden de compra."));
     } finally {
@@ -2502,7 +2551,7 @@ export default function OcV1Page() {
                   style={styles.input}
                 />
               </Field>
-              <Field><Label>Solicitante</Label><details style={{ position: "relative" }}><summary style={{ ...styles.input, display: "flex", alignItems: "center", cursor: "pointer" }}>Todos{solicitantesReporteFiltro.length > 0 && ` (${solicitantesReporteFiltro.length})`}</summary><div style={{ position: "absolute", zIndex: 20, top: "100%", left: 0, right: 0, maxHeight: 240, overflowY: "auto", padding: 8, background: "#fff", border: "1px solid #D1D5DB", borderRadius: 8 }}><input value={busquedaSolicitanteReporte} onChange={(e) => setBusquedaSolicitanteReporte(e.target.value)} placeholder="Escriba un solicitante..." style={styles.input} /><label style={{ display: "flex", gap: 6, padding: "6px 2px", fontSize: 12, fontWeight: 600 }}><input type="checkbox" onChange={(e) => { const disponibles = reporteOptions.solicitantes.filter((item) => item.toLocaleLowerCase().includes(busquedaSolicitanteReporte.toLocaleLowerCase())); const values = e.target.checked ? [...new Set([...solicitantesReporteFiltro, ...disponibles])] : solicitantesReporteFiltro.filter((v) => !disponibles.includes(v)); setSolicitantesReporteFiltro(values); setReporteFiltros((p) => ({ ...p, solicitante: values.join(",") })); }} />Marcar / desmarcar todos</label>{reporteOptions.solicitantes.filter((item) => item.toLocaleLowerCase().includes(busquedaSolicitanteReporte.toLocaleLowerCase())).map((item) => <label key={`rep-sol-${item}`} style={{ display: "flex", gap: 6, padding: "4px 2px", fontSize: 12 }}><input type="checkbox" checked={solicitantesReporteFiltro.includes(item)} onChange={(e) => { const values = e.target.checked ? [...solicitantesReporteFiltro, item] : solicitantesReporteFiltro.filter((v) => v !== item); setSolicitantesReporteFiltro(values); setReporteFiltros((p) => ({ ...p, solicitante: values.join(",") })); }} />{item}</label>)}</div></details></Field>
+              <Field><Label>Solicitante</Label><details style={{ position: "relative" }}><summary style={{ ...styles.input, display: "flex", alignItems: "center", cursor: "pointer" }}>Todos{solicitantesReporteFiltro.length > 0 && ` (${solicitantesReporteFiltro.length})`}</summary><div style={{ position: "absolute", zIndex: 20, top: "100%", left: 0, right: 0, maxHeight: 240, overflowY: "auto", padding: 8, background: "#fff", border: "1px solid #D1D5DB", borderRadius: 8 }}><input value={busquedaSolicitanteReporte} onChange={(e) => setBusquedaSolicitanteReporte(e.target.value)} placeholder="Escriba un solicitante..." style={styles.input} /><label style={{ display: "flex", gap: 6, padding: "6px 2px", fontSize: 12, fontWeight: 600 }}><input type="checkbox" onChange={(e) => { const disponibles = solicitanteReporteOptions.filter((item) => item.label.toLocaleLowerCase().includes(busquedaSolicitanteReporte.toLocaleLowerCase())).map((item) => item.value); const values = e.target.checked ? [...new Set([...solicitantesReporteFiltro, ...disponibles])] : solicitantesReporteFiltro.filter((v) => !disponibles.includes(v)); setSolicitantesReporteFiltro(values); setReporteFiltros((p) => ({ ...p, solicitante: values.join(",") })); }} />Marcar / desmarcar todos</label>{solicitanteReporteOptions.filter((item) => item.label.toLocaleLowerCase().includes(busquedaSolicitanteReporte.toLocaleLowerCase())).map((item) => <label key={`rep-sol-${item.value}`} style={{ display: "flex", gap: 6, padding: "4px 2px", fontSize: 12 }}><input type="checkbox" checked={solicitantesReporteFiltro.includes(item.value)} onChange={(e) => { const values = e.target.checked ? [...new Set([...solicitantesReporteFiltro, item.value])] : solicitantesReporteFiltro.filter((v) => v !== item.value); setSolicitantesReporteFiltro(values); setReporteFiltros((p) => ({ ...p, solicitante: values.join(",") })); }} />{item.label}</label>)}</div></details></Field>
               <Field>
               <Label>Responsable</Label>
               <details className="oc-reporte-multi-filter" style={{ position: "relative", minWidth: 180 }}>
@@ -2558,14 +2607,37 @@ export default function OcV1Page() {
               </Field>
               <Field>
                 <Label>Proyecto</Label>
-                <select
-                  value={reporteFiltros.proyecto}
-                  onChange={(event) => setReporteFiltros((prev) => ({ ...prev, proyecto: event.target.value }))}
-                  style={styles.input}
-                >
-                  <option value="">Todos</option>
-                  {reporteOptions.proyectos.map((item) => <option key={`rep-pro-${item}`} value={item}>{item}</option>)}
-                </select>
+                <details style={{ position: "relative" }}>
+                  <summary style={{ ...styles.input, display: "flex", alignItems: "center", cursor: "pointer" }}>
+                    Todos{proyectosReporteFiltro.length > 0 && ` (${proyectosReporteFiltro.length})`}
+                  </summary>
+                  <div style={{ position: "absolute", zIndex: 20, top: "100%", left: 0, right: 0, maxHeight: 240, overflowY: "auto", padding: 8, background: "#fff", border: "1px solid #D1D5DB", borderRadius: 8 }}>
+                    <input value={busquedaProyectoReporte} onChange={(event) => setBusquedaProyectoReporte(event.target.value)} placeholder="Escriba un proyecto..." style={styles.input} />
+                    <label style={{ display: "flex", gap: 6, padding: "6px 2px", fontSize: 12, fontWeight: 600 }}>
+                      <input type="checkbox" onChange={(event) => {
+                        const disponibles = reporteOptions.proyectos.filter((item) => item.toLocaleLowerCase().includes(busquedaProyectoReporte.toLocaleLowerCase()));
+                        const values = event.target.checked ? [...new Set([...proyectosReporteFiltro, ...disponibles])] : proyectosReporteFiltro.filter((value) => !disponibles.includes(value));
+                        setProyectosReporteFiltro(values);
+                        setReporteFiltros((prev) => ({ ...prev, proyecto: values.join(",") }));
+                      }} />
+                      Marcar / desmarcar todos
+                    </label>
+                    {reporteOptions.proyectos
+                      .filter((item) => item.toLocaleLowerCase().includes(busquedaProyectoReporte.toLocaleLowerCase()))
+                      .map((item) => (
+                        <label key={`rep-pro-${item}`} style={{ display: "flex", gap: 6, padding: "4px 2px", fontSize: 12 }}>
+                          <input type="checkbox" checked={proyectosReporteFiltro.includes(item)} onChange={(event) => {
+                            const values = event.target.checked
+                              ? [...new Set([...proyectosReporteFiltro, item])]
+                              : proyectosReporteFiltro.filter((value) => value !== item);
+                            setProyectosReporteFiltro(values);
+                            setReporteFiltros((prev) => ({ ...prev, proyecto: values.join(",") }));
+                          }} />
+                          {item}
+                        </label>
+                      ))}
+                  </div>
+                </details>
               </Field>
               <Field>
                 <Label>Site</Label>
@@ -2628,7 +2700,7 @@ export default function OcV1Page() {
                   type="button"
                   style={{ ...styles.secondaryButton, height: 34, minWidth: 76, padding: "0 10px", fontSize: 11, lineHeight: 1.2, whiteSpace: "normal" }}
                   onClick={() => {
-                    setReporteFiltros({ solicitante: "", responsable: "", cliente: "", proyecto: "", site: "", estado: reporteSubtab === "oc-gastos" ? ESTADOS_OC_GASTOS_POR_DEFECTO : "", idOc: "", fechaDesde: "", fechaHasta: "" }); setResponsablesReporteFiltro([]); setBusquedaResponsableReporte(""); setSolicitantesReporteFiltro([]); setBusquedaSolicitanteReporte(""); setSitesReporteFiltro([]); setBusquedaSiteReporte("");
+                    setReporteFiltros({ solicitante: "", responsable: "", cliente: "", proyecto: "", site: "", estado: reporteSubtab === "oc-gastos" ? ESTADOS_OC_GASTOS_POR_DEFECTO : "", idOc: "", fechaDesde: "", fechaHasta: "" }); setResponsablesReporteFiltro([]); setBusquedaResponsableReporte(""); setSolicitantesReporteFiltro([]); setBusquedaSolicitanteReporte(""); setProyectosReporteFiltro([]); setBusquedaProyectoReporte(""); setSitesReporteFiltro([]); setBusquedaSiteReporte("");
                     setReporteDetalles([]);
                     setReporteConsultado(false);
                   }}

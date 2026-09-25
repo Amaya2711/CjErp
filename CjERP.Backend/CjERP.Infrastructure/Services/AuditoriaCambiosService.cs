@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Data;
+using System.Text;
 using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces.Services;
 using Dapper;
@@ -51,26 +52,37 @@ public class AuditoriaCambiosService : IAuditoriaCambiosService
             return;
         }
 
-        foreach (var cambio in lote)
+        // Una llamada por campo es muy costosa cuando la API y SQL Server están
+        // en redes distintas. Agrupamos hasta 100 auditorías (1,000 parámetros,
+        // por debajo del límite de SQL Server) en un único viaje a SQL.
+        foreach (var grupo in lote.Chunk(100))
         {
             var parameters = new DynamicParameters();
-            parameters.Add("@Modulo", cambio.Modulo.Trim(), DbType.String);
-            parameters.Add("@Entidad", cambio.Entidad.Trim(), DbType.String);
-            parameters.Add("@IdRegistro", cambio.IdRegistro.Trim(), DbType.String);
-            parameters.Add("@Accion", cambio.Accion.Trim().ToUpperInvariant(), DbType.String);
-            parameters.Add("@Seccion", NullIfWhiteSpace(cambio.Seccion), DbType.String);
-            parameters.Add("@Campo", cambio.Campo.Trim(), DbType.String);
-            parameters.Add("@ValorAnterior", NullIfWhiteSpace(cambio.ValorAnterior), DbType.String);
-            parameters.Add("@ValorNuevo", NullIfWhiteSpace(cambio.ValorNuevo), DbType.String);
-            parameters.Add("@UsuarioAccion", cambio.UsuarioAccion.Trim(), DbType.String);
-            parameters.Add("@Observacion", NullIfWhiteSpace(cambio.Observacion), DbType.String);
+            var commandText = new StringBuilder();
+
+            foreach (var (cambio, index) in grupo.Select((cambio, index) => (cambio, index)))
+            {
+                commandText.Append($"EXEC {RegistrarSp} @Modulo = @Modulo{index}, @Entidad = @Entidad{index}, @IdRegistro = @IdRegistro{index}, @Accion = @Accion{index}, @Seccion = @Seccion{index}, @Campo = @Campo{index}, @ValorAnterior = @ValorAnterior{index}, @ValorNuevo = @ValorNuevo{index}, @UsuarioAccion = @UsuarioAccion{index}, @Observacion = @Observacion{index};");
+
+                parameters.Add($"@Modulo{index}", cambio.Modulo.Trim(), DbType.String);
+                parameters.Add($"@Entidad{index}", cambio.Entidad.Trim(), DbType.String);
+                parameters.Add($"@IdRegistro{index}", cambio.IdRegistro.Trim(), DbType.String);
+                parameters.Add($"@Accion{index}", cambio.Accion.Trim().ToUpperInvariant(), DbType.String);
+                parameters.Add($"@Seccion{index}", NullIfWhiteSpace(cambio.Seccion), DbType.String);
+                parameters.Add($"@Campo{index}", cambio.Campo.Trim(), DbType.String);
+                parameters.Add($"@ValorAnterior{index}", NullIfWhiteSpace(cambio.ValorAnterior), DbType.String);
+                parameters.Add($"@ValorNuevo{index}", NullIfWhiteSpace(cambio.ValorNuevo), DbType.String);
+                parameters.Add($"@UsuarioAccion{index}", cambio.UsuarioAccion.Trim(), DbType.String);
+                parameters.Add($"@Observacion{index}", NullIfWhiteSpace(cambio.Observacion), DbType.String);
+            }
 
             await connection.ExecuteAsync(
                 new CommandDefinition(
-                    RegistrarSp,
+                    commandText.ToString(),
                     parameters,
-                    commandType: CommandType.StoredProcedure,
-                    cancellationToken: cancellationToken));
+                    commandType: CommandType.Text,
+                    cancellationToken: cancellationToken,
+                    commandTimeout: 120));
         }
     }
 
