@@ -788,18 +788,23 @@ function buildHistorialOtRequest(row: PagoRow): PlanillaConsultaEstadosRequest |
   const idSite = row?.siteId?.trim();
   const tipoTrabajo = row?.tipoTrabajo?.trim();
 
-  if (!ot || idCliente <= 0 || idProyecto <= 0 || !idSite || !tipoTrabajo) {
+  if (idCliente <= 0 || idProyecto <= 0 || !idSite || !tipoTrabajo) {
     return null;
   }
 
-  return buildPagosV1PlanillaRequest([
-      { nombre: "Estados", valor: "4", tipo: "string" },
-      { nombre: "OT", valor: ot, tipo: "string" },
-      { nombre: "IdCliente", valor: String(Math.trunc(idCliente)), tipo: "int" },
-      { nombre: "IdProyecto", valor: String(Math.trunc(idProyecto)), tipo: "int" },
-      { nombre: "IdSite", valor: idSite, tipo: "string" },
-      { nombre: "TipoTrabajo", valor: tipoTrabajo, tipo: "string" },
-    ]);
+  const parametros: PlanillaConsultaParametro[] = [
+    { nombre: "Estados", valor: "4", tipo: "string" },
+    { nombre: "IdCliente", valor: String(Math.trunc(idCliente)), tipo: "int" },
+    { nombre: "IdProyecto", valor: String(Math.trunc(idProyecto)), tipo: "int" },
+    { nombre: "IdSite", valor: idSite, tipo: "string" },
+    { nombre: "TipoTrabajo", valor: tipoTrabajo, tipo: "string" },
+  ];
+
+  if (ot) {
+    parametros.splice(1, 0, { nombre: "OT", valor: ot, tipo: "string" });
+  }
+
+  return buildPagosV1PlanillaRequest(parametros);
 }
 
 function buildHistorialOcRequest(row: PagoRow): PlanillaConsultaEstadosRequest | null {
@@ -2424,6 +2429,13 @@ export default function PagosV1Page() {
     });
   };
 
+  const openDetailForRow = (row: PagoRow) => {
+    setSelectedId(row.id);
+    setHistorialOcRows([]);
+    setIsDetailPanelOpen(true);
+    setDetailTab("resumen");
+  };
+
   const openHistorialOtForRow = (row: PagoRow) => {
     preferredDetailTabRef.current = "historial";
     setSelectedId(row.id);
@@ -3675,6 +3687,12 @@ export default function PagosV1Page() {
                                       });
                                       return (
                                         <div style={{ display: "flex", justifyContent: "center", gap: 4 }}>
+                                          <button type="button" title="Visualizar gasto" aria-label={`Visualizar gasto ${row.correlativo}`} onClick={(event) => { event.stopPropagation(); abrirGasto(row, "ver"); }} style={actionStyle(true, "#2563EB", "#EFF6FF", "#93C5FD")}>
+                                            <Eye size={14} />
+                                          </button>
+                                          <button type="button" title="Ver detalle de la orden" aria-label={`Ver detalle de la orden ${row.idOc || row.documento || ""}`} onClick={(event) => { event.stopPropagation(); openDetailForRow(row); }} style={actionStyle(true, "#0F766E", "#F0FDFA", "#99F6E4")}>
+                                            <ReceiptText size={14} />
+                                          </button>
                                           <button type="button" title={accionesHabilitadas ? "Modificar gasto" : "Modificar no disponible para el estado actual"} aria-label={`Modificar gasto ${row.correlativo}`} disabled={!accionesHabilitadas} onClick={(event) => { event.stopPropagation(); if (accionesHabilitadas) abrirGasto(row, "editar"); }} style={actionStyle(accionesHabilitadas, "#3730A3", "#EEF2FF", "#C7D2FE")}>
                                             <Pencil size={14} />
                                           </button>
@@ -4224,9 +4242,7 @@ export default function PagosV1Page() {
                           {historialRowsFiltrados.length === 0 ? (
                             <tr>
                               <td colSpan={16} style={styles.emptyCell}>
-                                {tieneOtValida
-                                  ? "No hay registros para el cliente, proyecto, site y tipo de trabajo seleccionados."
-                                  : "La orden seleccionada no tiene una OT válida."}
+                                No hay registros para el cliente, proyecto, site y tipo de trabajo seleccionados.
                               </td>
                             </tr>
                           ) : (
@@ -4735,9 +4751,7 @@ export default function PagosV1Page() {
                           <td colSpan={16} style={styles.emptyCell}>
                             {historialSolicitanteSeleccionado
                               ? "No hay registros para el solicitante seleccionado."
-                              : tieneOtValida
-                              ? "No hay registros para el cliente, proyecto, site y tipo de trabajo seleccionados."
-                              : "La orden seleccionada no tiene una OT válida."}
+                              : "No hay registros para el cliente, proyecto, site y tipo de trabajo seleccionados."}
                           </td>
                         </tr>
                       ) : (
@@ -5280,6 +5294,9 @@ const styles: Record<string, React.CSSProperties> = {
     overflowX: "hidden",
     overflowY: "auto",
     scrollbarGutter: "stable",
+    // Reserva el espacio de la barra fija de acciones para que no cubra la
+    // última parte del contenido cuando la pantalla tiene poca altura.
+    paddingBottom: 70,
   },
   hero: {
     border: "1px solid #E2E8F0",
@@ -5563,6 +5580,11 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "start",
   },
   actionsBar: {
+    position: "fixed",
+    left: 56,
+    right: 12,
+    bottom: 48,
+    zIndex: 1100,
     marginTop: 0,
   },
   filtersCard: {
