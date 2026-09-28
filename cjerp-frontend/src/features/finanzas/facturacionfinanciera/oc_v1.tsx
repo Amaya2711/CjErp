@@ -657,6 +657,7 @@ export default function OcV1Page() {
   const [reportePlanillaRows, setReportePlanillaRows] = useState<Record<string, unknown>[]>([]);
   const [estadosOcGastosCatalogo, setEstadosOcGastosCatalogo] = useState<string[]>([]);
   const [solicitantesOcGastosCatalogo, setSolicitantesOcGastosCatalogo] = useState<Array<{ value: string; label: string }>>([]);
+  const [clientesOcGastosCatalogo, setClientesOcGastosCatalogo] = useState<Array<{ value: string; label: string }>>([]);
   const ocGastosHeaderScrollRef = useRef<HTMLDivElement | null>(null);
   const ocGastosHeaderScrollContentRef = useRef<HTMLDivElement | null>(null);
   const ocGastosTableScrollRef = useRef<HTMLDivElement | null>(null);
@@ -815,9 +816,9 @@ export default function OcV1Page() {
     else setReporteFiltros({ solicitante: "", responsable: "", cliente: "", proyecto: "", site: "", estado: tab === "oc-gastos" ? ESTADOS_OC_GASTOS_POR_DEFECTO : "", idOc: "", fechaDesde: "", fechaHasta: "" });
       setReporteSubtab(tab as typeof reporteSubtab);
       setReporteConsultado(false);
-       setReportePlanillaRows([]);
-       setEstadosOcGastosCatalogo([]);
-       setSolicitantesOcGastosCatalogo([]);
+        setReportePlanillaRows([]);
+        setEstadosOcGastosCatalogo([]);
+        setSolicitantesOcGastosCatalogo([]);
       setResponsablesReporteFiltro([]);
       setBusquedaResponsableReporte("");
       setSolicitantesReporteFiltro([]);
@@ -1097,6 +1098,7 @@ export default function OcV1Page() {
             .filter((value) => Number.isInteger(value) && value > 0)
         )];
         const idOcFiltro = reporteFiltros.idOc.trim();
+        const idClienteFiltro = Number(reporteFiltros.cliente);
         // El nuevo store recibe los filtros múltiples como CSV. Se usan los
         // códigos seleccionados, nunca el nombre del proyecto, para evitar que
         // la búsqueda dependa de que el listado de cabeceras esté cargado.
@@ -1117,6 +1119,7 @@ export default function OcV1Page() {
           ...(reporteFiltros.fechaDesde ? [{ nombre: "FechaInicio", valor: reporteFiltros.fechaDesde, tipo: "date" as const }] : []),
           ...(reporteFiltros.fechaHasta ? [{ nombre: "FechaFin", valor: reporteFiltros.fechaHasta, tipo: "date" as const }] : []),
           ...(idOcFiltro ? [{ nombre: "Id", valor: idOcFiltro, tipo: "int" as const }] : []),
+          ...(Number.isInteger(idClienteFiltro) && idClienteFiltro > 0 ? [{ nombre: "IdCliente", valor: String(idClienteFiltro), tipo: "int" as const }] : []),
           ...(idProyectoFiltro ? [{ nombre: "IdProyecto", valor: idProyectoFiltro, tipo: "string" as const }] : []),
           ...(idsSolicitanteFiltro.length ? [{ nombre: "IdSolicitante", valor: idsSolicitanteFiltro.join(","), tipo: "string" as const }] : []),
           ...(responsablesIds.length ? [{ nombre: "IdResponsable", valor: responsablesIds.join(","), tipo: "string" as const }] : []),
@@ -1133,6 +1136,10 @@ export default function OcV1Page() {
         const getIdSolicitanteOc = (row: Record<string, unknown>) => {
           const key = Object.keys(row).find((item) => item.toLowerCase() === "idsolicitanteoc")
             ?? Object.keys(row).find((item) => item.toLowerCase() === "idsolicitante");
+          return key ? String(row[key] ?? "").trim() : "";
+        };
+        const getIdClienteOc = (row: Record<string, unknown>) => {
+          const key = Object.keys(row).find((item) => item.toLowerCase() === "idcliente");
           return key ? String(row[key] ?? "").trim() : "";
         };
         let rows = normalizarRows(response?.rows);
@@ -1152,13 +1159,16 @@ export default function OcV1Page() {
         const rowsPorProyecto = idProyectoFiltro
           ? rowsPorIdOc.filter((row) => idProyectoFiltro.split(",").includes(getReporteRowIdProyecto(row)))
           : rowsPorIdOc;
+        const rowsPorCliente = idClienteFiltro > 0
+          ? rowsPorProyecto.filter((row) => getIdClienteOc(row) === String(idClienteFiltro))
+          : rowsPorProyecto;
         // El SP recibe el CSV en @IdSolicitante. Se replica el filtro en el
         // cliente con IdSolicitanteOc para proteger el resultado ante filas
         // adicionales producidas por los joins de planilla.
         const idsSolicitantesSeleccionados = new Set(idsSolicitanteFiltro);
         const rowsPorSolicitante = idsSolicitantesSeleccionados.size > 0
-          ? rowsPorProyecto.filter((row) => idsSolicitantesSeleccionados.has(getIdSolicitanteOc(row)))
-          : rowsPorProyecto;
+          ? rowsPorCliente.filter((row) => idsSolicitantesSeleccionados.has(getIdSolicitanteOc(row)))
+          : rowsPorCliente;
         // El filtro debe usar el solicitante de la cabecera de la OC
         // (CabOrdenCompra.IdSolicitante), no el solicitante de la planilla.
         // Se conserva el catálogo ya cargado durante esta sesión para permitir
@@ -1201,6 +1211,30 @@ export default function OcV1Page() {
           }))
             .sort((left, right) => left.label.localeCompare(right.label, "es"));
         });
+        setClientesOcGastosCatalogo((previous) => {
+          const clientes = new Map<string, string>();
+          const agregarCliente = (idCliente: string, nombreCliente: string) => {
+            const id = Number(idCliente);
+            const label = nombreCliente.replace(/[\s\u00A0]+/g, " ").trim();
+            if (!Number.isInteger(id) || id <= 0 || !label) return;
+            clientes.set(String(id), label);
+          };
+
+          previous.forEach((item) => agregarCliente(item.value, item.label));
+          rows.forEach((row) => {
+            const getValue = (...columnas: string[]) => {
+              for (const columna of columnas) {
+                const key = Object.keys(row).find((item) => item.toLowerCase() === columna.toLowerCase());
+                if (key) return String(row[key] ?? "").trim();
+              }
+              return "";
+            };
+            agregarCliente(getIdClienteOc(row), getValue("Cliente", "NombreCliente"));
+          });
+
+          return Array.from(clientes, ([value, label]) => ({ value, label }))
+            .sort((left, right) => left.label.localeCompare(right.label, "es"));
+        });
         setEstadosOcGastosCatalogo(getUniqueSorted(
           rows.map((row) => formatEstadoOcGrid(getEstadoOcRowValue(row))).filter((estado) => estado !== "SIN ESTADO")
         ));
@@ -1227,6 +1261,7 @@ export default function OcV1Page() {
 
   useEffect(() => {
     void loadCabeceras();
+    void loadClientesOcGastos();
     void loadProyectosOcGastos();
   }, []);
 
@@ -1590,6 +1625,13 @@ export default function OcV1Page() {
       ? responsablesOcGastosOptions
       : reporteOptions.responsables.map((nombre) => ({ value: nombre, label: nombre })),
     [reporteOptions.responsables, reporteSubtab, responsablesOcGastosOptions]
+  );
+
+  const clienteReporteOptions = useMemo(
+    () => reporteSubtab === "oc-gastos"
+      ? clientesOcGastosCatalogo
+      : reporteOptions.clientes.map((nombre) => ({ value: nombre, label: nombre })),
+    [clientesOcGastosCatalogo, reporteOptions.clientes, reporteSubtab],
   );
 
   const reporteSiteOptions = useMemo(() => {
@@ -1974,6 +2016,37 @@ export default function OcV1Page() {
     } catch {
       // Como respaldo se usarán los proyectos presentes en las cabeceras.
       setProyectosOcGastosCatalogo([]);
+    }
+  };
+
+  const loadClientesOcGastos = async () => {
+    try {
+      const response = await consultarPlanillaEstados(
+        { consulta: "clientes-activos", parametros: [] },
+        { timeoutMs: 60000 },
+      );
+      const clientes = new Map<number, string>();
+
+      (response.rows ?? []).forEach((row) => {
+        const idKey = Object.keys(row).find((key) => key.toLowerCase() === "idcliente");
+        const nombreKey = Object.keys(row).find((key) =>
+          ["nombrecliente", "cliente"].includes(key.toLowerCase()),
+        );
+        const idCliente = Number(idKey ? row[idKey] : 0);
+        const nombreCliente = String(nombreKey ? row[nombreKey] ?? "" : "").trim();
+        if (Number.isInteger(idCliente) && idCliente > 0 && nombreCliente) {
+          clientes.set(idCliente, nombreCliente);
+        }
+      });
+
+      setClientesOcGastosCatalogo(
+        Array.from(clientes, ([idCliente, nombreCliente]) => ({
+          value: String(idCliente),
+          label: nombreCliente,
+        })).sort((left, right) => left.label.localeCompare(right.label, "es")),
+      );
+    } catch {
+      // Como respaldo se conservarán los clientes recibidos desde OC/Gastos.
     }
   };
 
@@ -2959,7 +3032,7 @@ export default function OcV1Page() {
                   style={styles.input}
                 >
                   <option value="">Todos</option>
-                  {reporteOptions.clientes.map((item) => <option key={`rep-cli-${item}`} value={item}>{item}</option>)}
+                  {clienteReporteOptions.map((item) => <option key={`rep-cli-${item.value}`} value={item.value}>{item.label}</option>)}
                 </select>
               </Field>
               <Field>

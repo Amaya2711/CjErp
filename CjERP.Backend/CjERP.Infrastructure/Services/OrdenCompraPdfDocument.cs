@@ -203,9 +203,12 @@ internal sealed class OrdenCompraPdfDocument : IDocument
                         column.Item().Text(item.Detalle.Trim()).FontSize(7.5f);
                     }
                 });
+                var subtotalItem = item.SubtotalD != 0
+                    ? item.SubtotalD
+                    : item.Cantidad * item.PrecioUnitario;
                 DetailTextCell(table, FormatQuantity(item.Cantidad), alignCenter: true);
                 DetailTextCell(table, FormatMoney(item.PrecioUnitario), alignRight: true);
-                DetailTextCell(table, FormatMoney(item.SubtotalD), alignRight: true);
+                DetailTextCell(table, FormatMoney(subtotalItem), alignRight: true);
                 index++;
             }
         });
@@ -402,6 +405,6 @@ internal sealed class OrdenCompraPdfDocument : IDocument
 
     private static string FormatMoney(decimal value)
     {
-        return value == 0 ? ".00" : value.ToString("N2", EsPe);
+        return value.ToString("N2", EsPe);
     }
 }
