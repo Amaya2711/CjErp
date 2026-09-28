@@ -41,7 +41,7 @@ import { getHttpErrorMessage } from "../../../utils/httpError";
 import { ChevronDown, ChevronUp, ChevronsDown, ChevronsUp, Eye, FileDown } from "lucide-react";
 import { buildPlanillaConsultaEstadosRequest, consultarGastosPagadosPorId, consultarPlanillaEstados } from "../../../api/planillaConsultaService";
 
-const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "ResponsableOc", "MonedaOc", "SubtotalOc", "SubtotalPlanilla", "SaldoOcVsPlanilla", "PorcentajeConsumidoOc", "Cliente", "NombreProyecto", "IdSite", "Site", "FechaOc", "EstadoOc", "PrimeraValidacion", "SegundaValidacion", "TerceraValidacion", "CorrelativoPlanilla", "EstadoPlanilla", "SolicitantePlanilla", "MonedaPlanilla", "UltimaFechaDeposito"];
+const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "SolicitanteOc", "ResponsableOc", "MonedaOc", "SubtotalOc", "SubtotalPlanilla", "SaldoOcVsPlanilla", "PorcentajeConsumidoOc", "Cliente", "NombreProyecto", "IdSite", "Site", "FechaOc", "EstadoOc", "PrimeraValidacion", "SegundaValidacion", "TerceraValidacion", "CorrelativoPlanilla", "SolicitantePlanilla", "MonedaPlanilla", "UltimaFechaDeposito"];
 const OC_GASTOS_MAX_COLUMNAS_VISIBLES = 22;
 const OC_GASTOS_COLUMNAS_NUMERICAS = new Set([
   "SubtotalOc",
@@ -52,6 +52,7 @@ const OC_GASTOS_COLUMNAS_NUMERICAS = new Set([
   "SaldoOcVsPlanilla",
 ]);
 const OC_GASTOS_COLUMN_LABELS: Record<string, string> = {
+  SolicitanteOc: "Solicitante OC",
   PrimeraValidacion: "1ra validación",
   SegundaValidacion: "2da validación",
   TerceraValidacion: "3ra validación",
@@ -452,7 +453,17 @@ function getEstadoVista(item: OrdenCompraCabeceraDto): Exclude<EstadoVista, "tod
 }
 
 type EstadoOcReporte = "ACEPTADO" | "RECHAZADO" | "EN PROCESO";
-const ESTADOS_OC_GASTOS_POR_DEFECTO = "ACEPTADO,EN PROCESO";
+// El reporte debe iniciar sin restringir estados, igual que la ejecución directa
+// de sp_OrdenCompra_Consulta_Estados.
+const ESTADOS_OC_GASTOS_POR_DEFECTO = "";
+const ESTADOS_OC_GASTOS = [
+  "Aprobado",
+  "En 3era Aprob.",
+  "En 2da Aprob.",
+  "RECHAZADO",
+  "En 1era aprobacion",
+  "en Pre Aprob.",
+];
 
 function clasificarEstadoOc(value: unknown): EstadoOcReporte | "" {
   const estadoOc = Number(value);
@@ -480,16 +491,19 @@ function formatEstadoOcGrid(value: unknown) {
 }
 
 function getEstadoOcRowValue(row: Record<string, unknown>): unknown {
-  const idKey = Object.keys(row).find((key) => key.toLowerCase() === "idestadooc");
-  if (idKey) return row[idKey];
+  const estadoStoreKey = Object.keys(row).find((key) => key.toLowerCase() === "estado");
+  if (estadoStoreKey) return row[estadoStoreKey];
   const estadoKey = Object.keys(row).find((key) => key.toLowerCase() === "estadooc");
-  return estadoKey ? row[estadoKey] : undefined;
+  if (estadoKey) return row[estadoKey];
+  const idKey = Object.keys(row).find((key) => key.toLowerCase() === "idestadooc");
+  return idKey ? row[idKey] : undefined;
 }
 
-function getEstadosOcSeleccionados(value: string): EstadoOcReporte[] {
+function getEstadosOcSeleccionados(value: string): string[] {
   return value
     .split(",")
-    .filter((estado): estado is EstadoOcReporte => ["ACEPTADO", "RECHAZADO", "EN PROCESO"].includes(estado));
+    .map((estado) => estado.trim())
+    .filter(Boolean);
 }
 
 function formatValidadorNivel(value: number | null | undefined) {
@@ -569,7 +583,7 @@ async function exportToExcel(fileName: string, headers: string[], rows: Array<Ar
 
 function getReportePlanillaColumnValue(row: Record<string, unknown>, column: string): string {
   const aliases: Record<string, string[]> = {
-    EstadoOc: ["EstadoOc", "IdEstadoOc"],
+    EstadoOc: ["Estado", "EstadoOc", "IdEstadoOc"],
     CorrelativoPlanilla: ["CorrelativoPlanilla"],
     EstadoPlanilla: ["EstadoPlanilla", "ValidacionResponsable", "EstadoRelacion"],
   };
@@ -581,7 +595,9 @@ function getReportePlanillaColumnValue(row: Record<string, unknown>, column: str
     return precio && cantidad ? (precio * cantidad).toFixed(2) : "—";
   }
   const names = aliases[column] ?? [column];
-  const key = Object.keys(row).find((item) => names.some((name) => item.toLowerCase() === name.toLowerCase()));
+  const key = names
+    .map((name) => Object.keys(row).find((item) => item.toLowerCase() === name.toLowerCase()))
+    .find((item): item is string => Boolean(item));
   const value = key ? row[key] : undefined;
   if (column.toLowerCase() === "porcentajeconsumidooc" && value !== null && value !== undefined && value !== "") {
     const porcentaje = Number(value);
@@ -639,6 +655,12 @@ export default function OcV1Page() {
   }, [montoOcRows]);
   const [reporteDetalles, setReporteDetalles] = useState<OrdenCompraDetalleDto[]>([]);
   const [reportePlanillaRows, setReportePlanillaRows] = useState<Record<string, unknown>[]>([]);
+  const [estadosOcGastosCatalogo, setEstadosOcGastosCatalogo] = useState<string[]>([]);
+  const [solicitantesOcGastosCatalogo, setSolicitantesOcGastosCatalogo] = useState<Array<{ value: string; label: string }>>([]);
+  const ocGastosHeaderScrollRef = useRef<HTMLDivElement | null>(null);
+  const ocGastosHeaderScrollContentRef = useRef<HTMLDivElement | null>(null);
+  const ocGastosTableScrollRef = useRef<HTMLDivElement | null>(null);
+  const ocGastosScrollSyncingRef = useRef(false);
   const reportePlanillaIdOcUnicos = useMemo(
     () => new Set(reportePlanillaRows.map(getReporteRowIdOc).filter(Boolean)).size,
     [reportePlanillaRows]
@@ -793,14 +815,54 @@ export default function OcV1Page() {
     else setReporteFiltros({ solicitante: "", responsable: "", cliente: "", proyecto: "", site: "", estado: tab === "oc-gastos" ? ESTADOS_OC_GASTOS_POR_DEFECTO : "", idOc: "", fechaDesde: "", fechaHasta: "" });
       setReporteSubtab(tab as typeof reporteSubtab);
       setReporteConsultado(false);
-      setReportePlanillaRows([]);
+       setReportePlanillaRows([]);
+       setEstadosOcGastosCatalogo([]);
+       setSolicitantesOcGastosCatalogo([]);
       setResponsablesReporteFiltro([]);
       setBusquedaResponsableReporte("");
       setSolicitantesReporteFiltro([]);
       setBusquedaSolicitanteReporte("");
       setProyectosReporteFiltro([]);
       setBusquedaProyectoReporte("");
-  };
+   };
+
+  const sincronizarScrollOcGastos = useCallback((origen: "cabecera" | "tabla") => {
+    if (ocGastosScrollSyncingRef.current) return;
+
+    const origenElement = origen === "cabecera" ? ocGastosHeaderScrollRef.current : ocGastosTableScrollRef.current;
+    const destinoElement = origen === "cabecera" ? ocGastosTableScrollRef.current : ocGastosHeaderScrollRef.current;
+    if (!origenElement || !destinoElement) return;
+
+    ocGastosScrollSyncingRef.current = true;
+    destinoElement.scrollLeft = origenElement.scrollLeft;
+    window.requestAnimationFrame(() => {
+      ocGastosScrollSyncingRef.current = false;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (vistaOc !== "reporte" || reporteSubtab !== "oc-gastos") return;
+
+    const barraCabecera = ocGastosHeaderScrollRef.current;
+    const contenidoCabecera = ocGastosHeaderScrollContentRef.current;
+    const tabla = ocGastosTableScrollRef.current;
+    if (!barraCabecera || !contenidoCabecera || !tabla) return;
+
+    const actualizarAncho = () => {
+      contenidoCabecera.style.width = `${tabla.scrollWidth}px`;
+      barraCabecera.scrollLeft = tabla.scrollLeft;
+    };
+
+    actualizarAncho();
+    const resizeObserver = new ResizeObserver(actualizarAncho);
+    resizeObserver.observe(tabla);
+    window.addEventListener("resize", actualizarAncho);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", actualizarAncho);
+    };
+  }, [reportePlanillaColumns, reportePlanillaRows.length, reporteSubtab, vistaOc]);
 
   const camposConstantes = useMemo(
     () => ["tipo_moneda", "tipo_comprobante", "tipo_pago", "estado"],
@@ -1046,6 +1108,7 @@ export default function OcV1Page() {
         )].join(",");
         const idsSolicitanteFiltro = [...new Set(
           solicitantesReporteFiltro
+            .flatMap((value) => value.split(","))
             .map((value) => Number(value))
             .filter((id) => Number.isInteger(id) && id > 0)
             .map(String)
@@ -1061,24 +1124,92 @@ export default function OcV1Page() {
         ]);
         request.consulta = "analisis-gastos";
         const response = await consultarPlanillaEstados(request, { timeoutMs: 60000 });
-        const rows = (Array.isArray(response?.rows) ? response.rows : []).map((row) => {
+        const normalizarRows = (sourceRows: unknown) => (Array.isArray(sourceRows) ? sourceRows : []).map((row) => {
           // Mantener el alias del nuevo store aunque el serializador omita valores NULL.
           // Así no se utiliza CorSite (correlativo del site) como sustituto.
           const correlativoKey = Object.keys(row).find((key) => key.toLowerCase() === "correlativoplanilla");
           return correlativoKey ? row : { ...row, CorrelativoPlanilla: null };
         });
+        const getIdSolicitanteOc = (row: Record<string, unknown>) => {
+          const key = Object.keys(row).find((item) => item.toLowerCase() === "idsolicitanteoc")
+            ?? Object.keys(row).find((item) => item.toLowerCase() === "idsolicitante");
+          return key ? String(row[key] ?? "").trim() : "";
+        };
+        let rows = normalizarRows(response?.rows);
+        const idsDevueltos = new Set(rows.map(getIdSolicitanteOc));
+        const faltaSolicitanteSeleccionado = idsSolicitanteFiltro.some((id) => !idsDevueltos.has(id));
+        if (idsSolicitanteFiltro.length > 0 && faltaSolicitanteSeleccionado) {
+          const requestRecuperacion = {
+            ...request,
+            parametros: request.parametros.filter((parametro) => parametro.nombre.toLowerCase() !== "idsolicitante"),
+          };
+          const respuestaRecuperacion = await consultarPlanillaEstados(requestRecuperacion, { timeoutMs: 60000 });
+          rows = normalizarRows(respuestaRecuperacion?.rows);
+        }
         const rowsPorIdOc = idOcFiltro
           ? rows.filter((row) => getReporteRowIdOc(row) === idOcFiltro)
           : rows;
         const rowsPorProyecto = idProyectoFiltro
           ? rowsPorIdOc.filter((row) => idProyectoFiltro.split(",").includes(getReporteRowIdProyecto(row)))
           : rowsPorIdOc;
+        // El SP recibe el CSV en @IdSolicitante. Se replica el filtro en el
+        // cliente con IdSolicitanteOc para proteger el resultado ante filas
+        // adicionales producidas por los joins de planilla.
+        const idsSolicitantesSeleccionados = new Set(idsSolicitanteFiltro);
+        const rowsPorSolicitante = idsSolicitantesSeleccionados.size > 0
+          ? rowsPorProyecto.filter((row) => idsSolicitantesSeleccionados.has(getIdSolicitanteOc(row)))
+          : rowsPorProyecto;
+        // El filtro debe usar el solicitante de la cabecera de la OC
+        // (CabOrdenCompra.IdSolicitante), no el solicitante de la planilla.
+        // Se conserva el catálogo ya cargado durante esta sesión para permitir
+        // seleccionar más de un solicitante después de aplicar un primer filtro.
+        setSolicitantesOcGastosCatalogo((previous) => {
+          const solicitantes = new Map<string, { label: string; ids: Set<string> }>();
+          const agregarSolicitante = (idSolicitante: string, solicitante: string) => {
+            // SQL puede devolver el mismo nombre con espacios no separables,
+            // saltos de línea o más de un espacio. Se normaliza antes de
+            // agrupar para que no aparezca dos veces en el selector.
+            const label = solicitante.replace(/[\s\u00A0]+/g, " ").trim();
+            const key = label
+              .normalize("NFD")
+              .replace(/[\u0300-\u036f]/g, "")
+              .toLocaleLowerCase("es");
+            if (!idSolicitante || Number(idSolicitante) <= 0 || !label) return;
+            const actual = solicitantes.get(key) ?? { label, ids: new Set<string>() };
+            actual.ids.add(idSolicitante);
+            solicitantes.set(key, actual);
+          };
+
+          previous.forEach((item) => {
+            item.value.split(",").forEach((id) => agregarSolicitante(id.trim(), item.label));
+          });
+          rows.forEach((row) => {
+            const getValue = (...columnas: string[]) => {
+              for (const columna of columnas) {
+                const key = Object.keys(row).find((item) => item.toLowerCase() === columna.toLowerCase());
+                if (key) return String(row[key] ?? "").trim();
+              }
+              return "";
+            };
+            const idSolicitante = getValue("IdSolicitanteOc", "IdSolicitante");
+            const solicitante = getValue("SolicitanteOc", "Solicitante");
+            agregarSolicitante(idSolicitante, solicitante);
+          });
+          return Array.from(solicitantes.values(), ({ label, ids }) => ({
+            value: Array.from(ids).sort((left, right) => Number(left) - Number(right)).join(","),
+            label,
+          }))
+            .sort((left, right) => left.label.localeCompare(right.label, "es"));
+        });
+        setEstadosOcGastosCatalogo(getUniqueSorted(
+          rows.map((row) => formatEstadoOcGrid(getEstadoOcRowValue(row))).filter((estado) => estado !== "SIN ESTADO")
+        ));
         const estadosOcSeleccionados = getEstadosOcSeleccionados(reporteFiltros.estado);
         const rowsPorEstado = estadosOcSeleccionados.length
-          ? rowsPorProyecto.filter((row) => {
-            return estadosOcSeleccionados.includes(clasificarEstadoOc(getEstadoOcRowValue(row)) as EstadoOcReporte);
+          ? rowsPorSolicitante.filter((row) => {
+            return estadosOcSeleccionados.includes(formatEstadoOcGrid(getEstadoOcRowValue(row)));
           })
-          : rowsPorProyecto;
+          : rowsPorSolicitante;
         const rowsFiltradas = rowsPorEstado;
         setReportePlanillaRows(rowsFiltradas);
         setReportePlanillaColumns(OC_GASTOS_COLUMNAS_INICIALES);
@@ -1401,13 +1532,15 @@ export default function OcV1Page() {
     estados: ["ACEPTADO", "RECHAZADO", "EN PROCESO"],
   }), [cabeceras]);
 
+  const estadosReporteOptions = reporteSubtab === "oc-gastos"
+    ? getUniqueSorted([...ESTADOS_OC_GASTOS, ...estadosOcGastosCatalogo])
+    : reporteOptions.estados;
+
   const solicitanteReporteOptions = useMemo(
     () => reporteSubtab === "oc-gastos"
-      ? solicitanteOptions
-        .map((item) => ({ value: String(item.value ?? item.codigo ?? "").trim(), label: String(item.label ?? "").trim() }))
-        .filter((item) => item.value && item.label)
+      ? solicitantesOcGastosCatalogo
       : reporteOptions.solicitantes.map((nombre) => ({ value: nombre, label: nombre })),
-    [reporteOptions.solicitantes, reporteSubtab, solicitanteOptions]
+    [reporteOptions.solicitantes, reporteSubtab, solicitantesOcGastosCatalogo]
   );
 
   const responsablesOcGastosOptions = useMemo(() => {
@@ -2904,14 +3037,23 @@ export default function OcV1Page() {
                       : "Todos los estados"}
                   </summary>
                   <div style={{ position: "absolute", zIndex: 20, top: "100%", left: 0, right: 0, padding: 8, background: "#fff", border: "1px solid #D1D5DB", borderRadius: 8 }}>
-                    {reporteOptions.estados.map((item) => {
+                    <label style={{ display: "flex", gap: 6, padding: "4px 2px", fontSize: 12, fontWeight: 700, borderBottom: "1px solid #E5E7EB", marginBottom: 4 }}>
+                      <input
+                        type="radio"
+                        name="estado-oc-gastos"
+                        checked={getEstadosOcSeleccionados(reporteFiltros.estado).length === 0}
+                        onChange={() => setReporteFiltros((prev) => ({ ...prev, estado: "" }))}
+                      />
+                      Todos los estados
+                    </label>
+                    {estadosReporteOptions.map((item) => {
                       const selected = getEstadosOcSeleccionados(reporteFiltros.estado);
                       return <label key={`rep-est-${item}`} style={{ display: "flex", gap: 6, padding: "4px 2px", fontSize: 12 }}>
                         <input
                           type="checkbox"
-                          checked={selected.includes(item as EstadoOcReporte)}
+                          checked={selected.includes(item)}
                           onChange={(event) => {
-                            const values = event.target.checked ? [...selected, item as EstadoOcReporte] : selected.filter((value) => value !== item);
+                            const values = event.target.checked ? [...selected, item] : selected.filter((value) => value !== item);
                             setReporteFiltros((prev) => ({ ...prev, estado: values.join(",") }));
                           }}
                         />
@@ -2937,14 +3079,38 @@ export default function OcV1Page() {
                 {reporteSubtab === "oc-gastos" && <button type="button" style={{ ...styles.primaryButton, height: 34, minWidth: 76, padding: "0 10px", fontSize: 11, lineHeight: 1.2, whiteSpace: "normal" }} disabled={reporteLoading} onClick={() => { setReportePlanillaRows([]); void loadReporteDetalles(); }}>Aplicar filtros</button>}
               </div>
             </div>
-            <div style={String(reporteSubtab) === "oc-gastos" ? { ...styles.tableWrap, width: "100%", maxWidth: "100%", minWidth: 0 } : styles.tableWrap}>
+            {String(reporteSubtab) === "oc-gastos" ? (
+              <div
+                ref={ocGastosHeaderScrollRef}
+                onScroll={() => sincronizarScrollOcGastos("cabecera")}
+                aria-label="Desplazamiento horizontal de columnas de OC/Gastos"
+                style={{ overflowX: "auto", overflowY: "hidden", height: 16, marginBottom: 4 }}
+              >
+                <div ref={ocGastosHeaderScrollContentRef} style={{ height: 1 }} />
+              </div>
+            ) : null}
+            <div
+              ref={String(reporteSubtab) === "oc-gastos" ? ocGastosTableScrollRef : undefined}
+              onScroll={String(reporteSubtab) === "oc-gastos" ? () => sincronizarScrollOcGastos("tabla") : undefined}
+              style={String(reporteSubtab) === "oc-gastos"
+                ? {
+                    ...styles.tableWrap,
+                    width: "100%",
+                    maxWidth: "100%",
+                    minWidth: 0,
+                    minHeight: 260,
+                    maxHeight: "calc(100vh - 430px)",
+                    overflow: "auto",
+                  }
+                : styles.tableWrap}
+            >
               {String(reporteSubtab) === "oc-gastos" && <style>{`.oc-gastos-grid th:nth-child(n+${OC_GASTOS_MAX_COLUMNAS_VISIBLES + 1}), .oc-gastos-grid td:nth-child(n+${OC_GASTOS_MAX_COLUMNAS_VISIBLES + 1}) { display: none; }`}</style>}
               <table className={String(reporteSubtab) === "oc-gastos" ? "oc-gastos-grid" : undefined} style={String(reporteSubtab) === "oc-gastos" ? { ...styles.table, width: "max-content", minWidth: "100%" } : styles.table}>
                 <thead>
                   <tr>
                     {String(reporteSubtab) === "oc-gastos" ? <>
-                      <th style={{ ...styles.th, width: 52, minWidth: 52, position: "sticky", left: 0, zIndex: 4, background: "#fff" }} aria-label="Visualizar PDF">PDF</th>
-                      {reportePlanillaColumns.map((column, index) => <th key={`pla-head-${column}`} style={{ ...styles.th, width: 110, minWidth: 80, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer", ...(index < 4 ? { position: "sticky", left: 52 + index * 110, zIndex: 3, background: "#fff" } : {}) }} title={`Ordenar por ${OC_GASTOS_COLUMN_LABELS[column] ?? column}`} onClick={() => setReportePlanillaSort((current) => ({ column, direction: current.column === column && current.direction === "asc" ? "desc" : "asc" }))}>{OC_GASTOS_COLUMN_LABELS[column] ?? column}{reportePlanillaSort.column === column ? (reportePlanillaSort.direction === "asc" ? " ▲" : " ▼") : ""}</th>)}
+                      <th style={{ ...styles.th, width: 52, minWidth: 52, position: "sticky", top: 0, left: 0, zIndex: 6, background: "#fff" }} aria-label="Visualizar PDF">PDF</th>
+                      {reportePlanillaColumns.map((column, index) => <th key={`pla-head-${column}`} style={{ ...styles.th, width: 110, minWidth: 80, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer", position: "sticky", top: 0, zIndex: index < 4 ? 5 : 2, background: "#fff", ...(index < 4 ? { left: 52 + index * 110 } : {}) }} title={`Ordenar por ${OC_GASTOS_COLUMN_LABELS[column] ?? column}`} onClick={() => setReportePlanillaSort((current) => ({ column, direction: current.column === column && current.direction === "asc" ? "desc" : "asc" }))}>{OC_GASTOS_COLUMN_LABELS[column] ?? column}{reportePlanillaSort.column === column ? (reportePlanillaSort.direction === "asc" ? " ▲" : " ▼") : ""}</th>)}
                     </> : <th style={{ ...styles.th, width: 52 }} aria-label="Exportar PDF"></th>}
                     {String(reporteSubtab) !== "oc-gastos" && <>
                       <th style={styles.th}>OC</th>
@@ -2971,7 +3137,7 @@ export default function OcV1Page() {
                     ) : reportePlanillaRowsOrdenadas.map((row, index) => {
                       const read = (column: string) => {
                         const aliases: Record<string, string[]> = {
-                          EstadoOc: ["EstadoOc", "IdEstadoOc"],
+                          EstadoOc: ["Estado", "EstadoOc", "IdEstadoOc"],
                           PrimeraValidacion: ["PrimeraValidacion", "IdAprobador1"],
                           SegundaValidacion: ["SegundaValidacion", "IdAprobador2"],
                           TerceraValidacion: ["TerceraValidacion", "IdAprobador3"],
@@ -2984,7 +3150,9 @@ export default function OcV1Page() {
                           const cantidad = Number(row[Object.keys(row).find((key) => key.toLowerCase() === "cantoc") ?? ""] ?? 0);
                           return precio && cantidad ? (precio * cantidad).toFixed(2) : "—";
                         }
-                        const found = Object.keys(row).find((key) => names.some((name) => key.toLowerCase() === name.toLowerCase()));
+                        const found = names
+                          .map((name) => Object.keys(row).find((key) => key.toLowerCase() === name.toLowerCase()))
+                          .find((key): key is string => Boolean(key));
                         const rawValue = found ? row[found] : null;
                         if (column === "EstadoOc") return formatEstadoOcGrid(rawValue);
                         if (["PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"].includes(column)) {
