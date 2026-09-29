@@ -29,6 +29,7 @@ import {
   rechazarPlanilla,
 } from "../../../api/planillaConsultaService";
 import type {
+  AprobacionResultadoDto,
   PlanillaConsultaEstadosRequest,
   PlanillaConsultaParametro,
 } from "../../../models/planillaConsulta";
@@ -601,6 +602,14 @@ function mapPlanillaEstadoToPagoEstado(value: unknown, fallback: PagoEstado): Pa
   if (text.includes("observ")) return "observadas";
   if (text.includes("apro")) return "aprobar";
   return fallback;
+}
+
+function buildPagoAprobacionKey(correlativo: string | number, idSite: string, tipoMoneda?: number | null) {
+  return [
+    String(correlativo ?? "").trim(),
+    String(idSite ?? "").trim().toUpperCase(),
+    String(Math.trunc(Number(tipoMoneda ?? 0))),
+  ].join("|");
 }
 
 function mapPlanillaConsultaRowToPagoRow(
@@ -2635,6 +2644,51 @@ export default function PagosV1Page() {
     setHistorialOcLoading(false);
   };
 
+  const applyApprovalResultLocally = (resultados: AprobacionResultadoDto[]) => {
+    const resultadosAplicados = new Map(
+      resultados
+        .filter((resultado) => resultado.exito)
+        .map((resultado) => [
+          buildPagoAprobacionKey(resultado.correlativo, resultado.idSite, resultado.tipoMoneda),
+          resultado,
+        ])
+    );
+
+    if (resultadosAplicados.size === 0) {
+      return false;
+    }
+
+    setRowsByTab((previous) => {
+      const resumenActualizado = previous.resumen.map((row) => {
+        const resultado = resultadosAplicados.get(
+          buildPagoAprobacionKey(row.correlativo, row.siteId, row.tipoMoneda)
+        );
+
+        if (!resultado) {
+          return row;
+        }
+
+        const estadoCodigo = String(resultado.estadoAplicado);
+        const estado = mapPlanillaEstadoToPagoEstado(estadoCodigo, row.estado);
+        return {
+          ...row,
+          estado,
+          estadoCodigo,
+          estadoNombre: estadoCodigo,
+          planillaRow: {
+            ...(row.planillaRow ?? {}),
+            Estado: resultado.estadoAplicado,
+            estado: resultado.estadoAplicado,
+          },
+        };
+      });
+
+      return groupRowsByEstado(resumenActualizado);
+    });
+
+    return true;
+  };
+
   const handleAprobarSeleccionados = async (
     idRegularizar: number = 0,
     omitirConfirmacion: boolean = false,
@@ -2694,7 +2748,11 @@ export default function PagosV1Page() {
       setCheckedIds([]);
       setSelectedId(0);
       setMessage(mensajes.join(" "));
-      setRefreshTick((current) => current + 1);
+      if (!applyApprovalResultLocally(response?.detalle ?? [])) {
+        // El store siempre devuelve el detalle; se conserva esta ruta de
+        // respaldo para instalaciones antiguas que aún no lo incluyan.
+        setRefreshTick((current) => current + 1);
+      }
     } catch (error) {
       setMessage(getHttpErrorMessage(error, "No se pudo completar la aprobación."));
     }
@@ -2785,7 +2843,7 @@ export default function PagosV1Page() {
     try {
       setObservacionModal((prev) => (prev ? { ...prev, submitting: true, error: null } : prev));
 
-      await aprobarPlanillaMasiva(
+      const response = await aprobarPlanillaMasiva(
         {
           codEstado: 2,
           observacion,
@@ -2809,7 +2867,9 @@ export default function PagosV1Page() {
           ? "1 registro observado correctamente."
           : `${total} registros observados correctamente.`
       );
-      setRefreshTick((current) => current + 1);
+      if (!applyApprovalResultLocally(response?.detalle ?? [])) {
+        setRefreshTick((current) => current + 1);
+      }
     } catch (error) {
       setObservacionModal((prev) =>
         prev

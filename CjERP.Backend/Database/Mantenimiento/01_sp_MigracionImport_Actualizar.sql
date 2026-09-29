@@ -27,6 +27,12 @@ BEGIN
             u.Moneda,
             u.IdMoneda,
             u.MontoBck,
+            u.Porcentaje,
+            u.StatusAtp,
+            u.EstatusPap,
+            u.EstatusOt,
+            u.Capitalizacion,
+            u.Estado_Oc,
             u.Fecha,
             u.Hora,
             u.IdActualizar,
@@ -48,7 +54,13 @@ BEGIN
             s.TipoTrabajoKey,
             s.AnoGestionKey,
             MAX(s.IdMoneda) AS IdMoneda,
-            SUM(s.MontoBck) AS MontoBck
+            SUM(s.MontoBck) AS MontoBck,
+            MAX(s.Porcentaje) AS Porcentaje,
+            MAX(NULLIF(LTRIM(RTRIM(s.StatusAtp)), '')) AS StatusAtp,
+            MAX(NULLIF(LTRIM(RTRIM(s.EstatusPap)), '')) AS EstatusPap,
+            MAX(NULLIF(LTRIM(RTRIM(s.EstatusOt)), '')) AS EstatusOt,
+            MAX(NULLIF(LTRIM(RTRIM(s.Capitalizacion)), '')) AS Capitalizacion,
+            MAX(NULLIF(LTRIM(RTRIM(s.Estado_Oc)), '')) AS EstadoOc
         INTO #Matched
         FROM #Src s
         INNER JOIN dbo.importar i
@@ -75,7 +87,21 @@ BEGIN
         UPDATE i
            SET i.IdActualizar = 1,
                i.idmoneda = COALESCE(m.IdMoneda, i.idmoneda),
-               i.monto_bck = COALESCE(m.MontoBck, i.monto_bck)
+                i.monto_bck = COALESCE(m.MontoBck, i.monto_bck),
+                i.Porcentaje = COALESCE(m.Porcentaje, i.Porcentaje),
+                i.Status_Atp = COALESCE(m.StatusAtp, i.Status_Atp),
+                i.StatusOt = COALESCE(m.EstatusOt, i.StatusOt),
+                i.Capitalizacion = COALESCE(m.Capitalizacion, i.Capitalizacion),
+                i.Status_Pap = COALESCE(m.EstatusPap, i.Status_Pap),
+                i.Estado_Oc = COALESCE(m.EstadoOc, i.Estado_Oc),
+                i.Monto_Visible = CASE
+                    WHEN m.MontoBck IS NULL AND m.Porcentaje IS NULL THEN i.Monto_Visible
+                    ELSE CAST(
+                        COALESCE(m.MontoBck, i.Monto_Bck, 0) *
+                        (1 - COALESCE(m.Porcentaje, i.Porcentaje, 0) / 100.0)
+                        AS decimal(18, 2)
+                    )
+                END
         FROM dbo.importar i
         INNER JOIN #Matched m
             ON UPPER(LTRIM(RTRIM(ISNULL(i.Cliente, '')))) = m.ClienteKey

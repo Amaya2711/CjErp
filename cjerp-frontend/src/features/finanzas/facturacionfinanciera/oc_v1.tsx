@@ -634,6 +634,8 @@ export default function OcV1Page() {
   const [cabeceras, setCabeceras] = useState<OrdenCompraCabeceraDto[]>([]);
   const [detalles, setDetalles] = useState<OrdenCompraDetalleDto[]>([]);
   const [detalleSeleccionado, setDetalleSeleccionado] = useState<OrdenCompraDetalleDto | null>(null);
+  const detalleOcCacheRef = useRef<Map<number, OrdenCompraDetalleDto[]>>(new Map());
+  const detalleOcRequestRef = useRef(0);
   const [recibosAsociados, setRecibosAsociados] = useState<OrdenCompraReciboDto[]>([]);
   const [recibosSinAsociar, setRecibosSinAsociar] = useState<OrdenCompraReciboDto[]>([]);
   const [recibosLoading, setRecibosLoading] = useState(false);
@@ -1022,22 +1024,37 @@ export default function OcV1Page() {
     }
   };
 
-  const loadDetalles = async (idOc: number) => {
+  const loadDetalles = async (idOc: number, forceRefresh = false) => {
+    const requestId = ++detalleOcRequestRef.current;
+    const cachedRows = detalleOcCacheRef.current.get(idOc);
+    if (!forceRefresh && cachedRows) {
+      setDetalles(cachedRows);
+      setDetalleSeleccionado(cachedRows[0] ?? null);
+      setDetailLoading(false);
+      return;
+    }
+
     setDetailLoading(true);
     setError("");
     try {
       const response = await buscarOrdenCompraDetalle({ idOc: String(idOc) });
       const rows = Array.isArray(response) ? response : [];
+      if (requestId !== detalleOcRequestRef.current) return;
+      detalleOcCacheRef.current.set(idOc, rows);
       setDetalles(rows);
       setDetalleSeleccionado(rows[0] ?? null);
     } catch (err) {
       // Es una carga secundaria del panel derecho; no debe mostrar un error
       // global si la OC ya cambi� o el usuario cambi� de pesta�a.
       // No exponer detalles de la consulta de OC en consola.
-      setDetalles([]);
-      setDetalleSeleccionado(null);
+      if (requestId === detalleOcRequestRef.current) {
+        setDetalles([]);
+        setDetalleSeleccionado(null);
+      }
     } finally {
-      setDetailLoading(false);
+      if (requestId === detalleOcRequestRef.current) {
+        setDetailLoading(false);
+      }
     }
   };
 
@@ -2332,7 +2349,7 @@ export default function OcV1Page() {
           await loadCabeceras();
           if (response.idOc) {
             setSelectedOcId(response.idOc);
-            await loadDetalles(response.idOc);
+            await loadDetalles(response.idOc, true);
           }
         } catch (refreshError) {
           setError(getHttpErrorMessage(refreshError, "La OC fue guardada, pero no se pudo actualizar el listado."));
@@ -2449,7 +2466,7 @@ export default function OcV1Page() {
       );
       await loadCabeceras();
       if (selectedCabecera?.idOc) {
-        await loadDetalles(selectedCabecera.idOc);
+        await loadDetalles(selectedCabecera.idOc, true);
       }
     } catch (err) {
       setError(getHttpErrorMessage(err, "No se pudo aprobar la orden de compra."));

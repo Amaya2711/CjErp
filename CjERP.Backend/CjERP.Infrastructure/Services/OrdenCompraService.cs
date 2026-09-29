@@ -338,7 +338,10 @@ public class OrdenCompraService : IOrdenCompraService
                 p.IdTarea,
                 p.Ot
             FROM dbo.Planilla p
-            WHERE TRY_CONVERT(int, NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), p.IdOc))), '')) = det.IdOc
+            -- IdOc de Planilla se almacena como texto. Compararlo directamente
+            -- evita convertir toda la tabla por cada fila de DetOrdenCompra y
+            -- permite aprovechar un índice por (IdOc, Fila, Correlativo).
+            WHERE p.IdOc = CONVERT(varchar(50), det.IdOc)
               AND (p.Fila = det.Fila OR det.Fila IS NULL)
             ORDER BY CASE WHEN p.Fila = det.Fila THEN 0 ELSE 1 END, p.Correlativo DESC
         ) planilla

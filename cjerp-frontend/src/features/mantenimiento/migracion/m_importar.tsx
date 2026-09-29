@@ -5,6 +5,7 @@ import { analizarMigracionImport, aplicarMigracionImport } from "../../../api/mi
 import AppCard from "../../../components/base/AppCard";
 import AppPage from "../../../components/base/AppPage";
 import AppStatusMessage from "../../../components/base/AppStatusMessage";
+import { getHttpErrorMessage } from "../../../utils/httpError";
 
 type ValidationMode = "migrar" | "actualizar";
 
@@ -137,6 +138,8 @@ const ACTUALIZAR_COLUMNS: HeaderRule[] = [
   { label: "MONEDA" },
   { label: "ID_MONEDA", aliases: ["IDMONEDA"] },
   { label: "MONTO_BCK" },
+  { label: "PORCENTAJE" },
+  { label: "STATUS_ATP", aliases: ["STATUS ATP"] },
   { label: "ATP" },
   { label: "ESTATUS_PAP" },
   { label: "ESTADO OC", aliases: ["ESTADO_OC"] },
@@ -768,7 +771,7 @@ export default function MImportarPage() {
       );
     } catch (error) {
       setApplyMessage("");
-      setLoadError(error instanceof Error ? error.message : "No se pudo ejecutar el store de migracion.");
+      setLoadError(getHttpErrorMessage(error, "No se pudo ejecutar el store de migracion."));
     } finally {
       setApplying(false);
     }
