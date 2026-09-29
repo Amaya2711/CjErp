@@ -121,7 +121,8 @@ namespace CjERP.Api.Controllers
                     ? RequiredParametersPlanillaOtResumen
                 : string.Equals(consulta, "planilla-oc-resumen", StringComparison.OrdinalIgnoreCase)
                     ? RequiredParametersPlanillaOcResumen
-                : string.Equals(consulta, "pagos-v1", StringComparison.OrdinalIgnoreCase)
+                : (string.Equals(consulta, "pagos-v1", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(consulta, "pagos-v1-resumen", StringComparison.OrdinalIgnoreCase))
                     ? RequiredParametersPagosV1
                 : RequiredParameters;
 

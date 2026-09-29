@@ -111,124 +111,68 @@ public sealed class MigracionImportService : IMigracionImportService
             Hora = DateTime.Now
         }).ToList();
 
-        await using var connection = _sqlCommandFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-        using var transaction = connection.BeginTransaction();
-
-        try
+        // El modo Actualizar ya no usa dbo.updimportar: evita el DELETE global,
+        // los INSERT individuales y las colisiones entre usuarios.
+        if (modo == MigracionImportModo.Actualizar)
         {
-            await connection.ExecuteAsync(
+            var datos = CrearTablaActualizar(stagingRows);
+            await using var connection = _sqlCommandFactory.CreateConnection();
+            await connection.OpenAsync(cancellationToken);
+            var parameters = new DynamicParameters();
+            parameters.Add("@Datos", datos.AsTableValuedParameter("dbo.Type_MigracionImportActualizar"));
+
+            return await connection.QuerySingleAsync<MigracionImportEjecucionResultadoDto>(
                 new CommandDefinition(
-                    "DELETE FROM dbo.updimportar;",
-                    transaction: transaction,
-                    cancellationToken: cancellationToken,
-                    commandTimeout: _sqlCommandFactory.DefaultCommandTimeoutSeconds));
-
-            const string insertStagingSql = """
-                INSERT INTO dbo.updimportar (
-                    Ot,
-                    Cliente,
-                    Proyecto,
-                    IdSite,
-                    TipoTrabajo,
-                    AnoGestion,
-                    Moneda,
-                    IdMoneda,
-                    MontoBck,
-                    Porcentaje,
-                    StatusAtp,
-                    EstatusPap,
-                    EstatusOt,
-                    Capitalizacion,
-                    Correlativo,
-                    IdZona,
-                    Zona,
-                    Work,
-                    Empleado,
-                    Mes,
-                    Ano,
-                    Estado_Oc,
-                    Nro_Oc,
-                    Posicion,
-                    MontoOc,
-                    MontoLiq,
-                    Esting,
-                    Plano,
-                    Valmet,
-                    StatusCw,
-                    StatusRini,
-                    Fecha,
-                    Hora,
-                    IdActualizar,
-                    Site
-                )
-                VALUES (
-                    @Ot,
-                    @Cliente,
-                    @Proyecto,
-                    @IdSite,
-                    @TipoTrabajo,
-                    @AnoGestion,
-                    @Moneda,
-                    @IdMoneda,
-                    @MontoBck,
-                    @Porcentaje,
-                    @StatusAtp,
-                    @EstatusPap,
-                    @EstatusOt,
-                    @Capitalizacion,
-                    @Correlativo,
-                    @IdZona,
-                    @Zona,
-                    @Work,
-                    @Empleado,
-                    @Mes,
-                    @Ano,
-                    @EstadoOc,
-                    @NroOc,
-                    @Posicion,
-                    @MontoOc,
-                    @MontoLiq,
-                    @Esting,
-                    @Plano,
-                    @Valmet,
-                    @StatusCw,
-                    @StatusRini,
-                    @Fecha,
-                    @Hora,
-                    @IdActualizar,
-                    @Site
-                );
-                """;
-
-            await connection.ExecuteAsync(
-                new CommandDefinition(
-                    insertStagingSql,
-                    stagingRows,
-                    transaction: transaction,
-                    cancellationToken: cancellationToken,
-            commandTimeout: _sqlCommandFactory.DefaultCommandTimeoutSeconds));
-
-            var storeName = modo == MigracionImportModo.Migrar
-                ? "dbo.sp_MigracionImport_Insertar"
-                : "dbo.sp_MigracionImport_Actualizar";
-
-            var resultado = await connection.QuerySingleAsync<MigracionImportEjecucionResultadoDto>(
-                new CommandDefinition(
-                    storeName,
-                    transaction: transaction,
+                    "dbo.sp_MigracionImport_Actualizar_V2",
+                    parameters,
                     commandType: CommandType.StoredProcedure,
                     cancellationToken: cancellationToken,
                     commandTimeout: _sqlCommandFactory.DefaultCommandTimeoutSeconds));
+        }
 
+        // Migrar conserva temporalmente el flujo anterior.
+        await using var migrationConnection = _sqlCommandFactory.CreateConnection();
+        await migrationConnection.OpenAsync(cancellationToken);
+        using var transaction = migrationConnection.BeginTransaction();
+        try
+        {
+            await migrationConnection.ExecuteAsync(new CommandDefinition("DELETE FROM dbo.updimportar;", transaction: transaction, cancellationToken: cancellationToken, commandTimeout: _sqlCommandFactory.DefaultCommandTimeoutSeconds));
+            await migrationConnection.ExecuteAsync(new CommandDefinition("INSERT INTO dbo.updimportar (Ot, Cliente, Proyecto, IdSite, TipoTrabajo, AnoGestion, Moneda, IdMoneda, MontoBck, Porcentaje, StatusAtp, EstatusPap, EstatusOt, Capitalizacion, Correlativo, IdZona, Zona, Work, Empleado, Mes, Ano, Estado_Oc, Nro_Oc, Posicion, MontoOc, MontoLiq, Esting, Plano, Valmet, StatusCw, StatusRini, Fecha, Hora, IdActualizar, Site) VALUES (@Ot,@Cliente,@Proyecto,@IdSite,@TipoTrabajo,@AnoGestion,@Moneda,@IdMoneda,@MontoBck,@Porcentaje,@StatusAtp,@EstatusPap,@EstatusOt,@Capitalizacion,@Correlativo,@IdZona,@Zona,@Work,@Empleado,@Mes,@Ano,@EstadoOc,@NroOc,@Posicion,@MontoOc,@MontoLiq,@Esting,@Plano,@Valmet,@StatusCw,@StatusRini,@Fecha,@Hora,@IdActualizar,@Site);", stagingRows, transaction: transaction, cancellationToken: cancellationToken, commandTimeout: _sqlCommandFactory.DefaultCommandTimeoutSeconds));
+            var resultado = await migrationConnection.QuerySingleAsync<MigracionImportEjecucionResultadoDto>(new CommandDefinition("dbo.sp_MigracionImport_Insertar", transaction: transaction, commandType: CommandType.StoredProcedure, cancellationToken: cancellationToken, commandTimeout: _sqlCommandFactory.DefaultCommandTimeoutSeconds));
             await transaction.CommitAsync(cancellationToken);
             return resultado;
         }
-        catch
+        catch { await transaction.RollbackAsync(cancellationToken); throw; }
+    }
+
+    private static DataTable CrearTablaActualizar(IEnumerable<dynamic> filas)
+    {
+        var table = new DataTable();
+        table.Columns.Add("Cliente", typeof(string));
+        table.Columns.Add("Proyecto", typeof(string));
+        table.Columns.Add("IdSite", typeof(string));
+        table.Columns.Add("Site", typeof(string));
+        table.Columns.Add("TipoTrabajo", typeof(string));
+        table.Columns.Add("AnoGestion", typeof(int));
+        table.Columns.Add("IdMoneda", typeof(int));
+        table.Columns.Add("MontoBck", typeof(decimal));
+        table.Columns.Add("Porcentaje", typeof(decimal));
+
+        foreach (var fila in filas)
         {
-            await transaction.RollbackAsync(cancellationToken);
-            throw;
+            table.Rows.Add(
+                fila.Cliente ?? (object)DBNull.Value,
+                fila.Proyecto ?? (object)DBNull.Value,
+                fila.IdSite ?? (object)DBNull.Value,
+                fila.Site ?? (object)DBNull.Value,
+                fila.TipoTrabajo ?? (object)DBNull.Value,
+                fila.AnoGestion ?? (object)DBNull.Value,
+                fila.IdMoneda ?? (object)DBNull.Value,
+                fila.MontoBck ?? (object)DBNull.Value,
+                fila.Porcentaje ?? (object)DBNull.Value);
         }
+
+        return table;
     }
 
     private static WorkbookData LeerWorkbook(byte[] archivoBytes, string nombreArchivo, CancellationToken cancellationToken)

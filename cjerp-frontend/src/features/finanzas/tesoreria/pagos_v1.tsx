@@ -1086,7 +1086,7 @@ function getStateColor(tab: Exclude<PagoTabKey, "resumen">) {
 }
 
 export default function PagosV1Page() {
-  const [activeTab, setActiveTab] = useState<PagoTabKey>("resumen");
+  const [activeTab, setActiveTab] = useState<PagoTabKey>("aprobar");
   const [detailTab, setDetailTab] = useState<DetailTabKey>("resumen");
   const [isDetailPanelOpen, setIsDetailPanelOpen] = useState(false);
   const [filters, setFilters] = useState<FilterState>(() => getDefaultFilterState());
@@ -1103,6 +1103,13 @@ export default function PagosV1Page() {
     hormiga: [],
     observadas: [],
     resumen: [],
+  });
+  const [kpiCounts, setKpiCounts] = useState<Record<PagoTabKey, number>>({
+    aprobar: 0,
+    reaprobar: 0,
+    hormiga: 0,
+    observadas: 0,
+    resumen: 0,
   });
   const [loadingData, setLoadingData] = useState(true);
   const [tabPermissions, setTabPermissions] = useState<Record<string, boolean>>({});
@@ -1142,6 +1149,7 @@ export default function PagosV1Page() {
   const resumenOtCacheRef = useRef<Map<string, ResumenOtDetalle[]>>(new Map());
   const historialOtCacheRef = useRef<Map<string, PagoRow[]>>(new Map());
   const historialOcCacheRef = useRef<Map<string, PagoRow[]>>(new Map());
+  const tabRowsCacheRef = useRef<Map<string, PagoRow[]>>(new Map());
   const preferredDetailTabRef = useRef<DetailTabKey | null>(null);
   const previousCheckedIdsRef = useRef<number[]>([]);
   const loadTimeoutMs = 15000;
@@ -1252,11 +1260,62 @@ export default function PagosV1Page() {
     [pushLoadTrace]
   );
 
+  // Los indicadores se consultan sin descargar las filas del grid. Cada
+  // pestaña solicitará sus registros recién cuando el usuario la active.
+  useEffect(() => {
+    const controller = new AbortController();
+    const loadKpis = async () => {
+      const parametros: PlanillaConsultaParametro[] = [];
+      const fechaInicio = formatDateParam(appliedFilters.fechaDesde);
+      const fechaFin = formatDateParam(appliedFilters.fechaHasta);
+      if (fechaInicio) parametros.push({ nombre: "FechaInicio", valor: fechaInicio, tipo: "date" });
+      if (fechaFin) parametros.push({ nombre: "FechaFin", valor: fechaFin, tipo: "date" });
+
+      try {
+        const response = await consultarPlanillaEstados(
+          buildPagosV1PlanillaRequest(parametros, "pagos-v1-resumen"),
+          { timeoutMs: 120000, signal: controller.signal }
+        );
+        if (controller.signal.aborted) return;
+
+        const next = { aprobar: 0, reaprobar: 0, hormiga: 0, observadas: 0, resumen: 0 };
+        for (const row of response.rows ?? []) {
+          const count = getRecordNumber(row, "Cantidad", "cantidad") ?? 0;
+          const estado = getRecordNumber(row, "Estado", "estado");
+          if (estado === 0) next.aprobar = count;
+          if (estado === 6) next.reaprobar = count;
+          if (estado === 10) next.hormiga = count;
+          if (estado === 2) next.observadas = count;
+          next.resumen += count;
+        }
+        setKpiCounts(next);
+      } catch {
+        if (!controller.signal.aborted) setKpiCounts({ aprobar: 0, reaprobar: 0, hormiga: 0, observadas: 0, resumen: 0 });
+      }
+    };
+    void loadKpis();
+    return () => controller.abort();
+  }, [appliedFilters.fechaDesde, appliedFilters.fechaHasta, refreshTick]);
+
   useEffect(() => {
     const controller = new AbortController();
     let cancelled = false;
 
     const load = async (signal: AbortSignal) => {
+      const cacheKey = [
+        activeTab,
+        appliedFilters.fechaDesde,
+        appliedFilters.fechaHasta,
+        appliedFilters.query,
+        appliedFilters.correlativo,
+        refreshTick,
+      ].join("|");
+      const cachedRows = tabRowsCacheRef.current.get(cacheKey);
+      if (cachedRows) {
+        setRowsByTab((previous) => ({ ...previous, [activeTab]: cachedRows }));
+        return;
+      }
+
       setLoadingData(true);
       setLoadingStage("Preparando consulta de órdenes...");
       const loadStart = performance.now();
@@ -1283,6 +1342,13 @@ export default function PagosV1Page() {
         );
 
         const parametros: PlanillaConsultaParametro[] = [];
+        const estadoActivo = activeTab === "resumen"
+          ? "0,6,10,2"
+          : activeTab === "aprobar" ? "0"
+          : activeTab === "reaprobar" ? "6"
+          : activeTab === "hormiga" ? "10"
+          : "2";
+        parametros.push({ nombre: "Estados", valor: estadoActivo, tipo: "string" });
         // Los tipos de cambio se toman de los filtros principales y se
         // envían únicamente cuando contienen un valor válido.
         [
@@ -1362,7 +1428,11 @@ export default function PagosV1Page() {
         }
 
         pushLoadTrace(`Carga total: ${(performance.now() - loadStart).toFixed(0)} ms`);
-        setRowsByTab(nextRowsByTab);
+        setRowsByTab((previous) => ({
+          ...previous,
+          [activeTab]: nextRowsByTab[activeTab],
+        }));
+        tabRowsCacheRef.current.set(cacheKey, nextRowsByTab[activeTab]);
       } catch (error) {
         if (!cancelled && !controller.signal.aborted) {
           setMessage("No se pudieron cargar las Órdenes desde Planilla.");
@@ -1382,7 +1452,7 @@ export default function PagosV1Page() {
       cancelled = true;
       controller.abort();
     };
-  }, [appliedFilters.fechaDesde, appliedFilters.fechaHasta, appliedFilters.query, appliedFilters.correlativo, refreshTick, runTrackedRequest]);
+  }, [activeTab, appliedFilters.fechaDesde, appliedFilters.fechaHasta, appliedFilters.query, appliedFilters.correlativo, refreshTick, runTrackedRequest]);
 
   const activeRows = useMemo(
     () => (activeTab === "resumen" ? rowsByTab.resumen : rowsByTab[activeTab]),
@@ -1607,17 +1677,7 @@ export default function PagosV1Page() {
 
   const filaActiva = selectedRow;
 
-  const tabStats = useMemo(() => {
-    const counts = {
-      aprobar: rowsByTab.aprobar.filter((row) => matchesAppliedFilters(row, true)).length,
-      reaprobar: rowsByTab.reaprobar.filter((row) => matchesAppliedFilters(row, false)).length,
-      hormiga: rowsByTab.hormiga.filter((row) => matchesAppliedFilters(row, false)).length,
-      observadas: rowsByTab.observadas.filter((row) => matchesAppliedFilters(row, false)).length,
-      resumen: rowsByTab.resumen.filter((row) => matchesAppliedFilters(row, false)).length,
-    };
-
-    return counts;
-  }, [rowsByTab, matchesAppliedFilters]);
+  const tabStats = kpiCounts;
 
   const currentTheme = TAB_THEME[activeTab];
   const mapearDatosOc = useCallback(

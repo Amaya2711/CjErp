@@ -19,6 +19,7 @@ namespace CjERP.Infrastructure.Services
     public class PlanillaConsultaService : IPlanillaConsultaService
     {
         private const string StoredProcedureEstados = "dbo.sp_Planilla_Consulta_Estados";
+        private const string StoredProcedureEstadosResumen = "dbo.sp_Planilla_Consulta_Estados_Resumen";
         private const string StoredProcedureAprobar = "dbo.sp_Planilla_Consulta_Aprobar";
         private const string StoredProcedureVacaciones = "dbo.sp_EmpleadoOtros_ListarVacaciones";
         private const string StoredProcedureVacacionesTotal = "dbo.sp_EmpleadoOtros_ListarVacacionesTotal";
@@ -419,6 +420,7 @@ namespace CjERP.Infrastructure.Services
                 "planilla-oc-resumen" => StoredProcedurePlanillaOcResumen,
                 "movimientos-gastos-ingresos" => StoredProcedureMovimientosGastosIngresos,
                 "analisis-gastos" => StoredProcedureAnalisisGastos,
+                "pagos-v1-resumen" => StoredProcedureEstadosResumen,
                 "clientes-activos" => QueryClientesActivos,
                 "proyectos-activos" => QueryProyectosActivos,
                 _ => StoredProcedureEstados
