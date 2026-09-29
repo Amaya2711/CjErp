@@ -2398,7 +2398,7 @@ export default function PagosV1Page() {
   }, [activeTab]);
   const isResumenTab = activeTab === "resumen";
   const showEstadoOc = activeTab === "resumen";
-  const tableColSpan = showEstadoOc ? 23 : 22;
+  const tableColSpan = showEstadoOc ? 24 : 23;
   const stickyColumnWidths = [108, 94];
   const stickyColumnLefts = stickyColumnWidths.reduce<number[]>((acc, _width, index) => {
     const previousLeft = acc[index - 1] ?? 0;
@@ -3069,6 +3069,9 @@ export default function PagosV1Page() {
           .pagos-v1-selected-row > td:last-child {
             border-right: 2px solid #2563EB !important;
           }
+          .pagos-v1-main-grid .pagos-v1-data-row > td {
+            font-size: 15px !important;
+          }
         `}</style>
         <section
           style={{
@@ -3408,7 +3411,7 @@ export default function PagosV1Page() {
            
 
             <div style={styles.gridScrollable}>
-              <table style={styles.table}>
+              <table className="pagos-v1-main-grid" style={styles.table}>
                 <thead onClick={(event) => {
                   const column = (event.target as HTMLElement).closest<HTMLElement>("th")?.dataset.sort as PagoSortColumn | undefined;
                   if (column) handleSortColumn(column);
@@ -3449,18 +3452,19 @@ export default function PagosV1Page() {
                     <th data-sort="proyecto" style={{ ...styles.th, width: 90, cursor: "pointer" }}>Proyecto</th>
                     <th data-sort="site" style={{ ...styles.th, width: 150, cursor: "pointer" }}>Site</th>
                     <th data-sort="tipoTrabajo" style={{ ...styles.th, width: 100, cursor: "pointer" }}>Tipo trabajo</th>
+                    <th data-sort="tarea" style={{ ...styles.th, width: 130, cursor: "pointer" }}>Tarea</th>
                     <th data-sort="idOc" style={{ ...styles.th, width: 88, cursor: "pointer" }}>OC</th>
                     <th data-sort="subtotal" style={{ ...styles.th, width: 130, cursor: "pointer" }}>Subtotal</th>
                     <th data-sort="igv" style={{ ...styles.th, width: 90, cursor: "pointer" }}>IGV</th>
                     <th data-sort="total" style={{ ...styles.th, width: 100, cursor: "pointer" }}>Total</th>
                     <th data-sort="moneda" style={{ ...styles.th, width: 80, cursor: "pointer" }}>Moneda</th>
+                    <th style={{ ...styles.th, width: 180 }}>Detalle</th>
                     <th style={{ ...styles.th, width: 160 }}>Total Gastado</th>
                     <th style={{ ...styles.th, width: 170 }}>Total Sitio</th>
                     <th style={{ ...styles.th, width: 170 }}>Total Visible</th>
                     <th style={{ ...styles.th, width: 90 }}>% Avance</th>
                     <th style={{ ...styles.th, width: 130 }}>Avance</th>
                     <th data-sort="responsable" style={{ ...styles.th, width: 110, cursor: "pointer" }}>Responsable</th>
-                    <th style={{ ...styles.th, width: 180 }}>Detalle</th>
                     {showEstadoOc ? <th style={{ ...styles.th, width: 118 }}>Estado OC</th> : null}
                     <th data-sort="validador" style={{ ...styles.th, width: 110, cursor: "pointer" }}>Validador</th>
                     <th data-sort="ot" style={{ ...styles.th, width: 88, cursor: "pointer" }}>OT</th>
@@ -3548,12 +3552,11 @@ export default function PagosV1Page() {
                               const rowBackground = hasMontoBckExceeded
                                 ? (isSelected ? "#FECACA" : "#FFF1F2")
                                 : (isSelected ? "#DBEAFE" : "#FFFFFF");
-                              const totalSubtotalPorMoneda = row.totalSubtotalPorMoneda ?? 0;
                               const totalMontoBckPorMoneda = row.totalMontoBckPorMoneda ?? 0;
                               const totalMontoVisiblePorMoneda = row.totalMontoVisiblePorMoneda ?? 0;
                               const totalGastado = row.totalPagadoConvertidoSoles ?? 0;
                               const porcentajeAvance = totalMontoBckPorMoneda > 0
-                                ? (totalSubtotalPorMoneda / totalMontoBckPorMoneda) * 100
+                                ? (totalGastado / totalMontoBckPorMoneda) * 100
                                 : 0;
                               const porcentajeAvanceBarra = Math.max(0, Math.min(porcentajeAvance, 100));
                               const colorAvance = porcentajeAvance > 70 ? "#DC2626" : porcentajeAvance >= 50 ? "#CA8A04" : "#16A34A";
@@ -3561,7 +3564,7 @@ export default function PagosV1Page() {
                               return (
                                 <tr
                                   key={row.id}
-                                  className={isSelected ? "pagos-v1-selected-row" : undefined}
+                                  className={`pagos-v1-data-row${isSelected ? " pagos-v1-selected-row" : ""}`}
                                   onClick={() => setSelectedId(row.id)}
                                   style={{
                                     cursor: "pointer",
@@ -3603,6 +3606,7 @@ export default function PagosV1Page() {
                                   <td title={row.proyecto || "-"} style={styles.td}>{row.proyecto}</td>
                                   <td title={row.site || "-"} style={styles.td}>{row.site}</td>
                                   <td title={row.tipoTrabajo || "-"} style={styles.td}>{row.tipoTrabajo}</td>
+                                  <td title={row.tarea || "-"} style={styles.td}>{row.tarea || "-"}</td>
                                   <td
                                     title="Ver detalle de la orden"
                                     onClick={(event) => {
@@ -3617,6 +3621,18 @@ export default function PagosV1Page() {
                                   <td title={formatCurrency(row.igv, row.moneda)} style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
                                   <td title={formatCurrency(row.total, row.moneda)} style={styles.td}>{formatCurrency(row.total, row.moneda)}</td>
                                   <td title={row.moneda || "-"} style={styles.td}>{row.moneda || "-"}</td>
+                                  <td
+                                    title="Ver detalle completo"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setDetallePopup({ correlativo: row.correlativo, detalle: row.detalle?.trim() || "-" });
+                                    }}
+                                    style={{ ...styles.td, cursor: "pointer", color: "#2563EB", textDecoration: "underline" }}
+                                  >
+                                    <span style={{ display: "block", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                      {row.detalle?.trim() || "-"}
+                                    </span>
+                                  </td>
                                   <td
                                     title={`Ver detalle de la orden — ${formatCurrency(totalGastado, "SOLES")}`}
                                     onClick={(event) => {
@@ -3642,18 +3658,6 @@ export default function PagosV1Page() {
                                     </div>
                                   </td>
                                   <td title={row.responsable || "-"} style={styles.td}>{row.responsable}</td>
-                                  <td
-                                    title="Ver detalle completo"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      setDetallePopup({ correlativo: row.correlativo, detalle: row.detalle?.trim() || "-" });
-                                    }}
-                                    style={{ ...styles.td, cursor: "pointer", color: "#2563EB", textDecoration: "underline" }}
-                                  >
-                                    <span style={{ display: "block", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                      {row.detalle?.trim() || "-"}
-                                    </span>
-                                  </td>
                                   {showEstadoOc ? (
                                     <td style={styles.td}>
                                       <span
@@ -4092,7 +4096,7 @@ export default function PagosV1Page() {
                         <p style={styles.noteText}>Cargando registros...</p>
                       ) : (
                         <div style={styles.gridScrollable}>
-                          <table style={{ ...styles.table, minWidth: 980, width: "max-content" }}>
+                          <table style={{ ...styles.table, minWidth: 1110, width: "max-content" }}>
                             <thead>
                               <tr>
                                 <th style={styles.th}>Correlativo</th>
@@ -4101,6 +4105,7 @@ export default function PagosV1Page() {
                                 <th style={styles.th}>Site ID</th>
                                 <th style={styles.th}>Site</th>
                                 <th style={styles.th}>Tipo trabajo</th>
+                                <th style={styles.th}>Tarea</th>
                                 <th style={styles.th}>Subtotal</th>
                                 <th style={styles.th}>Moneda</th>
                                 <th style={styles.th}>Solicitante</th>
@@ -4109,7 +4114,7 @@ export default function PagosV1Page() {
                             <tbody>
                               {conPagadoRows.length === 0 ? (
                                 <tr>
-                                  <td colSpan={9} style={styles.emptyCell}>No hay registros para los criterios seleccionados.</td>
+                                  <td colSpan={10} style={styles.emptyCell}>No hay registros para los criterios seleccionados.</td>
                                 </tr>
                               ) : (
                                 conPagadoRows.map((row, index) => (
@@ -4120,6 +4125,7 @@ export default function PagosV1Page() {
                                     <td style={styles.td}>{row.siteId || "-"}</td>
                                     <td style={styles.td}>{row.site || "-"}</td>
                                     <td style={styles.td}>{row.tipoTrabajo || "-"}</td>
+                                    <td style={styles.td}>{row.tarea || "-"}</td>
                                     <td style={{ ...styles.td, fontWeight: 800 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
                                     <td style={styles.td}>{row.moneda || "-"}</td>
                                     <td style={styles.td}>{row.solicitante || "-"}</td>
@@ -4214,7 +4220,7 @@ export default function PagosV1Page() {
                     ) : null}
 
                     <div style={styles.gridScrollable}>
-                      <table style={{ ...styles.table, minWidth: 1570, width: "max-content" }}>
+                      <table style={{ ...styles.table, minWidth: 1700, width: "max-content" }}>
                         <thead onClick={(event) => {
                           const column = (event.target as HTMLElement).closest<HTMLElement>("th")?.dataset.historialSort as PagoSortColumn | undefined;
                           if (column) handleHistorialSortColumn(column);
@@ -4226,6 +4232,7 @@ export default function PagosV1Page() {
                             <th data-historial-sort="proyecto" style={{ ...styles.th, width: 90, cursor: "pointer" }}>Proyecto</th>
                             <th data-historial-sort="site" style={{ ...styles.th, width: 140, cursor: "pointer" }}>Site</th>
                             <th data-historial-sort="tipoTrabajo" style={{ ...styles.th, width: 90, cursor: "pointer" }}>Tipo trabajo</th>
+                            <th data-historial-sort="tarea" style={{ ...styles.th, width: 130, cursor: "pointer" }}>Tarea</th>
                             <th data-historial-sort="idOc" style={{ ...styles.th, width: 88, cursor: "pointer" }}>OC</th>
                             <th data-historial-sort="subtotal" style={{ ...styles.th, width: 90, cursor: "pointer" }}>Subtotal</th>
                             <th data-historial-sort="igv" style={{ ...styles.th, width: 90, cursor: "pointer" }}>IGV</th>
@@ -4241,7 +4248,7 @@ export default function PagosV1Page() {
                         <tbody>
                           {historialRowsFiltrados.length === 0 ? (
                             <tr>
-                              <td colSpan={16} style={styles.emptyCell}>
+                              <td colSpan={17} style={styles.emptyCell}>
                                 No hay registros para el cliente, proyecto, site y tipo de trabajo seleccionados.
                               </td>
                             </tr>
@@ -4254,6 +4261,7 @@ export default function PagosV1Page() {
                                 <td style={styles.td}>{row.proyecto}</td>
                                 <td style={styles.td}>{row.site}</td>
                                 <td style={styles.td}>{row.tipoTrabajo}</td>
+                                <td style={styles.td}>{row.tarea || '-'}</td>
                                 <td style={styles.td}>{row.idOc || row.documento || '-'}</td>
                                 <td style={{ ...styles.td, fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
                                 <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
@@ -4499,7 +4507,7 @@ export default function PagosV1Page() {
                   ))}
                 </div>
                 <div style={styles.gridScrollable}>
-                  <table style={{ ...styles.table, minWidth: 1100, width: "max-content" }}>
+                  <table style={{ ...styles.table, minWidth: 1230, width: "max-content" }}>
                     <thead>
                       <tr>
                         <th style={styles.th}>Correlativo</th>
@@ -4508,6 +4516,7 @@ export default function PagosV1Page() {
                         <th style={styles.th}>Site ID</th>
                         <th style={styles.th}>Site</th>
                         <th style={styles.th}>Tipo trabajo</th>
+                        <th style={styles.th}>Tarea</th>
                         <th style={styles.th}>Subtotal</th>
                         <th style={styles.th}>Moneda</th>
                         <th style={styles.th}>Solicitante</th>
@@ -4515,7 +4524,7 @@ export default function PagosV1Page() {
                     </thead>
                     <tbody>
                       {conPagadoRows.length === 0 ? (
-                        <tr><td colSpan={9} style={styles.emptyCell}>No hay registros para los criterios seleccionados.</td></tr>
+                        <tr><td colSpan={10} style={styles.emptyCell}>No hay registros para los criterios seleccionados.</td></tr>
                       ) : conPagadoRows.map((row, index) => (
                         <tr key={`popup-con-pagado-${row.id}-${index}`}>
                           <td style={styles.td}>{row.correlativo || "-"}</td>
@@ -4524,6 +4533,7 @@ export default function PagosV1Page() {
                           <td style={styles.td}>{row.siteId || "-"}</td>
                           <td style={styles.td}>{row.site || "-"}</td>
                           <td style={styles.td}>{row.tipoTrabajo || "-"}</td>
+                          <td style={styles.td}>{row.tarea || "-"}</td>
                           <td style={{ ...styles.td, fontWeight: 800 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
                           <td style={styles.td}>{row.moneda || "-"}</td>
                           <td style={styles.td}>{row.solicitante || "-"}</td>
@@ -4721,7 +4731,7 @@ export default function PagosV1Page() {
                   )
                 ) : (
                 <div style={styles.gridScrollable}>
-                  <table style={{ ...styles.table, minWidth: 1690, width: "max-content" }}>
+                  <table style={{ ...styles.table, minWidth: 1820, width: "max-content" }}>
                     <thead onClick={(event) => {
                       const column = (event.target as HTMLElement).closest<HTMLElement>("th")?.dataset.historialSort as PagoSortColumn | undefined;
                       if (column) handleHistorialSortColumn(column);
@@ -4733,6 +4743,7 @@ export default function PagosV1Page() {
                         <th data-historial-sort="proyecto" style={{ ...styles.th, width: 90, cursor: "pointer" }}>Proyecto</th>
                         <th data-historial-sort="site" style={{ ...styles.th, width: 140, cursor: "pointer" }}>Site</th>
                         <th data-historial-sort="tipoTrabajo" style={{ ...styles.th, width: 90, cursor: "pointer" }}>Tipo trabajo</th>
+                        <th data-historial-sort="tarea" style={{ ...styles.th, width: 130, cursor: "pointer" }}>Tarea</th>
                         <th data-historial-sort="idOc" style={{ ...styles.th, width: 88, cursor: "pointer" }}>OC</th>
                         <th data-historial-sort="subtotal" style={{ ...styles.th, width: 90, cursor: "pointer" }}>Subtotal</th>
                         <th data-historial-sort="igv" style={{ ...styles.th, width: 90, cursor: "pointer" }}>IGV</th>
@@ -4748,7 +4759,7 @@ export default function PagosV1Page() {
                     <tbody>
                       {historialPopupRowsFiltrados.length === 0 ? (
                         <tr>
-                          <td colSpan={16} style={styles.emptyCell}>
+                          <td colSpan={17} style={styles.emptyCell}>
                             {historialSolicitanteSeleccionado
                               ? "No hay registros para el solicitante seleccionado."
                               : "No hay registros para el cliente, proyecto, site y tipo de trabajo seleccionados."}
@@ -4763,6 +4774,7 @@ export default function PagosV1Page() {
                             <td style={styles.td}>{row.proyecto}</td>
                             <td style={styles.td}>{row.site}</td>
                             <td style={styles.td}>{row.tipoTrabajo}</td>
+                            <td style={styles.td}>{row.tarea || '-'}</td>
                             <td style={styles.td}>{row.idOc || row.documento || '-'}</td>
                             <td style={{ ...styles.td, fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
                             <td style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>

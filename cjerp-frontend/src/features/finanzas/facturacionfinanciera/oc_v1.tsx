@@ -1099,6 +1099,7 @@ export default function OcV1Page() {
         )];
         const idOcFiltro = reporteFiltros.idOc.trim();
         const idClienteFiltro = Number(reporteFiltros.cliente);
+        const estadosOcSeleccionados = getEstadosOcSeleccionados(reporteFiltros.estado);
         // El nuevo store recibe los filtros múltiples como CSV. Se usan los
         // códigos seleccionados, nunca el nombre del proyecto, para evitar que
         // la búsqueda dependa de que el listado de cabeceras esté cargado.
@@ -1108,9 +1109,13 @@ export default function OcV1Page() {
             .filter((id) => Number.isInteger(id) && id > 0)
             .map(String)
         )].join(",");
+        // El valor persistente del filtro es la fuente de verdad. El arreglo
+        // visual solo controla los checks; así una modificación de fechas no
+        // puede hacer que se omita IdSolicitante en la solicitud.
+        const solicitantesFiltroCsv = reporteFiltros.solicitante || solicitantesReporteFiltro.join(",");
         const idsSolicitanteFiltro = [...new Set(
-          solicitantesReporteFiltro
-            .flatMap((value) => value.split(","))
+          solicitantesFiltroCsv
+            .split(",")
             .map((value) => Number(value))
             .filter((id) => Number.isInteger(id) && id > 0)
             .map(String)
@@ -1143,15 +1148,26 @@ export default function OcV1Page() {
           return key ? String(row[key] ?? "").trim() : "";
         };
         let rows = normalizarRows(response?.rows);
-        const idsDevueltos = new Set(rows.map(getIdSolicitanteOc));
-        const faltaSolicitanteSeleccionado = idsSolicitanteFiltro.some((id) => !idsDevueltos.has(id));
-        if (idsSolicitanteFiltro.length > 0 && faltaSolicitanteSeleccionado) {
-          const requestRecuperacion = {
+        // El catálogo de solicitantes no debe quedar limitado a la selección
+        // actual. Se consulta el mismo conjunto de filtros, omitiendo solo
+        // IdSolicitante, para poder elegir más de un solicitante.
+        let rowsParaCatalogoSolicitantes = rows;
+        if (idsSolicitanteFiltro.length > 0) {
+          const requestSinSolicitante = {
             ...request,
             parametros: request.parametros.filter((parametro) => parametro.nombre.toLowerCase() !== "idsolicitante"),
           };
-          const respuestaRecuperacion = await consultarPlanillaEstados(requestRecuperacion, { timeoutMs: 60000 });
-          rows = normalizarRows(respuestaRecuperacion?.rows);
+          const respuestaSinSolicitante = await consultarPlanillaEstados(requestSinSolicitante, { timeoutMs: 60000 });
+          rowsParaCatalogoSolicitantes = normalizarRows(respuestaSinSolicitante?.rows);
+
+          // Algunos despliegues del SP no manejan de forma consistente el CSV.
+          // En ese caso se aplica el filtro múltiple localmente sobre la misma
+          // consulta sin solicitante para no perder registros seleccionados.
+          const idsDevueltos = new Set(rows.map(getIdSolicitanteOc));
+          const faltaSolicitanteSeleccionado = idsSolicitanteFiltro.some((id) => !idsDevueltos.has(id));
+          if (faltaSolicitanteSeleccionado) {
+            rows = rowsParaCatalogoSolicitantes;
+          }
         }
         const rowsPorIdOc = idOcFiltro
           ? rows.filter((row) => getReporteRowIdOc(row) === idOcFiltro)
@@ -1169,11 +1185,10 @@ export default function OcV1Page() {
         const rowsPorSolicitante = idsSolicitantesSeleccionados.size > 0
           ? rowsPorCliente.filter((row) => idsSolicitantesSeleccionados.has(getIdSolicitanteOc(row)))
           : rowsPorCliente;
-        // El filtro debe usar el solicitante de la cabecera de la OC
-        // (CabOrdenCompra.IdSolicitante), no el solicitante de la planilla.
-        // Se conserva el catálogo ya cargado durante esta sesión para permitir
-        // seleccionar más de un solicitante después de aplicar un primer filtro.
-        setSolicitantesOcGastosCatalogo((previous) => {
+        // Sin filtros, el catálogo se forma con el resultado general. Con
+        // filtros, se forma solo con los registros que cumplen esos filtros,
+        // excluyendo la propia selección de solicitante.
+        setSolicitantesOcGastosCatalogo(() => {
           const solicitantes = new Map<string, { label: string; ids: Set<string> }>();
           const agregarSolicitante = (idSolicitante: string, solicitante: string) => {
             // SQL puede devolver el mismo nombre con espacios no separables,
@@ -1190,10 +1205,10 @@ export default function OcV1Page() {
             solicitantes.set(key, actual);
           };
 
-          previous.forEach((item) => {
-            item.value.split(",").forEach((id) => agregarSolicitante(id.trim(), item.label));
-          });
-          rows.forEach((row) => {
+          const rowsCatalogoPorEstado = estadosOcSeleccionados.length
+            ? rowsParaCatalogoSolicitantes.filter((row) => estadosOcSeleccionados.includes(formatEstadoOcGrid(getEstadoOcRowValue(row))))
+            : rowsParaCatalogoSolicitantes;
+          rowsCatalogoPorEstado.forEach((row) => {
             const getValue = (...columnas: string[]) => {
               for (const columna of columnas) {
                 const key = Object.keys(row).find((item) => item.toLowerCase() === columna.toLowerCase());
@@ -1238,7 +1253,6 @@ export default function OcV1Page() {
         setEstadosOcGastosCatalogo(getUniqueSorted(
           rows.map((row) => formatEstadoOcGrid(getEstadoOcRowValue(row))).filter((estado) => estado !== "SIN ESTADO")
         ));
-        const estadosOcSeleccionados = getEstadosOcSeleccionados(reporteFiltros.estado);
         const rowsPorEstado = estadosOcSeleccionados.length
           ? rowsPorSolicitante.filter((row) => {
             return estadosOcSeleccionados.includes(formatEstadoOcGrid(getEstadoOcRowValue(row)));
@@ -1571,11 +1585,47 @@ export default function OcV1Page() {
     ? getUniqueSorted([...ESTADOS_OC_GASTOS, ...estadosOcGastosCatalogo])
     : reporteOptions.estados;
 
+  const solicitantesOcGastosGenerales = useMemo(() => {
+    const solicitantes = new Map<string, { label: string; ids: Set<string> }>();
+    cabeceras.forEach((item) => {
+      const id = String(item.idSolicitante ?? "").trim();
+      const label = String(item.solicitante ?? "").replace(/[\s\u00A0]+/g, " ").trim();
+      const key = label
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLocaleLowerCase("es");
+      if (!id || Number(id) <= 0 || !label) return;
+      const actual = solicitantes.get(key) ?? { label, ids: new Set<string>() };
+      actual.ids.add(id);
+      solicitantes.set(key, actual);
+    });
+    return Array.from(solicitantes.values(), ({ label, ids }) => ({
+      value: Array.from(ids).sort((left, right) => Number(left) - Number(right)).join(","),
+      label,
+    })).sort((left, right) => left.label.localeCompare(right.label, "es"));
+  }, [cabeceras]);
+
+  const hayFiltrosOcGastos = Boolean(
+    reporteFiltros.idOc.trim()
+    || reporteFiltros.fechaDesde
+    || reporteFiltros.fechaHasta
+    || reporteFiltros.cliente
+    || reporteFiltros.proyecto
+    || reporteFiltros.site
+    || reporteFiltros.estado
+    || reporteFiltros.responsable
+    || reporteFiltros.solicitante
+    || responsablesReporteFiltro.length
+    || proyectosReporteFiltro.length
+    || sitesReporteFiltro.length
+    || solicitantesReporteFiltro.length,
+  );
+
   const solicitanteReporteOptions = useMemo(
     () => reporteSubtab === "oc-gastos"
-      ? solicitantesOcGastosCatalogo
+      ? (hayFiltrosOcGastos ? solicitantesOcGastosCatalogo : (solicitantesOcGastosCatalogo.length ? solicitantesOcGastosCatalogo : solicitantesOcGastosGenerales))
       : reporteOptions.solicitantes.map((nombre) => ({ value: nombre, label: nombre })),
-    [reporteOptions.solicitantes, reporteSubtab, solicitantesOcGastosCatalogo]
+    [hayFiltrosOcGastos, reporteOptions.solicitantes, reporteSubtab, solicitantesOcGastosCatalogo, solicitantesOcGastosGenerales]
   );
 
   const responsablesOcGastosOptions = useMemo(() => {
@@ -2049,6 +2099,49 @@ export default function OcV1Page() {
       // Como respaldo se conservarán los clientes recibidos desde OC/Gastos.
     }
   };
+
+  const loadSolicitantesOcGastosGeneral = async () => {
+    try {
+      const request = buildPlanillaConsultaEstadosRequest([]);
+      request.consulta = "analisis-gastos";
+      const response = await consultarPlanillaEstados(request, { timeoutMs: 60000 });
+      const solicitantes = new Map<string, { label: string; ids: Set<string> }>();
+
+      (response.rows ?? []).forEach((row) => {
+        const getValue = (...columnas: string[]) => {
+          for (const columna of columnas) {
+            const key = Object.keys(row).find((item) => item.toLowerCase() === columna.toLowerCase());
+            if (key) return String(row[key] ?? "").trim();
+          }
+          return "";
+        };
+        const idSolicitante = getValue("IdSolicitanteOc", "IdSolicitante");
+        const label = getValue("SolicitanteOc", "Solicitante").replace(/[\s\u00A0]+/g, " ").trim();
+        const key = label
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLocaleLowerCase("es");
+        if (!idSolicitante || Number(idSolicitante) <= 0 || !label) return;
+        const actual = solicitantes.get(key) ?? { label, ids: new Set<string>() };
+        actual.ids.add(idSolicitante);
+        solicitantes.set(key, actual);
+      });
+
+      setSolicitantesOcGastosCatalogo(
+        Array.from(solicitantes.values(), ({ label, ids }) => ({
+          value: Array.from(ids).sort((left, right) => Number(left) - Number(right)).join(","),
+          label,
+        })).sort((left, right) => left.label.localeCompare(right.label, "es")),
+      );
+    } catch {
+      // El filtro seguirá actualizándose con la respuesta de Aplicar filtros.
+    }
+  };
+
+  useEffect(() => {
+    if (vistaOc !== "reporte" || reporteSubtab !== "oc-gastos" || solicitantesOcGastosCatalogo.length > 0) return;
+    void loadSolicitantesOcGastosGeneral();
+  }, [reporteSubtab, solicitantesOcGastosCatalogo.length, vistaOc]);
 
   const validateDetalleForm = (detalleActual: OrdenCompraDraftDetalle) => {
     return (
