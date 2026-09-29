@@ -83,6 +83,13 @@ BEGIN
 
         a6.IdOc,
 
+        a6.IdSolicitante AS IdSolicitanteOc,
+
+        CASE
+            WHEN ISNULL(a6.IdWeb, 0) = 1 THEN SolicitanteOcCj.NombreEmpleado
+            ELSE SolicitanteOc.NombreEmpleado
+        END AS SolicitanteOc,
+
         a6.IdResponsable AS IdResponsableOc,
 
         RespOc.NombreEmpleado AS ResponsableOc,
@@ -134,6 +141,12 @@ BEGIN
         st.NombreSite AS Site,
 
         a5.FechaCreacion AS FechaOc,
+
+        a5.TipoTrabajo AS TipoTrabajo,
+
+        TareaOc.ValorIni AS Tarea,
+
+        ComprobanteOc.ValorIni AS Comprobante,
 
         a5.PrecioUnitario AS PrecioUniOc,
 
@@ -438,6 +451,19 @@ BEGIN
 
 
     /* ============================================================
+       SOLICITANTE OC
+       ============================================================ */
+
+    LEFT JOIN dbo.EmpleadoCj SolicitanteOcCj
+        ON SolicitanteOcCj.IdEmpleado = a6.IdSolicitante
+       AND ISNULL(a6.IdWeb, 0) = 1
+
+    LEFT JOIN dbo.Empleado SolicitanteOc
+        ON SolicitanteOc.IdEmpleado = a6.IdSolicitante
+       AND ISNULL(a6.IdWeb, 0) <> 1
+
+
+    /* ============================================================
        RESPONSABLE OC
        ============================================================ */
 
@@ -465,6 +491,14 @@ BEGIN
     LEFT JOIN dbo.Constante MonedaOc
         ON MonedaOc.Campo = 'TIPO_MONEDA'
        AND MonedaOc.Correlativo = a6.IdMoneda
+
+    LEFT JOIN dbo.Constante ComprobanteOc
+        ON ComprobanteOc.Campo = 'TIPO_COMPROBANTE'
+       AND ComprobanteOc.Correlativo = a5.IdComprobante
+
+    LEFT JOIN dbo.Constante TareaOc
+        ON TareaOc.Campo = 'TAREA'
+       AND TareaOc.Correlativo = a5.IdTarea
 
 
     /* ============================================================

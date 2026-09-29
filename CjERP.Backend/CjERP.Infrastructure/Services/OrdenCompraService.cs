@@ -40,6 +40,20 @@ public class OrdenCompraService : IOrdenCompraService
         ) forma
         WHERE cab.IdOc = @IdOc;
         """;
+    private const string BuscarAprobadoresRegistradosPdfSql = """
+        SELECT TOP 1
+            ISNULL(cab.IdWeb, 0) AS IdWeb,
+            CASE WHEN MIN(CASE WHEN ISNULL(det.IdAprobador1, 0) > 0 THEN 1 ELSE 0 END) = 1
+                 THEN MAX(det.IdAprobador1) END AS IdAprobador1,
+            CASE WHEN MIN(CASE WHEN ISNULL(det.IdAprobador2, 0) > 0 THEN 1 ELSE 0 END) = 1
+                 THEN MAX(det.IdAprobador2) END AS IdAprobador2,
+            CASE WHEN MIN(CASE WHEN ISNULL(det.IdAprobador3, 0) > 0 THEN 1 ELSE 0 END) = 1
+                 THEN MAX(det.IdAprobador3) END AS IdAprobador3
+        FROM dbo.CabOrdenCompra cab
+        INNER JOIN dbo.DetOrdenCompra det ON det.IdOc = cab.IdOc
+        WHERE cab.IdOc = @IdOc
+        GROUP BY cab.IdOc, cab.IdWeb;
+        """;
     private const string BuscarDetalleEditarSql = """
         SELECT TOP 1
             IdOc,
@@ -465,17 +479,6 @@ public class OrdenCompraService : IOrdenCompraService
         CancellationToken cancellationToken = default)
     {
         await using var connection = _sqlCommandFactory.CreateConnection();
-        if (int.TryParse(request.IdOc, NumberStyles.Integer, CultureInfo.InvariantCulture, out var idOc) && idOc > 0)
-        {
-            return await connection.QueryAsync<OrdenCompraDetalleDto>(
-                _sqlCommandFactory.Create(
-                    BuscarEdicionDetalleSql,
-                    new { IdOc = idOc },
-                    CommandType.Text,
-                    cancellationToken,
-                    commandTimeout: 120));
-        }
-
         return await connection.QueryAsync<OrdenCompraDetalleDto>(
             _sqlCommandFactory.Create(
                 BuscarDetalleSp,
@@ -1064,6 +1067,14 @@ public class OrdenCompraService : IOrdenCompraService
             .ThenBy(item => item.Tarea)
             .ToList();
 
+        // Los nombres del PDF deben reflejar solo aprobaciones ya registradas en
+        // DetOrdenCompra; IdValidador/Validador son usuarios asignados, no evidencia
+        // de que hayan aprobado un nivel.
+        var aprobadores = await BuscarAprobadoresRegistradosPdfAsync(idOc, cancellationToken);
+        cabecera.Validador = aprobadores.Validador1;
+        cabecera.Validador2 = aprobadores.Validador2;
+        cabecera.Validador3 = aprobadores.Validador3;
+
         var metadata = await BuscarPdfMetadataAsync(idOc, cancellationToken);
         // Logo corporativo para documentos: fondo blanco, apto para impresión.
         var logoPath = FindProjectFile("cjerp-frontend", "src", "assets", "cj-telecom-logo-white.svg");
@@ -1106,6 +1117,48 @@ public class OrdenCompraService : IOrdenCompraService
         {
             return new OrdenCompraPdfMetadataDto();
         }
+    }
+
+    private async Task<AprobadoresRegistradosPdf> BuscarAprobadoresRegistradosPdfAsync(
+        int idOc,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        var aprobadores = await connection.QuerySingleOrDefaultAsync<AprobadoresRegistradosPdfLookup>(
+            _sqlCommandFactory.Create(
+                BuscarAprobadoresRegistradosPdfSql,
+                new { IdOc = idOc },
+                CommandType.Text,
+                cancellationToken,
+                commandTimeout: 60));
+
+        if (aprobadores is null)
+            return new AprobadoresRegistradosPdf();
+
+        var ids = new[] { aprobadores.IdAprobador1, aprobadores.IdAprobador2, aprobadores.IdAprobador3 }
+            .Where(id => id is > 0)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToArray();
+        if (ids.Length == 0)
+            return new AprobadoresRegistradosPdf();
+
+        var tablaEmpleado = aprobadores.IdWeb == 1 ? "dbo.EmpleadoCj" : "dbo.Empleado";
+        var nombres = (await connection.QueryAsync<EmpleadoNombreLookup>(
+            _sqlCommandFactory.Create(
+                $"SELECT IdEmpleado, NombreEmpleado FROM {tablaEmpleado} WHERE IdEmpleado IN @Ids;",
+                new { Ids = ids },
+                CommandType.Text,
+                cancellationToken,
+                commandTimeout: 60)))
+            .ToDictionary(item => item.IdEmpleado, item => item.NombreEmpleado?.Trim() ?? string.Empty);
+
+        return new AprobadoresRegistradosPdf
+        {
+            Validador1 = aprobadores.IdAprobador1 is > 0 && nombres.TryGetValue(aprobadores.IdAprobador1.Value, out var nombre1) ? nombre1 : string.Empty,
+            Validador2 = aprobadores.IdAprobador2 is > 0 && nombres.TryGetValue(aprobadores.IdAprobador2.Value, out var nombre2) ? nombre2 : string.Empty,
+            Validador3 = aprobadores.IdAprobador3 is > 0 && nombres.TryGetValue(aprobadores.IdAprobador3.Value, out var nombre3) ? nombre3 : string.Empty,
+        };
     }
 
     private static string? FindProjectFile(params string[] pathParts)
@@ -1219,6 +1272,27 @@ public class OrdenCompraService : IOrdenCompraService
     {
         public int IdOc { get; set; }
         public string? Nombre { get; set; }
+    }
+
+    private sealed class AprobadoresRegistradosPdfLookup
+    {
+        public int IdWeb { get; set; }
+        public int? IdAprobador1 { get; set; }
+        public int? IdAprobador2 { get; set; }
+        public int? IdAprobador3 { get; set; }
+    }
+
+    private sealed class EmpleadoNombreLookup
+    {
+        public int IdEmpleado { get; set; }
+        public string? NombreEmpleado { get; set; }
+    }
+
+    private sealed class AprobadoresRegistradosPdf
+    {
+        public string Validador1 { get; set; } = string.Empty;
+        public string Validador2 { get; set; } = string.Empty;
+        public string Validador3 { get; set; } = string.Empty;
     }
 
     private sealed class OrdenCompraDetalleEditSnapshot

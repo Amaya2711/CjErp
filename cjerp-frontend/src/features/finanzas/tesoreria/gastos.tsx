@@ -2570,8 +2570,6 @@ export default function GastosPage({
     if (editorOnly) {
       onEditorUpdated?.();
       onEditorClose?.();
-    } else {
-      await cargarGastos();
     }
   };
 
@@ -2988,7 +2986,7 @@ export default function GastosPage({
   );
   const columnasGridGastos = useMemo(
     () => [
-      { key: "id", label: "Id", width: "60px", align: "left" as const },
+      { key: "id", label: "Id", width: "80px", align: "left" as const },
       { key: "acciones", label: "Acciones", width: "140px", align: "center" as const },
       { key: "cliente", label: "Cliente", width: "90px", align: "left" as const },
       { key: "nombreProyecto", label: "Proyecto", width: "100px", align: "left" as const },
@@ -3120,7 +3118,7 @@ export default function GastosPage({
                   padding: "13px 11px",
                   borderBottom: "1px solid #F3F4F6",
                   color: col.key === "responsable" ? "#17143A" : "#374151",
-                  fontSize: 11,
+                  fontSize: 13,
                   fontWeight: col.key === "responsable" ? 700 : undefined,
                   overflow: "hidden",
                   whiteSpace: "nowrap",
@@ -3973,7 +3971,7 @@ export default function GastosPage({
                       style={{
                         textAlign: header.align,
                         padding: "13px 11px",
-                        fontSize: 11,
+                        fontSize: 13,
                         color: isSorted ? "#6E4CCB" : "#374151",
                         borderBottom: "1px solid #E5E7EB",
                         background: "#F9FAFB",

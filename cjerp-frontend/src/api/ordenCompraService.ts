@@ -71,8 +71,13 @@ export type OrdenCompraDetalleDto = {
   idComprobante?: number | null;
   ocAdeMon?: number;
   ocPorAde?: number;
+  idAprobador1?: number | null;
+  idAprobador2?: number | null;
+  idAprobador3?: number | null;
   monFic?: number;
   porFict?: number;
+  idValidador?: number | null;
+  idGestor?: number | null;
 };
 
 export type OrdenCompraConsultaParams = {

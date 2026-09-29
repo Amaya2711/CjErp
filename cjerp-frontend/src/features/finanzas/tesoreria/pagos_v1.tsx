@@ -92,6 +92,7 @@ type PagoRow = {
   observacion: string;
   detalle: string;
   idOc?: string;
+  idEstadoOc?: number;
   documento: string;
   planillaRow?: Record<string, unknown>;
 };
@@ -734,6 +735,7 @@ function mapPlanillaConsultaRowToPagoRow(
     observacion: getRecordString(row, "Observacion", "observacion", "Comentario", "comentario"),
     detalle: getRecordString(row, "Detalle", "detalle"),
     idOc: getRecordString(row, "IdOc", "IdOC", "Idoc", "OC", "Oc"),
+    idEstadoOc: getRecordNumber(row, "IdEstadoOc", "idEstadoOc") ?? undefined,
     documento: getRecordString(row, "Documento", "documento"),
     planillaRow: row,
   };
@@ -1141,6 +1143,7 @@ export default function PagosV1Page() {
   const historialOtCacheRef = useRef<Map<string, PagoRow[]>>(new Map());
   const historialOcCacheRef = useRef<Map<string, PagoRow[]>>(new Map());
   const preferredDetailTabRef = useRef<DetailTabKey | null>(null);
+  const previousCheckedIdsRef = useRef<number[]>([]);
   const loadTimeoutMs = 15000;
 
   useEffect(() => {
@@ -2336,6 +2339,21 @@ export default function PagosV1Page() {
     return filteredRows.filter((row) => selectedSet.has(row.id));
   }, [checkedIds, filteredRows]);
 
+  useEffect(() => {
+    const previousIds = new Set(previousCheckedIdsRef.current);
+    const rejectedOcRow = filteredRows.find(
+      (row) => checkedIds.includes(row.id) && !previousIds.has(row.id) && row.idEstadoOc === 6
+    );
+
+    if (rejectedOcRow) {
+      setMessage(
+        `Información: la OC ${rejectedOcRow.idOc || "asociada"} está rechazada. Verifique esta condición antes de cambiar el estado del registro.`
+      );
+    }
+
+    previousCheckedIdsRef.current = checkedIds;
+  }, [checkedIds, filteredRows]);
+
   const selectedTotalsByCurrency = useMemo(() => {
     return selectedRows.reduce<Record<string, { subtotal: number; igv: number; total: number }>>((acc, row) => {
       const key = (row.moneda || "Sin moneda").trim();
@@ -2407,7 +2425,8 @@ export default function PagosV1Page() {
   }, [activeTab]);
   const isResumenTab = activeTab === "resumen";
   const showEstadoOc = activeTab === "resumen";
-  const tableColSpan = showEstadoOc ? 24 : 23;
+  const showTotalSitio = canUseTab("reaprobar");
+  const tableColSpan = 22 + (showTotalSitio ? 1 : 0) + (showEstadoOc ? 1 : 0);
   const stickyColumnWidths = [108, 94];
   const stickyColumnLefts = stickyColumnWidths.reduce<number[]>((acc, _width, index) => {
     const previousLeft = acc[index - 1] ?? 0;
@@ -3513,6 +3532,7 @@ export default function PagosV1Page() {
                     <th data-sort="site" style={{ ...styles.th, width: 150, cursor: "pointer" }}>Site</th>
                     <th data-sort="tipoTrabajo" style={{ ...styles.th, width: 100, cursor: "pointer" }}>Tipo trabajo</th>
                     <th data-sort="tarea" style={{ ...styles.th, width: 130, cursor: "pointer" }}>Tarea</th>
+                    <th data-sort="responsable" style={{ ...styles.th, width: 110, cursor: "pointer" }}>Responsable</th>
                     <th data-sort="idOc" style={{ ...styles.th, width: 88, cursor: "pointer" }}>OC</th>
                     <th data-sort="subtotal" style={{ ...styles.th, width: 130, cursor: "pointer" }}>Subtotal</th>
                     <th data-sort="igv" style={{ ...styles.th, width: 90, cursor: "pointer" }}>IGV</th>
@@ -3520,11 +3540,10 @@ export default function PagosV1Page() {
                     <th data-sort="moneda" style={{ ...styles.th, width: 80, cursor: "pointer" }}>Moneda</th>
                     <th style={{ ...styles.th, width: 180 }}>Detalle</th>
                     <th style={{ ...styles.th, width: 160 }}>Total Gastado</th>
-                    <th style={{ ...styles.th, width: 170 }}>Total Sitio</th>
+                    {showTotalSitio ? <th style={{ ...styles.th, width: 170 }}>Total Sitio</th> : null}
                     <th style={{ ...styles.th, width: 170 }}>Total Visible</th>
                     <th style={{ ...styles.th, width: 90 }}>% Avance</th>
                     <th style={{ ...styles.th, width: 130 }}>Avance</th>
-                    <th data-sort="responsable" style={{ ...styles.th, width: 110, cursor: "pointer" }}>Responsable</th>
                     {showEstadoOc ? <th style={{ ...styles.th, width: 118 }}>Estado OC</th> : null}
                     <th data-sort="validador" style={{ ...styles.th, width: 110, cursor: "pointer" }}>Validador</th>
                     <th data-sort="ot" style={{ ...styles.th, width: 88, cursor: "pointer" }}>OT</th>
@@ -3609,14 +3628,17 @@ export default function PagosV1Page() {
                               const isSelected = row.id === selectedId;
                               const hasMontoBckExceeded =
                                 (row.totalSubtotalPorMoneda ?? 0) > (row.totalMontoBckPorMoneda ?? 0);
-                              const rowBackground = hasMontoBckExceeded
-                                ? (isSelected ? "#FECACA" : "#FFF1F2")
-                                : (isSelected ? "#DBEAFE" : "#FFFFFF");
+                              const isOcRechazada = row.idEstadoOc === 6;
+                              const rowBackground = isOcRechazada
+                                ? (isSelected ? "#FDE68A" : "#FFFBEB")
+                                : hasMontoBckExceeded
+                                  ? (isSelected ? "#FECACA" : "#FFF1F2")
+                                  : (isSelected ? "#DBEAFE" : "#FFFFFF");
                               const totalMontoBckPorMoneda = row.totalMontoBckPorMoneda ?? 0;
                               const totalMontoVisiblePorMoneda = row.totalMontoVisiblePorMoneda ?? 0;
                               const totalGastado = row.totalPagadoConvertidoSoles ?? 0;
-                              const porcentajeAvance = totalMontoBckPorMoneda > 0
-                                ? (totalGastado / totalMontoBckPorMoneda) * 100
+                              const porcentajeAvance = totalMontoVisiblePorMoneda > 0
+                                ? (totalGastado / totalMontoVisiblePorMoneda) * 100
                                 : 0;
                               const porcentajeAvanceBarra = Math.max(0, Math.min(porcentajeAvance, 100));
                               const colorAvance = porcentajeAvance > 70 ? "#DC2626" : porcentajeAvance >= 50 ? "#CA8A04" : "#16A34A";
@@ -3626,6 +3648,7 @@ export default function PagosV1Page() {
                                   key={row.id}
                                   className={`pagos-v1-data-row${isSelected ? " pagos-v1-selected-row" : ""}`}
                                   onClick={() => setSelectedId(row.id)}
+                                  title={isOcRechazada ? `La OC ${row.idOc || "asociada"} está rechazada.` : undefined}
                                   style={{
                                     cursor: "pointer",
                                     background: rowBackground,
@@ -3667,6 +3690,7 @@ export default function PagosV1Page() {
                                   <td title={row.site || "-"} style={styles.td}>{row.site}</td>
                                   <td title={row.tipoTrabajo || "-"} style={styles.td}>{row.tipoTrabajo}</td>
                                   <td title={row.tarea || "-"} style={styles.td}>{row.tarea || "-"}</td>
+                                  <td title={row.responsable || "-"} style={styles.td}>{row.responsable}</td>
                                   <td
                                     title="Ver detalle de la orden"
                                     onClick={(event) => {
@@ -3703,9 +3727,11 @@ export default function PagosV1Page() {
                                   >
                                     {formatCurrency(totalGastado, "SOLES")}
                                   </td>
-                                  <td title={formatCurrency(row.totalMontoBckPorMoneda ?? 0, row.moneda)} style={styles.td}>
-                                    {formatCurrency(totalMontoBckPorMoneda, row.moneda)}
-                                  </td>
+                                  {showTotalSitio ? (
+                                    <td title={formatCurrency(row.totalMontoBckPorMoneda ?? 0, row.moneda)} style={styles.td}>
+                                      {formatCurrency(totalMontoBckPorMoneda, row.moneda)}
+                                    </td>
+                                  ) : null}
                                   <td title={formatCurrency(row.totalMontoVisiblePorMoneda ?? 0, row.moneda)} style={styles.td}>
                                     {formatCurrency(totalMontoVisiblePorMoneda, row.moneda)}
                                   </td>
@@ -3717,7 +3743,6 @@ export default function PagosV1Page() {
                                       </div>
                                     </div>
                                   </td>
-                                  <td title={row.responsable || "-"} style={styles.td}>{row.responsable}</td>
                                   {showEstadoOc ? (
                                     <td style={styles.td}>
                                       <span

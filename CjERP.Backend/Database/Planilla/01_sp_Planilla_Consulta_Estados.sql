@@ -210,9 +210,10 @@ BEGIN
         END AS CorSite,
         a.Tipo_Trabajo,
         f_emp.NombreEmpleado AS Responsable,
-        g.NombreCliente AS Cliente,
-        a.IdOc,
-        a.MontoRetencion,
+         g.NombreCliente AS Cliente,
+         a.IdOc,
+         coc.IdEstado AS IdEstadoOc,
+         a.MontoRetencion,
         a.TotalPagar AS TotalPagarOriginal,
         CASE
             WHEN UPPER(LTRIM(RTRIM(ISNULL(ban.ValorIni, '')))) LIKE '%SCOTI%'
@@ -242,9 +243,11 @@ BEGIN
     LEFT JOIN Empleado f_emp
         ON f_emp.IdEmpleado = a.IdResponsable
        AND f_emp.IdCargo IN (10, 11, 83)
-    LEFT JOIN Cliente g
-        ON g.IdCliente = a.IdCliente
-    LEFT JOIN Constante h
+     LEFT JOIN Cliente g
+         ON g.IdCliente = a.IdCliente
+     LEFT JOIN dbo.CabOrdenCompra coc
+         ON coc.IdOc = TRY_CONVERT(INT, a.IdOc)
+     LEFT JOIN Constante h
         ON h.Sociedad = 'PE01'
        AND h.Programa = 'PLANTILLA'
        AND h.Campo = 'TIPO_BIEN'

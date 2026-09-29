@@ -274,21 +274,30 @@ internal sealed class OrdenCompraPdfDocument : IDocument
                     text.Span("Documento solicitado por: ").SemiBold();
                     text.Span(Clean(_cabecera.Solicitante));
                 });
-                column.Item().Text(text =>
+                if (!string.IsNullOrWhiteSpace(_cabecera.Validador))
                 {
-                    text.Span("Primer validador: ").SemiBold();
-                    text.Span(Clean(_cabecera.Validador));
-                });
-                column.Item().Text(text =>
+                    column.Item().Text(text =>
+                    {
+                        text.Span("Primer validador: ").SemiBold();
+                        text.Span(Clean(_cabecera.Validador));
+                    });
+                }
+                if (!string.IsNullOrWhiteSpace(_cabecera.Validador2))
                 {
-                    text.Span("Segundo validador: ").SemiBold();
-                    text.Span(Clean(_cabecera.Validador2));
-                });
-                column.Item().Text(text =>
+                    column.Item().Text(text =>
+                    {
+                        text.Span("Segundo validador: ").SemiBold();
+                        text.Span(Clean(_cabecera.Validador2));
+                    });
+                }
+                if (!string.IsNullOrWhiteSpace(_cabecera.Validador3))
                 {
-                    text.Span("Tercer validador: ").SemiBold();
-                    text.Span(Clean(_cabecera.Validador3));
-                });
+                    column.Item().Text(text =>
+                    {
+                        text.Span("Tercer validador: ").SemiBold();
+                        text.Span(Clean(_cabecera.Validador3));
+                    });
+                }
             });
 
             row.ConstantItem(190).AlignRight().Table(table =>

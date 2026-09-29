@@ -38,10 +38,10 @@ import type { ConstanteOption } from "../../../models/constante";
 import type { EmpleadoCta } from "../../../models/empleadoCta";
 import type { FiltroOperativoValue } from "../../../models/filtroOperativo";
 import { getHttpErrorMessage } from "../../../utils/httpError";
-import { ChevronDown, ChevronUp, ChevronsDown, ChevronsUp, Eye, FileDown } from "lucide-react";
+import { ChevronDown, ChevronUp, ChevronsDown, ChevronsUp, Eye, FileDown, FileText } from "lucide-react";
 import { buildPlanillaConsultaEstadosRequest, consultarGastosPagadosPorId, consultarPlanillaEstados } from "../../../api/planillaConsultaService";
 
-const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "SolicitanteOc", "ResponsableOc", "MonedaOc", "SubtotalOc", "SubtotalPlanilla", "SaldoOcVsPlanilla", "PorcentajeConsumidoOc", "Cliente", "NombreProyecto", "IdSite", "Site", "FechaOc", "EstadoOc", "PrimeraValidacion", "SegundaValidacion", "TerceraValidacion", "CorrelativoPlanilla", "SolicitantePlanilla", "MonedaPlanilla", "UltimaFechaDeposito"];
+const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "FechaOc", "Cliente", "NombreProyecto", "Site", "TipoTrabajo", "Tarea", "SolicitanteOc", "Comprobante", "SubtotalOc", "EstadoOc", "PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"];
 const OC_GASTOS_MAX_COLUMNAS_VISIBLES = 22;
 const OC_GASTOS_COLUMNAS_NUMERICAS = new Set([
   "SubtotalOc",
@@ -52,7 +52,13 @@ const OC_GASTOS_COLUMNAS_NUMERICAS = new Set([
   "SaldoOcVsPlanilla",
 ]);
 const OC_GASTOS_COLUMN_LABELS: Record<string, string> = {
+  IdOc: "OC",
+  FechaOc: "Fecha",
+  NombreProyecto: "Proyecto",
   SolicitanteOc: "Solicitante OC",
+  TipoTrabajo: "Tipo trabajo",
+  SubtotalOc: "Subtotal",
+  EstadoOc: "Estado",
   PrimeraValidacion: "1ra validación",
   SegundaValidacion: "2da validación",
   TerceraValidacion: "3ra validación",
@@ -61,6 +67,8 @@ const OC_APPROVAL_TAB_ACTION_KEYS = {
   2: "tab.validacion_2",
   3: "tab.validacion_3",
 } as const;
+type AgrupacionAprobacion = "sin-filtro" | "solicitante-responsable" | "responsable";
+type AprobacionSortColumn = "idOc" | "fecha" | "responsable" | "nombreCliente" | "comprobante" | "subtotal" | "moneda";
 
 function getReporteRowIdOc(row: Record<string, unknown>): string {
   const key = Object.keys(row).find((name) => name.toLowerCase() === "idoc");
@@ -656,6 +664,12 @@ export default function OcV1Page() {
     };
   }, [montoOcRows]);
   const [reporteDetalles, setReporteDetalles] = useState<OrdenCompraDetalleDto[]>([]);
+  const [detalleReporteOc, setDetalleReporteOc] = useState<{
+    idOc: number;
+    rows: OrdenCompraDetalleDto[];
+    loading: boolean;
+    error: string;
+  } | null>(null);
   const [reportePlanillaRows, setReportePlanillaRows] = useState<Record<string, unknown>[]>([]);
   const [estadosOcGastosCatalogo, setEstadosOcGastosCatalogo] = useState<string[]>([]);
   const [solicitantesOcGastosCatalogo, setSolicitantesOcGastosCatalogo] = useState<Array<{ value: string; label: string }>>([]);
@@ -762,6 +776,11 @@ export default function OcV1Page() {
   const [fechaCreacionDesde, setFechaCreacionDesde] = useState(`${today.slice(0, 4)}-01-01`);
   const [fechaCreacionHasta, setFechaCreacionHasta] = useState(today);
   const [filtroValidadorAprobacion, setFiltroValidadorAprobacion] = useState<string[]>([]);
+  const [agrupacionAprobacion, setAgrupacionAprobacion] = useState<AgrupacionAprobacion>("solicitante-responsable");
+  const [aprobacionSort, setAprobacionSort] = useState<{ column: AprobacionSortColumn; direction: "asc" | "desc" }>({
+    column: "idOc",
+    direction: "asc",
+  });
   const [detalleOcTab, setDetalleOcTab] = useState<DetalleOcTab>("detalle");
   const [selectedOcIds, setSelectedOcIds] = useState<number[]>([]);
   const [gruposAprobacionContraidos, setGruposAprobacionContraidos] = useState<Record<string, boolean>>({});
@@ -785,6 +804,18 @@ export default function OcV1Page() {
   const [mostrarMotivoRechazo, setMostrarMotivoRechazo] = useState(false);
   const [motivoRechazo, setMotivoRechazo] = useState("");
   const [detalleCompleto, setDetalleCompleto] = useState<string | null>(null);
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (detalleCompleto !== null) {
+        setDetalleCompleto(null);
+        return;
+      }
+      if (detalleReporteOc !== null) setDetalleReporteOc(null);
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [detalleCompleto, detalleReporteOc]);
   const [reciboVisualizado, setReciboVisualizado] = useState<OrdenCompraReciboDto | null>(null);
   const [rechazoError, setRechazoError] = useState("");
   const [rechazando, setRechazando] = useState(false);
@@ -1497,11 +1528,34 @@ export default function OcV1Page() {
       : "3ros validadores";
 
   const cabecerasBandejaAgrupadas = useMemo(() => {
+    const compareItems = (left: OrdenCompraCabeceraDto, right: OrdenCompraCabeceraDto) => {
+       const getValue = (item: OrdenCompraCabeceraDto): string | number => {
+         switch (aprobacionSort.column) {
+           case "idOc": return item.idOc;
+           case "fecha": return item.fecha || "";
+           case "responsable": return item.responsable || "";
+           case "nombreCliente": return item.nombreCliente || "";
+           case "comprobante": return item.comprobante || "";
+           case "subtotal": return toNumber(item.subtotal);
+           case "moneda": return item.moneda || "";
+         }
+       };
+       const leftValue = getValue(left);
+       const rightValue = getValue(right);
+       const result = typeof leftValue === "number" && typeof rightValue === "number"
+         ? leftValue - rightValue
+         : String(leftValue).localeCompare(String(rightValue), "es", { sensitivity: "base", numeric: true });
+       return aprobacionSort.direction === "asc" ? result : -result;
+     };
     const grupos = new Map<string, OrdenCompraCabeceraDto[]>();
     cabecerasBandeja.forEach((item) => {
       const solicitante = item.solicitante?.trim() || "Sin solicitante";
-      const validador = getValidadorAgrupacion(item);
-      const key = `${solicitante}|||${validador}`;
+      const responsable = getValidadorAgrupacion(item);
+      const key = agrupacionAprobacion === "sin-filtro"
+        ? "sin-filtro"
+        : agrupacionAprobacion === "responsable"
+        ? `responsable|||${responsable}`
+        : `solicitante-responsable|||${solicitante}|||${responsable}`;
       const actuales = grupos.get(key) ?? [];
       actuales.push(item);
       grupos.set(key, actuales);
@@ -1509,7 +1563,13 @@ export default function OcV1Page() {
 
     return Array.from(grupos.entries())
       .map(([key, items]) => {
-        const [solicitante, validador] = key.split("|||");
+        const [, agrupadoSolicitante, agrupadoResponsable] = key.split("|||");
+        const responsable = agrupacionAprobacion === "sin-filtro"
+          ? ""
+          : agrupacionAprobacion === "responsable"
+          ? agrupadoSolicitante
+          : agrupadoResponsable;
+        const solicitante = agrupacionAprobacion === "sin-filtro" || agrupacionAprobacion === "responsable" ? "" : agrupadoSolicitante;
         const totalesPorMoneda = new Map<string, number>();
         items.forEach((item) => {
           const moneda = item.moneda?.trim() || "Sin moneda";
@@ -1518,18 +1578,19 @@ export default function OcV1Page() {
         return {
           key,
           solicitante,
-          validador,
-          items: items.sort((left, right) => left.idOc - right.idOc),
+          responsable,
+          label: agrupacionAprobacion === "sin-filtro"
+            ? ""
+            : agrupacionAprobacion === "responsable"
+            ? responsable
+            : `${solicitante} - ${responsable}`,
+          items: [...items].sort(compareItems),
           totalesPorMoneda: Array.from(totalesPorMoneda.entries())
             .sort(([monedaA], [monedaB]) => monedaA.localeCompare(monedaB, "es", { sensitivity: "base" })),
         };
       })
-      .sort((left, right) => {
-        const solicitanteCompare = left.solicitante.localeCompare(right.solicitante, "es", { sensitivity: "base" });
-        if (solicitanteCompare !== 0) return solicitanteCompare;
-        return left.validador.localeCompare(right.validador, "es", { sensitivity: "base" });
-      });
-  }, [cabecerasBandeja, getValidadorAgrupacion]);
+      .sort((left, right) => left.label.localeCompare(right.label, "es", { sensitivity: "base" }));
+  }, [agrupacionAprobacion, aprobacionSort, cabecerasBandeja, getValidadorAgrupacion]);
 
   const todosLosGruposVisiblesContraidos = useMemo(
     () => cabecerasBandejaAgrupadas.length > 0 && cabecerasBandejaAgrupadas.every(
@@ -1576,6 +1637,8 @@ export default function OcV1Page() {
       const clientes = getUniqueSorted([cabecera.nombreCliente ?? "", ...detallesOc.map((item) => item.nombreCliente ?? "")]);
       const proyectos = getUniqueSorted([cabecera.nombreProyecto ?? "", ...detallesOc.map((item) => item.nombreProyecto ?? "")]);
       const sites = getUniqueSorted([cabecera.nombreSite || cabecera.idSite || "", ...detallesOc.map((item) => item.nombreSite || item.idSite || "")]);
+      const tiposTrabajo = getUniqueSorted(detallesOc.map((item) => item.tipoTrabajo ?? ""));
+      const tareas = getUniqueSorted(detallesOc.map((item) => item.tarea ?? ""));
 
       return {
         ...cabecera,
@@ -1585,6 +1648,8 @@ export default function OcV1Page() {
         clienteResumen: buildResumen(clientes),
         proyectoResumen: buildResumen(proyectos),
         siteResumen: buildResumen(sites),
+        tipoTrabajoResumen: buildResumen(tiposTrabajo),
+        tareaResumen: buildResumen(tareas),
       };
     });
   }, [cabecerasFiltradas, reporteConsultado, reporteDetalles, reporteFiltros]);
@@ -1776,6 +1841,44 @@ export default function OcV1Page() {
       setError(getHttpErrorMessage(err, "No se pudo visualizar el PDF de la orden de compra."));
     } finally {
       setPdfExportingOc(null);
+    }
+  }, []);
+
+  const visualizarDetalleReporteOc = useCallback(async (idOc: number) => {
+    if (!Number.isInteger(idOc) || idOc <= 0) return;
+    setDetalleReporteOc({ idOc, rows: [], loading: true, error: "" });
+    try {
+      // La ruta de detalle ejecuta dbo.sp_OrdenCompra_BuscarDetalle con @IdOc.
+      const response = await buscarOrdenCompraDetalle({ idOc: String(idOc) });
+      const rows = (Array.isArray(response) ? response : []).map((item) => {
+        // Compatibilidad con APIs que serializan los aliases del SP en PascalCase.
+        const raw = item as unknown as Record<string, unknown>;
+        const read = (...names: string[]) => {
+          const key = Object.keys(raw).find((candidate) => names.some((name) => candidate.toLowerCase() === name.toLowerCase()));
+          return key ? raw[key] : undefined;
+        };
+        const text = (...names: string[]) => String(read(...names) ?? "").trim();
+        return {
+          ...item,
+          solicitante: text("Solicitante", "SolicitanteOc") || item.solicitante,
+          responsable: text("Responsable", "ResponsableOc") || item.responsable,
+          moneda: text("Moneda", "MonedaOc") || item.moneda,
+          gestor: text("Gestor", "NombreGestor") || item.gestor,
+        };
+      });
+      setDetalleReporteOc({
+        idOc,
+        rows,
+        loading: false,
+        error: "",
+      });
+    } catch (err) {
+      setDetalleReporteOc({
+        idOc,
+        rows: [],
+        loading: false,
+        error: getHttpErrorMessage(err, "No se pudo obtener el detalle de la orden de compra."),
+      });
     }
   }, []);
 
@@ -2631,6 +2734,21 @@ export default function OcV1Page() {
             selected={filtroValidadorAprobacion}
             onChange={setFiltroValidadorAprobacion}
           />
+          <label style={{ ...ocV1Styles.stageDateFilter, width: 180 }}>
+            <span>Agrupar por</span>
+            <select
+              value={agrupacionAprobacion}
+              onChange={(event) => {
+                setAgrupacionAprobacion(event.target.value as AgrupacionAprobacion);
+                setGruposAprobacionContraidos({});
+              }}
+              style={{ ...ocV1Styles.stageDateInput, width: "100%" }}
+            >
+              <option value="sin-filtro">Sin agrupar</option>
+              <option value="solicitante-responsable">Solicitante - responsable</option>
+              <option value="responsable">Responsable</option>
+            </select>
+          </label>
           <div style={styles.actionRow}>
             <button
               type="button"
@@ -2690,13 +2808,44 @@ export default function OcV1Page() {
             <button
               type="button"
               style={{ ...styles.approvalGroupToggle, marginLeft: "auto" }}
-              disabled={cabecerasBandejaAgrupadas.length === 0}
+              disabled={cabecerasBandejaAgrupadas.length === 0 || agrupacionAprobacion === "sin-filtro"}
               onClick={cambiarVisibilidadTodosLosGrupos}
               title={todosLosGruposVisiblesContraidos ? "Desplegar todos los grupos" : "Contraer todos los grupos"}
               aria-label={todosLosGruposVisiblesContraidos ? "Desplegar todos los grupos" : "Contraer todos los grupos"}
             >
               {todosLosGruposVisiblesContraidos ? <ChevronsDown size={16} /> : <ChevronsUp size={16} />}
             </button>
+          </div>
+          <div style={styles.approvalColumnHeader}>
+            <span />
+            {([
+              ["idOc", "OC"],
+              ["fecha", "Fecha"],
+              ["responsable", "Responsable"],
+              ["nombreCliente", "Cliente"],
+              ["comprobante", "Comprobante"],
+              ["subtotal", "Subtotal"],
+              ["moneda", "Moneda"],
+            ] as Array<[AprobacionSortColumn, string]>).map(([column, label]) => {
+              const isActive = aprobacionSort.column === column;
+              return (
+                <button
+                  key={column}
+                  type="button"
+                  style={{
+                    ...styles.approvalColumnSortButton,
+                    ...(isActive ? styles.approvalColumnSortButtonActive : {}),
+                  }}
+                  onClick={() => setAprobacionSort((previous) => ({
+                    column,
+                    direction: previous.column === column && previous.direction === "asc" ? "desc" : "asc",
+                  }))}
+                  title={`Ordenar por ${label} ${isActive && aprobacionSort.direction === "asc" ? "descendente" : "ascendente"}`}
+                >
+                  {label}{isActive ? (aprobacionSort.direction === "asc" ? " ▲" : " ▼") : ""}
+                </button>
+              );
+            })}
           </div>
           {loading ? (
             <div style={styles.approvalEmpty}>Cargando cabeceras...</div>
@@ -2705,13 +2854,16 @@ export default function OcV1Page() {
           ) : (
             cabecerasBandejaAgrupadas.map((grupo) => {
               const groupId = `${nivelAprobacion}-${grupo.key}`;
-              const contraido = gruposAprobacionContraidos[groupId] ?? true;
+              const contraido = agrupacionAprobacion === "sin-filtro"
+                ? false
+                : (gruposAprobacionContraidos[groupId] ?? true);
 
               return (
               <div key={`grupo-${groupId}`} style={styles.approvalGroup}>
+                {agrupacionAprobacion !== "sin-filtro" ? (
                 <div style={styles.approvalGroupHeader}>
                   <div style={styles.approvalGroupSummary}>
-                    <strong>{grupo.solicitante} - {grupo.validador}</strong>
+                    <strong>{grupo.label}</strong>
                     <span style={styles.approvalGroupSubtotal}>
                       Subtotal: {grupo.totalesPorMoneda.map(([moneda, total]) => `${moneda} ${formatMoney(total)}`).join(" · ")}
                     </span>
@@ -2723,13 +2875,14 @@ export default function OcV1Page() {
                       style={styles.approvalGroupToggle}
                       onClick={() => setGruposAprobacionContraidos((prev) => ({ ...prev, [groupId]: !contraido }))}
                       aria-expanded={!contraido}
-                      aria-label={`${contraido ? "Desplegar" : "Contraer"} grupo ${grupo.solicitante} - ${grupo.validador}`}
+                      aria-label={`${contraido ? "Desplegar" : "Contraer"} grupo ${grupo.label}`}
                       title={contraido ? "Desplegar grupo" : "Contraer grupo"}
                     >
                       {contraido ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
                     </button>
                   </div>
                 </div>
+                ) : null}
                 {!contraido && grupo.items.map((item) => {
                   const isChecked = selectedOcIds.includes(item.idOc);
                   return (
@@ -2886,7 +3039,7 @@ export default function OcV1Page() {
                       <td style={styles.td}>{item.tipoTrabajo ?? ""}</td>
                       <td style={styles.td}>{item.ot ?? ""}</td>
                       <td style={styles.td}>{item.tarea ?? ""}</td>
-                      <td style={styles.td}>
+                      <td style={{ ...styles.td, width: 88, whiteSpace: "nowrap" }}>
                         <button
                           type="button"
                           style={styles.truncatedCellButton}
@@ -3030,7 +3183,14 @@ export default function OcV1Page() {
               <button key={tab.key} type="button" onClick={() => cambiarReporteSubtab(tab.key)} style={{ ...ocV1Styles.viewTab, ...(reporteSubtab === tab.key ? ocV1Styles.viewTabActive : {}) }}>{tab.label}</button>
             ))}
           </nav>
-          <div style={{ ...styles.card, display: reporteSubtab === "listado" || reporteSubtab === "oc-gastos" ? undefined : "none" }}>
+          <div style={{
+            ...styles.card,
+            display: reporteSubtab === "listado" || reporteSubtab === "oc-gastos" ? "flex" : "none",
+            flexDirection: "column",
+            height: "calc(100vh - 255px)",
+            minHeight: 420,
+            overflow: "hidden",
+          }}>
             <div style={styles.sectionHeader}>
               <div>
                 <h2 style={styles.sectionTitle}>Seguimiento de pagos</h2>
@@ -3278,33 +3438,33 @@ export default function OcV1Page() {
               style={String(reporteSubtab) === "oc-gastos"
                 ? {
                     ...styles.tableWrap,
+                    flex: 1,
                     width: "100%",
                     maxWidth: "100%",
                     minWidth: 0,
-                    minHeight: 260,
-                    maxHeight: "calc(100vh - 430px)",
+                    minHeight: 0,
                     overflow: "auto",
                   }
-                : styles.tableWrap}
+                : { ...styles.tableWrap, flex: 1, minHeight: 0, overflow: "auto" }}
             >
-              {String(reporteSubtab) === "oc-gastos" && <style>{`.oc-gastos-grid th:nth-child(n+${OC_GASTOS_MAX_COLUMNAS_VISIBLES + 1}), .oc-gastos-grid td:nth-child(n+${OC_GASTOS_MAX_COLUMNAS_VISIBLES + 1}) { display: none; }`}</style>}
-              <table className={String(reporteSubtab) === "oc-gastos" ? "oc-gastos-grid" : undefined} style={String(reporteSubtab) === "oc-gastos" ? { ...styles.table, width: "max-content", minWidth: "100%" } : styles.table}>
+              <style>{`.reporte-grid thead th { position: sticky; top: 0; z-index: 3; background: #fff; } .oc-gastos-grid th:nth-child(n+${OC_GASTOS_MAX_COLUMNAS_VISIBLES + 1}), .oc-gastos-grid td:nth-child(n+${OC_GASTOS_MAX_COLUMNAS_VISIBLES + 1}) { display: none; }`}</style>
+              <table className={String(reporteSubtab) === "oc-gastos" ? "reporte-grid oc-gastos-grid" : "reporte-grid"} style={String(reporteSubtab) === "oc-gastos" ? { ...styles.table, width: "max-content", minWidth: "100%" } : styles.table}>
                 <thead>
                   <tr>
                     {String(reporteSubtab) === "oc-gastos" ? <>
-                      <th style={{ ...styles.th, width: 52, minWidth: 52, position: "sticky", top: 0, left: 0, zIndex: 6, background: "#fff" }} aria-label="Visualizar PDF">PDF</th>
+                      <th style={{ ...styles.th, width: 52, minWidth: 52, position: "sticky", top: 0, left: 0, zIndex: 6, background: "#fff" }} aria-label="Acciones"></th>
                       {reportePlanillaColumns.map((column, index) => <th key={`pla-head-${column}`} style={{ ...styles.th, width: 110, minWidth: 80, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer", position: "sticky", top: 0, zIndex: index < 4 ? 5 : 2, background: "#fff", ...(index < 4 ? { left: 52 + index * 110 } : {}) }} title={`Ordenar por ${OC_GASTOS_COLUMN_LABELS[column] ?? column}`} onClick={() => setReportePlanillaSort((current) => ({ column, direction: current.column === column && current.direction === "asc" ? "desc" : "asc" }))}>{OC_GASTOS_COLUMN_LABELS[column] ?? column}{reportePlanillaSort.column === column ? (reportePlanillaSort.direction === "asc" ? " ▲" : " ▼") : ""}</th>)}
-                    </> : <th style={{ ...styles.th, width: 52 }} aria-label="Exportar PDF"></th>}
+                    </> : <th style={{ ...styles.th, width: 88 }} aria-label="Acciones">Acciones</th>}
                     {String(reporteSubtab) !== "oc-gastos" && <>
                       <th style={styles.th}>OC</th>
                     <th style={styles.th}>Fecha</th>
-                    <th style={styles.th}>Solicitante</th>
-                    <th style={styles.th}>Responsable</th>
                     <th style={styles.th}>Cliente</th>
                     <th style={styles.th}>Proyecto</th>
                     <th style={styles.th}>Site</th>
+                    <th style={styles.th}>Tipo trabajo</th>
+                    <th style={styles.th}>Tarea</th>
+                    <th style={styles.th}>Solicitante</th>
                     <th style={styles.th}>Comprobante</th>
-                    <th style={styles.th}>Moneda</th>
                     <th style={styles.th}>Subtotal</th>
                     <th style={styles.th}>Estado</th>
                     <th style={styles.th}>1ra validación</th>
@@ -3353,10 +3513,11 @@ export default function OcV1Page() {
 
                       return (
                         <tr key={`pla-${read("IdOc") || "sin-oc"}-${read("CorrelativoPlanilla")}-${read("IdSite")}-${read("PrecioUniOc")}-${read("CantOc")}-${index}`} style={{ ...styles.tr, ...(filaRechazada ? { background: "#fce7f3" } : {}) }}>
-                          <td style={{ ...styles.td, width: 52, minWidth: 52, position: "sticky", left: 0, zIndex: 2, background: filaRechazada ? "#fce7f3" : "#fff" }}>
+                          <td style={{ ...styles.td, width: 52, minWidth: 52, padding: "4px 2px", whiteSpace: "nowrap", lineHeight: 0, position: "sticky", left: 0, zIndex: 2, background: filaRechazada ? "#fce7f3" : "#fff" }}>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
                             <button
                               type="button"
-                              style={pdfExportingOc === Number(read("IdOc")) ? styles.pdfIconButtonDisabled : styles.pdfIconButton}
+                              style={{ ...(pdfExportingOc === Number(read("IdOc")) ? styles.pdfIconButtonDisabled : styles.pdfIconButton), width: 22, height: 22, borderRadius: 6, verticalAlign: "middle" }}
                               onClick={(event) => { event.stopPropagation(); void visualizarReporteOcPdf(Number(read("IdOc"))); }}
                               disabled={pdfExportingOc === Number(read("IdOc")) || !Number(read("IdOc"))}
                               title={`Visualizar PDF de la OC ${read("IdOc")}`}
@@ -3364,6 +3525,17 @@ export default function OcV1Page() {
                             >
                               <Eye size={15} strokeWidth={2.3} />
                             </button>
+                            <button
+                              type="button"
+                              style={{ ...styles.pdfIconButton, width: 22, height: 22, borderRadius: 6, verticalAlign: "middle" }}
+                              onClick={(event) => { event.stopPropagation(); void visualizarDetalleReporteOc(Number(read("IdOc"))); }}
+                              disabled={!Number(read("IdOc"))}
+                              title={`Mostrar detalle de la OC ${read("IdOc")}`}
+                              aria-label={`Mostrar detalle de la OC ${read("IdOc")}`}
+                            >
+                              <FileText size={14} strokeWidth={2.3} />
+                            </button>
+                            </span>
                           </td>
                           {reportePlanillaColumns.map((column, columnIndex) => {
                             const rawValue = read(column);
@@ -3415,7 +3587,7 @@ export default function OcV1Page() {
                     </tr>
                   ) : String(reporteSubtab) !== "oc-gastos" ? reporteRowsFiltradas.map((item) => (
                     <tr key={`rep-${item.idOc}`} style={styles.tr}>
-                      <td style={styles.td}>
+                      <td style={{ ...styles.td, width: 88, whiteSpace: "nowrap" }}>
                         <button
                           type="button"
                           style={pdfExportingOc === item.idOc ? styles.pdfIconButtonDisabled : styles.pdfIconButton}
@@ -3426,16 +3598,25 @@ export default function OcV1Page() {
                         >
                           <FileDown size={15} strokeWidth={2.3} />
                         </button>
+                        <button
+                          type="button"
+                          style={{ ...styles.pdfIconButton, marginLeft: 5 }}
+                          onClick={() => void visualizarDetalleReporteOc(item.idOc)}
+                          title={`Mostrar detalle de la OC ${item.idOc}`}
+                          aria-label={`Mostrar detalle de la OC ${item.idOc}`}
+                        >
+                          <FileText size={14} strokeWidth={2.3} />
+                        </button>
                       </td>
                       <td style={styles.td}>{item.idOc}</td>
                       <td style={styles.td}>{formatDate(item.fecha)}</td>
-                      <td style={styles.td}>{item.solicitante}</td>
-                      <td style={styles.td}>{item.responsable}</td>
                       <td style={styles.td} title={item.clientes.join(" / ")}>{item.clienteResumen || "-"}</td>
                       <td style={styles.td} title={item.proyectos.join(" / ")}>{item.proyectoResumen || "-"}</td>
                       <td style={styles.td} title={item.sites.join(" / ")}>{item.siteResumen || "-"}</td>
+                      <td style={styles.td} title={item.tipoTrabajoResumen}>{item.tipoTrabajoResumen || "-"}</td>
+                      <td style={styles.td} title={item.tareaResumen}>{item.tareaResumen || "-"}</td>
+                      <td style={styles.td}>{item.solicitante}</td>
                       <td style={styles.td}>{item.comprobante}</td>
-                      <td style={styles.td}>{item.moneda}</td>
                       <td style={styles.td}>{formatMoney(item.subtotal)}</td>
                       <td style={styles.td}>{item.estado}</td>
                       <td style={styles.td}><ValidationBadge value={item.idAprobador1} /></td>
@@ -3470,6 +3651,78 @@ export default function OcV1Page() {
                 Rechazar
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {detalleReporteOc !== null ? (
+        <div style={styles.modalOverlay} onMouseDown={() => setDetalleReporteOc(null)}>
+          <div style={{ ...styles.modalCard, width: "min(1500px, 96vw)", maxWidth: "none", maxHeight: "88vh", overflow: "auto" }} onMouseDown={(event) => event.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 14 }}>
+              <div>
+                <h3 style={{ margin: 0, color: "#17143A" }}>Detalle de OC {detalleReporteOc.idOc}</h3>
+                <p style={{ margin: "5px 0 0", color: "#64748B", fontSize: 12 }}>
+                  Datos obtenidos desde <strong>sp_OrdenCompra_BuscarDetalle</strong>.
+                </p>
+              </div>
+              <button type="button" style={styles.secondaryButton} onClick={() => setDetalleReporteOc(null)}>Cerrar</button>
+            </div>
+            {detalleReporteOc.loading ? (
+              <div style={styles.approvalEmpty}>Cargando detalle...</div>
+            ) : detalleReporteOc.error ? (
+              <div style={styles.errorBanner}>{detalleReporteOc.error}</div>
+            ) : detalleReporteOc.rows.length === 0 ? (
+              <div style={styles.approvalEmpty}>La OC no tiene líneas de detalle.</div>
+            ) : (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 14 }}>
+                  {[
+                    ["Solicitante", detalleReporteOc.rows[0].solicitante],
+                    ["Responsable", detalleReporteOc.rows[0].responsable],
+                    ["Moneda", detalleReporteOc.rows[0].moneda],
+                    ["Gestor", detalleReporteOc.rows[0].gestor],
+                  ].map(([label, value]) => (
+                    <div key={label} style={{ padding: 10, border: "1px solid #E2E8F0", borderRadius: 8, background: "#F8FAFC" }}>
+                      <div style={{ fontSize: 10, fontWeight: 800, color: "#64748B", textTransform: "uppercase" }}>{label}</div>
+                      <div style={{ marginTop: 4, fontSize: 12, color: "#1E293B" }}>{value || '-'}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ ...styles.tableWrap, maxHeight: "52vh", overflow: "auto" }}>
+                  <table style={{ ...styles.table, minWidth: 1120 }}>
+                    <thead>
+                      <tr>
+                        {['Fila', 'Cliente', 'Proyecto', 'Site', 'Tipo trabajo', 'Tarea', 'Detalle', 'Cantidad', 'P.U.', 'Subtotal', 'IGV', 'Total'].map((header) => <th key={header} style={styles.th}>{header}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detalleReporteOc.rows.map((row, index) => (
+                        <tr key={`${row.idOc}-${row.fila ?? row.correlativo ?? index}`} style={styles.tr}>
+                          <td style={styles.td}>{row.fila ?? row.correlativo ?? '-'}</td>
+                          <td style={{ ...styles.td, maxWidth: 150, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={row.nombreCliente || ''}>{row.nombreCliente || '-'}</td>
+                          <td style={{ ...styles.td, maxWidth: 150, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={row.nombreProyecto || ''}>{row.nombreProyecto || '-'}</td>
+                          <td style={{ ...styles.td, maxWidth: 150, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={row.nombreSite || row.idSite || ''}>{row.nombreSite || row.idSite || '-'}</td>
+                          <td style={{ ...styles.td, maxWidth: 130, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={row.tipoTrabajo || ''}>{row.tipoTrabajo || '-'}</td>
+                          <td style={{ ...styles.td, maxWidth: 140, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={row.tarea || ''}>{row.tarea || '-'}</td>
+                          <td
+                            style={{ ...styles.td, minWidth: 250, maxWidth: 360, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: row.detalle ? "pointer" : "default" }}
+                            title={row.detalle || ''}
+                            onClick={() => { if (row.detalle) setDetalleCompleto(row.detalle); }}
+                          >
+                            {row.detalle || '-'}
+                          </td>
+                          <td style={styles.td}>{row.cantidad ?? 0}</td>
+                          <td style={styles.td}>{formatMoney(row.precioUnitario)}</td>
+                          <td style={styles.td}>{formatMoney(row.subtotalD)}</td>
+                          <td style={styles.td}>{formatMoney(row.igvD)}</td>
+                          <td style={styles.td}>{formatMoney(row.totalD)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </div>
         </div>
       ) : null}
@@ -5349,6 +5602,31 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#334155",
     fontSize: 12,
     fontWeight: 700,
+  },
+  approvalColumnHeader: {
+    display: "grid",
+    gridTemplateColumns: "20px 90px 110px minmax(130px, 0.65fr) minmax(150px, 0.8fr) 86px 92px 75px",
+    minWidth: 730,
+    alignItems: "center",
+    columnGap: 4,
+    padding: "8px 18px",
+    boxSizing: "border-box",
+    borderBottom: "1px solid #DDE3E1",
+    background: "#F8FAFC",
+  },
+  approvalColumnSortButton: {
+    border: "none",
+    background: "transparent",
+    padding: 0,
+    color: "#64748B",
+    cursor: "pointer",
+    fontSize: 11,
+    fontWeight: 800,
+    textAlign: "left",
+    whiteSpace: "nowrap",
+  },
+  approvalColumnSortButtonActive: {
+    color: "#0E6E5C",
   },
   approvalCheckLabel: {
     display: "inline-flex",
