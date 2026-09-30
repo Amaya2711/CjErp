@@ -1354,14 +1354,6 @@ export default function PagosV1Page() {
         const buscarEnTotal = Boolean(textoBusqueda) || buscarPorCorrelativo;
         const tieneFiltroFechas = Boolean(fechaInicio || fechaFin);
         const quickIdOcOnly = getQuickIdOcOnly(appliedFilters);
-        const correlativoOnlyInResumen =
-          activeTab === "resumen" &&
-          buscarPorCorrelativo &&
-          !textoBusqueda &&
-          appliedFilters.solicitante.length === 0 &&
-          appliedFilters.responsable.length === 0 &&
-          appliedFilters.validador.length === 0 &&
-          appliedFilters.moneda.length === 0;
 
         let nextRowsByTab: Record<PagoTabKey, PagoRow[]>;
         setLoadingStage(
@@ -1404,11 +1396,14 @@ export default function PagosV1Page() {
             parametros.push({ nombre: "Correlativo", valor: String(correlativoNumero), tipo: "int" });
           }
 
-          if (fechaInicio && !correlativoOnlyInResumen) {
+          // El correlativo identifica un registro puntual; las fechas no
+          // deben limitarlo. El estado sí se conserva según la pestaña,
+          // salvo en Total Órdenes (resumen), que no envía @Estados.
+          if (fechaInicio && !buscarPorCorrelativo) {
             parametros.push({ nombre: "FechaInicio", valor: fechaInicio, tipo: "date" });
           }
 
-          if (fechaFin && !correlativoOnlyInResumen) {
+          if (fechaFin && !buscarPorCorrelativo) {
             parametros.push({ nombre: "FechaFin", valor: fechaFin, tipo: "date" });
           }
         }
@@ -1538,7 +1533,17 @@ export default function PagosV1Page() {
       const fechaDesde = includeDateFilters ? formatDateParam(appliedFilters.fechaDesde) : "";
       const fechaHasta = includeDateFilters ? formatDateParam(appliedFilters.fechaHasta) : "";
       const buscarEnTotal = Boolean(appliedFilters.query.trim());
+      const correlativo = appliedFilters.correlativo.trim();
+      const correlativoNumero = Number(correlativo);
+      const buscarPorCorrelativo = Number.isInteger(correlativoNumero) && correlativoNumero > 0;
       const rowDate = toComparableDateKey(row.fecha);
+
+      // La bandeja ya está limitada al estado de la pestaña activa. Para una
+      // búsqueda por correlativo no se deben volver a aplicar fechas ni los
+      // demás filtros manuales sobre el resultado puntual.
+      if (buscarPorCorrelativo) {
+        return String(row.correlativo).trim() === String(correlativoNumero);
+      }
 
       return (
         matchesTextFilter(row.cliente, appliedFilters.cliente) &&
