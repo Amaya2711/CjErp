@@ -1,13 +1,18 @@
 ﻿import { useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, ReactNode } from "react";
 import * as XLSX from "xlsx";
-import { analizarMigracionImport, aplicarMigracionImport } from "../../../api/migracionImportService";
+import {
+  analizarMigracionImport,
+  aplicarMigracionImport,
+  type MigracionImportEjecucionResultadoDto,
+} from "../../../api/migracionImportService";
 import AppCard from "../../../components/base/AppCard";
 import AppPage from "../../../components/base/AppPage";
 import AppStatusMessage from "../../../components/base/AppStatusMessage";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 
 type ValidationMode = "migrar" | "actualizar";
+type UpdateResultTab = "resumen" | "no-encontradas";
 
 type HeaderRule = {
   label: string;
@@ -677,6 +682,8 @@ export default function MImportarPage() {
   const [dragActive, setDragActive] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [applyMessage, setApplyMessage] = useState("");
+  const [executionResult, setExecutionResult] = useState<MigracionImportEjecucionResultadoDto | null>(null);
+  const [updateResultTab, setUpdateResultTab] = useState<UpdateResultTab>("resumen");
   const [workbookData, setWorkbookData] = useState<LoadedWorkbook | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [showDuplicateGroups, setShowDuplicateGroups] = useState(false);
@@ -695,6 +702,8 @@ export default function MImportarPage() {
   const handleFile = async (file: File) => {
     setLoadError("");
     setApplyMessage("");
+    setExecutionResult(null);
+    setUpdateResultTab("resumen");
     setLoading(true);
     setSelectedFile(file);
     setShowDuplicateGroups(false);
@@ -745,6 +754,8 @@ export default function MImportarPage() {
     setWorkbookData(null);
     setLoadError("");
     setApplyMessage("");
+    setExecutionResult(null);
+    setUpdateResultTab("resumen");
     setSelectedFile(null);
     setShowDuplicateGroups(false);
     setShowPreview(false);
@@ -764,6 +775,8 @@ export default function MImportarPage() {
 
     try {
       const result = await aplicarMigracionImport(selectedFile, mode);
+      setExecutionResult(result);
+      setUpdateResultTab("resumen");
       setApplyMessage(
         mode === "migrar"
           ? `Store de INSERT ejecutado: ${result.filasInsertadas} filas insertadas y ${result.operacionesCjNuevas} operaciones nuevas.`
@@ -771,6 +784,7 @@ export default function MImportarPage() {
       );
     } catch (error) {
       setApplyMessage("");
+      setExecutionResult(null);
       setLoadError(getHttpErrorMessage(error, "No se pudo ejecutar el store de migracion."));
     } finally {
       setApplying(false);
@@ -816,6 +830,30 @@ export default function MImportarPage() {
     XLSX.writeFile(workbook, `${fileBaseName}_duplicados.xlsx`);
   };
 
+  const handleExportNotFoundRecords = () => {
+    if (!executionResult || executionResult.registrosNoEncontrados.length === 0) {
+      return;
+    }
+
+    const exportRows = executionResult.registrosNoEncontrados.map((record) => ({
+      Cliente: record.cliente || "",
+      Proyecto: record.proyecto || "",
+      Código: record.idSite || "",
+      Site: record.site || "",
+      "Tipo trabajo": record.tipoTrabajo || "",
+      "Año OP.": record.anoGestion ?? "",
+      "Id moneda": record.idMoneda ?? "",
+      "Monto BCK": record.montoBck ?? "",
+      Porcentaje: record.porcentaje ?? "",
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(exportRows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "No encontradas");
+
+    const fileBaseName = (summary?.fileName || selectedFile?.name || "migracion").replace(/\.[^.]+$/, "");
+    XLSX.writeFile(workbook, `${fileBaseName}_no_encontradas.xlsx`);
+  };
+
   return (
     <AppPage
       style={{
@@ -852,13 +890,19 @@ export default function MImportarPage() {
                   active={mode === "migrar"}
                   label="Migrar"
                   description="Usa la estructura completa del archivo GENERAL adjunto."
-                  onClick={() => setMode("migrar")}
+                  onClick={() => {
+                    setMode("migrar");
+                    setExecutionResult(null);
+                  }}
                 />
                 <ModeButton
                   active={mode === "actualizar"}
                   label="Actualizar"
                   description="Valida la plantilla orientada a estatus, ATP y campos de seguimiento."
-                  onClick={() => setMode("actualizar")}
+                  onClick={() => {
+                    setMode("actualizar");
+                    setExecutionResult(null);
+                  }}
                 />
               </div>
             </div>
@@ -987,6 +1031,128 @@ export default function MImportarPage() {
           <AppStatusMessage tone="success" style={{ marginBottom: 0 }}>
             {applyMessage}
           </AppStatusMessage>
+        )}
+
+        {mode === "actualizar" && executionResult && (
+          <AppCard style={{ marginBottom: 0 }}>
+            <div style={{ display: "grid", gap: 14 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, borderBottom: "1px solid #E2E8F0", paddingBottom: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => setUpdateResultTab("resumen")}
+                  style={{
+                    border: "1px solid #C7D2FE",
+                    borderRadius: 10,
+                    padding: "9px 14px",
+                    fontWeight: 800,
+                    cursor: "pointer",
+                    color: updateResultTab === "resumen" ? "#FFFFFF" : "#3730A3",
+                    background: updateResultTab === "resumen" ? "#3730A3" : "#FFFFFF",
+                  }}
+                >
+                  Resumen de actualización
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUpdateResultTab("no-encontradas")}
+                  style={{
+                    border: "1px solid #F59E0B",
+                    borderRadius: 10,
+                    padding: "9px 14px",
+                    fontWeight: 800,
+                    cursor: "pointer",
+                    color: updateResultTab === "no-encontradas" ? "#FFFFFF" : "#92400E",
+                    background: updateResultTab === "no-encontradas" ? "#D97706" : "#FFFBEB",
+                  }}
+                >
+                  No encontradas ({executionResult.filasNoEncontradas})
+                </button>
+              </div>
+
+              {updateResultTab === "resumen" ? (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                  <Pill tone="good">{executionResult.filasActualizadas} actualizadas</Pill>
+                  <Pill tone={executionResult.filasNoEncontradas > 0 ? "warn" : "good"}>
+                    {executionResult.filasNoEncontradas} no encontradas
+                  </Pill>
+                  <Pill tone="neutral">{executionResult.filasStaging} registros procesados</Pill>
+                </div>
+              ) : executionResult.registrosNoEncontrados.length === 0 ? (
+                <AppStatusMessage tone="success">No se encontraron registros pendientes de coincidencia.</AppStatusMessage>
+              ) : (
+                <div style={{ display: "grid", gap: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                    <button
+                      type="button"
+                      onClick={handleExportNotFoundRecords}
+                      style={{
+                        padding: "10px 14px",
+                        borderRadius: 12,
+                        border: "1px solid #92400E",
+                        background: "#D97706",
+                        color: "#FFFFFF",
+                        fontWeight: 800,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Exportar no encontradas
+                    </button>
+                  </div>
+                  <div style={{ overflowX: "auto", maxHeight: 460, overflowY: "auto", border: "1px solid #FDE68A", borderRadius: 12 }}>
+                    <table style={{ width: "100%", minWidth: 1150, borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr>
+                        {[
+                          "Cliente",
+                          "Proyecto",
+                          "Código",
+                          "Site",
+                          "Tipo trabajo",
+                          "Año OP.",
+                          "Id moneda",
+                          "Monto BCK",
+                          "Porcentaje",
+                        ].map((header) => (
+                          <th
+                            key={header}
+                            style={{
+                              position: "sticky",
+                              top: 0,
+                              background: "#FFFBEB",
+                              textAlign: "left",
+                              padding: "10px 12px",
+                              borderBottom: "1px solid #FDE68A",
+                              fontSize: 12,
+                              color: "#92400E",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {header}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {executionResult.registrosNoEncontrados.map((record, index) => (
+                        <tr key={`${record.cliente}-${record.proyecto}-${record.idSite}-${record.site}-${record.tipoTrabajo}-${record.anoGestion}-${index}`}>
+                          {[record.cliente, record.proyecto, record.idSite, record.site, record.tipoTrabajo, record.anoGestion, record.idMoneda, record.montoBck, record.porcentaje].map((value, columnIndex) => (
+                            <td
+                              key={columnIndex}
+                              title={value == null ? "" : String(value)}
+                              style={{ padding: "10px 12px", borderBottom: "1px solid #FEF3C7", color: "#0F172A", whiteSpace: "nowrap" }}
+                            >
+                              {value == null || value === "" ? "-" : String(value)}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </AppCard>
         )}
 
         {!hasSummary && (

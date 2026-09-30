@@ -121,13 +121,17 @@ public sealed class MigracionImportService : IMigracionImportService
             var parameters = new DynamicParameters();
             parameters.Add("@Datos", datos.AsTableValuedParameter("dbo.Type_MigracionImportActualizar"));
 
-            return await connection.QuerySingleAsync<MigracionImportEjecucionResultadoDto>(
+            using var resultSets = await connection.QueryMultipleAsync(
                 new CommandDefinition(
                     "dbo.sp_MigracionImport_Actualizar_V2",
                     parameters,
                     commandType: CommandType.StoredProcedure,
                     cancellationToken: cancellationToken,
                     commandTimeout: _sqlCommandFactory.DefaultCommandTimeoutSeconds));
+
+            var resultado = await resultSets.ReadSingleAsync<MigracionImportEjecucionResultadoDto>();
+            resultado.RegistrosNoEncontrados = (await resultSets.ReadAsync<MigracionImportRegistroNoEncontradoDto>()).ToList();
+            return resultado;
         }
 
         // Migrar conserva temporalmente el flujo anterior.

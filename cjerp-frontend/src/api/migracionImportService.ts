@@ -30,6 +30,19 @@ export type MigracionImportEjecucionResultadoDto = {
   filasActualizadas: number;
   filasNoEncontradas: number;
   operacionesCjNuevas: number;
+  registrosNoEncontrados: MigracionImportRegistroNoEncontradoDto[];
+};
+
+export type MigracionImportRegistroNoEncontradoDto = {
+  cliente: string;
+  proyecto: string;
+  idSite: string;
+  site: string;
+  tipoTrabajo: string;
+  anoGestion: number;
+  idMoneda: number | null;
+  montoBck: number | null;
+  porcentaje: number | null;
 };
 
 export async function analizarMigracionImport(archivo: File): Promise<MigracionImportAnalisisDto> {

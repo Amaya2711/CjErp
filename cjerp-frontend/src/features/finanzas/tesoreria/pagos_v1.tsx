@@ -1363,9 +1363,8 @@ export default function PagosV1Page() {
           }
         });
 
-        // Se cargan todos los estados en una sola consulta para conservar los
-        // contadores de todos los KPIs al navegar entre pestañas. La pestaña
-        // activa solo determina qué grupo se muestra en el grid.
+        // El grid consulta únicamente el estado de la pestaña activa. Los
+        // contadores de todas las pestañas se obtienen por separado.
 
         if (buscarPorCorrelativo) {
           parametros.push({ nombre: "Correlativo", valor: String(correlativoNumero), tipo: "int" });
@@ -1574,19 +1573,21 @@ export default function PagosV1Page() {
       group.totalsByCurrency[currencyKey].total += row.total;
     });
 
-    return Array.from(map.values()).map((group) => ({
-      ...group,
-      rows: sortConfig
-        ? [...group.rows].sort((left, right) => {
-            const leftValue = left[sortConfig.column] ?? "";
-            const rightValue = right[sortConfig.column] ?? "";
-            const result = typeof leftValue === "number" && typeof rightValue === "number"
-              ? leftValue - rightValue
-              : String(leftValue).localeCompare(String(rightValue), "es", { numeric: true });
-            return sortConfig.direction === "asc" ? result : -result;
-          })
-        : group.rows,
-    }));
+    return Array.from(map.values())
+      .sort((left, right) => left.label.localeCompare(right.label, "es", { sensitivity: "base", numeric: true }))
+      .map((group) => ({
+        ...group,
+        rows: sortConfig
+          ? [...group.rows].sort((left, right) => {
+              const leftValue = left[sortConfig.column] ?? "";
+              const rightValue = right[sortConfig.column] ?? "";
+              const result = typeof leftValue === "number" && typeof rightValue === "number"
+                ? leftValue - rightValue
+                : String(leftValue).localeCompare(String(rightValue), "es", { numeric: true });
+              return sortConfig.direction === "asc" ? result : -result;
+            })
+          : group.rows,
+      }));
   }, [filteredRows, sortConfig]);
 
   const visibleRowIds = useMemo(() => {

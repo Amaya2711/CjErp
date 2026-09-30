@@ -38,6 +38,29 @@ public sealed class MigracionImportEjecucionResultadoDto
     public int FilasNoEncontradas { get; set; }
 
     public int OperacionesCjNuevas { get; set; }
+
+    public List<MigracionImportRegistroNoEncontradoDto> RegistrosNoEncontrados { get; set; } = [];
+}
+
+public sealed class MigracionImportRegistroNoEncontradoDto
+{
+    public string Cliente { get; set; } = string.Empty;
+
+    public string Proyecto { get; set; } = string.Empty;
+
+    public string IdSite { get; set; } = string.Empty;
+
+    public string Site { get; set; } = string.Empty;
+
+    public string TipoTrabajo { get; set; } = string.Empty;
+
+    public int AnoGestion { get; set; }
+
+    public int? IdMoneda { get; set; }
+
+    public decimal? MontoBck { get; set; }
+
+    public decimal? Porcentaje { get; set; }
 }
 
 public sealed class MigracionImportGrupoDuplicadoDto

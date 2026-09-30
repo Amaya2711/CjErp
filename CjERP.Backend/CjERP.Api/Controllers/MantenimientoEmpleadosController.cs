@@ -1263,10 +1263,16 @@ public class MantenimientoEmpleadosController : ControllerBase
 
         var fechaIngreso = ParseNullableDate(request.FechaIngreso);
         var fechaInicio = ParseNullableDate(request.FechaIniLaboral);
+        var fechaFin = ParseNullableDate(request.FechaFinLaboral);
 
         if (fechaIngreso.HasValue && fechaInicio.HasValue && fechaIngreso.Value.Date > fechaInicio.Value.Date)
         {
             return "La fecha de ingreso no puede ser mayor que la fecha de inicio.";
+        }
+
+        if (fechaInicio.HasValue && fechaFin.HasValue && fechaInicio.Value.Date > fechaFin.Value.Date)
+        {
+            return "La fecha fin no puede ser menor a la fecha de inicio.";
         }
 
         if (isUpdate)

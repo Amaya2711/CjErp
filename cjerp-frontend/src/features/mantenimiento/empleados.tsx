@@ -949,7 +949,11 @@ export default function MantenimientoEmpleadosPage() {
       <SidePanelForm
         open={panelOpen}
         title={mode === "nuevo" ? "Nuevo empleado" : "Editar empleado"}
-        subtitle="Actualice la ficha principal y los datos de detalle del empleado."
+        subtitle={
+          mode === "nuevo"
+            ? "Todos los campos son obligatorios para registrar un nuevo empleado, excepto la fecha de fin laboral."
+            : "Actualice la ficha principal y los datos de detalle del empleado."
+        }
         onClose={closePanel}
         maxWidth={880}
         footer={
@@ -967,7 +971,7 @@ export default function MantenimientoEmpleadosPage() {
 
       <div style={styles.formGrid}>
           <Field
-            label="Apellidos"
+            label="Apellidos *"
             error={errors.apellidosEmpleado}
             input={
               <input
@@ -981,7 +985,7 @@ export default function MantenimientoEmpleadosPage() {
             }
           />
           <Field
-            label="Nombres"
+            label="Nombres *"
             error={errors.nombresEmpleado}
             input={
               <input
@@ -995,7 +999,7 @@ export default function MantenimientoEmpleadosPage() {
             }
           />
           <Field
-            label="Tipo de documento"
+            label="Tipo de documento *"
             error={errors.idDocumento}
             input={
               <select
@@ -1013,7 +1017,7 @@ export default function MantenimientoEmpleadosPage() {
             }
           />
           <Field
-            label="Documento"
+            label="Documento *"
             error={errors.nroDocumento}
             input={
               <input
@@ -1025,7 +1029,7 @@ export default function MantenimientoEmpleadosPage() {
             }
           />
           <Field
-            label="Sexo"
+            label="Sexo *"
             error={errors.sexo}
             input={
               <select
@@ -1043,7 +1047,7 @@ export default function MantenimientoEmpleadosPage() {
             }
           />
           <Field
-            label="Telefono"
+            label="Telefono *"
             error={errors.telefono}
             input={
               <input
@@ -1055,7 +1059,7 @@ export default function MantenimientoEmpleadosPage() {
             }
           />
           <Field
-            label="Correo"
+            label="Correo *"
             error={errors.correo}
             input={
               <input
@@ -1067,7 +1071,7 @@ export default function MantenimientoEmpleadosPage() {
             }
           />
           <Field
-            label="Empresa"
+            label="Empresa *"
             error={errors.idEmpresaCj}
             input={
               <select
@@ -1085,7 +1089,7 @@ export default function MantenimientoEmpleadosPage() {
             }
           />
           <Field
-            label="Cliente"
+            label="Cliente *"
             error={errors.idClienteCj}
             input={
               <select
@@ -1103,7 +1107,7 @@ export default function MantenimientoEmpleadosPage() {
             }
           />
           <Field
-            label="Area"
+            label="Area *"
             error={errors.idAreaCj}
             input={
               <div ref={areaWrapRef} style={styles.typeaheadWrap}>
@@ -1156,7 +1160,7 @@ export default function MantenimientoEmpleadosPage() {
             }
           />
           <Field
-            label="Ubicacion"
+            label="Ubicacion *"
             error={errors.idUbicacionCj}
             input={
               <select
@@ -1174,7 +1178,7 @@ export default function MantenimientoEmpleadosPage() {
             }
           />
           <Field
-            label="Responsable"
+            label="Responsable *"
             error={errors.idResponsableCj}
             input={
               <div ref={responsableWrapRef} style={styles.typeaheadWrap}>
@@ -1231,7 +1235,7 @@ export default function MantenimientoEmpleadosPage() {
             }
           />
           <Field
-            label="2do validador vacaciones"
+            label="2do validador vacaciones *"
             error={errors.idSegundoVacaciones}
             input={
               <div ref={segundoValidadorWrapRef} style={styles.typeaheadWrap}>
@@ -1288,7 +1292,7 @@ export default function MantenimientoEmpleadosPage() {
             }
           />
           <Field
-            label="3er validador vacaciones"
+            label="3er validador vacaciones *"
             error={errors.idTerceroVacaciones}
             input={
               <select
@@ -1306,7 +1310,7 @@ export default function MantenimientoEmpleadosPage() {
             }
           />
           <Field
-            label="Fecha inicio laboral"
+            label="Fecha inicio laboral *"
             error={errors.fechaIniLaboral}
             input={
               <input
@@ -1331,7 +1335,7 @@ export default function MantenimientoEmpleadosPage() {
             }
           />
           <Field
-            label="Direccion"
+            label="Direccion *"
             error={errors.direccion}
             fullWidth
             input={
