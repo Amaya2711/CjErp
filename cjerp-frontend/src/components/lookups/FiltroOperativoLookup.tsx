@@ -6,7 +6,7 @@ import type {
 } from "../../models/filtroOperativo";
 import { useFiltroOperativoLookup } from "../../hooks/useFiltroOperativoLookup";
 
-export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filtroInputRef?: React.RefObject<HTMLInputElement | null> }> = ({
+export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filtroInputRef?: React.RefObject<HTMLInputElement | null>; fontSize?: number }> = ({
   value,
   onChange,
   onSelectionBlur,
@@ -16,6 +16,7 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
   showOt = true,
   showTarea = true,
   filtroInputRef,
+  fontSize = 11,
 }) => {
   const safeValue: FiltroOperativoValue = value ?? {};
   const safeOnChange = onChange ?? (() => {});
@@ -121,7 +122,7 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
         flexDirection: "column",
         gap: 4,
         maxWidth: 600,
-        fontSize: "11px",
+        fontSize,
         fontFamily: "Arial, sans-serif",
       }}
     >
@@ -141,7 +142,7 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
             style={{
               width: inputWidth,
               minWidth: 150,
-              fontSize: "11px",
+              fontSize,
               fontFamily: "Arial, sans-serif",
               border: "1px solid #D1D5DB",
               borderRadius: 10,
@@ -219,7 +220,7 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
               position: "absolute",
               visibility: "hidden",
               whiteSpace: "pre",
-              fontSize: "11px",
+              fontSize,
               fontFamily: "inherit",
               fontWeight: "normal",
               padding: "6px 12px",
@@ -287,7 +288,7 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
                   }
                   value={lookupValue?.tipoTrabajo?.tipoTrabajo || ""}
                   style={{
-                    fontSize: "11px",
+                    fontSize,
                     fontFamily: "Arial, sans-serif",
                     border: "1px solid #D1D5DB",
                     borderRadius: 10,
@@ -323,7 +324,7 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
                 }
                 value={lookupValue?.ot?.ot || ""}
                 style={{
-                  fontSize: "11px",
+                  fontSize,
                   fontFamily: "Arial, sans-serif",
                   border: "1px solid #D1D5DB",
                   borderRadius: 10,
@@ -351,12 +352,14 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
                 value={lookupValue}
                 tareas={tareasDisponibles}
                 handleTareaChange={handleTareaChange}
+                fontSize={fontSize}
               />
             ) : (
               <TareaAutocomplete
                 value={lookupValue}
                 tareas={tareasDisponibles}
                 handleTareaChange={handleTareaChange}
+                fontSize={fontSize}
               />
             )
           ) : null}
@@ -370,12 +373,14 @@ type TareaAutocompleteProps = {
   value?: FiltroOperativoValue;
   tareas: TareaOption[];
   handleTareaChange: (correlativo: number | null) => void;
+  fontSize: number;
 };
 
 function TareaSelect({
   value,
   tareas,
   handleTareaChange,
+  fontSize,
 }: TareaAutocompleteProps) {
   const tareasSafe = Array.isArray(tareas) ? tareas : [];
   const selectedValue =
@@ -399,7 +404,7 @@ function TareaSelect({
         style={{
           minWidth: 250,
           width: 350,
-          fontSize: "11px",
+          fontSize,
           fontFamily: "Arial, sans-serif",
           border: "1px solid #D1D5DB",
           borderRadius: 10,
@@ -423,6 +428,7 @@ function TareaAutocomplete({
   value,
   tareas,
   handleTareaChange,
+  fontSize,
 }: TareaAutocompleteProps) {
   const tareasSafe = Array.isArray(tareas) ? tareas : [];
 
@@ -479,7 +485,7 @@ function TareaAutocomplete({
         style={{
           minWidth: 250,
           width: 350,
-          fontSize: "11px",
+          fontSize,
           fontFamily: "Arial, sans-serif",
           border: "1px solid #D1D5DB",
           borderRadius: 10,
@@ -531,7 +537,7 @@ function TareaAutocomplete({
       {tareaDropdown && tareaInput && tareasFiltradas.length > 0 && (
         <div
           style={{
-            fontSize: "11px",
+            fontSize,
             fontFamily: "Arial, sans-serif",
             position: "absolute",
             top: "100%",

@@ -187,7 +187,6 @@ const tableColumns: TableColumn[] = [
   { key: "nombreEmpleado", label: "Nombre empleado", width: "250px" },
   { key: "tipoAprobacion", label: "Tipo aprobacion", width: "180px" },
   { key: "responsable", label: "Responsable", width: "220px" },
-  { key: "estado", label: "Estado", width: "150px" },
   { key: "estadoMarcacionTexto", label: "Estado marcacion", width: "170px" },
   { key: "hora", label: "Hora entrada", width: "110px", align: "center" },
   { key: "salida", label: "Hora salida", width: "110px", align: "center" },

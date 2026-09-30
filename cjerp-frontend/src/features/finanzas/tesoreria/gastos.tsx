@@ -4251,6 +4251,7 @@ export default function GastosPage({
               )}
               <FiltroOperativoLookup
                 value={form.filtroOperativo}
+                fontSize={13}
                 onChange={handleFiltroOperativoChange}
                 onSelectionBlur={(value) => {
                   void cargarValoresGasto(value);
@@ -4430,7 +4431,7 @@ export default function GastosPage({
                 }}
               >
                 <div style={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>Responsable</label>
+                  <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Responsable</label>
                   <div style={{ position: "relative", width: "100%" }}>
                     <input
                       type="text"
@@ -4501,7 +4502,7 @@ export default function GastosPage({
                         borderRadius: 10,
                         border: `1px solid ${errores.responsable ? "#F87171" : "#D1D5DB"}`,
                         padding: "0 12px",
-                        fontSize: 11,
+                        fontSize: 13,
                         boxSizing: "border-box",
                       }}
                       disabled={empleadosLoading}
@@ -4528,7 +4529,7 @@ export default function GastosPage({
                               padding: 6,
                               cursor: "pointer",
                               background: idx === highlightedResponsableIdx ? "#e6f7ff" : undefined,
-                              fontSize: 11,
+                              fontSize: 13,
                               lineHeight: 1.1,
                             }}
                             onMouseDown={() => {
@@ -4579,7 +4580,7 @@ export default function GastosPage({
   }}
 >
   <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "1 / -1", marginBottom: 8 }}>
-    <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>Cuenta</label>
+    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Cuenta</label>
     <textarea
       value={form.cuenta}
       readOnly
@@ -4591,7 +4592,7 @@ export default function GastosPage({
         borderRadius: 10,
         border: "1px solid #D1D5DB",
         padding: 10,
-        fontSize: 11,
+        fontSize: 13,
         resize: "none",
         boxSizing: "border-box",
         overflow: "hidden",
@@ -4612,7 +4613,7 @@ export default function GastosPage({
     marginBottom: 8,
   }}
 >
-  <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>
+  <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>
     Detalle
   </label>
   <textarea
@@ -4627,7 +4628,7 @@ export default function GastosPage({
       borderRadius: 10,
       border: "1px solid #D1D5DB",
       padding: 12,
-      fontSize: 11,
+      fontSize: 13,
       resize: "vertical",
       boxSizing: "border-box",
       height: "100%",
@@ -4645,7 +4646,7 @@ export default function GastosPage({
     marginBottom: 8,
   }}
 >
-  <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>
+  <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>
     Comentario
   </label>
   <textarea
@@ -4660,7 +4661,7 @@ export default function GastosPage({
       borderRadius: 10,
       border: "1px solid #D1D5DB",
       padding: 12,
-      fontSize: 11,
+      fontSize: 13,
       resize: "vertical",
       boxSizing: "border-box",
     }}
@@ -4678,7 +4679,7 @@ export default function GastosPage({
 >
   {/* FECHA INGRESO */}
   <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
-    <label style={{ fontSize: 11, fontWeight: 700, display: "flex", gap: 6 }}>
+    <label style={{ fontSize: 13, fontWeight: 700, display: "flex", gap: 6 }}>
       <input
         type="checkbox"
         checked={usarFechaEmision}
@@ -4711,7 +4712,7 @@ export default function GastosPage({
         borderRadius: 10,
         border: "1px solid #D1D5DB",
         padding: "0 12px",
-        fontSize: 11,
+        fontSize: 13,
         background: usarFechaEmision ? "#FFFFFF" : "#F3F4F6",
       }}
     />
@@ -4719,7 +4720,7 @@ export default function GastosPage({
 
   {/* FECHA VENCIMIENTO */}
   <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
-    <label style={{ fontSize: 11, fontWeight: 700, display: "flex", gap: 6 }}>
+    <label style={{ fontSize: 13, fontWeight: 700, display: "flex", gap: 6 }}>
       <input
         type="checkbox"
         checked={usarFechaVencimiento}
@@ -4752,7 +4753,7 @@ export default function GastosPage({
         borderRadius: 10,
         border: "1px solid #D1D5DB",
         padding: "0 12px",
-        fontSize: 11,
+        fontSize: 13,
         background: usarFechaVencimiento ? "#FFFFFF" : "#F3F4F6",
       }}
     />
@@ -4760,8 +4761,8 @@ export default function GastosPage({
 </div>
 
   <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 4", marginBottom: 8 }}>
-    <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>Bien</label>
-    <select value={getSelectValue(bienOptions, form.bien)} onChange={(e) => setForm((prev) => ({ ...prev, bien: e.target.value }))} disabled={constantesLoading} style={{ width: "100%", height: 42, borderRadius: 10, border: `1px solid ${errores.bien ? "#F87171" : "#D1D5DB"}`, padding: "0 12px", fontSize: 11, background: "#FFFFFF" }}>
+    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Bien</label>
+    <select value={getSelectValue(bienOptions, form.bien)} onChange={(e) => setForm((prev) => ({ ...prev, bien: e.target.value }))} disabled={constantesLoading} style={{ width: "100%", height: 42, borderRadius: 10, border: `1px solid ${errores.bien ? "#F87171" : "#D1D5DB"}`, padding: "0 12px", fontSize: 13, background: "#FFFFFF" }}>
       <option value="">Seleccione</option>
      {bienOptions.map((option, index) => (
         <option
@@ -4776,8 +4777,8 @@ export default function GastosPage({
   </div>
 
   <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 4", marginBottom: 8 }}>
-    <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>Comprobante</label>
-    <select value={getSelectValue(comprobanteOptions, form.comprobante)} onChange={(e) => setForm((prev) => ({ ...prev, comprobante: e.target.value }))} disabled={constantesLoading} style={{ width: "100%", height: 42, borderRadius: 10, border: `1px solid ${errores.comprobante ? "#F87171" : "#D1D5DB"}`, padding: "0 12px", fontSize: 11, background: "#FFFFFF" }}>
+    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Comprobante</label>
+    <select value={getSelectValue(comprobanteOptions, form.comprobante)} onChange={(e) => setForm((prev) => ({ ...prev, comprobante: e.target.value }))} disabled={constantesLoading} style={{ width: "100%", height: 42, borderRadius: 10, border: `1px solid ${errores.comprobante ? "#F87171" : "#D1D5DB"}`, padding: "0 12px", fontSize: 13, background: "#FFFFFF" }}>
       <option value="">Seleccione</option>
       {comprobanteOptions.map((option, index) => (
         <option
@@ -4793,8 +4794,8 @@ export default function GastosPage({
 
   <div style={{ display: "flex", alignItems: "center", gap: 12, gridColumn: "span 4", marginBottom: 8 }}>
     <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 1.5 }}>
-      <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>Serie</label>
-      <input type="text" value={form.serie} onChange={(e) => setForm((prev) => ({ ...prev, serie: e.target.value }))} placeholder="Serie" style={{ width: "100%", height: 42, borderRadius: 10, border: "1px solid #D1D5DB", padding: "0 12px", fontSize: 11, boxSizing: "border-box" }} />
+      <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Serie</label>
+      <input type="text" value={form.serie} onChange={(e) => setForm((prev) => ({ ...prev, serie: e.target.value }))} placeholder="Serie" style={{ width: "100%", height: 42, borderRadius: 10, border: "1px solid #D1D5DB", padding: "0 12px", fontSize: 13, boxSizing: "border-box" }} />
     </div>
     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
       <input
@@ -4804,13 +4805,13 @@ export default function GastosPage({
         onChange={(e) => setForm((prev) => ({ ...prev, rendicion: e.target.checked }))}
         style={{ width: 16, height: 16 }}
       />
-      <label htmlFor="rendicion" style={{ fontSize: 11, fontWeight: 700, color: "#374151", cursor: "pointer" }}>Rendición</label>
+      <label htmlFor="rendicion" style={{ fontSize: 13, fontWeight: 700, color: "#374151", cursor: "pointer" }}>Rendición</label>
     </div>
   </div>
 
   {/* TIPO DE PAGO */}
   <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 2", marginBottom: 8 }}>
-    <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>Tipo de pago</label>
+    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Tipo de pago</label>
     <select
       value={getSelectValue(tipoPagoOptions, form.tipoPago)}
       onChange={(e) => setForm((prev) => ({ ...prev, tipoPago: e.target.value }))}
@@ -4821,7 +4822,7 @@ export default function GastosPage({
         borderRadius: 10,
         border: `1px solid ${errores.tipoPago ? "#F87171" : "#D1D5DB"}`,
         padding: "0 12px",
-        fontSize: 11,
+        fontSize: 13,
         background: "#FFFFFF",
         boxSizing: "border-box",
       }}
@@ -4841,7 +4842,7 @@ export default function GastosPage({
 
 {/* SUBTOTAL */}
   <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 2", marginBottom: 8 }}>
-    <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>Subtotal</label>
+    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Subtotal</label>
     <input
       type="number"
       value={form.monto}
@@ -4853,7 +4854,7 @@ export default function GastosPage({
         borderRadius: 10,
         border: "1px solid #D1D5DB",
         padding: "0 12px",
-        fontSize: 11,
+        fontSize: 13,
         boxSizing: "border-box",
       }}
     />
@@ -4861,7 +4862,7 @@ export default function GastosPage({
 
 {/* IGV */}
   <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 2", marginBottom: 8 }}>
-    <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>IGV</label>
+    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>IGV</label>
     <input
       type="number"
       value={hasSubtotal ? igvAmount.toFixed(2) : ""}
@@ -4873,7 +4874,7 @@ export default function GastosPage({
         borderRadius: 10,
         border: "1px solid #D1D5DB",
         padding: "0 12px",
-        fontSize: 11,
+        fontSize: 13,
         background: "#F3F4F6",
         boxSizing: "border-box",
       }}
@@ -4882,7 +4883,7 @@ export default function GastosPage({
 
 {/* TOTAL */}
   <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 2", marginBottom: 8 }}>
-    <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>Total</label>
+    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Total</label>
     <input
       type="number"
       value={hasSubtotal ? totalAmount.toFixed(2) : ""}
@@ -4894,7 +4895,7 @@ export default function GastosPage({
         borderRadius: 10,
         border: "1px solid #D1D5DB",
         padding: "0 12px",
-        fontSize: 11,
+        fontSize: 13,
         background: "#F3F4F6",
         boxSizing: "border-box",
       }}
@@ -4904,7 +4905,7 @@ export default function GastosPage({
 {/* MONEDA */}
   <div style={{ display: "flex", alignItems: "flex-end", gap: 12, gridColumn: "span 2", marginBottom: 8 }}>
     <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 1.5 }}>
-      <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>Moneda</label>
+      <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Moneda</label>
       <select
         value={getSelectValue(monedaOptions, form.moneda)}
         onChange={(e) => setForm((prev) => ({ ...prev, moneda: e.target.value }))}
@@ -4917,7 +4918,7 @@ export default function GastosPage({
           borderRadius: 10,
           border: `1px solid ${errores.moneda ? "#F87171" : "#D1D5DB"}`,
           padding: "0 12px",
-          fontSize: 11,
+          fontSize: 13,
           background: "#FFFFFF",
           boxSizing: "border-box",
         }}
@@ -4936,7 +4937,7 @@ export default function GastosPage({
     </div>
     {!esSoles && (
       <div style={{ display: "flex", flexDirection: "column", gap: 1.5, minWidth: 100, maxWidth: '100%', gridColumn: 'span 2' }}>
-        <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>Tipo de cambio</label>
+        <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Tipo de cambio</label>
         <input
           type="number"
           value={tipoCambio}
@@ -4950,7 +4951,7 @@ export default function GastosPage({
             borderRadius: 10,
             border: "1px solid #D1D5DB",
             padding: "0 12px",
-            fontSize: 11,
+            fontSize: 13,
             boxSizing: "border-box",
           }}
         />
@@ -4959,7 +4960,7 @@ export default function GastosPage({
   </div>
 
   <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 4" }}>
-    <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>Solicitante</label>
+    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Solicitante</label>
     <div style={{ position: "relative", width: "100%" }}>
       <input
         type="text"
@@ -5010,7 +5011,7 @@ export default function GastosPage({
           borderRadius: 10,
           border: `1px solid ${errores.solicitante ? "#F87171" : "#D1D5DB"}`,
           padding: "0 12px",
-          fontSize: 11,
+          fontSize: 13,
           boxSizing: "border-box",
           background: solicitanteLoading ? "#F3F4F6" : "#FFFFFF",
         }}
@@ -5038,7 +5039,7 @@ export default function GastosPage({
                 padding: 6,
                 cursor: "pointer",
                 background: idx === highlightedSolicitanteIdx ? "#e6f7ff" : undefined,
-                fontSize: 11,
+                fontSize: 13,
                 lineHeight: 1.1,
               }}
               onMouseDown={() => {
@@ -5058,7 +5059,7 @@ export default function GastosPage({
   </div>
 
   <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 4" }}>
-    <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>Gestor</label>
+    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Gestor</label>
     <div style={{ position: "relative", width: "100%" }}>
       <input
         type="text"
@@ -5105,7 +5106,7 @@ export default function GastosPage({
           borderRadius: 10,
           border: `1px solid ${errores.gestor ? "#F87171" : "#D1D5DB"}`,
           padding: "0 12px",
-          fontSize: 11,
+          fontSize: 13,
           boxSizing: "border-box",
           background: gestorLoading ? "#F3F4F6" : "#FFFFFF",
         }}
@@ -5133,7 +5134,7 @@ export default function GastosPage({
                 padding: 6,
                 cursor: "pointer",
                 background: idx === highlightedGestorIdx ? "#e6f7ff" : undefined,
-                fontSize: 11,
+                fontSize: 13,
                 lineHeight: 1.1,
               }}
               onMouseDown={() => {
@@ -5153,7 +5154,7 @@ export default function GastosPage({
   </div>
 
   <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 4" }}>
-    <label style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>Validador</label>
+    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Validador</label>
     <div style={{ position: "relative", width: "100%" }}>
       <input
         type="text"
@@ -5204,7 +5205,7 @@ export default function GastosPage({
           borderRadius: 10,
           border: `1px solid ${errores.validador ? "#F87171" : "#D1D5DB"}`,
           padding: "0 12px",
-          fontSize: 11,
+          fontSize: 13,
           boxSizing: "border-box",
           background: validadorLoading ? "#F3F4F6" : "#FFFFFF",
         }}
@@ -5232,7 +5233,7 @@ export default function GastosPage({
                 padding: 6,
                 cursor: "pointer",
                 background: idx === highlightedValidadorIdx ? "#e6f7ff" : undefined,
-                fontSize: 11,
+                fontSize: 13,
                 lineHeight: 1.1,
               }}
               onMouseDown={() => {

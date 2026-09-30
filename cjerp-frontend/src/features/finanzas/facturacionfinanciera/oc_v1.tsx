@@ -235,6 +235,28 @@ function getLimaNow() {
   };
 }
 
+function getLimaDateOffset(days: number): string {
+  const [year, month, day] = getLimaNow().fecha.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function createReporteFiltros(tab: string): ReporteFiltros {
+  const isOcGastos = tab === "oc-gastos";
+  return {
+    solicitante: "",
+    responsable: "",
+    cliente: "",
+    proyecto: "",
+    site: "",
+    estado: isOcGastos ? ESTADOS_OC_GASTOS_POR_DEFECTO : "",
+    idOc: "",
+    fechaDesde: isOcGastos ? getLimaDateOffset(-7) : "",
+    fechaHasta: isOcGastos ? getLimaDateOffset(0) : "",
+  };
+}
+
 const today = getLimaNow().fecha;
 const archivoOcAccept = ".jpg,.jpeg,.png,.bmp,.gif,.pdf,.xls,.xlsx";
 
@@ -847,7 +869,7 @@ export default function OcV1Page() {
     setReporteFiltrosPorTab((prev) => ({ ...prev, [String(reporteSubtab)]: reporteFiltros }));
     const guardados = reporteFiltrosPorTab[tab];
     if (guardados) setReporteFiltros(guardados);
-    else setReporteFiltros({ solicitante: "", responsable: "", cliente: "", proyecto: "", site: "", estado: tab === "oc-gastos" ? ESTADOS_OC_GASTOS_POR_DEFECTO : "", idOc: "", fechaDesde: "", fechaHasta: "" });
+    else setReporteFiltros(createReporteFiltros(tab));
       setReporteSubtab(tab as typeof reporteSubtab);
       setReporteConsultado(false);
         setReportePlanillaRows([]);
@@ -1973,6 +1995,16 @@ export default function OcV1Page() {
       return prev.filter((idOc) => !cabecerasBandejaIds.includes(idOc));
     });
   }, [cabecerasBandejaIds]);
+
+  const toggleSeleccionGrupo = useCallback((idsOc: number[], checked: boolean) => {
+    const idsGrupo = new Set(idsOc);
+    setSelectedOcIds((prev) => {
+      if (checked) {
+        return Array.from(new Set([...prev, ...idsGrupo]));
+      }
+      return prev.filter((idOc) => !idsGrupo.has(idOc));
+    });
+  }, []);
   const draftTotals = useMemo(() => {
     let subtotal = 0;
     let igv = 0;
@@ -2858,16 +2890,32 @@ export default function OcV1Page() {
               const contraido = agrupacionAprobacion === "sin-filtro"
                 ? false
                 : (gruposAprobacionContraidos[groupId] ?? true);
+              const idsGrupo = grupo.items.map((item) => item.idOc);
+              const grupoSeleccionado = idsGrupo.length > 0 && idsGrupo.every((idOc) => selectedOcIds.includes(idOc));
 
               return (
               <div key={`grupo-${groupId}`} style={styles.approvalGroup}>
                 {agrupacionAprobacion !== "sin-filtro" ? (
                 <div style={styles.approvalGroupHeader}>
+                  <div style={styles.approvalGroupIdentity}>
+                  <label
+                    style={{ ...styles.approvalCheckLabel, flex: "0 0 auto" }}
+                    title={`Seleccionar todas las OCs del grupo ${grupo.label}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={grupoSeleccionado}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(event) => toggleSeleccionGrupo(idsGrupo, event.target.checked)}
+                      aria-label={`Seleccionar todas las OCs del grupo ${grupo.label}`}
+                    />
+                  </label>
                   <div style={styles.approvalGroupSummary}>
                     <strong>{grupo.label}</strong>
                     <span style={styles.approvalGroupSubtotal}>
                       Subtotal: {grupo.totalesPorMoneda.map(([moneda, total]) => `${moneda} ${formatMoney(total)}`).join(" · ")}
                     </span>
+                  </div>
                   </div>
                   <div style={styles.approvalGroupActions}>
                     <span>{grupo.items.length}</span>
@@ -3230,6 +3278,13 @@ export default function OcV1Page() {
                 <input
                   value={reporteFiltros.idOc}
                   onChange={(event) => setReporteFiltros((prev) => ({ ...prev, idOc: event.target.value }))}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !reporteLoading && reporteFiltros.idOc.trim()) {
+                      event.preventDefault();
+                      setReportePlanillaRows([]);
+                      void loadReporteDetalles();
+                    }
+                  }}
                   placeholder="IdOC"
                   style={styles.input}
                 />
@@ -3412,7 +3467,7 @@ export default function OcV1Page() {
                   type="button"
                   style={{ ...styles.secondaryButton, height: 34, minWidth: 76, padding: "0 10px", fontSize: 11, lineHeight: 1.2, whiteSpace: "normal" }}
                   onClick={() => {
-                    setReporteFiltros({ solicitante: "", responsable: "", cliente: "", proyecto: "", site: "", estado: reporteSubtab === "oc-gastos" ? ESTADOS_OC_GASTOS_POR_DEFECTO : "", idOc: "", fechaDesde: "", fechaHasta: "" }); setResponsablesReporteFiltro([]); setBusquedaResponsableReporte(""); setSolicitantesReporteFiltro([]); setBusquedaSolicitanteReporte(""); setProyectosReporteFiltro([]); setBusquedaProyectoReporte(""); setSitesReporteFiltro([]); setBusquedaSiteReporte("");
+                    setReporteFiltros(createReporteFiltros(reporteSubtab)); setResponsablesReporteFiltro([]); setBusquedaResponsableReporte(""); setSolicitantesReporteFiltro([]); setBusquedaSolicitanteReporte(""); setProyectosReporteFiltro([]); setBusquedaProyectoReporte(""); setSitesReporteFiltro([]); setBusquedaSiteReporte("");
                     setReporteDetalles([]);
                     setReporteConsultado(false);
                   }}
@@ -3477,7 +3532,7 @@ export default function OcV1Page() {
                 <tbody>
                   {String(reporteSubtab) === "oc-gastos" ? (
                     reportePlanillaRows.length === 0 ? (
-                      <tr><td style={styles.td} colSpan={Math.max(reportePlanillaColumns.length, 1)}>{!reporteConsultado ? "Seleccione al menos un filtro para consultar los gastos." : reporteLoading ? "Cargando datos..." : "No hay registros de Planilla."}</td></tr>
+                      <tr><td style={styles.td} colSpan={Math.max(reportePlanillaColumns.length, 1)}>{reporteLoading ? "Cargando datos..." : !reporteConsultado ? "Ingrese un filtro y presione Aplicar filtros o Enter en Nro OC." : "No hay registros de Planilla."}</td></tr>
                     ) : reportePlanillaRowsOrdenadas.map((row, index) => {
                       const read = (column: string) => {
                         const aliases: Record<string, string[]> = {
@@ -5666,6 +5721,14 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     gap: 3,
     minWidth: 0,
+  },
+  approvalGroupIdentity: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    gap: 10,
+    minWidth: 0,
+    textAlign: "left",
   },
   approvalGroupSubtotal: {
     color: "#52667A",
