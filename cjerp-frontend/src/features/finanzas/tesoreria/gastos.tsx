@@ -221,7 +221,10 @@ const GASTOS_HEADER_FILTERS_INITIAL: GastosHeaderFilters = {
   id: "",
   fechaInicio: obtenerFechaActual(),
   fechaFin: obtenerFechaActual(),
-  estado: ["0", "2"],
+  // Un selector vacío representa "Todos". No se limita la carga inicial a
+  // estados editables (0, 2), porque el listado de Gastos debe mostrar todos
+  // los registros del rango y solicitante seleccionado.
+  estado: [],
   comprobante: [],
   moneda: [],
   cliente: [],
@@ -1485,7 +1488,9 @@ export default function GastosPage({
       const filtrosConsulta = filtrosCabeceraAplicadosRef.current;
       const estadosSeleccionados = Array.from(
         new Set(
-          filtrosConsulta.estado
+          (filtrosConsulta.estado.length > 0
+            ? filtrosConsulta.estado
+            : estadoOptions.map((estado) => getConstanteStoredValue(estado)))
             .map((estado) => normalizeConstanteValue(estadoOptions, estado))
             .map((estado) => estado.trim())
             .filter(Boolean)
@@ -2993,6 +2998,7 @@ export default function GastosPage({
       { key: "site", label: "Site", width: "180px", align: "left" as const },
       { key: "tipoTrabajo", label: "Tipo Trabajo", width: "100px", align: "left" as const },
       { key: "tarea", label: "Tarea", width: "140px", align: "left" as const },
+      { key: "estado", label: "Estado", width: "80px", align: "left" as const },
       { key: "bien", label: "Bien", width: "80px", align: "left" as const },
       { key: "comprobante", label: "Comprobante", width: "140px", align: "left" as const },
       { key: "monto", label: "Monto", width: "100px", align: "left" as const },
@@ -3008,7 +3014,6 @@ export default function GastosPage({
       { key: "cuentaNumero", label: "Cuenta", width: "140px", align: "left" as const },
       { key: "cuentaInter", label: "Cuenta Inter", width: "160px", align: "left" as const },
       { key: "validador", label: "Validador", width: "140px", align: "left" as const },
-      { key: "estado", label: "Estado", width: "80px", align: "left" as const },
       { key: "detalle", label: "Detalle", width: "320px", align: "left" as const },
     ],
     []

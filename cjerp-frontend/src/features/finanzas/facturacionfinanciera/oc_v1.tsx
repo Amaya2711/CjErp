@@ -41,7 +41,7 @@ import { getHttpErrorMessage } from "../../../utils/httpError";
 import { ChevronDown, ChevronUp, ChevronsDown, ChevronsUp, Eye, FileDown, FileText } from "lucide-react";
 import { buildPlanillaConsultaEstadosRequest, consultarGastosPagadosPorId, consultarPlanillaEstados } from "../../../api/planillaConsultaService";
 
-const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "FechaOc", "Cliente", "NombreProyecto", "Site", "TipoTrabajo", "Tarea", "SolicitanteOc", "Comprobante", "SubtotalOc", "EstadoOc", "PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"];
+const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "FechaOc", "Cliente", "NombreProyecto", "Site", "TipoTrabajo", "Tarea", "SolicitanteOc", "Comprobante", "CorrelativoPlanilla", "SubtotalOc", "EstadoOc", "PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"];
 const OC_GASTOS_MAX_COLUMNAS_VISIBLES = 22;
 const OC_GASTOS_COLUMNAS_NUMERICAS = new Set([
   "SubtotalOc",
@@ -56,6 +56,7 @@ const OC_GASTOS_COLUMN_LABELS: Record<string, string> = {
   FechaOc: "Fecha",
   NombreProyecto: "Proyecto",
   SolicitanteOc: "Solicitante OC",
+  CorrelativoPlanilla: "Correlativo pago",
   TipoTrabajo: "Tipo trabajo",
   SubtotalOc: "Subtotal",
   EstadoOc: "Estado",

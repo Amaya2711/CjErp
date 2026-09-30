@@ -140,7 +140,6 @@ type FilterState = {
   responsable: string[];
   validador: string[];
   moneda: string[];
-  estado: string;
   correlativo: string;
   fechaDesde: string;
   fechaHasta: string;
@@ -285,7 +284,6 @@ function getDefaultFilterState(): FilterState {
     responsable: [],
     validador: [],
     moneda: [],
-    estado: "",
     correlativo: "",
     fechaDesde: formatDateInputValue(fechaDesde),
     fechaHasta: formatDateInputValue(fechaHasta),
@@ -603,6 +601,24 @@ function mapPlanillaEstadoToPagoEstado(value: unknown, fallback: PagoEstado): Pa
   if (text.includes("observ")) return "observadas";
   if (text.includes("apro")) return "aprobar";
   return fallback;
+}
+
+function getQuickIdOcOnly(filters: FilterState): number | null {
+  const idOcText = filters.query.trim();
+  const idOc = Number(idOcText);
+  const hasAdditionalFilter = Boolean(
+    filters.correlativo.trim() ||
+    filters.solicitante.length ||
+    filters.responsable.length ||
+    filters.validador.length ||
+    filters.moneda.length
+  );
+
+  if (!/^\d+$/.test(idOcText) || !Number.isSafeInteger(idOc) || idOc <= 0 || hasAdditionalFilter) {
+    return null;
+  }
+
+  return idOc;
 }
 
 function buildPagoAprobacionKey(correlativo: string | number, idSite: string, tipoMoneda?: number | null) {
@@ -1305,10 +1321,14 @@ export default function PagosV1Page() {
       const cacheKey = [
         activeTab,
         appliedFilters.fechaDesde,
-        appliedFilters.fechaHasta,
-        appliedFilters.query,
-        appliedFilters.correlativo,
-        refreshTick,
+          appliedFilters.fechaHasta,
+          appliedFilters.query,
+          appliedFilters.correlativo,
+          appliedFilters.solicitante.join(","),
+          appliedFilters.responsable.join(","),
+          appliedFilters.validador.join(","),
+          appliedFilters.moneda.join(","),
+          refreshTick,
       ].join("|");
       const cachedRows = tabRowsCacheRef.current.get(cacheKey);
       if (cachedRows) {
@@ -1333,51 +1353,64 @@ export default function PagosV1Page() {
         const buscarPorCorrelativo = Number.isInteger(correlativoNumero) && correlativoNumero > 0;
         const buscarEnTotal = Boolean(textoBusqueda) || buscarPorCorrelativo;
         const tieneFiltroFechas = Boolean(fechaInicio || fechaFin);
+        const quickIdOcOnly = getQuickIdOcOnly(appliedFilters);
+        const correlativoOnlyInResumen =
+          activeTab === "resumen" &&
+          buscarPorCorrelativo &&
+          !textoBusqueda &&
+          appliedFilters.solicitante.length === 0 &&
+          appliedFilters.responsable.length === 0 &&
+          appliedFilters.validador.length === 0 &&
+          appliedFilters.moneda.length === 0;
 
         let nextRowsByTab: Record<PagoTabKey, PagoRow[]>;
         setLoadingStage(
-          tieneFiltroFechas
+          quickIdOcOnly
+            ? "Consultando orden de compra..."
+            : tieneFiltroFechas
             ? "Consultando órdenes por rango de fechas..."
             : "Consultando órdenes consolidadas por estados..."
         );
 
         const parametros: PlanillaConsultaParametro[] = [];
-        const estadoActivo = activeTab === "resumen"
-          ? "0,6,10,2"
-          : activeTab === "aprobar" ? "0"
-          : activeTab === "reaprobar" ? "6"
-          : activeTab === "hormiga" ? "10"
-          : "2";
-        parametros.push({ nombre: "Estados", valor: estadoActivo, tipo: "string" });
-        // Los tipos de cambio se toman de los filtros principales y se
-        // envían únicamente cuando contienen un valor válido.
-        [
-          ["TipoCambioUSD", tipoCambioUsd],
-          ["TipoCambioEUR", tipoCambioEur],
-          ["TipoCambioDOP", tipoCambioDop],
-          ["TipoCambioCOP", tipoCambioCop],
-        ].forEach(([nombre, valor]) => {
-          const tipoCambioFiltro = parseNumericValue(valor);
-          if (tipoCambioFiltro > 0) {
-            parametros.push({ nombre, valor: String(tipoCambioFiltro), tipo: "decimal" });
+        if (quickIdOcOnly) {
+          // Una búsqueda aislada por IdOC no debe heredar estado ni fechas.
+          parametros.push({ nombre: "IdOc", valor: String(quickIdOcOnly), tipo: "int" });
+        } else {
+          const estadoActivo = activeTab === "aprobar" ? "0"
+            : activeTab === "reaprobar" ? "6"
+            : activeTab === "hormiga" ? "10"
+            : "2";
+          // Total Órdenes muestra todos los estados, por lo que no restringe
+          // la consulta con @Estados.
+          if (activeTab !== "resumen") {
+            parametros.push({ nombre: "Estados", valor: estadoActivo, tipo: "string" });
           }
-        });
+          // Los tipos de cambio se toman de los filtros principales y se
+          // envían únicamente cuando contienen un valor válido.
+          [
+            ["TipoCambioUSD", tipoCambioUsd],
+            ["TipoCambioEUR", tipoCambioEur],
+            ["TipoCambioDOP", tipoCambioDop],
+            ["TipoCambioCOP", tipoCambioCop],
+          ].forEach(([nombre, valor]) => {
+            const tipoCambioFiltro = parseNumericValue(valor);
+            if (tipoCambioFiltro > 0) {
+              parametros.push({ nombre, valor: String(tipoCambioFiltro), tipo: "decimal" });
+            }
+          });
 
-        // El grid consulta únicamente el estado de la pestaña activa. Los
-        // contadores de todas las pestañas se obtienen por separado.
+          if (buscarPorCorrelativo) {
+            parametros.push({ nombre: "Correlativo", valor: String(correlativoNumero), tipo: "int" });
+          }
 
-        if (buscarPorCorrelativo) {
-          parametros.push({ nombre: "Correlativo", valor: String(correlativoNumero), tipo: "int" });
-        }
+          if (fechaInicio && !correlativoOnlyInResumen) {
+            parametros.push({ nombre: "FechaInicio", valor: fechaInicio, tipo: "date" });
+          }
 
-        // La búsqueda rápida se resuelve en Planilla sobre todos los registros,
-        // sin restringirla al rango que estaba cargado antes en el navegador.
-        if (fechaInicio) {
-          parametros.push({ nombre: "FechaInicio", valor: fechaInicio, tipo: "date" });
-        }
-
-        if (fechaFin) {
-          parametros.push({ nombre: "FechaFin", valor: fechaFin, tipo: "date" });
+          if (fechaFin && !correlativoOnlyInResumen) {
+            parametros.push({ nombre: "FechaFin", valor: fechaFin, tipo: "date" });
+          }
         }
 
         // La búsqueda rápida se aplica localmente. Así OT y OC no dependen de
@@ -1419,7 +1452,9 @@ export default function PagosV1Page() {
         pushLoadTrace(`Mapeo de registros: ${(performance.now() - mapStart).toFixed(0)} ms`);
 
         const groupStart = performance.now();
-        nextRowsByTab = groupRowsByEstado(mappedRows);
+        nextRowsByTab = quickIdOcOnly
+          ? { aprobar: [], reaprobar: [], hormiga: [], observadas: [], resumen: [], [activeTab]: mappedRows }
+          : groupRowsByEstado(mappedRows);
         pushLoadTrace(`Agrupación de registros: ${(performance.now() - groupStart).toFixed(0)} ms`);
 
         if (cancelled) {
@@ -1451,7 +1486,7 @@ export default function PagosV1Page() {
       cancelled = true;
       controller.abort();
     };
-  }, [activeTab, appliedFilters.fechaDesde, appliedFilters.fechaHasta, appliedFilters.query, appliedFilters.correlativo, refreshTick, runTrackedRequest]);
+  }, [activeTab, appliedFilters, refreshTick, runTrackedRequest]);
 
   const activeRows = useMemo(
     () => (activeTab === "resumen" ? rowsByTab.resumen : rowsByTab[activeTab]),
@@ -1498,17 +1533,6 @@ export default function PagosV1Page() {
     () => Array.from(new Set(activeRows.map((row) => row.moneda.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
     [activeRows]
   );
-  const estadoOptions = useMemo(
-    () => Array.from(
-      new Map(
-        rowsByTab.resumen
-          .filter((row) => Boolean(row.estadoCodigo))
-          .map((row) => [row.estadoCodigo!, row.estadoNombre || `Estado ${row.estadoCodigo}`])
-      ).entries()
-    ).sort(([left], [right]) => left.localeCompare(right, undefined, { numeric: true })),
-    [rowsByTab.resumen]
-  );
-
   const matchesAppliedFilters = useCallback(
     (row: PagoRow, includeDateFilters: boolean) => {
       const fechaDesde = includeDateFilters ? formatDateParam(appliedFilters.fechaDesde) : "";
@@ -1527,7 +1551,6 @@ export default function PagosV1Page() {
         matchesMultiTextFilter(row.validador, appliedFilters.validador) &&
         matchesMultiTextFilter(row.moneda, appliedFilters.moneda) &&
         matchesTextFilter(row.correlativo, appliedFilters.correlativo) &&
-        (!appliedFilters.estado || row.estadoCodigo === appliedFilters.estado) &&
         (buscarEnTotal || !fechaDesde || rowDate >= fechaDesde) &&
         (buscarEnTotal || !fechaHasta || rowDate <= fechaHasta)
       );
@@ -1535,11 +1558,15 @@ export default function PagosV1Page() {
     [appliedFilters]
   );
 
+  const quickIdOcOnly = useMemo(() => getQuickIdOcOnly(appliedFilters), [appliedFilters]);
+
   const filteredRows = useMemo(() => {
     return activeRows.filter(
-      (row) => matchesAppliedFilters(row, activeTab === "aprobar") && matchesQuickSearch(row, filters.query)
+      (row) =>
+        (quickIdOcOnly || matchesAppliedFilters(row, activeTab === "aprobar")) &&
+        matchesQuickSearch(row, filters.query)
     );
-  }, [activeRows, activeTab, filters.query, matchesAppliedFilters]);
+  }, [activeRows, activeTab, filters.query, matchesAppliedFilters, quickIdOcOnly]);
 
   const groupedRows = useMemo<GroupRow[]>(() => {
     const map = new Map<string, GroupRow>();
@@ -3294,6 +3321,19 @@ export default function PagosV1Page() {
 
                 <div style={styles.quickDateFilters}>
                   <div style={styles.quickDateField}>
+                    <span style={styles.quickDateLabel}>Correlativo</span>
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      inputMode="numeric"
+                      value={filters.correlativo}
+                      onChange={(event) => setFilters((prev) => ({ ...prev, correlativo: event.target.value }))}
+                      placeholder="Correlativo"
+                      style={{ ...styles.quickDateInput, borderColor: currentTheme.border }}
+                    />
+                  </div>
+                  <div style={styles.quickDateField}>
                     <span style={styles.quickDateLabel}>Fecha inicio</span>
                     <input
                       type="date"
@@ -3310,20 +3350,6 @@ export default function PagosV1Page() {
                       onChange={(event) => setFilters((prev) => ({ ...prev, fechaHasta: event.target.value }))}
                       style={{ ...styles.quickDateInput, borderColor: currentTheme.border }}
                     />
-                  </div>
-                  <div style={styles.quickDateField}>
-                    <span style={styles.quickDateLabel}>Estado</span>
-                    <select
-                      value={filters.estado}
-                      onChange={(event) => setFilters((prev) => ({ ...prev, estado: event.target.value }))}
-                      style={{ ...styles.quickDateInput, borderColor: currentTheme.border }}
-                      aria-label="Filtrar por estado"
-                    >
-                      <option value="">Todos los estados</option>
-                      {estadoOptions.map(([codigo, nombre]) => (
-                        <option key={codigo} value={codigo}>{codigo} - {nombre}</option>
-                      ))}
-                    </select>
                   </div>
                   <details style={styles.multiFilter}>
                     <summary style={{ ...styles.multiFilterSummary, borderColor: currentTheme.border }}>

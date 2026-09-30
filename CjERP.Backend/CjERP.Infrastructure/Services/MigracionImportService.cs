@@ -134,19 +134,22 @@ public sealed class MigracionImportService : IMigracionImportService
             return resultado;
         }
 
-        // Migrar conserva temporalmente el flujo anterior.
+        // MIGRAR se procesa en un lote aislado. El flujo anterior borraba
+        // dbo.updimportar completa antes de cargar el Excel, bloqueando a todos
+        // los usuarios y haciendo que incluso archivos pequeños agotaran el timeout.
+        var datosMigrar = CrearTablaMigrar(stagingRows);
         await using var migrationConnection = _sqlCommandFactory.CreateConnection();
         await migrationConnection.OpenAsync(cancellationToken);
-        using var transaction = migrationConnection.BeginTransaction();
-        try
-        {
-            await migrationConnection.ExecuteAsync(new CommandDefinition("DELETE FROM dbo.updimportar;", transaction: transaction, cancellationToken: cancellationToken, commandTimeout: _sqlCommandFactory.DefaultCommandTimeoutSeconds));
-            await migrationConnection.ExecuteAsync(new CommandDefinition("INSERT INTO dbo.updimportar (Ot, Cliente, Proyecto, IdSite, TipoTrabajo, AnoGestion, Moneda, IdMoneda, MontoBck, Porcentaje, StatusAtp, EstatusPap, EstatusOt, Capitalizacion, Correlativo, IdZona, Zona, Work, Empleado, Mes, Ano, Estado_Oc, Nro_Oc, Posicion, MontoOc, MontoLiq, Esting, Plano, Valmet, StatusCw, StatusRini, Fecha, Hora, IdActualizar, Site) VALUES (@Ot,@Cliente,@Proyecto,@IdSite,@TipoTrabajo,@AnoGestion,@Moneda,@IdMoneda,@MontoBck,@Porcentaje,@StatusAtp,@EstatusPap,@EstatusOt,@Capitalizacion,@Correlativo,@IdZona,@Zona,@Work,@Empleado,@Mes,@Ano,@EstadoOc,@NroOc,@Posicion,@MontoOc,@MontoLiq,@Esting,@Plano,@Valmet,@StatusCw,@StatusRini,@Fecha,@Hora,@IdActualizar,@Site);", stagingRows, transaction: transaction, cancellationToken: cancellationToken, commandTimeout: _sqlCommandFactory.DefaultCommandTimeoutSeconds));
-            var resultado = await migrationConnection.QuerySingleAsync<MigracionImportEjecucionResultadoDto>(new CommandDefinition("dbo.sp_MigracionImport_Insertar", transaction: transaction, commandType: CommandType.StoredProcedure, cancellationToken: cancellationToken, commandTimeout: _sqlCommandFactory.DefaultCommandTimeoutSeconds));
-            await transaction.CommitAsync(cancellationToken);
-            return resultado;
-        }
-        catch { await transaction.RollbackAsync(cancellationToken); throw; }
+        var migrationParameters = new DynamicParameters();
+        migrationParameters.Add("@Datos", datosMigrar.AsTableValuedParameter("dbo.Type_MigracionImportInsertarV2"));
+
+        return await migrationConnection.QuerySingleAsync<MigracionImportEjecucionResultadoDto>(
+            new CommandDefinition(
+                "dbo.sp_MigracionImport_Insertar_V2",
+                migrationParameters,
+                commandType: CommandType.StoredProcedure,
+                cancellationToken: cancellationToken,
+                commandTimeout: _sqlCommandFactory.DefaultCommandTimeoutSeconds));
     }
 
     private static DataTable CrearTablaActualizar(IEnumerable<dynamic> filas)
@@ -174,6 +177,68 @@ public sealed class MigracionImportService : IMigracionImportService
                 fila.IdMoneda ?? (object)DBNull.Value,
                 fila.MontoBck ?? (object)DBNull.Value,
                 fila.Porcentaje ?? (object)DBNull.Value);
+        }
+
+        return table;
+    }
+
+    private static DataTable CrearTablaMigrar(IEnumerable<dynamic> filas)
+    {
+        var table = new DataTable();
+        table.Columns.Add("Ot", typeof(string));
+        table.Columns.Add("Cliente", typeof(string));
+        table.Columns.Add("Proyecto", typeof(string));
+        table.Columns.Add("IdSite", typeof(string));
+        table.Columns.Add("TipoTrabajo", typeof(string));
+        table.Columns.Add("AnoGestion", typeof(int));
+        table.Columns.Add("Moneda", typeof(string));
+        table.Columns.Add("IdMoneda", typeof(int));
+        table.Columns.Add("MontoBck", typeof(decimal));
+        table.Columns.Add("Porcentaje", typeof(decimal));
+        table.Columns.Add("StatusAtp", typeof(string));
+        table.Columns.Add("EstatusPap", typeof(string));
+        table.Columns.Add("EstatusOt", typeof(string));
+        table.Columns.Add("Capitalizacion", typeof(string));
+        table.Columns.Add("Correlativo", typeof(int));
+        table.Columns.Add("IdZona", typeof(int));
+        table.Columns.Add("Zona", typeof(string));
+        table.Columns.Add("Work", typeof(string));
+        table.Columns.Add("Empleado", typeof(string));
+        table.Columns.Add("Mes", typeof(int));
+        table.Columns.Add("Ano", typeof(int));
+        table.Columns.Add("EstadoOc", typeof(string));
+        table.Columns.Add("NroOc", typeof(string));
+        table.Columns.Add("Posicion", typeof(string));
+        table.Columns.Add("MontoOc", typeof(decimal));
+        table.Columns.Add("MontoLiq", typeof(decimal));
+        table.Columns.Add("Esting", typeof(string));
+        table.Columns.Add("Plano", typeof(string));
+        table.Columns.Add("Valmet", typeof(string));
+        table.Columns.Add("StatusCw", typeof(string));
+        table.Columns.Add("StatusRini", typeof(string));
+        table.Columns.Add("IdActualizar", typeof(int));
+        table.Columns.Add("Site", typeof(string));
+
+        foreach (var fila in filas)
+        {
+            table.Rows.Add(
+                fila.Ot ?? (object)DBNull.Value, fila.Cliente ?? (object)DBNull.Value,
+                fila.Proyecto ?? (object)DBNull.Value, fila.IdSite ?? (object)DBNull.Value,
+                fila.TipoTrabajo ?? (object)DBNull.Value, fila.AnoGestion ?? (object)DBNull.Value,
+                fila.Moneda ?? (object)DBNull.Value, fila.IdMoneda ?? (object)DBNull.Value,
+                fila.MontoBck ?? (object)DBNull.Value, fila.Porcentaje ?? (object)DBNull.Value,
+                fila.StatusAtp ?? (object)DBNull.Value, fila.EstatusPap ?? (object)DBNull.Value,
+                fila.EstatusOt ?? (object)DBNull.Value, fila.Capitalizacion ?? (object)DBNull.Value,
+                fila.Correlativo ?? (object)DBNull.Value, fila.IdZona ?? (object)DBNull.Value,
+                fila.Zona ?? (object)DBNull.Value, fila.Work ?? (object)DBNull.Value,
+                fila.Empleado ?? (object)DBNull.Value, fila.Mes ?? (object)DBNull.Value,
+                fila.Ano ?? (object)DBNull.Value, fila.EstadoOc ?? (object)DBNull.Value,
+                fila.NroOc ?? (object)DBNull.Value, fila.Posicion ?? (object)DBNull.Value,
+                fila.MontoOc ?? (object)DBNull.Value, fila.MontoLiq ?? (object)DBNull.Value,
+                fila.Esting ?? (object)DBNull.Value, fila.Plano ?? (object)DBNull.Value,
+                fila.Valmet ?? (object)DBNull.Value, fila.StatusCw ?? (object)DBNull.Value,
+                fila.StatusRini ?? (object)DBNull.Value, fila.IdActualizar ?? (object)DBNull.Value,
+                fila.Site ?? (object)DBNull.Value);
         }
 
         return table;
