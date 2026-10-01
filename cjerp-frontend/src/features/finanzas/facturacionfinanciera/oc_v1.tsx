@@ -41,8 +41,24 @@ import { getHttpErrorMessage } from "../../../utils/httpError";
 import { ChevronDown, ChevronUp, ChevronsDown, ChevronsUp, Eye, FileDown, FileText } from "lucide-react";
 import { buildPlanillaConsultaEstadosRequest, consultarGastosPagadosPorId, consultarPlanillaEstados } from "../../../api/planillaConsultaService";
 
-const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "FechaOc", "Cliente", "NombreProyecto", "Site", "TipoTrabajo", "Tarea", "SolicitanteOc", "Comprobante", "CorrelativoPlanilla", "SubtotalOc", "EstadoOc", "PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"];
-const OC_GASTOS_MAX_COLUMNAS_VISIBLES = 22;
+const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "EstadoOcSemaforo", "FechaOc", "Cliente", "NombreProyecto", "Site", "TipoTrabajo", "Tarea", "MonedaOc", "SubtotalOc", "SubtotalPlanilla", "AvanceOc", "DiferenciaSubtotal", "DiferenciaAvanceOc", "PagoNuevo", "CorrelativoPlanilla", "EstadoOc", "SolicitanteOc", "PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"];
+const OC_GASTOS_MAX_COLUMNAS_VISIBLES = 23;
+const COLORES_ESTADO_OC: Record<string, string> = {
+  R: "#D32F2F",
+  A: "#2E7D32",
+  "3": "#1976D2",
+  "2": "#FBC02D",
+  "1": "#F57C00",
+  P: "#FFFFFF",
+};
+const ETIQUETAS_ESTADO_OC: Record<string, string> = {
+  R: "Rechazada",
+  A: "Aprobado",
+  "3": "3era aprobación",
+  "2": "2da aprobación",
+  "1": "1era aprobación",
+  P: "S/O",
+};
 const OC_GASTOS_COLUMNAS_NUMERICAS = new Set([
   "SubtotalOc",
   "PrecioUniOc",
@@ -53,12 +69,19 @@ const OC_GASTOS_COLUMNAS_NUMERICAS = new Set([
 ]);
 const OC_GASTOS_COLUMN_LABELS: Record<string, string> = {
   IdOc: "OC",
+  EstadoOcSemaforo: "Estado OC",
   FechaOc: "Fecha",
   NombreProyecto: "Proyecto",
   SolicitanteOc: "Solicitante OC",
   CorrelativoPlanilla: "Correlativo pago",
   TipoTrabajo: "Tipo trabajo",
-  SubtotalOc: "Subtotal",
+  SubtotalOc: "Subtotal OC",
+  MonedaOc: "Moneda",
+  SubtotalPlanilla: "Subtotal planilla",
+  AvanceOc: "Avance OC",
+  DiferenciaSubtotal: "Saldo subtotal",
+  DiferenciaAvanceOc: "Saldo avance OC",
+  PagoNuevo: "Pago nuevo",
   EstadoOc: "Estado",
   PrimeraValidacion: "1ra validación",
   SegundaValidacion: "2da validación",
@@ -694,6 +717,8 @@ export default function OcV1Page() {
     error: string;
   } | null>(null);
   const [reportePlanillaRows, setReportePlanillaRows] = useState<Record<string, unknown>[]>([]);
+  const [ocGastosSaldosEditables, setOcGastosSaldosEditables] = useState<Record<string, { subtotal?: string; avance?: string }>>({});
+  const [ocGastosSaldoAlerts, setOcGastosSaldoAlerts] = useState<Record<string, string>>({});
   const [estadosOcGastosCatalogo, setEstadosOcGastosCatalogo] = useState<string[]>([]);
   const [solicitantesOcGastosCatalogo, setSolicitantesOcGastosCatalogo] = useState<Array<{ value: string; label: string }>>([]);
   const [clientesOcGastosCatalogo, setClientesOcGastosCatalogo] = useState<Array<{ value: string; label: string }>>([]);
@@ -1169,6 +1194,7 @@ export default function OcV1Page() {
             .filter((value) => Number.isInteger(value) && value > 0)
         )];
         const idOcFiltro = reporteFiltros.idOc.trim();
+        const buscarSoloPorIdOc = Boolean(idOcFiltro);
         const idClienteFiltro = Number(reporteFiltros.cliente);
         const estadosOcSeleccionados = getEstadosOcSeleccionados(reporteFiltros.estado);
         // El nuevo store recibe los filtros múltiples como CSV. Se usan los
@@ -1191,16 +1217,19 @@ export default function OcV1Page() {
             .filter((id) => Number.isInteger(id) && id > 0)
             .map(String)
         )];
-        const request = buildPlanillaConsultaEstadosRequest([
-          ...(reporteFiltros.fechaDesde ? [{ nombre: "FechaInicio", valor: reporteFiltros.fechaDesde, tipo: "date" as const }] : []),
-          ...(reporteFiltros.fechaHasta ? [{ nombre: "FechaFin", valor: reporteFiltros.fechaHasta, tipo: "date" as const }] : []),
-          ...(idOcFiltro ? [{ nombre: "Id", valor: idOcFiltro, tipo: "int" as const }] : []),
-          ...(Number.isInteger(idClienteFiltro) && idClienteFiltro > 0 ? [{ nombre: "IdCliente", valor: String(idClienteFiltro), tipo: "int" as const }] : []),
-          ...(idProyectoFiltro ? [{ nombre: "IdProyecto", valor: idProyectoFiltro, tipo: "string" as const }] : []),
-          ...(idsSolicitanteFiltro.length ? [{ nombre: "IdSolicitante", valor: idsSolicitanteFiltro.join(","), tipo: "string" as const }] : []),
-          ...(responsablesIds.length ? [{ nombre: "IdResponsable", valor: responsablesIds.join(","), tipo: "string" as const }] : []),
-          ...(sitesReporteFiltro.length ? [{ nombre: "IdSite", valor: sitesReporteFiltro.join(","), tipo: "string" as const }] : []),
-        ]);
+        const request = buildPlanillaConsultaEstadosRequest(
+          buscarSoloPorIdOc
+            ? [{ nombre: "Id", valor: idOcFiltro, tipo: "int" as const }]
+            : [
+                ...(reporteFiltros.fechaDesde ? [{ nombre: "FechaInicio", valor: reporteFiltros.fechaDesde, tipo: "date" as const }] : []),
+                ...(reporteFiltros.fechaHasta ? [{ nombre: "FechaFin", valor: reporteFiltros.fechaHasta, tipo: "date" as const }] : []),
+                ...(Number.isInteger(idClienteFiltro) && idClienteFiltro > 0 ? [{ nombre: "IdCliente", valor: String(idClienteFiltro), tipo: "int" as const }] : []),
+                ...(idProyectoFiltro ? [{ nombre: "IdProyecto", valor: idProyectoFiltro, tipo: "string" as const }] : []),
+                ...(idsSolicitanteFiltro.length ? [{ nombre: "IdSolicitante", valor: idsSolicitanteFiltro.join(","), tipo: "string" as const }] : []),
+                ...(responsablesIds.length ? [{ nombre: "IdResponsable", valor: responsablesIds.join(","), tipo: "string" as const }] : []),
+                ...(sitesReporteFiltro.length ? [{ nombre: "IdSite", valor: sitesReporteFiltro.join(","), tipo: "string" as const }] : []),
+              ]
+        );
         request.consulta = "analisis-gastos";
         const response = await consultarPlanillaEstados(request, { timeoutMs: 60000 });
         const normalizarRows = (sourceRows: unknown) => (Array.isArray(sourceRows) ? sourceRows : []).map((row) => {
@@ -1219,6 +1248,11 @@ export default function OcV1Page() {
           return key ? String(row[key] ?? "").trim() : "";
         };
         let rows = normalizarRows(response?.rows);
+        if (buscarSoloPorIdOc) {
+          setReportePlanillaRows(rows.filter((row) => getReporteRowIdOc(row) === idOcFiltro));
+          setReportePlanillaColumns(OC_GASTOS_COLUMNAS_INICIALES);
+          return;
+        }
         // El catálogo de solicitantes no debe quedar limitado a la selección
         // actual. Se consulta el mismo conjunto de filtros, omitiendo solo
         // IdSolicitante, para poder elegir más de un solicitante.
@@ -3541,6 +3575,7 @@ export default function OcV1Page() {
                           SegundaValidacion: ["SegundaValidacion", "IdAprobador2"],
                           TerceraValidacion: ["TerceraValidacion", "IdAprobador3"],
                           CorrelativoPlanilla: ["CorrelativoPlanilla"],
+                          MonedaOc: ["MonedaOc", "MonedaPlanilla", "Moneda"],
                           EstadoPlanilla: ["EstadoPlanilla", "ValidacionResponsable", "EstadoRelacion"],
                         };
                         const names = aliases[column] || [column];
@@ -3548,6 +3583,15 @@ export default function OcV1Page() {
                           const precio = Number(row[Object.keys(row).find((key) => key.toLowerCase() === "preciounioc") ?? ""] ?? 0);
                           const cantidad = Number(row[Object.keys(row).find((key) => key.toLowerCase() === "cantoc") ?? ""] ?? 0);
                           return precio && cantidad ? (precio * cantidad).toFixed(2) : "—";
+                        }
+                        if (column === "AvanceOc") {
+                          const getMonto = (nombre: string) => {
+                            const key = Object.keys(row).find((item) => item.toLowerCase() === nombre.toLowerCase());
+                            return key ? toNumber(row[key] as string | number | null | undefined) : 0;
+                          };
+                          const subtotalOc = getMonto("SubtotalOc");
+                          const subtotalPlanilla = getMonto("SubtotalPlanilla");
+                          return subtotalOc > 0 ? String(subtotalPlanilla / subtotalOc) : "0";
                         }
                         const found = names
                           .map((name) => Object.keys(row).find((key) => key.toLowerCase() === name.toLowerCase()))
@@ -3565,11 +3609,76 @@ export default function OcV1Page() {
                         }
                         return String(rawValue ?? "—");
                       };
-                      const filaRechazada = read("EstadoPlanilla").trim().toUpperCase() === "RECHAZADO" || Number(read("IdEstadoOc")) === 6;
+                      const subtotalOcFila = Math.max(0, toNumber(read("SubtotalOc")));
+                      const subtotalPlanillaFila = Math.max(0, toNumber(read("SubtotalPlanilla")));
+                      const saldoSubtotalFila = Math.max(0, subtotalOcFila - subtotalPlanillaFila);
+                      const avanceOcFila = Math.min(1, Math.max(0, toNumber(read("AvanceOc"))));
+                      const saldoAvanceOcFila = subtotalOcFila > 0 ? Math.max(0, (1 - avanceOcFila) * 100) : 0;
+                      const saldoEditableKey = [
+                        read("IdOc"),
+                        read("CorrelativoPlanilla"),
+                        read("IdSite"),
+                        index,
+                      ].join("|");
+                      const registrarEdicionSaldo = (campo: "subtotal" | "avance", valor: string) => {
+                        setOcGastosSaldosEditables((actual) => ({
+                          ...actual,
+                          [saldoEditableKey]: { ...actual[saldoEditableKey], [campo]: valor },
+                        }));
+                      };
+                      const confirmarSaldoEditable = (campo: "subtotal" | "avance", valor: string) => {
+                        if (valor !== "" && (!Number.isFinite(Number(valor)) || Number(valor) < 0)) return;
+                        if (valor === "") {
+                          setOcGastosSaldoAlerts((actual) => {
+                            const siguiente = { ...actual };
+                            delete siguiente[`${saldoEditableKey}:${campo}`];
+                            return siguiente;
+                          });
+                          setOcGastosSaldosEditables((actual) => ({
+                            ...actual,
+                            [saldoEditableKey]: { ...actual[saldoEditableKey], [campo]: "" },
+                          }));
+                          return;
+                        }
+
+                        const numero = Number(valor);
+                        const excedeSaldo = campo === "subtotal"
+                          ? numero > saldoSubtotalFila
+                          : numero > saldoAvanceOcFila;
+                        if (excedeSaldo) {
+                          const mensajeExceso = campo === "subtotal"
+                            ? `No se puede registrar ${formatMoney(numero)}. El saldo subtotal disponible es ${formatMoney(saldoSubtotalFila)}.`
+                            : `No se puede registrar ${numero.toFixed(2)}%. El saldo de avance disponible es ${saldoAvanceOcFila.toFixed(2)}%.`;
+                          setOcGastosSaldoAlerts((actual) => ({
+                            ...actual,
+                            [`${saldoEditableKey}:${campo}`]: mensajeExceso,
+                          }));
+                        } else {
+                          setOcGastosSaldoAlerts((actual) => {
+                            const siguiente = { ...actual };
+                            delete siguiente[`${saldoEditableKey}:${campo}`];
+                            return siguiente;
+                          });
+                        }
+                        const saldoSubtotal = campo === "subtotal"
+                          ? Math.min(numero, saldoSubtotalFila)
+                          : Math.min((numero * subtotalOcFila) / 100, saldoSubtotalFila);
+                        const saldoAvance = subtotalOcFila > 0
+                          ? Math.min((saldoSubtotal * 100) / subtotalOcFila, saldoAvanceOcFila)
+                          : 0;
+                        setOcGastosSaldosEditables((actual) => ({
+                          ...actual,
+                          [saldoEditableKey]: {
+                            ...actual[saldoEditableKey],
+                            subtotal: saldoSubtotal.toFixed(2),
+                            avance: saldoAvance.toFixed(2),
+                          },
+                        }));
+                      };
 
                       return (
-                        <tr key={`pla-${read("IdOc") || "sin-oc"}-${read("CorrelativoPlanilla")}-${read("IdSite")}-${read("PrecioUniOc")}-${read("CantOc")}-${index}`} style={{ ...styles.tr, ...(filaRechazada ? { background: "#fce7f3" } : {}) }}>
-                          <td style={{ ...styles.td, width: 52, minWidth: 52, padding: "4px 2px", whiteSpace: "nowrap", lineHeight: 0, position: "sticky", left: 0, zIndex: 2, background: filaRechazada ? "#fce7f3" : "#fff" }}>
+                        <tr key={`pla-${read("IdOc") || "sin-oc"}-${read("CorrelativoPlanilla")}-${read("IdSite")}-${read("PrecioUniOc")}-${read("CantOc")}-${index}`} style={styles.tr}>
+                          <td style={{ ...styles.td, width: 52, minWidth: 52, padding: "4px 2px", whiteSpace: "nowrap", lineHeight: 0, position: "sticky", left: 0, zIndex: 2, background: "#fff" }}>
                             <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
                             <button
                               type="button"
@@ -3595,8 +3704,23 @@ export default function OcV1Page() {
                           </td>
                           {reportePlanillaColumns.map((column, columnIndex) => {
                             const rawValue = read(column);
+                            const esSaldoSubtotal = column === "DiferenciaSubtotal";
+                            const esSaldoAvance = column === "DiferenciaAvanceOc";
+                            const esPagoNuevo = column === "PagoNuevo";
+                            const esEstadoOcSemaforo = column === "EstadoOcSemaforo";
+                            const estadoOcSemaforo = String(rawValue ?? "").trim().toUpperCase();
+                            const colorEstadoOc = COLORES_ESTADO_OC[estadoOcSemaforo];
+                            const estadoOcSemaforoDisplay = estadoOcSemaforo === "P" ? "S/O" : estadoOcSemaforo;
+                            const saldoSubtotalValue = ocGastosSaldosEditables[saldoEditableKey]?.subtotal ?? saldoSubtotalFila.toFixed(2);
+                            const saldoAvanceValue = ocGastosSaldosEditables[saldoEditableKey]?.avance ?? saldoAvanceOcFila.toFixed(2);
+                            const saldoSubtotalAlert = ocGastosSaldoAlerts[`${saldoEditableKey}:subtotal`];
+                            const saldoAvanceAlert = ocGastosSaldoAlerts[`${saldoEditableKey}:avance`];
                             const value = OC_GASTOS_COLUMNAS_NUMERICAS.has(column)
                               ? formatOcGastosNumber(rawValue)
+                              : column === "AvanceOc"
+                                ? formatPercent(Number(rawValue))
+                              : esSaldoSubtotal || esSaldoAvance || esPagoNuevo
+                                ? ""
                               : column.toLowerCase() === "porcentajeconsumidooc" && Number.isFinite(Number(rawValue))
                                 ? Number(rawValue).toFixed(2)
                                 : rawValue;
@@ -3607,8 +3731,62 @@ export default function OcV1Page() {
                               : [];
 
                             return (
-                              <td key={`${index}-${column}`} style={{ ...styles.td, width: 110, minWidth: 80, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer", ...(columnIndex < 4 ? { position: "sticky", left: 52 + columnIndex * 110, zIndex: 2, background: filaRechazada ? "#fce7f3" : "#fff" } : {}) }} title={value} onClick={(event) => { const cell = event.currentTarget; if (cell.style.whiteSpace === "normal") cell.style.whiteSpace = "nowrap"; else if (cell.scrollWidth > cell.clientWidth) cell.style.whiteSpace = "normal"; }}>
-                                {esValidacion ? <ValidacionEstadoBadge value={value} /> : esPorcentajeConsumido ? <PorcentajeConsumidoBar value={Number(rawValue)} /> : correlativosPlanilla.length ? (
+                              <td key={`${index}-${column}`} style={{ ...styles.td, width: 110, minWidth: 80, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer", ...(columnIndex < 4 ? { position: "sticky", left: 52 + columnIndex * 110, zIndex: 2, background: esEstadoOcSemaforo && colorEstadoOc ? colorEstadoOc : "#fff", ...(esEstadoOcSemaforo && colorEstadoOc ? { color: ["2", "P"].includes(estadoOcSemaforo) ? "#1F2937" : "#fff", textAlign: "center", fontWeight: 700 } : {}) } : esEstadoOcSemaforo && colorEstadoOc ? { background: colorEstadoOc, color: ["2", "P"].includes(estadoOcSemaforo) ? "#1F2937" : "#fff", textAlign: "center", fontWeight: 700 } : {}) }} title={esEstadoOcSemaforo ? (ETIQUETAS_ESTADO_OC[estadoOcSemaforo] ?? value) : value} onClick={(event) => { const cell = event.currentTarget; if (cell.style.whiteSpace === "normal") cell.style.whiteSpace = "nowrap"; else if (cell.scrollWidth > cell.clientWidth) cell.style.whiteSpace = "normal"; }}>
+                                {esEstadoOcSemaforo ? estadoOcSemaforoDisplay : esSaldoSubtotal ? (
+                                  <div style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 116 }}>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max={saldoSubtotalFila}
+                                    step="0.01"
+                                    value={saldoSubtotalValue}
+                                    onClick={(event) => event.stopPropagation()}
+                                    onChange={(event) => registrarEdicionSaldo("subtotal", event.target.value)}
+                                    onBlur={(event) => confirmarSaldoEditable("subtotal", event.target.value)}
+                                    onKeyDown={(event) => {
+                                      if (event.key === "Enter") {
+                                        event.preventDefault();
+                                        event.currentTarget.blur();
+                                      }
+                                    }}
+                                    title={`Máximo disponible: ${formatMoney(saldoSubtotalFila)}`}
+                                    style={{ width: "100%", minWidth: 96, height: 30, border: "1px solid #CBD5E1", borderRadius: 6, padding: "0 6px", boxSizing: "border-box", fontSize: 12 }}
+                                  />
+                                  {saldoSubtotalAlert ? <span role="alert" title={saldoSubtotalAlert} onClick={(event) => event.stopPropagation()} style={{ color: "#D97706", fontSize: 16, lineHeight: 1, cursor: "help" }}>⚠</span> : null}
+                                  </div>
+                                ) : esSaldoAvance ? (
+                                  <div style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 116 }}>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max={saldoAvanceOcFila}
+                                    step="0.01"
+                                    value={saldoAvanceValue}
+                                    onClick={(event) => event.stopPropagation()}
+                                    onChange={(event) => registrarEdicionSaldo("avance", event.target.value)}
+                                    onBlur={(event) => confirmarSaldoEditable("avance", event.target.value)}
+                                    onKeyDown={(event) => {
+                                      if (event.key === "Enter") {
+                                        event.preventDefault();
+                                        event.currentTarget.blur();
+                                      }
+                                    }}
+                                    title={`Máximo disponible: ${saldoAvanceOcFila.toFixed(2)}%`}
+                                    style={{ width: "100%", minWidth: 96, height: 30, border: "1px solid #CBD5E1", borderRadius: 6, padding: "0 6px", boxSizing: "border-box", fontSize: 12 }}
+                                  />
+                                  {saldoAvanceAlert ? <span role="alert" title={saldoAvanceAlert} onClick={(event) => event.stopPropagation()} style={{ color: "#D97706", fontSize: 16, lineHeight: 1, cursor: "help" }}>⚠</span> : null}
+                                  </div>
+                                ) : esPagoNuevo ? (
+                                  <button
+                                    type="button"
+                                    onClick={(event) => event.stopPropagation()}
+                                    title="La creación de pago nuevo estará disponible próximamente."
+                                    aria-label={`Pago nuevo para OC ${read("IdOc")}`}
+                                    style={{ border: "1px solid #0F766E", background: "#ECFDF5", color: "#0F766E", borderRadius: 6, padding: "6px 8px", fontSize: 11, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
+                                  >
+                                    Pago nuevo
+                                  </button>
+                                ) : esValidacion ? <ValidacionEstadoBadge value={value} /> : esPorcentajeConsumido ? <PorcentajeConsumidoBar value={Number(rawValue)} /> : correlativosPlanilla.length ? (
                                   <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 5 }}>
                                     {correlativosPlanilla.map((correlativo) => (
                                       <a

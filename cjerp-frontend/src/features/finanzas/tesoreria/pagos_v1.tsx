@@ -93,6 +93,7 @@ type PagoRow = {
   detalle: string;
   idOc?: string;
   idEstadoOc?: number;
+  estadoOcSemaforo?: string;
   documento: string;
   planillaRow?: Record<string, unknown>;
 };
@@ -103,6 +104,24 @@ type TabTheme = {
   soft: string;
   border: string;
   icon: React.ReactNode;
+};
+
+const COLORES_ESTADO_OC: Record<string, string> = {
+  R: "#D32F2F",
+  A: "#2E7D32",
+  "3": "#1976D2",
+  "2": "#FBC02D",
+  "1": "#F57C00",
+  P: "#FFFFFF",
+};
+
+const ETIQUETAS_ESTADO_OC: Record<string, string> = {
+  R: "Rechazada",
+  A: "Aprobado",
+  "3": "3era aprobación",
+  "2": "2da aprobación",
+  "1": "1era aprobación",
+  P: "S/O",
 };
 
 type RechazoModalState = {
@@ -752,6 +771,7 @@ function mapPlanillaConsultaRowToPagoRow(
     detalle: getRecordString(row, "Detalle", "detalle"),
     idOc: getRecordString(row, "IdOc", "IdOC", "Idoc", "OC", "Oc"),
     idEstadoOc: getRecordNumber(row, "IdEstadoOc", "idEstadoOc") ?? undefined,
+    estadoOcSemaforo: getRecordString(row, "EstadoOcSemaforo", "estadoOcSemaforo", "EstadoOCSemaforo"),
     documento: getRecordString(row, "Documento", "documento"),
     planillaRow: row,
   };
@@ -2519,7 +2539,7 @@ export default function PagosV1Page() {
   const isResumenTab = activeTab === "resumen";
   const showEstadoOc = activeTab === "resumen";
   const showTotalSitio = canUseTab("reaprobar");
-  const tableColSpan = 22 + (showTotalSitio ? 1 : 0) + (showEstadoOc ? 1 : 0);
+  const tableColSpan = 23 + (showTotalSitio ? 1 : 0) + (showEstadoOc ? 1 : 0);
   const stickyColumnWidths = [108, 94];
   const stickyColumnLefts = stickyColumnWidths.reduce<number[]>((acc, _width, index) => {
     const previousLeft = acc[index - 1] ?? 0;
@@ -3626,6 +3646,7 @@ export default function PagosV1Page() {
                     <th data-sort="tarea" style={{ ...styles.th, width: 130, cursor: "pointer" }}>Tarea</th>
                     <th data-sort="responsable" style={{ ...styles.th, width: 110, cursor: "pointer" }}>Responsable</th>
                     <th data-sort="idOc" style={{ ...styles.th, width: 88, cursor: "pointer" }}>OC</th>
+                    <th style={{ ...styles.th, width: 78 }}>Estado OC</th>
                     <th data-sort="subtotal" style={{ ...styles.th, width: 130, cursor: "pointer" }}>Subtotal</th>
                     <th data-sort="igv" style={{ ...styles.th, width: 90, cursor: "pointer" }}>IGV</th>
                     <th data-sort="total" style={{ ...styles.th, width: 100, cursor: "pointer" }}>Total</th>
@@ -3721,11 +3742,12 @@ export default function PagosV1Page() {
                               const hasMontoBckExceeded =
                                 (row.totalSubtotalPorMoneda ?? 0) > (row.totalMontoBckPorMoneda ?? 0);
                               const isOcRechazada = row.idEstadoOc === 6;
-                              const rowBackground = isOcRechazada
-                                ? (isSelected ? "#FDE68A" : "#FFFBEB")
-                                : hasMontoBckExceeded
+                              const rowBackground = hasMontoBckExceeded
                                   ? (isSelected ? "#FECACA" : "#FFF1F2")
                                   : (isSelected ? "#DBEAFE" : "#FFFFFF");
+                              const estadoOcSemaforo = row.estadoOcSemaforo?.trim().toUpperCase() ?? "";
+                              const colorEstadoOc = COLORES_ESTADO_OC[estadoOcSemaforo];
+                              const estadoOcSemaforoDisplay = estadoOcSemaforo === "P" ? "S/O" : estadoOcSemaforo;
                               const totalMontoBckPorMoneda = row.totalMontoBckPorMoneda ?? 0;
                               const totalMontoVisiblePorMoneda = row.totalMontoVisiblePorMoneda ?? 0;
                               const totalGastado = row.totalPagadoConvertidoSoles ?? 0;
@@ -3792,6 +3814,18 @@ export default function PagosV1Page() {
                                     style={{ ...styles.td, color: "#2563EB", cursor: "pointer", textDecoration: "underline" }}
                                   >
                                     {row.idOc || row.documento || "-"}
+                                  </td>
+                                  <td
+                                    title={ETIQUETAS_ESTADO_OC[estadoOcSemaforo] ?? "Sin estado de OC"}
+                                    style={{
+                                      ...styles.td,
+                                      background: colorEstadoOc ?? "#FFFFFF",
+                                      color: ["2", "P"].includes(estadoOcSemaforo) ? "#1F2937" : colorEstadoOc ? "#FFFFFF" : undefined,
+                                      textAlign: "center",
+                                      fontWeight: 800,
+                                    }}
+                                  >
+                                    {estadoOcSemaforoDisplay || "-"}
                                   </td>
                                   <td title={formatCurrency(row.subtotal, row.moneda)} style={{ ...styles.td, fontWeight: 900 }}>{formatCurrency(row.subtotal, row.moneda)}</td>
                                   <td title={formatCurrency(row.igv, row.moneda)} style={styles.td}>{formatCurrency(row.igv, row.moneda)}</td>
