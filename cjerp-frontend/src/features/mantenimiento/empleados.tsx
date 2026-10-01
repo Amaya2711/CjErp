@@ -308,6 +308,20 @@ function canDeleteEmpleado(tab: EmpleadoTab): boolean {
   return tab === "pendientes" ? false : true;
 }
 
+function deduplicateEmployees(items: EmpleadoCrudItem[]): EmpleadoCrudItem[] {
+  const ids = new Set<number>();
+
+  return items.filter((item) => {
+    const idEmpleado = Number(item.idEmpleado);
+    if (!Number.isFinite(idEmpleado) || idEmpleado <= 0 || ids.has(idEmpleado)) {
+      return false;
+    }
+
+    ids.add(idEmpleado);
+    return true;
+  });
+}
+
 export default function MantenimientoEmpleadosPage() {
   const [items, setItems] = useState<EmpleadoCrudItem[]>([]);
   const [search, setSearch] = useState("");
@@ -470,13 +484,13 @@ export default function MantenimientoEmpleadosPage() {
     };
   }, [filteredItems.length]);
 
-  const loadEmployees = async () => {
+  const loadEmployees = async (nombreEmpleado = search) => {
     setLoading(true);
     setError("");
 
     try {
-      const empleados = await empleadosCrudService.listar();
-      setItems(empleados);
+      const empleados = await empleadosCrudService.listar(nombreEmpleado.trim() || undefined);
+      setItems(deduplicateEmployees(empleados));
     } catch (err) {
       setError(getHttpErrorMessage(err, "No se pudo cargar el mantenimiento de empleados."));
     } finally {
@@ -506,7 +520,14 @@ export default function MantenimientoEmpleadosPage() {
   };
 
   useEffect(() => {
-    void loadEmployees();
+    const timer = window.setTimeout(() => {
+      void loadEmployees(search);
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
     void loadLookups();
   }, []);
 
