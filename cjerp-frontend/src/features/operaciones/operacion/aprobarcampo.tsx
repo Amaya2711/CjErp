@@ -93,6 +93,10 @@ type ColumnFilterDropdownProps = {
 const visibleColumns = [
   { key: "responsable", label: "Responsable", width: "180px" },
   { key: "nombreempleado", label: "Empleado", width: "200px" },
+  { key: "empresa", label: "Empresa", width: "180px" },
+  { key: "cliente", label: "Cliente", width: "180px" },
+  { key: "area", label: "Área", width: "160px" },
+  { key: "ubicacion", label: "Ubicación", width: "180px" },
   { key: "estado", label: "Estado", width: "140px" },
   { key: "fechaasistencia", label: "Fecha", width: "140px" },
   { key: "hora", label: "Ingreso", width: "130px" },
@@ -509,8 +513,6 @@ export default function AprobarCampoPage() {
   const [responsablesModalOpen, setResponsablesModalOpen] = useState(false);
   const [responsablesResumenRows, setResponsablesResumenRows] = useState<AprobarCampoRow[]>([]);
   const [responsablesResumenLoading, setResponsablesResumenLoading] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
   const [openColumnFilterKey, setOpenColumnFilterKey] = useState<string | null>(null);
   const [columnFilterSearch, setColumnFilterSearch] = useState("");
   const [filtrosColumnas, setFiltrosColumnas] = useState<Record<string, string[]>>({});
@@ -671,20 +673,8 @@ export default function AprobarCampoPage() {
     return result;
   }, [filtrosColumnas, rows, search, searchFields, sort, incluirDiaActual]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
-  const pagedRows = useMemo(() => {
-    const safePage = Math.min(currentPage, totalPages);
-    const start = (safePage - 1) * pageSize;
-    return filteredRows.slice(start, start + pageSize);
-  }, [currentPage, filteredRows, pageSize, totalPages]);
-
-  const allPagedRowsSelected = pagedRows.length > 0 && pagedRows.every((row) => selectedRecordKeys.has(buildRowKey(row)));
-
-  useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
-    }
-  }, [currentPage, totalPages]);
+  const allFilteredRowsSelected =
+    filteredRows.length > 0 && filteredRows.every((row) => selectedRecordKeys.has(buildRowKey(row)));
 
   // Total: siempre la cantidad de registros cargados (sin filtros)
   // Filtrados: solo los visibles tras aplicar filtros
@@ -709,7 +699,6 @@ export default function AprobarCampoPage() {
       const nextRows = Array.isArray(data.rows) ? data.rows : [];
       setRows(nextRows);
       setAvailableColumns(Array.isArray(data.columns) ? data.columns : []);
-      setCurrentPage(1);
       // Actualizar el total solo cuando se cargan datos nuevos
       setTotalRows(nextRows.length);
     } catch (err) {
@@ -1005,9 +994,6 @@ export default function AprobarCampoPage() {
     setMediaViewer({ type: "image", title, url: finalUrl });
   };
 
-  const startItem = filteredRows.length === 0 ? 0 : (Math.min(currentPage, totalPages) - 1) * pageSize + 1;
-  const endItem = Math.min(Math.min(currentPage, totalPages) * pageSize, filteredRows.length);
-
   return (
     <section style={styles.page}>
       
@@ -1124,11 +1110,11 @@ export default function AprobarCampoPage() {
                   <label style={styles.selectionHeaderLabel}>
                     <input
                       type="checkbox"
-                      checked={allPagedRowsSelected}
+                      checked={allFilteredRowsSelected}
                       onChange={(event) => {
                         setSelectedRecordKeys((current) => {
                           const next = new Set(current);
-                          pagedRows.forEach((row) => {
+                          filteredRows.forEach((row) => {
                             const key = buildRowKey(row);
                             if (event.target.checked) next.add(key);
                             else next.delete(key);
@@ -1136,7 +1122,7 @@ export default function AprobarCampoPage() {
                           return next;
                         });
                       }}
-                      aria-label="Seleccionar todos los registros de la página"
+                      aria-label="Seleccionar todos los registros filtrados"
                     />
                     Acciones
                   </label>
@@ -1198,14 +1184,14 @@ export default function AprobarCampoPage() {
                     Cargando aprobaciones de campo...
                   </td>
                 </tr>
-              ) : pagedRows.length === 0 ? (
+              ) : filteredRows.length === 0 ? (
                 <tr>
                   <td colSpan={visibleColumns.length + 5} style={styles.emptyCell}>
                     No hay registros para los filtros seleccionados.
                   </td>
                 </tr>
               ) : (
-                pagedRows.map((row) => {
+                filteredRows.map((row) => {
                   const ingresoActionEnabled =
                     canApproveIngreso(row) &&
                     Boolean(getValorIngreso(row)) &&
@@ -1358,46 +1344,6 @@ export default function AprobarCampoPage() {
           </table>
         </div>
 
-        <div style={styles.paginationBar}>
-          <div style={styles.paginationSummary}>
-            Mostrando {startItem}-{endItem} de {filteredRows.length} registros
-          </div>
-          <div style={styles.paginationControls}>
-            <select
-              value={pageSize}
-              onChange={(event) => {
-                setPageSize(Number(event.target.value));
-                setCurrentPage(1);
-              }}
-              style={styles.select}
-            >
-              {[10, 20, 50, 100].map((size) => (
-                <option key={size} value={size}>
-                  {size} por página
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              style={styles.secondaryButton}
-              disabled={currentPage <= 1}
-              onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-            >
-              Anterior
-            </button>
-            <span style={styles.pageNumber}>
-              Página {Math.min(currentPage, totalPages)} de {totalPages}
-            </span>
-            <button
-              type="button"
-              style={styles.secondaryButton}
-              disabled={currentPage >= totalPages}
-              onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
-            >
-              Siguiente
-            </button>
-          </div>
-        </div>
       </div>
 
       <SidePanelForm
@@ -2102,35 +2048,6 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 0,
     fontWeight: 700,
     textDecoration: "underline",
-  },
-  paginationBar: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 14,
-    flexWrap: "wrap",
-    flexShrink: 0,
-  },
-  paginationSummary: {
-    color: "#64748B",
-    fontSize: 13,
-  },
-  paginationControls: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    flexWrap: "wrap",
-  },
-  pageNumber: {
-    color: "#334155",
-    fontWeight: 700,
-    fontSize: 13,
-  },
-  select: {
-    border: "1px solid #CBD5E1",
-    borderRadius: 12,
-    padding: "10px 12px",
-    background: "#FFFFFF",
   },
   formGrid: {
     display: "grid",

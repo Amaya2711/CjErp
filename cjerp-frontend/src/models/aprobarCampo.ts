@@ -4,6 +4,10 @@ export type AprobarCampoRow = Record<string, unknown> & {
   idempleado?: number;
   idEmpleado?: number;
   responsable?: string;
+  empresa?: string;
+  cliente?: string;
+  area?: string;
+  ubicacion?: string;
   empleado?: string;
   nombreempleado?: string;
   nombreEmpleado?: string;
