@@ -29,6 +29,7 @@ import {
   rechazarPlanilla,
 } from "../../../api/planillaConsultaService";
 import type {
+  AprobacionResultadoDto,
   PlanillaConsultaEstadosRequest,
   PlanillaConsultaParametro,
 } from "../../../models/planillaConsulta";
@@ -2623,7 +2624,9 @@ export default function PagosV1Page() {
     if (label === "Re-aprobar") {
       setAprobarConfirm({
         rowsCount: selectedRows.length,
-        codEstado: 1,
+        // El SP interpreta 6 como segunda aprobación y realiza la
+        // transición interna hacia el estado final 1.
+        codEstado: 6,
         titulo: "Re-aprobar",
         mensaje: `¿Desea re-aprobar ${selectedRows.length} registro(s) seleccionado(s)?`,
       });
@@ -2774,6 +2777,17 @@ export default function PagosV1Page() {
     setRefreshTick((current) => current + 1);
   };
 
+  const resumirNoProcesados = (resultados: AprobacionResultadoDto[]) => {
+    const noProcesados = resultados.filter((resultado) => !resultado.exito);
+    if (!noProcesados.length) return "";
+    const detalle = noProcesados
+      .slice(0, 5)
+      .map((resultado) => `${resultado.correlativo}: ${resultado.mensaje || "no procesado por el procedimiento"}`)
+      .join(" · ");
+    const restantes = noProcesados.length > 5 ? ` · y ${noProcesados.length - 5} más` : "";
+    return ` Motivos: ${detalle}${restantes}.`;
+  };
+
   const handleAprobarSeleccionados = async (
     idRegularizar: number = 0,
     omitirConfirmacion: boolean = false,
@@ -2817,12 +2831,16 @@ export default function PagosV1Page() {
       const resumen = response?.resumen;
       const mensajes: string[] = [];
 
+      if (resumen?.procesados != null) {
+        mensajes.push(`${resumen.procesados} de ${selectedRows.length} registro(s) procesado(s).`);
+      }
+
       if (resumen?.enviadosSegundaAprobacion && resumen.enviadosSegundaAprobacion > 0) {
         mensajes.push(`${resumen.enviadosSegundaAprobacion} registro(s) fueron enviados a segunda aprobación.`);
       }
 
       if (resumen?.noProcesados && resumen.noProcesados > 0) {
-        mensajes.push(`${resumen.noProcesados} registro(s) no pudieron ser procesados.`);
+        mensajes.push(`${resumen.noProcesados} registro(s) no pudieron ser procesados.${resumirNoProcesados(response?.detalle ?? [])}`);
       }
 
       if (mensajes.length === 0) {
@@ -3537,6 +3555,23 @@ export default function PagosV1Page() {
             </div>
           </div>
         </section>
+        {message ? (
+          <div
+            role="status"
+            style={{
+              margin: "10px 0",
+              padding: "10px 14px",
+              border: `1px solid ${currentTheme.border}`,
+              borderRadius: 10,
+              background: "#FFFFFF",
+              color: "#334155",
+              fontSize: 13,
+              lineHeight: 1.45,
+            }}
+          >
+            {message}
+          </div>
+        ) : null}
 
           <section
             style={{

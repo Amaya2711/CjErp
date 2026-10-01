@@ -18,7 +18,7 @@ Estado 0  "Pendiente 1ª aprobación"   (estado inicial lo fija el SP: PV)
   │   CodEstado por defecto 10; CodEmpleado==77 fuerza 1; el SP decide 2ª aprobación por LimiteSegundaAprobacion (PV)
   ├─► Observar  (CodEstado=2)  → Estado 2 "Observada"   ── subsanar ─► 0
   ├─► Rechazar  → POST …/{correlativo}/rechazar → sp_Planilla_ActualizarEstado(3) → Estado 3 "Rechazado" (fin)
-  ├─► Estado 6 "Re-aprobar" → Re-aprobar solicita estado 1; estado 10 "Hormiga" → Aprobar solicita estado 1
+  ├─► Estado 6 "Re-aprobar" → Re-aprobar envía CodEstado=6 y el SP lo mueve a estado 1; estado 10 "Hormiga" → Aprobar solicita estado 1
   ▼
 Estado 1  "Aprobado → Revisión (tesorería)"
   │ pagartesoreria.tsx / PagoEtapaForm.tsx → POST /api/tesoreria/pagos/acciones

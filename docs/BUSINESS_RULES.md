@@ -12,7 +12,7 @@
 | 3 | Rechazado | `TesoreriaGastosController.cs` ~338, `PlanillaConsultaController.cs` ~531 |
 | 4 | **Pagado** (filtro "pagado" en SPs de OC/OT/conciliación) | `PagoTesoreriaService.PagarAsync` |
 | 5 | Administrativo | Workflow; estado por defecto GET /tesoreria/pagos |
-| 6 | Re-aprobar; la acción Re-aprobar la envía a estado 1 | `pagos_v1.tsx` |
+| 6 | Re-aprobar; la acción envía `CodEstado=6` y el SP la transforma a estado 1 | `sp_Planilla_ProcesarAprobacionMasiva` |
 | 7 | Observada en tesorería | Workflow |
 | 8 | Programado | Workflow |
 | 9 | Contabilidad (revisado) | Workflow |
