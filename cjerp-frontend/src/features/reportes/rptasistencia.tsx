@@ -134,6 +134,7 @@ type EmployeeGridSortKey =
   | `state:${string}`;
 
 type GerencialDetailFilters = {
+  nombreEmpleado: string[];
   responsable: string[];
   cliente: string[];
   proyecto: string[];
@@ -170,7 +171,7 @@ type RptAsistenciaReturnState = {
   selectedEstados?: string[];
   frontendFilters?: Partial<Record<SelectFilterKey, string>>;
   gerencialQuickFilters?: Partial<GerencialQuickFilters & { topEmpleado?: string | null }>;
-  gerencialDetailFilters?: Partial<GerencialDetailFilters & { nombreEmpleado?: string[] }>;
+  gerencialDetailFilters?: Partial<GerencialDetailFilters>;
   cuadrosDetailFilter?: Partial<{ area: string | null; estadoMarcacion: string | null }>;
 };
 
@@ -787,7 +788,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
     key: "fecha",
     direction: "asc",
   });
-  const [gerencialDetailFilters, setGerencialDetailFilters] = useState<GerencialDetailFilters & { nombreEmpleado?: string[] }>({
+  const [gerencialDetailFilters, setGerencialDetailFilters] = useState<GerencialDetailFilters>({
     responsable: [],
     cliente: [],
     proyecto: [],
@@ -1432,6 +1433,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
 
   const gerencialDetailFilterOptions = useMemo(
     () => ({
+      nombreEmpleado: buildValueOptions(filteredRows.map((item) => item.nombreEmpleado || "Sin empleado")).filter((option) => option !== ALL_OPTION),
       responsable: buildValueOptions(filteredRows.map((item) => item.responsable || "Sin responsable")).filter((option) => option !== ALL_OPTION),
       cliente: buildValueOptions(filteredRows.map((item) => item.cliente || "Sin cliente")).filter((option) => option !== ALL_OPTION),
       proyecto: buildValueOptions(filteredRows.map((item) => item.proyecto || "Sin proyecto")).filter((option) => option !== ALL_OPTION),
@@ -2065,6 +2067,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
     setCuadrosDetailFilter({ area: null, estadoMarcacion: null });
     setCuadrosDetailSort({ key: "fecha", direction: "asc" });
     setGerencialDetailFilters({
+      nombreEmpleado: [],
       responsable: [],
       cliente: [],
       proyecto: [],
@@ -3545,7 +3548,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
                 <div style={styles.gerencialDetailSectionGrid}>
                   <ChartCard
                     title="Detalle filtrado"
-                    subtitle="Vista ampliada con filtros por responsable, cliente, proyecto y site"
+                    subtitle="Vista ampliada con filtros por empleado, responsable, cliente, proyecto y site"
                     style={styles.gerencialDetailChartCard}
                   >
                     <div style={styles.gerencialSummaryToolbar}>
@@ -3624,6 +3627,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
                       onClearExtendedFilters={() =>
                         {
                           setGerencialDetailFilters({
+                            nombreEmpleado: [],
                             responsable: [],
                             cliente: [],
                             proyecto: [],
@@ -4592,6 +4596,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
                     onClearExtendedFilters={() =>
                       {
                         setGerencialDetailFilters({
+                            nombreEmpleado: [],
                           responsable: [],
                           cliente: [],
                           proyecto: [],
@@ -7051,7 +7056,13 @@ function SimpleCuadrosDetailGrid({
                       </button>
                     ) : null}
                   </th>
-                  <th style={styles.cuadrosDetailFilterTh} />
+                  <th style={styles.cuadrosDetailFilterTh}>
+                    <HeaderCheckboxFilter
+                      values={extendedColumnFilters.nombreEmpleado}
+                      options={extendedColumnOptions.nombreEmpleado}
+                      onChange={(value) => onExtendedColumnFilterChange("nombreEmpleado", value)}
+                    />
+                  </th>
                   <th style={styles.cuadrosDetailFilterTh}>
                     <HeaderCheckboxFilter
                       values={extendedColumnFilters.responsable}

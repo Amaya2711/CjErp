@@ -154,7 +154,7 @@ export const empleadosCrudService = {
     return mapItem(response);
   },
 
-  async actualizar(idEmpleado: number, payload: EmpleadoCrudSaveRequest): Promise<EmpleadoCrudItem> {
+  async actualizar(idEmpleado: number, payload: Partial<EmpleadoCrudSaveRequest>): Promise<EmpleadoCrudItem> {
     const response = await httpClient.put<Record<string, unknown>>(`/mantenimiento/empleados/${idEmpleado}`, payload);
     return mapItem(response);
   },

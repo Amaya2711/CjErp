@@ -40,7 +40,61 @@ type EmpleadoForm = {
 
 type EmpleadoTab = "todos" | "pendientes" | "activos" | "inactivos";
 
+type OrganizacionCampo = "empresa" | "cliente" | "area" | "ubicacion";
+type ValidadorCampo = "responsable" | "segundaValidacion" | "terceraValidacion";
+type CampoEditableEnGrilla = OrganizacionCampo | ValidadorCampo;
+
+type CampoEditableEnGrillaConfig = {
+  itemKey: keyof Pick<
+    EmpleadoCrudItem,
+    | "idEmpresaCj"
+    | "idClienteCj"
+    | "idAreaCj"
+    | "idUbicacionCj"
+    | "idResponsableCj"
+    | "idSegundoVacaciones"
+    | "idTerceroVacaciones"
+  >;
+  requestKey: keyof Pick<
+    EmpleadoCrudSaveRequest,
+    | "idEmpresaCj"
+    | "idClienteCj"
+    | "idAreaCj"
+    | "idUbicacionCj"
+    | "idResponsableCj"
+    | "idSegundoVacaciones"
+    | "idTerceroVacaciones"
+  >;
+  displayKey: keyof Pick<EmpleadoCrudItem, "empresa" | "cliente" | "area" | "ubicacion" | "responsable" | "soValidador" | "terValidador">;
+  label: string;
+};
+
+const camposEditablesEnGrilla: Record<CampoEditableEnGrilla, CampoEditableEnGrillaConfig> = {
+  empresa: { itemKey: "idEmpresaCj", requestKey: "idEmpresaCj", displayKey: "empresa", label: "Empresa" },
+  cliente: { itemKey: "idClienteCj", requestKey: "idClienteCj", displayKey: "cliente", label: "Cliente" },
+  area: { itemKey: "idAreaCj", requestKey: "idAreaCj", displayKey: "area", label: "Área" },
+  ubicacion: { itemKey: "idUbicacionCj", requestKey: "idUbicacionCj", displayKey: "ubicacion", label: "Ubicación" },
+  responsable: { itemKey: "idResponsableCj", requestKey: "idResponsableCj", displayKey: "responsable", label: "Responsable" },
+  segundaValidacion: {
+    itemKey: "idSegundoVacaciones",
+    requestKey: "idSegundoVacaciones",
+    displayKey: "soValidador",
+    label: "2da validación",
+  },
+  terceraValidacion: {
+    itemKey: "idTerceroVacaciones",
+    requestKey: "idTerceroVacaciones",
+    displayKey: "terValidador",
+    label: "3era validación",
+  },
+};
+
 const EMPLEADO_CARGO_ID = 50;
+
+const employeeColumnWidths = [
+  "72px", "290px", "180px", "180px", "170px", "170px", "250px",
+  "220px", "220px", "125px", "125px", "120px", "130px", "150px", "270px",
+] as const;
 
 const initialForm: EmpleadoForm = {
   id: null,
@@ -266,6 +320,61 @@ function lookupLabel(options: CrudLookupItem[], value: string): string {
   return options.find((item) => item.value === value)?.label ?? "";
 }
 
+function getInlineLookupOptions(
+  options: CrudLookupItem[],
+  currentValue: string,
+  currentLabel: string
+): CrudLookupItem[] {
+  if (!currentValue || options.some((option) => getLookupIdValue(option) === currentValue)) {
+    return options;
+  }
+
+  return [
+    {
+      value: currentValue,
+      label: currentLabel || currentValue,
+      codigo: currentValue,
+      campo: "",
+      orden: -1,
+    },
+    ...options,
+  ];
+}
+
+function EmployeeTableColumns() {
+  return (
+    <colgroup>
+      {employeeColumnWidths.map((width, index) => (
+        <col key={index} style={{ width }} />
+      ))}
+    </colgroup>
+  );
+}
+
+function EmployeeTableHeader() {
+  return (
+    <thead>
+      <tr>
+        <th style={styles.th}>Id</th>
+        <th style={styles.th}>Empleado</th>
+        <th style={styles.th}>Empresa</th>
+        <th style={styles.th}>Cliente</th>
+        <th style={styles.th}>Area</th>
+        <th style={styles.th}>Ubicacion</th>
+        <th style={styles.th}>Responsable</th>
+        <th style={styles.th}>2da validación</th>
+        <th style={styles.th}>3era validación</th>
+        <th style={styles.th}>Inicio</th>
+        <th style={styles.th}>Fin</th>
+        <th style={styles.th}>Documento</th>
+        <th style={styles.th}>Estado</th>
+        <th style={styles.th}>Usuario</th>
+        <th style={styles.th}>Acciones</th>
+      </tr>
+    </thead>
+  );
+}
+
 function getEstadoLabel(idEstado: number | null | undefined): string {
   if (idEstado === 9) {
     return "PENDIENTE";
@@ -328,6 +437,7 @@ export default function MantenimientoEmpleadosPage() {
   const [activeTab, setActiveTab] = useState<EmpleadoTab>("todos");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [updatingOrganizationField, setUpdatingOrganizationField] = useState<string | null>(null);
   const [approvingId, setApprovingId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [lookupError, setLookupError] = useState("");
@@ -354,12 +464,11 @@ export default function MantenimientoEmpleadosPage() {
   const [responsableOpen, setResponsableOpen] = useState(false);
   const [segundoValidadorQuery, setSegundoValidadorQuery] = useState("");
   const [segundoValidadorOpen, setSegundoValidadorOpen] = useState(false);
-  const [tableContentWidth, setTableContentWidth] = useState(0);
   const areaWrapRef = useRef<HTMLDivElement | null>(null);
   const responsableWrapRef = useRef<HTMLDivElement | null>(null);
   const segundoValidadorWrapRef = useRef<HTMLDivElement | null>(null);
   const tableScrollRef = useRef<HTMLDivElement | null>(null);
-  const bottomScrollRef = useRef<HTMLDivElement | null>(null);
+  const tableHeaderScrollRef = useRef<HTMLDivElement | null>(null);
 
   const searchFields = useMemo<CrudToolbarSearchField<EmpleadoCrudItem>[]>(
     () => [
@@ -405,82 +514,22 @@ export default function MantenimientoEmpleadosPage() {
 
   useEffect(() => {
     const tableEl = tableScrollRef.current;
-    const bottomEl = bottomScrollRef.current;
+    const headerEl = tableHeaderScrollRef.current;
 
-    if (!tableEl || !bottomEl) {
+    if (!tableEl || !headerEl) {
       return;
     }
 
-    let syncingFromTable = false;
-    let syncingFromBottom = false;
-
     const syncFromTable = () => {
-      if (syncingFromBottom) return;
-      syncingFromTable = true;
-      bottomEl.scrollLeft = tableEl.scrollLeft;
-      requestAnimationFrame(() => {
-        syncingFromTable = false;
-      });
-    };
-
-    const syncFromBottom = () => {
-      if (syncingFromTable) return;
-      syncingFromBottom = true;
-      tableEl.scrollLeft = bottomEl.scrollLeft;
-      requestAnimationFrame(() => {
-        syncingFromBottom = false;
-      });
+      headerEl.scrollLeft = tableEl.scrollLeft;
     };
 
     tableEl.addEventListener("scroll", syncFromTable, { passive: true });
-    bottomEl.addEventListener("scroll", syncFromBottom, { passive: true });
 
-    bottomEl.scrollLeft = tableEl.scrollLeft;
+    headerEl.scrollLeft = tableEl.scrollLeft;
 
     return () => {
       tableEl.removeEventListener("scroll", syncFromTable);
-      bottomEl.removeEventListener("scroll", syncFromBottom);
-    };
-  }, [filteredItems.length]);
-
-  useEffect(() => {
-    const tableEl = tableScrollRef.current;
-
-    if (!tableEl) {
-      return;
-    }
-
-    let frameId = 0;
-
-    const updateWidth = () => {
-      cancelAnimationFrame(frameId);
-      frameId = requestAnimationFrame(() => {
-        const nextWidth = Math.max(tableEl.scrollWidth, tableEl.clientWidth, 1);
-        setTableContentWidth((currentWidth) => (currentWidth === nextWidth ? currentWidth : nextWidth));
-      });
-    };
-
-    updateWidth();
-
-    const resizeObserver =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(() => {
-            updateWidth();
-          });
-
-    resizeObserver?.observe(tableEl);
-    const tableNode = tableEl.querySelector("table");
-    if (tableNode) {
-      resizeObserver?.observe(tableNode);
-    }
-
-    window.addEventListener("resize", updateWidth);
-
-    return () => {
-      cancelAnimationFrame(frameId);
-      resizeObserver?.disconnect();
-      window.removeEventListener("resize", updateWidth);
     };
   }, [filteredItems.length]);
 
@@ -727,6 +776,42 @@ export default function MantenimientoEmpleadosPage() {
     }
   };
 
+  const handleOrganizationChange = async (
+    item: EmpleadoCrudItem,
+    field: CampoEditableEnGrilla,
+    value: string
+  ) => {
+    const config = camposEditablesEnGrilla[field];
+    const selectedId = Number(value);
+    const currentValue = normalizeOptionValue(item[config.itemKey]);
+
+    if (value === currentValue) {
+      return;
+    }
+
+    if (!Number.isFinite(selectedId) || selectedId <= 0) {
+      setError(`Seleccione un valor válido para ${config.label.toLowerCase()}.`);
+      return;
+    }
+
+    const updateKey = `${item.idEmpleado}-${field}`;
+    setUpdatingOrganizationField(updateKey);
+    setError("");
+    setSuccess("");
+
+    try {
+      const updated = await empleadosCrudService.actualizar(item.idEmpleado, {
+        [config.requestKey]: selectedId,
+      });
+      setItems((current) => current.map((row) => (row.idEmpleado === item.idEmpleado ? updated : row)));
+      setSuccess(`${config.label} actualizada para ${item.nombreEmpleado}.`);
+    } catch (err) {
+      setError(getHttpErrorMessage(err, `No se pudo actualizar ${config.label.toLowerCase()}.`));
+    } finally {
+      setUpdatingOrganizationField(null);
+    }
+  };
+
   const handleDelete = async () => {
     if (!deleteItem) return;
 
@@ -774,6 +859,35 @@ export default function MantenimientoEmpleadosPage() {
     }
 
     setApproveItem(item);
+  };
+
+  const renderOrganizationSelect = (
+    item: EmpleadoCrudItem,
+    field: CampoEditableEnGrilla,
+    options: CrudLookupItem[]
+  ) => {
+    const config = camposEditablesEnGrilla[field];
+    const currentLabel = item[config.displayKey];
+    const currentValue = resolveLookupSelectValue(options, item[config.itemKey] ?? currentLabel);
+    const inlineOptions = getInlineLookupOptions(options, currentValue, currentLabel);
+    const isUpdating = updatingOrganizationField === `${item.idEmpleado}-${field}`;
+
+    return (
+      <select
+        value={currentValue}
+        onChange={(event) => void handleOrganizationChange(item, field, event.target.value)}
+        disabled={updatingOrganizationField !== null}
+        aria-label={`${config.label} de ${item.nombreEmpleado}`}
+        title={isUpdating ? `Actualizando ${config.label.toLowerCase()}...` : `Cambiar ${config.label.toLowerCase()}`}
+        style={{ ...styles.inlineLookupSelect, ...(isUpdating ? styles.inlineLookupSelectSaving : {}) }}
+      >
+        {inlineOptions.map((option) => (
+          <option key={`${field}-${option.value}-${option.codigo}`} value={getLookupIdValue(option)}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    );
   };
 
   return (
@@ -868,29 +982,19 @@ export default function MantenimientoEmpleadosPage() {
           </div>
 
           <div style={styles.tableShell}>
+            <div ref={tableHeaderScrollRef} style={styles.tableHeaderWrapper}>
+              <table style={styles.table}>
+                <EmployeeTableColumns />
+                <EmployeeTableHeader />
+              </table>
+            </div>
             <div ref={tableScrollRef} style={styles.tableWrapper}>
               <table style={styles.table}>
-                <thead>
-                  <tr>
-                    <th style={styles.th}>Id</th>
-                    <th style={styles.th}>Empleado</th>
-                    <th style={styles.th}>Documento</th>
-                    <th style={styles.th}>Empresa</th>
-                    <th style={styles.th}>Cliente</th>
-                    <th style={styles.th}>Estado</th>
-                    <th style={styles.th}>Area</th>
-                    <th style={styles.th}>Ubicacion</th>
-                    <th style={styles.th}>Responsable</th>
-                    <th style={styles.th}>Usuario</th>
-                    <th style={styles.th}>Inicio</th>
-                    <th style={styles.th}>Fin</th>
-                    <th style={styles.th}>Acciones</th>
-                  </tr>
-                </thead>
+                <EmployeeTableColumns />
                 <tbody>
                   {filteredItems.length === 0 ? (
                     <tr>
-                      <td colSpan={13} style={styles.emptyCell}>
+                      <td colSpan={15} style={styles.emptyCell}>
                         No se encontraron empleados.
                       </td>
                     </tr>
@@ -901,17 +1005,25 @@ export default function MantenimientoEmpleadosPage() {
                         style={getEstadoNormalizado(item).includes("PENDIENTE") ? styles.pendingRow : undefined}
                       >
                         <td style={styles.td}>{item.idEmpleado}</td>
-                        <td style={styles.tdBold}>{item.nombreEmpleado}</td>
-                        <td style={styles.td}>{item.nroDocumento || "-"}</td>
-                        <td style={styles.td}>{item.empresa || "-"}</td>
-                        <td style={styles.td}>{item.cliente || "-"}</td>
-                        <td style={styles.estadoCell}>{item.estado || getEstadoLabel(item.idEstado)}</td>
-                        <td style={styles.td}>{item.area || "-"}</td>
-                        <td style={styles.td}>{item.ubicacion || "-"}</td>
-                        <td style={styles.td}>{item.responsable || "-"}</td>
-                        <td style={styles.usuarioCell}>{item.idUsuario || "-"}</td>
+                        <td style={styles.tdBold} title={item.nombreEmpleado}>
+                          <span style={styles.truncatedCellText}>{item.nombreEmpleado}</span>
+                        </td>
+                        <td style={styles.td}>{renderOrganizationSelect(item, "empresa", empresas)}</td>
+                        <td style={styles.td}>{renderOrganizationSelect(item, "cliente", clientes)}</td>
+                        <td style={styles.td}>{renderOrganizationSelect(item, "area", areas)}</td>
+                        <td style={styles.td}>{renderOrganizationSelect(item, "ubicacion", ubicaciones)}</td>
+                        <td style={styles.td}>{renderOrganizationSelect(item, "responsable", responsables)}</td>
+                        <td style={styles.td}>
+                          {renderOrganizationSelect(item, "segundaValidacion", segundoValidadores)}
+                        </td>
+                        <td style={styles.td}>
+                          {renderOrganizationSelect(item, "terceraValidacion", tercerValidadores)}
+                        </td>
                         <td style={styles.td}>{formatDateValue(item.fechaIniLaboral)}</td>
                         <td style={styles.td}>{formatDateValue(item.fechaFinLaboral)}</td>
+                        <td style={styles.td}>{item.nroDocumento || "-"}</td>
+                        <td style={styles.estadoCell}>{item.estado || getEstadoLabel(item.idEstado)}</td>
+                        <td style={styles.usuarioCell}>{item.idUsuario || "-"}</td>
                         <td style={styles.actionsTd}>
                           <button
                             type="button"
@@ -953,14 +1065,6 @@ export default function MantenimientoEmpleadosPage() {
                   )}
                 </tbody>
               </table>
-            </div>
-            <div ref={bottomScrollRef} style={styles.bottomScrollBar} aria-hidden="true">
-              <div
-                style={{
-                  ...styles.bottomScrollSpacer,
-                  width: tableContentWidth > 0 ? `${tableContentWidth}px` : "100%",
-                }}
-              />
             </div>
           </div>
         </div>
@@ -1527,34 +1631,32 @@ const styles: Record<string, React.CSSProperties> = {
   tableShell: {
     display: "flex",
     flexDirection: "column",
-    gap: 8,
+    gap: 0,
     flex: 1,
     minHeight: 0,
   },
-  tableWrapper: {
+  tableHeaderWrapper: {
     overflowX: "hidden",
-    overflowY: "auto",
-    border: "1px solid #E5E7EB",
-    borderRadius: 18,
-    flex: 1,
-    minHeight: 0,
-  },
-  bottomScrollBar: {
-    overflowX: "scroll",
     overflowY: "hidden",
-    height: 18,
-    minHeight: 18,
+    flexShrink: 0,
     border: "1px solid #E5E7EB",
-    borderRadius: 999,
+    borderBottom: "none",
+    borderRadius: "18px 18px 0 0",
     background: "#F8FAFC",
   },
-  bottomScrollSpacer: {
-    height: 1,
+  tableWrapper: {
+    overflowX: "auto",
+    overflowY: "auto",
+    border: "1px solid #E5E7EB",
+    borderRadius: "0 0 18px 18px",
+    flex: 1,
+    minHeight: 0,
   },
   table: {
-    width: "max-content",
+    width: 2672,
     minWidth: "100%",
     borderCollapse: "collapse",
+    tableLayout: "fixed",
   },
   th: {
     textAlign: "left",
@@ -1572,6 +1674,12 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#334155",
     fontSize: 14,
     verticalAlign: "top",
+    whiteSpace: "nowrap",
+  },
+  truncatedCellText: {
+    display: "block",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   },
   estadoCell: {
@@ -1604,6 +1712,22 @@ const styles: Record<string, React.CSSProperties> = {
     verticalAlign: "top",
     fontWeight: 700,
     whiteSpace: "nowrap",
+  },
+  inlineLookupSelect: {
+    width: "100%",
+    minWidth: 130,
+    border: "1px solid #BFDBFE",
+    borderRadius: 8,
+    background: "#FFFFFF",
+    color: "#0F172A",
+    padding: "7px 8px",
+    fontSize: 12,
+    cursor: "pointer",
+  },
+  inlineLookupSelectSaving: {
+    background: "#EFF6FF",
+    color: "#1D4ED8",
+    cursor: "wait",
   },
   estadoBadge: {
     display: "inline-flex",
