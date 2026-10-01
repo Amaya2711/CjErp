@@ -73,6 +73,14 @@ type ResponsableResumenItem = {
   cantidad: number;
 };
 
+type BulkProgress = {
+  type: "aprobar-ingreso" | "aprobar-salida";
+  total: number;
+  completed: number;
+  succeeded: number;
+  failed: number;
+};
+
 type AprobarCampoNavigationState = {
   initialFilters?: Partial<FilterState>;
   returnToAsistencia?: boolean;
@@ -499,6 +507,8 @@ export default function AprobarCampoPage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [statusMessage, setStatusMessage] = useState("");
+  const [bulkProgress, setBulkProgress] = useState<BulkProgress | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelMode, setPanelMode] = useState<"create" | "edit">("create");
   const [draft, setDraft] = useState<Draft>(createEmptyDraft());
@@ -882,9 +892,15 @@ export default function AprobarCampoPage() {
 
     setSaving(true);
     setError("");
+    setStatusMessage("");
+    setBulkProgress({ type, total: eligibleRows.length, completed: 0, succeeded: 0, failed: 0 });
 
-    try {
-      for (const row of eligibleRows) {
+    const failedKeys = new Set<string>();
+    let completed = 0;
+    let succeeded = 0;
+
+    const processRow = async (row: AprobarCampoRow) => {
+      try {
         const payload: AprobarCampoAccionRequest = {
           ...buildClaveFromRow(row),
           observacion: "",
@@ -897,14 +913,54 @@ export default function AprobarCampoPage() {
         } else {
           await aprobarSalidaAprobarCampo(payload);
         }
+        succeeded += 1;
+      } catch {
+        failedKeys.add(buildRowKey(row));
+      } finally {
+        completed += 1;
+        setBulkProgress({
+          type,
+          total: eligibleRows.length,
+          completed,
+          succeeded,
+          failed: failedKeys.size,
+        });
       }
+    };
+
+    try {
+      const workerCount = Math.min(5, eligibleRows.length);
+      let nextIndex = 0;
+      await Promise.all(
+        Array.from({ length: workerCount }, async () => {
+          while (nextIndex < eligibleRows.length) {
+            const row = eligibleRows[nextIndex];
+            nextIndex += 1;
+            await processRow(row);
+          }
+        })
+      );
 
       await loadRows();
-      setSelectedRecordKeys(new Set());
+      const processedKeys = new Set(eligibleRows.map(buildRowKey));
+      setSelectedRecordKeys((current) =>
+        new Set(Array.from(current).filter((key) => !processedKeys.has(key) || failedKeys.has(key)))
+      );
+
+      const actionLabel = type === "aprobar-ingreso" ? "ingreso" : "salida";
+      if (failedKeys.size > 0) {
+        setError(
+          `Se aprobaron ${succeeded} de ${eligibleRows.length} registros de ${actionLabel}. ` +
+            `${failedKeys.size} no pudieron procesarse y quedaron seleccionados para reintentar.`
+        );
+      } else {
+        setStatusMessage(`Se aprobaron correctamente ${succeeded} registros de ${actionLabel}.`);
+      }
     } catch (err) {
       setError(getHttpErrorMessage(err, "No se pudieron aprobar todos los registros seleccionados."));
       await loadRows();
     } finally {
+      setBulkProgress(null);
       setSaving(false);
     }
   };
@@ -1023,7 +1079,9 @@ export default function AprobarCampoPage() {
             disabled={saving || selectedRecordKeys.size === 0}
             title="Aprobar ingreso de los registros seleccionados"
           >
-            Aprobar ingreso
+            {bulkProgress?.type === "aprobar-ingreso"
+              ? `Procesando ${bulkProgress.completed}/${bulkProgress.total}`
+              : "Aprobar ingreso"}
           </button>
           <button
             type="button"
@@ -1032,7 +1090,9 @@ export default function AprobarCampoPage() {
             disabled={saving || selectedRecordKeys.size === 0}
             title="Aprobar salida de los registros seleccionados"
           >
-            Aprobar salida
+            {bulkProgress?.type === "aprobar-salida"
+              ? `Procesando ${bulkProgress.completed}/${bulkProgress.total}`
+              : "Aprobar salida"}
           </button>
           <button
             type="button"
@@ -1095,6 +1155,14 @@ export default function AprobarCampoPage() {
       </div>
       <div style={{ ...styles.card, paddingTop: 10 }}>
 
+        {bulkProgress ? (
+          <div style={styles.processingBanner} role="status" aria-live="polite">
+            <strong>Proceso en ejecución:</strong>{" "}
+            {bulkProgress.type === "aprobar-ingreso" ? "aprobando ingresos" : "aprobando salidas"} ({bulkProgress.completed}
+            /{bulkProgress.total}). Correctos: {bulkProgress.succeeded}. Con error: {bulkProgress.failed}.
+          </div>
+        ) : null}
+        {statusMessage ? <div style={styles.successBanner}>{statusMessage}</div> : null}
         {error ? <div style={styles.errorBanner}>{error}</div> : null}
         {showInitialNavigationBanner ? (
           <div style={styles.prefillBanner}>
@@ -1916,6 +1984,24 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#B91C1C",
     padding: "12px 14px",
     fontSize: 14,
+  },
+  successBanner: {
+    borderRadius: 12,
+    background: "#F0FDF4",
+    border: "1px solid #86EFAC",
+    color: "#166534",
+    padding: "12px 14px",
+    fontSize: 14,
+    fontWeight: 600,
+  },
+  processingBanner: {
+    borderRadius: 12,
+    background: "#EFF6FF",
+    border: "1px solid #93C5FD",
+    color: "#1D4ED8",
+    padding: "12px 14px",
+    fontSize: 14,
+    fontWeight: 600,
   },
   prefillBanner: {
     borderRadius: 12,
