@@ -21,6 +21,8 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
   const safeValue: FiltroOperativoValue = value ?? {};
   const safeOnChange = onChange ?? (() => {});
   const trabajoSelectRef = useRef<HTMLSelectElement>(null);
+  const blurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const filtroSeleccionadoRef = useRef<string | null>(null);
 
   const {
     filtros,
@@ -101,6 +103,12 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
   const [highlightedIdx, setHighlightedIdx] = useState<number>(-1);
   const [showDropdown, setShowDropdown] = useState<boolean>(false);
 
+  useEffect(() => () => {
+    if (blurTimeoutRef.current) {
+      clearTimeout(blurTimeoutRef.current);
+    }
+  }, []);
+
   const filteredFiltros =
     filtroInput.trim() === ""
       ? filtrosSafe
@@ -177,6 +185,7 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
                 if (highlightedIdx >= 0 && highlightedIdx < filteredFiltros.length) {
                   const f = filteredFiltros[highlightedIdx];
                   const label = `${f.nombreCliente} - ${f.nombreProyecto} - ${f.nombreSite} - ${f.nroInterno}`;
+                  filtroSeleccionadoRef.current = f.filtroKey;
                   setFiltroInput(label);
                   handleFiltroChange(f.filtroKey);
                   setShowDropdown(false);
@@ -184,16 +193,26 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
               }
             }}
             onBlur={() => {
-              setTimeout(() => {
+              if (blurTimeoutRef.current) {
+                clearTimeout(blurTimeoutRef.current);
+              }
+
+              blurTimeoutRef.current = setTimeout(() => {
                 setShowDropdown(false);
 
-                const selected = filtrosSafe.find(
-                  (f) =>
-                    `${f.nombreCliente} - ${f.nombreProyecto} - ${f.nombreSite} - ${f.nroInterno}`.toLowerCase() ===
-                    filtroInput.toLowerCase()
-                );
+                const filtroSeleccionado = filtroSeleccionadoRef.current;
+                filtroSeleccionadoRef.current = null;
+                const selected = filtroSeleccionado
+                  ? filtrosSafe.find((f) => f.filtroKey === filtroSeleccionado)
+                  : filtrosSafe.find(
+                      (f) =>
+                        `${f.nombreCliente} - ${f.nombreProyecto} - ${f.nombreSite} - ${f.nroInterno}`.toLowerCase() ===
+                        filtroInput.toLowerCase()
+                    );
 
-                handleFiltroChange(selected ? selected.filtroKey : "");
+                if (!filtroSeleccionado) {
+                  handleFiltroChange(selected ? selected.filtroKey : "");
+                }
                 const nextValue: FiltroOperativoValue = selected
                   ? {
                       filtro: selected,
@@ -256,6 +275,7 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
                       background: isHighlighted ? "#e6f7ff" : undefined,
                     }}
                     onMouseDown={() => {
+                      filtroSeleccionadoRef.current = f.filtroKey;
                       setFiltroInput(label);
                       handleFiltroChange(f.filtroKey);
                       setShowDropdown(false);
