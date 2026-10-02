@@ -2824,7 +2824,6 @@ export default function OcV1Page() {
                 ])
               );
             }}>Exportar Excel</button>
-            <button type="button" style={styles.primaryButton} onClick={openNuevo}>Nueva OC</button>
           </div>
         </div>
       </section>
