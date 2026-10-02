@@ -2247,7 +2247,6 @@ export default function GastosPage({
     setHistorialSitioView("listado");
     setHistorialSitioSolicitante("");
     setHistorialSitioDetalleActivo(null);
-    setConstantesRefreshKey((current) => current + 1);
     valoresGastoRequestRef.current += 1;
     setValoresGastoLoading(false);
     setValoresGasto(VALORES_GASTO_INICIALES);
