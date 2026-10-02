@@ -1180,6 +1180,9 @@ export default function PagosV1Page() {
   const tabRowsCacheRef = useRef<Map<string, PagoRow[]>>(new Map());
   const preferredDetailTabRef = useRef<DetailTabKey | null>(null);
   const previousCheckedIdsRef = useRef<number[]>([]);
+  const mainGridScrollRef = useRef<HTMLDivElement | null>(null);
+  const fixedHorizontalScrollbarRef = useRef<HTMLDivElement | null>(null);
+  const [mainGridScrollMetrics, setMainGridScrollMetrics] = useState({ scrollWidth: 0, clientWidth: 0 });
   const loadTimeoutMs = 15000;
 
   useEffect(() => {
@@ -2435,6 +2438,35 @@ export default function PagosV1Page() {
     }, {});
   }, [filteredRows]);
 
+  useEffect(() => {
+    const grid = mainGridScrollRef.current;
+    const fixedScrollbar = fixedHorizontalScrollbarRef.current;
+    if (!grid || !fixedScrollbar) return;
+
+    const syncMetrics = () => {
+      setMainGridScrollMetrics({ scrollWidth: grid.scrollWidth, clientWidth: grid.clientWidth });
+      fixedScrollbar.scrollLeft = grid.scrollLeft;
+    };
+    const syncFromGrid = () => { fixedScrollbar.scrollLeft = grid.scrollLeft; };
+    const syncFromFixedScrollbar = () => { grid.scrollLeft = fixedScrollbar.scrollLeft; };
+    const table = grid.querySelector("table");
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(syncMetrics);
+
+    resizeObserver?.observe(grid);
+    if (table) resizeObserver?.observe(table);
+    grid.addEventListener("scroll", syncFromGrid, { passive: true });
+    fixedScrollbar.addEventListener("scroll", syncFromFixedScrollbar, { passive: true });
+    window.addEventListener("resize", syncMetrics);
+    syncMetrics();
+
+    return () => {
+      resizeObserver?.disconnect();
+      grid.removeEventListener("scroll", syncFromGrid);
+      fixedScrollbar.removeEventListener("scroll", syncFromFixedScrollbar);
+      window.removeEventListener("resize", syncMetrics);
+    };
+  }, [activeTab, filteredRows.length, isDetailPanelOpen, loadingData]);
+
   const selectedRows = useMemo(() => {
     if (!checkedIds.length) {
       return [] as PagoRow[];
@@ -2531,7 +2563,7 @@ export default function PagosV1Page() {
   const isResumenTab = activeTab === "resumen";
   const showEstadoOc = activeTab === "resumen";
   const showTotalSitio = canUseTab("reaprobar");
-  const tableColSpan = 23 + (showTotalSitio ? 1 : 0) + (showEstadoOc ? 1 : 0);
+  const tableColSpan = 23 + (showTotalSitio ? 4 : 0) + (showEstadoOc ? 1 : 0);
   const stickyColumnWidths = [108, 94];
   const stickyColumnLefts = stickyColumnWidths.reduce<number[]>((acc, _width, index) => {
     const previousLeft = acc[index - 1] ?? 0;
@@ -2901,7 +2933,7 @@ export default function PagosV1Page() {
           ? "1 registro rechazado correctamente."
           : `${total} registros rechazados correctamente.`
       );
-      setRefreshTick((current) => current + 1);
+      reloadAfterMutation();
     } catch (error) {
       setRechazoModal((prev) =>
         prev
@@ -3583,7 +3615,7 @@ export default function PagosV1Page() {
             <div style={styles.gridCard}>
            
 
-            <div style={styles.gridScrollable}>
+            <div ref={mainGridScrollRef} style={styles.gridScrollable}>
               <table className="pagos-v1-main-grid" style={styles.table}>
                 <thead onClick={(event) => {
                   const column = (event.target as HTMLElement).closest<HTMLElement>("th")?.dataset.sort as PagoSortColumn | undefined;
@@ -3639,6 +3671,9 @@ export default function PagosV1Page() {
                     <th style={{ ...styles.th, width: 170 }}>Total Visible</th>
                     <th style={{ ...styles.th, width: 90 }}>% Avance</th>
                     <th style={{ ...styles.th, width: 130 }}>Avance</th>
+                    {showTotalSitio ? <th style={{ ...styles.th, width: 170 }}>Sub Ficticio</th> : null}
+                    {showTotalSitio ? <th style={{ ...styles.th, width: 90 }}>% Ficticio</th> : null}
+                    {showTotalSitio ? <th style={{ ...styles.th, width: 130 }}>Avance ficticio</th> : null}
                     {showEstadoOc ? <th style={{ ...styles.th, width: 118 }}>Estado OC</th> : null}
                     <th data-sort="validador" style={{ ...styles.th, width: 110, cursor: "pointer" }}>Validador</th>
                     <th data-sort="ot" style={{ ...styles.th, width: 88, cursor: "pointer" }}>OT</th>
@@ -3738,6 +3773,12 @@ export default function PagosV1Page() {
                                 : 0;
                               const porcentajeAvanceBarra = Math.max(0, Math.min(porcentajeAvance, 100));
                               const colorAvance = porcentajeAvance > 70 ? "#DC2626" : porcentajeAvance >= 50 ? "#CA8A04" : "#16A34A";
+                              const subFicticio = totalGastado + row.subtotal;
+                              const porcentajeFicticio = totalMontoVisiblePorMoneda > 0
+                                ? (subFicticio / totalMontoVisiblePorMoneda) * 100
+                                : 0;
+                              const porcentajeFicticioBarra = Math.max(0, Math.min(porcentajeFicticio, 100));
+                              const colorFicticio = porcentajeFicticio > 70 ? "#DC2626" : porcentajeFicticio >= 50 ? "#CA8A04" : "#16A34A";
 
                               return (
                                 <tr
@@ -3851,6 +3892,23 @@ export default function PagosV1Page() {
                                       </div>
                                     </div>
                                   </td>
+                                  {showTotalSitio ? (
+                                    <td title={formatCurrency(subFicticio, "SOLES")} style={styles.td}>
+                                      {formatCurrency(subFicticio, "SOLES")}
+                                    </td>
+                                  ) : null}
+                                  {showTotalSitio ? (
+                                    <td style={{ ...styles.td, color: colorFicticio }}>{formatPercent(porcentajeFicticio)}</td>
+                                  ) : null}
+                                  {showTotalSitio ? (
+                                    <td style={{ ...styles.td, verticalAlign: "middle" }}>
+                                      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 28 }}>
+                                        <div title={formatPercent(porcentajeFicticio)} style={{ width: 112, height: 8, borderRadius: 999, background: "#E2E8F0", overflow: "hidden" }}>
+                                          <div style={{ width: `${porcentajeFicticioBarra}%`, height: "100%", borderRadius: "inherit", background: colorFicticio }} />
+                                        </div>
+                                      </div>
+                                    </td>
+                                  ) : null}
                                   {showEstadoOc ? (
                                     <td style={styles.td}>
                                       <span
@@ -3927,6 +3985,18 @@ export default function PagosV1Page() {
                 {checkedIds.length === 0 ? null : <span style={{ color: currentTheme.accent }}>Solo sobre registros seleccionados</span>}
               </div>
             </div>
+            </div>
+
+            <div
+              ref={fixedHorizontalScrollbarRef}
+              aria-label="Desplazamiento horizontal de la grilla"
+              style={{
+                ...styles.fixedHorizontalScrollbar,
+                opacity: mainGridScrollMetrics.scrollWidth > mainGridScrollMetrics.clientWidth ? 1 : 0,
+                pointerEvents: mainGridScrollMetrics.scrollWidth > mainGridScrollMetrics.clientWidth ? "auto" : "none",
+              }}
+            >
+              <div style={{ width: Math.max(mainGridScrollMetrics.scrollWidth, mainGridScrollMetrics.clientWidth), height: 1 }} />
             </div>
 
             <section style={styles.actionsBar}>
@@ -5002,7 +5072,7 @@ export default function PagosV1Page() {
             editorRequest={gastoEditorRequest}
             onEditorClose={() => setGastoEditorRequest(null)}
             onEditorUpdated={() => {
-              setRefreshTick((current) => current + 1);
+              reloadAfterMutation();
               setMessage("Gasto actualizado correctamente.");
             }}
           />
@@ -5791,6 +5861,21 @@ const styles: Record<string, React.CSSProperties> = {
     bottom: 48,
     zIndex: 1100,
     marginTop: 0,
+  },
+  fixedHorizontalScrollbar: {
+    position: "fixed",
+    left: 56,
+    right: 12,
+    bottom: 106,
+    zIndex: 1101,
+    height: 16,
+    overflowX: "scroll",
+    overflowY: "hidden",
+    scrollbarGutter: "stable",
+    background: "rgba(255, 255, 255, 0.96)",
+    borderRadius: 8,
+    boxShadow: "0 1px 5px rgba(15, 23, 42, 0.12)",
+    transition: "opacity 120ms ease",
   },
   filtersCard: {
     background: "#FFFFFF",

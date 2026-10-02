@@ -105,6 +105,21 @@ BEGIN
             ELSE ValidadorOc.NombreEmpleado
         END AS ValidadorOc,
 
+        CASE
+            WHEN ISNULL(a6.IdWeb, 0) = 1 THEN Aprobador1OcCj.NombreEmpleado
+            ELSE Aprobador1Oc.NombreEmpleado
+        END AS ValidadorAprobador1Oc,
+
+        CASE
+            WHEN ISNULL(a6.IdWeb, 0) = 1 THEN Aprobador2OcCj.NombreEmpleado
+            ELSE Aprobador2Oc.NombreEmpleado
+        END AS ValidadorAprobador2Oc,
+
+        CASE
+            WHEN ISNULL(a6.IdWeb, 0) = 1 THEN Aprobador3OcCj.NombreEmpleado
+            ELSE Aprobador3Oc.NombreEmpleado
+        END AS ValidadorAprobador3Oc,
+
 
         /* ========================================================
            MONEDA ORDEN DE COMPRA
@@ -511,6 +526,24 @@ BEGIN
     LEFT JOIN dbo.Empleado ValidadorOc
         ON ValidadorOc.IdEmpleado = a6.IdValidador
        AND ISNULL(a6.IdWeb, 0) <> 1
+
+    LEFT JOIN dbo.EmpleadoCj Aprobador1OcCj
+        ON Aprobador1OcCj.IdEmpleado = a5.IdAprobador1
+
+    LEFT JOIN dbo.Empleado Aprobador1Oc
+        ON Aprobador1Oc.IdEmpleado = a5.IdAprobador1
+
+    LEFT JOIN dbo.EmpleadoCj Aprobador2OcCj
+        ON Aprobador2OcCj.IdEmpleado = a5.IdAprobador2
+
+    LEFT JOIN dbo.Empleado Aprobador2Oc
+        ON Aprobador2Oc.IdEmpleado = a5.IdAprobador2
+
+    LEFT JOIN dbo.EmpleadoCj Aprobador3OcCj
+        ON Aprobador3OcCj.IdEmpleado = a5.IdAprobador3
+
+    LEFT JOIN dbo.Empleado Aprobador3Oc
+        ON Aprobador3Oc.IdEmpleado = a5.IdAprobador3
 
 
     /* ============================================================

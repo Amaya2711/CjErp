@@ -25,6 +25,8 @@ public class OrdenCompraService : IOrdenCompraService
             det.TipoTrabajo,
             det.Detalle,
             det.Ot,
+            det.IdAprobador1,
+            cab.IdSolicitante,
             cab.IdResponsable,
             cab.IdGestor,
             cab.IdValidador,
@@ -39,6 +41,7 @@ public class OrdenCompraService : IOrdenCompraService
           AND det.Fila = @Fila
           AND cab.IdEstado = 1
           AND det.IdEstado = 1
+          AND ISNULL(det.IdAprobador1, 0) > 0
           AND ISNULL(det.IdAprobador3, 0) > 0;
         """;
     private const string BuscarBancoCuentaPagoNuevoSql = """
@@ -499,6 +502,8 @@ public class OrdenCompraService : IOrdenCompraService
         public string? TipoTrabajo { get; set; }
         public string? Detalle { get; set; }
         public string? Ot { get; set; }
+        public int IdAprobador1 { get; set; }
+        public int IdSolicitante { get; set; }
         public int IdResponsable { get; set; }
         public int IdGestor { get; set; }
         public int IdValidador { get; set; }
@@ -1174,7 +1179,6 @@ public class OrdenCompraService : IOrdenCompraService
 
     public async Task<OrdenCompraGenerarPagoNuevoResultDto> GenerarPagoNuevoAsync(
         OrdenCompraGenerarPagoNuevoRequestDto request,
-        int idSolicitante,
         string usuarioAccion,
         CancellationToken cancellationToken = default)
     {
@@ -1197,9 +1201,9 @@ public class OrdenCompraService : IOrdenCompraService
             throw new InvalidOperationException("Los datos operativos de la OC cambiaron. Actualice la grilla antes de registrar el pago.");
         }
 
-        if (origen.IdResponsable <= 0 || origen.IdGestor <= 0 || origen.IdValidador <= 0 || origen.IdMoneda <= 0)
+        if (origen.IdSolicitante <= 0 || origen.IdResponsable <= 0 || origen.IdAprobador1 <= 0 || origen.IdMoneda <= 0)
         {
-            throw new InvalidOperationException("La cabecera de la OC no tiene responsable, gestor, validador o moneda válidos.");
+            throw new InvalidOperationException("La OC no tiene solicitante, responsable, primer aprobador o moneda válidos.");
         }
 
         var idBancoCta = await connection.QuerySingleOrDefaultAsync<int?>(
@@ -1255,9 +1259,9 @@ public class OrdenCompraService : IOrdenCompraService
                 Total = request.Monto + igv,
                 IdRendicion = 1,
                 Detalle = origen.Detalle ?? string.Empty,
-                Solicitante = idSolicitante.ToString(CultureInfo.InvariantCulture),
-                Gestor = origen.IdGestor.ToString(CultureInfo.InvariantCulture),
-                Validador = origen.IdValidador.ToString(CultureInfo.InvariantCulture),
+                Solicitante = origen.IdSolicitante.ToString(CultureInfo.InvariantCulture),
+                Gestor = origen.IdAprobador1.ToString(CultureInfo.InvariantCulture),
+                Validador = origen.IdAprobador1.ToString(CultureInfo.InvariantCulture),
                 Moneda = origen.IdMoneda.ToString(CultureInfo.InvariantCulture),
                 Bien = "1",
                 Comprobante = origen.IdComprobante.ToString(CultureInfo.InvariantCulture),

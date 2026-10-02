@@ -56,7 +56,8 @@
 - Archivos: jpg, png, bmp, gif, pdf, xls, xlsx ≤25 MB.
 - Asociar recibos: nivel 2/3 exige recibo Estado=4; recibos asociables en estados {0,1,4,5,6}.
 - Consumo = CabOrdenCompra.Subtotal vs SUM(Planilla.Subtotal, Estado=4).
-- **OC/Gastos**: el botón `Pago nuevo` solo se habilita si `sp_OrdenCompra_Consulta_Estados` devuelve `EstadoOc = 'Aprobado'`. El monto no puede superar el saldo disponible; el backend vuelve a validar la aprobación, la cuenta y los datos operativos y registra la solicitud mediante `sp_Planilla_Insertar` con estado inicial 0.
+- **OC/Gastos**: el botón `Pago nuevo` solo se habilita si `sp_OrdenCompra_Consulta_Estados` devuelve `EstadoOc = 'Aprobado'`. El monto no puede superar el saldo disponible; el backend vuelve a validar la aprobación, la cuenta y los datos operativos y registra la solicitud mediante `sp_Planilla_Insertar` con estado inicial 0. El gasto hereda `Solicitante` de `CabOrdenCompra.IdSolicitante` y usa `DetOrdenCompra.IdAprobador1` tanto para `Gestor` como para `Validador`; el usuario que ejecuta la acción se guarda solo como auditoría.
+- En `pagos_v1`, con permiso activo para la pestaña **Re-aprobar**, la grilla muestra el indicador visual `Sub Ficticio = Total Gastado + Subtotal` y `% Ficticio = Sub Ficticio / Total Visible`; la barra limita su ancho a 100 %, sin alterar los montos almacenados.
 
 ## 7. RRHH
 - **Empleado**: obligatorios empresa, cliente, área, ubicación, responsable, 2º y 3º validador, correo (con @), dirección, fecha inicio; DNI único entre activos del mismo cargo; cargo 50 = empleado CJ, 51 = externo; usuario generado IdCargo 84; sexo M/F → 1/2.

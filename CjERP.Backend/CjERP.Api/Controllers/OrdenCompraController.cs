@@ -354,21 +354,11 @@ public class OrdenCompraController : ControllerBase
             return BadRequest(new { success = false, message = "La fila de OC, cuenta, comprobante y monto son obligatorios para generar el pago." });
         }
 
-        var solicitanteClaim = User.FindFirstValue("CodEmp")
-            ?? User.FindFirstValue("IdEmpleado")
-            ?? User.FindFirstValue("CodEmpleadoMostrar");
-        var idSolicitante = GetNumericUserId(solicitanteClaim);
-        if (idSolicitante is null or <= 0)
-        {
-            return BadRequest(new { success = false, message = "No se pudo resolver el solicitante desde la sesión." });
-        }
-
         try
         {
             var usuarioAccion = ResolveUsuarioAccion();
             var result = await _ordenCompraService.GenerarPagoNuevoAsync(
                 request,
-                idSolicitante.Value,
                 usuarioAccion,
                 cancellationToken);
 

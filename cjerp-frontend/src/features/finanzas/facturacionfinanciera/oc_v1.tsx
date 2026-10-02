@@ -3720,7 +3720,14 @@ export default function OcV1Page() {
                           const registrado = /^registrado/i.test(text) || Number(rawValue) > 0;
                           if (!registrado) return "Pendiente";
 
-                          const validadorKey = Object.keys(row).find((key) => key.toLowerCase() === "validadoroc");
+                          const validadorPorNivel: Record<string, string> = {
+                            PrimeraValidacion: "validadoraprobador1oc",
+                            SegundaValidacion: "validadoraprobador2oc",
+                            TerceraValidacion: "validadoraprobador3oc",
+                          };
+                          const validadorKey = Object.keys(row).find(
+                            (key) => key.toLowerCase() === validadorPorNivel[column],
+                          );
                           const validador = String(validadorKey ? row[validadorKey] ?? "" : "").trim();
                           return validador ? `Registrado (${validador})` : (text && !/^\d+$/.test(text) ? text : formatValidadorNivel(Number(rawValue) || null));
                         }

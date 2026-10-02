@@ -58,7 +58,6 @@ public interface IOrdenCompraService
 
     Task<OrdenCompraGenerarPagoNuevoResultDto> GenerarPagoNuevoAsync(
         OrdenCompraGenerarPagoNuevoRequestDto request,
-        int idSolicitante,
         string usuarioAccion,
         CancellationToken cancellationToken = default);
 
