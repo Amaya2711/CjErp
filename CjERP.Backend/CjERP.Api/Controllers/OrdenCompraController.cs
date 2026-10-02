@@ -347,7 +347,7 @@ public class OrdenCompraController : ControllerBase
         CancellationToken cancellationToken)
     {
         if (request is null || request.IdOc <= 0 || request.Fila <= 0 || request.IdTarea <= 0 ||
-            request.IdCargo <= 0 || request.IdComprobante <= 0 || request.Monto <= 0 ||
+            request.IdComprobante <= 0 || request.Monto <= 0 ||
             string.IsNullOrWhiteSpace(request.Cuenta) || string.IsNullOrWhiteSpace(request.CuentaInter) ||
             string.IsNullOrWhiteSpace(request.NombreCta))
         {

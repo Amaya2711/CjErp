@@ -144,6 +144,8 @@ BEGIN
 
         a5.Fila AS Fila,
 
+        a5.Detalle AS Detalle,
+
         st.NombreSite AS Site,
 
         COALESCE(a5.FechaCreacion, a6.FechaCreacion) AS FechaOc,

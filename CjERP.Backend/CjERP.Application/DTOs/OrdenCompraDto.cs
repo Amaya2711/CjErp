@@ -235,7 +235,6 @@ public sealed class OrdenCompraGenerarPagoNuevoRequestDto
     public int IdOc { get; set; }
     public int Fila { get; set; }
     public int IdTarea { get; set; }
-    public int IdCargo { get; set; }
     public int IdComprobante { get; set; }
     public decimal Monto { get; set; }
     public string Cuenta { get; set; } = string.Empty;
@@ -289,6 +288,7 @@ public class OrdenCompraPdfMetadataDto
     public DateTime? FechaOrden { get; set; }
     public string FormaPago { get; set; } = string.Empty;
     public int? DiasPago { get; set; }
+    public bool EsRechazada { get; set; }
 }
 
 public class OrdenCompraPdfResultDto

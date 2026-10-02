@@ -17,7 +17,7 @@
 | C7 | **SQL Monitor**: `POST /api/sqlmonitor/cancelar/{id}` ejecuta `KILL` para cualquier autenticado | `SqlMonitorService.cs:552` | DoS de BD | Restringir a rol DBA |
 | C8 | **Webhook WhatsApp** anónimo sin validar `X-Hub-Signature-256` → genera/envía PDFs de asistencia y boletas a números de empleados | `WhatsappWebhookController.cs:10,39-51` | Spam/costo, fuga de datos, DoS | Validar HMAC con App Secret + idempotencia |
 | C9 | **Dashboard WUP sin chequeo admin** devuelve logs con `RequestJson` que contiene PDFs base64 (boletas ajenas) | `ReportesWhatsappController.cs:27-33`, `ReporteRepository.cs` ~620-667 | Fuga de nóminas | Chequeo admin + no persistir base64 |
-| C10 | **`POST /tesoreria/pagos/grabar`** marca pagado (8→4) sin transacción, sin control de versión, sin LogPlanilla/MovEstadosPagos, sin validaciones de PagarAsync | `PagoTesoreriaService.cs:176-191` | Pagos sin trazabilidad | Unificar con PagarAsync |
+| C10 | **`POST /tesoreria/pagos/grabar`** no aplica el control de versión ni todas las validaciones de `PagarAsync`; registra la transacción y el cambio 8→4 en `MovEstadosPagos` | `PagoTesoreriaService.cs` | Riesgo de actualización concurrente | Unificar con PagarAsync |
 | C11 | **`TesoreriaGastosController` con estado estático**: `static List<GastoDto>`/`_nextId`; DELETE no borra en BD; auditoría con Id ficticio | `TesoreriaGastosController.cs:104-105,170,289` | Datos/auditoría incorrectos, memoria | Eliminar estado en memoria |
 | C12 | **Datos de negocio fijos en FE**: `conciliacion_v1.tsx` crea recibos reales con proyecto/site/cliente/TC fijos | `conciliacion_v1.tsx` ~3188-3238 | Registros contables incorrectos | Parametrizar/validar en backend |
 

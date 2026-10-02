@@ -80,6 +80,10 @@ internal sealed class OrdenCompraPdfDocument : IDocument
         {
             column.Spacing(10);
             column.Item().Element(ComposeTitle);
+            if (_metadata.EsRechazada)
+            {
+                column.Item().Element(ComposeRejectedNotice);
+            }
             column.Item().Element(ComposeSupplier);
             column.Item().Element(ComposeGeneralInformation);
             column.Item().Element(ComposeItems);
@@ -96,6 +100,20 @@ internal sealed class OrdenCompraPdfDocument : IDocument
             .Text($"ORDEN DE COMPRA CJT / {_cabecera.IdOc} - {year}")
             .FontSize(11)
             .SemiBold();
+    }
+
+    private static void ComposeRejectedNotice(IContainer container)
+    {
+        container
+            .Background(Colors.Red.Lighten4)
+            .Border(1.5f)
+            .BorderColor(Colors.Red.Darken2)
+            .PaddingVertical(7)
+            .AlignCenter()
+            .Text("OC RECHAZADA")
+            .FontSize(16)
+            .Bold()
+            .FontColor(Colors.Red.Darken3);
     }
 
     private void ComposeSupplier(IContainer container)

@@ -132,13 +132,11 @@ type IaChatSessionState = {
   presentationMode?: IaChatPresentationMode;
 };
 
-function createConversationId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-
-  return `conv-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
+// Fase 2 (docs/AI_COPILOT_IMPLEMENTATION_PLAN.md): el ID de conversacion ya no lo genera el
+// cliente. Antes esta funcion creaba un UUID local (crypto.randomUUID) que el backend adoptaba
+// ciegamente; ahora se envia conversationId: null al iniciar un hilo y se adopta el valor que
+// devuelve el backend en la respuesta (ver sendQuestion). Se elimino por completo: ya no tiene
+// ningun llamador.
 
 function readIaChatSessionState(): IaChatSessionState | null {
   if (typeof window === "undefined") {
@@ -2359,10 +2357,10 @@ function StructuredResponseBlock({ response }: { response: IaChatResponse }) {
         question: getDashboardQuestion(response),
         contextualSummary: response.answer,
         structuredDataJson: JSON.stringify(dashboardData),
-        conversationId:
-          typeof response.interpretedFilters?.conversationId === "string"
-            ? response.interpretedFilters.conversationId
-            : null,
+        // Fase 2: el backend ignora este valor y reconstruye el payload desde el ultimo resultado
+        // autorizado de esta conversacion — se sigue enviando por compatibilidad de contrato, pero
+        // ya no es la fuente de datos del dashboard (ver IaExecutiveReportBuilder en el backend).
+        conversationId: response.conversationId ?? null,
         responseType: response.responseType,
       });
 
@@ -2999,10 +2997,10 @@ export default function IaChatPage() {
       GASTOS: createInitialThread(MODULES[0]),
     }
   );
+  // Sin valor inicial por modulo: ausencia de entrada = "sin conversacion todavia" = se envia
+  // conversationId: null en el primer mensaje, y el backend genera y devuelve el ID real.
   const [conversationIds, setConversationIds] = useState<Record<string, string>>(
-    sessionState?.conversationIds ?? {
-      GASTOS: createConversationId(),
-    }
+    sessionState?.conversationIds ?? {}
   );
   const [question, setQuestion] = useState("");
   const [attachment, setAttachment] = useState<IaChatImageAttachment | null>(null);
@@ -3013,6 +3011,13 @@ export default function IaChatPage() {
   );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
+  // Generacion de hilo por modulo: se incrementa cada vez que el hilo se "reinicia" (Limpiar
+  // conversacion). sendQuestion captura la generacion vigente al enviar; si al recibir la respuesta
+  // la generacion actual ya cambio, la respuesta es de un hilo anterior y se descarta por completo
+  // (ni mensaje ni conversationId) en vez de aplicarse sobre el hilo nuevo. Se usa un ref (no state)
+  // porque debe leerse de forma sincronica y siempre actualizada dentro del continuation async de
+  // sendQuestion, sin depender de closures de render ni de otro setState.
+  const threadGenerationsRef = useRef<Record<string, number>>({});
 
   const selectedModule = useMemo(
     () => MODULES.find((module) => module.id === selectedModuleId) ?? MODULES[0],
@@ -3043,12 +3048,9 @@ export default function IaChatPage() {
       }));
     }
 
-    if (!conversationIds[selectedModule.id]) {
-      setConversationIds((current) => ({
-        ...current,
-        [selectedModule.id]: createConversationId(),
-      }));
-    }
+    // No se pre-crea un conversationId aqui: la ausencia de entrada para este modulo ya significa
+    // "hilo nuevo, sin conversacion todavia" (sendQuestion envia null y adopta lo que el backend
+    // devuelva en el primer mensaje).
   }, [selectedModule, conversationIds, threads]);
 
   const updateCurrentThread = (updater: (messages: IaChatMessage[]) => IaChatMessage[]) => {
@@ -3084,16 +3086,9 @@ export default function IaChatPage() {
       };
     });
 
-    setConversationIds((current) => {
-      if (current[module.id]) {
-        return current;
-      }
-
-      return {
-        ...current,
-        [module.id]: createConversationId(),
-      };
-    });
+    // No se pre-crea un conversationId al cambiar de modulo: si el modulo aun no tiene uno, el
+    // primer mensaje de ese hilo se envia con conversationId: null y adopta el que devuelva el
+    // backend (igual criterio que el useEffect de arriba).
   };
 
   const triggerAttachmentPicker = () => {
@@ -3150,6 +3145,12 @@ export default function IaChatPage() {
   };
 
   const clearConversation = () => {
+    // Invalida de inmediato cualquier solicitud en vuelo para este modulo: si ya hay un mensaje
+    // pendiente de respuesta (loading=true) cuando el usuario limpia, esa respuesta tardia no debe
+    // restaurar el hilo ni el conversationId que se acaba de reiniciar.
+    threadGenerationsRef.current[selectedModule.id] =
+      (threadGenerationsRef.current[selectedModule.id] ?? 0) + 1;
+
     setErrorMessage(null);
     setAttachment(null);
     setThreads((current) => {
@@ -3166,10 +3167,11 @@ export default function IaChatPage() {
       return next;
     });
     setConversationIds((current) => {
-      const next = {
-        ...current,
-        [selectedModule.id]: createConversationId(),
-      };
+      // "Limpiar" ya no genera un ID nuevo en el cliente: se retira la entrada por completo, para
+      // que el siguiente mensaje se envie con conversationId: null y el backend cree una
+      // conversacion realmente nueva (con dueno propio), no una que el cliente se inventa.
+      const next = { ...current };
+      delete next[selectedModule.id];
       writeIaChatSessionState({
         selectedModuleId,
         threads,
@@ -3214,11 +3216,25 @@ export default function IaChatPage() {
     setQuestion("");
     setPresentationMode(modeOverride ?? presentationMode);
 
+    // Capturados en el momento de enviar (no releidos despues del await): identifican a que
+    // hilo/modulo pertenece esta solicitud especifica, para no dejar que una respuesta tardia de
+    // un hilo anterior pise el conversationId de otro hilo que mientras tanto avanzo o se limpio.
+    const requestModuleId = selectedModule.id;
+    const requestConversationId = conversationIds[requestModuleId] ?? null;
+    // Generacion del hilo al momento de enviar. Si "Limpiar conversacion" se presiona mientras esta
+    // solicitud sigue en vuelo, la generacion avanza y esta constante queda desactualizada —
+    // comparar contra threadGenerationsRef.current[requestModuleId] en el continuation (no contra
+    // conversationIds) es lo que permite distinguir "primer mensaje, nunca limpiado" de "primer
+    // mensaje, limpiado mientras esperaba respuesta": ambos casos dejan conversationIds[moduleId]
+    // ausente por igual, pero solo el segundo avanza la generacion.
+    const requestGeneration = threadGenerationsRef.current[requestModuleId] ?? 0;
+    const isResponseStale = () => (threadGenerationsRef.current[requestModuleId] ?? 0) !== requestGeneration;
+
     try {
       const requestPayload: IaChatRequest = {
-        module: selectedModule.id,
+        module: requestModuleId,
         question: trimmedQuestion,
-        conversationId: conversationIds[selectedModule.id] ?? null,
+        conversationId: requestConversationId,
         presentationMode: effectiveMode,
         attachment: attachment
           ? {
@@ -3235,6 +3251,33 @@ export default function IaChatPage() {
 
       if (!response) {
         throw new Error("El asistente no devolvio una respuesta valida.");
+      }
+
+      if (isResponseStale()) {
+        // El hilo se reinicio (Limpiar conversacion) mientras esta solicitud seguia en vuelo: la
+        // respuesta pertenece a un hilo que ya no existe. No se adopta conversationId, no se agrega
+        // el mensaje de asistente, no se toca errorMessage — se descarta por completo.
+        return;
+      }
+
+      // Adopta el conversationId que el backend genero/valido para este turno (Fase 2). Guardia de
+      // concurrencia: solo escribe si la entrada de ese modulo sigue siendo exactamente la misma
+      // que se envio en esta solicitud — si mientras tanto otra respuesta, un "Limpiar" o un cambio
+      // de hilo ya la modificaron, esta respuesta (ahora desactualizada) no la sobrescribe. Un
+      // conversationId ausente o invalido en el servidor (conversacion desconocida/expirada) ya fue
+      // resuelto por el backend creando una conversacion nueva propia — aqui solo se adopta lo que
+      // venga, sin tratarlo como error.
+      if (response.conversationId) {
+        setConversationIds((current) => {
+          const storedForModule = current[requestModuleId] ?? null;
+          if (storedForModule !== requestConversationId) {
+            return current;
+          }
+          if (storedForModule === response.conversationId) {
+            return current;
+          }
+          return { ...current, [requestModuleId]: response.conversationId as string };
+        });
       }
 
       const executedSqlPreview = response.interpretedFilters?.executedSqlPreview;
@@ -3265,18 +3308,22 @@ export default function IaChatPage() {
 
       updateCurrentThread((messages) => [...messages, assistantMessage]);
     } catch (error) {
-      const friendlyMessage = getIaChatErrorMessage(error);
-      setErrorMessage(friendlyMessage);
-      updateCurrentThread((messages) => [
-        ...messages,
-        {
-          id: `error-${Date.now()}`,
-          role: "assistant",
-          title: "No se pudo completar la consulta",
-          text: friendlyMessage,
-          tone: "error",
-        },
-      ]);
+      if (!isResponseStale()) {
+        // Mismo criterio que la rama de exito: un fallo tardio de una solicitud ya invalidada por
+        // "Limpiar conversacion" tampoco debe aparecer en el hilo nuevo.
+        const friendlyMessage = getIaChatErrorMessage(error);
+        setErrorMessage(friendlyMessage);
+        updateCurrentThread((messages) => [
+          ...messages,
+          {
+            id: `error-${Date.now()}`,
+            role: "assistant",
+            title: "No se pudo completar la consulta",
+            text: friendlyMessage,
+            tone: "error",
+          },
+        ]);
+      }
     } finally {
       setLoading(false);
       setPresentationMode("auto");

@@ -269,7 +269,6 @@ export type OrdenCompraGenerarPagoNuevoPayload = {
   idOc: number;
   fila: number;
   idTarea: number;
-  idCargo: number;
   idComprobante: number;
   monto: number;
   cuenta: string;

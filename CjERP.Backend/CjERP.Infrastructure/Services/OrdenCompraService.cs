@@ -45,7 +45,6 @@ public class OrdenCompraService : IOrdenCompraService
         SELECT TOP 1 cuenta.IdBanco
         FROM dbo.CuentaEmpleado cuenta
         WHERE cuenta.IdEmpleado = @IdResponsable
-          AND cuenta.IdCargo = @IdCargo
           AND LTRIM(RTRIM(ISNULL(cuenta.Cuenta, ''))) = LTRIM(RTRIM(@Cuenta))
           AND LTRIM(RTRIM(ISNULL(cuenta.CuentaInter, ''))) = LTRIM(RTRIM(@CuentaInter))
           AND LTRIM(RTRIM(ISNULL(cuenta.NombreCta, ''))) = LTRIM(RTRIM(@NombreCta));
@@ -79,7 +78,17 @@ public class OrdenCompraService : IOrdenCompraService
         SELECT TOP 1
             cab.FechaCreacion AS FechaOrden,
             COALESCE(forma.ValorIni, '') AS FormaPago,
-            cab.DiasPago
+            cab.DiasPago,
+            CAST(CASE
+                WHEN cab.IdEstado IN (3, 6)
+                  OR EXISTS (
+                      SELECT 1
+                      FROM dbo.DetOrdenCompra det
+                      WHERE det.IdOc = cab.IdOc
+                        AND det.IdEstado IN (3, 6)
+                  ) THEN 1
+                ELSE 0
+            END AS bit) AS EsRechazada
         FROM dbo.CabOrdenCompra cab
         OUTER APPLY (
             SELECT TOP 1 c.ValorIni
@@ -518,9 +527,9 @@ public class OrdenCompraService : IOrdenCompraService
                 cancellationToken,
                 commandTimeout: 120))).ToList();
 
-        // sp_OrdenCompra_BuscarCabecera puede devolver un nombre histórico en
-        // Validador. La bandeja debe agrupar por el validador vigente de la OC,
-        // igual que sp_OrdenCompra_Consulta_Estados: CabOrdenCompra.IdValidador.
+        // Los tres niveles vigentes se definen en EmpleadoCjDetalle del
+        // solicitante. No se deben reutilizar los nombres históricos que pueda
+        // devolver sp_OrdenCompra_BuscarCabecera para los niveles 2 y 3.
         var idsOc = cabeceras
             .Select(item => item.IdOc)
             .Where(idOc => idOc > 0)
@@ -534,17 +543,30 @@ public class OrdenCompraService : IOrdenCompraService
             new CommandDefinition(
                 """
                 SELECT cab.IdOc,
-                       CASE
-                           WHEN ISNULL(cab.IdWeb, 0) = 1 THEN empCj.NombreEmpleado
-                           ELSE emp.NombreEmpleado
-                       END AS Nombre
+                       responsable.NombreEmpleado AS Validador,
+                       segundo.NombreEmpleado AS Validador2,
+                       tercero.NombreEmpleado AS Validador3
                 FROM dbo.CabOrdenCompra cab
-                LEFT JOIN dbo.EmpleadoCj empCj
-                    ON empCj.IdEmpleado = cab.IdValidador
-                   AND ISNULL(cab.IdWeb, 0) = 1
-                LEFT JOIN dbo.Empleado emp
-                    ON emp.IdEmpleado = cab.IdValidador
+                LEFT JOIN dbo.Empleado solicitanteLegacy
+                    ON solicitanteLegacy.IdEmpleado = cab.IdSolicitante
                    AND ISNULL(cab.IdWeb, 0) <> 1
+                OUTER APPLY (
+                    SELECT TOP 1
+                        detalle.IdResponsableCj,
+                        detalle.IdSegundoVacaciones,
+                        detalle.IdTerceroVacaciones
+                    FROM dbo.EmpleadoCjDetalle detalle
+                    WHERE detalle.IdEmpleadoCj = CASE
+                        WHEN ISNULL(cab.IdWeb, 0) = 1 THEN cab.IdSolicitante
+                        ELSE solicitanteLegacy.IdEmpleadoCj
+                    END
+                ) detalleEmpleado
+                LEFT JOIN dbo.EmpleadoCj responsable
+                    ON responsable.IdEmpleado = detalleEmpleado.IdResponsableCj
+                LEFT JOIN dbo.EmpleadoCj segundo
+                    ON segundo.IdEmpleado = detalleEmpleado.IdSegundoVacaciones
+                LEFT JOIN dbo.EmpleadoCj tercero
+                    ON tercero.IdEmpleado = detalleEmpleado.IdTerceroVacaciones
                 WHERE EXISTS (
                     SELECT 1
                     FROM STRING_SPLIT(@IdsOcCsv, ',') ids
@@ -555,14 +577,19 @@ public class OrdenCompraService : IOrdenCompraService
                 cancellationToken: cancellationToken,
                 commandTimeout: 120));
 
-        var nombrePorOc = validadores
-            .Where(item => !string.IsNullOrWhiteSpace(item.Nombre))
-            .ToDictionary(item => item.IdOc, item => item.Nombre!.Trim());
+        var validadoresPorOc = validadores.ToDictionary(item => item.IdOc);
 
         foreach (var cabecera in cabeceras)
         {
-            if (nombrePorOc.TryGetValue(cabecera.IdOc, out var nombre))
-                cabecera.Validador = nombre;
+            if (!validadoresPorOc.TryGetValue(cabecera.IdOc, out var validadoresEmpleado))
+                continue;
+
+            if (!string.IsNullOrWhiteSpace(validadoresEmpleado.Validador))
+                cabecera.Validador = validadoresEmpleado.Validador.Trim();
+            if (!string.IsNullOrWhiteSpace(validadoresEmpleado.Validador2))
+                cabecera.Validador2 = validadoresEmpleado.Validador2.Trim();
+            if (!string.IsNullOrWhiteSpace(validadoresEmpleado.Validador3))
+                cabecera.Validador3 = validadoresEmpleado.Validador3.Trim();
         }
 
         return cabeceras;
@@ -1181,7 +1208,6 @@ public class OrdenCompraService : IOrdenCompraService
                 new
                 {
                     IdResponsable = origen.IdResponsable,
-                    request.IdCargo,
                     Cuenta = request.Cuenta.Trim(),
                     CuentaInter = request.CuentaInter.Trim(),
                     NombreCta = request.NombreCta.Trim()
@@ -1492,7 +1518,9 @@ public class OrdenCompraService : IOrdenCompraService
     private sealed class ValidadorOcLookup
     {
         public int IdOc { get; set; }
-        public string? Nombre { get; set; }
+        public string? Validador { get; set; }
+        public string? Validador2 { get; set; }
+        public string? Validador3 { get; set; }
     }
 
     private sealed class AprobadoresRegistradosPdfLookup

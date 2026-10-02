@@ -42,6 +42,9 @@ export type IaChatResponse = {
   };
   totalRows?: number;
   errorMessage?: string;
+  // El backend genera y valida el ID de conversacion (Fase 2, docs/AI_COPILOT_IMPLEMENTATION_PLAN.md).
+  // El cliente ya no inventa este valor: lo adopta de aqui y lo reenvia en el siguiente turno/export.
+  conversationId?: string | null;
 };
 
 export type IaChatDashboardExportRequest = {

@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- D-8: primera incorporación de xUnit en el backend. Versiones estándar del ecosistema .NET 8,
+         sin dependencias de mocking (Moq/NSubstitute) para mantener la huella mínima: los fakes de
+         HttpClient/ISqlCommandFactory se escriben a mano en TestSupport/. -->
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="coverlet.collector" Version="6.0.2">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Solo los proyectos estrictamente necesarios para instanciar IaChatService y sus DTOs:
+         Infrastructure (contiene IaChatService e ISqlCommandFactory), Application (DTOs de IA Chat),
+         Shared (OpenAiSettings/AnthropicSettings). No se referencia CjERP.Api ni CjERP.Domain. -->
+    <ProjectReference Include="..\..\CjERP.Infrastructure\CjERP.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\CjERP.Application\CjERP.Application.csproj" />
+    <ProjectReference Include="..\..\CjERP.Shared\CjERP.Shared.csproj" />
+  </ItemGroup>
+
+</Project>

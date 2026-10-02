@@ -3,6 +3,7 @@ import {
   matchesCrudToolbarSearch,
   type CrudToolbarSearchField,
 } from "../../../components/base/CrudToolbar";
+import ConfirmDialog from "../../../components/base/ConfirmDialog";
 import { FiltroOperativoLookup } from "../../../components/lookups/FiltroOperativoLookup";
 import {
   aprobarOrdenCompra,
@@ -42,7 +43,9 @@ import { getHttpErrorMessage } from "../../../utils/httpError";
 import { ChevronDown, ChevronUp, ChevronsDown, ChevronsUp, Eye, FileDown, FileText } from "lucide-react";
 import { buildPlanillaConsultaEstadosRequest, consultarGastosPagadosPorId, consultarPlanillaEstados } from "../../../api/planillaConsultaService";
 
-const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "EstadoOcSemaforo", "FechaOc", "Cliente", "NombreProyecto", "Site", "TipoTrabajo", "Tarea", "Cuenta", "CuentaInter", "NombreCta", "Banco", "Comprobante", "MonedaOc", "SubtotalOc", "SubtotalPlanilla", "AvanceOc", "DiferenciaSubtotal", "DiferenciaAvanceOc", "PagoNuevo", "CorrelativoPlanilla", "SolicitanteOc", "PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"];
+// Fila se mantiene en cada registro para enlazar el pago con DetOrdenCompra,
+// pero no se muestra como columna. Detalle sí debe estar disponible al usuario.
+const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "EstadoOcSemaforo", "FechaOc", "Cliente", "NombreProyecto", "Site", "TipoTrabajo", "Tarea", "Detalle", "Cuenta", "CuentaInter", "NombreCta", "Banco", "Comprobante", "MonedaOc", "SubtotalOc", "SubtotalPlanilla", "AvanceOc", "DiferenciaSubtotal", "DiferenciaAvanceOc", "PagoNuevo", "CorrelativoPlanilla", "SolicitanteOc", "PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"];
 const OC_GASTOS_MAX_COLUMNAS_VISIBLES = 32;
 const COLORES_ESTADO_OC: Record<string, string> = {
   R: "#D32F2F",
@@ -78,6 +81,7 @@ const OC_GASTOS_COLUMN_LABELS: Record<string, string> = {
   TipoTrabajo: "Tipo trabajo",
   IdTarea: "Id tarea",
   Tarea: "Tarea",
+  Detalle: "Detalle",
   IdCargo: "Id cargo",
   Cuenta: "Cuenta",
   CuentaInter: "Cuenta interbancaria",
@@ -537,7 +541,7 @@ const ESTADOS_OC_GASTOS = [
 function clasificarEstadoOc(value: unknown): EstadoOcReporte | "" {
   const estadoOc = Number(value);
   if (estadoOc === 1) return "ACEPTADO";
-  if (estadoOc === 6) return "RECHAZADO";
+  if (estadoOc === 3 || estadoOc === 6) return "RECHAZADO";
   if (estadoOc >= 90 && estadoOc <= 99) return "EN PROCESO";
   const texto = String(value ?? "").trim().toUpperCase();
   if (texto.includes("APROB") || texto.includes("ACEPT")) return "ACEPTADO";
@@ -550,13 +554,18 @@ function formatEstadoOcGrid(value: unknown) {
   const numericValue = Number(value);
   if (Number.isFinite(numericValue)) {
     if (numericValue === 1) return "APROBADO";
-    if (numericValue === 6) return "RECHAZADO";
+    if (numericValue === 3 || numericValue === 6) return "RECHAZADO";
     if (numericValue === 0) return "SIN ESTADO";
     return "PENDIENTE";
   }
 
   const text = String(value ?? "").trim();
   return text || "SIN ESTADO";
+}
+
+function esEstadoOcRechazado(value: unknown): boolean {
+  const codigo = Number(value);
+  return codigo === 3 || codigo === 6 || String(value ?? "").trim().toLocaleUpperCase("es-PE").includes("RECHAZ");
 }
 
 function getEstadoOcRowValue(row: Record<string, unknown>): unknown {
@@ -736,7 +745,18 @@ export default function OcV1Page() {
   const [reportePlanillaRows, setReportePlanillaRows] = useState<Record<string, unknown>[]>([]);
   const [ocGastosSaldosEditables, setOcGastosSaldosEditables] = useState<Record<string, { subtotal?: string; avance?: string }>>({});
   const [ocGastosSaldoAlerts, setOcGastosSaldoAlerts] = useState<Record<string, string>>({});
+  const [ocGastosFilaSeleccionada, setOcGastosFilaSeleccionada] = useState<string | null>(null);
   const [pagosNuevosEnProceso, setPagosNuevosEnProceso] = useState<Record<string, boolean>>({});
+  const [pagoNuevoPendiente, setPagoNuevoPendiente] = useState<{
+    row: Record<string, unknown>;
+    saldoEditableKey: string;
+    montoTexto: string;
+  } | null>(null);
+  const [resultadoPagoNuevo, setResultadoPagoNuevo] = useState<{
+    tipo: "exito" | "error";
+    titulo: string;
+    mensaje: string;
+  } | null>(null);
   const [estadosOcGastosCatalogo, setEstadosOcGastosCatalogo] = useState<string[]>([]);
   const [solicitantesOcGastosCatalogo, setSolicitantesOcGastosCatalogo] = useState<Array<{ value: string; label: string }>>([]);
   const [clientesOcGastosCatalogo, setClientesOcGastosCatalogo] = useState<Array<{ value: string; label: string }>>([]);
@@ -1405,20 +1425,32 @@ export default function OcV1Page() {
     const idOc = Number(getReporteRowValue(row, "IdOc"));
     const fila = Number(getReporteRowValue(row, "Fila"));
     const idTarea = Number(getReporteRowValue(row, "IdTarea"));
-    const idCargo = Number(getReporteRowValue(row, "IdCargo"));
     const idComprobante = Number(getReporteRowValue(row, "IdComprobante"));
     const cuenta = String(getReporteRowValue(row, "Cuenta") ?? "").trim();
     const cuentaInter = String(getReporteRowValue(row, "CuentaInter") ?? "").trim();
     const nombreCta = String(getReporteRowValue(row, "NombreCta") ?? "").trim();
 
     if (!Number.isFinite(monto) || monto <= 0) {
-      setError("Ingrese un saldo subtotal mayor que cero antes de crear el pago.");
+      const mensaje = "Ingrese un saldo subtotal mayor que cero antes de crear el pago.";
+      setError(mensaje);
+      setResultadoPagoNuevo({ tipo: "error", titulo: "No se generó el pago", mensaje });
       return;
     }
 
-    if (![idOc, fila, idTarea, idCargo, idComprobante].every((value) => Number.isInteger(value) && value > 0) ||
-        !cuenta || !cuentaInter || !nombreCta) {
-      setError("La fila no tiene todos los datos requeridos para Pago nuevo. Actualice la grilla después de aplicar el store actualizado.");
+    const camposFaltantes = [
+      !Number.isInteger(idOc) || idOc <= 0 ? "OC" : null,
+      !Number.isInteger(fila) || fila <= 0 ? "Fila de detalle" : null,
+      !Number.isInteger(idTarea) || idTarea <= 0 ? "Id tarea" : null,
+      !Number.isInteger(idComprobante) || idComprobante <= 0 ? "Id comprobante" : null,
+      !cuenta ? "Cuenta" : null,
+      !cuentaInter ? "Cuenta interbancaria" : null,
+      !nombreCta ? "Titular de cuenta" : null,
+    ].filter((campo): campo is string => campo !== null);
+
+    if (camposFaltantes.length > 0) {
+      const mensaje = `No se generó el pago porque la fila no envía: ${camposFaltantes.join(", ")}.`;
+      setError(mensaje);
+      setResultadoPagoNuevo({ tipo: "error", titulo: "No se generó el pago", mensaje });
       return;
     }
 
@@ -1431,23 +1463,26 @@ export default function OcV1Page() {
         idOc,
         fila,
         idTarea,
-        idCargo,
         idComprobante,
         monto,
         cuenta,
         cuentaInter,
         nombreCta,
       });
-      setMessage(`Pago registrado correctamente. Correlativo ${result.correlativo}.`);
       setOcGastosSaldosEditables((actual) => {
         const siguiente = { ...actual };
         delete siguiente[saldoEditableKey];
         return siguiente;
       });
       await loadReporteDetalles();
+      const mensaje = `El pago se generó correctamente con correlativo ${result.correlativo}. La grilla ya fue actualizada.`;
+      setMessage(mensaje);
+      setResultadoPagoNuevo({ tipo: "exito", titulo: "Pago generado", mensaje });
     } catch (err) {
-      setError(getHttpErrorMessage(err, "No se pudo registrar el pago nuevo."));
+      const mensaje = getHttpErrorMessage(err, "No se pudo registrar el pago nuevo.");
+      setError(mensaje);
       setMessage("");
+      setResultadoPagoNuevo({ tipo: "error", titulo: "No se generó el pago", mensaje });
     } finally {
       setPagosNuevosEnProceso((actual) => {
         const siguiente = { ...actual };
@@ -1582,11 +1617,11 @@ export default function OcV1Page() {
     const fallbackValidador = idValidador ? validadorLabelById.get(idValidador) ?? `Validador ${idValidador}` : "";
 
     if (nivelAprobacion === 2) {
-      return item.validador2?.trim() || fallbackValidador || "Sin validador 2";
+      return item.validador2?.trim() || "Sin validador 2";
     }
 
     if (nivelAprobacion === 3) {
-      return item.validador3?.trim() || fallbackValidador || "Sin validador 3";
+      return item.validador3?.trim() || "Sin validador 3";
     }
 
     return item.validador?.trim() || fallbackValidador || "Sin validador";
@@ -2419,6 +2454,7 @@ export default function OcV1Page() {
       draft.comprobante &&
       draft.formaPago &&
       draft.moneda &&
+      detalleActual.detalle.trim().length > 0 &&
       toNumber(detalleActual.cantidad) > 0 &&
       toNumber(detalleActual.precioUnitario) > 0
     );
@@ -2438,7 +2474,7 @@ export default function OcV1Page() {
     };
 
     if (!validateDetalleForm(nextItem)) {
-      setError("Cada posición debe tener cliente, proyecto, site, tipo de trabajo, tarea, comprobante, tipo de pago, moneda, cantidad y precio unitario.");
+      setError("Complete todos los campos obligatorios de la posición: cliente, proyecto, site, tipo de trabajo, tarea, comprobante, tipo de pago, moneda, detalle, cantidad y precio unitario.");
       return;
     }
 
@@ -3616,7 +3652,7 @@ export default function OcV1Page() {
                   }
                 : { ...styles.tableWrap, flex: 1, minHeight: 0, overflow: "auto" }}
             >
-              <style>{`.reporte-grid thead th { position: sticky; top: 0; z-index: 3; background: #fff; } .oc-gastos-grid th:nth-child(n+${OC_GASTOS_MAX_COLUMNAS_VISIBLES + 1}), .oc-gastos-grid td:nth-child(n+${OC_GASTOS_MAX_COLUMNAS_VISIBLES + 1}) { display: none; }`}</style>
+              <style>{`.reporte-grid thead th { position: sticky; top: 0; z-index: 3; background: #fff; } .oc-gastos-grid th:nth-child(n+${OC_GASTOS_MAX_COLUMNAS_VISIBLES + 1}), .oc-gastos-grid td:nth-child(n+${OC_GASTOS_MAX_COLUMNAS_VISIBLES + 1}) { display: none; } .oc-gastos-grid tbody tr.oc-gastos-fila-rechazada > td { background: #FEF2F2 !important; } .oc-gastos-grid tbody tr.oc-gastos-fila-seleccionada > td { background: #FFF7ED !important; border-top: 3px solid #F97316 !important; border-bottom: 3px solid #F97316 !important; } .oc-gastos-grid tbody tr.oc-gastos-fila-seleccionada.oc-gastos-fila-rechazada > td { background: #FEE2E2 !important; } .oc-gastos-grid tbody tr.oc-gastos-fila-seleccionada > td:first-child { border-left: 3px solid #F97316 !important; } .oc-gastos-grid tbody tr.oc-gastos-fila-seleccionada > td:last-child { border-right: 3px solid #F97316 !important; } .oc-gastos-grid tbody tr > td.oc-gastos-estado-rechazada { background: #B91C1C !important; color: #FFFFFF !important; font-weight: 800 !important; }`}</style>
               <table className={String(reporteSubtab) === "oc-gastos" ? "reporte-grid oc-gastos-grid" : "reporte-grid"} style={String(reporteSubtab) === "oc-gastos" ? { ...styles.table, width: "max-content", minWidth: "100%" } : styles.table}>
                 <thead>
                   <tr>
@@ -3767,8 +3803,19 @@ export default function OcV1Page() {
                         }));
                       };
 
+                      const filaSeleccionada = ocGastosFilaSeleccionada === saldoEditableKey;
+                      const filaRechazada = esEstadoOcRechazado(read("EstadoOc")) || esEstadoOcRechazado(read("IdEstadoOc"));
                       return (
-                        <tr key={`pla-${read("IdOc") || "sin-oc"}-${read("CorrelativoPlanilla")}-${read("IdSite")}-${read("PrecioUniOc")}-${read("CantOc")}-${index}`} style={styles.tr}>
+                        <tr
+                          key={`pla-${read("IdOc") || "sin-oc"}-${read("CorrelativoPlanilla")}-${read("IdSite")}-${read("PrecioUniOc")}-${read("CantOc")}-${index}`}
+                          className={[
+                            filaSeleccionada ? "oc-gastos-fila-seleccionada" : "",
+                            filaRechazada ? "oc-gastos-fila-rechazada" : "",
+                          ].filter(Boolean).join(" ") || undefined}
+                          style={{ ...styles.tr, cursor: "pointer" }}
+                          onClick={() => setOcGastosFilaSeleccionada(saldoEditableKey)}
+                          aria-selected={filaSeleccionada}
+                        >
                           <td style={{ ...styles.td, width: 52, minWidth: 52, padding: "4px 2px", whiteSpace: "nowrap", lineHeight: 0, position: "sticky", left: 0, zIndex: 2, background: "#fff" }}>
                             <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
                             <button
@@ -3800,15 +3847,15 @@ export default function OcV1Page() {
                             const esPagoNuevo = column === "PagoNuevo";
                             const esEstadoOcSemaforo = column === "EstadoOcSemaforo";
                             const estadoOcParaPago = String(read("EstadoOc") ?? "").trim().toLocaleUpperCase("es-PE");
-                            const pagoNuevoHabilitado = estadoOcParaPago === "APROBADO";
+                            // El store puede devolver el estado como texto (APROBADO)
+                            // o como su correlativo (1). La grilla lo formatea como
+                            // "APROBADO", pero la habilitación debe aceptar ambas formas.
+                            const pagoNuevoHabilitado = Number(read("EstadoOc")) === 1 || ["APROBADO", "ACEPTADO", "A"].includes(estadoOcParaPago);
                             const pagoNuevoEnProceso = Boolean(pagosNuevosEnProceso[saldoEditableKey]);
-                            const pagoNuevoDatosCompletos = ["Fila", "IdTarea", "IdCargo", "IdComprobante"]
-                              .every((campo) => Number(read(campo)) > 0) &&
-                              ["Cuenta", "CuentaInter", "NombreCta"].every((campo) => String(read(campo) ?? "").trim().length > 0);
-                            const pagoNuevoDisponible = pagoNuevoHabilitado && pagoNuevoDatosCompletos && !pagoNuevoEnProceso;
+                            const pagoNuevoDisponible = pagoNuevoHabilitado && !pagoNuevoEnProceso;
                             const estadoOcSemaforo = String(rawValue ?? "").trim().toUpperCase();
-                            const colorEstadoOc = COLORES_ESTADO_OC[estadoOcSemaforo];
-                            const estadoOcSemaforoDisplay = estadoOcSemaforo === "P" ? "S/O" : estadoOcSemaforo;
+                            const colorEstadoOc = filaRechazada ? "#D32F2F" : COLORES_ESTADO_OC[estadoOcSemaforo];
+                            const estadoOcSemaforoDisplay = filaRechazada ? "RECHAZADA" : estadoOcSemaforo === "P" ? "S/O" : estadoOcSemaforo;
                             const saldoSubtotalValue = ocGastosSaldosEditables[saldoEditableKey]?.subtotal ?? saldoSubtotalFila.toFixed(2);
                             const saldoAvanceValue = ocGastosSaldosEditables[saldoEditableKey]?.avance ?? saldoAvanceOcFila.toFixed(2);
                             const saldoSubtotalAlert = ocGastosSaldoAlerts[`${saldoEditableKey}:subtotal`];
@@ -3829,7 +3876,7 @@ export default function OcV1Page() {
                               : [];
 
                             return (
-                              <td key={`${index}-${column}`} style={{ ...styles.td, width: 110, minWidth: 80, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer", ...(columnIndex < 4 ? { position: "sticky", left: 52 + columnIndex * 110, zIndex: 2, background: esEstadoOcSemaforo && colorEstadoOc ? colorEstadoOc : "#fff", ...(esEstadoOcSemaforo && colorEstadoOc ? { color: ["2", "P"].includes(estadoOcSemaforo) ? "#1F2937" : "#fff", textAlign: "center", fontWeight: 700 } : {}) } : esEstadoOcSemaforo && colorEstadoOc ? { background: colorEstadoOc, color: ["2", "P"].includes(estadoOcSemaforo) ? "#1F2937" : "#fff", textAlign: "center", fontWeight: 700 } : {}) }} title={esEstadoOcSemaforo ? (ETIQUETAS_ESTADO_OC[estadoOcSemaforo] ?? value) : value} onClick={(event) => { const cell = event.currentTarget; if (cell.style.whiteSpace === "normal") cell.style.whiteSpace = "nowrap"; else if (cell.scrollWidth > cell.clientWidth) cell.style.whiteSpace = "normal"; }}>
+                              <td key={`${index}-${column}`} className={esEstadoOcSemaforo && filaRechazada ? "oc-gastos-estado-rechazada" : undefined} style={{ ...styles.td, width: 110, minWidth: 80, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer", ...(columnIndex < 4 ? { position: "sticky", left: 52 + columnIndex * 110, zIndex: 2, background: esEstadoOcSemaforo && colorEstadoOc ? colorEstadoOc : "#fff", ...(esEstadoOcSemaforo && colorEstadoOc ? { color: filaRechazada || !["2", "P"].includes(estadoOcSemaforo) ? "#fff" : "#1F2937", textAlign: "center", fontWeight: 700 } : {}) } : esEstadoOcSemaforo && colorEstadoOc ? { background: colorEstadoOc, color: filaRechazada || !["2", "P"].includes(estadoOcSemaforo) ? "#fff" : "#1F2937", textAlign: "center", fontWeight: 700 } : {}) }} title={esEstadoOcSemaforo ? (filaRechazada ? "Rechazada" : ETIQUETAS_ESTADO_OC[estadoOcSemaforo] ?? value) : value} onClick={(event) => { const cell = event.currentTarget; if (cell.style.whiteSpace === "normal") cell.style.whiteSpace = "nowrap"; else if (cell.scrollWidth > cell.clientWidth) cell.style.whiteSpace = "normal"; }}>
                                 {esEstadoOcSemaforo ? estadoOcSemaforoDisplay : esSaldoSubtotal ? (
                                   <div style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 116 }}>
                                   <input
@@ -3879,16 +3926,14 @@ export default function OcV1Page() {
                                     type="button"
                                     onClick={(event) => {
                                       event.stopPropagation();
-                                      void registrarPagoNuevoDesdeOc(row, saldoEditableKey, saldoSubtotalValue);
+                                      setPagoNuevoPendiente({ row, saldoEditableKey, montoTexto: saldoSubtotalValue });
                                     }}
                                     disabled={!pagoNuevoDisponible}
                                     title={!pagoNuevoHabilitado
                                       ? "Pago nuevo solo está disponible para órdenes con estado Aprobado."
-                                      : !pagoNuevoDatosCompletos
-                                        ? "Faltan datos de cuenta o de la fila. Actualice la grilla con el store actualizado."
-                                        : pagoNuevoEnProceso
-                                          ? "Proceso en ejecución..."
-                                          : `Registrar ${formatMoney(Number(saldoSubtotalValue) || 0)} como nuevo pago.`}
+                                      : pagoNuevoEnProceso
+                                        ? "Proceso en ejecución..."
+                                        : `Registrar ${formatMoney(Number(saldoSubtotalValue) || 0)} como nuevo pago.`}
                                     aria-label={`Pago nuevo para OC ${read("IdOc")}`}
                                     style={{
                                       border: "1px solid #0F766E",
@@ -3983,6 +4028,43 @@ export default function OcV1Page() {
           </div>
           {reporteSubtab === "resumen" && <div style={{ ...styles.card, padding: 32, textAlign: "center", color: "#607089" }}><h2 style={styles.sectionTitle}>Resumen</h2><p style={styles.sectionText}>Seleccione los filtros para consultar esta vista.</p></div>}
         </section>
+      ) : null}
+
+      <ConfirmDialog
+        open={pagoNuevoPendiente !== null}
+        title="Generar pago nuevo"
+        message={pagoNuevoPendiente ? (
+          <>
+            ¿Desea generar el pago por <strong>{formatMoney(Number(pagoNuevoPendiente.montoTexto) || 0)}</strong>
+            {" "}para la OC <strong>{String(getReporteRowValue(pagoNuevoPendiente.row, "IdOc") ?? "")}</strong>?
+          </>
+        ) : null}
+        confirmLabel="Generar pago"
+        cancelLabel="Cancelar"
+        onCancel={() => setPagoNuevoPendiente(null)}
+        onConfirm={() => {
+          const pago = pagoNuevoPendiente;
+          setPagoNuevoPendiente(null);
+          if (pago) void registrarPagoNuevoDesdeOc(pago.row, pago.saldoEditableKey, pago.montoTexto);
+        }}
+      />
+
+      {resultadoPagoNuevo ? (
+        <div style={styles.modalOverlay} role="dialog" aria-modal="true" aria-labelledby="resultado-pago-nuevo-titulo">
+          <div style={styles.modalCardSmall}>
+            <h3 id="resultado-pago-nuevo-titulo" style={{ marginTop: 0, marginBottom: 12, color: "#17143A" }}>
+              {resultadoPagoNuevo.titulo}
+            </h3>
+            <div style={resultadoPagoNuevo.tipo === "exito" ? styles.successBanner : styles.errorBanner}>
+              {resultadoPagoNuevo.mensaje}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 24 }}>
+              <button type="button" style={styles.primaryButton} onClick={() => setResultadoPagoNuevo(null)}>
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {mostrarConfirmacionRechazo && idsOcRechazo.length > 0 ? (

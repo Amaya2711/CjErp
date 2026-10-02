@@ -276,11 +276,42 @@ builder.Services.AddHttpClient<IMetaWhatsAppService, MetaWhatsAppService>(client
     client.Timeout = TimeSpan.FromSeconds(60);
 });
 builder.Services.AddSingleton<IReporteWhatsappRuntimeMonitor, ReporteWhatsappRuntimeMonitor>();
-builder.Services.AddHttpClient<IIaChatService, IaChatService>(client =>
+// Fase 1.2 (docs/AI_COPILOT_IMPLEMENTATION_PLAN.md): IaChatService ya no habla HTTP directamente
+// con OpenAI/Anthropic; delega en estos dos providers y en el planner de GASTOS. Cada provider
+// mantiene el mismo Timeout que tenia el HttpClient combinado original (90s). BaseAddress no se
+// preserva porque ambos providers siempre usaron URLs absolutas (https://api.openai.com/... y
+// https://api.anthropic.com/...) y nunca dependieron de HttpClient.BaseAddress.
+builder.Services.AddHttpClient<IOpenAiChatProvider, OpenAiChatProvider>(client =>
 {
-    client.BaseAddress = new Uri("https://api.openai.com");
     client.Timeout = TimeSpan.FromSeconds(90);
 });
+builder.Services.AddHttpClient<IAnthropicMessagesProvider, AnthropicMessagesProvider>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(90);
+});
+builder.Services.AddScoped<IGastosQueryPlanner, GastosQueryPlanner>();
+// Paso 1.12 original de la tabla de Fase 1: genera la respuesta final de GASTOS via OpenAI a
+// partir del payload ya analizado; depende de IOpenAiChatProvider (ya registrado arriba).
+builder.Services.AddScoped<IResponseGenerator, ResponseGenerator>();
+// Paso 1.13 original de la tabla de Fase 1 (PV levantado tras lectura linea por linea): unico
+// punto que llama a Anthropic para el dashboard HTML. Reutiliza IAnthropicMessagesProvider (ya
+// registrado arriba).
+builder.Services.AddScoped<IIaDashboardExportService, IaDashboardExportService>();
+// Fase 1.3: unico punto que ejecuta dbo.sp_IA_Planilla_Buscar. No agrega HttpClient propio;
+// reutiliza ISqlCommandFactory (ya registrado) y el ILogger generico.
+builder.Services.AddScoped<IGastosQueryExecutor, GastosQueryExecutor>();
+// Fase 1.4: reemplaza el ConcurrentDictionary estatico que antes vivia dentro de IaChatService.
+// Debe ser Singleton: el estado conversacional tiene que sobrevivir entre requests HTTP durante
+// toda la vida del proceso, igual que el campo estatico original. Si fuera Scoped/Transient, cada
+// request crearia un diccionario vacio y la conversacion se perderia turno a turno.
+builder.Services.AddSingleton<IIaConversationStore, InMemoryIaConversationStore>();
+// Paso 1.9 original de la tabla de Fase 1: unico punto que ejecuta dbo.sp_IaChatAuditoria_Insertar.
+// Reutiliza ISqlCommandFactory (ya registrado) y el ILogger generico, igual que GastosQueryExecutor.
+builder.Services.AddScoped<IIaAuditService, IaAuditService>();
+// Paso 1.14 original de la tabla de Fase 1: IaOrchestrator reemplaza a IaChatService como
+// implementacion registrada de IIaChatService. IaChatService ya no implementa la interfaz (quedo
+// reducido a una clase estatica de constantes compartidas, ver IaChatService.cs).
+builder.Services.AddScoped<IIaChatService, IaOrchestrator>();
 builder.Services.AddHttpClient<ISharePointCommercialUploadService, SharePointCommercialUploadService>();
 builder.Services.AddHttpClient<IWupAuthService, WupAuthService>((serviceProvider, client) =>
 {

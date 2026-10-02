@@ -21,4 +21,11 @@ public sealed class IaChatResponseDto
     public int? TotalRows { get; set; }
 
     public string? ErrorMessage { get; set; }
+
+    // Fase 2 (docs/AI_COPILOT_IMPLEMENTATION_PLAN.md): el backend genera y valida el ID de
+    // conversacion — este campo le informa al cliente cual usar en el siguiente turno. Antes de
+    // este cambio el cliente generaba su propio ID (crypto.randomUUID en iachat.tsx) y el backend
+    // lo adoptaba ciegamente; el frontend debe migrar a adoptar este valor (cambio coordinado,
+    // pendiente, no incluido en esta sesion).
+    public string? ConversationId { get; set; }
 }
