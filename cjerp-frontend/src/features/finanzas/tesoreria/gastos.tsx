@@ -1576,6 +1576,7 @@ export default function GastosPage({
     loading: cargando,
     saving: guardando,
     error: errorGuardado,
+    setError: setErrorGuardado,
     panelOpen: panelAbierto,
     setPanelOpen: setPanelAbierto,
     mode: modo,
@@ -2238,6 +2239,8 @@ export default function GastosPage({
   };
 
   const abrirNuevo = () => {
+    // Un error de carga anterior no debe aparecer en un nuevo registro.
+    setErrorGuardado("");
     setModo("nuevo");
     setGastoEditorTab("principal");
     setHistorialSitioExpanded(false);
@@ -2414,6 +2417,7 @@ export default function GastosPage({
   };
 
   const cerrarPanel = () => {
+    setErrorGuardado("");
     setPanelAbierto(false);
     setGastoEditorTab("principal");
     setHistorialSitioExpanded(false);
