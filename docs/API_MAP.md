@@ -79,6 +79,7 @@
 | GET /tesoreria/pagos/v1 | PagoTesoreriaController | PagoTesoreriaWorkflow → `sp_Planilla_ConsultaIni` (1 llamada por banco) | MENU | pagartesoreria_v1.tsx |
 | GET /tesoreria/pagos/reporte-resumen | PagoTesoreriaController | `sp_Planilla_ReporteResumen` | MENU | pagartesoreria_v1 |
 | GET /tesoreria/pagos/cuentas/{responsable} | PagoTesoreriaController | SQL inline CuentaEmpleado | MENU | pagoTesoreriaService |
+| GET /tesoreria/pagos/historial-estados/{correlativo} | PagoTesoreriaController | `MovEstadosPagos` (estado, usuario, observaciÃ³n, fecha/hora) | MENU | pagartesoreria_v1 |
 | POST /tesoreria/pagos (pagar) | PagoTesoreriaController | tx: `sp_Planilla_AdministrativoMasivo` (desde 5) / `sp_Planilla_PagoContabilidadMasivo @Opc=2` (desde 8), TVP `PlanillaRevisionType` | MENU | pagartesoreria*.tsx |
 | POST /tesoreria/pagos/grabar | PagoTesoreriaController | **UPDATE inline 8→4 sin tx/versión/log** | MENU | pagartesoreria.tsx |
 | POST /tesoreria/pagos/acciones | PagoTesoreriaController | Workflow.EjecutarAccionAsync: `sp_Planilla_ActualizarRevisionMasiva` (revisar), `sp_Planilla_ContabilidadMasivo`, `sp_Planilla_PasarAdministrativoMasivo`, `sp_Planilla_ProgramarMasivo`, `sp_Planilla_ActualizarRendirMasivo`, UPDATE inline (administrativo/observar/corregir/subsanar) + LogPlanilla + MovEstadosPagos | MENU | PagoEtapaForm.tsx |
@@ -98,6 +99,7 @@
 | POST /rechazar-masivo | `sp_OrdenCompra_RechazarMasivo` (IdRechazador del body) | oc, oc_v1 |
 | POST /detalle/editar | SQL dinámico con lista blanca | oc_v1 |
 | GET /recibos/asociados · /recibos/sin-asociar · POST /recibos/asociar | SQL inline Planilla.IdOc/Fila | oc_v1 |
+| POST /pago-nuevo | OrdenCompraService valida OC aprobada, fila, cuenta y saldo; inserta mediante `sp_Planilla_Insertar`, toma `CorrelativoGenerado` y asocia `Planilla.IdOc/Fila` | oc_v1 (OC/Gastos) |
 | GET /monto-oc · GET /consumo | SQL inline | oc_v1, pagos_v1 (OrdenCompraConsumoDto) |
 | GET /{idOc}/pdf | OrdenCompraPdfDocument (QuestPDF) | oc_v1 |
 | POST /archivo (25 MB) · GET /archivo/{codigo} | proxy gestor legacy `elnk.uno/cjmultimedia/mgr001.php` | oc_v1 |

@@ -93,40 +93,73 @@ function getDateTimeString(row: AsistenciaReporteApiRow, ...keys: string[]): str
 }
 
 function normalizeAsistenciaRow(row: AsistenciaReporteApiRow): AsistenciaReporteItem {
+  // El reporte puede devolver miles de filas. Normalizar las claves una sola vez
+  // evita recorrer Object.keys por cada campo y por cada alias de la fila.
+  const values = Object.fromEntries(
+    Object.entries(row).map(([key, value]) => [key.toLowerCase(), value])
+  ) as AsistenciaReporteApiRow;
+  const stringValue = (...keys: string[]) => getStringValue(values, ...keys);
+  const numberValue = (...keys: string[]) => getNumberValue(values, ...keys);
+
   return {
-    fecha: getString(row, "Fecha", "fecha"),
-    hora: getString(row, "Hora", "hora"),
-    nombreEmpleado: getString(row, "nombreempleado", "nombreEmpleado", "NombreEmpleado"),
-    telefono: getString(row, "Telefono", "telefono", "Celular", "celular", "TelefonoWup", "telefonoWup"),
-    correoEmpleado: getString(row, "CorreoEmpleado", "correoEmpleado", "correoempleado"),
-    correoResponsable: getString(row, "CorreoResponsable", "correoResponsable", "correoresponsable"),
-    tipoAprobacion: getString(row, "TipoAprobacion", "tipoAprobacion", "tipo_aprobacion"),
-    responsable: getString(row, "Responsable", "responsable"),
-    estado: getString(row, "Estado", "estado"),
-    comentario: getString(row, "Comentario", "comentario"),
-    observacion: getString(row, "Observacion", "observacion"),
-    empresa: getString(row, "empresa", "Empresa"),
-    cliente: getString(row, "Cliente", "cliente"),
-    proyecto: getString(row, "Proyecto", "proyecto", "NombreProyecto", "nombreProyecto"),
-    site: getString(row, "Site", "site", "NombreSite", "nombreSite"),
-    area: getString(row, "Area", "area"),
-    ubicacion: getString(row, "Ubicacion", "ubicacion", "ValorIni", "valorini"),
-    idEmpleado: getNumber(row, "IdEmpleado", "idEmpleado") || null,
-    estadoAct: getString(row, "EstadoAct", "estadoAct"),
-    sexo: getString(row, "Sexo", "sexo"),
-    fechaIniLaboral: getString(row, "FechaIniLaboral", "fechaIniLaboral"),
-    fechaFinLaboral: getString(row, "FechaFinlaboral", "FechaFinLaboral", "fechaFinLaboral"),
-    salida: getString(row, "Salida", "salida"),
-    estadoMarcacionTexto: getString(row, "EstadoMarcacionTexto", "estadoMarcacionTexto"),
-    tiempoTrabajado: getString(row, "TiempoTrabajado", "tiempoTrabajado"),
-    totalHoras: getNumber(row, "TotalHoras", "totalHoras"),
-    totalHorasEmpleado: getNumber(row, "TotalHorasEmpleado", "totalHorasEmpleado"),
-    totalHorasLaborales: getNumber(row, "TotalHorasLaborales", "totalHorasLaborales"),
-    totalHorasFaltaAprobar: getNumber(row, "TotalHorasFaltaAprobar", "totalHorasFaltaAprobar"),
-    estadoValidacionHoras: getString(row, "EstadoValidacionHoras", "estadoValidacionHoras", "Estadovalidacionhoras", "estadovalidacionhoras"),
-    tiempoHoras: getString(row, "TiempoHoras", "tiempoHoras"),
-    origenMarcacion: getString(row, "OrigenMarcacion", "origenMarcacion"),
+    fecha: stringValue("fecha"),
+    hora: stringValue("hora"),
+    nombreEmpleado: stringValue("nombreempleado"),
+    telefono: stringValue("telefono", "celular", "telefonowup"),
+    correoEmpleado: stringValue("correoempleado"),
+    correoResponsable: stringValue("correoresponsable"),
+    tipoAprobacion: stringValue("tipoaprobacion", "tipo_aprobacion"),
+    responsable: stringValue("responsable"),
+    estado: stringValue("estado"),
+    comentario: stringValue("comentario"),
+    observacion: stringValue("observacion"),
+    empresa: stringValue("empresa"),
+    cliente: stringValue("cliente"),
+    proyecto: stringValue("proyecto", "nombreproyecto"),
+    site: stringValue("site", "nombresite"),
+    area: stringValue("area"),
+    ubicacion: stringValue("ubicacion", "valorini"),
+    idEmpleado: numberValue("idempleado") || null,
+    estadoAct: stringValue("estadoact"),
+    sexo: stringValue("sexo"),
+    fechaIniLaboral: stringValue("fechainilaboral"),
+    fechaFinLaboral: stringValue("fechafinlaboral"),
+    salida: stringValue("salida"),
+    estadoMarcacionTexto: stringValue("estadomarcaciontexto"),
+    tiempoTrabajado: stringValue("tiempotrabajado"),
+    totalHoras: numberValue("totalhoras"),
+    totalHorasEmpleado: numberValue("totalhorasempleado"),
+    totalHorasLaborales: numberValue("totalhoraslaborales"),
+    totalHorasFaltaAprobar: numberValue("totalhorasfaltaaprobar"),
+    estadoValidacionHoras: stringValue("estadovalidacionhoras"),
+    tiempoHoras: stringValue("tiempohoras"),
+    origenMarcacion: stringValue("origenmarcacion"),
   };
+}
+
+function getStringValue(row: AsistenciaReporteApiRow, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = row[key];
+    if (value != null) return String(value).trim();
+  }
+  return "";
+}
+
+function getNumberValue(row: AsistenciaReporteApiRow, ...keys: string[]): number {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+      const normalized = value.trim().replace(/\s+/g, "");
+      const parsed = Number(normalized.includes(",") && normalized.includes(".")
+        ? normalized.replace(/\./g, "").replace(",", ".")
+        : normalized.replace(",", "."));
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
 }
 
 function normalizeTrackingRow(row: AsistenciaReporteApiRow) {

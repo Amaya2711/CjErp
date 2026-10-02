@@ -341,6 +341,59 @@ public class OrdenCompraController : ControllerBase
         }
     }
 
+    [HttpPost("pago-nuevo")]
+    public async Task<IActionResult> GenerarPagoNuevo(
+        [FromBody] OrdenCompraGenerarPagoNuevoRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null || request.IdOc <= 0 || request.Fila <= 0 || request.IdTarea <= 0 ||
+            request.IdCargo <= 0 || request.IdComprobante <= 0 || request.Monto <= 0 ||
+            string.IsNullOrWhiteSpace(request.Cuenta) || string.IsNullOrWhiteSpace(request.CuentaInter) ||
+            string.IsNullOrWhiteSpace(request.NombreCta))
+        {
+            return BadRequest(new { success = false, message = "La fila de OC, cuenta, comprobante y monto son obligatorios para generar el pago." });
+        }
+
+        var solicitanteClaim = User.FindFirstValue("CodEmp")
+            ?? User.FindFirstValue("IdEmpleado")
+            ?? User.FindFirstValue("CodEmpleadoMostrar");
+        var idSolicitante = GetNumericUserId(solicitanteClaim);
+        if (idSolicitante is null or <= 0)
+        {
+            return BadRequest(new { success = false, message = "No se pudo resolver el solicitante desde la sesión." });
+        }
+
+        try
+        {
+            var usuarioAccion = ResolveUsuarioAccion();
+            var result = await _ordenCompraService.GenerarPagoNuevoAsync(
+                request,
+                idSolicitante.Value,
+                usuarioAccion,
+                cancellationToken);
+
+            await _auditoriaCambiosService.RegistrarLoteAsync(
+                BuildPagoNuevoAuditEntries(request, result, usuarioAccion),
+                cancellationToken);
+
+            return Ok(new
+            {
+                success = true,
+                message = $"Pago registrado correctamente. Correlativo: {result.Correlativo}.",
+                data = result
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "No se pudo generar un pago nuevo desde la OC {IdOc}, fila {Fila}", request.IdOc, request.Fila);
+            return StatusCode(500, new { success = false, message = "No se pudo registrar el pago nuevo." });
+        }
+    }
+
     [HttpPost("aprobar")]
     public async Task<IActionResult> Aprobar(
         [FromBody] OrdenCompraAprobarRequestDto request,
@@ -688,6 +741,38 @@ public class OrdenCompraController : ControllerBase
                     : observacion.Trim()
             };
         }
+    }
+
+    private static IEnumerable<AuditoriaCambioDto> BuildPagoNuevoAuditEntries(
+        OrdenCompraGenerarPagoNuevoRequestDto request,
+        OrdenCompraGenerarPagoNuevoResultDto result,
+        string usuarioAccion)
+    {
+        yield return new AuditoriaCambioDto
+        {
+            Modulo = "FacturacionFinanciera",
+            Entidad = "Planilla",
+            IdRegistro = result.Correlativo.ToString(CultureInfo.InvariantCulture),
+            Accion = "INSERT",
+            Seccion = "OrdenCompra",
+            Campo = "IdOc/Fila",
+            ValorNuevo = $"OC {result.IdOc} / Fila {result.Fila}",
+            UsuarioAccion = usuarioAccion,
+            Observacion = "Pago nuevo generado desde OC/Gastos."
+        };
+
+        yield return new AuditoriaCambioDto
+        {
+            Modulo = "FacturacionFinanciera",
+            Entidad = "Planilla",
+            IdRegistro = result.Correlativo.ToString(CultureInfo.InvariantCulture),
+            Accion = "INSERT",
+            Seccion = "OrdenCompra",
+            Campo = "Subtotal",
+            ValorNuevo = result.Subtotal.ToString("0.00", CultureInfo.InvariantCulture),
+            UsuarioAccion = usuarioAccion,
+            Observacion = "Monto solicitado desde OC/Gastos."
+        };
     }
 
     private static IEnumerable<AuditoriaCambioDto> BuildDetailEditAuditEntries(

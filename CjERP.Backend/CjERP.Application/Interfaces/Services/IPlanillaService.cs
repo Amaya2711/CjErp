@@ -7,7 +7,7 @@ namespace CjERP.Application.Interfaces.Services
         Task<IReadOnlyList<SuministroProvisionalVigenteDto>> ObtenerSuministrosProvisionalesVigentesAsync(
             SuministroProvisionalVigenteRequestDto request,
             CancellationToken cancellationToken = default);
-        Task InsertarPlanillaAsync(PlanillaInsertRequestDto request, CancellationToken cancellationToken = default);
+        Task<PlanillaInsertResultDto> InsertarPlanillaAsync(PlanillaInsertRequestDto request, CancellationToken cancellationToken = default);
         Task ActualizarPlanillaAsync(PlanillaUpdateRequestDto request, CancellationToken cancellationToken = default);
         Task ActualizarNroOperacionPlanillaAsync(
             PlanillaActualizarNroOperacionRequestDto request,

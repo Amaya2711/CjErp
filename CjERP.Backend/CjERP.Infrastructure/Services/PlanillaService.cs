@@ -49,7 +49,7 @@ namespace CjERP.Infrastructure.Services
             return rows.Select(MapSuministroVigenteRow).ToList();
         }
 
-        public async Task InsertarPlanillaAsync(PlanillaInsertRequestDto request, CancellationToken cancellationToken = default)
+        public async Task<PlanillaInsertResultDto> InsertarPlanillaAsync(PlanillaInsertRequestDto request, CancellationToken cancellationToken = default)
         {
             await using var connection = _sqlCommandFactory.CreateConnection();
 
@@ -102,13 +102,20 @@ namespace CjERP.Infrastructure.Services
                 Environment.NewLine,
                 JsonSerializer.Serialize(logObject, new JsonSerializerOptions { WriteIndented = true }));
 
-            await connection.ExecuteAsync(
+            var result = await connection.QuerySingleOrDefaultAsync<PlanillaInsertResultDto>(
                 _sqlCommandFactory.Create(
                     InsertStoredProcedureName,
                     parameters,
                     CommandType.StoredProcedure,
                     cancellationToken,
                     commandTimeout: 120));
+
+            if (result is null || result.CorrelativoGenerado <= 0)
+            {
+                throw new InvalidOperationException("sp_Planilla_Insertar no devolvió el correlativo generado.");
+            }
+
+            return result;
         }
 
         public async Task ActualizarPlanillaAsync(PlanillaUpdateRequestDto request, CancellationToken cancellationToken = default)

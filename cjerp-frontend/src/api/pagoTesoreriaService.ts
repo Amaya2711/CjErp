@@ -55,6 +55,14 @@ export type PagoTesoreriaRow = {
   observacion: string | null;
   imgFactura: string | null;
 };
+export type PagoTesoreriaCambioEstado = {
+  correlativo: number;
+  estado: number;
+  observacion: string | null;
+  usuario: string | null;
+  fechaCreacion: string | null;
+  horaCreacion: string | null;
+};
 export type PagoOpcion = {
   id: number;
   nombre: string;
@@ -88,6 +96,8 @@ export type PagoTesoreriaRequest = {
   items: PagoAccionItem[];
 };
 const url = "/tesoreria/pagos";
+export const obtenerHistorialEstadosPago = (correlativo: number, signal?: AbortSignal) =>
+  httpClient.get<PagoTesoreriaCambioEstado[]>(`${url}/historial-estados/${correlativo}`, { signal });
 export type PagoRevisionPermisos = { puedeEditar: boolean; puedeEditarOperacion: boolean; puedeEditarEstado: boolean };
 export type PagoRevisionRequest = Pick<PagoTesoreriaRow, "idAnticipo" | "nroOperacion" | "idComprobante" | "idTipoPago" | "imgFactura" | "estado"> & {
   item: PagoAccionItem;

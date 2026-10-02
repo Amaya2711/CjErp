@@ -15,6 +15,7 @@ import {
   buscarRecibosSinAsociarOrdenCompra,
   descargarArchivoOrdenCompra,
   descargarOrdenCompraPdf,
+  generarPagoNuevoOrdenCompra,
   insertarOrdenCompra,
   obtenerOrdenCompraEdicion,
   rechazarOrdenCompraMasivo,
@@ -41,8 +42,8 @@ import { getHttpErrorMessage } from "../../../utils/httpError";
 import { ChevronDown, ChevronUp, ChevronsDown, ChevronsUp, Eye, FileDown, FileText } from "lucide-react";
 import { buildPlanillaConsultaEstadosRequest, consultarGastosPagadosPorId, consultarPlanillaEstados } from "../../../api/planillaConsultaService";
 
-const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "EstadoOcSemaforo", "FechaOc", "Cliente", "NombreProyecto", "Site", "TipoTrabajo", "Tarea", "MonedaOc", "SubtotalOc", "SubtotalPlanilla", "AvanceOc", "DiferenciaSubtotal", "DiferenciaAvanceOc", "PagoNuevo", "CorrelativoPlanilla", "EstadoOc", "SolicitanteOc", "PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"];
-const OC_GASTOS_MAX_COLUMNAS_VISIBLES = 23;
+const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "EstadoOcSemaforo", "FechaOc", "Cliente", "NombreProyecto", "Site", "TipoTrabajo", "Tarea", "Cuenta", "CuentaInter", "NombreCta", "Banco", "Comprobante", "MonedaOc", "SubtotalOc", "SubtotalPlanilla", "AvanceOc", "DiferenciaSubtotal", "DiferenciaAvanceOc", "PagoNuevo", "CorrelativoPlanilla", "SolicitanteOc", "PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"];
+const OC_GASTOS_MAX_COLUMNAS_VISIBLES = 32;
 const COLORES_ESTADO_OC: Record<string, string> = {
   R: "#D32F2F",
   A: "#2E7D32",
@@ -75,6 +76,15 @@ const OC_GASTOS_COLUMN_LABELS: Record<string, string> = {
   SolicitanteOc: "Solicitante OC",
   CorrelativoPlanilla: "Correlativo pago",
   TipoTrabajo: "Tipo trabajo",
+  IdTarea: "Id tarea",
+  Tarea: "Tarea",
+  IdCargo: "Id cargo",
+  Cuenta: "Cuenta",
+  CuentaInter: "Cuenta interbancaria",
+  NombreCta: "Titular de cuenta",
+  Banco: "Banco",
+  IdComprobante: "Id comprobante",
+  Comprobante: "Comprobante",
   SubtotalOc: "Subtotal OC",
   MonedaOc: "Moneda",
   SubtotalPlanilla: "Subtotal planilla",
@@ -102,6 +112,11 @@ function getReporteRowIdOc(row: Record<string, unknown>): string {
 function getReporteRowIdProyecto(row: Record<string, unknown>): string {
   const key = Object.keys(row).find((name) => name.toLowerCase() === "idproyecto");
   return key ? String(row[key] ?? "").trim() : "";
+}
+
+function getReporteRowValue(row: Record<string, unknown>, column: string): unknown {
+  const key = Object.keys(row).find((name) => name.toLowerCase() === column.toLowerCase());
+  return key ? row[key] : undefined;
 }
 
 type ColumnFilterDropdownProps = {
@@ -637,7 +652,9 @@ async function exportToExcel(fileName: string, headers: string[], rows: Array<Ar
 
 function getReportePlanillaColumnValue(row: Record<string, unknown>, column: string): string {
   const aliases: Record<string, string[]> = {
-    EstadoOc: ["Estado", "EstadoOc", "IdEstadoOc"],
+    EstadoOc: ["EstadoOc", "Estado", "IdEstadoOc"],
+    EstadoOcSemaforo: ["EstadoOcSemaforo", "EstadoOc", "IdEstadoOc"],
+    FechaOc: ["FechaOc", "FechaCreacion", "FechaOrden"],
     CorrelativoPlanilla: ["CorrelativoPlanilla"],
     EstadoPlanilla: ["EstadoPlanilla", "ValidacionResponsable", "EstadoRelacion"],
   };
@@ -719,6 +736,7 @@ export default function OcV1Page() {
   const [reportePlanillaRows, setReportePlanillaRows] = useState<Record<string, unknown>[]>([]);
   const [ocGastosSaldosEditables, setOcGastosSaldosEditables] = useState<Record<string, { subtotal?: string; avance?: string }>>({});
   const [ocGastosSaldoAlerts, setOcGastosSaldoAlerts] = useState<Record<string, string>>({});
+  const [pagosNuevosEnProceso, setPagosNuevosEnProceso] = useState<Record<string, boolean>>({});
   const [estadosOcGastosCatalogo, setEstadosOcGastosCatalogo] = useState<string[]>([]);
   const [solicitantesOcGastosCatalogo, setSolicitantesOcGastosCatalogo] = useState<Array<{ value: string; label: string }>>([]);
   const [clientesOcGastosCatalogo, setClientesOcGastosCatalogo] = useState<Array<{ value: string; label: string }>>([]);
@@ -1375,6 +1393,67 @@ export default function OcV1Page() {
       setReporteDetalles([]);
     } finally {
       setReporteLoading(false);
+    }
+  };
+
+  const registrarPagoNuevoDesdeOc = async (
+    row: Record<string, unknown>,
+    saldoEditableKey: string,
+    montoTexto: string,
+  ) => {
+    const monto = Number(montoTexto);
+    const idOc = Number(getReporteRowValue(row, "IdOc"));
+    const fila = Number(getReporteRowValue(row, "Fila"));
+    const idTarea = Number(getReporteRowValue(row, "IdTarea"));
+    const idCargo = Number(getReporteRowValue(row, "IdCargo"));
+    const idComprobante = Number(getReporteRowValue(row, "IdComprobante"));
+    const cuenta = String(getReporteRowValue(row, "Cuenta") ?? "").trim();
+    const cuentaInter = String(getReporteRowValue(row, "CuentaInter") ?? "").trim();
+    const nombreCta = String(getReporteRowValue(row, "NombreCta") ?? "").trim();
+
+    if (!Number.isFinite(monto) || monto <= 0) {
+      setError("Ingrese un saldo subtotal mayor que cero antes de crear el pago.");
+      return;
+    }
+
+    if (![idOc, fila, idTarea, idCargo, idComprobante].every((value) => Number.isInteger(value) && value > 0) ||
+        !cuenta || !cuentaInter || !nombreCta) {
+      setError("La fila no tiene todos los datos requeridos para Pago nuevo. Actualice la grilla después de aplicar el store actualizado.");
+      return;
+    }
+
+    setError("");
+    setMessage("Registrando pago nuevo...");
+    setPagosNuevosEnProceso((actual) => ({ ...actual, [saldoEditableKey]: true }));
+
+    try {
+      const result = await generarPagoNuevoOrdenCompra({
+        idOc,
+        fila,
+        idTarea,
+        idCargo,
+        idComprobante,
+        monto,
+        cuenta,
+        cuentaInter,
+        nombreCta,
+      });
+      setMessage(`Pago registrado correctamente. Correlativo ${result.correlativo}.`);
+      setOcGastosSaldosEditables((actual) => {
+        const siguiente = { ...actual };
+        delete siguiente[saldoEditableKey];
+        return siguiente;
+      });
+      await loadReporteDetalles();
+    } catch (err) {
+      setError(getHttpErrorMessage(err, "No se pudo registrar el pago nuevo."));
+      setMessage("");
+    } finally {
+      setPagosNuevosEnProceso((actual) => {
+        const siguiente = { ...actual };
+        delete siguiente[saldoEditableKey];
+        return siguiente;
+      });
     }
   };
 
@@ -3570,7 +3649,9 @@ export default function OcV1Page() {
                     ) : reportePlanillaRowsOrdenadas.map((row, index) => {
                       const read = (column: string) => {
                         const aliases: Record<string, string[]> = {
-                          EstadoOc: ["Estado", "EstadoOc", "IdEstadoOc"],
+        EstadoOc: ["EstadoOc", "Estado", "IdEstadoOc"],
+        EstadoOcSemaforo: ["EstadoOcSemaforo", "EstadoOc", "IdEstadoOc"],
+        FechaOc: ["FechaOc", "FechaCreacion", "FechaOrden"],
                           PrimeraValidacion: ["PrimeraValidacion", "IdAprobador1"],
                           SegundaValidacion: ["SegundaValidacion", "IdAprobador2"],
                           TerceraValidacion: ["TerceraValidacion", "IdAprobador3"],
@@ -3621,6 +3702,16 @@ export default function OcV1Page() {
                         index,
                       ].join("|");
                       const registrarEdicionSaldo = (campo: "subtotal" | "avance", valor: string) => {
+                        const numero = Number(valor);
+                        const limite = campo === "subtotal" ? saldoSubtotalFila : saldoAvanceOcFila;
+                        const valorDentroDelRango = valor === "" || (Number.isFinite(numero) && numero >= 0 && numero <= limite);
+                        if (valorDentroDelRango) {
+                          setOcGastosSaldoAlerts((actual) => {
+                            const siguiente = { ...actual };
+                            delete siguiente[`${saldoEditableKey}:${campo}`];
+                            return siguiente;
+                          });
+                        }
                         setOcGastosSaldosEditables((actual) => ({
                           ...actual,
                           [saldoEditableKey]: { ...actual[saldoEditableKey], [campo]: valor },
@@ -3708,6 +3799,13 @@ export default function OcV1Page() {
                             const esSaldoAvance = column === "DiferenciaAvanceOc";
                             const esPagoNuevo = column === "PagoNuevo";
                             const esEstadoOcSemaforo = column === "EstadoOcSemaforo";
+                            const estadoOcParaPago = String(read("EstadoOc") ?? "").trim().toLocaleUpperCase("es-PE");
+                            const pagoNuevoHabilitado = estadoOcParaPago === "APROBADO";
+                            const pagoNuevoEnProceso = Boolean(pagosNuevosEnProceso[saldoEditableKey]);
+                            const pagoNuevoDatosCompletos = ["Fila", "IdTarea", "IdCargo", "IdComprobante"]
+                              .every((campo) => Number(read(campo)) > 0) &&
+                              ["Cuenta", "CuentaInter", "NombreCta"].every((campo) => String(read(campo) ?? "").trim().length > 0);
+                            const pagoNuevoDisponible = pagoNuevoHabilitado && pagoNuevoDatosCompletos && !pagoNuevoEnProceso;
                             const estadoOcSemaforo = String(rawValue ?? "").trim().toUpperCase();
                             const colorEstadoOc = COLORES_ESTADO_OC[estadoOcSemaforo];
                             const estadoOcSemaforoDisplay = estadoOcSemaforo === "P" ? "S/O" : estadoOcSemaforo;
@@ -3779,12 +3877,33 @@ export default function OcV1Page() {
                                 ) : esPagoNuevo ? (
                                   <button
                                     type="button"
-                                    onClick={(event) => event.stopPropagation()}
-                                    title="La creación de pago nuevo estará disponible próximamente."
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      void registrarPagoNuevoDesdeOc(row, saldoEditableKey, saldoSubtotalValue);
+                                    }}
+                                    disabled={!pagoNuevoDisponible}
+                                    title={!pagoNuevoHabilitado
+                                      ? "Pago nuevo solo está disponible para órdenes con estado Aprobado."
+                                      : !pagoNuevoDatosCompletos
+                                        ? "Faltan datos de cuenta o de la fila. Actualice la grilla con el store actualizado."
+                                        : pagoNuevoEnProceso
+                                          ? "Proceso en ejecución..."
+                                          : `Registrar ${formatMoney(Number(saldoSubtotalValue) || 0)} como nuevo pago.`}
                                     aria-label={`Pago nuevo para OC ${read("IdOc")}`}
-                                    style={{ border: "1px solid #0F766E", background: "#ECFDF5", color: "#0F766E", borderRadius: 6, padding: "6px 8px", fontSize: 11, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
+                                    style={{
+                                      border: "1px solid #0F766E",
+                                      background: pagoNuevoDisponible ? "#ECFDF5" : "#F1F5F9",
+                                      color: pagoNuevoDisponible ? "#0F766E" : "#94A3B8",
+                                      borderRadius: 6,
+                                      padding: "6px 8px",
+                                      fontSize: 11,
+                                      fontWeight: 700,
+                                      cursor: pagoNuevoDisponible ? "pointer" : "not-allowed",
+                                      whiteSpace: "nowrap",
+                                      opacity: pagoNuevoDisponible ? 1 : 0.8,
+                                    }}
                                   >
-                                    Pago nuevo
+                                    {pagoNuevoEnProceso ? "Registrando..." : "Pago nuevo"}
                                   </button>
                                 ) : esValidacion ? <ValidacionEstadoBadge value={value} /> : esPorcentajeConsumido ? <PorcentajeConsumidoBar value={Number(rawValue)} /> : correlativosPlanilla.length ? (
                                   <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 5 }}>

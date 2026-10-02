@@ -790,6 +790,29 @@
 .pt-detail-dialog {
   width: min(680px, calc(100vw - 32px));
 }
+.pt-history-list {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 22px;
+}
+.pt-history-item {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  color: #475569;
+  font-size: 12px;
+}
+.pt-history-item strong {
+  color: #1e3a5f;
+}
+.pt-history-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  color: #64748b;
+}
 .pt-preserve {
   white-space: pre-wrap;
   line-height: 1.6;

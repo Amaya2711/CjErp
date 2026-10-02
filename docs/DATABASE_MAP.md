@@ -28,7 +28,7 @@
 | Tabla | PK | Campos clave | Estados | DDL |
 |---|---|---|---|---|
 | `CabOrdenCompra` | IdOc | IdSolicitante, IdResponsable, IdValidador, IdGestor, IdMoneda, IdComprobante, IdFormaPago, DiasPago, Subtotal, Igv, Total, **IdEstado**, IdAprobador1..3, FechaAprobador1..3, IdWeb | 0 pendiente (niveles 1-2), 1 aprobado (nivel 3), 6 rechazado | No |
-| `DetOrdenCompra` | IdOc + Fila | IdCliente, IdProyecto, IdSite, Correlativo(=CorreSite), TipoTrabajo, IdTarea, Ot, Detalle, Cantidad, PrecioUnitario, ImgOc, ImgPresupuesto, Peso, IdEstado, IdAprobador1..3 | idem | No |
+| `DetOrdenCompra` | IdOc + Fila | IdCliente, IdProyecto, IdSite, Correlativo(=CorreSite), TipoTrabajo, IdTipoTrabajo, IdTarea, Ot, Detalle, Cantidad, PrecioUnitario, IdComprobante, ImgOc, ImgPresupuesto, Peso, UsuarioCreacion, FechaCreacion, HoraCreacion, IdEstado, IdAprobador1..3 | idem | No |
 Relación: `Planilla.IdOc + Planilla.Fila` → `DetOrdenCompra`. Consumo OC = `CabOrdenCompra.Subtotal` vs `SUM(Planilla.Subtotal WHERE Estado=4)`.
 
 ### 2.3 Conciliación bancaria

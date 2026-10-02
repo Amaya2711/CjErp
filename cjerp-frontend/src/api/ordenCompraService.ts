@@ -265,6 +265,27 @@ export type OrdenCompraConsumoDto = {
   pagadoOc: number;
 };
 
+export type OrdenCompraGenerarPagoNuevoPayload = {
+  idOc: number;
+  fila: number;
+  idTarea: number;
+  idCargo: number;
+  idComprobante: number;
+  monto: number;
+  cuenta: string;
+  cuentaInter: string;
+  nombreCta: string;
+};
+
+export type OrdenCompraGenerarPagoNuevoResult = {
+  correlativo: number;
+  idOc: number;
+  fila: number;
+  subtotal: number;
+  igv: number;
+  total: number;
+};
+
 
 export async function buscarOrdenCompraCabecera(params?: OrdenCompraConsultaParams) {
   return await httpClient.get<OrdenCompraCabeceraDto[]>("/facturacionfinanciera/oc/cabecera", { params });
@@ -322,6 +343,13 @@ export async function buscarConsumoOrdenCompra(
     params,
     signal: options?.signal,
   });
+}
+
+export async function generarPagoNuevoOrdenCompra(payload: OrdenCompraGenerarPagoNuevoPayload) {
+  return await httpClient.post<OrdenCompraGenerarPagoNuevoResult>(
+    "/facturacionfinanciera/oc/pago-nuevo",
+    payload,
+  );
 }
 
 export const descargarOrdenCompraPdf = (idOc: number) =>

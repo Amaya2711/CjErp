@@ -78,3 +78,13 @@ public sealed class PagoTesoreriaAccionDto
     public bool AplicarAdjunto { get; set; }
     [StringLength(2500)] public string ImgFactura { get; set; } = "";
 }
+
+public sealed class PagoTesoreriaCambioEstadoDto
+{
+    public int Correlativo { get; set; }
+    public int Estado { get; set; }
+    public string? Observacion { get; set; }
+    public string? Usuario { get; set; }
+    public DateTime? FechaCreacion { get; set; }
+    public DateTime? HoraCreacion { get; set; }
+}

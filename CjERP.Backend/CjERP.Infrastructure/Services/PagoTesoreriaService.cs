@@ -107,6 +107,27 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
             """, new { responsable }, cancellationToken: ct));
     }
 
+    public async Task<IReadOnlyList<PagoTesoreriaCambioEstadoDto>> ListarHistorialEstadosAsync(int correlativo, CancellationToken ct)
+    {
+        if (correlativo <= 0) throw new ArgumentException("El correlativo es invÃ¡lido.");
+
+        await using var cn = factory.CreateConnection();
+        var rows = await cn.QueryAsync<PagoTesoreriaCambioEstadoDto>(factory.Create("""
+            SELECT
+                Correlativo,
+                Estado,
+                Observacion,
+                Usuario,
+                FechaCreacion,
+                HoraCreacion
+            FROM dbo.MovEstadosPagos
+            WHERE Correlativo = @correlativo
+            ORDER BY FechaCreacion DESC, HoraCreacion DESC
+            """, new { correlativo }, cancellationToken: ct));
+
+        return rows.ToList();
+    }
+
     public async Task<int> PagarAsync(PagoTesoreriaRequestDto request, string usuario, CancellationToken ct)
     {
         if (request.EstadoOrigen is not (5 or 8)) throw new ArgumentException("Solo se pueden pagar recibos administrativos o programados.");
@@ -169,16 +190,28 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
         await cn.ExecuteAsync(new CommandDefinition(sp, parameters, tx, commandTimeout: 180, commandType: CommandType.StoredProcedure, cancellationToken: ct));
         var pagados = await cn.ExecuteScalarAsync<int>(new CommandDefinition("SELECT COUNT(*) FROM Planilla WHERE Correlativo IN @ids AND Estado=4", new { ids }, tx, cancellationToken: ct));
         if (pagados != ids.Length) throw new InvalidOperationException("El procedimiento no confirmó todos los pagos. La operación se revirtió.");
+        var ahora = DateTime.UtcNow.AddHours(-5);
+        await cn.ExecuteAsync(new CommandDefinition("""
+            INSERT MovEstadosPagos(Correlativo,Estado,Observacion,Usuario,FechaCreacion,HoraCreacion)
+            SELECT Correlativo,Estado,@observacion,LEFT(@usuario,10),@ahora,@ahora
+            FROM Planilla WHERE Correlativo IN @ids AND Estado=4
+            """, new { ids, observacion = request.Comentario.Trim(), usuario, ahora }, tx, cancellationToken: ct));
         await tx.CommitAsync(ct);
         return pagados;
     }
 
-    public async Task<int> GrabarAsync(PagoTesoreriaGrabarDto request, CancellationToken ct)
+    public async Task<int> GrabarAsync(PagoTesoreriaGrabarDto request, string usuario, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(usuario)) throw new ArgumentException("Usuario de auditoría inválido.");
         await using var cn = factory.CreateConnection();
+        await cn.OpenAsync(ct);
+        await using var tx = (SqlTransaction)await cn.BeginTransactionAsync(ct);
         var ids = request.Items.Select(x => x.Correlativo).Distinct().ToArray();
+        var cambianAPagado = (await cn.QueryAsync<int>(new CommandDefinition(
+            "SELECT Correlativo FROM Planilla WITH (UPDLOCK,HOLDLOCK) WHERE Correlativo IN @ids AND Estado=8",
+            new { ids }, tx, cancellationToken: ct))).ToArray();
         var fechaDepositoIso = request.FechaDeposito.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
-        return await cn.ExecuteAsync(factory.Create("""
+        var procesados = await cn.ExecuteAsync(new CommandDefinition("""
             UPDATE Planilla SET IdEjecutor=@IdEjecutor, IdTransferencia=@IdTransferencia,
                 IdBanco=@IdBanco, IdMoneda2=@IdMoneda2, FechaDeposito=@FechaDeposito,
                 Cheque=@Cheque, NroOperacion=@NroOperacion,
@@ -187,7 +220,18 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
                     ELSE LEFT(CONCAT(ISNULL(Comentario,''), CASE WHEN ISNULL(Comentario,'')='' THEN '' ELSE ' - ' END, @Comentario), 500) END
             WHERE Correlativo IN @ids AND Estado IN (5,8);
             """, new { request.IdEjecutor, request.IdTransferencia, request.IdBanco, request.IdMoneda2,
-                FechaDeposito = fechaDepositoIso, request.Cheque, request.NroOperacion, request.Comentario, ids }, cancellationToken: ct));
+                FechaDeposito = fechaDepositoIso, request.Cheque, request.NroOperacion, request.Comentario, ids }, tx, cancellationToken: ct));
+        if (cambianAPagado.Length > 0)
+        {
+            var ahora = DateTime.UtcNow.AddHours(-5);
+            await cn.ExecuteAsync(new CommandDefinition("""
+                INSERT MovEstadosPagos(Correlativo,Estado,Observacion,Usuario,FechaCreacion,HoraCreacion)
+                SELECT Correlativo,Estado,@observacion,LEFT(@usuario,10),@ahora,@ahora
+                FROM Planilla WHERE Correlativo IN @cambianAPagado AND Estado=4
+                """, new { cambianAPagado, observacion = request.Comentario.Trim(), usuario, ahora }, tx, cancellationToken: ct));
+        }
+        await tx.CommitAsync(ct);
+        return procesados;
     }
 
     private sealed class PagoActual

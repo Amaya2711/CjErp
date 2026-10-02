@@ -136,6 +136,7 @@ type EmployeeGridSortKey =
 type GerencialDetailFilters = {
   nombreEmpleado: string[];
   responsable: string[];
+  estadoMarcacion: string[];
   cliente: string[];
   proyecto: string[];
   site: string[];
@@ -176,6 +177,7 @@ type RptAsistenciaReturnState = {
 };
 
 const ALL_OPTION = "__ALL__";
+const DETALLE_FILTRADO_PAGE_SIZE = 100;
 const OBSERVATION_HOURS_THRESHOLD = 9.6;
 const MISSING_OR_INCOMPLETE_HOURS = 9.6;
 const PRESENT_STATES = new Set(["PRESENTE", "ASISTIO", "OK"]);
@@ -626,7 +628,8 @@ function matchesMultiSelect(value: string, selectedValues: string[]) {
     return true;
   }
 
-  return selectedValues.includes(value);
+  const normalizedValue = normalizeText(value);
+  return selectedValues.some((selectedValue) => normalizeText(selectedValue) === normalizedValue);
 }
 
 function getSortValue(item: AsistenciaReporteItem, key: SortKey) {
@@ -789,11 +792,12 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
     direction: "asc",
   });
   const [gerencialDetailFilters, setGerencialDetailFilters] = useState<GerencialDetailFilters>({
+    nombreEmpleado: [],
     responsable: [],
+    estadoMarcacion: [],
     cliente: [],
     proyecto: [],
     site: [],
-    nombreEmpleado: [],
   });
   const [gerencialQuickFilters, setGerencialQuickFilters] = useState<GerencialQuickFilters & { topEmpleado?: string | null }>({
     responsable: null,
@@ -833,6 +837,11 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
   const { constantesPorCampo } = useConstantesPorCampo(["estado_asistencia"]);
 
   const deferredSearch = useDeferredValue(busqueda);
+   // Las vistas por empleado y tiempos generan matrices y ordenamientos grandes.
+   // Se calculan recién al abrir la pestaña que las necesita.
+   const shouldBuildEmployeeViews = activeTab === "cuadros" || activeTab === "empleado";
+   const shouldBuildTiemposView = activeTab === "tiempos";
+   const shouldBuildDetalleView = activeTab === "detalle";
 
   const searchFields = useMemo<CrudToolbarSearchField<AsistenciaReporteItem>[]>(
     () => [
@@ -995,6 +1004,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
   }, [deferredSearch, fechaFin, fechaInicio, frontendFilters, rows, searchFields, selectedAreas, selectedEstados, selectedEstadoMarcacion, sortState]);
 
   const tiemposFilteredRows = useMemo(() => {
+    if (!shouldBuildTiemposView) return [];
     const selectedState = normalizeText(tiemposEstado);
 
     const base = rows
@@ -1015,7 +1025,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
 
       return compareValues(left.nombreEmpleado, right.nombreEmpleado);
     });
-  }, [fechaFin, fechaInicio, rows, tiemposEstado]);
+  }, [fechaFin, fechaInicio, rows, shouldBuildTiemposView, tiemposEstado]);
 
   const tiemposDetailRows = useMemo(() => {
     const filtered = tiemposFilteredRows.filter((item) => {
@@ -1137,6 +1147,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
   const tiemposStickyLeftKeys = new Set<keyof AsistenciaReporteItem>(["fecha", "nombreEmpleado", "responsable", "hora"]);
 
   const detailRows = useMemo(() => {
+    if (!shouldBuildDetalleView) return [];
     const base = filteredRows.filter((item) => (
       (!detailDrilldown.fecha || formatDateLabel(item.fecha) === detailDrilldown.fecha) &&
       (!detailDrilldown.nombreEmpleado || item.nombreEmpleado === detailDrilldown.nombreEmpleado) &&
@@ -1162,7 +1173,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
 
       return compareValues(left.nombreEmpleado, right.nombreEmpleado);
     });
-  }, [detailDrilldown, filteredRows, frontendFilters]);
+  }, [detailDrilldown, filteredRows, frontendFilters, shouldBuildDetalleView]);
 
   const totals = useMemo(() => {
     const totalRegistros = filteredRows.length;
@@ -1353,6 +1364,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
         (activeTab !== "gerencial" || !gerencialQuickFilters.cliente || item.cliente === gerencialQuickFilters.cliente) &&
         (activeTab !== "gerencial" || matchesMultiSelect(item.responsable, gerencialDetailFilters.responsable)) &&
         (activeTab !== "gerencial" || matchesMultiSelect(item.nombreEmpleado, gerencialDetailFilters.nombreEmpleado ?? [])) &&
+        (activeTab !== "gerencial" || matchesMultiSelect(item.estadoMarcacionTexto, gerencialDetailFilters.estadoMarcacion)) &&
         (activeTab !== "gerencial" || matchesMultiSelect(item.cliente, gerencialDetailFilters.cliente)) &&
         (activeTab !== "gerencial" || matchesMultiSelect(item.proyecto, gerencialDetailFilters.proyecto)) &&
         (activeTab !== "gerencial" || matchesMultiSelect(item.site, gerencialDetailFilters.site))
@@ -1378,6 +1390,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
           (!gerencialQuickFilters.cliente || (item.cliente || "Sin cliente") === gerencialQuickFilters.cliente) &&
           matchesMultiSelect(item.responsable || "Sin responsable", gerencialDetailFilters.responsable) &&
           matchesMultiSelect(item.nombreEmpleado, gerencialDetailFilters.nombreEmpleado ?? []) &&
+          matchesMultiSelect(item.estadoMarcacionTexto || item.estado || "Sin clasificar", gerencialDetailFilters.estadoMarcacion) &&
           matchesMultiSelect(item.cliente || "Sin cliente", gerencialDetailFilters.cliente) &&
           matchesMultiSelect(item.proyecto || "Sin proyecto", gerencialDetailFilters.proyecto) &&
           matchesMultiSelect(item.site || "Sin site", gerencialDetailFilters.site)
@@ -1435,6 +1448,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
     () => ({
       nombreEmpleado: buildValueOptions(filteredRows.map((item) => item.nombreEmpleado || "Sin empleado")).filter((option) => option !== ALL_OPTION),
       responsable: buildValueOptions(filteredRows.map((item) => item.responsable || "Sin responsable")).filter((option) => option !== ALL_OPTION),
+      estadoMarcacion: buildValueOptions(filteredRows.map((item) => item.estadoMarcacionTexto || item.estado || "Sin clasificar")).filter((option) => option !== ALL_OPTION),
       cliente: buildValueOptions(filteredRows.map((item) => item.cliente || "Sin cliente")).filter((option) => option !== ALL_OPTION),
       proyecto: buildValueOptions(filteredRows.map((item) => item.proyecto || "Sin proyecto")).filter((option) => option !== ALL_OPTION),
       site: buildValueOptions(filteredRows.map((item) => item.site || "Sin site")).filter((option) => option !== ALL_OPTION),
@@ -1725,6 +1739,9 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
   );
 
   const chartEmpleadoPorDia = useMemo(() => {
+    if (!shouldBuildEmployeeViews) {
+      return { fechas: [] as string[], rows: [] as EmployeeDateRow[], states: [] as string[] };
+    }
     const fechas = getDateRangeLabels(fechaInicio, fechaFin);
     const employees = Array.from(
       new Set(filteredRows.map((item) => item.nombreEmpleado).filter(Boolean))
@@ -1920,7 +1937,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
       .map(([key]) => key);
 
     return { fechas, rows, states };
-  }, [fechaFin, fechaInicio, filteredRows]);
+  }, [fechaFin, fechaInicio, filteredRows, shouldBuildEmployeeViews]);
 
   const employeeGridValidationOptions = useMemo(
     () => [ALL_OPTION, ...Array.from(new Set(chartEmpleadoPorDia.rows.map((item) => item.estadoValidacionHoras).filter(Boolean))).sort((a, b) => a.localeCompare(b, "es"))],
@@ -2069,6 +2086,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
     setGerencialDetailFilters({
       nombreEmpleado: [],
       responsable: [],
+      estadoMarcacion: [],
       cliente: [],
       proyecto: [],
       site: [],
@@ -3548,7 +3566,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
                 <div style={styles.gerencialDetailSectionGrid}>
                   <ChartCard
                     title="Detalle filtrado"
-                    subtitle="Vista ampliada con filtros por empleado, responsable, cliente, proyecto y site"
+                    subtitle="Vista ampliada con filtros por empleado, responsable, estado de marcación, cliente, proyecto y site"
                     style={styles.gerencialDetailChartCard}
                   >
                     <div style={styles.gerencialSummaryToolbar}>
@@ -3629,6 +3647,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
                           setGerencialDetailFilters({
                             nombreEmpleado: [],
                             responsable: [],
+                            estadoMarcacion: [],
                             cliente: [],
                             proyecto: [],
                             site: [],
@@ -4598,6 +4617,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
                         setGerencialDetailFilters({
                             nombreEmpleado: [],
                           responsable: [],
+                          estadoMarcacion: [],
                           cliente: [],
                           proyecto: [],
                           site: [],
@@ -6986,6 +7006,16 @@ function SimpleCuadrosDetailGrid({
   onToggleSort: (key: CuadrosDetailSortKey) => void;
   expanded?: boolean;
 }) {
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(data.length / DETALLE_FILTRADO_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const firstRowIndex = (currentPage - 1) * DETALLE_FILTRADO_PAGE_SIZE;
+  const visibleRows = data.slice(firstRowIndex, firstRowIndex + DETALLE_FILTRADO_PAGE_SIZE);
+
+  useEffect(() => {
+    setPage(1);
+  }, [data]);
+
   const renderSortPill = (key: CuadrosDetailSortKey) =>
     sortKey === key ? (sortDirection === "asc" ? "ASC" : "DESC") : "ORD";
 
@@ -6994,6 +7024,7 @@ function SimpleCuadrosDetailGrid({
       {data.length === 0 ? (
         <div style={styles.emptyMiniState}>Sin registros para mostrar.</div>
       ) : (
+        <>
         <div style={expanded ? { ...styles.cuadrosDetailScroller, ...styles.cuadrosDetailScrollerExpanded } : styles.cuadrosDetailScroller}>
           <table style={styles.cuadrosDetailTable}>
             <thead>
@@ -7072,7 +7103,13 @@ function SimpleCuadrosDetailGrid({
                   </th>
                   <th style={styles.cuadrosDetailFilterTh} />
                   <th style={styles.cuadrosDetailFilterTh} />
-                  <th style={styles.cuadrosDetailFilterTh} />
+                  <th style={styles.cuadrosDetailFilterTh}>
+                    <HeaderCheckboxFilter
+                      values={extendedColumnFilters.estadoMarcacion}
+                      options={extendedColumnOptions.estadoMarcacion}
+                      onChange={(value) => onExtendedColumnFilterChange("estadoMarcacion", value)}
+                    />
+                  </th>
                   <th style={styles.cuadrosDetailFilterTh}>
                     <HeaderCheckboxFilter
                       values={extendedColumnFilters.cliente}
@@ -7102,7 +7139,7 @@ function SimpleCuadrosDetailGrid({
               ) : null}
             </thead>
             <tbody>
-              {data.map((item) => (
+              {visibleRows.map((item) => (
                 <tr key={item.key}>
                   <td style={{
                     ...styles.cuadrosDetailTd,
@@ -7255,6 +7292,32 @@ function SimpleCuadrosDetailGrid({
             </tbody>
           </table>
         </div>
+        <div style={styles.detailPagination}>
+          <span>
+            Mostrando {firstRowIndex + 1}-{Math.min(firstRowIndex + visibleRows.length, data.length)} de {data.length} registro
+            {data.length === 1 ? "" : "s"}
+          </span>
+          <div style={styles.detailPaginationActions}>
+            <button
+              type="button"
+              style={styles.detailPaginationButton}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              disabled={currentPage === 1}
+            >
+              Anterior
+            </button>
+            <span>Página {currentPage} de {totalPages}</span>
+            <button
+              type="button"
+              style={styles.detailPaginationButton}
+              onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+              disabled={currentPage === totalPages}
+            >
+              Siguiente
+            </button>
+          </div>
+        </div>
+        </>
       )}
     </div>
   );
@@ -8297,6 +8360,31 @@ const styles: Record<string, React.CSSProperties> = {
   cuadrosDetailScrollerExpanded: {
     maxHeight: "none",
     height: "100%",
+  },
+  detailPagination: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    padding: "10px 4px 0",
+    color: "#475569",
+    fontSize: 12,
+    flexWrap: "wrap",
+  },
+  detailPaginationActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  },
+  detailPaginationButton: {
+    border: "1px solid #CBD5E1",
+    borderRadius: 8,
+    background: "#FFFFFF",
+    color: "#1E3A8A",
+    padding: "6px 10px",
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: "pointer",
   },
   cuadrosDetailTable: {
     width: "100%",

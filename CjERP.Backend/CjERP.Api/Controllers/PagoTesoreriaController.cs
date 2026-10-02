@@ -50,6 +50,14 @@ public sealed class PagoTesoreriaController(PagoTesoreriaService service, ISegMe
         return Ok(await service.ReporteResumenAsync(fechaInicio, fechaFin, ct));
     }
 
+    [HttpGet("historial-estados/{correlativo:int}")]
+    public async Task<IActionResult> HistorialEstados(int correlativo, CancellationToken ct)
+    {
+        if (!await PuedeAsync()) return SinAcceso();
+        try { return Ok(await service.ListarHistorialEstadosAsync(correlativo, ct)); }
+        catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+
     [HttpPut("revision")]
     public async Task<IActionResult> GuardarRevision(PagoRevisionDto request, CancellationToken ct)
     {
@@ -164,7 +172,10 @@ public sealed class PagoTesoreriaController(PagoTesoreriaService service, ISegMe
     public async Task<IActionResult> Grabar(PagoTesoreriaGrabarDto request, CancellationToken ct)
     {
         if (!await PuedeAsync()) return SinAcceso();
-        try { return Ok(new { procesados = await service.GrabarAsync(request, ct) }); }
+        var usuario = User.FindFirstValue("Usuario") ?? User.FindFirstValue(ClaimTypes.Name) ?? User.FindFirstValue("IdUsuario");
+        if (string.IsNullOrWhiteSpace(usuario)) return Unauthorized();
+        try { return Ok(new { procesados = await service.GrabarAsync(request, usuario, ct) }); }
+        catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
         catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogError(ex, "Error grabando datos de pago"); return StatusCode(500, new { message = "No se pudo grabar la información del pago." }); }
     }
 

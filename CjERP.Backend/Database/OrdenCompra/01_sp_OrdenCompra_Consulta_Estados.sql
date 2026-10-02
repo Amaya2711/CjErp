@@ -96,6 +96,10 @@ BEGIN
 
         a6.IdValidador AS IdValidadorOc,
 
+        a6.IdGestor AS IdGestorOc,
+
+        a6.IdComprobante AS IdComprobante,
+
         CASE
             WHEN ISNULL(a6.IdWeb, 0) = 1 THEN ValidadorOcCj.NombreEmpleado
             ELSE ValidadorOc.NombreEmpleado
@@ -138,13 +142,29 @@ BEGIN
 
         a5.Correlativo AS CorSite,
 
+        a5.Fila AS Fila,
+
         st.NombreSite AS Site,
 
-        a5.FechaCreacion AS FechaOc,
+        COALESCE(a5.FechaCreacion, a6.FechaCreacion) AS FechaOc,
 
         a5.TipoTrabajo AS TipoTrabajo,
 
+        a5.IdTarea AS IdTarea,
+
         TareaOc.ValorIni AS Tarea,
+
+        CtaEmp.IdCargo AS IdCargo,
+
+        CtaEmp.IdBanco AS IdBancoCta,
+
+        CtaEmp.Cuenta AS Cuenta,
+
+        CtaEmp.CuentaInter AS CuentaInter,
+
+        CtaEmp.NombreCta AS NombreCta,
+
+        BancoCta.ValorIni AS Banco,
 
         ComprobanteOc.ValorIni AS Comprobante,
 
@@ -470,6 +490,13 @@ BEGIN
     LEFT JOIN dbo.Empleado RespOc
         ON RespOc.IdEmpleado = a6.IdResponsable
 
+    LEFT JOIN dbo.CuentaEmpleado CtaEmp
+        ON CtaEmp.IdEmpleado = a6.IdResponsable
+
+    LEFT JOIN dbo.Constante BancoCta
+        ON BancoCta.Campo = 'BANCO'
+       AND BancoCta.Correlativo = CtaEmp.IdBanco
+
 
     /* ============================================================
        VALIDADOR OC
@@ -494,7 +521,7 @@ BEGIN
 
     LEFT JOIN dbo.Constante ComprobanteOc
         ON ComprobanteOc.Campo = 'TIPO_COMPROBANTE'
-       AND ComprobanteOc.Correlativo = a5.IdComprobante
+       AND ComprobanteOc.Correlativo = a6.IdComprobante
 
     LEFT JOIN dbo.Constante TareaOc
         ON TareaOc.Campo = 'TAREA'

@@ -15,6 +15,56 @@ public class OrdenCompraService : IOrdenCompraService
     private const string BuscarDetalleSp = "dbo.sp_OrdenCompra_BuscarDetalle";
     private const string InsertarSp = "dbo.sp_OrdenCompra_Insertar";
     private const string RechazarMasivoSp = "dbo.sp_OrdenCompra_RechazarMasivo";
+    private const string BuscarOrigenPagoNuevoSql = """
+        SELECT TOP 1
+            det.IdProyecto,
+            det.IdCliente,
+            det.IdSite,
+            det.Correlativo AS CorreSite,
+            det.IdTarea,
+            det.TipoTrabajo,
+            det.Detalle,
+            det.Ot,
+            cab.IdResponsable,
+            cab.IdGestor,
+            cab.IdValidador,
+            cab.IdMoneda,
+            cab.IdComprobante,
+            cab.Subtotal AS SubtotalOc,
+            site.NombreSite AS SiteNombre
+        FROM dbo.CabOrdenCompra cab
+        INNER JOIN dbo.DetOrdenCompra det ON det.IdOc = cab.IdOc
+        LEFT JOIN dbo.Site site ON site.IdSite = det.IdSite AND site.Correlativo = det.Correlativo
+        WHERE cab.IdOc = @IdOc
+          AND det.Fila = @Fila
+          AND cab.IdEstado = 1
+          AND det.IdEstado = 1
+          AND ISNULL(det.IdAprobador3, 0) > 0;
+        """;
+    private const string BuscarBancoCuentaPagoNuevoSql = """
+        SELECT TOP 1 cuenta.IdBanco
+        FROM dbo.CuentaEmpleado cuenta
+        WHERE cuenta.IdEmpleado = @IdResponsable
+          AND cuenta.IdCargo = @IdCargo
+          AND LTRIM(RTRIM(ISNULL(cuenta.Cuenta, ''))) = LTRIM(RTRIM(@Cuenta))
+          AND LTRIM(RTRIM(ISNULL(cuenta.CuentaInter, ''))) = LTRIM(RTRIM(@CuentaInter))
+          AND LTRIM(RTRIM(ISNULL(cuenta.NombreCta, ''))) = LTRIM(RTRIM(@NombreCta));
+        """;
+    private const string BuscarSaldoPagoNuevoSql = """
+        SELECT ISNULL(SUM(ISNULL(planilla.Subtotal, 0)), 0)
+        FROM dbo.Planilla planilla
+        WHERE TRY_CONVERT(INT, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), planilla.IdOc))), '')) = @IdOc
+          AND planilla.IdProyecto = @IdProyecto
+          AND planilla.IdSite = @IdSite
+          AND ISNULL(planilla.CorreSite, 0) = ISNULL(@CorreSite, 0)
+          AND ISNULL(planilla.Estado, 0) <> 3;
+        """;
+    private const string AsociarPagoNuevoOcSql = """
+        UPDATE dbo.Planilla
+        SET IdOc = CONVERT(VARCHAR(50), @IdOc),
+            Fila = @Fila
+        WHERE Correlativo = @Correlativo;
+        """;
     private const string ActualizarIdWebSql = """
         UPDATE dbo.CabOrdenCompra
         SET IdWeb = @IdWeb
@@ -266,12 +316,24 @@ public class OrdenCompraService : IOrdenCompraService
         UPDATE det
         SET Correlativo = @Correlativo,
             TipoTrabajo = @TipoTrabajo,
+            IdTipoTrabajo = COALESCE(tipoTrabajo.IdTipoTrabajo, det.IdTipoTrabajo),
             IdTarea = @IdTarea,
-            Ot = @Ot
+            Ot = @Ot,
+            IdComprobante = COALESCE(@IdComprobante, @IdComprobanteCabecera),
+            UsuarioCreacion = @UsuarioCreacion,
+            FechaCreacion = @FechaCreacion,
+            HoraCreacion = @HoraCreacion
         FROM dbo.DetOrdenCompra det
         INNER JOIN DetalleOrdenado ordenado
             ON ordenado.IdOc = det.IdOc
            AND ordenado.Fila = det.Fila
+        OUTER APPLY (
+            SELECT TOP (1) constante.Correlativo AS IdTipoTrabajo
+            FROM dbo.Constante constante
+            WHERE constante.Campo = 'TIPO_TRABAJO'
+              AND UPPER(LTRIM(RTRIM(constante.ValorIni))) = UPPER(LTRIM(RTRIM(@TipoTrabajo)))
+            ORDER BY constante.Correlativo
+        ) tipoTrabajo
         WHERE det.IdOc = @IdOc
           AND ordenado.Posicion = @Posicion;
         """;
@@ -374,11 +436,22 @@ public class OrdenCompraService : IOrdenCompraService
         """;
     private const string InsertarDetalleEdicionSql = """
         INSERT INTO dbo.DetOrdenCompra
-            (IdOc, Fila, IdCliente, IdProyecto, IdSite, Correlativo, TipoTrabajo, IdTarea, Ot,
-             Detalle, Cantidad, PrecioUnitario, IdComprobante, ImgOc, ImgPresupuesto)
-        VALUES
-            (@IdOc, @Fila, @IdCliente, @IdProyecto, @IdSite, @Correlativo, @TipoTrabajo, @IdTarea, @Ot,
-             @Detalle, @Cantidad, @PrecioUnitario, @IdComprobante, @ImgOc, @ImgPresupuesto);
+            (IdOc, Fila, IdCliente, IdProyecto, IdSite, Correlativo, TipoTrabajo, IdTipoTrabajo, IdTarea, Ot,
+             Detalle, Cantidad, PrecioUnitario, IdComprobante, ImgOc, ImgPresupuesto,
+             UsuarioCreacion, FechaCreacion, HoraCreacion)
+        SELECT
+            @IdOc, @Fila, @IdCliente, @IdProyecto, @IdSite, @Correlativo, @TipoTrabajo,
+            tipoTrabajo.IdTipoTrabajo, @IdTarea, @Ot,
+            @Detalle, @Cantidad, @PrecioUnitario, COALESCE(@IdComprobante, @IdComprobanteCabecera), @ImgOc, @ImgPresupuesto,
+            @UsuarioCreacion, @FechaCreacion, @HoraCreacion
+        FROM (VALUES (1)) origen(Id)
+        OUTER APPLY (
+            SELECT TOP (1) constante.Correlativo AS IdTipoTrabajo
+            FROM dbo.Constante constante
+            WHERE constante.Campo = 'TIPO_TRABAJO'
+              AND UPPER(LTRIM(RTRIM(constante.ValorIni))) = UPPER(LTRIM(RTRIM(@TipoTrabajo)))
+            ORDER BY constante.Correlativo
+        ) tipoTrabajo;
         """;
     private const string BuscarConsumoOcSql = """
         SELECT TOP (1)
@@ -405,10 +478,31 @@ public class OrdenCompraService : IOrdenCompraService
           );
         """;
     private readonly ISqlCommandFactory _sqlCommandFactory;
+    private readonly IPlanillaService _planillaService;
 
-    public OrdenCompraService(ISqlCommandFactory sqlCommandFactory)
+    private sealed class PagoNuevoOrigen
+    {
+        public int IdProyecto { get; set; }
+        public int IdCliente { get; set; }
+        public string IdSite { get; set; } = string.Empty;
+        public int CorreSite { get; set; }
+        public int IdTarea { get; set; }
+        public string? TipoTrabajo { get; set; }
+        public string? Detalle { get; set; }
+        public string? Ot { get; set; }
+        public int IdResponsable { get; set; }
+        public int IdGestor { get; set; }
+        public int IdValidador { get; set; }
+        public int IdMoneda { get; set; }
+        public int IdComprobante { get; set; }
+        public decimal SubtotalOc { get; set; }
+        public string? SiteNombre { get; set; }
+    }
+
+    public OrdenCompraService(ISqlCommandFactory sqlCommandFactory, IPlanillaService planillaService)
     {
         _sqlCommandFactory = sqlCommandFactory;
+        _planillaService = planillaService;
     }
 
     public async Task<IEnumerable<OrdenCompraCabeceraDto>> BuscarCabeceraAsync(
@@ -571,6 +665,11 @@ public class OrdenCompraService : IOrdenCompraService
                             TipoTrabajo = NullIfWhiteSpace(item.TipoTrabajo),
                             IdTarea = item.IdTarea,
                             Ot = NullIfWhiteSpace(item.Ot),
+                             IdComprobante = item.IdComprobante,
+                             IdComprobanteCabecera = request.IdComprobante,
+                             UsuarioCreacion = NullIfWhiteSpace(request.UsuarioCreacion),
+                             FechaCreacion = request.FechaCreacion.Date,
+                             HoraCreacion = request.HoraCreacion,
                         },
                         CommandType.Text,
                         cancellationToken,
@@ -704,8 +803,12 @@ public class OrdenCompraService : IOrdenCompraService
                         item.Cantidad,
                         item.PrecioUnitario,
                         item.IdComprobante,
+                        IdComprobanteCabecera = request.IdComprobante,
                         ImgOc = NullIfWhiteSpace(item.ImgOc),
                         ImgPresupuesto = NullIfWhiteSpace(item.ImgPresupuesto),
+                        UsuarioCreacion = NullIfWhiteSpace(request.UsuarioCreacion),
+                        FechaCreacion = request.FechaCreacion.Date,
+                        HoraCreacion = request.HoraCreacion,
                         item.Peso,
                     };
                     await connection.ExecuteAsync(new CommandDefinition(
@@ -1040,6 +1143,124 @@ public class OrdenCompraService : IOrdenCompraService
                 CommandType.Text,
                 cancellationToken,
                 commandTimeout: 120));
+    }
+
+    public async Task<OrdenCompraGenerarPagoNuevoResultDto> GenerarPagoNuevoAsync(
+        OrdenCompraGenerarPagoNuevoRequestDto request,
+        int idSolicitante,
+        string usuarioAccion,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        var origen = await connection.QuerySingleOrDefaultAsync<PagoNuevoOrigen>(
+            _sqlCommandFactory.Create(
+                BuscarOrigenPagoNuevoSql,
+                new { request.IdOc, request.Fila },
+                CommandType.Text,
+                cancellationToken,
+                commandTimeout: 120));
+
+        if (origen is null)
+        {
+            throw new InvalidOperationException("La OC no está aprobada o la fila seleccionada ya no existe.");
+        }
+
+        if (origen.IdTarea != request.IdTarea || origen.IdComprobante != request.IdComprobante)
+        {
+            throw new InvalidOperationException("Los datos operativos de la OC cambiaron. Actualice la grilla antes de registrar el pago.");
+        }
+
+        if (origen.IdResponsable <= 0 || origen.IdGestor <= 0 || origen.IdValidador <= 0 || origen.IdMoneda <= 0)
+        {
+            throw new InvalidOperationException("La cabecera de la OC no tiene responsable, gestor, validador o moneda válidos.");
+        }
+
+        var idBancoCta = await connection.QuerySingleOrDefaultAsync<int?>(
+            _sqlCommandFactory.Create(
+                BuscarBancoCuentaPagoNuevoSql,
+                new
+                {
+                    IdResponsable = origen.IdResponsable,
+                    request.IdCargo,
+                    Cuenta = request.Cuenta.Trim(),
+                    CuentaInter = request.CuentaInter.Trim(),
+                    NombreCta = request.NombreCta.Trim()
+                },
+                CommandType.Text,
+                cancellationToken,
+                commandTimeout: 120));
+
+        if (idBancoCta is null or <= 0)
+        {
+            throw new InvalidOperationException("La cuenta seleccionada ya no corresponde al responsable de la OC. Actualice la grilla.");
+        }
+
+        var subtotalRegistrado = await connection.ExecuteScalarAsync<decimal>(
+            _sqlCommandFactory.Create(
+                BuscarSaldoPagoNuevoSql,
+                new { request.IdOc, origen.IdProyecto, origen.IdSite, origen.CorreSite },
+                CommandType.Text,
+                cancellationToken,
+                commandTimeout: 120));
+        var saldoDisponible = Math.Max(0m, origen.SubtotalOc - subtotalRegistrado);
+        if (request.Monto > saldoDisponible)
+        {
+            throw new InvalidOperationException("El monto solicitado supera el saldo disponible de la OC.");
+        }
+
+        var igv = origen.IdComprobante == 2 ? Math.Round(request.Monto * 0.18m, 2) : 0m;
+        var planillaInsertResult = await _planillaService.InsertarPlanillaAsync(
+            new PlanillaInsertRequestDto
+            {
+                IdProyecto = origen.IdProyecto,
+                IdSite = origen.IdSite,
+                CorreSite = origen.CorreSite,
+                IdTarea = origen.IdTarea,
+                Responsable = origen.IdResponsable.ToString(CultureInfo.InvariantCulture),
+                IdCliente = origen.IdCliente,
+                IdBancoCta = idBancoCta,
+                CuentaNumero = request.Cuenta.Trim(),
+                CuentaInter = request.CuentaInter.Trim(),
+                NombreCta = request.NombreCta.Trim(),
+                TipoPago = "1",
+                Monto = request.Monto,
+                Subtotal = request.Monto,
+                Igv = igv,
+                Total = request.Monto + igv,
+                IdRendicion = 1,
+                Detalle = origen.Detalle ?? string.Empty,
+                Solicitante = idSolicitante.ToString(CultureInfo.InvariantCulture),
+                Gestor = origen.IdGestor.ToString(CultureInfo.InvariantCulture),
+                Validador = origen.IdValidador.ToString(CultureInfo.InvariantCulture),
+                Moneda = origen.IdMoneda.ToString(CultureInfo.InvariantCulture),
+                Bien = "1",
+                Comprobante = origen.IdComprobante.ToString(CultureInfo.InvariantCulture),
+                TipoTrabajo = origen.TipoTrabajo ?? string.Empty,
+                SiteNombre = origen.SiteNombre ?? origen.IdSite,
+                Usuario = usuarioAccion,
+                Ot = origen.Ot ?? string.Empty,
+                TipoCambio = 3.80m,
+                FechaEmision = DateTime.Today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+            },
+            cancellationToken);
+
+        await connection.ExecuteAsync(
+            _sqlCommandFactory.Create(
+                AsociarPagoNuevoOcSql,
+                new { request.IdOc, request.Fila, Correlativo = planillaInsertResult.CorrelativoGenerado },
+                CommandType.Text,
+                cancellationToken,
+                commandTimeout: 120));
+
+        return new OrdenCompraGenerarPagoNuevoResultDto
+        {
+            Correlativo = planillaInsertResult.CorrelativoGenerado,
+            IdOc = request.IdOc,
+            Fila = request.Fila,
+            Subtotal = request.Monto,
+            Igv = igv,
+            Total = request.Monto + igv
+        };
     }
 
     public async Task<OrdenCompraPdfResultDto> GenerarPdfAsync(

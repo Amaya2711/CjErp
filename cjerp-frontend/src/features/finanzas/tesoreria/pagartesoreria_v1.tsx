@@ -34,6 +34,7 @@ import {
   obtenerReporteResumenTesoreria,
   obtenerCatalogosPago,
   obtenerCuentasPago,
+  obtenerHistorialEstadosPago,
   registrarPagosTesoreria, grabarPagoTesoreria,
   crearItemsTesoreria,
 } from "../../../api/pagoTesoreriaService";
@@ -42,6 +43,7 @@ import type {
   PagoOpcion,
   PagoTesoreriaRequest,
   PagoTesoreriaRow,
+  PagoTesoreriaCambioEstado,
   PagoRevisionPermisos,
 } from "../../../api/pagoTesoreriaService";
 import { getHttpErrorMessage } from "../../../utils/httpError";
@@ -108,6 +110,17 @@ const tabs = [
   { estado: 100, label: "Búsqueda", icon: Search },
   { estado: 99, label: "Reporte", icon: BarChart3 },
 ];
+const labelEstadoHistorial = (estado: number) =>
+  estado === 7
+    ? "Observada administrativa"
+    : tabs.find((tab) => tab.estado === estado)?.label ?? `Estado ${estado}`;
+const fechaHoraHistorial = (fechaCreacion: string | null, horaCreacion: string | null) => {
+  const fechaTexto = fecha(fechaCreacion);
+  const horaTexto = horaCreacion
+    ? (horaCreacion.includes("T") ? horaCreacion.slice(11, 19) : horaCreacion.slice(0, 8))
+    : "";
+  return [fechaTexto === "—" ? "" : fechaTexto, horaTexto].filter(Boolean).join(" ") || "—";
+};
 const REPORT_STATES = [0, 1, 9, 8, 5, 4, 2];
 const initialForm = () => ({
   idEjecutor: "",
@@ -214,6 +227,9 @@ export default function PagarTesoreriaV1Page() {
     null,
   );
   const [detail, setDetail] = useState<PagoTesoreriaRow | null>(null);
+  const [historialEstados, setHistorialEstados] = useState<PagoTesoreriaCambioEstado[]>([]);
+  const [historialEstadosLoading, setHistorialEstadosLoading] = useState(false);
+  const [historialEstadosError, setHistorialEstadosError] = useState("");
   const [cuentas, setCuentas] = useState<
     {
       cuenta: string | null;
@@ -360,6 +376,32 @@ export default function PagarTesoreriaV1Page() {
       });
     return () => controller.abort();
   }, [detail]);
+  useEffect(() => {
+    if (!detail) {
+      setHistorialEstados([]);
+      setHistorialEstadosError("");
+      return;
+    }
+    const controller = new AbortController();
+    setHistorialEstados([]);
+    setHistorialEstadosError("");
+    setHistorialEstadosLoading(true);
+    obtenerHistorialEstadosPago(detail.correlativo, controller.signal)
+      .then((result) => {
+        if (!controller.signal.aborted) setHistorialEstados(result);
+      })
+      .catch((e) => {
+        if (!controller.signal.aborted) {
+          setHistorialEstadosError(
+            getHttpErrorMessage(e, "No se pudo cargar el historial de estados."),
+          );
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setHistorialEstadosLoading(false);
+      });
+    return () => controller.abort();
+  }, [detail?.correlativo]);
 
   const visibleRows = useMemo(() => {
     if (estado === 100 && !correlativoBusqueda.trim() && !desde && !hasta && !estadoBusqueda) return [];
@@ -2290,6 +2332,30 @@ export default function PagarTesoreriaV1Page() {
                   </div>
                 ))}
               </dl>
+              <h3>Historial de estados</h3>
+              {historialEstadosLoading ? (
+                <p>Cargando historial de estados…</p>
+              ) : historialEstadosError ? (
+                <p role="alert">{historialEstadosError}</p>
+              ) : !historialEstados.length ? (
+                <p>No hay cambios de estado registrados para este correlativo.</p>
+              ) : (
+                <div className="pt-history-list">
+                  {historialEstados.map((cambio, index) => (
+                    <div
+                      className="pt-history-item"
+                      key={`${cambio.correlativo}:${cambio.estado}:${cambio.fechaCreacion}:${cambio.horaCreacion}:${index}`}
+                    >
+                      <strong>{labelEstadoHistorial(cambio.estado)}</strong>
+                      <div className="pt-history-meta">
+                        <span>Usuario: {cambio.usuario || "—"}</span>
+                        <span>{fechaHoraHistorial(cambio.fechaCreacion, cambio.horaCreacion)}</span>
+                      </div>
+                      {cambio.observacion && <span className="pt-preserve">{cambio.observacion}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
               <h3>Detalle del recibo</h3>
               {detail.observacion && (
                 <div className="pt-inline-alert">

@@ -1,5 +1,13 @@
 namespace CjERP.Application.DTOs
 {
+    public sealed class PlanillaInsertResultDto
+    {
+        public int CorrelativoGenerado { get; set; }
+        public long? IdProvisional { get; set; }
+        public string? NroOperacion { get; set; }
+        public string? FechaDeposito { get; set; }
+    }
+
     public class PlanillaInsertRequestDto
     {
         public string FiltroOperativoKey { get; set; } = string.Empty;

@@ -56,6 +56,12 @@ public interface IOrdenCompraService
         OrdenCompraRecibosRequestDto request,
         CancellationToken cancellationToken = default);
 
+    Task<OrdenCompraGenerarPagoNuevoResultDto> GenerarPagoNuevoAsync(
+        OrdenCompraGenerarPagoNuevoRequestDto request,
+        int idSolicitante,
+        string usuarioAccion,
+        CancellationToken cancellationToken = default);
+
     Task<OrdenCompraPdfResultDto> GenerarPdfAsync(
         int idOc,
         CancellationToken cancellationToken = default);

@@ -60,6 +60,7 @@ Aprobación nivel 1 → 2 → 3 (estrictamente secuencial) — POST /oc/aprobar 
    ▼
 Asociar recibos (Planilla.IdOc/Fila) → POST /oc/recibos/asociar (coincidencia Cliente/Proyecto/Site/CorreSite/TipoTrabajo;
    nivel 2/3 exige recibo Estado=4)
+   ├─ Pago nuevo desde OC/Gastos → POST /oc/pago-nuevo → valida fila aprobada, cuenta y saldo → `sp_Planilla_Insertar` → asocia el correlativo generado a IdOc/Fila
    ▼
 Consumo: GET /oc/consumo (Subtotal OC vs pagado)   ·   PDF: GET /oc/{idOc}/pdf (QuestPDF)
 ```

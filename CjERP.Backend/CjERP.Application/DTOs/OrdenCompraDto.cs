@@ -229,6 +229,29 @@ public class OrdenCompraAsociarRecibosResultDto
     public int Solicitados { get; set; }
     public int Asociados { get; set; }
 }
+
+public sealed class OrdenCompraGenerarPagoNuevoRequestDto
+{
+    public int IdOc { get; set; }
+    public int Fila { get; set; }
+    public int IdTarea { get; set; }
+    public int IdCargo { get; set; }
+    public int IdComprobante { get; set; }
+    public decimal Monto { get; set; }
+    public string Cuenta { get; set; } = string.Empty;
+    public string CuentaInter { get; set; } = string.Empty;
+    public string NombreCta { get; set; } = string.Empty;
+}
+
+public sealed class OrdenCompraGenerarPagoNuevoResultDto
+{
+    public int Correlativo { get; set; }
+    public int IdOc { get; set; }
+    public int Fila { get; set; }
+    public decimal Subtotal { get; set; }
+    public decimal Igv { get; set; }
+    public decimal Total { get; set; }
+}
 public class OrdenCompraMontoOcDto
 {
     public int? IdOc { get; set; }
