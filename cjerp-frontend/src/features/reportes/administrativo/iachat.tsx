@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ChangeEvent } from "react";
 import {
   Bot,
@@ -2313,7 +2313,8 @@ function getChartTitle(chartType: IaChatChartType) {
       : "Comparacion";
 }
 
-function MessageBubble({ message }: { message: IaChatMessage }) {
+// Memoizado: escribir en el prompt cambia solo `question` y no debe recalcular las respuestas ya renderizadas.
+const MessageBubble = memo(function MessageBubble({ message }: { message: IaChatMessage }) {
   const isAssistant = message.role === "assistant";
 
   return (
@@ -2355,7 +2356,7 @@ function MessageBubble({ message }: { message: IaChatMessage }) {
       )}
     </div>
   );
-}
+});
 
 function StructuredResponseBlock({ response }: { response: IaChatResponse }) {
   const [showExecutive, setShowExecutive] = useState(false);
