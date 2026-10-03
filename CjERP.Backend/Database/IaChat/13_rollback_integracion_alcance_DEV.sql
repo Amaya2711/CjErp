@@ -12,9 +12,9 @@
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
-DECLARE @BaseDestino SYSNAME = N'<NOMBRE_DE_LA_BASE_DESTINO>';
-IF @BaseDestino = N'<NOMBRE_DE_LA_BASE_DESTINO>' OR DB_NAME() <> @BaseDestino
-    THROW 50040, 'Guarda de base: edite @BaseDestino con el nombre exacto de la base destino y ejecute conectado a ella.', 1;
+DECLARE @BaseDestino SYSNAME = N'JC_Db';
+IF DB_NAME() <> @BaseDestino
+    THROW 50040, 'Guarda de base: la base activa no es la base destino (@BaseDestino). Cambie la base activa en SSMS.', 1;
 
 IF OBJECT_ID(N'dbo.IaToolPermiso', N'U') IS NOT NULL
 BEGIN

@@ -16,13 +16,12 @@
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
--- GUARDA DE BASE (obligatoria): edite @BaseDestino con el nombre EXACTO de la base donde DECIDE aplicar este script
--- (copia de pruebas o, con autorizacion expresa, la base real) y ejecute conectado a ella. Si no coincide o no se
--- edito, el script se detiene sin tocar nada.
+-- GUARDA DE BASE: la base destino por defecto es JC_Db (editar @BaseDestino solo si se aplica en otra base).
+-- Si la base ACTIVA de la conexion en SSMS es otra (p. ej. master), el script no hace nada.
 -- ORDEN: este script se aplica DESPUES de validar el alcance (ver docs/AI_COPILOT_FASE2_INTEGRACION_DEV.md).
-DECLARE @BaseDestino SYSNAME = N'<NOMBRE_DE_LA_BASE_DESTINO>';
-IF @BaseDestino = N'<NOMBRE_DE_LA_BASE_DESTINO>' OR DB_NAME() <> @BaseDestino
-    THROW 50040, 'Guarda de base: edite @BaseDestino con el nombre exacto de la base destino y ejecute conectado a ella.', 1;
+DECLARE @BaseDestino SYSNAME = N'JC_Db';
+IF DB_NAME() <> @BaseDestino
+    THROW 50040, 'Guarda de base: la base activa no es la base destino (@BaseDestino). Cambie la base activa en SSMS.', 1;
 
 DECLARE @Ruta NVARCHAR(200) = N'/reportes/administrativo/iachat';
 DECLARE @Actor NVARCHAR(100) = N'SEED_MENU_CHATIA_2026-10-03';
