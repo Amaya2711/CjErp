@@ -184,9 +184,14 @@ public static class GastosAnalysisService
         List<Dictionary<string, object?>> detailRows,
         int totalRows,
         Dictionary<string, object?> toolParameters,
-        Dictionary<string, object?> interpretedFilters)
+        Dictionary<string, object?> interpretedFilters,
+        IReadOnlyList<string>? unavailableFields = null)
     {
-        var compareVentasAndGastos = ShouldCompareVentasAndGastos(question, detailRows);
+        var hasUnavailableFields = unavailableFields is { Count: > 0 };
+        // Si la metrica depende de columnas no disponibles NO se compara ni se prioriza Ventas: las filas ya
+        // no traen esas columnas, y aun asi se corta aqui para no depender solo de su ausencia.
+        var compareVentasAndGastos = !IaGlobalColumns.IsUnavailable(unavailableFields, "Ventas")
+            && ShouldCompareVentasAndGastos(question, detailRows);
         var amountField = ResolveAnalysisValueField(question, detailRows);
         var analysisRows = ApplyBusinessAnalysisRules(question, detailRows, amountField, out var analysisRuleSummary);
         var totalAmount = analysisRows.Sum(row => NormalizeDecimalValue(GetRowValue(row, amountField)));
@@ -224,6 +229,7 @@ public static class GastosAnalysisService
                 defaultState = args.EstadosAplicadosPorDefecto ? args.Estados : null,
                 defaultPeriodApplied = args.FechasAplicadasPorDefecto,
                 analysisRule = analysisRuleSummary,
+                unavailableFieldsRule = hasUnavailableFields ? IaGlobalColumns.AnalysisRule : null,
                 analysisMode = compareVentasAndGastos ? "comparison_ventas_vs_gastos" : "single_metric",
                 multipleCurrencies = hasMultipleCurrencies
             },
@@ -235,6 +241,7 @@ public static class GastosAnalysisService
             currencyTotals,
             sourceCoverage = "Los agregados y totales se calcularon sobre el 100% de las filas devueltas por SQL.",
             availableFields,
+            unavailableFields = hasUnavailableFields ? unavailableFields : null,
             toolParameters,
             interpretedFilters,
             breakdowns = new

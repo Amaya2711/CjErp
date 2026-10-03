@@ -312,6 +312,19 @@ builder.Services.AddScoped<IIaAuditService, IaAuditService>();
 // implementacion registrada de IIaChatService. IaChatService ya no implementa la interfaz (quedo
 // reducido a una clase estatica de constantes compartidas, ver IaChatService.cs).
 builder.Services.AddScoped<IIaChatService, IaOrchestrator>();
+// Fase 2 (docs/AI_COPILOT_IMPLEMENTATION_PLAN.md): autorizacion real del IA Chat. REGISTRADA PERO INACTIVA:
+// IaOrchestrator solo la usa si recibe IaScopeEnforcementOptions con Enabled = true, y esa opcion NO esta
+// registrada ni enlazada a configuracion, asi que el flujo sigue por la ruta antigua sin alcance.
+// Dependen de la tabla dbo.IaToolPermiso (script 08, PROPUESTA no ejecutada): sin ella la autorizacion
+// deniega (fail-closed). No activar hasta cumplir el checklist del anexo del plan.
+builder.Services.AddScoped<CjERP.Application.Interfaces.Services.AI.IIaPermissionStore, IaPermissionStore>();
+builder.Services.AddScoped<CjERP.Application.Interfaces.Services.AI.IIaEmployeeDirectory, IaEmployeeDirectory>();
+builder.Services.AddScoped<CjERP.Application.Interfaces.Services.AI.IIaAuthorizationService, IaAuthorizationService>();
+// Interruptor de TRANSICION para integracion en DESARROLLO: IaChat:ScopeEnforcement:Enabled (por defecto false;
+// sin la seccion = desactivado). Se activa solo por variable de entorno (IaChat__ScopeEnforcement__Enabled=true)
+// en una base COPIA; NO se agrega a appsettings.json. Al cerrar la Fase 2 este interruptor y la ruta antigua se eliminan.
+builder.Services.AddSingleton(builder.Configuration.GetSection("IaChat:ScopeEnforcement").Get<IaScopeEnforcementOptions>()
+    ?? new IaScopeEnforcementOptions());
 builder.Services.AddHttpClient<ISharePointCommercialUploadService, SharePointCommercialUploadService>();
 builder.Services.AddHttpClient<IWupAuthService, WupAuthService>((serviceProvider, client) =>
 {

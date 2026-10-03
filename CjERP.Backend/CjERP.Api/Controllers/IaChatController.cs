@@ -34,9 +34,9 @@ public sealed class IaChatController : ControllerBase
             });
         }
 
-        var usuarioId = User.FindFirstValue("IdUsuario")
-            ?? User.FindFirstValue(ClaimTypes.Name)
-            ?? User.Identity?.Name;
+        // Identidad solo desde el claim IdUsuario del JWT validado; sin fallback a nombres. Si falta,
+        // el orquestador rechaza la solicitud (deniega ante identidad ausente).
+        var usuarioId = User.FindFirstValue("IdUsuario");
 
         var response = await _iaChatService.ConsultarAsync(request, usuarioId, cancellationToken);
         return Ok(response);
@@ -57,9 +57,9 @@ public sealed class IaChatController : ControllerBase
             });
         }
 
-        var usuarioId = User.FindFirstValue("IdUsuario")
-            ?? User.FindFirstValue(ClaimTypes.Name)
-            ?? User.Identity?.Name;
+        // Identidad solo desde el claim IdUsuario del JWT validado; sin fallback a nombres. Si falta,
+        // el orquestador rechaza la solicitud (deniega ante identidad ausente).
+        var usuarioId = User.FindFirstValue("IdUsuario");
 
         var response = await _iaChatService.GenerarDashboardReporteAsync(request, usuarioId, cancellationToken);
         return Ok(response);

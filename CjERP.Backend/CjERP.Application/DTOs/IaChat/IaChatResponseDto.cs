@@ -28,4 +28,9 @@ public sealed class IaChatResponseDto
     // lo adoptaba ciegamente; el frontend debe migrar a adoptar este valor (cambio coordinado,
     // pendiente, no incluido en esta sesion).
     public string? ConversationId { get; set; }
+
+    // Fase 2: campos NO disponibles por permisos (p.ej. las columnas globales de site/OC cuando la cuenta no
+    // tiene el permiso de totales globales). Un campo listado aqui no esta en las filas y NO equivale a
+    // cero. null/vacio = todos los campos disponibles.
+    public List<string>? UnavailableFields { get; set; }
 }

@@ -45,6 +45,9 @@ export type IaChatResponse = {
   // El backend genera y valida el ID de conversacion (Fase 2, docs/AI_COPILOT_IMPLEMENTATION_PLAN.md).
   // El cliente ya no inventa este valor: lo adopta de aqui y lo reenvia en el siguiente turno/export.
   conversationId?: string | null;
+  // Campos NO disponibles por permisos del usuario (p.ej. ventas y saldos de OC/site). Un campo listado
+  // aqui no viene en las filas y NO equivale a cero: la UI debe mostrar "No disponible", nunca 0.
+  unavailableFields?: string[] | null;
 };
 
 export type IaChatDashboardExportRequest = {

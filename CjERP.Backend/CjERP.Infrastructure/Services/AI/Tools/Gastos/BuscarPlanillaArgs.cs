@@ -92,6 +92,18 @@ public sealed class BuscarPlanillaArgs
         return this;
     }
 
+    /// <summary>
+    /// Copia de TODOS los criterios con otra pagina/tamano. Copia por MemberwiseClone para que
+    /// ningun filtro actual o futuro se pierda al paginar (antes la copia manual omitia Site).
+    /// </summary>
+    public BuscarPlanillaArgs WithPage(int pagina, int tamanoPagina)
+    {
+        var clone = (BuscarPlanillaArgs)MemberwiseClone();
+        clone.Pagina = pagina;
+        clone.TamanoPagina = tamanoPagina;
+        return clone;
+    }
+
     public Dictionary<string, object?> AsDictionary()
     {
         return new Dictionary<string, object?>

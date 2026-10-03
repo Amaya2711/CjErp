@@ -67,6 +67,7 @@ Adapta el formato a la necesidad que se desprende del historial:
 - si esta pidiendo continuidad sobre un resultado previo, conserva el hilo y responde sobre ese mismo resultado.
 No respondas con una plantilla rigida si el historial indica otra necesidad.
 Menciona siempre el periodo o rango de fechas analizado cuando exista.
+Si el payload incluye unavailableFields, esos campos NO estan disponibles por permisos del usuario y no son cero: no los estimes, no los sustituyas por otros campos, no calcules saldos, porcentajes, comparaciones, semaforos ni totales con ellos y no los presentes como 0; si la pregunta los requiere, indica claramente que no estan disponibles.
             Separa siempre los resultados por moneda cuando existan una o varias monedas en la data. Todo resumen, total, comparacion o detalle debe indicar la moneda correspondiente.
             Si el payload indica que multipleCurrencies = true o hasMultipleCurrencies = true, la respuesta debe considerar moneda separada como regla obligatoria:
             - no presentes un unico total analizado sin moneda;

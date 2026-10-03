@@ -978,6 +978,7 @@ function buildDashboardStructuredData(response: IaChatResponse) {
     responseType: response.responseType,
     totalRows: response.totalRows ?? response.detailRows?.length ?? 0,
     metric: report.metric,
+    metricUnavailable: report.metricUnavailable,
     currency: report.currency,
     hasMultipleCurrencies: report.hasMultipleCurrencies,
     period: report.period,
@@ -1470,6 +1471,20 @@ function detectReportMetric(response: IaChatResponse) {
   return wantsVentas ? "ventas" : "gastos";
 }
 
+// Campos globales (site/OC) que el backend declara NO disponibles por permisos. "No disponible" es distinto
+// de cero: nunca se convierte, no se calculan porcentajes, saldos, comparaciones ni semaforos con ellos.
+type UnavailableFlags = { ventas: boolean; acumulado: boolean };
+
+const NOT_AVAILABLE_LABEL = "No disponible";
+
+function resolveUnavailable(response: IaChatResponse): UnavailableFlags {
+  const list = (response.unavailableFields ?? []).map((field) => String(field).toLowerCase());
+  return {
+    ventas: list.includes("ventas"),
+    acumulado: list.includes("conpagadosoles") || list.includes("conpagado"),
+  };
+}
+
 function resolveMetricAmountField(metric: "ventas" | "gastos") {
   return metric === "ventas" ? "Ventas" : "Subtotal";
 }
@@ -1575,6 +1590,8 @@ function buildMonthlyRows(
 function buildExecutiveWeeklyReportData(response: IaChatResponse) {
   const rawRows = response.detailRows ?? [];
   const metric = detectReportMetric(response);
+  const unavailable = resolveUnavailable(response);
+  const ventasUnavailable = metric === "ventas" && unavailable.ventas;
   const metricRows = normalizeRowsForMetric(rawRows, metric);
   const filters = buildDisplayFilters(response);
   const period = resolvePeriodLabel(filters);
@@ -1762,7 +1779,7 @@ function buildExecutiveWeeklyReportData(response: IaChatResponse) {
       : "Separar el análisis por cliente, proyecto o estado para reforzar la toma de decisiones.",
   ].filter((item): item is string => Boolean(item)).slice(0, 5);
 
-  return {
+  const report = {
     metric,
     currency: primaryCurrency,
     hasMultipleCurrencies,
@@ -1788,12 +1805,45 @@ function buildExecutiveWeeklyReportData(response: IaChatResponse) {
     projectChartRows: projectRows.map((item) => ({ label: item.label, amount: item.amount, participation: item.participation })),
     solicitanteChartRows: solicitanteRows.map((item) => ({ label: item.label, amount: item.amount, participation: item.participation })),
     siteChartRows: siteRows.map((item) => ({ label: item.label, amount: item.amount })),
-    annexRows: detailSourceRowsFromRaw(metricRows),
+    annexRows: detailSourceRowsFromRaw(metricRows, unavailable),
+  };
+
+  if (!ventasUnavailable) {
+    return { ...report, metricUnavailable: false };
+  }
+
+  // Metrica de ventas no disponible por permisos: no se publica ningun monto, porcentaje, semaforo ni
+  // lectura derivada (los tres calculos de arriba operaron sobre filas sin la columna y no son validos).
+  const unavailableMessage =
+    "La metrica de ventas no esta disponible para este usuario segun los permisos configurados; no se calcularon totales, porcentajes ni semaforos con ella.";
+
+  return {
+    ...report,
+    metricUnavailable: true,
+    currencyTotals: [] as typeof report.currencyTotals,
+    summaryRows: buildKeyValueExportRows([
+      ["Metrica solicitada", "Ventas"],
+      ["Disponibilidad", "No disponible por permisos"],
+    ]),
+    kpiRows: [] as typeof kpiRows,
+    monthTable: [] as typeof monthTable,
+    projectTable: [] as typeof projectTable,
+    solicitanteTable: [] as typeof solicitanteTable,
+    siteTable: [] as typeof siteTable,
+    currencyTable: [] as typeof currencyTable,
+    semaphoreTable: [] as typeof semaphoreTable,
+    executiveReading: unavailableMessage,
+    conclusion: unavailableMessage,
+    recommendations: [] as string[],
+    monthChartRows: [] as typeof report.monthChartRows,
+    projectChartRows: [] as typeof report.projectChartRows,
+    solicitanteChartRows: [] as typeof report.solicitanteChartRows,
+    siteChartRows: [] as typeof report.siteChartRows,
   };
 }
 
-function detailSourceRowsFromRaw(rows: Record<string, unknown>[]) {
-  return buildDetailedGridRows(rows);
+function detailSourceRowsFromRaw(rows: Record<string, unknown>[], unavailable?: UnavailableFlags) {
+  return buildDetailedGridRows(rows, unavailable);
 }
 
 function getModuleBadgeStyles(enabled: boolean): CSSProperties {
@@ -1858,7 +1908,7 @@ const DETAIL_GRID_COLUMNS = [
   "IdOc",
 ] as const;
 
-function buildDetailedGridRows(rows: Record<string, unknown>[]) {
+function buildDetailedGridRows(rows: Record<string, unknown>[], unavailable?: UnavailableFlags) {
   return rows.map((row) => ({
     IdPlanilla: getCaseInsensitiveValue(row, "IdPlanilla") ?? getCaseInsensitiveValue(row, "IDPLANILLA") ?? null,
     Fecha: getCaseInsensitiveValue(row, "Fecha") ?? getCaseInsensitiveValue(row, "FECHA") ?? getCaseInsensitiveValue(row, "FechaIngresoTexto") ?? null,
@@ -1870,7 +1920,7 @@ function buildDetailedGridRows(rows: Record<string, unknown>[]) {
     IdSite: getCaseInsensitiveValue(row, "IdSite") ?? null,
     Site: getCaseInsensitiveValue(row, "Site") ?? getCaseInsensitiveValue(row, "Sitio") ?? null,
     Ot: getCaseInsensitiveValue(row, "Ot") ?? getCaseInsensitiveValue(row, "OT") ?? null,
-    Ventas: getCaseInsensitiveValue(row, "Ventas") ?? null,
+    Ventas: unavailable?.ventas ? NOT_AVAILABLE_LABEL : getCaseInsensitiveValue(row, "Ventas") ?? null,
     Responsable: getCaseInsensitiveValue(row, "Responsable") ?? null,
     Solicitante: getCaseInsensitiveValue(row, "Solicitante") ?? null,
     Bien: getCaseInsensitiveValue(row, "Bien") ?? null,
@@ -1934,7 +1984,13 @@ function resolveNumericField(row: Record<string, unknown>, fields: string[]) {
   return 0;
 }
 
-function buildSiteExecutiveCards(rows: Record<string, unknown>[], metric: "ventas" | "gastos") {
+function buildSiteExecutiveCards(
+  rows: Record<string, unknown>[],
+  metric: "ventas" | "gastos",
+  unavailable: UnavailableFlags = { ventas: false, acumulado: false },
+) {
+  // null = dato NO disponible por permisos (distinto de 0): no participa en saldos ni porcentajes.
+  const amountUnavailable = metric === "ventas" && unavailable.ventas;
   const grouped = new Map<
     string,
     {
@@ -1942,11 +1998,11 @@ function buildSiteExecutiveCards(rows: Record<string, unknown>[], metric: "venta
       cliente: string;
       proyecto: string;
       site: string;
-      amount: number;
+      amount: number | null;
       amountLabel: string;
-      totalAcumulado: number;
-      saldoReferencial: number;
-      usedPercent: number;
+      totalAcumulado: number | null;
+      saldoReferencial: number | null;
+      usedPercent: number | null;
     }
   >();
 
@@ -1958,25 +2014,35 @@ function buildSiteExecutiveCards(rows: Record<string, unknown>[], metric: "venta
     const proyecto = formatValue(resolveFieldValue(row, ["Proyecto", "proyecto"])) || "Sin proyecto";
     const site = formatValue(resolveFieldValue(row, ["Site", "Sitio", "site", "sitio"])) || "Sin sitio";
     const key = `${cliente}||${proyecto}||${site}`;
-    const amount = resolveNumericField(row, [amountField, amountField.toLowerCase()]);
-    const totalAcumulado = resolveNumericField(row, ["ConPagadoSoles", "ConPagado", "Con Pagado", "conPagado", "con_pagado"]);
+    const amount = amountUnavailable ? null : resolveNumericField(row, [amountField, amountField.toLowerCase()]);
+    const totalAcumulado = unavailable.acumulado
+      ? null
+      : resolveNumericField(row, ["ConPagadoSoles", "ConPagado", "Con Pagado", "conPagado", "con_pagado"]);
 
     const current = grouped.get(key) ?? {
       key,
       cliente,
       proyecto,
       site,
-      amount: 0,
+      amount: amountUnavailable ? null : 0,
       amountLabel,
-      totalAcumulado: 0,
-      saldoReferencial: 0,
-      usedPercent: 0,
+      totalAcumulado: unavailable.acumulado ? null : 0,
+      saldoReferencial: null,
+      usedPercent: null,
     };
 
-    current.amount += amount;
-    current.totalAcumulado += totalAcumulado;
-    current.saldoReferencial = current.amount - current.totalAcumulado;
-    current.usedPercent = current.amount > 0 ? (current.totalAcumulado / current.amount) * 100 : 0;
+    current.amount = amount === null || current.amount === null ? null : current.amount + amount;
+    current.totalAcumulado =
+      totalAcumulado === null || current.totalAcumulado === null ? null : current.totalAcumulado + totalAcumulado;
+    // Saldo y porcentaje solo existen si AMBOS datos estan disponibles; nunca se derivan de un dato ausente.
+    current.saldoReferencial =
+      current.amount === null || current.totalAcumulado === null ? null : current.amount - current.totalAcumulado;
+    current.usedPercent =
+      current.amount === null || current.totalAcumulado === null
+        ? null
+        : current.amount > 0
+          ? (current.totalAcumulado / current.amount) * 100
+          : 0;
     grouped.set(key, current);
   }
 
@@ -1992,7 +2058,7 @@ function buildSiteExecutiveCards(rows: Record<string, unknown>[], metric: "venta
     })
     .map((item) => ({
       ...item,
-      usedPercent: Math.max(0, Math.min(100, item.usedPercent)),
+      usedPercent: item.usedPercent === null ? null : Math.max(0, Math.min(100, item.usedPercent)),
     }));
 }
 
@@ -2023,10 +2089,10 @@ function buildExecutiveRowsFromSiteCards(cards: ReturnType<typeof buildSiteExecu
     Cliente: card.cliente,
     Proyecto: card.proyecto,
     Site: card.site,
-    [amountLabel]: card.amount,
-    "Total acumulado del sitio": card.totalAcumulado,
-    "Saldo referencial despues del sitio": card.saldoReferencial,
-    "Uso %": `${card.usedPercent.toFixed(2)}%`,
+    [amountLabel]: card.amount ?? NOT_AVAILABLE_LABEL,
+    "Total acumulado del sitio": card.totalAcumulado ?? NOT_AVAILABLE_LABEL,
+    "Saldo referencial despues del sitio": card.saldoReferencial ?? NOT_AVAILABLE_LABEL,
+    "Uso %": card.usedPercent === null ? NOT_AVAILABLE_LABEL : `${card.usedPercent.toFixed(2)}%`,
   }));
 }
 
@@ -2304,7 +2370,8 @@ function StructuredResponseBlock({ response }: { response: IaChatResponse }) {
   const reportPreviewRef = useRef<HTMLDivElement | null>(null);
   const rawRows = response.detailRows ?? [];
   const reportMetric = detectReportMetric(response);
-  const detailedGridRows = buildDetailedGridRows(rawRows);
+  const unavailable = resolveUnavailable(response);
+  const detailedGridRows = buildDetailedGridRows(rawRows, unavailable);
   const summaryExecutiveCards = buildSiteExecutiveCardsFromSummary(response.summary).map((card) => ({
     ...card,
     amountLabel: card.amountLabel || (reportMetric === "ventas" ? "Ventas" : "Subtotal"),
@@ -2322,7 +2389,7 @@ function StructuredResponseBlock({ response }: { response: IaChatResponse }) {
     : chartExecutiveRows.length > 0
       ? chartExecutiveRows
       : normalizeExecutiveRows(rawRows);
-  const siteExecutiveCards = summaryExecutiveCards.length > 0 ? summaryExecutiveCards : buildSiteExecutiveCards(rawRows, reportMetric);
+  const siteExecutiveCards = summaryExecutiveCards.length > 0 ? summaryExecutiveCards : buildSiteExecutiveCards(rawRows, reportMetric, unavailable);
   const detailColumns = buildDetailColumns(executiveRows);
   const numericSummary = summarizeNumericEntries(response.summary);
   const displayFilters = buildDisplayFilters(response);
@@ -2694,35 +2761,44 @@ function ExecutiveSummaryBlock({
             <div style={styles.siteExecutiveMetrics}>
               <div style={styles.siteExecutiveMetric}>
                 <div style={styles.siteExecutiveMetricLabel}>{card.amountLabel ?? (metric === "ventas" ? "Ventas" : "Subtotal")}</div>
-                <div style={styles.siteExecutiveMetricValue}>{formatCurrency(card.amount)}</div>
+                <div style={styles.siteExecutiveMetricValue}>{card.amount === null ? NOT_AVAILABLE_LABEL : formatCurrency(card.amount)}</div>
               </div>
               <div style={styles.siteExecutiveMetric}>
                 <div style={styles.siteExecutiveMetricLabel}>Total acumulado del sitio</div>
-                <div style={styles.siteExecutiveMetricValue}>{formatCurrency(card.totalAcumulado)}</div>
+                <div style={styles.siteExecutiveMetricValue}>{card.totalAcumulado === null ? NOT_AVAILABLE_LABEL : formatCurrency(card.totalAcumulado)}</div>
               </div>
             </div>
 
-            <div style={styles.siteExecutiveProgressBlock}>
-              <div style={styles.siteExecutiveProgressTrack}>
-                <div
-                  style={{
-                    ...styles.siteExecutiveProgressFill,
-                    width: `${Math.max(0, Math.min(100, card.usedPercent))}%`,
-                  }}
-                />
-              </div>
-              <div style={styles.siteExecutiveProgressRow}>
-                <span style={styles.siteExecutiveProgressPercent}>{card.usedPercent.toFixed(2)}%</span>
-                <span style={styles.siteExecutiveProgressState}>{card.saldoReferencial > 0 ? "Disponible" : "Sin saldo"}</span>
-              </div>
-            </div>
+            {card.usedPercent !== null && card.saldoReferencial !== null ? (
+              <>
+                <div style={styles.siteExecutiveProgressBlock}>
+                  <div style={styles.siteExecutiveProgressTrack}>
+                    <div
+                      style={{
+                        ...styles.siteExecutiveProgressFill,
+                        width: `${Math.max(0, Math.min(100, card.usedPercent))}%`,
+                      }}
+                    />
+                  </div>
+                  <div style={styles.siteExecutiveProgressRow}>
+                    <span style={styles.siteExecutiveProgressPercent}>{card.usedPercent.toFixed(2)}%</span>
+                    <span style={styles.siteExecutiveProgressState}>{card.saldoReferencial > 0 ? "Disponible" : "Sin saldo"}</span>
+                  </div>
+                </div>
 
-            <div style={styles.siteExecutiveBadge}>{card.saldoReferencial > 0 ? "Disponible" : "Agotado"}</div>
+                <div style={styles.siteExecutiveBadge}>{card.saldoReferencial > 0 ? "Disponible" : "Agotado"}</div>
 
-            <div style={styles.siteExecutiveSaldoBlock}>
-              <div style={styles.siteExecutiveSaldoLabel}>Saldo referencial despues del sitio</div>
-              <div style={styles.siteExecutiveSaldoValue}>{formatCurrency(card.saldoReferencial)}</div>
-            </div>
+                <div style={styles.siteExecutiveSaldoBlock}>
+                  <div style={styles.siteExecutiveSaldoLabel}>Saldo referencial despues del sitio</div>
+                  <div style={styles.siteExecutiveSaldoValue}>{formatCurrency(card.saldoReferencial)}</div>
+                </div>
+              </>
+            ) : (
+              <div style={styles.siteExecutiveSaldoBlock}>
+                <div style={styles.siteExecutiveSaldoLabel}>Avance y saldo del sitio</div>
+                <div style={styles.siteExecutiveSaldoValue}>{NOT_AVAILABLE_LABEL}</div>
+              </div>
+            )}
           </div>
         ))}
       </div>

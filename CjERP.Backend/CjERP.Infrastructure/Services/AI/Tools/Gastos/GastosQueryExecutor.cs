@@ -6,6 +6,7 @@
 using System.Data;
 using System.Globalization;
 using Dapper;
+using CjERP.Application.Interfaces.Services.AI;
 using CjERP.Infrastructure.Persistence.Sql;
 using Microsoft.Extensions.Logging;
 
@@ -17,6 +18,17 @@ public interface IGastosQueryExecutor
 {
     Task<PlanillaBuscarExecutionResult> EjecutarBuscarPlanillaAsync(
         BuscarPlanillaArgs args,
+        CancellationToken cancellationToken,
+        bool fetchAllPages = false);
+
+    /// <summary>
+    /// Ejecucion con alcance OBLIGATORIO (Fase 2). Sin un IaResolvedScope valido no se llega a SQL.
+    /// NO esta conectada al flujo real todavia: IaOrchestrator sigue usando la ruta sin alcance hasta
+    /// completar permisos, resolucion de identidad y despliegue de la version del SP con alcance.
+    /// </summary>
+    Task<PlanillaBuscarExecutionResult> EjecutarBuscarPlanillaConAlcanceAsync(
+        BuscarPlanillaArgs args,
+        IaResolvedScope scope,
         CancellationToken cancellationToken,
         bool fetchAllPages = false);
 }
@@ -35,12 +47,43 @@ public sealed class GastosQueryExecutor : IGastosQueryExecutor
         _logger = logger;
     }
 
-    public async Task<PlanillaBuscarExecutionResult> EjecutarBuscarPlanillaAsync(
+    public Task<PlanillaBuscarExecutionResult> EjecutarBuscarPlanillaAsync(
         BuscarPlanillaArgs args,
+        CancellationToken cancellationToken,
+        bool fetchAllPages = false) =>
+        FetchAsync(args, scope: null, cancellationToken, fetchAllPages);
+
+    public Task<PlanillaBuscarExecutionResult> EjecutarBuscarPlanillaConAlcanceAsync(
+        BuscarPlanillaArgs args,
+        IaResolvedScope scope,
         CancellationToken cancellationToken,
         bool fetchAllPages = false)
     {
-        var rows = await EjecutarBuscarPlanillaPageAsync(args, cancellationToken);
+        // Falla ANTES de abrir cualquier conexion: sin alcance no se ejecuta nada.
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(scope);
+        return FetchAsync(args, scope, cancellationToken, fetchAllPages);
+    }
+
+    private Task<PlanillaBuscarExecutionResult> FetchAsync(
+        BuscarPlanillaArgs args,
+        IaResolvedScope? scope,
+        CancellationToken cancellationToken,
+        bool fetchAllPages) =>
+        FetchPagesAsync(args, scope, fetchAllPages, EjecutarBuscarPlanillaPageAsync, cancellationToken);
+
+    /// <summary>
+    /// Bucle de paginacion con la obtencion de cada pagina inyectada (permite probarlo sin SQL).
+    /// Cada pagina recibe una copia COMPLETA de los criterios (WithPage) y el MISMO alcance.
+    /// </summary>
+    internal static async Task<PlanillaBuscarExecutionResult> FetchPagesAsync(
+        BuscarPlanillaArgs args,
+        IaResolvedScope? scope,
+        bool fetchAllPages,
+        Func<BuscarPlanillaArgs, IaResolvedScope?, CancellationToken, Task<List<Dictionary<string, object?>>>> fetchPage,
+        CancellationToken cancellationToken)
+    {
+        var rows = await fetchPage(args, scope, cancellationToken);
 
         if (fetchAllPages)
         {
@@ -51,31 +94,9 @@ public sealed class GastosQueryExecutor : IGastosQueryExecutor
 
             while (accumulatedRows.Count < totalRows && accumulatedRows.Count < MaxLocalAggregationRows)
             {
-                var nextArgs = new BuscarPlanillaArgs
-                {
-                    TextoBusqueda = args.TextoBusqueda,
-                    Estados = args.Estados,
-                    FechaInicio = args.FechaInicio,
-                    FechaFin = args.FechaFin,
-                    IdSolicitante = args.IdSolicitante,
-                    IdValidador = args.IdValidador,
-                    IdCliente = args.IdCliente,
-                    IdProyecto = args.IdProyecto,
-                    IdSite = args.IdSite,
-                    CorreSite = args.CorreSite,
-                    Cliente = args.Cliente,
-                    Proyecto = args.Proyecto,
-                    Responsable = args.Responsable,
-                    Solicitante = args.Solicitante,
-                    Ot = args.Ot,
-                    CoincidirTodas = args.CoincidirTodas,
-                    IncluirEstado99 = args.IncluirEstado99,
-                    Pagina = nextPage,
-                    TamanoPagina = pageSize,
-                    TipoCambio = args.TipoCambio
-                };
+                var nextArgs = args.WithPage(nextPage, pageSize);
 
-                var nextPageRows = await EjecutarBuscarPlanillaPageAsync(nextArgs, cancellationToken);
+                var nextPageRows = await fetchPage(nextArgs, scope, cancellationToken);
                 if (nextPageRows.Count == 0)
                 {
                     break;
@@ -97,39 +118,34 @@ public sealed class GastosQueryExecutor : IGastosQueryExecutor
         // No se aplica un refiltro local por contains sobre Responsable/Solicitante
         // para no alterar el universo real devuelto por SQL.
 
+        // Sin permiso de totales globales, las 15 columnas globales se RETIRAN de las filas (el SP ya las
+        // devuelve en NULL; esto es defensa en profundidad) y se informan como no disponibles. Un NULL
+        // nunca se convierte en cero. La ruta heredada (scope == null) no cambia.
+        var unavailable = scope is { CanViewGlobalTotals: false }
+            ? IaGlobalColumns.Names
+            : (IReadOnlyList<string>)Array.Empty<string>();
+
+        if (unavailable.Count > 0)
+        {
+            rows = IaGlobalColumns.StripFromRows(rows);
+        }
+
         return new PlanillaBuscarExecutionResult
         {
             Rows = rows,
-            TotalRows = GetTotalRows(rows)
+            TotalRows = GetTotalRows(rows),
+            UnavailableColumns = unavailable
         };
     }
 
     private async Task<List<Dictionary<string, object?>>> EjecutarBuscarPlanillaPageAsync(
         BuscarPlanillaArgs args,
+        IaResolvedScope? scope,
         CancellationToken cancellationToken)
     {
         await using var connection = _sqlCommandFactory.CreateConnection();
 
-        var parameters = new DynamicParameters();
-        parameters.Add("@TextoBusqueda", args.TextoBusqueda, DbType.String, size: 500);
-        parameters.Add("@Estados", args.Estados, DbType.String, size: 100);
-        // El store se valida en SQL con el formato compacto yyyyMMdd, igual que en los EXEC manuales.
-        parameters.Add("@FechaInicio", args.FechaInicio?.ToString("yyyyMMdd", CultureInfo.InvariantCulture), DbType.String, size: 8);
-        parameters.Add("@FechaFin", args.FechaFin?.ToString("yyyyMMdd", CultureInfo.InvariantCulture), DbType.String, size: 8);
-        parameters.Add("@IdSite", args.IdSite, DbType.String, size: 50);
-        parameters.Add("@Site", args.Site, DbType.String, size: 150);
-        parameters.Add("@CorreSite", args.CorreSite, DbType.Int32);
-        parameters.Add("@Cliente", args.Cliente, DbType.String, size: 150);
-        parameters.Add("@Proyecto", args.Proyecto, DbType.String, size: 150);
-        parameters.Add("@Responsable", args.Responsable, DbType.String, size: 150);
-        parameters.Add("@Solicitante", args.Solicitante, DbType.String, size: 150);
-        parameters.Add("@Ot", args.Ot, DbType.String, size: 100);
-        parameters.Add("@CoincidirTodas", args.CoincidirTodas, DbType.Boolean);
-        parameters.Add("@IncluirEstado99", args.IncluirEstado99, DbType.Boolean);
-        parameters.Add("@Pagina", args.Pagina, DbType.Int32);
-        parameters.Add("@TamanoPagina", args.TamanoPagina, DbType.Int32);
-        parameters.Add("@TipoCambio", args.TipoCambio, DbType.Decimal);
-
+        var parameters = BuildParameters(args, scope);
         _logger.LogInformation(
             "IA Chat ejecutando {StoredProcedure} con parametros: {Parametros}",
             StoredProcedureBuscar,
@@ -153,6 +169,43 @@ public sealed class GastosQueryExecutor : IGastosQueryExecutor
             rows.Count);
 
         return rows;
+    }
+
+    /// <summary>
+    /// Parametros del SP. Con alcance, agrega los 4 parametros de alcance; sin alcance (ruta heredada)
+    /// no los agrega y la version del SP con alcance rechazara la llamada (falla cerrada).
+    /// </summary>
+    internal static DynamicParameters BuildParameters(BuscarPlanillaArgs args, IaResolvedScope? scope)
+    {
+        var parameters = new DynamicParameters();
+        parameters.Add("@TextoBusqueda", args.TextoBusqueda, DbType.String, size: 500);
+        parameters.Add("@Estados", args.Estados, DbType.String, size: 100);
+        // El store se valida en SQL con el formato compacto yyyyMMdd, igual que en los EXEC manuales.
+        parameters.Add("@FechaInicio", args.FechaInicio?.ToString("yyyyMMdd", CultureInfo.InvariantCulture), DbType.String, size: 8);
+        parameters.Add("@FechaFin", args.FechaFin?.ToString("yyyyMMdd", CultureInfo.InvariantCulture), DbType.String, size: 8);
+        parameters.Add("@IdSite", args.IdSite, DbType.String, size: 50);
+        parameters.Add("@Site", args.Site, DbType.String, size: 150);
+        parameters.Add("@CorreSite", args.CorreSite, DbType.Int32);
+        parameters.Add("@Cliente", args.Cliente, DbType.String, size: 150);
+        parameters.Add("@Proyecto", args.Proyecto, DbType.String, size: 150);
+        parameters.Add("@Responsable", args.Responsable, DbType.String, size: 150);
+        parameters.Add("@Solicitante", args.Solicitante, DbType.String, size: 150);
+        parameters.Add("@Ot", args.Ot, DbType.String, size: 100);
+        parameters.Add("@CoincidirTodas", args.CoincidirTodas, DbType.Boolean);
+        parameters.Add("@IncluirEstado99", args.IncluirEstado99, DbType.Boolean);
+        parameters.Add("@Pagina", args.Pagina, DbType.Int32);
+        parameters.Add("@TamanoPagina", args.TamanoPagina, DbType.Int32);
+        parameters.Add("@TipoCambio", args.TipoCambio, DbType.Decimal);
+
+        if (scope is not null)
+        {
+            parameters.Add("@AlcanceNivel", scope.SqlNivel, DbType.String, size: 12);
+            parameters.Add("@AlcanceCampos", scope.SqlCampos, DbType.String, size: 2);
+            parameters.Add("@AlcanceEmpleados", scope.SqlEmpleados, DbType.String, size: -1);
+            parameters.Add("@VerTotalesGlobales", scope.CanViewGlobalTotals, DbType.Boolean);
+        }
+
+        return parameters;
     }
 
     private static int GetTotalRows(List<Dictionary<string, object?>> rows)
@@ -218,4 +271,10 @@ public sealed class PlanillaBuscarExecutionResult
     public List<Dictionary<string, object?>> Rows { get; set; } = [];
 
     public int TotalRows { get; set; }
+
+    /// <summary>
+    /// Columnas NO disponibles por permisos (vacio = todas disponibles). Una columna listada aqui no esta
+    /// en las filas y NO equivale a cero.
+    /// </summary>
+    public IReadOnlyList<string> UnavailableColumns { get; set; } = Array.Empty<string>();
 }

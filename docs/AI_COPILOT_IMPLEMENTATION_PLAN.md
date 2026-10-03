@@ -687,4 +687,361 @@ Ejecutado en `cjerp-frontend/src/features/reportes/administrativo/iachat.tsx` y 
 
 ---
 
+## Anexo — Reconstrucción de estado y bloqueos de autorización/alcance (2026-10-03, sesión de reanudación)
+
+**Verificado en esta sesión** (no tomado de reportes): árbol git limpio salvo `tmp/` sin versionar; todo lo de Fase 1 y la parte implementada de Fase 2 está en el commit `2d75b5f` (`IaChatService.cs` ya no existe; `IaOrchestrator` es el registrado). `dotnet test` del proyecto `CjERP.Backend.Tests.Ia` → **131/131**; `dotnet build CjERP.Api.csproj` (salida temporal) → **0 errores**. `grep` confirma que `IIaAuthorizationService` **no existe** como tipo (solo aparece en comentarios) y que `IaAuthorizedScope`/`RecordAuthorizedScope`/`MatchesAuthorizedScope` no tienen ningún llamador fuera de tests.
+
+**Implementado**: propiedad de conversación por `IdUsuario` (`TryGetOwned`, ID generado por el backend, `ConversationId` en la respuesta), frontend adopta ese ID, exportación reconstruye desde `DetailRows` ignorando `StructuredDataJson` del cliente. **Preparado, sin conectar**: `IaAuthorizedScope` y su comparación por conjunto. **Bloqueado**: `IIaAuthorizationService`, enforcement `Propio/Equipo/Total`, permiso de totales globales, revalidación antes de reutilizar memoria/exportar.
+
+**Cambio de esta sesión**: `IaChatController` (ambos endpoints) obtiene la identidad **solo** del claim `IdUsuario`; se eliminó el fallback a `ClaimTypes.Name`/`Identity.Name` (hoy ese claim repite el mismo valor, pero un nombre nunca debe ser clave de propiedad/seguridad). Sin claim → el orquestador deniega (ya validado en `ConsultarAsync` y `GenerarDashboardReporteAsync`).
+
+### Qué falta exactamente (metadata)
+
+| Falta | Por qué bloquea | Evidencia |
+|---|---|---|
+| Definición vigente de `dbo.sp_IA_Planilla_Buscar` | No está versionada en el repo (`Database/IaChat/` solo tiene `01_IaChatAuditoria.sql`); `Metadata.txt` contiene solo las *consultas*, no resultados. `AI_COPILOT_DESIGN.md` §2 describe el SP como "verificado", pero ese texto es un reporte histórico, no la definición | `GastosQueryExecutor.cs:114-131` |
+| Cómo el SP vincula `Planilla` con responsable/solicitante | El ejecutor solo pasa `@Responsable` y `@Solicitante` como **texto** (`LIKE`); no existe parámetro por identificador. Restringir por identificadores antes del conteo/paginación exige un cambio en el SP (parámetros de identificadores o TVP) y saber contra qué columnas filtrar | `GastosQueryExecutor.cs:124-125`; el SP calcula `TotalRegistros` |
+| Columnas reales de Planilla/Empleado/EmpleadoCj/EmpleadoCjDetalle/Usuario y vínculo Usuario→Empleado | Sin DDL en el repo; no se asume `IdResponsableCj` ni `IdEmpleadoCj` en `Usuario` | AGENTS.md ("Tablas núcleo sin DDL en repo") |
+| Composición de jerarquía (profundidad, ciclos, varias filas por empleado) y cuentas múltiples por empleado | Define "Equipo" y la no-compartición entre cuentas | — |
+
+**Entregable**: `CjERP.Backend/Database/IaChat/Metadata_Alcance_SoloLectura.sql` — un único script de solo lectura (definición, parámetros, dependencias, columnas, índices, FK, conteos agregados sin datos personales, distribución perfil/rol). Pendiente: que se ejecute y se devuelvan los result sets.
+
+### Dependencias y orden una vez llegue la metadata
+1. Contrato `IIaAuthorizationService` + `IaResolvedScope` (Application) — resolución por cuenta (`IdUsuario`), deniega ante identidad ausente/permiso ausente/fallo.
+2. Fuente de permisos (tabla de permiso por herramienta/alcance, fail-closed, D-2) y permiso independiente de totales globales OC/site.
+3. SP: parámetros de identificadores aplicados antes del conteo y la paginación (script nuevo versionado, **sin ejecutar ALTER** desde esta sesión).
+4. Ejecutor: alcance obligatorio (sin alcance → no ejecuta); filtros del usuario solo intersectan.
+5. Orquestador: revalidar permiso y composición completa (`MatchesAuthorizedScope`) antes de reutilizar memoria o exportar; datos globales no permitidos → "no disponible", nunca 0.
+6. Pruebas sintéticas (reglas de intersección, deny-by-default, cuentas distintas del mismo empleado) separadas de pruebas de integración contra el SP real.
+
+### Decisiones de negocio aún NO confirmadas (no aprobadas)
+a) **Propio**: responsable, solicitante o cualquiera de los dos. b) **Equipo**: titular + subordinados directos o toda la jerarquía. c) **Perfiles con alcance Total** y quién recibe el permiso de totales globales.
+
+---
+
+## Anexo — Resultados de metadata ronda 1 contrastados con el código (2026-10-03)
+
+**Recibido**: resultados de las secciones [1]–[8] de `Metadata_Alcance_SoloLectura.sql` (BD `JC_Db`, SP modificado por última vez 2026-06-23). Los chequeos [8a] y [9] no corrieron porque `Usuario.IdEmpleadoCj` y `SegUsuarioPerfilRol.IdPerfil/IdRol` no existen (las cuentas se enlazan por otro camino, ver abajo). Las decisiones de negocio (Propio/Equipo/Total/totales globales) **siguen sin respuesta**.
+
+### Hechos verificados contra la definición real del SP
+1. **Identificadores de filtrado**: `Planilla.IdResponsable` apunta a `dbo.Empleado.IdEmpleado` (legacy). `Planilla.IdSolicitante` apunta a `Empleado.IdEmpleado` **o** a `EmpleadoCj.IdEmpleado` según `Planilla.IdWeb` (1 = EmpleadoCj). El vínculo al identificador corporativo es `Empleado.IdEmpleadoCj` (nullable, índice no único `IX_Empleado_IdEmpleadoCj`).
+2. **Identidad de la cuenta**: `sp_ValidarUsuario` (versionado en `Database/Mobile/13_Perfil_Cargo_Login.sql`, PV si es el vigente en BD) deriva `Usuario.IdEmpleado → Empleado.IdEmpleadoCj → EmpleadoCj.IdEmpleado`; `AuthService` copia `CodEmp` a `IdEmpleadoCj`. El claim `IdEmpleadoCj` del JWT es la clave corporativa, calculada en servidor. Dos cuentas del mismo empleado comparten esa clave, por lo que permisos y conversaciones deben seguir keyed por `IdUsuario`.
+3. **Perfil/rol**: `SegUsuarioPerfilRol(IdUsuario, IdPerfilRol, EsActivo)` → `SegPerfilRol`. El login hace `LEFT JOIN` sin filtrar `EsActivo` y devuelve una fila por perfil-rol; el JWT lleva un solo par IdPerfil/IdRol aunque la cuenta tenga varios → la autorización debe consultar por `IdUsuario`, no confiar en esos dos claims.
+4. **Conteo y paginación** salen de `#Candidatos` (WHERE) → `COUNT(*) OVER()` en `#Pagina`. Aplicar el alcance en el WHERE de `#Candidatos` cumple "antes del conteo y la paginación". Los joins a `emp`, `m_emp`, `m_cj` ya existen en esa consulta.
+5. **Fuga que el filtro por filas NO cierra**: los `OUTER APPLY` calculan, por cada fila visible, agregados **globales** del site/OC sobre toda `Planilla`/`Importar`/`detOrdenCompra`, sin restricción de alcance: `Ventas`, `TotalPagadoHistoricoSoles`, `ConPagadoSoles`, `ConPagadoMonedaRegistro`, `ConPagado`, `SaldoOcSitio`, `SubOc`, `SubPlanilla`, `SubPlanillaConRegistroActual`, `PorcentajeSubPlanilla`, `AdelaFic`, `DiferenciaFic`, `CodigoValidacionFic`, `ResultadoValidacionFic`, `PorcentajeFic`. Con Propio/Equipo revelarían montos de gastos ajenos → deben devolverse **NULL** (no 0; hoy el SP usa `COALESCE(...,0)`) salvo permiso de totales globales. Confirma que el permiso de totales debe ser independiente del alcance de filas.
+6. **Filtros de usuario** `@Responsable`/`@Solicitante` son `LIKE` sobre nombres: pueden quedar como filtros de reducción, nunca como mecanismo de seguridad.
+7. **Índices**: existe `IX_Planilla_IdSolicitante_IdWeb`; no hay índice con `IdResponsable` como clave (solo INCLUDE). Un alcance por responsable puede requerir un `CREATE INDEX` (propuesta, no ejecutada).
+8. **Jerarquía** (`EmpleadoCjDetalle`: 373 filas, 1 por empleado, `IdResponsableCj` nunca nulo): hay **1 registro autorreferenciado** y la cadena alcanzó el tope de 20 niveles → hay al menos un ciclo o una cadena anómala. Cualquier "toda la jerarquía" debe ser anti-ciclo y con tope.
+
+### Aún falta (ronda 2)
+`Metadata_Alcance_Ronda2_SoloLectura.sql`: `SegPerfilRol` y su distribución, ciclos (solo ids), huérfanos de `IdResponsableCj`, cobertura de `Empleado.IdEmpleadoCj` en Planilla y cuentas, múltiples cuentas por empleado y definición vigente de `sp_ValidarUsuario`.
+
+### Diseño del SP preparado (sin ejecutar), independiente de las decisiones a/b/c
+Parámetros nuevos: `@AlcanceNivel` (`TOTAL`/`RESTRINGIDO`), `@AlcanceCampos` (`R`, `S`, `RS`), `@AlcanceEmpleados` (lista de `EmpleadoCj.IdEmpleado`), `@VerTotalesGlobales` (BIT). Sin `@AlcanceNivel` el SP debe **fallar** (no asumir TOTAL). Las decisiones solo configuran el resolutor del backend; no cambian el SP. El script y el código no se escriben hasta tener las decisiones y la ronda 2.
+
+---
+
+## Anexo — Fase 2: autorización y alcance preparados, sin conectar (2026-10-03)
+
+**Decisiones confirmadas**: Propio = responsable **o** solicitante. Equipo = titular + subordinados directos (un solo nivel; los ciclos de la jerarquía no afectan esta regla). Acceso Total y totales globales = permisos **independientes**; los IdPerfil/IdRol concretos quedan **pendientes** de elegir con los resultados de la ronda 2. **No se concedió ningún permiso por defecto ni se creó ningún seed.**
+Supuesto a confirmar: Equipo se evalúa con la misma regla "responsable o solicitante" aplicada al conjunto del equipo. PV: que `EmpleadoCjDetalle.IdResponsableCj` sea el jefe de `IdEmpleadoCj` (dirección de la relación) y que apunte a `EmpleadoCj.IdEmpleado` (la ronda 2, R6, lo verifica).
+
+### Preparado (código y scripts; nada ejecutado contra BD)
+| Pieza | Archivo | Estado |
+|---|---|---|
+| Script del SP con alcance | `Database/IaChat/02_sp_IA_Planilla_Buscar_Alcance.sql` | Escrito, **no ejecutado**. `CREATE OR ALTER` de la definición vigente + 4 parámetros; alcance ausente/ inválido → errores 50010–50018; lista de identificadores validada (solo dígitos y comas, sin vacíos, positivos, ≤ 500); alcance en el WHERE de `#Candidatos` (antes de `COUNT(*) OVER()` y `ROW_NUMBER()`); 15 columnas globales → NULL sin permiso (por `CASE` en el `SELECT` final); los 4 bloques `APPLY` globales llevan la condición `@VerTotalesGlobales = 1` con la **intención** de evitar su costo, pero que el motor no los ejecute está **sin verificar** (ver anexo de 2026-10-03, punto "Verificación pendiente"); cálculos intactos con permiso |
+| Contratos | `CjERP.Application/Interfaces/Services/AI/IIaAuthorizationService.cs`, `IaResolvedScope.cs` | `IIaAuthorizationService`, `IIaPermissionStore`, `IIaEmployeeDirectory`, `IaResolvedScope` (fábricas validadas, huella del alcance), `IaAuthorizationResult` (Allow solo con alcance) |
+| Servicio de autorización | `CjERP.Infrastructure/Services/AI/Security/IaAuthorizationService.cs` | Deniega ante identidad ausente, herramienta ausente, sin nivel de alcance (aunque tenga totales globales), empleado no resuelto (Propio/Equipo) y cualquier excepción; la cancelación se propaga. **No registrado en DI**: sus dependencias no tienen implementación |
+| Ejecutor con alcance obligatorio | `GastosQueryExecutor.EjecutarBuscarPlanillaConAlcanceAsync` | Falla antes de abrir conexión si falta alcance/argumentos; envía los 4 parámetros; la paginación `fetchAllPages` conserva el alcance. La ruta anterior queda como envoltorio sin parámetros de alcance (**sigue siendo la única usada por `IaOrchestrator`**) |
+| Memoria | `IaResolvedScopeExtensions.ToAuthorizedScope` | Codifica nivel, campos y permiso de totales + conjunto completo → `MatchesAuthorizedScope` invalida si cambia cualquiera |
+
+### Combinación de varios perfiles/roles activos (definida, sin elegir una fila arbitraria)
+El almacén de permisos debe devolver **todas** las concesiones activas de la cuenta (por `IdUsuario`, nunca por empleado). Se combinan por **unión determinista**: el nivel efectivo es el más amplio concedido (Total > Equipo > Propio); los totales globales se otorgan si **cualquiera** los concede; ambos se combinan por separado. Sin nivel concedido → denegado, aunque exista permiso de totales. El resultado no depende del orden (probado con todas las permutaciones). Motivo: el login actual (`sp_ValidarUsuario`) devuelve una fila por perfil-rol sin filtrar `EsActivo`, y el JWT guarda solo un par IdPerfil/IdRol; esos dos claims **no** deben usarse para autorizar.
+
+### Pruebas (ejecutadas en esta sesión)
+`dotnet test` → **196/196** (antes 131; +65). `dotnet build CjERP.Api.csproj` → 0 errores.
+- **Sintéticas** (memoria, sin SQL): `IaResolvedScopeTests`, `IaAuthorizationServiceTests` (almacén y directorio falsos: denegación, independencia de totales, unión de concesiones, cuentas distintas del mismo empleado, fallos, invalidación de memoria), `GastosQueryExecutorScopeTests` (parámetros y guardas previas a SQL).
+- **Estáticas** (texto del script): `IaScopedSpScriptContractTests` — verifican estructura (validaciones, orden, 15 columnas, ausencia de DDL de tablas). **No ejecutan T-SQL.**
+- **Integración real: NINGUNA ejecutada.** `ISqlCommandFactory` devuelve `SqlConnection` concreto, por lo que no se puede simular el SP sin una BD.
+
+### Sigue bloqueado — requiere integración real antes de conectar al flujo
+1. **Metadata de ronda 2** (no recibida): `SegPerfilRol`, asignaciones activas, cuentas múltiples por empleado, cobertura de `Empleado.IdEmpleadoCj` (si es NULL el registro/ cuenta nunca coincide), clasificación de la jerarquía (raíz autorreferenciada / ciclos / cadenas sin salida) y definición vigente de `sp_ValidarUsuario`.
+2. **IdPerfil/IdRol concretos** de Total y de totales globales, y la **fuente de permisos** (tabla o configuración) → implementar `IIaPermissionStore`.
+3. **Implementar `IIaEmployeeDirectory`** (consultas a `Usuario → Empleado → EmpleadoCj` y `EmpleadoCjDetalle`) y registrar el servicio en `Program.cs`.
+4. **Despliegue SQL compatible**: el script cambia la firma y falla cerrado; un backend anterior recibirá 50010. Orden: probar el script en un entorno de pruebas con datos reales → desplegar SQL y backend **juntos** → recién entonces cambiar `IaOrchestrator` a `EjecutarBuscarPlanillaConAlcanceAsync` con `AuthorizeAsync` y revalidar `MatchesAuthorizedScope` antes de reutilizar memoria o exportar.
+5. **Frontend/análisis con "no disponible"**: `GastosAnalysisService`, `IaExecutiveReportBuilder` y `iachat.tsx` hoy tratan `SubOc/Ventas/...` como números; con NULL deben mostrarse como **no disponibles** y no como 0. Pendiente de implementar al conectar.
+6. Pruebas de integración contra el SP real (ver caso por caso: alcance ausente, lista inválida, Propio/Equipo con identificadores reales, totales NULL, paridad de columnas y cálculos con permiso).
+
+### Observaciones fuera de alcance (no corregidas)
+- `GastosQueryExecutor.FetchAsync` (paginación completa) no copia `Site` al armar `nextArgs`: las páginas ≥ 2 pierden ese filtro (preexistente).
+- El índice `IX_Planilla_*` no tiene `IdResponsable` como clave: puede requerir un índice para filtrar por responsable (propuesta, no incluida).
+- `EmpleadoCjDetalle` tiene 1 registro autorreferenciado y una cadena que alcanza el tope de 20 niveles (ronda 1); la ronda 2 la clasifica.
+
+---
+
+## Anexo — Datos "no disponibles", paginación con alcance y conexión preparada del orquestador (2026-10-03)
+
+### Estado: la Fase 2 NO está cerrada y la ruta antigua SIGUE ACTIVA
+`IaOrchestrator` se registra en `Program.cs` sin `IIaAuthorizationService` ni `IaScopeEnforcementOptions`, por lo que `_enforceScope = false`: el IA Chat sigue ejecutando `sp_IA_Planilla_Buscar` **sin alcance**, igual que antes. La conexión de este anexo está **preparada y desactivada**. Nada de lo siguiente cambia el comportamiento en producción hasta activarla.
+
+**Condición de cierre (no negociable)**: al completar la integración debe existir **una única ruta de ejecución con alcance obligatorio y ningún fallback sin restricción**. El interruptor `IaScopeEnforcementOptions` y la rama heredada son transitorios y se **eliminan** al activar (checklist abajo).
+
+### Implementado en esta sesión (sin ejecutar nada en BD)
+1. **Columnas globales como "no disponibles"** (`Shared/IaGlobalColumns.cs`, única fuente de las 15). El ejecutor con alcance, si `CanViewGlobalTotals == false`, **retira** esas columnas de las filas (no las deja en NULL ni las convierte a 0) y devuelve `PlanillaBuscarExecutionResult.UnavailableColumns`. Cero real = columna presente con valor 0; dato no permitido = columna ausente + listada.
+2. **Análisis y respuesta**: `BuildOpenAiAnalysisPayload` acepta `unavailableFields`, agrega `unavailableFields` y su regla al payload, y no activa la comparación ventas-vs-gastos; el prompt de `ResponseGenerator` prohíbe estimar, sustituir o calcular saldos/porcentajes/semáforos con esos campos. Si la pregunta depende de ventas/saldos/valor de OC (heurística estrecha `QuestionNeedsGlobalMetric`), el orquestador responde "no disponible" **sin analizar ni mostrar filas**.
+3. **Respuesta/DTO**: `IaChatResponseDto.UnavailableFields` y `unavailableFields` en el tipo TS.
+4. **Informe ejecutivo**: `IaExecutiveReportBuilder.Build(..., unavailableFields)`. Con métrica ventas no disponible devuelve `MetricUnavailable = true` sin totales, porcentajes, KPIs, semáforo ni lecturas derivadas.
+5. **Frontend** (`iachat.tsx`): `resolveUnavailable`; las tarjetas por site usan `number | null` (monto de ventas, total acumulado, saldo y % de uso muestran "No disponible", sin barra de progreso ni badge "Agotado"); la columna Ventas del detalle y las filas ejecutivas muestran "No disponible"; el informe semanal con métrica ventas no disponible no publica montos ni semáforos. `npx tsc -b --force` → 0 errores. **No hay framework de pruebas de frontend en el proyecto: estos cambios no tienen pruebas automatizadas ni se probaron manualmente en navegador.**
+6. **Paginación**: verificado por lectura que el bucle de `fetchAllPages` armaba la copia manual de criterios **sin `Site`** (páginas ≥ 2 perdían ese filtro). Corregido con `BuscarPlanillaArgs.WithPage` (copia de todas las propiedades, cubre campos futuros) y el bucle se extrajo a `GastosQueryExecutor.FetchPagesAsync` con la obtención de página inyectada. Prueba de regresión añadida; **no se ejecutó contra el código anterior para demostrar que fallaba** (solo se verificó que pasa con el corregido).
+7. **Orquestador preparado y desactivado** (`IaOrchestrator`): un único punto `ExecuteSearchAsync`; con la aplicación activa, autoriza por cuenta antes de usar memoria, descarta **toda** la memoria (turnos y filas) si cambió el alcance (`InvalidateMemory`), estampa el alcance del turno en cada resultado (`SetTurnScope`) y revalida el alcance completo antes de exportar. Sin servicio de autorización, con denegación o con excepción: no ejecuta nada y no llama al LLM.
+
+### Checklist de activación (todo pendiente — bloquea activar)
+1. Resultados de la ronda 2 y selección de IdPerfil/IdRol para Total y totales globales (sin seed por defecto).
+2. Implementar `IIaPermissionStore` e `IIaEmployeeDirectory` y registrar `IIaAuthorizationService` en DI.
+3. Probar `02_sp_IA_Planilla_Buscar_Alcance.sql` en un entorno de pruebas con datos reales, y desplegar SQL y backend **juntos** (el SP falla cerrado ante backends antiguos: error 50010).
+4. **Verificación pendiente de los bloques globales**: la condición `@VerTotalesGlobales = 1` dentro de los 4 `APPLY` globales es una *intención de optimización*. Los tests estáticos solo comprueban el texto. **No se afirma que el motor deje de ejecutarlos** hasta verificarlo con ejecución y plan de ejecución reales (lecturas lógicas, operadores del plan) con y sin permiso. La protección de datos no depende de esto: la dan los `CASE` del `SELECT` final.
+5. Evaluar con mediciones (no antes) un índice con `IdResponsable` como clave en `Planilla`. Propuesta, **no creado**.
+6. Pruebas de integración reales contra el SP (alcance ausente/inválido, Propio/Equipo con identificadores reales, NULL en las 15 columnas, paridad de cálculos con permiso, paginación con alcance).
+7. **Convertir a ruta única**: eliminar `IaScopeEnforcementOptions`, la rama `scope is null` de `ExecuteSearchAsync`, `IGastosQueryExecutor.EjecutarBuscarPlanillaAsync` (ruta sin alcance) y las pruebas de la ruta heredada; hacer `IIaAuthorizationService` dependencia obligatoria del constructor; registrar en `Program.cs`; añadir un test que falle si reaparece una llamada sin alcance.
+
+### Pruebas (ejecutadas)
+`dotnet test` → **228/228** (antes 196). Nuevas, **todas sintéticas**: `UnavailableFieldsTests` (columnas, análisis, informe, cero real vs no disponible), `GastosPaginationScopeTests` (filtros y alcance entre páginas, retirada de columnas), `IaScopeEnforcementOrchestratorTests` (ejecutor espía y autorización falsa: ruta heredada con la aplicación desactivada; denegación sin fallback; excepción = denegación; invalidación de memoria; exportación con alcance distinto). **Integración real contra SQL Server: ninguna.**
+
+### Limitaciones conocidas
+- `QuestionNeedsGlobalMetric` es una heurística de texto: puede dejar pasar formulaciones no previstas (el análisis recibe igualmente `unavailableFields` y las filas sin esas columnas) o bloquear una pregunta mixta (gasto + saldo).
+- Los atajos que reutilizan la última respuesta usan sus filas ya guardadas (sin esas columnas); solo se revalidan por `MatchesAuthorizedScope` al inicio de cada turno.
+- El informe HTML de Anthropic recibe el payload con `MetricUnavailable`; no se probó con el modelo real.
+
+---
+
+## Anexo — Incidente: script 02 ejecutado en `JC_Db` con el backend actual (2026-10-03)
+
+**Hecho (captura de SSMS del usuario)**: el script `02_sp_IA_Planilla_Buscar_Alcance.sql` se ejecutó en la base `JC_Db` (servidor `161.132.48.29,8966`, usuario `sa`) con "Los comandos se han completado correctamente", finalización 2026-10-03 07:14:00. Los campos del formulario del usuario (nombre del script, base, **entorno desarrollo/producción**) llegaron sin completar: **el entorno no está confirmado**. Evidencia indirecta, sin mostrar secretos: `appsettings.Development.json` apunta a esa misma base y servidor, y el plan (D-1) ya registra que ese archivo contiene credenciales reales; por prudencia se trata como **producción** hasta que se confirme lo contrario.
+
+**Compatibilidad con el backend actual: NO es compatible.** El único llamador es `GastosQueryExecutor` (la ruta antigua activa no envía `@AlcanceNivel`, `@AlcanceCampos`, `@AlcanceEmpleados` ni `@VerTotalesGlobales`). El script 02 hace `THROW 50010` cuando `@AlcanceNivel` es NULL, antes del bloque `TRY`. Consecuencia esperada: **cada consulta del IA Chat que llegue a SQL falla** (el usuario ve el mensaje amigable de error; en producción el detalle se oculta). No hay otros llamadores en el código; el script de verificación 04 revisa además dependencias dentro de la BD. Esto no está verificado contra la BD: lo confirma la sección [1]/[5] del script 04.
+
+**Combinación compatible recuperable**: la definición vigente anterior (modify_date 2026-06-23) se extrajo literalmente de los resultados de metadata (`Metadata_1d.sql`) a `03_rollback_sp_IA_Planilla_Buscar_vigente_2026-06-23.sql` (1002 líneas; solo cambia `CREATE`→`CREATE OR ALTER`, se omite el bloque de comentarios posterior al `END` y se recortan espacios finales). Se comparó contra el script 02: las diferencias son exactamente las previstas (4 parámetros, validación de alcance, filtro de alcance en `#Candidatos`, los 15 `CASE` del `SELECT` final y la condición en los 4 bloques `APPLY` globales). La recuperación **no fue ejecutada**.
+
+### Pasos de recuperación (no ejecutados; ejecutar solo con confirmación del usuario)
+1. **Verificar (solo lectura)**: ejecutar `04_verificar_estado_sp_IA_Planilla_Buscar.sql` en `JC_Db`. Debe indicar `VERSION CON ALCANCE` y 22 parámetros. La sección [5] muestra cuántas consultas del IA Chat fallaron desde las 07:00.
+2. **Confirmar el entorno** (¿es la base que usa el backend desplegado?). Si lo es, la recuperación es urgente.
+3. **Recuperar**: ejecutar `03_rollback_...sql` en la misma base. Es un `CREATE OR ALTER PROCEDURE` (restaura la definición; conserva permisos del objeto; no toca tablas ni datos).
+4. **Verificar de nuevo** con el script 04: debe indicar `VERSION ANTERIOR` y 18 parámetros; hacer una consulta de prueba en el IA Chat.
+5. Probar el script 02 **solo en una copia** de la base (restauración de respaldo en un servidor/BD de desarrollo) con una cadena de conexión propia por variable de entorno o secretos de usuario, sin editar archivos de configuración productiva.
+
+**Lección operativa**: los scripts de este plan no deben ejecutarse en la base compartida hasta que backend y SQL se desplieguen juntos; el script 02 está marcado "PROPUESTA — NO EJECUTADA" y falla cerrado a propósito.
+
+---
+
+## Anexo — Actualización del incidente del SP (2026-10-03, tras `Metadata4.txt`)
+
+**Corrección de un error mío**: en el resumen anterior afirmé que el SP con alcance "sigue desplegado" en `JC_Db`. Era una suposición sin verificar. Además, la versión 1 de `04_verificar_...sql` clasificaba por `LIKE '%@AlcanceNivel%'` sobre el texto crudo, lo que puede dar un falso positivo si esa palabra aparece en un comentario. Ambos puntos quedan corregidos abajo (el script 04 pasó a v2; ver "Diagnóstico").
+
+### Evidencia (hechos observados)
+| # | Hecho | Fuente |
+|---|---|---|
+| E1 | El script 02 se ejecutó en `JC_Db` (servidor `161.132.48.29,8966`) con "Los comandos se han completado correctamente", fin 2026-10-03 07:14:00 | captura de SSMS |
+| E2 | A las 07:29:42 el SP tiene **18 parámetros, exactamente los de la versión anterior**, y ninguno de los 4 de alcance (`@AlcanceNivel`, `@AlcanceCampos`, `@AlcanceEmpleados`, `@VerTotalesGlobales`) | `Metadata4.txt` [2] |
+| E3 | `modify_date` del SP = **2026-10-03 07:28:43.613**, es decir **posterior** a la ejecución del script 02 (07:14) | `Metadata4.txt` [1] |
+| E4 | La clasificación "VERSION CON ALCANCE" del script 04 v1 se basó en un `LIKE` sobre el texto crudo; no es evidencia estructural | código del script v1 |
+| E5 | `IaChatAuditoria` no tiene filas de `buscar_planilla` desde 07:00; `sys.dm_exec_procedure_stats` está vacío | `Metadata4.txt` [4][5] |
+| E6 | Ningún objeto de BD depende del SP (sección [3] vacía); en el código solo lo llama `GastosQueryExecutor` | `Metadata4.txt` [3]; búsqueda en el código |
+| E7 | En esta máquina **no hay ningún proceso de la API escuchando** en 5015/7130/5000/42129 (el único `dotnet` activo es el host de build de C# Dev Kit) | comprobación local |
+
+### Lo que NO se sabe (hipótesis, no hechos)
+- **H1 — qué produjo el cambio de las 07:28:43**: lo más coherente con E2/E3 es que alguien ejecutó una definición de 18 parámetros (p. ej. el script 03 de recuperación) a las 07:28:43. **No está probado**: no consta en ninguna evidencia quién lo hizo ni con qué script. El usuario escribió "no ejecutes nuevamente el rollback", lo que sugiere que se ejecutó, pero eso no es una verificación.
+- **H2 — por qué el verificador v1 dijo "con alcance"**: posible falso positivo si la definición almacenada conserva el comentario de cabecera (el script 03 menciona `@AlcanceNivel` en su cabecera). **Sin verificar**: depende de cómo SQL Server almacene comentarios anteriores a `CREATE`.
+- **H3 — que el cuerpo vigente sea idéntico a la versión anterior**: E2 solo prueba la firma. El cuerpo puede ser el anterior, el de alcance con la firma recortada, o una mezcla; **hasta leer la definición completa no se puede afirmar compatibilidad**.
+
+### Base de datos del backend probado (qué se puede y qué no confirmar)
+- Frontend en `npm run dev` (`import.meta.env.DEV`): usa **`http://127.0.0.1:5015/api`**. Un frontend compilado usa `VITE_API_BASE_URL`/`VITE_API_URL` o, por defecto, `https://cjerp-production.up.railway.app/api`. En `cjerp-frontend/.env` no hay variable de API.
+- Backend local (perfil `http`, puerto 5015, `ASPNETCORE_ENVIRONMENT=Development`): carga `appsettings.Development.json`, que **contiene** `JC_Db` y el servidor `161.132.48.29,8966` (comprobado por conteo de coincidencias, sin leer credenciales). Por configuración, la API local usaría `JC_Db`; **no se verificó en ejecución** (no hay API corriendo ahora).
+- Backend de Railway: su cadena de conexión viene de variables de entorno de Railway, **que no tengo**. No se puede afirmar qué base usa. Qué backend se está probando (local o Railway) lo debe confirmar el usuario.
+
+### Diagnóstico corregido y consulta de la definición (preparados, no ejecutados)
+- `04_verificar_estado_sp_IA_Planilla_Buscar.sql` **v2**: clasifica por (a) parámetros reales (`sys.parameters`) y (b) texto **ejecutable** (comentarios `--` y `/* */` retirados, respetando literales). Informa por separado `AlcanceMencionadoSoloEnComentarios`. Veredictos: CON ALCANCE (4 parámetros + `THROW 50010` ejecutable), SIN ALCANCE (0 parámetros, sin referencias ejecutables) o INCONSISTENTE.
+- `05_definicion_vigente_y_llamada_legada_sp_IA_Planilla_Buscar.sql`: (1) devuelve la definición completa línea a línea con marca en líneas que mencionan `AlcanceNivel`/`50010`; (2) ejecuta una llamada con **los mismos parámetros que envía el backend actual** (una página de 1 fila; es una lectura) y devuelve `OK` o el número y mensaje exacto del error. Con eso se contrasta localmente la definición contra 03 (anterior) y 02 (alcance).
+
+### Consulta de lectura desde el IA Chat (no realizada)
+No pude ejecutar una consulta desde el IA Chat: requiere iniciar sesión con credenciales de un usuario y una API en ejecución, y no tengo ni una cosa ni la otra (ni debo usar las credenciales de la base que figuran en la configuración para conectarme por mi cuenta). Queda como paso del usuario: hacer una pregunta simple de gastos y registrar el mensaje exacto; después ejecutar la sección [5] del script 04 para ver el registro de auditoría.
+
+### Estado
+Compatibilidad SQL↔backend: **probable pero NO confirmada** (E2 la sugiere; H3 la deja abierta). No se continúa con la metadata de ronda 2 ni con los permisos hasta confirmarla. No se ejecutó nada contra la BD en esta actualización.
+
+---
+
+## Anexo — Resultado del script 04 v2 (`Metadata_v4.txt`, 2026-10-03 07:39)
+
+**Evidencia nueva** (BD `JC_Db`, `modify_date` 07:28:43.613, sin cambios desde la lectura anterior):
+- 18 parámetros, **0** de alcance; `THROW 50010` en código ejecutable = 0; referencia a `@AlcanceNivel` en código ejecutable = 0; clasificación: **SIN ALCANCE (versión anterior)**.
+- `AlcanceMencionadoSoloEnComentarios = 1`: la definición almacenada **sí contiene** `@AlcanceNivel`, pero únicamente en comentarios. Esto **confirma H2** (el verificador v1 dio un falso positivo por un comentario) y muestra que SQL Server **conserva** en la definición el comentario que precede a `CREATE`.
+- Longitud de la definición almacenada: **35 995** caracteres. Comparación orientativa con los archivos del repo (texto con saltos CRLF): el script 03 completo (cabecera + cuerpo, sin `GO`) mide 36 000; desde `CREATE` sin cabecera, 35 101; el script 02 completo, 45 344. La definición almacenada es compatible en tamaño con el **script 03 completo** y claramente **no** con el 02. La diferencia de 5 caracteres no está explicada: **no se afirma igualdad**.
+
+**Qué queda probado y qué no**
+- Probado: la estructura ejecutable vigente **no** contiene el alcance (sin parámetros, sin `THROW 50010`).
+- Sugerido, no probado: que el cuerpo sea el del script 03 (la anterior). Falta la comparación línea a línea (script 05, sección [2]).
+- Sin cambio: **H1** (qué acción produjo el cambio de las 07:28:43) sigue sin evidencia directa; el tamaño es coherente con que se ejecutó el script 03, pero no identifica a quien lo hizo.
+- Pendiente: la llamada con los parámetros del backend actual (script 05, sección [3]) y la consulta real desde el IA Chat.
+
+---
+
+## Anexo — Cierre del incidente del SP: SQL compatible con el backend actual (2026-10-03, tras `Metadata_v5.txt`, 07:41)
+
+**Verificado con evidencia** (comparación local de la definición completa devuelta por el script 05):
+1. La definición almacenada (1013 líneas) coincide con el script `03_rollback_...` **y** con la definición original vigente al 2026-06-23 (`Metadata_1d.sql`), comparando con comentarios retirados y espacios colapsados; **no** coincide con el script 02 (18 127 caracteres normalizados frente a 21 216). No hay `THROW 50010` ejecutable.
+2. La definición almacenada contiene la cabecera de comentarios que solo existe en el script 03 (texto "RECUPERACION (ROLLBACK)"). Es evidencia directa de que **el script 03 se ejecutó**, lo que explica `modify_date` 07:28:43. **Quién lo ejecutó no consta** (la evidencia solo identifica el script, no a la persona).
+3. SQL Server **conserva** los comentarios que preceden a `CREATE` en la definición y reescribe `CREATE OR ALTER` como `CREATE` con espacios. Eso explicó el falso positivo del verificador v1 y la diferencia de 5 caracteres de longitud.
+4. La llamada con los parámetros de la ruta antigua (los del backend actual) devolvió `OK` con una fila completa: el SP vigente acepta el contrato del backend actual.
+5. No hay filas de `buscar_planilla` en `IaChatAuditoria` desde las 07:00 (y los fallos también se auditan): **no hay evidencia de uso del IA Chat** durante la ventana en que estuvo desplegado el script 02 (07:14–07:28), por tanto tampoco de consultas fallidas.
+
+**Conclusión**: SQL (`JC_Db`) y backend actual son **compatibles** a nivel de contrato del procedimiento. El estado de la BD es el de antes del incidente.
+
+**Sigue sin verificar**
+- Qué backend se está probando (local `127.0.0.1:5015`, que por configuración usaría `JC_Db`, o Railway, cuya base viene de variables de entorno no visibles). Si el backend de Railway usa **otra** base, esa base no se ha comprobado.
+- Una consulta real desde el IA Chat (no realizada por falta de sesión autenticada).
+- Si alguien más ejecutó otros scripts en `JC_Db` (no consta).
+
+**Medidas**: el encabezado de `02_sp_IA_Planilla_Buscar_Alcance.sql` ahora indica que **no debe ejecutarse en `JC_Db`** y que solo se prueba en una copia con backend y SQL desplegados juntos. Los scripts SQL propuestos de este plan no deben ejecutarse en la base compartida; los de solo lectura (`Metadata_*`, `04`, `05`) sí.
+
+---
+
+## Anexo — Resultados de la ronda 2 y sus consecuencias para alcance y permisos (2026-10-03, `ronda2.txt`, 07:46)
+
+**Evidencia (BD `JC_Db`)**
+| Tema | Resultado | Consecuencia |
+|---|---|---|
+| Perfil-rol activos | Solo **21 cuentas** tienen un perfil-rol activo (de 316 cuentas). Por perfil/rol: FINANZAS/ADMIN 1, /ESTANDAR 2, /ESPE_FIN 1; LOGISTICA/ADMIN 1; ADMINISTRACION/ESTANDAR 1; ADMIN(8)/ADMIN 1, /SISTEMAS 1; OPERACIONES(9)/ADMIN 2, /ESTANDAR 4; ESTANDAR(14)/ESTANDAR 5; GERENCIA(15)/ADMIN 2 | Con "sin fila = denegado" (D-2), **~295 cuentas** quedarían sin acceso al IA Chat salvo que se defina un permiso base. Decisión de negocio pendiente |
+| Varios perfil-rol activos por cuenta | **0** cuentas | La regla de unión definida no tiene casos hoy; se mantiene por robustez |
+| Cuenta → empleado corporativo | De 316 cuentas: 0 sin `IdEmpleado`; 2 sin fila en `Empleado`; **27** con `Empleado.IdEmpleadoCj` NULL; 6 con `IdEmpleadoCj` sin fila en `EmpleadoCj` → **35 cuentas (11 %) no resuelven empleado** | Propio/Equipo las **deniegan** (`empleado_no_resuelto`); Total no depende del empleado |
+| Cuentas por empleado | 5 empleados corporativos con >1 cuenta; 164 con >1 fila en `Empleado` legacy | Confirma que permisos y conversaciones van por `IdUsuario`; el SP ya compara por `Empleado.IdEmpleadoCj` (cubre todas las filas legacy de un mismo empleado) |
+| Jerarquía (`EmpleadoCjDetalle`, 373 filas) | 1 raíz autorreferenciada; **346** llegan a la raíz (profundidad máx. **5**); **26** con `IdResponsableCj = 0` (sin responsable, no ciclo); **0 ciclos**; 3 `IdEmpleadoCj` huérfanos; 26 `IdResponsableCj` huérfanos (los mismos 0) | La alerta de ronda 1 (cadena de 20 niveles / 1 ciclo) se debió a la raíz autorreferenciada, no a un ciclo real. Equipo = subordinados **directos** (`IdResponsableCj = titular`, titular > 0), sin necesidad de recorrer la jerarquía; `0` es "sin jefe" y no debe tratarse como empleado |
+| Cobertura de identificadores en `Planilla` (112 483 filas) | `IdResponsable` sin fila en `Empleado`: **11 110** (9,9 %); responsable con `Empleado.IdEmpleadoCj` NULL: **76 194** (67,7 %) → solo **~22 %** de las filas tienen responsable corporativo. Solicitante: 30 filas `IdWeb=1` (5 sin `EmpleadoCj`); filas legacy sin `Empleado` 3 012 y sin `IdEmpleadoCj` 5 131 → **~93 %** de las filas legacy tienen solicitante corporativo | La regla Propio = responsable **o** solicitante es viable por el lado del **solicitante**; por el lado del responsable la cobertura histórica es baja. **Falla cerrada (sub-inclusión, no fuga)**: un empleado puede no ver gastos propios antiguos cuyo responsable no está mapeado a `IdEmpleadoCj`, hasta completar ese dato en origen |
+| `sp_ValidarUsuario` vigente | `modify_date` 2026-04-24; la definición **difiere** de la versión del repo (`Database/Mobile/13_Perfil_Cargo_Login.sql`): distinto texto y comentarios. La salida se truncó por ancho de columna | El supuesto de cómo se derivan `CodEmp`/`IdEmpleadoCj`/`IdPerfil` queda **sin verificar**; el servicio de directorio planificado no depende de ello (resuelve por `IdUsuario` en BD). Falta la definición completa (script 06 [S1]) |
+
+**Qué NO está decidido (no se asume)**: los IdPerfil/IdRol de Total y de totales globales; si las cuentas sin perfil-rol activo tendrán un permiso base (p. ej. Propio) o quedarán denegadas; el tratamiento de cuentas sin empleado resoluble.
+
+**Pendiente para decidir con datos**: `06_ronda3_login_y_uso_iachat_SoloLectura.sql` ([S2] qué perfil/rol usan hoy el IA Chat en los últimos 90 días; [S3] cuántas de esas cuentas no resuelven empleado; [S4] cuentas con empleado resoluble por perfil/rol; [S1] definición completa del login).
+
+**Diseño de permisos propuesto (sin crear tablas ni seed)**: una tabla de permisos por herramienta con clave `IdPerfilRol` (ya existe y es único por par perfil-rol), con `ScopeLevel` y `PermiteTotalesGlobales` como columnas **independientes** y `EsActivo`; sin fila = denegado. `IIaPermissionStore` leería las asignaciones activas de `SegUsuarioPerfilRol` por `IdUsuario` y las uniría a esa tabla; `IIaEmployeeDirectory` resolvería `Usuario.IdEmpleado → Empleado.IdEmpleadoCj → EmpleadoCj` (exigiendo fila en `EmpleadoCj`) y los subordinados directos con `IdResponsableCj = titular` ignorando `0`, el propio titular y ids sin fila en `EmpleadoCj`. Ninguna de estas piezas está implementada ni registrada.
+
+---
+
+## Anexo — Resultados de la ronda 3 (`ronda3.txt`, 2026-10-03 07:49)
+
+**Evidencia**
+- `sp_ValidarUsuario` desplegado (modify 2026-04-24): deriva `CodEmp = EmpleadoCj.IdEmpleado` vía `Usuario.IdEmpleado → Empleado.IdEmpleadoCj → EmpleadoCj`, tal como asume `AuthService`; la lógica es **equivalente** a la del repo (difieren solo comentarios/formato). Une `SegUsuarioPerfilRol` y `SegPerfilRol` **sin filtrar `EsActivo`** y, por el `LEFT JOIN` a `Empleado d (IdCargo = 13)`, puede devolver más de una fila. Queda **verificado** el supuesto de identidad; queda **confirmado** que los claims `IdPerfil`/`IdRol` del JWT no son confiables para autorizar.
+- Las **21** cuentas con perfil-rol activo resuelven empleado corporativo (21/21).
+- **No hay consultas de `buscar_planilla` en `IaChatAuditoria` en los últimos 90 días** ([S2] vacío; [S3] = 0 trivialmente). Hipótesis, sin verificar: el IA Chat no se usa, o la auditoría no está registrando. Se comprueba con `SELECT COUNT(*), MIN(FechaCreacion), MAX(FechaCreacion) FROM dbo.IaChatAuditoria;` (solo lectura).
+
+**Cierre de dudas anteriores**: la discrepancia "versión del repo ≠ desplegada" de `sp_ValidarUsuario` era formal, no funcional.
+
+**Pendiente (decisión de negocio)**: completar `docs/AI_COPILOT_FASE2_MATRIZ_PERMISOS.md` (alcance de filas y totales globales por perfil-rol, y las 3 preguntas asociadas). No se implementa el almacén de permisos ni se crea tabla/seed hasta tenerla.
+
+---
+
+## Anexo — Autorización real del backend y diseño del mantenimiento de permisos IA (2026-10-03)
+
+**Principio**: la matriz de permisos es **configuración inicial editable**, no valores en código. El código solo lee la tabla; los valores los define el negocio y se cambian sin redesplegar. La matriz **sigue sin aprobarse**; no hay seed.
+
+### 1. Autorización real del backend (completada primero; sin activar, sin probar contra BD)
+| Pieza | Archivo | Estado |
+|---|---|---|
+| Tabla de permisos (propuesta) | `Database/IaChat/08_IaToolPermiso_Base.sql` | **No ejecutada.** Crea `dbo.IaToolPermiso` (herramienta + `IdPerfilRol` único; `ScopeLevel` PROPIO/EQUIPO/TOTAL; `PermiteTotalesGlobales` independiente; `EsActivo`; usuario y fecha de creación/modificación), FK a `SegPerfilRol`, y un trigger `INSTEAD OF DELETE` que impide el borrado físico (error 50030). **Sin filas iniciales** |
+| `IIaPermissionStore` | `Services/AI/Security/IaPermissionStore.cs` | Lee las concesiones activas por `IdUsuario` (asignación, perfil-rol, perfil y rol activos + fila activa de `IaToolPermiso`). **Sin cache**: se consulta en cada llamada |
+| `IIaEmployeeDirectory` | `Services/AI/Security/IaEmployeeDirectory.cs` | Empleado por `IdUsuario` (exige fila en `EmpleadoCj`; ambiguo = no resuelto) y subordinados directos (ignora `0`, el propio titular y huérfanos) |
+| Registro en DI | `Program.cs` | Registrados `IaPermissionStore`, `IaEmployeeDirectory` e `IaAuthorizationService`. **Inactivos**: el orquestador solo los usa con `IaScopeEnforcementOptions.Enabled = true`, opción que no está registrada ni enlazada. La ruta antigua sigue activa |
+
+Verificado: compilación sin errores; 233/233 pruebas existentes (no se añadieron pruebas). **No verificado**: las consultas Dapper contra SQL Server (incluida la lectura de tuplas) y el arranque real de DI; quedan para el entorno de integración. Si `IaToolPermiso` no existe o la consulta falla, la autorización **deniega** (fail-closed).
+
+**Reevaluación en cada consulta y exportación** (ya implementada en el orquestador, activa solo con la aplicación del alcance habilitada): el permiso se pide al almacén en cada `ConsultarAsync` y en cada exportación; si el alcance vigente (nivel, campos, miembros del equipo o permiso de totales) difiere del que autorizó la memoria, se **descarta toda la memoria**, sin cerrar sesión ni redesplegar (los permisos no viajan en el JWT). Límite: una consulta ya en curso termina con el permiso con que empezó. **No añadir cache al almacén** sin TTL de segundos y sin invalidación explícita.
+
+### 2. Tarea del plan — Pantalla de mantenimiento de permisos IA (NO implementada)
+**Objetivo**: crear configuración, editar alcance y permiso de totales globales, y desactivar acceso, por `IdPerfilRol`.
+
+**Reglas**
+- **Los perfil-rol nuevos no reciben acceso IA automáticamente**: no hay valores por defecto ni triggers que inserten filas; sin fila, o con `EsActivo = 0`, el acceso es denegado. La pantalla lista los perfil-rol sin configurar como "Sin acceso (no configurado)".
+- **Sin borrado físico**: no existe verbo `DELETE` en la API y el trigger lo impide en BD; "desactivar" es `EsActivo = 0` y se puede reactivar.
+- **Herramientas permitidas**: solo las registradas en la lista blanca de herramientas del IA Chat (hoy `buscar_planilla`).
+
+**Seguridad (reutiliza la existente)**
+- Quién puede administrar se controla con la **autorización por ruta de menú** que ya usa el ERP (`ISegMenuService.ListarPorUsuarioAsync`, mismo patrón que `PagoTesoreriaController`): se crea un ítem en `SegMenu` con la **misma ruta** que la página (propuesta `/seguridad/ia-permisos`) y se asigna con `SegPerfilRolMenu` solo a los perfil-rol que decida el negocio. El backend valida la ruta en **cada** llamada de la API; no solo el frontend.
+- Identidad del actor: solo el claim `IdUsuario` del JWT (nunca el cuerpo de la petición).
+- **Propuesta a decidir** (anti-escalada): rechazar cambios que afecten a un perfil-rol al que pertenece el propio administrador.
+
+**API (propuesta)**: `GET /api/seguridad/ia-permisos` (todos los perfil-rol activos, con su configuración o "no configurado" y cuentas activas) y `PUT /api/seguridad/ia-permisos/{idPerfilRol}` con `{ toolName, scopeLevel, permiteTotalesGlobales, esActivo, observacion, fechaModificacionLeida }` (409 si la fila cambió desde la lectura). Convención del proyecto: la escritura en un SP `dbo.sp_IaToolPermiso_Guardar`, versionado en `Database/IaChat/`.
+
+**Auditoría (reutiliza `AuditoriaCambios`)**: una fila por campo cambiado con `Modulo = SEGURIDAD`, `Entidad = IaToolPermiso`, `IdRegistro = {toolName}:{idPerfilRol}`, `Accion` (CREAR/EDITAR/DESACTIVAR/REACTIVAR), `Campo` (`ScopeLevel`/`PermiteTotalesGlobales`/`EsActivo`), `ValorAnterior`, `ValorNuevo`, `UsuarioAccion` (del JWT) y `Observacion` (obligatoria al conceder TOTAL o totales globales); la fecha la pone la BD. Para que cambio y auditoría sean **atómicos**, el SP de guardado debe llamar a `sp_AuditoriaCambios_Registrar` dentro de la misma transacción (**PV**: firma real del SP, no verificada) en lugar de registrar en dos pasos desde C#. La pantalla muestra el historial leyendo `AuditoriaCambios` filtrado por `Entidad = IaToolPermiso`.
+
+**Frontend (propuesta, sin DevExtreme)**: `features/seguridad/pages/iapermisos.tsx` + servicio `features/seguridad/services/iaPermisosService.ts` con `httpClient`; ruta lazy en `AppRouter.tsx` e ítem de `SegMenu` con la misma ruta; reutilizar `AppPage`, `DataGridBase`, `SidePanelForm`, `SelectBase`, `ConfirmDialog` y `AppStatusMessage`. Muestra la matriz editable (alcance, totales globales, estado, última modificación), advertencia y observación obligatoria al conceder TOTAL o totales globales, y el historial por fila.
+
+**Orden y dependencias**: (1) autorización real del backend — hecho, sin activar; (2) aprobación de la matriz por el negocio; (3) probar `08_…sql` en una **copia** de la BD; (4) SP de guardado + API de administración con auditoría atómica; (5) pantalla; (6) carga inicial desde la matriz aprobada mediante un script de datos aparte (editable luego desde la pantalla); (7) pruebas de integración y checklist de activación (anexo anterior).
+
+**Casos de aceptación adicionales del mantenimiento** (para ejecutar en desarrollo cuando exista): crear configuración; editar alcance y totales; desactivar y reactivar; intento de `DELETE` directo en BD (debe fallar con 50030); perfil-rol nuevo sin acceso hasta configurarlo; auditoría con quién/cuándo/anterior/nuevo por campo; usuario sin la ruta de menú recibe 403 en cada verbo; rechazo de autoescalada (si se aprueba); una **reducción o revocación** hecha en la pantalla invalida la memoria incompatible en la siguiente consulta del afectado, sin cerrar sesión ni redesplegar.
+
+---
+
+## Anexo — Matriz aprobada, seed/migración preparados e investigación de la auditoría (2026-10-03)
+
+**Aprobación**: matriz aprobada con cambios (30 y 32 TOTAL sin globales; 26 EQUIPO; 2 y 34 TOTAL con globales) y reglas confirmadas (sin perfil-rol activo: denegado; sin empleado: denegado PROPIO/EQUIPO; exclusión temporal de filas sin responsable ni solicitante mapeados, con seguimiento). Matriz completa y autosuficiente en `docs/AI_COPILOT_FASE2_MATRIZ_PERMISOS.md`.
+
+**Preparado, sin ejecutar** (todo en `Database/IaChat/`): `08` migración (tabla, FK, trigger anti-borrado); `09` seed de la matriz (idempotente, no sobrescribe filas existentes, verifica el trío IdPerfilRol/IdPerfil/IdRol y revierte todo si alguna fila no encaja); `10` habilitación del menú Chat IA para (2,4) y (15,4) vía `sp_SegPerfilRolMenu_Insertar`, sin borrar menús existentes. Los valores viven en BD, no en código. Observación: 7 perfil-rol con permiso no tienen el menú (ver matriz).
+
+**Implementado**: `IaPermissionStore` e `IaEmployeeDirectory` con la metadata verificada (`SegPerfil.EsActivo`, `SegRol.EsActivo`, `EmpleadoCjDetalle.IdResponsableCj`, `IdResponsableCj = 0` ignorado) y mapeo por nombre de columna. En `Program.cs`: servicios registrados y un interruptor de transición `IaChat:ScopeEnforcement:Enabled` (por defecto desactivado; solo por variable de entorno en desarrollo; **no** se añadió a `appsettings.json`). Con el interruptor ausente, el flujo sigue por la ruta antigua. Compilación sin errores; 233/233 pruebas; consultas Dapper **sin probar contra BD**. Runbook: `docs/AI_COPILOT_FASE2_INTEGRACION_DEV.md`.
+
+### Auditoría del IA Chat — investigación
+| Verificación | Resultado | Tipo |
+|---|---|---|
+| Código de registro | `IaAuditService` llama a `dbo.sp_IaChatAuditoria_Insertar` con 9 parámetros cuyos nombres coinciden con la definición del repo (`01_IaChatAuditoria.sql`) | Evidencia (código) |
+| Registro en DI | `IIaAuditService → IaAuditService` registrado en `Program.cs`; el orquestador lo recibe | Evidencia (código) |
+| Llamadas | 12 puntos de invocación en `IaOrchestrator`, en todos los caminos de consulta (éxito, atajos conversacionales, errores) | Evidencia (código) |
+| Manejo de errores | `RegistrarAsync` **traga cualquier excepción** y solo escribe un aviso `LogWarning` ("No se pudo registrar la auditoria de IA Chat.") | Evidencia (código) |
+| Dónde queda ese aviso | El backend usa el registro por consola predeterminado (sin Serilog ni archivo). Los únicos logs en disco son de una ejecución del 2026-09-13 sin ninguna línea del IA Chat. **No existe registro persistente de fallos pasados** | Evidencia |
+| Tabla en la BD | `dbo.IaChatAuditoria` **existe** (las consultas la leen sin error) y tiene 0 filas | Evidencia (BD) |
+| Procedimiento en la BD | **No verificado.** Si no existe o la cuenta de la API no puede ejecutarlo, cada intento falla y se traga | Pendiente |
+| Qué significa la tabla vacía | **Ambiguo**: nunca se usó, **o** se intentó registrar y falló en silencio. No se deduce falta de uso | Hipótesis abiertas |
+
+Se preparó `11_verificar_auditoria_iachat_SoloLectura.sql` (solo lectura): existencia y parámetros del SP, columnas/triggers/restricciones de la tabla, **último valor de la columna IDENTITY** (`NULL` = nunca hubo un INSERT; mayor que 0 con tabla vacía = hubo filas que se borraron o truncaron), estadísticas de ejecución del SP en caché y permisos sobre SP y tabla. Y un paso del runbook: una pregunta real en la copia y revisión de la consola de la API.
+
+**Posible defecto a vigilar (no confirmado)**: como los fallos de auditoría son invisibles, conviene en el cierre de la Fase 2 registrarlos de forma persistente (p. ej. contador o log a archivo) o elevar el nivel de aviso; decisión del plan, no incluida aquí.
+
+---
+
+## Anexo — Procedimiento único de integración, guardas de base y verificador integral (2026-10-03)
+
+**Incidente**: el seed (`09`) se ejecutó en `JC_Db` (confirmado por el usuario). Terminó con el error 50031 de su comprobación inicial ("Falta dbo.IaToolPermiso"), **antes** de abrir transacción: no se modificó ningún dato ni objeto. Como el error pudo ser más grave, los scripts de cambio llevan ahora una **guarda de base**: se detienen si `@BaseDestino` no se editó con el nombre exacto de la copia, si la conexión no es a esa base, o si es `JC_Db` (02 y 08 con `SET NOEXEC ON`; 09, 10 y 13 con `THROW 50040`). Para producción se usará un procedimiento aparte con aprobación explícita.
+
+**Dependencias reales de los verificadores (confirmado)**: el script 04 valida **solo** el estado de `dbo.sp_IA_Planilla_Buscar`; **no** valida la tabla de permisos, el seed ni los menús. Se añadió `12_verificar_integracion_alcance_SoloLectura.sql` (lectura, seguro en cualquier base): firma del SP, estructura/restricciones/trigger de `IaToolPermiso`, las 11 filas de la matriz una por una, los pares perfil-rol, el menú Chat IA (solo los esperados; FAIL si aparece en 30, 32, 3, 31, 29, 33 o 28) y cobertura de cuentas. **No validado en SQL Server** (ninguno de los scripts se ha compilado allí).
+
+**Procedimiento único**: `docs/AI_COPILOT_FASE2_INTEGRACION_DEV.md` (orden P1–P12, configuración del backend por variables de entorno, activación, pruebas, recuperación, tabla de dependencias por script y estado del código). Menús: solo IdPerfilRol 2 y 34, **al final** (P9), tras validar el alcance; los otros siete perfil-rol sin cambios de menú hasta una decisión posterior. Recuperación parcial: `13_rollback_integracion_alcance_DEV.sql` (solo tabla, con guarda) + `03` (SP) + respaldo/pantalla para menús; la vía más segura es restaurar la copia.
+
+**Código**: terminado el almacén de permisos, el directorio de empleados, la autorización, el ejecutor con alcance, el orquestador (desactivado por defecto) y el frontend de "No disponible". **Falta para probar el flujo real**: copia de desarrollo; ejecutar y corregir los scripts en SQL Server; cuentas de prueba; casos de aceptación; verificar las consultas Dapper con datos reales. **No implementado**: pantalla/API de mantenimiento y visibilidad persistente de fallos de auditoría.
+
+**Auditoría (continúa)**: sin resultados nuevos de BD; el script 11 sigue pendiente de ejecutar por el usuario. Conclusiones de código sin cambio (SP y parámetros consistentes con el repo; DI registrado; 12 invocaciones; errores tragados con aviso solo por consola; sin registro persistente de fallos pasados).
+
+---
+
+## Anexo — Resultado de la verificación de auditoría (`Metadata_v11.txt`, 2026-10-03 08:26): el SP de auditoría NO existe en `JC_Db`
+
+**Evidencia (BD `JC_Db`)**
+| # | Hecho | Fuente |
+|---|---|---|
+| A1/A2 | **`dbo.sp_IaChatAuditoria_Insertar` no existe** (sin fila ni parámetros) | `Metadata_v11.txt` [A1][A2] |
+| A3 | La tabla `dbo.IaChatAuditoria` existe con las 11 columnas del script del repo; sin triggers ni restricciones que rechacen filas | [A3] |
+| A4 | `last_value` del IDENTITY = **NULL**, `IDENT_CURRENT` = 1, filas = 0: **nunca se insertó una fila** en esa tabla | [A4] |
+| A5/A6 | Sin estadísticas de ejecución del SP y sin permisos explícitos sobre SP/tabla (esperable al no existir el SP) | [A5][A6] |
+| A7 | Miembros de `db_owner`: `cjt_admin_sql`, `dbo`; de `db_datawriter`: `cj_asistencia1` | [A7] |
+| Config | El usuario de BD de `appsettings.Development.json` es `sa` (comprobado por coincidencia, sin mostrar la cadena), que equivale a `dbo`; no coincide con `cjt_admin_sql` ni `cj_asistencia1`. El usuario de la API en Railway **no se conoce** | comprobación local |
+| Repo | `01_IaChatAuditoria.sql` (commit `019b344`, 2026-06-12) crea la tabla y, **tras un `GO`**, el SP; en `JC_Db` quedó la tabla pero no el SP | repo + BD |
+
+**Conclusión (acotada)**: la auditoría del IA Chat **nunca ha registrado nada en `JC_Db`**, y la causa directa es que falta el SP: `IaAuditService` lo invoca, SQL Server responde "procedimiento no encontrado" y el servicio traga el error (solo un aviso por consola). La tabla vacía es **consecuencia del defecto**, no evidencia de poco uso. **El uso real del IA Chat sigue sin conocerse**: no hay registro alguno que lo pruebe ni lo refute. Hipótesis (sin verificar) de por qué falta: la segunda tanda del script 01 no se ejecutó (o el SP se eliminó después).
+
+**Consecuencias**
+- Todos los accesos denegados que registrará el orquestador con la aplicación del alcance activa (`acceso_denegado`) tampoco se auditarían sin el SP.
+- **Segundo riesgo latente**: al crear el SP, el usuario de BD de la API necesitará `EXECUTE` sobre él (como dueño del SP, el encadenamiento de propiedad cubre el `INSERT` a la tabla). Si la API de producción se conectara como `cj_asistencia1` (solo `db_datawriter`), seguiría fallando; el usuario real de Railway está por confirmar.
+- Antes de habilitar la auditoría conviene decidir si se registrará el texto de la pregunta (`Pregunta`, texto libre del usuario) como ya prevé el diseño del repo.
+
+**Corrección propuesta (no ejecutada)**: ejecutar `Database/IaChat/01_IaChatAuditoria.sql` (idempotente: crea la tabla solo si falta; `CREATE OR ALTER` del SP) y, si procede, `GRANT EXECUTE ON dbo.sp_IaChatAuditoria_Insertar TO <usuario de la API>`. En la copia de desarrollo se ejecuta en el paso P2; el verificador `12` incluye el chequeo C08. Para confirmar el síntoma sin cambiar la BD: hacer una pregunta en un backend local y comprobar en la consola el aviso "No se pudo registrar la auditoria de IA Chat." con el error de procedimiento inexistente.
+
+---
+
 *Documento generado en sesión de planificación 2026-09-29, actualizado el mismo día con las decisiones D-1 a D-11 aprobadas y los anexos de hallazgos de Fase 1.0, Fase 1.1, Fase 1.2, Fase 1.3 y Fase 1.4; el 2026-10-01 con el anexo de la extracción de `IaTextUtils.cs`; el 2026-10-02 con los anexos de los pasos 1.7, 1.6, 1.9, 1.12, 1.13 (PV levantado), 1.14 (extracción final a `IaOrchestrator.cs`) y el cierre formal de Fase 1 (`IaChatService.cs` eliminado, `IaChatSharedDefaults.cs` creado, tabla de cumplimiento 0.1–1.15); y el 2026-10-03 con el anexo de las partes de Fase 2 implementadas sin depender del SP (propiedad de conversaciones, `IaExecutiveReportBuilder`, preparación de alcance) y el anexo del cambio coordinado de frontend (adopción de `conversationId`). No modifica `docs/AI_COPILOT_DESIGN.md`. Referencias cruzadas: `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/DATABASE_MAP.md`, `docs/TECHNICAL_DEBT.md`, `docs/AI_COPILOT_DESIGN.md`.*

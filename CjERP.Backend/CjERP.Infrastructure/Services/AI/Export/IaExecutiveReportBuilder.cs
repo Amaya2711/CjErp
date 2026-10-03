@@ -43,6 +43,14 @@ public sealed class IaExecutiveReportPayload
     public string ExecutiveReading { get; set; } = string.Empty;
     public string Conclusion { get; set; } = string.Empty;
     public List<string> Recommendations { get; set; } = [];
+
+    /// <summary>
+    /// true cuando la metrica pedida (p.ej. ventas) depende de campos no disponibles por permisos: el informe
+    /// NO contiene montos, porcentajes ni semaforos de esa metrica (no son cero: no existen para este usuario).
+    /// </summary>
+    public bool MetricUnavailable { get; set; }
+
+    public List<string> UnavailableFields { get; set; } = [];
 }
 
 internal sealed record TopRowAggregate(string Label, decimal Amount, int Count, string? Currency, double Participation, int? Ranking);
@@ -57,13 +65,21 @@ public static class IaExecutiveReportBuilder
         List<Dictionary<string, object?>> detailRows,
         int? totalRowsReportado,
         string? question,
-        string? answer)
+        string? answer,
+        IReadOnlyCollection<string>? unavailableFields = null)
     {
         var totalRows = totalRowsReportado ?? detailRows.Count;
         var filasAnalizadas = detailRows.Count;
         var informeParcial = totalRows > filasAnalizadas;
 
         var metric = DetectMetric(question, answer);
+
+        // Metrica no disponible por permisos: no se calcula NADA con ella (ni totales, ni porcentajes, ni
+        // semaforos, ni lecturas derivadas). Un cero real solo existe cuando la columna esta presente.
+        if (metric == "ventas" && IaGlobalColumns.IsUnavailable(unavailableFields, ResolveMetricAmountField(metric)))
+        {
+            return BuildUnavailablePayload(metric, totalRows, filasAnalizadas, informeParcial, unavailableFields!);
+        }
         var metricRows = NormalizeRowsForMetric(detailRows, metric);
 
         var currencyRows = BuildTopRowsByField(metricRows, metric, ["Moneda"], 10, splitByCurrency: false, forceCurrencyKey: true);
@@ -240,6 +256,36 @@ public static class IaExecutiveReportBuilder
         }
 
         return payload;
+    }
+
+    private static IaExecutiveReportPayload BuildUnavailablePayload(
+        string metric,
+        int totalRows,
+        int filasAnalizadas,
+        bool informeParcial,
+        IReadOnlyCollection<string> unavailableFields)
+    {
+        const string message =
+            "La metrica de ventas no esta disponible para este usuario segun los permisos configurados; " +
+            "no se calcularon totales, porcentajes ni semaforos con ella.";
+
+        return new IaExecutiveReportPayload
+        {
+            Metric = metric,
+            TotalRows = totalRows,
+            FilasAnalizadas = filasAnalizadas,
+            InformeParcial = informeParcial,
+            MetricUnavailable = true,
+            UnavailableFields = unavailableFields.ToList(),
+            SummaryRows =
+            [
+                KeyValueRow("Metrica solicitada", "Ventas"),
+                KeyValueRow("Disponibilidad", "No disponible por permisos"),
+                KeyValueRow("Cantidad de registros analizados", filasAnalizadas)
+            ],
+            ExecutiveReading = message,
+            Conclusion = message
+        };
     }
 
     private static Dictionary<string, object?> KeyValueRow(string campo, object? valor) =>

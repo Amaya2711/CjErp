@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CjERP.Application.DTOs.IaChat;
 using CjERP.Application.Interfaces.Services;
+using CjERP.Application.Interfaces.Services.AI;
 using CjERP.Infrastructure.Persistence.Sql;
 using Dapper;
 using Microsoft.Extensions.Logging;
@@ -56,6 +57,15 @@ public sealed class IaOrchestrator : IIaChatService
     private readonly IIaDashboardExportService _dashboardExportService;
     private readonly ILogger<IaOrchestrator> _logger;
 
+    // Fase 2 - AUTORIZACION/ALCANCE: PREPARADO Y DESACTIVADO. Ver IaScopeEnforcementOptions.
+    // Mientras _enforceScope sea false (valor por defecto) el flujo es exactamente el anterior, SIN
+    // alcance. Cuando se active, TODA ejecucion pasa por ExecuteSearchAsync con alcance obligatorio y no
+    // existe fallback sin restriccion: sin servicio de autorizacion o con denegacion, no se ejecuta nada.
+    private readonly IIaAuthorizationService? _authorizationService;
+    private readonly bool _enforceScope;
+
+    private const string AccessDeniedMessage = "No tienes permiso para consultar esta informacion.";
+
     public IaOrchestrator(
         IGastosQueryExecutor gastosQueryExecutor,
         IOpenAiChatProvider openAiChatProvider,
@@ -64,8 +74,12 @@ public sealed class IaOrchestrator : IIaChatService
         IIaAuditService auditService,
         IResponseGenerator responseGenerator,
         IIaDashboardExportService dashboardExportService,
-        ILogger<IaOrchestrator> logger)
+        ILogger<IaOrchestrator> logger,
+        IIaAuthorizationService? authorizationService = null,
+        IaScopeEnforcementOptions? scopeEnforcement = null)
     {
+        _authorizationService = authorizationService;
+        _enforceScope = scopeEnforcement?.Enabled == true;
         _gastosQueryExecutor = gastosQueryExecutor;
         _openAiChatProvider = openAiChatProvider;
         _gastosQueryPlanner = gastosQueryPlanner;
@@ -121,6 +135,33 @@ public sealed class IaOrchestrator : IIaChatService
         {
             response.ConversationId = conversationId;
             return response;
+        }
+
+        // Fase 2 (desactivado por defecto): autorizar y resolver el alcance ANTES de reutilizar memoria.
+        // Si el alcance vigente no coincide con el que autorizo el resultado guardado (nivel, campos,
+        // composicion completa del equipo o permiso de totales), se descarta TODA la memoria derivada de
+        // datos (turnos y filas) antes de construir el contexto o de intentar cualquier atajo.
+        IaResolvedScope? scope = null;
+        if (_enforceScope)
+        {
+            scope = await ResolveScopeAsync(idUsuario, cancellationToken);
+            if (scope is null)
+            {
+                // Permiso revocado o verificacion fallida: la memoria previa deja de ser utilizable.
+                conversationState.InvalidateMemory();
+                await _auditService.RegistrarAsync(
+                    idUsuario, module, question, ToolBuscarPlanilla, new Dictionary<string, object?>(),
+                    (int)Math.Min(int.MaxValue, stopwatch.ElapsedMilliseconds), 0, false, "acceso_denegado", cancellationToken);
+                return WithConversationId(Failure(module, AccessDeniedMessage));
+            }
+
+            var currentScope = scope.ToAuthorizedScope();
+            if (conversationState.LastResponse is not null && !conversationState.MatchesAuthorizedScope(currentScope))
+            {
+                conversationState.InvalidateMemory();
+            }
+
+            conversationState.SetTurnScope(currentScope);
         }
 
         var conversationContext = BuildConversationContext(conversationState);
@@ -261,14 +302,51 @@ public sealed class IaOrchestrator : IIaChatService
                     ["reusedConversationContext"] = true
                 };
 
-                var contextualFollowUpResult = await _gastosQueryExecutor.EjecutarBuscarPlanillaAsync(contextualFollowUpArgs, cancellationToken, fetchAllPages: true);
+                var contextualFollowUpResult = await ExecuteSearchAsync(contextualFollowUpArgs, scope, cancellationToken, fetchAllPages: true);
+                if (IaGlobalColumns.QuestionNeedsGlobalMetric(question, contextualFollowUpResult.UnavailableColumns))
+                {
+                    contextualInterpretedFilters["routingMode"] = "global_totals_unavailable";
+                    var unavailableResponse = new IaChatResponseDto
+                    {
+                        Success = true,
+                        Module = module,
+                        Answer = IaGlobalColumns.UnavailableAnswer,
+                        ResponseType = "conversation",
+                        InterpretedFilters = contextualInterpretedFilters,
+                        UnavailableFields = contextualFollowUpResult.UnavailableColumns.ToList()
+                    };
+
+                    stopwatch.Stop();
+                    conversationState.AppendTurn("user", question);
+                    conversationState.AppendAssistant(
+                        IaGlobalColumns.UnavailableAnswer,
+                        unavailableResponse,
+                        ToolBuscarPlanilla,
+                        contextualFollowUpArgs.AsDictionary());
+
+                    await _auditService.RegistrarAsync(
+                        idUsuario,
+                        module,
+                        question,
+                        ToolBuscarPlanilla,
+                        contextualFollowUpArgs.AsDictionary(),
+                        (int)Math.Min(int.MaxValue, stopwatch.ElapsedMilliseconds),
+                        0,
+                        true,
+                        null,
+                        cancellationToken);
+
+                    return WithConversationId(unavailableResponse);
+                }
+
                 var contextualFollowUpPayload = BuildOpenAiAnalysisPayload(
                     question,
                     contextualFollowUpArgs,
                     contextualFollowUpResult.Rows,
                     contextualFollowUpResult.TotalRows,
                     contextualFollowUpArgs.AsDictionary(),
-                    contextualInterpretedFilters);
+                    contextualInterpretedFilters,
+                    contextualFollowUpResult.UnavailableColumns);
 
                 var contextualFollowUpAnswer = await _responseGenerator.GenerateOpenAiFinalAnswerAsync(
                     question,
@@ -296,7 +374,10 @@ public sealed class IaOrchestrator : IIaChatService
                     ResponseType = "detail",
                     InterpretedFilters = contextualInterpretedFilters,
                     DetailRows = contextualFollowUpResult.Rows.Count > 0 ? contextualFollowUpResult.Rows : null,
-                    TotalRows = contextualFollowUpResult.TotalRows
+                    TotalRows = contextualFollowUpResult.TotalRows,
+                    UnavailableFields = contextualFollowUpResult.UnavailableColumns.Count > 0
+                        ? contextualFollowUpResult.UnavailableColumns.ToList()
+                        : null
                 };
 
                 stopwatch.Stop();
@@ -336,7 +417,7 @@ public sealed class IaOrchestrator : IIaChatService
         {
             try
             {
-                var roleFollowUpResult = await _gastosQueryExecutor.EjecutarBuscarPlanillaAsync(roleFollowUpArgs, cancellationToken, fetchAllPages: true);
+                var roleFollowUpResult = await ExecuteSearchAsync(roleFollowUpArgs, scope, cancellationToken, fetchAllPages: true);
                 var roleFollowUpAnswer = BuildDetailAnswer(roleFollowUpResult.Rows, roleFollowUpResult.TotalRows, roleFollowUpArgs);
 
                 var roleFollowUpResponse = new IaChatResponseDto
@@ -359,7 +440,10 @@ public sealed class IaOrchestrator : IIaChatService
                         ["reusedConversationContext"] = true
                     },
                     DetailRows = roleFollowUpResult.Rows.Count > 0 ? roleFollowUpResult.Rows : null,
-                    TotalRows = roleFollowUpResult.TotalRows
+                    TotalRows = roleFollowUpResult.TotalRows,
+                    UnavailableFields = roleFollowUpResult.UnavailableColumns.Count > 0
+                        ? roleFollowUpResult.UnavailableColumns.ToList()
+                        : null
                 };
 
                 stopwatch.Stop();
@@ -438,7 +522,7 @@ public sealed class IaOrchestrator : IIaChatService
         {
             try
             {
-                var localExecutiveResult = await EjecutarLocalExecutiveAggregationAsync(localExecutiveRequest, cancellationToken);
+                var localExecutiveResult = await EjecutarLocalExecutiveAggregationAsync(localExecutiveRequest, scope, cancellationToken);
                 var localExecutiveAnswer = BuildLocalExecutiveAnswer(localExecutiveRequest, localExecutiveResult);
 
                 interpretedFilters["toolName"] = ToolBuscarPlanilla;
@@ -509,7 +593,7 @@ public sealed class IaOrchestrator : IIaChatService
         {
             try
             {
-                var deterministicResult = await _gastosQueryExecutor.EjecutarBuscarPlanillaAsync(deterministicBuscarArgs, cancellationToken);
+                var deterministicResult = await ExecuteSearchAsync(deterministicBuscarArgs, scope, cancellationToken);
                 var deterministicAnswer = BuildDetailAnswer(
                     deterministicResult.Rows,
                     deterministicResult.TotalRows,
@@ -589,6 +673,7 @@ public sealed class IaOrchestrator : IIaChatService
         var responseType = "conversation";
         var answer = string.Empty;
         var completed = false;
+        IReadOnlyList<string> unavailableFields = Array.Empty<string>();
 
         try
         {
@@ -631,39 +716,58 @@ public sealed class IaOrchestrator : IIaChatService
                 lastToolName = ToolBuscarPlanilla;
                 lastToolInput = args.AsDictionary();
 
-                var result = await _gastosQueryExecutor.EjecutarBuscarPlanillaAsync(args, cancellationToken, fetchAllPages: true);
-                detailRows = result.Rows;
-                totalRows = result.TotalRows;
-                responseType = "detail";
+                var result = await ExecuteSearchAsync(args, scope, cancellationToken, fetchAllPages: true);
+                unavailableFields = result.UnavailableColumns;
 
-                var payload = BuildOpenAiAnalysisPayload(
-                    question,
-                    args,
-                    detailRows,
-                    totalRows,
-                    lastToolInput,
-                    interpretedFilters);
-
-                answer = await _responseGenerator.GenerateOpenAiFinalAnswerAsync(
-                    question,
-                    conversationContext,
-                    module,
-                    plannerRoute,
-                    responseType,
-                    args,
-                    payload,
-                    cancellationToken);
-
-                if (string.IsNullOrWhiteSpace(answer))
+                if (IaGlobalColumns.QuestionNeedsGlobalMetric(question, unavailableFields))
                 {
-                    answer = BuildDetailAnswer(detailRows, totalRows, args);
+                    // La pregunta depende de columnas no disponibles por permisos: no se analiza, no se
+                    // compara y no se muestran filas. Un dato no permitido NO se presenta como cero.
+                    detailRows = [];
+                    totalRows = 0;
+                    responseType = "conversation";
+                    answer = IaGlobalColumns.UnavailableAnswer;
+                    interpretedFilters["provider"] = "openai";
+                    interpretedFilters["routingMode"] = "global_totals_unavailable";
+                    interpretedFilters["responseType"] = responseType;
+                    completed = true;
                 }
+                else
+                {
+                    detailRows = result.Rows;
+                    totalRows = result.TotalRows;
+                    responseType = "detail";
 
-                interpretedFilters["provider"] = "openai";
-                interpretedFilters["toolName"] = lastToolName;
-                interpretedFilters["toolParameters"] = lastToolInput;
-                interpretedFilters["responseType"] = responseType;
-                completed = true;
+                    var payload = BuildOpenAiAnalysisPayload(
+                        question,
+                        args,
+                        detailRows,
+                        totalRows,
+                        lastToolInput,
+                        interpretedFilters,
+                        unavailableFields);
+
+                    answer = await _responseGenerator.GenerateOpenAiFinalAnswerAsync(
+                        question,
+                        conversationContext,
+                        module,
+                        plannerRoute,
+                        responseType,
+                        args,
+                        payload,
+                        cancellationToken);
+
+                    if (string.IsNullOrWhiteSpace(answer))
+                    {
+                        answer = BuildDetailAnswer(detailRows, totalRows, args);
+                    }
+
+                    interpretedFilters["provider"] = "openai";
+                    interpretedFilters["toolName"] = lastToolName;
+                    interpretedFilters["toolParameters"] = lastToolInput;
+                    interpretedFilters["responseType"] = responseType;
+                    completed = true;
+                }
             }
             else
             {
@@ -713,7 +817,8 @@ public sealed class IaOrchestrator : IIaChatService
                         : null,
                 Summary = summary,
                 Chart = chart,
-                TotalRows = totalRows
+                TotalRows = totalRows,
+                UnavailableFields = unavailableFields.Count > 0 ? unavailableFields.ToList() : null
             }, lastToolName, lastToolInput);
             await _auditService.RegistrarAsync(
                 idUsuario,
@@ -743,7 +848,8 @@ public sealed class IaOrchestrator : IIaChatService
                         : null,
                 Summary = summary,
                 Chart = chart,
-                TotalRows = totalRows
+                TotalRows = totalRows,
+                UnavailableFields = unavailableFields.Count > 0 ? unavailableFields.ToList() : null
             });
         }
         catch (Exception ex)
@@ -768,6 +874,75 @@ public sealed class IaOrchestrator : IIaChatService
                 cancellationToken);
 
             return WithConversationId(Failure(module, friendlyMessage));
+        }
+    }
+
+    /// <summary>
+    /// UNICO punto por el que el orquestador ejecuta la busqueda. Con alcance ejecuta la variante con
+    /// alcance obligatorio; sin alcance (solo posible con la aplicacion del alcance DESACTIVADA) usa la
+    /// ruta heredada. Cuando se active la Fase 2 la rama heredada debe ELIMINARSE junto con
+    /// IaScopeEnforcementOptions: debe quedar una sola ruta, siempre con alcance.
+    /// </summary>
+    private async Task<PlanillaBuscarExecutionResult> ExecuteSearchAsync(
+        BuscarPlanillaArgs args,
+        IaResolvedScope? scope,
+        CancellationToken cancellationToken,
+        bool fetchAllPages = false)
+    {
+        if (_enforceScope && scope is null)
+        {
+            // Invariante: con la aplicacion activa nunca se llega aqui sin alcance; si ocurre, se falla cerrado.
+            throw new InvalidOperationException("Ejecucion sin alcance rechazada: la aplicacion del alcance esta activa.");
+        }
+
+        if (scope is null)
+        {
+            return await _gastosQueryExecutor.EjecutarBuscarPlanillaAsync(args, cancellationToken, fetchAllPages);
+        }
+
+        var result = await _gastosQueryExecutor.EjecutarBuscarPlanillaConAlcanceAsync(args, scope, cancellationToken, fetchAllPages);
+
+        // DEFENSA EN PROFUNDIDAD, independiente de la heuristica de preguntas y de lo que haga el ejecutor:
+        // sin permiso de totales globales, las 15 columnas se retiran aqui TAMBIEN, antes de que las filas
+        // lleguen al analisis/LLM, a la memoria o a la exportacion.
+        if (!scope.CanViewGlobalTotals)
+        {
+            return new PlanillaBuscarExecutionResult
+            {
+                Rows = IaGlobalColumns.StripFromRows(result.Rows),
+                TotalRows = result.TotalRows,
+                UnavailableColumns = IaGlobalColumns.Names
+            };
+        }
+
+        return result;
+    }
+
+    /// <summary>Autoriza por cuenta; null = denegado (identidad, permiso, fallo de verificacion o servicio ausente).</summary>
+    private async Task<IaResolvedScope?> ResolveScopeAsync(string idUsuario, CancellationToken cancellationToken)
+    {
+        if (_authorizationService is null)
+        {
+            _logger.LogError("IA Chat: la aplicacion del alcance esta activa pero no hay IIaAuthorizationService registrado; se deniega.");
+            return null;
+        }
+
+        try
+        {
+            var result = await _authorizationService.AuthorizeAsync(
+                new IaAuthorizationRequest(idUsuario, ToolBuscarPlanilla),
+                cancellationToken);
+
+            return result is { Allowed: true, Scope: not null } ? result.Scope : null;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "IA Chat: fallo al autorizar al usuario {Usuario}; se deniega.", idUsuario);
+            return null;
         }
     }
 
@@ -821,17 +996,46 @@ public sealed class IaOrchestrator : IIaChatService
             return IaChatDashboardExportResponseDto.Failure(module, "No tienes acceso a la conversación indicada para exportar.");
         }
 
+        // Fase 2 (desactivado por defecto): revalidar permisos y composicion COMPLETA del alcance antes de
+        // exportar. Si cambiaron (nivel, campos, miembros del equipo o permiso de totales), el resultado
+        // guardado ya no es exportable.
+        IaResolvedScope? exportScope = null;
+        if (_enforceScope)
+        {
+            exportScope = await ResolveScopeAsync(idUsuario, cancellationToken);
+            if (exportScope is null)
+            {
+                return IaChatDashboardExportResponseDto.Failure(module, AccessDeniedMessage);
+            }
+
+            if (!access.State!.MatchesAuthorizedScope(exportScope.ToAuthorizedScope()))
+            {
+                return IaChatDashboardExportResponseDto.Failure(module, "Tu alcance de datos cambio desde esa consulta. Vuelve a consultar antes de exportar.");
+            }
+        }
+
         var lastResponse = access.State!.LastResponse;
         if (lastResponse?.DetailRows is null || lastResponse.DetailRows.Count == 0)
         {
             return IaChatDashboardExportResponseDto.Failure(module, "No hay un resultado previo en tu conversación para exportar. Realiza una consulta antes de exportar.");
         }
 
+        // Defensa en profundidad (independiente de lo guardado en memoria): sin permiso de totales globales
+        // vigente, el informe se construye SIN las 15 columnas y con la lista de no disponibles.
+        var withoutGlobals = exportScope is { CanViewGlobalTotals: false };
+        var exportRows = withoutGlobals
+            ? IaGlobalColumns.StripFromRows(lastResponse.DetailRows)
+            : lastResponse.DetailRows;
+        IReadOnlyCollection<string>? exportUnavailable = withoutGlobals
+            ? IaGlobalColumns.Names
+            : lastResponse.UnavailableFields;
+
         var reportPayload = IaExecutiveReportBuilder.Build(
-            lastResponse.DetailRows,
+            exportRows,
             lastResponse.TotalRows,
             question,
-            lastResponse.Answer);
+            lastResponse.Answer,
+            exportUnavailable);
 
         var structuredDataJson = JsonSerializer.Serialize(reportPayload, IaChatSharedDefaults.JsonOptions);
 
@@ -904,9 +1108,10 @@ public sealed class IaOrchestrator : IIaChatService
 
     private async Task<PlanillaLocalAggregationExecutionResult> EjecutarLocalExecutiveAggregationAsync(
         LocalExecutiveAggregationRequest request,
+        IaResolvedScope? scope,
         CancellationToken cancellationToken)
     {
-        var searchResult = await _gastosQueryExecutor.EjecutarBuscarPlanillaAsync(request.SearchArgs, cancellationToken, fetchAllPages: true);
+        var searchResult = await ExecuteSearchAsync(request.SearchArgs, scope, cancellationToken, fetchAllPages: true);
         if (searchResult.Rows.Count == 0)
         {
             return new PlanillaLocalAggregationExecutionResult

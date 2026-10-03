@@ -54,6 +54,8 @@ public sealed class ConversationState
 
     public IaAuthorizedScope? LastAuthorizedScope { get; private set; }
 
+    private IaAuthorizedScope? _turnScope;
+
     /// <summary>
     /// Registra el alcance con el que se autorizo el resultado que se esta a punto de guardar.
     /// Preparacion de Fase 2: ningun llamador existe todavia (la resolucion real de alcance
@@ -93,6 +95,36 @@ public sealed class ConversationState
         }
     }
 
+    /// <summary>
+    /// Alcance con el que se esta resolviendo el turno actual (Fase 2, preparado, sin conectar al flujo
+    /// activo). Mientras este definido, cada AppendAssistant registra ESE alcance como el que autorizo el
+    /// resultado guardado; si es null (ruta heredada) LastAuthorizedScope no se actualiza.
+    /// </summary>
+    public void SetTurnScope(IaAuthorizedScope? scope)
+    {
+        lock (_sync)
+        {
+            _turnScope = scope;
+        }
+    }
+
+    /// <summary>
+    /// Descarta TODA la memoria derivada de datos (turnos, ultima respuesta, parametros y alcance). Se usa
+    /// cuando el alcance vigente ya no coincide con el que autorizo ese resultado: ni el texto de las
+    /// respuestas previas ni sus filas pueden reutilizarse.
+    /// </summary>
+    public void InvalidateMemory()
+    {
+        lock (_sync)
+        {
+            _turns.Clear();
+            LastResponse = null;
+            LastToolParameters = null;
+            LastToolName = null;
+            LastAuthorizedScope = null;
+        }
+    }
+
     public void AppendTurn(string role, string text)
     {
         var normalizedText = NormalizeText(text) ?? string.Empty;
@@ -117,6 +149,11 @@ public sealed class ConversationState
         lock (_sync)
         {
             LastResponse = response;
+            if (_turnScope is not null)
+            {
+                LastAuthorizedScope = _turnScope;
+            }
+
             LastToolName = NormalizeText(toolName);
             LastToolParameters = toolParameters is null
                 ? null
