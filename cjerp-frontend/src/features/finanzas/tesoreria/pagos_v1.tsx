@@ -2370,7 +2370,9 @@ export default function PagosV1Page() {
   // No depende del historial ni de consultas adicionales al seleccionar la fila.
   const montoPlanillaPagadoOt = Math.max(montoPlanillaOriginalOt, 0);
   const consumoOtLoading = false;
-  const totalOtLocal = Math.max(parseNumericValue(detalleOcActiva?.totalAcumuladoOt ?? 0), 0);
+  // En Resumen, el Total OT corresponde al monto disponible para la OT,
+  // no al monto de respaldo previo a la aplicación del porcentaje.
+  const totalOtLocal = Math.max(parseNumericValue(detalleOcActiva?.totalMontoVisiblePorMoneda ?? 0), 0);
   const disponibleOtLocal = totalOtLocal - montoPlanillaPagadoOt;
   const consumoOtPercent = getConsumptionPercent(totalOtLocal, disponibleOtLocal);
   const totalDetalleConversionSoles = resumenOtMonedas.reduce((total, resumen) => {
@@ -3613,7 +3615,17 @@ export default function PagosV1Page() {
           >
           <div style={styles.leftColumn}>
             <div style={styles.gridCard}>
-           
+            <div
+              ref={fixedHorizontalScrollbarRef}
+              aria-label="Desplazamiento horizontal de la grilla"
+              style={{
+                ...styles.fixedHorizontalScrollbar,
+                opacity: mainGridScrollMetrics.scrollWidth > mainGridScrollMetrics.clientWidth ? 1 : 0,
+                pointerEvents: mainGridScrollMetrics.scrollWidth > mainGridScrollMetrics.clientWidth ? "auto" : "none",
+              }}
+            >
+              <div style={{ width: Math.max(mainGridScrollMetrics.scrollWidth, mainGridScrollMetrics.clientWidth), height: 1 }} />
+            </div>
 
             <div ref={mainGridScrollRef} style={styles.gridScrollable}>
               <table className="pagos-v1-main-grid" style={styles.table}>
@@ -3985,18 +3997,6 @@ export default function PagosV1Page() {
                 {checkedIds.length === 0 ? null : <span style={{ color: currentTheme.accent }}>Solo sobre registros seleccionados</span>}
               </div>
             </div>
-            </div>
-
-            <div
-              ref={fixedHorizontalScrollbarRef}
-              aria-label="Desplazamiento horizontal de la grilla"
-              style={{
-                ...styles.fixedHorizontalScrollbar,
-                opacity: mainGridScrollMetrics.scrollWidth > mainGridScrollMetrics.clientWidth ? 1 : 0,
-                pointerEvents: mainGridScrollMetrics.scrollWidth > mainGridScrollMetrics.clientWidth ? "auto" : "none",
-              }}
-            >
-              <div style={{ width: Math.max(mainGridScrollMetrics.scrollWidth, mainGridScrollMetrics.clientWidth), height: 1 }} />
             </div>
 
             <section style={styles.actionsBar}>
@@ -5863,18 +5863,14 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 0,
   },
   fixedHorizontalScrollbar: {
-    position: "fixed",
-    left: 56,
-    right: 12,
-    bottom: 106,
-    zIndex: 1101,
+    flex: "0 0 16px",
+    width: "100%",
     height: 16,
     overflowX: "scroll",
     overflowY: "hidden",
     scrollbarGutter: "stable",
     background: "rgba(255, 255, 255, 0.96)",
-    borderRadius: 8,
-    boxShadow: "0 1px 5px rgba(15, 23, 42, 0.12)",
+    borderBottom: "1px solid #E2E8F0",
     transition: "opacity 120ms ease",
   },
   filtersCard: {
@@ -6110,7 +6106,8 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: 0,
     maxWidth: "100%",
     maxHeight: "100%",
-    overflowX: "scroll",
+    // La barra horizontal se expone en la cabecera mediante fixedHorizontalScrollbar.
+    overflowX: "hidden",
     overflowY: "scroll",
     overscrollBehavior: "contain",
     WebkitOverflowScrolling: "touch",
