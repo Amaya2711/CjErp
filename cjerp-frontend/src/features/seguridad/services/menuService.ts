@@ -72,6 +72,7 @@ export interface CrearNodoMenuRequest {
 const BASE_URL = "/menu";
 const MENU_DINAMICO_CACHE_PREFIX = "cj_menu_dinamico_";
 const menuDinamicoMemoryCache = new Map<string, MenuDto[]>();
+const menuDinamicoPendingRequests = new Map<string, Promise<MenuDto[]>>();
 
 function extraerArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? value : [];
@@ -198,22 +199,35 @@ export const menuService = {
       return cached;
     }
 
-    try {
-      const response = await httpClient.get<MenuDto[]>(`${BASE_URL}/dinamico`, {
-        params: { idUsuario },
-      });
-
-      const items = extraerArray<MenuDto>(response);
-      writeCachedMenu(idUsuario, items);
-      return items;
-    } catch (error) {
-      const fallback = readCachedMenu(idUsuario);
-      if (fallback) {
-        return fallback;
-      }
-
-      throw error;
+    const cacheKey = getMenuCacheKey(idUsuario);
+    const pendingRequest = menuDinamicoPendingRequests.get(cacheKey);
+    if (pendingRequest) {
+      return pendingRequest;
     }
+
+    const request = (async () => {
+      try {
+        const response = await httpClient.get<MenuDto[]>(`${BASE_URL}/dinamico`, {
+          params: { idUsuario },
+        });
+
+        const items = extraerArray<MenuDto>(response);
+        writeCachedMenu(idUsuario, items);
+        return items;
+      } catch (error) {
+        const fallback = readCachedMenu(idUsuario);
+        if (fallback) {
+          return fallback;
+        }
+
+        throw error;
+      } finally {
+        menuDinamicoPendingRequests.delete(cacheKey);
+      }
+    })();
+
+    menuDinamicoPendingRequests.set(cacheKey, request);
+    return request;
   },
 
   async obtenerPorPerfilRol(idPerfil: number, idRol: number): Promise<MenuDto[]> {

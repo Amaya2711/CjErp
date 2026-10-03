@@ -205,7 +205,7 @@ export default function DashboardPage() {
           }
           return;
         }
-        const menuRaw = await menuService.obtenerMenuDinamicoPorUsuario(usuario.usuario, true);
+        const menuRaw = await menuService.obtenerMenuDinamicoPorUsuario(usuario.usuario);
         //const menu: MenuAccesoDto[] = menuRaw.map((item) => ({
         //  ...item,
         //  acceso: getAccesoValue(item),
