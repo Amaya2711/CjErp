@@ -12,7 +12,7 @@ Alcance de filas: `PROPIO` = filas donde el empleado de la cuenta es responsable
 | 32 | 2 / FINANZAS | 8 / ESPE_FIN | 1 | **TOTAL** | NO |
 | 3 | 3 / LOGISTICA | 4 / ADMIN | 1 | EQUIPO | NO |
 | 31 | 4 / ADMINISTRACION | 7 / ESTANDAR | 1 | PROPIO | NO |
-| 26 | 8 / ADMIN | 4 / ADMIN | 1 | **EQUIPO** | NO |
+| 26 | 8 / ADMIN | 4 / ADMIN | 1 | **TOTAL** | **SÍ** |
 | 27 | 8 / ADMIN | 5 / SISTEMAS | 1 | PROPIO | NO |
 | 29 | 9 / OPERACIONES | 4 / ADMIN | 2 | EQUIPO | NO |
 | 33 | 9 / OPERACIONES | 7 / ESTANDAR | 4 | PROPIO | NO |

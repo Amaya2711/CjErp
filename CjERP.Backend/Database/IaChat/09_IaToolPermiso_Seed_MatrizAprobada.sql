@@ -41,7 +41,7 @@ VALUES
     (32,  2, 8, 'TOTAL',  0),  -- FINANZAS / ESPE_FIN
     (3,   3, 4, 'EQUIPO', 0),  -- LOGISTICA / ADMIN
     (31,  4, 7, 'PROPIO', 0),  -- ADMINISTRACION / ESTANDAR
-    (26,  8, 4, 'EQUIPO', 0),  -- ADMIN / ADMIN
+    (26,  8, 4, 'TOTAL',  1),  -- ADMIN / ADMIN (ajustado 2026-10-03: antes EQUIPO/0; ver 15_ajuste_26_ADMIN_TOTAL.sql)
     (27,  8, 5, 'PROPIO', 0),  -- ADMIN / SISTEMAS
     (29,  9, 4, 'EQUIPO', 0),  -- OPERACIONES / ADMIN
     (33,  9, 7, 'PROPIO', 0),  -- OPERACIONES / ESTANDAR
