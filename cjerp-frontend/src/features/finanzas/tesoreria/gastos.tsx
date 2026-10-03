@@ -1289,6 +1289,7 @@ export default function GastosPage({
   const constantesInicialesIniciadasRef = useRef(false);
   const cargaInicialGastosSolicitadaRef = useRef(false);
   const sidePanelRef = useRef<HTMLDivElement | null>(null);
+  const filtroInputRef = useRef<HTMLInputElement | null>(null);
   const cabeceraFiltroMenuRef = useRef<HTMLDivElement | null>(null);
   const ultimoSuministroVigenteLookupKeyRef = useRef("");
   const preservarSuministroEdicionRef = useRef(false);
@@ -2485,6 +2486,51 @@ export default function GastosPage({
     return () => document.removeEventListener("keydown", handleEscape);
   }, [historialSitioDetalleActivo, historialSitioExpanded, panelAbierto, showFacturaSourceMenu, showFacturaViewer]);
 
+  // Al abrir "Nuevo gasto" el foco debe quedar en el campo Filtro.
+  useEffect(() => {
+    if (!panelAbierto || modo !== "nuevo") {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => filtroInputRef.current?.focus(), 80);
+    return () => window.clearTimeout(timeoutId);
+  }, [panelAbierto, modo]);
+
+  // Atajo Shift + N: equivale a presionar "Nuevo gasto". Se ignora si el panel
+  // ya está abierto, si hay un campo de texto enfocado o si se usan otros modificadores.
+  const abrirNuevoRef = useRef(abrirNuevo);
+  useEffect(() => {
+    abrirNuevoRef.current = abrirNuevo;
+  });
+
+  useEffect(() => {
+    if (editorOnly || panelAbierto) {
+      return;
+    }
+
+    const handleAtajoNuevo = (event: KeyboardEvent) => {
+      if (!event.shiftKey || event.ctrlKey || event.altKey || event.metaKey || event.repeat) {
+        return;
+      }
+
+      if (event.key !== "N" && event.key !== "n") {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) {
+        return;
+      }
+
+      event.preventDefault();
+      abrirNuevoRef.current();
+    };
+
+    document.addEventListener("keydown", handleAtajoNuevo);
+    return () => document.removeEventListener("keydown", handleAtajoNuevo);
+  }, [editorOnly, panelAbierto]);
+
   const validar = () => {
     const nuevosErrores: Record<string, string> = {};
 
@@ -3395,6 +3441,7 @@ export default function GastosPage({
           {
             key: "nuevo",
             label: "Nuevo gasto",
+            title: "Nuevo gasto (Shift + N)",
             onClick: abrirNuevo,
           },
           {
@@ -4255,6 +4302,7 @@ export default function GastosPage({
               <FiltroOperativoLookup
                 value={form.filtroOperativo}
                 fontSize={13}
+                filtroInputRef={filtroInputRef}
                 onChange={handleFiltroOperativoChange}
                 onSelectionBlur={(value) => {
                   void cargarValoresGasto(value);

@@ -171,6 +171,13 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
               }
             }}
             onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                setShowDropdown(false);
+                return;
+              }
+
               if (filteredFiltros.length === 0) return;
 
               if (e.key === "ArrowDown") {
@@ -210,10 +217,19 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
                         filtroInput.toLowerCase()
                     );
 
-                if (!filtroSeleccionado) {
+                // Si el filtro no cambió, no se reinician Trabajo/OT/Tarea:
+                // hacerlo en cada blur provocaba que los combos parpadearan.
+                const filtroSinCambios =
+                  !filtroSeleccionado &&
+                  selected != null &&
+                  selected.filtroKey === lookupValue?.filtro?.filtroKey;
+
+                if (!filtroSeleccionado && !filtroSinCambios) {
                   handleFiltroChange(selected ? selected.filtroKey : "");
                 }
-                const nextValue: FiltroOperativoValue = selected
+                const nextValue: FiltroOperativoValue = filtroSinCambios
+                  ? lookupValue
+                  : selected
                   ? {
                       filtro: selected,
                       tipoTrabajo: undefined,
@@ -299,6 +315,11 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
                 <select
                   ref={trabajoSelectRef}
                   onChange={(e) => handleTipoTrabajoChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      e.stopPropagation();
+                    }
+                  }}
                   onBlur={(e) =>
                     onSelectionBlur?.({
                       ...lookupValue,
@@ -336,6 +357,11 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
               <label style={{ whiteSpace: "nowrap" }}>OT</label>
               <select
                 onChange={(e) => handleOtChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.stopPropagation();
+                  }
+                }}
                 onBlur={(e) =>
                   onSelectionBlur?.({
                     ...lookupValue,
@@ -523,6 +549,13 @@ function TareaAutocomplete({
           if (tareasFiltradas.length > 0) setTareaDropdown(true);
         }}
         onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            setTareaDropdown(false);
+            return;
+          }
+
           if (tareasFiltradas.length === 0) return;
 
           if (e.key === "ArrowDown") {

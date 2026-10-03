@@ -50,6 +50,7 @@
 ## 5. Visibilidad de datos
 - `sp_Planilla_Consulta_Estados` filtra por solicitante salvo que `@IdCargo` esté en `Constante 'PERMISOS'`; responsables con IdCargo ∈ (10, 11, 83). ⚠ IdCargo/IdEmpleado llegan del cliente.
 - `maxRows` en consultas genéricas → `LimitExceeded` ("aplique más filtros").
+- Solicitante en "Nuevo gasto" (`gastos.tsx` → `GET /lookup/gastos/bootstrap` → `sp_ListarSolicitante`): para que el combo cargue datos y se habilite, el empleado debe tener registrado el **perfil 11 en la tabla `EmpleadoCjPerfil`** (indicado por el equipo, 2026-10-02). PV: tabla y SP sin DDL en el repo; validar en BD. Sin ese registro el combo queda vacío y deshabilitado (el perfil ADMIN no depende de esto).
 
 ## 6. Orden de Compra
 - Cabecera obligatoria: solicitante, responsable, validador, gestor, moneda, comprobante, forma de pago. Detalle: cliente, proyecto, site, tipo de trabajo, tarea, cantidad>0, precio>0, detalle (`OrdenCompraController.cs:61-95`).

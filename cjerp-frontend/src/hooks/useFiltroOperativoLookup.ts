@@ -1,6 +1,6 @@
 // src/hooks/useFiltroOperativoLookup.ts
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { getHttpErrorMessage } from '../utils/httpError';
 import type {
   FiltroOperativoItem,
@@ -48,6 +48,20 @@ function areFiltroOperativoValuesEqual(
   );
 }
 
+function getFiltroOperativoValueKey(value?: FiltroOperativoValue): string {
+  return [
+    value?.filtro?.filtroKey ?? '',
+    value?.filtro?.idCliente ?? 0,
+    value?.filtro?.idProyecto ?? 0,
+    value?.filtro?.idSite ?? '',
+    value?.filtro?.correlativo ?? 0,
+    value?.tipoTrabajo?.tipoTrabajo ?? '',
+    value?.ot?.ot ?? '',
+    value?.tarea?.correlativo ?? 0,
+    value?.tarea?.tarea ?? '',
+  ].join('|');
+}
+
 interface UseFiltroOperativoLookupResult {
   filtros: FiltroOperativoItem[];
   tipoTrabajos: TipoTrabajoOption[];
@@ -75,24 +89,28 @@ export function useFiltroOperativoLookup(
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [value, setValueState] = useState<FiltroOperativoValue>(initialValue || {});
-  const initialValueKey = [
-    initialValue?.filtro?.filtroKey ?? '',
-    initialValue?.filtro?.idCliente ?? 0,
-    initialValue?.filtro?.idProyecto ?? 0,
-    initialValue?.filtro?.idSite ?? '',
-    initialValue?.filtro?.correlativo ?? 0,
-    initialValue?.tipoTrabajo?.tipoTrabajo ?? '',
-    initialValue?.ot?.ot ?? '',
-    initialValue?.tarea?.correlativo ?? 0,
-    initialValue?.tarea?.tarea ?? '',
-  ].join('|');
+  const initialValueKey = getFiltroOperativoValueKey(initialValue);
+  // Valores que este hook emitió al padre y que aún no regresan como
+  // `initialValue`. Evita que el eco (posiblemente desfasado) del padre
+  // pise un valor más reciente y genere un ciclo infinito de actualizaciones.
+  const pendingEchoKeysRef = useRef<Set<string>>(new Set());
+  const initialValueKeyRef = useRef(initialValueKey);
 
   useEffect(() => {
+    initialValueKeyRef.current = initialValueKey;
+
+    if (pendingEchoKeysRef.current.has(initialValueKey)) {
+      pendingEchoKeysRef.current.delete(initialValueKey);
+      return;
+    }
+
+    pendingEchoKeysRef.current.clear();
     const nextValue = initialValue || {};
 
     setValueState((prev) =>
       areFiltroOperativoValuesEqual(prev, nextValue) ? prev : nextValue
     );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialValueKey]);
 
   // 🔹 Cargar filtros y tareas al iniciar
@@ -325,6 +343,10 @@ export function useFiltroOperativoLookup(
 
   // 🔹 Notificar cambios al padre
   useEffect(() => {
+    const valueKey = getFiltroOperativoValueKey(value);
+    if (valueKey !== initialValueKeyRef.current) {
+      pendingEchoKeysRef.current.add(valueKey);
+    }
     if (onChange) onChange(value);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
