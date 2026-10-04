@@ -16,6 +16,7 @@ public sealed class GastosPaginationScopeTests
     {
         TextoBusqueda = "texto",
         Estados = "PAGADO,APROBADO",
+        TodosLosEstados = true,
         FechaInicio = new DateOnly(2026, 1, 1),
         FechaFin = new DateOnly(2026, 6, 30),
         IdSolicitante = 11,

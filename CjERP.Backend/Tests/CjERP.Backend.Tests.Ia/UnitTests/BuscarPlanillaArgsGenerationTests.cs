@@ -53,6 +53,70 @@ public sealed class BuscarPlanillaArgsGenerationTests
         Assert.Equal("Claro", args.Cliente);
     }
 
+    [Theory]
+    [InlineData("gastos por cliente y moneda para el mes de setiembre 2026")]
+    [InlineData("gastos agrupados por cliente en setiembre 2026")]
+    [InlineData("gastos separados por cliente y proyecto")]
+    public void AgruparPorCliente_NoSeInterpretaComoNombreDeCliente(string pregunta)
+    {
+        // Caso real (auditoria 2026-10-03): "por cliente y moneda..." enviaba cliente = "y moneda para el mes de
+        // setiembre 2026" al SP y devolvia 0 registros. "por <dimension>" es agrupacion, no un filtro.
+        var args = IaChatServiceReflection.BuildSearchArgsFromQuestion(pregunta);
+
+        Assert.Null(args.Cliente);
+        Assert.Null(args.Proyecto);
+    }
+
+    [Fact]
+    public void PalabrasDeMonedaYMes_NoSeConviertenEnTextoDeBusqueda()
+    {
+        // El mes ya viaja en fechaInicio/fechaFin; "moneda" es una dimension. Como texto de busqueda restringirian
+        // a los gastos cuyo detalle mencione esas palabras (caso real: 590 filas en vez del total del mes).
+        var args = IaChatServiceReflection.BuildSearchArgsFromQuestion("gastos por cliente y moneda para el mes de setiembre 2026");
+
+        Assert.Null(args.TextoBusqueda);
+    }
+
+    [Theory]
+    [InlineData("gastos por cliente y moneda para el mes de setiembre 2026")]
+    [InlineData("gastos de setiembre 2026")]
+    [InlineData("todos los gastos del cliente Claro")]
+    public void SinEstadoExplicito_SeAplicaPagadoPorDefecto(string pregunta)
+    {
+        // Regla de negocio (2026-10-03): sin estado explicito solo se consideran los gastos PAGADO.
+        var args = IaChatServiceReflection.BuildSearchArgsFromQuestion(pregunta);
+
+        Assert.Equal("PAGADO", args.Estados);
+    }
+
+    [Theory]
+    [InlineData("gastos de setiembre 2026 considerando todos los estados")]
+    [InlineData("gastos por cliente y moneda de setiembre 2026 sin importar el estado")]
+    [InlineData("gastos de setiembre 2026 en cualquier estado")]
+    [InlineData("gastos de setiembre 2026 sin filtro de estado")]
+    public void SiPideTodosLosEstados_NoSeAplicaElEstadoPorDefecto(string pregunta)
+    {
+        var args = IaChatServiceReflection.BuildSearchArgsFromQuestion(pregunta);
+
+        Assert.Null(args.Estados);
+    }
+
+    [Fact]
+    public void ConEstadoExplicito_SeRespetaElEstadoPedido()
+    {
+        var args = IaChatServiceReflection.BuildSearchArgsFromQuestion("gastos pendientes de setiembre 2026");
+
+        Assert.Equal("PENDIENTE", args.Estados);
+    }
+
+    [Fact]
+    public void ClienteConEtiquetaExplicita_SigueExtrayendoseDespuesDeUnaAgrupacion()
+    {
+        var args = IaChatServiceReflection.BuildSearchArgsFromQuestion("gastos por mes del cliente Claro");
+
+        Assert.Equal("Claro", args.Cliente);
+    }
+
     [Fact]
     public void HallazgoDocumentado_FiltroPorCliente_NoRecortaTextoDeRangoDeFechaPegadoALaEtiqueta()
     {

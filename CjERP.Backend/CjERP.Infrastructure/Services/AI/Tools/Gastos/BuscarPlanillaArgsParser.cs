@@ -45,6 +45,7 @@ internal static class BuscarPlanillaArgsParser
         args.Ot = GetJsonStringLikeValue(value, "ot");
         args.CoincidirTodas = GetJsonBoolValue(value, "coincidirTodas") ?? args.CoincidirTodas;
         args.IncluirEstado99 = GetJsonBoolValue(value, "incluirEstado99") ?? args.IncluirEstado99;
+        args.TodosLosEstados = GetJsonBoolValue(value, "todosLosEstados") ?? args.TodosLosEstados;
         args.Pagina = GetJsonIntValue(value, "pagina") ?? args.Pagina;
         args.TamanoPagina = GetJsonIntValue(value, "tamanoPagina") ?? args.TamanoPagina;
         args.TipoCambio = GetJsonDecimalValue(value, "tipoCambio") ?? args.TipoCambio;

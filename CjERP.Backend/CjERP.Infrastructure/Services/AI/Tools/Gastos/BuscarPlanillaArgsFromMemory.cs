@@ -35,6 +35,7 @@ internal static class BuscarPlanillaArgsFromMemory
             Ot = GetDictionaryString(toolParameters, "ot"),
             CoincidirTodas = GetDictionaryBool(toolParameters, "coincidirTodas") ?? false,
             IncluirEstado99 = GetDictionaryBool(toolParameters, "incluirEstado99") ?? true,
+            TodosLosEstados = GetDictionaryBool(toolParameters, "todosLosEstados") ?? false,
             Pagina = GetDictionaryInt(toolParameters, "pagina") ?? 1,
             TamanoPagina = GetDictionaryInt(toolParameters, "tamanoPagina") ?? 50,
             TipoCambio = GetDictionaryDecimal(toolParameters, "tipoCambio")

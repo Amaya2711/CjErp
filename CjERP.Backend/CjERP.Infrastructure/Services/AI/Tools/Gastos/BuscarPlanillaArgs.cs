@@ -13,6 +13,9 @@ public sealed class BuscarPlanillaArgs
 
     public string? Estados { get; set; }
 
+    // true = el usuario pidio expresamente considerar TODOS los estados: no se aplica el estado por defecto (PAGADO).
+    public bool TodosLosEstados { get; set; }
+
     public DateOnly? FechaInicio { get; set; }
 
     public DateOnly? FechaFin { get; set; }
@@ -68,7 +71,12 @@ public sealed class BuscarPlanillaArgs
         Solicitante = NormalizeText(Solicitante);
         Ot = NormalizeText(Ot);
 
-        if (string.IsNullOrWhiteSpace(Estados))
+        if (TodosLosEstados)
+        {
+            Estados = null;
+            EstadosAplicadosPorDefecto = false;
+        }
+        else if (string.IsNullOrWhiteSpace(Estados))
         {
             Estados = "PAGADO";
             EstadosAplicadosPorDefecto = true;
@@ -130,6 +138,7 @@ public sealed class BuscarPlanillaArgs
             ["pagina"] = Pagina,
             ["tamanoPagina"] = TamanoPagina,
             ["tipoCambio"] = TipoCambio,
+            ["todosLosEstados"] = TodosLosEstados,
             ["estadoAplicadoPorDefecto"] = EstadosAplicadosPorDefecto,
             ["fechasAplicadasPorDefecto"] = FechasAplicadasPorDefecto
         };

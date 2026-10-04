@@ -148,6 +148,10 @@ public static class GastosAnalysisService
                 ? $"con estados {args.Estados} (aplicado por defecto)"
                 : $"con estados {args.Estados}");
         }
+        else if (args.TodosLosEstados)
+        {
+            parts.Add("considerando todos los estados");
+        }
 
         if (args.FechaInicio.HasValue || args.FechaFin.HasValue)
         {

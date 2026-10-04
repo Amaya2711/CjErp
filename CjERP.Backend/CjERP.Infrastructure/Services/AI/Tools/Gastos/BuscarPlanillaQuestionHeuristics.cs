@@ -91,7 +91,8 @@ internal static class BuscarPlanillaQuestionHeuristics
             args.FechaFin = new DateOnly(peruNow.Year, 12, 31);
         }
 
-        args.Estados = ExtractEstadosFilter(question);
+        args.TodosLosEstados = RequestsAllStates(question);
+        args.Estados = args.TodosLosEstados ? null : ExtractEstadosFilter(question);
         args.Solicitante = ExtractNamedFilter(question, "solicitante");
         args.Responsable = ExtractResponsibleFilter(question) ?? ExtractPersonFilter(question);
         args.Cliente = ExtractNamedFilter(question, "cliente");
@@ -154,28 +155,58 @@ internal static class BuscarPlanillaQuestionHeuristics
             : null;
     }
 
+    // "por cliente", "agrupado por proyecto", "segun site"...: la etiqueta es una DIMENSION de agrupacion, no un
+    // filtro con valor. Se ignora esa aparicion para no convertir el resto de la frase en un nombre.
+    private static readonly System.Text.RegularExpressions.Regex GroupingPrefix = new(
+        @"(\bpor|\bseg[uú]n|\bagrupad[oa]s?\s+por|\bseparad[oa]s?\s+por|\bdesglos\w*\s+por|\bclasificad[oa]s?\s+por|\bordenad[oa]s?\s+por|\bdetalle\s+por|\bresumen\s+por)\s*$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    // Si el "valor" empieza con una palabra de enlace no es un nombre ("cliente y moneda", "proyecto para ...").
+    private static readonly HashSet<string> NonNameLeadingWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "y", "e", "o", "u", "para", "en", "del", "de", "la", "las", "el", "los", "con", "sin", "por", "durante",
+        "segun", "según", "mes", "año", "ano", "entre", "desde", "hasta", "que", "al", "a"
+    };
+
     internal static string? ExtractNamedFilter(string question, string token)
     {
         var pattern = $@"\b{System.Text.RegularExpressions.Regex.Escape(token)}\s+(?<value>[A-Za-zÁÉÍÓÚáéíóúÑñ0-9\.\-_ ]{{3,80}})";
-        var match = System.Text.RegularExpressions.Regex.Match(
+        var matches = System.Text.RegularExpressions.Regex.Matches(
             question,
             pattern,
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
-        if (!match.Success)
+        foreach (System.Text.RegularExpressions.Match match in matches)
         {
-            return null;
+            if (GroupingPrefix.IsMatch(question[..match.Index]))
+            {
+                continue;
+            }
+
+            var value = match.Groups["value"].Value.Trim();
+            value = TrimAtStructuralSeparator(value);
+            value = System.Text.RegularExpressions.Regex.Replace(
+                value,
+                @"\b(de este mes|del este mes|de este año|del este año|de 20\d{2}|del 20\d{2}|este mes|este año|mes pasado|hoy|ayer)\b.*$",
+                string.Empty,
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+            var normalizedValue = NormalizeText(value);
+            if (string.IsNullOrWhiteSpace(normalizedValue))
+            {
+                continue;
+            }
+
+            var firstWord = normalizedValue.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
+            if (NonNameLeadingWords.Contains(firstWord))
+            {
+                continue;
+            }
+
+            return normalizedValue;
         }
 
-        var value = match.Groups["value"].Value.Trim();
-        value = TrimAtStructuralSeparator(value);
-        value = System.Text.RegularExpressions.Regex.Replace(
-            value,
-            @"\b(de este mes|del este mes|de este año|del este año|de 20\d{2}|del 20\d{2}|este mes|este año|mes pasado|hoy|ayer)\b.*$",
-            string.Empty,
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
-
-        return NormalizeText(value);
+        return null;
     }
 
     internal static string? ExtractLooseSearchText(string question, params string?[] explicitFilters)
@@ -203,7 +234,7 @@ internal static class BuscarPlanillaQuestionHeuristics
 
         normalized = System.Text.RegularExpressions.Regex.Replace(
             normalized,
-            @"\b(comparacion|comparar|comparando|comparativa|comparativo|contra|vs|versus|frente|frentea|montooc2|montooc|monto|oc2|conpagado|conpagadosoles|subtotalesoles|subtotalsoles|saldoocsitio|suboc|subplanilla|adelafic|diferenciafic|venta|ventas|quiero|saber|mostrar|consultar|buscar|registros|registro|planilla|detalle|detalles|total|suma|sumado|gasto|gastos|cliente|clientes|proyecto|proyectos|site|sitio|sitios|responsable|responsables|solicitante|solicitantes|estado|estados|considerando|considera|considerar|pagado|pagada|pagados|pagadas|aprobado|aprobada|aprobados|aprobadas|pendiente|pendientes|observado|observada|observados|observadas|rechazado|rechazada|rechazados|rechazadas|separado|separada|separados|separadas|agrupado|agrupada|agrupados|agrupadas|de|del|para|por|con|en|el|la|los|las|periodo|periodo|mes|ano|año|inicio|fin|desde|hasta|ejecuta|ejecutar|store|sp|ia|modulo|módulo|texto|busqueda|general|coincidir|todas)\b",
+            @"\b(comparacion|comparar|comparando|comparativa|comparativo|contra|vs|versus|frente|frentea|montooc2|montooc|monto|oc2|conpagado|conpagadosoles|subtotalesoles|subtotalsoles|saldoocsitio|suboc|subplanilla|adelafic|diferenciafic|venta|ventas|quiero|saber|mostrar|consultar|buscar|registros|registro|planilla|detalle|detalles|total|suma|sumado|gasto|gastos|cliente|clientes|proyecto|proyectos|site|sitio|sitios|responsable|responsables|solicitante|solicitantes|estado|estados|considerando|considera|considerar|pagado|pagada|pagados|pagadas|aprobado|aprobada|aprobados|aprobadas|pendiente|pendientes|observado|observada|observados|observadas|rechazado|rechazada|rechazados|rechazadas|separado|separada|separados|separadas|agrupado|agrupada|agrupados|agrupadas|de|del|para|por|con|en|el|la|los|las|periodo|mes|ano|año|moneda|monedas|enero|febrero|marzo|abril|mayo|junio|julio|agosto|setiembre|septiembre|octubre|noviembre|diciembre|realizado|realizados|realizada|realizadas|desglose|desglosado|desglosada|resumen|inicio|fin|desde|hasta|ejecuta|ejecutar|store|sp|ia|modulo|módulo|texto|busqueda|general|coincidir|todas)\b",
             " ",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
@@ -394,6 +425,15 @@ internal static class BuscarPlanillaQuestionHeuristics
 
         return cleaned.Trim().TrimEnd('.', ',', ';', ':');
     }
+
+    // El usuario pide expresamente no limitar por estado ("todos los estados", "sin importar el estado"...).
+    // Sin esta peticion explicita el sistema considera solo PAGADO (regla de negocio, 2026-10-03).
+    private static readonly System.Text.RegularExpressions.Regex AllStatesRequest = new(
+        @"\b(todos\s+los\s+estados|todo\s+estado|cualquier\s+estado|en\s+cualquier\s+estado|sin\s+(importar|filtrar|considerar)\s+(el\s+|por\s+)?estados?|sin\s+filtros?\s+(de|por)\s+estados?|independientemente\s+del\s+estado|sin\s+restringir\s+(el\s+|por\s+)?estado)\b",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    internal static bool RequestsAllStates(string question) =>
+        !string.IsNullOrWhiteSpace(question) && AllStatesRequest.IsMatch(question);
 
     internal static string? ExtractEstadosFilter(string question)
     {
