@@ -3,12 +3,17 @@ import type { CSSProperties, ChangeEvent } from "react";
 import {
   Bot,
   Download,
+  Eraser,
   FileText,
   Loader2,
   MessageSquareText,
+  Mic,
   Paperclip,
   Sparkles,
+  Square,
   Trash2,
+  Volume2,
+  VolumeX,
   X,
   WandSparkles,
 } from "lucide-react";
@@ -38,6 +43,8 @@ import {
   exportarDashboardIaChat,
   getIaChatErrorMessage,
 } from "./iachat/services/iaChatService";
+import { useSpeechDictation } from "./iachat/hooks/useSpeechDictation";
+import { cancelSpeech, useSpeechReader } from "./iachat/hooks/useSpeechReader";
 import type {
   IaChatMessage,
   IaChatModuleCode,
@@ -2337,6 +2344,28 @@ function getChartTitle(chartType: IaChatChartType) {
       : "Comparacion";
 }
 
+// Lee en voz alta el texto de una respuesta (voz del navegador). Se oculta si el navegador no la soporta.
+function ReadAloudButton({ text }: { text: string }) {
+  const reader = useSpeechReader();
+
+  if (!reader.supported || !text.trim()) {
+    return null;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => (reader.speaking ? reader.stop() : reader.speak(text))}
+      aria-label={reader.speaking ? "Detener la lectura" : "Escuchar la respuesta"}
+      title={reader.speaking ? "Detener la lectura" : "Escuchar la respuesta"}
+      style={{ ...styles.readAloudButton, ...(reader.speaking ? styles.readAloudButtonActive : {}) }}
+    >
+      {reader.speaking ? <VolumeX size={14} /> : <Volume2 size={14} />}
+      {reader.speaking ? "Detener" : "Escuchar"}
+    </button>
+  );
+}
+
 // Memoizado: escribir en el prompt cambia solo `question` y no debe recalcular las respuestas ya renderizadas.
 const MessageBubble = memo(function MessageBubble({ message }: { message: IaChatMessage }) {
   const isAssistant = message.role === "assistant";
@@ -2369,6 +2398,11 @@ const MessageBubble = memo(function MessageBubble({ message }: { message: IaChat
           </div>
         ) : (
           <div style={styles.messageText}>{message.text}</div>
+        )}
+        {isAssistant && message.tone !== "error" && message.text.trim() && (
+          <div style={styles.readAloudRow}>
+            <ReadAloudButton text={message.text} />
+          </div>
         )}
         {message.response?.success && <StructuredResponseBlock response={message.response} />}
       </div>
@@ -3106,6 +3140,35 @@ export default function IaChatPage() {
   const [question, setQuestion] = useState("");
   const [attachment, setAttachment] = useState<IaChatImageAttachment | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Dictado por voz: el texto reconocido se agrega al cuadro de consulta y NUNCA se envia solo.
+  const questionBeforeDictationRef = useRef("");
+  const dictation = useSpeechDictation({
+    onTranscript: (finalText, interimText) => {
+      const dictated = [finalText, interimText].filter(Boolean).join(" ").trim();
+      const base = questionBeforeDictationRef.current.replace(/\s+$/, "");
+      setQuestion(base ? `${base} ${dictated}`.trim() : dictated);
+    },
+  });
+
+  const clearDictation = () => {
+    dictation.abort();
+    questionBeforeDictationRef.current = "";
+    setQuestion("");
+  };
+
+  // Al salir de la pagina se corta tambien la lectura en voz alta.
+  useEffect(() => () => cancelSpeech(), []);
+
+  const toggleDictation = () => {
+    if (dictation.listening) {
+      dictation.stop();
+      return;
+    }
+
+    questionBeforeDictationRef.current = question;
+    dictation.start();
+  };
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [presentationMode, setPresentationMode] = useState<IaChatPresentationMode>(
     sessionState?.presentationMode ?? "auto"
@@ -3252,6 +3315,7 @@ export default function IaChatPage() {
     threadGenerationsRef.current[selectedModule.id] =
       (threadGenerationsRef.current[selectedModule.id] ?? 0) + 1;
 
+    cancelSpeech();
     setErrorMessage(null);
     setAttachment(null);
     setThreads((current) => {
@@ -3284,6 +3348,8 @@ export default function IaChatPage() {
   };
 
   const sendQuestion = async (modeOverride?: IaChatPresentationMode, questionOverride?: string) => {
+    dictation.stop();
+    cancelSpeech();
     const trimmedQuestion = (questionOverride ?? question).trim();
     const effectiveMode = modeOverride ?? presentationMode;
 
@@ -3596,6 +3662,46 @@ export default function IaChatPage() {
               />
 
               <div style={styles.composerActionRow}>
+                {dictation.supported ? (
+                  <div style={styles.micGroup}>
+                    <button
+                      type="button"
+                      onClick={toggleDictation}
+                      disabled={loading || !isEnabled}
+                      aria-label={dictation.listening ? "Detener dictado por voz" : "Dictar consulta por voz"}
+                      title={dictation.listening ? "Detener dictado" : "Dictar consulta por voz"}
+                      style={{
+                        ...styles.micButton,
+                        ...(dictation.listening ? styles.micButtonActive : {}),
+                        ...(loading || !isEnabled ? styles.sendButtonDisabled : {}),
+                      }}
+                    >
+                      {dictation.listening ? <Square size={16} /> : <Mic size={16} />}
+                      {dictation.listening ? "Detener" : "Dictar"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearDictation}
+                      disabled={loading || !isEnabled || (!question && !dictation.listening)}
+                      aria-label="Borrar el texto de la consulta"
+                      title="Borrar el texto de la consulta"
+                      style={{
+                        ...styles.micButton,
+                        ...(loading || !isEnabled || (!question && !dictation.listening) ? styles.sendButtonDisabled : {}),
+                      }}
+                    >
+                      <Eraser size={16} />
+                      Limpiar
+                    </button>
+                    {(dictation.listening || dictation.error) && (
+                      <span style={{ ...styles.micStatus, ...(dictation.error ? styles.micStatusError : {}) }}>
+                        {dictation.error ?? "Escuchando... revisa el texto y pulsa Enviar cuando estes listo."}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <span />
+                )}
                 <button
                   type="button"
                   onClick={() => void sendQuestion()}
@@ -4644,6 +4750,62 @@ const styles: Record<string, CSSProperties> = {
     gap: 8,
     padding: "0 18px",
     boxShadow: "0 14px 24px rgba(15,118,110,0.18)",
+  },
+  micGroup: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  micButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    minHeight: 52,
+    padding: "0 16px",
+    borderRadius: 16,
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    color: "#0F172A",
+    fontWeight: 800,
+    fontSize: 13,
+    cursor: "pointer",
+  },
+  micButtonActive: {
+    background: "#FEF2F2",
+    borderColor: "#DC2626",
+    color: "#B91C1C",
+  },
+  readAloudRow: {
+    marginTop: 10,
+    display: "flex",
+    justifyContent: "flex-start",
+  },
+  readAloudButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "6px 12px",
+    borderRadius: 999,
+    border: "1px solid #CBD5E1",
+    background: "#FFFFFF",
+    color: "#0F172A",
+    fontWeight: 700,
+    fontSize: 12,
+    cursor: "pointer",
+  },
+  readAloudButtonActive: {
+    background: "#ECFDF5",
+    borderColor: "#0F766E",
+    color: "#0F766E",
+  },
+  micStatus: {
+    fontSize: 12,
+    color: "#475569",
+  },
+  micStatusError: {
+    color: "#B91C1C",
   },
   sendButtonDisabled: {
     opacity: 0.55,
