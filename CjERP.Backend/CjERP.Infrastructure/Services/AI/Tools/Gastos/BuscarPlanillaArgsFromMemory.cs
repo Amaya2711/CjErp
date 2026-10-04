@@ -37,7 +37,7 @@ internal static class BuscarPlanillaArgsFromMemory
             IncluirEstado99 = GetDictionaryBool(toolParameters, "incluirEstado99") ?? true,
             Pagina = GetDictionaryInt(toolParameters, "pagina") ?? 1,
             TamanoPagina = GetDictionaryInt(toolParameters, "tamanoPagina") ?? 50,
-            TipoCambio = GetDictionaryDecimal(toolParameters, "tipoCambio") ?? 3.8m
+            TipoCambio = GetDictionaryDecimal(toolParameters, "tipoCambio")
         };
 
         return args.Normalize();

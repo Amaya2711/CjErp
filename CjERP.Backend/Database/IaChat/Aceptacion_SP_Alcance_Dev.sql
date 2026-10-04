@@ -156,7 +156,7 @@ EXEC dbo.sp_IA_Planilla_Buscar @AlcanceNivel = 'RESTRINGIDO', @AlcanceCampos = '
 --     debe devolver <= B02 (normalmente 0), nunca ampliar. Sustituir el nombre por uno real ajeno.
 EXEC dbo.sp_IA_Planilla_Buscar @AlcanceNivel = 'RESTRINGIDO', @AlcanceCampos = 'RS', @AlcanceEmpleados = @ListaEquipo, @VerTotalesGlobales = 0, @Responsable = N'NOMBRE_AJENO', @Pagina = 1, @TamanoPagina = 5;
 
--- B07 Totales globales: SIN permiso las 15 columnas deben ser NULL (no 0); CON permiso, con valores.
+-- B07 Totales globales: SIN permiso las columnas globales (15 de la Fase 2 + 6 de la version 2, script 16) deben ser NULL (no 0); CON permiso, con valores.
 EXEC dbo.sp_IA_Planilla_Buscar @AlcanceNivel = 'RESTRINGIDO', @AlcanceCampos = 'RS', @AlcanceEmpleados = @ListaPropio, @VerTotalesGlobales = 0, @Pagina = 1, @TamanoPagina = 5;
 EXEC dbo.sp_IA_Planilla_Buscar @AlcanceNivel = 'RESTRINGIDO', @AlcanceCampos = 'RS', @AlcanceEmpleados = @ListaPropio, @VerTotalesGlobales = 1, @Pagina = 1, @TamanoPagina = 5;
 --     Paridad de calculos: para el MISMO IdPlanilla, las 15 columnas con permiso deben igualar las del SP

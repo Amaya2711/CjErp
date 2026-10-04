@@ -11,7 +11,7 @@ namespace CjERP.Infrastructure.Services;
 
 internal static class IaGlobalColumns
 {
-    /// <summary>Las 15 columnas globales del SP (ver el script del SP y el anexo del plan).</summary>
+    /// <summary>Las 21 columnas globales del SP (15 de la Fase 2 + 6 de la version 2; ver los scripts 02 y 16).</summary>
     internal static readonly IReadOnlyList<string> Names =
     [
         "Ventas",
@@ -28,7 +28,15 @@ internal static class IaGlobalColumns
         "DiferenciaFic",
         "CodigoValidacionFic",
         "ResultadoValidacionFic",
-        "PorcentajeFic"
+        "PorcentajeFic",
+        // Version 2 del SP (16_sp_IA_Planilla_Buscar_v2_ColumnasAnalisis.sql): agregados por site/OT/banco
+        // sobre toda la tabla; mismo tratamiento que las 15 anteriores (NULL = no permitido, nunca 0).
+        "TotalSubtotalPorMoneda",
+        "TotalMontoBckPorMoneda",
+        "TotalMontoVisiblePorMoneda",
+        "TotalPagadoConvertidoSoles",
+        "TipoCambioFaltanteOT",
+        "TotalPagarProcesado"
     ];
 
     private static readonly HashSet<string> NameSet = new(Names, StringComparer.OrdinalIgnoreCase);

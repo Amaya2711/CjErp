@@ -158,13 +158,13 @@ public sealed class BuscarPlanillaArgsGenerationTests
     }
 
     [Fact]
-    public void TipoCambioPorDefecto_EsElHardcodeadoActual3_80()
+    public void TipoCambioPorDefecto_NoSeFijaEnCodigo_LoResuelveElSp()
     {
-        // Documenta el hallazgo ya conocido (docs/AI_COPILOT_DESIGN.md): el tipo de cambio por defecto
-        // es un valor fijo en codigo, no una consulta a un tipo de cambio real del dia.
+        // Decision de negocio 2026-10-03: el backend ya no fija 3.80; envia null y el SP resuelve el tipo de
+        // cambio (tabla a_tipo_cambio_diario o, si no hay, USD 3.50).
         var args = IaChatServiceReflection.BuildSearchArgsFromQuestion("gastos del cliente Claro");
 
-        Assert.Equal(3.80m, args.TipoCambio);
+        Assert.Null(args.TipoCambio);
     }
 
     [Fact]

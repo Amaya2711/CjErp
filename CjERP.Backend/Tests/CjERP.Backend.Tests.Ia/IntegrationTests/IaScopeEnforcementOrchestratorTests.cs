@@ -189,7 +189,7 @@ public sealed class IaScopeEnforcementOrchestratorTests
         Assert.Equal(0, executor.LegacyCalls);
         Assert.Equal(1, executor.ScopedCalls);
         Assert.Same(scope, executor.LastScope);
-        Assert.Equal(15, response.UnavailableFields!.Count);
+        Assert.Equal(IaGlobalColumns.Names.Count, response.UnavailableFields!.Count);
         Assert.NotNull(response.DetailRows);
 
         // El analisis enviado al LLM declara los campos no disponibles y la regla.
@@ -211,7 +211,7 @@ public sealed class IaScopeEnforcementOrchestratorTests
         Assert.Contains("no está disponible", response.Answer);
         Assert.Null(response.DetailRows);
         Assert.Equal(0, response.TotalRows);
-        Assert.Equal(15, response.UnavailableFields!.Count);
+        Assert.Equal(IaGlobalColumns.Names.Count, response.UnavailableFields!.Count);
         Assert.Equal(1, handler.CallCount);                       // solo el planner: no hubo analisis ni respuesta del LLM
     }
 
@@ -305,7 +305,7 @@ public sealed class IaScopeEnforcementOrchestratorTests
 
         Assert.True(response.Success);
         Assert.All(IaGlobalColumns.Names, name => Assert.DoesNotContain(response.DetailRows![0].Keys, k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase)));
-        Assert.Equal(15, response.UnavailableFields!.Count);
+        Assert.Equal(IaGlobalColumns.Names.Count, response.UnavailableFields!.Count);
 
         foreach (var body in handler.RequestBodies)
         {

@@ -122,7 +122,7 @@ public sealed record BuscarPlanillaArgsSnapshot(
     bool IncluirEstado99,
     int Pagina,
     int TamanoPagina,
-    decimal TipoCambio,
+    decimal? TipoCambio,
     bool EstadosAplicadosPorDefecto,
     bool FechasAplicadasPorDefecto)
 {
@@ -148,7 +148,7 @@ public sealed record BuscarPlanillaArgsSnapshot(
             IncluirEstado99: Get<bool>("IncluirEstado99"),
             Pagina: Get<int>("Pagina"),
             TamanoPagina: Get<int>("TamanoPagina"),
-            TipoCambio: Get<decimal>("TipoCambio"),
+            TipoCambio: GetNullable<decimal>("TipoCambio"),
             EstadosAplicadosPorDefecto: Get<bool>("EstadosAplicadosPorDefecto"),
             FechasAplicadasPorDefecto: Get<bool>("FechasAplicadasPorDefecto"));
     }

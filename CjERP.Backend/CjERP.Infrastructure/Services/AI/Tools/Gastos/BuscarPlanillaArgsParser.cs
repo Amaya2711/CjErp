@@ -14,7 +14,7 @@ internal static class BuscarPlanillaArgsParser
         var args = ParseBuscarPlanillaArgsManually(input);
         args.TamanoPagina = Math.Clamp(args.TamanoPagina <= 0 ? 50 : args.TamanoPagina, 1, MaxPageSize);
         args.Pagina = Math.Max(args.Pagina, 1);
-        args.TipoCambio = args.TipoCambio <= 0 ? 3.8m : args.TipoCambio;
+        args.TipoCambio = args.TipoCambio is > 0 ? args.TipoCambio : null;
         return args.Normalize();
     }
 

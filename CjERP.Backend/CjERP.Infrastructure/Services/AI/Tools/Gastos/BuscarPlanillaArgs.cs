@@ -49,7 +49,8 @@ public sealed class BuscarPlanillaArgs
 
     public int TamanoPagina { get; set; } = 50;
 
-    public decimal TipoCambio { get; set; } = 3.8m;
+    // null = el SP resuelve el tipo de cambio (tabla de tipos de cambio y, si no hay, USD 3.50).
+    public decimal? TipoCambio { get; set; }
 
     public bool EstadosAplicadosPorDefecto { get; set; }
 

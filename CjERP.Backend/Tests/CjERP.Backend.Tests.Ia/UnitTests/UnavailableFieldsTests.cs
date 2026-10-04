@@ -15,13 +15,16 @@ public sealed class UnavailableFieldsTests
     [
         "Ventas", "TotalPagadoHistoricoSoles", "ConPagadoSoles", "ConPagadoMonedaRegistro", "ConPagado",
         "SaldoOcSitio", "SubOc", "SubPlanilla", "SubPlanillaConRegistroActual", "PorcentajeSubPlanilla",
-        "AdelaFic", "DiferenciaFic", "CodigoValidacionFic", "ResultadoValidacionFic", "PorcentajeFic"
+        "AdelaFic", "DiferenciaFic", "CodigoValidacionFic", "ResultadoValidacionFic", "PorcentajeFic",
+        // Version 2 del SP (script 16)
+        "TotalSubtotalPorMoneda", "TotalMontoBckPorMoneda", "TotalMontoVisiblePorMoneda",
+        "TotalPagadoConvertidoSoles", "TipoCambioFaltanteOT", "TotalPagarProcesado"
     ];
 
     [Fact]
-    public void LasQuinceColumnasGlobales_CoincidenConElContratoDelSp()
+    public void LasColumnasGlobales_CoincidenConElContratoDelSp()
     {
-        Assert.Equal(15, IaGlobalColumns.Names.Count);
+        Assert.Equal(21, IaGlobalColumns.Names.Count);
         Assert.Equal(Expected.OrderBy(n => n), IaGlobalColumns.Names.OrderBy(n => n));
         Assert.All(Expected, name => Assert.True(IaGlobalColumns.IsGlobal(name.ToUpperInvariant())));
         Assert.False(IaGlobalColumns.IsGlobal("Subtotal"));
@@ -81,7 +84,7 @@ public sealed class UnavailableFieldsTests
         using var json = JsonDocument.Parse(JsonSerializer.Serialize(payload));
         var root = json.RootElement;
 
-        Assert.Equal(15, root.GetProperty("unavailableFields").GetArrayLength());
+        Assert.Equal(IaGlobalColumns.Names.Count, root.GetProperty("unavailableFields").GetArrayLength());
         Assert.Equal("single_metric", root.GetProperty("assumptions").GetProperty("analysisMode").GetString());
         Assert.Equal(JsonValueKind.Null, root.GetProperty("comparison").ValueKind);
         Assert.Contains("NO estan disponibles", root.GetProperty("assumptions").GetProperty("unavailableFieldsRule").GetString());
@@ -135,7 +138,7 @@ public sealed class UnavailableFieldsTests
 
         Assert.True(report.MetricUnavailable);
         Assert.Equal("ventas", report.Metric);
-        Assert.Equal(15, report.UnavailableFields.Count);
+        Assert.Equal(IaGlobalColumns.Names.Count, report.UnavailableFields.Count);
         Assert.Empty(report.KpiRows);
         Assert.Empty(report.SemaphoreTable);
         Assert.Empty(report.ProjectTable);

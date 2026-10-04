@@ -169,7 +169,7 @@ public sealed class GastosPaginationScopeTests
             }),
             CancellationToken.None);
 
-        Assert.Equal(15, result.UnavailableColumns.Count);
+        Assert.Equal(IaGlobalColumns.Names.Count, result.UnavailableColumns.Count);
         Assert.Equal(["IdPlanilla", "Subtotal", "TotalRegistros"], result.Rows[0].Keys);
         Assert.Equal(1, result.TotalRows);
     }

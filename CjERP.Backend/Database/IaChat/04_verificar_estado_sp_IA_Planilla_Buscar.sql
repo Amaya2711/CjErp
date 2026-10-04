@@ -81,7 +81,7 @@ SELECT @@SERVERNAME AS Servidor,
 FROM sys.objects o
 WHERE o.object_id = @obj;
 
--- [2] Parametros actuales (18 = anterior; 22 = con alcance)
+-- [2] Parametros actuales (18 = anterior; 22 = con alcance, script 02; 26 = version 2 con columnas de analisis, script 16)
 SELECT p.parameter_id AS Orden, p.name AS Parametro, TYPE_NAME(p.user_type_id) AS Tipo, p.has_default_value AS TieneDefault
 FROM sys.parameters p
 WHERE p.object_id = @obj
