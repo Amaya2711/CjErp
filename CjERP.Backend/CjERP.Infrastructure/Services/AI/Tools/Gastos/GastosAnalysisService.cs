@@ -213,6 +213,9 @@ public static class GastosAnalysisService
         decimal? consolidatedTotalAmount = hasMultipleCurrencies ? null : totalAmount;
         var clientProjectBreakdown = BuildClientProjectBreakdown(analysisRows, amountField);
         var monthBreakdown = BuildMonthBreakdown(analysisRows, amountField);
+        // "por cliente y moneda" / "por fecha": cada grupo ya va separado por moneda (no se mezclan monedas).
+        var clientCurrencyBreakdown = BuildClientCurrencyBreakdown(analysisRows);
+        var dateCurrencyBreakdown = BuildDateCurrencyBreakdown(analysisRows);
         var siteBreakdown = BuildSingleFieldBreakdown(analysisRows, "Site", amountField, "IdSite", "Site");
         var responsibleBreakdown = BuildSingleFieldBreakdown(analysisRows, "Responsable", amountField);
         var solicitanteBreakdown = BuildSingleFieldBreakdown(analysisRows, "Solicitante", amountField);
@@ -254,6 +257,8 @@ public static class GastosAnalysisService
                 status = TrimBreakdown(statusBreakdown, 20),
                 clientProject = TrimBreakdown(clientProjectBreakdown, 80),
                 month = monthBreakdown,
+                clientCurrency = TrimBreakdown(clientCurrencyBreakdown, 150),
+                dateCurrency = TrimBreakdown(dateCurrencyBreakdown, 120),
                 site = TrimBreakdown(siteBreakdown, 50),
                 responsable = TrimBreakdown(responsibleBreakdown, 50),
                 solicitante = TrimBreakdown(solicitanteBreakdown, 50)
@@ -560,6 +565,91 @@ public static class GastosAnalysisService
             .ToList();
     }
 
+    /// <summary>
+    /// Desglose Cliente x Moneda: registros, subtotal en la moneda original y, si el store lo trae, su
+    /// equivalente en soles. Cada fila corresponde a UNA moneda, asi que no mezcla monedas.
+    /// </summary>
+    internal static List<Dictionary<string, object?>> BuildClientCurrencyBreakdown(List<Dictionary<string, object?>> rows)
+    {
+        var hasSoles = HasField(rows, "SubtotalSoles");
+        var groups = new Dictionary<(string Cliente, string Moneda), (int Count, decimal Original, decimal Soles)>();
+
+        foreach (var row in rows)
+        {
+            var key = (
+                NormalizeAggregationLabel(GetRowValue(row, "Cliente")),
+                NormalizeAggregationLabel(GetRowValue(row, "Moneda")));
+            (int Count, decimal Original, decimal Soles) current = groups.TryGetValue(key, out var existing) ? existing : (0, 0m, 0m);
+
+            current.Count += 1;
+            current.Original += NormalizeDecimalValue(GetRowValue(row, "Subtotal", "SubTotal"));
+            if (hasSoles)
+            {
+                current.Soles += NormalizeDecimalValue(GetRowValue(row, "SubtotalSoles"));
+            }
+
+            groups[key] = current;
+        }
+
+        return groups
+            .OrderBy(item => item.Key.Cliente, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item => item.Key.Moneda, StringComparer.OrdinalIgnoreCase)
+            .Select(item =>
+            {
+                var result = new Dictionary<string, object?>
+                {
+                    ["Cliente"] = item.Key.Cliente,
+                    ["Moneda"] = item.Key.Moneda,
+                    ["Registros"] = item.Value.Count,
+                    ["SubtotalMonedaOriginal"] = item.Value.Original
+                };
+
+                if (hasSoles)
+                {
+                    result["SubtotalSolesEquivalente"] = item.Value.Soles;
+                }
+
+                return result;
+            })
+            .ToList();
+    }
+
+    /// <summary>Desglose por fecha (dia) y moneda: nunca mezcla monedas en una misma cifra.</summary>
+    internal static List<Dictionary<string, object?>> BuildDateCurrencyBreakdown(List<Dictionary<string, object?>> rows)
+    {
+        var groups = new Dictionary<(DateTime Fecha, string Moneda), (int Count, decimal Original)>();
+
+        foreach (var row in rows)
+        {
+            if (!TryGetRowDate(row, out var date))
+            {
+                continue;
+            }
+
+            var key = (date.Date, NormalizeAggregationLabel(GetRowValue(row, "Moneda")));
+            (int Count, decimal Original) current = groups.TryGetValue(key, out var existing) ? existing : (0, 0m);
+
+            current.Count += 1;
+            current.Original += NormalizeDecimalValue(GetRowValue(row, "Subtotal", "SubTotal"));
+            groups[key] = current;
+        }
+
+        return groups
+            .OrderBy(item => item.Key.Fecha)
+            .ThenBy(item => item.Key.Moneda, StringComparer.OrdinalIgnoreCase)
+            .Select(item => new Dictionary<string, object?>
+            {
+                ["Fecha"] = item.Key.Fecha.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                ["Moneda"] = item.Key.Moneda,
+                ["Registros"] = item.Value.Count,
+                ["SubtotalMonedaOriginal"] = item.Value.Original
+            })
+            .ToList();
+    }
+
+    private static bool HasField(List<Dictionary<string, object?>> rows, string field) =>
+        rows.Any(row => row.Keys.Any(key => string.Equals(key, field, StringComparison.OrdinalIgnoreCase)));
+
     internal static List<Dictionary<string, object?>> BuildDualMetricFieldBreakdown(
         List<Dictionary<string, object?>> gastosRows,
         List<Dictionary<string, object?>> ventasRows,
@@ -790,11 +880,21 @@ public static class GastosAnalysisService
             case DateTimeOffset dateTimeOffset:
                 date = dateTimeOffset.DateTime;
                 return true;
-            case string text when DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var parsedInvariant):
-                date = parsedInvariant;
+            // El store entrega Fecha como dd/mm/aaaa (y otras fechas como aaaa-mm-dd). Se leen primero los formatos
+            // exactos: "01/09/2026" es 1 de setiembre, no 9 de enero (la lectura invariante la invertia).
+            case string text when DateTime.TryParseExact(
+                text.Trim(),
+                new[] { "dd/MM/yyyy", "d/M/yyyy", "yyyy-MM-dd", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-ddTHH:mm:ss", "dd/MM/yyyy HH:mm:ss" },
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var parsedExact):
+                date = parsedExact;
                 return true;
             case string text when DateTime.TryParse(text, CultureInfo.GetCultureInfo("es-PE"), DateTimeStyles.AllowWhiteSpaces, out var parsedPe):
                 date = parsedPe;
+                return true;
+            case string text when DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var parsedInvariant):
+                date = parsedInvariant;
                 return true;
             case string text when DateTime.TryParse(text, CultureInfo.GetCultureInfo("en-US"), DateTimeStyles.AllowWhiteSpaces, out var parsedUs):
                 date = parsedUs;
