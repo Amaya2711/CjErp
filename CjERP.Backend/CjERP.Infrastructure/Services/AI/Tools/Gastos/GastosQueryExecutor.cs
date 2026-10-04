@@ -31,6 +31,18 @@ public interface IGastosQueryExecutor
         IaResolvedScope scope,
         CancellationToken cancellationToken,
         bool fetchAllPages = false);
+
+    /// <summary>
+    /// Resumen agrupado DENTRO de SQL: dbo.sp_IA_Planilla_Buscar en modo RESUMEN (mismo filtrado y mismo alcance
+    /// que el detalle). No trae filas de detalle: devuelve los grupos (dimensiones pedidas + moneda) y los totales
+    /// por moneda de todo el universo filtrado. Alcance obligatorio.
+    /// </summary>
+    Task<PlanillaResumenExecutionResult> EjecutarResumenPlanillaConAlcanceAsync(
+        BuscarPlanillaArgs args,
+        IReadOnlyList<string> dimensions,
+        int top,
+        IaResolvedScope scope,
+        CancellationToken cancellationToken);
 }
 
 public sealed class GastosQueryExecutor : IGastosQueryExecutor
@@ -63,6 +75,73 @@ public sealed class GastosQueryExecutor : IGastosQueryExecutor
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(scope);
         return FetchAsync(args, scope, cancellationToken, fetchAllPages);
+    }
+
+    public async Task<PlanillaResumenExecutionResult> EjecutarResumenPlanillaConAlcanceAsync(
+        BuscarPlanillaArgs args,
+        IReadOnlyList<string> dimensions,
+        int top,
+        IaResolvedScope scope,
+        CancellationToken cancellationToken)
+    {
+        // Falla ANTES de abrir cualquier conexion: sin alcance ni dimensiones validas no se ejecuta nada.
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(dimensions);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        if (dimensions.Count is < 1 or > 3)
+        {
+            throw new ArgumentException("El resumen admite de 1 a 3 dimensiones.", nameof(dimensions));
+        }
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+
+        var parameters = BuildResumenParameters(args, dimensions, top, scope);
+        _logger.LogInformation(
+            "IA Chat ejecutando {StoredProcedure} en modo RESUMEN agrupando por {Dimensiones}",
+            StoredProcedureBuscar,
+            string.Join(",", dimensions));
+
+        using var grid = await connection.QueryMultipleAsync(
+            _sqlCommandFactory.Create(
+                StoredProcedureBuscar,
+                parameters,
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120));
+
+        var groups = (await grid.ReadAsync()).Select(MapRow).ToList();
+        var totals = (await grid.ReadAsync()).Select(MapRow).ToList();
+
+        var totalRows = 0;
+        foreach (var total in totals)
+        {
+            if (total.TryGetValue("Registros", out var registros) && TryConvertToInt(registros, out var count))
+            {
+                totalRows += count;
+            }
+        }
+
+        return new PlanillaResumenExecutionResult
+        {
+            Groups = groups,
+            TotalsByCurrency = totals,
+            TotalRows = totalRows
+        };
+    }
+
+    /// <summary>Mismos parametros que el detalle (filtros y alcance) mas los del modo RESUMEN.</summary>
+    internal static DynamicParameters BuildResumenParameters(
+        BuscarPlanillaArgs args,
+        IReadOnlyList<string> dimensions,
+        int top,
+        IaResolvedScope scope)
+    {
+        var parameters = BuildParameters(args, scope);
+        parameters.Add("@Modo", "RESUMEN", DbType.String, size: 10);
+        parameters.Add("@AgruparPor", string.Join(",", dimensions), DbType.String, size: 100);
+        parameters.Add("@Top", top, DbType.Int32);
+        return parameters;
     }
 
     private Task<PlanillaBuscarExecutionResult> FetchAsync(
@@ -264,6 +343,20 @@ public sealed class GastosQueryExecutor : IGastosQueryExecutor
             item => item.Key,
             item => item.Value == DBNull.Value ? null : item.Value);
     }
+}
+
+/// <summary>
+/// Resultado del modo RESUMEN: grupos (dimensiones + moneda) y totales por moneda de TODO el universo filtrado.
+/// Nunca contiene filas de detalle ni columnas globales.
+/// </summary>
+public sealed class PlanillaResumenExecutionResult
+{
+    public List<Dictionary<string, object?>> Groups { get; set; } = [];
+
+    public List<Dictionary<string, object?>> TotalsByCurrency { get; set; } = [];
+
+    /// <summary>Suma de Registros de los totales por moneda (= registros del universo filtrado).</summary>
+    public int TotalRows { get; set; }
 }
 
 public sealed class PlanillaBuscarExecutionResult

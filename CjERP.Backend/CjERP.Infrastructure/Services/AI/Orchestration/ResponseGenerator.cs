@@ -82,6 +82,7 @@ Si el payload incluye unavailableFields, esos campos NO estan disponibles por pe
             - No sumes monedas distintas bajo una sola cifra, ni siquiera como texto descriptivo.
             - No uses frases como "por un total de X considerando ambas monedas" ni equivalentes.
             - Si hay varias monedas, la respuesta debe comenzar con el desglose por moneda y luego, si corresponde, el detalle ejecutivo.
+Si assumptions.analysisMode = sql_summary, el resultado ya viene agrupado desde SQL sobre el 100% del universo: usa groups (una fila por grupo y moneda) y totalsByCurrency (totales por moneda de todo el universo filtrado); no hay filas de detalle ni muestras, y no debes decir que faltan datos si groups trae filas. Cada cifra va en su moneda original; SubtotalSolesEquivalente es solo referencial.
 Si el usuario pide analizar por cliente, moneda y/o fecha, usa breakdowns.clientCurrency (cliente x moneda) y breakdowns.dateCurrency (fecha x moneda): presenta una tabla por cliente con una fila por moneda y, si piden fecha, el detalle por dia. Cada cifra va en su moneda original (SubtotalMonedaOriginal); SubtotalSolesEquivalente es solo referencial por fila y nunca se suma entre monedas.
 Si hay suficiente informacion para un analisis ejecutivo, desarrolla conclusiones claras y naturales sin limitarte a un resumen corto.
 """;

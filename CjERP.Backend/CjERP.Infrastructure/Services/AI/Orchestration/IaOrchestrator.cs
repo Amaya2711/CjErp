@@ -48,6 +48,9 @@ public sealed class IaOrchestrator : IIaChatService
 
     private static readonly int ConversationHistoryLimit = 6;
 
+    // Maximo de grupos que se piden al modo RESUMEN del store (el store admite hasta 1000).
+    private const int MaxSummaryGroups = 200;
+
     private readonly IGastosQueryExecutor _gastosQueryExecutor;
     private readonly IOpenAiChatProvider _openAiChatProvider;
     private readonly IGastosQueryPlanner _gastosQueryPlanner;
@@ -713,6 +716,62 @@ public sealed class IaOrchestrator : IIaChatService
                 args.TamanoPagina = MaxPageSize;
                 args.Pagina = 1;
 
+                // Preguntas de AGRUPACION ("por cliente y moneda", "por mes"...): el resumen se calcula DENTRO de SQL
+                // (sp_IA_Planilla_Buscar en modo RESUMEN, mismo filtrado y alcance que el detalle) y no se traen miles
+                // de filas al backend. Las preguntas que dependen de metricas globales (ventas, saldos...) o piden el
+                // detalle siguen por la ruta de detalle.
+                if (scope is not null
+                    && TryResolveSummaryDimensions(question, out var summaryDimensions)
+                    && !IaGlobalColumns.MentionsGlobalMetric(question))
+                {
+                    lastToolName = ToolBuscarPlanilla;
+                    lastToolInput = args.AsDictionary();
+                    lastToolInput["modo"] = "RESUMEN";
+                    lastToolInput["agruparPor"] = string.Join(",", summaryDimensions);
+
+                    var resumen = await _gastosQueryExecutor.EjecutarResumenPlanillaConAlcanceAsync(
+                        args, summaryDimensions, MaxSummaryGroups, scope, cancellationToken);
+
+                    totalRows = resumen.TotalRows;
+                    detailRows = [];
+                    groupedRows = resumen.Groups;
+                    summary = new Dictionary<string, object?>
+                    {
+                        ["cantidadRegistros"] = resumen.TotalRows,
+                        ["cantidadGrupos"] = resumen.Groups.Count
+                    };
+                    responseType = "summary";
+
+                    var resumenPayload = BuildResumenAnalysisPayload(
+                        question, args, summaryDimensions, resumen, lastToolInput, interpretedFilters);
+
+                    answer = await _responseGenerator.GenerateOpenAiFinalAnswerAsync(
+                        question,
+                        conversationContext,
+                        module,
+                        plannerRoute,
+                        responseType,
+                        args,
+                        resumenPayload,
+                        cancellationToken);
+
+                    if (string.IsNullOrWhiteSpace(answer))
+                    {
+                        answer = resumen.TotalRows <= 0
+                            ? "No se encontraron registros para los filtros indicados."
+                            : $"Se agruparon {resumen.TotalRows} registros por {string.Join(", ", summaryDimensions)} y moneda ({resumen.Groups.Count} grupos).";
+                    }
+
+                    interpretedFilters["provider"] = "openai";
+                    interpretedFilters["toolName"] = lastToolName;
+                    interpretedFilters["toolParameters"] = lastToolInput;
+                    interpretedFilters["responseType"] = responseType;
+                    interpretedFilters["routingMode"] = "sql_summary";
+                    interpretedFilters["groupBy"] = string.Join(",", summaryDimensions);
+                    completed = true;
+                }
+                else
+                {
                 lastToolName = ToolBuscarPlanilla;
                 lastToolInput = args.AsDictionary();
 
@@ -767,6 +826,7 @@ public sealed class IaOrchestrator : IIaChatService
                     interpretedFilters["toolParameters"] = lastToolInput;
                     interpretedFilters["responseType"] = responseType;
                     completed = true;
+                }
                 }
             }
             else

@@ -426,6 +426,76 @@ internal static class BuscarPlanillaQuestionHeuristics
         return cleaned.Trim().TrimEnd('.', ',', ';', ':');
     }
 
+    private const string DimensionPattern =
+        @"(?:clientes?|proyectos?|responsables?|solicitantes?|sites?|sitios?|estados?|monedas?|bien(?:es)?|comprobantes?|tipos?\s+de\s+pago|tipos?\s+de\s+trabajo|fechas?|d[ií]as?|diari[oa]s?|mes(?:es)?|mensual(?:es)?)";
+
+    private static readonly System.Text.RegularExpressions.Regex SummaryGrouping = new(
+        $@"\b(?:por|seg[uú]n)\s+(?<d1>{DimensionPattern})(?:\s*(?:,|\by\b|\be\b)\s*(?:por\s+)?(?<d2>{DimensionPattern}))?(?:\s*(?:,|\by\b|\be\b)\s*(?:por\s+)?(?<d3>{DimensionPattern}))?\b",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    private static readonly System.Text.RegularExpressions.Regex DetailRequest = new(
+        @"\b(detalle|detallad[oa]s?|listado|lista|listar|registro\s+por\s+registro|uno\s+por\s+uno|cada\s+(?:gasto|registro))\b",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Pregunta de AGRUPACION ("gastos por cliente y moneda", "por mes", "por cliente, moneda y fecha"): devuelve las
+    /// dimensiones del modo RESUMEN del store (1 a 3, en el orden pedido). Si el usuario pide expresamente el
+    /// detalle ("detalle", "listado"...) no se usa el resumen.
+    /// </summary>
+    internal static bool TryResolveSummaryDimensions(string? question, out List<string> dimensions)
+    {
+        dimensions = [];
+        if (string.IsNullOrWhiteSpace(question) || DetailRequest.IsMatch(question))
+        {
+            return false;
+        }
+
+        var match = SummaryGrouping.Match(question);
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        foreach (var group in new[] { "d1", "d2", "d3" })
+        {
+            if (!match.Groups[group].Success)
+            {
+                continue;
+            }
+
+            var dimension = MapSummaryDimension(match.Groups[group].Value);
+            if (dimension is not null && !dimensions.Contains(dimension))
+            {
+                dimensions.Add(dimension);
+            }
+        }
+
+        return dimensions.Count > 0;
+    }
+
+    private static string? MapSummaryDimension(string word)
+    {
+        var text = System.Text.RegularExpressions.Regex.Replace(word.Trim().ToLowerInvariant(), @"\s+", " ");
+
+        return text switch
+        {
+            _ when text.StartsWith("cliente") => "CLIENTE",
+            _ when text.StartsWith("proyecto") => "PROYECTO",
+            _ when text.StartsWith("responsable") => "RESPONSABLE",
+            _ when text.StartsWith("solicitante") => "SOLICITANTE",
+            _ when text.StartsWith("site") || text.StartsWith("sitio") => "SITE",
+            _ when text.StartsWith("estado") => "ESTADO",
+            _ when text.StartsWith("moneda") => "MONEDA",
+            _ when text.StartsWith("bien") => "BIEN",
+            _ when text.StartsWith("comprobante") => "COMPROBANTE",
+            _ when text.Contains("de pago") => "TIPOPAGO",
+            _ when text.Contains("de trabajo") => "TIPOTRABAJO",
+            _ when text.StartsWith("fecha") || text.StartsWith("dia") || text.StartsWith("día") || text.StartsWith("diari") => "FECHA",
+            _ when text.StartsWith("mes") || text.StartsWith("mensual") => "MES",
+            _ => null
+        };
+    }
+
     // El usuario pide expresamente no limitar por estado ("todos los estados", "sin importar el estado"...).
     // Sin esta peticion explicita el sistema considera solo PAGADO (regla de negocio, 2026-10-03).
     private static readonly System.Text.RegularExpressions.Regex AllStatesRequest = new(

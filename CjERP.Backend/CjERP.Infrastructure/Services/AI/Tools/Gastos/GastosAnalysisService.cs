@@ -269,6 +269,49 @@ public static class GastosAnalysisService
         };
     }
 
+    /// <summary>
+    /// Payload para el redactor cuando el resumen se calculo DENTRO de SQL (modo RESUMEN): trae los grupos y los
+    /// totales por moneda del universo completo; no hay filas de detalle. Cada cifra va en su moneda original.
+    /// </summary>
+    internal static object BuildResumenAnalysisPayload(
+        string question,
+        BuscarPlanillaArgs args,
+        IReadOnlyList<string> dimensions,
+        PlanillaResumenExecutionResult result,
+        Dictionary<string, object?> toolParameters,
+        Dictionary<string, object?> interpretedFilters)
+    {
+        const int groupsLimit = 200;
+        var hasMultipleCurrencies = result.TotalsByCurrency.Count > 1;
+
+        return new
+        {
+            question,
+            period = BuildPeriodText(args),
+            assumptions = new
+            {
+                defaultStateApplied = args.EstadosAplicadosPorDefecto,
+                defaultState = args.EstadosAplicadosPorDefecto ? args.Estados : null,
+                defaultPeriodApplied = args.FechasAplicadasPorDefecto,
+                analysisMode = "sql_summary",
+                multipleCurrencies = hasMultipleCurrencies
+            },
+            summaryMode = new
+            {
+                dimensions,
+                source = "Agrupado dentro de SQL sobre el 100% del universo filtrado (sin limite de filas). groups trae una fila por grupo y moneda; totalsByCurrency, los totales por moneda de todo el universo.",
+                groupsReturned = result.Groups.Count,
+                groupsTruncated = result.Groups.Count > groupsLimit
+            },
+            totalRows = result.TotalRows,
+            hasMultipleCurrencies,
+            totalsByCurrency = result.TotalsByCurrency,
+            groups = TrimBreakdown(result.Groups, groupsLimit),
+            toolParameters,
+            interpretedFilters
+        };
+    }
+
     internal static List<Dictionary<string, object?>> ApplyBusinessAnalysisRules(
         string question,
         List<Dictionary<string, object?>> rows,

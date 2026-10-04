@@ -63,6 +63,10 @@ internal static class IaGlobalColumns
         @"\bventas?\b|\bsaldos?\b|\bcon\s*pagado\b|\bconpagado\b|\bcomprometid\w*\b|\bacumulad\w*\b|\bsub\s*oc\b|\bsuboc\b|\b(monto|valor|importe|total)\s+(de\s+)?(la\s+|las\s+)?(oc|ocs|orden(es)?\s+de\s+compra)\b|\b(porcentaje|%)\s+de\s+(avance|uso|ejecucion|ejecución|consumo)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
+    /// <summary>La pregunta menciona una metrica global (ventas, saldos, valor de OC...), con independencia del permiso.</summary>
+    internal static bool MentionsGlobalMetric(string? question) =>
+        !string.IsNullOrWhiteSpace(question) && GlobalMetricQuestion.IsMatch(question);
+
     internal static bool QuestionNeedsGlobalMetric(string? question, IReadOnlyCollection<string>? unavailable) =>
         unavailable is { Count: > 0 }
         && !string.IsNullOrWhiteSpace(question)

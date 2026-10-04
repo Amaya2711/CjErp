@@ -54,6 +54,31 @@ public sealed class IaScopeEnforcementOrchestratorTests
             return Task.FromResult(Result());
         }
 
+        public int SummaryCalls { get; private set; }
+        public IReadOnlyList<string>? LastDimensions { get; private set; }
+
+        public Task<PlanillaResumenExecutionResult> EjecutarResumenPlanillaConAlcanceAsync(
+            BuscarPlanillaArgs args, IReadOnlyList<string> dimensions, int top, IaResolvedScope scope, CancellationToken cancellationToken)
+        {
+            SummaryCalls++;
+            LastDimensions = dimensions;
+            LastScope = scope;
+            return Task.FromResult(new PlanillaResumenExecutionResult
+            {
+                Groups =
+                [
+                    new() { ["Cliente"] = "AMX", ["Moneda"] = "SOLES", ["Registros"] = 3, ["SubtotalMonedaOriginal"] = 300m },
+                    new() { ["Cliente"] = "AMX", ["Moneda"] = "DOLARES", ["Registros"] = 1, ["SubtotalMonedaOriginal"] = 10m }
+                ],
+                TotalsByCurrency =
+                [
+                    new() { ["Moneda"] = "SOLES", ["Registros"] = 3, ["SubtotalMonedaOriginal"] = 300m },
+                    new() { ["Moneda"] = "DOLARES", ["Registros"] = 1, ["SubtotalMonedaOriginal"] = 10m }
+                ],
+                TotalRows = 4
+            });
+        }
+
         public List<Dictionary<string, object?>>? Rows { get; set; }
 
         private PlanillaBuscarExecutionResult Result() => new()
@@ -194,6 +219,78 @@ public sealed class IaScopeEnforcementOrchestratorTests
 
         // El analisis enviado al LLM declara los campos no disponibles y la regla.
         Assert.Contains("unavailableFields", handler.RequestBodies[1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Activado_PreguntaDeAgrupacion_UsaElResumenDeSql_YNoTraeFilasDeDetalle()
+    {
+        var scope = Restricted(globals: true, 7);
+        var auth = new FakeAuth { Next = () => IaAuthorizationResult.Allow(scope) };
+        var handler = new FakeHttpMessageHandler()
+            .EnqueueJson(PlannerEnvelope("buscar_planilla"))
+            .EnqueueJson(TextEnvelope("Resumen por cliente y moneda."));
+        var executor = new SpyExecutor();
+        var h = Build(auth, enabled: true, handler, executor);
+
+        var response = await Ask(h, "gastos por cliente y moneda para el mes de setiembre 2026");
+
+        Assert.True(response.Success);
+        Assert.Equal(1, executor.SummaryCalls);
+        Assert.Equal(0, executor.ScopedCalls);                 // no se carga el detalle
+        Assert.Equal(["CLIENTE", "MONEDA"], executor.LastDimensions);
+        Assert.Same(scope, executor.LastScope);               // el mismo alcance que el detalle
+        Assert.Equal("summary", response.ResponseType);
+        Assert.Equal(4, response.TotalRows);
+        Assert.Equal(2, response.DetailRows!.Count);          // los grupos
+        Assert.Contains("sql_summary", handler.RequestBodies[1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Activado_PreguntaDeAgrupacionConMetricaGlobal_SigueLaRutaDeDetalle()
+    {
+        var scope = Restricted(globals: true, 7);
+        var auth = new FakeAuth { Next = () => IaAuthorizationResult.Allow(scope) };
+        var handler = new FakeHttpMessageHandler()
+            .EnqueueJson(PlannerEnvelope("buscar_planilla"))
+            .EnqueueJson(TextEnvelope("Respuesta."));
+        var executor = new SpyExecutor();
+        var h = Build(auth, enabled: true, handler, executor);
+
+        await Ask(h, "ventas por cliente");
+
+        Assert.Equal(0, executor.SummaryCalls);
+        Assert.Equal(1, executor.ScopedCalls);
+    }
+
+    [Fact]
+    public async Task Activado_PidiendoElDetalle_NoUsaElResumen()
+    {
+        var scope = Restricted(globals: true, 7);
+        var auth = new FakeAuth { Next = () => IaAuthorizationResult.Allow(scope) };
+        var handler = new FakeHttpMessageHandler()
+            .EnqueueJson(PlannerEnvelope("buscar_planilla"))
+            .EnqueueJson(TextEnvelope("Respuesta."));
+        var executor = new SpyExecutor();
+        var h = Build(auth, enabled: true, handler, executor);
+
+        await Ask(h, "detalle de gastos por cliente");
+
+        Assert.Equal(0, executor.SummaryCalls);
+        Assert.Equal(1, executor.ScopedCalls);
+    }
+
+    [Fact]
+    public async Task Desactivado_NuncaUsaElResumen_PorqueNoHayAlcance()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .EnqueueJson(PlannerEnvelope("buscar_planilla"))
+            .EnqueueJson(TextEnvelope("Respuesta."));
+        var h = Build(auth: null, enabled: false, handler);
+
+        await Ask(h, "gastos por cliente y moneda");
+
+        Assert.Equal(0, h.Executor.SummaryCalls);
+        Assert.Equal(1, h.Executor.LegacyCalls);
     }
 
     [Fact]
