@@ -1303,6 +1303,37 @@ export default function PagosV1Page() {
       if (fechaInicio) parametros.push({ nombre: "FechaInicio", valor: fechaInicio, tipo: "date" });
       if (fechaFin) parametros.push({ nombre: "FechaFin", valor: fechaFin, tipo: "date" });
 
+      const cargarKpisDesdeConsultaPrincipal = async () => {
+        const estadosKpi: Array<[Exclude<PagoTabKey, "resumen">, number]> = [
+          ["aprobar", 0],
+          ["reaprobar", 6],
+          ["hormiga", 10],
+          ["observadas", 2],
+        ];
+        const resultados = await Promise.all(
+          estadosKpi.map(async ([tab, estado]) => {
+            const response = await consultarPlanillaEstados(
+              {
+                ...buildPagosV1PlanillaRequest([
+                  ...parametros,
+                  { nombre: "Estados", valor: String(estado), tipo: "string" },
+                ]),
+                // Solo se requiere TotalRows; evita transferir la grilla completa.
+                maxRows: 1,
+              },
+              { timeoutMs: 120000, signal: controller.signal },
+            );
+            return [tab, Number(response.totalRows) || 0] as const;
+          }),
+        );
+        const next = { aprobar: 0, reaprobar: 0, hormiga: 0, observadas: 0, resumen: 0 };
+        for (const [tab, total] of resultados) {
+          next[tab] = total;
+          next.resumen += total;
+        }
+        return next;
+      };
+
       try {
         const response = await consultarPlanillaEstados(
           buildPagosV1PlanillaRequest(parametros, "pagos-v1-resumen"),
@@ -1311,18 +1342,28 @@ export default function PagosV1Page() {
         if (controller.signal.aborted) return;
 
         const next = { aprobar: 0, reaprobar: 0, hormiga: 0, observadas: 0, resumen: 0 };
+        let tieneResumenCompatible = false;
         for (const row of response.rows ?? []) {
-          const count = getRecordNumber(row, "Cantidad", "cantidad") ?? 0;
-          const estado = getRecordNumber(row, "Estado", "estado");
+          const count = getRecordNumber(row, "Cantidad", "cantidad", "Total", "total", "Conteo", "conteo") ?? 0;
+          const estado = getRecordNumber(row, "Estado", "estado", "IdEstado", "idEstado");
+          tieneResumenCompatible ||= estado != null;
           if (estado === 0) next.aprobar = count;
           if (estado === 6) next.reaprobar = count;
           if (estado === 10) next.hormiga = count;
           if (estado === 2) next.observadas = count;
           next.resumen += count;
         }
-        setKpiCounts(next);
+        setKpiCounts(tieneResumenCompatible ? next : await cargarKpisDesdeConsultaPrincipal());
       } catch {
-        if (!controller.signal.aborted) setKpiCounts({ aprobar: 0, reaprobar: 0, hormiga: 0, observadas: 0, resumen: 0 });
+        if (!controller.signal.aborted) {
+          try {
+            setKpiCounts(await cargarKpisDesdeConsultaPrincipal());
+          } catch {
+            if (!controller.signal.aborted) {
+              setKpiCounts({ aprobar: 0, reaprobar: 0, hormiga: 0, observadas: 0, resumen: 0 });
+            }
+          }
+        }
       }
     };
     void loadKpis();

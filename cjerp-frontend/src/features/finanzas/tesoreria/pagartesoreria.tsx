@@ -192,7 +192,7 @@ export default function PagarTesoreriaPage() {
   const [estadoBusqueda, setEstadoBusqueda] = useState("");
   const [desde, setDesde] = useState(inicioMesActual);
   const [hasta, setHasta] = useState(hoy);
-  const [groupBy, setGroupBy] = useState<"comprobante" | "proyecto-site" | "responsable" | "banco" | "adjunto" | "serie-view-detalle">("comprobante");
+  const [groupBy, setGroupBy] = useState<"todos" | "comprobante" | "proyecto-site" | "responsable" | "banco" | "adjunto" | "serie-view-detalle">("todos");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [form, setForm] = useState(initialForm);
   const [operationSaving, setSaving] = useState(false);
@@ -640,7 +640,7 @@ export default function PagarTesoreriaPage() {
     setSolicitantesFiltro([]);
     setBusquedaSolicitante("");
     setRendicion("");
-    if (next !== 1 && groupBy === "serie-view-detalle") setGroupBy("comprobante");
+    if (next !== 1 && groupBy === "serie-view-detalle") setGroupBy("todos");
     setForm(initialForm());
     setRegistroPagoAbierto(false);
     setContabilidadValida(false);
@@ -1401,6 +1401,7 @@ export default function PagarTesoreriaPage() {
                   setExpanded(new Set());
                 }}
               >
+                <option value="todos">Todos</option>
                 <option value="comprobante">Agrupar por comprobante</option>
                 <option value="proyecto-site">Agrupar por PROYECTO/SITE</option>
                 <option value="responsable">Agrupar por responsable</option>
