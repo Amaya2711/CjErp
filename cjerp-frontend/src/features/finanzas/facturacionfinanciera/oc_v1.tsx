@@ -42,10 +42,14 @@ import type { FiltroOperativoValue } from "../../../models/filtroOperativo";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 import { ChevronDown, ChevronUp, ChevronsDown, ChevronsUp, Eye, FileDown, FileText } from "lucide-react";
 import { buildPlanillaConsultaEstadosRequest, consultarGastosPagadosPorId, consultarPlanillaEstados } from "../../../api/planillaConsultaService";
+import GastosPage, { type GastoEditorRequest } from "../tesoreria/gastos";
 
 // Fila se mantiene en cada registro para enlazar el pago con DetOrdenCompra,
 // pero no se muestra como columna. Detalle sí debe estar disponible al usuario.
-const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "EstadoOcSemaforo", "FechaOc", "Cliente", "NombreProyecto", "Site", "TipoTrabajo", "Tarea", "Detalle", "Cuenta", "CuentaInter", "NombreCta", "Banco", "Comprobante", "MonedaOc", "SubtotalOc", "SubtotalPlanilla", "AvanceOc", "DiferenciaSubtotal", "DiferenciaAvanceOc", "PagoNuevo", "CorrelativoPlanilla", "SolicitanteOc", "PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"];
+// IdResponsable se conserva en cada fila para filtros y validaciones; no se
+// agrega a las columnas visibles. El nombre sí se muestra para identificar al
+// beneficiario del pago.
+const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "EstadoOcSemaforo", "FechaOc", "Cliente", "NombreProyecto", "Site", "TipoTrabajo", "Tarea", "Detalle", "ResponsableOc", "Cuenta", "CuentaInter", "NombreCta", "Banco", "Comprobante", "MonedaOc", "SubtotalOc", "SubtotalPlanilla", "AvanceOc", "DiferenciaSubtotal", "DiferenciaAvanceOc", "PagoNuevo", "CorrelativoPlanilla", "SolicitanteOc", "PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"];
 const OC_GASTOS_MAX_COLUMNAS_VISIBLES = 32;
 const COLORES_ESTADO_OC: Record<string, string> = {
   R: "#D32F2F",
@@ -82,6 +86,8 @@ const OC_GASTOS_COLUMN_LABELS: Record<string, string> = {
   IdTarea: "Id tarea",
   Tarea: "Tarea",
   Detalle: "Detalle",
+  IdResponsable: "Id responsable",
+  ResponsableOc: "Responsable OC",
   IdCargo: "Id cargo",
   Cuenta: "Cuenta",
   CuentaInter: "Cuenta interbancaria",
@@ -902,7 +908,7 @@ export default function OcV1Page() {
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
   }, [detalleCompleto, detalleReporteOc]);
-  const [reciboVisualizado, setReciboVisualizado] = useState<OrdenCompraReciboDto | null>(null);
+  const [gastoEditorRequest, setGastoEditorRequest] = useState<GastoEditorRequest | null>(null);
   const [rechazoError, setRechazoError] = useState("");
   const [rechazando, setRechazando] = useState(false);
   const [idsOcRechazo, setIdsOcRechazo] = useState<number[]>([]);
@@ -1273,8 +1279,20 @@ export default function OcV1Page() {
         const normalizarRows = (sourceRows: unknown) => (Array.isArray(sourceRows) ? sourceRows : []).map((row) => {
           // Mantener el alias del nuevo store aunque el serializador omita valores NULL.
           // Así no se utiliza CorSite (correlativo del site) como sustituto.
-          const correlativoKey = Object.keys(row).find((key) => key.toLowerCase() === "correlativoplanilla");
-          return correlativoKey ? row : { ...row, CorrelativoPlanilla: null };
+          const getRowValue = (...names: string[]) => {
+            const key = names
+              .map((name) => Object.keys(row).find((item) => item.toLowerCase() === name.toLowerCase()))
+              .find((item): item is string => Boolean(item));
+            return key ? row[key] : null;
+          };
+          return {
+            ...row,
+            CorrelativoPlanilla: getRowValue("CorrelativoPlanilla"),
+            // El identificador se mantiene para las validaciones y filtros,
+            // aunque no figure entre las columnas visibles del grid.
+            IdResponsable: getRowValue("IdResponsable", "IdResponsableOc"),
+            ResponsableOc: getRowValue("ResponsableOc", "Responsable", "NomResponsable"),
+          };
         });
         const getIdSolicitanteOc = (row: Record<string, unknown>) => {
           const key = Object.keys(row).find((item) => item.toLowerCase() === "idsolicitanteoc")
@@ -2058,50 +2076,34 @@ export default function OcV1Page() {
 
     setError("");
     try {
+      // Pagos v1 entrega la fila de Planilla al visor. OC/Gastos debe hacer la
+      // misma carga explícita para que GastosPage no dispare una segunda
+      // consulta extensa que puede quedar pendiente.
       const response = await consultarGastosPagadosPorId(correlativo, { timeoutMs: 60000 });
-      const row = Array.isArray(response?.rows) ? response.rows[0] : null;
-      if (!row) {
+      const planillaRow = Array.isArray(response?.rows) ? response.rows[0] : null;
+      if (!planillaRow) {
         throw new Error("No se encontró información para el gasto seleccionado.");
       }
 
-      const read = (...names: string[]) => {
-        const key = Object.keys(row).find((item) => names.some((name) => item.toLowerCase() === name.toLowerCase()));
-        return key ? row[key] : undefined;
-      };
+      const row = planillaRow as Record<string, unknown>;
+      const correlativoKey = Object.keys(row).find((key) =>
+        ["CorrelativoPlanilla", "Correlativo", "Corre"].some((name) => key.toLowerCase() === name.toLowerCase())
+      );
 
-      setReciboVisualizado({
+      setGastoEditorRequest({
         correlativo,
-        fecIngreso: String(read("FecIngreso", "Fecha", "FechaIngreso") ?? ""),
-        subtotal: Number(read("Subtotal") ?? 0),
-        igv: Number(read("IGV", "Igv") ?? 0),
-        total: Number(read("Total") ?? 0),
-        moneda: String(read("Moneda") ?? ""),
-        detalle: String(read("Detalle") ?? ""),
-        comprobante: String(read("Comprobante") ?? ""),
-        responsable: String(read("Responsable", "NomResponsable") ?? ""),
-        nroDocumento: String(read("NroDocumento", "NroOperacion", "NroComprobante") ?? ""),
-        estado: getOptionLabel(estadoOptions, String(read("EstadoNombre", "Estado", "EstadoPlanilla") ?? "")),
-        tarea: String(read("Tarea") ?? ""),
-        cliente: String(read("Cliente", "NombreCliente") ?? ""),
-        proyecto: String(read("Proyecto", "NombreProyecto") ?? ""),
-        site: String(read("Site", "NombreSite") ?? ""),
-        tipoTrabajo: String(read("TipoTrabajo", "Tipo_Trabajo") ?? ""),
-        ot: String(read("OT", "Ot") ?? ""),
-        cuenta: String(read("Cuenta", "CuentaInter") ?? ""),
-        comentario: String(read("Comentario") ?? ""),
-        bien: String(read("Bien") ?? ""),
-        serie: String(read("Serie") ?? ""),
-        tipoPago: String(read("TipoPago", "FormaPago") ?? ""),
-        solicitante: String(read("Solicitante", "NombreSolicitante") ?? ""),
-        gestor: String(read("Gestor", "NombreGestor") ?? ""),
-        validador: String(read("Validador", "NombreValidador") ?? ""),
-        fechaEmision: String(read("FecEmision", "FechaEmision") ?? ""),
-        fechaVencimiento: String(read("FechaVencimiento", "FecVencimiento") ?? ""),
+        mode: "ver",
+        // El mapper de GastosPage usa CorrelativoPlanilla; el store puede
+        // devolver el mismo valor con el alias Correlativo o Corre.
+        planillaRow: {
+          ...row,
+          CorrelativoPlanilla: correlativoKey ? row[correlativoKey] : correlativo,
+        },
       });
     } catch (err) {
       setError(getHttpErrorMessage(err, "No se pudo cargar la información del gasto."));
     }
-  }, [estadoOptions]);
+  }, []);
 
   const selectedCabecera = useMemo(
     () => cabeceras.find((item) => item.idOc === selectedOcId) ?? null,
@@ -3278,7 +3280,7 @@ export default function OcV1Page() {
               selectedIds={[]}
               onToggle={() => undefined}
               onDetalleClick={setDetalleCompleto}
-              onCorrelativoClick={setReciboVisualizado}
+              onCorrelativoClick={(recibo) => visualizarGastoPorCorrelativo(recibo.correlativo)}
             />
           </div>
         ) : null}
@@ -4186,10 +4188,11 @@ export default function OcV1Page() {
         </div>
       ) : null}
 
-      {reciboVisualizado ? (
-        <ReciboDetallePanel
-          recibo={reciboVisualizado}
-          onClose={() => setReciboVisualizado(null)}
+      {gastoEditorRequest ? (
+        <GastosPage
+          editorRequest={gastoEditorRequest}
+          onEditorClose={() => setGastoEditorRequest(null)}
+          onEditorUpdated={() => setGastoEditorRequest(null)}
         />
       ) : null}
 

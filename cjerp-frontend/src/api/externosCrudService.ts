@@ -2,7 +2,6 @@
 
 const EXTERNOS_LIST_TIMEOUT_MS = 60000;
 const EXTERNOS_LOOKUPS_TIMEOUT_MS = 60000;
-const EXTERNOS_EMPRESA_FILTRO = "EXTERNO";
 
 export type ExternoCrudItem = {
   idEmpleado: number;
@@ -90,6 +89,11 @@ function toStringValue(value: unknown): string {
 }
 
 function mapItem(raw: Record<string, unknown>): ExternoCrudItem {
+  // El cliente HTTP desenvuelve el campo `data`; el backend puede responder
+  // `data: null` si no logra volver a consultar el registro recién creado.
+  // No permitir que esa respuesta exponga un TypeError en el formulario.
+  raw ??= {};
+
   return {
     idEmpleado: Number(raw.idEmpleado ?? raw.IdEmpleado ?? 0),
     nombreEmpleado: toStringValue(raw.nombreEmpleado ?? raw.NombreEmpleado),
@@ -138,10 +142,7 @@ function mapLookup(raw: Record<string, unknown>): CrudLookupItem {
 export const externosCrudService = {
   async listar(nombreEmpleado?: string): Promise<ExternoCrudItem[]> {
     const response = await httpClient.get<Record<string, unknown>[] | unknown>("/mantenimiento/externos", {
-      params: {
-        nombreEmpleado: nombreEmpleado ?? undefined,
-        empresa: EXTERNOS_EMPRESA_FILTRO,
-      },
+      params: { nombreEmpleado: nombreEmpleado ?? undefined },
       timeout: EXTERNOS_LIST_TIMEOUT_MS,
     });
 
@@ -149,9 +150,7 @@ export const externosCrudService = {
   },
 
   async obtener(idEmpleado: number): Promise<ExternoCrudItem> {
-    const response = await httpClient.get<Record<string, unknown>>(`/mantenimiento/externos/${idEmpleado}`, {
-      params: { empresa: EXTERNOS_EMPRESA_FILTRO },
-    });
+    const response = await httpClient.get<Record<string, unknown>>(`/mantenimiento/externos/${idEmpleado}`);
     return mapItem(response);
   },
 

@@ -207,7 +207,10 @@ public class OrdenCompraReciboDto
     public int? CorreSite { get; set; }
     public string TipoTrabajo { get; set; } = string.Empty;
     public string Comprobante { get; set; } = string.Empty;
+    public string TipoPago { get; set; } = string.Empty;
     public string Responsable { get; set; } = string.Empty;
+    public string Gestor { get; set; } = string.Empty;
+    public string Validador { get; set; } = string.Empty;
     public string NroDocumento { get; set; } = string.Empty;
     public string Estado { get; set; } = string.Empty;
     public string Tarea { get; set; } = string.Empty;

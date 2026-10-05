@@ -444,7 +444,10 @@ public class MantenimientoExternosController : ControllerBase
                 {
                     IdEmpleado = idEmpleado,
                     NombreEmpleado = string.IsNullOrWhiteSpace(nombreEmpleado) ? null : nombreEmpleado.Trim(),
-                    Empresa = string.IsNullOrWhiteSpace(empresa) ? "EXTERNO" : empresa.Trim(),
+                    // El cargo 51 ya identifica a los externos. La empresa
+                    // es un dato de la ficha y no debe ocultar externos de
+                    // otras empresas, como "SIN PLANILLA".
+                    Empresa = string.IsNullOrWhiteSpace(empresa) ? null : empresa.Trim(),
                     IdCargo = CargoId
                 },
                 commandTimeout: 60,
@@ -487,7 +490,11 @@ public class MantenimientoExternosController : ControllerBase
                 new
                 {
                     IdEmpleado = idEmpleado,
-                    Empresa = string.IsNullOrWhiteSpace(empresa) ? "EXTERNO" : empresa.Trim(),
+                    // Las operaciones internas usan el IdEmpleado como clave.
+                    // No deben heredar el filtro de listado "EXTERNO", porque
+                    // un externo puede pertenecer a otra empresa del catálogo
+                    // (por ejemplo, "SIN PLANILLA").
+                    Empresa = string.IsNullOrWhiteSpace(empresa) ? null : empresa.Trim(),
                     IdCargo = CargoId
                 },
                 transaction: transaction,
