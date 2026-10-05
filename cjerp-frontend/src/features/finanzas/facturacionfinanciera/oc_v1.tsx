@@ -757,6 +757,7 @@ export default function OcV1Page() {
     row: Record<string, unknown>;
     saldoEditableKey: string;
     montoTexto: string;
+    saldoAvanceTexto: string;
   } | null>(null);
   const [resultadoPagoNuevo, setResultadoPagoNuevo] = useState<{
     tipo: "exito" | "error";
@@ -1438,8 +1439,10 @@ export default function OcV1Page() {
     row: Record<string, unknown>,
     saldoEditableKey: string,
     montoTexto: string,
+    saldoAvanceTexto: string,
   ) => {
     const monto = Number(montoTexto);
+    const saldoAvance = Number(saldoAvanceTexto);
     const idOc = Number(getReporteRowValue(row, "IdOc"));
     const fila = Number(getReporteRowValue(row, "Fila"));
     const idTarea = Number(getReporteRowValue(row, "IdTarea"));
@@ -1448,8 +1451,8 @@ export default function OcV1Page() {
     const cuentaInter = String(getReporteRowValue(row, "CuentaInter") ?? "").trim();
     const nombreCta = String(getReporteRowValue(row, "NombreCta") ?? "").trim();
 
-    if (!Number.isFinite(monto) || monto <= 0) {
-      const mensaje = "Ingrese un saldo subtotal mayor que cero antes de crear el pago.";
+    if (!Number.isFinite(monto) || monto <= 0 || !Number.isFinite(saldoAvance) || saldoAvance <= 0) {
+      const mensaje = "El saldo subtotal y el saldo avance OC deben ser mayores que cero antes de crear el pago.";
       setError(mensaje);
       setResultadoPagoNuevo({ tipo: "error", titulo: "No se generó el pago", mensaje });
       return;
@@ -3860,12 +3863,17 @@ export default function OcV1Page() {
                             // "APROBADO", pero la habilitación debe aceptar ambas formas.
                             const pagoNuevoHabilitado = Number(read("EstadoOc")) === 1 || ["APROBADO", "ACEPTADO", "A"].includes(estadoOcParaPago);
                             const pagoNuevoEnProceso = Boolean(pagosNuevosEnProceso[saldoEditableKey]);
-                            const pagoNuevoDisponible = pagoNuevoHabilitado && !pagoNuevoEnProceso;
                             const estadoOcSemaforo = String(rawValue ?? "").trim().toUpperCase();
                             const colorEstadoOc = filaRechazada ? "#D32F2F" : COLORES_ESTADO_OC[estadoOcSemaforo];
                             const estadoOcSemaforoDisplay = filaRechazada ? "RECHAZADA" : estadoOcSemaforo === "P" ? "S/O" : estadoOcSemaforo;
                             const saldoSubtotalValue = ocGastosSaldosEditables[saldoEditableKey]?.subtotal ?? saldoSubtotalFila.toFixed(2);
                             const saldoAvanceValue = ocGastosSaldosEditables[saldoEditableKey]?.avance ?? saldoAvanceOcFila.toFixed(2);
+                            const saldoSubtotalDisponibleParaPago = Number(saldoSubtotalValue) > 0;
+                            const saldoAvanceDisponibleParaPago = Number(saldoAvanceValue) > 0;
+                            const pagoNuevoDisponible = pagoNuevoHabilitado
+                              && saldoSubtotalDisponibleParaPago
+                              && saldoAvanceDisponibleParaPago
+                              && !pagoNuevoEnProceso;
                             const saldoSubtotalAlert = ocGastosSaldoAlerts[`${saldoEditableKey}:subtotal`];
                             const saldoAvanceAlert = ocGastosSaldoAlerts[`${saldoEditableKey}:avance`];
                             const value = OC_GASTOS_COLUMNAS_NUMERICAS.has(column)
@@ -3934,12 +3942,19 @@ export default function OcV1Page() {
                                     type="button"
                                     onClick={(event) => {
                                       event.stopPropagation();
-                                      setPagoNuevoPendiente({ row, saldoEditableKey, montoTexto: saldoSubtotalValue });
+                                      setPagoNuevoPendiente({
+                                        row,
+                                        saldoEditableKey,
+                                        montoTexto: saldoSubtotalValue,
+                                        saldoAvanceTexto: saldoAvanceValue,
+                                      });
                                     }}
                                     disabled={!pagoNuevoDisponible}
                                     title={!pagoNuevoHabilitado
                                       ? "Pago nuevo solo está disponible para órdenes con estado Aprobado."
-                                      : pagoNuevoEnProceso
+                                      : !saldoSubtotalDisponibleParaPago || !saldoAvanceDisponibleParaPago
+                                        ? "Pago nuevo requiere saldo subtotal y saldo avance OC mayores que cero."
+                                        : pagoNuevoEnProceso
                                         ? "Proceso en ejecución..."
                                         : `Registrar ${formatMoney(Number(saldoSubtotalValue) || 0)} como nuevo pago.`}
                                     aria-label={`Pago nuevo para OC ${read("IdOc")}`}
@@ -4053,7 +4068,7 @@ export default function OcV1Page() {
         onConfirm={() => {
           const pago = pagoNuevoPendiente;
           setPagoNuevoPendiente(null);
-          if (pago) void registrarPagoNuevoDesdeOc(pago.row, pago.saldoEditableKey, pago.montoTexto);
+          if (pago) void registrarPagoNuevoDesdeOc(pago.row, pago.saldoEditableKey, pago.montoTexto, pago.saldoAvanceTexto);
         }}
       />
 

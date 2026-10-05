@@ -39,6 +39,28 @@ type EmpleadoForm = {
 };
 
 type EmpleadoTab = "todos" | "pendientes" | "activos" | "inactivos";
+type EmployeeOrganizationFilters = {
+  empresa: string;
+  cliente: string;
+  area: string;
+  ubicacion: string;
+};
+type EmployeeSortDirection = "asc" | "desc";
+type EmployeeSortKey =
+  | "idEmpleado"
+  | "nombreEmpleado"
+  | "empresa"
+  | "cliente"
+  | "area"
+  | "ubicacion"
+  | "responsable"
+  | "soValidador"
+  | "terValidador"
+  | "fechaIniLaboral"
+  | "fechaFinLaboral"
+  | "nroDocumento"
+  | "estado"
+  | "idUsuario";
 
 type OrganizacionCampo = "empresa" | "cliente" | "area" | "ubicacion";
 type ValidadorCampo = "responsable" | "segundaValidacion" | "terceraValidacion";
@@ -115,6 +137,13 @@ const initialForm: EmpleadoForm = {
   idResponsableCj: "",
   idSegundoVacaciones: "",
   idTerceroVacaciones: "",
+};
+
+const initialOrganizationFilters: EmployeeOrganizationFilters = {
+  empresa: "",
+  cliente: "",
+  area: "",
+  ubicacion: "",
 };
 
 function normalizeOptionValue(value: string | number | null | undefined): string {
@@ -341,6 +370,30 @@ function getInlineLookupOptions(
   ];
 }
 
+function matchesOrganizationFilter(
+  item: EmpleadoCrudItem,
+  selectedValue: string,
+  idKey: string,
+  labelKey: string,
+  options: CrudLookupItem[],
+): boolean {
+  if (!selectedValue) {
+    return true;
+  }
+
+  const values = [
+    normalizeOptionValue((item as Record<string, unknown>)[idKey] as string | number | null | undefined),
+    normalizeOptionValue((item as Record<string, unknown>)[labelKey] as string | number | null | undefined),
+  ].filter(Boolean);
+  const selectedOption = options.find((option) => getLookupIdValue(option) === selectedValue);
+  const acceptedValues = new Set([
+    selectedValue,
+    ...(selectedOption ? [getLookupIdValue(selectedOption), getLookupStoredValue(selectedOption), selectedOption.label] : []),
+  ].map(normalizeOptionValue));
+
+  return values.some((value) => acceptedValues.has(value));
+}
+
 function EmployeeTableColumns() {
   return (
     <colgroup>
@@ -351,24 +404,51 @@ function EmployeeTableColumns() {
   );
 }
 
-function EmployeeTableHeader() {
+const employeeSortableColumns: Array<{ key: EmployeeSortKey; label: string }> = [
+  { key: "idEmpleado", label: "Id" },
+  { key: "nombreEmpleado", label: "Empleado" },
+  { key: "empresa", label: "Empresa" },
+  { key: "cliente", label: "Cliente" },
+  { key: "area", label: "Area" },
+  { key: "ubicacion", label: "Ubicacion" },
+  { key: "responsable", label: "Responsable" },
+  { key: "soValidador", label: "2da validación" },
+  { key: "terValidador", label: "3era validación" },
+  { key: "fechaIniLaboral", label: "Inicio" },
+  { key: "fechaFinLaboral", label: "Fin" },
+  { key: "nroDocumento", label: "Documento" },
+  { key: "estado", label: "Estado" },
+  { key: "idUsuario", label: "Usuario" },
+];
+
+function EmployeeTableHeader({
+  sortKey,
+  sortDirection,
+  onSort,
+}: {
+  sortKey: EmployeeSortKey | null;
+  sortDirection: EmployeeSortDirection;
+  onSort: (key: EmployeeSortKey) => void;
+}) {
   return (
     <thead>
       <tr>
-        <th style={styles.th}>Id</th>
-        <th style={styles.th}>Empleado</th>
-        <th style={styles.th}>Empresa</th>
-        <th style={styles.th}>Cliente</th>
-        <th style={styles.th}>Area</th>
-        <th style={styles.th}>Ubicacion</th>
-        <th style={styles.th}>Responsable</th>
-        <th style={styles.th}>2da validación</th>
-        <th style={styles.th}>3era validación</th>
-        <th style={styles.th}>Inicio</th>
-        <th style={styles.th}>Fin</th>
-        <th style={styles.th}>Documento</th>
-        <th style={styles.th}>Estado</th>
-        <th style={styles.th}>Usuario</th>
+        {employeeSortableColumns.map((column) => {
+          const isActive = sortKey === column.key;
+          const directionLabel = isActive && sortDirection === "asc" ? "ascendente" : "descendente";
+          return (
+            <th key={column.key} style={styles.th} aria-sort={isActive ? sortDirection === "asc" ? "ascending" : "descending" : "none"}>
+              <button
+                type="button"
+                onClick={() => onSort(column.key)}
+                title={`Ordenar por ${column.label} ${directionLabel}`}
+                style={styles.sortHeaderButton}
+              >
+                {column.label} {isActive ? (sortDirection === "asc" ? "▲" : "▼") : "↕"}
+              </button>
+            </th>
+          );
+        })}
         <th style={styles.th}>Acciones</th>
       </tr>
     </thead>
@@ -435,6 +515,9 @@ export default function MantenimientoEmpleadosPage() {
   const [items, setItems] = useState<EmpleadoCrudItem[]>([]);
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState<EmpleadoTab>("todos");
+  const [organizationFilters, setOrganizationFilters] = useState<EmployeeOrganizationFilters>(initialOrganizationFilters);
+  const [sortKey, setSortKey] = useState<EmployeeSortKey | null>(null);
+  const [sortDirection, setSortDirection] = useState<EmployeeSortDirection>("asc");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [updatingOrganizationField, setUpdatingOrganizationField] = useState<string | null>(null);
@@ -489,27 +572,87 @@ export default function MantenimientoEmpleadosPage() {
     () =>
       items.filter(
         (item) =>
-          matchesEmpleadoTab(item, activeTab) && matchesCrudToolbarSearch(item, search, searchFields)
+          matchesEmpleadoTab(item, activeTab)
+          && matchesCrudToolbarSearch(item, search, searchFields)
+          && matchesOrganizationFilter(item, organizationFilters.empresa, "idEmpresaCj", "empresa", empresas)
+          && matchesOrganizationFilter(item, organizationFilters.cliente, "idClienteCj", "cliente", clientes)
+          && matchesOrganizationFilter(item, organizationFilters.area, "idAreaCj", "area", areas)
+          && matchesOrganizationFilter(item, organizationFilters.ubicacion, "idUbicacionCj", "ubicacion", ubicaciones)
       ),
-    [activeTab, items, search, searchFields]
+    [activeTab, areas, clientes, empresas, items, organizationFilters, search, searchFields, ubicaciones]
   );
+
+  const sortedItems = useMemo(() => {
+    if (!sortKey) {
+      return filteredItems;
+    }
+
+    const direction = sortDirection === "asc" ? 1 : -1;
+    return [...filteredItems].sort((left, right) => {
+      const leftValue = sortKey === "estado" ? getEstadoNormalizado(left) : left[sortKey];
+      const rightValue = sortKey === "estado" ? getEstadoNormalizado(right) : right[sortKey];
+      const leftNumber = Number(leftValue);
+      const rightNumber = Number(rightValue);
+
+      if (leftValue != null && rightValue != null && String(leftValue).trim() !== "" && String(rightValue).trim() !== ""
+        && Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+        return (leftNumber - rightNumber) * direction;
+      }
+
+      return String(leftValue ?? "").localeCompare(String(rightValue ?? ""), "es", {
+        numeric: true,
+        sensitivity: "base",
+      }) * direction;
+    });
+  }, [filteredItems, sortDirection, sortKey]);
+
+  const handleSort = (key: EmployeeSortKey) => {
+    if (sortKey === key) {
+      setSortDirection((current) => current === "asc" ? "desc" : "asc");
+      return;
+    }
+
+    setSortKey(key);
+    setSortDirection("asc");
+  };
 
   const tabCounts = useMemo(
     () => ({
-      todos: items.filter((item) => matchesCrudToolbarSearch(item, search, searchFields)).length,
+      todos: items.filter((item) =>
+        matchesCrudToolbarSearch(item, search, searchFields)
+        && matchesOrganizationFilter(item, organizationFilters.empresa, "idEmpresaCj", "empresa", empresas)
+        && matchesOrganizationFilter(item, organizationFilters.cliente, "idClienteCj", "cliente", clientes)
+        && matchesOrganizationFilter(item, organizationFilters.area, "idAreaCj", "area", areas)
+        && matchesOrganizationFilter(item, organizationFilters.ubicacion, "idUbicacionCj", "ubicacion", ubicaciones)
+      ).length,
       pendientes: items.filter(
-        (item) => matchesEmpleadoTab(item, "pendientes") && matchesCrudToolbarSearch(item, search, searchFields)
+        (item) => matchesEmpleadoTab(item, "pendientes")
+          && matchesCrudToolbarSearch(item, search, searchFields)
+          && matchesOrganizationFilter(item, organizationFilters.empresa, "idEmpresaCj", "empresa", empresas)
+          && matchesOrganizationFilter(item, organizationFilters.cliente, "idClienteCj", "cliente", clientes)
+          && matchesOrganizationFilter(item, organizationFilters.area, "idAreaCj", "area", areas)
+          && matchesOrganizationFilter(item, organizationFilters.ubicacion, "idUbicacionCj", "ubicacion", ubicaciones)
       ).length,
       activos: items.filter(
         (item) =>
-          matchesEmpleadoTab(item, "activos") && matchesCrudToolbarSearch(item, search, searchFields)
+          matchesEmpleadoTab(item, "activos")
+          && matchesCrudToolbarSearch(item, search, searchFields)
+          && matchesOrganizationFilter(item, organizationFilters.empresa, "idEmpresaCj", "empresa", empresas)
+          && matchesOrganizationFilter(item, organizationFilters.cliente, "idClienteCj", "cliente", clientes)
+          && matchesOrganizationFilter(item, organizationFilters.area, "idAreaCj", "area", areas)
+          && matchesOrganizationFilter(item, organizationFilters.ubicacion, "idUbicacionCj", "ubicacion", ubicaciones)
       ).length,
       inactivos: items.filter(
         (item) =>
-          matchesEmpleadoTab(item, "inactivos") && matchesCrudToolbarSearch(item, search, searchFields)
+          matchesEmpleadoTab(item, "inactivos")
+          && matchesCrudToolbarSearch(item, search, searchFields)
+          && matchesOrganizationFilter(item, organizationFilters.empresa, "idEmpresaCj", "empresa", empresas)
+          && matchesOrganizationFilter(item, organizationFilters.cliente, "idClienteCj", "cliente", clientes)
+          && matchesOrganizationFilter(item, organizationFilters.area, "idAreaCj", "area", areas)
+          && matchesOrganizationFilter(item, organizationFilters.ubicacion, "idUbicacionCj", "ubicacion", ubicaciones)
       ).length,
     }),
-    [items, search, searchFields]
+    [areas, clientes, empresas, items, organizationFilters, search, searchFields, ubicaciones]
   );
 
   useEffect(() => {
@@ -962,6 +1105,39 @@ export default function MantenimientoEmpleadosPage() {
         >
           Inactivos ({tabCounts.inactivos})
         </button>
+        <div style={styles.organizationFilterBar} aria-label="Filtros de organización">
+          {([
+            { key: "empresa", label: "Empresa", options: empresas },
+            { key: "cliente", label: "Cliente", options: clientes },
+            { key: "area", label: "Área", options: areas },
+            { key: "ubicacion", label: "Ubicación", options: ubicaciones },
+          ] as Array<{ key: keyof EmployeeOrganizationFilters; label: string; options: CrudLookupItem[] }>).map((filter) => (
+            <label key={filter.key} style={styles.organizationFilterLabel}>
+              {filter.label}
+              <select
+                value={organizationFilters[filter.key]}
+                onChange={(event) => setOrganizationFilters((current) => ({ ...current, [filter.key]: event.target.value }))}
+                style={styles.organizationFilterSelect}
+              >
+                <option value="">Todos</option>
+                {filter.options.map((option) => (
+                  <option key={`${filter.key}-${getLookupIdValue(option)}`} value={getLookupIdValue(option)}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+          {Object.values(organizationFilters).some(Boolean) ? (
+            <button
+              type="button"
+              onClick={() => setOrganizationFilters(initialOrganizationFilters)}
+              style={styles.clearOrganizationFiltersButton}
+            >
+              Limpiar filtros
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {loading ? <AppStatusMessage tone="info">Cargando empleados...</AppStatusMessage> : null}
@@ -985,21 +1161,21 @@ export default function MantenimientoEmpleadosPage() {
             <div ref={tableHeaderScrollRef} style={styles.tableHeaderWrapper}>
               <table style={styles.table}>
                 <EmployeeTableColumns />
-                <EmployeeTableHeader />
+                <EmployeeTableHeader sortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} />
               </table>
             </div>
             <div ref={tableScrollRef} style={styles.tableWrapper}>
               <table style={styles.table}>
                 <EmployeeTableColumns />
                 <tbody>
-                  {filteredItems.length === 0 ? (
+                  {sortedItems.length === 0 ? (
                     <tr>
                       <td colSpan={15} style={styles.emptyCell}>
                         No se encontraron empleados.
                       </td>
                     </tr>
                   ) : (
-                    filteredItems.map((item) => (
+                    sortedItems.map((item) => (
                       <tr
                         key={item.idEmpleado}
                         style={getEstadoNormalizado(item).includes("PENDIENTE") ? styles.pendingRow : undefined}
@@ -1667,6 +1843,58 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#F8FAFC",
     borderBottom: "1px solid #E5E7EB",
     whiteSpace: "nowrap",
+  },
+  sortHeaderButton: {
+    width: "100%",
+    padding: 0,
+    border: 0,
+    background: "transparent",
+    color: "inherit",
+    font: "inherit",
+    fontWeight: 700,
+    textAlign: "left",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  organizationFilterBar: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "end",
+    gap: 12,
+    padding: "12px 14px",
+    marginLeft: "auto",
+    border: "1px solid #E2E8F0",
+    borderRadius: 12,
+    background: "#F8FAFC",
+  },
+  organizationFilterLabel: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 5,
+    minWidth: 190,
+    color: "#475569",
+    fontSize: 12,
+    fontWeight: 700,
+  },
+  organizationFilterSelect: {
+    height: 36,
+    padding: "0 10px",
+    border: "1px solid #CBD5E1",
+    borderRadius: 8,
+    background: "#FFFFFF",
+    color: "#334155",
+    fontSize: 13,
+  },
+  clearOrganizationFiltersButton: {
+    height: 36,
+    padding: "0 12px",
+    border: "1px solid #CBD5E1",
+    borderRadius: 8,
+    background: "#FFFFFF",
+    color: "#334155",
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: "pointer",
   },
   td: {
     padding: "14px 16px",
