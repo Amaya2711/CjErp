@@ -40,6 +40,17 @@
   --color-border: #E5E7EB;
 }
 
+/* Zoom global: ver utils/appZoom.ts. --app-vh/--app-vw compensan el zoom en unidades de viewport. */
+:root {
+  --app-zoom: 1;
+  --app-vh: calc(100vh / var(--app-zoom));
+  --app-vw: calc(100vw / var(--app-zoom));
+}
+
+html {
+  zoom: var(--app-zoom);
+}
+
 * {
   box-sizing: border-box;
 }

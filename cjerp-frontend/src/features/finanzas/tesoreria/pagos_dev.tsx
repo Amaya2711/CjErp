@@ -4160,7 +4160,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     minHeight: 0,
-    maxHeight: "calc(100vh - 420px)",
+    maxHeight: "calc(var(--app-vh) - 420px)",
     overflow: "hidden",
     boxShadow: "0 1px 6px rgba(15, 23, 42, 0.05)",
   },
@@ -4778,7 +4778,7 @@ const styles: Record<string, React.CSSProperties> = {
     zIndex: 70,
   },
   popupCard: {
-    width: "min(1360px, calc(100vw - 32px))",
+    width: "min(1360px, calc(var(--app-vw) - 32px))",
     maxHeight: "min(86vh, 920px)",
     background: "#FFFFFF",
     borderRadius: 18,
@@ -4836,7 +4836,7 @@ const styles: Record<string, React.CSSProperties> = {
     zIndex: 90,
   },
   rejectModalCard: {
-    width: "min(680px, calc(100vw - 32px))",
+    width: "min(680px, calc(var(--app-vw) - 32px))",
     background: "#FFFFFF",
     borderRadius: 18,
     border: "1px solid #FCA5A5",

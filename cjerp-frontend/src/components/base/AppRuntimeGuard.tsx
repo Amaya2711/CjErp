@@ -117,7 +117,7 @@ export default function AppRuntimeGuard({ children }: AppRuntimeGuardProps) {
 
 const styles: Record<string, React.CSSProperties> = {
   overlay: {
-    minHeight: "100vh",
+    minHeight: "var(--app-vh)",
     display: "grid",
     placeItems: "center",
     padding: 24,

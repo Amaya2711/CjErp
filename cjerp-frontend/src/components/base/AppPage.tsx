@@ -44,7 +44,7 @@ const AppPage: React.FC<AppPageProps> = ({ title, actions, children, style, fill
               overflow: "hidden",
             }
           : {
-              minHeight: "calc(100vh - 120px)",
+              minHeight: "calc(var(--app-vh) - 120px)",
             }),
         ...style,
       }}

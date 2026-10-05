@@ -55,7 +55,7 @@ const styles: Record<string, React.CSSProperties> = {
   panel: {
     width: "100%",
     maxWidth: 1000,
-    height: "100vh",
+    height: "var(--app-vh)",
     background: "#FFFFFF",
     boxShadow: "-8px 0 24px rgba(15,23,42,0.18)",
     display: "flex",

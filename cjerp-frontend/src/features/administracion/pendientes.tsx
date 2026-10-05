@@ -917,7 +917,7 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     gap: 16,
     width: "100%",
-    minHeight: "calc(100vh - 112px)",
+    minHeight: "calc(var(--app-vh) - 112px)",
   },
   toolbarTitle: {
     fontSize: 16,

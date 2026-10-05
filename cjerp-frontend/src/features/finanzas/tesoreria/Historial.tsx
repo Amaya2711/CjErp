@@ -4667,7 +4667,7 @@ export default function PagosV1Page() {
             role="presentation"
           >
             <div
-              style={{ ...styles.popupCard, width: "min(680px, calc(100vw - 32px))", height: "auto", maxHeight: "min(560px, calc(100vh - 32px))" }}
+              style={{ ...styles.popupCard, width: "min(680px, calc(var(--app-vw) - 32px))", height: "auto", maxHeight: "min(560px, calc(var(--app-vh) - 32px))" }}
               onClick={(event) => event.stopPropagation()}
               role="dialog"
               aria-modal="true"
@@ -6038,7 +6038,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     minHeight: 0,
-    maxHeight: "calc(100vh - 420px)",
+    maxHeight: "calc(var(--app-vh) - 420px)",
     overflow: "hidden",
     boxShadow: "0 1px 6px rgba(15, 23, 42, 0.05)",
   },
@@ -6285,7 +6285,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 12,
     minHeight: 0,
     height: "auto",
-    maxHeight: "calc(100vh - 178px)",
+    maxHeight: "calc(var(--app-vh) - 178px)",
     alignSelf: "start",
     overflow: "hidden",
   },
@@ -6688,9 +6688,9 @@ const styles: Record<string, React.CSSProperties> = {
     zIndex: 3000,
   },
   popupCard: {
-    width: "min(1360px, calc(100vw - 32px))",
-    height: "min(900px, calc(100vh - 32px))",
-    maxHeight: "calc(100vh - 32px)",
+    width: "min(1360px, calc(var(--app-vw) - 32px))",
+    height: "min(900px, calc(var(--app-vh) - 32px))",
+    maxHeight: "calc(var(--app-vh) - 32px)",
     background: "#FFFFFF",
     borderRadius: 18,
     border: "1px solid #DBEAFE",
@@ -6748,7 +6748,7 @@ const styles: Record<string, React.CSSProperties> = {
     zIndex: 90,
   },
   rejectModalCard: {
-    width: "min(680px, calc(100vw - 32px))",
+    width: "min(680px, calc(var(--app-vw) - 32px))",
     background: "#FFFFFF",
     borderRadius: 18,
     border: "1px solid #FCA5A5",

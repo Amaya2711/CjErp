@@ -8992,14 +8992,14 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     gap: 10,
-    height: "calc(100vh - 240px)", // Ajusta este valor segÃºn el alto de header, filtros, etc.
+    height: "calc(var(--app-vh) - 240px)", // Ajusta este valor segÃºn el alto de header, filtros, etc.
     minHeight: 320,
-    maxHeight: "100vh",
+    maxHeight: "var(--app-vh)",
   },
   employeeGridSection: {
-    height: "calc(100vh - 240px)",
+    height: "calc(var(--app-vh) - 240px)",
     minHeight: 320,
-    maxHeight: "100vh",
+    maxHeight: "var(--app-vh)",
     overflow: "hidden",
     minWidth: 0,
   },

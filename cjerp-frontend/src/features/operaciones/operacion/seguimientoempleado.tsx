@@ -844,7 +844,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "grid",
     gap: 20,
     background: "radial-gradient(circle at top left, #f8fafc 0%, #eef2ff 36%, #f8fafc 100%)",
-    minHeight: "100vh",
+    minHeight: "var(--app-vh)",
   },
   hero: {
     display: "flex",

@@ -2082,7 +2082,7 @@ export default function ContratosPage() {
                 style={{
                   ...styles.fixedTableScrollDock,
                   left: relationScrollDockGeometry?.left ?? 24,
-                  width: relationScrollDockGeometry?.width ?? "calc(100vw - 48px)",
+                  width: relationScrollDockGeometry?.width ?? "calc(var(--app-vw) - 48px)",
                 }}
                 aria-label="Scroll horizontal del grid"
               >

@@ -2986,13 +2986,13 @@ const styles: Record<string, React.CSSProperties> = {
     overflowY: "auto",
     borderRadius: 18,
     border: "1px solid #E2E8F0",
-    maxHeight: "calc(100vh - 360px)",
+    maxHeight: "calc(var(--app-vh) - 360px)",
     minHeight: 0,
     position: "relative",
     isolation: "isolate",
   },
   recordsDetailTableWrapExpanded: {
-    maxHeight: "calc(100vh - 260px)",
+    maxHeight: "calc(var(--app-vh) - 260px)",
   },
   paginationBar: {
     display: "flex",

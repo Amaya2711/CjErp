@@ -1836,7 +1836,7 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     gap: 16,
     minHeight: 0,
-    maxHeight: "calc(100vh - 210px)",
+    maxHeight: "calc(var(--app-vh) - 210px)",
     overflow: "hidden",
   },
   cardHeader: {

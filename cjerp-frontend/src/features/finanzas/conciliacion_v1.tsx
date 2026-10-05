@@ -5791,7 +5791,7 @@ export default function ConciliacionBcpPage() {
 
       {montoDiferenciaModal ? (
         <div style={styles.modalOverlay} onClick={closeMontoDiferenciaModal}>
-          <div style={{ ...styles.modalCard, width: "min(520px, calc(100vw - 40px))" }} onClick={(event) => event.stopPropagation()}>
+          <div style={{ ...styles.modalCard, width: "min(520px, calc(var(--app-vw) - 40px))" }} onClick={(event) => event.stopPropagation()}>
             <div style={styles.modalHeader}>
               <div>
                 <h3 style={styles.modalTitle}>Monto diferencia</h3>
@@ -6635,7 +6635,7 @@ const styles: Record<string, React.CSSProperties> = {
     overflowY: "scroll",
     flex: 1,
     minHeight: 0,
-    maxHeight: "calc(100vh - 430px)",
+    maxHeight: "calc(var(--app-vh) - 430px)",
     position: "relative",
     scrollbarGutter: "stable",
   },

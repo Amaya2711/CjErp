@@ -139,7 +139,7 @@ export default function LoginPage() {
 
 const styles: Record<string, React.CSSProperties> = {
   container: {
-    minHeight: "100vh",
+    minHeight: "var(--app-vh)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",

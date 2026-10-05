@@ -738,7 +738,7 @@
   border: 1px solid #e2e8f0;
   border-radius: 16px;
   padding: 24px;
-  width: min(540px, calc(100vw - 32px));
+  width: min(540px, calc(var(--app-vw) - 32px));
   max-height: 85vh;
   color: #334155;
   box-shadow: 0 20px 80px #172b4d33;
@@ -788,7 +788,7 @@
   margin-top: 24px;
 }
 .pt-detail-dialog {
-  width: min(680px, calc(100vw - 32px));
+  width: min(680px, calc(var(--app-vw) - 32px));
 }
 .pt-history-list {
   display: grid;

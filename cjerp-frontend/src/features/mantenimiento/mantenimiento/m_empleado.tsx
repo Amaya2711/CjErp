@@ -963,7 +963,7 @@ const styles: Record<string, CSSProperties> = {
     border: "1px solid #E2E8F0",
     flex: 1,
     minHeight: 0,
-    maxHeight: "calc(100vh - 430px)",
+    maxHeight: "calc(var(--app-vh) - 430px)",
     scrollbarGutter: "stable",
   },
   table: {

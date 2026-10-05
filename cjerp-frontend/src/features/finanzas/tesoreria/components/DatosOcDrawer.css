@@ -9,8 +9,8 @@
   position: fixed;
   top: 0;
   right: 0;
-  width: min(560px, calc(100vw - 24px));
-  height: 100vh;
+  width: min(560px, calc(var(--app-vw) - 24px));
+  height: var(--app-vh);
   background: #ffffff;
   box-shadow: -12px 0 30px rgba(15, 23, 42, 0.18);
   z-index: 1230;
@@ -212,7 +212,7 @@
 
 @media (max-width: 720px) {
   .datos-oc-drawer {
-    width: 100vw;
+    width: var(--app-vw);
   }
 
   .datos-oc-drawer__grid,

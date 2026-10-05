@@ -2634,7 +2634,7 @@ function getPillStyle(value?: string | null): CSSProperties {
 
 const styles: Record<string, CSSProperties> = {
   page: {
-    minHeight: "calc(100vh - 120px)",
+    minHeight: "calc(var(--app-vh) - 120px)",
     padding: "24px 24px 40px",
     position: "relative",
     overflow: "hidden",
@@ -2764,7 +2764,7 @@ const styles: Record<string, CSSProperties> = {
     left: 0,
     zIndex: 50,
     width: 280,
-    maxWidth: "calc(100vw - 32px)",
+    maxWidth: "calc(var(--app-vw) - 32px)",
     borderRadius: 16,
     border: "1px solid #D1D5DB",
     background: "#FFFFFF",
@@ -2900,7 +2900,7 @@ const styles: Record<string, CSSProperties> = {
     left: "50%",
     top: "50%",
     width: "min(1040px, 100%)",
-    maxHeight: "calc(100vh - 40px)",
+    maxHeight: "calc(var(--app-vh) - 40px)",
     overflow: "auto",
     borderRadius: 20,
     border: "1px solid #E2E8F0",
