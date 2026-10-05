@@ -192,7 +192,7 @@ export default function PagarTesoreriaPage() {
   const [estadoBusqueda, setEstadoBusqueda] = useState("");
   const [desde, setDesde] = useState(inicioMesActual);
   const [hasta, setHasta] = useState(hoy);
-  const [groupBy, setGroupBy] = useState<"comprobante" | "proyecto-site" | "responsable" | "banco" | "serie-view-detalle">("comprobante");
+  const [groupBy, setGroupBy] = useState<"comprobante" | "proyecto-site" | "responsable" | "banco" | "adjunto" | "serie-view-detalle">("comprobante");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [form, setForm] = useState(initialForm);
   const [operationSaving, setSaving] = useState(false);
@@ -206,7 +206,7 @@ export default function PagarTesoreriaPage() {
   const [permisosRevision, setPermisosRevision] = useState<PagoRevisionPermisos>({
     puedeEditar: false, puedeEditarOperacion: false, puedeEditarEstado: false,
   });
-  const columnCount = estado === 1 ? 22 : estado === 9 ? 16 : estado === 4 ? 18 : estado === 100 ? 17 : 15;
+  const columnCount = estado === 1 ? 22 : estado === 9 ? 17 : estado === 4 ? 18 : estado === 100 ? 18 : 16;
   const [confirmation, setConfirmation] = useState<PagoTesoreriaRequest | null>(
     null,
   );
@@ -348,6 +348,7 @@ export default function PagarTesoreriaPage() {
         (!bancosPagoFiltro.length || bancosPagoFiltro.some((id) =>
           String(r.idBanco) === id ||
           catalogos.bancos.find((banco) => String(banco.id) === id)?.nombre.trim().toLocaleUpperCase() === (r.banco ?? "").trim().toLocaleUpperCase())) &&
+        (groupBy !== "adjunto" || Boolean(r.imgFactura?.trim())) &&
         (!search ||
           [
             r.correlativo,
@@ -379,6 +380,7 @@ export default function PagarTesoreriaPage() {
     rendicion,
     estado,
     correlativoBusqueda,
+    groupBy,
   ]);
   const requierePaginacion = visibleRows.length > 1000;
   const pageCount = requierePaginacion ? Math.max(1, Math.ceil(visibleRows.length / pageSize)) : 1;
@@ -563,6 +565,8 @@ export default function PagarTesoreriaPage() {
         ? `${r.proyecto || "Sin proyecto"} · ${r.idSite || "Sin site"}${r.site ? ` · ${r.site}` : ""}`
         : groupBy === "responsable"
           ? r.responsable || "Sin responsable"
+          : groupBy === "adjunto"
+            ? "Documentos con adjunto"
           : groupBy === "serie-view-detalle"
             ? `${r.serie?.trim() || "Sin serie"} · ${r.imgFactura?.trim() ? "Con documento adjunto" : "Sin documento adjunto"}`
           : groupBy === "banco"
@@ -1401,6 +1405,7 @@ export default function PagarTesoreriaPage() {
                 <option value="proyecto-site">Agrupar por PROYECTO/SITE</option>
                 <option value="responsable">Agrupar por responsable</option>
                 <option value="banco">Agrupar por banco</option>
+                <option value="adjunto">Agrupar por adjunto</option>
                 {estado === 1 && <option value="serie-view-detalle">Agrupar por serie / view detalle</option>}
               </select>
             </fieldset>
@@ -1437,7 +1442,6 @@ export default function PagarTesoreriaPage() {
                     </th>
                     <th>Recibo / OT</th>
                     {estado === 100 && <th>Estado</th>}
-                    {estado === 1 && <th>Serie</th>}
                     <th>Responsable / Solicitante</th>
                     <th>Proyecto / Site</th>
                     <th>Site + Detalle</th>
@@ -1451,13 +1455,14 @@ export default function PagarTesoreriaPage() {
                       {estado === 4 ? "Pagado" : "A pagar"}
                     </th>
                     <th>Detalle</th>
+                    <th>Serie</th>
                     <th>View factura</th>
                     {(estado === 1 || estado === 9 || estado === 5 || estado === 2 || estado === 100) && <th>Banco</th>}
                     <th>Cuenta</th>
                     <th>CuentaInter</th>
                     <th>NombreCta</th>
                     <th>IdBancoCta</th>
-                    {estado === 4 && <><th>Serie</th><th>Transferencia</th><th>Banco</th></>}
+                    {estado === 4 && <><th>Transferencia</th><th>Banco</th></>}
                     {estado === 1 && <>
                       <th>Anticipo</th><th>NroOperacion</th><th>Comprobante</th><th>TipoPago</th>
                       <th className="pt-revision-actions">Edición</th>
@@ -1528,7 +1533,7 @@ export default function PagarTesoreriaPage() {
                               />
                             }
                           </td>
-                          <td colSpan={estado === 1 ? 9 : estado === 9 ? 8 : estado === 100 ? 8 : 7}>
+                          <td colSpan={estado === 1 ? 10 : estado === 9 ? 9 : estado === 100 ? 9 : 8}>
                             <button
                               disabled={saving}
                               onClick={() =>
@@ -1588,7 +1593,6 @@ export default function PagarTesoreriaPage() {
                                 <small>OT {r.ot || "—"}</small>
                               </td>
                               {estado === 100 && <td>{catalogos.estados.find((item) => item.id === r.estado)?.nombre || r.estado}</td>}
-                              {estado === 1 && <td>{r.serie || "—"}</td>}
                               <td>
                                 <strong>
                                   {r.responsable || "Sin responsable"}
@@ -1660,6 +1664,7 @@ export default function PagarTesoreriaPage() {
                                   <Eye size={16} />
                                 </button>
                               </td>
+                              <td>{r.serie || "—"}</td>
                               <td><FacturaLink referencia={r.imgFactura} correlativo={r.correlativo} /></td>
                               {(estado === 1 || estado === 9 || estado === 5 || estado === 2 || estado === 100) && <td>{r.banco || "—"}</td>}
                               <td>
@@ -1690,7 +1695,7 @@ export default function PagarTesoreriaPage() {
                                   ? "Ã¢â‚¬â€"
                                   : `${r.idBancoCta} · ${catalogos.bancosCuenta.find((b) => b.id === r.idBancoCta)?.nombre || "Banco no encontrado"}`}
                               </td>
-                              {estado === 4 && <><td>{r.serie || "—"}</td><td>{r.transferencia || (r.idTransferencia != null ? String(r.idTransferencia) : "—")}</td><td>{r.banco || (r.idBanco != null ? String(r.idBanco) : "—")}</td></>}
+                              {estado === 4 && <><td>{r.transferencia || (r.idTransferencia != null ? String(r.idTransferencia) : "—")}</td><td>{r.banco || (r.idBanco != null ? String(r.idBanco) : "—")}</td></>}
                               {estado === 1 && <PagoRevisionCells row={r} catalogos={catalogos}
                                 permisos={permisosRevision} disabled={saving || loading || !puedePagar}
                                 onEditing={setEditingRevision} onSaved={refreshRevision} />}
