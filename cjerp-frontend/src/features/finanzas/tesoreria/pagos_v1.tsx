@@ -1145,6 +1145,7 @@ export default function PagosV1Page() {
   const [selectedId, setSelectedId] = useState<number>(0);
   const [checkedIds, setCheckedIds] = useState<number[]>([]);
   const [refreshTick, setRefreshTick] = useState(0);
+  const [kpiRefreshTick, setKpiRefreshTick] = useState(0);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [filtersVisible, setFiltersVisible] = useState(true);
   const [isHistorialPopupOpen, setIsHistorialPopupOpen] = useState(false);
@@ -1326,7 +1327,7 @@ export default function PagosV1Page() {
     };
     void loadKpis();
     return () => controller.abort();
-  }, [appliedFilters.fechaDesde, appliedFilters.fechaHasta, refreshTick]);
+  }, [appliedFilters.fechaDesde, appliedFilters.fechaHasta, refreshTick, kpiRefreshTick]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -2811,6 +2812,42 @@ export default function PagosV1Page() {
     setRefreshTick((current) => current + 1);
   };
 
+  const refreshAfterApproval = (
+    detalle: AprobacionResultadoDto[],
+    procesados: number | undefined,
+  ) => {
+    const correlativosProcesados = new Set(
+      detalle
+        .filter((resultado) => resultado.exito && Number.isFinite(resultado.correlativo))
+        .map((resultado) => Math.trunc(resultado.correlativo)),
+    );
+
+    // La respuesta del SP identifica exactamente los registros modificados.
+    // Así se conserva la bandeja actual y se retiran solo sus filas ya
+    // procesadas. Si el SP no devuelve el detalle completo, se mantiene la
+    // recarga total como salvaguarda de consistencia.
+    if (
+      correlativosProcesados.size === 0 ||
+      procesados === undefined ||
+      correlativosProcesados.size !== procesados
+    ) {
+      reloadAfterMutation();
+      return;
+    }
+
+    // Las otras bandejas pueden contener el estado destino; se invalidan para
+    // que se consulten al abrirlas, sin bloquear al usuario recargando la
+    // pestaña que acaba de procesar.
+    tabRowsCacheRef.current.clear();
+    setRowsByTab((previous) => ({
+      ...previous,
+      [activeTab]: previous[activeTab].filter(
+        (row) => !correlativosProcesados.has(Math.trunc(Number(row.correlativo))),
+      ),
+    }));
+    setKpiRefreshTick((current) => current + 1);
+  };
+
   const resumirNoProcesados = (resultados: AprobacionResultadoDto[]) => {
     const noProcesados = resultados.filter((resultado) => !resultado.exito);
     if (!noProcesados.length) return "";
@@ -2885,7 +2922,7 @@ export default function PagosV1Page() {
       setCheckedIds([]);
       setSelectedId(0);
       setMessage(mensajes.join(" "));
-      reloadAfterMutation();
+      refreshAfterApproval(response?.detalle ?? [], resumen?.procesados);
     } catch (error) {
       setMessage(getHttpErrorMessage(error, "No se pudo completar la aprobación."));
     }

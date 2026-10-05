@@ -210,19 +210,6 @@ namespace CjERP.Infrastructure.Services
                     connection.DataSource,
                     connection.Database);
 
-                var pingStart = Stopwatch.StartNew();
-                await connection.ExecuteScalarAsync<int>(
-                    _sqlCommandFactory.Create(
-                        "SELECT 1",
-                        null,
-                        CommandType.Text,
-                        cancellationToken,
-                        commandTimeout: 30));
-                pingStart.Stop();
-
-                _logger.LogInformation(
-                    "[PagosV1Timing] sqlPingMs={PingMs}",
-                    pingStart.Elapsed.TotalMilliseconds);
             }
 
             var queryStart = Stopwatch.StartNew();
