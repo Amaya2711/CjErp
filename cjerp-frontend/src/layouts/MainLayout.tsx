@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import logo from "../assets/logo.png";
 import { PageTitleContext } from "../components/base/AppPage";
+import ZoomPrompt from "../components/base/ZoomPrompt";
 import { clearAuthUser, getAuthUser } from "../utils/authStorage";
 import { logoutSession } from "../features/auth/services/logoutSession";
 import {
@@ -432,7 +433,7 @@ export default function MainLayout() {
 
   return (
     <PageTitleContext.Provider value={{ setPageTitle }}>
-      <div className="min-h-screen h-screen bg-bg-app flex flex-col overflow-hidden">
+      <div className="bg-bg-app flex flex-col overflow-hidden" style={{ height: "var(--app-vh)", minHeight: "var(--app-vh)" }}>
       {/* Header */}
       <div className="sticky top-0 z-[1100] shadow-[0_4px_14px_rgba(23,20,58,0.08)]">
         <header className="h-14 bg-brand-dark text-white flex items-center px-4 box-border border-b-[3px] border-brand-purple gap-4">
@@ -588,6 +589,8 @@ export default function MainLayout() {
           <Outlet />
         </main>
       </div>
+
+      <ZoomPrompt />
 
       {/* Footer */}
       <footer className="fixed left-0 right-0 bottom-0 min-h-[44px] bg-brand-dark border-t-2 border-brand-purple text-slate-200 z-[1200] flex items-center">
