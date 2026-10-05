@@ -843,6 +843,17 @@ WHERE Correlativo IN @Correlativos";
                     return parametros.Where(p => !string.IsNullOrWhiteSpace(p.Nombre) && allowed.Contains(p.Nombre.Trim().TrimStart('@')));
                 }
 
+                if (string.Equals(storedProcedureName, StoredProcedureEstadosResumen, StringComparison.OrdinalIgnoreCase))
+                {
+                    // El controller completa IdEmpleado e IdCargo desde el JWT para
+                    // consultas de Planilla. Este resumen solo recibe el rango de
+                    // fechas; enviar los claims hace que SQL Server rechace el SP
+                    // por parámetros desconocidos y deja los KPI en cero.
+                    var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    { "FechaInicio", "FechaFin" };
+                    return parametros.Where(p => !string.IsNullOrWhiteSpace(p.Nombre) && allowed.Contains(p.Nombre.Trim().TrimStart('@')));
+                }
+
                 return parametros;
             }
 
