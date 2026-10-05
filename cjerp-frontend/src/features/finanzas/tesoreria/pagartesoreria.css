@@ -80,7 +80,7 @@
   color: #172b4d;
   font-size: 13px;
   overflow: auto;
-  padding: 2px;
+  padding: 2px 2px 76px;
 }
 .pt-page * {
   box-sizing: border-box;
@@ -949,13 +949,23 @@
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  padding: 14px 16px;
-  border-top: 1px solid #e8edf4;
-  background: #f8fafc;
+  padding: 8px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 1px 6px rgba(15, 23, 42, 0.05);
   flex-shrink: 0;
-  position: sticky;
-  bottom: 0;
-  z-index: 6;
+  position: fixed;
+  left: 56px;
+  right: 12px;
+  bottom: 48px;
+  z-index: 1100;
+}
+@media (max-width: 700px) {
+  .pt-grid-actions {
+    left: 12px;
+    right: 12px;
+  }
 }
 .pt-workspace.pt-workspace-review,
 .pt-workspace.pt-workspace-search {
