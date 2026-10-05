@@ -1848,6 +1848,41 @@ export default function GastosPage({
     });
   }, [gestorOptions, solicitanteOptions, setForm, validadorOptions]);
 
+  useEffect(() => {
+    // Al registrar un gasto, el solicitante corresponde al empleado de la
+    // sesión. El catálogo llega de forma asíncrona desde el bootstrap, por lo
+    // que se resuelve recién cuando sus opciones están disponibles.
+    if (
+      !panelAbierto ||
+      modo !== "nuevo" ||
+      form.solicitante ||
+      idEmpleado <= 0 ||
+      solicitanteOptions.length === 0
+    ) {
+      return;
+    }
+
+    const solicitanteSesion = solicitanteOptions.find(
+      (option) => Number(getConstanteStoredValue(option)) === idEmpleado
+    );
+
+    if (!solicitanteSesion) {
+      return;
+    }
+
+    setForm((prev) => {
+      if (prev.solicitante) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        solicitante: getConstanteStoredValue(solicitanteSesion),
+        solicitanteLabel: solicitanteSesion.label,
+      };
+    });
+  }, [form.solicitante, idEmpleado, modo, panelAbierto, setForm, solicitanteOptions]);
+
   const empleadosSafe = Array.isArray(empleados) ? empleados : [];
   const gastosSafe = Array.isArray(gastos) ? gastos : [];
   const gastosGridScrollRef = useRef<HTMLDivElement | null>(null);

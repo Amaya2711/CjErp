@@ -89,7 +89,8 @@ namespace CjERP.Api.Controllers
                 providedParameters[normalizedName] = parametro.Valor;
             }
 
-            EnsureClaimFallback(consulta, providedParameters);
+            EnsureClaimFallback(providedParameters);
+            AppendClaimFallbackParameters(parametros, providedParameters);
 
             var providedNames = new HashSet<string>(
                 providedParameters.Keys,
@@ -597,13 +598,8 @@ namespace CjERP.Api.Controllers
             };
         }
 
-        private void EnsureClaimFallback(string? consulta, Dictionary<string, string?> providedParameters)
+        private void EnsureClaimFallback(Dictionary<string, string?> providedParameters)
         {
-            if (string.Equals(consulta, "gastos", StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
             if (!providedParameters.ContainsKey("IdEmpleado"))
             {
                 var resolvedIdEmpleado = ResolveNumericClaimValue(
@@ -631,6 +627,36 @@ namespace CjERP.Api.Controllers
                 {
                     providedParameters["IdCargo"] = resolvedIdCargo;
                 }
+            }
+        }
+
+        private static void AppendClaimFallbackParameters(
+            List<PlanillaConsultaParametroDto> parametros,
+            IReadOnlyDictionary<string, string?> providedParameters)
+        {
+            foreach (var parameterName in new[] { "IdEmpleado", "IdCargo" })
+            {
+                if (parametros.Any(parametro =>
+                        string.Equals(
+                            parametro.Nombre?.Trim().TrimStart('@'),
+                            parameterName,
+                            StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                if (!providedParameters.TryGetValue(parameterName, out var value) ||
+                    string.IsNullOrWhiteSpace(value))
+                {
+                    continue;
+                }
+
+                parametros.Add(new PlanillaConsultaParametroDto
+                {
+                    Nombre = parameterName,
+                    Valor = value,
+                    Tipo = "int"
+                });
             }
         }
 
