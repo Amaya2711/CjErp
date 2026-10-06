@@ -41,20 +41,24 @@ public sealed partial class PagoTesoreriaService
         // Dapper expande IN @ids a un parámetro por correlativo. SQL Server admite
         // como máximo 2,100 parámetros por solicitud, por eso se consulta en lotes.
         var versiones = new Dictionary<int, string>();
+        var observaciones = new Dictionary<int, string?>();
         foreach (var lote in ids.Chunk(1000))
         {
-            var resultado = await cn.QueryAsync<(int Correlativo, string Version)>(new CommandDefinition($"""
-                SELECT a.Correlativo, {VersionSql} AS Version
+            var resultado = await cn.QueryAsync<(int Correlativo, string Version, string? Observacion)>(new CommandDefinition($"""
+                SELECT a.Correlativo, {VersionSql} AS Version, CONVERT(varchar(max), a.Observacion) AS Observacion
                 FROM Planilla a
                 WHERE a.Correlativo IN @ids
                 """, new { ids = lote }, cancellationToken: ct));
-            foreach (var item in resultado) versiones[item.Correlativo] = item.Version;
+            foreach (var item in resultado) { versiones[item.Correlativo] = item.Version; observaciones[item.Correlativo] = item.Observacion; }
         }
         foreach (var row in rows.OfType<IDictionary<string, object>>())
         {
             var value = row.FirstOrDefault(item => string.Equals(item.Key, "Correlativo", StringComparison.OrdinalIgnoreCase) || string.Equals(item.Key, "Corre", StringComparison.OrdinalIgnoreCase)).Value;
-            if (value is not null && int.TryParse(value.ToString(), out var id) && versiones.TryGetValue(id, out var version))
-                row["Version"] = version;
+            if (value is null || !int.TryParse(value.ToString(), out var id)) continue;
+            if (versiones.TryGetValue(id, out var version)) row["Version"] = version;
+            // Si el SP no devuelve Observacion, se completa desde Planilla para el detalle del recibo.
+            if (observaciones.TryGetValue(id, out var observacion) && !row.Keys.Any(k => string.Equals(k, "Observacion", StringComparison.OrdinalIgnoreCase)))
+                row["Observacion"] = observacion ?? "";
         }
         return rows;
     }

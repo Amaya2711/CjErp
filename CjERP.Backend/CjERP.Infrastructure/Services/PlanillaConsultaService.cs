@@ -245,6 +245,12 @@ namespace CjERP.Infrastructure.Services
 
             if (isPagosV1Consulta)
             {
+                // sp_Planilla_Consulta_Estados no devuelve Observacion; se completa para "Visualizar gasto".
+                await AgregarObservacionAsync(connection, rows, cancellationToken);
+            }
+
+            if (isPagosV1Consulta)
+            {
                 _logger.LogInformation(
                     "[PagosV1Timing] storeMs={StoreMs} materializationMs={MaterializationMs} rows={Rows}",
                     queryStart.Elapsed.TotalMilliseconds,
@@ -935,6 +941,53 @@ WHERE Codigo = @CodigoBanco
             };
 
             return resolved;
+        }
+
+        private static async Task AgregarObservacionAsync(
+            IDbConnection connection,
+            List<Dictionary<string, object?>> rows,
+            CancellationToken cancellationToken)
+        {
+            if (rows.Count == 0 || rows.Any(row => row.ContainsKey("ObservacionPlanilla")))
+            {
+                return;
+            }
+
+            var ids = rows
+                .Select(row => row.TryGetValue("Corre", out var value) || row.TryGetValue("Correlativo", out value) ? value : null)
+                .Where(value => value is not null && int.TryParse(value.ToString(), out _))
+                .Select(value => int.Parse(value!.ToString()!))
+                .Distinct()
+                .ToArray();
+            if (ids.Length == 0)
+            {
+                return;
+            }
+
+            // SQL Server admite como máximo 2,100 parámetros por solicitud: se consulta en lotes.
+            var observaciones = new Dictionary<int, string?>();
+            foreach (var lote in ids.Chunk(1000))
+            {
+                var resultado = await connection.QueryAsync<(int Correlativo, string? Observacion)>(new CommandDefinition(
+                    "SELECT Correlativo, CONVERT(varchar(max), Observacion) AS Observacion FROM dbo.Planilla WHERE Correlativo IN @ids",
+                    new { ids = lote },
+                    cancellationToken: cancellationToken));
+                foreach (var item in resultado)
+                {
+                    observaciones[item.Correlativo] = item.Observacion;
+                }
+            }
+
+            foreach (var row in rows)
+            {
+                if ((row.TryGetValue("Corre", out var value) || row.TryGetValue("Correlativo", out value))
+                    && value is not null
+                    && int.TryParse(value.ToString(), out var id))
+                {
+                    // Clave aparte de "Observacion" para no alterar el mapeo existente de "Comentario" en el FE.
+                    row["ObservacionPlanilla"] = observaciones.TryGetValue(id, out var observacion) ? observacion ?? string.Empty : string.Empty;
+                }
+            }
         }
 
         private static Dictionary<string, object?> MapRow(dynamic row)

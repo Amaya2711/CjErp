@@ -228,7 +228,7 @@ function groupRowsByEstado(rows: PagoRow[]): Record<PagoTabKey, PagoRow[]> {
   const grouped = createEmptyRowsByTab();
 
   for (const row of rows) {
-    if (["0", "6", "10", "2"].includes(row.estadoCodigo ?? "")) {
+    if (["0", "6", "10", "2", "7"].includes(row.estadoCodigo ?? "")) {
       grouped[row.estado].push(row);
     }
   }
@@ -610,6 +610,7 @@ function mapPlanillaEstadoToPagoEstado(value: unknown, fallback: PagoEstado): Pa
       case 10:
         return "hormiga";
       case 2:
+      case 7: // Observada administrativa: se agrupa con las observadas.
         return "observadas";
       default:
         return fallback;
@@ -1308,11 +1309,11 @@ export default function PagosV1Page() {
       if (fechaFin) parametros.push({ nombre: "FechaFin", valor: fechaFin, tipo: "date" });
 
       const cargarKpisDesdeConsultaPrincipal = async () => {
-        const estadosKpi: Array<[Exclude<PagoTabKey, "resumen">, number]> = [
-          ["aprobar", 0],
-          ["reaprobar", 6],
-          ["hormiga", 10],
-          ["observadas", 2],
+        const estadosKpi: Array<[Exclude<PagoTabKey, "resumen">, string]> = [
+          ["aprobar", "0"],
+          ["reaprobar", "6"],
+          ["hormiga", "10"],
+          ["observadas", "2,7"],
         ];
         const resultados = await Promise.all(
           estadosKpi.map(async ([tab, estado]) => {
@@ -1320,7 +1321,7 @@ export default function PagosV1Page() {
               {
                 ...buildPagosV1PlanillaRequest([
                   ...parametros,
-                  { nombre: "Estados", valor: String(estado), tipo: "string" },
+                  { nombre: "Estados", valor: estado, tipo: "string" },
                 ]),
                 // Solo se requiere TotalRows; evita transferir la grilla completa.
                 maxRows: 1,
@@ -1357,6 +1358,25 @@ export default function PagosV1Page() {
           if (estado === 2) next.observadas = count;
           next.resumen += count;
         }
+        if (tieneResumenCompatible) {
+          // El resumen solo agrupa los estados 0, 2, 6 y 10: el estado 7 (observada
+          // administrativa) se cuenta aparte y se suma a Observadas.
+          try {
+            const respuesta7 = await consultarPlanillaEstados(
+              {
+                ...buildPagosV1PlanillaRequest([...parametros, { nombre: "Estados", valor: "7", tipo: "string" }]),
+                maxRows: 1,
+              },
+              { timeoutMs: 120000, signal: controller.signal },
+            );
+            const total7 = Number(respuesta7.totalRows) || 0;
+            next.observadas += total7;
+            next.resumen += total7;
+          } catch {
+            if (controller.signal.aborted) return;
+          }
+        }
+        if (controller.signal.aborted) return;
         setKpiCounts(tieneResumenCompatible ? next : await cargarKpisDesdeConsultaPrincipal());
       } catch {
         if (!controller.signal.aborted) {
@@ -1433,7 +1453,7 @@ export default function PagosV1Page() {
           const estadoActivo = activeTab === "aprobar" ? "0"
             : activeTab === "reaprobar" ? "6"
             : activeTab === "hormiga" ? "10"
-            : "2";
+            : "2,7"; // Observadas: estados 2 (observada) y 7 (observada administrativa)
           // Total Órdenes muestra todos los estados, por lo que no restringe
           // la consulta con @Estados.
           if (activeTab !== "resumen") {

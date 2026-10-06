@@ -355,6 +355,11 @@ export default function PagarTesoreriaV1Page() {
             })
           : status === 4
           ? await listarPagosTesoreria(100, start, end, controller.signal) // Rendición: todos los estados; solo se seleccionan los 4
+          : status === 2
+          // Observada reúne los estados 2 y 7; el SP filtra por un solo estado, por eso se consultan ambos.
+          ? (await Promise.all([2, 7].map((idEstado) => listarPagosTesoreria(idEstado, start, end, controller.signal))))
+              .flat()
+              .sort((a, b) => b.correlativo - a.correlativo)
           : await listarPagosTesoreria(status, start, end, controller.signal);
         if (!controller.signal.aborted) setRows(result);
       } catch (e) {
@@ -657,12 +662,65 @@ export default function PagarTesoreriaV1Page() {
       (exclude === "moneda" || !monedasFiltro.length || monedasFiltro.includes(String(r.tipoMoneda))) &&
       (exclude === "comprobante" || !comprobantesFiltro.length || comprobantesFiltro.includes(r.comprobante ?? "")) &&
       (exclude === "banco" || !bancosCtaFiltro.length || bancosCtaFiltro.includes(r.bancoCta ?? "")) &&
+       (exclude === "bancoPago" || !bancosPagoFiltro.length || bancosPagoFiltro.some((id) =>
+         String(r.idBanco) === id ||
+         catalogos.bancos.find((banco) => String(banco.id) === id)?.nombre.trim().toLocaleUpperCase() === (r.banco ?? "").trim().toLocaleUpperCase())) &&
       (!search || [r.correlativo, r.responsable, r.solicitante, r.cliente, r.proyecto, r.site, r.idSite, r.ot, r.detalle, r.nroOperacion]
         .join(" ").toLocaleLowerCase().includes(search)),
     );
   };
   // Opciones de los filtros de Rendición: solo lo que existe en los registros visibles del grid
   // (se conservan las ya marcadas para poder desmarcarlas).
+  // En Contabilidad los filtros se alimentan solo con los recibos presentes en la grilla.
+  const opcionesFiltroContabilidad = useMemo(() => {
+    if (estado !== 9) return null;
+
+    // Se conservan las opciones ya marcadas aunque otro filtro las deje sin registros, para poder desmarcarlas.
+    const crearOpciones = (
+      campo: string,
+      incluye: (row: PagoTesoreriaRow, option: PagoOpcion) => boolean,
+      marcada: (option: PagoOpcion) => boolean,
+      source: PagoOpcion[],
+    ) => {
+      const registros = rowsForFilterOption(campo);
+      return source.filter((option) => marcada(option) || registros.some((row) => incluye(row, option)));
+    };
+
+    return {
+      monedas: crearOpciones("moneda", (row, option) => String(row.tipoMoneda) === String(option.id),
+        (option) => monedasFiltro.includes(String(option.id)), catalogos.monedas),
+      bancosPago: crearOpciones("bancoPago", (row, option) =>
+        String(row.idBanco) === String(option.id) ||
+        normalizarTextoFiltro(row.banco) === normalizarTextoFiltro(option.nombre),
+        (option) => bancosPagoFiltro.includes(String(option.id)), catalogos.bancos),
+      comprobantes: crearOpciones("comprobante", (row, option) =>
+        normalizarTextoFiltro(row.comprobante) === normalizarTextoFiltro(option.nombre),
+        (option) => comprobantesFiltro.includes(option.nombre), catalogos.comprobantes),
+      bancosCuenta: crearOpciones("banco", (row, option) =>
+        normalizarTextoFiltro(row.bancoCta) === normalizarTextoFiltro(option.nombre),
+        (option) => bancosCtaFiltro.includes(option.nombre), catalogos.bancosCuenta),
+      responsables: crearOpciones("responsable", (row, option) =>
+        String(row.idResponsable) === String(option.id) ||
+        normalizarTextoFiltro(row.responsable) === normalizarTextoFiltro(option.nombre),
+        (option) => responsablesFiltro.includes(String(option.id)), catalogos.responsables),
+    };
+  }, [
+    estado,
+    rows,
+    query,
+    cliente,
+    monedasFiltro,
+    comprobantesFiltro,
+    bancosCtaFiltro,
+    bancosPagoFiltro,
+    responsablesFiltro,
+    solicitantesFiltro,
+    rendicion,
+    estadosFiltro,
+    operacionFiltro,
+    catalogos,
+    coincideResponsableFiltro,
+  ]);
   const rowsEstadoOpciones = estado === 4 ? rowsForFilterOption("estado") : [];
   const opcionesEstado = [...new Set([...rowsEstadoOpciones.map((r) => r.estado), ...estadosFiltro.map(Number)])]
     .sort((a, b) => a - b)
@@ -1412,7 +1470,7 @@ export default function PagarTesoreriaV1Page() {
               <details className="pt-comprobante-filter">
                 <summary>Todas las monedas{monedasFiltro.length > 0 && ` (${monedasFiltro.length})`}</summary>
                 <div className="pt-comprobante-options" aria-label="Filtrar por monedas">
-                  {catalogos.monedas.map((item) => (
+                  {(opcionesFiltroContabilidad?.monedas ?? catalogos.monedas).map((item) => (
                     <label key={item.id}>
                       <input
                         type="checkbox"
@@ -1432,7 +1490,7 @@ export default function PagarTesoreriaV1Page() {
               <details className="pt-comprobante-filter">
                 <summary>Todos los bancos pago{bancosPagoFiltro.length > 0 && ` (${bancosPagoFiltro.length})`}</summary>
                 <div className="pt-comprobante-options" aria-label="Filtrar por bancos de pago">
-                  {catalogos.bancos.map((item) => (
+                  {(opcionesFiltroContabilidad?.bancosPago ?? catalogos.bancos).map((item) => (
                     <label key={item.id}>
                       <input type="checkbox" checked={bancosPagoFiltro.includes(String(item.id))} onChange={(e) => {
                         setBancosPagoFiltro((actual) => e.target.checked ? [...actual, String(item.id)] : actual.filter((id) => id !== String(item.id)));
@@ -1449,7 +1507,7 @@ export default function PagarTesoreriaV1Page() {
                   {comprobantesFiltro.length > 0 && ` (${comprobantesFiltro.length})`}
                 </summary>
                 <div className="pt-comprobante-options" aria-label="Filtrar por comprobante">
-                    {catalogos.comprobantes.map((item) => (
+                    {(opcionesFiltroContabilidad?.comprobantes ?? catalogos.comprobantes).map((item) => (
                       <label key={item.id}>
                         <input
                           type="checkbox"
@@ -1472,7 +1530,7 @@ export default function PagarTesoreriaV1Page() {
                   {bancosCtaFiltro.length > 0 && ` (${bancosCtaFiltro.length})`}
                 </summary>
                 <div className="pt-comprobante-options" aria-label="Filtrar por banco">
-                   {catalogos.bancosCuenta.map((item) => (
+                   {(opcionesFiltroContabilidad?.bancosCuenta ?? catalogos.bancosCuenta).map((item) => (
                       <label key={item.id}>
                         <input
                           type="checkbox"
@@ -1502,7 +1560,7 @@ export default function PagarTesoreriaV1Page() {
                     value={busquedaResponsable}
                     onChange={(e) => setBusquedaResponsable(e.target.value)}
                   />
-                   {catalogos.responsables
+                   {(opcionesFiltroContabilidad?.responsables ?? catalogos.responsables)
                     .filter((item) => item.nombre.toLocaleLowerCase().includes(busquedaResponsable.trim().toLocaleLowerCase()))
                     .map((item) => (
                       <label key={item.id}>
@@ -2471,10 +2529,11 @@ export default function PagarTesoreriaV1Page() {
                     "Operación / Cheque",
                     `${detail.nroOperacion || "—"} / ${detail.cheque || "—"}`,
                   ],
+                  ["Observación", detail.observacion],
                 ].map(([label, value]) => (
                   <div key={label}>
                     <dt>{label}</dt>
-                    <dd>{value || "—"}</dd>
+                    <dd className={label === "Observación" ? "pt-preserve" : undefined}>{value || "—"}</dd>
                   </div>
                 ))}
               </dl>
@@ -2503,12 +2562,6 @@ export default function PagarTesoreriaV1Page() {
                 </div>
               )}
               <h3>Detalle del recibo</h3>
-              {detail.observacion && (
-                <div className="pt-inline-alert">
-                  <strong>Observación</strong>
-                  <p className="pt-preserve">{detail.observacion}</p>
-                </div>
-              )}
               <FacturaLink referencia={detail.imgFactura} correlativo={detail.correlativo} />
               <p className="pt-preserve">{detail.detalle || "Sin detalle"}</p>
               {detail.comentarioAdicional && (

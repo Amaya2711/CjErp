@@ -54,6 +54,7 @@ type GastoDto = {
   detalle: string;
   comentario: string;
   fechaVencimiento?: string;
+  observacion?: string;
   fecIngreso?: string;
   fechaEmision?: string;
   solicitante?: string;
@@ -110,6 +111,7 @@ type GastoForm = {
   detalle: string;
   comentario: string;
   fechaVencimiento: string;
+  observacion?: string;
   fecIngreso: string;
   fechaEmision: string;
   solicitante: string;
@@ -1089,6 +1091,7 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     fecIngreso: normalizeFecIngresoFromStore(getRecordString(
       row,
       "FecIngreso",
+    observacion: getRecordString(row, "ObservacionPlanilla", "observacionPlanilla", "Observacion", "observacion"),
       "fecIngreso",
       "fecingreso",
       "FechaIngreso",
@@ -1229,6 +1232,7 @@ function mapGastoDtoToView(item: GastoDto): GastoForm {
     moneda: item.moneda || item.monedaLabel || "",
     monedaLabel: item.monedaLabel || item.moneda || "",
     bien: item.bien || item.bienLabel || "",
+    observacion: item.observacion ?? "",
     bienLabel: item.bienLabel || item.bien || "",
     comprobante: item.comprobante || item.comprobanteLabel || "",
     comprobanteLabel: item.comprobanteLabel || item.comprobante || "",
@@ -5037,6 +5041,39 @@ export default function GastosPage({
               : "",
           }));
         }}
+{/* OBSERVACIÓN (solo lectura, solo al visualizar el gasto) */}
+{esModoVisualizacion ? (
+  <div
+    style={{
+      display: "flex",
+      flexDirection: "column",
+      gap: 1.5,
+      gridColumn: "span 6",
+      marginBottom: 8,
+    }}
+  >
+    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>
+      Observación
+    </label>
+    <textarea
+      value={form.observacion ?? ""}
+      readOnly
+      rows={3}
+      placeholder="Sin observación"
+      style={{
+        width: "100%",
+        borderRadius: 10,
+        border: "1px solid #D1D5DB",
+        padding: 12,
+        fontSize: 13,
+        resize: "vertical",
+        boxSizing: "border-box",
+        background: "#F9FAFB",
+      }}
+    />
+  </div>
+) : null}
+
       />
       Fecha emision
     </label>
