@@ -567,6 +567,41 @@ export default function PagarTesoreriaV1Page() {
     const sheet = XLSX.utils.json_to_sheet(data); sheet["!cols"] = [14, 32, 24, 14, 16].map((wch) => ({ wch }));
     const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, "Bancos"); XLSX.writeFile(book, `programado-bancos-${hoy()}.xlsx`);
   };
+  const exportarChuckyPdf = async () => {
+    const [{ default: jsPDF }, autoTableModule] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    const autoTable = autoTableModule.default;
+    const nombreBanco = (id: number | null | undefined) => id == null ? "Sin banco" : catalogos.bancos.find((item) => item.id === id)?.nombre || "Banco no encontrado";
+    const body: string[][] = [];
+    for (const group of chuckyGroups) {
+      const collapsed = chuckyCollapsed.has(`${group.label}-${group.moneda}`);
+      body.push([`${collapsed ? "+" : "-"} ${group.label} · ${nombreBanco(group.items[0]?.idBancoCta)} · ${group.moneda}`, "", "", "", ""]);
+      if (!collapsed) {
+        body.push(...group.items.map((item) => [
+          item.idBancoCta == null ? "Sin banco" : `${item.idBancoCta} · ${nombreBanco(item.idBancoCta)}`,
+          item.responsable || "", item.cuenta || "", item.moneda || "", `${currencySymbol(item.moneda)} ${money(item.total)}`,
+        ]));
+      }
+      body.push(["TOTAL", "", "", "", `${currencySymbol(group.moneda)} ${money(group.total)}`]);
+    }
+    body.push(["Total general", "", "", "", `${currencySymbol(chuckyGroups[0]?.moneda)} ${money(chuckyGroups.reduce((total, group) => total + group.total, 0))}`]);
+    autoTable(doc, {
+      head: [["IdBancoCta · Banco", "Responsable", "Cuenta", "Moneda", "Suma de Total"]],
+      body,
+      styles: { fontSize: 7, cellPadding: 2 },
+      headStyles: { fillColor: [219, 234, 247], textColor: [31, 41, 55] },
+      didParseCell: (data) => {
+        if (data.section !== "body" || data.column.index !== 0) return;
+        const label = String(data.cell.raw || "");
+        if (label === "Total general") {
+          Object.values(data.row.cells).forEach((cell) => { cell.styles.fillColor = [191, 219, 254]; cell.styles.fontStyle = "bold"; });
+        } else if (label === "TOTAL" || label.startsWith("+ ") || label.startsWith("- ")) {
+          Object.values(data.row.cells).forEach((cell) => { cell.styles.fillColor = [226, 232, 240]; cell.styles.fontStyle = "bold"; });
+        }
+      },
+    });
+    doc.save(`programado-bancos-${hoy()}.pdf`);
+  };
   const exportarResumen = () => {
     const data = resumenBancos.map((item) => ({ BancoCta: item.banco, Moneda: item.moneda, SumaTotalPagar: item.total }));
     const sheet = XLSX.utils.json_to_sheet(data); sheet["!cols"] = [{ wch: 24 }, { wch: 14 }, { wch: 20 }];
@@ -1985,6 +2020,7 @@ export default function PagarTesoreriaV1Page() {
                 {programadoSubtab === "chucky" && <label className="pt-paolo-group-select"><span>Agrupar por</span><select value={chuckyGroupMode} onChange={(e) => setChuckyGroupMode(e.target.value as typeof chuckyGroupMode)}><option value="banco">Agrupar por banco</option><option value="responsable">Agrupar por responsable</option><option value="moneda">Agrupar por moneda</option></select></label>}
                 {programadoSubtab === "chucky" && <button type="button" className="pt-paolo-collapse" onClick={() => setChuckyCollapsed(chuckyCollapsed.size ? new Set() : new Set(chuckyGroups.map((g) => `${g.label}-${g.moneda}`)))}>{chuckyCollapsed.size ? "Expandir grupos" : "Comprimir grupos"}</button>}
                 {programadoSubtab === "chucky" && <button type="button" disabled={!rows.length || saving} onClick={exportarChucky}><Download size={15} /> Excel</button>}
+                {programadoSubtab === "chucky" && <button type="button" disabled={!chuckyGroups.length || saving} onClick={() => void exportarChuckyPdf()} title="Exportar bancos a PDF"><Printer size={15} /> PDF</button>}
                 {programadoSubtab === "resumen" && <button type="button" disabled={!rows.length || saving} onClick={exportarResumen}><Download size={15} /> Excel</button>}
                 {programadoSubtab === "resumen" && <button type="button" disabled={!rows.length || saving} onClick={() => void exportarResumenPdf()} title="Exportar resumen a PDF"><Printer size={15} /> PDF</button>}
                 {programadoSubtab === "paolo" && (
