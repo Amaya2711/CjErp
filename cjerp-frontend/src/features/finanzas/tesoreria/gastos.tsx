@@ -53,8 +53,8 @@ type GastoDto = {
   idRendicion?: number;
   detalle: string;
   comentario: string;
-  fechaVencimiento?: string;
   observacion?: string;
+  fechaVencimiento?: string;
   fecIngreso?: string;
   fechaEmision?: string;
   solicitante?: string;
@@ -110,8 +110,8 @@ type GastoForm = {
   totalPagar: string;
   detalle: string;
   comentario: string;
-  fechaVencimiento: string;
   observacion?: string;
+  fechaVencimiento: string;
   fecIngreso: string;
   fechaEmision: string;
   solicitante: string;
@@ -1078,6 +1078,7 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     idRendicion: getRecordNumber(row, "IdRendicion", "idRendicion") ?? undefined,
     detalle: getRecordString(row, "Detalle", "detalle"),
     comentario: getRecordString(row, "Observacion", "observacion", "Comentario", "comentario"),
+    observacion: getRecordString(row, "ObservacionPlanilla", "observacionPlanilla", "Observacion", "observacion"),
     fechaDeposito: getRecordString(row, "FechaDeposito", "fechaDeposito"),
     fechaVencimiento: getRecordString(
       row,
@@ -1091,7 +1092,6 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     fecIngreso: normalizeFecIngresoFromStore(getRecordString(
       row,
       "FecIngreso",
-    observacion: getRecordString(row, "ObservacionPlanilla", "observacionPlanilla", "Observacion", "observacion"),
       "fecIngreso",
       "fecingreso",
       "FechaIngreso",
@@ -1219,6 +1219,7 @@ function mapGastoDtoToView(item: GastoDto): GastoForm {
     totalPagar: item.totalPagar != null ? item.totalPagar.toString() : "",
     detalle: item.detalle,
     comentario: item.comentario ?? (item as any).observacion ?? "",
+    observacion: item.observacion ?? "",
     fechaDeposito: item.fechaDeposito ?? "",
     fechaVencimiento: normalizeDateForInput(item.fechaVencimiento),
     fecIngreso: normalizeFecIngresoFromStore(item.fecIngreso || item.fechaEmision),
@@ -1232,7 +1233,6 @@ function mapGastoDtoToView(item: GastoDto): GastoForm {
     moneda: item.moneda || item.monedaLabel || "",
     monedaLabel: item.monedaLabel || item.moneda || "",
     bien: item.bien || item.bienLabel || "",
-    observacion: item.observacion ?? "",
     bienLabel: item.bienLabel || item.bien || "",
     comprobante: item.comprobante || item.comprobanteLabel || "",
     comprobanteLabel: item.comprobanteLabel || item.comprobante || "",
@@ -5016,31 +5016,6 @@ export default function GastosPage({
   />
 </div>
 
-{/* FILA DERECHA 2: FECHAS */}
-<div
-  style={{
-    display: "flex",
-    gap: 12,
-    gridColumn: "span 6",
-    marginBottom: 8,
-  }}
->
-  {/* FECHA INGRESO */}
-  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
-    <label style={{ fontSize: 13, fontWeight: 700, display: "flex", gap: 6 }}>
-      <input
-        type="checkbox"
-        checked={usarFechaEmision}
-        onChange={(e) => {
-          const checked = e.target.checked;
-          setUsarFechaEmision(checked);
-          setForm((prev) => ({
-            ...prev,
-            fechaEmision: checked
-              ? prev.fechaEmision || fechaActual
-              : "",
-          }));
-        }}
 {/* OBSERVACIÓN (solo lectura, solo al visualizar el gasto) */}
 {esModoVisualizacion ? (
   <div
@@ -5074,6 +5049,31 @@ export default function GastosPage({
   </div>
 ) : null}
 
+{/* FILA DERECHA 2: FECHAS */}
+<div
+  style={{
+    display: "flex",
+    gap: 12,
+    gridColumn: "span 6",
+    marginBottom: 8,
+  }}
+>
+  {/* FECHA INGRESO */}
+  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+    <label style={{ fontSize: 13, fontWeight: 700, display: "flex", gap: 6 }}>
+      <input
+        type="checkbox"
+        checked={usarFechaEmision}
+        onChange={(e) => {
+          const checked = e.target.checked;
+          setUsarFechaEmision(checked);
+          setForm((prev) => ({
+            ...prev,
+            fechaEmision: checked
+              ? prev.fechaEmision || fechaActual
+              : "",
+          }));
+        }}
       />
       Fecha emision
     </label>
