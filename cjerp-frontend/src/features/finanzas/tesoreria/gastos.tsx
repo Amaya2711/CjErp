@@ -13,7 +13,7 @@ import CrudToolbar, { matchesCrudToolbarSearch, type CrudToolbarSearchField } fr
 import { FiltroOperativoLookup } from "../../../components/lookups/FiltroOperativoLookup";
 import { getValoresGasto } from "../../../api/filtroOperativoService";
 import { getGastosBootstrap } from "../../../api/gastosBootstrapService";
-import { buscarEmpleadosResponsables, insertarEmpleadoResponsable } from "../../../api/empleadoResponsableService";
+import { actualizarEmpleadoResponsable, buscarEmpleadosResponsables, insertarEmpleadoResponsable } from "../../../api/empleadoResponsableService";
 import { useConstantesPorCampo } from "../../../hooks/useConstantesPorCampo";
 import type { ConstanteOption } from "../../../models/constante";
 import type { FiltroOperativoValue, TareaOption } from "../../../models/filtroOperativo";
@@ -146,6 +146,8 @@ type NuevoResponsableForm = {
   banco: string;
   nroDocumento: string;
 };
+
+type ModoResponsableForm = "nuevo" | "editar";
 
 const NUEVO_RESPONSABLE_INICIAL: NuevoResponsableForm = {
   nombre: "",
@@ -831,6 +833,13 @@ function buildCuentaResumen(empleado: EmpleadoCta): string {
   return `Banco: ${empleado.nombreBanco || ""}, Tipo Cta: ${empleado.nombreCta || ""}, Cta. ${empleado.cuenta || ""}, CI: ${empleado.cuentaInter || ""}, Nro Doc: ${empleado.nroDocumento || ""}`;
 }
 
+function buildResponsableDisplay(empleado: EmpleadoCta): string {
+  return [empleado.nombreEmpleado, empleado.nombreBanco, empleado.nombreCta]
+    .map((value) => value?.trim())
+    .filter(Boolean)
+    .join(" - ");
+}
+
 function normalizarNombreResponsable(value: string | null | undefined): string {
   return String(value ?? "")
     .normalize("NFD")
@@ -1354,6 +1363,7 @@ export default function GastosPage({
   const [showResponsableDropdown, setShowResponsableDropdown] = useState(false);
   const [highlightedResponsableIdx, setHighlightedResponsableIdx] = useState(-1);
   const [mostrarNuevoResponsable, setMostrarNuevoResponsable] = useState(false);
+  const [modoResponsableForm, setModoResponsableForm] = useState<ModoResponsableForm>("nuevo");
   const [nuevoResponsable, setNuevoResponsable] = useState<NuevoResponsableForm>(NUEVO_RESPONSABLE_INICIAL);
   const [nuevoResponsableError, setNuevoResponsableError] = useState<string | null>(null);
   const [guardandoNuevoResponsable, setGuardandoNuevoResponsable] = useState(false);
@@ -1923,6 +1933,11 @@ export default function GastosPage({
 
   const empleadosSafe = Array.isArray(empleados) ? empleados : [];
   const gastosSafe = Array.isArray(gastos) ? gastos : [];
+  const responsableSeleccionado = empleadosSafe.find(
+    (empleado) =>
+      String(empleado.idEmpleado) === String(form.responsable) &&
+      (!form.idBancoCta || getIdBancoCtaValue(empleado) === String(form.idBancoCta)),
+  ) ?? empleadosSafe.find((empleado) => String(empleado.idEmpleado) === String(form.responsable));
   const tipoCuentaNuevoResponsable = getConstanteLabel(tipoCuentaOptions, nuevoResponsable.tipoCuenta) || nuevoResponsable.tipoCuenta;
   const bancoNuevoResponsable = getConstanteLabel(bancoOptions, nuevoResponsable.banco) || nuevoResponsable.banco;
   const existeCuentaResponsableDuplicada = Boolean(
@@ -1930,6 +1945,7 @@ export default function GastosPage({
     tipoCuentaNuevoResponsable.trim() &&
     bancoNuevoResponsable.trim(),
   ) && empleadosSafe.some((empleado) =>
+    (modoResponsableForm !== "editar" || getIdBancoCtaValue(empleado) !== String(form.idBancoCta)) &&
     normalizarNombreResponsable(empleado.nroDocumento) === normalizarNombreResponsable(nuevoResponsable.nroDocumento) &&
     normalizarNombreResponsable(empleado.nombreCta) === normalizarNombreResponsable(tipoCuentaNuevoResponsable) &&
     normalizarNombreResponsable(empleado.nombreBanco) === normalizarNombreResponsable(bancoNuevoResponsable),
@@ -1975,7 +1991,18 @@ export default function GastosPage({
   }, [mostrarNuevoResponsable, nuevoResponsable.nombre]);
 
   const guardarNuevoResponsable = async () => {
+    const esEdicion = modoResponsableForm === "editar";
+    const bancoActualOption = esEdicion && responsableSeleccionado
+      ? findConstanteOption(bancoOptions, responsableSeleccionado.nombreBanco)
+      : undefined;
+    const idBancoActual = bancoActualOption
+      ? Number(getConstanteStoredValue(bancoActualOption))
+      : undefined;
     const request = {
+      idBancoCta: esEdicion && Number(form.idBancoCta) > 0 ? Number(form.idBancoCta) : undefined,
+      idBancoActual: Number.isInteger(idBancoActual) && idBancoActual! > 0 ? idBancoActual : undefined,
+      cuentaActual: esEdicion ? responsableSeleccionado?.cuenta.trim() : undefined,
+      nombreCtaActual: esEdicion ? responsableSeleccionado?.nombreCta.trim() : undefined,
       nombre: nuevoResponsable.nombre.trim(),
       cuenta: nuevoResponsable.cuenta.trim(),
       cuentaInter: nuevoResponsable.cuentaInter.trim(),
@@ -1986,8 +2013,13 @@ export default function GastosPage({
       nroDocumento: nuevoResponsable.nroDocumento.trim(),
     };
 
-    if (Object.values(request).some((value) => !value)) {
+    if ([request.nombre, request.cuenta, request.cuentaInter, request.tipoCuenta, request.nombreCta, request.banco, request.idBanco, request.nroDocumento].some((value) => !value)) {
       setNuevoResponsableError("Complete todos los datos del responsable.");
+      return;
+    }
+
+    if (esEdicion && (!request.idBancoActual || !request.cuentaActual || !request.nombreCtaActual)) {
+      setNuevoResponsableError("No se pudieron identificar los datos actuales de la cuenta seleccionada. Vuelva a seleccionar el responsable.");
       return;
     }
 
@@ -1999,7 +2031,16 @@ export default function GastosPage({
     setGuardandoNuevoResponsable(true);
     setNuevoResponsableError(null);
     try {
-      await insertarEmpleadoResponsable(request);
+      if (esEdicion) {
+        const idEmpleado = Number(form.responsable);
+        if (!Number.isInteger(idEmpleado) || idEmpleado <= 0) {
+          setNuevoResponsableError("Seleccione un responsable válido para editar.");
+          return;
+        }
+        await actualizarEmpleadoResponsable(idEmpleado, request);
+      } else {
+        await insertarEmpleadoResponsable(request);
+      }
       const bootstrap = await getGastosBootstrap({
         idCargo: idCargo > 0 ? idCargo : null,
         idEmpleado: idEmpleado > 0 ? idEmpleado : null,
@@ -2009,7 +2050,9 @@ export default function GastosPage({
 
       const responsableCreado = responsablesActualizados.find(
         (empleado) =>
-          empleado.nombreEmpleado.trim().toLocaleLowerCase() === request.nombre.toLocaleLowerCase() &&
+          (esEdicion
+            ? String(empleado.idEmpleado) === String(form.responsable)
+            : empleado.nombreEmpleado.trim().toLocaleLowerCase() === request.nombre.toLocaleLowerCase()) &&
           empleado.cuenta.trim() === request.cuenta,
       );
 
@@ -2031,6 +2074,7 @@ export default function GastosPage({
       }
 
       setNuevoResponsable(NUEVO_RESPONSABLE_INICIAL);
+      setModoResponsableForm("nuevo");
       setMostrarNuevoResponsable(false);
     } catch (error) {
       setNuevoResponsableError(getHttpErrorMessage(error, "No se pudo registrar el responsable."));
@@ -2081,7 +2125,7 @@ export default function GastosPage({
     responsableInput.trim() === ""
       ? empleadosSafe
       : empleadosSafe.filter((emp) =>
-          emp.nombreEmpleado.toLowerCase().includes(responsableInput.toLowerCase())
+          matchesFlexibleSearch(buildResponsableDisplay(emp), responsableInput)
         );
 
   const filteredSolicitantes =
@@ -4672,38 +4716,74 @@ export default function GastosPage({
                 <div style={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                     <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Responsable</label>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setNuevoResponsable(NUEVO_RESPONSABLE_INICIAL);
-                        setNuevoResponsableError(null);
-                        setMostrarNuevoResponsable(true);
-                      }}
-                      disabled={modo === "ver"}
-                      title="Registrar nuevo responsable"
-                      style={{
-                        border: "1px solid #2563EB",
-                        borderRadius: 7,
-                        background: "#EFF6FF",
-                        color: "#1D4ED8",
-                        padding: "4px 8px",
-                        fontSize: 11,
-                        fontWeight: 700,
-                        cursor: modo === "ver" ? "not-allowed" : "pointer",
-                        opacity: modo === "ver" ? 0.55 : 1,
-                      }}
-                    >
-                      + Nuevo responsable
-                    </button>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setModoResponsableForm("nuevo");
+                          setNuevoResponsable(NUEVO_RESPONSABLE_INICIAL);
+                          setNuevoResponsableError(null);
+                          setMostrarNuevoResponsable(true);
+                        }}
+                        disabled={modo === "ver"}
+                        title="Registrar nuevo responsable"
+                        style={{
+                          border: "1px solid #2563EB",
+                          borderRadius: 7,
+                          background: "#EFF6FF",
+                          color: "#1D4ED8",
+                          padding: "4px 8px",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          cursor: modo === "ver" ? "not-allowed" : "pointer",
+                          opacity: modo === "ver" ? 0.55 : 1,
+                        }}
+                      >
+                        + Nuevo responsable
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!responsableSeleccionado) return;
+                          const tipoCuenta = findConstanteOption(tipoCuentaOptions, responsableSeleccionado.nombreCta);
+                          const banco = findConstanteOption(bancoOptions, responsableSeleccionado.nombreBanco);
+                          setModoResponsableForm("editar");
+                          setNuevoResponsable({
+                            nombre: responsableSeleccionado.nombreEmpleado,
+                            cuenta: responsableSeleccionado.cuenta,
+                            cuentaInter: responsableSeleccionado.cuentaInter,
+                            tipoCuenta: tipoCuenta ? getConstanteStoredValue(tipoCuenta) : responsableSeleccionado.nombreCta,
+                            banco: banco ? getConstanteStoredValue(banco) : responsableSeleccionado.nombreBanco,
+                            nroDocumento: responsableSeleccionado.nroDocumento,
+                          });
+                          setNuevoResponsableError(null);
+                          setMostrarNuevoResponsable(true);
+                        }}
+                        disabled={modo === "ver" || !responsableSeleccionado}
+                        title={responsableSeleccionado ? "Editar responsable seleccionado" : "Seleccione un responsable para editar"}
+                        style={{
+                          border: "1px solid #0F766E",
+                          borderRadius: 7,
+                          background: "#F0FDFA",
+                          color: "#0F766E",
+                          padding: "4px 8px",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          cursor: modo === "ver" || !responsableSeleccionado ? "not-allowed" : "pointer",
+                          opacity: modo === "ver" || !responsableSeleccionado ? 0.55 : 1,
+                        }}
+                      >
+                        Editar responsable
+                      </button>
+                    </div>
                   </div>
                   <div style={{ position: "relative", width: "100%" }}>
                     <input
                       type="text"
                       value={
-                        empleadosSafe.find((emp) => String(emp.idEmpleado) === form.responsable)?.nombreEmpleado ||
-                        form.responsableLabel ||
-                        responsableInput ||
-                        ""
+                        responsableSeleccionado
+                          ? buildResponsableDisplay(responsableSeleccionado)
+                          : form.responsableLabel || responsableInput || ""
                       }
                       onChange={(e) => {
                         setResponsableInput(e.target.value);
@@ -4815,7 +4895,7 @@ export default function GastosPage({
                               setHighlightedResponsableIdx(-1);
                             }}
                           >
-                            {emp.nombreEmpleado}
+                            {buildResponsableDisplay(emp)}
                           </div>
                         ))}
                       </div>
@@ -5847,12 +5927,19 @@ export default function GastosPage({
           >
             <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "16px 18px", borderBottom: "1px solid #E2E8F0" }}>
               <div>
-                <h2 id="nuevo-responsable-title" style={{ margin: 0, fontSize: 18, color: "#0F172A" }}>Nuevo responsable</h2>
-                <span style={{ display: "block", marginTop: 3, color: "#64748B", fontSize: 12 }}>Registre los datos bancarios del responsable.</span>
+                <h2 id="nuevo-responsable-title" style={{ margin: 0, fontSize: 18, color: "#0F172A" }}>
+                  {modoResponsableForm === "editar" ? "Editar responsable" : "Nuevo responsable"}
+                </h2>
+                <span style={{ display: "block", marginTop: 3, color: "#64748B", fontSize: 12 }}>
+                  {modoResponsableForm === "editar" ? "Actualice los datos bancarios del responsable seleccionado." : "Registre los datos bancarios del responsable."}
+                </span>
               </div>
               <button
                 type="button"
-                onClick={() => setMostrarNuevoResponsable(false)}
+                onClick={() => {
+                  setMostrarNuevoResponsable(false);
+                  setModoResponsableForm("nuevo");
+                }}
                 disabled={guardandoNuevoResponsable}
                 aria-label="Cerrar"
                 style={{ border: "none", background: "transparent", color: "#475569", fontSize: 24, cursor: "pointer", lineHeight: 1 }}
@@ -5943,8 +6030,8 @@ export default function GastosPage({
               )}
             </div>
             <footer style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "14px 18px", borderTop: "1px solid #E2E8F0" }}>
-              <button type="button" onClick={() => setMostrarNuevoResponsable(false)} disabled={guardandoNuevoResponsable} style={{ border: "1px solid #CBD5E1", borderRadius: 8, padding: "9px 14px", background: "#FFFFFF", color: "#334155", fontWeight: 700, cursor: "pointer" }}>Cancelar</button>
-              <button type="submit" disabled={guardandoNuevoResponsable || existeCuentaResponsableDuplicada} style={{ border: "1px solid #2563EB", borderRadius: 8, padding: "9px 14px", background: "#2563EB", color: "#FFFFFF", fontWeight: 700, cursor: guardandoNuevoResponsable || existeCuentaResponsableDuplicada ? "not-allowed" : "pointer", opacity: guardandoNuevoResponsable || existeCuentaResponsableDuplicada ? 0.7 : 1 }}>{guardandoNuevoResponsable ? "Grabando..." : "Grabar"}</button>
+              <button type="button" onClick={() => { setMostrarNuevoResponsable(false); setModoResponsableForm("nuevo"); }} disabled={guardandoNuevoResponsable} style={{ border: "1px solid #CBD5E1", borderRadius: 8, padding: "9px 14px", background: "#FFFFFF", color: "#334155", fontWeight: 700, cursor: "pointer" }}>Cancelar</button>
+              <button type="submit" disabled={guardandoNuevoResponsable || existeCuentaResponsableDuplicada} style={{ border: "1px solid #2563EB", borderRadius: 8, padding: "9px 14px", background: "#2563EB", color: "#FFFFFF", fontWeight: 700, cursor: guardandoNuevoResponsable || existeCuentaResponsableDuplicada ? "not-allowed" : "pointer", opacity: guardandoNuevoResponsable || existeCuentaResponsableDuplicada ? 0.7 : 1 }}>{guardandoNuevoResponsable ? "Guardando..." : modoResponsableForm === "editar" ? "Actualizar" : "Grabar"}</button>
             </footer>
           </form>
         </div>

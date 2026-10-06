@@ -1,6 +1,10 @@
 import httpClient from "./httpClient";
 
 export type EmpleadoResponsableInsertarRequest = {
+  idBancoCta?: number;
+  idBancoActual?: number;
+  cuentaActual?: string;
+  nombreCtaActual?: string;
   nombre: string;
   cuenta: string;
   cuentaInter: string;
@@ -31,4 +35,11 @@ export async function insertarEmpleadoResponsable(
   request: EmpleadoResponsableInsertarRequest,
 ): Promise<void> {
   await httpClient.post("/tesoreria/gastos/responsables", request);
+}
+
+export async function actualizarEmpleadoResponsable(
+  idEmpleado: number,
+  request: EmpleadoResponsableInsertarRequest,
+): Promise<void> {
+  await httpClient.put(`/tesoreria/gastos/responsables/${idEmpleado}`, request);
 }

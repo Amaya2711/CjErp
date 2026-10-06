@@ -157,6 +157,53 @@ public class TesoreriaGastosController : ControllerBase
         }
     }
 
+    [HttpPut("responsables/{idEmpleado:int}")]
+    public async Task<IActionResult> ActualizarResponsable(
+        int idEmpleado,
+        [FromBody] EmpleadoResponsableInsertarRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (idEmpleado <= 0 ||
+            string.IsNullOrWhiteSpace(request.Nombre) ||
+            string.IsNullOrWhiteSpace(request.Cuenta) ||
+            string.IsNullOrWhiteSpace(request.CuentaInter) ||
+            string.IsNullOrWhiteSpace(request.TipoCuenta) ||
+            string.IsNullOrWhiteSpace(request.Banco) ||
+            string.IsNullOrWhiteSpace(request.NroDocumento) ||
+            request.IdBancoActual is not > 0 ||
+            string.IsNullOrWhiteSpace(request.CuentaActual) ||
+            string.IsNullOrWhiteSpace(request.NombreCtaActual))
+        {
+            return BadRequest(new { success = false, message = "Nombre, cuenta, cuenta interbancaria, tipo de cuenta, banco, documento y los datos actuales de la cuenta son obligatorios." });
+        }
+
+        request.IdEmpleado = idEmpleado;
+        request.Nombre = request.Nombre.Trim();
+        request.Cuenta = request.Cuenta.Trim();
+        request.CuentaInter = request.CuentaInter.Trim();
+        request.TipoCuenta = request.TipoCuenta.Trim();
+        request.Banco = request.Banco.Trim();
+        request.NroDocumento = request.NroDocumento.Trim();
+        request.CuentaActual = request.CuentaActual.Trim();
+        request.NombreCtaActual = request.NombreCtaActual.Trim();
+        request.UsuarioAccion = ResolveUsuarioAccion();
+        request.FechaCreacion = DateTime.Now.ToString("MM/dd/yyyy", CultureInfo.InvariantCulture);
+
+        try
+        {
+            await _empleadoResponsableService.ActualizarAsync(request, cancellationToken);
+            return Ok(new { success = true, message = "Responsable actualizado correctamente." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (SqlException ex) when (ex.Number >= 50000)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
     private static readonly List<GastoDto> Gastos = [];
     private static int _nextId = 1;
 

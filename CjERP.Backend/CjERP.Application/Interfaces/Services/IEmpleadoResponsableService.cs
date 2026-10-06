@@ -6,4 +6,5 @@ public interface IEmpleadoResponsableService
 {
     Task<IReadOnlyList<EmpleadoResponsableBuscarDto>> BuscarAsync(string nombreEmpleado, CancellationToken cancellationToken = default);
     Task InsertarAsync(EmpleadoResponsableInsertarRequestDto request, CancellationToken cancellationToken = default);
+    Task ActualizarAsync(EmpleadoResponsableInsertarRequestDto request, CancellationToken cancellationToken = default);
 }

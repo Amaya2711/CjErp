@@ -11,6 +11,7 @@ public sealed class EmpleadoResponsableService : IEmpleadoResponsableService
 {
     private const string BuscarSp = "dbo.sp_EmpleadoResponsable_Buscar";
     private const string InsertarSp = "dbo.sp_EmpleadoResponsable_Insertar";
+    private const string ActualizarSp = "dbo.sp_EmpleadoResponsable_Actualizar";
     private readonly ISqlCommandFactory _sqlCommandFactory;
 
     public EmpleadoResponsableService(ISqlCommandFactory sqlCommandFactory)
@@ -55,6 +56,21 @@ public sealed class EmpleadoResponsableService : IEmpleadoResponsableService
         EmpleadoResponsableInsertarRequestDto request,
         CancellationToken cancellationToken = default)
     {
+        await EjecutarAsync(InsertarSp, request, cancellationToken);
+    }
+
+    public async Task ActualizarAsync(
+        EmpleadoResponsableInsertarRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        await EjecutarAsync(ActualizarSp, request, cancellationToken);
+    }
+
+    private async Task EjecutarAsync(
+        string storedProcedure,
+        EmpleadoResponsableInsertarRequestDto request,
+        CancellationToken cancellationToken)
+    {
         await using var connection = _sqlCommandFactory.CreateConnection();
         var parameters = (await connection.QueryAsync<StoredProcedureParameter>(
             _sqlCommandFactory.Create(
@@ -67,13 +83,13 @@ public sealed class EmpleadoResponsableService : IEmpleadoResponsableService
                 WHERE p.object_id = OBJECT_ID(@ProcedureName, 'P')
                 ORDER BY p.parameter_id;
                 """,
-                new { ProcedureName = InsertarSp },
+                new { ProcedureName = storedProcedure },
                 CommandType.Text,
                 cancellationToken))).ToList();
 
         if (parameters.Count == 0)
         {
-            throw new InvalidOperationException("No se encontró el store sp_EmpleadoResponsable_Insertar en la base de datos.");
+            throw new InvalidOperationException($"No se encontró el store {storedProcedure} en la base de datos.");
         }
 
         var dynamicParameters = new DynamicParameters();
@@ -99,16 +115,24 @@ public sealed class EmpleadoResponsableService : IEmpleadoResponsableService
         if (unsupportedRequiredParameters.Count > 0)
         {
             throw new InvalidOperationException(
-                "El store sp_EmpleadoResponsable_Insertar requiere parámetros no contemplados por el formulario: " +
+                $"El store {storedProcedure} requiere parámetros no contemplados por el formulario: " +
                 string.Join(", ", unsupportedRequiredParameters) + ".");
         }
 
-        await connection.ExecuteAsync(
+        var resultado = await connection.QueryFirstOrDefaultAsync<EmpleadoResponsableOperacionResultado>(
             _sqlCommandFactory.Create(
-                InsertarSp,
+                storedProcedure,
                 dynamicParameters,
                 CommandType.StoredProcedure,
                 cancellationToken));
+
+        if (resultado?.Resultado == 0)
+        {
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(resultado.Mensaje)
+                    ? "No se pudo actualizar el responsable."
+                    : resultado.Mensaje);
+        }
     }
 
     private static string? GetParameterValue(
@@ -119,6 +143,11 @@ public sealed class EmpleadoResponsableService : IEmpleadoResponsableService
 
         return normalizedName switch
         {
+            "idempleado" or "idresponsable" => request.IdEmpleado?.ToString(),
+            "idbancocta" or "idcuentaempleado" => request.IdBancoCta?.ToString(),
+            "idbancoactual" => request.IdBancoActual?.ToString(),
+            "cuentaactual" => request.CuentaActual,
+            "nombrectaactual" or "tipocuentaactual" => request.NombreCtaActual,
             "nombre" or "nombreresponsable" or "responsable" or "nombreempleado" or "nomempleado"
                 => request.Nombre,
             "cuenta" or "nrocuenta" or "numerocuenta" or "cuentabancaria"
@@ -135,9 +164,9 @@ public sealed class EmpleadoResponsableService : IEmpleadoResponsableService
                 => request.Banco,
             "nrodocumento" or "numerodocumento" or "documento" or "nrodoc"
                 => request.NroDocumento,
-            "usuario" or "usuarioaccion" or "usuarioregistro" or "usuariocrea" or "usuariocreacion"
+            "usuario" or "usuarioaccion" or "usuarioregistro" or "usuariocrea" or "usuariocreacion" or "usuariomodificacion" or "usuariomodifica"
                 => request.UsuarioAccion,
-            "fechacreacion" or "fecharegistro"
+            "fechacreacion" or "fecharegistro" or "fechaactualizacion" or "fechamodificacion"
                 => request.FechaCreacion,
             _ => null
         };
@@ -168,5 +197,11 @@ public sealed class EmpleadoResponsableService : IEmpleadoResponsableService
         public string Name { get; set; } = string.Empty;
         public bool IsOutput { get; set; }
         public bool HasDefaultValue { get; set; }
+    }
+
+    private sealed class EmpleadoResponsableOperacionResultado
+    {
+        public int? Resultado { get; set; }
+        public string? Mensaje { get; set; }
     }
 }
