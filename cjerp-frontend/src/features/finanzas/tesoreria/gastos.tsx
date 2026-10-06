@@ -13,6 +13,7 @@ import CrudToolbar, { matchesCrudToolbarSearch, type CrudToolbarSearchField } fr
 import { FiltroOperativoLookup } from "../../../components/lookups/FiltroOperativoLookup";
 import { getValoresGasto } from "../../../api/filtroOperativoService";
 import { getGastosBootstrap } from "../../../api/gastosBootstrapService";
+import { buscarEmpleadosResponsables, insertarEmpleadoResponsable } from "../../../api/empleadoResponsableService";
 import { useConstantesPorCampo } from "../../../hooks/useConstantesPorCampo";
 import type { ConstanteOption } from "../../../models/constante";
 import type { FiltroOperativoValue, TareaOption } from "../../../models/filtroOperativo";
@@ -21,6 +22,7 @@ import type { ValoresGastoRequest, ValoresGastoResponse } from "../../../models/
 import { getAuthUser } from "../../../utils/authStorage";
 import { compressImageForUpload } from "../../../utils/imageCompression";
 import { SHAREPOINT_BASE_URL } from "../../../utils/sharepoint";
+import { getHttpErrorMessage } from "../../../utils/httpError";
 
 type GastoDto = {
   id: number;
@@ -134,6 +136,24 @@ type GastoForm = {
   fechaDeposito: string;
   nroOperacion: string;
   banco: string;
+};
+
+type NuevoResponsableForm = {
+  nombre: string;
+  cuenta: string;
+  cuentaInter: string;
+  tipoCuenta: string;
+  banco: string;
+  nroDocumento: string;
+};
+
+const NUEVO_RESPONSABLE_INICIAL: NuevoResponsableForm = {
+  nombre: "",
+  cuenta: "",
+  cuentaInter: "",
+  tipoCuenta: "",
+  banco: "",
+  nroDocumento: "",
 };
 
 export type GastoEditorRequest = {
@@ -811,6 +831,15 @@ function buildCuentaResumen(empleado: EmpleadoCta): string {
   return `Banco: ${empleado.nombreBanco || ""}, Tipo Cta: ${empleado.nombreCta || ""}, Cta. ${empleado.cuenta || ""}, CI: ${empleado.cuentaInter || ""}, Nro Doc: ${empleado.nroDocumento || ""}`;
 }
 
+function normalizarNombreResponsable(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleUpperCase();
+}
+
 function buildCuentaMetadata(empleado: EmpleadoCta) {
   return {
     cuentaNumero: empleado.cuenta || "",
@@ -1324,6 +1353,13 @@ export default function GastosPage({
   const [responsableInput, setResponsableInput] = useState("");
   const [showResponsableDropdown, setShowResponsableDropdown] = useState(false);
   const [highlightedResponsableIdx, setHighlightedResponsableIdx] = useState(-1);
+  const [mostrarNuevoResponsable, setMostrarNuevoResponsable] = useState(false);
+  const [nuevoResponsable, setNuevoResponsable] = useState<NuevoResponsableForm>(NUEVO_RESPONSABLE_INICIAL);
+  const [nuevoResponsableError, setNuevoResponsableError] = useState<string | null>(null);
+  const [guardandoNuevoResponsable, setGuardandoNuevoResponsable] = useState(false);
+  const [coincidenciasNuevoResponsable, setCoincidenciasNuevoResponsable] = useState<string[]>([]);
+  const [buscandoNuevoResponsable, setBuscandoNuevoResponsable] = useState(false);
+  const [busquedaNuevoResponsableError, setBusquedaNuevoResponsableError] = useState<string | null>(null);
   const [usarFechaEmision, setUsarFechaEmision] = useState(true);
   const [usarFechaVencimiento, setUsarFechaVencimiento] = useState(false);
   const [tipoCambio, setTipoCambio] = useState("3.80");
@@ -1349,7 +1385,7 @@ export default function GastosPage({
   );
   const [constantesRefreshKey, setConstantesRefreshKey] = useState(0);
   const camposConstantes = useMemo(
-    () => ["tipo_bien", "tipo_comprobante", "tipo_pago", "tipo_moneda", "estado"],
+    () => ["tipo_bien", "tipo_comprobante", "tipo_pago", "tipo_moneda", "tipo_cta", "estado"],
     []
   );
   const {
@@ -1359,6 +1395,7 @@ export default function GastosPage({
   } = useConstantesPorCampo(camposConstantes, constantesRefreshKey);
 
   const tipoPagoOptions = constantesPorCampo.tipo_pago ?? [];
+  const tipoCuentaOptions = constantesPorCampo.tipo_cta ?? [];
   const monedaOptions = constantesPorCampo.tipo_moneda ?? [];
   const bienOptions = constantesPorCampo.tipo_bien ?? [];
   const comprobanteOptions = constantesPorCampo.tipo_comprobante ?? [];
@@ -1885,6 +1922,120 @@ export default function GastosPage({
 
   const empleadosSafe = Array.isArray(empleados) ? empleados : [];
   const gastosSafe = Array.isArray(gastos) ? gastos : [];
+  const nombreNuevoResponsableNormalizado = normalizarNombreResponsable(nuevoResponsable.nombre);
+  const existeNuevoResponsable = nombreNuevoResponsableNormalizado.length > 0 &&
+    coincidenciasNuevoResponsable.some((nombre) => normalizarNombreResponsable(nombre) === nombreNuevoResponsableNormalizado);
+
+  useEffect(() => {
+    const nombre = nuevoResponsable.nombre.trim();
+    if (!mostrarNuevoResponsable || nombre.length < 3) {
+      setCoincidenciasNuevoResponsable([]);
+      setBusquedaNuevoResponsableError(null);
+      setBuscandoNuevoResponsable(false);
+      return undefined;
+    }
+
+    let vigente = true;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(async () => {
+      setBuscandoNuevoResponsable(true);
+      setBusquedaNuevoResponsableError(null);
+      try {
+        const data = await buscarEmpleadosResponsables(nombre, controller.signal);
+        if (!vigente) return;
+        setCoincidenciasNuevoResponsable(
+          Array.from(new Set(data
+            .map((item) => item.nombreEmpleado || item.nombre || "")
+            .map((item) => item.trim())
+            .filter(Boolean))),
+        );
+      } catch (error) {
+        if (!vigente || controller.signal.aborted) return;
+        setCoincidenciasNuevoResponsable([]);
+        setBusquedaNuevoResponsableError(getHttpErrorMessage(error, "No se pudo buscar responsables."));
+      } finally {
+        if (vigente) setBuscandoNuevoResponsable(false);
+      }
+    }, 300);
+
+    return () => {
+      vigente = false;
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [mostrarNuevoResponsable, nuevoResponsable.nombre]);
+
+  const guardarNuevoResponsable = async () => {
+    const request = {
+      nombre: nuevoResponsable.nombre.trim(),
+      cuenta: nuevoResponsable.cuenta.trim(),
+      cuentaInter: nuevoResponsable.cuentaInter.trim(),
+      tipoCuenta: nuevoResponsable.tipoCuenta.trim(),
+      banco: nuevoResponsable.banco.trim(),
+      nroDocumento: nuevoResponsable.nroDocumento.trim(),
+    };
+
+    if (Object.values(request).some((value) => !value)) {
+      setNuevoResponsableError("Complete todos los datos del responsable.");
+      return;
+    }
+
+    try {
+      const existentes = await buscarEmpleadosResponsables(request.nombre);
+      const nombreYaRegistrado = existentes.some((item) =>
+        normalizarNombreResponsable(item.nombreEmpleado || item.nombre || "") === normalizarNombreResponsable(request.nombre),
+      );
+      if (nombreYaRegistrado) {
+        setNuevoResponsableError("Ya existe un responsable registrado con ese nombre.");
+        return;
+      }
+    } catch (error) {
+      setNuevoResponsableError(getHttpErrorMessage(error, "No se pudo validar el responsable."));
+      return;
+    }
+
+    setGuardandoNuevoResponsable(true);
+    setNuevoResponsableError(null);
+    try {
+      await insertarEmpleadoResponsable(request);
+      const bootstrap = await getGastosBootstrap({
+        idCargo: idCargo > 0 ? idCargo : null,
+        idEmpleado: idEmpleado > 0 ? idEmpleado : null,
+      });
+      const responsablesActualizados = Array.isArray(bootstrap.empleados) ? bootstrap.empleados : [];
+      setEmpleados(responsablesActualizados);
+
+      const responsableCreado = responsablesActualizados.find(
+        (empleado) =>
+          empleado.nombreEmpleado.trim().toLocaleLowerCase() === request.nombre.toLocaleLowerCase() &&
+          empleado.cuenta.trim() === request.cuenta,
+      );
+
+      if (responsableCreado) {
+        const cuentaMetadata = buildCuentaMetadata(responsableCreado);
+        setForm((previous) => ({
+          ...previous,
+          responsable: String(responsableCreado.idEmpleado),
+          responsableLabel: responsableCreado.nombreEmpleado,
+          idSuministroProvisional: "",
+          idBancoCta: getIdBancoCtaValue(responsableCreado),
+          cuenta: buildCuentaResumen(responsableCreado),
+          cuentaNumero: cuentaMetadata.cuentaNumero,
+          cuentaInter: cuentaMetadata.cuentaInter,
+          nombreCta: cuentaMetadata.nombreCta,
+          ruc: cuentaMetadata.ruc,
+        }));
+        setResponsableInput(responsableCreado.nombreEmpleado);
+      }
+
+      setNuevoResponsable(NUEVO_RESPONSABLE_INICIAL);
+      setMostrarNuevoResponsable(false);
+    } catch (error) {
+      setNuevoResponsableError(getHttpErrorMessage(error, "No se pudo registrar el responsable."));
+    } finally {
+      setGuardandoNuevoResponsable(false);
+    }
+  };
   const gastosGridScrollRef = useRef<HTMLDivElement | null>(null);
   const [gastosGridScrollTop, setGastosGridScrollTop] = useState(0);
   const [gastosGridViewportHeight, setGastosGridViewportHeight] = useState(520);
@@ -4517,7 +4668,32 @@ export default function GastosPage({
                 }}
               >
                 <div style={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-                  <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Responsable</label>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Responsable</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNuevoResponsable(NUEVO_RESPONSABLE_INICIAL);
+                        setNuevoResponsableError(null);
+                        setMostrarNuevoResponsable(true);
+                      }}
+                      disabled={modo === "ver"}
+                      title="Registrar nuevo responsable"
+                      style={{
+                        border: "1px solid #2563EB",
+                        borderRadius: 7,
+                        background: "#EFF6FF",
+                        color: "#1D4ED8",
+                        padding: "4px 8px",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        cursor: modo === "ver" ? "not-allowed" : "pointer",
+                        opacity: modo === "ver" ? 0.55 : 1,
+                      }}
+                    >
+                      + Nuevo responsable
+                    </button>
+                  </div>
                   <div style={{ position: "relative", width: "100%" }}>
                     <input
                       type="text"
@@ -5634,6 +5810,129 @@ export default function GastosPage({
               )}
             </div>
           </section>
+        </div>
+      )}
+
+      {mostrarNuevoResponsable && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="nuevo-responsable-title"
+          style={{
+            position: "fixed",
+            inset: 0,
+            // Debe quedar sobre el panel lateral de "Nuevo gasto" (zIndex 3000).
+            zIndex: 5000,
+            background: "rgba(15, 23, 42, 0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 18,
+          }}
+        >
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void guardarNuevoResponsable();
+            }}
+            style={{
+              width: "min(620px, 100%)",
+              background: "#FFFFFF",
+              borderRadius: 14,
+              boxShadow: "0 24px 60px rgba(15, 23, 42, 0.25)",
+              overflow: "hidden",
+            }}
+          >
+            <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "16px 18px", borderBottom: "1px solid #E2E8F0" }}>
+              <div>
+                <h2 id="nuevo-responsable-title" style={{ margin: 0, fontSize: 18, color: "#0F172A" }}>Nuevo responsable</h2>
+                <span style={{ display: "block", marginTop: 3, color: "#64748B", fontSize: 12 }}>Registre los datos bancarios del responsable.</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMostrarNuevoResponsable(false)}
+                disabled={guardandoNuevoResponsable}
+                aria-label="Cerrar"
+                style={{ border: "none", background: "transparent", color: "#475569", fontSize: 24, cursor: "pointer", lineHeight: 1 }}
+              >
+                ×
+              </button>
+            </header>
+            <div style={{ display: "grid", gap: 14, padding: 18 }}>
+              {nuevoResponsableError && (
+                <div role="alert" style={{ border: "1px solid #FCA5A5", borderRadius: 8, background: "#FEF2F2", color: "#B91C1C", padding: "9px 11px", fontSize: 12 }}>
+                  {nuevoResponsableError}
+                </div>
+              )}
+              {[
+                { key: "nombre", label: "Nombre", placeholder: "Nombre completo" },
+                { key: "cuenta", label: "Cuenta", placeholder: "Número de cuenta" },
+                { key: "cuentaInter", label: "Cta. interbancaria", placeholder: "Código de cuenta interbancaria" },
+                { key: "nroDocumento", label: "Nro. documento", placeholder: "Documento de identidad" },
+              ].map((field) => (
+                <label key={field.key} style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 700, color: "#334155" }}>
+                  {field.label}
+                  <input
+                    list={field.key === "nombre" ? "nombres-responsable-encontrados" : undefined}
+                    value={nuevoResponsable[field.key as keyof NuevoResponsableForm]}
+                    onChange={(event) => {
+                      setNuevoResponsableError(null);
+                      setNuevoResponsable((previous) => ({ ...previous, [field.key]: event.target.value }));
+                    }}
+                    placeholder={field.placeholder}
+                    disabled={guardandoNuevoResponsable}
+                    style={{ height: 38, border: "1px solid #CBD5E1", borderRadius: 8, padding: "0 10px", fontSize: 13 }}
+                  />
+                  {field.key === "nombre" && (
+                    <>
+                      {buscandoNuevoResponsable && <span style={{ color: "#64748B", fontSize: 11, fontWeight: 500 }}>Buscando responsables...</span>}
+                      <datalist id="nombres-responsable-encontrados">
+                        {coincidenciasNuevoResponsable.map((nombre) => <option key={nombre} value={nombre} />)}
+                      </datalist>
+                      {!buscandoNuevoResponsable && existeNuevoResponsable && <span style={{ color: "#B45309", fontSize: 11, fontWeight: 600 }}>Ya existe este responsable.</span>}
+                      {busquedaNuevoResponsableError && <span style={{ color: "#DC2626", fontSize: 11, fontWeight: 600 }}>{busquedaNuevoResponsableError}</span>}
+                    </>
+                  )}
+                </label>
+              ))}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
+                <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 700, color: "#334155" }}>
+                  Tipo de cuenta
+                  <select
+                    value={nuevoResponsable.tipoCuenta}
+                    onChange={(event) => setNuevoResponsable((previous) => ({ ...previous, tipoCuenta: event.target.value }))}
+                    disabled={guardandoNuevoResponsable || constantesLoading}
+                    style={{ height: 38, border: "1px solid #CBD5E1", borderRadius: 8, padding: "0 10px", fontSize: 13 }}
+                  >
+                    <option value="">{constantesLoading ? "Cargando..." : "Seleccione"}</option>
+                    {tipoCuentaOptions.map((option, index) => (
+                      <option key={`tipo-cuenta-${getConstanteStoredValue(option)}-${index}`} value={getConstanteStoredValue(option)}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 700, color: "#334155" }}>
+                  Banco
+                  <input
+                    list="bancos-responsable"
+                    value={nuevoResponsable.banco}
+                    onChange={(event) => setNuevoResponsable((previous) => ({ ...previous, banco: event.target.value }))}
+                    placeholder="Seleccione o escriba"
+                    disabled={guardandoNuevoResponsable}
+                    style={{ height: 38, border: "1px solid #CBD5E1", borderRadius: 8, padding: "0 10px", fontSize: 13 }}
+                  />
+                  <datalist id="bancos-responsable">
+                    {Array.from(new Set(empleadosSafe.map((empleado) => empleado.nombreBanco).filter(Boolean))).map((option) => <option key={option} value={option} />)}
+                  </datalist>
+                </label>
+              </div>
+            </div>
+            <footer style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "14px 18px", borderTop: "1px solid #E2E8F0" }}>
+              <button type="button" onClick={() => setMostrarNuevoResponsable(false)} disabled={guardandoNuevoResponsable} style={{ border: "1px solid #CBD5E1", borderRadius: 8, padding: "9px 14px", background: "#FFFFFF", color: "#334155", fontWeight: 700, cursor: "pointer" }}>Cancelar</button>
+              <button type="submit" disabled={guardandoNuevoResponsable || existeNuevoResponsable} style={{ border: "1px solid #2563EB", borderRadius: 8, padding: "9px 14px", background: "#2563EB", color: "#FFFFFF", fontWeight: 700, cursor: guardandoNuevoResponsable || existeNuevoResponsable ? "not-allowed" : "pointer", opacity: guardandoNuevoResponsable || existeNuevoResponsable ? 0.7 : 1 }}>{guardandoNuevoResponsable ? "Grabando..." : "Grabar"}</button>
+            </footer>
+          </form>
         </div>
       )}
 

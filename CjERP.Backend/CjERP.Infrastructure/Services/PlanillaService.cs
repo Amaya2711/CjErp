@@ -544,7 +544,13 @@ namespace CjERP.Infrastructure.Services
             parameters.Add("@RutaFactura", NullIfWhiteSpace(request.FacturaPath), DbType.String);
             parameters.Add("@IdUsuarioFactura", request.IdUsuarioFactura, DbType.Int32);
             parameters.Add("@FechaVencimiento", ParseNullableDate(request.FechaVencimiento), DbType.DateTime);
-            parameters.Add("@IdProvisional", request.IdSuministroProvisional, DbType.Int32);
+            // El suministro provisional es opcional. Al no enviarlo se conserva el
+            // valor por defecto definido por sp_Planilla_Insertar, en lugar de
+            // sobrescribirlo explícitamente con NULL.
+            if (request.IdSuministroProvisional is > 0)
+            {
+                parameters.Add("@IdProvisional", request.IdSuministroProvisional, DbType.Int32);
+            }
 
             return parameters;
         }

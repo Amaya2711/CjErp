@@ -16,17 +16,20 @@ public class TesoreriaGastosController : ControllerBase
 {
     private readonly ISharePointCommercialUploadService _sharePointCommercialUploadService;
     private readonly IPlanillaService _planillaService;
+    private readonly IEmpleadoResponsableService _empleadoResponsableService;
     private readonly IAuditoriaCambiosService _auditoriaCambiosService;
     private readonly ILogger<TesoreriaGastosController> _logger;
 
     public TesoreriaGastosController(
         ISharePointCommercialUploadService sharePointCommercialUploadService,
         IPlanillaService planillaService,
+        IEmpleadoResponsableService empleadoResponsableService,
         IAuditoriaCambiosService auditoriaCambiosService,
         ILogger<TesoreriaGastosController> logger)
     {
         _sharePointCommercialUploadService = sharePointCommercialUploadService;
         _planillaService = planillaService;
+        _empleadoResponsableService = empleadoResponsableService;
         _auditoriaCambiosService = auditoriaCambiosService;
         _logger = logger;
     }
@@ -99,6 +102,58 @@ public class TesoreriaGastosController : ControllerBase
         public string IdSite { get; set; } = string.Empty;
         public string Observacion { get; set; } = string.Empty;
         public int? IdAprobador { get; set; }
+    }
+
+    [HttpGet("responsables/buscar")]
+    public async Task<IActionResult> BuscarResponsables(
+        [FromQuery] string? nombre,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(nombre) || nombre.Trim().Length < 3)
+        {
+            return Ok(new { success = true, data = Array.Empty<EmpleadoResponsableBuscarDto>() });
+        }
+
+        var data = await _empleadoResponsableService.BuscarAsync(nombre, cancellationToken);
+        return Ok(new { success = true, data });
+    }
+
+    [HttpPost("responsables")]
+    public async Task<IActionResult> InsertarResponsable(
+        [FromBody] EmpleadoResponsableInsertarRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Nombre) ||
+            string.IsNullOrWhiteSpace(request.Cuenta) ||
+            string.IsNullOrWhiteSpace(request.CuentaInter) ||
+            string.IsNullOrWhiteSpace(request.TipoCuenta) ||
+            string.IsNullOrWhiteSpace(request.Banco) ||
+            string.IsNullOrWhiteSpace(request.NroDocumento))
+        {
+            return BadRequest(new { success = false, message = "Nombre, cuenta, cuenta interbancaria, tipo de cuenta, banco y documento son obligatorios." });
+        }
+
+        request.Nombre = request.Nombre.Trim();
+        request.Cuenta = request.Cuenta.Trim();
+        request.CuentaInter = request.CuentaInter.Trim();
+        request.TipoCuenta = request.TipoCuenta.Trim();
+        request.Banco = request.Banco.Trim();
+        request.NroDocumento = request.NroDocumento.Trim();
+        request.UsuarioAccion = ResolveUsuarioAccion();
+
+        try
+        {
+            await _empleadoResponsableService.InsertarAsync(request, cancellationToken);
+            return Ok(new { success = true, message = "Responsable registrado correctamente." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (SqlException ex) when (ex.Number >= 50000)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
     }
 
     private static readonly List<GastoDto> Gastos = [];

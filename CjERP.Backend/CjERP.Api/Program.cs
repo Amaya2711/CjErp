@@ -237,6 +237,7 @@ builder.Services.AddScoped<ISegPermisoAccionService, SegPermisoAccionService>();
 builder.Services.AddScoped<ILookupService, LookupService>();
 builder.Services.AddHostedService<SqlMonitorWorker>();
 builder.Services.AddScoped<IEmpleadoCtaService, EmpleadoCtaService>();
+builder.Services.AddScoped<IEmpleadoResponsableService, EmpleadoResponsableService>();
 builder.Services.AddScoped<IChequeEmpleadoService, ChequeEmpleadoService>();
 builder.Services.AddScoped<IPlanillaService, PlanillaService>();
 builder.Services.AddScoped<IPlanillaBoletaService, PlanillaBoletaService>();
