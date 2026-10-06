@@ -208,55 +208,22 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
         await using var tx = (SqlTransaction)await cn.BeginTransactionAsync(ct);
         var ids = request.Items.Select(x => x.Correlativo).Distinct().ToArray();
         var cambianAPagado = (await cn.QueryAsync<int>(new CommandDefinition(
-            "SELECT Correlativo FROM Planilla WITH (UPDLOCK,HOLDLOCK) WHERE Correlativo IN @ids AND Estado=8",
-            new { ids }, tx, cancellationToken: ct))).ToArray();
-        var envianAProgramado = (await cn.QueryAsync<int>(new CommandDefinition(
-            "SELECT Correlativo FROM Planilla WITH (UPDLOCK,HOLDLOCK) WHERE Correlativo IN @ids AND Estado=5",
+            "SELECT Correlativo FROM Planilla WITH (UPDLOCK,HOLDLOCK) WHERE Correlativo IN @ids AND Estado IN (5,8)",
             new { ids }, tx, cancellationToken: ct))).ToArray();
         var fechaDepositoIso = request.FechaDeposito.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
         var procesados = await cn.ExecuteAsync(new CommandDefinition("""
             UPDATE Planilla SET IdEjecutor=@IdEjecutor, IdTransferencia=@IdTransferencia,
                 IdBanco=@IdBanco, IdMoneda2=@IdMoneda2, FechaDeposito=@FechaDeposito,
                 Cheque=@Cheque, NroOperacion=@NroOperacion,
-                Estado=CASE WHEN Estado=8 THEN 4 ELSE Estado END,
+                Estado=4,
                 Comentario=CASE WHEN NULLIF(LTRIM(RTRIM(@Comentario)), '') IS NULL THEN Comentario
                     ELSE LEFT(CONCAT(ISNULL(Comentario,''), CASE WHEN ISNULL(Comentario,'')='' THEN '' ELSE ' - ' END, @Comentario), 500) END
             WHERE Correlativo IN @ids AND Estado IN (5,8);
             """, new { request.IdEjecutor, request.IdTransferencia, request.IdBanco, request.IdMoneda2,
                 FechaDeposito = fechaDepositoIso, request.Cheque, request.NroOperacion, request.Comentario, ids }, tx, cancellationToken: ct));
-        var ahora = DateTime.UtcNow.AddHours(-5);
-        if (envianAProgramado.Length > 0)
-        {
-            var itemsProgramar = new DataTable();
-            itemsProgramar.Columns.Add("Correlativo", typeof(int));
-            itemsProgramar.Columns.Add("IdSite", typeof(string));
-            var idsProgramar = envianAProgramado.ToHashSet();
-            foreach (var item in request.Items.Where(item => idsProgramar.Contains(item.Correlativo)))
-                itemsProgramar.Rows.Add(item.Correlativo, item.IdSite);
-
-            await AuditarAsync(cn, tx, envianAProgramado, usuario, "ANTES programar", ahora, ct);
-            var parametrosProgramar = new DynamicParameters();
-            parametrosProgramar.Add("Items", itemsProgramar.AsTableValuedParameter("dbo.PlanillaRevisionType"));
-            parametrosProgramar.Add("Observacion", request.Comentario.Trim(), DbType.AnsiString);
-            await cn.ExecuteAsync(new CommandDefinition(
-                "dbo.sp_Planilla_ProgramarMasivo", parametrosProgramar, tx, commandTimeout: 180,
-                commandType: CommandType.StoredProcedure, cancellationToken: ct));
-
-            var programados = await cn.ExecuteScalarAsync<int>(new CommandDefinition(
-                "SELECT COUNT(*) FROM Planilla WHERE Correlativo IN @envianAProgramado AND Estado=8",
-                new { envianAProgramado }, tx, cancellationToken: ct));
-            if (programados != envianAProgramado.Length)
-                throw new InvalidOperationException("No se pudo enviar todos los recibos a Programado. La operación se revirtió.");
-
-            await AuditarAsync(cn, tx, envianAProgramado, usuario, "DESPUÉS programar", ahora, ct);
-            await cn.ExecuteAsync(new CommandDefinition("""
-                INSERT MovEstadosPagos(Correlativo,Estado,Observacion,Usuario,FechaCreacion,HoraCreacion)
-                SELECT Correlativo,Estado,@observacion,LEFT(@usuario,10),@ahora,@ahora
-                FROM Planilla WHERE Correlativo IN @envianAProgramado AND Estado=8
-                """, new { envianAProgramado, observacion = request.Comentario.Trim(), usuario, ahora }, tx, cancellationToken: ct));
-        }
         if (cambianAPagado.Length > 0)
         {
+            var ahora = DateTime.UtcNow.AddHours(-5);
             await cn.ExecuteAsync(new CommandDefinition("""
                 INSERT MovEstadosPagos(Correlativo,Estado,Observacion,Usuario,FechaCreacion,HoraCreacion)
                 SELECT Correlativo,Estado,@observacion,LEFT(@usuario,10),@ahora,@ahora

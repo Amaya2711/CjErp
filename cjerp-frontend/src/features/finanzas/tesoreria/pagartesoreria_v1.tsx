@@ -907,9 +907,7 @@ export default function PagarTesoreriaV1Page() {
     setSaving(true); setError("");
     try {
       const result = await grabarPagoTesoreria({ ...form, idEjecutor: Number(form.idEjecutor), idTransferencia: Number(form.idTransferencia), idBanco: Number(form.idBanco), idMoneda2: Number(form.idMoneda2), items: crearItemsTesoreria(selectedRows) });
-      setSuccess(estado === 5
-        ? `${result.procesados} recibo(s) guardado(s) y enviado(s) a Programado.`
-        : `${result.procesados} recibo(s) guardado(s) y marcado(s) como pagado(s).`);
+      setSuccess(`${result.procesados} recibo(s) guardado(s) y marcado(s) como pagado(s).`);
       await load(estado, desde, hasta);
     } catch (e) { setError(getHttpErrorMessage(e, "No se pudo grabar la información del pago.")); } finally { setSaving(false); }
   };
