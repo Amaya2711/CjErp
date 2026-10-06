@@ -221,10 +221,8 @@ export default function PagarTesoreriaV1Page() {
   const [editingRevision, setEditingRevision] = useState(false);
   const [registroPagoAbierto, setRegistroPagoAbierto] = useState(false);
   useEffect(() => {
-    if (estado === 5) setRegistroPagoAbierto(selected.size > 0);
-    else if (estado === 8 && selected.size === 0) setRegistroPagoAbierto(false);
-    else if (estado !== 8) setRegistroPagoAbierto(false);
-  }, [estado, selected]);
+    setRegistroPagoAbierto(esPago && selected.size > 0);
+  }, [esPago, selected]);
   const [contabilidadValida, setContabilidadValida] = useState(false);
   const saving = operationSaving || editingRevision;
   const [permisosRevision, setPermisosRevision] = useState<PagoRevisionPermisos>({
@@ -1952,11 +1950,6 @@ export default function PagarTesoreriaV1Page() {
             {!esReporte && <div className="pt-grid-actions" role="group" aria-label={`Acciones de ${tabs.find(t => t.estado === estado)?.label}`}>
               {esPago && (
                 <>
-                  {estado === 8 && selectedRows.length > 0 && <button className="pt-primary pt-register-payment-entry" type="button"
-                    disabled={saving || loading || registroPagoAbierto}
-                    onClick={() => setRegistroPagoAbierto(true)}>
-                    Registrar pago ({selectedRows.length})
-                  </button>}
                   {estado === 5 && (
                     <button className="pt-primary" type="submit" form={`pt-stage-${estado}`}
                       value="programar"
