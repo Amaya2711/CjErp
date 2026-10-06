@@ -14,8 +14,8 @@ export default function ZoomPrompt() {
     <ConfirmDialog
       open={open}
       title="Tamaño de la pantalla"
-      message="¿Desea ajustar el tamaño de la pantalla al 65 % para ver más contenido? Se aplica de inmediato y recordaremos su elección en este navegador."
-      confirmLabel="Sí, ajustar al 65 %"
+      message="¿Desea ajustar el tamaño de la pantalla al 70 % para ver más contenido? Se aplica de inmediato y vale hasta que cierre sesión."
+      confirmLabel="Sí, ajustar al 70 %"
       cancelLabel="No, mantener tamaño actual"
       onConfirm={() => responder(true)}
       onCancel={() => responder(false)}
