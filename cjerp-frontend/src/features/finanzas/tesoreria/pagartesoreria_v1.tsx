@@ -203,10 +203,12 @@ export default function PagarTesoreriaV1Page() {
   const [solicitantesFiltro, setSolicitantesFiltro] = useState<string[]>([]);
   const [busquedaSolicitante, setBusquedaSolicitante] = useState("");
   const [rendicion, setRendicion] = useState("");
+  const [estadosFiltro, setEstadosFiltro] = useState<string[]>([]);
+  const [operacionFiltro, setOperacionFiltro] = useState<"" | "con" | "sin">("");
   const [estadoBusqueda, setEstadoBusqueda] = useState("");
   const [desde, setDesde] = useState(inicioMesActual);
   const [hasta, setHasta] = useState(hoy);
-  const [groupBy, setGroupBy] = useState<"todos" | "comprobante" | "proyecto-site" | "responsable" | "banco" | "adjunto" | "serie-view-detalle">("todos");
+  const [groupBy, setGroupBy] = useState<"todos" | "comprobante" | "proyecto-site" | "responsable" | "solicitante" | "banco" | "adjunto" | "serie-view-detalle">("todos");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [form, setForm] = useState(initialForm);
   const [operationSaving, setSaving] = useState(false);
@@ -222,7 +224,7 @@ export default function PagarTesoreriaV1Page() {
   const [permisosRevision, setPermisosRevision] = useState<PagoRevisionPermisos>({
     puedeEditar: false, puedeEditarOperacion: false, puedeEditarEstado: false,
   });
-  const columnCount = estado === 1 ? 22 : estado === 9 ? 17 : estado === 4 ? 18 : estado === 100 ? 18 : 16;
+  const columnCount = estado === 1 ? 22 : estado === 9 ? 17 : estado === 4 ? 19 : estado === 100 ? 18 : 16;
   const [confirmation, setConfirmation] = useState<PagoTesoreriaRequest | null>(
     null,
   );
@@ -313,6 +315,10 @@ export default function PagarTesoreriaV1Page() {
 
   const load = useCallback(
     async (status: number, start: string, end: string, correlativo?: number) => {
+      if (status === 4) {
+        start = start || inicioMesActual();
+        end = end || hoy();
+      }
       fetchRef.current?.abort();
       const controller = new AbortController();
       fetchRef.current = controller;
@@ -329,6 +335,8 @@ export default function PagarTesoreriaV1Page() {
               const r = raw as Record<string, unknown>;
               return { correlativo: 0, idSite: "reporte", estado: Number(r.Estado ?? r.estado ?? 0), tipoMoneda: Number(r.TipoMoneda ?? r.tipoMoneda ?? 0), idResponsable: 0, cantidadRegistros: Number(r.CantidadRegistros ?? r.cantidadRegistros ?? 0), totalPagar: Number(r.TotalPagar ?? r.totalPagar ?? 0), montoRetencion: Number(r.MontoRetencion ?? r.montoRetencion ?? 0), total: Number(r.TotalNeto ?? r.totalNeto ?? 0), moneda: String(r.Moneda ?? r.moneda ?? ""), version: "reporte" } as PagoTesoreriaRow;
             })
+          : status === 4
+          ? await listarPagosTesoreria(100, start, end, controller.signal) // Rendición: todos los estados; solo se seleccionan los 4
           : await listarPagosTesoreria(status, start, end, controller.signal);
         if (!controller.signal.aborted) setRows(result);
       } catch (e) {
@@ -411,6 +419,8 @@ export default function PagarTesoreriaV1Page() {
         (!responsablesFiltro.length || responsablesFiltro.includes(r.responsable ?? "")) &&
         (!solicitantesFiltro.length || solicitantesFiltro.includes(r.solicitante ?? "")) &&
         (!rendicion || String(r.idRendicion) === rendicion) &&
+        (estado !== 4 || !estadosFiltro.length || estadosFiltro.includes(String(r.estado))) &&
+        (estado !== 4 || !operacionFiltro || Boolean(r.nroOperacion?.trim()) === (operacionFiltro === "con")) &&
         (estado !== 100 || !estadoBusqueda || String(r.estado) === estadoBusqueda) &&
         (!cliente || r.cliente === cliente) &&
         (!monedasFiltro.length || monedasFiltro.includes(String(r.tipoMoneda))) &&
@@ -449,6 +459,8 @@ export default function PagarTesoreriaV1Page() {
     responsablesFiltro,
     solicitantesFiltro,
     rendicion,
+    estadosFiltro,
+    operacionFiltro,
     estado,
     correlativoBusqueda,
     groupBy,
@@ -585,6 +597,8 @@ export default function PagarTesoreriaV1Page() {
       (exclude === "responsable" || !responsablesFiltro.length || responsablesFiltro.includes(r.responsable ?? "")) &&
       (exclude === "solicitante" || !solicitantesFiltro.length || solicitantesFiltro.includes(r.solicitante ?? "")) &&
       (exclude === "rendicion" || !rendicion || String(r.idRendicion) === rendicion) &&
+      (estado !== 4 || exclude === "estado" || !estadosFiltro.length || estadosFiltro.includes(String(r.estado))) &&
+      (estado !== 4 || exclude === "operacion" || !operacionFiltro || Boolean(r.nroOperacion?.trim()) === (operacionFiltro === "con")) &&
       (exclude === "cliente" || !cliente || r.cliente === cliente) &&
       (exclude === "moneda" || !monedasFiltro.length || monedasFiltro.includes(String(r.tipoMoneda))) &&
       (exclude === "comprobante" || !comprobantesFiltro.length || comprobantesFiltro.includes(r.comprobante ?? "")) &&
@@ -593,11 +607,26 @@ export default function PagarTesoreriaV1Page() {
         .join(" ").toLocaleLowerCase().includes(search)),
     );
   };
+  // Opciones de los filtros de Rendición: solo lo que existe en los registros visibles del grid
+  // (se conservan las ya marcadas para poder desmarcarlas).
+  const rowsEstadoOpciones = estado === 4 ? rowsForFilterOption("estado") : [];
+  const opcionesEstado = [...new Set([...rowsEstadoOpciones.map((r) => r.estado), ...estadosFiltro.map(Number)])]
+    .sort((a, b) => a - b)
+    .map((id) => ({
+      id,
+      nombre: catalogos.estados.find((item) => item.id === id)?.nombre || labelEstadoHistorial(id),
+      cantidad: rowsEstadoOpciones.filter((r) => r.estado === id).length,
+    }));
+  const rowsOperacionOpciones = estado === 4 ? rowsForFilterOption("operacion") : [];
+  const operacionesCon = rowsOperacionOpciones.filter((r) => Boolean(r.nroOperacion?.trim())).length;
+  const operacionesSin = rowsOperacionOpciones.length - operacionesCon;
   const selectedRows = useMemo(
     () => visibleRows.filter((r) => selected.has(key(r))),
     [visibleRows, selected],
   );
-  const kpiRows = estado === 1 && selectedRows.length > 0 ? selectedRows : visibleRows;
+  const kpiRows = estado === 1 && selectedRows.length > 0
+    ? selectedRows
+    : estado === 4 ? visibleRows.filter((r) => r.estado === 4) : visibleRows;
   const selectedCurrencies = new Set(selectedRows.map((r) => r.tipoMoneda));
   const totals = useMemo(
     () =>
@@ -636,6 +665,8 @@ export default function PagarTesoreriaV1Page() {
         ? `${r.proyecto || "Sin proyecto"} · ${r.idSite || "Sin site"}${r.site ? ` · ${r.site}` : ""}`
         : groupBy === "responsable"
           ? r.responsable || "Sin responsable"
+          : groupBy === "solicitante"
+          ? r.solicitante || "Sin solicitante"
           : groupBy === "adjunto"
             ? "Documentos con adjunto"
           : groupBy === "serie-view-detalle"
@@ -656,7 +687,7 @@ export default function PagarTesoreriaV1Page() {
     }));
   }, [pagedRows, estado, groupBy, catalogos.bancos]);
   const selectable = visibleRows.filter(
-    (r) => r.correlativo > 0 && r.idSite && r.version,
+    (r) => r.correlativo > 0 && r.idSite && r.version && (estado !== 4 || r.estado === 4),
   );
   useEffect(() => {
     if (selectAll.current)
@@ -683,7 +714,7 @@ export default function PagarTesoreriaV1Page() {
     setSelected((prev) => {
       const next = new Set(prev);
       for (const r of items) {
-        if (checked && r.correlativo > 0 && r.idSite && r.version)
+        if (checked && r.correlativo > 0 && r.idSite && r.version && (estado !== 4 || r.estado === 4))
           next.add(key(r));
         else next.delete(key(r));
       }
@@ -711,7 +742,11 @@ export default function PagarTesoreriaV1Page() {
     setSolicitantesFiltro([]);
     setBusquedaSolicitante("");
     setRendicion("");
-    if (next !== 1 && groupBy === "serie-view-detalle") setGroupBy("todos");
+    setEstadosFiltro([]);
+    setOperacionFiltro("");
+    if (next === 4) setGroupBy("solicitante"); // Rendición agrupa por solicitante por defecto
+    else if (next !== 1 && groupBy === "serie-view-detalle") setGroupBy("todos");
+    else if (estado === 4 && groupBy === "solicitante") setGroupBy("todos");
     setForm(initialForm());
     setRegistroPagoAbierto(false);
     setContabilidadValida(false);
@@ -854,7 +889,7 @@ export default function PagarTesoreriaV1Page() {
   const exportar = () => {
     if (estado === 4) {
       const sheet = XLSX.utils.json_to_sheet(visibleRows.map((r) => ({
-        Recibo: r.correlativo, OT: r.ot, Responsable: r.responsable, Detalle: r.detalle,
+        Recibo: r.correlativo, Estado: catalogos.estados.find((item) => item.id === r.estado)?.nombre || labelEstadoHistorial(r.estado), OT: r.ot, Responsable: r.responsable, Detalle: r.detalle,
         Cliente: r.cliente, Proyecto: r.proyecto, Site: r.site, Solicitante: r.solicitante,
         Comprobante: r.comprobante, Serie: r.serie, Moneda: r.moneda, Subtotal: r.subtotal,
         IGV: r.igv, Total: r.total, Retencion: r.montoRetencion, TotalPagar: r.totalPagar,
@@ -1065,7 +1100,7 @@ export default function PagarTesoreriaV1Page() {
               {tab.label}
               {tab.estado >= 0 && tab.estado !== 99 && tab.estado !== 100
                 ? <span>{tabCountsLoading ? "…" : (tabCounts[tab.estado] ?? 0)}</span>
-                : estado === tab.estado && <span>{estado === 100 && !correlativoBusqueda.trim() ? 0 : rows.length}</span>}
+                : estado === tab.estado && <span>{estado === 100 && !correlativoBusqueda.trim() ? 0 : estado === 4 ? rows.filter((r) => r.estado === 4).length : rows.length}</span>}
             </button>
           ))}
         </nav>
@@ -1137,9 +1172,12 @@ export default function PagarTesoreriaV1Page() {
 						type="button"
 						disabled={loading}
 						onClick={() => {
+							// Rendición siempre exige rango de fechas: se conserva el actual (o el del mes en curso si está vacío)
+							const rangoDesde = estado === 4 ? desde || inicioMesActual() : "";
+							const rangoHasta = estado === 4 ? hasta || hoy() : "";
 							setQuery("");
-							setDesde("");
-							setHasta("");
+							setDesde(rangoDesde);
+							setHasta(rangoHasta);
 							setCliente("");
 							setMonedasFiltro([]);
 							setComprobantesFiltro([]);
@@ -1150,8 +1188,10 @@ export default function PagarTesoreriaV1Page() {
 							setSolicitantesFiltro([]);
 							setBusquedaSolicitante("");
 							setRendicion("");
+							setEstadosFiltro([]);
+							setOperacionFiltro("");
 							setSelected(new Set());
-							void load(estado, "", "");
+							void load(estado, rangoDesde, rangoHasta);
 						}}
 						title="Limpiar filtros"
 						aria-label="Limpiar filtros"
@@ -1471,6 +1511,40 @@ export default function PagarTesoreriaV1Page() {
                   ))}
                 </select>
               )}
+              {estado === 4 && (
+                <>
+                  <details className="pt-comprobante-filter">
+                    <summary>Todos los estados{estadosFiltro.length > 0 && ` (${estadosFiltro.length})`}</summary>
+                    <div className="pt-comprobante-options" aria-label="Filtrar por estados">
+                      {opcionesEstado.map((item) => (
+                        <label key={item.id}>
+                          <input
+                            type="checkbox"
+                            checked={estadosFiltro.includes(String(item.id))}
+                            onChange={(e) => {
+                              setEstadosFiltro((actual) => e.target.checked
+                                ? [...actual, String(item.id)]
+                                : actual.filter((id) => id !== String(item.id)));
+                              setSelected(new Set());
+                              setCurrentPage(1);
+                            }}
+                          />
+                          {item.nombre} ({item.cantidad})
+                        </label>
+                      ))}
+                    </div>
+                  </details>
+                  <select
+                    aria-label="Filtrar por número de operación"
+                    value={operacionFiltro}
+                    onChange={(e) => changeFilter((v) => setOperacionFiltro(v as "" | "con" | "sin"), e.target.value)}
+                  >
+                    <option value="">N° operación: todos</option>
+                    {(operacionesCon > 0 || operacionFiltro === "con") && <option value="con">Con N° operación ({operacionesCon})</option>}
+                    {(operacionesSin > 0 || operacionFiltro === "sin") && <option value="sin">Sin N° operación ({operacionesSin})</option>}
+                  </select>
+                </>
+              )}
               <select
                 aria-label="Agrupar recibos"
                 value={groupBy}
@@ -1483,6 +1557,7 @@ export default function PagarTesoreriaV1Page() {
                 <option value="comprobante">Agrupar por comprobante</option>
                 <option value="proyecto-site">Agrupar por PROYECTO/SITE</option>
                 <option value="responsable">Agrupar por responsable</option>
+                <option value="solicitante">Agrupar por solicitante</option>
                 <option value="banco">Agrupar por banco</option>
                 <option value="adjunto">Agrupar por adjunto</option>
                 {estado === 1 && <option value="serie-view-detalle">Agrupar por serie / view detalle</option>}
@@ -1520,7 +1595,7 @@ export default function PagarTesoreriaV1Page() {
                       }
                     </th>
                     <th>Recibo / OT</th>
-                    {estado === 100 && <th>Estado</th>}
+                    {(estado === 100 || estado === 4) && <th>Estado</th>}
                     <th>Responsable / Solicitante</th>
                     <th>Proyecto / Site</th>
                     <th>Site + Detalle</th>
@@ -1612,7 +1687,7 @@ export default function PagarTesoreriaV1Page() {
                               />
                             }
                           </td>
-                          <td colSpan={estado === 1 ? 10 : estado === 9 ? 9 : estado === 100 ? 9 : 8}>
+                          <td colSpan={estado === 1 ? 10 : estado === 9 ? 9 : estado === 100 || estado === 4 ? 9 : 8}>
                             <button
                               disabled={saving}
                               onClick={() =>
@@ -1635,7 +1710,7 @@ export default function PagarTesoreriaV1Page() {
                             </button>
                           </td>
                           <td className="numeric">{money(sum(g.items))}</td>
-                          <td colSpan={estado === 1 ? 11 : estado === 4 ? 10 : estado === 100 ? 8 : 7} />
+                          <td colSpan={estado === 1 ? 11 : estado === 4 ? 11 : estado === 100 ? 8 : 7} />
                         </tr>
                         {expanded.has(g.id) &&
                           g.items.map((r) => (
@@ -1654,7 +1729,8 @@ export default function PagarTesoreriaV1Page() {
                                       !puedePagar ||
                                       !r.version ||
                                       !r.idSite ||
-                                      !(r.correlativo > 0)
+                                      !(r.correlativo > 0) ||
+                                      (estado === 4 && r.estado !== 4)
                                     }
                                     onChange={(e) =>
                                       toggleRows([r], e.target.checked)
@@ -1671,7 +1747,7 @@ export default function PagarTesoreriaV1Page() {
                                 </button>
                                 <small>OT {r.ot || "—"}</small>
                               </td>
-                              {estado === 100 && <td>{catalogos.estados.find((item) => item.id === r.estado)?.nombre || r.estado}</td>}
+                              {(estado === 100 || estado === 4) && <td>{catalogos.estados.find((item) => item.id === r.estado)?.nombre || labelEstadoHistorial(r.estado)}</td>}
                               <td>
                                 <strong>
                                   {r.responsable || "Sin responsable"}
