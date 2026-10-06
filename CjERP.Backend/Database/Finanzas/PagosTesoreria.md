@@ -9,7 +9,7 @@ Los grupos se presentan contraídos al abrir, consultar o cambiar de pestaña o 
 | Revisión | 1 | Revisar → 9; observar → 7. Fecha y turno AM/PM calculados en Lima al guardar. |
 | Contabilidad | 9 | Guardar retención y observación → Programado (8) o Administrativo (5); observar → 7. |
 | Programado | 8 | Registrar pago → 4; enviar a Administrativo → 5; observar → 7. |
-| Administrativo | 5 | Registrar pago → 4; programar → 8; observar → 7. |
+| Administrativo | 5 | Grabar datos del pago y enviar a Programado → 8; observar → 7. |
 | Rendición | 4 | Editar por bloques; permanece pagado. Filtrado por fecha de depósito, responsable, solicitante y rendición. |
 | Observada | 2 y 7 | Guardar correcciones sin cambiar estado; subsanar devuelve 2 → 0 (aprobación) o 7 → 1 (revisión). |
 

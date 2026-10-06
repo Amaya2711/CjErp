@@ -72,6 +72,12 @@ const currencySymbol = (currency: string | null | undefined) => {
 };
 const fecha = (value: string | null) =>
   value ? value.slice(0, 10).split("-").reverse().join("/") : "—";
+const normalizarTextoFiltro = (value: string | null | undefined) =>
+  String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLocaleUpperCase();
 const key = (r: PagoTesoreriaRow) => `${r.correlativo}:${r.idSite}`;
 const sum = (
   rows: PagoTesoreriaRow[],
@@ -232,6 +238,20 @@ export default function PagarTesoreriaV1Page() {
   const [historialEstados, setHistorialEstados] = useState<PagoTesoreriaCambioEstado[]>([]);
   const [historialEstadosLoading, setHistorialEstadosLoading] = useState(false);
   const [historialEstadosError, setHistorialEstadosError] = useState("");
+  const coincideResponsableFiltro = useCallback((row: PagoTesoreriaRow) => {
+    if (!responsablesFiltro.length) return true;
+
+    if (row.idResponsable > 0 && responsablesFiltro.includes(String(row.idResponsable))) {
+      return true;
+    }
+
+    // Compatibilidad con resultados antiguos o catálogos cuyo identificador no coincide.
+    const responsable = normalizarTextoFiltro(row.responsable);
+    return catalogos.responsables.some((item) =>
+      responsablesFiltro.includes(String(item.id)) &&
+      normalizarTextoFiltro(item.nombre) === responsable,
+    );
+  }, [catalogos.responsables, responsablesFiltro]);
   const [cuentas, setCuentas] = useState<
     {
       cuenta: string | null;
@@ -416,7 +436,7 @@ export default function PagarTesoreriaV1Page() {
     const search = query.trim().toLocaleLowerCase();
     return rows.filter(
       (r) =>
-        (!responsablesFiltro.length || responsablesFiltro.includes(r.responsable ?? "")) &&
+        coincideResponsableFiltro(r) &&
         (!solicitantesFiltro.length || solicitantesFiltro.includes(r.solicitante ?? "")) &&
         (!rendicion || String(r.idRendicion) === rendicion) &&
         (estado !== 4 || !estadosFiltro.length || estadosFiltro.includes(String(r.estado))) &&
@@ -456,6 +476,7 @@ export default function PagarTesoreriaV1Page() {
     bancosCtaFiltro,
     bancosPagoFiltro,
     catalogos.bancos,
+    coincideResponsableFiltro,
     responsablesFiltro,
     solicitantesFiltro,
     rendicion,
@@ -629,7 +650,7 @@ export default function PagarTesoreriaV1Page() {
   const rowsForFilterOption = (exclude: string) => {
     const search = query.trim().toLocaleLowerCase();
     return rows.filter((r) =>
-      (exclude === "responsable" || !responsablesFiltro.length || responsablesFiltro.includes(r.responsable ?? "")) &&
+      (exclude === "responsable" || coincideResponsableFiltro(r)) &&
       (exclude === "solicitante" || !solicitantesFiltro.length || solicitantesFiltro.includes(r.solicitante ?? "")) &&
       (exclude === "rendicion" || !rendicion || String(r.idRendicion) === rendicion) &&
       (estado !== 4 || exclude === "estado" || !estadosFiltro.length || estadosFiltro.includes(String(r.estado))) &&
@@ -886,8 +907,13 @@ export default function PagarTesoreriaV1Page() {
     if (!selectedRows.length) { setError("No existen registros seleccionados"); return; }
     if (!datosRegistroPagoCompletos) { setError("Complete los datos del pago y seleccione al menos un recibo."); return; }
     setSaving(true); setError("");
-    try { const result = await grabarPagoTesoreria({ ...form, idEjecutor: Number(form.idEjecutor), idTransferencia: Number(form.idTransferencia), idBanco: Number(form.idBanco), idMoneda2: Number(form.idMoneda2), items: crearItemsTesoreria(selectedRows) }); setSuccess(estado === 8 ? `${result.procesados} recibo(s) guardado(s) y marcado(s) como pagado(s).` : `${result.procesados} recibo(s) guardado(s) sin cambiar de estado.`); await load(estado, desde, hasta); }
-    catch (e) { setError(getHttpErrorMessage(e, "No se pudo grabar la información del pago.")); } finally { setSaving(false); }
+    try {
+      const result = await grabarPagoTesoreria({ ...form, idEjecutor: Number(form.idEjecutor), idTransferencia: Number(form.idTransferencia), idBanco: Number(form.idBanco), idMoneda2: Number(form.idMoneda2), items: crearItemsTesoreria(selectedRows) });
+      setSuccess(estado === 5
+        ? `${result.procesados} recibo(s) guardado(s) y enviado(s) a Programado.`
+        : `${result.procesados} recibo(s) guardado(s) y marcado(s) como pagado(s).`);
+      await load(estado, desde, hasta);
+    } catch (e) { setError(getHttpErrorMessage(e, "No se pudo grabar la información del pago.")); } finally { setSaving(false); }
   };
   const save = async () => {
     if (!confirmation || submitting.current) return;
@@ -1486,11 +1512,12 @@ export default function PagarTesoreriaV1Page() {
                       <label key={item.id}>
                         <input
                           type="checkbox"
-                          checked={responsablesFiltro.includes(item.nombre)}
+                          checked={responsablesFiltro.includes(String(item.id))}
                           onChange={(e) => {
+                            const idResponsable = String(item.id);
                             setResponsablesFiltro((current) => e.target.checked
-                              ? [...current, item.nombre]
-                              : current.filter((value) => value !== item.nombre));
+                              ? [...current, idResponsable]
+                              : current.filter((value) => value !== idResponsable));
                             setSelected(new Set());
                           }}
                         />
