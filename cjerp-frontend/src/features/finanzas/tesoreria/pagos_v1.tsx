@@ -60,6 +60,8 @@ type PagoRow = {
   site: string;
   tipoTrabajo: string;
   tarea: string;
+  atp: string;
+  statusPap: string;
   fecha: string;
   solicitante: string;
   responsable: string;
@@ -175,7 +177,7 @@ type GroupRow = {
   totalsByCurrency: Record<string, { subtotal: number; igv: number; total: number }>;
 };
 
-type PagoSortColumn = keyof Pick<PagoRow, "correlativo" | "ot" | "idOc" | "fila" | "solicitante" | "responsable" | "validador" | "subtotal" | "igv" | "total" | "fecha" | "cliente" | "proyecto" | "siteId" | "corSite" | "site" | "tipoTrabajo" | "tarea" | "moneda" | "detalle">;
+type PagoSortColumn = keyof Pick<PagoRow, "correlativo" | "ot" | "idOc" | "fila" | "solicitante" | "responsable" | "validador" | "subtotal" | "igv" | "total" | "fecha" | "cliente" | "proyecto" | "siteId" | "corSite" | "site" | "tipoTrabajo" | "tarea" | "atp" | "statusPap" | "moneda" | "detalle">;
 
 type ResumenOtDetalle = {
   ot: string;
@@ -752,6 +754,8 @@ function mapPlanillaConsultaRowToPagoRow(
       "TotalPagadoConvertidoSoles",
       "totalPagadoConvertidoSoles"
     ) ?? undefined,
+    atp: getRecordString(row, "Atp", "ATP", "atp"),
+    statusPap: getRecordString(row, "status_Pap", "Status_Pap", "StatusPap", "statusPap"),
     subtotal: Number.isFinite(subtotal) ? subtotal : 0,
     igv: Number.isFinite(igv) ? igv : 0,
     total: Number.isFinite(total) ? total : 0,
@@ -2607,7 +2611,7 @@ export default function PagosV1Page() {
   const isResumenTab = activeTab === "resumen";
   const showEstadoOc = activeTab === "resumen";
   const showTotalSitio = canUseTab("reaprobar");
-  const tableColSpan = 23 + (showTotalSitio ? 4 : 0) + (showEstadoOc ? 1 : 0);
+  const tableColSpan = 25 + (showTotalSitio ? 4 : 0) + (showEstadoOc ? 1 : 0);
   const stickyColumnWidths = [108, 94];
   const stickyColumnLefts = stickyColumnWidths.reduce<number[]>((acc, _width, index) => {
     const previousLeft = acc[index - 1] ?? 0;
@@ -3144,6 +3148,8 @@ export default function PagosV1Page() {
       row.site,
       row.tipoTrabajo,
       row.tarea,
+      row.atp,
+      row.statusPap,
       row.moneda,
       getStatusLabel(row.estado),
       row.subOc && row.subOc > 0 ? (row.subtotal / row.subOc) * 100 : 0,
@@ -3187,6 +3193,8 @@ export default function PagosV1Page() {
           "Site",
           "Tipo Trabajo",
           "Tarea",
+          "ATP",
+          "Status PAP",
           "Moneda",
           "Estado OC",
           "% OC",
@@ -3767,6 +3775,8 @@ export default function PagosV1Page() {
                     {showEstadoOc ? <th style={{ ...styles.th, width: 118 }}>Estado OC</th> : null}
                     <th data-sort="validador" style={{ ...styles.th, width: 110, cursor: "pointer" }}>Validador</th>
                     <th data-sort="ot" style={{ ...styles.th, width: 88, cursor: "pointer" }}>OT</th>
+                    <th data-sort="atp" style={{ ...styles.th, width: 110, cursor: "pointer" }}>ATP</th>
+                    <th data-sort="statusPap" style={{ ...styles.th, width: 120, cursor: "pointer" }}>Status PAP</th>
                     <th style={{ ...styles.th, textAlign: "center" }}>Acciones</th>
                   </tr>
                 </thead>
@@ -4016,6 +4026,8 @@ export default function PagosV1Page() {
                                   ) : null}
                                   <td title={row.validador || "-"} style={styles.td}>{row.validador || "-"}</td>
                                   <td title={row.ot || "-"} style={styles.td}>{row.ot || "-"}</td>
+                                  <td title={row.atp || "-"} style={styles.td}>{row.atp || "-"}</td>
+                                  <td title={row.statusPap || "-"} style={styles.td}>{row.statusPap || "-"}</td>
                                   <td style={{ ...styles.td, textAlign: "center" }}>
                                     {(() => {
                                       const accionesHabilitadas = !["99", "3", "4", "5", "8"].includes(row.estadoCodigo ?? "");

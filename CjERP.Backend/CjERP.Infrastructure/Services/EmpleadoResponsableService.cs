@@ -127,12 +127,18 @@ public sealed class EmpleadoResponsableService : IEmpleadoResponsableService
                 => request.CuentaInter,
             "tipocuenta" or "tipocta" or "tipodecuenta"
                 => request.TipoCuenta,
+            "nombrecta" or "nombrecuenta"
+                => request.NombreCta,
+            "idbanco" or "codigobanco" or "codigobancocta"
+                => request.IdBanco,
             "banco" or "nombrebanco"
                 => request.Banco,
             "nrodocumento" or "numerodocumento" or "documento" or "nrodoc"
                 => request.NroDocumento,
-            "usuario" or "usuarioaccion" or "usuarioregistro" or "usuariocrea"
+            "usuario" or "usuarioaccion" or "usuarioregistro" or "usuariocrea" or "usuariocreacion"
                 => request.UsuarioAccion,
+            "fechacreacion" or "fecharegistro"
+                => request.FechaCreacion,
             _ => null
         };
     }

@@ -15,7 +15,7 @@ Usuario (solicitante)
 Estado 0  "Pendiente 1ª aprobación"   (estado inicial lo fija el SP: PV)
   │ pagos_v1.tsx (pestañas por estado) → POST /api/planilla/consulta-estados/aprobar-masivo
   │   → PlanillaService.ProcesarAprobacionMasivaAsync → sp_Planilla_ProcesarAprobacionMasiva (TVP)
-  │   CodEstado por defecto 10; CodEmpleado==77 fuerza 1; el SP decide 2ª aprobación por LimiteSegundaAprobacion (PV)
+  │   CodEstado por defecto 10; el backend conserva el estado solicitado por la pantalla y el SP decide la transición, incluida la 2ª aprobación por LimiteSegundaAprobacion (PV)
   ├─► Observar  (CodEstado=2)  → Estado 2 "Observada"   ── subsanar ─► 0
   ├─► Rechazar  → POST …/{correlativo}/rechazar → sp_Planilla_ActualizarEstado(3) → Estado 3 "Rechazado" (fin)
   ├─► Estado 6 "Re-aprobar" → Re-aprobar envía CodEstado=6 y el SP lo mueve a estado 1; estado 10 "Hormiga" → Aprobar solicita estado 1

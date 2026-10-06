@@ -5,7 +5,9 @@ export type EmpleadoResponsableInsertarRequest = {
   cuenta: string;
   cuentaInter: string;
   tipoCuenta: string;
+  nombreCta: string;
   banco: string;
+  idBanco: string;
   nroDocumento: string;
 };
 

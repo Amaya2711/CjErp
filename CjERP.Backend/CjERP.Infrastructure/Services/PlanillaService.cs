@@ -420,7 +420,9 @@ namespace CjERP.Infrastructure.Services
             }
 
             var usuarioLimpio = string.IsNullOrWhiteSpace(usuario) ? "SISTEMA" : usuario.Trim();
-            var codEstadoAplicado = codEmpleado == 77 ? 1 : (codEstado > 0 ? codEstado : 10);
+            // El estado lo determina la acción solicitada por pagos_v1 y el
+            // procedimiento almacenado; no aplicar excepciones por empleado.
+            var codEstadoAplicado = codEstado > 0 ? codEstado : 10;
             var tvp = BuildAprobacionTvp(registrosNormalizados);
 
             await using var connection = _sqlCommandFactory.CreateConnection();
@@ -544,13 +546,12 @@ namespace CjERP.Infrastructure.Services
             parameters.Add("@RutaFactura", NullIfWhiteSpace(request.FacturaPath), DbType.String);
             parameters.Add("@IdUsuarioFactura", request.IdUsuarioFactura, DbType.Int32);
             parameters.Add("@FechaVencimiento", ParseNullableDate(request.FechaVencimiento), DbType.DateTime);
-            // El suministro provisional es opcional. Al no enviarlo se conserva el
-            // valor por defecto definido por sp_Planilla_Insertar, en lugar de
-            // sobrescribirlo explícitamente con NULL.
-            if (request.IdSuministroProvisional is > 0)
-            {
-                parameters.Add("@IdProvisional", request.IdSuministroProvisional, DbType.Int32);
-            }
+            // sp_Planilla_Insertar trata NULL como una selección obligatoria. Para
+            // registrar un gasto sin suministro provisional se utiliza 0, que
+            // representa una asociación no seleccionada en la tabla Planilla.
+            parameters.Add("@IdProvisional", request.IdSuministroProvisional is > 0
+                ? request.IdSuministroProvisional
+                : 0, DbType.Int32);
 
             return parameters;
         }

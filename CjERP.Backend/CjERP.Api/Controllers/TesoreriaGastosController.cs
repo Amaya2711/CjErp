@@ -140,6 +140,7 @@ public class TesoreriaGastosController : ControllerBase
         request.Banco = request.Banco.Trim();
         request.NroDocumento = request.NroDocumento.Trim();
         request.UsuarioAccion = ResolveUsuarioAccion();
+        request.FechaCreacion = DateTime.Now.ToString("MM/dd/yyyy", CultureInfo.InvariantCulture);
 
         try
         {

@@ -21,7 +21,7 @@
 ⚠ Mapeos de etiquetas de pestañas cruzados entre `pagos_v1.tsx` y `gastosaprobar.tsx`. Nombres oficiales: `Constante` MAESTRO/ESTADO (PV).
 
 ## 2. Aprobaciones y usuarios especiales
-- **CodEmpleado/IdEmpleadoCj == 77** es un "super-aprobador" fijo en código: aprueba directo a estado 1 (`PlanillaConsultaController.cs:689`, `PlanillaService.cs:416`) y puede editar estado en revisión (`PagoTesoreriaRevision.cs:13`).
+- **CodEmpleado/IdEmpleadoCj == 77** puede editar estado en revisión (`PagoTesoreriaRevision.cs:13`). En `/finanzas/tesoreria/pagos_v1`, el backend envía al procedimiento el estado solicitado por la pantalla sin reemplazarlo por una regla adicional.
 - 2ª aprobación de recibos determinada por `LimiteSegundaAprobacion` dentro de `sp_Planilla_ProcesarAprobacionMasiva` (PV).
 - **OC**: 3 niveles secuenciales; nivel 3 ⇒ aprobada (IdEstado=1); rechazada (6) no aprobable (`OrdenCompraService.cs` ~745-848).
 - **Contratos**: 3 aprobaciones secuenciales (`AprobacionesRequeridas=3`, `ContratosDto.cs:88`); nivel 3 exige documento; sin validar aprobadores distintos.

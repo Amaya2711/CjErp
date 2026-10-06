@@ -831,8 +831,8 @@ function buildCuentaResumen(empleado: EmpleadoCta): string {
   return `Banco: ${empleado.nombreBanco || ""}, Tipo Cta: ${empleado.nombreCta || ""}, Cta. ${empleado.cuenta || ""}, CI: ${empleado.cuentaInter || ""}, Nro Doc: ${empleado.nroDocumento || ""}`;
 }
 
-function normalizarNombreResponsable(value: string): string {
-  return value
+function normalizarNombreResponsable(value: string | null | undefined): string {
+  return String(value ?? "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .trim()
@@ -1385,7 +1385,7 @@ export default function GastosPage({
   );
   const [constantesRefreshKey, setConstantesRefreshKey] = useState(0);
   const camposConstantes = useMemo(
-    () => ["tipo_bien", "tipo_comprobante", "tipo_pago", "tipo_moneda", "tipo_cta", "estado"],
+    () => ["tipo_bien", "tipo_comprobante", "tipo_pago", "tipo_moneda", "tipo_cta", "banco", "estado"],
     []
   );
   const {
@@ -1396,6 +1396,7 @@ export default function GastosPage({
 
   const tipoPagoOptions = constantesPorCampo.tipo_pago ?? [];
   const tipoCuentaOptions = constantesPorCampo.tipo_cta ?? [];
+  const bancoOptions = constantesPorCampo.banco ?? [];
   const monedaOptions = constantesPorCampo.tipo_moneda ?? [];
   const bienOptions = constantesPorCampo.tipo_bien ?? [];
   const comprobanteOptions = constantesPorCampo.tipo_comprobante ?? [];
@@ -1922,9 +1923,17 @@ export default function GastosPage({
 
   const empleadosSafe = Array.isArray(empleados) ? empleados : [];
   const gastosSafe = Array.isArray(gastos) ? gastos : [];
-  const nombreNuevoResponsableNormalizado = normalizarNombreResponsable(nuevoResponsable.nombre);
-  const existeNuevoResponsable = nombreNuevoResponsableNormalizado.length > 0 &&
-    coincidenciasNuevoResponsable.some((nombre) => normalizarNombreResponsable(nombre) === nombreNuevoResponsableNormalizado);
+  const tipoCuentaNuevoResponsable = getConstanteLabel(tipoCuentaOptions, nuevoResponsable.tipoCuenta) || nuevoResponsable.tipoCuenta;
+  const bancoNuevoResponsable = getConstanteLabel(bancoOptions, nuevoResponsable.banco) || nuevoResponsable.banco;
+  const existeCuentaResponsableDuplicada = Boolean(
+    nuevoResponsable.nroDocumento.trim() &&
+    tipoCuentaNuevoResponsable.trim() &&
+    bancoNuevoResponsable.trim(),
+  ) && empleadosSafe.some((empleado) =>
+    normalizarNombreResponsable(empleado.nroDocumento) === normalizarNombreResponsable(nuevoResponsable.nroDocumento) &&
+    normalizarNombreResponsable(empleado.nombreCta) === normalizarNombreResponsable(tipoCuentaNuevoResponsable) &&
+    normalizarNombreResponsable(empleado.nombreBanco) === normalizarNombreResponsable(bancoNuevoResponsable),
+  );
 
   useEffect(() => {
     const nombre = nuevoResponsable.nombre.trim();
@@ -1971,7 +1980,9 @@ export default function GastosPage({
       cuenta: nuevoResponsable.cuenta.trim(),
       cuentaInter: nuevoResponsable.cuentaInter.trim(),
       tipoCuenta: nuevoResponsable.tipoCuenta.trim(),
-      banco: nuevoResponsable.banco.trim(),
+      nombreCta: tipoCuentaNuevoResponsable.trim(),
+      banco: bancoNuevoResponsable.trim(),
+      idBanco: nuevoResponsable.banco.trim(),
       nroDocumento: nuevoResponsable.nroDocumento.trim(),
     };
 
@@ -1980,17 +1991,8 @@ export default function GastosPage({
       return;
     }
 
-    try {
-      const existentes = await buscarEmpleadosResponsables(request.nombre);
-      const nombreYaRegistrado = existentes.some((item) =>
-        normalizarNombreResponsable(item.nombreEmpleado || item.nombre || "") === normalizarNombreResponsable(request.nombre),
-      );
-      if (nombreYaRegistrado) {
-        setNuevoResponsableError("Ya existe un responsable registrado con ese nombre.");
-        return;
-      }
-    } catch (error) {
-      setNuevoResponsableError(getHttpErrorMessage(error, "No se pudo validar el responsable."));
+    if (existeCuentaResponsableDuplicada) {
+      setNuevoResponsableError("Ya existe una cuenta registrada con el mismo documento, tipo de cuenta y banco.");
       return;
     }
 
@@ -5889,7 +5891,6 @@ export default function GastosPage({
                       <datalist id="nombres-responsable-encontrados">
                         {coincidenciasNuevoResponsable.map((nombre) => <option key={nombre} value={nombre} />)}
                       </datalist>
-                      {!buscandoNuevoResponsable && existeNuevoResponsable && <span style={{ color: "#B45309", fontSize: 11, fontWeight: 600 }}>Ya existe este responsable.</span>}
                       {busquedaNuevoResponsableError && <span style={{ color: "#DC2626", fontSize: 11, fontWeight: 600 }}>{busquedaNuevoResponsableError}</span>}
                     </>
                   )}
@@ -5900,7 +5901,10 @@ export default function GastosPage({
                   Tipo de cuenta
                   <select
                     value={nuevoResponsable.tipoCuenta}
-                    onChange={(event) => setNuevoResponsable((previous) => ({ ...previous, tipoCuenta: event.target.value }))}
+                    onChange={(event) => {
+                      setNuevoResponsableError(null);
+                      setNuevoResponsable((previous) => ({ ...previous, tipoCuenta: event.target.value }));
+                    }}
                     disabled={guardandoNuevoResponsable || constantesLoading}
                     style={{ height: 38, border: "1px solid #CBD5E1", borderRadius: 8, padding: "0 10px", fontSize: 13 }}
                   >
@@ -5914,23 +5918,33 @@ export default function GastosPage({
                 </label>
                 <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 700, color: "#334155" }}>
                   Banco
-                  <input
-                    list="bancos-responsable"
+                  <select
                     value={nuevoResponsable.banco}
-                    onChange={(event) => setNuevoResponsable((previous) => ({ ...previous, banco: event.target.value }))}
-                    placeholder="Seleccione o escriba"
-                    disabled={guardandoNuevoResponsable}
+                    onChange={(event) => {
+                      setNuevoResponsableError(null);
+                      setNuevoResponsable((previous) => ({ ...previous, banco: event.target.value }));
+                    }}
+                    disabled={guardandoNuevoResponsable || constantesLoading}
                     style={{ height: 38, border: "1px solid #CBD5E1", borderRadius: 8, padding: "0 10px", fontSize: 13 }}
-                  />
-                  <datalist id="bancos-responsable">
-                    {Array.from(new Set(empleadosSafe.map((empleado) => empleado.nombreBanco).filter(Boolean))).map((option) => <option key={option} value={option} />)}
-                  </datalist>
+                  >
+                    <option value="">{constantesLoading ? "Cargando..." : "Seleccione"}</option>
+                    {bancoOptions.map((option, index) => (
+                      <option key={`banco-responsable-${getConstanteStoredValue(option)}-${index}`} value={getConstanteStoredValue(option)}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </label>
               </div>
+              {existeCuentaResponsableDuplicada && (
+                <div style={{ color: "#B45309", fontSize: 11, fontWeight: 600 }}>
+                  Ya existe una cuenta registrada con el mismo documento, tipo de cuenta y banco.
+                </div>
+              )}
             </div>
             <footer style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "14px 18px", borderTop: "1px solid #E2E8F0" }}>
               <button type="button" onClick={() => setMostrarNuevoResponsable(false)} disabled={guardandoNuevoResponsable} style={{ border: "1px solid #CBD5E1", borderRadius: 8, padding: "9px 14px", background: "#FFFFFF", color: "#334155", fontWeight: 700, cursor: "pointer" }}>Cancelar</button>
-              <button type="submit" disabled={guardandoNuevoResponsable || existeNuevoResponsable} style={{ border: "1px solid #2563EB", borderRadius: 8, padding: "9px 14px", background: "#2563EB", color: "#FFFFFF", fontWeight: 700, cursor: guardandoNuevoResponsable || existeNuevoResponsable ? "not-allowed" : "pointer", opacity: guardandoNuevoResponsable || existeNuevoResponsable ? 0.7 : 1 }}>{guardandoNuevoResponsable ? "Grabando..." : "Grabar"}</button>
+              <button type="submit" disabled={guardandoNuevoResponsable || existeCuentaResponsableDuplicada} style={{ border: "1px solid #2563EB", borderRadius: 8, padding: "9px 14px", background: "#2563EB", color: "#FFFFFF", fontWeight: 700, cursor: guardandoNuevoResponsable || existeCuentaResponsableDuplicada ? "not-allowed" : "pointer", opacity: guardandoNuevoResponsable || existeCuentaResponsableDuplicada ? 0.7 : 1 }}>{guardandoNuevoResponsable ? "Grabando..." : "Grabar"}</button>
             </footer>
           </form>
         </div>

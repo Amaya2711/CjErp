@@ -414,7 +414,7 @@ namespace CjERP.Api.Controllers
             }
 
             var usuario = ResolveUsuarioAccion();
-            var codEstado = ResolveCodEstadoAprobacion(request?.CodEstado ?? 0, codEmpleado);
+            var codEstado = ResolveCodEstadoAprobacion(request?.CodEstado ?? 0);
 
             try
             {
@@ -710,10 +710,9 @@ namespace CjERP.Api.Controllers
             return int.TryParse(resolved, out var codEmpleado) ? codEmpleado : 0;
         }
 
-        private static int ResolveCodEstadoAprobacion(int codEstadoSolicitado, int codEmpleado)
+        private static int ResolveCodEstadoAprobacion(int codEstadoSolicitado)
         {
-            var codEstado = codEstadoSolicitado > 0 ? codEstadoSolicitado : 10;
-            return codEmpleado == 77 ? 1 : codEstado;
+            return codEstadoSolicitado > 0 ? codEstadoSolicitado : 10;
         }
     }
 }

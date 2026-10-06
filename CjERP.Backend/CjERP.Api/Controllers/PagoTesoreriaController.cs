@@ -2,13 +2,14 @@ using System.Security.Claims;
 using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces.Services;
 using CjERP.Infrastructure.Services;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CjERP.Api.Controllers;
 
 [ApiController, Authorize, Route("api/tesoreria/pagos")]
-public sealed class PagoTesoreriaController(PagoTesoreriaService service, ISegMenuService menus, ILogger<PagoTesoreriaController> logger, IHttpClientFactory httpClients) : ControllerBase
+public sealed class PagoTesoreriaController(PagoTesoreriaService service, ISegMenuService menus, IMemoryCache cache, ILogger<PagoTesoreriaController> logger, IHttpClientFactory httpClients) : ControllerBase
 {
     private const string GestorArchivoUrl = "https://www.elnk.uno/cjmultimedia/mgr001.php";
     private async Task<bool> PuedeAsync()
@@ -16,13 +17,18 @@ public sealed class PagoTesoreriaController(PagoTesoreriaService service, ISegMe
         var usuario = User.FindFirstValue("IdUsuario") ?? User.FindFirstValue(ClaimTypes.Name);
         if (string.IsNullOrWhiteSpace(usuario)) return false;
 
+        var cacheKey = $"pagos-tesoreria:acceso:{usuario.Trim().ToUpperInvariant()}";
+        if (cache.TryGetValue(cacheKey, out bool permitido)) return permitido;
+
         // Debe coincidir con la fuente usada para construir el menú lateral.
         // El SP dinámico antiguo puede no devolver páginas asignadas mediante
         // SegPerfilRolMenu, aun cuando el usuario las tiene visibles.
         var opciones = await menus.ListarPorUsuarioAsync(usuario);
-        return opciones.Any(p =>
+        permitido = opciones.Any(p =>
             string.Equals(p.Ruta?.Trim().TrimEnd('/'), "/finanzas/tesoreria/pagartesoreria", StringComparison.OrdinalIgnoreCase)
             || string.Equals(p.Ruta?.Trim().TrimEnd('/'), "/finanzas/tesoreria/pagartesoreria_v1", StringComparison.OrdinalIgnoreCase));
+        cache.Set(cacheKey, permitido, TimeSpan.FromMinutes(2));
+        return permitido;
     }
 
     private ObjectResult SinAcceso() => StatusCode(403, new { message = "No tiene acceso a Pagos de tesorería. Asigne esta página al perfil y rol correspondiente en Seguridad / Menú." });
