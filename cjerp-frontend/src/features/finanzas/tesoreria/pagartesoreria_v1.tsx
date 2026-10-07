@@ -230,7 +230,7 @@ export default function PagarTesoreriaV1Page() {
   const [permisosRevision, setPermisosRevision] = useState<PagoRevisionPermisos>({
     puedeEditar: false, puedeEditarOperacion: false, puedeEditarEstado: false,
   });
-  const columnCount = estado === 1 ? 22 : estado === 9 ? 17 : estado === 4 ? 19 : estado === 100 ? 18 : 16;
+  const columnCount = estado === 1 ? 24 : estado === 9 ? 17 : estado === 4 ? 20 : estado === 100 ? 18 : 16;
   const [confirmation, setConfirmation] = useState<PagoTesoreriaRequest | null>(
     null,
   );
@@ -356,7 +356,7 @@ export default function PagarTesoreriaV1Page() {
               return { correlativo: 0, idSite: "reporte", estado: Number(r.Estado ?? r.estado ?? 0), tipoMoneda: Number(r.TipoMoneda ?? r.tipoMoneda ?? 0), idResponsable: 0, cantidadRegistros: Number(r.CantidadRegistros ?? r.cantidadRegistros ?? 0), totalPagar: Number(r.TotalPagar ?? r.totalPagar ?? 0), montoRetencion: Number(r.MontoRetencion ?? r.montoRetencion ?? 0), total: Number(r.TotalNeto ?? r.totalNeto ?? 0), moneda: String(r.Moneda ?? r.moneda ?? ""), version: "reporte" } as PagoTesoreriaRow;
             })
           : status === 4
-          ? await listarPagosTesoreria(100, start, end, controller.signal) // Rendición: todos los estados; solo se seleccionan los 4
+          ? await listarPagosTesoreria(4, start, end, controller.signal) // Rendición: solo documentos pagados
           : status === 2
           // Observada reúne los estados 2 y 7; el SP filtra por un solo estado, por eso se consultan ambos.
           ? (await Promise.all([2, 7].map((idEstado) => listarPagosTesoreria(idEstado, start, end, controller.signal))))
@@ -1759,10 +1759,11 @@ export default function PagarTesoreriaV1Page() {
                     <th>CuentaInter</th>
                     <th>NombreCta</th>
                     <th>IdBancoCta</th>
-                    {estado === 4 && <><th>Transferencia</th><th>Banco</th></>}
+                    {estado === 4 && <><th>Transferencia</th><th>Banco</th><th>NroOperacion</th></>}
                     {estado === 1 && <>
                       <th>Anticipo</th><th>NroOperacion</th><th>Comprobante</th><th>TipoPago</th>
                       <th className="pt-revision-actions">Edición</th>
+                      <th>RUC</th>
                     </>}
                   </tr>
                 </thead>
@@ -1853,7 +1854,7 @@ export default function PagarTesoreriaV1Page() {
                             </button>
                           </td>
                           <td className="numeric">{money(sum(g.items))}</td>
-                          <td colSpan={estado === 1 ? 11 : estado === 4 ? 11 : estado === 100 ? 8 : 7} />
+                          <td colSpan={estado === 1 ? 12 : estado === 4 ? 12 : estado === 100 ? 8 : 7} />
                         </tr>
                         {expanded.has(g.id) &&
                           g.items.map((r) => (
@@ -1993,12 +1994,13 @@ export default function PagarTesoreriaV1Page() {
                                   ? "Ã¢â‚¬â€"
                                   : `${r.idBancoCta} · ${catalogos.bancosCuenta.find((b) => b.id === r.idBancoCta)?.nombre || "Banco no encontrado"}`}
                               </td>
-                              {estado === 4 && <><td>{r.transferencia || (r.idTransferencia != null ? String(r.idTransferencia) : "—")}</td><td>{r.banco || (r.idBanco != null ? String(r.idBanco) : "—")}</td></>}
+                              {estado === 4 && <><td>{r.transferencia || (r.idTransferencia != null ? String(r.idTransferencia) : "—")}</td><td>{r.banco || (r.idBanco != null ? String(r.idBanco) : "—")}</td><td>{r.nroOperacion || "—"}</td></>}
                               {estado === 1 && <PagoRevisionCells row={r} catalogos={catalogos}
                                 permisos={permisosRevision} disabled={saving || loading || !puedePagar}
                                 editing={editKeys.has(key(r))}
                                 onStartEdit={() => startEditRevision(r)} onStopEdit={() => stopEditRevision(r)}
                                 onSaved={(guardado) => applyRevisionSaved(r, guardado)} />}
+                              {estado === 1 && <td>{r.ruc || "—"}</td>}
                             </tr>
                           ))}
                       </Fragment>
