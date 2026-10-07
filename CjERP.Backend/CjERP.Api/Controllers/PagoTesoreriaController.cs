@@ -72,8 +72,8 @@ public sealed class PagoTesoreriaController(PagoTesoreriaService service, ISegMe
         if (string.IsNullOrWhiteSpace(usuario)) return Unauthorized();
         try
         {
-            await service.GuardarRevisionAsync(request, usuario, ct);
-            return Ok(new { procesados = 1 });
+            var version = await service.GuardarRevisionAsync(request, usuario, ct);
+            return Ok(new { procesados = 1, version });
         }
         catch (UnauthorizedAccessException ex) { return StatusCode(403, new { message = ex.Message }); }
         catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }

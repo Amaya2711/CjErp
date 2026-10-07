@@ -485,9 +485,14 @@ BEGIN
        AND a.CorreSite = c.Correlativo
 
 
-    LEFT JOIN MovEstadosPagos x
-        ON a.Correlativo = x.Correlativo
-       AND x.Estado = 2
+    OUTER APPLY
+    (
+        SELECT TOP (1) m.Usuario
+        FROM dbo.MovEstadosPagos m
+        WHERE m.Correlativo = a.Correlativo
+          AND m.Estado = 2
+        ORDER BY m.FechaCreacion DESC, m.HoraCreacion DESC
+    ) x
 
 
     LEFT JOIN Constante y

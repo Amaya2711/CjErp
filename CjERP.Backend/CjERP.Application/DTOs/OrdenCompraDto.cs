@@ -28,6 +28,10 @@ public class OrdenCompraCabeceraDto
     public int? IdAprobador1 { get; set; }
     public int? IdAprobador2 { get; set; }
     public int? IdAprobador3 { get; set; }
+    // Nombres de los aprobadores 1, 2 y 3 (EmpleadoCj) tal como los devuelve sp_OrdenCompra_BuscarCabecera.
+    public string? Nombre1 { get; set; }
+    public string? Nombre2 { get; set; }
+    public string? Nombre3 { get; set; }
     public int? IdValidador { get; set; }
     public string Validador { get; set; } = string.Empty;
     public string Validador2 { get; set; } = string.Empty;
@@ -84,6 +88,10 @@ public class OrdenCompraDetalleDto
     public int? IdAprobador1 { get; set; }
     public int? IdAprobador2 { get; set; }
     public int? IdAprobador3 { get; set; }
+    // Nombres de los aprobadores 1, 2 y 3 tal como los devuelve sp_OrdenCompra_BuscarDetalle.
+    public string? Nombre1 { get; set; }
+    public string? Nombre2 { get; set; }
+    public string? Nombre3 { get; set; }
     public decimal MonFic { get; set; }
     public decimal PorFict { get; set; }
     public string RutaImagen { get; set; } = string.Empty;

@@ -46,7 +46,7 @@ import type {
 import { getHttpErrorMessage } from "../../../utils/httpError";
 import "./pagartesoreria.css";
 import PagoEtapaForm, { PagoEtapaActions } from "./PagoEtapaForm";
-import PagoRevisionCells, { FacturaLink } from "./PagoRevisionCells";
+import PagoRevisionCells, { FacturaLink, type PagoRevisionGuardado } from "./PagoRevisionCells";
 
 const hoy = () =>
   new Intl.DateTimeFormat("en-CA", {
@@ -196,7 +196,9 @@ export default function PagarTesoreriaPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [form, setForm] = useState(initialForm);
   const [operationSaving, setSaving] = useState(false);
-  const [editingRevision, setEditingRevision] = useState(false);
+  // Recibos de Revisión en edición (el lápiz activa todos los seleccionados).
+  const [editKeys, setEditKeys] = useState<Set<string>>(new Set());
+  const editingRevision = editKeys.size > 0;
   const [registroPagoAbierto, setRegistroPagoAbierto] = useState(false);
   useEffect(() => {
     if (estado === 5) setRegistroPagoAbierto(selected.size > 0);
@@ -659,19 +661,44 @@ export default function PagarTesoreriaPage() {
     window.addEventListener("beforeunload", beforeUnload);
     return () => window.removeEventListener("beforeunload", beforeUnload);
   }, [editingRevision]);
-  const refreshRevision = async () => {
-    setSaving(true);
-    setSuccess("Cambios del recibo guardados correctamente.");
-    setError("");
+  // Los recibos que se editan se identifican con la clave; al cambiar de pestaña se cierra la edición.
+  const revisionCambios = useRef(0); // recibos guardados durante la edición en curso
+  useEffect(() => { setEditKeys(new Set()); revisionCambios.current = 0; }, [estado]);
+  const startEditRevision = (row: PagoTesoreriaRow) => {
+    const targets = selected.has(key(row))
+      ? visibleRows.filter((r) => selected.has(key(r)) && r.version)
+      : [row];
+    setEditKeys((actual) => new Set([...actual, ...targets.map(key)]));
+  };
+  // Cada guardado actualiza la fila en memoria (valores y nueva versión): no se recarga la lista
+  // ni se muestra mensaje mientras se edita.
+  const applyRevisionSaved = (row: PagoTesoreriaRow, guardado: PagoRevisionGuardado) => {
+    revisionCambios.current += 1;
+    setRows((actual) => actual.map((r) => key(r) === key(row)
+      ? { ...r, ...guardado, version: guardado.version ?? r.version } : r));
+  };
+  // Al terminar la edición: un solo mensaje y una recarga para quedar con los datos del servidor.
+  const finalizarEdicionRevision = async () => {
+    setEditKeys(new Set());
+    const cambios = revisionCambios.current;
+    revisionCambios.current = 0;
+    if (!cambios) return;
     setSelected(new Set());
+    setSaving(true);
+    setError("");
     try {
-      const result = await listarPagosTesoreria(1, desde, hasta);
-      setRows(result);
+      setRows(await listarPagosTesoreria(1, desde, hasta));
       setExpanded(new Set());
+      setSuccess(cambios === 1 ? "Cambios del recibo guardados correctamente." : `${cambios} cambios guardados correctamente.`);
     } catch (e) {
-      setRows([]);
-      setError(getHttpErrorMessage(e, "El recibo se guardó, pero no se pudo actualizar la lista. Pulse Consultar."));
+      setError(getHttpErrorMessage(e, "Los cambios se guardaron, pero no se pudo actualizar la lista. Pulse Consultar."));
     } finally { setSaving(false); }
+  };
+  const stopEditRevision = (row: PagoTesoreriaRow) => {
+    const next = new Set(editKeys);
+    next.delete(key(row));
+    if (next.size === 0) void finalizarEdicionRevision();
+    else setEditKeys(next);
   };
   const medio =
     catalogos.transferencias
@@ -1699,7 +1726,9 @@ export default function PagarTesoreriaPage() {
                               {estado === 4 && <><td>{r.transferencia || (r.idTransferencia != null ? String(r.idTransferencia) : "—")}</td><td>{r.banco || (r.idBanco != null ? String(r.idBanco) : "—")}</td></>}
                               {estado === 1 && <PagoRevisionCells row={r} catalogos={catalogos}
                                 permisos={permisosRevision} disabled={saving || loading || !puedePagar}
-                                onEditing={setEditingRevision} onSaved={refreshRevision} />}
+                                editing={editKeys.has(key(r))}
+                                onStartEdit={() => startEditRevision(r)} onStopEdit={() => stopEditRevision(r)}
+                                onSaved={(guardado) => applyRevisionSaved(r, guardado)} />}
                             </tr>
                           ))}
                       </Fragment>

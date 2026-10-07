@@ -30,6 +30,8 @@ export type GastosBootstrapResponse = {
 type GastosBootstrapParams = {
   idCargo?: number | null;
   idEmpleado?: number | null;
+  /** Evita la caché del navegador (el endpoint responde con max-age=180). */
+  forzarActualizacion?: boolean;
 };
 
 function extraerArray<T>(value: unknown): T[] {
@@ -59,6 +61,8 @@ export async function getGastosBootstrap(
     params: {
       idCargo: params.idCargo && params.idCargo > 0 ? params.idCargo : undefined,
       idEmpleado: params.idEmpleado && params.idEmpleado > 0 ? params.idEmpleado : undefined,
+      // El backend ignora este parámetro; solo cambia la URL para saltar la caché del navegador.
+      _: params.forzarActualizacion ? Date.now() : undefined,
     },
   });
 

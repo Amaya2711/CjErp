@@ -104,7 +104,7 @@ export type PagoRevisionRequest = Pick<PagoTesoreriaRow, "idAnticipo" | "nroOper
   confirmarCambioEstado: boolean;
 };
 export const guardarRevisionTesoreria = (request: PagoRevisionRequest) =>
-  httpClient.put<{ procesados: number }>(`${url}/revision`, request);
+  httpClient.put<{ procesados: number; version?: string }>(`${url}/revision`, request);
 
 export const descargarFacturaRevision = (correlativo: number) =>
   httpClient.get<Blob>(`${url}/revision/${correlativo}/factura`, { responseType: "blob" });

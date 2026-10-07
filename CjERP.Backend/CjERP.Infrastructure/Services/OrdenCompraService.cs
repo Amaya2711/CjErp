@@ -1340,13 +1340,14 @@ public class OrdenCompraService : IOrdenCompraService
             .ThenBy(item => item.Tarea)
             .ToList();
 
-        // Los nombres del PDF deben reflejar solo aprobaciones ya registradas en
-        // DetOrdenCompra; IdValidador/Validador son usuarios asignados, no evidencia
-        // de que hayan aprobado un nivel.
-        var aprobadores = await BuscarAprobadoresRegistradosPdfAsync(idOc, cancellationToken);
-        cabecera.Validador = aprobadores.Validador1;
-        cabecera.Validador2 = aprobadores.Validador2;
-        cabecera.Validador3 = aprobadores.Validador3;
+        // Primer, segundo y tercer validador: Nombre1, Nombre2 y Nombre3 que devuelve
+        // sp_OrdenCompra_BuscarCabecera (aprobadores 1, 2 y 3 desde EmpleadoCj). Si la cabecera no los
+        // trae, se usan los de sp_OrdenCompra_BuscarDetalle (primer valor no vacío entre sus filas).
+        static string PrimerNombre(params string?[] nombres) =>
+            nombres.Select(nombre => nombre?.Trim()).FirstOrDefault(nombre => !string.IsNullOrWhiteSpace(nombre)) ?? string.Empty;
+        cabecera.Validador = PrimerNombre(cabecera.Nombre1, PrimerNombre(detalle.Select(item => item.Nombre1).ToArray()));
+        cabecera.Validador2 = PrimerNombre(cabecera.Nombre2, PrimerNombre(detalle.Select(item => item.Nombre2).ToArray()));
+        cabecera.Validador3 = PrimerNombre(cabecera.Nombre3, PrimerNombre(detalle.Select(item => item.Nombre3).ToArray()));
 
         var metadata = await BuscarPdfMetadataAsync(idOc, cancellationToken);
         // Logo corporativo para documentos: fondo blanco, apto para impresión.

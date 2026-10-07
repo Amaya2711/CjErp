@@ -35,7 +35,8 @@ public sealed partial class PagoTesoreriaService
             throw new ArgumentException("El número de operación o la referencia de factura supera la longitud permitida.");
     }
 
-    public async Task GuardarRevisionAsync(PagoRevisionDto request, string usuario, CancellationToken ct)
+    /// <summary>Guarda la edición de Revisión y devuelve la nueva versión del recibo, para encadenar ediciones sin recargar la lista.</summary>
+    public async Task<string> GuardarRevisionAsync(PagoRevisionDto request, string usuario, CancellationToken ct)
     {
         var permisos = await PermisosRevisionAsync(usuario, ct);
         ValidarRevision(request, permisos);
@@ -86,7 +87,11 @@ public sealed partial class PagoTesoreriaService
                 INSERT MovEstadosPagos(Correlativo,Estado,Observacion,Usuario,FechaCreacion,HoraCreacion)
                 VALUES(@correlativo,@Estado,'Corrección de estado desde Revisión',LEFT(@usuario,10),@ahora,@ahora)
                 """, new { correlativo = request.Item.Correlativo, request.Estado, usuario, ahora }, tx, cancellationToken: ct));
+        var nuevaVersion = await cn.QuerySingleAsync<string>(new CommandDefinition($"""
+            SELECT {VersionSql} FROM Planilla a WHERE a.Correlativo=@Correlativo
+            """, request.Item, tx, cancellationToken: ct));
         await tx.CommitAsync(ct);
+        return nuevaVersion;
     }
 
     public async Task<string?> ObtenerFacturaRevisionAsync(int correlativo, CancellationToken ct)

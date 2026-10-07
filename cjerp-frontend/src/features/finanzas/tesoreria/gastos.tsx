@@ -2048,6 +2048,7 @@ export default function GastosPage({
       const bootstrap = await getGastosBootstrap({
         idCargo: idCargo > 0 ? idCargo : null,
         idEmpleado: idEmpleado > 0 ? idEmpleado : null,
+        forzarActualizacion: true,
       });
       const responsablesActualizados = Array.isArray(bootstrap.empleados) ? bootstrap.empleados : [];
       setEmpleados(responsablesActualizados);
