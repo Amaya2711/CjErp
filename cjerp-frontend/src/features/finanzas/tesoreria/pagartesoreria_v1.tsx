@@ -1037,16 +1037,25 @@ export default function PagarTesoreriaV1Page() {
       opciones.find((item) => item.id === id)?.nombre || valorActual || (id == null ? "—" : String(id));
     const data = visibleRows.map((r) => {
       const fila: Record<string, string | number | null> = {
-        "Recibo / OT": `${r.correlativo}${r.ot ? ` / OT ${r.ot}` : ""}`,
+        Recibo: r.correlativo,
+        OT: r.ot || "—",
       };
       if (estado === 100 || estado === 4) fila.Estado = etiquetaCatalogo(catalogos.estados, r.estado, labelEstadoHistorial(r.estado));
-      const responsableSolicitante = [r.responsable || "Sin responsable", r.solicitante || "—"];
-      if (estado === 4) responsableSolicitante.push(`Rendición: ${r.rendicion || "Sin estado"}`);
-      if (estado === 9) responsableSolicitante.push(`Revisión: ${r.revisionPm || "—"} · ${fecha(r.fechaRevision)}`);
-      if (estado === 2) responsableSolicitante.push(`${r.estado === 7 ? "Observado administrativo" : "Observado de aprobación"}: ${r.observacion || "Sin motivo"}`);
-      fila["Responsable / Solicitante"] = responsableSolicitante.join(" / ");
-      fila["Proyecto / Site"] = [r.proyecto || "—", `${r.site || r.idSite || "—"} · ${r.cliente || "—"}`].join(" / ");
-      fila["Site + Detalle"] = [r.idSite, r.site, r.detalle].filter(Boolean).join(" / ") || "—";
+      fila.Responsable = r.responsable || "Sin responsable";
+      fila.Solicitante = r.solicitante || "—";
+      if (estado === 4) fila.Rendición = r.rendicion || "Sin estado";
+      if (estado === 9) {
+        fila["Revisión PM"] = r.revisionPm || "—";
+        fila["Fecha revisión PM"] = fecha(r.fechaRevision);
+      }
+      if (estado === 2) {
+        fila["Tipo de observación"] = r.estado === 7 ? "Observado administrativo" : "Observado de aprobación";
+        fila["Motivo observación"] = r.observacion || "Sin motivo";
+      }
+      fila.Proyecto = r.proyecto || "—";
+      fila.Site = r.site || "—";
+      fila.Cliente = r.cliente || "—";
+      fila["Id Site"] = r.idSite || "—";
       fila.Fecha = fecha(estado === 4 ? r.fechaDeposito : r.fecha);
       if (estado === 1 || estado === 9) fila["Revisión de aprobación"] = `${r.revisionPmAprobar?.trim() || "Sin registro"} · ${fecha(r.fechaRevisionAprobar)}`;
       fila.Total = r.total;
@@ -1059,9 +1068,10 @@ export default function PagarTesoreriaV1Page() {
       fila.Cuenta = r.cuenta || "—";
       fila.CuentaInter = r.cuentaInter || "—";
       fila.NombreCta = r.nombreCta || "—";
-      fila.IdBancoCta = r.idBancoCta == null
+      fila.IdBancoCta = r.idBancoCta ?? "—";
+      fila["Banco de cuenta"] = r.idBancoCta == null
         ? "—"
-        : `${r.idBancoCta} · ${catalogos.bancosCuenta.find((banco) => banco.id === r.idBancoCta)?.nombre || "Banco no encontrado"}`;
+        : catalogos.bancosCuenta.find((banco) => banco.id === r.idBancoCta)?.nombre || "Banco no encontrado";
       if (estado === 4) {
         fila.Transferencia = r.transferencia || (r.idTransferencia != null ? String(r.idTransferencia) : "—");
         fila.Banco = r.banco || (r.idBanco != null ? String(r.idBanco) : "—");
