@@ -26,6 +26,14 @@ export type EmpleadoResponsableBusqueda = {
   idEmpleado?: number | null;
   nombreEmpleado?: string;
   nombre?: string;
+  idBancoCta?: number | null;
+  idBanco?: number | null;
+  nombreBanco?: string;
+  cuenta?: string;
+  cuentaInter?: string;
+  nombreCta?: string;
+  tipoCuenta?: string;
+  nroDocumento?: string;
 };
 
 export async function buscarEmpleadosResponsables(

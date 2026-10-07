@@ -73,8 +73,9 @@
 | GET /tesoreria/gastos · /{id} | TesoreriaGastosController | **lista estática en memoria** | JWT | — |
 | POST /tesoreria/gastos/{id}/rechazar | TesoreriaGastosController | `sp_Planilla_ActualizarEstado` (3) | JWT (IdAprobador del body) | gastos, gastosaprobar |
 | GET /tesoreria/gastos/suministros-vigentes | TesoreriaGastosController | `sp_SuministroProvisional_ObtenerVigente` | JWT | gastos |
-| GET /tesoreria/gastos/responsables/buscar?nombre= | TesoreriaGastosController → EmpleadoResponsableService → `sp_EmpleadoResponsable_Buscar` | JWT | empleadoResponsableService.ts (gastos.tsx) |
-| POST /tesoreria/gastos/responsables | TesoreriaGastosController → EmpleadoResponsableService → `sp_EmpleadoResponsable_Insertar` | JWT | empleadoResponsableService.ts (gastos.tsx) |
+| GET /tesoreria/gastos/responsables/buscar?nombre= | TesoreriaGastosController → EmpleadoResponsableService → `sp_EmpleadoResponsable_Buscar` | JWT | empleadoResponsableService.ts (gastos.tsx, mantenimiento/responsable.tsx) |
+| POST /tesoreria/gastos/responsables | TesoreriaGastosController → EmpleadoResponsableService → `sp_EmpleadoResponsable_Insertar` | JWT | empleadoResponsableService.ts (gastos.tsx, mantenimiento/responsable.tsx) |
+| PUT /tesoreria/gastos/responsables/{idEmpleado} | TesoreriaGastosController → EmpleadoResponsableService → `sp_EmpleadoResponsable_Actualizar` | JWT | empleadoResponsableService.ts (gastos.tsx, mantenimiento/responsable.tsx) |
 | POST /tesoreria/gastos/upload-factura (10 MB) | TesoreriaGastosController | SharePointCommercialUploadService | JWT | gastos, pagoTesoreriaService.subirFacturaRevision |
 | GET /tesoreria/pagos/catalogos | C/PagoTesoreriaController | PagoTesoreriaService (SQL inline + `sp_Empleado_Cta_Listar`, `sp_Constante_ListarPorCampo`, `sp_Listar_Cliente`) | MENU(`/finanzas/tesoreria/pagartesoreria[_v1]`) | pagoTesoreriaService.ts |
 | GET /tesoreria/pagos?estado=5&desde&hasta&correlativo&idBancos | PagoTesoreriaController | SQL inline sobre Planilla | MENU | pagartesoreria.tsx |

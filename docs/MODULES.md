@@ -78,6 +78,7 @@
 | `/mantenimiento/empleados` | `features/mantenimiento/empleados.tsx` | ACTIVA (activos/pendientes/bajas; aprobar si IdEstado=9) |
 | `/mantenimiento/externo` | `externo.tsx` | ACTIVA (copia de empleados.tsx) |
 | `/mantenimiento/mantenimiento/m_empleado` | `mantenimiento/m_empleado.tsx` | ACTIVA (grilla editable) |
+| `/mantenimiento/responsable` | `responsable.tsx` | ACTIVA (consulta, alta y edición de cuentas de responsables) |
 | `/mantenimiento/migracion/importar` | `migracion/importar.tsx` | ACTIVA (nuevo, TVP) |
 | `/mantenimiento/migracion/m_importar` | `migracion/m_importar.tsx` | LEGACY (staging updimportar) |
 | `/mantenimiento/modificaciones` (+`/consulta/modificaciones`) | `consulta/modificaciones.tsx` | ACTIVA (monitor AuditoriaCambios) |

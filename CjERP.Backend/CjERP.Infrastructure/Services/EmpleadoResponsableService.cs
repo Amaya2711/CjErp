@@ -24,26 +24,46 @@ public sealed class EmpleadoResponsableService : IEmpleadoResponsableService
         CancellationToken cancellationToken = default)
     {
         await using var connection = _sqlCommandFactory.CreateConnection();
+        var buscarTodos = string.IsNullOrWhiteSpace(nombreEmpleado);
         var terms = nombreEmpleado
             .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
         var candidates = new List<EmpleadoResponsableBuscarDto>();
-        foreach (var term in terms)
+        if (buscarTodos)
         {
             var data = await connection.QueryAsync<EmpleadoResponsableBuscarDto>(
                 _sqlCommandFactory.Create(
                     BuscarSp,
-                    new { NombreEmpleado = term },
+                    null,
                     CommandType.StoredProcedure,
                     cancellationToken));
             candidates.AddRange(data);
         }
+        else
+        {
+            foreach (var term in terms)
+            {
+                var data = await connection.QueryAsync<EmpleadoResponsableBuscarDto>(
+                    _sqlCommandFactory.Create(
+                        BuscarSp,
+                        new { NombreEmpleado = term },
+                        CommandType.StoredProcedure,
+                        cancellationToken));
+                candidates.AddRange(data);
+            }
+        }
 
         return candidates
-            .Where(item => terms.All(term => NombreResultado(item).Contains(term, StringComparison.OrdinalIgnoreCase)))
-            .GroupBy(item => item.IdEmpleado is > 0 ? $"id:{item.IdEmpleado}" : NombreResultado(item), StringComparer.OrdinalIgnoreCase)
+            // El SP vigente devuelve CE.NombreCta con el alias TipoCuenta.
+            // Normalizamos el contrato antes de exponerlo para que los consumidores
+            // reciban NombreCta y TipoCuenta, junto a los cÃ³digos IdEmpleado/IdBanco.
+            .Select(NormalizarDatosCuenta)
+            .Where(item => buscarTodos || terms.All(term => NombreResultado(item).Contains(term, StringComparison.OrdinalIgnoreCase)))
+            // Un responsable puede tener varias cuentas. Conservamos cada combinación
+            // para permitir su mantenimiento individual.
+            .GroupBy(item => $"{item.IdEmpleado}:{item.IdBanco}:{item.Cuenta}:{NombreCuentaResultado(item)}", StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .OrderBy(NombreResultado, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -51,6 +71,17 @@ public sealed class EmpleadoResponsableService : IEmpleadoResponsableService
 
     private static string NombreResultado(EmpleadoResponsableBuscarDto item) =>
         !string.IsNullOrWhiteSpace(item.NombreEmpleado) ? item.NombreEmpleado.Trim() : item.Nombre.Trim();
+
+    private static string NombreCuentaResultado(EmpleadoResponsableBuscarDto item) =>
+        !string.IsNullOrWhiteSpace(item.NombreCta) ? item.NombreCta.Trim() : item.TipoCuenta.Trim();
+
+    private static EmpleadoResponsableBuscarDto NormalizarDatosCuenta(EmpleadoResponsableBuscarDto item)
+    {
+        var tipoCuenta = NombreCuentaResultado(item);
+        item.NombreCta = tipoCuenta;
+        item.TipoCuenta = tipoCuenta;
+        return item;
+    }
 
     public async Task InsertarAsync(
         EmpleadoResponsableInsertarRequestDto request,

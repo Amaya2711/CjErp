@@ -109,12 +109,8 @@ public class TesoreriaGastosController : ControllerBase
         [FromQuery] string? nombre,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(nombre) || nombre.Trim().Length < 3)
-        {
-            return Ok(new { success = true, data = Array.Empty<EmpleadoResponsableBuscarDto>() });
-        }
-
-        var data = await _empleadoResponsableService.BuscarAsync(nombre, cancellationToken);
+        // Una búsqueda vacía ejecuta el SP sin parámetros para la carga inicial.
+        var data = await _empleadoResponsableService.BuscarAsync(nombre ?? string.Empty, cancellationToken);
         return Ok(new { success = true, data });
     }
 

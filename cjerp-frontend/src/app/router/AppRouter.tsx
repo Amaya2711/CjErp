@@ -75,6 +75,7 @@ const MantenimientoPage = lazy(() => import("../../features/mantenimiento/manten
 const MantenimientoEmpleadosPage = lazy(() => import("../../features/mantenimiento/empleados"));
 const MantenimientoExternoPage = lazy(() => import("../../features/mantenimiento/externo"));
 const MantenimientoEmpleadoFichaPage = lazy(() => import("../../features/mantenimiento/mantenimiento/m_empleado"));
+const MantenimientoResponsablePage = lazy(() => import("../../features/mantenimiento/responsable"));
 const RptWupPage = lazy(() => import("../../features/mantenimiento/sistemas/rptwup"));
 const RptWupGerencialPage = lazy(() => import("../../features/mantenimiento/sistemas/rptwupgerencial"));
 const RptBoletaPage = lazy(() => import("../../features/mantenimiento/sistemas/rptboleta"));
@@ -218,6 +219,7 @@ export default function AppRouter() {
             <Route path="/mantenimiento/empleados" element={<MantenimientoEmpleadosPage />} />
             <Route path="/mantenimiento/externo" element={<MantenimientoExternoPage />} />
             <Route path="/mantenimiento/mantenimiento/m_empleado" element={<MantenimientoEmpleadoFichaPage />} />
+            <Route path="/mantenimiento/responsable" element={<MantenimientoResponsablePage />} />
             <Route path="/mantenimiento/migracion" element={<MigracionPage />} />
             <Route path="/mantenimiento/migracion/m_importar" element={<MigracionImportPage />} />
             <Route path="/mantenimiento/migracion/importar" element={<MigracionImportNewPage />} />
