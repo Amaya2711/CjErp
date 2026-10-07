@@ -1029,46 +1029,55 @@ export default function PagarTesoreriaV1Page() {
     }
   };
   const exportar = () => {
-    if (estado === 4) {
-      const sheet = XLSX.utils.json_to_sheet(visibleRows.map((r) => ({
-        Recibo: r.correlativo, Estado: catalogos.estados.find((item) => item.id === r.estado)?.nombre || labelEstadoHistorial(r.estado), OT: r.ot, Responsable: r.responsable, Detalle: r.detalle,
-        Cliente: r.cliente, Proyecto: r.proyecto, Site: r.site, Solicitante: r.solicitante,
-        Comprobante: r.comprobante, Serie: r.serie, Moneda: r.moneda, Subtotal: r.subtotal,
-        IGV: r.igv, Total: r.total, Retencion: r.montoRetencion, TotalPagar: r.totalPagar,
-        FechaDeposito: fecha(r.fechaDeposito), Transferencia: r.transferencia || r.idTransferencia,
-        Banco: r.banco || r.idBanco, Operacion: r.nroOperacion,
-      })));
-      const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, "Rendicion"); XLSX.writeFile(book, `tesoreria-rendicion-${hoy()}.xlsx`); return;
-    }
-    const sheet = XLSX.utils.json_to_sheet(
-      visibleRows.map((r) => ({
-        Recibo: r.correlativo,
-        ot: r.ot,
-        ...(estado === 4 ? { Serie: r.serie, Transferencia: r.transferencia || r.idTransferencia, Banco: r.banco || r.idBanco } : {}),
-        responsable: r.responsable,
-        solicitante: r.solicitante,
-        cliente: r.cliente,
-        proyecto: r.proyecto,
-        site: r.site,
-        detalle: r.detalle,
-        fecha: fecha(estado === 4 ? r.fechaDeposito : r.fecha),
-        comprobante: r.comprobante,
-        moneda: r.moneda,
-        subtotal: r.subtotal,
-        igv: r.igv,
-        total: r.total,
-        "Retención": r.montoRetencion,
-        "Total a pagar": r.totalPagar,
-        IdBancoCta: r.idBancoCta,
-        Cuenta: r.cuenta,
-        CuentaInter: r.cuentaInter,
-        NombreCta: r.nombreCta,
-        "Fecha de depósito": fecha(r.fechaDeposito),
-        "Operación": r.nroOperacion,
-      })),
-    );
+    const etiquetaCatalogo = (opciones: PagoOpcion[], id: number | null, valorActual?: string | null) =>
+      opciones.find((item) => item.id === id)?.nombre || valorActual || (id == null ? "—" : String(id));
+    const data = visibleRows.map((r) => {
+      const fila: Record<string, string | number | null> = {
+        "Recibo / OT": `${r.correlativo}${r.ot ? ` / OT ${r.ot}` : ""}`,
+      };
+      if (estado === 100 || estado === 4) fila.Estado = etiquetaCatalogo(catalogos.estados, r.estado, labelEstadoHistorial(r.estado));
+      const responsableSolicitante = [r.responsable || "Sin responsable", r.solicitante || "—"];
+      if (estado === 4) responsableSolicitante.push(`Rendición: ${r.rendicion || "Sin estado"}`);
+      if (estado === 9) responsableSolicitante.push(`Revisión: ${r.revisionPm || "—"} · ${fecha(r.fechaRevision)}`);
+      if (estado === 2) responsableSolicitante.push(`${r.estado === 7 ? "Observado administrativo" : "Observado de aprobación"}: ${r.observacion || "Sin motivo"}`);
+      fila["Responsable / Solicitante"] = responsableSolicitante.join(" / ");
+      fila["Proyecto / Site"] = [r.proyecto || "—", `${r.site || r.idSite || "—"} · ${r.cliente || "—"}`].join(" / ");
+      fila["Site + Detalle"] = [r.idSite, r.site, r.detalle].filter(Boolean).join(" / ") || "—";
+      fila.Fecha = fecha(estado === 4 ? r.fechaDeposito : r.fecha);
+      if (estado === 1 || estado === 9) fila["Revisión de aprobación"] = `${r.revisionPmAprobar?.trim() || "Sin registro"} · ${fecha(r.fechaRevisionAprobar)}`;
+      fila.Total = r.total;
+      fila.Retención = r.montoRetencion;
+      fila[estado === 4 ? "Pagado" : "A pagar"] = r.totalPagar;
+      fila.Detalle = r.detalle || "—";
+      fila.Serie = r.serie || "—";
+      fila["View factura"] = r.imgFactura || "Sin factura adjunta";
+      if (estado === 1 || estado === 9 || estado === 5 || estado === 2 || estado === 100) fila.Banco = r.banco || "—";
+      fila.Cuenta = r.cuenta || "—";
+      fila.CuentaInter = r.cuentaInter || "—";
+      fila.NombreCta = r.nombreCta || "—";
+      fila.IdBancoCta = r.idBancoCta == null
+        ? "—"
+        : `${r.idBancoCta} · ${catalogos.bancosCuenta.find((banco) => banco.id === r.idBancoCta)?.nombre || "Banco no encontrado"}`;
+      if (estado === 4) {
+        fila.Transferencia = r.transferencia || (r.idTransferencia != null ? String(r.idTransferencia) : "—");
+        fila.Banco = r.banco || (r.idBanco != null ? String(r.idBanco) : "—");
+        fila.NroOperacion = r.nroOperacion || "—";
+      }
+      if (estado === 1) {
+        fila.Anticipo = etiquetaCatalogo(catalogos.anticipos, r.idAnticipo);
+        fila.NroOperacion = r.nroOperacion || "—";
+        fila.Comprobante = etiquetaCatalogo(catalogos.comprobantes, r.idComprobante, r.comprobante);
+        fila.TipoPago = etiquetaCatalogo(catalogos.tiposPago, r.idTipoPago);
+        fila.Edición = permisosRevision.puedeEditar ? "Disponible" : "No disponible";
+        fila.RUC = r.ruc || "—";
+      }
+      if (estado === 5) fila.RUC = r.ruc || "—";
+      return fila;
+    });
+    const sheet = XLSX.utils.json_to_sheet(data);
+    sheet["!cols"] = Object.keys(data[0] ?? {}).map((encabezado) => ({ wch: Math.min(Math.max(encabezado.length + 2, 14), 38) }));
     const book = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(book, sheet, "Recibos");
+    XLSX.utils.book_append_sheet(book, sheet, estado === 4 ? "Rendicion" : "Recibos");
     XLSX.writeFile(book, `tesoreria-${estado}-${hoy()}.xlsx`);
   };
   const exportarPaolo = () => {

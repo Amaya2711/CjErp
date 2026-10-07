@@ -39,11 +39,7 @@ public class OrdenCompraService : IOrdenCompraService
         INNER JOIN dbo.DetOrdenCompra det ON det.IdOc = cab.IdOc
         LEFT JOIN dbo.Site site ON site.IdSite = det.IdSite AND site.Correlativo = det.Correlativo
         WHERE cab.IdOc = @IdOc
-          AND det.Fila = @Fila
-          AND cab.IdEstado = 1
-          AND det.IdEstado = 1
-          AND ISNULL(det.IdAprobador1, 0) > 0
-          AND ISNULL(det.IdAprobador3, 0) > 0;
+          AND det.Fila = @Fila;
         """;
     private const string BuscarBancoCuentaPagoNuevoSql = """
         SELECT TOP 1 cuenta.IdBanco
@@ -1215,7 +1211,7 @@ public class OrdenCompraService : IOrdenCompraService
 
         if (origen is null)
         {
-            throw new InvalidOperationException("La OC no está aprobada o la fila seleccionada ya no existe.");
+            throw new InvalidOperationException("La fila seleccionada de la OC ya no existe.");
         }
 
         if (origen.IdTarea != request.IdTarea || origen.IdComprobante != request.IdComprobante)
