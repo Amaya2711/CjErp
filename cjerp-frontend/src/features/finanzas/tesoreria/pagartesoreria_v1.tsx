@@ -211,7 +211,7 @@ export default function PagarTesoreriaV1Page() {
   const [rendicion, setRendicion] = useState("");
   const [estadosFiltro, setEstadosFiltro] = useState<string[]>([]);
   const [operacionFiltro, setOperacionFiltro] = useState<"" | "con" | "sin">("");
-  const [estadoBusqueda, setEstadoBusqueda] = useState("");
+  const [estadoBusqueda, setEstadoBusqueda] = useState<string[]>([]);
   const [desde, setDesde] = useState(inicioMesActual);
   const [hasta, setHasta] = useState(hoy);
   const [groupBy, setGroupBy] = useState<"todos" | "comprobante" | "proyecto-site" | "responsable" | "solicitante" | "banco" | "adjunto" | "serie-view-detalle">("todos");
@@ -349,7 +349,19 @@ export default function PagarTesoreriaV1Page() {
       setLoading(true);
       try {
         const result = status === 100
-          ? await listarPagosTesoreria(100, start, end, controller.signal, correlativo, estadoBusqueda ? Number(estadoBusqueda) : undefined, bancosPagoFiltro.length ? { idBancos: bancosPagoFiltro.map(Number) } : {})
+          ? estadoBusqueda.length
+            ? Array.from(
+                new Map(
+                  (await Promise.all(
+                    estadoBusqueda.map((idEstado) =>
+                      listarPagosTesoreria(100, start, end, controller.signal, correlativo, Number(idEstado), bancosPagoFiltro.length ? { idBancos: bancosPagoFiltro.map(Number) } : {}),
+                    ),
+                  ))
+                    .flat()
+                    .map((row) => [`${row.correlativo}-${row.idSite}`, row]),
+                ).values(),
+              ).sort((a, b) => b.correlativo - a.correlativo)
+            : await listarPagosTesoreria(100, start, end, controller.signal, correlativo, undefined, bancosPagoFiltro.length ? { idBancos: bancosPagoFiltro.map(Number) } : {})
           : status === 99
           ? (await obtenerReporteResumenTesoreria(start, end, controller.signal)).map((raw) => {
               const r = raw as Record<string, unknown>;
@@ -437,7 +449,7 @@ export default function PagarTesoreriaV1Page() {
   }, [detail?.correlativo]);
 
   const visibleRows = useMemo(() => {
-    if (estado === 100 && !correlativoBusqueda.trim() && !desde && !hasta && !estadoBusqueda) return [];
+    if (estado === 100 && !correlativoBusqueda.trim() && !desde && !hasta && !estadoBusqueda.length) return [];
     const search = query.trim().toLocaleLowerCase();
     return rows.filter(
       (r) =>
@@ -446,7 +458,7 @@ export default function PagarTesoreriaV1Page() {
         (!rendicion || String(r.idRendicion) === rendicion) &&
         (estado !== 4 || !estadosFiltro.length || estadosFiltro.includes(String(r.estado))) &&
         (estado !== 4 || !operacionFiltro || Boolean(r.nroOperacion?.trim()) === (operacionFiltro === "con")) &&
-        (estado !== 100 || !estadoBusqueda || String(r.estado) === estadoBusqueda) &&
+        (estado !== 100 || !estadoBusqueda.length || estadoBusqueda.includes(String(r.estado))) &&
         (!cliente || r.cliente === cliente) &&
         (!monedasFiltro.length || monedasFiltro.includes(String(r.tipoMoneda))) &&
         (!comprobantesFiltro.length || comprobantesFiltro.includes(r.comprobante ?? "")) &&
@@ -845,7 +857,7 @@ export default function PagarTesoreriaV1Page() {
     setHasta(end);
     setQuery("");
     setCorrelativoBusqueda("");
-    setEstadoBusqueda("");
+    setEstadoBusqueda([]);
     setCliente("");
     setMonedasFiltro([]);
     setComprobantesFiltro([]);
@@ -1332,6 +1344,7 @@ export default function PagarTesoreriaV1Page() {
 							setBusquedaSolicitante("");
 							setRendicion("");
 							setEstadosFiltro([]);
+							setEstadoBusqueda([]);
 							setOperacionFiltro("");
 							setSelected(new Set());
 							void load(estado, rangoDesde, rangoHasta);
@@ -1347,7 +1360,7 @@ export default function PagarTesoreriaV1Page() {
           <form className="pt-filters pt-search-only" onSubmit={(e) => {
             e.preventDefault();
             if (!desde || !hasta) { setError("Ingrese la fecha de inicio y la fecha fin para realizar la búsqueda."); return; } const parsed = Number(correlativoBusqueda.trim());
-            const hasFilter = (Number.isInteger(parsed) && parsed > 0) || estadoBusqueda || desde || hasta || cliente || monedasFiltro.length || comprobantesFiltro.length || bancosCtaFiltro.length || bancosPagoFiltro.length || responsablesFiltro.length || solicitantesFiltro.length;
+            const hasFilter = (Number.isInteger(parsed) && parsed > 0) || estadoBusqueda.length > 0 || desde || hasta || cliente || monedasFiltro.length || comprobantesFiltro.length || bancosCtaFiltro.length || bancosPagoFiltro.length || responsablesFiltro.length || solicitantesFiltro.length;
             if (!hasFilter) {
               setError("Seleccione al menos un filtro para realizar la búsqueda.");
               return;
@@ -1360,7 +1373,6 @@ export default function PagarTesoreriaV1Page() {
                 <input
                   type="number"
                   min="1"
-                  required
                   placeholder="Ingrese el correlativo"
                   value={correlativoBusqueda}
                   onChange={(e) => { setCorrelativoBusqueda(e.target.value); setRows([]); setError(""); }}
@@ -1479,8 +1491,8 @@ export default function PagarTesoreriaV1Page() {
               </div>
             )}
             <fieldset className="pt-local-filters" disabled={saving}>
-              {estado === 100 && <><label className="pt-field"><input type="number" min="1" placeholder="Ingrese el correlativo" value={correlativoBusqueda} onChange={(e) => { setCorrelativoBusqueda(e.target.value); setRows([]); }} /></label><button className="pt-primary" type="button" disabled={loading} onClick={() => { if (!desde || !hasta) { setError("Ingrese la fecha de inicio y la fecha fin para realizar la búsqueda."); return; } const parsed = Number(correlativoBusqueda.trim()); const hasFilter = (Number.isInteger(parsed) && parsed > 0) || estadoBusqueda || desde || hasta || cliente || monedasFiltro.length || comprobantesFiltro.length || bancosCtaFiltro.length || bancosPagoFiltro.length || responsablesFiltro.length || solicitantesFiltro.length; if (!hasFilter) { setError("Seleccione al menos un filtro para realizar la búsqueda."); return; } void load(100, desde, hasta, Number.isInteger(parsed) && parsed > 0 ? parsed : undefined); }}><Search size={15} /> Buscar</button></>}
-              {estado === 100 && <select value={estadoBusqueda} onChange={(e) => setEstadoBusqueda(e.target.value)}><option value="">Todos los estados</option>{catalogos.estados.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select>}
+              {estado === 100 && <><label className="pt-field"><input type="number" min="1" placeholder="Ingrese el correlativo" value={correlativoBusqueda} onChange={(e) => { setCorrelativoBusqueda(e.target.value); setRows([]); }} /></label><button className="pt-primary" type="button" disabled={loading} onClick={() => { if (!desde || !hasta) { setError("Ingrese la fecha de inicio y la fecha fin para realizar la búsqueda."); return; } const parsed = Number(correlativoBusqueda.trim()); const hasFilter = (Number.isInteger(parsed) && parsed > 0) || estadoBusqueda.length > 0 || desde || hasta || cliente || monedasFiltro.length || comprobantesFiltro.length || bancosCtaFiltro.length || bancosPagoFiltro.length || responsablesFiltro.length || solicitantesFiltro.length; if (!hasFilter) { setError("Seleccione al menos un filtro para realizar la búsqueda."); return; } void load(100, desde, hasta, Number.isInteger(parsed) && parsed > 0 ? parsed : undefined); }}><Search size={15} /> Buscar</button></>}
+              {estado === 100 && <details className="pt-comprobante-filter"><summary>Todos los estados{estadoBusqueda.length > 0 && ` (${estadoBusqueda.length})`}</summary><div className="pt-comprobante-options" aria-label="Filtrar por estados de búsqueda">{catalogos.estados.map((item) => <label key={item.id}><input type="checkbox" checked={estadoBusqueda.includes(String(item.id))} onChange={(e) => { setEstadoBusqueda((actual) => e.target.checked ? [...actual, String(item.id)] : actual.filter((id) => id !== String(item.id))); setRows([]); setSelected(new Set()); setCurrentPage(1); }} />{item.nombre}</label>)}</div></details>}
               <select
                 aria-label="Filtrar por cliente"
                 value={cliente}
