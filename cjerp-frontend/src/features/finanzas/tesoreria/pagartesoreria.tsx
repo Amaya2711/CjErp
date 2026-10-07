@@ -1811,7 +1811,6 @@ export default function PagarTesoreriaPage() {
                 onBusy={setSaving}
                 onRefresh={() => load(estado, desde, hasta)}
                 onMessage={(message, isError) => isError ? setError(message) : setSuccess(message)}
-                programarListo={datosCuentaProgramacionCompletos}
                 ocultarFormulario
               />
             )}
@@ -2114,8 +2113,6 @@ export default function PagarTesoreriaPage() {
                       onMessage={(message, isError) =>
                         isError ? setError(message) : setSuccess(message)
                       }
-                      programarListo={datosCuentaProgramacionCompletos}
-                      onProgramarIncompleto={() => setRegistroPagoAbierto(true)}
                     />
                   </div>
                 </>
