@@ -14,6 +14,7 @@ import { FiltroOperativoLookup } from "../../../components/lookups/FiltroOperati
 import { getValoresGasto } from "../../../api/filtroOperativoService";
 import { getGastosBootstrap } from "../../../api/gastosBootstrapService";
 import { actualizarEmpleadoResponsable, buscarEmpleadosResponsables, insertarEmpleadoResponsable } from "../../../api/empleadoResponsableService";
+import type { EmpleadoResponsableActualizarRequest } from "../../../api/empleadoResponsableService";
 import { useConstantesPorCampo } from "../../../hooks/useConstantesPorCampo";
 import type { ConstanteOption } from "../../../models/constante";
 import type { FiltroOperativoValue, TareaOption } from "../../../models/filtroOperativo";
@@ -151,6 +152,12 @@ type NuevoResponsableForm = {
 
 type ModoResponsableForm = "nuevo" | "editar";
 
+type CuentaResponsableOriginal = {
+  idBanco: number | null;
+  cuenta: string;
+  nombreCta: string;
+};
+
 const NUEVO_RESPONSABLE_INICIAL: NuevoResponsableForm = {
   nombre: "",
   cuenta: "",
@@ -158,6 +165,12 @@ const NUEVO_RESPONSABLE_INICIAL: NuevoResponsableForm = {
   tipoCuenta: "",
   banco: "",
   nroDocumento: "",
+};
+
+const CUENTA_RESPONSABLE_ORIGINAL_INICIAL: CuentaResponsableOriginal = {
+  idBanco: null,
+  cuenta: "",
+  nombreCta: "",
 };
 
 export type GastoEditorRequest = {
@@ -259,6 +272,10 @@ const GASTOS_HEADER_FILTERS_INITIAL: GastosHeaderFilters = {
   responsable: [],
   validador: [],
 };
+
+// "pendientes-hoy": registros generados hoy en estado 0 (pendientes de aprobar).
+// "consulta": cualquier filtro, sin restringir por estado (equivale a "Total Órdenes" de Pagos).
+type GastosVista = "pendientes-hoy" | "consulta";
 
 type GastosHeaderMultiFilterKey =
   | "estado"
@@ -1305,6 +1322,8 @@ export default function GastosPage({
   const [filtrosCabecera, setFiltrosCabecera] = useState<GastosHeaderFilters>(GASTOS_HEADER_FILTERS_INITIAL);
   const [filtrosCabeceraAplicados, setFiltrosCabeceraAplicados] = useState<GastosHeaderFilters>(GASTOS_HEADER_FILTERS_INITIAL);
   const filtrosCabeceraAplicadosRef = useRef<GastosHeaderFilters>(GASTOS_HEADER_FILTERS_INITIAL);
+  const [vistaGastos, setVistaGastos] = useState<GastosVista>("pendientes-hoy");
+  const vistaGastosRef = useRef<GastosVista>("pendientes-hoy");
   const [headerFilterSearch, setHeaderFilterSearch] = useState<Record<GastosHeaderSearchableFilterKey, string>>(
     GASTOS_HEADER_FILTER_SEARCH_INITIAL
   );
@@ -1369,6 +1388,7 @@ export default function GastosPage({
   const [mostrarNuevoResponsable, setMostrarNuevoResponsable] = useState(false);
   const [modoResponsableForm, setModoResponsableForm] = useState<ModoResponsableForm>("nuevo");
   const [nuevoResponsable, setNuevoResponsable] = useState<NuevoResponsableForm>(NUEVO_RESPONSABLE_INICIAL);
+  const [cuentaResponsableOriginal, setCuentaResponsableOriginal] = useState<CuentaResponsableOriginal>(CUENTA_RESPONSABLE_ORIGINAL_INICIAL);
   const [nuevoResponsableError, setNuevoResponsableError] = useState<string | null>(null);
   const [guardandoNuevoResponsable, setGuardandoNuevoResponsable] = useState(false);
   const [coincidenciasNuevoResponsable, setCoincidenciasNuevoResponsable] = useState<string[]>([]);
@@ -1539,66 +1559,106 @@ export default function GastosPage({
       }
 
       const filtrosConsulta = filtrosCabeceraAplicadosRef.current;
-      const estadosSeleccionados = Array.from(
-        new Set(
-          (filtrosConsulta.estado.length > 0
-            ? filtrosConsulta.estado
-            : estadoOptions.map((estado) => getConstanteStoredValue(estado)))
-            .map((estado) => normalizeConstanteValue(estadoOptions, estado))
-            .map((estado) => estado.trim())
-            .filter(Boolean)
+      const parametrosConsulta: PlanillaConsultaParametro[] = [];
+      // Cada grupo es un valor explícito de @Estados.
+      const gruposEstados: string[] = [];
+
+      if (vistaGastosRef.current === "pendientes-hoy") {
+        // Solo lo generado hoy (fecha de ingreso) y pendiente de aprobar (estado 0).
+        const hoy = formatInputDateForPlanillaParametro(obtenerFechaActual());
+        gruposEstados.push("0");
+        if (hoy) {
+          parametrosConsulta.push({ nombre: "FechaInicio", valor: hoy, tipo: "date" });
+          parametrosConsulta.push({ nombre: "FechaFin", valor: hoy, tipo: "date" });
+        }
+        setMensajeFiltroCabecera(null);
+      } else {
+        // Consulta libre: sin estado consulta explícitamente todos los estados.
+        // Un correlativo identifica un registro puntual y no se limita por fechas.
+        // Si no se elige un estado, se debe consultar explícitamente el universo completo.
+        // La ausencia de @Estados no tiene la misma semántica en el procedimiento.
+        const estadosElegidos = Array.from(
+          new Set(
+            filtrosConsulta.estado
+              .map((estado) => normalizeConstanteValue(estadoOptions, estado))
+              .map((estado) => estado.trim())
+              .filter(Boolean)
+          )
+        );
+        const estadosSeleccionados = estadosElegidos.length > 0
+          ? estadosElegidos
+          : Array.from(
+            new Set(
+              estadoOptions
+                .map((estado) => normalizeConstanteValue(estadoOptions, getConstanteStoredValue(estado)).trim())
+                .filter(Boolean),
+            ),
+          );
+        const correlativoNumero = Number(filtrosConsulta.id.trim());
+        const buscarPorCorrelativo = Number.isInteger(correlativoNumero) && correlativoNumero > 0;
+        const fechaInicio = filtrosConsulta.fechaInicio.trim();
+        const fechaFin = filtrosConsulta.fechaFin.trim();
+
+        // sp_Planilla_Consulta_Estados filtra por fecha de depósito TODAS las filas cuando entre los
+        // estados viene el 4 (Pagado), y los demás estados no tienen fecha de depósito. Por eso, si se
+        // eligen el 4 y otros estados, se consultan en dos grupos (los demás por fecha de ingreso).
+        if (estadosSeleccionados.includes("4") && estadosSeleccionados.length > 1) {
+          gruposEstados.push(estadosSeleccionados.filter((estado) => estado !== "4").join(","), "4");
+        } else if (estadosSeleccionados.length > 0) {
+          gruposEstados.push(estadosSeleccionados.join(","));
+        }
+
+        if (buscarPorCorrelativo) {
+          parametrosConsulta.push({ nombre: "Correlativo", valor: String(correlativoNumero), tipo: "int" });
+        } else {
+          if (!fechaInicio && !fechaFin) {
+            setMensajeFiltroCabecera("Indique un correlativo o un rango de fechas para consultar.");
+            return [];
+          }
+
+          if (!isInputDateRangeValid(fechaInicio, fechaFin)) {
+            setMensajeFiltroCabecera(null);
+            return [];
+          }
+
+          const fechaInicioParametro = formatInputDateForPlanillaParametro(fechaInicio);
+          const fechaFinParametro = formatInputDateForPlanillaParametro(fechaFin);
+          if (fechaInicioParametro) {
+            parametrosConsulta.push({ nombre: "FechaInicio", valor: fechaInicioParametro, tipo: "date" });
+          }
+          if (fechaFinParametro) {
+            parametrosConsulta.push({ nombre: "FechaFin", valor: fechaFinParametro, tipo: "date" });
+          }
+        }
+
+        setMensajeFiltroCabecera(null);
+      }
+
+      const respuestas = await Promise.all(
+        (gruposEstados.length > 0 ? gruposEstados : [""]).map((estados) =>
+          consultarPlanillaEstados({
+            ...buildPlanillaConsultaEstadosRequest([
+              ...(estados ? [{ nombre: "Estados", valor: estados, tipo: "string" } satisfies PlanillaConsultaParametro] : []),
+              ...parametrosConsulta,
+            ]),
+          })
         )
       );
-      const fechaInicio = filtrosConsulta.fechaInicio.trim();
-      const fechaFin = filtrosConsulta.fechaFin.trim();
-      const fechaInicioParametro = formatInputDateForPlanillaParametro(fechaInicio);
-      const fechaFinParametro = formatInputDateForPlanillaParametro(fechaFin);
 
-      if (estadosSeleccionados.length === 0) {
-        setMensajeFiltroCabecera(null);
-        return [];
+      const gastosConsulta = respuestas
+        .flatMap((respuesta) => extraerArray<Record<string, unknown>>(respuesta.rows))
+        .map((row, index) => mapGastoDtoToView(mapPlanillaConsultaRowToGastoDto(row, index)));
+
+      if (respuestas.length === 1) {
+        return gastosConsulta;
       }
 
-      if (!isInputDateRangeValid(fechaInicio, fechaFin)) {
-        setMensajeFiltroCabecera(null);
-        return [];
+      // Varios grupos: se unen sin repetidos y en el mismo orden del SP (correlativo descendente).
+      const unicos = new Map<string, GastoForm>();
+      for (const gasto of gastosConsulta) {
+        unicos.set(String(gasto.id), gasto);
       }
-
-      setMensajeFiltroCabecera(null);
-
-      const response = await consultarPlanillaEstados(
-        {
-          ...buildPlanillaConsultaEstadosRequest([
-            {
-              nombre: "Estados",
-              valor: estadosSeleccionados.join(","),
-              tipo: "string",
-            },
-            ...(fechaInicioParametro
-              ? [
-                  {
-                    nombre: "FechaInicio",
-                    valor: fechaInicioParametro,
-                    tipo: "date",
-                  } satisfies PlanillaConsultaParametro,
-                ]
-              : []),
-            ...(fechaFinParametro
-              ? [
-                  {
-                    nombre: "FechaFin",
-                    valor: fechaFinParametro,
-                    tipo: "date",
-                  } satisfies PlanillaConsultaParametro,
-                ]
-              : []),
-          ]),
-        }
-      );
-
-      return extraerArray<Record<string, unknown>>(response.rows).map((row, index) =>
-        mapGastoDtoToView(mapPlanillaConsultaRowToGastoDto(row, index))
-      );
+      return [...unicos.values()].sort((a, b) => Number(b.id) - Number(a.id));
     },
 
     create: async (form: GastoForm) => {
@@ -1996,17 +2056,8 @@ export default function GastosPage({
 
   const guardarNuevoResponsable = async () => {
     const esEdicion = modoResponsableForm === "editar";
-    const bancoActualOption = esEdicion && responsableSeleccionado
-      ? findConstanteOption(bancoOptions, responsableSeleccionado.nombreBanco)
-      : undefined;
-    const idBancoActual = bancoActualOption
-      ? Number(getConstanteStoredValue(bancoActualOption))
-      : undefined;
     const request = {
       idBancoCta: esEdicion && Number(form.idBancoCta) > 0 ? Number(form.idBancoCta) : undefined,
-      idBancoActual: Number.isInteger(idBancoActual) && idBancoActual! > 0 ? idBancoActual : undefined,
-      cuentaActual: esEdicion ? responsableSeleccionado?.cuenta.trim() : undefined,
-      nombreCtaActual: esEdicion ? responsableSeleccionado?.nombreCta.trim() : undefined,
       nombre: nuevoResponsable.nombre.trim(),
       cuenta: nuevoResponsable.cuenta.trim(),
       cuentaInter: nuevoResponsable.cuentaInter.trim(),
@@ -2022,7 +2073,19 @@ export default function GastosPage({
       return;
     }
 
-    if (esEdicion && (!request.idBancoActual || !request.cuentaActual || !request.nombreCtaActual)) {
+    const requestActualizar: EmpleadoResponsableActualizarRequest | null = esEdicion
+      && cuentaResponsableOriginal.idBanco
+      && cuentaResponsableOriginal.cuenta
+      && cuentaResponsableOriginal.nombreCta
+      ? {
+        ...request,
+        idBancoActual: cuentaResponsableOriginal.idBanco,
+        cuentaActual: cuentaResponsableOriginal.cuenta,
+        nombreCtaActual: cuentaResponsableOriginal.nombreCta,
+      }
+      : null;
+
+    if (esEdicion && !requestActualizar) {
       setNuevoResponsableError("No se pudieron identificar los datos actuales de la cuenta seleccionada. Vuelva a seleccionar el responsable.");
       return;
     }
@@ -2041,7 +2104,7 @@ export default function GastosPage({
           setNuevoResponsableError("Seleccione un responsable válido para editar.");
           return;
         }
-        await actualizarEmpleadoResponsable(idEmpleado, request);
+        await actualizarEmpleadoResponsable(idEmpleado, requestActualizar!);
       } else {
         await insertarEmpleadoResponsable(request);
       }
@@ -2080,6 +2143,7 @@ export default function GastosPage({
 
       setNuevoResponsable(NUEVO_RESPONSABLE_INICIAL);
       setModoResponsableForm("nuevo");
+      setCuentaResponsableOriginal(CUENTA_RESPONSABLE_ORIGINAL_INICIAL);
       setMostrarNuevoResponsable(false);
     } catch (error) {
       setNuevoResponsableError(getHttpErrorMessage(error, "No se pudo registrar el responsable."));
@@ -3056,6 +3120,30 @@ export default function GastosPage({
     await cargarGastos();
   };
 
+  // Cambia entre "Pendientes de hoy" y "Consulta" y recarga con los filtros iniciales de esa vista.
+  const cambiarVistaGastos = async (vista: GastosVista) => {
+    if (vista === vistaGastosRef.current) {
+      return;
+    }
+
+    vistaGastosRef.current = vista;
+    setVistaGastos(vista);
+
+    const hoy = obtenerFechaActual();
+    const filtrosIniciales: GastosHeaderFilters = { ...GASTOS_HEADER_FILTERS_INITIAL, fechaInicio: hoy, fechaFin: hoy };
+    filtrosCabeceraAplicadosRef.current = filtrosIniciales;
+    setFiltrosCabecera(filtrosIniciales);
+    setFiltrosCabeceraAplicados(filtrosIniciales);
+    setCabeceraFiltroAbierto(null);
+    setMensajeFiltroCabecera(null);
+    setBusqueda("");
+    setSelectedRowKey(null);
+
+    cargaInicialGastosListaRef.current = true;
+    cargaInicialGastosSolicitadaRef.current = true;
+    await cargarGastos();
+  };
+
   // Solo columnas visibles: id, monto, tipoPago, ot, fecIngreso, fechaVencimiento
   const camposBusquedaGastos = useMemo<CrudToolbarSearchField<GastoForm>[]>(
     () => [
@@ -3780,6 +3868,63 @@ export default function GastosPage({
         ]}
       />
 
+      <div role="tablist" aria-label="Vista de gastos" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        {([
+          { key: "pendientes-hoy" as const, label: "Pendientes de hoy" },
+          { key: "consulta" as const, label: "Consulta" },
+        ]).map((tab) => {
+          const activa = vistaGastos === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={activa}
+              disabled={cargando}
+              onClick={() => void cambiarVistaGastos(tab.key)}
+              style={{
+                border: "none",
+                borderBottom: `3px solid ${activa ? "#4F46E5" : "transparent"}`,
+                background: "transparent",
+                color: activa ? "#3730A3" : "#64748B",
+                padding: "8px 14px",
+                fontSize: 12,
+                fontWeight: 800,
+                cursor: cargando ? "not-allowed" : "pointer",
+              }}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+        <span
+          aria-live="polite"
+          title="Registros de la vista actual (con los filtros y la búsqueda aplicados)"
+          style={{
+            marginLeft: "auto",
+            background: "#EEF2FF",
+            color: "#3730A3",
+            border: "1px solid #C7D2FE",
+            borderRadius: 999,
+            padding: "4px 12px",
+            fontSize: 11,
+            fontWeight: 800,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {cargando
+            ? "Cargando..."
+            : `${cantidadRegistrosFiltrados.toLocaleString("es-PE")} ${cantidadRegistrosFiltrados === 1 ? "registro" : "registros"}`}
+        </span>
+      </div>
+
+      {vistaGastos === "pendientes-hoy" ? (
+        <div style={{ fontSize: 11, color: "#475569", fontWeight: 600, padding: "0 4px" }}>
+          Registros generados hoy y pendientes de aprobar (estado 0). Use la pestaña Consulta para filtrar por cualquier estado o fecha.
+        </div>
+      ) : null}
+
+      {vistaGastos === "consulta" && (
       <div
         style={{
           background: "#FFFFFF",
@@ -3803,9 +3948,10 @@ export default function GastosPage({
             key: "estado",
             label: "Estado",
             section: "basic" as const,
-            options: headerFilterOptions.estado.map((option) => ({
-              value: option,
-              label: getEstadoLabel(estadoOptions, option),
+            // Una opción por cada fila de sp_Constante_ListarPorCampo @Campo='estado', en el orden del SP.
+            options: estadoOptions.map((option) => ({
+              value: getConstanteStoredValue(option),
+              label: option.label || getConstanteStoredValue(option),
             })),
             selectedValues: filtrosCabecera.estado,
           },
@@ -4189,6 +4335,7 @@ export default function GastosPage({
           </button>
         </div>
       </div>
+      )}
 
       {rechazoError && (
         <div
@@ -4727,6 +4874,7 @@ export default function GastosPage({
                         onClick={() => {
                           setModoResponsableForm("nuevo");
                           setNuevoResponsable(NUEVO_RESPONSABLE_INICIAL);
+                          setCuentaResponsableOriginal(CUENTA_RESPONSABLE_ORIGINAL_INICIAL);
                           setNuevoResponsableError(null);
                           setMostrarNuevoResponsable(true);
                         }}
@@ -4752,7 +4900,13 @@ export default function GastosPage({
                           if (!responsableSeleccionado) return;
                           const tipoCuenta = findConstanteOption(tipoCuentaOptions, responsableSeleccionado.nombreCta);
                           const banco = findConstanteOption(bancoOptions, responsableSeleccionado.nombreBanco);
+                          const idBancoOriginal = banco ? Number(getConstanteStoredValue(banco)) : Number.NaN;
                           setModoResponsableForm("editar");
+                          setCuentaResponsableOriginal({
+                            idBanco: Number.isInteger(idBancoOriginal) && idBancoOriginal > 0 ? idBancoOriginal : null,
+                            cuenta: responsableSeleccionado.cuenta.trim(),
+                            nombreCta: responsableSeleccionado.nombreCta.trim(),
+                          });
                           setNuevoResponsable({
                             nombre: responsableSeleccionado.nombreEmpleado,
                             cuenta: responsableSeleccionado.cuenta,
@@ -4933,14 +5087,14 @@ export default function GastosPage({
     <textarea
       value={form.cuenta}
       readOnly
-      rows={2}
+      rows={1}
       placeholder="Cuenta bancaria asociada"
       style={{
         width: "100%",
-        minHeight: 56,
+        height: 42,
         borderRadius: 10,
         border: "1px solid #D1D5DB",
-        padding: 10,
+        padding: "8px 10px",
         fontSize: 13,
         resize: "none",
         boxSizing: "border-box",
@@ -5050,13 +5204,13 @@ export default function GastosPage({
   </div>
 ) : null}
 
-{/* FILA DERECHA 2: FECHAS */}
-<div
+  {/* Fila: fechas, bien, comprobante, serie y rendición. */}
+  <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gridColumn: "1 / -1", gap: 12, marginBottom: 8 }}>
+  <div
   style={{
     display: "flex",
     gap: 12,
-    gridColumn: "span 6",
-    marginBottom: 8,
+      gridColumn: "span 2",
   }}
 >
   {/* FECHA INGRESO */}
@@ -5142,7 +5296,7 @@ export default function GastosPage({
   </div>
 </div>
 
-  <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 4", marginBottom: 8 }}>
+  <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 1" }}>
     <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Bien</label>
     <select value={getSelectValue(bienOptions, form.bien)} onChange={(e) => setForm((prev) => ({ ...prev, bien: e.target.value }))} disabled={constantesLoading} style={{ width: "100%", height: 42, borderRadius: 10, border: `1px solid ${errores.bien ? "#F87171" : "#D1D5DB"}`, padding: "0 12px", fontSize: 13, background: "#FFFFFF" }}>
       <option value="">Seleccione</option>
@@ -5158,7 +5312,7 @@ export default function GastosPage({
     {errores.bien && <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>{errores.bien}</div>}
   </div>
 
-  <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 4", marginBottom: 8 }}>
+  <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 1" }}>
     <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Comprobante</label>
     <select value={getSelectValue(comprobanteOptions, form.comprobante)} onChange={(e) => setForm((prev) => ({ ...prev, comprobante: e.target.value }))} disabled={constantesLoading} style={{ width: "100%", height: 42, borderRadius: 10, border: `1px solid ${errores.comprobante ? "#F87171" : "#D1D5DB"}`, padding: "0 12px", fontSize: 13, background: "#FFFFFF" }}>
       <option value="">Seleccione</option>
@@ -5174,7 +5328,7 @@ export default function GastosPage({
     {errores.comprobante && <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>{errores.comprobante}</div>}
   </div>
 
-  <div style={{ display: "flex", alignItems: "center", gap: 12, gridColumn: "span 4", marginBottom: 8 }}>
+  <div style={{ display: "flex", alignItems: "center", gap: 12, gridColumn: "span 2" }}>
     <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 1.5 }}>
       <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Serie</label>
       <input type="text" value={form.serie} onChange={(e) => setForm((prev) => ({ ...prev, serie: e.target.value }))} placeholder="Serie" style={{ width: "100%", height: 42, borderRadius: 10, border: "1px solid #D1D5DB", padding: "0 12px", fontSize: 13, boxSizing: "border-box" }} />
@@ -5191,8 +5345,12 @@ export default function GastosPage({
     </div>
   </div>
 
+  </div>
+
+  {/* Fila: importes y moneda. */}
+  <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gridColumn: "1 / -1", gap: 12, marginBottom: 8 }}>
   {/* TIPO DE PAGO */}
-  <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 2", marginBottom: 8 }}>
+  <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 1" }}>
     <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Tipo de pago</label>
     <select
       value={getSelectValue(tipoPagoOptions, form.tipoPago)}
@@ -5223,7 +5381,7 @@ export default function GastosPage({
   </div>
 
 {/* SUBTOTAL */}
-  <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 2", marginBottom: 8 }}>
+  <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 1" }}>
     <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Subtotal</label>
     <input
       type="number"
@@ -5243,7 +5401,7 @@ export default function GastosPage({
   </div>
 
 {/* IGV */}
-  <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 2", marginBottom: 8 }}>
+  <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 1" }}>
     <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>IGV</label>
     <input
       type="number"
@@ -5264,7 +5422,7 @@ export default function GastosPage({
   </div>
 
 {/* TOTAL */}
-  <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 2", marginBottom: 8 }}>
+  <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 1" }}>
     <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Total</label>
     <input
       type="number"
@@ -5285,7 +5443,7 @@ export default function GastosPage({
   </div>
 
 {/* MONEDA */}
-  <div style={{ display: "flex", alignItems: "flex-end", gap: 12, gridColumn: "span 2", marginBottom: 8 }}>
+  <div style={{ display: "flex", alignItems: "flex-end", gap: 12, gridColumn: "span 1" }}>
     <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 1.5 }}>
       <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Moneda</label>
       <select
@@ -5339,6 +5497,8 @@ export default function GastosPage({
         />
       </div>
     )}
+  </div>
+
   </div>
 
   <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 4" }}>
@@ -5977,6 +6137,7 @@ export default function GastosPage({
                 onClick={() => {
                   setMostrarNuevoResponsable(false);
                   setModoResponsableForm("nuevo");
+                  setCuentaResponsableOriginal(CUENTA_RESPONSABLE_ORIGINAL_INICIAL);
                 }}
                 disabled={guardandoNuevoResponsable}
                 aria-label="Cerrar"
@@ -6068,7 +6229,7 @@ export default function GastosPage({
               )}
             </div>
             <footer style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "14px 18px", borderTop: "1px solid #E2E8F0" }}>
-              <button type="button" onClick={() => { setMostrarNuevoResponsable(false); setModoResponsableForm("nuevo"); }} disabled={guardandoNuevoResponsable} style={{ border: "1px solid #CBD5E1", borderRadius: 8, padding: "9px 14px", background: "#FFFFFF", color: "#334155", fontWeight: 700, cursor: "pointer" }}>Cancelar</button>
+              <button type="button" onClick={() => { setMostrarNuevoResponsable(false); setModoResponsableForm("nuevo"); setCuentaResponsableOriginal(CUENTA_RESPONSABLE_ORIGINAL_INICIAL); }} disabled={guardandoNuevoResponsable} style={{ border: "1px solid #CBD5E1", borderRadius: 8, padding: "9px 14px", background: "#FFFFFF", color: "#334155", fontWeight: 700, cursor: "pointer" }}>Cancelar</button>
               <button type="submit" disabled={guardandoNuevoResponsable || existeCuentaResponsableDuplicada} style={{ border: "1px solid #2563EB", borderRadius: 8, padding: "9px 14px", background: "#2563EB", color: "#FFFFFF", fontWeight: 700, cursor: guardandoNuevoResponsable || existeCuentaResponsableDuplicada ? "not-allowed" : "pointer", opacity: guardandoNuevoResponsable || existeCuentaResponsableDuplicada ? 0.7 : 1 }}>{guardandoNuevoResponsable ? "Guardando..." : modoResponsableForm === "editar" ? "Actualizar" : "Grabar"}</button>
             </footer>
           </form>

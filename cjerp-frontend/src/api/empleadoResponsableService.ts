@@ -15,6 +15,13 @@ export type EmpleadoResponsableInsertarRequest = {
   nroDocumento: string;
 };
 
+/** Datos de la cuenta que identifica el registro original en una actualización. */
+export type EmpleadoResponsableActualizarRequest = EmpleadoResponsableInsertarRequest & {
+  idBancoActual: number;
+  cuentaActual: string;
+  nombreCtaActual: string;
+};
+
 export type EmpleadoResponsableBusqueda = {
   idEmpleado?: number | null;
   nombreEmpleado?: string;
@@ -39,7 +46,7 @@ export async function insertarEmpleadoResponsable(
 
 export async function actualizarEmpleadoResponsable(
   idEmpleado: number,
-  request: EmpleadoResponsableInsertarRequest,
+  request: EmpleadoResponsableActualizarRequest,
 ): Promise<void> {
   await httpClient.put(`/tesoreria/gastos/responsables/${idEmpleado}`, request);
 }
