@@ -18,6 +18,7 @@ public class OrdenCompraCabeceraDto
     public int IdOc { get; set; }
     public int IdSolicitante { get; set; }
     public string Solicitante { get; set; } = string.Empty;
+    public string? SolicitanteCabecera { get; set; }
     public int IdResponsable { get; set; }
     public string Responsable { get; set; } = string.Empty;
     public decimal Subtotal { get; set; }
@@ -34,6 +35,7 @@ public class OrdenCompraCabeceraDto
     public string? Nombre3 { get; set; }
     public int? IdValidador { get; set; }
     public string Validador { get; set; } = string.Empty;
+    public string? ValidadorCabecera { get; set; }
     public string Validador2 { get; set; } = string.Empty;
     public string Validador3 { get; set; } = string.Empty;
     public string Estado { get; set; } = string.Empty;

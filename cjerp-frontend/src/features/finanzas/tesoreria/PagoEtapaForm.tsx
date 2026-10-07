@@ -119,8 +119,6 @@ export default function PagoEtapaForm({
   onBusy,
   onRefresh,
   onMessage,
-  programarListo,
-  onProgramarIncompleto,
   onContabilidadValida,
   ocultarFormulario = false,
 }: {
@@ -132,8 +130,6 @@ export default function PagoEtapaForm({
   onBusy: (busy: boolean) => void;
   onRefresh: () => Promise<void>;
   onMessage: (message: string, error?: boolean) => void;
-  programarListo?: boolean;
-  onProgramarIncompleto?: () => void;
   onContabilidadValida?: (valid: boolean) => void;
   ocultarFormulario?: boolean;
 }) {
@@ -231,6 +227,12 @@ export default function PagoEtapaForm({
       imgFactura: r.imgFactura || "",
     }));
   };
+  const mostrarError = (message: string) => {
+    setError(message);
+    // El formulario puede estar oculto o fuera del área visible al registrar
+    // un pago; el aviso global evita que la acción quede silenciosa.
+    onMessage(message, true);
+  };
   const revisar = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError("");
@@ -239,32 +241,27 @@ export default function PagoEtapaForm({
     )?.value as PagoAccion;
     if (!acciones[estado]?.some((a) => a.key === accion) || busy || disabled) return;
     if (!rows.length) {
-      setError("No existen registros seleccionados");
+      mostrarError("No existen registros seleccionados");
       return;
     }
     if (rows.length > 500) {
-      setError("Seleccione entre 1 y 500 recibos.");
+      mostrarError("Seleccione entre 1 y 500 recibos.");
       return;
     }
     if (accion === "observar") {
       setPending({ accion, items: crearItemsTesoreria(rows), observacion: "" });
       return;
     }
-    if (accion === "programar" && !programarListo) {
-      onProgramarIncompleto?.();
-      setError("Complete los datos obligatorios de Registrar pago antes de enviar a Programado.");
-      return;
-    }
     if (
       ["corregir", "subsanar"].includes(accion) &&
       !form.observacion.trim()
     ) {
-      setError("Ingrese el motivo o el detalle de la corrección.");
+      mostrarError("Ingrese el motivo o el detalle de la corrección.");
       return;
     }
     const contabilidad = accion.startsWith("contabilidad-");
     if (contabilidad && form.idRetencion === "") {
-      setError("Seleccione la retención.");
+      mostrarError("Seleccione la retención.");
       return;
     }
     if (editar) {

@@ -568,11 +568,24 @@ public class OrdenCompraService : IOrdenCompraService
                 SELECT cab.IdOc,
                        responsable.NombreEmpleado AS Validador,
                        segundo.NombreEmpleado AS Validador2,
-                       tercero.NombreEmpleado AS Validador3
+                       tercero.NombreEmpleado AS Validador3,
+                       COALESCE(solicitanteCj.NombreEmpleado, solicitanteUnificado.NombreEmpleado, solicitanteLegacy.NombreEmpleado, CONVERT(varchar(20), cab.IdSolicitante), '') AS SolicitanteCabecera,
+                       COALESCE(validadorCj.NombreEmpleado, validadorNombreLegacy.NombreEmpleado, CONVERT(varchar(20), cab.IdValidador), '') AS ValidadorCabecera
                 FROM dbo.CabOrdenCompra cab
                 LEFT JOIN dbo.Empleado solicitanteLegacy
                     ON solicitanteLegacy.IdEmpleado = cab.IdSolicitante
                    AND ISNULL(cab.IdWeb, 0) <> 1
+                LEFT JOIN dbo.EmpleadoCj solicitanteCj
+                    ON solicitanteCj.IdEmpleado = cab.IdSolicitante
+                    AND ISNULL(cab.IdWeb, 0) = 1
+                LEFT JOIN dbo.EmpleadoCj solicitanteUnificado
+                    ON solicitanteUnificado.IdEmpleado = solicitanteLegacy.IdEmpleadoCj
+                LEFT JOIN dbo.Empleado validadorNombreLegacy
+                    ON validadorNombreLegacy.IdEmpleado = cab.IdValidador
+                    AND ISNULL(cab.IdWeb, 0) <> 1
+                LEFT JOIN dbo.EmpleadoCj validadorCj
+                    ON validadorCj.IdEmpleado = cab.IdValidador
+                    AND ISNULL(cab.IdWeb, 0) = 1
                 OUTER APPLY (
                     SELECT TOP 1
                         detalle.IdResponsableCj,
@@ -600,7 +613,12 @@ public class OrdenCompraService : IOrdenCompraService
                 cancellationToken: cancellationToken,
                 commandTimeout: 120));
 
-        var validadoresPorOc = validadores.ToDictionary(item => item.IdOc);
+        // Una misma OC puede tener más de una relación histórica en Empleado.
+        // Los datos de cabecera son los mismos para cada una, por lo que se
+        // consolida por OC antes de enriquecer el resultado del SP.
+        var validadoresPorOc = validadores
+            .GroupBy(item => item.IdOc)
+            .ToDictionary(group => group.Key, group => group.First());
 
         foreach (var cabecera in cabeceras)
         {
@@ -613,6 +631,10 @@ public class OrdenCompraService : IOrdenCompraService
                 cabecera.Validador2 = validadoresEmpleado.Validador2.Trim();
             if (!string.IsNullOrWhiteSpace(validadoresEmpleado.Validador3))
                 cabecera.Validador3 = validadoresEmpleado.Validador3.Trim();
+            if (!string.IsNullOrWhiteSpace(validadoresEmpleado.SolicitanteCabecera))
+                cabecera.SolicitanteCabecera = validadoresEmpleado.SolicitanteCabecera.Trim();
+            if (!string.IsNullOrWhiteSpace(validadoresEmpleado.ValidadorCabecera))
+                cabecera.ValidadorCabecera = validadoresEmpleado.ValidadorCabecera.Trim();
         }
 
         return cabeceras;
@@ -1544,6 +1566,8 @@ public class OrdenCompraService : IOrdenCompraService
         public string? Validador { get; set; }
         public string? Validador2 { get; set; }
         public string? Validador3 { get; set; }
+        public string? SolicitanteCabecera { get; set; }
+        public string? ValidadorCabecera { get; set; }
     }
 
     private sealed class AprobadoresRegistradosPdfLookup

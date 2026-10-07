@@ -935,14 +935,6 @@ export default function PagarTesoreriaV1Page() {
   );
   // En Administrativo, enviar a Programado depende de los datos registrados
   // en el bloque Registrar pago, no de las cuentas de cada recibo.
-  const datosCuentaProgramacionCompletos = Boolean(
-    form.idEjecutor &&
-      form.idTransferencia &&
-      form.idBanco &&
-      form.idMoneda2 &&
-      form.fechaDeposito &&
-      form.fechaDeposito <= hoy(),
-  );
   const review = () => {
     setError("");
     setSuccess("");
@@ -2105,7 +2097,6 @@ export default function PagarTesoreriaV1Page() {
                 onBusy={setSaving}
                 onRefresh={() => load(estado, desde, hasta)}
                 onMessage={(message, isError) => isError ? setError(message) : setSuccess(message)}
-                programarListo={datosCuentaProgramacionCompletos}
                 ocultarFormulario
               />
             )}
@@ -2409,8 +2400,6 @@ export default function PagarTesoreriaV1Page() {
                       onMessage={(message, isError) =>
                         isError ? setError(message) : setSuccess(message)
                       }
-                      programarListo={datosCuentaProgramacionCompletos}
-                      onProgramarIncompleto={() => setRegistroPagoAbierto(true)}
                     />
                   </div>
                 </>

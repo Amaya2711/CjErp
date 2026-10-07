@@ -4,6 +4,7 @@ export type OrdenCompraCabeceraDto = {
   idOc: number;
   idSolicitante: number;
   solicitante: string;
+  solicitanteCabecera?: string | null;
   idResponsable: number;
   responsable: string;
   subtotal: number;
@@ -16,6 +17,7 @@ export type OrdenCompraCabeceraDto = {
   idAprobador3?: number | null;
   idValidador?: number | null;
   validador?: string | null;
+  validadorCabecera?: string | null;
   validador2?: string | null;
   validador3?: string | null;
   estado: string;

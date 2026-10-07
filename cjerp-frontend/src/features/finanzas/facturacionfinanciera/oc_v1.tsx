@@ -1645,7 +1645,7 @@ export default function OcV1Page() {
       return item.validador3?.trim() || "Sin validador 3";
     }
 
-    return item.validador?.trim() || fallbackValidador || "Sin validador";
+    return item.validadorCabecera?.trim() || fallbackValidador || item.validador?.trim() || "Sin validador";
   }, [nivelAprobacion, validadorLabelById]);
 
   const conteoNiveles = useMemo(
@@ -1741,7 +1741,7 @@ export default function OcV1Page() {
      };
     const grupos = new Map<string, OrdenCompraCabeceraDto[]>();
     cabecerasBandeja.forEach((item) => {
-      const solicitante = item.solicitante?.trim() || "Sin solicitante";
+      const solicitante = item.solicitanteCabecera?.trim() || item.solicitante?.trim() || "Sin solicitante";
       const responsable = getValidadorAgrupacion(item);
       const key = agrupacionAprobacion === "sin-filtro"
         ? "sin-filtro"
