@@ -230,7 +230,7 @@ export default function PagarTesoreriaV1Page() {
   const [permisosRevision, setPermisosRevision] = useState<PagoRevisionPermisos>({
     puedeEditar: false, puedeEditarOperacion: false, puedeEditarEstado: false,
   });
-  const columnCount = estado === 1 ? 24 : estado === 9 ? 17 : estado === 4 ? 20 : estado === 100 ? 18 : 16;
+  const columnCount = estado === 1 ? 24 : estado === 9 ? 17 : estado === 4 ? 20 : estado === 5 ? 18 : estado === 100 ? 18 : 16;
   const [confirmation, setConfirmation] = useState<PagoTesoreriaRequest | null>(
     null,
   );
@@ -1765,6 +1765,7 @@ export default function PagarTesoreriaV1Page() {
                       <th className="pt-revision-actions">Edición</th>
                       <th>RUC</th>
                     </>}
+                    {estado === 5 && <th>RUC</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -1854,7 +1855,7 @@ export default function PagarTesoreriaV1Page() {
                             </button>
                           </td>
                           <td className="numeric">{money(sum(g.items))}</td>
-                          <td colSpan={estado === 1 ? 12 : estado === 4 ? 12 : estado === 100 ? 8 : 7} />
+                          <td colSpan={estado === 1 ? 12 : estado === 4 ? 12 : estado === 5 ? 8 : estado === 100 ? 8 : 7} />
                         </tr>
                         {expanded.has(g.id) &&
                           g.items.map((r) => (
@@ -2001,6 +2002,7 @@ export default function PagarTesoreriaV1Page() {
                                 onStartEdit={() => startEditRevision(r)} onStopEdit={() => stopEditRevision(r)}
                                 onSaved={(guardado) => applyRevisionSaved(r, guardado)} />}
                               {estado === 1 && <td>{r.ruc || "—"}</td>}
+                              {estado === 5 && <td>{r.ruc || "—"}</td>}
                             </tr>
                           ))}
                       </Fragment>

@@ -3857,11 +3857,6 @@ export default function OcV1Page() {
                             const esSaldoAvance = column === "DiferenciaAvanceOc";
                             const esPagoNuevo = column === "PagoNuevo";
                             const esEstadoOcSemaforo = column === "EstadoOcSemaforo";
-                            const estadoOcParaPago = String(read("EstadoOc") ?? "").trim().toLocaleUpperCase("es-PE");
-                            // El store puede devolver el estado como texto (APROBADO)
-                            // o como su correlativo (1). La grilla lo formatea como
-                            // "APROBADO", pero la habilitación debe aceptar ambas formas.
-                            const pagoNuevoHabilitado = Number(read("EstadoOc")) === 1 || ["APROBADO", "ACEPTADO", "A"].includes(estadoOcParaPago);
                             const pagoNuevoEnProceso = Boolean(pagosNuevosEnProceso[saldoEditableKey]);
                             const estadoOcSemaforo = String(rawValue ?? "").trim().toUpperCase();
                             const colorEstadoOc = filaRechazada ? "#D32F2F" : COLORES_ESTADO_OC[estadoOcSemaforo];
@@ -3870,8 +3865,7 @@ export default function OcV1Page() {
                             const saldoAvanceValue = ocGastosSaldosEditables[saldoEditableKey]?.avance ?? saldoAvanceOcFila.toFixed(2);
                             const saldoSubtotalDisponibleParaPago = Number(saldoSubtotalValue) > 0;
                             const saldoAvanceDisponibleParaPago = Number(saldoAvanceValue) > 0;
-                            const pagoNuevoDisponible = pagoNuevoHabilitado
-                              && saldoSubtotalDisponibleParaPago
+                            const pagoNuevoDisponible = saldoSubtotalDisponibleParaPago
                               && saldoAvanceDisponibleParaPago
                               && !pagoNuevoEnProceso;
                             const saldoSubtotalAlert = ocGastosSaldoAlerts[`${saldoEditableKey}:subtotal`];
@@ -3950,9 +3944,7 @@ export default function OcV1Page() {
                                       });
                                     }}
                                     disabled={!pagoNuevoDisponible}
-                                    title={!pagoNuevoHabilitado
-                                      ? "Pago nuevo solo está disponible para órdenes con estado Aprobado."
-                                      : !saldoSubtotalDisponibleParaPago || !saldoAvanceDisponibleParaPago
+                                    title={!saldoSubtotalDisponibleParaPago || !saldoAvanceDisponibleParaPago
                                         ? "Pago nuevo requiere saldo subtotal y saldo avance OC mayores que cero."
                                         : pagoNuevoEnProceso
                                         ? "Proceso en ejecución..."
