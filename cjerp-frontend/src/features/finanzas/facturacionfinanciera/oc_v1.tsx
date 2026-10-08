@@ -114,6 +114,13 @@ const OC_APPROVAL_TAB_ACTION_KEYS = {
 type AgrupacionAprobacion = "sin-filtro" | "solicitante-responsable" | "responsable";
 type AprobacionSortColumn = "idOc" | "fecha" | "responsable" | "nombreCliente" | "comprobante" | "subtotal" | "moneda";
 
+function buildResponsableDisplay(empleado: EmpleadoCta): string {
+  return [empleado.nombreEmpleado, empleado.nombreBanco, empleado.nombreCta]
+    .map((value) => value?.trim())
+    .filter(Boolean)
+    .join(" - ");
+}
+
 function getReporteRowIdOc(row: Record<string, unknown>): string {
   const key = Object.keys(row).find((name) => name.toLowerCase() === "idoc");
   return key ? String(row[key] ?? "").trim() : "";
@@ -4338,6 +4345,7 @@ export default function OcV1Page() {
                 if (!responsable) return "";
                 // Concatenar informaciÒ�� �"Ò�a�³n relevante de la cuenta
                 let info = `Banco: ${responsable.nombreBanco || ""}`;
+                if (responsable.nombreCta) info += `, Tipo Cta: ${responsable.nombreCta}`;
                 if (responsable.cuenta) info += `, Cta: ${responsable.cuenta}`;
                 if (responsable.cuentaInter) info += `, CCI: ${responsable.cuentaInter}`;
                 if (responsable.nroDocumento) info += `, Nro Doc: ${responsable.nroDocumento}`;
@@ -5330,18 +5338,18 @@ const ResponsableTypeahead = React.memo(function ResponsableTypeahead({
   );
 
   useEffect(() => {
-    setInputValue(selectedOption?.nombreEmpleado ?? "");
+    setInputValue(selectedOption ? buildResponsableDisplay(selectedOption) : "");
   }, [selectedOption]);
 
   const filteredOptions = useMemo(() => {
     const query = inputValue.trim().toLowerCase();
     if (!query) return options;
-    return options.filter((emp) => emp.nombreEmpleado.toLowerCase().includes(query));
+    return options.filter((emp) => buildResponsableDisplay(emp).toLowerCase().includes(query));
   }, [inputValue, options]);
 
   const applySelection = useCallback((emp: EmpleadoCta) => {
     onSelect(String(emp.idEmpleado));
-    setInputValue(emp.nombreEmpleado);
+    setInputValue(buildResponsableDisplay(emp));
     setShowDropdown(false);
     setHighlightedIdx(-1);
   }, [onSelect]);
@@ -5423,7 +5431,7 @@ const ResponsableTypeahead = React.memo(function ResponsableTypeahead({
               }}
               onMouseDown={() => applySelection(emp)}
             >
-              {emp.nombreEmpleado}
+              {buildResponsableDisplay(emp)}
             </div>
           ))}
         </div>

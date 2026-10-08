@@ -1241,9 +1241,12 @@ public class OrdenCompraService : IOrdenCompraService
             throw new InvalidOperationException("Los datos operativos de la OC cambiaron. Actualice la grilla antes de registrar el pago.");
         }
 
-        if (origen.IdSolicitante <= 0 || origen.IdResponsable <= 0 || origen.IdAprobador1 <= 0 || origen.IdMoneda <= 0 || origen.IdFormaPago <= 0)
+        // El pago nuevo puede generarse antes de aprobar la OC. Los responsables
+        // del flujo se toman de la cabecera (gestor y validador), no del primer
+        // aprobador registrado por una aprobación ya ejecutada.
+        if (origen.IdSolicitante <= 0 || origen.IdResponsable <= 0 || origen.IdGestor <= 0 || origen.IdValidador <= 0 || origen.IdMoneda <= 0 || origen.IdFormaPago <= 0)
         {
-            throw new InvalidOperationException("La OC no tiene solicitante, responsable, primer aprobador o moneda válidos.");
+            throw new InvalidOperationException("La OC no tiene solicitante, responsable, gestor, validador, moneda o tipo de pago válidos.");
         }
 
         var idBancoCta = await connection.QuerySingleOrDefaultAsync<int?>(
@@ -1300,8 +1303,8 @@ public class OrdenCompraService : IOrdenCompraService
                 IdRendicion = 1,
                 Detalle = origen.Detalle ?? string.Empty,
                 Solicitante = origen.IdSolicitante.ToString(CultureInfo.InvariantCulture),
-                Gestor = origen.IdAprobador1.ToString(CultureInfo.InvariantCulture),
-                Validador = origen.IdAprobador1.ToString(CultureInfo.InvariantCulture),
+                Gestor = origen.IdGestor.ToString(CultureInfo.InvariantCulture),
+                Validador = origen.IdValidador.ToString(CultureInfo.InvariantCulture),
                 Moneda = origen.IdMoneda.ToString(CultureInfo.InvariantCulture),
                 Bien = "1",
                 Comprobante = origen.IdComprobante.ToString(CultureInfo.InvariantCulture),

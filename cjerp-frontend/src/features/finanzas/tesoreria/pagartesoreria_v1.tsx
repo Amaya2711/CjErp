@@ -230,7 +230,7 @@ export default function PagarTesoreriaV1Page() {
   const [permisosRevision, setPermisosRevision] = useState<PagoRevisionPermisos>({
     puedeEditar: false, puedeEditarOperacion: false, puedeEditarEstado: false,
   });
-  const columnCount = estado === 1 ? 24 : estado === 9 ? 17 : estado === 4 ? 20 : estado === 5 ? 18 : estado === 100 ? 18 : 16;
+  const columnCount = estado === 1 ? 24 : estado === 9 ? 19 : estado === 4 ? 20 : estado === 5 ? 18 : estado === 100 ? 18 : 16;
   const [confirmation, setConfirmation] = useState<PagoTesoreriaRequest | null>(
     null,
   );
@@ -1085,6 +1085,7 @@ export default function PagarTesoreriaV1Page() {
         fila.Edición = permisosRevision.puedeEditar ? "Disponible" : "No disponible";
         fila.RUC = r.ruc || "—";
       }
+      if (estado === 9) fila.Anticipo = etiquetaCatalogo(catalogos.anticipos, r.idAnticipo);
       if (estado === 5) fila.RUC = r.ruc || "—";
       return fila;
     });
@@ -1782,6 +1783,7 @@ export default function PagarTesoreriaV1Page() {
                     <th>CuentaInter</th>
                     <th>NombreCta</th>
                     <th>IdBancoCta</th>
+                    {estado === 9 && <th>Anticipo</th>}
                     {estado === 4 && <><th>Transferencia</th><th>Banco</th><th>NroOperacion</th></>}
                     {estado === 1 && <>
                       <th>Anticipo</th><th>NroOperacion</th><th>Comprobante</th><th>TipoPago</th>
@@ -1878,7 +1880,7 @@ export default function PagarTesoreriaV1Page() {
                             </button>
                           </td>
                           <td className="numeric">{money(sum(g.items))}</td>
-                          <td colSpan={estado === 1 ? 12 : estado === 4 ? 12 : estado === 5 ? 8 : estado === 100 ? 8 : 7} />
+                          <td colSpan={estado === 1 ? 12 : estado === 9 ? 8 : estado === 4 ? 12 : estado === 5 ? 8 : estado === 100 ? 8 : 7} />
                         </tr>
                         {expanded.has(g.id) &&
                           g.items.map((r) => (
@@ -2018,6 +2020,7 @@ export default function PagarTesoreriaV1Page() {
                                   ? "Ã¢â‚¬â€"
                                   : `${r.idBancoCta} · ${catalogos.bancosCuenta.find((b) => b.id === r.idBancoCta)?.nombre || "Banco no encontrado"}`}
                               </td>
+                              {estado === 9 && <td>{catalogos.anticipos.find((item) => item.id === r.idAnticipo)?.nombre || "—"}</td>}
                               {estado === 4 && <><td>{r.transferencia || (r.idTransferencia != null ? String(r.idTransferencia) : "—")}</td><td>{r.banco || (r.idBanco != null ? String(r.idBanco) : "—")}</td><td>{r.nroOperacion || "—"}</td></>}
                               {estado === 1 && <PagoRevisionCells row={r} catalogos={catalogos}
                                 permisos={permisosRevision} disabled={saving || loading || !puedePagar}
