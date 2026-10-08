@@ -161,11 +161,14 @@ type FilterState = {
   responsable: string[];
   validador: string[];
   moneda: string[];
+  estado: string[];
   correlativo: string;
   fechaDesde: string;
   fechaHasta: string;
   query: string;
 };
+
+type GroupBy = "solicitante" | "responsable";
 
 type GroupRow = {
   key: string;
@@ -305,6 +308,7 @@ function getDefaultFilterState(): FilterState {
     responsable: [],
     validador: [],
     moneda: [],
+    estado: [],
     correlativo: "",
     fechaDesde: formatDateInputValue(fechaDesde),
     fechaHasta: formatDateInputValue(fechaHasta),
@@ -1130,6 +1134,7 @@ export default function PagosV1Page() {
   const [busquedaResponsable, setBusquedaResponsable] = useState("");
   const [busquedaValidador, setBusquedaValidador] = useState("");
   const [busquedaMoneda, setBusquedaMoneda] = useState("");
+  const [groupBy, setGroupBy] = useState<GroupBy>("solicitante");
   const [rowsByTab, setRowsByTab] = useState<Record<PagoTabKey, PagoRow[]>>({
     aprobar: [],
     reaprobar: [],
@@ -1409,6 +1414,7 @@ export default function PagosV1Page() {
           appliedFilters.responsable.join(","),
           appliedFilters.validador.join(","),
           appliedFilters.moneda.join(","),
+          appliedFilters.estado.join(","),
           refreshTick,
       ].join("|");
       const cachedRows = tabRowsCacheRef.current.get(cacheKey);
@@ -1454,10 +1460,12 @@ export default function PagosV1Page() {
             : activeTab === "reaprobar" ? "6"
             : activeTab === "hormiga" ? "10"
             : "2,7"; // Observadas: estados 2 (observada) y 7 (observada administrativa)
-          // Total Órdenes muestra todos los estados, por lo que no restringe
-          // la consulta con @Estados.
+          // Total Órdenes muestra todos los estados salvo que el usuario haya
+          // elegido explícitamente uno o más estados en su filtro.
           if (activeTab !== "resumen") {
             parametros.push({ nombre: "Estados", valor: estadoActivo, tipo: "string" });
+          } else if (appliedFilters.estado.length > 0) {
+            parametros.push({ nombre: "Estados", valor: appliedFilters.estado.join(","), tipo: "string" });
           }
           // Los tipos de cambio se toman de los filtros principales y se
           // envían únicamente cuando contienen un valor válido.
@@ -1609,6 +1617,21 @@ export default function PagosV1Page() {
     () => Array.from(new Set(activeRows.map((row) => row.moneda.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
     [activeRows]
   );
+  const estadoOptions = useMemo(
+    () => Array.from(
+      new Map(
+        activeRows
+          .map((row) => {
+            const value = row.estadoCodigo?.trim() ?? "";
+            return value ? [value, row.estadoNombre?.trim() || value] as const : null;
+          })
+          .filter((item): item is readonly [string, string] => item !== null)
+      ).entries()
+    )
+      .map(([value, label]) => ({ value, label }))
+      .sort((left, right) => left.label.localeCompare(right.label, "es", { sensitivity: "base", numeric: true })),
+    [activeRows]
+  );
   const matchesAppliedFilters = useCallback(
     (row: PagoRow, includeDateFilters: boolean) => {
       const fechaDesde = includeDateFilters ? formatDateParam(appliedFilters.fechaDesde) : "";
@@ -1636,12 +1659,13 @@ export default function PagosV1Page() {
         matchesMultiTextFilter(row.responsable, appliedFilters.responsable) &&
         matchesMultiTextFilter(row.validador, appliedFilters.validador) &&
         matchesMultiTextFilter(row.moneda, appliedFilters.moneda) &&
+        (activeTab !== "resumen" || appliedFilters.estado.length === 0 || appliedFilters.estado.includes(row.estadoCodigo ?? "")) &&
         matchesTextFilter(row.correlativo, appliedFilters.correlativo) &&
         (buscarEnTotal || !fechaDesde || rowDate >= fechaDesde) &&
         (buscarEnTotal || !fechaHasta || rowDate <= fechaHasta)
       );
     },
-    [appliedFilters]
+    [activeTab, appliedFilters]
   );
 
   const quickIdOcOnly = useMemo(() => getQuickIdOcOnly(appliedFilters), [appliedFilters]);
@@ -1658,11 +1682,13 @@ export default function PagosV1Page() {
     const map = new Map<string, GroupRow>();
 
     filteredRows.forEach((row) => {
-      const key = row.solicitante;
+      const groupValue = groupBy === "responsable" ? row.responsable : row.solicitante;
+      const fallbackLabel = groupBy === "responsable" ? "Sin responsable" : "Sin solicitante";
+      const key = `${groupBy}:${groupValue.trim() || fallbackLabel}`;
       if (!map.has(key)) {
         map.set(key, {
           key,
-          label: row.solicitante,
+          label: groupValue.trim() || fallbackLabel,
           rows: [],
           total: 0,
           subtotal: 0,
@@ -1701,7 +1727,7 @@ export default function PagosV1Page() {
             })
           : group.rows,
       }));
-  }, [filteredRows, sortConfig]);
+  }, [filteredRows, groupBy, sortConfig]);
 
   const visibleRowIds = useMemo(() => {
     const ids: number[] = [];
@@ -2629,9 +2655,11 @@ export default function PagosV1Page() {
     }
   }, [activeTab]);
   const isResumenTab = activeTab === "resumen";
-  const showEstadoOc = activeTab === "resumen";
+  // El estado propio de Planilla sólo se expone en Total Órdenes; las demás
+  // pestañas ya representan un estado operativo específico.
+  const showEstadoPlanilla = activeTab === "resumen";
   const showTotalSitio = canUseTab("reaprobar");
-  const tableColSpan = 25 + (showTotalSitio ? 4 : 0) + (showEstadoOc ? 1 : 0);
+  const tableColSpan = 25 + (showTotalSitio ? 4 : 0) + (showEstadoPlanilla ? 1 : 0);
   const stickyColumnWidths = [108, 94];
   const stickyColumnLefts = stickyColumnWidths.reduce<number[]>((acc, _width, index) => {
     const previousLeft = acc[index - 1] ?? 0;
@@ -3148,93 +3176,79 @@ export default function PagosV1Page() {
   };
 
   function handleExport() {
-    const rows = filteredRows.map((row) => [
-      row.id,
-      row.correlativo,
-      row.ot,
-      row.idOc || row.documento,
-      row.fila ?? "",
-      row.solicitante,
-      row.responsable,
-      row.validador || "",
-      row.subtotal,
-      row.igv,
-      row.total,
-      row.fecha,
-      row.cliente,
-      row.proyecto,
-      row.siteId,
-      row.corSite || "",
-      row.site,
-      row.tipoTrabajo,
-      row.tarea,
-      row.atp,
-      row.statusPap,
-      row.moneda,
-      getStatusLabel(row.estado),
-      row.subOc && row.subOc > 0 ? (row.subtotal / row.subOc) * 100 : 0,
-      row.documento,
-      row.idCliente ?? "",
-      row.idProyecto ?? "",
-      row.tipoMoneda ?? "",
-      row.montoOc2 ?? "",
-      row.montoPlanillaPagado ?? "",
-      row.montoPlanillaPagadoDisplay ?? "",
-      row.conPagado ?? "",
-      row.conPagadoDisplay ?? "",
-      row.subOc ?? "",
-      row.adelaFic ?? "",
-      row.porcentajeFic ?? "",
-      row.disponibleOc ?? "",
-      row.diasEstado,
-      row.observacion,
-      row.detalle,
-    ]);
+    // Mantener el Excel en la misma secuencia de columnas que la grilla.
+    // Las columnas que son barras visuales se exportan como su porcentaje.
+    const headers = [
+      "Correlativo",
+      "Fecha",
+      "Cliente",
+      "Proyecto",
+      "Site",
+      "Tipo trabajo",
+      "Tarea",
+      "Responsable",
+      "OC",
+      "Estado OC",
+      "Subtotal",
+      "IGV",
+      "Total",
+      "Moneda",
+      "Detalle",
+      "Total Gastado",
+      ...(showTotalSitio ? ["Total Sitio"] : []),
+      "Total Visible",
+      "% Avance",
+      "Avance",
+      ...(showTotalSitio ? ["Sub Ficticio", "% Ficticio", "Avance ficticio"] : []),
+      ...(showEstadoPlanilla ? ["Estado planilla"] : []),
+      "Validador",
+      "OT",
+      "ATP",
+      "Status PAP",
+    ];
+    const rows = filteredRows.map((row) => {
+      const estadoOc = row.estadoOcSemaforo?.trim().toUpperCase() ?? "";
+      const estadoOcDisplay = estadoOc === "P" ? "S/O" : estadoOc;
+      const totalGastado = row.totalPagadoConvertidoSoles ?? 0;
+      const totalSitio = row.totalMontoBckPorMoneda ?? 0;
+      const totalVisible = row.totalMontoVisiblePorMoneda ?? 0;
+      const porcentajeAvance = totalVisible > 0 ? (totalGastado / totalVisible) * 100 : 0;
+      const subFicticio = totalGastado + row.subtotal;
+      const porcentajeFicticio = totalVisible > 0 ? (subFicticio / totalVisible) * 100 : 0;
+
+      return [
+        row.correlativo,
+        formatDate(row.fecha),
+        row.cliente,
+        row.proyecto,
+        row.site,
+        row.tipoTrabajo,
+        row.tarea,
+        row.responsable,
+        row.idOc || row.documento || "-",
+        estadoOcDisplay || "-",
+        row.subtotal,
+        row.igv,
+        row.total,
+        row.moneda || "-",
+        row.detalle?.trim() || "-",
+        totalGastado,
+        ...(showTotalSitio ? [totalSitio] : []),
+        totalVisible,
+        porcentajeAvance,
+        porcentajeAvance,
+        ...(showTotalSitio ? [subFicticio, porcentajeFicticio, porcentajeFicticio] : []),
+        ...(showEstadoPlanilla ? [row.estadoNombre || getStatusLabel(row.estado)] : []),
+        row.validador || "-",
+        row.ot || "-",
+        row.atp || "-",
+        row.statusPap || "-",
+      ];
+    });
 
     exportToExcel(
       `pagos_v1_${activeTab}_${new Date().toISOString().slice(0, 10)}.xlsx`,
-        [
-          "ID",
-          "Correlativo",
-          "OT",
-          "OC",
-          "Fila",
-          "Solicitante",
-          "Responsable",
-          "Validador",
-          "Subtotal",
-          "IGV",
-          "Total",
-          "Fecha",
-          "Cliente",
-          "Proyecto",
-          "Site ID",
-          "CorSite",
-          "Site",
-          "Tipo Trabajo",
-          "Tarea",
-          "ATP",
-          "Status PAP",
-          "Moneda",
-          "Estado OC",
-          "% OC",
-          "Documento",
-          "Id Cliente",
-          "Id Proyecto",
-          "Tipo Moneda",
-          "Monto OC 2",
-          "Monto Planilla Pagado",
-          "Monto Planilla Pagado (Texto)",
-          "Con Pagado",
-          "Con Pagado (Texto)",
-          "Subtotal OC",
-          "Adelanto FIC",
-          "% FIC",
-          "Disponible OC",
-          "Días en estado",
-          "Observación",
-          "Detalle",
-      ],
+      headers,
       rows
     );
     setMessage(`Exportación a Excel lista: ${rows.length} registros y todas sus columnas.`);
@@ -3481,6 +3495,30 @@ export default function PagosV1Page() {
                       style={{ ...styles.quickDateInput, borderColor: currentTheme.border }}
                     />
                   </div>
+                  {activeTab === "resumen" ? (
+                    <details style={styles.multiFilter}>
+                      <summary style={{ ...styles.multiFilterSummary, borderColor: currentTheme.border }}>
+                        Todos los estados{filters.estado.length > 0 ? ` (${filters.estado.length})` : ""}
+                      </summary>
+                      <div style={styles.multiFilterOptions} aria-label="Filtrar por estado">
+                        {estadoOptions.map((estado) => (
+                          <label key={estado.value} style={styles.multiFilterOption}>
+                            <input
+                              type="checkbox"
+                              checked={filters.estado.includes(estado.value)}
+                              onChange={(event) => setFilters((prev) => ({
+                                ...prev,
+                                estado: event.target.checked
+                                  ? [...prev.estado, estado.value]
+                                  : prev.estado.filter((value) => value !== estado.value),
+                              }))}
+                            />
+                            <span title={estado.label}>{estado.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </details>
+                  ) : null}
                   <details style={styles.multiFilter}>
                     <summary style={{ ...styles.multiFilterSummary, borderColor: currentTheme.border }}>
                       Todos los solicitantes{filters.solicitante.length > 0 ? ` (${filters.solicitante.length})` : ""}
@@ -3605,6 +3643,21 @@ export default function PagosV1Page() {
                         ))}
                     </div>
                   </details>
+                  <div style={styles.quickDateField}>
+                    <span style={styles.quickDateLabel}>Agrupar por</span>
+                    <select
+                      value={groupBy}
+                      onChange={(event) => {
+                        setGroupBy(event.target.value as GroupBy);
+                        setCollapsedGroups({});
+                      }}
+                      style={{ ...styles.quickDateInput, borderColor: currentTheme.border }}
+                      aria-label="Agrupar registros"
+                    >
+                      <option value="solicitante">Solicitante</option>
+                      <option value="responsable">Responsable</option>
+                    </select>
+                  </div>
                   <button
                     type="button"
                     onClick={handleApplyFilters}
@@ -3792,7 +3845,7 @@ export default function PagosV1Page() {
                     {showTotalSitio ? <th style={{ ...styles.th, width: 170 }}>Sub Ficticio</th> : null}
                     {showTotalSitio ? <th style={{ ...styles.th, width: 90 }}>% Ficticio</th> : null}
                     {showTotalSitio ? <th style={{ ...styles.th, width: 130 }}>Avance ficticio</th> : null}
-                    {showEstadoOc ? <th style={{ ...styles.th, width: 118 }}>Estado OC</th> : null}
+                    {showEstadoPlanilla ? <th style={{ ...styles.th, width: 118 }}>Estado planilla</th> : null}
                     <th data-sort="validador" style={{ ...styles.th, width: 110, cursor: "pointer" }}>Validador</th>
                     <th data-sort="ot" style={{ ...styles.th, width: 88, cursor: "pointer" }}>OT</th>
                     <th data-sort="atp" style={{ ...styles.th, width: 110, cursor: "pointer" }}>ATP</th>
@@ -3830,7 +3883,7 @@ export default function PagosV1Page() {
                               <div style={styles.groupBar}>
                                 <input
                                   type="checkbox"
-                                  aria-label={`Seleccionar registros del solicitante ${group.label}`}
+                                  aria-label={`Seleccionar registros del ${groupBy} ${group.label}`}
                                   checked={groupAllChecked}
                                   ref={(el) => {
                                     if (el) {
@@ -3856,7 +3909,7 @@ export default function PagosV1Page() {
                                 >
                                   {isCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
                                 </button>
-                                <strong style={styles.groupTitle}>Solicitante: {group.label}</strong>
+                                <strong style={styles.groupTitle}>{groupBy === "responsable" ? "Responsable" : "Solicitante"}: {group.label}</strong>
                                 <span style={styles.groupCount}>{group.count}</span>
                                 <div style={styles.groupCurrencyStack}>
                                   {Object.entries(group.totalsByCurrency).map(([currency, amounts]) => (
@@ -4029,7 +4082,7 @@ export default function PagosV1Page() {
                                       </div>
                                     </td>
                                   ) : null}
-                                  {showEstadoOc ? (
+                                  {showEstadoPlanilla ? (
                                     <td style={styles.td}>
                                       <span
                                           title={row.estadoNombre || getStatusLabel(row.estado)}
