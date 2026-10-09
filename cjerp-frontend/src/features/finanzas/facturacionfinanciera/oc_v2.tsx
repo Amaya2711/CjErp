@@ -40,9 +40,11 @@ import type { ConstanteOption } from "../../../models/constante";
 import type { EmpleadoCta } from "../../../models/empleadoCta";
 import type { FiltroOperativoValue } from "../../../models/filtroOperativo";
 import { getHttpErrorMessage } from "../../../utils/httpError";
-import { ChevronDown, ChevronUp, ChevronsDown, ChevronsUp, Eye, FileDown, FileText } from "lucide-react";
+import { Eye, FileDown, FileText } from "lucide-react";
 import { buildPlanillaConsultaEstadosRequest, consultarGastosPagadosPorId, consultarPlanillaEstados } from "../../../api/planillaConsultaService";
 import GastosPage, { type GastoEditorRequest } from "../tesoreria/gastos";
+import DataGridPro from "../../../components/datagrid/DataGridPro";
+import type { GridColumn } from "../../../components/datagrid/types";
 
 // Fila se mantiene en cada registro para enlazar el pago con DetOrdenCompra,
 // pero no se muestra como columna. Detalle sí debe estar disponible al usuario.
@@ -112,7 +114,6 @@ const OC_APPROVAL_TAB_ACTION_KEYS = {
   3: "tab.validacion_3",
 } as const;
 type AgrupacionAprobacion = "sin-filtro" | "solicitante-responsable" | "responsable";
-type AprobacionSortColumn = "idOc" | "fecha" | "responsable" | "nombreCliente" | "comprobante" | "subtotal" | "moneda";
 
 function buildResponsableDisplay(empleado: EmpleadoCta): string {
   return [empleado.nombreEmpleado, empleado.nombreBanco, empleado.nombreCta]
@@ -357,55 +358,6 @@ const cabeceraColumns = [
   { key: "comprobante", label: "Tipo documento", width: "86px" },
   { key: "subtotal", label: "Subtotal", width: "92px" },
   { key: "moneda", label: "Moneda", width: "75px" },
-] as const;
-
-const detalleColumns = [
-  { key: "fila", label: "Fila", width: "70px" },
-  { key: "nombreCliente", label: "Cliente", width: "180px" },
-  { key: "nombreProyecto", label: "Proyecto", width: "180px" },
-  { key: "idSite", label: "Id Site", width: "100px" },
-  { key: "nombreSite", label: "Site", width: "180px" },
-  { key: "tipoTrabajo", label: "Tipo trabajo", width: "140px" },
-  { key: "ot", label: "OT", width: "110px" },
-  { key: "tarea", label: "Tarea", width: "140px" },
-  { key: "detalle", label: "Detalle", width: "260px" },
-  { key: "cantidad", label: "Cantidad", width: "80px" },
-  { key: "precioUnitario", label: "Precio unit.", width: "80px" },
-  { key: "subtotalD", label: "Subtotal", width: "80px" },
-  { key: "igvD", label: "IGV", width: "80px" },
-  { key: "totalD", label: "Total", width: "80px" },
-  { key: "adjuntos", label: "Adjuntos", width: "130px" },
-] as const;
-
-const reciboColumns = [
-  { key: "seleccion", label: "", width: "44px" },
-  { key: "correlativo", label: "Correlativo", width: "100px" },
-  { key: "fecIngreso", label: "Fecha", width: "95px" },
-  { key: "subtotal", label: "Subtotal", width: "90px" },
-  { key: "igv", label: "IGV", width: "80px" },
-  { key: "total", label: "Total", width: "90px" },
-  { key: "moneda", label: "Moneda", width: "90px" },
-  { key: "detalle", label: "Detalle", width: "260px" },
-  { key: "comprobante", label: "Comprobante", width: "120px" },
-  { key: "responsable", label: "Responsable", width: "180px" },
-  { key: "nroDocumento", label: "Nro.Doc", width: "110px" },
-  { key: "estado", label: "Estado", width: "110px" },
-  { key: "tarea", label: "Tarea", width: "140px" },
-] as const;
-
-const montoOcColumns = [
-  { key: "idOc", label: "IdOC", width: "80px" },
-  { key: "fechaOc", label: "Fecha OC", width: "105px" },
-  { key: "idSite", label: "IdSite", width: "90px" },
-  { key: "tipoTrabajo", label: "Tipo Trabajo", width: "130px" },
-  { key: "montoOc", label: "Monto Cliente", width: "120px" },
-  { key: "nombreSite", label: "Site", width: "150px" },
-  { key: "pagadoFic", label: "Pagado Fic", width: "110px" },
-  { key: "avanceFic", label: "Avance Fic", width: "100px" },
-  { key: "detalle", label: "Detalle", width: "360px" },
-  { key: "estado", label: "Estado", width: "120px" },
-  { key: "fila", label: "Fila", width: "70px" },
-  { key: "solicitante", label: "Solicitante", width: "180px" },
 ] as const;
 
 function normalizeOptionValue(option: ConstanteOption): string {
@@ -712,7 +664,7 @@ function downloadBlob(blob: Blob, fileName: string) {
   }, 0);
 }
 
-export default function OcV1Page() {
+export default function OcV2Page() {
   const authUser = getAuthUser();
   const userId = toPositiveNumber(authUser?.idEmpleado, authUser?.codEmp);
   const userCargoId = toPositiveNumber(authUser?.idCargo, authUser?.idrol);
@@ -883,10 +835,6 @@ export default function OcV1Page() {
   const [fechaCreacionHasta, setFechaCreacionHasta] = useState(today);
   const [filtroValidadorAprobacion, setFiltroValidadorAprobacion] = useState<string[]>([]);
   const [agrupacionAprobacion, setAgrupacionAprobacion] = useState<AgrupacionAprobacion>("solicitante-responsable");
-  const [aprobacionSort, setAprobacionSort] = useState<{ column: AprobacionSortColumn; direction: "asc" | "desc" }>({
-    column: "idOc",
-    direction: "asc",
-  });
   const [detalleOcTab, setDetalleOcTab] = useState<DetalleOcTab>("detalle");
   // OC cuyo detalle ya terminó de cargar: recibos y monto dependen de su "fila", así que esperan a este dato.
   const [detalleCargadoOcId, setDetalleCargadoOcId] = useState<number | null>(null);
@@ -895,7 +843,6 @@ export default function OcV1Page() {
   const recibosCargadosKeyRef = useRef("");
   const montoCargadoKeyRef = useRef("");
   const [selectedOcIds, setSelectedOcIds] = useState<number[]>([]);
-  const [gruposAprobacionContraidos, setGruposAprobacionContraidos] = useState<Record<string, boolean>>({});
   const [filtrosColumnas, setFiltrosColumnas] = useState<Record<string, string[]>>({});
   const [columnaFiltroAbierta, setColumnaFiltroAbierta] = useState<string | null>(null);
   const [filtroBusqueda, setFiltroBusqueda] = useState("");
@@ -1717,7 +1664,7 @@ export default function OcV1Page() {
     if (!exportarOrdenesSolicitado || !cabecerasCompletasRef.current || loading) return;
     setExportarOrdenesSolicitado(false);
     void exportToExcel(
-      `ordenes_compra_${today}.xlsx`,
+      `ordenes_compra_v2_${today}.xlsx`,
       cabeceraColumns.map((column) => column.label),
       cabecerasFiltradas.map((item) => [
         item.idOc,
@@ -1801,8 +1748,15 @@ export default function OcV1Page() {
     [cabecerasBandejaIds, selectedOcIds]
   );
 
-  const todasLasCabecerasVisiblesSeleccionadas =
-    cabecerasBandejaIds.length > 0 && cabecerasBandejaIds.every((idOc) => selectedOcIds.includes(idOc));
+  // El grid informa las filas que realmente se ven tras sus filtros: lo que un filtro oculta deja de estar
+  // seleccionado y no puede entrar en una aprobación o rechazo masivo.
+  const handleBandejaVisibleRows = useCallback((rows: OrdenCompraCabeceraDto[]) => {
+    const visibles = new Set(rows.map((row) => row.idOc));
+    setSelectedOcIds((prev) => {
+      const next = prev.filter((idOc) => visibles.has(idOc));
+      return next.length === prev.length ? prev : next;
+    });
+  }, []);
 
   const cambiarNivelAprobacion = useCallback((nivel: 1 | 2 | 3) => {
     if (!canUseApprovalTab(nivel)) return;
@@ -1827,88 +1781,7 @@ export default function OcV1Page() {
       ? "2dos validadores"
       : "3ros validadores";
 
-  const cabecerasBandejaAgrupadas = useMemo(() => {
-    const compareItems = (left: OrdenCompraCabeceraDto, right: OrdenCompraCabeceraDto) => {
-       const getValue = (item: OrdenCompraCabeceraDto): string | number => {
-         switch (aprobacionSort.column) {
-           case "idOc": return item.idOc;
-           case "fecha": return item.fecha || "";
-           case "responsable": return item.responsable || "";
-           case "nombreCliente": return item.nombreCliente || "";
-           case "comprobante": return item.comprobante || "";
-           case "subtotal": return toNumber(item.subtotal);
-           case "moneda": return item.moneda || "";
-         }
-       };
-       const leftValue = getValue(left);
-       const rightValue = getValue(right);
-       const result = typeof leftValue === "number" && typeof rightValue === "number"
-         ? leftValue - rightValue
-         : String(leftValue).localeCompare(String(rightValue), "es", { sensitivity: "base", numeric: true });
-       return aprobacionSort.direction === "asc" ? result : -result;
-     };
-    const grupos = new Map<string, OrdenCompraCabeceraDto[]>();
-    cabecerasBandeja.forEach((item) => {
-      const solicitante = item.solicitanteCabecera?.trim() || item.solicitante?.trim() || "Sin solicitante";
-      const responsable = getValidadorAgrupacion(item);
-      const key = agrupacionAprobacion === "sin-filtro"
-        ? "sin-filtro"
-        : agrupacionAprobacion === "responsable"
-        ? `responsable|||${responsable}`
-        : `solicitante-responsable|||${solicitante}|||${responsable}`;
-      const actuales = grupos.get(key) ?? [];
-      actuales.push(item);
-      grupos.set(key, actuales);
-    });
 
-    return Array.from(grupos.entries())
-      .map(([key, items]) => {
-        const [, agrupadoSolicitante, agrupadoResponsable] = key.split("|||");
-        const responsable = agrupacionAprobacion === "sin-filtro"
-          ? ""
-          : agrupacionAprobacion === "responsable"
-          ? agrupadoSolicitante
-          : agrupadoResponsable;
-        const solicitante = agrupacionAprobacion === "sin-filtro" || agrupacionAprobacion === "responsable" ? "" : agrupadoSolicitante;
-        const totalesPorMoneda = new Map<string, number>();
-        items.forEach((item) => {
-          const moneda = item.moneda?.trim() || "Sin moneda";
-          totalesPorMoneda.set(moneda, (totalesPorMoneda.get(moneda) ?? 0) + toNumber(item.subtotal));
-        });
-        return {
-          key,
-          solicitante,
-          responsable,
-          label: agrupacionAprobacion === "sin-filtro"
-            ? ""
-            : agrupacionAprobacion === "responsable"
-            ? responsable
-            : `${solicitante} - ${responsable}`,
-          items: [...items].sort(compareItems),
-          totalesPorMoneda: Array.from(totalesPorMoneda.entries())
-            .sort(([monedaA], [monedaB]) => monedaA.localeCompare(monedaB, "es", { sensitivity: "base" })),
-        };
-      })
-      .sort((left, right) => left.label.localeCompare(right.label, "es", { sensitivity: "base" }));
-  }, [agrupacionAprobacion, aprobacionSort, cabecerasBandeja, getValidadorAgrupacion]);
-
-  const todosLosGruposVisiblesContraidos = useMemo(
-    () => cabecerasBandejaAgrupadas.length > 0 && cabecerasBandejaAgrupadas.every(
-      (grupo) => gruposAprobacionContraidos[`${nivelAprobacion}-${grupo.key}`] ?? true
-    ),
-    [cabecerasBandejaAgrupadas, gruposAprobacionContraidos, nivelAprobacion]
-  );
-
-  const cambiarVisibilidadTodosLosGrupos = useCallback(() => {
-    const contraer = !todosLosGruposVisiblesContraidos;
-    setGruposAprobacionContraidos((prev) => {
-      const next = { ...prev };
-      cabecerasBandejaAgrupadas.forEach((grupo) => {
-        next[`${nivelAprobacion}-${grupo.key}`] = contraer;
-      });
-      return next;
-    });
-  }, [cabecerasBandejaAgrupadas, nivelAprobacion, todosLosGruposVisiblesContraidos]);
 
   const opcionesFiltroPorColumna = useMemo(() => {
     // Solo se calculan las opciones de la columna cuyo menú está abierto (antes: las 18 columnas en cada carga).
@@ -2241,33 +2114,6 @@ export default function OcV1Page() {
     setSelectedOcIds((prev) => prev.filter((idOc) => cabeceras.some((item) => item.idOc === idOc)));
   }, [cabeceras]);
 
-  const toggleSeleccionOc = useCallback((idOc: number, checked: boolean) => {
-    setSelectedOcIds((prev) => {
-      if (checked) {
-        return prev.includes(idOc) ? prev : [...prev, idOc];
-      }
-      return prev.filter((item) => item !== idOc);
-    });
-  }, []);
-
-  const toggleSeleccionVisible = useCallback((checked: boolean) => {
-    setSelectedOcIds((prev) => {
-      if (checked) {
-        return Array.from(new Set([...prev, ...cabecerasBandejaIds]));
-      }
-      return prev.filter((idOc) => !cabecerasBandejaIds.includes(idOc));
-    });
-  }, [cabecerasBandejaIds]);
-
-  const toggleSeleccionGrupo = useCallback((idsOc: number[], checked: boolean) => {
-    const idsGrupo = new Set(idsOc);
-    setSelectedOcIds((prev) => {
-      if (checked) {
-        return Array.from(new Set([...prev, ...idsGrupo]));
-      }
-      return prev.filter((idOc) => !idsGrupo.has(idOc));
-    });
-  }, []);
   const draftTotals = useMemo(() => {
     let subtotal = 0;
     let igv = 0;
@@ -2912,6 +2758,151 @@ export default function OcV1Page() {
     }
   }, [detalleSeleccionado?.fila, loadRecibosOc, nivelAprobacion, recibosSeleccionados, selectedOcId]);
 
+  const normalizarTexto = (value: string | null | undefined) => value?.trim() ?? "";
+  const solicitanteBandeja = (item: OrdenCompraCabeceraDto) =>
+    item.solicitanteCabecera?.trim() || item.solicitante?.trim() || "Sin solicitante";
+
+  const bandejaColumns: GridColumn<OrdenCompraCabeceraDto>[] = [
+    {
+      dataField: "idOc",
+      caption: "OC",
+      dataType: "number",
+      width: 100,
+      alignment: "left",
+      sortOrder: "asc",
+      cellRender: (_value, item) => <span style={styles.approvalOc}>OC-{item.idOc}</span>,
+    },
+    { dataField: "fecha", caption: "Fecha", dataType: "date", width: 100, calculateCellValue: (item) => item.fecha ?? null },
+    { dataField: "responsable", caption: "Responsable", width: 190, calculateCellValue: (item) => normalizarTexto(item.responsable) || "-" },
+    { dataField: "nombreCliente", caption: "Cliente", width: 170, calculateCellValue: (item) => normalizarTexto(item.nombreCliente) || "-" },
+    { dataField: "comprobante", caption: "Comprobante", width: 150, calculateCellValue: (item) => normalizarTexto(item.comprobante) || "-" },
+    {
+      dataField: "subtotal",
+      caption: "Subtotal",
+      dataType: "number",
+      width: 110,
+      calculateCellValue: (item) => toNumber(item.subtotal),
+      cellRender: (_value, item) => <span style={styles.approvalAmount}>{formatMoney(item.subtotal)}</span>,
+    },
+    { dataField: "moneda", caption: "Moneda", width: 90, calculateCellValue: (item) => normalizarTexto(item.moneda) || "-" },
+    // Columnas opcionales (selector de columnas).
+    { dataField: "solicitanteBandeja", caption: "Solicitante", width: 180, visible: false, calculateCellValue: solicitanteBandeja },
+    { dataField: "validadorBandeja", caption: "Validador", width: 180, visible: false, calculateCellValue: (item) => getValidadorAgrupacion(item) },
+    { dataField: "nombreProyecto", caption: "Proyecto", width: 170, visible: false, calculateCellValue: (item) => normalizarTexto(item.nombreProyecto) || "-" },
+    { dataField: "nombreSite", caption: "Site", width: 170, visible: false, calculateCellValue: (item) => normalizarTexto(item.nombreSite) || "-" },
+    { dataField: "igv", caption: "IGV", dataType: "number", width: 100, visible: false, calculateCellValue: (item) => toNumber(item.igv), cellRender: (_value, item) => formatMoney(item.igv) },
+    { dataField: "total", caption: "Total", dataType: "number", width: 110, visible: false, calculateCellValue: (item) => toNumber(item.total), cellRender: (_value, item) => formatMoney(item.total) },
+    // Agrupaciones de la bandeja (las elige el selector "Agrupar por").
+    {
+      dataField: "grpSolicitanteResponsable",
+      caption: "Solicitante - responsable",
+      visible: false,
+      allowFiltering: false,
+      allowHeaderFilter: false,
+      allowSearch: false,
+      calculateCellValue: (item) => `${solicitanteBandeja(item)} - ${getValidadorAgrupacion(item)}`,
+    },
+    {
+      dataField: "grpResponsable",
+      caption: "Responsable",
+      visible: false,
+      allowFiltering: false,
+      allowHeaderFilter: false,
+      allowSearch: false,
+      calculateCellValue: (item) => getValidadorAgrupacion(item),
+    },
+  ];
+  const groupFieldsBandeja = agrupacionAprobacion === "responsable"
+    ? ["grpResponsable"]
+    : agrupacionAprobacion === "solicitante-responsable"
+      ? ["grpSolicitanteResponsable"]
+      : [];
+
+  const detalleKey = (item: OrdenCompraDetalleDto) => `${item.idOc}-${item.fila}-${item.idCliente}-${item.idProyecto}`;
+  const detalleGridColumns: GridColumn<OrdenCompraDetalleDto>[] = [
+    { dataField: "fila", caption: "Fila", dataType: "number", width: 70, alignment: "left", calculateCellValue: (item) => item.fila ?? null },
+    { dataField: "nombreCliente", caption: "Cliente", width: 180, calculateCellValue: (item) => item.nombreCliente ?? "" },
+    { dataField: "nombreProyecto", caption: "Proyecto", width: 180, calculateCellValue: (item) => item.nombreProyecto ?? "" },
+    { dataField: "idSite", caption: "Id Site", width: 100, calculateCellValue: (item) => item.idSite ?? "" },
+    { dataField: "nombreSite", caption: "Site", width: 180, calculateCellValue: (item) => item.nombreSite ?? "" },
+    { dataField: "tipoTrabajo", caption: "Tipo trabajo", width: 140, calculateCellValue: (item) => item.tipoTrabajo ?? "" },
+    { dataField: "ot", caption: "OT", width: 110, calculateCellValue: (item) => item.ot ?? "" },
+    { dataField: "tarea", caption: "Tarea", width: 140, calculateCellValue: (item) => item.tarea ?? "" },
+    {
+      dataField: "detalle",
+      caption: "Detalle",
+      width: 260,
+      calculateCellValue: (item) => item.detalle ?? "",
+      cellRender: (_value, item) => (
+        <button
+          type="button"
+          style={styles.truncatedCellButton}
+          title={item.detalle ?? ""}
+          onClick={(event) => {
+            event.stopPropagation();
+            setDetalleCompleto(item.detalle ?? "");
+          }}
+        >
+          {item.detalle ?? ""}
+        </button>
+      ),
+    },
+    { dataField: "cantidad", caption: "Cantidad", dataType: "number", width: 90, calculateCellValue: (item) => toNumber(item.cantidad), cellRender: (_value, item) => formatMoney(item.cantidad) },
+    { dataField: "precioUnitario", caption: "Precio unit.", dataType: "number", width: 100, calculateCellValue: (item) => toNumber(item.precioUnitario), cellRender: (_value, item) => formatMoney(item.precioUnitario) },
+    { dataField: "subtotalD", caption: "Subtotal", dataType: "number", width: 100, calculateCellValue: (item) => toNumber(item.subtotalD), cellRender: (_value, item) => formatMoney(item.subtotalD) },
+    { dataField: "igvD", caption: "IGV", dataType: "number", width: 90, calculateCellValue: (item) => toNumber(item.igvD), cellRender: (_value, item) => formatMoney(item.igvD) },
+    { dataField: "totalD", caption: "Total", dataType: "number", width: 100, calculateCellValue: (item) => toNumber(item.totalD), cellRender: (_value, item) => formatMoney(item.totalD) },
+    {
+      dataField: "adjuntos",
+      caption: "Adjuntos",
+      width: 150,
+      allowSorting: false,
+      allowFiltering: false,
+      allowHeaderFilter: false,
+      allowSearch: false,
+      calculateCellValue: () => "",
+      cellRender: (_value, item) => (
+        <span onClick={(event) => event.stopPropagation()}>
+          <ArchivoButton codigo={item.imgOc} label="Ver OC cliente" />
+          <ArchivoButton codigo={item.imgPresupuesto} label="Ver presupuesto" />
+        </span>
+      ),
+    },
+  ];
+
+  const montoOcGridColumns: GridColumn<OrdenCompraMontoOcDto & { __key: string }>[] = [
+    { dataField: "idOc", caption: "IdOC", dataType: "number", width: 80, alignment: "left", calculateCellValue: (item) => item.idOc ?? null },
+    { dataField: "fechaOc", caption: "Fecha OC", dataType: "date", width: 105, calculateCellValue: (item) => item.fechaOc ?? null },
+    { dataField: "idSite", caption: "IdSite", width: 90, calculateCellValue: (item) => item.idSite || "-" },
+    { dataField: "tipoTrabajo", caption: "Tipo Trabajo", width: 130, calculateCellValue: (item) => item.tipoTrabajo || "-" },
+    { dataField: "montoOc", caption: "Monto Cliente", dataType: "number", width: 120, calculateCellValue: (item) => toNumber(item.montoOc), cellRender: (_value, item) => formatMoney(item.montoOc) },
+    { dataField: "nombreSite", caption: "Site", width: 150, calculateCellValue: (item) => item.nombreSite || "-" },
+    { dataField: "pagadoFic", caption: "Pagado Fic", dataType: "number", width: 110, calculateCellValue: (item) => toNumber(item.pagadoFic), cellRender: (_value, item) => formatMoney(item.pagadoFic) },
+    { dataField: "avanceFic", caption: "Avance Fic", dataType: "number", width: 100, calculateCellValue: (item) => toNumber(item.avanceFic), cellRender: (_value, item) => formatPercent(item.avanceFic) },
+    {
+      dataField: "detalle",
+      caption: "Detalle",
+      width: 320,
+      calculateCellValue: (item) => item.detalle || "-",
+      cellRender: (_value, item) => (
+        <button
+          type="button"
+          style={styles.truncatedCellButton}
+          title={item.detalle || ""}
+          onClick={(event) => {
+            event.stopPropagation();
+            setDetalleCompleto(item.detalle || "");
+          }}
+        >
+          {item.detalle || "-"}
+        </button>
+      ),
+    },
+    { dataField: "estado", caption: "Estado", width: 120, calculateCellValue: (item) => item.estado || "-" },
+    { dataField: "fila", caption: "Fila", dataType: "number", width: 70, calculateCellValue: (item) => item.fila ?? null },
+    { dataField: "solicitante", caption: "Solicitante", width: 180, calculateCellValue: (item) => item.solicitante || "-" },
+  ];
+
   return (
     <div style={styles.page}>
       <section style={ocV1Styles.topbar}>
@@ -3034,10 +3025,7 @@ export default function OcV1Page() {
             <span>Agrupar por</span>
             <select
               value={agrupacionAprobacion}
-              onChange={(event) => {
-                setAgrupacionAprobacion(event.target.value as AgrupacionAprobacion);
-                setGruposAprobacionContraidos({});
-              }}
+              onChange={(event) => setAgrupacionAprobacion(event.target.value as AgrupacionAprobacion)}
               style={{ ...ocV1Styles.stageDateInput, width: "100%" }}
             >
               <option value="sin-filtro">Sin agrupar</option>
@@ -3082,17 +3070,9 @@ export default function OcV1Page() {
       <div style={styles.workspaceGrid}>
       <section style={{ ...styles.card, ...styles.masterCard }}>
         
-        <div style={styles.approvalListWrap}>
+        {/* El scroll lo maneja el grid: el contenedor no debe agregar uno propio. */}
+        <div style={{ ...styles.approvalListWrap, maxHeight: "none", overflow: "visible" }}>
           <div style={styles.approvalSelectionBar}>
-            <label style={styles.approvalCheckLabel}>
-              <input
-                type="checkbox"
-                checked={todasLasCabecerasVisiblesSeleccionadas}
-                disabled={cabecerasBandejaIds.length === 0}
-                onChange={(event) => toggleSeleccionVisible(event.target.checked)}
-              />
-              <span>Seleccionar visibles</span>
-            </label>
             <span style={styles.approvalSelectionCount}>
               {seleccionadasEnBandeja.length} seleccionada{seleccionadasEnBandeja.length === 1 ? "" : "s"}
             </span>
@@ -3101,146 +3081,49 @@ export default function OcV1Page() {
                 Limpiar
               </button>
             ) : null}
-            <button
-              type="button"
-              style={{ ...styles.approvalGroupToggle, marginLeft: "auto" }}
-              disabled={cabecerasBandejaAgrupadas.length === 0 || agrupacionAprobacion === "sin-filtro"}
-              onClick={cambiarVisibilidadTodosLosGrupos}
-              title={todosLosGruposVisiblesContraidos ? "Desplegar todos los grupos" : "Contraer todos los grupos"}
-              aria-label={todosLosGruposVisiblesContraidos ? "Desplegar todos los grupos" : "Contraer todos los grupos"}
-            >
-              {todosLosGruposVisiblesContraidos ? <ChevronsDown size={16} /> : <ChevronsUp size={16} />}
-            </button>
           </div>
-          <div style={styles.approvalColumnHeader}>
-            <span />
-            {([
-              ["idOc", "OC"],
-              ["fecha", "Fecha"],
-              ["responsable", "Responsable"],
-              ["nombreCliente", "Cliente"],
-              ["comprobante", "Comprobante"],
-              ["subtotal", "Subtotal"],
-              ["moneda", "Moneda"],
-            ] as Array<[AprobacionSortColumn, string]>).map(([column, label]) => {
-              const isActive = aprobacionSort.column === column;
+          <DataGridPro<OrdenCompraCabeceraDto>
+            key={nivelAprobacion}
+            dataSource={cabecerasBandeja}
+            keyExpr="idOc"
+            columns={bandejaColumns}
+            height="calc(var(--app-vh) - 520px)"
+            loading={loading}
+            noDataText="No hay ordenes pendientes para este nivel."
+            stateStoringKey={`oc-v2-bandeja-${nivelAprobacion}`}
+            selection="multiple"
+            selectedKeys={selectedOcIds.map(String)}
+            onSelectionChanged={(keys) => setSelectedOcIds(keys.map(Number))}
+            onVisibleRowsChange={handleBandejaVisibleRows}
+            focusedRowKey={selectedOcId ? String(selectedOcId) : null}
+            onRowClick={(item) => {
+              setSelectedOcId(item.idOc);
+              void loadDetalles(item.idOc);
+            }}
+            groupFields={groupFieldsBandeja}
+            autoExpandAll={false}
+            paging={{ pageSize: 100, pageSizes: [50, 100, 250, 500] }}
+            allowExport={false}
+            showSearchPanel={false}
+            rowAlternation={false}
+            rowPadding="3px 8px"
+            groupSummaryRender={({ rows: grupoRows }) => {
+              const totales = new Map<string, number>();
+              grupoRows.forEach((item) => {
+                const moneda = item.moneda?.trim() || "Sin moneda";
+                totales.set(moneda, (totales.get(moneda) ?? 0) + toNumber(item.subtotal));
+              });
               return (
-                <button
-                  key={column}
-                  type="button"
-                  style={{
-                    ...styles.approvalColumnSortButton,
-                    ...(isActive ? styles.approvalColumnSortButtonActive : {}),
-                  }}
-                  onClick={() => setAprobacionSort((previous) => ({
-                    column,
-                    direction: previous.column === column && previous.direction === "asc" ? "desc" : "asc",
-                  }))}
-                  title={`Ordenar por ${label} ${isActive && aprobacionSort.direction === "asc" ? "descendente" : "ascendente"}`}
-                >
-                  {label}{isActive ? (aprobacionSort.direction === "asc" ? " ▲" : " ▼") : ""}
-                </button>
+                <span style={{ marginLeft: 12, fontSize: 12, color: "#475569" }}>
+                  Subtotal:{" "}
+                  {Array.from(totales.entries())
+                    .sort(([a], [b]) => a.localeCompare(b, "es", { sensitivity: "base" }))
+                    .map(([moneda, total]) => `${moneda} ${formatMoney(total)}`)
+                    .join(" · ")}
+                </span>
               );
-            })}
-          </div>
-          {loading ? (
-            <div style={styles.approvalEmpty}>Cargando cabeceras...</div>
-          ) : cabecerasBandejaAgrupadas.length === 0 ? (
-            <div style={styles.approvalEmpty}>No hay ordenes pendientes para este nivel.</div>
-          ) : (
-            cabecerasBandejaAgrupadas.map((grupo) => {
-              const groupId = `${nivelAprobacion}-${grupo.key}`;
-              const contraido = agrupacionAprobacion === "sin-filtro"
-                ? false
-                : (gruposAprobacionContraidos[groupId] ?? true);
-              const idsGrupo = grupo.items.map((item) => item.idOc);
-              const grupoSeleccionado = idsGrupo.length > 0 && idsGrupo.every((idOc) => selectedOcIds.includes(idOc));
-
-              return (
-              <div key={`grupo-${groupId}`} style={styles.approvalGroup}>
-                {agrupacionAprobacion !== "sin-filtro" ? (
-                <div style={styles.approvalGroupHeader}>
-                  <div style={styles.approvalGroupIdentity}>
-                  <label
-                    style={{ ...styles.approvalCheckLabel, flex: "0 0 auto" }}
-                    title={`Seleccionar todas las OCs del grupo ${grupo.label}`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={grupoSeleccionado}
-                      onClick={(event) => event.stopPropagation()}
-                      onChange={(event) => toggleSeleccionGrupo(idsGrupo, event.target.checked)}
-                      aria-label={`Seleccionar todas las OCs del grupo ${grupo.label}`}
-                    />
-                  </label>
-                  <div style={styles.approvalGroupSummary}>
-                    <strong>{grupo.label}</strong>
-                    <span style={styles.approvalGroupSubtotal}>
-                      Subtotal: {grupo.totalesPorMoneda.map(([moneda, total]) => `${moneda} ${formatMoney(total)}`).join(" · ")}
-                    </span>
-                  </div>
-                  </div>
-                  <div style={styles.approvalGroupActions}>
-                    <span>{grupo.items.length}</span>
-                    <button
-                      type="button"
-                      style={styles.approvalGroupToggle}
-                      onClick={() => setGruposAprobacionContraidos((prev) => ({ ...prev, [groupId]: !contraido }))}
-                      aria-expanded={!contraido}
-                      aria-label={`${contraido ? "Desplegar" : "Contraer"} grupo ${grupo.label}`}
-                      title={contraido ? "Desplegar grupo" : "Contraer grupo"}
-                    >
-                      {contraido ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-                    </button>
-                  </div>
-                </div>
-                ) : null}
-                {!contraido && grupo.items.map((item) => {
-                  const isChecked = selectedOcIds.includes(item.idOc);
-                  return (
-                  <div
-                    key={item.idOc}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => {
-                      setSelectedOcId(item.idOc);
-                      void loadDetalles(item.idOc);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        setSelectedOcId(item.idOc);
-                        void loadDetalles(item.idOc);
-                      }
-                    }}
-                    style={{
-                      ...styles.approvalCard,
-                      ...(selectedOcId === item.idOc ? styles.approvalCardActive : {}),
-                    }}
-                  >
-                    <div style={styles.approvalCardLine}>
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={(event) => toggleSeleccionOc(item.idOc, event.target.checked)}
-                        style={styles.approvalCheckbox}
-                        aria-label={`Seleccionar OC ${item.idOc}`}
-                      />
-                      <span style={styles.approvalOc}>OC-{item.idOc}</span>
-                      <span style={styles.approvalCardMeta}>{item.fecha ? new Date(item.fecha).toLocaleDateString("es-PE") : "-"}</span>
-                      <span style={styles.approvalCardMeta} title={item.responsable || ""}>{item.responsable || "-"}</span>
-                      <span style={styles.approvalCardMeta} title={item.nombreCliente || ""}>{item.nombreCliente || "-"}</span>
-                      <span style={styles.approvalCardTitle} title={item.comprobante || ""}>{item.comprobante || "-"}</span>
-                      <span style={styles.approvalAmount}>{formatMoney(item.subtotal)}</span>
-                      <span style={styles.approvalCardMeta}>{item.moneda || "-"}</span>
-                    </div>
-                  </div>
-                )})}
-              </div>
-              );
-            })
-          )}
+            }}
+          />
         </div>      </section>
 
       <section style={{ ...styles.card, ...styles.detailCard }}>
@@ -3315,67 +3198,23 @@ export default function OcV1Page() {
         </div>
 
         {detalleOcTab === "detalle" ? (
-          <div style={styles.tableWrap}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  {detalleColumns.map((column) => (
-                    <th key={column.key} style={{ ...styles.th, width: column.width }}>{column.label}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {detailLoading ? (
-                  <tr><td style={styles.td} colSpan={detalleColumns.length}>Cargando detalle...</td></tr>
-                ) : detalles.length === 0 ? (
-                  <tr><td style={styles.td} colSpan={detalleColumns.length}>Sin posiciones para mostrar.</td></tr>
-                ) : (
-                  detalles.map((item) => {
-                    const detalleActivo = detalleSeleccionado?.fila === item.fila;
-                    return (
-                    <tr
-                      key={`${item.idOc}-${item.fila}-${item.idCliente}-${item.idProyecto}`}
-                      style={{ ...styles.tr, ...(detalleActivo ? styles.trActive : {}) }}
-                      onClick={() => setDetalleSeleccionado(item)}
-                    >
-                      <td style={{ ...styles.td, display: "none" }}>
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <button type="button" style={styles.smallActionButton} onClick={() => setMessage("La ediciÃ³n detallada queda habilitada desde el segmento Nueva orden.")}>Editar</button>
-                        </div>
-                      </td>
-                      <td style={styles.td}>{item.fila ?? ""}</td>
-                      <td style={styles.td}>{item.nombreCliente ?? ""}</td>
-                      <td style={styles.td}>{item.nombreProyecto ?? ""}</td>
-                      <td style={styles.td}>{item.idSite ?? ""}</td>
-                      <td style={styles.td}>{item.nombreSite ?? ""}</td>
-                      <td style={styles.td}>{item.tipoTrabajo ?? ""}</td>
-                      <td style={styles.td}>{item.ot ?? ""}</td>
-                      <td style={styles.td}>{item.tarea ?? ""}</td>
-                      <td style={{ ...styles.td, width: 88, whiteSpace: "nowrap" }}>
-                        <button
-                          type="button"
-                          style={styles.truncatedCellButton}
-                          title={item.detalle ?? ""}
-                          onClick={() => setDetalleCompleto(item.detalle ?? "")}
-                        >
-                          {item.detalle ?? ""}
-                        </button>
-                      </td>
-                      <td style={styles.td}>{formatMoney(item.cantidad)}</td>
-                      <td style={styles.td}>{formatMoney(item.precioUnitario)}</td>
-                      <td style={styles.td}>{formatMoney(item.subtotalD)}</td>
-                      <td style={styles.td}>{formatMoney(item.igvD)}</td>
-                      <td style={styles.td}>{formatMoney(item.totalD)}</td>
-                      <td style={styles.td}>
-                        <ArchivoButton codigo={item.imgOc} label="Ver OC cliente" />
-                        <ArchivoButton codigo={item.imgPresupuesto} label="Ver presupuesto" />
-                      </td>
-                    </tr>
-                  )})
-                )}
-              </tbody>
-            </table>
-          </div>
+          <DataGridPro<OrdenCompraDetalleDto>
+            dataSource={detalles}
+            keyExpr={detalleKey}
+            columns={detalleGridColumns}
+            height="calc(var(--app-vh) - 520px)"
+            loading={detailLoading}
+            noDataText="Sin posiciones para mostrar."
+            focusedRowKey={detalleSeleccionado ? detalleKey(detalleSeleccionado) : null}
+            onRowClick={(item) => setDetalleSeleccionado(item)}
+            paging={false}
+            allowExport={false}
+            showGroupPanel={false}
+            showSearchPanel={false}
+            showFilterRow={false}
+            rowAlternation={false}
+            rowPadding="4px 8px"
+          />
         ) : null}
 
         {detalleOcTab === "recibosAsociados" ? (
@@ -3437,50 +3276,21 @@ export default function OcV1Page() {
 
         {detalleOcTab === "montoOc" ? (
           <div style={styles.detailTabPanel}>
-            <div style={styles.tableWrap}>
-              <table style={styles.montoOcTable}>
-                <thead>
-                  <tr>
-                    {montoOcColumns.map((column) => (
-                      <th key={column.key} style={{ ...styles.th, width: column.width }}>{column.label}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {montoOcLoading ? (
-                    <tr><td style={styles.td} colSpan={montoOcColumns.length}>Cargando monto OC...</td></tr>
-                  ) : montoOcRows.length === 0 ? (
-                    <tr><td style={styles.td} colSpan={montoOcColumns.length}>Sin información de monto OC para la posición seleccionada.</td></tr>
-                  ) : (
-                    montoOcRows.map((item, index) => (
-                      <tr key={`${item.idOc}-${item.idSite}-${item.fila}-${item.tipoTrabajo}-${index}`} style={styles.tr}>
-                        <td style={styles.td}>{item.idOc ?? "-"}</td>
-                        <td style={styles.td}>{formatDate(item.fechaOc)}</td>
-                        <td style={styles.td}>{item.idSite || "-"}</td>
-                        <td style={styles.td} title={item.tipoTrabajo || ""}>{item.tipoTrabajo || "-"}</td>
-                        <td style={styles.tdRight}>{formatMoney(item.montoOc)}</td>
-                        <td style={styles.td} title={item.nombreSite || ""}>{item.nombreSite || "-"}</td>
-                        <td style={styles.tdRight}>{formatMoney(item.pagadoFic)}</td>
-                        <td style={styles.tdRight}>{formatPercent(item.avanceFic)}</td>
-                        <td style={styles.td}>
-                          <button
-                            type="button"
-                            style={styles.truncatedCellButton}
-                            title={item.detalle || ""}
-                            onClick={() => setDetalleCompleto(item.detalle || "")}
-                          >
-                            {item.detalle || "-"}
-                          </button>
-                        </td>
-                        <td style={styles.td}>{item.estado || "-"}</td>
-                        <td style={styles.tdRight}>{item.fila ?? "-"}</td>
-                        <td style={styles.td} title={item.solicitante || ""}>{item.solicitante || "-"}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <DataGridPro<OrdenCompraMontoOcDto & { __key: string }>
+              dataSource={montoOcRows.map((row, index) => ({ ...row, __key: String(index) }))}
+              keyExpr="__key"
+              columns={montoOcGridColumns}
+              height="calc(var(--app-vh) - 520px)"
+              loading={montoOcLoading}
+              noDataText="Sin información de monto OC para la posición seleccionada."
+              paging={false}
+              allowExport={false}
+              showGroupPanel={false}
+              showSearchPanel={false}
+              showFilterRow={false}
+              rowAlternation={false}
+              rowPadding="4px 8px"
+            />
           </div>
         ) : null}
       </section>
@@ -4839,81 +4649,94 @@ function RecibosOrdenCompraTable({
   onDetalleClick: (detalle: string) => void;
   onCorrelativoClick?: (recibo: OrdenCompraReciboDto) => void;
 }) {
-  const columns = hideIgvAndTotal
-    ? reciboColumns.filter((column) => column.key !== "igv" && column.key !== "total")
-    : reciboColumns;
+  const columns: GridColumn<OrdenCompraReciboDto>[] = [
+    {
+      dataField: "correlativo",
+      caption: "Correlativo",
+      dataType: "number",
+      width: 100,
+      alignment: "left",
+      cellRender: (_value, item) =>
+        onCorrelativoClick ? (
+          <a
+            href={`#recibo-${item.correlativo}`}
+            style={styles.correlativoLink}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onCorrelativoClick(item);
+            }}
+            aria-label={`Visualizar gasto ${item.correlativo}`}
+          >
+            {item.correlativo}
+          </a>
+        ) : (
+          item.correlativo
+        ),
+    },
+    { dataField: "fecIngreso", caption: "Fecha", dataType: "date", width: 100 },
+    { dataField: "subtotal", caption: "Subtotal", dataType: "number", width: 100, cellRender: (_value, item) => formatMoney(item.subtotal) },
+    ...(hideIgvAndTotal
+      ? []
+      : [
+          { dataField: "igv", caption: "IGV", dataType: "number", width: 90, cellRender: (_value: unknown, item: OrdenCompraReciboDto) => formatMoney(item.igv) },
+          { dataField: "total", caption: "Total", dataType: "number", width: 100, cellRender: (_value: unknown, item: OrdenCompraReciboDto) => formatMoney(item.total) },
+        ] as GridColumn<OrdenCompraReciboDto>[]),
+    { dataField: "moneda", caption: "Moneda", width: 90, calculateCellValue: (item) => item.moneda || "-" },
+    {
+      dataField: "detalle",
+      caption: "Detalle",
+      width: 240,
+      calculateCellValue: (item) => item.detalle ?? "",
+      cellRender: (_value, item) => (
+        <button
+          type="button"
+          style={styles.truncatedCellButton}
+          title={item.detalle ?? ""}
+          onClick={(event) => {
+            event.stopPropagation();
+            onDetalleClick(item.detalle ?? "");
+          }}
+        >
+          {item.detalle ?? ""}
+        </button>
+      ),
+    },
+    { dataField: "comprobante", caption: "Comprobante", width: 130, calculateCellValue: (item) => item.comprobante ?? "" },
+    { dataField: "responsable", caption: "Responsable", width: 180, calculateCellValue: (item) => item.responsable ?? "" },
+    { dataField: "nroDocumento", caption: "Nro. documento", width: 130, calculateCellValue: (item) => item.nroDocumento ?? "" },
+    { dataField: "estado", caption: "Estado", width: 110, calculateCellValue: (item) => item.estado ?? "" },
+    { dataField: "tarea", caption: "Tarea", width: 140, calculateCellValue: (item) => item.tarea ?? "" },
+  ];
 
   return (
-    <div style={styles.tableWrap}>
-      <table style={styles.receiptTable}>
-        <thead>
-          <tr>
-            {columns.map((column) => (
-              <th key={column.key} style={{ ...styles.th, width: column.width }}>
-                {column.key === "seleccion" && selectable ? "" : column.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {loading ? (
-            <tr><td style={styles.td} colSpan={columns.length}>Cargando recibos...</td></tr>
-          ) : rows.length === 0 ? (
-            <tr><td style={styles.td} colSpan={columns.length}>{emptyText}</td></tr>
-          ) : (
-            rows.map((item) => (
-              <tr key={item.correlativo} style={styles.tr}>
-                <td style={styles.td}>
-                  {selectable ? (
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.includes(item.correlativo)}
-                      onChange={(event) => onToggle(item.correlativo, event.target.checked)}
-                      aria-label={`Seleccionar recibo ${item.correlativo}`}
-                    />
-                  ) : null}
-                </td>
-                <td style={styles.td}>
-                  {onCorrelativoClick ? (
-                    <a
-                      href={`#recibo-${item.correlativo}`}
-                      style={styles.correlativoLink}
-                      onClick={(event) => {
-                        event.preventDefault();
-                        onCorrelativoClick(item);
-                      }}
-                      aria-label={`Visualizar gasto ${item.correlativo}`}
-                    >
-                      {item.correlativo}
-                    </a>
-                  ) : item.correlativo}
-                </td>
-                <td style={styles.td}>{item.fecIngreso ? new Date(item.fecIngreso).toLocaleDateString("es-PE") : ""}</td>
-                <td style={styles.td}>{formatMoney(item.subtotal)}</td>
-                {!hideIgvAndTotal ? <td style={styles.td}>{formatMoney(item.igv)}</td> : null}
-                {!hideIgvAndTotal ? <td style={styles.td}>{formatMoney(item.total)}</td> : null}
-                <td style={styles.td}>{item.moneda || "-"}</td>
-                <td style={styles.td}>
-                  <button
-                    type="button"
-                    style={styles.truncatedCellButton}
-                    title={item.detalle ?? ""}
-                    onClick={() => onDetalleClick(item.detalle ?? "")}
-                  >
-                    {item.detalle ?? ""}
-                  </button>
-                </td>
-                <td style={styles.td}>{item.comprobante ?? ""}</td>
-                <td style={styles.td} title={item.responsable ?? ""}>{item.responsable ?? ""}</td>
-                <td style={styles.td}>{item.nroDocumento ?? ""}</td>
-                <td style={styles.td}>{item.estado ?? ""}</td>
-                <td style={styles.td}>{item.tarea ?? ""}</td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </div>
+    <DataGridPro<OrdenCompraReciboDto>
+      dataSource={rows}
+      keyExpr="correlativo"
+      columns={columns}
+      height="calc(var(--app-vh) - 540px)"
+      loading={loading}
+      noDataText={emptyText}
+      selection={selectable ? "multiple" : "none"}
+      selectedKeys={selectedIds.map(String)}
+      onSelectionChanged={(keys) => {
+        // El grid informa el conjunto completo; la pantalla trabaja con altas y bajas por recibo.
+        const siguiente = new Set(keys.map(Number));
+        const anterior = new Set(selectedIds);
+        siguiente.forEach((correlativo) => {
+          if (!anterior.has(correlativo)) onToggle(correlativo, true);
+        });
+        anterior.forEach((correlativo) => {
+          if (!siguiente.has(correlativo)) onToggle(correlativo, false);
+        });
+      }}
+      paging={{ pageSize: 100, pageSizes: [50, 100, 250, 500] }}
+      allowExport={false}
+      showGroupPanel={false}
+      showFilterRow={false}
+      rowAlternation={false}
+      rowPadding="4px 8px"
+    />
   );
 }
 

@@ -82,7 +82,7 @@ Seguridad · Tesorería/Finanzas (recibos, pagos, cheques, conciliación) · Ord
 - Estados: 1 revisión → 9 contabilidad → 8 programado / 5 administrativo → 4 pagado; 7 observada
 
 ### Orden de compra
-- FE: `features/finanzas/facturacionfinanciera/oc_v1.tsx` (activa), `oc.tsx` (legacy); API `api/ordenCompraService.ts`
+- FE: `features/finanzas/facturacionfinanciera/oc_v1.tsx` (activa), `oc_v2.tsx` (copia de v1 con `DataGridPro` en bandeja, detalle, monto y recibos; reporte sin cambios), `oc.tsx` (legacy); API `api/ordenCompraService.ts`
 - BE: C/OrdenCompraController → S/OrdenCompraService, S/OrdenCompraPdfDocument
 - SP: `sp_OrdenCompra_Insertar`, `sp_OrdenCompra_BuscarCabecera`, `sp_OrdenCompra_BuscarDetalle`, `sp_OrdenCompra_RechazarMasivo`, `sp_OrdenCompra_Consulta_Estados`
 - Tablas: CabOrdenCompra, DetOrdenCompra, Planilla (IdOc/Fila)

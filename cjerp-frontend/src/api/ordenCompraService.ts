@@ -92,6 +92,8 @@ export type OrdenCompraConsultaParams = {
   idSolicitante?: number | null;
   idResponsable?: number | null;
   idOc?: string | null;
+  /** Solo cabeceras: devuelve únicamente las OC pendientes de 1ra/2da/3ra validación (bandeja de aprobación). */
+  soloPendientesAprobacion?: boolean;
 };
 
 export type OrdenCompraInsertDetallePayload = {

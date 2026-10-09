@@ -578,6 +578,13 @@ public class OrdenCompraService : IOrdenCompraService
                 cancellationToken,
                 commandTimeout: 120))).ToList();
 
+        // La bandeja de aprobación solo necesita las OC pendientes de validar: se descartan aquí, antes del
+        // enriquecimiento y de la serialización, en lugar de enviar todo el historial al navegador.
+        if (request.SoloPendientesAprobacion)
+        {
+            cabeceras = cabeceras.Where(OrdenCompraBandeja.EsPendienteDeAprobacion).ToList();
+        }
+
         // Rendimiento: el filtro por OC debe ser un semi-join sobre STRING_SPLIT. La version anterior
         // (CHARINDEX sobre una lista CSV con todas las OC) recorria la lista completa por cada fila de
         // CabOrdenCompra y crecia de forma cuadratica con el numero de OC, provocando timeouts en produccion.

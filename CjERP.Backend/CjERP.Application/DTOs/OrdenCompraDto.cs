@@ -11,6 +11,13 @@ public class OrdenCompraConsultaRequestDto
     public int? IdSolicitante { get; set; }
     public int? IdResponsable { get; set; }
     public string? IdOc { get; set; }
+
+    /// <summary>
+    /// Solo cabeceras (<c>/oc/cabecera</c>): devuelve únicamente las OC pendientes de 1ra, 2da o 3ra validación
+    /// (excluye aprobadas por completo y rechazadas). Se aplica antes de enriquecer y serializar para reducir
+    /// el tiempo de respuesta y el tamaño de la bandeja de aprobación. Por defecto no filtra.
+    /// </summary>
+    public bool SoloPendientesAprobacion { get; set; }
 }
 
 public class OrdenCompraCabeceraDto
