@@ -1,4 +1,5 @@
 using CjERP.Api.Configuration;
+using CjERP.Infrastructure.Services.Graph;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using System.Net.Http.Headers;
@@ -25,6 +26,24 @@ public interface ISharePointCommercialUploadService
     Task<byte[]> DownloadFileAsync(string filePath, CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// Actualización de tablas de Excel alojadas en SharePoint (API de libros de Microsoft Graph).
+/// Interfaz aparte de <see cref="ISharePointCommercialUploadService"/> para no alterar a sus consumidores.
+/// </summary>
+public interface ISharePointExcelTableService
+{
+    /// <summary>Reemplaza todo el cuerpo de la tabla por las filas indicadas.</summary>
+    Task<SharePointExcelTableResult> ReplaceTableBodyAsync(
+        string documentLibraryName,
+        string? folderPath,
+        string fileName,
+        string tableName,
+        IReadOnlyList<object?[]> rows,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed record SharePointExcelTableResult(string FileName, string FileUrl, string StoragePath, int RowsWritten);
+
 public sealed record ExpenseInvoiceUploadContext(
     int? GastoId,
     string? FiltroOperativoKey,
@@ -39,7 +58,7 @@ public sealed record SharePointCommercialUploadResult(
     string FileUrl,
     string StoragePath);
 
-public sealed class SharePointCommercialUploadService : ISharePointCommercialUploadService
+public sealed class SharePointCommercialUploadService : ISharePointCommercialUploadService, ISharePointExcelTableService
 {
     private static readonly HashSet<string> AllowedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -171,6 +190,93 @@ public sealed class SharePointCommercialUploadService : ISharePointCommercialUpl
             fileName,
             webUrl,
             BuildStoragePath(fileName, normalizedFolderPath, resolvedLibraryName));
+    }
+
+    public async Task<SharePointExcelTableResult> ReplaceTableBodyAsync(
+        string documentLibraryName,
+        string? folderPath,
+        string fileName,
+        string tableName,
+        IReadOnlyList<object?[]> rows,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(fileName) || Path.GetFileName(fileName) != fileName)
+        {
+            throw new InvalidOperationException("El nombre del archivo de Excel no es valido.");
+        }
+
+        if (string.IsNullOrWhiteSpace(tableName))
+        {
+            throw new InvalidOperationException("Debe indicar el nombre de la tabla de Excel.");
+        }
+
+        var resolvedLibraryName = string.IsNullOrWhiteSpace(documentLibraryName)
+            ? _options.DocumentLibraryName
+            : documentLibraryName.Trim();
+
+        ValidateConfiguration(resolvedLibraryName);
+        var accessToken = await GetAccessTokenAsync(cancellationToken);
+        var siteId = await GetSiteIdAsync(accessToken, cancellationToken);
+        var driveId = await GetDriveIdAsync(siteId, accessToken, cancellationToken, resolvedLibraryName);
+        var normalizedFolderPath = NormalizeFolderPath(folderPath);
+        var item = await ResolveDriveItemAsync(driveId, accessToken, normalizedFolderPath, fileName, cancellationToken);
+
+        var written = await GraphExcelTableWriter.ReplaceTableBodyAsync(
+            _httpClient, accessToken, driveId, item.Id, tableName, rows,
+            GraphExcelTableWriter.DefaultBatchSize, cancellationToken);
+
+        return new SharePointExcelTableResult(
+            fileName,
+            item.WebUrl,
+            BuildStoragePath(fileName, normalizedFolderPath, resolvedLibraryName),
+            written);
+    }
+
+    private async Task<(string Id, string WebUrl)> ResolveDriveItemAsync(
+        string driveId,
+        string accessToken,
+        string normalizedFolderPath,
+        string fileName,
+        CancellationToken cancellationToken)
+    {
+        var encodedDrive = Uri.EscapeDataString(driveId);
+        // Con carpeta configurada se consulta la ruta exacta; sin carpeta se busca por nombre (como la rutina manual).
+        var requestUrl = string.IsNullOrWhiteSpace(normalizedFolderPath)
+            ? $"https://graph.microsoft.com/v1.0/drives/{encodedDrive}/root/search(q='{Uri.EscapeDataString(fileName.Replace("'", "''"))}')"
+            : $"https://graph.microsoft.com/v1.0/drives/{encodedDrive}/root:/{EncodePath(normalizedFolderPath)}/{EncodePathSegment(fileName)}";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUrl);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(
+                $"No se pudo ubicar '{fileName}' en SharePoint. Detalle: {response.StatusCode} {responseContent}");
+        }
+
+        using var document = JsonDocument.Parse(responseContent);
+        var root = document.RootElement;
+        if (root.TryGetProperty("value", out var values))
+        {
+            foreach (var candidate in values.EnumerateArray())
+            {
+                var name = candidate.TryGetProperty("name", out var nameProperty) ? nameProperty.GetString() : null;
+                if (string.Equals(name, fileName, StringComparison.OrdinalIgnoreCase) && candidate.TryGetProperty("id", out _))
+                {
+                    return ReadItem(candidate);
+                }
+            }
+
+            throw new InvalidOperationException($"No se encontro el archivo '{fileName}' en SharePoint.");
+        }
+
+        return ReadItem(root);
+
+        static (string Id, string WebUrl) ReadItem(JsonElement element) => (
+            element.GetProperty("id").GetString()
+                ?? throw new InvalidOperationException("SharePoint no devolvio el id del archivo."),
+            element.TryGetProperty("webUrl", out var webUrl) ? webUrl.GetString() ?? string.Empty : string.Empty);
     }
 
     public async Task<byte[]> DownloadFileAsync(string filePath, CancellationToken cancellationToken = default)

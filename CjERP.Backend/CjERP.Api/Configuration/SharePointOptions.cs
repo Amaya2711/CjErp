@@ -15,10 +15,22 @@ public sealed class SharePointOptions
     public string MobileCommunicationsFolderPath { get; set; } = "COMUNICACIONES";
     public Dictionary<string, string> FolderPaths { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public SharePointAsistenciaOptions Asistencia { get; set; } = new();
+    public SharePointGastosExcelOptions GastosExcel { get; set; } = new();
 }
 
 public sealed class SharePointAsistenciaOptions
 {
     public string DocumentLibraryName { get; set; } = "Documentos compartidos";
     public string FolderPath { get; set; } = "Asistencia";
+}
+
+/// <summary>Libro de Excel con la tabla de gastos que actualiza el job GASTOS_EXCEL_SHAREPOINT.</summary>
+public sealed class SharePointGastosExcelOptions
+{
+    /// <summary>Biblioteca del sitio (el alias "Documentos compartidos" equivale a Documents/Documentos).</summary>
+    public string DocumentLibraryName { get; set; } = "Documentos compartidos";
+    /// <summary>Carpeta del archivo; vacío = se busca por nombre en toda la biblioteca.</summary>
+    public string FolderPath { get; set; } = string.Empty;
+    public string FileName { get; set; } = "GASTOS.xlsx";
+    public string TableName { get; set; } = "TBL_GASTOS";
 }

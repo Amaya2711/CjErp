@@ -152,6 +152,7 @@
 | POST /operacion/aprobarcampo · PUT /operacion/aprobarcampo | AsistenciaValidarCampoController | INSERT/UPDATE dinámico `dbo.Asistencia` + Auditoría | idem, rptasistencia |
 | POST /operacion/aprobarcampo/aprobar-ingreso · /aprobar-salida · /rechazar | AsistenciaValidarCampoController | `sp_Asistencia_AprobarIngreso/AprobarSalida/RechazarDocumento` | idem (IdAprobador aceptado del body) |
 | GET/PUT /admin/asistencia-sharepoint/configuracion · POST /ejecutar · GET /historial · POST /historial/{id}/reintentar | C/AsistenciaSharePointController | Scheduler + AsistenciaSharePointRepository (`sp_Asistencia_BuscarPorFechas_Job`) | ADM · asistenciaSharePointService.ts (exportacionasistnciasharepointpage.tsx) |
+| GET/PUT /admin/gastos-excel-sharepoint/configuracion · POST /ejecutar · GET /historial · POST /historial/{id}/reintentar | C/GastosExcelSharePointController | Scheduler + GastosExcelSharePointService → GastosExcelSharePointRepository (SQL inline de solo lectura sobre Planilla) → `ISharePointExcelTableService.ReplaceTableBodyAsync` (Graph workbook API) | JWT + acceso administrativo | features/administracion/GastosExcelJobPanel.tsx (api/gastosExcelSharePointService.ts) |
 
 ## 8. Operación / Logística
 | Método Ruta | Controller → Servicio → SP | FE |

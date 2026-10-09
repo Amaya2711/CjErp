@@ -55,6 +55,7 @@ Relación: `Planilla.IdOc + Planilla.Fila` → `DetOrdenCompra`. Consumo OC = `C
 | `EmpleadoPendiente` | IdPendiente | Tareas pendientes por empleado | No |
 | `Asistencia` | IdEmpleado + FechaAsistencia | IdEstado (constante `estado_asistencia`; 9=pendiente validar, 0 inicial, 16 previo a ingreso), IdAprobador, horas, lat/long, imágenes | No |
 | `AsistenciaSharePointJobConfig`, `AsistenciaSharePointExportLog` | — | Config/log del job de export | `Database/Reportes/01_*.sql` |
+| `GastosExcelSharePointJobConfig`, `GastosExcelSharePointLog` | — | Config (IdCliente/EstadoPlanilla, hora, activo) y log del job que actualiza TBL_GASTOS en GASTOS.xlsx; nace activo (03:00 Lima) salvo que un administrador lo desactive; también se crean solas si faltan | `Database/Reportes/02_*.sql` |
 | `PlanillaBoletaCabecera`, `PlanillaBoletaDetalle`, `PlanillaBoletaSuspension`, `PlanillaBoletaPdf`, `PlanillaEmpresaFirma` | — | **Nómina** (boletas XML/PDF) | No |
 
 ### 2.5 Operaciones / Importación

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import AppPage from "../../components/base/AppPage";
+import GastosExcelJobPanel from "./GastosExcelJobPanel";
 import {
   asistenciaSharePointService,
   type AsistenciaSharePointConfig,
@@ -16,7 +17,7 @@ function firstDayInputValue() {
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
-export default function exportacionasistnciasharepointpage() {
+function AsistenciaSharePointJobPanel() {
   const [config, setConfig] = useState<AsistenciaSharePointConfig | null>(null);
   const [history, setHistory] = useState<AsistenciaSharePointLog[]>([]);
   const [active, setActive] = useState(true);
@@ -86,7 +87,7 @@ export default function exportacionasistnciasharepointpage() {
   };
 
   return (
-    <AppPage title="Exportación Asistencia - SharePoint">
+    <>
       <div style={styles.grid}>
         <section style={styles.section}>
           <h2 style={styles.heading}>Estado del Job</h2>
@@ -154,11 +155,48 @@ export default function exportacionasistnciasharepointpage() {
           </table>
         </div>
       </section>
+    </>
+  );
+}
+
+type JobTabKey = "asistencia-sharepoint" | "gastos-excel-sharepoint";
+
+const JOB_TABS: Array<{ key: JobTabKey; label: string }> = [
+  { key: "asistencia-sharepoint", label: "Exportación asistencia SharePoint" },
+  { key: "gastos-excel-sharepoint", label: "Gastos Excel SharePoint" },
+];
+
+export default function ExportacionAsistenciaSharePointPage() {
+  const [tab, setTab] = useState<JobTabKey>("asistencia-sharepoint");
+
+  return (
+    <AppPage title="Exportación Asistencia - SharePoint">
+      <div role="tablist" aria-label="Jobs" style={styles.tabs}>
+        {JOB_TABS.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            role="tab"
+            aria-selected={tab === item.key}
+            onClick={() => setTab(item.key)}
+            style={{ ...styles.tab, ...(tab === item.key ? styles.tabActive : null) }}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "asistencia-sharepoint" ? <AsistenciaSharePointJobPanel /> : null}
+      {tab === "gastos-excel-sharepoint" ? <GastosExcelJobPanel /> : null}
     </AppPage>
   );
 }
 
 const styles = {
+  tabs: { display: "flex", gap: 4, borderBottom: "1px solid #d8dee8", marginBottom: 20, flexWrap: "wrap" as const },
+  tab: { background: "transparent", color: "#40566d", border: 0, borderBottom: "3px solid transparent", padding: "10px 16px", cursor: "pointer", fontSize: 14, fontWeight: 600 },
+  // Se reemplaza el borde completo (no solo el color) para no mezclar propiedades abreviadas y sueltas.
+  tabActive: { color: "#1f6f8b", borderBottom: "3px solid #1f6f8b" },
   grid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 },
   section: { background: "#fff", border: "1px solid #d8dee8", borderRadius: 8, padding: 20, marginBottom: 20 },
   heading: { marginTop: 0, color: "#1f3b57", fontSize: 18 },

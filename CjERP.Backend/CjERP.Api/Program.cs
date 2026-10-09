@@ -270,6 +270,9 @@ builder.Services.AddScoped<IReportePdfService, ReportePdfService>();
 builder.Services.AddScoped<IReporteAutomaticoService, ReporteAutomaticoService>();
 builder.Services.AddScoped<IReporteWhatsappJobScheduler, ReporteWhatsappJobScheduler>();
 builder.Services.AddScoped<IAsistenciaSharePointJobScheduler, AsistenciaSharePointJobScheduler>();
+builder.Services.AddScoped<IGastosExcelSharePointRepository, GastosExcelSharePointRepository>();
+builder.Services.AddScoped<IGastosExcelSharePointService, GastosExcelSharePointService>();
+builder.Services.AddScoped<IGastosExcelSharePointJobScheduler, GastosExcelSharePointJobScheduler>();
 builder.Services.AddScoped<IWhatsappInboundService, WhatsappInboundService>();
 builder.Services.AddScoped<IArrendamientosService, ArrendamientosService>();
 builder.Services.AddHttpClient<IMetaWhatsAppService, MetaWhatsAppService>(client =>
@@ -328,6 +331,7 @@ builder.Services.AddScoped<CjERP.Application.Interfaces.Services.AI.IIaAuthoriza
 builder.Services.AddSingleton(builder.Configuration.GetSection("IaChat:ScopeEnforcement").Get<IaScopeEnforcementOptions>()
     ?? new IaScopeEnforcementOptions());
 builder.Services.AddHttpClient<ISharePointCommercialUploadService, SharePointCommercialUploadService>();
+builder.Services.AddHttpClient<ISharePointExcelTableService, SharePointCommercialUploadService>();
 builder.Services.AddHttpClient<IWupAuthService, WupAuthService>((serviceProvider, client) =>
 {
     var settings = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WupSettings>>().Value;
@@ -481,6 +485,15 @@ using (var scope = app.Services.CreateScope())
     await scheduler.ReprogramarAsync(ReporteWhatsappTipos.Gerencial);
     var asistenciaSharePointScheduler = scope.ServiceProvider.GetRequiredService<IAsistenciaSharePointJobScheduler>();
     await asistenciaSharePointScheduler.ReprogramarAsync();
+    try
+    {
+        // El job de gastos nace activo (respeta la hora registrada y su desactivacion); un problema con su configuracion no debe impedir que la API arranque.
+        await scope.ServiceProvider.GetRequiredService<IGastosExcelSharePointJobScheduler>().ReprogramarAsync();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "No se pudo programar el job de gastos Excel (GASTOS_EXCEL_SHAREPOINT).");
+    }
     RecurringJob.AddOrUpdate<MobilePushDispatchJob>(
         "mobile-push-dispatch",
         job => job.EjecutarAsync(),

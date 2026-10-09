@@ -29,6 +29,7 @@
 | `reporte-whatsapp-asistencia-wup-gerencial-{día}` | idem | un job por día configurado | Reporte gerencial |
 | Boleta (`PLANILLA_BOLETA_WUP`) | solo al reprogramar desde UI | **comparte JobId con Operativo** (colisión) | Envía boletas por WUP |
 | `asistencia-sharepoint-diario` | `AsistenciaSharePointJobScheduler` al arrancar | `Cron.Daily` (default 02:00, zona Lima), 3 reintentos | Export JSON de asistencia del mes a SharePoint |
+| `gastos-excel-sharepoint-diario` | `GastosExcelSharePointJobScheduler` al arrancar (solo si el job está activo) | `Cron.Daily` (default 03:00, zona Lima, **activo** por defecto; un administrador puede desactivarlo), 3 reintentos, sin ejecución concurrente | Reemplaza el cuerpo de la tabla `TBL_GASTOS` de `GASTOS.xlsx` (SharePoint) con los gastos de Planilla (cliente 4, estado 4) usando la API de libros de Graph (`GraphExcelTableWriter`: sesión, limpiar, escribir por lotes de 200, cerrar). **PV**: permisos de aplicación de Graph sobre Excel |
 | `mobile-push-dispatch` | `Program.cs:438-442` | `*/5 * * * *` UTC, `DisableConcurrentExecution(600)`, 2 reintentos | Despacho de push Expo |
 | `AsistenciaReporteJob.EnviarPdfEmpleadoLlamadaAtencionAsync` | Enqueue desde API | fire-and-forget, 2 reintentos | Email de llamada de atención |
 | `ReporteWhatsAppJob.EjecutarManualAsync / ReintentarFallidosAsync` | Enqueue desde /reportes-whatsapp | bajo demanda | Ejecución manual |

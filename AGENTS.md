@@ -124,6 +124,7 @@ Seguridad · Tesorería/Finanzas (recibos, pagos, cheques, conciliación) · Ord
 - BE: C/AsistenciaReporteController, C/AsistenciaValidarCampoController, C/AsistenciaSharePointController → S/AsistenciaReporteService, S/AsistenciaValidarCampoService, Api/Services/AsistenciaSharePointService · Jobs AsistenciaReporteJob, AsistenciaSharePointJob
 - SP: `RptAsistenciaFechas`, `sp_Asistencia_ValidarCampo`, `sp_Asistencia_AprobarIngreso/AprobarSalida/RechazarDocumento`, `sp_Asistencia_ActualizarEstadoEmpleado`, `sp_AsistenciaTracking_Consulta`, `sp_Asistencia_BuscarPorFechas_Job`
 - Tablas: Asistencia, AsistenciaSharePointJobConfig/ExportLog, ReporteWhatsAppLog · Estado 9 = pendiente de validar
+- Job gastos → Excel (pestaña "Gastos Excel SharePoint" de `administracion/exportacionasistnciasharepointpage`): FE `features/administracion/GastosExcelJobPanel.tsx`, `api/gastosExcelSharePointService.ts` · BE C/GastosExcelSharePointController → Api/Services/GastosExcelSharePointService + GastosExcelSharePointJobScheduler, Jobs/GastosExcelSharePointJob, Infrastructure/Repositories/GastosExcelSharePointRepository, Services/Graph/GraphExcelTableWriter · Tablas `GastosExcelSharePointJobConfig/Log` (activo y programado automáticamente)
 
 ### Pendientes (tareas)
 - FE: `features/administracion/pendientes.tsx`; API `api/empleadoPendienteService.ts` · BE: C/EmpleadoPendienteController → S/EmpleadoPendienteService · SP: `sp_EmpleadoPendiente_Listar/Insertar/Actualizar`
