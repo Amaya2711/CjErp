@@ -1230,6 +1230,26 @@ export default function PagarTesoreriaV2Page() {
       calculateCellValue: (r) => [r.idSite, r.site, r.detalle].filter(Boolean).join(" / ") || "—",
       cellRender: (v) => copyButton(String(v) === "—" ? null : String(v), "Site y detalle", true),
     },
+    {
+      dataField: "tipoPago",
+      caption: "TipoPago",
+      width: 160,
+      calculateCellValue: (r: PagoTesoreriaRow) =>
+        catalogos.tiposPago.find((item) => item.id === r.idTipoPago)?.nombre || "—",
+      ...(estado === 1
+        ? { cellRender: (_v: unknown, r: PagoTesoreriaRow) => revisionEditor.tipoPago(r) }
+        : null),
+    },
+    {
+      dataField: "comprobante",
+      caption: "Comprobante",
+      width: 170,
+      calculateCellValue: (r: PagoTesoreriaRow) =>
+        catalogos.comprobantes.find((item) => item.id === r.idComprobante)?.nombre || r.comprobante || "—",
+      ...(estado === 1
+        ? { cellRender: (_v: unknown, r: PagoTesoreriaRow) => revisionEditor.comprobante(r) }
+        : null),
+    },
     ...(estado === 1 || estado === 9
       ? [{
           dataField: "revisionAprobar",
@@ -1320,24 +1340,6 @@ export default function PagarTesoreriaV2Page() {
           calculateCellValue: (r: PagoTesoreriaRow) => r.nroOperacion || "—",
           ...(estado === 1 ? { cellRender: (_v: unknown, r: PagoTesoreriaRow) => revisionEditor.operacion(r) } : null),
         } as GridColumn<PagoTesoreriaRow>]
-      : []),
-    ...(estado === 1
-      ? [
-          {
-            dataField: "comprobanteRevision",
-            caption: "Comprobante",
-            width: 170,
-            calculateCellValue: (r: PagoTesoreriaRow) => catalogos.comprobantes.find((item) => item.id === r.idComprobante)?.nombre || "—",
-            cellRender: (_v: unknown, r: PagoTesoreriaRow) => revisionEditor.comprobante(r),
-          },
-          {
-            dataField: "tipoPagoRevision",
-            caption: "TipoPago",
-            width: 160,
-            calculateCellValue: (r: PagoTesoreriaRow) => catalogos.tiposPago.find((item) => item.id === r.idTipoPago)?.nombre || "—",
-            cellRender: (_v: unknown, r: PagoTesoreriaRow) => revisionEditor.tipoPago(r),
-          },
-        ] as GridColumn<PagoTesoreriaRow>[]
       : []),
     ...(estado === 1 || estado === 5
       ? [{ dataField: "ruc", caption: "RUC", width: 120, calculateCellValue: (r: PagoTesoreriaRow) => r.ruc || "—" } as GridColumn<PagoTesoreriaRow>]
