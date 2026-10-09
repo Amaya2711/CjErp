@@ -4,7 +4,13 @@ using System.Text.Json;
 using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces.Services;
 using CjERP.Infrastructure.Persistence.Sql;
+using CjERP.Shared.Configuration;
 using Dapper;
+using MailKit.Security;
+using MailKitSmtpClient = MailKit.Net.Smtp.SmtpClient;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using MimeKit;
 using QuestPDF.Fluent;
 
 namespace CjERP.Infrastructure.Services;
@@ -73,6 +79,20 @@ public class OrdenCompraService : IOrdenCompraService
         SELECT TOP 1 IdOc, IdAprobador1, IdAprobador2, IdAprobador3, IdEstado
         FROM dbo.CabOrdenCompra
         WHERE IdOc = @IdOc;
+        """;
+    private const string BuscarDestinatariosCorreoOcSql = """
+        SELECT DISTINCT LTRIM(RTRIM(ValorIni))
+        FROM dbo.Constante
+        WHERE UPPER(LTRIM(RTRIM(Campo))) = 'CORREO_OC'
+          AND TRY_CONVERT(INT, ValorFin) = 1
+          AND NULLIF(LTRIM(RTRIM(ValorIni)), '') IS NOT NULL;
+        """;
+    private const string BuscarCorreoSolicitanteOcSql = """
+        SELECT TOP 1
+            empleado.Correo
+        FROM dbo.CabOrdenCompra cab
+        INNER JOIN dbo.Empleado empleado ON empleado.IdEmpleado = cab.IdSolicitante
+        WHERE cab.IdOc = @IdOc;
         """;
     private const string BuscarPdfMetadataSql = """
         SELECT TOP 1
@@ -508,6 +528,8 @@ public class OrdenCompraService : IOrdenCompraService
         """;
     private readonly ISqlCommandFactory _sqlCommandFactory;
     private readonly IPlanillaService _planillaService;
+    private readonly SmtpSettings _smtpSettings;
+    private readonly ILogger<OrdenCompraService> _logger;
 
     private sealed class PagoNuevoOrigen
     {
@@ -531,10 +553,16 @@ public class OrdenCompraService : IOrdenCompraService
         public string? SiteNombre { get; set; }
     }
 
-    public OrdenCompraService(ISqlCommandFactory sqlCommandFactory, IPlanillaService planillaService)
+    public OrdenCompraService(
+        ISqlCommandFactory sqlCommandFactory,
+        IPlanillaService planillaService,
+        IOptions<SmtpSettings> smtpSettings,
+        ILogger<OrdenCompraService> logger)
     {
         _sqlCommandFactory = sqlCommandFactory;
         _planillaService = planillaService;
+        _smtpSettings = smtpSettings.Value;
+        _logger = logger;
     }
 
     public async Task<IEnumerable<OrdenCompraCabeceraDto>> BuscarCabeceraAsync(
@@ -1029,6 +1057,66 @@ public class OrdenCompraService : IOrdenCompraService
         }
     }
 
+    public async Task<IReadOnlyList<OrdenCompraCorreoAprobacionResultDto>> EnviarCorreoAprobacionFinalAsync(
+        IEnumerable<int> idsOc,
+        CancellationToken cancellationToken = default)
+    {
+        var ordenes = idsOc.Where(id => id > 0).Distinct().ToArray();
+        if (ordenes.Length == 0)
+        {
+            return [];
+        }
+
+        var destinatariosPorParametro = await ObtenerDestinatariosCorreoOcAsync(cancellationToken);
+
+        var results = new List<OrdenCompraCorreoAprobacionResultDto>();
+        foreach (var idOc in ordenes)
+        {
+            IReadOnlyList<string> destinatarios = [];
+            try
+            {
+                destinatarios = await ObtenerDestinatariosCorreoOcAsync(
+                    idOc,
+                    destinatariosPorParametro,
+                    cancellationToken);
+                if (destinatarios.Count == 0)
+                {
+                    _logger.LogWarning(
+                        "No se envió correo de aprobación final para la OC {IdOc}: no hay destinatarios configurados ni correo válido del solicitante.",
+                        idOc);
+                    results.Add(new OrdenCompraCorreoAprobacionResultDto
+                    {
+                        IdOc = idOc,
+                        Mensaje = "No hay destinatarios activos configurados ni correo válido del solicitante."
+                    });
+                    continue;
+                }
+
+                var pdf = await GenerarPdfAsync(idOc, cancellationToken);
+                await EnviarCorreoOcAsync(idOc, destinatarios, pdf, cancellationToken);
+                results.Add(new OrdenCompraCorreoAprobacionResultDto
+                {
+                    IdOc = idOc,
+                    Enviado = true,
+                    Destinatarios = destinatarios.Count,
+                    Mensaje = "Correo enviado correctamente."
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "No se pudo enviar el correo de aprobación final para la OC {IdOc}", idOc);
+                results.Add(new OrdenCompraCorreoAprobacionResultDto
+                {
+                    IdOc = idOc,
+                    Destinatarios = destinatarios.Count,
+                    Mensaje = $"La OC fue aprobada, pero no se pudo enviar el correo: {ex.Message}"
+                });
+            }
+        }
+
+        return results;
+    }
+
     public async Task<OrdenCompraEditarDetalleResultDto> EditarDetalleAsync(
         OrdenCompraEditarDetalleRequestDto request,
         CancellationToken cancellationToken = default)
@@ -1336,6 +1424,142 @@ public class OrdenCompraService : IOrdenCompraService
         };
     }
 
+    private async Task<IReadOnlyList<string>> ObtenerDestinatariosCorreoOcAsync(CancellationToken cancellationToken)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        var correos = await connection.QueryAsync<string>(
+            _sqlCommandFactory.Create(
+                BuscarDestinatariosCorreoOcSql,
+                commandType: CommandType.Text,
+                cancellationToken: cancellationToken,
+                commandTimeout: 30));
+
+        return correos
+            .Select(correo => correo?.Trim())
+            .Where(EsCorreoValido)
+            .Select(correo => correo!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private async Task<IReadOnlyList<string>> ObtenerDestinatariosCorreoOcAsync(
+        int idOc,
+        IReadOnlyList<string> destinatariosPorParametro,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        var solicitante = await connection.QueryFirstOrDefaultAsync<SolicitanteCorreoOc>(
+            _sqlCommandFactory.Create(
+                BuscarCorreoSolicitanteOcSql,
+                new { IdOc = idOc },
+                commandType: CommandType.Text,
+                cancellationToken: cancellationToken,
+                commandTimeout: 30));
+
+        var destinatarios = new List<string>(destinatariosPorParametro);
+        if (solicitante is not null && EsCorreoValido(solicitante.Correo))
+        {
+            destinatarios.Add(solicitante.Correo!.Trim());
+        }
+
+        return destinatarios
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private async Task EnviarCorreoOcAsync(
+        int idOc,
+        IReadOnlyList<string> destinatarios,
+        OrdenCompraPdfResultDto pdf,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(_smtpSettings.Host) ||
+            string.IsNullOrWhiteSpace(_smtpSettings.UserName) ||
+            string.IsNullOrWhiteSpace(_smtpSettings.Password) ||
+            string.IsNullOrWhiteSpace(_smtpSettings.From))
+        {
+            throw new InvalidOperationException("La configuración SMTP no está completa.");
+        }
+
+        var message = new MimeMessage();
+        message.From.Add(MailboxAddress.Parse(_smtpSettings.From));
+        foreach (var destinatario in destinatarios)
+        {
+            message.To.Add(MailboxAddress.Parse(destinatario));
+        }
+
+        message.Subject = $"Orden de compra aprobada - OC {idOc}";
+        var body = new BodyBuilder
+        {
+            TextBody = $"La orden de compra OC {idOc} fue aprobada correctamente en los tres niveles. Se adjunta el documento PDF."
+        };
+        body.Attachments.Add(pdf.FileName, pdf.Content, ContentType.Parse("application/pdf"));
+        message.Body = body.ToMessageBody();
+
+        var attempts = new List<SecureSocketOptions>();
+        void AddAttempt(SecureSocketOptions option)
+        {
+            if (!attempts.Contains(option)) attempts.Add(option);
+        }
+
+        if (_smtpSettings.EnableSsl)
+        {
+            AddAttempt(SecureSocketOptions.StartTls);
+            AddAttempt(SecureSocketOptions.Auto);
+        }
+        else
+        {
+            AddAttempt(SecureSocketOptions.None);
+            AddAttempt(SecureSocketOptions.Auto);
+        }
+
+        if (_smtpSettings.AllowInsecureFallback)
+        {
+            AddAttempt(SecureSocketOptions.None);
+        }
+
+        Exception? lastError = null;
+        foreach (var socketOptions in attempts)
+        {
+            try
+            {
+                using var smtp = new MailKitSmtpClient
+                {
+                    Timeout = Math.Max(1, _smtpSettings.TimeoutSeconds) * 1000
+                };
+                if (_smtpSettings.AllowInvalidCertificate)
+                {
+                    smtp.ServerCertificateValidationCallback = static (_, _, _, _) => true;
+                }
+
+                await smtp.ConnectAsync(_smtpSettings.Host, _smtpSettings.Port, socketOptions, cancellationToken);
+                await smtp.AuthenticateAsync(_smtpSettings.UserName, _smtpSettings.Password, cancellationToken);
+                await smtp.SendAsync(message, cancellationToken);
+                await smtp.DisconnectAsync(true, cancellationToken);
+                return;
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+                _logger.LogWarning(ex,
+                    "Falló el envío de correo de OC {IdOc}. Host={Host}, puerto={Port}, protocolo={SocketOptions}",
+                    idOc,
+                    _smtpSettings.Host,
+                    _smtpSettings.Port,
+                    socketOptions);
+            }
+        }
+
+        throw new InvalidOperationException(
+            "No se pudo enviar el correo de la orden de compra por SMTP.",
+            lastError);
+    }
+
+    private static bool EsCorreoValido(string? correo)
+    {
+        return !string.IsNullOrWhiteSpace(correo) && MailboxAddress.TryParse(correo, out _);
+    }
+
     public async Task<OrdenCompraPdfResultDto> GenerarPdfAsync(
         int idOc,
         CancellationToken cancellationToken = default)
@@ -1561,6 +1785,11 @@ public class OrdenCompraService : IOrdenCompraService
         public int? IdAprobador2 { get; set; }
         public int? IdAprobador3 { get; set; }
         public int? IdEstado { get; set; }
+    }
+
+    private sealed class SolicitanteCorreoOc
+    {
+        public string? Correo { get; set; }
     }
 
     private sealed class ValidadorOcLookup

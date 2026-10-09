@@ -416,12 +416,27 @@ public class OrdenCompraController : ControllerBase
             request.IdAprobador = idAprobador;
             request.Observacion = request.Observacion?.Trim() ?? string.Empty;
 
-            var data = await _ordenCompraService.AprobarAsync(request, cancellationToken);
+            var aprobaciones = await _ordenCompraService.AprobarAsync(request, cancellationToken);
             await _auditoriaCambiosService.RegistrarLoteAsync(
-                BuildApprovalAuditEntries(data, ResolveUsuarioAccion(), request.Observacion),
+                BuildApprovalAuditEntries(aprobaciones, ResolveUsuarioAccion(), request.Observacion),
                 cancellationToken);
 
-            return Ok(new { success = true, message = "Orden(es) de compra aprobada(s) correctamente.", data });
+            // El correo se emite únicamente después de que el nivel 3 fue
+            // confirmado. La aprobación ya está persistida si el SMTP falla.
+            var aprobacionesFinales = aprobaciones
+                .Where(item => item.Nivel == 3)
+                .Select(item => item.IdOc)
+                .ToArray();
+            var correos = aprobacionesFinales.Length == 0
+                ? []
+                : await _ordenCompraService.EnviarCorreoAprobacionFinalAsync(aprobacionesFinales, cancellationToken);
+
+            return Ok(new
+            {
+                success = true,
+                message = "Orden(es) de compra aprobada(s) correctamente.",
+                data = new { aprobaciones, correos }
+            });
         }
         catch (Exception ex)
         {

@@ -1432,7 +1432,10 @@ export default function OcV1Page() {
         setReportePlanillaColumns(OC_GASTOS_COLUMNAS_INICIALES);
         return;
       }
-      const response = await buscarOrdenCompraDetalle();
+      const idOcFiltro = reporteFiltros.idOc.trim();
+      const response = await buscarOrdenCompraDetalle(
+        idOcFiltro ? { idOc: idOcFiltro } : undefined
+      );
       setReporteDetalles(Array.isArray(response) ? response : []);
     } catch (err) {
       setError(getHttpErrorMessage(err, "No se pudo cargar el detalle para el reporte de ordenes de compra."));
@@ -2749,18 +2752,25 @@ export default function OcV1Page() {
       setAprobando(true);
       setError("");
       setMessage("");
-      await aprobarOrdenCompra({
+      const respuestaAprobacion = await aprobarOrdenCompra({
         idsOc: idsAprobar,
         nivel: nivelAprobacion,
         idAprobador: userId > 0 ? userId : undefined,
         observacion: `Aprobacion desde OC v1 - nivel ${nivelAprobacion}`,
       });
       setSelectedOcIds((prev) => prev.filter((idOc) => !idsAprobar.includes(idOc)));
-      setMessage(
+      const mensajeAprobacion =
         idsAprobar.length === 1
           ? `Orden de compra ${idsAprobar[0]} aprobada en nivel ${nivelAprobacion}.`
-          : `${idsAprobar.length} ordenes de compra aprobadas en nivel ${nivelAprobacion}.`
-      );
+          : `${idsAprobar.length} ordenes de compra aprobadas en nivel ${nivelAprobacion}.`;
+      const correosNivelFinal = respuestaAprobacion.correos ?? [];
+      const correosNoEnviados = correosNivelFinal.filter((correo) => !correo.enviado);
+      const mensajeCorreo = correosNivelFinal.length === 0
+        ? ""
+        : correosNoEnviados.length === 0
+          ? ` Correo enviado a ${correosNivelFinal.reduce((total, correo) => total + correo.destinatarios, 0)} destinatario(s).`
+          : ` ${correosNoEnviados.map((correo) => correo.mensaje).join(" ")}`;
+      setMessage(`${mensajeAprobacion}${mensajeCorreo}`);
       await loadCabeceras();
       if (selectedCabecera?.idOc) {
         await loadDetalles(selectedCabecera.idOc, true);

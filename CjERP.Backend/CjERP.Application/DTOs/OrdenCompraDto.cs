@@ -317,6 +317,14 @@ public class OrdenCompraAprobacionResultDto
     public int IdAprobador { get; set; }
 }
 
+public sealed class OrdenCompraCorreoAprobacionResultDto
+{
+    public int IdOc { get; set; }
+    public bool Enviado { get; set; }
+    public int Destinatarios { get; set; }
+    public string Mensaje { get; set; } = string.Empty;
+}
+
 public class OrdenCompraEditarDetalleResultDto
 {
     public int IdOc { get; set; }

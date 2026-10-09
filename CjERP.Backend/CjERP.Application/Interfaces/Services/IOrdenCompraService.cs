@@ -32,6 +32,10 @@ public interface IOrdenCompraService
         OrdenCompraAprobarRequestDto request,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<OrdenCompraCorreoAprobacionResultDto>> EnviarCorreoAprobacionFinalAsync(
+        IEnumerable<int> idsOc,
+        CancellationToken cancellationToken = default);
+
     Task<OrdenCompraEditarDetalleResultDto> EditarDetalleAsync(
         OrdenCompraEditarDetalleRequestDto request,
         CancellationToken cancellationToken = default);

@@ -22,7 +22,7 @@ import type { EmpleadoCta } from "../../../models/empleadoCta";
 import type { ValoresGastoRequest, ValoresGastoResponse } from "../../../models/valoresGasto";
 import { getAuthUser } from "../../../utils/authStorage";
 import { compressImageForUpload } from "../../../utils/imageCompression";
-import { SHAREPOINT_BASE_URL } from "../../../utils/sharepoint";
+import { buildSharePointUrl } from "../../../utils/sharepoint";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 
 type GastoDto = {
@@ -832,6 +832,13 @@ function getFacturaDisplayPath(facturaPath?: string, facturaUrl?: string): strin
   return facturaUrl?.trim() || facturaPath?.trim() || "";
 }
 
+function getFacturaMediaType(url: string): "image" | "pdf" | "unknown" {
+  const pathname = url.split(/[?#]/)[0]?.toLowerCase() ?? "";
+  if (/\.(jpe?g|png|gif|webp|bmp|svg)$/.test(pathname)) return "image";
+  if (/\.pdf$/.test(pathname)) return "pdf";
+  return "unknown";
+}
+
 function resolveFacturaFields(item: Partial<GastoDto>) {
   const facturaUrl =
     item.facturaUrl?.trim() ||
@@ -1334,6 +1341,9 @@ export default function GastosPage({
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
 
   const [showFacturaViewer, setShowFacturaViewer] = useState(false);
+  const [facturaViewerUrl, setFacturaViewerUrl] = useState("");
+  const [facturaViewerLoading, setFacturaViewerLoading] = useState(false);
+  const [facturaViewerError, setFacturaViewerError] = useState("");
   const [valoresGasto, setValoresGasto] = useState<ValoresGastoResponse>(VALORES_GASTO_INICIALES);
   const [valoresGastoLoading, setValoresGastoLoading] = useState(false);
   const valoresGastoRequestRef = useRef(0);
@@ -1634,16 +1644,20 @@ export default function GastosPage({
         setMensajeFiltroCabecera(null);
       }
 
-      const respuestas = await Promise.all(
-        (gruposEstados.length > 0 ? gruposEstados : [""]).map((estados) =>
-          consultarPlanillaEstados({
+      // Cuando se combina Pagado (4) con otros estados se requieren dos
+      // consultas por la distinta fecha usada por el SP. Se ejecutan en serie
+      // para no pedir dos planes pesados a SQL Server al mismo tiempo.
+      const respuestas = [];
+      for (const estados of gruposEstados.length > 0 ? gruposEstados : [""]) {
+        respuestas.push(
+          await consultarPlanillaEstados({
             ...buildPlanillaConsultaEstadosRequest([
               ...(estados ? [{ nombre: "Estados", valor: estados, tipo: "string" } satisfies PlanillaConsultaParametro] : []),
               ...parametrosConsulta,
             ]),
           })
-        )
-      );
+        );
+      }
 
       const gastosConsulta = respuestas
         .flatMap((respuesta) => extraerArray<Record<string, unknown>>(respuesta.rows))
@@ -2475,10 +2489,56 @@ export default function GastosPage({
   const aplicaIgv = isFacturaComprobante(comprobanteOptions, form.comprobante);
   const igvAmount = roundToTwoDecimals(aplicaIgv ? subtotalAmount * IGV_RATE : 0);
   const totalAmount = roundToTwoDecimals(subtotalAmount + igvAmount);
-  const facturaDisplayPath =
-    modo === "editar" && form.facturaPath && !form.facturaPath.startsWith("http")
-      ? SHAREPOINT_BASE_URL + form.facturaPath.replace(/^\/+/, "")
-      : getFacturaDisplayPath(form.facturaPath, form.facturaUrl);
+  // Las rutas históricas de Planilla se guardan relativas a la biblioteca de
+  // SharePoint. Siempre se resuelven contra la base corporativa, incluso al
+  // visualizar, para evitar que el navegador las interprete como rutas SPA.
+  const facturaSourcePath = getFacturaDisplayPath(form.facturaPath, form.facturaUrl);
+  const facturaDisplayPath = buildSharePointUrl(facturaSourcePath);
+  const facturaMediaType = getFacturaMediaType(facturaDisplayPath);
+
+  useEffect(() => {
+    if (!showFacturaViewer || !facturaSourcePath) {
+      setFacturaViewerUrl("");
+      setFacturaViewerError("");
+      setFacturaViewerLoading(false);
+      return;
+    }
+
+    let activo = true;
+    let objectUrl = "";
+    setFacturaViewerLoading(true);
+    setFacturaViewerError("");
+
+    void httpClient
+      .get<Blob>(`${GASTOS_API_URL}/factura`, {
+        params: { ruta: facturaSourcePath },
+        responseType: "blob",
+      })
+      .then((archivo) => {
+        if (!activo) return;
+        objectUrl = URL.createObjectURL(archivo);
+        setFacturaViewerUrl(objectUrl);
+      })
+      .catch(() => {
+        if (activo) {
+          // SharePoint may deny embedding even though the current user can open
+          // the file directly. In that case, open its native viewer in a new
+          // tab (PDFs and images are both supported).
+          const sharePointTab = window.open(facturaDisplayPath, "_blank", "noopener,noreferrer");
+          if (!sharePointTab) {
+            window.location.assign(facturaDisplayPath);
+          }
+        }
+      })
+      .finally(() => {
+        if (activo) setFacturaViewerLoading(false);
+      });
+
+    return () => {
+      activo = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [facturaDisplayPath, facturaSourcePath, showFacturaViewer]);
 
   const subirFactura = async (file: File) => {
     const formData = new FormData();
@@ -4655,6 +4715,27 @@ export default function GastosPage({
               </div>
             )}
 
+            {modo !== "nuevo" && modo !== "editar" && facturaDisplayPath && (
+              <button
+                type="button"
+                onClick={() => setShowFacturaViewer(true)}
+                style={{
+                  marginBottom: 10,
+                  alignSelf: "flex-start",
+                  border: "none",
+                  background: "transparent",
+                  color: "#6E4CCB",
+                  fontWeight: 600,
+                  fontSize: 13,
+                  padding: 0,
+                  textDecoration: "underline",
+                  cursor: "pointer",
+                }}
+              >
+                Ver adjunto
+              </button>
+            )}
+
             <div
               style={{
                 display: "flex",
@@ -4664,25 +4745,6 @@ export default function GastosPage({
                 opacity: esModoVisualizacion ? 0.92 : 1,
               }}
             >
-              {/* Enlace para visualizar la factura solo si hay ruta y NO es modo nuevo ni editar */}
-              {modo !== "nuevo" && modo !== "editar" && (form.facturaPath || form.facturaUrl) && (
-                <a
-                  href={facturaDisplayPath}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    display: "inline-block",
-                    marginBottom: 10,
-                    color: "#6E4CCB",
-                    fontWeight: 600,
-                    fontSize: 13,
-                    textDecoration: "underline",
-                    cursor: "pointer",
-                  }}
-                >
-                  Ver factura
-                </a>
-              )}
               <FiltroOperativoLookup
                 value={form.filtroOperativo}
                 fontSize={13}
@@ -5845,88 +5907,6 @@ export default function GastosPage({
                       : facturaDisplayPath || "Sin factura cargada"}
                   </div>
                         {/* Visualizador modal de factura */}
-                        {showFacturaViewer && facturaDisplayPath && (
-                          <div
-                            style={{
-                              position: "fixed",
-                              inset: 0,
-                              background: "rgba(15, 23, 42, 0.60)",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              zIndex: 4000,
-                            }}
-                            onClick={() => setShowFacturaViewer(false)}
-                          >
-                            <div
-                              style={{
-                                background: "#fff",
-                                borderRadius: 12,
-                                padding: 16,
-                                maxWidth: "90vw",
-                                maxHeight: "90vh",
-                                boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
-                                position: "relative",
-                                display: "flex",
-                                flexDirection: "column",
-                                alignItems: "center",
-                                justifyContent: "center",
-                              }}
-                              onClick={e => e.stopPropagation()}
-                            >
-                              <button
-                                style={{
-                                  position: "absolute",
-                                  top: 8,
-                                  right: 8,
-                                  background: "#F3F4F6",
-                                  border: "none",
-                                  borderRadius: 6,
-                                  width: 32,
-                                  height: 32,
-                                  fontSize: 20,
-                                  fontWeight: 700,
-                                  color: "#17143A",
-                                  cursor: "pointer",
-                                  zIndex: 2,
-                                }}
-                                onClick={() => setShowFacturaViewer(false)}
-                                title="Cerrar"
-                              >
-                                ×
-                              </button>
-                              {facturaDisplayPath.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
-                                <img
-                                  src={facturaDisplayPath}
-                                  alt="Factura adjunta"
-                                  style={{
-                                    maxWidth: "80vw",
-                                    maxHeight: "80vh",
-                                    borderRadius: 8,
-                                    boxShadow: "0 2px 12px rgba(0,0,0,0.10)",
-                                  }}
-                                />
-                              ) : facturaDisplayPath.match(/\.(pdf)$/i) ? (
-                                <iframe
-                                  src={facturaDisplayPath}
-                                  title="Factura PDF"
-                                  style={{
-                                    width: "80vw",
-                                    height: "80vh",
-                                    border: "none",
-                                    borderRadius: 8,
-                                    boxShadow: "0 2px 12px rgba(0,0,0,0.10)",
-                                  }}
-                                  allow="autoplay"
-                                />
-                              ) : (
-                                <div style={{ color: "#DC2626", fontWeight: 600, fontSize: 14 }}>
-                                  No se puede visualizar este tipo de archivo.
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
                   {showFacturaSourceMenu && !esModoVisualizacion && (
                     <div
                       style={{
@@ -6033,6 +6013,67 @@ export default function GastosPage({
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {showFacturaViewer && facturaDisplayPath && (
+        <div
+          role="presentation"
+          onClick={() => setShowFacturaViewer(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 4300,
+            padding: 18,
+            background: "rgba(15, 23, 42, 0.60)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label="Documento adjunto"
+            onClick={(event) => event.stopPropagation()}
+            style={{
+              width: "min(1100px, 96vw)",
+              maxHeight: "92vh",
+              overflow: "hidden",
+              borderRadius: 12,
+              background: "#FFFFFF",
+              boxShadow: "0 18px 48px rgba(15,23,42,.30)",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 16px", borderBottom: "1px solid #E2E8F0" }}>
+              <strong style={{ color: "#17143A", fontSize: 14 }}>Documento adjunto</strong>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <a href={facturaDisplayPath} target="_blank" rel="noopener noreferrer" style={{ color: "#6E4CCB", fontSize: 12, fontWeight: 700 }}>
+                  Abrir en SharePoint
+                </a>
+                <button type="button" onClick={() => setShowFacturaViewer(false)} aria-label="Cerrar visor" style={{ border: "1px solid #CBD5E1", borderRadius: 7, background: "#FFFFFF", color: "#334155", width: 30, height: 30, fontSize: 18, cursor: "pointer" }}>
+                  ×
+                </button>
+              </div>
+            </header>
+            <div style={{ minHeight: 360, padding: facturaMediaType === "image" ? 16 : 0, overflow: "auto", display: "flex", alignItems: "center", justifyContent: "center", background: "#F8FAFC" }}>
+              {facturaViewerLoading ? (
+                <div style={{ color: "#475569", fontSize: 14 }}>Cargando vista previa...</div>
+              ) : facturaViewerError ? (
+                <div style={{ padding: 28, textAlign: "center", color: "#B91C1C", fontSize: 14 }}>{facturaViewerError}</div>
+              ) : facturaMediaType === "image" && facturaViewerUrl ? (
+                <img src={facturaViewerUrl} alt="Documento adjunto" style={{ display: "block", maxWidth: "100%", maxHeight: "78vh", objectFit: "contain", borderRadius: 6 }} />
+              ) : facturaMediaType === "pdf" && facturaViewerUrl ? (
+                <iframe src={facturaViewerUrl} title="Documento PDF" style={{ width: "100%", height: "78vh", minHeight: 500, border: "none" }} />
+              ) : (
+                <div style={{ padding: 28, textAlign: "center", color: "#475569", fontSize: 14 }}>
+                  Este formato no cuenta con vista previa. Use “Abrir en SharePoint” para visualizarlo o descargarlo.
+                </div>
+              )}
+            </div>
+          </section>
         </div>
       )}
 

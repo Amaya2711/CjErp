@@ -527,6 +527,67 @@ public class TesoreriaGastosController : ControllerBase
         }
     }
 
+    [HttpGet("factura")]
+    public async Task<IActionResult> ObtenerFactura([FromQuery] string ruta, CancellationToken cancellationToken)
+    {
+        if (!EsRutaFacturaPermitida(ruta))
+        {
+            return BadRequest(new { success = false, message = "La ruta del adjunto no es vÃ¡lida." });
+        }
+
+        try
+        {
+            var bytes = await _sharePointCommercialUploadService.DownloadFileAsync(
+                Uri.UnescapeDataString(ruta),
+                cancellationToken);
+            return File(bytes, ObtenerTipoContenidoFactura(ruta));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
+    private static bool EsRutaFacturaPermitida(string? ruta)
+    {
+        var raw = ruta?.Trim();
+        if (string.IsNullOrWhiteSpace(raw)) return false;
+
+        var path = raw;
+        if (Uri.TryCreate(raw, UriKind.Absolute, out var absoluteUri))
+        {
+            if (!string.Equals(absoluteUri.Host, "cjtelecom.sharepoint.com", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            path = absoluteUri.AbsolutePath;
+        }
+
+        path = Uri.UnescapeDataString(path).Replace('\\', '/').TrimStart('/');
+        return !path.Contains("..", StringComparison.Ordinal)
+            && (path.StartsWith("APLICATIVOS EXTERNOS/GASTO_FOTOS/", StringComparison.OrdinalIgnoreCase)
+                || path.StartsWith("sites/CJ-PROYECTOS/APLICATIVOS EXTERNOS/GASTO_FOTOS/", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string ObtenerTipoContenidoFactura(string ruta)
+    {
+        var path = Uri.TryCreate(ruta, UriKind.Absolute, out var absoluteUri)
+            ? absoluteUri.AbsolutePath
+            : ruta;
+        return Path.GetExtension(path).ToLowerInvariant() switch
+        {
+            ".pdf" => "application/pdf",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            ".bmp" => "image/bmp",
+            ".svg" => "image/svg+xml",
+            _ => "application/octet-stream"
+        };
+    }
+
     private static GastoDto Normalize(GastoDto dto)
     {
         return new GastoDto

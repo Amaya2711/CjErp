@@ -151,6 +151,18 @@ export type OrdenCompraAprobacionResult = {
   idAprobador: number;
 };
 
+export type OrdenCompraCorreoAprobacionResult = {
+  idOc: number;
+  enviado: boolean;
+  destinatarios: number;
+  mensaje: string;
+};
+
+export type OrdenCompraAprobarResponse = {
+  aprobaciones: OrdenCompraAprobacionResult[];
+  correos: OrdenCompraCorreoAprobacionResult[];
+};
+
 export type OrdenCompraEditarDetallePayload = {
   idOc: number;
   idSite: string;
@@ -313,7 +325,7 @@ export async function rechazarOrdenCompraMasivo(payload: OrdenCompraRechazoMasiv
 }
 
 export async function aprobarOrdenCompra(payload: OrdenCompraAprobarPayload) {
-  return await httpClient.post<OrdenCompraAprobacionResult[]>("/facturacionfinanciera/oc/aprobar", payload);
+  return await httpClient.post<OrdenCompraAprobarResponse>("/facturacionfinanciera/oc/aprobar", payload);
 }
 
 export async function editarDetalleOrdenCompra(payload: OrdenCompraEditarDetallePayload) {
