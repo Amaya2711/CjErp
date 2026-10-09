@@ -153,6 +153,21 @@ public class OrdenCompraInsertRequestDto
     public List<OrdenCompraInsertDetalleDto> Detalle { get; set; } = [];
 }
 
+/// <summary>Resultado de eliminar una posición (fila de DetOrdenCompra) de una orden de compra.</summary>
+public class OrdenCompraEliminarDetalleResultDto
+{
+    public int IdOc { get; set; }
+    public int Fila { get; set; }
+    public string? IdSite { get; set; }
+    public string? Detalle { get; set; }
+    public decimal Cantidad { get; set; }
+    public decimal PrecioUnitario { get; set; }
+    public int PosicionesRestantes { get; set; }
+    public decimal Subtotal { get; set; }
+    public decimal Igv { get; set; }
+    public decimal Total { get; set; }
+}
+
 public class OrdenCompraActualizarRequestDto : OrdenCompraInsertRequestDto
 {
     public int IdOc { get; set; }

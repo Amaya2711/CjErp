@@ -99,6 +99,7 @@
 | GET /detalle | `sp_OrdenCompra_BuscarDetalle` o SQL inline (edición) | idem |
 | POST / | `sp_OrdenCompra_Insertar` (@Detalle JSON) + UPDATE IdWeb + N UPDATE (sin tx) | idem |
 | GET /{idOc}/edicion · PUT /{idOc} | SQL inline; PUT en tx con `MAX(Fila)+1` | oc_v1 |
+| DELETE /{idOc}/detalle/{fila} | tx: borra la fila de `DetOrdenCompra` y recalcula Subtotal/Igv/Total de `CabOrdenCompra`; rechaza (400) si tiene recibos (`Planilla.IdOc/Fila`) o es la última posición; audita DELETE | oc_v2 |
 | POST /aprobar | tx; UPDATE `IdAprobador{n}` Cab/Det; nivel 3 ⇒ IdEstado=1 | oc_v1 (pestañas `tab.validacion_2/3` vía SegPermisoAccion **solo FE**) |
 | POST /rechazar-masivo | `sp_OrdenCompra_RechazarMasivo` (IdRechazador del body) | oc, oc_v1 |
 | POST /detalle/editar | SQL dinámico con lista blanca | oc_v1 |

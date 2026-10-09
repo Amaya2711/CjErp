@@ -332,6 +332,24 @@ export async function actualizarOrdenCompra(payload: OrdenCompraActualizarPayloa
   return await httpClient.put<{ idOc: number }>(`/facturacionfinanciera/oc/${payload.idOc}`, payload);
 }
 
+/** Elimina una posición (fila de DetOrdenCompra) de la orden de compra y recalcula sus totales. */
+export async function eliminarDetalleOrdenCompra(idOc: number, fila: number) {
+  return await httpClient.delete<OrdenCompraEliminarDetalleResultDto>(`/facturacionfinanciera/oc/${idOc}/detalle/${fila}`);
+}
+
+export type OrdenCompraEliminarDetalleResultDto = {
+  idOc: number;
+  fila: number;
+  idSite?: string | null;
+  detalle?: string | null;
+  cantidad: number;
+  precioUnitario: number;
+  posicionesRestantes: number;
+  subtotal: number;
+  igv: number;
+  total: number;
+};
+
 export async function rechazarOrdenCompraMasivo(payload: OrdenCompraRechazoMasivoPayload) {
   return await httpClient.post("/facturacionfinanciera/oc/rechazar-masivo", payload);
 }

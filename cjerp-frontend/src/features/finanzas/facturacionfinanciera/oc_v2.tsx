@@ -12,6 +12,7 @@ import {
   buscarOrdenCompraCabecera,
   buscarOrdenCompraDetalle,
   buscarMontoOcOrdenCompra,
+  eliminarDetalleOrdenCompra,
   buscarRecibosAsociadosOrdenCompra,
   buscarRecibosSinAsociarOrdenCompra,
   descargarArchivoOrdenCompra,
@@ -825,6 +826,11 @@ export default function OcV2Page() {
   const [draft, setDraft] = useState<OrdenCompraDraft>(createInitialDraft);
   const [detalleForm, setDetalleForm] = useState<OrdenCompraDraftDetalle>(createEmptyDetalle);
   const [editingDetalleId, setEditingDetalleId] = useState<string | null>(null);
+  // Posición que el usuario pidió eliminar y está esperando su confirmación.
+  const [detallePorEliminar, setDetallePorEliminar] = useState<OrdenCompraDraftDetalle | null>(null);
+  const [eliminandoDetalle, setEliminandoDetalle] = useState(false);
+  // Resultado de la última eliminación, visible junto al grid de posiciones.
+  const [resultadoEliminar, setResultadoEliminar] = useState<{ tipo: "exito" | "error"; texto: string } | null>(null);
   const [busqueda, setBusqueda] = useState("");
   const [estadoVista, setEstadoVista] = useState<EstadoVista>("todos");
   const [vistaOc, setVistaOc] = useState<VistaOc>("aprobacion");
@@ -2482,18 +2488,76 @@ export default function OcV2Page() {
     setEditingDetalleId(item.tempId);
   }, []);
 
-  const removeDetalle = useCallback((tempId: string) => {
-    if (isAccepted || editingOcId) return;
-    setDraft((prev) => ({ ...prev, detalles: prev.detalles.filter((item) => item.tempId !== tempId) }));
-    if (editingDetalleId === tempId) {
-      setDetalleForm(createEmptyDetalle());
-      detalleInputRef.current = "";
-      cantidadInputRef.current = "";
-      precioUnitarioInputRef.current = "";
-      pesoInputRef.current = "";
-      setEditingDetalleId(null);
+  // Paso 1: el botón Eliminar solo pide confirmación; no cambia nada todavía.
+  const solicitarEliminarDetalle = useCallback((tempId: string) => {
+    if (isAccepted) {
+      setError("No se puede eliminar una posición de una orden de compra aprobada.");
+      return;
     }
-  }, [editingDetalleId, isAccepted, editingOcId]);
+
+    const detalle = draft.detalles.find((item) => item.tempId === tempId);
+    if (!detalle) {
+      setError("No se encontró la posición que desea eliminar.");
+      return;
+    }
+
+    setError("");
+    setResultadoEliminar(null);
+    setDetallePorEliminar(detalle);
+  }, [draft.detalles, isAccepted]);
+
+  // Paso 2: confirmado. Si la posición ya existe en la OC se elimina de inmediato de DetOrdenCompra (sin pasar por
+  // "Actualizar" ni guardar el resto del formulario); luego se quita del grid y se refrescan la bandeja y el detalle.
+  // Si el servidor no lo permite (p. ej. tiene recibos asociados) la posición se queda y se muestra el motivo.
+  const confirmarEliminarDetalle = async () => {
+    const detalle = detallePorEliminar;
+    setDetallePorEliminar(null);
+    if (!detalle) return;
+
+    const posicion = draft.detalles.findIndex((item) => item.tempId === detalle.tempId) + 1;
+    const quitarDelBorrador = () => {
+      setDraft((prev) => ({ ...prev, detalles: prev.detalles.filter((item) => item.tempId !== detalle.tempId) }));
+      if (editingDetalleId === detalle.tempId) {
+        setDetalleForm(createEmptyDetalle());
+        detalleInputRef.current = "";
+        cantidadInputRef.current = "";
+        precioUnitarioInputRef.current = "";
+        pesoInputRef.current = "";
+        setEditingDetalleId(null);
+      }
+    };
+
+    setError("");
+    setResultadoEliminar(null);
+
+    // Posición que todavía no existe en la OC (OC nueva o posición agregada sin guardar): solo se quita de la lista.
+    if (!editingOcId || !detalle.fila) {
+      quitarDelBorrador();
+      setResultadoEliminar({ tipo: "exito", texto: `La posición ${posicion} fue quitada de la lista.` });
+      return;
+    }
+
+    setEliminandoDetalle(true);
+    try {
+      await eliminarDetalleOrdenCompra(editingOcId, detalle.fila);
+      quitarDelBorrador();
+      setResultadoEliminar({
+        tipo: "exito",
+        texto: `La posición ${posicion} fue eliminada de la orden de compra ${editingOcId}.`,
+      });
+      try {
+        await loadCabeceras();
+        setSelectedOcId(editingOcId);
+        await loadDetalles(editingOcId, true);
+      } catch {
+        // La posición ya se eliminó; el listado se actualizará en la próxima carga.
+      }
+    } catch (err) {
+      setResultadoEliminar({ tipo: "error", texto: getHttpErrorMessage(err, "No se pudo eliminar la posición.") });
+    } finally {
+      setEliminandoDetalle(false);
+    }
+  };
 
   const validateDraft = () => {
     const gestorEfectivo = draft.gestor || draft.validador || draft.responsable;
@@ -3987,6 +4051,27 @@ export default function OcV2Page() {
       ) : null}
 
       <ConfirmDialog
+        open={detallePorEliminar !== null}
+        title="Eliminar posición"
+        destructive
+        message={detallePorEliminar ? (
+          <>
+            ¿Desea eliminar la posición{" "}
+            <strong>{draft.detalles.findIndex((item) => item.tempId === detallePorEliminar.tempId) + 1}</strong>
+            {detallePorEliminar.detalle ? <> ({detallePorEliminar.detalle.slice(0, 80)})</> : null}?
+            <br />
+            {editingOcId && detallePorEliminar.fila
+              ? `Se eliminará de la orden de compra ${editingOcId} y no se podrá deshacer.`
+              : "Se quitará de la lista de posiciones."}
+          </>
+        ) : null}
+        confirmLabel="Eliminar"
+        cancelLabel="Cancelar"
+        onCancel={() => setDetallePorEliminar(null)}
+        onConfirm={() => void confirmarEliminarDetalle()}
+      />
+
+      <ConfirmDialog
         open={pagoNuevoPendiente !== null}
         title="Generar pago nuevo"
         message={pagoNuevoPendiente ? (
@@ -4540,7 +4625,7 @@ export default function OcV2Page() {
                         <td style={styles.td}>
                           <div style={{ display: "flex", gap: 8 }}>
                             <button type="button" style={styles.smallActionButton} onClick={() => editDetalle(item)}>Editar</button>
-                            <button type="button" style={styles.smallDangerButton} disabled={isAccepted || Boolean(editingOcId)} onClick={() => removeDetalle(item.tempId)}>Rechazar</button>
+                            <button type="button" style={styles.smallDangerButton} disabled={isAccepted || Boolean(editingOcId)} onClick={() => solicitarEliminarDetalle(item.tempId)}>Rechazar</button>
                           </div>
                         </td>
                         <td style={styles.td}>{index + 1}</td>
@@ -4570,15 +4655,20 @@ export default function OcV2Page() {
             </table>
           </div>
           ) : null}
+          {resultadoEliminar ? (
+            <div role="status" style={resultadoEliminar.tipo === "exito" ? styles.successBanner : styles.errorBanner}>
+              {resultadoEliminar.texto}
+            </div>
+          ) : null}
           <DraftDetalleTable
             detalles={draft.detalles}
             editingDetalleId={editingDetalleId}
-            isAccepted={isAccepted || Boolean(editingOcId)}
+            isAccepted={isAccepted || eliminandoDetalle}
             comprobanteOptions={comprobanteOptions}
             tipoPagoOptions={tipoPagoOptions}
             monedaOptions={monedaOptions}
             onEdit={editDetalle}
-            onRemove={removeDetalle}
+            onRemove={solicitarEliminarDetalle}
             onDetalleClick={setDetalleCompleto}
           />
 
@@ -4618,7 +4708,7 @@ export default function OcV2Page() {
                       <td style={styles.td}>
                         <div style={{ display: "flex", gap: 8 }}>
                           <button type="button" style={styles.smallActionButton} onClick={() => editDetalle(item)}>Editar</button>
-                          <button type="button" style={styles.smallDangerButton} disabled={isAccepted} onClick={() => removeDetalle(item.tempId)}>Rechazar</button>
+                          <button type="button" style={styles.smallDangerButton} disabled={isAccepted} onClick={() => solicitarEliminarDetalle(item.tempId)}>Rechazar</button>
                         </div>
                       </td>
                       <td style={styles.td}>{item.filtroOperativo.filtro?.nombreCliente ?? ""}</td>
@@ -5422,6 +5512,11 @@ const DraftDetalleTable = React.memo(function DraftDetalleTable({
 }) {
   return (
     <div style={styles.tableWrap}>
+      <style>{`
+        .oc-detalle-seleccionado > td { border-top: 2px solid #2563EB !important; border-bottom: 2px solid #2563EB !important; background: #EFF6FF !important; }
+        .oc-detalle-seleccionado > td:first-child { border-left: 2px solid #2563EB !important; }
+        .oc-detalle-seleccionado > td:last-child { border-right: 2px solid #2563EB !important; }
+      `}</style>
       <table style={styles.table}>
         <thead>
           <tr>
@@ -5463,9 +5558,21 @@ const DraftDetalleTable = React.memo(function DraftDetalleTable({
                   const isFactura = comprobanteUpper === "2" || comprobanteUpper === "6";
                   const igv = isFactura ? subtotal * 0.18 : 0;
                   const total = subtotal + igv;
+                  const isEditing = editingDetalleId === item.tempId;
 
                 return (
-                  <tr key={`top-${item.tempId}`} style={styles.tr}>
+                  <tr
+                    key={`top-${item.tempId}`}
+                    className={isEditing ? "oc-detalle-seleccionado" : undefined}
+                    style={styles.tr}
+                    aria-label={isEditing ? "Posición seleccionada" : undefined}
+                    aria-selected={isEditing}
+                    onClick={(event) => {
+                      // Un clic en la fila la selecciona; los botones y enlaces de las celdas conservan su propia acción.
+                      if ((event.target as HTMLElement).closest("button, a, input, select, textarea")) return;
+                      onEdit(item);
+                    }}
+                  >
                     <td style={styles.td}>
                       <div style={{ display: "flex", gap: 8 }}>
                         <button type="button" style={styles.smallActionButton} title="Editar posición" aria-label="Editar posición" onClick={() => onEdit(item)}>✎</button>

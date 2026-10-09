@@ -405,6 +405,45 @@ public class OrdenCompraService : IOrdenCompraService
             Total = @Total
         WHERE IdOc = @IdOc;
         """;
+    private const string BuscarPosicionEliminarSql = """
+        SELECT CAST(IdSite AS NVARCHAR(100)) AS IdSite,
+               CAST(Detalle AS NVARCHAR(500)) AS Detalle,
+               CAST(Cantidad AS DECIMAL(18,4)) AS Cantidad,
+               CAST(PrecioUnitario AS DECIMAL(18,4)) AS PrecioUnitario
+        FROM dbo.DetOrdenCompra
+        WHERE IdOc = @IdOc AND Fila = @Fila;
+        """;
+    private const string RecalcularTotalesCabeceraSql = """
+        UPDATE cab
+        SET Subtotal = ISNULL(x.Subtotal, 0),
+            Igv = CASE WHEN cab.IdComprobante IN (2, 6) THEN ISNULL(x.Subtotal, 0) * 0.18 ELSE 0 END,
+            Total = ISNULL(x.Subtotal, 0) + CASE WHEN cab.IdComprobante IN (2, 6) THEN ISNULL(x.Subtotal, 0) * 0.18 ELSE 0 END
+        FROM dbo.CabOrdenCompra cab
+        OUTER APPLY (
+            SELECT SUM(CAST(det.Cantidad AS DECIMAL(18,4)) * CAST(det.PrecioUnitario AS DECIMAL(18,4))) AS Subtotal
+            FROM dbo.DetOrdenCompra det
+            WHERE det.IdOc = cab.IdOc
+        ) x
+        WHERE cab.IdOc = @IdOc;
+
+        SELECT CAST(Subtotal AS DECIMAL(18,4)) AS Subtotal,
+               CAST(Igv AS DECIMAL(18,4)) AS Igv,
+               CAST(Total AS DECIMAL(18,4)) AS Total
+        FROM dbo.CabOrdenCompra
+        WHERE IdOc = @IdOc;
+        """;
+    private const string EliminarPosicionSql = """
+        DELETE FROM dbo.DetOrdenCompra
+        WHERE IdOc = @IdOc AND Fila = @Fila;
+        """;
+    private const string ExistePlanillaPosicionSql = """
+        SELECT CASE WHEN EXISTS (
+            SELECT 1
+            FROM dbo.Planilla
+            WHERE TRY_CONVERT(INT, IdOc) = @IdOc
+              AND Fila = @Fila
+        ) THEN 1 ELSE 0 END;
+        """;
     private const string ActualizarDetalleEdicionSql = """
         UPDATE dbo.DetOrdenCompra
         SET IdCliente = COALESCE(NULLIF(@IdCliente, 0), IdCliente),
@@ -823,6 +862,87 @@ public class OrdenCompraService : IOrdenCompraService
                 commandTimeout: 120));
         cabecera.Detalle = detalle.ToList();
         return cabecera;
+    }
+
+    public async Task<OrdenCompraEliminarDetalleResultDto> EliminarDetalleAsync(
+        int idOc,
+        int fila,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        try
+        {
+            var posicion = await connection.QuerySingleOrDefaultAsync<PosicionEliminar>(new CommandDefinition(
+                BuscarPosicionEliminarSql,
+                new { IdOc = idOc, Fila = fila }, transaction, cancellationToken: cancellationToken));
+            if (posicion is null)
+            {
+                throw new InvalidOperationException($"No se encontró la posición {fila} de la orden de compra {idOc}.");
+            }
+
+            var cantidadPosiciones = await connection.ExecuteScalarAsync<int>(new CommandDefinition(
+                "SELECT COUNT(*) FROM dbo.DetOrdenCompra WHERE IdOc = @IdOc;",
+                new { IdOc = idOc }, transaction, cancellationToken: cancellationToken));
+            if (cantidadPosiciones <= 1)
+            {
+                throw new InvalidOperationException("La orden de compra debe conservar al menos una posición.");
+            }
+
+            var tienePlanillaAsociada = await connection.ExecuteScalarAsync<int>(new CommandDefinition(
+                ExistePlanillaPosicionSql,
+                new { IdOc = idOc, Fila = fila }, transaction, cancellationToken: cancellationToken));
+            if (tienePlanillaAsociada != 0)
+            {
+                throw new InvalidOperationException($"No se puede eliminar la posición {fila} porque tiene recibos asociados.");
+            }
+
+            await connection.ExecuteAsync(new CommandDefinition(
+                EliminarPosicionSql,
+                new { IdOc = idOc, Fila = fila }, transaction, cancellationToken: cancellationToken));
+
+            var totales = await connection.QuerySingleAsync<TotalesCabecera>(new CommandDefinition(
+                RecalcularTotalesCabeceraSql,
+                new { IdOc = idOc }, transaction, cancellationToken: cancellationToken));
+
+            await transaction.CommitAsync(cancellationToken);
+
+            return new OrdenCompraEliminarDetalleResultDto
+            {
+                IdOc = idOc,
+                Fila = fila,
+                IdSite = posicion.IdSite,
+                Detalle = posicion.Detalle,
+                Cantidad = posicion.Cantidad,
+                PrecioUnitario = posicion.PrecioUnitario,
+                PosicionesRestantes = cantidadPosiciones - 1,
+                Subtotal = totales.Subtotal,
+                Igv = totales.Igv,
+                Total = totales.Total,
+            };
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            throw;
+        }
+    }
+
+    private sealed class PosicionEliminar
+    {
+        public string? IdSite { get; set; }
+        public string? Detalle { get; set; }
+        public decimal Cantidad { get; set; }
+        public decimal PrecioUnitario { get; set; }
+    }
+
+    private sealed class TotalesCabecera
+    {
+        public decimal Subtotal { get; set; }
+        public decimal Igv { get; set; }
+        public decimal Total { get; set; }
     }
 
     public async Task ActualizarAsync(

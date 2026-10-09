@@ -173,6 +173,41 @@ public class OrdenCompraController : ControllerBase
         return Ok(new { success = true, message = "Orden de compra actualizada correctamente.", data = new { idOc } });
     }
 
+    /// <summary>Elimina una posición de la orden de compra (fila de DetOrdenCompra) y recalcula los totales de la OC.</summary>
+    [HttpDelete("{idOc:int}/detalle/{fila:int}")]
+    public async Task<IActionResult> EliminarDetalle(int idOc, int fila, CancellationToken cancellationToken)
+    {
+        if (idOc <= 0 || fila <= 0)
+        {
+            return BadRequest(new { success = false, message = "La orden de compra o la posición no es válida." });
+        }
+
+        OrdenCompraEliminarDetalleResultDto resultado;
+        try
+        {
+            resultado = await _ordenCompraService.EliminarDetalleAsync(idOc, fila, cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Reglas de negocio (recibos asociados, última posición, posición inexistente): mensaje claro al usuario.
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+
+        try
+        {
+            await _auditoriaCambiosService.RegistrarLoteAsync(
+                BuildDetalleEliminadoAuditEntries(resultado, ResolveUsuarioAccion()),
+                cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            // La posición ya fue eliminada: un fallo de auditoría no debe presentarse como fallo de la eliminación.
+            _logger.LogWarning(ex, "No se pudo registrar la auditoría de la eliminación de la posición {Fila} de la OC {IdOc}", fila, idOc);
+        }
+
+        return Ok(new { success = true, message = "Posición eliminada correctamente.", data = resultado });
+    }
+
     [HttpPost("archivo")]
     [Consumes("multipart/form-data")]
     [RequestSizeLimit(25_000_000)]
@@ -777,6 +812,25 @@ public class OrdenCompraController : ControllerBase
             ValorNuevo = result.Subtotal.ToString("0.00", CultureInfo.InvariantCulture),
             UsuarioAccion = usuarioAccion,
             Observacion = "Monto solicitado desde OC/Gastos."
+        };
+    }
+
+    private static IEnumerable<AuditoriaCambioDto> BuildDetalleEliminadoAuditEntries(
+        OrdenCompraEliminarDetalleResultDto result,
+        string usuarioAccion)
+    {
+        yield return new AuditoriaCambioDto
+        {
+            Modulo = "FacturacionFinanciera",
+            Entidad = "OrdenCompraDetalle",
+            IdRegistro = result.IdOc.ToString(CultureInfo.InvariantCulture),
+            Accion = "DELETE",
+            Seccion = $"Site {result.IdSite} / Fila {result.Fila.ToString(CultureInfo.InvariantCulture)}",
+            Campo = "Posicion",
+            ValorAnterior = $"{result.Detalle} | Cantidad {result.Cantidad.ToString("0.####", CultureInfo.InvariantCulture)} | Precio unitario {result.PrecioUnitario.ToString("0.####", CultureInfo.InvariantCulture)}",
+            ValorNuevo = null,
+            UsuarioAccion = usuarioAccion,
+            Observacion = "Eliminacion de la posicion de la orden de compra."
         };
     }
 

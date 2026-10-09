@@ -24,6 +24,15 @@ public interface IOrdenCompraService
         OrdenCompraActualizarRequestDto request,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Elimina una posición (fila de DetOrdenCompra) de la orden y recalcula sus totales. No permite eliminarla si
+    /// tiene recibos asociados ni dejar la orden sin posiciones; en esos casos lanza <see cref="InvalidOperationException"/>.
+    /// </summary>
+    Task<OrdenCompraEliminarDetalleResultDto> EliminarDetalleAsync(
+        int idOc,
+        int fila,
+        CancellationToken cancellationToken = default);
+
     Task RechazarMasivoAsync(
         OrdenCompraRechazoMasivoRequestDto request,
         CancellationToken cancellationToken = default);
