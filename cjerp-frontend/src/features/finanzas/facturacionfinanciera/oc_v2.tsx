@@ -113,7 +113,7 @@ const OC_APPROVAL_TAB_ACTION_KEYS = {
   2: "tab.validacion_2",
   3: "tab.validacion_3",
 } as const;
-type AgrupacionAprobacion = "sin-filtro" | "solicitante-responsable" | "responsable";
+type AgrupacionAprobacion = "sin-filtro" | "solicitante" | "solicitante-responsable" | "responsable";
 
 function buildResponsableDisplay(empleado: EmpleadoCta): string {
   return [empleado.nombreEmpleado, empleado.nombreBanco, empleado.nombreCta]
@@ -834,7 +834,7 @@ export default function OcV2Page() {
   const [fechaCreacionDesde, setFechaCreacionDesde] = useState(`${today.slice(0, 4)}-01-01`);
   const [fechaCreacionHasta, setFechaCreacionHasta] = useState(today);
   const [filtroValidadorAprobacion, setFiltroValidadorAprobacion] = useState<string[]>([]);
-  const [agrupacionAprobacion, setAgrupacionAprobacion] = useState<AgrupacionAprobacion>("solicitante-responsable");
+  const [agrupacionAprobacion, setAgrupacionAprobacion] = useState<AgrupacionAprobacion>("solicitante");
   const [detalleOcTab, setDetalleOcTab] = useState<DetalleOcTab>("detalle");
   // OC cuyo detalle ya terminó de cargar: recibos y monto dependen de su "fila", así que esperan a este dato.
   const [detalleCargadoOcId, setDetalleCargadoOcId] = useState<number | null>(null);
@@ -2773,7 +2773,17 @@ export default function OcV2Page() {
       cellRender: (_value, item) => <span style={styles.approvalOc}>OC-{item.idOc}</span>,
     },
     { dataField: "fecha", caption: "Fecha", dataType: "date", width: 100, calculateCellValue: (item) => item.fecha ?? null },
+    { dataField: "solicitanteBandeja", caption: "Solicitante", width: 190, calculateCellValue: solicitanteBandeja },
     { dataField: "responsable", caption: "Responsable", width: 190, calculateCellValue: (item) => normalizarTexto(item.responsable) || "-" },
+    {
+      dataField: "solicitanteResponsableBandeja",
+      caption: "Solicitante / Responsable",
+      width: 330,
+      calculateCellValue: (item) => [
+        solicitanteBandeja(item),
+        normalizarTexto(item.responsable) || "-",
+      ].join(" - "),
+    },
     { dataField: "nombreCliente", caption: "Cliente", width: 170, calculateCellValue: (item) => normalizarTexto(item.nombreCliente) || "-" },
     { dataField: "comprobante", caption: "Comprobante", width: 150, calculateCellValue: (item) => normalizarTexto(item.comprobante) || "-" },
     {
@@ -2786,13 +2796,21 @@ export default function OcV2Page() {
     },
     { dataField: "moneda", caption: "Moneda", width: 90, calculateCellValue: (item) => normalizarTexto(item.moneda) || "-" },
     // Columnas opcionales (selector de columnas).
-    { dataField: "solicitanteBandeja", caption: "Solicitante", width: 180, visible: false, calculateCellValue: solicitanteBandeja },
     { dataField: "validadorBandeja", caption: "Validador", width: 180, visible: false, calculateCellValue: (item) => getValidadorAgrupacion(item) },
     { dataField: "nombreProyecto", caption: "Proyecto", width: 170, visible: false, calculateCellValue: (item) => normalizarTexto(item.nombreProyecto) || "-" },
     { dataField: "nombreSite", caption: "Site", width: 170, visible: false, calculateCellValue: (item) => normalizarTexto(item.nombreSite) || "-" },
     { dataField: "igv", caption: "IGV", dataType: "number", width: 100, visible: false, calculateCellValue: (item) => toNumber(item.igv), cellRender: (_value, item) => formatMoney(item.igv) },
     { dataField: "total", caption: "Total", dataType: "number", width: 110, visible: false, calculateCellValue: (item) => toNumber(item.total), cellRender: (_value, item) => formatMoney(item.total) },
     // Agrupaciones de la bandeja (las elige el selector "Agrupar por").
+    {
+      dataField: "grpSolicitante",
+      caption: "Solicitante",
+      visible: false,
+      allowFiltering: false,
+      allowHeaderFilter: false,
+      allowSearch: false,
+      calculateCellValue: solicitanteBandeja,
+    },
     {
       dataField: "grpSolicitanteResponsable",
       caption: "Solicitante - responsable",
@@ -2814,7 +2832,9 @@ export default function OcV2Page() {
   ];
   const groupFieldsBandeja = agrupacionAprobacion === "responsable"
     ? ["grpResponsable"]
-    : agrupacionAprobacion === "solicitante-responsable"
+    : agrupacionAprobacion === "solicitante"
+      ? ["grpSolicitante"]
+      : agrupacionAprobacion === "solicitante-responsable"
       ? ["grpSolicitanteResponsable"]
       : [];
 
@@ -3029,6 +3049,7 @@ export default function OcV2Page() {
               style={{ ...ocV1Styles.stageDateInput, width: "100%" }}
             >
               <option value="sin-filtro">Sin agrupar</option>
+              <option value="solicitante">Solicitante</option>
               <option value="solicitante-responsable">Solicitante - responsable</option>
               <option value="responsable">Responsable</option>
             </select>

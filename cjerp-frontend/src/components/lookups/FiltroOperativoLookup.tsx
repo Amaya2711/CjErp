@@ -2,9 +2,21 @@ import React, { useState, useRef, useEffect } from "react";
 import type {
   FiltroOperativoLookupProps,
   FiltroOperativoValue,
+  FiltroOperativoItem,
   TareaOption,
 } from "../../models/filtroOperativo";
 import { useFiltroOperativoLookup } from "../../hooks/useFiltroOperativoLookup";
+
+function formatFiltroLabel(filtro?: FiltroOperativoItem): string {
+  if (!filtro) return "";
+  return [
+    filtro.nombreCliente,
+    filtro.nombreProyecto,
+    filtro.idSite,
+    filtro.nombreSite,
+    filtro.nroInterno ? String(filtro.nroInterno) : "",
+  ].filter(Boolean).join(" - ");
+}
 
 export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filtroInputRef?: React.RefObject<HTMLInputElement | null>; fontSize?: number }> = ({
   value,
@@ -53,7 +65,7 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
   const [inputWidth, setInputWidth] = useState<number>(250);
 
   const maxFiltroLabel = filtrosSafe.reduce((max: string, f) => {
-    const label = `${f.nombreCliente} - ${f.nombreProyecto} - ${f.nombreSite} - ${f.nroInterno}`;
+    const label = formatFiltroLabel(f);
     return label.length > max.length ? label : max;
   }, "Seleccione...");
 
@@ -68,7 +80,7 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
       const filtroKey = safeValue.filtro.filtroKey;
       const filtro = filtrosSafe.find((f) => f.filtroKey === filtroKey);
       return filtro
-        ? `${filtro.nombreCliente} - ${filtro.nombreProyecto} - ${filtro.nombreSite} - ${filtro.nroInterno}`
+        ? formatFiltroLabel(filtro)
         : "";
     }
     return "";
@@ -83,21 +95,12 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
     const filtro = filtrosSafe.find((f) => f.filtroKey === safeValue.filtro?.filtroKey);
     if (filtro) {
       setFiltroInput(
-        `${filtro.nombreCliente} - ${filtro.nombreProyecto} - ${filtro.nombreSite} - ${filtro.nroInterno}`
+        formatFiltroLabel(filtro)
       );
       return;
     }
 
-    const fallbackLabel = [
-      safeValue.filtro.nombreCliente,
-      safeValue.filtro.nombreProyecto,
-      safeValue.filtro.nombreSite,
-      safeValue.filtro.nroInterno ? String(safeValue.filtro.nroInterno) : "",
-    ]
-      .filter(Boolean)
-      .join(" - ");
-
-    setFiltroInput(fallbackLabel);
+    setFiltroInput(formatFiltroLabel(safeValue.filtro));
   }, [safeValue?.filtro, filtrosSafe]);
 
   const [highlightedIdx, setHighlightedIdx] = useState<number>(-1);
@@ -113,8 +116,7 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
     filtroInput.trim() === ""
       ? filtrosSafe
       : filtrosSafe.filter((f) => {
-          const label =
-            `${f.nombreCliente} - ${f.nombreProyecto} - ${f.nombreSite} - ${f.nroInterno}`.toLowerCase();
+          const label = formatFiltroLabel(f).toLowerCase();
           const palabras = filtroInput.toLowerCase().split(/\s+/).filter(Boolean);
           return palabras.every((palabra) => label.includes(palabra));
         });
@@ -191,7 +193,7 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
               } else if (e.key === "Enter") {
                 if (highlightedIdx >= 0 && highlightedIdx < filteredFiltros.length) {
                   const f = filteredFiltros[highlightedIdx];
-                  const label = `${f.nombreCliente} - ${f.nombreProyecto} - ${f.nombreSite} - ${f.nroInterno}`;
+                  const label = formatFiltroLabel(f);
                   filtroSeleccionadoRef.current = f.filtroKey;
                   setFiltroInput(label);
                   handleFiltroChange(f.filtroKey);
@@ -213,7 +215,7 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
                   ? filtrosSafe.find((f) => f.filtroKey === filtroSeleccionado)
                   : filtrosSafe.find(
                       (f) =>
-                        `${f.nombreCliente} - ${f.nombreProyecto} - ${f.nombreSite} - ${f.nroInterno}`.toLowerCase() ===
+                        formatFiltroLabel(f).toLowerCase() ===
                         filtroInput.toLowerCase()
                     );
 
@@ -279,7 +281,7 @@ export const FiltroOperativoLookup: React.FC<FiltroOperativoLookupProps & { filt
               }}
             >
               {filteredFiltros.map((f, idx) => {
-                const label = `${f.nombreCliente} - ${f.nombreProyecto} - ${f.nombreSite} - ${f.nroInterno}`;
+                const label = formatFiltroLabel(f);
                 const isHighlighted = idx === highlightedIdx;
 
                 return (

@@ -1,7 +1,7 @@
 /**
- * Zoom global de la interfaz (equivale a ver la app con el navegador al 70 %).
+ * Zoom global de la interfaz (equivale a ver la app con el navegador al 80 %).
  *
- * En cada ingreso (login) ZoomPrompt pregunta si se quiere ajustar al 70 %, solo si el zoom
+ * En cada ingreso (login) ZoomPrompt pregunta si se quiere ajustar al 80 %, solo si el zoom
  * del navegador es > 75 %. La respuesta vive en sessionStorage["appZoomSesion"] ("si" | "no")
  * y se borra al cerrar sesión (clearAuthUser limpia sessionStorage), por lo que vuelve a preguntar.
  *
@@ -9,7 +9,7 @@
  * Para desactivar la función para todos: ZOOM_ACTIVO = false.
  */
 const ZOOM_ACTIVO = true;
-const ZOOM_OBJETIVO = 0.7;
+const ZOOM_OBJETIVO = 0.8;
 const ZOOM_MIN = 0.4;
 const ZOOM_MAX = 1.5;
 /** El aviso/ajuste solo aplica si el zoom del navegador es mayor a este valor. */
