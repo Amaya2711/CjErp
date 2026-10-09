@@ -4128,6 +4128,31 @@ export default function GastosPage({
               }}
             >
               <span>{filter.label}</span>
+              {filter.type === "date" ? (
+                <input
+                  type="date"
+                  value={filter.selectedValue}
+                  max={filter.key === "fechaFin" ? obtenerFechaActual() : undefined}
+                  onChange={(event) =>
+                    setFiltrosCabecera((prev) => ({
+                      ...prev,
+                      [filter.key]: event.target.value,
+                    }))
+                  }
+                  style={{
+                    width: "100%",
+                    height: 36,
+                    borderRadius: 10,
+                    border: "1px solid #D1D5DB",
+                    padding: "0 10px",
+                    fontSize: 11,
+                    color: "#111827",
+                    background: "#FFFFFF",
+                    boxSizing: "border-box",
+                    cursor: "pointer",
+                  }}
+                />
+              ) : (
               <button
                 type="button"
                 onClick={() =>
@@ -4172,8 +4197,9 @@ export default function GastosPage({
                 </span>
                 <span style={{ color: "#6B7280", fontSize: 10 }}>{isOpen ? "▲" : "▼"}</span>
               </button>
+              )}
 
-              {isOpen && (
+              {isOpen && filter.type !== "date" && (
                 <div
                   ref={cabeceraFiltroMenuRef}
                   style={{
@@ -4192,28 +4218,7 @@ export default function GastosPage({
                     zIndex: 20,
                   }}
                 >
-                  {filter.type === "date" ? (
-                    <input
-                      type="date"
-                      value={filter.selectedValue}
-                      onChange={(event) =>
-                        setFiltrosCabecera((prev) => ({
-                          ...prev,
-                          [filter.key]: event.target.value,
-                        }))
-                      }
-                      style={{
-                        width: "100%",
-                        height: 36,
-                        borderRadius: 10,
-                        border: "1px solid #D1D5DB",
-                        padding: "0 10px",
-                        fontSize: 11,
-                        color: "#111827",
-                        background: "#FFFFFF",
-                      }}
-                    />
-                  ) : filter.type === "text" ? (
+                  {filter.type === "text" ? (
                     <input
                       type="text"
                       value={filter.selectedValue ?? ""}

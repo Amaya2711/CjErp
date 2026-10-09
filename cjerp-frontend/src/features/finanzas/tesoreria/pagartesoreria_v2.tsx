@@ -576,7 +576,7 @@ export default function PagarTesoreriaV2Page() {
   const resumenBancos = useMemo(() => {
     const map = new Map<string, { banco: string; moneda: string; total: number }>();
     for (const row of rows) {
-      const banco = row.idBancoCta == null ? "Sin banco" : catalogos.bancos.find((item) => item.id === row.idBancoCta)?.nombre || "Banco no encontrado";
+      const banco = row.idBancoCta == null ? "Sin banco" : catalogos.bancosCuenta.find((item) => item.id === row.idBancoCta)?.nombre || "Banco no encontrado";
       const moneda = row.moneda || "Sin moneda";
       const key = `${banco}\u001f${moneda}`;
       const actual = map.get(key);
@@ -596,7 +596,7 @@ export default function PagarTesoreriaV2Page() {
   const exportarChucky = () => {
     const agrupados = new Map<string, { IdBancoCta: number | string; Banco: string; Responsable: string; Cuenta: string; Moneda: string; Total: number }>();
     for (const row of rows) {
-      const banco = row.idBancoCta == null ? "Sin banco" : catalogos.bancos.find((item) => item.id === row.idBancoCta)?.nombre || "Banco no encontrado";
+      const banco = row.idBancoCta == null ? "Sin banco" : catalogos.bancosCuenta.find((item) => item.id === row.idBancoCta)?.nombre || "Banco no encontrado";
       const key = `${row.idBancoCta ?? ""}\u001f${row.responsable || "Sin responsable"}\u001f${row.moneda || "Sin moneda"}`;
       const actual = agrupados.get(key);
       if (actual) actual.Total += row.total || 0;
@@ -610,7 +610,7 @@ export default function PagarTesoreriaV2Page() {
     const [{ default: jsPDF }, autoTableModule] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
     const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
     const autoTable = autoTableModule.default;
-    const nombreBanco = (id: number | null | undefined) => id == null ? "Sin banco" : catalogos.bancos.find((item) => item.id === id)?.nombre || "Banco no encontrado";
+    const nombreBanco = (id: number | null | undefined) => id == null ? "Sin banco" : catalogos.bancosCuenta.find((item) => item.id === id)?.nombre || "Banco no encontrado";
     const body: string[][] = [];
     for (const group of chuckyGroups) {
       const collapsed = chuckyCollapsed.has(`${group.label}-${group.moneda}`);
@@ -2331,7 +2331,7 @@ export default function PagarTesoreriaV2Page() {
                     "IdBancoCta",
                     detail.idBancoCta == null
                       ? null
-                      : `${detail.idBancoCta} · ${catalogos.bancos.find((b) => b.id === detail.idBancoCta)?.nombre || "Banco no encontrado"}`,
+                      : `${detail.idBancoCta} · ${catalogos.bancosCuenta.find((b) => b.id === detail.idBancoCta)?.nombre || "Banco no encontrado"}`,
                   ],
                   ["Cuenta", detail.cuenta],
                   ["CuentaInter", detail.cuentaInter],
