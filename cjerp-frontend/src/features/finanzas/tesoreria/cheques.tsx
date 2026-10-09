@@ -5,6 +5,8 @@ import CrudToolbar, {
   type CrudToolbarSearchField,
 } from "../../../components/base/CrudToolbar";
 import SidePanelForm from "../../../components/base/SidePanelForm";
+import DataGridPro from "../../../components/datagrid/DataGridPro";
+import type { GridColumn } from "../../../components/datagrid/types";
 import {
   actualizarCheque,
   crearCheque,
@@ -23,19 +25,21 @@ import { getAuthUser } from "../../../utils/authStorage";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 import { compressImageForUpload } from "../../../utils/imageCompression";
 
-type SortKey =
-  | "fechaCheque"
-  | "nroCheque"
-  | "empleado"
-  | "banco"
-  | "importe"
-  | "moneda"
-  | "estado"
-  | "comentario";
-
-type SortState = {
-  key: SortKey;
-  direction: "asc" | "desc";
+/** Fila plana del grid de cheques: cada columna trae su valor listo para ordenar, filtrar y agrupar. */
+type ChequeGridRow = {
+  cheque: ChequeRow;
+  idCheque: number;
+  fechaCheque: string;
+  nroCheque: string;
+  empleado: string;
+  banco: string;
+  importe: number;
+  moneda: string;
+  estado: string;
+  comentario: string;
+  ruta: string;
+  fechaCreacion: string;
+  fechaModificacion: string;
 };
 
 type FormState = {
@@ -85,26 +89,6 @@ function findConstanteOption(options: ConstanteOption[], selectedValue?: string 
 function getConstanteLabel(options: ConstanteOption[], value?: string | number | null) {
   const match = findConstanteOption(options, value == null ? "" : String(value));
   return match?.label ?? String(value ?? "");
-}
-
-function formatDate(value?: string | null) {
-  if (!value) return "";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleDateString("es-PE");
-}
-
-function formatDateTime(value?: string | null) {
-  if (!value) return "";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString("es-PE", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 function formatMoney(value?: number | null) {
@@ -250,7 +234,6 @@ export default function TesoreriaChequesPage() {
   const [empleados, setEmpleados] = useState<EmpleadoCta[]>([]);
   const [empleadosCargo, setEmpleadosCargo] = useState<EmpleadoCta[]>([]);
   const [search, setSearch] = useState("");
-  const [sort, setSort] = useState<SortState>({ key: "fechaCheque", direction: "desc" });
   const [loading, setLoading] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelLoading, setPanelLoading] = useState(false);
@@ -266,8 +249,6 @@ export default function TesoreriaChequesPage() {
   const [panelImagePreviewMimeType, setPanelImagePreviewMimeType] = useState("");
   const [uploadingImage, setUploadingImage] = useState(false);
   const [uploadImageError, setUploadImageError] = useState<string | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
   const archivoRutaInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const camposConstantes = useMemo(
@@ -350,7 +331,6 @@ export default function TesoreriaChequesPage() {
       setError(null);
       const data = await listarCheques();
       setRows(data);
-      setCurrentPage(1);
     } catch (err: unknown) {
       setError(getHttpErrorMessage(err, "No se pudo cargar la lista de cheques."));
     } finally {
@@ -450,61 +430,115 @@ export default function TesoreriaChequesPage() {
     ];
   }, [bankById, employeeById, estadoOptions, monedaOptions]);
 
-  const filteredRows = useMemo(() => {
-    const data = rows.filter((row) => matchesCrudToolbarSearch(row, search, searchFields));
-
-    data.sort((a, b) => {
-      const getValue = (row: ChequeRow) => {
-        switch (sort.key) {
-          case "fechaCheque":
-            return row.fechaCheque || "";
-          case "nroCheque":
-            return row.nroCheque || "";
-          case "empleado":
-            return (
-              row.nombreEmpleado ||
-              employeeById.get(row.idEmpleado)?.nombreEmpleadoCJ ||
-              employeeById.get(row.idEmpleado)?.nombreEmpleado ||
-              ""
-            );
-          case "banco":
-            return bankById.get(row.idBanco) || row.nombreBanco || "";
-          case "importe":
-            return row.importe || 0;
-          case "moneda":
-            return row.nombreMoneda || getConstanteLabel(monedaOptions, row.idMoneda);
-          case "estado":
-            return row.nombreEstado || getConstanteLabel(estadoOptions, row.idEstado);
-          case "comentario":
-            return row.comentario || "";
-          default:
-            return "";
-        }
-      };
-
-      const left = getValue(a);
-      const right = getValue(b);
-
-      if (typeof left === "number" && typeof right === "number") {
-        return sort.direction === "asc" ? left - right : right - left;
-      }
-
-      const result = String(left).localeCompare(String(right), "es", {
-        numeric: true,
-        sensitivity: "base",
-      });
-      return sort.direction === "asc" ? result : -result;
-    });
-
-    return data;
-  }, [rows, search, searchFields, sort, employeeById, bankById, monedaOptions, estadoOptions]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
-  const safeCurrentPage = Math.min(currentPage, totalPages);
-  const pagedRows = filteredRows.slice(
-    (safeCurrentPage - 1) * pageSize,
-    safeCurrentPage * pageSize
+  const filteredRows = useMemo(
+    () => rows.filter((row) => matchesCrudToolbarSearch(row, search, searchFields)),
+    [rows, search, searchFields]
   );
+
+  const gridRows = useMemo<ChequeGridRow[]>(
+    () =>
+      filteredRows.map((row) => {
+        const empleado = employeeById.get(row.idEmpleado);
+        return {
+          cheque: row,
+          idCheque: row.idCheque,
+          fechaCheque: row.fechaCheque || "",
+          nroCheque: row.nroCheque || "",
+          empleado: row.nombreEmpleado || empleado?.nombreEmpleadoCJ || empleado?.nombreEmpleado || String(row.idEmpleado ?? ""),
+          banco: bankById.get(row.idBanco) || row.nombreBanco || String(row.idBanco ?? ""),
+          importe: Number(row.importe) || 0,
+          moneda: row.nombreMoneda || getConstanteLabel(monedaOptions, row.idMoneda),
+          estado: row.nombreEstado || getConstanteLabel(estadoOptions, row.idEstado),
+          comentario: row.comentario?.trim() || "",
+          ruta: row.ruta || "",
+          fechaCreacion: row.fechaCreacion || "",
+          fechaModificacion: row.fechaModificacion || "",
+        };
+      }),
+    [filteredRows, employeeById, bankById, monedaOptions, estadoOptions]
+  );
+
+  const gridColumns: GridColumn<ChequeGridRow>[] = [
+    {
+      dataField: "acciones",
+      caption: "Acciones",
+      width: 110,
+      alignment: "center",
+      fixed: true,
+      allowSorting: false,
+      allowFiltering: false,
+      allowGrouping: false,
+      allowHeaderFilter: false,
+      allowSearch: false,
+      allowResizing: false,
+      calculateCellValue: () => "",
+      cellRender: (_value, gridRow) => {
+        const row = gridRow.cheque;
+        const accionesDeshabilitadas = row.idEstado === 0;
+        const rechazoDeshabilitado = accionesDeshabilitadas || row.idEstado === -1;
+        return (
+          <div style={styles.actionRow}>
+            <button
+              type="button"
+              style={accionesDeshabilitadas ? { ...styles.editButton, ...styles.disabledActionButton } : styles.editButton}
+              title="Editar cheque"
+              onClick={(event) => {
+                event.stopPropagation();
+                void openEditPanel(row.idCheque);
+              }}
+              disabled={accionesDeshabilitadas}
+            >
+              <Pencil size={14} />
+            </button>
+            <button
+              type="button"
+              style={rechazoDeshabilitado ? { ...styles.rejectButton, ...styles.disabledActionButton } : styles.rejectButton}
+              title="Rechazar cheque"
+              onClick={(event) => {
+                event.stopPropagation();
+                setRejectModal({ row, observacion: "", error: null, submitting: false });
+              }}
+              disabled={rechazoDeshabilitado}
+            >
+              <Ban size={14} />
+            </button>
+          </div>
+        );
+      },
+    },
+    { dataField: "fechaCheque", caption: "Fecha cheque", dataType: "date", width: 120, sortOrder: "desc" },
+    { dataField: "nroCheque", caption: "Nro cheque", width: 130 },
+    { dataField: "empleado", caption: "Empleado", width: 240 },
+    { dataField: "banco", caption: "Banco", width: 170 },
+    { dataField: "importe", caption: "Importe", dataType: "number", width: 120, format: { type: "fixedPoint", precision: 2 } },
+    { dataField: "moneda", caption: "Moneda", width: 100 },
+    { dataField: "estado", caption: "Estado", width: 110 },
+    { dataField: "comentario", caption: "Comentario", width: 240 },
+    {
+      dataField: "ruta",
+      caption: "Ruta",
+      width: 130,
+      allowGrouping: false,
+      cellRender: (_value, gridRow) =>
+        gridRow.ruta ? (
+          <button
+            type="button"
+            style={styles.linkButton}
+            title={gridRow.ruta}
+            onClick={(event) => {
+              event.stopPropagation();
+              void abrirVistaImagen(gridRow.ruta, `Cheque ${gridRow.nroCheque || gridRow.idCheque}`);
+            }}
+          >
+            Ver imagen
+          </button>
+        ) : (
+          "-"
+        ),
+    },
+    { dataField: "fechaCreacion", caption: "F. creacion", dataType: "datetime", width: 150 },
+    { dataField: "fechaModificacion", caption: "F. modificacion", dataType: "datetime", width: 150 },
+  ];
 
   const stats = useMemo(
     () => ({
@@ -890,163 +924,21 @@ export default function TesoreriaChequesPage() {
       {message ? <div style={styles.successBanner}>{message}</div> : null}
 
       <section style={styles.card}>
-        <div style={styles.tableWrap}>
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={{ ...styles.th, minWidth: 140 }}>Acciones</th>
-                <SortableHeader label="Fecha cheque" sortKey="fechaCheque" sort={sort} setSort={setSort} />
-                <SortableHeader label="Nro cheque" sortKey="nroCheque" sort={sort} setSort={setSort} />
-                <SortableHeader label="Empleado" sortKey="empleado" sort={sort} setSort={setSort} />
-                <SortableHeader label="Banco" sortKey="banco" sort={sort} setSort={setSort} />
-                <SortableHeader label="Importe" sortKey="importe" sort={sort} setSort={setSort} />
-                <SortableHeader label="Moneda" sortKey="moneda" sort={sort} setSort={setSort} />
-                <SortableHeader label="Estado" sortKey="estado" sort={sort} setSort={setSort} />
-                <SortableHeader label="Comentario" sortKey="comentario" sort={sort} setSort={setSort} />
-                <th style={{ ...styles.th, minWidth: 220 }}>Ruta</th>
-                <th style={{ ...styles.th, minWidth: 160 }}>F. creacion</th>
-                <th style={{ ...styles.th, minWidth: 160 }}>F. modificacion</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td style={styles.emptyCell} colSpan={12}>
-                    Cargando cheques...
-                  </td>
-                </tr>
-              ) : pagedRows.length === 0 ? (
-                <tr>
-                  <td style={styles.emptyCell} colSpan={12}>
-                    No hay registros para los filtros seleccionados.
-                  </td>
-                </tr>
-              ) : (
-                pagedRows.map((row) => {
-                  const empleado = employeeById.get(row.idEmpleado);
-                  const accionesDeshabilitadas = row.idEstado === 0;
-                  const rechazoDeshabilitado = accionesDeshabilitadas || row.idEstado === -1;
-                  return (
-                    <tr key={row.idCheque}>
-                      <td style={styles.td}>
-                        <div style={styles.actionRow}>
-                          <button
-                            type="button"
-                            style={
-                              accionesDeshabilitadas
-                                ? { ...styles.editButton, ...styles.disabledActionButton }
-                                : styles.editButton
-                            }
-                            title="Editar cheque"
-                            onClick={() => void openEditPanel(row.idCheque)}
-                            disabled={accionesDeshabilitadas}
-                          >
-                            <Pencil size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            style={
-                              rechazoDeshabilitado
-                                ? { ...styles.rejectButton, ...styles.disabledActionButton }
-                                : styles.rejectButton
-                            }
-                            title="Rechazar cheque"
-                            onClick={() =>
-                              setRejectModal({
-                                row,
-                                observacion: "",
-                                error: null,
-                                submitting: false,
-                              })
-                            }
-                            disabled={rechazoDeshabilitado}
-                          >
-                            <Ban size={14} />
-                          </button>
-                        </div>
-                      </td>
-                      <td style={styles.td}>{formatDate(row.fechaCheque)}</td>
-                      <td style={styles.td}>{row.nroCheque}</td>
-                      <td style={styles.td}>
-                        {row.nombreEmpleado ||
-                          empleado?.nombreEmpleadoCJ ||
-                          empleado?.nombreEmpleado ||
-                          row.idEmpleado}
-                      </td>
-                      <td style={styles.td}>{bankById.get(row.idBanco) || row.nombreBanco || row.idBanco}</td>
-                      <td style={styles.td}>{formatMoney(row.importe)}</td>
-                      <td style={styles.td}>{row.nombreMoneda || getConstanteLabel(monedaOptions, row.idMoneda)}</td>
-                      <td style={styles.td}>{row.nombreEstado || getConstanteLabel(estadoOptions, row.idEstado)}</td>
-                      <td style={styles.td} title={row.comentario ?? ""}>
-                        {row.comentario?.trim() || "-"}
-                      </td>
-                      <td style={styles.td} title={row.ruta ?? ""}>
-                        {row.ruta ? (
-                            <button
-                              type="button"
-                              style={styles.linkButton}
-                              onClick={() =>
-                                void abrirVistaImagen(
-                                  row.ruta,
-                                  `Cheque ${row.nroCheque || row.idCheque}`
-                                )
-                              }
-                            >
-                              Ver imagen
-                            </button>
-                        ) : (
-                          "-"
-                        )}
-                      </td>
-                      <td style={styles.td}>{formatDateTime(row.fechaCreacion)}</td>
-                      <td style={styles.td}>{formatDateTime(row.fechaModificacion)}</td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <div style={styles.footerRow}>
-          <span style={styles.footerText}>
-            Mostrando {pagedRows.length === 0 ? 0 : (safeCurrentPage - 1) * pageSize + 1}-
-            {Math.min(safeCurrentPage * pageSize, filteredRows.length)} de {filteredRows.length} registros
-          </span>
-          <div style={styles.paginationRow}>
-            <select
-              value={pageSize}
-              onChange={(event) => {
-                setPageSize(Number(event.target.value));
-                setCurrentPage(1);
-              }}
-              style={styles.pageSizeSelect}
-            >
-              <option value={10}>10 por pagina</option>
-              <option value={20}>20 por pagina</option>
-              <option value={50}>50 por pagina</option>
-            </select>
-            <button
-              type="button"
-              style={styles.paginationButton}
-              disabled={safeCurrentPage <= 1}
-              onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-            >
-              Anterior
-            </button>
-            <span style={styles.footerText}>
-              Pagina {safeCurrentPage} de {totalPages}
-            </span>
-            <button
-              type="button"
-              style={styles.paginationButton}
-              disabled={safeCurrentPage >= totalPages}
-              onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
-            >
-              Siguiente
-            </button>
-          </div>
-        </div>
+        <DataGridPro<ChequeGridRow>
+          dataSource={gridRows}
+          columns={gridColumns}
+          keyExpr="idCheque"
+          height="65vh"
+          loading={loading}
+          noDataText="No hay registros para los filtros seleccionados."
+          stateStoringKey="cheques"
+          showSearchPanel={false}
+          allowExport={false}
+          autoExpandAll={false}
+          rowAlternation={false}
+          rowPadding="4px 8px"
+          paging={{ pageSize: 50, pageSizes: [20, 50, 100, 250] }}
+        />
       </section>
 
       <SidePanelForm
@@ -1385,40 +1277,6 @@ export default function TesoreriaChequesPage() {
         </div>
       ) : null}
     </section>
-  );
-}
-
-function SortableHeader({
-  label,
-  sortKey,
-  sort,
-  setSort,
-}: {
-  label: string;
-  sortKey: SortKey;
-  sort: SortState;
-  setSort: React.Dispatch<React.SetStateAction<SortState>>;
-}) {
-  const isActive = sort.key === sortKey;
-  const glyph = isActive ? (sort.direction === "asc" ? "▲" : "▼") : "↕";
-
-  return (
-    <th style={{ ...styles.th, minWidth: 140 }}>
-      <button
-        type="button"
-        style={styles.sortButton}
-        onClick={() =>
-          setSort((prev) =>
-            prev.key === sortKey
-              ? { key: sortKey, direction: prev.direction === "asc" ? "desc" : "asc" }
-              : { key: sortKey, direction: "asc" }
-          )
-        }
-      >
-        <span>{label}</span>
-        <span>{glyph}</span>
-      </button>
-    </th>
   );
 }
 

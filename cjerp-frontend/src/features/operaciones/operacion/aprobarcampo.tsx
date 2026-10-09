@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { ArrowUpRight, ClipboardList } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import CrudToolbar, {
@@ -6,6 +6,8 @@ import CrudToolbar, {
   type CrudToolbarSearchField,
 } from "../../../components/base/CrudToolbar";
 import SidePanelForm from "../../../components/base/SidePanelForm";
+import DataGridPro from "../../../components/datagrid/DataGridPro";
+import type { GridColumn } from "../../../components/datagrid/types";
 import {
   actualizarAprobarCampo,
   aprobarIngresoAprobarCampo,
@@ -27,11 +29,6 @@ import type { AuditoriaCambioItem } from "../../../models/auditoria";
 import { getAuthUser } from "../../../utils/authStorage";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 import { SHAREPOINT_BASE_URL } from "../../../utils/sharepoint";
-
-type SortState = {
-  key: string;
-  direction: "asc" | "desc";
-};
 
 type Draft = {
   idAsistencia?: number;
@@ -88,16 +85,6 @@ type AprobarCampoNavigationState = {
   sourceLabel?: string;
 };
 
-type ColumnFilterDropdownProps = {
-  header: { key: string; label: string };
-  filtroColumnaMenuRef: React.RefObject<HTMLDivElement | null>;
-  filtrosColumnas: Record<string, string[]>;
-  setFiltrosColumnas: React.Dispatch<React.SetStateAction<Record<string, string[]>>>;
-  opcionesFiltroPorColumna: Record<string, string[]>;
-  filtroBusqueda: string;
-  setFiltroBusqueda: (value: string) => void;
-};
-
 const visibleColumns = [
   { key: "responsable", label: "Responsable", width: "180px" },
   { key: "nombreempleado", label: "Empleado", width: "200px" },
@@ -111,8 +98,6 @@ const visibleColumns = [
   { key: "horasalida", label: "Salida", width: "130px" },
   { key: "comentario", label: "Comentario", width: "240px" },
 ] as const;
-
-const actionColumnWidth = "190px";
 
 // Estilos para botones deshabilitados
 const disabledButtonStyle = {
@@ -236,25 +221,6 @@ function getSalidaImage(row: AprobarCampoRow) {
       row.imagenSalida ||
       (row as Record<string, unknown>).imagenSalidaRuta
   );
-}
-
-function normalizeColumnValue(value: unknown) {
-  return String(value ?? "").trim();
-}
-
-function matchesColumnFilterValue(value: unknown, selectedValues: string[]) {
-  if (!selectedValues.length) return true;
-  return selectedValues.includes(normalizeColumnValue(value));
-}
-
-function formatDate(value?: string | null) {
-  if (!value) return "";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-
-  return parsed.toLocaleDateString("es-PE");
 }
 
 function formatDateTime(value?: string | null) {
@@ -409,80 +375,6 @@ function hasCoordinates(lat?: string, lng?: string) {
   return Boolean(lat?.trim() && lng?.trim());
 }
 
-function ColumnFilterDropdown({
-  header,
-  filtroColumnaMenuRef,
-  filtrosColumnas,
-  setFiltrosColumnas,
-  opcionesFiltroPorColumna,
-  filtroBusqueda,
-  setFiltroBusqueda,
-}: ColumnFilterDropdownProps) {
-  const opciones = (opcionesFiltroPorColumna[header.key] ?? []).filter((opcion) =>
-    (opcion || "(Vacio)").toLowerCase().includes(filtroBusqueda.toLowerCase())
-  );
-
-  return (
-    <div
-      ref={filtroColumnaMenuRef}
-      onClick={(event) => event.stopPropagation()}
-      style={styles.columnFilter}
-    >
-      <div style={styles.columnFilterHeader}>
-        <strong style={styles.columnFilterTitle}>{header.label}</strong>
-        <button
-          type="button"
-          onClick={() => setFiltrosColumnas((prev) => ({ ...prev, [header.key]: [] }))}
-          style={styles.clearInlineButton}
-        >
-          Limpiar
-        </button>
-      </div>
-      <input
-        type="text"
-        placeholder="Buscar opcion..."
-        value={filtroBusqueda}
-        onChange={(event) => setFiltroBusqueda(event.target.value)}
-        style={styles.columnFilterInput}
-      />
-      <label style={styles.columnFilterItem}>
-        <input
-          type="checkbox"
-          checked={(filtrosColumnas[header.key] ?? []).length === 0}
-          onChange={() => setFiltrosColumnas((prev) => ({ ...prev, [header.key]: [] }))}
-        />
-        <span>(Todas)</span>
-      </label>
-      <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 220, overflowY: "auto" }}>
-        {opciones.map((opcion) => {
-          const seleccionadas = filtrosColumnas[header.key] ?? [];
-          const checked = seleccionadas.includes(opcion);
-          return (
-            <label key={`${header.key}-${opcion}`} style={styles.columnFilterItem}>
-              <input
-                type="checkbox"
-                checked={checked}
-                onChange={() =>
-                  setFiltrosColumnas((prev) => {
-                    const actuales = prev[header.key] ?? [];
-                    return {
-                      ...prev,
-                      [header.key]: checked
-                        ? actuales.filter((item) => item !== opcion)
-                        : [...actuales, opcion],
-                    };
-                  })
-                }
-              />
-              <span>{opcion || "(Vacio)"}</span>
-            </label>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 export default function AprobarCampoPage() {
     // Estado para el checkbox 'Incluido día actual'
     const [incluirDiaActual, setIncluirDiaActual] = useState(false);
@@ -523,13 +415,7 @@ export default function AprobarCampoPage() {
   const [responsablesModalOpen, setResponsablesModalOpen] = useState(false);
   const [responsablesResumenRows, setResponsablesResumenRows] = useState<AprobarCampoRow[]>([]);
   const [responsablesResumenLoading, setResponsablesResumenLoading] = useState(false);
-  const [openColumnFilterKey, setOpenColumnFilterKey] = useState<string | null>(null);
-  const [columnFilterSearch, setColumnFilterSearch] = useState("");
-  const [filtrosColumnas, setFiltrosColumnas] = useState<Record<string, string[]>>({});
-  const [sort, setSort] = useState<SortState | null>(null);
   const [selectedRecordKeys, setSelectedRecordKeys] = useState<Set<string>>(new Set());
-  const filtroColumnaMenuRef = useRef<HTMLDivElement | null>(null);
-  const sortableColumns = ["responsable", "nombreempleado", "estado", "fechaasistencia", "hora", "horasalida"];
 
   const navigationState = (location.state as AprobarCampoNavigationState | null) ?? null;
   const [showInitialNavigationBanner, setShowInitialNavigationBanner] = useState(
@@ -604,41 +490,8 @@ export default function AprobarCampoPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incluirDiaActual]);
 
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        openColumnFilterKey &&
-        filtroColumnaMenuRef.current &&
-        !filtroColumnaMenuRef.current.contains(event.target as Node)
-      ) {
-        setOpenColumnFilterKey(null);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [openColumnFilterKey]);
-
-  const opcionesFiltroPorColumna = useMemo(() => {
-    const options: Record<string, string[]> = {};
-
-    visibleColumns.forEach((column) => {
-      options[column.key] = Array.from(
-        new Set(rows.map((row) => normalizeColumnValue(row[column.key])).filter(Boolean))
-      ).sort((a, b) => a.localeCompare(b, "es"));
-    });
-
-    return options;
-  }, [rows]);
-
   const filteredRows = useMemo(() => {
-    let result = rows
-      .filter((row) => matchesCrudToolbarSearch(row, search, searchFields))
-      .filter((row) =>
-        visibleColumns.every((column) =>
-          matchesColumnFilterValue(row[column.key], filtrosColumnas[column.key] ?? [])
-        )
-      );
+    let result = rows.filter((row) => matchesCrudToolbarSearch(row, search, searchFields));
     // Si el checkbox está desmarcado, filtrar el día actual
     if (!incluirDiaActual) {
       const hoy = new Date();
@@ -663,28 +516,8 @@ export default function AprobarCampoPage() {
         return fechaSolo !== hoyStr;
       });
     }
-    if (sort && sortableColumns.includes(sort.key)) {
-      result = [...result].sort((a, b) => {
-        const aValue = toText(a[sort.key]);
-        const bValue = toText(b[sort.key]);
-        if (sort.key === 'fechaasistencia' || sort.key === 'hora' || sort.key === 'horasalida') {
-          // Ordenar por fecha/hora/salida
-          const aDate = new Date(aValue);
-          const bDate = new Date(bValue);
-          if (aDate < bDate) return sort.direction === 'asc' ? -1 : 1;
-          if (aDate > bDate) return sort.direction === 'asc' ? 1 : -1;
-          return 0;
-        }
-        if (aValue < bValue) return sort.direction === 'asc' ? -1 : 1;
-        if (aValue > bValue) return sort.direction === 'asc' ? 1 : -1;
-        return 0;
-      });
-    }
     return result;
-  }, [filtrosColumnas, rows, search, searchFields, sort, incluirDiaActual]);
-
-  const allFilteredRowsSelected =
-    filteredRows.length > 0 && filteredRows.every((row) => selectedRecordKeys.has(buildRowKey(row)));
+  }, [rows, search, searchFields, incluirDiaActual]);
 
   // Total: siempre la cantidad de registros cargados (sin filtros)
   // Filtrados: solo los visibles tras aplicar filtros
@@ -1021,7 +854,6 @@ export default function AprobarCampoPage() {
 
     setResponsablesModalOpen(false);
     setSearch("");
-    setFiltrosColumnas({});
     setFilters(nextFilters);
     // Al igual que Limpiar filtros, recarga los datos y actualiza el total
     await loadRows(nextFilters);
@@ -1049,6 +881,205 @@ export default function AprobarCampoPage() {
     const finalUrl = url.startsWith("http") ? url : SHAREPOINT_PREFIX + url;
     setMediaViewer({ type: "image", title, url: finalUrl });
   };
+
+  const gridColumns: GridColumn<AprobarCampoRow>[] = [
+    {
+      dataField: "acciones",
+      caption: "Acciones",
+      width: 170,
+      alignment: "center",
+      fixed: true,
+      allowSorting: false,
+      allowFiltering: false,
+      allowGrouping: false,
+      allowHeaderFilter: false,
+      allowSearch: false,
+      allowResizing: false,
+      calculateCellValue: () => "",
+      cellRender: (_value, row) => {
+        const ingresoActionEnabled =
+          canApproveIngreso(row) &&
+          Boolean(getValorIngreso(row)) &&
+          hasCoordinates(getIngresoCoordinates(row).lat, getIngresoCoordinates(row).lng);
+        const salidaActionEnabled =
+          canApproveSalida(row) &&
+          Boolean(getValorSalida(row)) &&
+          hasCoordinates(getSalidaCoordinates(row).lat, getSalidaCoordinates(row).lng);
+        const rechazoEnabled = canRejectRow(row);
+        return (
+          <div style={styles.rowActions}>
+            <button
+              type="button"
+              style={{ ...styles.successTinyButton, ...(ingresoActionEnabled ? {} : disabledButtonStyle) }}
+              onClick={(event) => {
+                event.stopPropagation();
+                handleOpenAction("aprobar-ingreso", row);
+              }}
+              disabled={!ingresoActionEnabled}
+              title="Aprobar ingreso"
+            >
+              <span role="img" aria-label="Aprobar ingreso">✅</span>
+            </button>
+            <button
+              type="button"
+              style={{ ...styles.successTinyButton, ...(salidaActionEnabled ? {} : disabledButtonStyle) }}
+              onClick={(event) => {
+                event.stopPropagation();
+                handleOpenAction("aprobar-salida", row);
+              }}
+              disabled={!salidaActionEnabled}
+              title="Aprobar salida"
+            >
+              <span role="img" aria-label="Aprobar salida">🕒</span>
+            </button>
+            <button
+              type="button"
+              style={{ ...styles.dangerTinyButton, ...(rechazoEnabled ? {} : disabledButtonStyle) }}
+              onClick={(event) => {
+                event.stopPropagation();
+                handleOpenAction("rechazar", row);
+              }}
+              disabled={!rechazoEnabled}
+              title="Rechazar"
+            >
+              <span role="img" aria-label="Rechazar">❌</span>
+            </button>
+          </div>
+        );
+      },
+    },
+    ...visibleColumns.map<GridColumn<AprobarCampoRow>>((column) => {
+      const base: GridColumn<AprobarCampoRow> = {
+        dataField: column.key,
+        caption: column.label,
+        width: Number.parseInt(column.width, 10),
+        calculateCellValue: (row) => toText(row[column.key]),
+      };
+      if (column.key === "fechaasistencia") return { ...base, dataType: "date" };
+      if (column.key === "hora" || column.key === "horasalida") {
+        return { ...base, cellRender: (value) => formatTime(toText(value)) || "-" };
+      }
+      return base;
+    }),
+    {
+      dataField: "mapaIngreso",
+      caption: "Mapa ingreso",
+      width: 110,
+      allowSorting: false,
+      allowFiltering: false,
+      allowGrouping: false,
+      allowHeaderFilter: false,
+      allowSearch: false,
+      calculateCellValue: () => "",
+      cellRender: (_value, row) => {
+        const enabled =
+          canApproveIngreso(row) &&
+          Boolean(getValorIngreso(row)) &&
+          hasCoordinates(getIngresoCoordinates(row).lat, getIngresoCoordinates(row).lng);
+        return (
+          <button
+            type="button"
+            style={{ ...styles.linkButton, ...(enabled ? {} : disabledButtonStyle) }}
+            disabled={!enabled}
+            onClick={(event) => {
+              event.stopPropagation();
+              handleOpenMap("Ubicación de ingreso", toText(row.latitud), toText(row.longitud));
+            }}
+          >
+            Ver mapa
+          </button>
+        );
+      },
+    },
+    {
+      dataField: "mapaSalida",
+      caption: "Mapa salida",
+      width: 110,
+      allowSorting: false,
+      allowFiltering: false,
+      allowGrouping: false,
+      allowHeaderFilter: false,
+      allowSearch: false,
+      calculateCellValue: () => "",
+      cellRender: (_value, row) => {
+        const enabled =
+          canApproveSalida(row) &&
+          Boolean(getValorSalida(row)) &&
+          hasCoordinates(getSalidaCoordinates(row).lat, getSalidaCoordinates(row).lng);
+        return (
+          <button
+            type="button"
+            style={{ ...styles.linkButton, ...(enabled ? {} : disabledButtonStyle) }}
+            disabled={!enabled}
+            onClick={(event) => {
+              event.stopPropagation();
+              handleOpenMap(
+                "Ubicación de salida",
+                toText(row.latitudsalida || row.latitudSalida),
+                toText(row.longitudsalida || row.longitudSalida)
+              );
+            }}
+          >
+            Ver mapa
+          </button>
+        );
+      },
+    },
+    {
+      dataField: "imagenIngreso",
+      caption: "Imagen",
+      width: 110,
+      allowSorting: false,
+      allowFiltering: false,
+      allowGrouping: false,
+      allowHeaderFilter: false,
+      allowSearch: false,
+      calculateCellValue: () => "",
+      cellRender: (_value, row) => {
+        const enabled = canApproveIngreso(row) && Boolean(getValorIngreso(row)) && Boolean(getIngresoImage(row));
+        return (
+          <button
+            type="button"
+            style={{ ...styles.linkButton, ...(enabled ? {} : disabledButtonStyle) }}
+            disabled={!enabled}
+            onClick={(event) => {
+              event.stopPropagation();
+              handleOpenImage("Imagen de ingreso", getIngresoImage(row));
+            }}
+          >
+            Ver imagen
+          </button>
+        );
+      },
+    },
+    {
+      dataField: "imagenSalida",
+      caption: "Imagen salida",
+      width: 130,
+      allowSorting: false,
+      allowFiltering: false,
+      allowGrouping: false,
+      allowHeaderFilter: false,
+      allowSearch: false,
+      calculateCellValue: () => "",
+      cellRender: (_value, row) => {
+        const enabled = canApproveSalida(row) && Boolean(getValorSalida(row)) && Boolean(getSalidaImage(row));
+        return (
+          <button
+            type="button"
+            style={{ ...styles.linkButton, ...(enabled ? {} : disabledButtonStyle) }}
+            disabled={!enabled}
+            onClick={(event) => {
+              event.stopPropagation();
+              handleOpenImage("Imagen de salida", getSalidaImage(row));
+            }}
+          >
+            Ver imagen
+          </button>
+        );
+      },
+    },
+  ];
 
   return (
     <section style={styles.page}>
@@ -1120,7 +1151,6 @@ export default function AprobarCampoPage() {
             onClick={async () => {
               setSearch("");
               setFilters(initialFilters);
-              setFiltrosColumnas({});
               setShowInitialNavigationBanner(false);
               setCanReturnToAsistencia(false);
               await loadRows(initialFilters);
@@ -1170,246 +1200,26 @@ export default function AprobarCampoPage() {
           </div>
         ) : null}
 
-        <div style={styles.tableWrapper}>
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={{ ...styles.th, minWidth: actionColumnWidth }}>
-                  <label style={styles.selectionHeaderLabel}>
-                    <input
-                      type="checkbox"
-                      checked={allFilteredRowsSelected}
-                      onChange={(event) => {
-                        setSelectedRecordKeys((current) => {
-                          const next = new Set(current);
-                          filteredRows.forEach((row) => {
-                            const key = buildRowKey(row);
-                            if (event.target.checked) next.add(key);
-                            else next.delete(key);
-                          });
-                          return next;
-                        });
-                      }}
-                      aria-label="Seleccionar todos los registros filtrados"
-                    />
-                    Acciones
-                  </label>
-                </th>
-                {visibleColumns.map((column) => (
-                  <th key={column.key} style={{ ...styles.th, minWidth: column.width }}>
-                    <div style={styles.thContent}>
-                      <span>{column.label}</span>
-                      {sortableColumns.includes(column.key) && (
-                        <button
-                          type="button"
-                          style={{ ...styles.filterButton, marginLeft: 4, padding: '4px 6px' }}
-                          title={sort?.key === column.key ? (sort.direction === 'asc' ? 'Orden ascendente' : 'Orden descendente') : 'Ordenar'}
-                          onClick={() => {
-                            setSort((prev) => {
-                              if (!prev || prev.key !== column.key) return { key: column.key, direction: 'asc' };
-                              if (prev.direction === 'asc') return { key: column.key, direction: 'desc' };
-                              return null; // Quitar orden
-                            });
-                          }}
-                        >
-                          {sort?.key === column.key ? (sort.direction === 'asc' ? '▲' : '▼') : '↕'}
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        style={styles.filterButton}
-                        onClick={() => {
-                          setOpenColumnFilterKey((prev) => (prev === column.key ? null : column.key));
-                          setColumnFilterSearch("");
-                        }}
-                      >
-                        Filtrar
-                      </button>
-                    </div>
-                    {openColumnFilterKey === column.key ? (
-                      <ColumnFilterDropdown
-                        header={{ key: column.key, label: column.label }}
-                        filtroColumnaMenuRef={filtroColumnaMenuRef}
-                        filtrosColumnas={filtrosColumnas}
-                        setFiltrosColumnas={setFiltrosColumnas}
-                        opcionesFiltroPorColumna={opcionesFiltroPorColumna}
-                        filtroBusqueda={columnFilterSearch}
-                        setFiltroBusqueda={setColumnFilterSearch}
-                      />
-                    ) : null}
-                  </th>
-                ))}
-                <th style={{ ...styles.th, minWidth: "110px" }}>Mapa ingreso</th>
-                <th style={{ ...styles.th, minWidth: "110px" }}>Mapa salida</th>
-                <th style={{ ...styles.th, minWidth: "110px" }}>Imagen</th>
-                <th style={{ ...styles.th, minWidth: "130px" }}>Imagen salida</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={visibleColumns.length + 5} style={styles.emptyCell}>
-                    Cargando aprobaciones de campo...
-                  </td>
-                </tr>
-              ) : filteredRows.length === 0 ? (
-                <tr>
-                  <td colSpan={visibleColumns.length + 5} style={styles.emptyCell}>
-                    No hay registros para los filtros seleccionados.
-                  </td>
-                </tr>
-              ) : (
-                filteredRows.map((row) => {
-                  const ingresoActionEnabled =
-                    canApproveIngreso(row) &&
-                    Boolean(getValorIngreso(row)) &&
-                    hasCoordinates(getIngresoCoordinates(row).lat, getIngresoCoordinates(row).lng);
-                  const salidaActionEnabled =
-                    canApproveSalida(row) &&
-                    Boolean(getValorSalida(row)) &&
-                    hasCoordinates(getSalidaCoordinates(row).lat, getSalidaCoordinates(row).lng);
-                  const rechazoEnabled = canRejectRow(row);
-                  const ingresoMapEnabled = ingresoActionEnabled;
-                  const salidaMapEnabled = salidaActionEnabled;
-                  const ingresoImageEnabled =
-                    canApproveIngreso(row) && Boolean(getValorIngreso(row)) && Boolean(getIngresoImage(row));
-                  const salidaImageEnabled =
-                    canApproveSalida(row) && Boolean(getValorSalida(row)) && Boolean(getSalidaImage(row));
-
-                  return (
-                  <tr key={buildRowKey(row)}>
-                    <td style={styles.td}>
-                      <div style={styles.rowActions}>
-                        <input
-                          type="checkbox"
-                          checked={selectedRecordKeys.has(buildRowKey(row))}
-                          onChange={(event) => {
-                            const key = buildRowKey(row);
-                            setSelectedRecordKeys((current) => {
-                              const next = new Set(current);
-                              if (event.target.checked) next.add(key);
-                              else next.delete(key);
-                              return next;
-                            });
-                          }}
-                          aria-label={`Seleccionar registro ${buildRowKey(row)}`}
-                        />
-                        {/* Botón Editar eliminado por requerimiento */}
-                        <button
-                          type="button"
-                          style={{
-                            ...styles.successTinyButton,
-                            // Deshabilitar si el botón de mapa ingreso está inactivo
-                            ...(ingresoActionEnabled ? {} : disabledButtonStyle),
-                          }}
-                          onClick={() => handleOpenAction("aprobar-ingreso", row)}
-                          disabled={!ingresoActionEnabled}
-                          title="Aprobar ingreso"
-                        >
-                          <span role="img" aria-label="Aprobar ingreso">✅</span>
-                        </button>
-                        <button
-                          type="button"
-                          style={{
-                            ...styles.successTinyButton,
-                            // Deshabilitar si el botón de mapa salida está inactivo
-                            ...(salidaActionEnabled ? {} : disabledButtonStyle),
-                          }}
-                          onClick={() => handleOpenAction("aprobar-salida", row)}
-                          disabled={!salidaActionEnabled}
-                          title="Aprobar salida"
-                        >
-                          <span role="img" aria-label="Aprobar salida">🕒</span>
-                        </button>
-                        <button
-                          type="button"
-                          style={{
-                            ...styles.dangerTinyButton,
-                            ...(rechazoEnabled ? {} : disabledButtonStyle),
-                          }}
-                          onClick={() => handleOpenAction("rechazar", row)}
-                          disabled={!rechazoEnabled}
-                          title="Rechazar"
-                        >
-                          <span role="img" aria-label="Rechazar">❌</span>
-                        </button>
-                      </div>
-                    </td>
-                    {visibleColumns.map((column) => {
-                      const value = row[column.key];
-                      const displayValue =
-                        column.key === "fechaasistencia"
-                          ? formatDate(toText(value))
-                          : column.key === "hora" || column.key === "horasalida"
-                          ? formatTime(toText(value))
-                          : toText(value);
-
-                      return (
-                        <td key={column.key} style={styles.td}>
-                          <span title={toText(value)}>{displayValue || "-"}</span>
-                        </td>
-                      );
-                    })}
-                    <td style={styles.td}>
-                      <button
-                        type="button"
-                        style={{
-                          ...styles.linkButton,
-                          ...(ingresoMapEnabled ? {} : disabledButtonStyle),
-                        }}
-                        disabled={!ingresoMapEnabled}
-                        onClick={() => handleOpenMap("Ubicación de ingreso", toText(row.latitud), toText(row.longitud))}
-                      >
-                        Ver mapa
-                      </button>
-                    </td>
-                    <td style={styles.td}>
-                      <button
-                        type="button"
-                        style={{
-                          ...styles.linkButton,
-                          ...(salidaMapEnabled ? {} : disabledButtonStyle),
-                        }}
-                        disabled={!salidaMapEnabled}
-                        onClick={() =>
-                          handleOpenMap("Ubicación de salida", toText(row.latitudsalida || row.latitudSalida), toText(row.longitudsalida || row.longitudSalida))
-                        }
-                      >
-                        Ver mapa
-                      </button>
-                    </td>
-                    <td style={styles.td}>
-                      <button
-                        type="button"
-                        style={{
-                          ...styles.linkButton,
-                          ...(ingresoImageEnabled ? {} : disabledButtonStyle),
-                        }}
-                        disabled={!ingresoImageEnabled}
-                        onClick={() => handleOpenImage("Imagen de ingreso", getIngresoImage(row))}
-                      >
-                        Ver imagen
-                      </button>
-                    </td>
-                    <td style={styles.td}>
-                      <button
-                        type="button"
-                        style={{
-                          ...styles.linkButton,
-                          ...(salidaImageEnabled ? {} : disabledButtonStyle),
-                        }}
-                        disabled={!salidaImageEnabled}
-                        onClick={() => handleOpenImage("Imagen de salida", getSalidaImage(row))}
-                      >
-                        Ver imagen
-                      </button>
-                    </td>
-                  </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+          <DataGridPro<AprobarCampoRow>
+            dataSource={filteredRows}
+            columns={gridColumns}
+            keyExpr={buildRowKey}
+            height="fill"
+            loading={loading}
+            noDataText="No hay registros para los filtros seleccionados."
+            stateStoringKey="aprobarcampo"
+            showSearchPanel={false}
+            allowExport={false}
+            autoExpandAll={false}
+            rowAlternation={false}
+            rowPadding="3px 8px"
+            selection="multiple"
+            selectionDisabled={saving}
+            selectedKeys={Array.from(selectedRecordKeys)}
+            onSelectionChanged={(keys) => setSelectedRecordKeys(new Set(keys))}
+            paging={{ pageSize: 100, pageSizes: [50, 100, 250, 500] }}
+          />
         </div>
 
       </div>

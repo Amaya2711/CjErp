@@ -2411,7 +2411,7 @@ export default function PagosV2Page() {
         return {
           primary: { label: "Aprobar", icon: <CheckCircle2 size={18} />, color: "#1D4ED8", soft: "#EFF6FF", border: "#93C5FD" },
           secondary: { label: "Rechazar", icon: <XCircle size={18} />, color: "#DC2626", soft: "#FEF2F2", border: "#FCA5A5" },
-          tertiary: { label: "Ver PDF", icon: <Printer size={18} />, color: "#334155", soft: "#FFFFFF", border: "#CBD5E1" },
+          tertiary: { label: "Observar", icon: <AlertTriangle size={18} />, color: "#DC2626", soft: "#FEF2F2", border: "#FCA5A5" },
           quaternary: { label: "Regularizar", icon: <ShieldCheck size={18} />, color: "#0F766E", soft: "#F0FDFA", border: "#5EEAD4" },
         };
       case "reaprobar":

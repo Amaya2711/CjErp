@@ -1,8 +1,8 @@
-import React, { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
   // Estado para fila seleccionada
   
 import { useCrudForm } from "../../../hooks/useCrudForm";
-import { ArrowDown, ArrowUp, Eye, Pencil, Trash2 } from "lucide-react";
+import { Eye, Pencil, Trash2 } from "lucide-react";
 import httpClient from "../../../api/httpClient";
 import {
   buildPlanillaConsultaEstadosRequest,
@@ -24,6 +24,8 @@ import { getAuthUser } from "../../../utils/authStorage";
 import { compressImageForUpload } from "../../../utils/imageCompression";
 import { buildSharePointUrl } from "../../../utils/sharepoint";
 import { getHttpErrorMessage } from "../../../utils/httpError";
+import DataGridPro from "../../../components/datagrid/DataGridPro";
+import type { GridColumn } from "../../../components/datagrid/types";
 
 type GastoDto = {
   id: number;
@@ -291,7 +293,6 @@ type GastosHeaderMultiFilterKey =
 
 type GastosHeaderSearchableFilterKey = "cliente" | "proyecto" | "site" | "tipoTrabajo" | "solicitante" | "responsable" | "validador";
 type HistorialSitioView = "listado" | "resumen";
-type HistorialSitioSortKey = "correlativo" | "fecha" | "subtotal" | "moneda" | "solicitante";
 
 const GASTOS_HEADER_FILTER_SEARCH_INITIAL: Record<GastosHeaderSearchableFilterKey, string> = {
   cliente: "",
@@ -303,8 +304,35 @@ const GASTOS_HEADER_FILTER_SEARCH_INITIAL: Record<GastosHeaderSearchableFilterKe
   validador: "",
 };
 
-const GASTOS_GRID_ROW_HEIGHT = 46;
-const GASTOS_GRID_OVERSCAN_ROWS = 14;
+/** Fila plana del grid de gastos: cada columna ya trae su valor listo para ordenar, filtrar, agrupar y exportar. */
+type GastoGridRow = {
+  rowKey: string;
+  rowIndex: number;
+  gasto: GastoForm;
+  id: number;
+  cliente: string;
+  nombreProyecto: string;
+  site: string;
+  tipoTrabajo: string;
+  tarea: string;
+  estado: string;
+  bien: string;
+  comprobante: string;
+  monto: number | null;
+  totalPagar: number | null;
+  moneda: string;
+  banco: string;
+  nroOperacion: string;
+  fechaDeposito: string;
+  fecIngreso: string;
+  ot: string;
+  solicitante: string;
+  responsable: string;
+  cuentaNumero: string;
+  cuentaInter: string;
+  validador: string;
+  detalle: string;
+};
 
 type FacturaUploadResponse = {
   fileName: string;
@@ -1338,7 +1366,6 @@ export default function GastosPage({
   const [cabeceraFiltroAbierto, setCabeceraFiltroAbierto] = useState<string | null>(null);
   const [mensajeFiltroCabecera, setMensajeFiltroCabecera] = useState<string | null>(null);
     // Estado para ordenamiento
-    const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
 
   const [showFacturaViewer, setShowFacturaViewer] = useState(false);
   const [facturaViewerUrl, setFacturaViewerUrl] = useState("");
@@ -1354,7 +1381,6 @@ export default function GastosPage({
   const [historialSitioView, setHistorialSitioView] = useState<HistorialSitioView>("listado");
   const [historialSitioSolicitante, setHistorialSitioSolicitante] = useState("");
   const [historialSitioDetalleActivo, setHistorialSitioDetalleActivo] = useState<string | null>(null);
-  const [historialSitioSort, setHistorialSitioSort] = useState<{ key: HistorialSitioSortKey; direction: "asc" | "desc" }>({ key: "fecha", direction: "desc" });
   const historialSitioLastKeyRef = useRef("");
   const cargaInicialGastosListaRef = useRef(false);
   const constantesInicialesIniciadasRef = useRef(false);
@@ -1811,41 +1837,6 @@ export default function GastosPage({
       : historialSitioRows;
   }, [historialSitioRows, historialSitioSolicitante]);
 
-  const historialSitioRowsOrdenados = useMemo(() => {
-    const factor = historialSitioSort.direction === "asc" ? 1 : -1;
-    return [...historialSitioRowsFiltrados].sort((left, right) => {
-      const leftValue = historialSitioSort.key === "correlativo"
-        ? Number(left.id ?? 0)
-        : historialSitioSort.key === "fecha"
-          ? normalizeFecIngresoFromStore(left.fecIngreso)
-          : historialSitioSort.key === "subtotal"
-            ? Number(left.subtotal ?? left.monto ?? 0)
-            : historialSitioSort.key === "moneda"
-              ? (left.monedaLabel || left.moneda || "")
-              : (left.solicitanteLabel || left.solicitante || "");
-      const rightValue = historialSitioSort.key === "correlativo"
-        ? Number(right.id ?? 0)
-        : historialSitioSort.key === "fecha"
-          ? normalizeFecIngresoFromStore(right.fecIngreso)
-          : historialSitioSort.key === "subtotal"
-            ? Number(right.subtotal ?? right.monto ?? 0)
-            : historialSitioSort.key === "moneda"
-              ? (right.monedaLabel || right.moneda || "")
-              : (right.solicitanteLabel || right.solicitante || "");
-
-      return typeof leftValue === "number" && typeof rightValue === "number"
-        ? factor * (leftValue - rightValue)
-        : factor * String(leftValue).localeCompare(String(rightValue), "es", { numeric: true, sensitivity: "base" });
-    });
-  }, [historialSitioRowsFiltrados, historialSitioSort]);
-
-  const ordenarHistorialSitio = (key: HistorialSitioSortKey) => {
-    setHistorialSitioSort((current) => ({
-      key,
-      direction: current.key === key && current.direction === "asc" ? "desc" : "asc",
-    }));
-  };
-
   const historialSitioTotalesPorMoneda = useMemo(() => {
     const totals = new Map<string, number>();
     historialSitioRowsFiltrados.forEach((row) => {
@@ -2165,9 +2156,6 @@ export default function GastosPage({
       setGuardandoNuevoResponsable(false);
     }
   };
-  const gastosGridScrollRef = useRef<HTMLDivElement | null>(null);
-  const [gastosGridScrollTop, setGastosGridScrollTop] = useState(0);
-  const [gastosGridViewportHeight, setGastosGridViewportHeight] = useState(520);
 
   // La consulta de Planilla conserva la cuenta, pero no siempre IdBancoCta.
   // Al cargar el catálogo, completar sólo ese identificador para el gasto abierto.
@@ -3338,28 +3326,7 @@ export default function GastosPage({
   }, []);
   // Ordenar y luego filtrar gastos: el ordenamiento se aplica a todos los registros cargados
   const gastosFiltradosBase = useMemo(() => {
-    let sorted = [...gastosSafe];
-    if (sortConfig) {
-      const { key, direction } = sortConfig;
-      const col = camposBusquedaGastos.find((c) => c.key === key);
-      if (col) {
-        sorted.sort((a, b) => {
-          let aValue = col.getValue(a);
-          let bValue = col.getValue(b);
-          // Si es string, comparar insensible a mayúsculas
-          if (typeof aValue === 'string' && typeof bValue === 'string') {
-            aValue = aValue.toLowerCase();
-            bValue = bValue.toLowerCase();
-          }
-          if (aValue == null) return 1;
-          if (bValue == null) return -1;
-          if (aValue < bValue) return direction === 'asc' ? -1 : 1;
-          if (aValue > bValue) return direction === 'asc' ? 1 : -1;
-          return 0;
-        });
-      }
-    }
-    // Filtrar después de ordenar
+    const sorted = [...gastosSafe];
     return sorted
       .filter((gasto) => matchesCrudToolbarSearch(gasto, busqueda, camposBusquedaGastos))
       .filter((gasto) => {
@@ -3407,7 +3374,6 @@ export default function GastosPage({
     gastosSafe,
     monedaOptions,
     solicitanteOptions,
-    sortConfig,
     validadorOptions,
   ]);
   const cantidadRegistrosFiltrados = gastosFiltradosBase.length;
@@ -3452,33 +3418,6 @@ export default function GastosPage({
     ],
     []
   );
-  const columnasCongeladasGrid = useMemo(
-    () =>
-      new Set([
-        "id",
-        "acciones",
-        "cliente",
-        "nombreProyecto",
-        "site",
-        "tipoTrabajo",
-      ]),
-    []
-  );
-  const stickyLeftByColumn = useMemo(() => {
-    let left = 0;
-    const offsets: Record<string, number> = {};
-
-    for (const columna of columnasGridGastos) {
-      if (columnasCongeladasGrid.has(columna.key)) {
-        offsets[columna.key] = left;
-      }
-
-      const width = Number.parseInt(columna.width, 10);
-      left += Number.isFinite(width) ? width : 0;
-    }
-
-    return offsets;
-  }, [columnasGridGastos]);
 
   useEffect(() => {
     if (!cabeceraFiltroAbierto) {
@@ -3499,319 +3438,171 @@ export default function GastosPage({
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [cabeceraFiltroAbierto]);
 
-  const gastosGridVirtualWindow = useMemo(() => {
-    const totalRows = gastosFiltradosDiferidos.length;
-
-    if (totalRows === 0) {
-      return {
-        startIndex: 0,
-        topSpacerHeight: 0,
-        bottomSpacerHeight: 0,
-        rows: [] as GastoForm[],
-      };
-    }
-
-    const visibleCount = Math.max(
-      Math.ceil(gastosGridViewportHeight / GASTOS_GRID_ROW_HEIGHT) + GASTOS_GRID_OVERSCAN_ROWS,
-      GASTOS_GRID_OVERSCAN_ROWS * 2
-    );
-    const startIndex = Math.max(
-      Math.floor(gastosGridScrollTop / GASTOS_GRID_ROW_HEIGHT) - GASTOS_GRID_OVERSCAN_ROWS,
-      0
-    );
-    const endIndex = Math.min(startIndex + visibleCount, totalRows);
-
-    return {
-      startIndex,
-      topSpacerHeight: startIndex * GASTOS_GRID_ROW_HEIGHT,
-      bottomSpacerHeight: Math.max((totalRows - endIndex) * GASTOS_GRID_ROW_HEIGHT, 0),
-      rows: gastosFiltradosDiferidos.slice(startIndex, endIndex),
-    };
-  }, [gastosFiltradosDiferidos, gastosGridScrollTop, gastosGridViewportHeight]);
-
-  const renderedGastoRows = useMemo(
+  const gastosGridRows = useMemo<GastoGridRow[]>(
     () =>
-      gastosGridVirtualWindow.rows.map((gasto, visibleIndex) => {
-        const rowIndex = gastosGridVirtualWindow.startIndex + visibleIndex;
-        const rowKey = getGastoRowKey(gasto, rowIndex);
-
-        return (
-          <tr
-            key={rowKey}
-            style={{
-              background: selectedRowKey === rowKey ? "#E0E7FF" : "transparent",
-              transition: "background 0.1s",
-              height: GASTOS_GRID_ROW_HEIGHT,
-            }}
-            onClick={() => {
-              setSelectedRowKey(rowKey);
-              if (rechazoError) {
-                setRechazoError(null);
-              }
-            }}
-          >
-            {columnasGridGastos.map((col) => (
-              <td
-                key={col.key}
-                style={{
-                  padding: "13px 11px",
-                  borderBottom: "1px solid #F3F4F6",
-                  color: col.key === "responsable" ? "#17143A" : "#374151",
-                  fontSize: 13,
-                  fontWeight: col.key === "responsable" ? 700 : undefined,
-                  overflow: "hidden",
-                  whiteSpace: "nowrap",
-                  textOverflow: "ellipsis",
-                  maxWidth: "100%",
-                  position: columnasCongeladasGrid.has(col.key) ? "sticky" : undefined,
-                  left: columnasCongeladasGrid.has(col.key)
-                    ? stickyLeftByColumn[col.key]
-                    : undefined,
-                  zIndex: columnasCongeladasGrid.has(col.key) ? 2 : 1,
-                  background: columnasCongeladasGrid.has(col.key)
-                    ? selectedRowKey === rowKey
-                      ? "#E0E7FF"
-                      : "#FFFFFF"
-                    : undefined,
-                  borderRight: columnasCongeladasGrid.has(col.key)
-                    ? "1px solid #E5E7EB"
-                    : undefined,
-                }}
-              >
-                {(() => {
-                  switch (col.key) {
-                    case "cliente":
-                      return renderGridCellText(gasto.filtroOperativo.filtro?.nombreCliente);
-                    case "nombreProyecto":
-                      return renderGridCellText(gasto.filtroOperativo.filtro?.nombreProyecto);
-                    case "tipoTrabajo":
-                      return renderGridCellText(
-                        gasto.filtroOperativo.filtro?.tipoTrabajo ??
-                          gasto.filtroOperativo.tipoTrabajo?.tipoTrabajo
-                      );
-                    case "id":
-                      return renderGridCellText(gasto.id);
-                    case "site":
-                      return renderGridCellText(gasto.filtroOperativo.filtro?.nombreSite);
-                    case "solicitante":
-                      return renderGridCellText(
-                        getConstanteLabelOrFallback(
-                          solicitanteOptions,
-                          gasto.solicitante,
-                          gasto.solicitanteLabel
-                        )
-                      );
-                    case "responsable":
-                      return renderGridCellText(gasto.responsableLabel || gasto.responsable || "");
-                    case "cuentaNumero":
-                      return renderGridCellText(gasto.cuentaNumero || gasto.cuenta || "");
-                    case "cuentaInter":
-                      return renderGridCellText(gasto.cuentaInter || "");
-                    case "validador":
-                      return renderGridCellText(
-                        getConstanteLabelOrFallback(
-                          validadorOptions,
-                          gasto.validador,
-                          gasto.validadorLabel
-                        )
-                      );
-                    case "tarea":
-                      return renderGridCellText(
-                        getTareaLabelOrFallback(
-                          tareasCatalogo,
-                          gasto.filtroOperativo.tarea?.correlativo,
-                          gasto.filtroOperativo.tarea?.tarea
-                        )
-                      );
-                    case "detalle":
-                      return renderGridCellText(gasto.detalle);
-                    case "comentario":
-                      return renderGridCellText(
-                        gasto.comentario
-                          ? String(gasto.comentario).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim()
-                          : ""
-                      );
-                    case "bien":
-                      return renderGridCellText(getConstanteLabel(bienOptions, gasto.bien));
-                    case "comprobante":
-                      return renderGridCellText(getConstanteLabel(comprobanteOptions, gasto.comprobante));
-                    case "moneda":
-                      return renderGridCellText(getConstanteLabel(monedaOptions, gasto.moneda));
-                    case "banco":
-                      return renderGridCellText(gasto.banco ?? "");
-                    case "nroOperacion":
-                      return renderGridCellText(gasto.nroOperacion ?? "");
-                    case "fechaDeposito":
-                      return renderGridCellText(formatInputDateForDisplay(gasto.fechaDeposito));
-                    case "monto":
-                      return renderGridCellText(
-                        gasto.monto !== undefined && gasto.monto !== null && gasto.monto !== ""
-                          ? Number(gasto.monto).toLocaleString("es-PE", {
-                              minimumFractionDigits: 2,
-                            })
-                          : ""
-                      );
-                    case "totalPagar":
-                      return renderGridCellText(
-                        gasto.totalPagar !== undefined && gasto.totalPagar !== null && gasto.totalPagar !== ""
-                          ? Number(gasto.totalPagar).toLocaleString("es-PE", {
-                              minimumFractionDigits: 2,
-                            })
-                          : ""
-                      );
-                    case "ot":
-                      return renderGridCellText(gasto.filtroOperativo.ot?.ot);
-                    case "estado":
-                      return renderGridCellText(getEstadoLabel(estadoOptions, gasto.estado, gasto.estadoLabel));
-                    case "fecIngreso":
-                      return renderGridCellText(formatInputDateForDisplay(gasto.fecIngreso));
-                    case "acciones": {
-                      const accionesHabilitadas = gasto.estado === 0 || gasto.estado === 2;
-                      return (
-                        <div style={{ display: "flex", justifyContent: "center", gap: 8 }}>
-                          <button
-                            title="Visualizar"
-                            aria-label="Visualizar"
-                            style={{
-                              width: 34,
-                              height: 34,
-                              border: "1px solid #BFDBFE",
-                              background: "#EFF6FF",
-                              color: "#1D4ED8",
-                              borderRadius: 8,
-                              fontWeight: 700,
-                              cursor: "pointer",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              fontSize: 15,
-                            }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              abrirVisualizarRef.current(gasto);
-                            }}
-                          >
-                            <Eye size={16} strokeWidth={2.2} />
-                          </button>
-                          <button
-                            title="Editar"
-                            aria-label="Editar"
-                            style={{
-                              width: 34,
-                              height: 34,
-                              border: `1px solid ${accionesHabilitadas ? "#C7D2FE" : "#E5E7EB"}`,
-                              background: accionesHabilitadas ? "#EEF2FF" : "#F3F4F6",
-                              color: accionesHabilitadas ? "#3730A3" : "#9CA3AF",
-                              borderRadius: 8,
-                              fontWeight: 700,
-                              cursor: accionesHabilitadas ? "pointer" : "not-allowed",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              fontSize: 15,
-                              opacity: accionesHabilitadas ? 1 : 0.65,
-                            }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (!accionesHabilitadas) return;
-                              abrirEditarRef.current(gasto);
-                            }}
-                            disabled={!accionesHabilitadas}
-                          >
-                            <Pencil size={16} strokeWidth={2.2} />
-                          </button>
-                          <button
-                            title="Rechazar"
-                            aria-label="Rechazar"
-                            style={{
-                              width: 34,
-                              height: 34,
-                              border: `1px solid ${accionesHabilitadas ? "#FECACA" : "#E5E7EB"}`,
-                              background: accionesHabilitadas ? "#FEF2F2" : "#F3F4F6",
-                              color: accionesHabilitadas ? "#B91C1C" : "#9CA3AF",
-                              borderRadius: 8,
-                              fontWeight: 700,
-                              cursor: accionesHabilitadas ? "pointer" : "not-allowed",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              fontSize: 15,
-                              opacity: accionesHabilitadas ? 1 : 0.65,
-                            }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (!accionesHabilitadas) return;
-                              confirmarEliminarRef.current(gasto, rowIndex);
-                            }}
-                            disabled={!accionesHabilitadas}
-                          >
-                            <Trash2 size={16} strokeWidth={2.2} />
-                          </button>
-                        </div>
-                      );
-                    }
-                    default:
-                      return null;
-                  }
-                })()}
-              </td>
-            ))}
-          </tr>
-        );
+      gastosFiltradosDiferidos.map((gasto, rowIndex) => {
+        const filtro = gasto.filtroOperativo.filtro;
+        const numero = (value: unknown) =>
+          value !== undefined && value !== null && value !== "" && Number.isFinite(Number(value)) ? Number(value) : null;
+        return {
+          rowKey: getGastoRowKey(gasto, rowIndex),
+          rowIndex,
+          gasto,
+          id: Number(gasto.id ?? 0),
+          cliente: filtro?.nombreCliente ?? "",
+          nombreProyecto: filtro?.nombreProyecto ?? "",
+          site: filtro?.nombreSite ?? "",
+          tipoTrabajo: filtro?.tipoTrabajo ?? gasto.filtroOperativo.tipoTrabajo?.tipoTrabajo ?? "",
+          tarea: getTareaLabelOrFallback(
+            tareasCatalogo,
+            gasto.filtroOperativo.tarea?.correlativo,
+            gasto.filtroOperativo.tarea?.tarea
+          ),
+          estado: getEstadoLabel(estadoOptions, gasto.estado, gasto.estadoLabel),
+          bien: getConstanteLabel(bienOptions, gasto.bien),
+          comprobante: getConstanteLabel(comprobanteOptions, gasto.comprobante),
+          monto: numero(gasto.monto),
+          totalPagar: numero(gasto.totalPagar),
+          moneda: getConstanteLabel(monedaOptions, gasto.moneda),
+          banco: gasto.banco ?? "",
+          nroOperacion: gasto.nroOperacion ?? "",
+          fechaDeposito: normalizeFecIngresoFromStore(gasto.fechaDeposito),
+          fecIngreso: normalizeFecIngresoFromStore(gasto.fecIngreso),
+          ot: gasto.filtroOperativo.ot?.ot ?? "",
+          solicitante: getConstanteLabelOrFallback(solicitanteOptions, gasto.solicitante, gasto.solicitanteLabel),
+          responsable: gasto.responsableLabel || gasto.responsable || "",
+          cuentaNumero: gasto.cuentaNumero || gasto.cuenta || "",
+          cuentaInter: gasto.cuentaInter || "",
+          validador: getConstanteLabelOrFallback(validadorOptions, gasto.validador, gasto.validadorLabel),
+          detalle: gasto.detalle ? String(gasto.detalle).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim() : "",
+        };
       }),
     [
-      gastosGridVirtualWindow,
-      selectedRowKey,
-      rechazoError,
-      columnasGridGastos,
-      columnasCongeladasGrid,
-      stickyLeftByColumn,
-      solicitanteOptions,
-      validadorOptions,
+      gastosFiltradosDiferidos,
       tareasCatalogo,
+      estadoOptions,
       bienOptions,
       comprobanteOptions,
       monedaOptions,
-      estadoOptions,
+      solicitanteOptions,
+      validadorOptions,
     ]
   );
 
-  useEffect(() => {
-    const container = gastosGridScrollRef.current;
-
-    if (!container || typeof ResizeObserver === "undefined") {
-      return;
-    }
-
-    const updateViewportHeight = () => {
-      setGastosGridViewportHeight(container.clientHeight || 520);
-    };
-
-    updateViewportHeight();
-
-    const observer = new ResizeObserver(() => {
-      updateViewportHeight();
-    });
-
-    observer.observe(container);
-
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    if (gastosGridScrollTop === 0) {
-      return;
-    }
-
-    const maxScrollTop = Math.max(
-      gastosFiltradosDiferidos.length * GASTOS_GRID_ROW_HEIGHT - gastosGridViewportHeight,
-      0
-    );
-
-    if (gastosGridScrollTop > maxScrollTop) {
-      setGastosGridScrollTop(maxScrollTop);
-    }
-  }, [gastosFiltradosDiferidos.length, gastosGridScrollTop, gastosGridViewportHeight]);
+  const gastosGridColumns = useMemo<GridColumn<GastoGridRow>[]>(
+    () => [
+      { dataField: "id", caption: "Id", dataType: "number", width: 80, fixed: true, format: (value) => String(value ?? "") },
+      {
+        dataField: "acciones",
+        caption: "Acciones",
+        width: 140,
+        alignment: "center",
+        fixed: true,
+        allowSorting: false,
+        allowFiltering: false,
+        allowGrouping: false,
+        allowHeaderFilter: false,
+        allowSearch: false,
+        allowResizing: false,
+        calculateCellValue: () => "",
+        cellRender: (_value, row) => {
+          const accionesHabilitadas = row.gasto.estado === 0 || row.gasto.estado === 2;
+          const baseButton = {
+            width: 30,
+            height: 30,
+            borderRadius: 8,
+            fontWeight: 700,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          } as const;
+          return (
+            <div style={{ display: "flex", justifyContent: "center", gap: 6 }}>
+              <button
+                title="Visualizar"
+                aria-label="Visualizar"
+                style={{ ...baseButton, border: "1px solid #BFDBFE", background: "#EFF6FF", color: "#1D4ED8", cursor: "pointer" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  abrirVisualizarRef.current(row.gasto);
+                }}
+              >
+                <Eye size={16} strokeWidth={2.2} />
+              </button>
+              <button
+                title="Editar"
+                aria-label="Editar"
+                style={{
+                  ...baseButton,
+                  border: `1px solid ${accionesHabilitadas ? "#C7D2FE" : "#E5E7EB"}`,
+                  background: accionesHabilitadas ? "#EEF2FF" : "#F3F4F6",
+                  color: accionesHabilitadas ? "#3730A3" : "#9CA3AF",
+                  cursor: accionesHabilitadas ? "pointer" : "not-allowed",
+                  opacity: accionesHabilitadas ? 1 : 0.65,
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!accionesHabilitadas) return;
+                  abrirEditarRef.current(row.gasto);
+                }}
+                disabled={!accionesHabilitadas}
+              >
+                <Pencil size={16} strokeWidth={2.2} />
+              </button>
+              <button
+                title="Rechazar"
+                aria-label="Rechazar"
+                style={{
+                  ...baseButton,
+                  border: `1px solid ${accionesHabilitadas ? "#FECACA" : "#E5E7EB"}`,
+                  background: accionesHabilitadas ? "#FEF2F2" : "#F3F4F6",
+                  color: accionesHabilitadas ? "#B91C1C" : "#9CA3AF",
+                  cursor: accionesHabilitadas ? "pointer" : "not-allowed",
+                  opacity: accionesHabilitadas ? 1 : 0.65,
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!accionesHabilitadas) return;
+                  confirmarEliminarRef.current(row.gasto, row.rowIndex);
+                }}
+                disabled={!accionesHabilitadas}
+              >
+                <Trash2 size={16} strokeWidth={2.2} />
+              </button>
+            </div>
+          );
+        },
+      },
+      { dataField: "cliente", caption: "Cliente", width: 110, fixed: true },
+      { dataField: "nombreProyecto", caption: "Proyecto", width: 130, fixed: true },
+      { dataField: "site", caption: "Site", width: 180, fixed: true },
+      { dataField: "tipoTrabajo", caption: "Tipo Trabajo", width: 120, fixed: true },
+      { dataField: "tarea", caption: "Tarea", width: 140 },
+      { dataField: "estado", caption: "Estado", width: 100 },
+      { dataField: "bien", caption: "Bien", width: 90 },
+      { dataField: "comprobante", caption: "Comprobante", width: 140 },
+      { dataField: "monto", caption: "Monto", dataType: "number", width: 110, format: { type: "fixedPoint", precision: 2 } },
+      { dataField: "totalPagar", caption: "Total Pagar", dataType: "number", width: 120, format: { type: "fixedPoint", precision: 2 } },
+      { dataField: "moneda", caption: "Moneda", width: 90 },
+      { dataField: "banco", caption: "Banco", width: 140 },
+      { dataField: "nroOperacion", caption: "NroOperacion", width: 140 },
+      { dataField: "fechaDeposito", caption: "FechaDeposito", dataType: "date", width: 130 },
+      { dataField: "fecIngreso", caption: "FecIngreso", dataType: "date", width: 130 },
+      { dataField: "ot", caption: "OT", width: 80 },
+      { dataField: "solicitante", caption: "Solicitante", width: 170 },
+      {
+        dataField: "responsable",
+        caption: "Responsable",
+        width: 190,
+        cellStyle: () => ({ color: "#17143A", fontWeight: 700 }),
+      },
+      { dataField: "cuentaNumero", caption: "Cuenta", width: 150 },
+      { dataField: "cuentaInter", caption: "Cuenta Inter", width: 170 },
+      { dataField: "validador", caption: "Validador", width: 150 },
+      { dataField: "detalle", caption: "Detalle", width: 320 },
+    ],
+    []
+  );
 
   return (
     <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 5 }}>
@@ -4443,132 +4234,29 @@ export default function GastosPage({
           boxShadow: "0 8px 24px rgba(23,20,58,0.08)",
         }}
       >
-        <div
-          ref={gastosGridScrollRef}
-          style={{
-            width: "100%",
-            maxHeight: "70vh",
-            overflow: "auto",
-            position: "relative",
+        <DataGridPro<GastoGridRow>
+          dataSource={gastosGridRows}
+          columns={gastosGridColumns}
+          keyExpr="rowKey"
+          height="70vh"
+          loading={cargando}
+          noDataText={mensajeFiltroCabecera ? mensajeFiltroCabecera : "No se encontraron gastos."}
+          stateStoringKey="gastos-registro"
+          showSearchPanel={false}
+          allowExport={false}
+          autoExpandAll={false}
+          rowAlternation={false}
+          rowPadding="4px 8px"
+          paging={{ pageSize: 100, pageSizes: [50, 100, 250, 500] }}
+          focusedRowKey={selectedRowKey}
+          onRowClick={(row) => {
+            setSelectedRowKey(row.rowKey);
+            if (rechazoError) {
+              setRechazoError(null);
+            }
           }}
-          onScroll={(event) => {
-            const nextScrollTop = event.currentTarget.scrollTop;
-            startTransition(() => {
-              setGastosGridScrollTop(nextScrollTop);
-            });
-          }}
-        >
-          <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
-            <colgroup>
-              {columnasGridGastos.map((columna) => (
-                <col key={`col-${columna.key}`} style={{ width: columna.width }} />
-              ))}
-            </colgroup>
-            <thead>
-              <tr>
-                {columnasGridGastos.map((header) => {
-                  const isSorted = sortConfig?.key === header.key;
-                  const isFrozen = columnasCongeladasGrid.has(header.key);
-                  return (
-                    <th
-                      key={header.key}
-                      style={{
-                        textAlign: header.align,
-                        padding: "13px 11px",
-                        fontSize: 13,
-                        color: isSorted ? "#6E4CCB" : "#374151",
-                        borderBottom: "1px solid #E5E7EB",
-                        background: "#F9FAFB",
-                        position: "sticky",
-                        top: 0,
-                        left: isFrozen ? stickyLeftByColumn[header.key] : undefined,
-                        zIndex: isFrozen ? 4 : 3,
-                        boxShadow: "0 1px 0 #E5E7EB",
-                        borderRight: isFrozen ? "1px solid #E5E7EB" : undefined,
-                        cursor: header.key !== 'acciones' ? 'pointer' : 'default',
-                        userSelect: 'none',
-                      }}
-                      onClick={() => {
-                        if (header.key === 'acciones') return;
-                        setSortConfig((prev) => {
-                          if (prev?.key === header.key) {
-                            // Alternar dirección
-                            return { key: header.key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
-                          }
-                          return { key: header.key, direction: 'asc' };
-                        });
-                      }}
-                    >
-                      {header.label}
-                      {isSorted && (
-                        <span
-                          aria-hidden="true"
-                          style={{
-                            marginLeft: 4,
-                            display: "inline-flex",
-                            alignItems: "center",
-                            verticalAlign: "middle",
-                          }}
-                        >
-                          {sortConfig?.direction === "asc" ? (
-                            <ArrowUp size={12} strokeWidth={2.5} />
-                          ) : (
-                            <ArrowDown size={12} strokeWidth={2.5} />
-                          )}
-                        </span>
-                      )}
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {cargando ? (
-                <tr>
-                  <td colSpan={columnasGridGastos.length} style={{ padding: 24, textAlign: "center", color: "#6B7280", fontSize: 11 }}>
-                    Cargando gastos...
-                  </td>
-                </tr>
-              ) : gastosFiltrados.length === 0 ? (
-                <tr>
-                  <td colSpan={columnasGridGastos.length} style={{ padding: 24, textAlign: "center", color: "#6B7280", fontSize: 11 }}>
-                    {mensajeFiltroCabecera ? mensajeFiltroCabecera : "No se encontraron gastos."}
-                  </td>
-                </tr>
-              ) : (
-                <>
-                  {gastosGridVirtualWindow.topSpacerHeight > 0 && (
-                    <tr aria-hidden="true">
-                      <td
-                        colSpan={columnasGridGastos.length}
-                        style={{
-                          padding: 0,
-                          border: 0,
-                          height: gastosGridVirtualWindow.topSpacerHeight,
-                          background: "transparent",
-                        }}
-                      />
-                    </tr>
-                  )}
-                  {renderedGastoRows}
-                  {gastosGridVirtualWindow.bottomSpacerHeight > 0 && (
-                    <tr aria-hidden="true">
-                      <td
-                        colSpan={columnasGridGastos.length}
-                        style={{
-                          padding: 0,
-                          border: 0,
-                          height: gastosGridVirtualWindow.bottomSpacerHeight,
-                          background: "transparent",
-                        }}
-                      />
-                    </tr>
-                  )}
-                </>
-              )}
-            </tbody>
-          </table>
-        </div>
+          rowBackground={(_row, focused) => (focused ? "#E0E7FF" : undefined)}
+        />
         {/* Pie de grilla: cantidad de registros y suma por moneda */}
         <div style={{
           width: "100%",
@@ -4879,20 +4567,22 @@ export default function GastosPage({
                             {!historialSitioResumenSolicitante.length && <div style={{ padding: 12, textAlign: "center", color: "#64748B", fontSize: 11 }}>No hay solicitudes para resumir.</div>}
                           </div>
                         ) : (
-                          <div style={{ maxHeight: 240, overflow: "auto", margin: 14 }}>
-                            <table style={{ width: "100%", minWidth: 700, borderCollapse: "collapse", fontSize: 10 }}>
-                              <thead><tr>{[
-                                { label: "Correlativo", key: "correlativo" as const }, { label: "Fecha", key: "fecha" as const }, { label: "Cliente" }, { label: "Proyecto" }, { label: "Site" }, { label: "Tipo trabajo" }, { label: "Subtotal", key: "subtotal" as const }, { label: "Moneda", key: "moneda" as const }, { label: "Solicitante", key: "solicitante" as const }, { label: "Detalle" },
-                              ].map((header) => <th key={header.label} style={{ textAlign: "left", padding: "7px 6px", color: "#475569", borderBottom: "1px solid #CBD5E1", whiteSpace: "nowrap" }}>{header.key ? <button type="button" onClick={() => ordenarHistorialSitio(header.key!)} style={{ border: "none", background: "transparent", color: historialSitioSort.key === header.key ? "#1D4ED8" : "inherit", font: "inherit", fontWeight: 800, padding: 0, cursor: "pointer" }}>{header.label} {historialSitioSort.key === header.key ? (historialSitioSort.direction === "asc" ? "↑" : "↓") : "↕"}</button> : header.label}</th>)}</tr></thead>
-                              <tbody>
-                                {historialSitioRowsOrdenados.map((row) => (
-                                  <tr key={`${row.id}-${row.idSite}-${row.correSite}`}>
-                                    <td style={{ padding: "6px", borderBottom: "1px solid #E2E8F0" }}>{row.id}</td><td style={{ padding: "6px", borderBottom: "1px solid #E2E8F0" }}>{formatDateToMMDDYYYYPeru(normalizeFecIngresoFromStore(row.fecIngreso)) || "-"}</td><td style={{ padding: "6px", borderBottom: "1px solid #E2E8F0" }}>{row.clienteNombre || "-"}</td><td style={{ padding: "6px", borderBottom: "1px solid #E2E8F0" }}>{row.nombreProyecto || "-"}</td><td style={{ padding: "6px", borderBottom: "1px solid #E2E8F0" }}>{row.siteNombre || "-"}</td><td style={{ padding: "6px", borderBottom: "1px solid #E2E8F0" }}>{row.tipoTrabajo || "-"}</td><td style={{ padding: "6px", borderBottom: "1px solid #E2E8F0", fontWeight: 700 }}>{formatDecimalValue(Number(row.subtotal ?? row.monto ?? 0))}</td><td style={{ padding: "6px", borderBottom: "1px solid #E2E8F0" }}>{row.monedaLabel || row.moneda || "-"}</td><td style={{ padding: "6px", borderBottom: "1px solid #E2E8F0" }}>{row.solicitanteLabel || row.solicitante || "-"}</td><td style={{ padding: "6px", borderBottom: "1px solid #E2E8F0", maxWidth: 170 }}><button type="button" title={row.detalle || ""} onClick={() => setHistorialSitioDetalleActivo(row.detalle || "Sin detalle registrado.")} style={{ border: "none", background: "transparent", color: "#1D4ED8", cursor: "pointer", padding: 0, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "left", textDecoration: "underline" }}>{row.detalle || "-"}</button></td>
-                                  </tr>
-                                ))}
-                                {!historialSitioRowsFiltrados.length && <tr><td colSpan={10} style={{ padding: 16, textAlign: "center", color: "#64748B" }}>{historialSitioSolicitante ? "No hay registros para el solicitante seleccionado." : "No hay registros pagados para el sitio seleccionado."}</td></tr>}
-                              </tbody>
-                            </table>
+                          <div style={{ margin: 14 }}>
+                            <DataGridPro<GastoDto>
+                              dataSource={historialSitioRowsFiltrados}
+                              columns={buildHistorialSitioColumns({ onDetalle: setHistorialSitioDetalleActivo })}
+                              keyExpr={historialSitioRowKey}
+                              height={240}
+                              noDataText={historialSitioSolicitante ? "No hay registros para el solicitante seleccionado." : "No hay registros pagados para el sitio seleccionado."}
+                              showFilterRow={false}
+                              showSearchPanel={false}
+                              showGroupPanel={false}
+                              showColumnChooser={false}
+                              allowExport={false}
+                              rowAlternation={false}
+                              rowPadding="3px 6px"
+                              paging={false}
+                            />
                           </div>
                         )}
                      </>
@@ -6132,7 +5822,18 @@ export default function GastosPage({
                   return <section key={moneda} style={{ border: "1px solid #DBEAFE", borderRadius: 12, padding: 14, background: "#F8FBFF" }}><strong style={{ color: "#0F172A", fontSize: 13 }}>{moneda}</strong><div style={{ display: "grid", gap: 9, marginTop: 12 }}>{items.map(({ solicitante, total }) => <button key={solicitante} type="button" onClick={() => { setHistorialSitioSolicitante(solicitante); setHistorialSitioView("listado"); }} style={{ border: "none", background: "transparent", display: "grid", gridTemplateColumns: "minmax(150px, .9fr) minmax(170px, 2fr) auto", alignItems: "center", gap: 12, textAlign: "left", cursor: "pointer" }}><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 700, color: "#334155" }}>{solicitante}</span><span style={{ height: 11, borderRadius: 99, background: "#E2E8F0", overflow: "hidden" }}><i style={{ display: "block", height: "100%", width: `${max ? Math.max(2, total / max * 100) : 0}%`, background: "#F59E0B", borderRadius: 99 }} /></span><strong style={{ fontSize: 12, color: "#0F172A" }}>{formatDecimalValue(total)}</strong></button>)}</div></section>;
                 })}</div>
               ) : (
-                <div style={{ overflow: "auto" }}><table style={{ width: "100%", minWidth: 1040, borderCollapse: "collapse", fontSize: 11 }}><thead><tr>{["Correlativo", "Fecha", "Cliente", "Proyecto", "Site", "Tipo trabajo", "Subtotal", "IGV", "Total", "Moneda", "Solicitante", "Responsable", "Detalle"].map((header) => <th key={header} style={{ position: "sticky", top: 0, background: "#F8FAFC", textAlign: "left", padding: "8px 7px", borderBottom: "1px solid #CBD5E1", whiteSpace: "nowrap" }}>{header}</th>)}</tr></thead><tbody>{historialSitioRowsFiltrados.length ? historialSitioRowsFiltrados.map((row) => <tr key={`historial-sitio-${row.id}-${row.idSite}-${row.correSite}`}><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0" }}>{row.id}</td><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0" }}>{formatDateToMMDDYYYYPeru(row.fecIngreso)}</td><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0" }}>{row.clienteNombre || "-"}</td><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0" }}>{row.nombreProyecto || "-"}</td><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0" }}>{row.siteNombre || "-"}</td><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0" }}>{row.tipoTrabajo || "-"}</td><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0", fontWeight: 700 }}>{formatDecimalValue(Number(row.subtotal ?? row.monto ?? 0))}</td><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0" }}>{formatDecimalValue(Number(row.igv ?? 0))}</td><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0" }}>{formatDecimalValue(Number(row.total ?? row.totalPagar ?? 0))}</td><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0" }}>{row.monedaLabel || row.moneda || "-"}</td><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0" }}>{row.solicitanteLabel || row.solicitante || "-"}</td><td style={{ padding: 7, borderBottom: "1px solid #E2E8F0" }}>{row.responsableLabel || "-"}</td><td title={row.detalle} style={{ padding: 7, borderBottom: "1px solid #E2E8F0", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.detalle || "-"}</td></tr>) : <tr><td colSpan={13} style={{ padding: 20, textAlign: "center", color: "#64748B" }}>{historialSitioSolicitante ? "No hay registros para el solicitante seleccionado." : "No hay registros para el sitio seleccionado."}</td></tr>}</tbody></table></div>
+                <DataGridPro<GastoDto>
+                  dataSource={historialSitioRowsFiltrados}
+                  columns={buildHistorialSitioColumns({ extendido: true })}
+                  keyExpr={historialSitioRowKey}
+                  height="55vh"
+                  noDataText={historialSitioSolicitante ? "No hay registros para el solicitante seleccionado." : "No hay registros para el sitio seleccionado."}
+                  showSearchPanel={false}
+                  allowExport={false}
+                  rowAlternation={false}
+                  rowPadding="4px 8px"
+                  paging={false}
+                />
               )}
             </div>
           </section>
@@ -6430,6 +6131,72 @@ export default function GastosPage({
     </div>
   );
 }
+const historialSitioRowKey = (row: GastoDto) => `${row.id}-${row.idSite}-${row.correSite}`;
+
+/** Columnas del historial de gastos por sitio; `extendido` agrega IGV, Total y Responsable (vista del modal). */
+function buildHistorialSitioColumns(options: { onDetalle?: (detalle: string) => void; extendido?: boolean }): GridColumn<GastoDto>[] {
+  const { onDetalle, extendido = false } = options;
+  const dinero = { type: "fixedPoint", precision: 2 } as const;
+  return [
+    { dataField: "id", caption: "Correlativo", dataType: "number", width: 100, format: (value) => String(value ?? "") },
+    {
+      dataField: "fecIngreso",
+      caption: "Fecha",
+      dataType: "date",
+      width: 100,
+      sortOrder: "desc",
+      calculateCellValue: (row) => normalizeFecIngresoFromStore(row.fecIngreso),
+    },
+    { dataField: "clienteNombre", caption: "Cliente", width: 120, calculateCellValue: (row) => row.clienteNombre || "" },
+    { dataField: "nombreProyecto", caption: "Proyecto", width: 140, calculateCellValue: (row) => row.nombreProyecto || "" },
+    { dataField: "siteNombre", caption: "Site", width: 160, calculateCellValue: (row) => row.siteNombre || "" },
+    { dataField: "tipoTrabajo", caption: "Tipo trabajo", width: 120, calculateCellValue: (row) => row.tipoTrabajo || "" },
+    {
+      dataField: "subtotal",
+      caption: "Subtotal",
+      dataType: "number",
+      width: 110,
+      format: dinero,
+      calculateCellValue: (row) => Number(row.subtotal ?? row.monto ?? 0),
+      cellStyle: () => ({ fontWeight: 700 }),
+    },
+    ...(extendido
+      ? ([
+          { dataField: "igv", caption: "IGV", dataType: "number", width: 90, format: dinero, calculateCellValue: (row: GastoDto) => Number(row.igv ?? 0) },
+          { dataField: "total", caption: "Total", dataType: "number", width: 110, format: dinero, calculateCellValue: (row: GastoDto) => Number(row.total ?? row.totalPagar ?? 0) },
+        ] satisfies GridColumn<GastoDto>[])
+      : []),
+    { dataField: "moneda", caption: "Moneda", width: 90, calculateCellValue: (row) => row.monedaLabel || row.moneda || "" },
+    { dataField: "solicitante", caption: "Solicitante", width: 170, calculateCellValue: (row) => row.solicitanteLabel || row.solicitante || "" },
+    ...(extendido
+      ? ([
+          { dataField: "responsable", caption: "Responsable", width: 170, calculateCellValue: (row: GastoDto) => row.responsableLabel || "" },
+        ] satisfies GridColumn<GastoDto>[])
+      : []),
+    {
+      dataField: "detalle",
+      caption: "Detalle",
+      width: 220,
+      calculateCellValue: (row) => row.detalle || "",
+      cellRender: onDetalle
+        ? (_value, row) => (
+            <button
+              type="button"
+              title={row.detalle || ""}
+              onClick={(event) => {
+                event.stopPropagation();
+                onDetalle(row.detalle || "Sin detalle registrado.");
+              }}
+              style={{ border: "none", background: "transparent", color: "#1D4ED8", cursor: "pointer", padding: 0, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "left", textDecoration: "underline" }}
+            >
+              {row.detalle || "-"}
+            </button>
+          )
+        : undefined,
+    },
+  ];
+}
+
 const getGastoRowKey = (gasto: GastoForm, rowIndex: number) => {
   const id = Number(gasto.id ?? 0);
   const idSite = String(gasto.filtroOperativo.filtro?.idSite ?? "").trim();

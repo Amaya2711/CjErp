@@ -2,15 +2,14 @@
   // Estado para fila seleccionada
  
 import { useCrudForm } from "../../hooks/useCrudForm";
+import DataGridPro from "../../components/datagrid/DataGridPro";
+import type { GridColumn } from "../../components/datagrid/types";
 import {
   AlertTriangle,
   Bug,
   CheckCircle2,
-  CircleX,
   Eraser,
   Eye,
-  ArrowDown,
-  ArrowUp,
   ListFilter,
   PencilLine,
   FileDown,
@@ -1426,7 +1425,6 @@ export default function RecursosHumanosVacacionesPage() {
   const [showEmpleadoVacacionDropdown, setShowEmpleadoVacacionDropdown] = useState(false);
   const [highlightedEmpleadoVacacionIdx, setHighlightedEmpleadoVacacionIdx] = useState(-1);
   const [actualizacionBloqueada, setActualizacionBloqueada] = useState(false);
-  const selectAllCheckboxRef = useRef<HTMLInputElement | null>(null);
   const [filtrosCabecera, setFiltrosCabecera] = useState<GastosHeaderFilters>(GASTOS_HEADER_FILTERS_INITIAL);
   const [headerFilterSearch, setHeaderFilterSearch] = useState<Record<GastosHeaderSearchableFilterKey, string>>(
     GASTOS_HEADER_FILTER_SEARCH_INITIAL
@@ -1441,7 +1439,6 @@ export default function RecursosHumanosVacacionesPage() {
     message: string;
   } | null>(null);
     // Estado para ordenamiento
-    const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
 
   const [showFacturaViewer, setShowFacturaViewer] = useState(false);
   const [valoresGasto, setValoresGasto] = useState<ValoresGastoResponse>(VALORES_GASTO_INICIALES);
@@ -2932,27 +2929,7 @@ export default function RecursosHumanosVacacionesPage() {
 
   // Ordenar y luego filtrar gastos: el ordenamiento se aplica a todos los registros cargados
   const gastosFiltradosBase = useMemo(() => {
-    let sorted = [...gastosSafe];
-    if (sortConfig) {
-      const { key, direction } = sortConfig;
-      const col = camposBusquedaGastos.find((c) => c.key === key);
-      if (col) {
-        sorted.sort((a, b) => {
-          let aValue = col.getValue(a);
-          let bValue = col.getValue(b);
-          // Si es string, comparar insensible a mayÃºsculas
-          if (typeof aValue === 'string' && typeof bValue === 'string') {
-            aValue = aValue.toLowerCase();
-            bValue = bValue.toLowerCase();
-          }
-          if (aValue == null) return 1;
-          if (bValue == null) return -1;
-          if (aValue < bValue) return direction === 'asc' ? -1 : 1;
-          if (aValue > bValue) return direction === 'asc' ? 1 : -1;
-          return 0;
-        });
-      }
-    }
+    const sorted = [...gastosSafe];
     // Filtrar despuÃ©s de ordenar
     return sorted
       .filter((gasto) => matchesCrudToolbarSearch(gasto, busqueda, camposBusquedaGastos))
@@ -3003,7 +2980,6 @@ export default function RecursosHumanosVacacionesPage() {
     gastosSafe,
     monedaOptions,
     solicitanteOptions,
-    sortConfig,
     validadorOptions,
   ]);
   const cantidadRegistrosFiltrados = gastosFiltradosBase.length;
@@ -3011,10 +2987,6 @@ export default function RecursosHumanosVacacionesPage() {
   const gastosFiltrados = useMemo(
     () => (excedeLimiteRegistros ? [] : gastosFiltradosBase),
     [excedeLimiteRegistros, gastosFiltradosBase]
-  );
-  const gastosFiltradosKeys = useMemo(
-    () => gastosFiltrados.map((gasto, rowIndex) => getGastoRowKey(gasto, rowIndex)),
-    [gastosFiltrados]
   );
   const idEstadoActualValidador = useMemo(() => {
     const estado = Number(filtrosCabecera.estado[0]);
@@ -3028,39 +3000,6 @@ export default function RecursosHumanosVacacionesPage() {
     () => idEstadoActualValidador !== null,
     [idEstadoActualValidador]
   );
-  const todosLosVisiblesSeleccionados = useMemo(
-    () => gastosFiltradosKeys.length > 0 && gastosFiltradosKeys.every((key) => selectedRowKeys.includes(key)),
-    [gastosFiltradosKeys, selectedRowKeys]
-  );
-  const algunosVisiblesSeleccionados = useMemo(
-    () => gastosFiltradosKeys.some((key) => selectedRowKeys.includes(key)),
-    [gastosFiltradosKeys, selectedRowKeys]
-  );
-
-  useEffect(() => {
-    if (!selectAllCheckboxRef.current) return;
-    selectAllCheckboxRef.current.indeterminate = algunosVisiblesSeleccionados && !todosLosVisiblesSeleccionados;
-  }, [algunosVisiblesSeleccionados, todosLosVisiblesSeleccionados]);
-
-  const alternarSeleccionVisible = React.useCallback(
-    (checked: boolean) => {
-      setSelectedRowKeys((prev) => {
-        const actuales = new Set(prev);
-
-        for (const rowKey of gastosFiltradosKeys) {
-          if (checked) {
-            actuales.add(rowKey);
-          } else {
-            actuales.delete(rowKey);
-          }
-        }
-
-        return Array.from(actuales);
-      });
-    },
-    [gastosFiltradosKeys]
-  );
-
   const handleFiltroOperativoChange = React.useCallback(
     (val: FiltroOperativoValue) => {
       setForm((prev) =>
@@ -3102,13 +3041,6 @@ export default function RecursosHumanosVacacionesPage() {
     { key: "saldoVacaciones", label: "Saldo vacaciones", width: "140px", align: "right" as const },
     { key: "acciones", label: "Acciones", width: "80px", align: "center" as const, visible: true },
   ];
-  const columnasGridGastosVisibles = columnasGridGastos.filter((columna) => columna.visible !== false);
-  const gridMinWidth = useMemo(() => {
-    return columnasGridGastosVisibles.reduce((total, columna) => {
-      const numericWidth = Number.parseInt(String(columna.width).replace("px", ""), 10);
-      return total + (Number.isFinite(numericWidth) ? numericWidth : 0);
-    }, 0);
-  }, [columnasGridGastosVisibles]);
   const getRowHighlightByPorcentajeFic = React.useCallback((valor: number | string | null | undefined) => {
     const porcentaje = typeof valor === "number" ? valor : Number(valor);
 
@@ -3201,32 +3133,109 @@ export default function RecursosHumanosVacacionesPage() {
 
     confirmarEliminar(filaActiva, filaActivaIndex);
   }, [confirmarEliminar, filaActiva, filaActivaIndex]);
-  const stickyLeftByColumn = useMemo(() => {
-    let left = 0;
-    const offsets: Record<string, number> = {};
+  const gridRows = useMemo<VacacionGridRow[]>(
+    () =>
+      gastosFiltrados.map((gasto, rowIndex) => {
+        const saldo = Number(gasto.saldoVacaciones);
+        return {
+          rowKey: getGastoRowKey(gasto, rowIndex),
+          gasto,
+          idEmpleadoCj: String(gasto.idEmpleadoCj ?? gasto.id ?? ""),
+          nombreEmpleado: gasto.nombreEmpleado ?? "",
+          idEstado: String(gasto.estado ?? ""),
+          estado: gasto.estadoLabel ?? "",
+          idActivo: String(gasto.idActivo ?? ""),
+          fechaInicio: normalizeFecIngresoFromStore(gasto.fechaInicio),
+          fechaFin: normalizeFecIngresoFromStore(gasto.fechaFin),
+          usuario: gasto.usuario ?? "",
+          fechaCreacion: normalizeFecIngresoFromStore(gasto.fechaCreacion),
+          idResponsableCj: String(gasto.idResponsableCj ?? ""),
+          idSegundoVacaciones: String(gasto.idSegundoVacaciones ?? ""),
+          idTerceroVacaciones: String(gasto.idTerceroVacaciones ?? ""),
+          primerValidador: gasto.primerValidador ?? "",
+          segundoValidador: gasto.segundoValidador ?? "",
+          tercerValidador: gasto.tercerValidador ?? "",
+          responsableVacaciones: String(gasto.responsableVacaciones || gasto.responsableLabel || gasto.responsable || ""),
+          fechaAprob: normalizeFecIngresoFromStore(gasto.fechaAprob),
+          saldoVacaciones:
+            gasto.saldoVacaciones === undefined || gasto.saldoVacaciones === null || gasto.saldoVacaciones === "" || !Number.isFinite(saldo)
+              ? null
+              : saldo,
+        };
+      }),
+    [gastosFiltrados]
+  );
 
-    for (const columna of columnasGridGastosVisibles) {
-      if (columna.fixed === "left") {
-        offsets[columna.key] = left;
-      }
-
-      const width = Number.parseInt(columna.width, 10);
-      left += Number.isFinite(width) ? width : 0;
-    }
-
-    return offsets;
-  }, [columnasGridGastosVisibles]);
-  const stickyColumnZIndex: Record<string, number> = {
-    seleccion: 6,
-    nombreEmpleado: 5,
-  };
-  const getColumnWidthPx = React.useCallback((width: string) => {
-    const parsed = Number.parseInt(String(width).replace("px", ""), 10);
-    return Number.isFinite(parsed) ? `${parsed}px` : width;
-  }, []);
-  const getStickyCellBackground = React.useCallback((background: string | undefined, fallback: string) => {
-    return !background || background === "transparent" ? fallback : background;
-  }, []);
+  const gridColumns: GridColumn<VacacionGridRow>[] = [
+    {
+      dataField: "acciones",
+      caption: "Acciones",
+      width: 90,
+      alignment: "center",
+      fixed: true,
+      allowSorting: false,
+      allowFiltering: false,
+      allowGrouping: false,
+      allowHeaderFilter: false,
+      allowSearch: false,
+      allowResizing: false,
+      calculateCellValue: () => "",
+      cellRender: (_value, row) => (
+        <div style={{ display: "flex", justifyContent: "center", gap: 8 }}>
+          <button
+            title="Seleccionar"
+            aria-label="Seleccionar"
+            style={{
+              width: 30,
+              height: 30,
+              border: "1px solid #C7D2FE",
+              background: "#EEF2FF",
+              color: "#3730A3",
+              borderRadius: 8,
+              fontWeight: 700,
+              cursor: puedeSeleccionarRegistros ? "pointer" : "not-allowed",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: puedeSeleccionarRegistros ? 1 : 0.55,
+            }}
+            disabled={!puedeSeleccionarRegistros}
+            onClick={(event) => {
+              event.stopPropagation();
+              handleRowClick(row.gasto, row.rowKey);
+            }}
+          >
+            <Eye size={17} strokeWidth={2.2} />
+          </button>
+        </div>
+      ),
+    },
+    { dataField: "idEmpleadoCj", caption: "Id", width: 80, visible: false },
+    { dataField: "nombreEmpleado", caption: "Empleado", width: 300, fixed: true },
+    { dataField: "idEstado", caption: "Id Estado", width: 90, visible: false },
+    { dataField: "estado", caption: "Estado", width: 130 },
+    { dataField: "idActivo", caption: "Activo", width: 100, visible: false },
+    { dataField: "fechaInicio", caption: "Fecha inicio", dataType: "date", width: 120 },
+    { dataField: "fechaFin", caption: "Fecha fin", dataType: "date", width: 120 },
+    { dataField: "usuario", caption: "Usuario", width: 120, visible: false },
+    { dataField: "fechaCreacion", caption: "Fecha creación", dataType: "date", width: 130, visible: false },
+    { dataField: "idResponsableCj", caption: "Id responsable", width: 120, visible: false },
+    { dataField: "idSegundoVacaciones", caption: "Id segundo", width: 120, visible: false },
+    { dataField: "idTerceroVacaciones", caption: "Id tercero", width: 120, visible: false },
+    { dataField: "primerValidador", caption: "Primer validador", width: 180 },
+    { dataField: "segundoValidador", caption: "Segundo validador", width: 180 },
+    { dataField: "tercerValidador", caption: "Tercer validador", width: 180 },
+    { dataField: "responsableVacaciones", caption: "Responsable", width: 180, visible: false },
+    { dataField: "fechaAprob", caption: "Fecha aprobación", dataType: "date", width: 130, visible: false },
+    {
+      dataField: "saldoVacaciones",
+      caption: "Saldo vacaciones",
+      dataType: "number",
+      width: 140,
+      alignment: "right",
+      format: (value) => String(value ?? ""),
+    },
+  ];
 
   useEffect(() => {
     if (!cabeceraFiltroAbierto) {
@@ -3864,465 +3873,61 @@ export default function RecursosHumanosVacacionesPage() {
           boxShadow: "0 8px 24px rgba(23,20,58,0.08)",
         }}
       >
-        <div
-          style={{
-            width: "100%",
-            maxHeight: "70vh",
-            overflowX: "auto",
-            overflowY: "auto",
-            position: "relative",
+        <DataGridPro<VacacionGridRow>
+          dataSource={gridRows}
+          columns={gridColumns}
+          keyExpr="rowKey"
+          height="70vh"
+          loading={cargando}
+          noDataText={
+            mensajeFiltroCabecera
+              ? mensajeFiltroCabecera
+              : limiteConsultaServidor
+                ? limiteConsultaServidor.message
+                : excedeLimiteRegistros
+                  ? `Se encontraron ${cantidadRegistrosFiltrados} registros y el máximo permitido para mostrar es ${MAX_GASTOS_PARA_MOSTRAR}. Aplique más filtros.`
+                  : "No se encontraron vacaciones."
+          }
+          stateStoringKey="rrhh-vacaciones"
+          showSearchPanel={false}
+          allowExport={false}
+          autoExpandAll={false}
+          rowAlternation={false}
+          rowPadding="4px 8px"
+          paging={{ pageSize: 100, pageSizes: [50, 100, 250, 500] }}
+          selection="multiple"
+          selectionDisabled={!puedeSeleccionarRegistros || vacacionGuardando}
+          selectedKeys={selectedRowKeys}
+          onSelectionChanged={(keys) => {
+            if (!puedeSeleccionarRegistros) {
+              window.alert("Seleccione 1er, 2do o 3er validador antes de seleccionar registros.");
+              return;
+            }
+            setSelectedRowKeys(keys);
+            const ultima = keys.length > 0 ? keys[keys.length - 1] : null;
+            if (ultima && !selectedRowKeys.includes(ultima)) {
+              setSelectedRowKey(ultima);
+            } else if (selectedRowKey && !keys.includes(selectedRowKey)) {
+              setSelectedRowKey(null);
+            }
           }}
-        >
-            <table style={{ width: `${gridMinWidth}px`, minWidth: `${gridMinWidth}px`, borderCollapse: "collapse", tableLayout: "fixed" }}>
-              <colgroup>
-                {columnasGridGastosVisibles.map((columna) => (
-                  <col key={`col-${columna.key}`} style={{ width: columna.width }} />
-                ))}
-              </colgroup>
-              <thead>
-                <tr>
-                {columnasGridGastosVisibles.map((header) => {
-                  const isSorted = sortConfig?.key === header.key;
-                  const isFrozen = header.fixed === "left";
-                  const esColumnaSeleccion = header.key === "seleccion";
-                  return (
-                    <th
-                      key={header.key}
-                      style={{
-                        textAlign: header.align,
-                        boxSizing: "border-box",
-                        width: header.fixed === "left" ? getColumnWidthPx(header.width) : header.width,
-                        minWidth: header.fixed === "left" ? getColumnWidthPx(header.width) : header.width,
-                        maxWidth: header.fixed === "left" ? getColumnWidthPx(header.width) : header.width,
-                        padding: "13px 11px",
-                        fontSize: 11,
-                        color: isSorted ? "#6E4CCB" : "#374151",
-                        borderBottom: "1px solid #E5E7EB",
-                        background: "#F9FAFB",
-                        position: "sticky",
-                        top: 0,
-                        left: isFrozen ? stickyLeftByColumn[header.key] : undefined,
-                        zIndex: isFrozen ? stickyColumnZIndex[header.key] ?? 4 : 3,
-                        boxShadow: "0 1px 0 #E5E7EB",
-                        borderRight: isFrozen ? "1px solid #E5E7EB" : undefined,
-                        cursor: header.key !== 'acciones' && header.key !== 'seleccion' ? 'pointer' : 'default',
-                        userSelect: 'none',
-                      }}
-                      onClick={() => {
-                        if (header.key === 'acciones' || header.key === 'seleccion') return;
-                        setSortConfig((prev) => {
-                          if (prev?.key === header.key) {
-                            // Alternar direcciÃ³n
-                            return { key: header.key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
-                          }
-                          return { key: header.key, direction: 'asc' };
-                        });
-                      }}
-                    >
-                      {esColumnaSeleccion ? (
-                          <input
-                          ref={selectAllCheckboxRef}
-                          type="checkbox"
-                          aria-label="Seleccionar o deseleccionar todos los registros visibles"
-                          checked={todosLosVisiblesSeleccionados}
-                          disabled={gastosFiltradosKeys.length === 0 || !puedeSeleccionarRegistros}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => {
-                            e.stopPropagation();
-                            if (!puedeSeleccionarRegistros) {
-                              window.alert("Seleccione 1er, 2do o 3er validador antes de seleccionar registros.");
-                              return;
-                            }
-                            alternarSeleccionVisible(e.currentTarget.checked);
-                          }}
-                          style={{
-                            width: 16,
-                            height: 16,
-                            cursor: gastosFiltradosKeys.length > 0 && puedeSeleccionarRegistros ? "pointer" : "not-allowed",
-                            accentColor: "#6E4CCB",
-                          }}
-                        />
-                      ) : (
-                        header.label
-                      )}
-                      {isSorted && (
-                        <span
-                          aria-hidden="true"
-                          style={{
-                            marginLeft: 4,
-                            display: "inline-flex",
-                            alignItems: "center",
-                            verticalAlign: "middle",
-                          }}
-                        >
-                          {sortConfig?.direction === "asc" ? (
-                            <ArrowUp size={12} strokeWidth={2.5} />
-                          ) : (
-                            <ArrowDown size={12} strokeWidth={2.5} />
-                          )}
-                        </span>
-                      )}
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {cargando ? (
-                <tr>
-                    <td colSpan={columnasGridGastosVisibles.length} style={{ padding: 24, textAlign: "center", color: "#6B7280", fontSize: 11 }}>
-                    Cargando vacaciones...
-                  </td>
-                </tr>
-              ) : gastosFiltrados.length === 0 ? (
-                <tr>
-                    <td colSpan={columnasGridGastosVisibles.length} style={{ padding: 24, textAlign: "center", color: "#6B7280", fontSize: 11 }}>
-                    {mensajeFiltroCabecera
-                      ? mensajeFiltroCabecera
-                      : limiteConsultaServidor
-                        ? limiteConsultaServidor.message
-                        : excedeLimiteRegistros
-                      ? `Se encontraron ${cantidadRegistrosFiltrados} registros y el mÃ¡ximo permitido para mostrar es ${MAX_GASTOS_PARA_MOSTRAR}. Aplique mÃ¡s filtros.`
-                      : "No se encontraron vacaciones."}
-                  </td>
-                </tr>
-              ) : (
-                  gastosFiltrados.map((gasto, rowIndex) => {
-                    const rowKey = getGastoRowKey(gasto, rowIndex);
-                    const highlightStyle = getRowHighlightByPorcentajeFic(gasto.porcentajeFic);
-                    const isSelectedRow = selectedRowKeys.includes(rowKey) || selectedRowKey === rowKey;
-                    const rowBackground = highlightStyle.background;
-                    const rowColor = highlightStyle.color;
-                    const rowFontWeight = highlightStyle.fontWeight;
-
-                  return (
-                    <tr
-                      key={rowKey}
-                      className={filaActivaKey === rowKey ? "gasto-row-active" : undefined}
-                      style={{
-                        background: rowBackground,
-                        transition: "background 0.1s",
-                        color: rowColor,
-                        fontWeight: rowFontWeight,
-                        outline: isSelectedRow ? "2px solid #6366F1" : "none",
-                        outlineOffset: "-2px",
-                      }}
-                    onClick={() => {
-                      handleRowClick(gasto, rowKey);
-                      if (rechazoError) {
-                        setRechazoError(null);
-                      }
-                    }}
-                    >
-                      {columnasGridGastosVisibles.map((col) => (
-                      <td
-                        key={col.key}
-                          style={{
-                            padding: "13px 11px",
-                            boxSizing: "border-box",
-                            width: col.fixed === "left" ? getColumnWidthPx(col.width) : col.width,
-                            minWidth: col.fixed === "left" ? getColumnWidthPx(col.width) : col.width,
-                            maxWidth: col.fixed === "left" ? getColumnWidthPx(col.width) : col.width,
-                            borderBottom: "1px solid #F3F4F6",
-                            color: rowColor,
-                            fontSize: 11,
-                            fontWeight: rowFontWeight || (col.key === "responsable" ? 700 : undefined),
-                            textAlign: col.align,
-                            overflow: "hidden",
-                            whiteSpace: "nowrap",
-                            textOverflow: "ellipsis",
-                            position: col.fixed === "left" ? "sticky" : undefined,
-                          left: col.fixed === "left"
-                            ? stickyLeftByColumn[col.key]
-                            : undefined,
-                            zIndex: col.fixed === "left" ? stickyColumnZIndex[col.key] ?? 2 : 1,
-                            background: col.fixed === "left"
-                              ? getStickyCellBackground(rowBackground, "#FFFFFF")
-                              : undefined,
-                            borderRight: col.fixed === "left"
-                              ? "1px solid #E5E7EB"
-                              : undefined,
-                        }}
-                      >
-
-                        
-                        {/* Renderizado de cada celda */}
-                        {(() => {
-                          switch (col.key) {
-                            case "idEmpleadoCj":
-                              return renderGridCellText(gasto.idEmpleadoCj ?? gasto.id);
-                            case "nombreEmpleado":
-                              return renderGridCellText(gasto.nombreEmpleado);
-                            case "idEstado":
-                              return renderGridCellText(gasto.estado);
-                            case "estado":
-                              return renderGridCellText(gasto.estadoLabel);
-                            case "idActivo":
-                              return renderGridCellText(gasto.idActivo);
-                            case "fechaInicio":
-                              return renderGridCellText(formatInputDateForDisplay(gasto.fechaInicio));
-                            case "fechaFin":
-                              return renderGridCellText(formatInputDateForDisplay(gasto.fechaFin));
-                            case "usuario":
-                              return renderGridCellText(gasto.usuario);
-                            case "fechaCreacion":
-                              return renderGridCellText(formatInputDateForDisplay(gasto.fechaCreacion));
-                            case "idResponsableCj":
-                              return renderGridCellText(gasto.idResponsableCj);
-                            case "idSegundoVacaciones":
-                              return renderGridCellText(gasto.idSegundoVacaciones);
-                            case "idTerceroVacaciones":
-                              return renderGridCellText(gasto.idTerceroVacaciones);
-                            case "primerValidador":
-                              return renderGridCellText(gasto.primerValidador);
-                            case "segundoValidador":
-                              return renderGridCellText(gasto.segundoValidador);
-                            case "tercerValidador":
-                              return renderGridCellText(gasto.tercerValidador);
-                            case "responsableVacaciones":
-                              return renderGridCellText(
-                                gasto.responsableVacaciones || gasto.responsableLabel || gasto.responsable
-                              );
-                            case "fechaAprob":
-                              return renderGridCellText(formatInputDateForDisplay(gasto.fechaAprob));
-                            case "saldoVacaciones":
-                              return renderGridCellText(gasto.saldoVacaciones);
-                            case "acciones":
-                              return (
-                                <div style={{ display: "flex", justifyContent: "center", gap: 8 }}>
-                                  <button
-                                    title="Seleccionar"
-                                    aria-label="Seleccionar"
-                                    style={{
-                                      width: 34,
-                                      height: 34,
-                                      border: "1px solid #C7D2FE",
-                                      background: "#EEF2FF",
-                                      color: "#3730A3",
-                                      borderRadius: 8,
-                                      fontWeight: 700,
-                                      cursor: puedeSeleccionarRegistros ? "pointer" : "not-allowed",
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      fontSize: 15,
-                                      opacity: puedeSeleccionarRegistros ? 1 : 0.55,
-                                    }}
-                                    disabled={!puedeSeleccionarRegistros}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleRowClick(gasto, rowKey);
-                                    }}
-                                  >
-                                    <Eye size={17} strokeWidth={2.2} />
-                                  </button>
-                                </div>
-                              );
-                            case "seleccion":
-                              return (
-                                <input
-                                  type="checkbox"
-                                  aria-label={`Seleccionar registro ${gasto.id}`}
-                                  checked={selectedRowKeys.includes(rowKey)}
-                                  disabled={!puedeSeleccionarRegistros}
-                                  onClick={(e) => e.stopPropagation()}
-                                  onChange={(e) => {
-                                    e.stopPropagation();
-                                    if (!puedeSeleccionarRegistros) {
-                                      window.alert("Seleccione 1er, 2do o 3er validador antes de seleccionar un registro.");
-                                      return;
-                                    }
-                                    const checked = e.currentTarget.checked;
-                                    setSelectedRowKeys((prev) => {
-                                      if (checked) {
-                                        if (prev.includes(rowKey)) return prev;
-                                        return [...prev, rowKey];
-                                      }
-                                      return prev.filter((key) => key !== rowKey);
-                                    });
-                                    if (checked) {
-                                      setSelectedRowKey(rowKey);
-                                    } else if (selectedRowKey === rowKey) {
-                                      setSelectedRowKey(null);
-                                    }
-                                  }}
-                                  style={{
-                                    width: 16,
-                                    height: 16,
-                                    cursor: puedeSeleccionarRegistros ? "pointer" : "not-allowed",
-                                    accentColor: "#6E4CCB",
-                                  }}
-                                />
-                              );
-                            case "cliente":
-                              return renderGridCellText(gasto.filtroOperativo.filtro?.nombreCliente);
-                            case "nombreProyecto":
-                              return renderGridCellText(gasto.filtroOperativo.filtro?.nombreProyecto);
-                            case "tipoTrabajo":
-                              return renderGridCellText(
-                                gasto.filtroOperativo.filtro?.tipoTrabajo ??
-                                  gasto.filtroOperativo.tipoTrabajo?.tipoTrabajo
-                              );
-                            case "id":
-                              return renderGridCellText(gasto.id);
-                            case "idOc":
-                              return renderGridCellText(gasto.idOc);
-                            case "site":
-                              return renderGridCellText(gasto.filtroOperativo.filtro?.nombreSite);
-                            case "empleado":
-                              return renderGridCellText(
-                                getConstanteLabelOrFallback(empleadoOptions, gasto.solicitante, gasto.solicitanteLabel)
-                              );
-                            case "responsable":
-                              return renderGridCellText(gasto.responsableLabel || gasto.responsable || "");
-                            case "validador":
-                              return renderGridCellText(
-                                getConstanteLabelOrFallback(
-                                  validadorOptions,
-                                  gasto.validador,
-                                  gasto.validadorLabel
-                                )
-                              );
-                            case "tarea":
-                              return renderGridCellText(
-                                getTareaLabelOrFallback(
-                                  tareasCatalogo,
-                                  gasto.filtroOperativo.tarea?.correlativo,
-                                  gasto.filtroOperativo.tarea?.tarea
-                                )
-                              );
-                            case "detalle":
-                              return renderGridCellText(gasto.detalle);
-                            case "comentario":
-                                return renderGridCellText(
-                                  gasto.comentario ? String(gasto.comentario).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim() : ""
-                                );
-                            case "bien":
-                              return renderGridCellText(getConstanteLabel(bienOptions, gasto.bien));
-                            case "comprobante":
-                              return renderGridCellText(getConstanteLabel(comprobanteOptions, gasto.comprobante));
-                            case "moneda":
-                              return renderGridCellText(getConstanteLabel(monedaOptions, gasto.moneda));
-                            case "monto":
-                              return renderGridCellText(
-                                gasto.monto !== undefined && gasto.monto !== null && gasto.monto !== ""
-                                  ? Number(gasto.monto).toLocaleString("es-PE", {
-                                      minimumFractionDigits: 2,
-                                    })
-                                  : ""
-                              );
-                            case "subtotal":
-                              return renderGridCellText(
-                                gasto.subtotal !== undefined && gasto.subtotal !== null
-                                  ? formatDecimalValue(Number(gasto.subtotal))
-                                  : ""
-                              );
-                            case "igv":
-                              return renderGridCellText(
-                                gasto.igv !== undefined && gasto.igv !== null
-                                  ? formatDecimalValue(Number(gasto.igv))
-                                  : ""
-                              );
-                            case "total":
-                              return renderGridCellText(
-                                gasto.total !== undefined && gasto.total !== null
-                                  ? formatDecimalValue(Number(gasto.total))
-                                  : ""
-                              );
-                            case "subOc":
-                              return renderGridCellText(
-                                gasto.subOc !== undefined && gasto.subOc !== null
-                                  ? formatDecimalValue(Number(gasto.subOc))
-                                  : ""
-                              );
-                            case "adelaFic":
-                              return renderGridCellText(
-                                gasto.adelaFic !== undefined && gasto.adelaFic !== null
-                                  ? formatDecimalValue(Number(gasto.adelaFic))
-                                  : ""
-                              );
-                            case "porce":
-                              return renderGridCellText(
-                                gasto.porce !== undefined && gasto.porce !== null
-                                  ? Number(gasto.porce).toLocaleString("es-PE", {
-                                      minimumFractionDigits: 2,
-                                    })
-                                  : ""
-                              );
-                            case "porcentajeFic":
-                              return renderGridCellText(
-                                gasto.porcentajeFic !== undefined && gasto.porcentajeFic !== null
-                                  ? Number(gasto.porcentajeFic).toLocaleString("es-PE", {
-                                      minimumFractionDigits: 2,
-                                    })
-                                  : ""
-                              );
-                            case "conPagado":
-                              return renderGridCellText(
-                                gasto.conPagadoDisplay?.trim()
-                                  ? gasto.conPagadoDisplay
-                                  : gasto.conPagado !== undefined && gasto.conPagado !== null
-                                    ? Number(gasto.conPagado).toLocaleString("es-PE", {
-                                        minimumFractionDigits: 2,
-                                      })
-                                    : ""
-                              );
-                            case "montoOc2":
-                              return renderGridCellText(gasto.montoOc2);
-                            case "ot":
-                              return renderGridCellText(gasto.filtroOperativo.ot?.ot);
-                            case "estado":
-                              return renderGridCellText(getEstadoLabel(estadoOptions, gasto.estado, gasto.estadoLabel));
-                            case "fecIngreso":
-                              return renderGridCellText(
-                                formatInputDateForDisplay(gasto.fecIngreso)
-                              );
-                            case "acciones":
-                              const accionesHabilitadas = gasto.estado === 97 || gasto.estado === 98 || gasto.estado === 99;
-                              return (
-                                <div style={{ display: "flex", justifyContent: "center" }}>
-                                  <button
-                                    title="Rechazar"
-                                    aria-label="Rechazar"
-                                    style={{
-                                      width: 34,
-                                      height: 34,
-                                      border: `1px solid ${accionesHabilitadas ? "#FECACA" : "#E5E7EB"}`,
-                                      background: accionesHabilitadas ? "#FEF2F2" : "#F3F4F6",
-                                      color: accionesHabilitadas ? "#B91C1C" : "#9CA3AF",
-                                      borderRadius: 8,
-                                      fontWeight: 700,
-                                      cursor: accionesHabilitadas ? "pointer" : "not-allowed",
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      fontSize: 15,
-                                      opacity: accionesHabilitadas ? 1 : 0.65,
-                                    }}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      if (!accionesHabilitadas) return;
-                                      void rechazarVacacionRegistro(gasto);
-                                    }}
-                                    disabled={!accionesHabilitadas}
-                                  >
-                                    <CircleX size={17} strokeWidth={2.2} />
-                                  </button>
-                                </div>
-                              );
-                            default:
-                              return null;
-                          }
-                        })()}
-                      </td>
-                    ))}
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+          focusedRowKey={filaActivaKey}
+          onRowClick={(row) => {
+            handleRowClick(row.gasto, row.rowKey);
+            if (rechazoError) {
+              setRechazoError(null);
+            }
+          }}
+          rowBackground={(row, focused) => {
+            const { background } = getRowHighlightByPorcentajeFic(row.gasto.porcentajeFic);
+            if (background && background !== "transparent") return background;
+            return focused ? "#E0E7FF" : undefined;
+          }}
+          rowStyle={(row) => {
+            const { color, fontWeight } = getRowHighlightByPorcentajeFic(row.gasto.porcentajeFic);
+            return { color, fontWeight };
+          }}
+        />
         {/* Pie de grilla: cantidad de registros y suma por moneda */}
         <div style={{
           width: "100%",
@@ -6093,6 +5698,30 @@ export default function RecursosHumanosVacacionesPage() {
       </div>
     );
 }
+/** Fila plana del grid de vacaciones: cada columna trae su valor listo para ordenar, filtrar y agrupar. */
+type VacacionGridRow = {
+  rowKey: string;
+  gasto: GastoForm;
+  idEmpleadoCj: string;
+  nombreEmpleado: string;
+  idEstado: string;
+  estado: string;
+  idActivo: string;
+  fechaInicio: string;
+  fechaFin: string;
+  usuario: string;
+  fechaCreacion: string;
+  idResponsableCj: string;
+  idSegundoVacaciones: string;
+  idTerceroVacaciones: string;
+  primerValidador: string;
+  segundoValidador: string;
+  tercerValidador: string;
+  responsableVacaciones: string;
+  fechaAprob: string;
+  saldoVacaciones: number | null;
+};
+
 const getGastoRowKey = (gasto: GastoForm, rowIndex: number) => {
   const id = Number(gasto.id ?? 0);
   const idSite = String(gasto.filtroOperativo.filtro?.idSite ?? "").trim();
