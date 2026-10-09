@@ -405,6 +405,18 @@ function toNumber(value: string | number | null | undefined) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
+function tasaIgvPorComprobante(idComprobante: string | number | null | undefined) {
+  switch (Number(idComprobante)) {
+    case 2: // FACTURA
+    case 6: // RENDICION FACTURA
+      return 0.18;
+    case 5: // HONORARIO
+      return 0.08;
+    default:
+      return 0;
+  }
+}
+
 function sameFiltroOperativoValue(
   left?: FiltroOperativoValue,
   right?: FiltroOperativoValue,
@@ -915,8 +927,6 @@ export default function OcV2Page() {
       setReporteSubtab(tab as typeof reporteSubtab);
       setReporteConsultado(false);
         setReportePlanillaRows([]);
-        setEstadosOcGastosCatalogo([]);
-        setSolicitantesOcGastosCatalogo([]);
       setResponsablesReporteFiltro([]);
       setBusquedaResponsableReporte("");
       setSolicitantesReporteFiltro([]);
@@ -1373,47 +1383,10 @@ export default function OcV2Page() {
         const rowsPorSolicitante = idsSolicitantesSeleccionados.size > 0
           ? rowsPorCliente.filter((row) => idsSolicitantesSeleccionados.has(getIdSolicitanteOc(row)))
           : rowsPorCliente;
-        // Sin filtros, el catálogo se forma con el resultado general. Con
-        // filtros, se forma solo con los registros que cumplen esos filtros,
-        // excluyendo la propia selección de solicitante.
-        setSolicitantesOcGastosCatalogo(() => {
-          const solicitantes = new Map<string, { label: string; ids: Set<string> }>();
-          const agregarSolicitante = (idSolicitante: string, solicitante: string) => {
-            // SQL puede devolver el mismo nombre con espacios no separables,
-            // saltos de línea o más de un espacio. Se normaliza antes de
-            // agrupar para que no aparezca dos veces en el selector.
-            const label = solicitante.replace(/[\s\u00A0]+/g, " ").trim();
-            const key = label
-              .normalize("NFD")
-              .replace(/[\u0300-\u036f]/g, "")
-              .toLocaleLowerCase("es");
-            if (!idSolicitante || Number(idSolicitante) <= 0 || !label) return;
-            const actual = solicitantes.get(key) ?? { label, ids: new Set<string>() };
-            actual.ids.add(idSolicitante);
-            solicitantes.set(key, actual);
-          };
-
-          const rowsCatalogoPorEstado = estadosOcSeleccionados.length
-            ? rowsParaCatalogoSolicitantes.filter((row) => estadosOcSeleccionados.includes(formatEstadoOcGrid(getEstadoOcRowValue(row))))
-            : rowsParaCatalogoSolicitantes;
-          rowsCatalogoPorEstado.forEach((row) => {
-            const getValue = (...columnas: string[]) => {
-              for (const columna of columnas) {
-                const key = Object.keys(row).find((item) => item.toLowerCase() === columna.toLowerCase());
-                if (key) return String(row[key] ?? "").trim();
-              }
-              return "";
-            };
-            const idSolicitante = getValue("IdSolicitanteOc", "IdSolicitante");
-            const solicitante = getValue("SolicitanteOc", "Solicitante");
-            agregarSolicitante(idSolicitante, solicitante);
-          });
-          return Array.from(solicitantes.values(), ({ label, ids }) => ({
-            value: Array.from(ids).sort((left, right) => Number(left) - Number(right)).join(","),
-            label,
-          }))
-            .sort((left, right) => left.label.localeCompare(right.label, "es"));
-        });
+        // Las opciones de cabecera se cargan desde la consulta general y no se
+        // recalculan a partir de los resultados filtrados de esta consulta.
+        // Así se puede combinar o cambiar cualquier filtro general sin perder
+        // opciones; los filtros por celda siguen siendo independientes.
         setClientesOcGastosCatalogo((previous) => {
           const clientes = new Map<string, string>();
           const agregarCliente = (idCliente: string, nombreCliente: string) => {
@@ -1438,9 +1411,10 @@ export default function OcV2Page() {
           return Array.from(clientes, ([value, label]) => ({ value, label }))
             .sort((left, right) => left.label.localeCompare(right.label, "es"));
         });
-        setEstadosOcGastosCatalogo(getUniqueSorted(
-          rows.map((row) => formatEstadoOcGrid(getEstadoOcRowValue(row))).filter((estado) => estado !== "SIN ESTADO")
-        ));
+        setEstadosOcGastosCatalogo((previous) => getUniqueSorted([
+          ...previous,
+          ...rows.map((row) => formatEstadoOcGrid(getEstadoOcRowValue(row))).filter((estado) => estado !== "SIN ESTADO"),
+        ]));
         const rowsPorEstado = estadosOcSeleccionados.length
           ? rowsPorSolicitante.filter((row) => {
             return estadosOcSeleccionados.includes(formatEstadoOcGrid(getEstadoOcRowValue(row)));
@@ -1868,27 +1842,11 @@ export default function OcV2Page() {
     })).sort((left, right) => left.label.localeCompare(right.label, "es"));
   }, [cabeceras]);
 
-  const hayFiltrosOcGastos = Boolean(
-    reporteFiltros.idOc.trim()
-    || reporteFiltros.fechaDesde
-    || reporteFiltros.fechaHasta
-    || reporteFiltros.cliente
-    || reporteFiltros.proyecto
-    || reporteFiltros.site
-    || reporteFiltros.estado
-    || reporteFiltros.responsable
-    || reporteFiltros.solicitante
-    || responsablesReporteFiltro.length
-    || proyectosReporteFiltro.length
-    || sitesReporteFiltro.length
-    || solicitantesReporteFiltro.length,
-  );
-
   const solicitanteReporteOptions = useMemo(
     () => reporteSubtab === "oc-gastos"
-      ? (hayFiltrosOcGastos ? solicitantesOcGastosCatalogo : (solicitantesOcGastosCatalogo.length ? solicitantesOcGastosCatalogo : solicitantesOcGastosGenerales))
+      ? (solicitantesOcGastosCatalogo.length ? solicitantesOcGastosCatalogo : solicitantesOcGastosGenerales)
       : reporteOptions.solicitantes.map((nombre) => ({ value: nombre, label: nombre })),
-    [hayFiltrosOcGastos, reporteOptions.solicitantes, reporteSubtab, solicitantesOcGastosCatalogo, solicitantesOcGastosGenerales]
+    [reporteOptions.solicitantes, reporteSubtab, solicitantesOcGastosCatalogo, solicitantesOcGastosGenerales]
   );
 
   const responsablesOcGastosOptions = useMemo(() => {
@@ -2127,9 +2085,7 @@ export default function OcV2Page() {
     let peso = 0;
     draft.detalles.forEach((item) => {
       const sub = toNumber(item.cantidad) * toNumber(item.precioUnitario);
-      const comprobanteUpper = (item.comprobante || "").toString().toUpperCase();
-      const isFactura = comprobanteUpper === "2" || comprobanteUpper === "6";
-      const igvItem = isFactura ? sub * 0.18 : 0;
+      const igvItem = sub * tasaIgvPorComprobante(item.comprobante);
       subtotal += sub;
       igv += igvItem;
       total += sub + igvItem;
@@ -4463,10 +4419,7 @@ export default function OcV2Page() {
               <Label>IGV</Label>
               {(() => {
                 const subtotal = toNumber(cantidadInputRef.current) * toNumber(precioUnitarioInputRef.current);
-                const comprobanteUpper = (draft.comprobante || "").toString().toUpperCase();
-                const isFactura = comprobanteUpper === "FACTURA" || comprobanteUpper === "RENDICION FACTURA";
-                const igv = isFactura ? subtotal * 0.18 : 0;
-                //console.log(isFactura, subtotal, igv);
+                const igv = subtotal * tasaIgvPorComprobante(draft.comprobante);
                 return (
                   <input type="text" readOnly value={formatMoney(igv)} style={{ ...styles.input2, background: "#F8FAFC" }} />
                 );
@@ -4617,7 +4570,7 @@ export default function OcV2Page() {
                 ) : (
                   draft.detalles.map((item, index) => {
                     const subtotal = toNumber(item.cantidad) * toNumber(item.precioUnitario);
-                    const igv = subtotal * 0.18;
+                    const igv = subtotal * tasaIgvPorComprobante(item.comprobante);
                     const total = subtotal + igv;
 
                     return (
@@ -5553,10 +5506,7 @@ const DraftDetalleTable = React.memo(function DraftDetalleTable({
             ) : (
               detalles.map((item, index) => {
                   const subtotal = toNumber(item.cantidad) * toNumber(item.precioUnitario);
-                  // Calcular IGV solo si comprobante es FACTURA o RENDICION FACTURA
-                  const comprobanteUpper = (item.comprobante || "").toString().toUpperCase();
-                  const isFactura = comprobanteUpper === "2" || comprobanteUpper === "6";
-                  const igv = isFactura ? subtotal * 0.18 : 0;
+                  const igv = subtotal * tasaIgvPorComprobante(item.comprobante);
                   const total = subtotal + igv;
                   const isEditing = editingDetalleId === item.tempId;
 

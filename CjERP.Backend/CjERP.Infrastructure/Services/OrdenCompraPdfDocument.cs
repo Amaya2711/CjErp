@@ -327,7 +327,7 @@ internal sealed class OrdenCompraPdfDocument : IDocument
                 });
 
                 TotalRow(table, "SUB TOTAL", FormatMoney(ResolveSubtotal()));
-                TotalRow(table, "IGV (18%)", FormatMoney(ResolveIgv()));
+                TotalRow(table, "IGV", FormatMoney(ResolveIgv()));
                 TotalRow(table, "TOTAL", FormatMoney(ResolveTotal()), emphasize: true);
                 TotalRow(table, "MONEDA", Clean(_cabecera.Moneda));
             });

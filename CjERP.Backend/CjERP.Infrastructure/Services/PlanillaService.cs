@@ -18,6 +18,13 @@ namespace CjERP.Infrastructure.Services
         private const string UpdateStatusStoredProcedureName = "dbo.sp_Planilla_ActualizarEstado";
         private const string ProcessApprovalStoredProcedureName = "dbo.sp_Planilla_ProcesarAprobacionMasiva";
 
+        private static decimal ObtenerTasaIgv(int idComprobante) => idComprobante switch
+        {
+            2 or 6 => 0.18m,
+            5 => 0.08m,
+            _ => 0m,
+        };
+
         private readonly ISqlCommandFactory _sqlCommandFactory;
         private readonly IAuditoriaCambiosService _auditoriaCambiosService;
         private readonly ILogger<PlanillaService> _logger;
@@ -508,6 +515,9 @@ namespace CjERP.Infrastructure.Services
             var idSolicitante = ParseRequiredInt(request.Solicitante, nameof(request.Solicitante));
             var idGestor = ParseRequiredInt(request.Gestor, nameof(request.Gestor));
             var idValidador = ParseRequiredInt(request.Validador, nameof(request.Validador));
+            var subtotal = request.Subtotal ?? request.Monto;
+            var igv = Math.Round(subtotal * ObtenerTasaIgv(idComprobante), 2);
+            var total = subtotal + igv;
 
             var parameters = new DynamicParameters();
             parameters.Add("@IdProyecto", request.IdProyecto, DbType.Int32);
@@ -524,9 +534,9 @@ namespace CjERP.Infrastructure.Services
             parameters.Add("@Serie", NullIfWhiteSpace(request.Serie), DbType.String);
             parameters.Add("@IdTipoPago", idTipoPago, DbType.Int32);
             parameters.Add("@TipoMoneda", tipoMoneda, DbType.Int32);
-            parameters.Add("@Total", request.Total ?? request.Monto, DbType.Decimal);
-            parameters.Add("@Subtotal", request.Subtotal ?? request.Monto, DbType.Decimal);
-            parameters.Add("@Igv", request.Igv ?? 0m, DbType.Decimal);
+            parameters.Add("@Total", total, DbType.Decimal);
+            parameters.Add("@Subtotal", subtotal, DbType.Decimal);
+            parameters.Add("@Igv", igv, DbType.Decimal);
             parameters.Add("@IdRendicion", request.IdRendicion, DbType.Int32);
             parameters.Add("@Comentario", NullIfWhiteSpace(request.Comentario), DbType.String);
             parameters.Add("@IdSolicitante", idSolicitante, DbType.Int32);

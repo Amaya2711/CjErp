@@ -17,6 +17,13 @@ namespace CjERP.Infrastructure.Services;
 
 public class OrdenCompraService : IOrdenCompraService
 {
+    private static decimal ObtenerTasaIgv(int? idComprobante) => idComprobante switch
+    {
+        2 or 6 => 0.18m,
+        5 => 0.08m,
+        _ => 0m,
+    };
+
     private const string BuscarCabeceraSp = "dbo.sp_OrdenCompra_BuscarCabecera";
     private const string BuscarDetalleSp = "dbo.sp_OrdenCompra_BuscarDetalle";
     private const string InsertarSp = "dbo.sp_OrdenCompra_Insertar";
@@ -416,11 +423,21 @@ public class OrdenCompraService : IOrdenCompraService
     private const string RecalcularTotalesCabeceraSql = """
         UPDATE cab
         SET Subtotal = ISNULL(x.Subtotal, 0),
-            Igv = CASE WHEN cab.IdComprobante IN (2, 6) THEN ISNULL(x.Subtotal, 0) * 0.18 ELSE 0 END,
-            Total = ISNULL(x.Subtotal, 0) + CASE WHEN cab.IdComprobante IN (2, 6) THEN ISNULL(x.Subtotal, 0) * 0.18 ELSE 0 END
+            Igv = ISNULL(x.Igv, 0),
+            Total = ISNULL(x.Subtotal, 0) + ISNULL(x.Igv, 0)
         FROM dbo.CabOrdenCompra cab
         OUTER APPLY (
-            SELECT SUM(CAST(det.Cantidad AS DECIMAL(18,4)) * CAST(det.PrecioUnitario AS DECIMAL(18,4))) AS Subtotal
+            SELECT
+                SUM(CAST(det.Cantidad AS DECIMAL(18,4)) * CAST(det.PrecioUnitario AS DECIMAL(18,4))) AS Subtotal,
+                SUM(
+                    CAST(det.Cantidad AS DECIMAL(18,4)) * CAST(det.PrecioUnitario AS DECIMAL(18,4))
+                    * CASE det.IdComprobante
+                        WHEN 2 THEN 0.18
+                        WHEN 5 THEN 0.08
+                        WHEN 6 THEN 0.18
+                        ELSE 0
+                      END
+                ) AS Igv
             FROM dbo.DetOrdenCompra det
             WHERE det.IdOc = cab.IdOc
         ) x
@@ -830,6 +847,14 @@ public class OrdenCompraService : IOrdenCompraService
                         cancellationToken,
                         commandTimeout: 120));
             }
+
+            await connection.QuerySingleAsync<TotalesCabecera>(
+                _sqlCommandFactory.Create(
+                    RecalcularTotalesCabeceraSql,
+                    new { IdOc = idOc },
+                    CommandType.Text,
+                    cancellationToken,
+                    commandTimeout: 120));
         }
 
         return idOc;
@@ -956,7 +981,8 @@ public class OrdenCompraService : IOrdenCompraService
         try
         {
             var subtotal = request.Detalle.Sum(item => item.Cantidad * item.PrecioUnitario);
-            var igv = request.IdComprobante is 2 or 6 ? subtotal * 0.18m : 0m;
+            var igv = request.Detalle.Sum(item =>
+                item.Cantidad * item.PrecioUnitario * ObtenerTasaIgv(item.IdComprobante));
             var headerAffected = await connection.ExecuteAsync(new CommandDefinition(
                 ActualizarCabeceraEdicionSql,
                 new
@@ -1051,6 +1077,12 @@ public class OrdenCompraService : IOrdenCompraService
                         InsertarDetalleEdicionSql, insertParameters, transaction, cancellationToken: cancellationToken));
                 }
             }
+
+            await connection.QuerySingleAsync<TotalesCabecera>(new CommandDefinition(
+                RecalcularTotalesCabeceraSql,
+                new { request.IdOc },
+                transaction,
+                cancellationToken: cancellationToken));
 
             await transaction.CommitAsync(cancellationToken);
         }
@@ -1505,7 +1537,7 @@ public class OrdenCompraService : IOrdenCompraService
             throw new InvalidOperationException("El monto solicitado supera el saldo disponible de la OC.");
         }
 
-        var igv = origen.IdComprobante == 2 ? Math.Round(request.Monto * 0.18m, 2) : 0m;
+        var igv = Math.Round(request.Monto * ObtenerTasaIgv(origen.IdComprobante), 2);
         var planillaInsertResult = await _planillaService.InsertarPlanillaAsync(
             new PlanillaInsertRequestDto
             {

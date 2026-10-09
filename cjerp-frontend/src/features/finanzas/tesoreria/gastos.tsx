@@ -740,8 +740,6 @@ function toNumberOrZero(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-const IGV_RATE = 0.18;
-
 function roundToTwoDecimals(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
@@ -804,16 +802,20 @@ function areFiltroOperativoValuesEqual(
   );
 }
 
-function isFacturaComprobante(
+function tasaIgvPorComprobante(
   options: ConstanteOption[],
   selectedValue?: string | null
-): boolean {
+): number {
   const match = findConstanteOption(options, selectedValue);
-  const valuesToCheck = match
-    ? [match.label, match.codigo, match.value]
-    : [selectedValue];
+  const idComprobante = [match?.codigo, match?.value, match?.valor, selectedValue]
+    .map((value) => Number(value))
+    .find((value) => Number.isInteger(value) && value > 0);
 
-  return valuesToCheck.some((value) => normalizeSearchText(value) === "factura");
+  return idComprobante === 2 || idComprobante === 6
+    ? 0.18
+    : idComprobante === 5
+      ? 0.08
+      : 0;
 }
 
 function buildValoresGastoRequest(
@@ -2474,8 +2476,9 @@ export default function GastosPage({
   const subtotal = Number(form.monto);
   const hasSubtotal = form.monto.trim() !== "" && Number.isFinite(subtotal);
   const subtotalAmount = hasSubtotal ? subtotal : 0;
-  const aplicaIgv = isFacturaComprobante(comprobanteOptions, form.comprobante);
-  const igvAmount = roundToTwoDecimals(aplicaIgv ? subtotalAmount * IGV_RATE : 0);
+  const igvAmount = roundToTwoDecimals(
+    subtotalAmount * tasaIgvPorComprobante(comprobanteOptions, form.comprobante)
+  );
   const totalAmount = roundToTwoDecimals(subtotalAmount + igvAmount);
   // Las rutas históricas de Planilla se guardan relativas a la biblioteca de
   // SharePoint. Siempre se resuelven contra la base corporativa, incluso al
