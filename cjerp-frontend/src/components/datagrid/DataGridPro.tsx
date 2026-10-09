@@ -582,6 +582,12 @@ export default function DataGridPro<T extends object>({
     return formatValue(col, value);
   };
 
+  const getCellTooltip = (row: T, col: GridColumn<T>) => {
+    const value = getCellValue(row, col, col.dataField);
+    const text = formatValue(col, value);
+    return text || undefined;
+  };
+
   return (
     <div className={className} style={height === "fill" ? { ...styles.root, flex: 1, minHeight: 0 } : styles.root}>
       {/* Panel de agrupación y barra de herramientas */}
@@ -969,6 +975,7 @@ export default function DataGridPro<T extends object>({
                       {visibleCols.map((c) => (
                         <td
                           key={c.dataField}
+                          title={getCellTooltip(row, c)}
                           style={{
                             ...tdStyle,
                             ...stickyStyle(c, background),

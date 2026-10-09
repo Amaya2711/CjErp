@@ -2955,7 +2955,7 @@ export default function PagosV2Page() {
     ];
     const rows = visibleRows.map((row) => {
       const estadoOc = row.estadoOcSemaforo?.trim().toUpperCase() ?? "";
-      const estadoOcDisplay = estadoOc === "P" ? "S/O" : estadoOc;
+      const estadoOcDisplay = estadoOc === "P" ? "-" : estadoOc;
       const totalGastado = row.totalPagadoConvertidoSoles ?? 0;
       const totalSitio = row.totalMontoBckPorMoneda ?? 0;
       const totalVisible = row.totalMontoVisiblePorMoneda ?? 0;
@@ -2972,7 +2972,9 @@ export default function PagosV2Page() {
         row.tipoTrabajo,
         row.tarea,
         row.responsable,
-        row.idOc || row.documento || "-",
+        String(row.idOc || row.documento || "-").trim().toUpperCase() === "S/O"
+          ? "-"
+          : row.idOc || row.documento || "-",
         estadoOcDisplay || "-",
         row.subtotal,
         row.igv,
@@ -3154,10 +3156,13 @@ export default function PagosV2Page() {
       dataField: "idOc",
       caption: "OC",
       width: 90,
-      calculateCellValue: (row) => row.idOc || row.documento || "-",
+      calculateCellValue: (row) => {
+        const oc = String(row.idOc || row.documento || "").trim();
+        return !oc || oc.toUpperCase() === "S/O" ? "-" : oc;
+      },
       cellRender: (value, row) => (
         <span
-          title="Ver detalle de la orden"
+          title={String(value)}
           style={linkStyle}
           onClick={(event) => {
             event.stopPropagation();
@@ -3175,7 +3180,7 @@ export default function PagosV2Page() {
       alignment: "center",
       calculateCellValue: (row) => {
         const code = row.estadoOcSemaforo?.trim().toUpperCase() ?? "";
-        return (code === "P" ? "S/O" : code) || "-";
+        return (code === "P" ? "-" : code) || "-";
       },
       cellStyle: (_v, row) => {
         const code = row.estadoOcSemaforo?.trim().toUpperCase() ?? "";
@@ -3198,7 +3203,7 @@ export default function PagosV2Page() {
       calculateCellValue: (row) => row.detalle?.trim() || "-",
       cellRender: (value, row) => (
         <span
-          title="Ver detalle completo"
+          title={String(value)}
           style={linkStyle}
           onClick={(event) => {
             event.stopPropagation();
