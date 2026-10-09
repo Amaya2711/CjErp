@@ -82,6 +82,7 @@ export default function MainLayout() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [pageTitle, setPageTitle] = useState<string | null>(null);
   const logoutRef = useRef(false);
+  const footerRef = useRef<HTMLElement | null>(null);
   const ingresosEgresosSidebarStateRef = useRef<{
     active: boolean;
     previousCollapsed: boolean;
@@ -125,6 +126,20 @@ export default function MainLayout() {
     clearAuthUser();
     window.location.replace("/");
   };
+
+  // Publica la altura real del pie fijo para que las páginas a pantalla completa
+  // reserven exactamente ese espacio, sea cual sea el monitor o el zoom.
+  useEffect(() => {
+    const footer = footerRef.current;
+    if (!footer) return;
+    const publish = () =>
+      document.documentElement.style.setProperty("--app-footer-h", `${footer.offsetHeight}px`);
+    publish();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(publish);
+    observer.observe(footer);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     let activo = true;
@@ -581,10 +596,18 @@ export default function MainLayout() {
         <main
           className={`flex-1 min-w-0 w-0 h-full p-3 box-border overflow-x-hidden ${
         isEmployeesPage || location.pathname.startsWith("/finanzas/tesoreria/pagos_v1")
+            || location.pathname.startsWith("/finanzas/tesoreria/pagos_v2")
+            || location.pathname.startsWith("/finanzas/tesoreria/pagartesoreria_v2")
             || location.pathname.startsWith("/finanzas/tesoreria/pagos_dev")
               ? "overflow-y-hidden pb-3"
               : "overflow-y-auto pb-20"
           }`}
+          style={
+            location.pathname.startsWith("/finanzas/tesoreria/pagos_v2") ||
+            location.pathname.startsWith("/finanzas/tesoreria/pagartesoreria_v2")
+              ? { paddingBottom: "calc(var(--app-footer-h, 44px) + 8px)" }
+              : undefined
+          }
         >
           <Outlet />
         </main>
@@ -593,7 +616,7 @@ export default function MainLayout() {
       <ZoomPrompt />
 
       {/* Footer */}
-      <footer className="fixed left-0 right-0 bottom-0 min-h-[44px] bg-brand-dark border-t-2 border-brand-purple text-slate-200 z-[1200] flex items-center">
+      <footer ref={footerRef} className="fixed left-0 right-0 bottom-0 min-h-[44px] bg-brand-dark border-t-2 border-brand-purple text-slate-200 z-[1200] flex items-center">
         <div className="w-full flex justify-between items-center px-6 py-2.5 text-xs font-semibold box-border gap-3 flex-wrap">
           <div className="flex items-center gap-4">
             <div className="text-sm font-bold">Usuario: {usuarioMostrar}</div>

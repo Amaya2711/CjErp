@@ -974,3 +974,42 @@
 .pt-stage-dialogs {
   display: contents;
 }
+
+/* Cabecera compacta (pagartesoreria_v2): KPIs más pequeños sin afectar a otras pantallas. */
+.pt-hero.pt-hero-compact {
+  padding: 8px 14px;
+  gap: 12px;
+}
+.pt-hero-compact .pt-metrics {
+  gap: 6px;
+}
+.pt-hero-compact .pt-metrics > div {
+  padding: 5px 12px;
+  min-width: 90px;
+  border-radius: 9px;
+}
+.pt-hero-compact .pt-metrics span {
+  font-size: 10px;
+}
+.pt-hero-compact .pt-metrics strong {
+  font-size: 16px;
+  margin-top: 2px;
+}
+
+/* Distribución a pantalla completa (pagartesoreria_v2): todo el alto disponible, sin medidas fijas.
+   La barra de acciones deja de ser fija en pantalla y pasa al pie de la tarjeta de la lista. */
+.pt-page.pt-page-compact {
+  padding: 0;
+  gap: 8px;
+}
+.pt-page-compact .pt-workspace {
+  min-height: 260px;
+}
+.pt-page-compact .pt-grid-actions {
+  position: static;
+  flex-shrink: 0;
+  border: 0;
+  border-top: 1px solid #e2e8f0;
+  border-radius: 0;
+  box-shadow: none;
+}

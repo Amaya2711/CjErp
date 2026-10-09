@@ -42,7 +42,7 @@ export function FacturaLink({ referencia, correlativo }: { referencia: string | 
   </span>;
 }
 
-const borradorDesde = (row: PagoTesoreriaRow): PagoRevisionRequest => ({
+export const borradorDesde = (row: PagoTesoreriaRow): PagoRevisionRequest => ({
   item: crearItemsTesoreria([row])[0], idAnticipo: row.idAnticipo,
   nroOperacion: row.nroOperacion, idComprobante: row.idComprobante, idTipoPago: row.idTipoPago,
   imgFactura: row.imgFactura, estado: row.estado, confirmarCambioEstado: false,

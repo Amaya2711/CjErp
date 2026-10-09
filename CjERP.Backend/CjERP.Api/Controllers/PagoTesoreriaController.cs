@@ -26,7 +26,8 @@ public sealed class PagoTesoreriaController(PagoTesoreriaService service, ISegMe
         var opciones = await menus.ListarPorUsuarioAsync(usuario);
         permitido = opciones.Any(p =>
             string.Equals(p.Ruta?.Trim().TrimEnd('/'), "/finanzas/tesoreria/pagartesoreria", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(p.Ruta?.Trim().TrimEnd('/'), "/finanzas/tesoreria/pagartesoreria_v1", StringComparison.OrdinalIgnoreCase));
+            || string.Equals(p.Ruta?.Trim().TrimEnd('/'), "/finanzas/tesoreria/pagartesoreria_v1", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(p.Ruta?.Trim().TrimEnd('/'), "/finanzas/tesoreria/pagartesoreria_v2", StringComparison.OrdinalIgnoreCase));
         cache.Set(cacheKey, permitido, TimeSpan.FromMinutes(2));
         return permitido;
     }

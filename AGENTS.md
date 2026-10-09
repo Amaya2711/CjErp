@@ -37,7 +37,7 @@ docs/            ARCHITECTURE · MODULES · API_MAP · DATABASE_MAP · PROCESS_M
 ## Frontend
 - Nueva página: `features/<modulo>/<pagina>.tsx` + ruta lazy en `app/router/AppRouter.tsx` + ítem en `SegMenu` (BD) con la **misma ruta**.
 - HTTP **siempre** con `src/api/httpClient.ts` (desenvuelve `{success,data}`, rechaza `success:false`, 401 → login). Errores: `utils/httpError.ts#getHttpErrorMessage`.
-- Reutilizar: `components/base/` (AppPage, AppCard, DataGridBase, StoredProcedureGrid, SidePanelForm, CrudToolbar, ConfirmDialog, InputBase, SelectBase, AppStatusMessage, ToolbarFiltro, PlaceholderPage), `components/lookups/FiltroOperativoLookup`, hooks `useConstantesPorCampo`, `useCrudForm`, `useFiltroOperativoLookup`, utils `sharepoint`, `imageCompression`, `authStorage`.
+- Reutilizar: `components/base/` (AppPage, AppCard, DataGridBase, StoredProcedureGrid, SidePanelForm, CrudToolbar, ConfirmDialog, InputBase, SelectBase, AppStatusMessage, ToolbarFiltro, PlaceholderPage), `components/datagrid/DataGridPro` (grilla avanzada: agrupar, filtros, resumen, edición, export; reemplaza la necesidad de DevExtreme), `components/lookups/FiltroOperativoLookup`, hooks `useConstantesPorCampo`, `useCrudForm`, `useFiltroOperativoLookup`, utils `sharepoint`, `imageCompression`, `authStorage`.
 - Estilo dominante: estilos inline tipados. Sin store global. Grillas propias (DataGridBase). Excel `xlsx` y PDF `jspdf` con import dinámico. Gráficos `recharts`.
 
 ## Backend
@@ -68,14 +68,14 @@ Seguridad · Tesorería/Finanzas (recibos, pagos, cheques, conciliación) · Ord
 > FE = `cjerp-frontend/src/`, C = `CjERP.Api/Controllers/`, S = `CjERP.Infrastructure/Services/`. Endpoints completos en `docs/API_MAP.md`.
 
 ### Recibos / gastos (tabla Planilla)
-- FE: `features/finanzas/tesoreria/gastos.tsx` (registro), `pagos_v1.tsx` (**aprobaciones**), `gastosaprobar.tsx`; API `api/planillaConsultaService.ts`
+- FE: `features/finanzas/tesoreria/gastos.tsx` (registro), `pagos_v1.tsx` (**aprobaciones**), `pagos_v2.tsx` (copia de v1 con `DataGridPro`; mismos servicios y permisos de `pagos_v1`), `gastosaprobar.tsx`; API `api/planillaConsultaService.ts`
 - BE: C/TesoreriaGastosController, C/PlanillaConsultaController → S/PlanillaService, S/PlanillaConsultaService
 - SP: `sp_Planilla_Insertar`, `sp_Planilla_Actualizar`, `sp_Planilla_ActualizarEstado`, `sp_Planilla_ProcesarAprobacionMasiva`, `sp_Planilla_Consulta_Estados` (consulta genérica; `consulta` elige SP), `sp_Planilla_Consulta_Aprobar`, `sp_Finanzas_CargarValoresGasto`
 - Tablas: Planilla, Constante, CuentaEmpleado, Empleado/EmpleadoCj
 - Procesos: registro → aprobación (1ª/2ª, observar, rechazar) → tesorería
 
 ### Pago de tesorería
-- FE: `features/finanzas/tesoreria/pagartesoreria.tsx` (+`PagoEtapaForm.tsx`, `PagoRevisionCells.tsx`), `pagartesoreria_v1.tsx`; API `api/pagoTesoreriaService.ts`
+- FE: `features/finanzas/tesoreria/pagartesoreria.tsx` (+`PagoEtapaForm.tsx`, `PagoRevisionCells.tsx`), `pagartesoreria_v1.tsx`, `pagartesoreria_v2.tsx` (copia de v1 con `DataGridPro`; edición de Revisión en `usePagoRevisionEditor.tsx`); API `api/pagoTesoreriaService.ts`
 - BE: C/PagoTesoreriaController → S/PagoTesoreriaService, PagoTesoreriaWorkflow (`EstadoDestino`), PagoTesoreriaRevision
 - SP: `sp_Planilla_ActualizarRevisionMasiva`, `sp_Planilla_ContabilidadMasivo`, `sp_Planilla_PasarAdministrativoMasivo`, `sp_Planilla_ProgramarMasivo`, `sp_Planilla_AdministrativoMasivo`, `sp_Planilla_PagoContabilidadMasivo`, `sp_Planilla_ActualizarRendirMasivo`, `sp_Planilla_ConsultaIni`, `sp_Planilla_ReporteResumen`
 - Tablas: Planilla, LogPlanilla, MovEstadosPagos · Doc: `CjERP.Backend/Database/Finanzas/PagosTesoreria.md`
