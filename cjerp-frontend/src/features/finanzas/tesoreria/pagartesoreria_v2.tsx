@@ -1012,6 +1012,7 @@ export default function PagarTesoreriaV2Page() {
       Tarea: string;
       Solicitante: string;
       Cuenta: string;
+      Banco: string;
       Moneda: string;
       "Suma de Total": number;
       "Suma de Retencion": number;
@@ -1024,9 +1025,10 @@ export default function PagarTesoreriaV2Page() {
         Tarea: r.tarea || "",
         Solicitante: r.solicitante || "",
         Cuenta: r.cuenta || "",
+        Banco: r.bancoCta?.trim() || "Sin banco",
         Moneda: r.moneda || "",
       };
-      const id = [values.Cliente, values.Responsable, values.Tarea, values.Solicitante, values.Cuenta, values.Moneda].join("\u001f");
+      const id = [values.Cliente, values.Responsable, values.Tarea, values.Solicitante, values.Cuenta, values.Banco, values.Moneda].join("\u001f");
       const actual = agrupados.get(id);
       if (actual) {
         actual["Suma de Total"] += r.total || 0;
@@ -1042,8 +1044,8 @@ export default function PagarTesoreriaV2Page() {
       }
     }
     const data = [...agrupados.values()].sort((a, b) =>
-      [a.Cliente, a.Responsable, a.Tarea, a.Solicitante, a.Cuenta]
-        .join(" ").localeCompare([b.Cliente, b.Responsable, b.Tarea, b.Solicitante, b.Cuenta].join(" ")),
+      [a.Cliente, a.Responsable, a.Tarea, a.Solicitante, a.Cuenta, a.Banco]
+        .join(" ").localeCompare([b.Cliente, b.Responsable, b.Tarea, b.Solicitante, b.Cuenta, b.Banco].join(" ")),
     );
     const exportRows: typeof data = [];
     const rowLevels: { level: number }[] = [];
@@ -1057,6 +1059,7 @@ export default function PagarTesoreriaV2Page() {
         Tarea: "",
         Solicitante: "",
         Cuenta: "",
+        Banco: "",
         Moneda: "",
         "Suma de Total": items.reduce((total, row) => total + row["Suma de Total"], 0),
         "Suma de Retencion": items.reduce((total, row) => total + row["Suma de Retencion"], 0),
@@ -1065,7 +1068,7 @@ export default function PagarTesoreriaV2Page() {
       rowLevels.push({ level: 0 });
     }
     const sheet = XLSX.utils.json_to_sheet(exportRows, {
-       header: ["Cliente", "Responsable", "Tarea", "Solicitante", "Cuenta", "Moneda", "Suma de Total", "Suma de Retencion", "Suma de TotalPagar"],
+       header: ["Cliente", "Responsable", "Tarea", "Solicitante", "Cuenta", "Banco", "Moneda", "Suma de Total", "Suma de Retencion", "Suma de TotalPagar"],
     });
     const totalGeneral = {
       Cliente: "Total general",
@@ -1073,24 +1076,25 @@ export default function PagarTesoreriaV2Page() {
       Tarea: "",
       Solicitante: "",
       Cuenta: "",
+      Banco: "",
       Moneda: "",
       "Suma de Total": data.reduce((total, row) => total + row["Suma de Total"], 0),
       "Suma de Retencion": data.reduce((total, row) => total + row["Suma de Retencion"], 0),
       "Suma de TotalPagar": data.reduce((total, row) => total + row["Suma de TotalPagar"], 0),
     };
     XLSX.utils.sheet_add_aoa(sheet, [[
-      totalGeneral.Cliente, "", "", "", "", "", totalGeneral["Suma de Total"],
+      totalGeneral.Cliente, "", "", "", "", "", "", totalGeneral["Suma de Total"],
       totalGeneral["Suma de Retencion"], totalGeneral["Suma de TotalPagar"],
     ]], { origin: -1 });
     sheet["!rows"] = [...rowLevels, { level: 0 }];
     for (let row = 2; row <= exportRows.length + 2; row += 1) {
-      for (const column of ["G", "H", "I"]) {
+      for (const column of ["H", "I", "J"]) {
         const cell = sheet[`${column}${row}`];
         if (cell) cell.z = '"S/" #,##0.00';
       }
     }
-    sheet["!cols"] = [13, 30, 36, 38, 18, 12, 16, 20, 22].map((wch) => ({ wch }));
-    sheet["!autofilter"] = { ref: `A1:I${exportRows.length + 1}` };
+    sheet["!cols"] = [13, 30, 36, 38, 18, 24, 12, 16, 20, 22].map((wch) => ({ wch }));
+    sheet["!autofilter"] = { ref: `A1:J${exportRows.length + 1}` };
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, sheet, "Gerencia");
     XLSX.writeFile(book, `programado-gerencia-${hoy()}.xlsx`);
@@ -1103,18 +1107,18 @@ export default function PagarTesoreriaV2Page() {
     for (const group of paoloGroups) {
       const key = `${group.cliente}-${group.moneda}`;
       const collapsed = paoloCollapsed.has(key);
-      body.push([`${collapsed ? "â–¶" : "â–¼"} ${group.cliente} · ${group.moneda} (${group.items.length})`, "", "", "", "", "", ""]);
+      body.push([`${collapsed ? "â–¶" : "â–¼"} ${group.cliente} · ${group.moneda} (${group.items.length})`, "", "", "", "", "", "", ""]);
       if (!collapsed) {
         body.push(...group.items.map((item) => [
           item.cliente || "", item.responsable || "", item.tarea || "", item.solicitante || "",
-          item.cuenta || "", item.moneda || "", `${currencySymbol(item.moneda)} ${money(item.total)}`,
+          item.cuenta || "", item.bancoCta?.trim() || "Sin banco", item.moneda || "", `${currencySymbol(item.moneda)} ${money(item.total)}`,
         ]));
       }
-      body.push([`Total ${group.cliente}`, "", "", "", "", "", `${currencySymbol(group.moneda)} ${money(group.total)}`]);
+      body.push([`Total ${group.cliente}`, "", "", "", "", "", "", `${currencySymbol(group.moneda)} ${money(group.total)}`]);
     }
-    body.push(["Total general", "", "", "", "", "", `${currencySymbol(paoloGroups[0]?.moneda)} ${money(paoloGroups.reduce((total, group) => total + group.total, 0))}`]);
+    body.push(["Total general", "", "", "", "", "", "", `${currencySymbol(paoloGroups[0]?.moneda)} ${money(paoloGroups.reduce((total, group) => total + group.total, 0))}`]);
     autoTable(doc, {
-      head: [["Cliente", "Responsable", "Tarea", "Solicitante", "Cuenta", "Moneda", "Suma de Total"]],
+      head: [["Cliente", "Responsable", "Tarea", "Solicitante", "Cuenta", "Banco", "Moneda", "Suma de Total"]],
       body,
       styles: { fontSize: 7, cellPadding: 2 },
       headStyles: { fillColor: [219, 234, 247], textColor: [31, 41, 55] },
@@ -1932,20 +1936,20 @@ export default function PagarTesoreriaV2Page() {
               ) : programadoSubtab === "paolo" && (
                 <div className="pt-paolo-table-wrap">
                   <table className="pt-paolo-table">
-                    <thead><tr><th>Cliente</th><th>Responsable</th><th>Tarea</th><th>Solicitante</th><th>Cuenta</th><th>Moneda</th><th>Suma de Total</th></tr></thead>
+                    <thead><tr><th>Cliente</th><th>Responsable</th><th>Tarea</th><th>Solicitante</th><th>Cuenta</th><th>Banco</th><th>Moneda</th><th>Suma de Total</th></tr></thead>
                     <tbody>
                       {paoloGroups.map((group) => (
                         <Fragment key={group.cliente}>
-                          <tr className="pt-paolo-group-header"><td colSpan={7}><button type="button" onClick={() => setPaoloCollapsed((current) => { const next = new Set(current); if (next.has(`${group.cliente}-${group.moneda}`)) next.delete(`${group.cliente}-${group.moneda}`); else next.add(`${group.cliente}-${group.moneda}`); return next; })}>{paoloCollapsed.has(`${group.cliente}-${group.moneda}`) ? "â–¶" : "â–¼"} {group.cliente} · {group.moneda} ({group.items.length})</button></td></tr>
+                          <tr className="pt-paolo-group-header"><td colSpan={8}><button type="button" onClick={() => setPaoloCollapsed((current) => { const next = new Set(current); if (next.has(`${group.cliente}-${group.moneda}`)) next.delete(`${group.cliente}-${group.moneda}`); else next.add(`${group.cliente}-${group.moneda}`); return next; })}>{paoloCollapsed.has(`${group.cliente}-${group.moneda}`) ? "â–¶" : "â–¼"} {group.cliente} · {group.moneda} ({group.items.length})</button></td></tr>
                           {!paoloCollapsed.has(`${group.cliente}-${group.moneda}`) && group.items.map((row, index) => (
                             <tr key={`${group.cliente}-${row.correlativo}-${row.idSite}-${index}`}>
-                              <td>{index === 0 ? group.cliente : ""}</td><td>{index === 0 || group.items[index - 1]?.responsable !== row.responsable ? row.responsable || "" : ""}</td><td>{row.tarea || ""}</td><td>{row.solicitante || ""}</td><td>{row.cuenta || ""}</td><td>{row.moneda || ""}</td><td className="pt-paolo-number">{currencySymbol(row.moneda)} {money(row.total)}</td>
+                              <td>{index === 0 ? group.cliente : ""}</td><td>{index === 0 || group.items[index - 1]?.responsable !== row.responsable ? row.responsable || "" : ""}</td><td>{row.tarea || ""}</td><td>{row.solicitante || ""}</td><td>{row.cuenta || ""}</td><td>{row.bancoCta?.trim() || "Sin banco"}</td><td>{row.moneda || ""}</td><td className="pt-paolo-number">{currencySymbol(row.moneda)} {money(row.total)}</td>
                             </tr>
                           ))}
-                          <tr className="pt-paolo-subtotal"><td colSpan={5}>Total {group.cliente}</td><td>{group.moneda}</td><td className="pt-paolo-number">{currencySymbol(group.moneda)} {money(group.total)}</td></tr>
+                          <tr className="pt-paolo-subtotal"><td colSpan={6}>Total {group.cliente}</td><td>{group.moneda}</td><td className="pt-paolo-number">{currencySymbol(group.moneda)} {money(group.total)}</td></tr>
                         </Fragment>
                       ))}
-                      {!(paoloGroupMode === "solicitante" && paoloSolicitanteFilter) && <tr className="pt-paolo-total"><td colSpan={6}>Total general</td><td className="pt-paolo-number">S/ {money(sum(rows, "total"))}</td></tr>}
+                      {!(paoloGroupMode === "solicitante" && paoloSolicitanteFilter) && <tr className="pt-paolo-total"><td colSpan={7}>Total general</td><td className="pt-paolo-number">S/ {money(sum(rows, "total"))}</td></tr>}
                     </tbody>
                   </table>
                   {!paoloGroups.length && <div className="pt-programado-view-empty"><strong>Sin registros</strong><span>No hay recibos que coincidan con los filtros.</span></div>}
