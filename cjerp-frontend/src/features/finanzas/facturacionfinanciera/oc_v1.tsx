@@ -1149,7 +1149,7 @@ export default function OcV1Page() {
         }
       }
     } catch (err) {
-      setError("No se pudo cargar la bandeja de órdenes de compra. Intente actualizar nuevamente.");
+      setError(getHttpErrorMessage(err, "No se pudo cargar la bandeja de órdenes de compra. Intente actualizar nuevamente."));
     } finally {
       setLoading(false);
     }

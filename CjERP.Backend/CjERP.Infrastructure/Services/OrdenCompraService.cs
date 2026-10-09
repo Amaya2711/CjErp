@@ -590,6 +590,8 @@ public class OrdenCompraService : IOrdenCompraService
         if (idsOc.Length == 0)
             return cabeceras;
 
+        try
+        {
         var validadores = await connection.QueryAsync<ValidadorOcLookup>(
             new CommandDefinition(
                 """
@@ -631,11 +633,7 @@ public class OrdenCompraService : IOrdenCompraService
                     ON segundo.IdEmpleado = detalleEmpleado.IdSegundoVacaciones
                 LEFT JOIN dbo.EmpleadoCj tercero
                     ON tercero.IdEmpleado = detalleEmpleado.IdTerceroVacaciones
-                WHERE EXISTS (
-                    SELECT 1
-                    FROM STRING_SPLIT(@IdsOcCsv, ',') ids
-                    WHERE TRY_CONVERT(int, LTRIM(RTRIM(ids.value))) = cab.IdOc
-                );
+                WHERE CHARINDEX(',' + CONVERT(varchar(20), cab.IdOc) + ',', ',' + @IdsOcCsv + ',') > 0;
                 """,
                 new { IdsOcCsv = string.Join(',', idsOc) },
                 cancellationToken: cancellationToken,
@@ -663,6 +661,14 @@ public class OrdenCompraService : IOrdenCompraService
                 cabecera.SolicitanteCabecera = validadoresEmpleado.SolicitanteCabecera.Trim();
             if (!string.IsNullOrWhiteSpace(validadoresEmpleado.ValidadorCabecera))
                 cabecera.ValidadorCabecera = validadoresEmpleado.ValidadorCabecera.Trim();
+        }
+
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception,
+                "No se pudo enriquecer la bandeja de OC con nombres unificados; se usarán los datos de {StoredProcedure}.",
+                BuscarCabeceraSp);
         }
 
         return cabeceras;
