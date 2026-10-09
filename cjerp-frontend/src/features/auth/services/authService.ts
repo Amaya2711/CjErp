@@ -25,6 +25,17 @@ export async function login(payload: LoginRequest): Promise<LoginResponse> {
   return await httpClient.post<LoginResponse>("/auth/login", payload);
 }
 
+export interface RenewSessionResponse {
+  token: string;
+  sessionId?: string;
+  expiration?: string;
+}
+
+/** Renueva el token mientras el usuario usa la aplicación (misma sesión, vigencia nueva). */
+export async function renewSession(): Promise<RenewSessionResponse> {
+  return await httpClient.post<RenewSessionResponse>("/auth/refresh");
+}
+
 export async function logout(): Promise<void> {
   await httpClient.post("/auth/logout");
 }

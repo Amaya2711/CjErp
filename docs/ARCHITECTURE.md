@@ -114,7 +114,7 @@ var rows = await cn.QueryAsync<T>(_sqlFactory.Create("dbo.sp_X", new { ... }, Co
 - **Menú**: `MainLayout` → `features/dashboard/services/dashboardMenuService` → `features/seguridad/services/menuService.obtenerMenuDinamicoPorUsuario` → `GET /api/menu/dinamico` (cache memoria + `sessionStorage`). `app/menu/menuData.ts`/`menuDashboard.ts` son **código muerto**.
 - **HTTP**: siempre vía `src/api/httpClient.ts` (default export con `get/post/put/delete<T>`). Base: DEV `http://127.0.0.1:5015/api` fijo; PROD `VITE_API_BASE_URL` o `https://cjerp-production.up.railway.app/api`. Timeout 30 s (sobreescribible por request).
 - **Errores**: `utils/httpError.ts#getHttpErrorMessage(error, fallback)` (estándar, ~49 usos).
-- **Sesión**: `utils/authStorage.ts` (`localStorage["authUser"]`), `SessionManager` (idle `VITE_IDLE_TIMEOUT_MINUTES`=30, sincroniza pestañas), `features/auth/services/logoutSession.ts`.
+- **Sesión**: `utils/authStorage.ts` (`localStorage["authUser"]`), `SessionManager` (cierra la sesión tras 10 min sin uso, `VITE_IDLE_TIMEOUT_MINUTES`=10; renueva el token con `POST /auth/refresh` cada ≤5 min mientras hay uso; sincroniza pestañas), `features/auth/services/logoutSession.ts`.
 - **Estado**: sin store global (no Redux/Zustand). `useState/useMemo` locales + contexto `PageTitleContext` (MainLayout). Hooks compartidos en `src/hooks`.
 - **Estilos**: predominan estilos inline (`const styles: Record<string, CSSProperties>`), CSS plano por página en tesorería, Tailwind 4 en ~11 archivos.
 - **Grillas**: `components/base/DataGridBase` (propio) o tablas HTML propias. DevExtreme **solo** en `pagos_dev.tsx`.

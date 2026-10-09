@@ -18,6 +18,29 @@ namespace CjERP.Infrastructure.Services
             _jwtSettings = jwtSettings.Value;
         }
 
+        public string RenewToken(ClaimsPrincipal principal)
+        {
+            string Value(string type) => principal.FindFirst(type)?.Value ?? string.Empty;
+
+            var claims = new List<Claim>
+            {
+                new Claim(ClaimTypes.Name, principal.Identity?.Name ?? Value("IdUsuario")),
+                new Claim("IdUsuario", Value("IdUsuario")),
+                new Claim("NombreEmpleado", Value("NombreEmpleado")),
+                new Claim("Correo", Value("Correo")),
+                new Claim("CodEmp", Value("CodEmp")),
+                new Claim("IdEmpleadoCj", Value("IdEmpleadoCj")),
+                new Claim("IdCargo", Value("IdCargo")),
+                new Claim("CodVal", Value("CodVal")),
+                new Claim("Cuadrilla", Value("Cuadrilla")),
+                new Claim("IdPerfil", Value("IdPerfil")),
+                new Claim("IdRol", Value("IdRol")),
+                new Claim("SessionId", Value("SessionId"))
+            };
+
+            return WriteToken(claims);
+        }
+
         public string GenerateToken(LoginResponseDto usuario, string sessionId)
         {
             var claims = new List<Claim>
@@ -36,6 +59,11 @@ namespace CjERP.Infrastructure.Services
                 new Claim("SessionId", sessionId ?? string.Empty)
             };
 
+            return WriteToken(claims);
+        }
+
+        private string WriteToken(IEnumerable<Claim> claims)
+        {
             var key = new SymmetricSecurityKey(
                 Encoding.UTF8.GetBytes(_jwtSettings.Key));
 

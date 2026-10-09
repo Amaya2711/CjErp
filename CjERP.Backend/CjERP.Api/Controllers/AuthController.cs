@@ -64,6 +64,30 @@ namespace CjERP.Api.Controllers
             });
         }
 
+        /// <summary>
+        /// Renueva el token mientras el usuario está usando la aplicación. La autenticación ya valida
+        /// la sesión y marca su actividad; solo se emite un token nuevo con la misma sesión.
+        /// Sin rate limit: es una llamada liviana (sin BD) y espaciada por el cliente.
+        /// </summary>
+        [DisableRateLimiting]
+        [Authorize]
+        [HttpPost("refresh")]
+        public IActionResult Refresh()
+        {
+            var token = _jwtService.RenewToken(User);
+            return Ok(new
+            {
+                success = true,
+                message = "Sesion renovada.",
+                data = new
+                {
+                    token,
+                    sessionId = User.FindFirstValue("SessionId"),
+                    expiration = DateTime.UtcNow.AddMinutes(_jwtSettings.DurationInMinutes)
+                }
+            });
+        }
+
         [Authorize]
         [HttpPost("logout")]
         public IActionResult Logout()

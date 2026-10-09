@@ -1,14 +1,20 @@
 import { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { logoutSession } from "../../features/auth/services/logoutSession";
+import { renewSession } from "../../features/auth/services/authService";
 import {
   getAuthUser,
   getLastAuthActivity,
   markAuthActivity,
+  saveAuthUser,
 } from "../../utils/authStorage";
 import { getJwtExpiration, isJwtExpired } from "../../utils/jwt";
 
-const DEFAULT_IDLE_TIMEOUT_MINUTES = 30;
+// La sesión se cierra tras 10 minutos sin uso (ratón, teclado, scroll o toque).
+const DEFAULT_IDLE_TIMEOUT_MINUTES = 10;
+// Mientras haya uso, el token se renueva como máximo cada 5 minutos (el token dura 30).
+const RENEW_INTERVAL_MS = 5 * 60 * 1000;
+const RENEW_RETRY_DELAY_MS = 30 * 1000;
 const LAST_ACTIVITY_KEY = "authLastActivityAt";
 const ACTIVITY_EVENTS: Array<keyof WindowEventMap> = [
   "mousemove",
@@ -32,6 +38,8 @@ export default function SessionManager() {
   const location = useLocation();
   const timerRef = useRef<number | null>(null);
   const logoutInProgressRef = useRef(false);
+  const lastRenewRef = useRef(0);
+  const renewInFlightRef = useRef(false);
 
   useEffect(() => {
     if (location.pathname !== "/") {
@@ -83,6 +91,34 @@ export default function SessionManager() {
       }, remainingMs);
     };
 
+    // Renueva el token y la sesión del servidor solo si el usuario está usando la aplicación;
+    // sin uso no se renueva y la sesión termina a los 10 minutos.
+    const renewIfNeeded = async () => {
+      const authUser = getAuthUser();
+      if (!authUser?.token || renewInFlightRef.current) {
+        return;
+      }
+      if (Date.now() - lastRenewRef.current < RENEW_INTERVAL_MS) {
+        return;
+      }
+
+      renewInFlightRef.current = true;
+      try {
+        const renewed = await renewSession();
+        const current = getAuthUser();
+        if (renewed?.token && current?.token && current.sessionId === authUser.sessionId) {
+          saveAuthUser({ ...current, token: renewed.token, expiration: renewed.expiration ?? current.expiration });
+        }
+        lastRenewRef.current = Date.now();
+      } catch {
+        // Un 401 lo gestiona httpClient (vuelve al login). Ante un fallo de red se reintenta
+        // en 30 segundos con la siguiente actividad.
+        lastRenewRef.current = Date.now() - RENEW_INTERVAL_MS + RENEW_RETRY_DELAY_MS;
+      } finally {
+        renewInFlightRef.current = false;
+      }
+    };
+
     const handleActivity = () => {
       if (!getAuthUser()?.token) {
         return;
@@ -90,6 +126,7 @@ export default function SessionManager() {
 
       markAuthActivity();
       validateSession();
+      void renewIfNeeded();
     };
 
     const handleVisibilityChange = () => {

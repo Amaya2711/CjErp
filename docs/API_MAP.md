@@ -14,6 +14,7 @@
 | Método Ruta | Controller | Servicio → SP/SQL | Auth | FE consumidor |
 |---|---|---|---|---|
 | POST /auth/login | C/AuthController | AuthService → `sp_ValidarUsuario`; JwtService; ActiveUserSessionService | ANÓN, sin rate limit | features/auth/services/authService.ts (LoginPage) |
+| POST /auth/refresh | AuthController | JwtService.RenewToken (misma sesión, vigencia nueva) | JWT, sin rate limit | SessionManager (renueva cada ≤5 min mientras hay uso) |
 | POST /auth/logout | AuthController | ActiveUserSession.LogoutSession | JWT | features/auth/services/logoutSession.ts |
 | POST /auth/logout-beacon | AuthController | JwtService.ValidateToken(sin lifetime) | ANÓN | logoutSession (sendBeacon) |
 | GET /auth/me | C/AuthMeController | claims (bug: lee `IdEmpleado`) | JWT | sin uso |

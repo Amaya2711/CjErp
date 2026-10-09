@@ -55,7 +55,7 @@ docs/            ARCHITECTURE · MODULES · API_MAP · DATABASE_MAP · PROCESS_M
 - Inventario completo de SPs y tablas: `docs/DATABASE_MAP.md`.
 
 ## Seguridad
-- Login `POST /api/auth/login` → `sp_ValidarUsuario` (clave en texto plano) → JWT HS256 30 min (claims: IdUsuario, NombreEmpleado, Correo, CodEmp, IdEmpleadoCj, IdCargo, CodVal, Cuadrilla, IdPerfil, IdRol, SessionId) + sesión en memoria (idle 30 min). Token en `localStorage["authUser"]`.
+- Login `POST /api/auth/login` → `sp_ValidarUsuario` (clave en texto plano) → JWT HS256 30 min (claims: IdUsuario, NombreEmpleado, Correo, CodEmp, IdEmpleadoCj, IdCargo, CodVal, Cuadrilla, IdPerfil, IdRol, SessionId) + sesión en memoria (idle 30 min en el servidor, respaldo; la web cierra sesión a los **10 min sin uso** y renueva el token con `POST /api/auth/refresh` cada ≤5 min mientras hay uso). Token en `localStorage["authUser"]`.
 - Menú dinámico: `GET /api/menu/dinamico` → `sp_Seguridad_ObtenerMenuDinamico` (Usuario → SegUsuarioPerfilRol → SegPerfilRol → SegPerfilRolMenu → SegMenu).
 - Permisos por acción/pestaña: tabla `SegPermisoAccion` (`/api/seguridad-permisos-acciones`), usados **solo en FE** (`pagos_v1`, `oc_v1`). Bypass FE perfil 8 + rol 5.
 - ⚠ Backend **sin autorización por rol** (solo JWT). Excepciones: `PagoTesoreriaController` (ruta en menú), `MobileMonitorController` (rol 5), reportes WUP / export SharePoint (acceso administrativo).
