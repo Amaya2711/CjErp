@@ -17,9 +17,9 @@ const configuredApiBaseUrl =
   import.meta.env.VITE_API_BASE_URL?.trim() ||
   import.meta.env.VITE_API_URL?.trim() ||
   "";
-// En producción el navegador usa el rewrite de Vercel (/api → Railway). Así la
-// llamada permanece en el mismo origen y no queda expuesta a restricciones CORS.
-const productionApiBaseUrl = "/api";
+// Railway expone CORS para la aplicación de Vercel. Se usa el API directo para
+// evitar los 502 que puede introducir el proxy de Vercel en llamadas autenticadas.
+const productionApiBaseUrl = "https://cjerp-production.up.railway.app/api";
 
 export const API_BASE_URL =
   import.meta.env.DEV
