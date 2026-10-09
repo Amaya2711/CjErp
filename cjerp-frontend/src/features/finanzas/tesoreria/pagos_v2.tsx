@@ -3108,10 +3108,6 @@ export default function PagosV2Page() {
 
   const linkStyle: React.CSSProperties = { color: "#2563EB", cursor: "pointer", textDecoration: "underline" };
   const avanceColor = (percent: number) => (percent > 70 ? "#DC2626" : percent >= 50 ? "#CA8A04" : "#16A34A");
-  const calcAvance = (row: PagoRow) => {
-    const visible = row.totalMontoVisiblePorMoneda ?? 0;
-    return visible > 0 ? ((row.totalPagadoConvertidoSoles ?? 0) / visible) * 100 : 0;
-  };
   const calcSubFicticio = (row: PagoRow) => (row.totalPagadoConvertidoSoles ?? 0) + row.subtotal;
   const calcFicticio = (row: PagoRow) => {
     const visible = row.totalMontoVisiblePorMoneda ?? 0;
@@ -3249,23 +3245,6 @@ export default function PagosV2Page() {
       width: 170,
       calculateCellValue: (row) => row.totalMontoVisiblePorMoneda ?? 0,
       cellRender: (value, row) => formatCurrency(Number(value), row.moneda),
-    },
-    {
-      dataField: "avancePct",
-      caption: "% Avance",
-      dataType: "number",
-      width: 100,
-      calculateCellValue: calcAvance,
-      cellRender: (value) => <span style={{ color: avanceColor(Number(value)) }}>{formatPercent(Number(value))}</span>,
-    },
-    {
-      dataField: "avance",
-      caption: "Avance",
-      width: 140,
-      allowFiltering: false,
-      allowHeaderFilter: false,
-      calculateCellValue: calcAvance,
-      cellRender: (value) => barCell(Number(value)),
     },
     {
       dataField: "subFicticio",

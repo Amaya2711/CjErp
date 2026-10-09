@@ -578,6 +578,9 @@ public class OrdenCompraService : IOrdenCompraService
                 cancellationToken,
                 commandTimeout: 120))).ToList();
 
+        // Rendimiento: el filtro por OC debe ser un semi-join sobre STRING_SPLIT. La version anterior
+        // (CHARINDEX sobre una lista CSV con todas las OC) recorria la lista completa por cada fila de
+        // CabOrdenCompra y crecia de forma cuadratica con el numero de OC, provocando timeouts en produccion.
         // Los tres niveles vigentes se definen en EmpleadoCjDetalle del
         // solicitante. No se deben reutilizar los nombres históricos que pueda
         // devolver sp_OrdenCompra_BuscarCabecera para los niveles 2 y 3.
@@ -633,7 +636,7 @@ public class OrdenCompraService : IOrdenCompraService
                     ON segundo.IdEmpleado = detalleEmpleado.IdSegundoVacaciones
                 LEFT JOIN dbo.EmpleadoCj tercero
                     ON tercero.IdEmpleado = detalleEmpleado.IdTerceroVacaciones
-                WHERE CHARINDEX(',' + CONVERT(varchar(20), cab.IdOc) + ',', ',' + @IdsOcCsv + ',') > 0;
+                WHERE cab.IdOc IN (SELECT TRY_CONVERT(int, ids.value) FROM STRING_SPLIT(@IdsOcCsv, ',') ids);
                 """,
                 new { IdsOcCsv = string.Join(',', idsOc) },
                 cancellationToken: cancellationToken,

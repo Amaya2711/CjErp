@@ -300,12 +300,22 @@ export type OrdenCompraGenerarPagoNuevoResult = {
 };
 
 
+// La bandeja trae todas las cabeceras y el backend permite hasta 120 s para esa consulta
+// (commandTimeout del store); con el timeout global de 30 s el cliente cortaba antes que el servidor.
+const OC_CONSULTA_TIMEOUT_MS = 120_000;
+
 export async function buscarOrdenCompraCabecera(params?: OrdenCompraConsultaParams) {
-  return await httpClient.get<OrdenCompraCabeceraDto[]>("/facturacionfinanciera/oc/cabecera", { params });
+  return await httpClient.get<OrdenCompraCabeceraDto[]>("/facturacionfinanciera/oc/cabecera", {
+    params,
+    timeout: OC_CONSULTA_TIMEOUT_MS,
+  });
 }
 
 export async function buscarOrdenCompraDetalle(params?: OrdenCompraConsultaParams) {
-  return await httpClient.get<OrdenCompraDetalleDto[]>("/facturacionfinanciera/oc/detalle", { params });
+  return await httpClient.get<OrdenCompraDetalleDto[]>("/facturacionfinanciera/oc/detalle", {
+    params,
+    timeout: OC_CONSULTA_TIMEOUT_MS,
+  });
 }
 
 export async function insertarOrdenCompra(payload: OrdenCompraInsertPayload) {
