@@ -10,41 +10,60 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
 {
     public async Task<object> CatalogosAsync(CancellationToken ct)
     {
-        await using var cn = factory.CreateConnection();
-        var ejecutores = await cn.QueryAsync(factory.Create("SELECT IdEmpleado AS Id, NombreEmpleado AS Nombre FROM Empleado WHERE IdCargo=14 AND IdEstado=1 ORDER BY NombreEmpleado", cancellationToken: ct));
-        var responsables = (await cn.QueryAsync<EmpleadoCtaDto>(factory.Create(
-            "sp_Empleado_Cta_Listar", null, CommandType.StoredProcedure, ct)))
+        // Datos siempre en línea (sin caché). Para reducir la latencia, las consultas se ejecutan
+        // en paralelo, cada una con su propia conexión del pool, en lugar de una tras otra.
+        async Task<List<dynamic>> Sql(string sql)
+        {
+            await using var cn = factory.CreateConnection();
+            return (await cn.QueryAsync(factory.Create(sql, cancellationToken: ct))).ToList();
+        }
+        async Task<List<T>> Sp<T>(string sp, object? parameters = null)
+        {
+            await using var cn = factory.CreateConnection();
+            return (await cn.QueryAsync<T>(factory.Create(sp, parameters, CommandType.StoredProcedure, ct))).ToList();
+        }
+        var tEjecutores = Sql("SELECT IdEmpleado AS Id, NombreEmpleado AS Nombre FROM Empleado WHERE IdCargo=14 AND IdEstado=1 ORDER BY NombreEmpleado");
+        var tResponsables = Sp<EmpleadoCtaDto>("sp_Empleado_Cta_Listar");
+        var tConstantes = Sql("SELECT Correlativo AS Id, ValorIni AS Nombre, TRY_CONVERT(decimal(18,4),ValorFin) AS Porcentaje, Campo FROM Constante WHERE Sociedad='PE01' AND Programa='PLANTILLA' AND Campo IN ('TIPO_TRANSFERENCIA','TIPO_PAGO','RENDICION','DETRACCION') AND Correlativo>=0 ORDER BY Correlativo");
+        var tBancos = Sp<ConstanteBanco>("sp_Constante_ListarPorCampo", new { Campo = "banco" });
+        var tBancosCuenta = Sp<ConstanteBanco>("sp_Constante_ListarPorCampo", new { Campo = "banco_emp" });
+        var tMonedas = Sp<ConstanteBanco>("sp_Constante_ListarPorCampo", new { Campo = "tipo_moneda" });
+        var tComprobantes = Sp<ConstanteBanco>("sp_Constante_ListarPorCampo", new { Campo = "tipo_comprobante" });
+        var tClientes = Sp<ClienteCatalogo>("dbo.sp_Listar_Cliente");
+        var tMaestros = Sql("SELECT Correlativo AS Id, ValorIni AS Nombre, Campo FROM Constante WHERE Sociedad='PE01' AND Programa='MAESTRO' AND Campo IN ('ANTICIPO','ESTADO') AND Correlativo>=0 ORDER BY Correlativo");
+        await Task.WhenAll(tEjecutores, tResponsables, tConstantes, tBancos, tBancosCuenta, tMonedas, tComprobantes, tClientes, tMaestros);
+
+        var ejecutores = tEjecutores.Result;
+        var responsables = tResponsables.Result
             .Where(x => x.IdEmpleado > 0 && !string.IsNullOrWhiteSpace(x.NombreEmpleado))
+            // Un responsable puede tener varias cuentas. Se consolida por el
+            // código del empleado, que es el mismo valor que recibe
+            // @IdResponsable en dbo.sp_Planilla_ConsultaIni.
             .GroupBy(x => x.IdEmpleado)
             .Select(group => new { Id = group.Key, Nombre = group.First().NombreEmpleado.Trim() })
             .OrderBy(x => x.Nombre)
             .ToList();
-        var constantes = (await cn.QueryAsync(factory.Create("SELECT Correlativo AS Id, ValorIni AS Nombre, TRY_CONVERT(decimal(18,4),ValorFin) AS Porcentaje, Campo FROM Constante WHERE Sociedad='PE01' AND Programa='PLANTILLA' AND Campo IN ('TIPO_TRANSFERENCIA','TIPO_PAGO','RENDICION','DETRACCION') AND Correlativo>=0 ORDER BY Correlativo", cancellationToken: ct))).ToList();
-        // El catálogo del banco asociado a la cuenta se obtiene por el procedimiento vigente.
-        var bancos = (await cn.QueryAsync<ConstanteBanco>(factory.Create(
-            "sp_Constante_ListarPorCampo", new { Campo = "banco" }, CommandType.StoredProcedure, ct)))
+        var constantes = tConstantes.Result;
+        var bancos = tBancos.Result
             .Select(x => new { Id = x.Correlativo, Nombre = x.ValorIni ?? "" })
             .Where(x => x.Id >= 0)
             .ToList();
-        var bancosCuenta = (await cn.QueryAsync<ConstanteBanco>(factory.Create(
-            "sp_Constante_ListarPorCampo", new { Campo = "banco_emp" }, CommandType.StoredProcedure, ct)))
+        var bancosCuenta = tBancosCuenta.Result
             .Select(x => new { Id = x.Correlativo, Nombre = x.ValorIni ?? "" })
             .Where(x => x.Id >= 0 && !string.IsNullOrWhiteSpace(x.Nombre))
             .ToList();
-        var monedas = (await cn.QueryAsync<ConstanteBanco>(factory.Create(
-            "sp_Constante_ListarPorCampo", new { Campo = "tipo_moneda" }, CommandType.StoredProcedure, ct)))
+        var monedas = tMonedas.Result
             .Select(x => new { Id = x.Correlativo, Nombre = x.ValorIni ?? "" })
             .Where(x => x.Id >= 0 && !string.IsNullOrWhiteSpace(x.Nombre))
             .ToList();
-        var comprobantes = (await cn.QueryAsync<ConstanteBanco>(factory.Create(
-            "sp_Constante_ListarPorCampo", new { Campo = "tipo_comprobante" }, CommandType.StoredProcedure, ct)))
+        var comprobantes = tComprobantes.Result
             .Select(x => new { Id = x.Correlativo, Nombre = x.ValorIni ?? "" })
             .Where(x => x.Id >= 0 && !string.IsNullOrWhiteSpace(x.Nombre))
             .ToList();
-        var clientes = (await cn.QueryAsync<ClienteCatalogo>(factory.Create("dbo.sp_Listar_Cliente", null, CommandType.StoredProcedure, ct)))
+        var clientes = tClientes.Result
             .Where(x => x.IdCliente.HasValue && !string.IsNullOrWhiteSpace(x.NombreCliente))
             .Select(x => new { Id = x.IdCliente!.Value, Nombre = x.NombreCliente! }).ToList();
-        var maestros = (await cn.QueryAsync(factory.Create("SELECT Correlativo AS Id, ValorIni AS Nombre, Campo FROM Constante WHERE Sociedad='PE01' AND Programa='MAESTRO' AND Campo IN ('ANTICIPO','ESTADO') AND Correlativo>=0 ORDER BY Correlativo", cancellationToken: ct))).ToList();
+        var maestros = tMaestros.Result;
         return new { ejecutores, responsables, clientes, anticipos = maestros.Where(x => x.Campo == "ANTICIPO"), estados = maestros.Where(x => x.Campo == "ESTADO"), bancos, bancosCuenta, transferencias = constantes.Where(x => x.Campo == "TIPO_TRANSFERENCIA"), monedas, comprobantes, tiposPago = constantes.Where(x => x.Campo == "TIPO_PAGO"), rendiciones = constantes.Where(x => x.Campo == "RENDICION"), retenciones = constantes.Where(x => string.Equals((string)x.Campo,"DETRACCION",StringComparison.OrdinalIgnoreCase)) };
     }
 

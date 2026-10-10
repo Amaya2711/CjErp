@@ -1582,8 +1582,7 @@ export default function PagosV2Page() {
         tabRowsCacheRef.current.set(cacheKey, nextRowsByTab[activeTab]);
       } catch (error) {
         if (!cancelled && !controller.signal.aborted) {
-          setMessage("No se pudieron cargar las Órdenes desde Planilla.");
-          // No exponer errores ni detalles de consultas de órdenes en consola.
+          setMessage(getHttpErrorMessage(error, "No se pudieron cargar las Órdenes desde Planilla."));
         }
       } finally {
         if (!cancelled && !controller.signal.aborted) {
@@ -1643,7 +1642,10 @@ export default function PagosV2Page() {
         (filtrosResumenAplicadosEnServidor || matchesContainsFilter(row.responsable, appliedFilters.responsable)) &&
         matchesMultiTextFilter(row.validador, appliedFilters.validador) &&
         matchesMultiTextFilter(row.moneda, appliedFilters.moneda) &&
-        (filtrosResumenAplicadosEnServidor || appliedFilters.estado.length === 0 || appliedFilters.estado.includes(row.estadoCodigo ?? "")) &&
+        // Cada bandeja ya se consulta con su estado operativo. El filtro Estado
+        // de cabecera solo pertenece a Total Órdenes; no debe ocultar filas de
+        // Aprobar, Re-aprobar, Hormiga u Observadas.
+        (activeTab !== "resumen" || appliedFilters.estado.length === 0 || appliedFilters.estado.includes(row.estadoCodigo ?? "")) &&
         matchesTextFilter(row.correlativo, appliedFilters.correlativo) &&
         (filtrosResumenAplicadosEnServidor || buscarEnTotal || !fechaDesde || rowDate >= fechaDesde) &&
         (filtrosResumenAplicadosEnServidor || buscarEnTotal || !fechaHasta || rowDate <= fechaHasta)
@@ -1717,9 +1719,34 @@ export default function PagosV2Page() {
       responsables: ordenar(resumenCatalogos.responsables),
     };
   }, [resumenCatalogos]);
+  const nombresEstadoPlanilla = useMemo(
+    () => new Map(resumenOpciones.estados.map((estado) => [estado.codigo, estado.nombre])),
+    [resumenOpciones.estados]
+  );
+  const getEstadoPlanillaNombre = useCallback(
+    (row: PagoRow) => {
+      const codigo = String(row.estadoCodigo ?? "").trim();
+      const nombreRecibido = String(row.estadoNombre ?? "").trim();
+
+      // El SP puede devolver únicamente Estado (código). En ese caso, el
+      // nombre visible procede del catálogo MAESTRO/ESTADO, sin alterar el
+      // código usado por los filtros ni por las reglas de la pantalla.
+      if (nombreRecibido && nombreRecibido !== codigo && !/^\d+$/.test(nombreRecibido)) {
+        return nombreRecibido;
+      }
+
+      return nombresEstadoPlanilla.get(codigo) || nombreRecibido || "Sin estado";
+    },
+    [nombresEstadoPlanilla]
+  );
   const filtroFechaPorDeposito = filters.estado.length === 1 && filters.estado[0] === ESTADO_PAGADO;
 
   const aplicarFiltrosCabecera = () => {
+    if (!filters.fechaDesde || !filters.fechaHasta) {
+      setMessage("Seleccione la fecha inicio y la fecha fin para realizar la búsqueda.");
+      return;
+    }
+
     if (filters.fechaDesde && filters.fechaHasta && filters.fechaDesde > filters.fechaHasta) {
       setMessage("La fecha inicio no puede ser mayor que la fecha fin.");
       return;
@@ -3154,7 +3181,7 @@ export default function PagosV2Page() {
         porcentajeAvance,
         porcentajeAvance,
         ...(showTotalSitio ? [subFicticio, porcentajeFicticio, porcentajeFicticio] : []),
-        ...(showEstadoPlanilla ? [row.estadoNombre || getStatusLabel(row.estado)] : []),
+        ...(showEstadoPlanilla ? [getEstadoPlanillaNombre(row)] : []),
         row.validador || "-",
         row.ot || "-",
         row.atp || "-",
@@ -3446,7 +3473,7 @@ export default function PagosV2Page() {
       caption: "Estado planilla",
       width: 130,
       visible: showEstadoPlanilla,
-      calculateCellValue: (row) => row.estadoNombre || getStatusLabel(row.estado),
+      calculateCellValue: getEstadoPlanillaNombre,
       cellRender: (value, row) => {
         const rowTheme = getStateColor(row.estado);
         return (
@@ -3640,6 +3667,7 @@ export default function PagosV2Page() {
                 value={filters.fechaDesde}
                 onChange={(event) => setFilters((prev) => ({ ...prev, fechaDesde: event.target.value }))}
                 style={styles.cabeceraControl}
+                required
               />
             </label>
             <label style={styles.cabeceraCampo}>
@@ -3649,6 +3677,7 @@ export default function PagosV2Page() {
                 value={filters.fechaHasta}
                 onChange={(event) => setFilters((prev) => ({ ...prev, fechaHasta: event.target.value }))}
                 style={styles.cabeceraControl}
+                required
               />
             </label>
             <label style={styles.cabeceraCampo}>

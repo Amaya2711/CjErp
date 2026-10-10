@@ -37,7 +37,9 @@ public sealed class PagoTesoreriaController(PagoTesoreriaService service, ISegMe
     [HttpGet("catalogos")]
     public async Task<IActionResult> Catalogos(CancellationToken ct)
     {
-        if (!await PuedeAsync()) return SinAcceso();
+        // Catálogos de lectura para la pantalla de pagos. La autenticación JWT
+        // del controlador sigue siendo obligatoria; no se exige una asignación
+        // adicional de menú para poblar los filtros.
         var usuario = User.FindFirstValue("IdUsuario") ?? User.FindFirstValue(ClaimTypes.Name)!;
         return Ok(new { catalogos = await service.CatalogosAsync(ct), puedePagar = true,
             permisosRevision = await service.PermisosRevisionAsync(usuario, ct) });
@@ -46,7 +48,8 @@ public sealed class PagoTesoreriaController(PagoTesoreriaService service, ISegMe
     [HttpGet("v1")]
     public async Task<IActionResult> ListarV1([FromQuery] int? correlativo = null, [FromQuery] int? idEstado = null, [FromQuery] int? idCliente = null, [FromQuery] int? tipoMoneda = null, [FromQuery] int? idComprobante = null, [FromQuery] string? idBancos = null, [FromQuery] int? idResponsable = null, [FromQuery] int? idSolicitante = null, [FromQuery] DateTime? fechaInicio = null, [FromQuery] DateTime? fechaFin = null, CancellationToken ct = default)
     {
-        if (!await PuedeAsync()) return SinAcceso();
+        // Consulta de lectura para Total Órdenes. Delega sin alteraciones en
+        // dbo.sp_Planilla_ConsultaIni con los parámetros recibidos.
         return Ok(await service.ListarConsultaIniAsync(correlativo, idEstado, idCliente, tipoMoneda, idComprobante, ParseIds(idBancos), idResponsable, idSolicitante, fechaInicio, fechaFin, ct));
     }
 
