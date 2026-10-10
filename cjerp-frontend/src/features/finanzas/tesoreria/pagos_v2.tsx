@@ -288,7 +288,7 @@ function getDefaultFilterState(): FilterState {
     responsable: [],
     validador: [],
     moneda: [],
-    estado: [],
+    estado: [ESTADO_PAGADO],
     correlativo: "",
     fechaDesde: formatDateInputValue(fechaDesde),
     fechaHasta: formatDateInputValue(fechaHasta),
@@ -1132,6 +1132,7 @@ export default function PagosV2Page() {
   const [isDetailPanelOpen, setIsDetailPanelOpen] = useState(false);
   const [filters, setFilters] = useState<FilterState>(() => getDefaultFilterState());
   const [responsableTextoFiltro, setResponsableTextoFiltro] = useState("");
+  const [resumenConsultaSolicitada, setResumenConsultaSolicitada] = useState(false);
   const [historialSortConfig, setHistorialSortConfig] = useState<{ column: PagoSortColumn; direction: "asc" | "desc" } | null>(null);
   const [appliedFilters, setAppliedFilters] = useState<FilterState>(() => getDefaultFilterState());
   const [rowsByTab, setRowsByTab] = useState<Record<PagoTabKey, PagoRow[]>>({
@@ -1398,6 +1399,15 @@ export default function PagosV2Page() {
     const controller = new AbortController();
     let cancelled = false;
 
+    // Total Órdenes se consulta solo de forma explícita desde el botón Buscar.
+    // Al abrir la pestaña no se descargan registros ni se reutiliza una carga previa.
+    if (activeTab === "resumen" && !resumenConsultaSolicitada) {
+      setRowsByTab((previous) => (previous.resumen.length ? { ...previous, resumen: [] } : previous));
+      setLoadingData(false);
+      setLoadingStage("");
+      return () => controller.abort();
+    }
+
     const load = async (signal: AbortSignal) => {
       const cacheKey = [
         activeTab,
@@ -1589,7 +1599,7 @@ export default function PagosV2Page() {
       cancelled = true;
       controller.abort();
     };
-  }, [activeTab, appliedFilters, refreshTick, runTrackedRequest]);
+  }, [activeTab, appliedFilters, refreshTick, resumenConsultaSolicitada, runTrackedRequest]);
 
   const activeRows = useMemo(
     () => (activeTab === "resumen" ? rowsByTab.resumen : rowsByTab[activeTab]),
@@ -1729,6 +1739,8 @@ export default function PagosV2Page() {
       responsable: responsable ? [responsable.codigo] : [],
     };
     setMessage("");
+    tabRowsCacheRef.current.clear();
+    setResumenConsultaSolicitada(true);
     setFilters(filtrosCabecera);
     setAppliedFilters(filtrosCabecera);
   };
@@ -1737,6 +1749,7 @@ export default function PagosV2Page() {
     const defaults = getDefaultFilterState();
     setMessage("");
     setResponsableTextoFiltro("");
+    setResumenConsultaSolicitada(false);
     setFilters(defaults);
     setAppliedFilters(defaults);
   };
@@ -2641,6 +2654,9 @@ export default function PagosV2Page() {
 
     if (label === "Limpiar") {
       const defaultFilters = getDefaultFilterState();
+      if (activeTab === "resumen") {
+        setResumenConsultaSolicitada(false);
+      }
       setFilters(defaultFilters);
       setAppliedFilters(defaultFilters);
       setMessage("Filtros limpiados.");
@@ -3292,13 +3308,13 @@ export default function PagosV2Page() {
       ),
     },
     { dataField: "fecha", caption: "Fecha", dataType: "date", width: 100, calculateCellValue: (row) => toComparableDateKey(row.fecha) },
-    { dataField: "solicitante", caption: "Solicitante", width: 170, groupIndex: 0, sortOrder: "asc" },
+    { dataField: "solicitante", caption: "Solicitante", width: 280, groupIndex: 0, sortOrder: "asc" },
     { dataField: "cliente", caption: "Cliente", width: 110 },
     { dataField: "proyecto", caption: "Proyecto", width: 130 },
     { dataField: "site", caption: "Site", width: 170 },
     { dataField: "tipoTrabajo", caption: "Tipo trabajo", width: 120 },
     { dataField: "tarea", caption: "Tarea", width: 130, calculateCellValue: (row) => row.tarea || "-" },
-    { dataField: "responsable", caption: "Responsable", width: 150 },
+    { dataField: "responsable", caption: "Responsable", width: 280 },
     {
       dataField: "idOc",
       caption: "OC",
@@ -3580,7 +3596,12 @@ export default function PagosV2Page() {
                 border="#C4B5FD"
                 icon={<ShieldCheck size={14} />}
                 selected={activeTab === "resumen"}
-                onClick={() => setActiveTab("resumen")}
+                onClick={() => {
+                  // Total Órdenes puede abarcar muchos registros: su consulta
+                  // siempre se inicia al confirmar filtros con el botón Buscar.
+                  setResumenConsultaSolicitada(false);
+                  setActiveTab("resumen");
+                }}
               />
             </div>
           </div>
