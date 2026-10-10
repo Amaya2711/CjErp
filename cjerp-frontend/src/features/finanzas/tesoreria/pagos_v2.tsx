@@ -33,6 +33,8 @@ import type {
 import { getHttpErrorMessage } from "../../../utils/httpError";
 import { getAuthUser, hasFullPageActionAccess } from "../../../utils/authStorage";
 import { type OrdenCompraConsumoDto } from "../../../api/ordenCompraService";
+import { listarPagosTesoreriaV1, obtenerCatalogosPago } from "../../../api/pagoTesoreriaService";
+import { listarSolicitanteOptions } from "../../../api/solicitanteService";
 import {
   seguridadPermisosAccionesService,
   type PermisoAccionDto,
@@ -62,6 +64,7 @@ type PagoRow = {
   atp: string;
   statusPap: string;
   fecha: string;
+  fechaDeposito?: string;
   solicitante: string;
   responsable: string;
   validador: string;
@@ -606,6 +609,18 @@ function mapPlanillaEstadoToPagoEstado(value: unknown, fallback: PagoEstado): Pa
   return fallback;
 }
 
+const ESTADO_PAGADO = "4";
+
+/** Sin estado seleccionado, Total Órdenes también incluye los registros pagados. */
+function incluyeEstadoPagado(filters: FilterState) {
+  return filters.estado.length === 0 || filters.estado.includes(ESTADO_PAGADO);
+}
+
+/** En Total Órdenes cada registro pagado se compara contra su fecha de depósito. */
+function usaFechaDeposito(row: Pick<PagoRow, "estadoCodigo">) {
+  return String(row.estadoCodigo ?? "").trim() === ESTADO_PAGADO;
+}
+
 function getQuickIdOcOnly(filters: FilterState): number | null {
   const idOcText = filters.query.trim();
   const idOc = Number(idOcText);
@@ -614,7 +629,8 @@ function getQuickIdOcOnly(filters: FilterState): number | null {
     filters.solicitante.length ||
     filters.responsable.length ||
     filters.validador.length ||
-    filters.moneda.length
+    filters.moneda.length ||
+    filters.estado.length
   );
 
   if (!/^\d+$/.test(idOcText) || !Number.isSafeInteger(idOc) || idOc <= 0 || hasAdditionalFilter) {
@@ -678,6 +694,7 @@ function mapPlanillaConsultaRowToPagoRow(
     tipoTrabajo: getRecordString(row, "TipoTrabajo", "tipoTrabajo", "Tipo_Trabajo", "tipo_trabajo"),
     tarea: getRecordString(row, "Tarea", "tarea", "DescTarea", "descTarea"),
     fecha: getRecordString(row, "Fecha", "fecha", "FecIngreso", "fecIngreso", "FechaIngreso", "fechaIngreso"),
+    fechaDeposito: getRecordString(row, "FechaDeposito", "fechaDeposito", "FecDeposito", "fecDeposito"),
     solicitante: getRecordString(row, "Solicitante", "solicitante", "NombreSolicitante", "nombreSolicitante"),
     responsable: getRecordString(row, "Responsable", "responsable", "NombreResponsable", "nombreResponsable"),
     validador: getRecordString(
@@ -762,6 +779,16 @@ function matchesMultiTextFilter(rowValue: string, selectedValues: string[]) {
 
   const normalizedValue = normalizeText(rowValue);
   return selectedValues.some((value) => normalizedValue === normalizeText(value));
+}
+
+/** Coincidencia parcial (sin tildes ni mayúsculas) para filtros con autollenado. */
+function matchesContainsFilter(rowValue: string, selectedValues: string[]) {
+  const criterios = selectedValues.map((value) => normalizeText(value)).filter(Boolean);
+  if (criterios.length === 0) {
+    return true;
+  }
+  const normalizedValue = normalizeText(rowValue);
+  return criterios.some((criterio) => normalizedValue.includes(criterio));
 }
 
 function buildPagosV1PlanillaRequest(
@@ -1104,6 +1131,7 @@ export default function PagosV2Page() {
   const [detailTab, setDetailTab] = useState<DetailTabKey>("resumen");
   const [isDetailPanelOpen, setIsDetailPanelOpen] = useState(false);
   const [filters, setFilters] = useState<FilterState>(() => getDefaultFilterState());
+  const [responsableTextoFiltro, setResponsableTextoFiltro] = useState("");
   const [historialSortConfig, setHistorialSortConfig] = useState<{ column: PagoSortColumn; direction: "asc" | "desc" } | null>(null);
   const [appliedFilters, setAppliedFilters] = useState<FilterState>(() => getDefaultFilterState());
   const [rowsByTab, setRowsByTab] = useState<Record<PagoTabKey, PagoRow[]>>({
@@ -1455,11 +1483,15 @@ export default function PagosV2Page() {
           // El correlativo identifica un registro puntual; las fechas no
           // deben limitarlo. El estado sí se conserva según la pestaña,
           // salvo en Total Órdenes (resumen), que no envía @Estados.
-          if (fechaInicio && !buscarPorCorrelativo) {
+          // En Total Órdenes una consulta que incluya PAGADO no puede enviar fechas
+          // al store: este filtra por fecha regular y excluiría pagos cuyo depósito
+          // sí está dentro del rango. El rango se aplica por fila más abajo.
+          const resumenIncluyePagado = activeTab === "resumen" && incluyeEstadoPagado(appliedFilters);
+          if (fechaInicio && !buscarPorCorrelativo && !resumenIncluyePagado) {
             parametros.push({ nombre: "FechaInicio", valor: fechaInicio, tipo: "date" });
           }
 
-          if (fechaFin && !buscarPorCorrelativo) {
+          if (fechaFin && !buscarPorCorrelativo && !resumenIncluyePagado) {
             parametros.push({ nombre: "FechaFin", valor: fechaFin, tipo: "date" });
           }
         }
@@ -1467,29 +1499,49 @@ export default function PagosV2Page() {
         // La búsqueda rápida se aplica localmente. Así OT y OC no dependen de
         // qué campos contemple la versión instalada del store de Planilla.
 
-        const requestBuildStart = performance.now();
-        const request = buildPagosV1PlanillaRequest(parametros);
-        pushLoadTrace(`Armado de request: ${(performance.now() - requestBuildStart).toFixed(0)} ms`);
         setLoadingStage("Enviando consulta a la API...");
+        let rows: Record<string, unknown>[] = [];
 
-        const response = await runTrackedRequest(
-          buscarEnTotal ? "Búsqueda global en Planilla" : tieneFiltroFechas ? "Consulta por fechas" : "Consulta consolidada",
-          () => consultarPlanillaEstados(request, { timeoutMs: 120000, signal }),
-          signal
-        );
-
-        if (signal.aborted || cancelled) {
-          return;
+        if (activeTab === "resumen" && !quickIdOcOnly) {
+          // Total Órdenes consulta por los identificadores de sus filtros de
+          // cabecera. No descarga primero todos los recibos para filtrarlos en el navegador.
+          const idEstado = Number(appliedFilters.estado[0] ?? 0);
+          const idResponsable = Number(appliedFilters.responsable[0] ?? 0);
+          const idSolicitante = Number(appliedFilters.solicitante[0] ?? 0);
+          const consultaResumen = await runTrackedRequest(
+            "Consulta de Total Órdenes por filtros de cabecera",
+            () =>
+              listarPagosTesoreriaV1(
+                100,
+                fechaInicio,
+                fechaFin,
+                signal,
+                undefined,
+                Number.isInteger(idEstado) && idEstado > 0 ? idEstado : undefined,
+                {
+                  idResponsable: Number.isInteger(idResponsable) && idResponsable > 0 ? idResponsable : undefined,
+                  idSolicitante: Number.isInteger(idSolicitante) && idSolicitante > 0 ? idSolicitante : undefined,
+                }
+              ),
+            signal
+          );
+          rows = (Array.isArray(consultaResumen) ? consultaResumen : []) as unknown as Record<string, unknown>[];
+        } else {
+          const requestBuildStart = performance.now();
+          const request = buildPagosV1PlanillaRequest(parametros);
+          pushLoadTrace(`Armado de request: ${(performance.now() - requestBuildStart).toFixed(0)} ms`);
+          const response = await runTrackedRequest(
+            buscarEnTotal ? "Búsqueda global en Planilla" : tieneFiltroFechas ? "Consulta por fechas" : "Consulta consolidada",
+            () => consultarPlanillaEstados(request, { timeoutMs: 120000, signal }),
+            signal
+          );
+          rows = Array.isArray(response?.rows) ? response.rows : [];
         }
 
-        if (!response) {
-          return;
-        }
-
-        pushLoadTrace(`Respuesta API: ${Array.isArray(response.rows) ? response.rows.length : 0} registros`);
+        if (signal.aborted || cancelled) return;
+        pushLoadTrace(`Respuesta API: ${rows.length} registros`);
 
         const mapStart = performance.now();
-        const rows = Array.isArray(response.rows) ? response.rows : [];
         const mappedRows = rows.map((row, index) =>
           mapPlanillaConsultaRowToPagoRow(
             row,
@@ -1546,13 +1598,23 @@ export default function PagosV2Page() {
 
   const matchesAppliedFilters = useCallback(
     (row: PagoRow, includeDateFilters: boolean) => {
-      const fechaDesde = includeDateFilters ? formatDateParam(appliedFilters.fechaDesde) : "";
-      const fechaHasta = includeDateFilters ? formatDateParam(appliedFilters.fechaHasta) : "";
+      const filtrosResumenAplicadosEnServidor = activeTab === "resumen";
+      const porDeposito = activeTab === "resumen" && usaFechaDeposito(row);
+      // Total Órdenes necesita evaluar siempre las fechas localmente: si la
+      // consulta contiene PAGADO, el backend no recibe el rango para no mezclar
+      // fecha de ingreso con fecha de depósito.
+      const aplicarFechas = includeDateFilters || activeTab === "resumen";
+      const fechaDesde = aplicarFechas ? formatDateParam(appliedFilters.fechaDesde) : "";
+      const fechaHasta = aplicarFechas ? formatDateParam(appliedFilters.fechaHasta) : "";
       const buscarEnTotal = Boolean(appliedFilters.query.trim());
       const correlativo = appliedFilters.correlativo.trim();
       const correlativoNumero = Number(correlativo);
       const buscarPorCorrelativo = Number.isInteger(correlativoNumero) && correlativoNumero > 0;
-      const rowDate = toComparableDateKey(row.fecha);
+      const rowDate = toComparableDateKey(porDeposito ? row.fechaDeposito ?? "" : row.fecha);
+      // Sin fecha de depósito el registro no puede caer dentro de un rango de depósito.
+      if (porDeposito && (fechaDesde || fechaHasta) && !rowDate) {
+        return false;
+      }
 
       // La bandeja ya está limitada al estado de la pestaña activa. Para una
       // búsqueda por correlativo no se deben volver a aplicar fechas ni los
@@ -1567,14 +1629,14 @@ export default function PagosV2Page() {
         matchesTextFilter(row.site, appliedFilters.site) &&
         matchesTextFilter(row.tipoTrabajo, appliedFilters.tipoTrabajo) &&
         matchesTextFilter(row.tarea, appliedFilters.tarea) &&
-        matchesMultiTextFilter(row.solicitante, appliedFilters.solicitante) &&
-        matchesMultiTextFilter(row.responsable, appliedFilters.responsable) &&
+        (filtrosResumenAplicadosEnServidor || matchesContainsFilter(row.solicitante, appliedFilters.solicitante)) &&
+        (filtrosResumenAplicadosEnServidor || matchesContainsFilter(row.responsable, appliedFilters.responsable)) &&
         matchesMultiTextFilter(row.validador, appliedFilters.validador) &&
         matchesMultiTextFilter(row.moneda, appliedFilters.moneda) &&
-        (activeTab !== "resumen" || appliedFilters.estado.length === 0 || appliedFilters.estado.includes(row.estadoCodigo ?? "")) &&
+        (filtrosResumenAplicadosEnServidor || appliedFilters.estado.length === 0 || appliedFilters.estado.includes(row.estadoCodigo ?? "")) &&
         matchesTextFilter(row.correlativo, appliedFilters.correlativo) &&
-        (buscarEnTotal || !fechaDesde || rowDate >= fechaDesde) &&
-        (buscarEnTotal || !fechaHasta || rowDate <= fechaHasta)
+        (filtrosResumenAplicadosEnServidor || buscarEnTotal || !fechaDesde || rowDate >= fechaDesde) &&
+        (filtrosResumenAplicadosEnServidor || buscarEnTotal || !fechaHasta || rowDate <= fechaHasta)
       );
     },
     [activeTab, appliedFilters]
@@ -1589,6 +1651,95 @@ export default function PagosV2Page() {
         matchesQuickSearch(row, filters.query)
     );
   }, [activeRows, activeTab, filters.query, matchesAppliedFilters, quickIdOcOnly]);
+
+  // Igual que Búsqueda de pagos de tesorería, los responsables y estados proceden
+  // del catálogo, no de las filas actuales. Así siguen disponibles al filtrar.
+  const [resumenCatalogos, setResumenCatalogos] = useState<{
+    estados: Array<{ codigo: string; nombre: string }>;
+    solicitantes: Array<{ codigo: string; nombre: string }>;
+    responsables: Array<{ codigo: string; nombre: string }>;
+  }>({ estados: [{ codigo: ESTADO_PAGADO, nombre: "PAGADO" }], solicitantes: [], responsables: [] });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const authUser = getAuthUser();
+    const idCargo = Number(authUser?.idCargo ?? 0);
+    const idEmpleado = Number(authUser?.idEmpleado ?? authUser?.codEmp ?? 0);
+
+    void Promise.allSettled([
+      obtenerCatalogosPago(controller.signal),
+      listarSolicitanteOptions({
+        idCargo: Number.isFinite(idCargo) && idCargo > 0 ? idCargo : null,
+        idEmpleado: Number.isFinite(idEmpleado) && idEmpleado > 0 ? idEmpleado : null,
+      }),
+    ]).then(([catalogosResult, solicitantesResult]) => {
+      if (controller.signal.aborted) return;
+
+      setResumenCatalogos((previous) => ({
+        estados:
+          catalogosResult.status === "fulfilled"
+            ? catalogosResult.value.catalogos.estados.map((item) => ({ codigo: String(item.id), nombre: item.nombre }))
+            : previous.estados,
+        responsables:
+          catalogosResult.status === "fulfilled"
+            ? catalogosResult.value.catalogos.responsables.map((item) => ({ codigo: String(item.id), nombre: item.nombre })).filter((item) => Boolean(item.nombre))
+            : previous.responsables,
+        solicitantes:
+          solicitantesResult.status === "fulfilled"
+            ? solicitantesResult.value.map((item) => ({ codigo: item.value, nombre: item.label })).filter((item) => Boolean(item.codigo && item.nombre))
+            : previous.solicitantes,
+      }));
+    });
+
+    return () => controller.abort();
+  }, []);
+
+  const resumenOpciones = useMemo(() => {
+    const estados = new Map<string, string>(resumenCatalogos.estados.map((item) => [item.codigo, item.nombre]));
+    estados.set(ESTADO_PAGADO, estados.get(ESTADO_PAGADO) || "PAGADO");
+    const ordenar = (valores: Array<{ codigo: string; nombre: string }>) =>
+      [...valores].sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
+    return {
+      estados: Array.from(estados, ([codigo, nombre]) => ({ codigo, nombre })).sort((a, b) =>
+        a.nombre.localeCompare(b.nombre, "es")
+      ),
+      solicitantes: ordenar(resumenCatalogos.solicitantes),
+      responsables: ordenar(resumenCatalogos.responsables),
+    };
+  }, [resumenCatalogos]);
+  const filtroFechaPorDeposito = filters.estado.length === 1 && filters.estado[0] === ESTADO_PAGADO;
+
+  const aplicarFiltrosCabecera = () => {
+    if (filters.fechaDesde && filters.fechaHasta && filters.fechaDesde > filters.fechaHasta) {
+      setMessage("La fecha inicio no puede ser mayor que la fecha fin.");
+      return;
+    }
+
+    const responsableTexto = responsableTextoFiltro.trim();
+    const responsable = resumenOpciones.responsables.find(
+      (item) => normalizeText(item.nombre) === normalizeText(responsableTexto)
+    );
+    if (responsableTexto && !responsable) {
+      setMessage("Seleccione un responsable de las sugerencias para realizar la búsqueda.");
+      return;
+    }
+
+    const filtrosCabecera = {
+      ...filters,
+      responsable: responsable ? [responsable.codigo] : [],
+    };
+    setMessage("");
+    setFilters(filtrosCabecera);
+    setAppliedFilters(filtrosCabecera);
+  };
+
+  const limpiarFiltrosCabecera = () => {
+    const defaults = getDefaultFilterState();
+    setMessage("");
+    setResponsableTextoFiltro("");
+    setFilters(defaults);
+    setAppliedFilters(defaults);
+  };
 
   // Filas que realmente se ven tras los filtros de la grilla (fila de filtros,
   // filtro de encabezado y búsqueda). Selección, totales y export trabajan sobre ellas.
@@ -3452,6 +3603,98 @@ export default function PagosV2Page() {
           </div>
         ) : null}
 
+        {activeTab === "resumen" ? (
+          <form
+            style={styles.cabeceraFiltros}
+            aria-label="Filtros de Total Órdenes"
+            onSubmit={(event) => {
+              event.preventDefault();
+              aplicarFiltrosCabecera();
+            }}
+          >
+            <label style={styles.cabeceraCampo}>
+              <span style={styles.cabeceraEtiqueta}>Fecha inicio</span>
+              <input
+                type="date"
+                value={filters.fechaDesde}
+                onChange={(event) => setFilters((prev) => ({ ...prev, fechaDesde: event.target.value }))}
+                style={styles.cabeceraControl}
+              />
+            </label>
+            <label style={styles.cabeceraCampo}>
+              <span style={styles.cabeceraEtiqueta}>Fecha fin</span>
+              <input
+                type="date"
+                value={filters.fechaHasta}
+                onChange={(event) => setFilters((prev) => ({ ...prev, fechaHasta: event.target.value }))}
+                style={styles.cabeceraControl}
+              />
+            </label>
+            <label style={styles.cabeceraCampo}>
+              <span style={styles.cabeceraEtiqueta}>Estado</span>
+              <select
+                value={filters.estado[0] ?? ""}
+                onChange={(event) =>
+                  setFilters((prev) => ({ ...prev, estado: event.target.value ? [event.target.value] : [] }))
+                }
+                style={styles.cabeceraControl}
+              >
+                <option value="">Todos</option>
+                {resumenOpciones.estados.map((estado) => (
+                  <option key={estado.codigo} value={estado.codigo}>
+                    {estado.nombre}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={styles.cabeceraCampo}>
+              <span style={styles.cabeceraEtiqueta}>Solicitante</span>
+              <select
+                value={filters.solicitante[0] ?? ""}
+                onChange={(event) =>
+                  setFilters((prev) => ({ ...prev, solicitante: event.target.value ? [event.target.value] : [] }))
+                }
+                style={{ ...styles.cabeceraControl, minWidth: 220 }}
+              >
+                <option value="">Todos</option>
+                {resumenOpciones.solicitantes.map((solicitante) => (
+                  <option key={solicitante.codigo} value={solicitante.codigo}>
+                    {solicitante.nombre}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={styles.cabeceraCampo}>
+              <span style={styles.cabeceraEtiqueta}>Responsable</span>
+              <input
+                type="text"
+                list="pagos-v2-responsables"
+                value={responsableTextoFiltro}
+                placeholder="Escriba un responsable..."
+                autoComplete="off"
+                onChange={(event) => setResponsableTextoFiltro(event.target.value)}
+                style={{ ...styles.cabeceraControl, minWidth: 220 }}
+              />
+              <datalist id="pagos-v2-responsables">
+                {resumenOpciones.responsables.map((responsable) => (
+                  <option key={responsable.codigo} value={responsable.nombre} />
+                ))}
+              </datalist>
+            </label>
+            <button type="submit" style={styles.cabeceraBoton}>
+              Buscar
+            </button>
+            <button type="button" onClick={limpiarFiltrosCabecera} style={styles.cabeceraBotonSecundario}>
+              Limpiar
+            </button>
+            {filtroFechaPorDeposito ? (
+              <span style={styles.cabeceraNota}>
+                Para PAGADO las fechas se comparan con la fecha de depósito; los demás estados usan la fecha de registro.
+              </span>
+            ) : null}
+          </form>
+        ) : null}
+
           <section
             style={{
               ...styles.mainGrid,
@@ -5250,6 +5493,51 @@ const styles: Record<string, React.CSSProperties> = {
     width: "100%",
     minWidth: 0,
   },
+  cabeceraFiltros: {
+    display: "flex",
+    alignItems: "flex-end",
+    flexWrap: "wrap",
+    gap: 10,
+    margin: "8px 0",
+    padding: "8px 12px",
+    border: "1px solid #DDD6FE",
+    borderRadius: 10,
+    background: "#FFFFFF",
+  },
+  cabeceraCampo: { display: "flex", flexDirection: "column", gap: 3 },
+  cabeceraEtiqueta: { fontSize: 11, fontWeight: 700, color: "#475569", textTransform: "uppercase" },
+  cabeceraControl: {
+    height: 32,
+    minWidth: 140,
+    padding: "0 8px",
+    border: "1px solid #CBD5E1",
+    borderRadius: 8,
+    fontSize: 13,
+    background: "#FFFFFF",
+    color: "#0F172A",
+  },
+  cabeceraBoton: {
+    height: 32,
+    padding: "0 16px",
+    border: 0,
+    borderRadius: 8,
+    background: "#7C3AED",
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  cabeceraBotonSecundario: {
+    height: 32,
+    padding: "0 14px",
+    border: "1px solid #CBD5E1",
+    borderRadius: 8,
+    background: "#FFFFFF",
+    color: "#334155",
+    fontSize: 13,
+    cursor: "pointer",
+  },
+  cabeceraNota: { fontSize: 12, color: "#7C3AED", alignSelf: "center" },
   quickDateFilters: {
     display: "flex",
     alignItems: "flex-end",
