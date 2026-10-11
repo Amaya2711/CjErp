@@ -510,10 +510,10 @@ export async function exportarPdfIa(ctx: ContextoIa) {
   pagina.nueva("landscape");
   pagina.titulo("Detalle por OC y pagos asociados");
   if (listaOcs.length === 0) vacio(doc, pagina, "No hay OC en el resultado.");
-  let sitioPrevio = "";
-  listaOcs.forEach(({ sitio, oc }) => {
-    const mostrar = multiSitio && sitio.clave !== sitioPrevio;
-    sitioPrevio = sitio.clave;
+  listaOcs.forEach(({ sitio, oc }, indice) => {
+    // Cada OC empieza en una página nueva para que su detalle y sus pagos no se mezclen con otra OC.
+    if (indice > 0) pagina.nueva();
+    const mostrar = multiSitio;
     bloqueOc(doc, autoTable, pagina, sitio, oc, mostrar);
   });
 
