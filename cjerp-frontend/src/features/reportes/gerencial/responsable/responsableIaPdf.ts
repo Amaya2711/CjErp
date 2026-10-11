@@ -5,13 +5,11 @@ import {
   mensajesClave,
   montoConSimbolo,
   responsablesAnalizados,
-  type AnalisisEstructurado,
   type NivelMensaje,
   type OcAnalisis,
-  type PagoAnalisis,
   type SitioAnalisis,
 } from "./responsableAnalisis";
-import { fechaClave, formatFecha, formatMonto, formatPorcentaje, periodoConsultado, type FilaReporte, type FiltrosReporte } from "./responsableLogic";
+import { formatFecha, formatMonto, formatPorcentaje, periodoConsultado, type FilaReporte, type FiltrosReporte } from "./responsableLogic";
 
 type Rgb = [number, number, number];
 
@@ -32,16 +30,11 @@ const MARGEN = 15;
 const ANCHO = 180;
 const ALTO_PAGINA = 297;
 const LIMITE_Y = ALTO_PAGINA - 17;
-const MAX_TARJETAS_OC = 40;
-const MAX_EVENTOS_LINEA = 18;
 
 type ContextoIa = {
   filas: FilaReporte[];
   filtros: FiltrosReporte;
   criterio: string;
-  analisis: AnalisisEstructurado;
-  /** true si lo redactó la IA; false si es el análisis automático de respaldo. */
-  generadoPorIa: boolean;
 };
 
 const truncar = (texto: string, max: number) => (texto.length > max ? `${texto.slice(0, max - 1)}…` : texto);
@@ -54,14 +47,6 @@ function colorChip(etiqueta: string): Rgb {
   if (["BAJO", "BAJA", "HECHO", "SÍ", "SI", "APROBADA", "PAGADO COMPLETO"].includes(e)) return GRN;
   if (e === "PAGADO EN EXCESO") return [124, 58, 237];
   return GRY;
-}
-
-function nivelDe(texto: string): string {
-  const t = texto.toUpperCase();
-  if (t === "ALTA") return "ALTO";
-  if (t === "MEDIA") return "MEDIO";
-  if (t === "BAJA") return "BAJO";
-  return t;
 }
 
 /** Píldora de color con texto blanco; devuelve el ancho dibujado. */
@@ -77,36 +62,61 @@ function chip(doc: Doc, x: number, y: number, texto: string, color: Rgb, alto = 
   return ancho;
 }
 
+const ANCHO_PAISAJE = 267;
+const ALTO_PAISAJE = 210;
+
 class Pagina {
   y = 0;
+  /** Primera página horizontal (todas las siguientes también lo son); 0 si no hay. */
+  primeraPaisaje = 0;
+  private ancho = ANCHO;
+  private limiteY = LIMITE_Y;
   private readonly doc: Doc;
   private readonly cabecera: string;
+  private readonly conCabecera = new Set<number>();
 
   constructor(doc: Doc, cabecera: string) {
     this.doc = doc;
     this.cabecera = cabecera;
   }
 
-  nueva() {
-    this.doc.addPage();
+  nueva(orientacion: "portrait" | "landscape" = this.primeraPaisaje ? "landscape" : "portrait") {
+    this.doc.addPage("a4", orientacion);
+    if (orientacion === "landscape") {
+      if (!this.primeraPaisaje) this.primeraPaisaje = this.doc.getNumberOfPages();
+      this.ancho = ANCHO_PAISAJE;
+      this.limiteY = ALTO_PAISAJE - 17;
+    }
     this.dibujarCabecera();
     this.y = 17;
   }
 
+  /** Dibuja la cabecera de la página actual una sola vez y sin que los textos se encimen. */
   dibujarCabecera() {
+    const pagina = this.doc.getCurrentPageInfo().pageNumber;
+    if (this.conCabecera.has(pagina)) return;
+    this.conCabecera.add(pagina);
     this.doc.setFont("helvetica", "normal");
     this.doc.setFontSize(7);
     this.doc.setTextColor(...GRY);
-    this.doc.text(this.cabecera, MARGEN, 10);
-    this.doc.text("Informe Analítico con IA", MARGEN + ANCHO, 10, { align: "right" });
+    const derecha = "Informe Analítico con IA";
+    const disponible = this.ancho - this.doc.getTextWidth(derecha) - 6;
+    let izquierda = this.cabecera;
+    while (izquierda.length > 4 && this.doc.getTextWidth(izquierda) > disponible) izquierda = `${izquierda.slice(0, -2)}…`;
+    this.doc.text(izquierda, MARGEN, 10);
+    this.doc.text(derecha, MARGEN + this.ancho, 10, { align: "right" });
     this.doc.setDrawColor(...LINE);
     this.doc.setLineWidth(0.3);
-    this.doc.line(MARGEN, 12, MARGEN + ANCHO, 12);
+    this.doc.line(MARGEN, 12, MARGEN + this.ancho, 12);
     this.doc.setTextColor(...INK);
   }
 
   asegurar(alto: number) {
-    if (this.y + alto > LIMITE_Y) this.nueva();
+    if (this.y + alto > this.limiteY) this.nueva();
+  }
+
+  get anchoUtil() {
+    return this.ancho;
   }
 
   titulo(texto: string, nota?: string) {
@@ -117,11 +127,11 @@ class Pagina {
     this.doc.setTextColor(...BLUE);
     this.doc.text(texto, MARGEN, this.y + 3);
     if (nota) {
-      const ancho = this.doc.getTextWidth(texto);
+      const anchoTexto = this.doc.getTextWidth(texto);
       this.doc.setFont("helvetica", "bold");
       this.doc.setFontSize(7.5);
       this.doc.setTextColor(...GRY);
-      this.doc.text(`  ${nota}`, MARGEN + ancho, this.y + 3);
+      this.doc.text(`  ${nota}`, MARGEN + anchoTexto, this.y + 3);
     }
     this.doc.setTextColor(...INK);
     this.y += 7;
@@ -198,14 +208,14 @@ function filaMensaje(doc: Doc, y: number, nivel: NivelMensaje, titulo: string, d
   return y + alto;
 }
 
-function tarjetaOc(doc: Doc, y: number, oc: OcAnalisis) {
-  const alto = 26;
+function tarjetaOc(doc: Doc, y: number, oc: OcAnalisis, ancho: number) {
+  const alto = 20;
   const colorAprobacion = colorChip(oc.estadoAprobacion);
   const rechazada = oc.estadoAprobacion === "RECHAZADA";
   doc.setFillColor(...WHITE);
   doc.setDrawColor(...LINE);
   doc.setLineWidth(0.3);
-  doc.roundedRect(MARGEN, y, ANCHO, alto, 2, 2, "FD");
+  doc.roundedRect(MARGEN, y, ancho, alto, 2, 2, "FD");
   doc.setFillColor(...colorAprobacion);
   doc.rect(MARGEN, y, 1.6, alto, "F");
 
@@ -221,14 +231,11 @@ function tarjetaOc(doc: Doc, y: number, oc: OcAnalisis) {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.3);
   doc.setTextColor(...GRY);
-  doc.text(truncar(`${oc.solicitante || "—"}  ·  ${formatFecha(oc.fechaOc) || "—"}  ·  ${lineas} línea(s) de detalle`, 80), MARGEN + 5, y + 11.2);
-  doc.setFontSize(7.6);
-  doc.setTextColor(...INK);
-  doc.text(truncar((oc.detalle || "—").replace(/\s+/g, " "), 92), MARGEN + 5, y + 16);
+  doc.text(truncar(`${oc.solicitante || "—"}  ·  F. ingreso ${formatFecha(oc.fechaOc) || "—"}  ·  ${lineas} línea(s) de detalle  ·  Filas ${oc.filas}`, 120), MARGEN + 5, y + 11.2);
 
   const pct = oc.monto > 0 ? Math.min(Math.max(oc.gasto / oc.monto, 0), 1) : 0;
   const bx = MARGEN + 5;
-  const by = y + alto - 6.2;
+  const by = y + alto - 5.2;
   doc.setFillColor(...LINE);
   doc.roundedRect(bx, by, 100, 2.4, 1.2, 1.2, "F");
   if (pct > 0) {
@@ -245,7 +252,7 @@ function tarjetaOc(doc: Doc, y: number, oc: OcAnalisis) {
     ["PAGADO", formatMonto(oc.gasto), GRN],
     ["SALDO", rechazada ? "n/a" : formatMonto(oc.saldo), rechazada ? GRY : AMB],
   ];
-  [MARGEN + ANCHO - 44, MARGEN + ANCHO - 24, MARGEN + ANCHO - 4].forEach((xr, i) => {
+  [MARGEN + ancho - 44, MARGEN + ancho - 24, MARGEN + ancho - 4].forEach((xr, i) => {
     const [etiqueta, valor, color] = columnas[i];
     doc.setFont("helvetica", "bold");
     doc.setFontSize(6);
@@ -257,124 +264,6 @@ function tarjetaOc(doc: Doc, y: number, oc: OcAnalisis) {
   });
   doc.setTextColor(...INK);
   return y + alto;
-}
-
-type EventoLinea = { fecha: string; texto: string; color: Rgb; arriba: boolean };
-
-function eventosLinea(sitios: SitioAnalisis[]): EventoLinea[] {
-  const eventos: EventoLinea[] = [];
-  sitios.forEach((sitio) => {
-    sitio.ocs.forEach((oc) => {
-      const emision = fechaClave(oc.fechaOc);
-      const aprobacion = fechaClave([...oc.aprobadores].reverse().find((a) => a.fecha)?.fecha ?? "");
-      if (!emision) return;
-      if (oc.estadoAprobacion === "RECHAZADA") {
-        eventos.push({ fecha: emision, texto: `OC ${oc.idOc} rechazada`, color: RED, arriba: true });
-      } else if (oc.estadoAprobacion === "APROBADA" && aprobacion && aprobacion !== emision) {
-        eventos.push({ fecha: emision, texto: `OC ${oc.idOc} emitida`, color: BLUE, arriba: true });
-        eventos.push({ fecha: aprobacion, texto: `OC ${oc.idOc} aprobada (3/3)`, color: GRN, arriba: true });
-      } else {
-        eventos.push({ fecha: emision, texto: `OC ${oc.idOc} emitida${oc.estadoAprobacion === "APROBADA" ? " y aprobada" : ""}`, color: BLUE, arriba: true });
-      }
-    });
-    sitio.pagos.forEach((pago) => {
-      const deposito = fechaClave(pago.fechaDeposito);
-      if (!deposito) return;
-      eventos.push(
-        pago.idOc === null
-          ? { fecha: deposito, texto: `Pago ${pago.correlativo} sin OC · ${montoConSimbolo(pago.monto, pago.moneda)}`, color: RED, arriba: false }
-          : {
-              fecha: deposito,
-              texto: `Pago ${pago.correlativo} · ${montoConSimbolo(pago.monto, pago.moneda)}${pago.diasOcDeposito !== null ? ` (${pago.diasOcDeposito} días desde OC)` : ""}`,
-              color: GRN,
-              arriba: false,
-            },
-      );
-    });
-  });
-  eventos.sort((a, b) => a.fecha.localeCompare(b.fecha));
-  if (eventos.length <= MAX_EVENTOS_LINEA) return eventos;
-  // Con muchos hechos se priorizan rechazos y pagos; el resto queda en las tablas.
-  return eventos.filter((e) => e.color !== BLUE).slice(0, MAX_EVENTOS_LINEA);
-}
-
-function lineaDeTiempo(doc: Doc, y: number, eventos: EventoLinea[]) {
-  const alto = 60;
-  if (eventos.length === 0) {
-    doc.setFont("helvetica", "italic");
-    doc.setFontSize(8.5);
-    doc.setTextColor(...GRY);
-    doc.text("Sin fechas para construir la línea de tiempo.", MARGEN + 2, y + 5);
-    doc.setTextColor(...INK);
-    return y + 10;
-  }
-  const dias = (clave: string) => Date.parse(`${clave}T00:00:00Z`) / 86_400_000;
-  const d0 = dias(eventos[0].fecha);
-  const d1 = Math.max(dias(eventos[eventos.length - 1].fecha), d0 + 1);
-  const x0 = MARGEN + 8;
-  const x1 = MARGEN + ANCHO - 8;
-  const ay = y + alto / 2 - 3;
-  const px = (clave: string) => x0 + ((dias(clave) - d0) / (d1 - d0)) * (x1 - x0);
-
-  doc.setDrawColor(...GRY);
-  doc.setLineWidth(1);
-  doc.line(x0, ay, x1, ay);
-
-  // Marcas de mes
-  const inicio = new Date(d0 * 86_400_000);
-  const fin = new Date(d1 * 86_400_000);
-  const paso = (d1 - d0) / 30 > 14 ? 3 : 1;
-  let marca = new Date(Date.UTC(inicio.getUTCFullYear(), inicio.getUTCMonth() + 1, 1));
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(6);
-  while (marca <= fin) {
-    const clave = marca.toISOString().slice(0, 10);
-    const x = px(clave);
-    doc.setDrawColor(...LINE);
-    doc.setLineWidth(0.4);
-    doc.line(x, ay - 2, x, ay + 2);
-    doc.setTextColor(...GRY);
-    doc.text(`01/${String(marca.getUTCMonth() + 1).padStart(2, "0")}`, x, ay + 5, { align: "center" });
-    marca = new Date(Date.UTC(marca.getUTCFullYear(), marca.getUTCMonth() + paso, 1));
-  }
-
-  const mitad = (x0 + x1) / 2;
-  const contador = { arriba: 0, abajo: 0 };
-  eventos.forEach((evento) => {
-    const x = px(evento.fecha);
-    const nivel = (evento.arriba ? contador.arriba++ : contador.abajo++) % 3 + 1;
-    const yl = evento.arriba ? ay - (3 + nivel * 6.5) : ay + (6 + nivel * 6.5);
-    doc.setDrawColor(...evento.color);
-    doc.setLineWidth(0.4);
-    doc.line(x, ay, x, yl);
-    doc.setFillColor(...evento.color);
-    doc.circle(x, ay, 1.5, "F");
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(6.6);
-    doc.setTextColor(...evento.color);
-    const ty = yl + (evento.arriba ? -0.8 : 2.8);
-    if (x <= mitad) doc.text(evento.texto, x + 1.5, ty);
-    else doc.text(evento.texto, x - 1.5, ty, { align: "right" });
-  });
-
-  // Leyenda
-  let lx = MARGEN + 2;
-  const ly = y + alto - 1.5;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(6.5);
-  [
-    [BLUE, "Emisión OC"],
-    [GRN, "Aprobación / pago con OC"],
-    [RED, "Rechazo / pago sin OC"],
-  ].forEach(([color, texto]) => {
-    doc.setFillColor(...(color as Rgb));
-    doc.circle(lx, ly - 0.8, 1.1, "F");
-    doc.setTextColor(...GRY);
-    doc.text(texto as string, lx + 2, ly);
-    lx += 42;
-  });
-  doc.setTextColor(...INK);
-  return y + alto + 2;
 }
 
 type OpcionesTabla = { chipCols?: number[]; derecha?: number[]; anchos?: Record<number, number>; fontSize?: number; filaTotal?: boolean; rojoCol?: number };
@@ -395,6 +284,7 @@ function tabla(doc: Doc, autoTable: AutoTable, pagina: Pagina, head: string[], b
     },
     margin: { left: MARGEN, right: MARGEN, top: 17, bottom: 17 },
     didDrawPage: () => pagina.dibujarCabecera(),
+    // Sin saltos de línea dentro de las celdas de totales: el ancho de columna ya contempla el texto.
     didParseCell: (data: { section: string; column: { index: number }; row: { index: number }; cell: { raw: unknown; text: string[]; styles: { fontStyle?: string; fillColor?: unknown; textColor?: unknown } } }) => {
       if (data.section !== "body") return;
       if (chipCols.includes(data.column.index)) {
@@ -431,6 +321,107 @@ function vacio(doc: Doc, pagina: Pagina, texto: string) {
   pagina.y += 8;
 }
 
+function subtituloSeccion(doc: Doc, pagina: Pagina, texto: string, color: Rgb = BLUE) {
+  pagina.asegurar(10);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8.5);
+  doc.setTextColor(...color);
+  doc.text(texto, MARGEN, pagina.y + 3);
+  doc.setTextColor(...INK);
+  pagina.y += 5.5;
+}
+
+/** Una OC completa: encabezado, detalle íntegro, aprobadores y, debajo, solo los pagos asociados a esa OC. */
+function bloqueOc(doc: Doc, autoTable: AutoTable, pagina: Pagina, sitio: SitioAnalisis, oc: OcAnalisis, mostrarSitio: boolean) {
+  pagina.asegurar(mostrarSitio ? 52 : 46);
+  if (mostrarSitio) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(...GRY);
+    doc.text(`Sitio ${sitio.etiqueta}${sitio.cliente ? ` · ${sitio.cliente}` : ""}`, MARGEN, pagina.y + 3);
+    doc.setTextColor(...INK);
+    pagina.y += 5;
+  }
+  pagina.y = tarjetaOc(doc, pagina.y, oc, pagina.anchoUtil) + 3;
+
+  // Detalle completo de la OC (cada línea de DetOrdenCompra, sin recortar).
+  subtituloSeccion(doc, pagina, "Detalle de la OC", GRY);
+  const entradas = (oc.detalle || "—").split(" | ").map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7.8);
+  doc.setTextColor(...INK);
+  entradas.forEach((entrada, i) => {
+    const partes = doc.splitTextToSize(`${entradas.length > 1 ? `${i + 1}. ` : ""}${entrada}`, pagina.anchoUtil - 8) as string[];
+    partes.forEach((linea) => {
+      pagina.asegurar(5);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.8);
+      doc.setTextColor(...INK);
+      doc.text(linea, MARGEN + 3, pagina.y + 3);
+      pagina.y += 3.8;
+    });
+  });
+  pagina.y += 1.5;
+
+  const aprobadores = oc.aprobadores.map((a) => `${a.nombre}${a.fecha ? ` (${formatFecha(a.fecha)})` : ""}`).join("   ·   ");
+  const textoAprobacion =
+    oc.estadoAprobacion === "RECHAZADA"
+      ? `RECHAZADA${aprobadores ? `. Aprobadores previos: ${aprobadores}` : " - sin aprobadores"}`
+      : `${oc.estadoAprobacion === "APROBADA" ? "Aprobada por" : `${oc.estadoAprobacion}. Aprobadores registrados:`} ${aprobadores || "—"}`;
+  const lineasAprobacion = doc.splitTextToSize(`Aprobación: ${textoAprobacion}`, pagina.anchoUtil - 8) as string[];
+  lineasAprobacion.forEach((linea) => {
+    pagina.asegurar(5);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.6);
+    doc.setTextColor(...(oc.estadoAprobacion === "RECHAZADA" ? RED : GRY));
+    doc.text(linea, MARGEN + 3, pagina.y + 3);
+    pagina.y += 3.8;
+  });
+  doc.setTextColor(...INK);
+  pagina.y += 2;
+
+  // Pagos asociados solo a esta OC.
+  const pagos = sitio.pagos.filter((p) => p.idOc === oc.idOc);
+  subtituloSeccion(doc, pagina, `Pagos asociados a la OC ${oc.idOc}`);
+  if (pagos.length === 0) {
+    vacio(doc, pagina, "Esta OC no tiene pagos asociados.");
+  } else {
+    const total = pagos.reduce((t, p) => t + p.monto, 0);
+    tabla(
+      doc,
+      autoTable,
+      pagina,
+      ["PAGO", "FILA", "F. INGRESO", "F. DEPÓSITO", "SERIE", "NRO. OPERACIÓN", "SOLICITANTE", "RESPONSABLE", "PLANILLA.DETALLE", "MONTO"],
+      [
+        ...pagos.map((p) => [
+          String(p.correlativo),
+          p.fila === null ? "—" : String(p.fila),
+          formatFecha(p.fechaIngreso) || "—",
+          formatFecha(p.fechaDeposito) || "—",
+          p.serie || "—",
+          p.nroOperacion || "—",
+          p.solicitante || "—",
+          p.responsable || "—",
+          (p.detalle || "—").replace(/\s+/g, " "),
+          montoConSimbolo(p.monto, p.moneda),
+        ]),
+        ["TOTAL", "", "", "", "", "", "", "", "", montoConSimbolo(total, pagos[0].moneda)],
+      ],
+      {
+        fontSize: 7,
+        derecha: [9],
+        filaTotal: true,
+        anchos: { 0: 18, 1: 12, 2: 22, 3: 24, 4: 19, 5: 27, 6: 30, 7: 34, 9: 28 },
+      },
+    );
+  }
+  pagina.y += 4;
+  doc.setDrawColor(...LINE);
+  doc.setLineWidth(0.3);
+  doc.line(MARGEN, pagina.y, MARGEN + pagina.anchoUtil, pagina.y);
+  pagina.y += 4;
+}
+
 /** PDF analítico con el diseño aprobado: KPIs, lo más importante, estado de las OC, pagos sin OC, línea de tiempo, análisis y anexos. */
 export async function exportarPdfIa(ctx: ContextoIa) {
   const { doc, autoTable } = await cargarPdf("portrait");
@@ -441,9 +432,8 @@ export async function exportarPdfIa(ctx: ContextoIa) {
   const unSitio = sitios.length === 1 ? sitios[0] : null;
   const nombresResponsables = responsables.map((r) => r.nombre).join(" · ") || ctx.criterio;
   const multiSitio = sitios.length > 1;
-  const multiResponsable = new Set(sitios.flatMap((s) => s.pagos.map((p) => p.responsable))).size > 1;
 
-  const cabecera = `${truncar(nombresResponsables, 60)}  ·  ${unSitio ? truncar(unSitio.etiqueta, 40) : `${sitios.length} sitios`}  ·  ${truncar(periodo, 60)}`;
+  const cabecera = `${truncar(nombresResponsables, 70)}  ·  ${unSitio ? truncar(unSitio.etiqueta, 40) : `${sitios.length} sitios`}`;
   const pagina = new Pagina(doc, cabecera);
 
   // ---- Página 1: banda, KPIs, lo más importante, estado de las OC
@@ -458,7 +448,7 @@ export async function exportarPdfIa(ctx: ContextoIa) {
     doc,
     17,
     lineasBanda,
-    ctx.generadoPorIa ? "Análisis redactado por IA (OpenAI); los ítems A VERIFICAR son hipótesis." : "Análisis automático: el servicio de IA no estuvo disponible.",
+    "Datos de CabOrdenCompra, DetOrdenCompra y Planilla (pagos en estado PAGADO).",
   );
   pagina.y += 4;
 
@@ -489,40 +479,47 @@ export async function exportarPdfIa(ctx: ContextoIa) {
 
   const totalOcs = sitios.reduce((t, s) => t + s.ocs.length, 0);
   const totalLineas = sitios.reduce((t, s) => t + s.ocs.reduce((n, o) => n + (o.filas.split(",").filter((f) => f.trim()).length || 1), 0), 0);
-  pagina.titulo("Estado de las OC", `(${totalOcs} OC · ${totalLineas} líneas de detalle)`);
-  const tarjetas = sitios
-    .flatMap((s) => s.ocs.map((oc) => ({ sitio: s, oc })))
-    .sort((a, b) => b.oc.monto - a.oc.monto)
-    .slice(0, MAX_TARJETAS_OC)
+  pagina.titulo("Resumen de OC", `(${totalOcs} OC · ${totalLineas} líneas de detalle)`);
+  const listaOcs = sitios
+    .flatMap((sitio) => sitio.ocs.map((oc) => ({ sitio, oc })))
     .sort((a, b) => a.sitio.etiqueta.localeCompare(b.sitio.etiqueta, "es") || a.oc.idOc - b.oc.idOc);
-  if (tarjetas.length === 0) vacio(doc, pagina, "No hay OC en el resultado.");
-  let sitioActual = "";
-  tarjetas.forEach(({ sitio, oc }) => {
-    if (multiSitio && sitio.clave !== sitioActual) {
-      pagina.asegurar(36);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(8.5);
-      doc.setTextColor(...BLUE);
-      doc.text(`Sitio ${sitio.etiqueta}${sitio.cliente ? ` · ${sitio.cliente}` : ""}`, MARGEN, pagina.y + 3);
-      doc.setTextColor(...INK);
-      pagina.y += 5.5;
-      sitioActual = sitio.clave;
-    }
-    pagina.asegurar(29);
-    pagina.y = tarjetaOc(doc, pagina.y, oc) + 2.5;
-  });
-  if (totalOcs > tarjetas.length) {
-    doc.setFont("helvetica", "italic");
-    doc.setFontSize(7.5);
-    doc.setTextColor(...GRY);
-    doc.text(`Se muestran las ${tarjetas.length} OC de mayor monto; el Anexo B lista todas las OC (${totalOcs}).`, MARGEN, pagina.y + 3);
-    doc.setTextColor(...INK);
-    pagina.y += 6;
+  if (listaOcs.length === 0) {
+    vacio(doc, pagina, "No hay OC en el resultado.");
+  } else {
+    const o = multiSitio ? 1 : 0;
+    tabla(
+      doc,
+      autoTable,
+      pagina,
+      [...(multiSitio ? ["SITIO"] : []), "OC", "APROBACIÓN", "ESTADO DE PAGO", "MONTO", "PAGADO", "SALDO", "% PAGADO"],
+      listaOcs.map(({ sitio, oc }) => [
+        ...(multiSitio ? [sitio.etiqueta] : []),
+        String(oc.idOc),
+        oc.estadoAprobacion,
+        oc.estado,
+        montoConSimbolo(oc.monto, oc.moneda),
+        montoConSimbolo(oc.gasto, oc.moneda),
+        oc.estadoAprobacion === "RECHAZADA" ? "n/a" : montoConSimbolo(oc.saldo, oc.moneda),
+        formatPorcentaje(oc.monto > 0 ? (oc.gasto / oc.monto) * 100 : 0),
+      ]),
+      { chipCols: [o + 1 + 1, o + 1 + 2], derecha: [o + 3, o + 4, o + 5, o + 6], anchos: { [o + 1]: 28, [o + 2]: 34 }, fontSize: 7.5 },
+    );
   }
 
-  // ---- Página 2: pagos sin OC, línea de tiempo, análisis
+  // ---- Detalle por OC (hoja horizontal): cada OC con su detalle completo y sus pagos asociados
+  pagina.nueva("landscape");
+  pagina.titulo("Detalle por OC y pagos asociados");
+  if (listaOcs.length === 0) vacio(doc, pagina, "No hay OC en el resultado.");
+  let sitioPrevio = "";
+  listaOcs.forEach(({ sitio, oc }) => {
+    const mostrar = multiSitio && sitio.clave !== sitioPrevio;
+    sitioPrevio = sitio.clave;
+    bloqueOc(doc, autoTable, pagina, sitio, oc, mostrar);
+  });
+
+  // ---- Pagos sin OC
   pagina.nueva();
-  const pagosSinOc = sitios.flatMap((s) => s.pagos.filter((p) => p.idOc === null).map((p) => ({ s, p })));
+    const pagosSinOc = sitios.flatMap((s) => s.pagos.filter((p) => p.idOc === null).map((p) => ({ s, p })));
   pagina.titulo("Pagos sin OC asociada");
   if (pagosSinOc.length === 0) {
     vacio(doc, pagina, "No hay pagos sin OC asociada.");
@@ -533,86 +530,37 @@ export async function exportarPdfIa(ctx: ContextoIa) {
       doc,
       autoTable,
       pagina,
-      [...(multiSitio ? ["SITIO"] : []), "PAGO", "F. DEPÓSITO", "SOLICITANTE", "MONTO", "ACCIÓN SUGERIDA"],
+      [...(multiSitio ? ["SITIO"] : []), "PAGO", "F. DEPÓSITO", "SERIE", "NRO. OPERACIÓN", "SOLICITANTE", "RESPONSABLE", "PLANILLA.DETALLE", "MONTO", "ACCIÓN SUGERIDA"],
       [
-        ...pagosSinOc.map(({ s, p }) => [...(multiSitio ? [s.etiqueta] : []), String(p.correlativo), formatFecha(p.fechaDeposito) || "—", p.solicitante || "—", montoConSimbolo(p.monto, p.moneda), "VINCULAR A OC O JUSTIFICAR"]),
-        ...Array.from(totalesSinOc, ([moneda, total]) => [...(multiSitio ? [""] : []), "TOTAL", "", "", montoConSimbolo(total, moneda), ""]),
-      ],
-      { chipCols: [multiSitio ? 5 : 4], derecha: [multiSitio ? 4 : 3], anchos: { [multiSitio ? 5 : 4]: 52 } },
-    );
-  }
-
-  pagina.titulo(unSitio ? "Línea de tiempo del sitio" : "Línea de tiempo");
-  pagina.asegurar(64);
-  pagina.y = lineaDeTiempo(doc, pagina.y, eventosLinea(sitios));
-
-  pagina.titulo("Análisis IA: conclusiones, riesgos y recomendaciones");
-  const filasAnalisis: string[][] = [
-    ...ctx.analisis.conclusiones.map((c) => ["Conclusión", "INFO", c.texto, c.tipo]),
-    ...ctx.analisis.riesgos.map((r) => ["Riesgo", nivelDe(r.nivel), [r.tema, r.detalle].filter(Boolean).join(": "), r.tipo]),
-    ...ctx.analisis.recomendaciones.map((r) => ["Recomendación", nivelDe(r.prioridad), r.accion, r.tipo]),
-  ];
-  if (filasAnalisis.length === 0) vacio(doc, pagina, "Sin análisis disponible.");
-  else tabla(doc, autoTable, pagina, ["TIPO", "NIVEL", "TEXTO", "ETIQUETA"], filasAnalisis, { chipCols: [1, 3], anchos: { 0: 26, 1: 20, 3: 24 }, fontSize: 8 });
-
-  // ---- Anexos
-  pagina.nueva();
-  pagina.titulo("Anexo A · Detalle de pagos (con y sin OC)");
-  const pagos = sitios
-    .flatMap((s) => s.pagos.map((p) => ({ s, p })))
-    .sort((a, b) => a.p.fechaDeposito.localeCompare(b.p.fechaDeposito) || a.p.correlativo - b.p.correlativo);
-  if (pagos.length === 0) {
-    vacio(doc, pagina, "No hay pagos en el resultado.");
-  } else {
-    const totales = new Map<string, number>();
-    pagos.forEach(({ p }) => totales.set(p.moneda, (totales.get(p.moneda) ?? 0) + p.monto));
-    const colMonto = 5 + (multiSitio ? 1 : 0) + (multiResponsable ? 1 : 0);
-    const colChip = colMonto + 1;
-    tabla(
-      doc,
-      autoTable,
-      pagina,
-      [...(multiSitio ? ["SITIO"] : []), "PAGO", "OC / FILA", "F. INGRESO", "F. DEPÓSITO", "SOLICITANTE", ...(multiResponsable ? ["RESPONSABLE"] : []), "MONTO", "CON OC"],
-      [
-        ...pagos.map(({ s, p }: { s: SitioAnalisis; p: PagoAnalisis }) => [
+        ...pagosSinOc.map(({ s, p }) => [
           ...(multiSitio ? [s.etiqueta] : []),
           String(p.correlativo),
-          p.idOc === null ? "-" : `${p.idOc}${p.fila === null ? "" : ` / ${p.fila}`}`,
-          formatFecha(p.fechaIngreso) || "—",
           formatFecha(p.fechaDeposito) || "—",
+          p.serie || "—",
+          p.nroOperacion || "—",
           p.solicitante || "—",
-          ...(multiResponsable ? [p.responsable || "—"] : []),
+          p.responsable || "—",
+          (p.detalle || "—").replace(/\s+/g, " "),
           montoConSimbolo(p.monto, p.moneda),
-          p.idOc === null ? "NO" : "SÍ",
+          "VINCULAR A OC O JUSTIFICAR",
         ]),
-        ...Array.from(totales, ([moneda, total]) => [...(multiSitio ? [""] : []), "TOTAL", "", "", "", "", ...(multiResponsable ? [""] : []), montoConSimbolo(total, moneda), ""]),
+        ...Array.from(totalesSinOc, ([moneda, total]) => [...(multiSitio ? [""] : []), "TOTAL", "", "", "", "", "", "", montoConSimbolo(total, moneda), ""]),
       ],
-      { chipCols: [colChip], derecha: [colMonto], anchos: { [colChip]: 17 } },
-    );
-  }
-
-  pagina.titulo("Anexo B · Descripción de OC y aprobadores");
-  const todasOcs = sitios.flatMap((s) => s.ocs.map((oc) => ({ s, oc }))).sort((a, b) => a.s.etiqueta.localeCompare(b.s.etiqueta, "es") || a.oc.idOc - b.oc.idOc);
-  if (todasOcs.length === 0) {
-    vacio(doc, pagina, "No hay OC en el resultado.");
-  } else {
-    const colAprob = multiSitio ? 3 : 2;
-    tabla(
-      doc,
-      autoTable,
-      pagina,
-      [...(multiSitio ? ["SITIO"] : []), "OC", "DESCRIPCIÓN COMPLETA", "APROBADORES Y FECHAS"],
-      todasOcs.map(({ s, oc }) => {
-        const aprobadores = oc.aprobadores.map((a) => `${a.nombre}${a.fecha ? ` ${formatFecha(a.fecha)}` : ""}`).join("\n");
-        const estado =
-          oc.estadoAprobacion === "APROBADA"
-            ? aprobadores || "APROBADA"
-            : oc.estadoAprobacion === "RECHAZADA"
-              ? `RECHAZADA${aprobadores ? `\n${aprobadores}` : " - sin aprobadores"}`
-              : `${oc.estadoAprobacion}${aprobadores ? `\n${aprobadores}` : ""}`;
-        return [...(multiSitio ? [s.etiqueta] : []), String(oc.idOc), (oc.detalle || "—").replace(/\s+/g, " "), estado];
-      }),
-      { anchos: { [multiSitio ? 1 : 0]: 17, [colAprob]: 62 }, fontSize: 7.5, rojoCol: colAprob },
+      {
+        chipCols: [multiSitio ? 9 : 8],
+        derecha: [multiSitio ? 8 : 7],
+        anchos: {
+          ...(multiSitio ? ({ 0: 30 } as Record<number, number>) : {}),
+          [multiSitio ? 1 : 0]: 18,
+          [multiSitio ? 2 : 1]: 24,
+          [multiSitio ? 3 : 2]: 19,
+          [multiSitio ? 4 : 3]: 27,
+          [multiSitio ? 5 : 4]: 32,
+          [multiSitio ? 6 : 5]: 34,
+          [multiSitio ? 8 : 7]: 28,
+          [multiSitio ? 9 : 8]: 44,
+        },
+      },
     );
   }
 
@@ -620,14 +568,17 @@ export async function exportarPdfIa(ctx: ContextoIa) {
   const total = doc.getNumberOfPages();
   for (let i = 1; i <= total; i += 1) {
     doc.setPage(i);
+    const horizontal = pagina.primeraPaisaje > 0 && i >= pagina.primeraPaisaje;
+    const anchoPie = horizontal ? ANCHO_PAISAJE : ANCHO;
+    const altoPie = horizontal ? ALTO_PAISAJE : ALTO_PAGINA;
     doc.setDrawColor(...LINE);
     doc.setLineWidth(0.3);
-    doc.line(MARGEN, ALTO_PAGINA - 13, MARGEN + ANCHO, ALTO_PAGINA - 13);
+    doc.line(MARGEN, altoPie - 13, MARGEN + anchoPie, altoPie - 13);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7);
     doc.setTextColor(...GRY);
-    doc.text(`${EMPRESA}  ·  Informe Analítico de OC, Gastos y Pagos`, MARGEN, ALTO_PAGINA - 8.5);
-    doc.text(`Página ${i} de ${total}`, MARGEN + ANCHO, ALTO_PAGINA - 8.5, { align: "right" });
+    doc.text(`${EMPRESA}  ·  Informe Analítico de OC, Gastos y Pagos`, MARGEN, altoPie - 8.5);
+    doc.text(`Página ${i} de ${total}`, MARGEN + anchoPie, altoPie - 8.5, { align: "right" });
   }
 
   doc.save(nombreArchivo("Informe_Analitico_IA"));

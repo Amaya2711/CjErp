@@ -297,7 +297,7 @@ export async function exportarPdfResumen(ctx: Contexto) {
 type Seccion = { titulo: string; pagina: number };
 
 const COLUMNAS_DETALLE = [
-  "OC", "Fila", "OT", "Cliente / Proyecto / Site", "Fecha OC", "Detalle OC", "Cant.", "P. unit.", "Subtotal OC", "Mon.", "Pago", "F. depósito", "Gasto (planilla)", "Saldo OC", "Estado de pago", "Observación",
+  "OC", "Fila", "OT", "Cliente / Proyecto / Site", "Fecha OC", "Detalle OC", "Cant.", "P. unit.", "Subtotal OC", "Mon.", "Pago", "F. depósito", "Serie", "Nro. operación", "Gasto (planilla)", "Saldo OC", "Estado de pago", "Observación",
 ];
 
 function filaDetalle(fila: FilaReporte): Array<string | number> {
@@ -314,6 +314,8 @@ function filaDetalle(fila: FilaReporte): Array<string | number> {
     fila.tieneOc ? fila.monedaClave : "—",
     fila.correlativoPago ?? "—",
     formatFecha(fila.fechaDeposito) || "—",
+    fila.seriePago || "—",
+    fila.nroOperacionPago || "—",
     fila.subtotalGasto === null ? "—" : formatMonto(fila.subtotalGasto),
     fila.primeraDeOc ? formatMonto(fila.saldoOc) : "",
     fila.primeraDeOc ? fila.estadoPagoOc : "",
@@ -330,9 +332,9 @@ function tablaDetalle(doc: Doc, autoTable: AutoTable, filas: FilaReporte[], y: n
     headStyles: { fillColor: AZUL, textColor: 255 },
     alternateRowStyles: { fillColor: GRIS },
     columnStyles: {
-      0: { cellWidth: 13 }, 1: { cellWidth: 8 }, 2: { cellWidth: 18 }, 3: { cellWidth: 36 }, 4: { cellWidth: 15 }, 5: { cellWidth: 32 },
-      6: { halign: "right", cellWidth: 10 }, 7: { halign: "right", cellWidth: 14 }, 8: { halign: "right", cellWidth: 16 }, 9: { cellWidth: 8 },
-      10: { cellWidth: 12 }, 11: { cellWidth: 15 }, 12: { halign: "right", cellWidth: 16 }, 13: { halign: "right", cellWidth: 16 }, 14: { cellWidth: 20 },
+      0: { cellWidth: 12 }, 1: { cellWidth: 8 }, 2: { cellWidth: 16 }, 3: { cellWidth: 30 }, 4: { cellWidth: 14 }, 5: { cellWidth: 26 },
+      6: { halign: "right", cellWidth: 9 }, 7: { halign: "right", cellWidth: 13 }, 8: { halign: "right", cellWidth: 15 }, 9: { cellWidth: 8 },
+      10: { cellWidth: 11 }, 11: { cellWidth: 14 }, 12: { cellWidth: 12 }, 13: { cellWidth: 16 }, 14: { halign: "right", cellWidth: 15 }, 15: { halign: "right", cellWidth: 15 }, 16: { cellWidth: 18 },
     },
     margin: { left: 10, right: 10 },
   });

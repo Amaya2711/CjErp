@@ -43,6 +43,11 @@ export type RptResponsableRow = {
   solicitanteOc: string;
   solicitantePlanilla: string;
   fechaIngresoPlanilla: string;
+  /** Planilla.Serie y Planilla.NroOperacion del pago (los completa el backend). */
+  seriePago: string;
+  nroOperacionPago: string;
+  /** Planilla.Detalle del pago (lo completa el backend). */
+  detallePago: string;
   estadoAprobacionOc: string;
   aprobador1Oc: string;
   aprobador2Oc: string;
@@ -113,6 +118,9 @@ export function mapRptResponsableRow(raw: RawRow): RptResponsableRow {
     solicitanteOc: text(get("SolicitanteOC")),
     solicitantePlanilla: text(get("SolicitantePlanilla")),
     fechaIngresoPlanilla: text(get("FechaIngresoPlanilla")),
+    seriePago: text(get("SeriePago")),
+    nroOperacionPago: text(get("NroOperacionPago")),
+    detallePago: text(get("DetallePago")),
     estadoAprobacionOc: text(get("EstadoAprobacionOC")),
     aprobador1Oc: text(get("Aprobador1OC")),
     aprobador2Oc: text(get("Aprobador2OC")),

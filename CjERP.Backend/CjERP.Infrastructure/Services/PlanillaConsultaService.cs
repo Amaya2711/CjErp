@@ -628,6 +628,9 @@ SELECT p.Correlativo AS Correlativo,
        p.Subtotal AS SubtotalGasto,
        m.ValorIni AS MonedaGasto,
        p.FecIngreso AS FechaIngresoPlanilla,
+       p.Serie AS SeriePago,
+       p.NroOperacion AS NroOperacionPago,
+       p.Detalle AS DetallePago,
        p.IdSolicitante AS IdSolicitantePlanilla
 FROM dbo.Planilla p
 LEFT JOIN dbo.Constante m ON m.Campo = 'TIPO_MONEDA' AND m.Correlativo = p.TipoMoneda
@@ -700,6 +703,9 @@ WHERE p.Correlativo IN @Ids",
                     row["SubtotalGasto"] = planilla.TryGetValue("SubtotalGasto", out var subtotal) ? subtotal : null;
                     row["MonedaGasto"] = planilla.TryGetValue("MonedaGasto", out var moneda) ? moneda : null;
                     row["FechaIngresoPlanilla"] = planilla.TryGetValue("FechaIngresoPlanilla", out var fecha) ? fecha : null;
+                    row["SeriePago"] = planilla.TryGetValue("SeriePago", out var serie) ? serie : null;
+                    row["NroOperacionPago"] = planilla.TryGetValue("NroOperacionPago", out var nroOperacion) ? nroOperacion : null;
+                    row["DetallePago"] = planilla.TryGetValue("DetallePago", out var detallePago) ? detallePago : null;
                     if (planilla.TryGetValue("IdSolicitantePlanilla", out var idSolicitante) && idSolicitante is not null
                         && nombres.TryGetValue(Convert.ToInt32(idSolicitante), out var nombrePlanilla))
                     {

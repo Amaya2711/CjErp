@@ -37,6 +37,10 @@ export type PagoAnalisis = {
   fila: number | null;
   fechaIngreso: string;
   fechaDeposito: string;
+  serie: string;
+  nroOperacion: string;
+  /** Planilla.Detalle del pago. */
+  detalle: string;
   solicitante: string;
   responsable: string;
   monto: number;
@@ -133,6 +137,9 @@ export function analizarPorSitio(filas: FilaReporte[]): SitioAnalisis[] {
           fila: f.tieneOc ? f.fila : null,
           fechaIngreso: f.fechaIngresoPlanilla,
           fechaDeposito: f.fechaDeposito,
+          serie: f.seriePago,
+          nroOperacion: f.nroOperacionPago,
+          detalle: f.detallePago,
           solicitante: f.solicitantePlanilla,
           responsable: f.responsablePlanilla || f.responsable,
           monto: f.subtotalGasto ?? 0,
@@ -211,7 +218,7 @@ export function construirContextoIa(filas: FilaReporte[], filtros: FiltrosReport
           .sort((a, b) => Math.abs(b.saldo) - Math.abs(a.saldo))
           .slice(0, maxItems)
           .map((o) => ({ idOc: o.idOc, aprobacion: o.estadoAprobacion, fechaOc: o.fechaOc, solicitante: o.solicitante, responsable: o.responsable, monto: o.monto, gasto: o.gasto, estado: o.estado, moneda: o.moneda })),
-        pagos: s.pagos.slice(-maxItems).map((p) => ({ correlativo: p.correlativo, idOc: p.idOc, fechaIngreso: p.fechaIngreso, fechaDeposito: p.fechaDeposito, solicitante: p.solicitante, responsable: p.responsable, monto: p.monto, moneda: p.moneda })),
+        pagos: s.pagos.slice(-maxItems).map((p) => ({ correlativo: p.correlativo, idOc: p.idOc, fechaIngreso: p.fechaIngreso, fechaDeposito: p.fechaDeposito, serie: p.serie, nroOperacion: p.nroOperacion, detalle: (p.detalle || "").slice(0, 120), solicitante: p.solicitante, responsable: p.responsable, monto: p.monto, moneda: p.moneda })),
       })),
     });
 

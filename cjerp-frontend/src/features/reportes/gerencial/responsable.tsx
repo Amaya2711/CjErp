@@ -4,7 +4,7 @@ import DataGridPro from "../../../components/datagrid/DataGridPro";
 import type { GridColumn } from "../../../components/datagrid/types";
 import { descargarOrdenCompraPdf } from "../../../api/ordenCompraService";
 import { buscarEmpleadosResponsables } from "../../../api/empleadoResponsableService";
-import { consultarOrdenesPorResponsable, generarAnalisisIaResponsable, type ConsultaPorResponsable } from "../../../api/reporteResponsableService";
+import { consultarOrdenesPorResponsable, type ConsultaPorResponsable } from "../../../api/reporteResponsableService";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 import {
   AGRUPACIONES,
@@ -28,9 +28,8 @@ import {
   type ResumenGrupo,
   type VinculoFiltro,
 } from "./responsable/responsableLogic";
-import { exportarPdfDetallado, exportarPdfResumen } from "./responsable/responsablePdf";
 import { exportarPdfIa } from "./responsable/responsableIaPdf";
-import { analisisBasico, calcularAlertas, construirContextoIa, parsearAnalisisIa, responsablesAnalizados, type AnalisisEstructurado } from "./responsable/responsableAnalisis";
+import { calcularAlertas, responsablesAnalizados } from "./responsable/responsableAnalisis";
 
 type ResponsableElegido = { id: number; nombre: string; documento: string };
 type Vista = "resumen" | "detalle";
@@ -78,10 +77,9 @@ export default function ReporteResponsablePage() {
   const [vista, setVista] = useState<Vista>("resumen");
   const [agrupacion, setAgrupacion] = useState<Agrupacion>("responsable");
   const [cargando, setCargando] = useState(false);
-  const [exportando, setExportando] = useState<"" | "resumen" | "detallado" | "ia">("");
+  const [exportando, setExportando] = useState<"" | "ia">("");
   const [ocEnProceso, setOcEnProceso] = useState<number | null>(null);
   const [error, setError] = useState("");
-  const [aviso, setAviso] = useState("");
   const consultaRef = useRef<AbortController | null>(null);
 
   // Autollenado de responsables: consulta el buscador existente de empleados responsables.
@@ -233,44 +231,13 @@ export default function ReporteResponsablePage() {
 
   const exportarIa = async () => {
     if (filasFiltradas.length === 0) {
-      setError("No hay registros para analizar.");
+      setError("No hay registros para exportar.");
       return;
     }
     setExportando("ia");
     setError("");
-    setAviso("");
     try {
-      let analisis: AnalisisEstructurado | null = null;
-      try {
-        const texto = await generarAnalisisIaResponsable(construirContextoIa(filasFiltradas, filtros, criterioConsultado));
-        analisis = parsearAnalisisIa(texto);
-      } catch {
-        analisis = null;
-      }
-      const generadoPorIa = analisis !== null;
-      if (!analisis) {
-        analisis = analisisBasico(filasFiltradas);
-        setAviso("La IA no estuvo disponible: el PDF incluye un análisis automático con los mismos datos.");
-      }
-      await exportarPdfIa({ filas: filasFiltradas, filtros, criterio: criterioConsultado, analisis, generadoPorIa });
-    } catch (err) {
-      setError(getHttpErrorMessage(err, "No se pudo generar el PDF con IA."));
-    } finally {
-      setExportando("");
-    }
-  };
-
-  const exportar = async (tipo: "resumen" | "detallado") => {
-    if (filasFiltradas.length === 0) {
-      setError("No hay registros para exportar.");
-      return;
-    }
-    setExportando(tipo);
-    setError("");
-    try {
-      const contexto = { filas: filasFiltradas, filtros, criterio: criterioConsultado };
-      if (tipo === "resumen") await exportarPdfResumen(contexto);
-      else await exportarPdfDetallado(contexto);
+      await exportarPdfIa({ filas: filasFiltradas, filtros, criterio: criterioConsultado });
     } catch (err) {
       setError(getHttpErrorMessage(err, "No se pudo generar el PDF."));
     } finally {
@@ -409,6 +376,9 @@ export default function ReporteResponsablePage() {
       cellStyle: (_valor, fila) => (fila.pagosDeLaOc > 1 ? { color: "#B45309", fontWeight: 700 } : undefined),
     },
     { dataField: "fechaDeposito", caption: "Fecha depósito", width: 120, calculateCellValue: (f) => formatFecha(f.fechaDeposito) || "—" },
+    { dataField: "seriePago", caption: "Serie", width: 100, calculateCellValue: (f) => f.seriePago || "—" },
+    { dataField: "nroOperacionPago", caption: "Nro. operación", width: 130, calculateCellValue: (f) => f.nroOperacionPago || "—" },
+    { dataField: "detallePago", caption: "Planilla.Detalle", width: 260, calculateCellValue: (f) => f.detallePago || "—" },
     { dataField: "estadoNombre", caption: "Estado planilla", width: 120, calculateCellValue: (f) => f.estadoNombre || "—" },
     { dataField: "tieneOc", caption: "Tiene OC", width: 90, calculateCellValue: (f) => (f.tieneOc ? "Sí" : "No") },
     { dataField: "tienePago", caption: "Tiene pago", width: 100, calculateCellValue: (f) => (f.tienePago ? "Sí" : "No") },
@@ -532,29 +502,17 @@ export default function ReporteResponsablePage() {
             </select>
           </label>
           <div style={{ flex: 1 }} />
-          <button type="button" style={styles.botonPdf} disabled={!consultado || exportando !== ""} onClick={() => void exportar("resumen")}>
-            {exportando === "resumen" ? "Generando…" : "Exportar PDF resumen"}
-          </button>
-          <button type="button" style={styles.botonPdf} disabled={!consultado || exportando !== ""} onClick={() => void exportar("detallado")}>
-            {exportando === "detallado" ? "Generando…" : "Exportar PDF detallado"}
-          </button>
           <button
             type="button"
             style={{ ...styles.botonPdf, background: "#7C3AED", color: "#fff" }}
             disabled={!consultado || exportando !== ""}
-            title="Análisis redactado con IA por sitio (IdSite + CorreSite), con gráficos y detalle de OCs y pagos"
+            title="Informe por OC con su detalle completo, aprobadores y pagos asociados"
             onClick={() => void exportarIa()}
           >
-            {exportando === "ia" ? "Analizando con IA…" : "Exportar PDF con IA"}
+            {exportando === "ia" ? "Generando…" : "Exportar PDF"}
           </button>
         </div>
       </form>
-
-      {aviso ? (
-        <div role="status" style={{ ...styles.error, background: "#FFFBEB", borderColor: "#FDE68A", color: "#92400E" }}>
-          {aviso}
-        </div>
-      ) : null}
 
       {error ? (
         <div role="alert" style={styles.error}>
