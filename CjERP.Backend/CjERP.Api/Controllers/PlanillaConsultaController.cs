@@ -106,6 +106,8 @@ namespace CjERP.Api.Controllers
                 ? RequiredParametersAprobar
                 : string.Equals(consulta, "analisis-gastos", StringComparison.OrdinalIgnoreCase)
                     ? Array.Empty<string>()
+                : string.Equals(consulta, "planilla-por-ot", StringComparison.OrdinalIgnoreCase)
+                    ? Array.Empty<string>()
                 : string.Equals(consulta, "vacaciones", StringComparison.OrdinalIgnoreCase)
                     ? RequiredParametersVacaciones
                 : string.Equals(consulta, "pagados-dashboard", StringComparison.OrdinalIgnoreCase)
@@ -587,6 +589,7 @@ namespace CjERP.Api.Controllers
             return (consulta ?? string.Empty).Trim().ToLowerInvariant() switch
             {
                 "aprobar" => "sp_Planilla_Consulta_Aprobar",
+                "planilla-por-ot" => "sp_Planilla_ConsultarPorOT",
                 "vacaciones" => "sp_EmpleadoOtros_ListarVacaciones",
                 "pagados-dashboard" => "sp_Planilla_ConsultarPagados_Dsh",
                 "importar-consulta-dsh" => "sp_Importar_ConsultaDsh",

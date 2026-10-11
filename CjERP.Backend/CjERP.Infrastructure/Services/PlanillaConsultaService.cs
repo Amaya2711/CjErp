@@ -31,6 +31,7 @@ namespace CjERP.Infrastructure.Services
         private const string StoredProcedureMovimientosGastosIngresos = "dbo.sp_Movimientos_Consulta_GastosIngresos";
         private const string StoredProcedureGastosPagados = "dbo.sp_Planilla_Consulta_Gastos_Pagados";
         private const string StoredProcedureAnalisisGastos = "dbo.sp_OrdenCompra_Consulta_Estados";
+        private const string StoredProcedurePlanillaPorOt = "dbo.sp_Planilla_ConsultarPorOT";
         private const string QueryClientesActivos = "clientes-activos";
         private const string QueryProyectosActivos = "proyectos-activos";
         private readonly ISqlCommandFactory _sqlCommandFactory;
@@ -282,6 +283,12 @@ namespace CjERP.Infrastructure.Services
                 rows = ApplyImportarConsultaDshFilters(rows, parametrosList);
             }
 
+            if (string.Equals(storedProcedureName, StoredProcedurePlanillaPorOt, StringComparison.OrdinalIgnoreCase))
+            {
+                // El store no entrega el importe del gasto: se completa para comparar OC vs gasto.
+                await AgregarMontoGastoAsync(connection, rows, cancellationToken);
+            }
+
             var totalRows = rows.Count;
             var normalizedPageSize = pageSize.HasValue && pageSize.Value > 0 ? pageSize.Value : totalRows > 0 ? totalRows : 1;
             var normalizedPageNumber = pageNumber.HasValue && pageNumber.Value > 0 ? pageNumber.Value : 1;
@@ -413,6 +420,7 @@ namespace CjERP.Infrastructure.Services
                 "planilla-oc-resumen" => StoredProcedurePlanillaOcResumen,
                 "movimientos-gastos-ingresos" => StoredProcedureMovimientosGastosIngresos,
                 "analisis-gastos" => StoredProcedureAnalisisGastos,
+                "planilla-por-ot" => StoredProcedurePlanillaPorOt,
                 "pagos-v1-resumen" => StoredProcedureEstadosResumen,
                 "clientes-activos" => QueryClientesActivos,
                 "proyectos-activos" => QueryProyectosActivos,
@@ -590,6 +598,192 @@ namespace CjERP.Infrastructure.Services
             return _sqlCommandFactory.Create(sql, parameters, commandType, cancellationToken, commandTimeout);
         }
 
+        /// <summary>
+        /// Completa las filas del reporte por responsable con datos que el store no entrega:
+        /// SubtotalGasto, MonedaGasto, FechaIngresoPlanilla y SolicitantePlanilla (Planilla.Subtotal, TipoMoneda,
+        /// FecIngreso e IdSolicitante) y SolicitanteOC (CabOrdenCompra.IdSolicitante que ya devuelve el store).
+        /// Los nombres se resuelven en dbo.Empleado, igual que el responsable en el store.
+        /// </summary>
+        private async Task AgregarMontoGastoAsync(
+            SqlConnection connection,
+            List<Dictionary<string, object?>> rows,
+            CancellationToken cancellationToken)
+        {
+            var correlativos = rows
+                .Select(row => TryGetInt(row, "CorrelativoPago"))
+                .Where(value => value.HasValue && value.Value > 0)
+                .Select(value => value!.Value)
+                .Distinct()
+                .ToList();
+
+            var datosPlanilla = new Dictionary<int, IDictionary<string, object?>>();
+
+            // SQL Server admite hasta 2100 parámetros por comando.
+            foreach (var lote in correlativos.Chunk(1000))
+            {
+                var data = await connection.QueryAsync(
+                    CreateCommand(
+                        @"
+SELECT p.Correlativo AS Correlativo,
+       p.Subtotal AS SubtotalGasto,
+       m.ValorIni AS MonedaGasto,
+       p.FecIngreso AS FechaIngresoPlanilla,
+       p.IdSolicitante AS IdSolicitantePlanilla
+FROM dbo.Planilla p
+LEFT JOIN dbo.Constante m ON m.Campo = 'TIPO_MONEDA' AND m.Correlativo = p.TipoMoneda
+WHERE p.Correlativo IN @Ids",
+                        new { Ids = lote },
+                        CommandType.Text,
+                        cancellationToken));
+
+                foreach (var item in data)
+                {
+                    var fila = (IDictionary<string, object?>)item;
+                    if (fila.TryGetValue("Correlativo", out var correlativo) && correlativo is not null)
+                    {
+                        datosPlanilla[Convert.ToInt32(correlativo)] = fila;
+                    }
+                }
+            }
+
+            var idsSolicitantes = rows
+                .Select(row => TryGetInt(row, "IdSolicitante"))
+                .Concat(datosPlanilla.Values.Select(fila =>
+                    fila.TryGetValue("IdSolicitantePlanilla", out var id) && id is not null ? (int?)Convert.ToInt32(id) : null))
+                .Where(value => value.HasValue && value.Value > 0)
+                .Select(value => value!.Value)
+                .Distinct()
+                .ToList();
+
+            var nombres = new Dictionary<int, string?>();
+            foreach (var lote in idsSolicitantes.Chunk(1000))
+            {
+                var data = await connection.QueryAsync(
+                    CreateCommand(
+                        "SELECT e.IdEmpleado AS IdEmpleado, e.NombreEmpleado AS NombreEmpleado FROM dbo.Empleado e WHERE e.IdEmpleado IN @Ids",
+                        new { Ids = lote },
+                        CommandType.Text,
+                        cancellationToken));
+
+                foreach (var item in data)
+                {
+                    var fila = (IDictionary<string, object?>)item;
+                    if (fila.TryGetValue("IdEmpleado", out var id) && id is not null)
+                    {
+                        nombres[Convert.ToInt32(id)] = fila.TryGetValue("NombreEmpleado", out var nombre) ? nombre?.ToString() : null;
+                    }
+                }
+            }
+
+            var aprobaciones = await ObtenerAprobacionesOcAsync(connection, rows, cancellationToken);
+
+            foreach (var row in rows)
+            {
+                var idOcFila = TryGetInt(row, "IdOcDetalleOC");
+                if (idOcFila.HasValue && aprobaciones.TryGetValue(idOcFila.Value, out var aprobacion))
+                {
+                    foreach (var par in aprobacion)
+                    {
+                        row[par.Key] = par.Value;
+                    }
+                }
+
+                var idSolicitanteOc = TryGetInt(row, "IdSolicitante");
+                if (idSolicitanteOc.HasValue && nombres.TryGetValue(idSolicitanteOc.Value, out var nombreOc))
+                {
+                    row["SolicitanteOC"] = nombreOc;
+                }
+
+                var correlativo = TryGetInt(row, "CorrelativoPago");
+                if (correlativo.HasValue && datosPlanilla.TryGetValue(correlativo.Value, out var planilla))
+                {
+                    row["SubtotalGasto"] = planilla.TryGetValue("SubtotalGasto", out var subtotal) ? subtotal : null;
+                    row["MonedaGasto"] = planilla.TryGetValue("MonedaGasto", out var moneda) ? moneda : null;
+                    row["FechaIngresoPlanilla"] = planilla.TryGetValue("FechaIngresoPlanilla", out var fecha) ? fecha : null;
+                    if (planilla.TryGetValue("IdSolicitantePlanilla", out var idSolicitante) && idSolicitante is not null
+                        && nombres.TryGetValue(Convert.ToInt32(idSolicitante), out var nombrePlanilla))
+                    {
+                        row["SolicitantePlanilla"] = nombrePlanilla;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Estado de aprobación de cada OC (CabOrdenCompra: IdEstado, IdAprobador1-3 y FechaAprobador1-3).
+        /// Misma regla que la bandeja de OC: rechazada (IdEstado 6), o nivel alcanzado según los aprobadores registrados.
+        /// El nombre del aprobador se toma de EmpleadoCj si la OC es de la web (IdWeb = 1) y de Empleado en otro caso.
+        /// </summary>
+        private async Task<Dictionary<int, Dictionary<string, object?>>> ObtenerAprobacionesOcAsync(
+            SqlConnection connection,
+            List<Dictionary<string, object?>> rows,
+            CancellationToken cancellationToken)
+        {
+            var resultado = new Dictionary<int, Dictionary<string, object?>>();
+            var idsOc = rows
+                .Select(row => TryGetInt(row, "IdOcDetalleOC"))
+                .Where(value => value.HasValue && value.Value > 0)
+                .Select(value => value!.Value)
+                .Distinct()
+                .ToList();
+
+            foreach (var lote in idsOc.Chunk(1000))
+            {
+                var data = await connection.QueryAsync(
+                    CreateCommand(
+                        @"
+SELECT cab.IdOc AS IdOc,
+       cab.IdEstado AS IdEstado,
+       cab.IdAprobador1 AS IdAprobador1, cab.IdAprobador2 AS IdAprobador2, cab.IdAprobador3 AS IdAprobador3,
+       cab.FechaAprobador1 AS FechaAprobador1, cab.FechaAprobador2 AS FechaAprobador2, cab.FechaAprobador3 AS FechaAprobador3,
+       CASE WHEN ISNULL(cab.IdWeb, 0) = 1 THEN a1cj.NombreEmpleado ELSE a1.NombreEmpleado END AS Aprobador1,
+       CASE WHEN ISNULL(cab.IdWeb, 0) = 1 THEN a2cj.NombreEmpleado ELSE a2.NombreEmpleado END AS Aprobador2,
+       CASE WHEN ISNULL(cab.IdWeb, 0) = 1 THEN a3cj.NombreEmpleado ELSE a3.NombreEmpleado END AS Aprobador3
+FROM dbo.CabOrdenCompra cab
+LEFT JOIN dbo.Empleado a1 ON a1.IdEmpleado = cab.IdAprobador1
+LEFT JOIN dbo.Empleado a2 ON a2.IdEmpleado = cab.IdAprobador2
+LEFT JOIN dbo.Empleado a3 ON a3.IdEmpleado = cab.IdAprobador3
+LEFT JOIN dbo.EmpleadoCj a1cj ON a1cj.IdEmpleado = cab.IdAprobador1
+LEFT JOIN dbo.EmpleadoCj a2cj ON a2cj.IdEmpleado = cab.IdAprobador2
+LEFT JOIN dbo.EmpleadoCj a3cj ON a3cj.IdEmpleado = cab.IdAprobador3
+WHERE cab.IdOc IN @Ids",
+                        new { Ids = lote },
+                        CommandType.Text,
+                        cancellationToken));
+
+                foreach (var item in data)
+                {
+                    var fila = (IDictionary<string, object?>)item;
+                    if (!fila.TryGetValue("IdOc", out var idOc) || idOc is null)
+                    {
+                        continue;
+                    }
+
+                    int Entero(string clave) => fila.TryGetValue(clave, out var v) && v is not null ? Convert.ToInt32(v) : 0;
+                    var idEstado = Entero("IdEstado");
+                    var estado = idEstado == 6 ? "RECHAZADA"
+                        : Entero("IdAprobador3") > 0 ? "APROBADA"
+                        : Entero("IdAprobador2") > 0 ? "EN 3ra. APROBACION"
+                        : Entero("IdAprobador1") > 0 ? "EN 2da. APROBACION"
+                        : "EN 1ra. APROBACION";
+
+                    var valores = new Dictionary<string, object?> { ["EstadoAprobacionOC"] = estado };
+                    foreach (var nivel in new[] { 1, 2, 3 })
+                    {
+                        var tieneAprobador = Entero($"IdAprobador{nivel}") > 0;
+                        valores[$"Aprobador{nivel}OC"] = tieneAprobador && fila.TryGetValue($"Aprobador{nivel}", out var nombre)
+                            ? (nombre as string) ?? $"ID {Entero($"IdAprobador{nivel}")}"
+                            : null;
+                        valores[$"FechaAprobador{nivel}OC"] = tieneAprobador && fila.TryGetValue($"FechaAprobador{nivel}", out var fecha) ? fecha : null;
+                    }
+
+                    resultado[Convert.ToInt32(idOc)] = valores;
+                }
+            }
+
+            return resultado;
+        }
+
         private async Task EnrichRowsWithFacturaDataAsync(
             SqlConnection connection,
             List<Dictionary<string, object?>> rows,
@@ -762,6 +956,28 @@ WHERE Correlativo IN @Correlativos";
                     var allowedParametersAnalisis = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                     { "pProyecto", "Ano", "Id", "IdResponsable", "IdSolicitante", "IdCliente", "IdProyecto", "IdSite", "Estados", "FechaInicio", "FechaFin" };
                     return parametros.Where(parametro => !string.IsNullOrWhiteSpace(parametro.Nombre) && allowedParametersAnalisis.Contains(parametro.Nombre.Trim().TrimStart('@')));
+                }
+
+                if (string.Equals(storedProcedureName, StoredProcedurePlanillaPorOt, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Reporte por responsable: el SP no recibe IdEmpleado/IdCargo del JWT.
+                    var allowedParametersPlanillaPorOt = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        "IdResponsables",
+                        "NroDocumento",
+                        "IdCliente",
+                        "IdProyecto",
+                        "IdSite",
+                        "CorreSite",
+                        "TipoTrabajo",
+                        "Ot",
+                        "Fila",
+                        "IdOc"
+                    };
+
+                    return parametros.Where(parametro =>
+                        !string.IsNullOrWhiteSpace(parametro.Nombre) &&
+                        allowedParametersPlanillaPorOt.Contains(parametro.Nombre.Trim().TrimStart('@')));
                 }
 
                 if (string.Equals(storedProcedureName, StoredProcedureVacaciones, StringComparison.OrdinalIgnoreCase))

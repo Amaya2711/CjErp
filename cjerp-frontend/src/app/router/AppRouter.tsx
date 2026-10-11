@@ -95,6 +95,7 @@ const DashboardCjPage = lazy(() => import("../../features/reportes/gerencial/das
 const Dashboard1Page = lazy(() => import("../../features/reportes/gerencial/dashboard1"));
 const Dashboard3Page = lazy(() => import("../../features/reportes/gerencial/dashboard3"));
 const BacklogPage = lazy(() => import("../../features/reportes/gerencial/backlog"));
+const ReporteResponsablePage = lazy(() => import("../../features/reportes/gerencial/responsable"));
 const IngresosEgresosPage = lazy(() => import("../../features/reportes/gerencial/ingresosegresos"));
 const AnalisisPage = lazy(() => import("../../features/reportes/gerencial/analisis"));
 const AnalisisProyectoPage = lazy(() => import("../../features/reportes/gerencial/analisisproyecto"));
@@ -254,6 +255,7 @@ export default function AppRouter() {
             <Route path="/gerencial/dashboard1" element={<Dashboard1Page />} />
             <Route path="/reportes/gerencial/dashboard3" element={<Dashboard3Page />} />
             <Route path="/reportes/gerencial/backlog" element={<BacklogPage />} />
+            <Route path="/reportes/gerencial/responsable" element={<ReporteResponsablePage />} />
             <Route path="/reportes/gerencial/ingresosegresos" element={<IngresosEgresosPage />} />
             <Route path="/reportes/gerencial/analisis" element={<AnalisisPage />} />
             <Route path="/reportes/gerencial/analisisproyecto" element={<AnalisisProyectoPage />} />
