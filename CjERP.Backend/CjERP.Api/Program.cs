@@ -480,11 +480,26 @@ app.MapHealthChecks("/health").RequireRateLimiting("api");
 
 using (var scope = app.Services.CreateScope())
 {
-    var scheduler = scope.ServiceProvider.GetRequiredService<IReporteWhatsappJobScheduler>();
-    await scheduler.ReprogramarAsync(ReporteWhatsappTipos.Operativo);
-    await scheduler.ReprogramarAsync(ReporteWhatsappTipos.Gerencial);
-    var asistenciaSharePointScheduler = scope.ServiceProvider.GetRequiredService<IAsistenciaSharePointJobScheduler>();
-    await asistenciaSharePointScheduler.ReprogramarAsync();
+    // Un problema con la BD (p. ej. tiempo de espera) al programar los jobs no debe impedir que la API arranque.
+    try
+    {
+        var scheduler = scope.ServiceProvider.GetRequiredService<IReporteWhatsappJobScheduler>();
+        await scheduler.ReprogramarAsync(ReporteWhatsappTipos.Operativo);
+        await scheduler.ReprogramarAsync(ReporteWhatsappTipos.Gerencial);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "No se pudieron programar los jobs de reportes WhatsApp.");
+    }
+    try
+    {
+        var asistenciaSharePointScheduler = scope.ServiceProvider.GetRequiredService<IAsistenciaSharePointJobScheduler>();
+        await asistenciaSharePointScheduler.ReprogramarAsync();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "No se pudo programar el job de asistencia a SharePoint.");
+    }
     try
     {
         // El job de gastos nace activo (respeta la hora registrada y su desactivacion); un problema con su configuracion no debe impedir que la API arranque.
