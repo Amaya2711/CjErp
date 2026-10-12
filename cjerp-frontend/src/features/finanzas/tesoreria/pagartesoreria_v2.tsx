@@ -1322,7 +1322,14 @@ export default function PagarTesoreriaV2Page() {
       width: 100,
       alignment: "center",
       allowSorting: false,
-      ...noFilter,
+      // El archivo se sigue abriendo desde la celda, pero para la grilla se expone
+      // un valor semántico. Así el filtro permite distinguir recibos con y sin adjunto.
+      calculateCellValue: (r: PagoTesoreriaRow) =>
+        r.imgFactura?.trim() ? "Con adjunto" : "Sin adjunto",
+      lookup: [
+        { value: "con", label: "Con adjunto" },
+        { value: "sin", label: "Sin adjunto" },
+      ],
       cellRender: (_v, r) => (
         <span onClick={(e) => e.stopPropagation()}>
           <FacturaLink referencia={r.imgFactura} correlativo={r.correlativo} />
