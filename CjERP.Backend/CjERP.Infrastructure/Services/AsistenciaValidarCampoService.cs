@@ -31,12 +31,14 @@ public class AsistenciaValidarCampoService : IAsistenciaValidarCampoService
 
     public async Task<AsistenciaValidarCampoListaDto> ListarAsync(
         AsistenciaValidarCampoFiltroDto filtro,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int? idResponsable = null)
     {
         await using var connection = BuildConnection();
         var rows = (await connection.QueryAsync(
                 CreateCommand(
                     ListarSp,
+                    new { IdRes = idResponsable },
                     commandType: CommandType.StoredProcedure,
                     cancellationToken: cancellationToken)))
             .Select(MapRow)
@@ -58,9 +60,13 @@ public class AsistenciaValidarCampoService : IAsistenciaValidarCampoService
 
     public async Task<Dictionary<string, object?>?> ObtenerPorClaveAsync(
         AsistenciaValidarCampoClaveDto clave,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int? idResponsable = null)
     {
-        var data = await ListarAsync(new AsistenciaValidarCampoFiltroDto(), cancellationToken);
+        var data = await ListarAsync(
+            new AsistenciaValidarCampoFiltroDto(),
+            cancellationToken,
+            idResponsable);
         return data.Rows.FirstOrDefault(row => MatchesKey(row, clave));
     }
 

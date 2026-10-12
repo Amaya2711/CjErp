@@ -23,7 +23,16 @@ public class AsistenciaValidarCampoController : ControllerBase
         [FromQuery] AsistenciaValidarCampoFiltroDto filtro,
         CancellationToken cancellationToken)
     {
-        var data = await _asistenciaValidarCampoService.ListarAsync(filtro, cancellationToken);
+        var idResponsable = ResolveIdResponsableEstandar();
+        if (EsPerfilRolEstandar() && idResponsable is null)
+        {
+            return BadRequest(new { success = false, message = "No se pudo resolver el empleado responsable de la sesiÃ³n." });
+        }
+
+        var data = await _asistenciaValidarCampoService.ListarAsync(
+            filtro,
+            cancellationToken,
+            idResponsable);
         return Ok(new { success = true, message = "ok", data });
     }
 
@@ -32,7 +41,16 @@ public class AsistenciaValidarCampoController : ControllerBase
         [FromQuery] AsistenciaValidarCampoClaveDto clave,
         CancellationToken cancellationToken)
     {
-        var data = await _asistenciaValidarCampoService.ObtenerPorClaveAsync(clave, cancellationToken);
+        var idResponsable = ResolveIdResponsableEstandar();
+        if (EsPerfilRolEstandar() && idResponsable is null)
+        {
+            return BadRequest(new { success = false, message = "No se pudo resolver el empleado responsable de la sesiÃ³n." });
+        }
+
+        var data = await _asistenciaValidarCampoService.ObtenerPorClaveAsync(
+            clave,
+            cancellationToken,
+            idResponsable);
         if (data is null)
         {
             return NotFound(new { success = false, message = "No se encontró el registro solicitado." });
@@ -115,6 +133,20 @@ public class AsistenciaValidarCampoController : ControllerBase
         return int.TryParse(aprobadorClaim, out var idAprobador) && idAprobador > 0
             ? idAprobador
             : null;
+    }
+
+    private bool EsPerfilRolEstandar()
+    {
+        var perfil = User.FindFirstValue("IdPerfil");
+        var rol = User.FindFirstValue("IdRol");
+
+        return int.TryParse(perfil, out var idPerfil) && idPerfil == 14 &&
+               int.TryParse(rol, out var idRol) && idRol == 7;
+    }
+
+    private int? ResolveIdResponsableEstandar()
+    {
+        return EsPerfilRolEstandar() ? ResolveIdAprobador() : null;
     }
 
     private string ResolveUsuario(string? usuario)

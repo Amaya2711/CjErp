@@ -135,7 +135,80 @@ public class SegMenuService : ISegMenuService
                 },
                 CommandType.StoredProcedure));
 
-        return BuildMenusFromDynamicRows(rows);
+        var menus = BuildMenusFromDynamicRows(rows).ToDictionary(menu => menu.IdMenu);
+
+        if (string.IsNullOrWhiteSpace(idUsuario))
+            return OrdenarMenus(menus.Values);
+
+        // SegPerfilRolMenu alimenta el menu general. Los permisos individuales de tipo
+        // "menu" complementan ese resultado sin conceder acceso al mismo item a todo el rol.
+        var menusIndividuales = await connection.QueryAsync<MenuDto>(
+            _sqlCommandFactory.Create(
+                """
+                SELECT DISTINCT
+                    m.IdMenu,
+                    m.IdMenuPadre,
+                    m.NombreMenu,
+                    m.Ruta,
+                    m.Icono,
+                    m.OrdenMenu,
+                    m.NivelMenu,
+                    m.CodigoMenu,
+                    1 AS Acceso
+                FROM dbo.SegPermisoAccion p
+                INNER JOIN dbo.Usuario u
+                    ON u.IdUsuario = @IdUsuario
+                INNER JOIN dbo.Empleado e
+                    ON e.IdEmpleado = u.IdEmpleado
+                INNER JOIN dbo.EmpleadoCj ec
+                    ON ec.IdEmpleado = e.IdEmpleadoCj
+                INNER JOIN dbo.SegMenu m
+                    ON (p.ClaveAccion = m.CodigoMenu
+                        OR p.ClaveAccion = CONCAT('menu.', CONVERT(varchar(12), m.IdMenu)))
+                WHERE p.IdEmpleado = ec.IdEmpleado
+                  AND p.TipoElemento = 'menu'
+                  AND p.PuedeVer = 1
+                  AND p.EsActivo = 1
+                  AND m.EsActivo = 1
+                  AND m.EsVisible = 1
+                """,
+                new { IdUsuario = idUsuario.Trim() }));
+
+        if (!menusIndividuales.Any())
+            return OrdenarMenus(menus.Values);
+
+        var catalogoMenus = (await connection.QueryAsync<MenuDto>(
+            _sqlCommandFactory.Create(
+                """
+                SELECT
+                    m.IdMenu,
+                    m.IdMenuPadre,
+                    m.NombreMenu,
+                    m.Ruta,
+                    m.Icono,
+                    m.OrdenMenu,
+                    m.NivelMenu,
+                    m.CodigoMenu,
+                    1 AS Acceso
+                FROM dbo.SegMenu m
+                WHERE m.EsActivo = 1
+                  AND m.EsVisible = 1
+                """))).ToDictionary(menu => menu.IdMenu);
+
+        foreach (var menuIndividual in menusIndividuales)
+        {
+            MenuDto? actual = menuIndividual;
+            while (actual is not null)
+            {
+                menus[actual.IdMenu] = actual;
+                actual = actual.IdMenuPadre is int padreId
+                    && catalogoMenus.TryGetValue(padreId, out var padre)
+                    ? padre
+                    : null;
+            }
+        }
+
+        return OrdenarMenus(menus.Values);
     }
 
     public async Task<IEnumerable<MenuDto>> ListarPorUsuarioAsync(string idUsuario)
@@ -477,7 +550,12 @@ public class SegMenuService : ISegMenuService
             }
         }
 
-        return menuMap.Values
+        return OrdenarMenus(menuMap.Values);
+    }
+
+    private static IEnumerable<MenuDto> OrdenarMenus(IEnumerable<MenuDto> menus)
+    {
+        return menus
             .OrderBy(m => m.NivelMenu)
             .ThenBy(m => m.OrdenMenu)
             .ThenBy(m => m.IdMenu)

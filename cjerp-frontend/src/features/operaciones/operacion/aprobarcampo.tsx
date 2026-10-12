@@ -87,7 +87,7 @@ type AprobarCampoNavigationState = {
 
 const visibleColumns = [
   { key: "responsable", label: "Responsable", width: "180px" },
-  { key: "nombreempleado", label: "Empleado", width: "200px" },
+  { key: "nombreEmpleado", label: "Empleado", width: "200px" },
   { key: "empresa", label: "Empresa", width: "180px" },
   { key: "cliente", label: "Cliente", width: "180px" },
   { key: "area", label: "Área", width: "160px" },

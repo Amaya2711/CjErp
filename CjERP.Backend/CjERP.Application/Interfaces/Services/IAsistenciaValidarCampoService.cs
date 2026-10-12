@@ -6,11 +6,13 @@ public interface IAsistenciaValidarCampoService
 {
     Task<AsistenciaValidarCampoListaDto> ListarAsync(
         AsistenciaValidarCampoFiltroDto filtro,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        int? idResponsable = null);
 
     Task<Dictionary<string, object?>?> ObtenerPorClaveAsync(
         AsistenciaValidarCampoClaveDto clave,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        int? idResponsable = null);
 
     Task<AsistenciaValidarCampoOperacionResultadoDto> CrearAsync(
         AsistenciaValidarCampoGuardarDto request,
