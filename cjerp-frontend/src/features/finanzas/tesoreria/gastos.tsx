@@ -1122,9 +1122,9 @@ function getRecordNumber(row: Record<string, unknown>, ...keys: string[]): numbe
 }
 
 function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: number): GastoDto {
-  const subtotal = getRecordNumber(row, "Subtotal", "subtotal", "Subtotalb", "subtotalb");
-  const total = getRecordNumber(row, "Total", "total", "Totalb", "totalb", "TotalPagar", "totalPagar");
-  const igv = getRecordNumber(row, "IGV", "Igv", "igv", "Igvb", "igvb");
+  const subtotal = getRecordNumber(row, "Subtotal", "subtotal", "Subtotalb", "subtotalb") ?? undefined;
+  const total = getRecordNumber(row, "Total", "total", "Totalb", "totalb", "TotalPagar", "totalPagar") ?? undefined;
+  const igv = getRecordNumber(row, "IGV", "Igv", "igv", "Igvb", "igvb") ?? undefined;
 
   return {
     id: getRecordNumber(row, "Corre", "CorrelativoPlanilla", "Id", "id", "IdPlanilla", "idPlanilla") ?? index + 1,
