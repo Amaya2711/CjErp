@@ -509,11 +509,18 @@ using (var scope = app.Services.CreateScope())
     {
         app.Logger.LogWarning(ex, "No se pudo programar el job de gastos Excel (GASTOS_EXCEL_SHAREPOINT).");
     }
-    RecurringJob.AddOrUpdate<MobilePushDispatchJob>(
-        "mobile-push-dispatch",
-        job => job.EjecutarAsync(),
-        "*/5 * * * *",
-        new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
+    try
+    {
+        RecurringJob.AddOrUpdate<MobilePushDispatchJob>(
+            "mobile-push-dispatch",
+            job => job.EjecutarAsync(),
+            "*/5 * * * *",
+            new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "No se pudo programar el job de push móvil (mobile-push-dispatch).");
+    }
 }
 
 app.Run();
