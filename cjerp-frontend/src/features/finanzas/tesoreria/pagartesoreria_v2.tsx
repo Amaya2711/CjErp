@@ -1167,9 +1167,13 @@ export default function PagarTesoreriaV2Page() {
     ) : (
       "—"
     );
-  const groupColumn = (dataField: string, label: (r: PagoTesoreriaRow) => string): GridColumn<PagoTesoreriaRow> => ({
+  const groupColumn = (
+    dataField: string,
+    label: (r: PagoTesoreriaRow) => string,
+    caption = "Grupo"
+  ): GridColumn<PagoTesoreriaRow> => ({
     dataField,
-    caption: "Grupo",
+    caption,
     visible: false,
     allowGrouping: true,
     allowFiltering: false,
@@ -1178,6 +1182,8 @@ export default function PagarTesoreriaV2Page() {
     calculateCellValue: (r) => `${label(r)} · ${monedaGrupo(r)}`,
   });
   const noFilter = { allowFiltering: false, allowHeaderFilter: false, allowSearch: false } as const;
+  const nombreComprobante = (row: PagoTesoreriaRow) =>
+    catalogos.comprobantes.find((item) => item.id === row.idComprobante)?.nombre || row.comprobante || "Sin comprobante";
 
   const gridColumns: GridColumn<PagoTesoreriaRow>[] = [
     // Orden fijo de inicio: Recibo / OT, Cliente, Proyecto, Site, Tipo trabajo, Fecha, Solicitante, Responsable.
@@ -1224,6 +1230,17 @@ export default function PagarTesoreriaV2Page() {
         </span>
       ),
     },
+    {
+      // Campo visual independiente: evita que una configuración persistida
+      // anterior o el campo usado por filtros oculte el comprobante en Revisión.
+      dataField: "comprobanteVista",
+      caption: "Comprobante",
+      width: 170,
+      calculateCellValue: nombreComprobante,
+      ...(estado === 1
+        ? { cellRender: (_v: unknown, r: PagoTesoreriaRow) => revisionEditor.comprobante(r) }
+        : null),
+    },
     ...(estado === 100 || estado === 4
       ? [{ dataField: "estadoNombre", caption: "Estado", width: 130, calculateCellValue: nombreEstado } as GridColumn<PagoTesoreriaRow>]
       : []),
@@ -1244,16 +1261,6 @@ export default function PagarTesoreriaV2Page() {
         ? { cellRender: (_v: unknown, r: PagoTesoreriaRow) => revisionEditor.tipoPago(r) }
         : null),
     },
-    {
-      dataField: "comprobante",
-      caption: "Comprobante",
-      width: 170,
-      calculateCellValue: (r: PagoTesoreriaRow) =>
-        catalogos.comprobantes.find((item) => item.id === r.idComprobante)?.nombre || r.comprobante || "—",
-      ...(estado === 1
-        ? { cellRender: (_v: unknown, r: PagoTesoreriaRow) => revisionEditor.comprobante(r) }
-        : null),
-    },
     ...(estado === 1 || estado === 9
       ? [{
           dataField: "revisionAprobar",
@@ -1266,6 +1273,14 @@ export default function PagarTesoreriaV2Page() {
               <small style={cellSub}>{fecha(r.fechaRevisionAprobar)}</small>
             </span>
           ),
+        } as GridColumn<PagoTesoreriaRow>]
+      : []),
+    ...(estado === 1
+      ? [{
+          dataField: "moneda",
+          caption: "Moneda",
+          width: 110,
+          calculateCellValue: (r: PagoTesoreriaRow) => r.moneda || "—",
         } as GridColumn<PagoTesoreriaRow>]
       : []),
     { dataField: "total", caption: "Total", dataType: "number", width: 110, cellRender: (_v, r) => money(r.total) },
@@ -1349,17 +1364,16 @@ export default function PagarTesoreriaV2Page() {
       ? [{ dataField: "ruc", caption: "RUC", width: 120, calculateCellValue: (r: PagoTesoreriaRow) => r.ruc || "—" } as GridColumn<PagoTesoreriaRow>]
       : []),
     // Columnas auxiliares para agrupar (equivalen a las opciones de "Agrupar recibos").
-    groupColumn("grp_comprobante", (r) => `${estado === 5 ? "" : `${r.revisionPm?.trim() || "Sin revisión"} · `}${r.comprobante || "Sin comprobante"}`),
+    groupColumn("grp_comprobante", (r) => `${estado === 5 ? "" : `${r.revisionPm?.trim() || "Sin revisión"} · `}${nombreComprobante(r)}`, "Comprobante"),
     groupColumn("grp_proyecto", (r) => `${r.proyecto || "Sin proyecto"} · ${r.idSite || "Sin site"}${r.site ? ` · ${r.site}` : ""}`),
-    groupColumn("grp_responsable", (r) => r.responsable || "Sin responsable"),
+    groupColumn("grp_responsable", (r) => r.responsable || "Sin responsable", "Responsable"),
     groupColumn("grp_solicitante", (r) => r.solicitante || "Sin solicitante"),
     groupColumn("grp_banco", (r) => r.banco || "Sin banco"),
     groupColumn("grp_adjunto", () => "Documentos con adjunto"),
     groupColumn("grp_serie", (r) => `${r.serie?.trim() || "Sin serie"} · ${r.imgFactura?.trim() ? "Con documento adjunto" : "Sin documento adjunto"}`),
   ];
-  // Sin agrupación al cargar cualquier pestaña (también ignora una agrupación guardada antes);
-  // el usuario puede agrupar arrastrando encabezados al panel de la grilla.
-  const groupFields: string[] = [];
+  // Revisión inicia por comprobante y se desglosa por responsable.
+  const groupFields: string[] = estado === 1 ? ["grp_comprobante", "grp_responsable"] : [];
 
   return (
     <AppPage title="Pagos de tesorería" fillHeight style={{ padding: "4px 8px 0" }}>
@@ -1784,7 +1798,9 @@ export default function PagarTesoreriaV2Page() {
                         ? "No hay pagos en este período"
                         : "No hay recibos pendientes en esta consulta"
                 }
-                stateStoringKey={`pagartesoreria-v2-o2-${estado}`}
+                // Revisión conserva un orden funcional fijo: Responsable → Comprobante
+                // y Moneda → Total. No se restaura un orden anterior del navegador.
+                stateStoringKey={estado === 1 ? undefined : `pagartesoreria-v2-o2-${estado}`}
                 selection="multiple"
                 selectedKeys={[...selected]}
                 onSelectionChanged={(keys) => setSelected(new Set(keys))}
@@ -1792,6 +1808,7 @@ export default function PagarTesoreriaV2Page() {
                 selectionDisabled={saving || loading || !puedePagar}
                 onVisibleRowsChange={handleGridRows}
                 groupFields={groupFields}
+                requiredGroupFields={estado === 1 ? ["grp_comprobante"] : undefined}
                 autoExpandAll={false}
                 paging={requierePaginacion ? { pageSize: 100, pageSizes: [20, 50, 100, 250] } : false}
                 allowExport={false}

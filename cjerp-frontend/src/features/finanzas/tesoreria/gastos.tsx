@@ -818,6 +818,38 @@ function tasaIgvPorComprobante(
       : 0;
 }
 
+function esComprobanteSinIgv(idComprobante: unknown, comprobante: unknown): boolean {
+  const id = Number(idComprobante);
+  if ([1, 3, 4, 7, 8].includes(id)) return true;
+
+  const nombre = normalizeSearchText(String(comprobante ?? ""));
+  return ["PAGO", "RENDICION", "EXONERADO", "EXENTO", "INAFECTO", "PLANILLA", "AFP"].includes(nombre);
+}
+
+function normalizarTotalPagarConsulta(
+  row: Record<string, unknown>,
+  subtotal: number | undefined,
+  total: number | undefined,
+  igv: number | undefined
+): number | undefined {
+  const totalPagar = getRecordNumber(row, "TotalPagar", "totalPagar");
+  const comprobanteId = getRecordNumber(row, "IdComprobante", "idComprobante");
+  const comprobante = getRecordString(row, "Comprobante", "comprobante", "ComprobanteLabel", "comprobanteLabel");
+
+  // TotalPagar puede quedar con el importe previo en registros históricos. Para
+  // documentos sin IGV no debe exceder el total del comprobante por un IGV inexistente.
+  if (
+    totalPagar != null &&
+    esComprobanteSinIgv(comprobanteId, comprobante) &&
+    Number(igv ?? 0) === 0
+  ) {
+    const totalSinIgv = total ?? subtotal;
+    if (totalSinIgv != null && totalPagar > totalSinIgv) return totalSinIgv;
+  }
+
+  return totalPagar ?? total ?? subtotal;
+}
+
 function buildValoresGastoRequest(
   filtroOperativo: FiltroOperativoValue
 ): ValoresGastoRequest | null {
@@ -1090,6 +1122,10 @@ function getRecordNumber(row: Record<string, unknown>, ...keys: string[]): numbe
 }
 
 function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: number): GastoDto {
+  const subtotal = getRecordNumber(row, "Subtotal", "subtotal", "Subtotalb", "subtotalb");
+  const total = getRecordNumber(row, "Total", "total", "Totalb", "totalb", "TotalPagar", "totalPagar");
+  const igv = getRecordNumber(row, "IGV", "Igv", "igv", "Igvb", "igvb");
+
   return {
     id: getRecordNumber(row, "Corre", "CorrelativoPlanilla", "Id", "id", "IdPlanilla", "idPlanilla") ?? index + 1,
     idSuministroProvisional:
@@ -1125,10 +1161,10 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     ruc: getRecordString(row, "RUC", "Ruc", "ruc"),
     tipoPago: getRecordString(row, "IdTipoPago", "idTipoPago", "TipoPago", "tipoPago"),
     monto: getRecordNumber(row, "Total", "total", "Totalb", "totalb", "TotalPagar", "totalPagar") ?? 0,
-    totalPagar: getRecordNumber(row, "TotalPagar", "totalPagar", "Total", "total") ?? undefined,
-    subtotal: getRecordNumber(row, "Subtotal", "subtotal", "Subtotalb", "subtotalb") ?? undefined,
-    total: getRecordNumber(row, "Total", "total", "Totalb", "totalb", "TotalPagar", "totalPagar") ?? undefined,
-    igv: getRecordNumber(row, "IGV", "Igv", "igv", "Igvb", "igvb") ?? undefined,
+    totalPagar: normalizarTotalPagarConsulta(row, subtotal, total, igv),
+    subtotal,
+    total,
+    igv,
     idRendicion: getRecordNumber(row, "IdRendicion", "idRendicion") ?? undefined,
     detalle: getRecordString(row, "Detalle", "detalle"),
     comentario: getRecordString(row, "Observacion", "observacion", "Comentario", "comentario"),

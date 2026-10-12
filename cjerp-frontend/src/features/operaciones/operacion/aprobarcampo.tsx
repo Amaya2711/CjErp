@@ -71,7 +71,7 @@ type ResponsableResumenItem = {
 };
 
 type BulkProgress = {
-  type: "aprobar-ingreso" | "aprobar-salida";
+  type: "aprobar-ingreso" | "aprobar-salida" | "validar-marcaciones";
   total: number;
   completed: number;
   succeeded: number;
@@ -798,6 +798,105 @@ export default function AprobarCampoPage() {
     }
   };
 
+  const handleBulkValidateMarcaciones = async () => {
+    const selectedRows = rows.filter((row) => selectedRecordKeys.has(buildRowKey(row)));
+    const eligibleRows = selectedRows.filter((row) => canApproveIngreso(row) || canApproveSalida(row));
+
+    if (eligibleRows.length === 0) {
+      setError("Seleccione al menos un registro con ingreso o salida pendiente de aprobación.");
+      return;
+    }
+
+    const totalActions = eligibleRows.reduce(
+      (total, row) => total + Number(canApproveIngreso(row)) + Number(canApproveSalida(row)),
+      0
+    );
+    const failedKeys = new Set<string>();
+    let completed = 0;
+    let succeeded = 0;
+
+    setSaving(true);
+    setError("");
+    setStatusMessage("");
+    setBulkProgress({ type: "validar-marcaciones", total: totalActions, completed: 0, succeeded: 0, failed: 0 });
+
+    const actualizarProgreso = () => {
+      setBulkProgress({
+        type: "validar-marcaciones",
+        total: totalActions,
+        completed,
+        succeeded,
+        failed: failedKeys.size,
+      });
+    };
+
+    const processRow = async (row: AprobarCampoRow) => {
+      const rowKey = buildRowKey(row);
+      const payload: AprobarCampoAccionRequest = {
+        ...buildClaveFromRow(row),
+        observacion: "",
+        idAprobador,
+        usuarioAccion,
+      };
+
+      // Si una misma marcación tiene ambos pendientes, el ingreso se aprueba
+      // primero y recién después se intenta la salida.
+      for (const action of [
+        ...(canApproveIngreso(row) ? ["ingreso" as const] : []),
+        ...(canApproveSalida(row) ? ["salida" as const] : []),
+      ]) {
+        try {
+          if (action === "ingreso") {
+            await aprobarIngresoAprobarCampo(payload);
+          } else {
+            await aprobarSalidaAprobarCampo(payload);
+          }
+          succeeded += 1;
+        } catch {
+          failedKeys.add(rowKey);
+        } finally {
+          completed += 1;
+          actualizarProgreso();
+        }
+      }
+    };
+
+    try {
+      const workerCount = Math.min(5, eligibleRows.length);
+      let nextIndex = 0;
+      await Promise.all(
+        Array.from({ length: workerCount }, async () => {
+          while (nextIndex < eligibleRows.length) {
+            const row = eligibleRows[nextIndex];
+            nextIndex += 1;
+            await processRow(row);
+          }
+        })
+      );
+
+      await loadRows();
+      const processedKeys = new Set(eligibleRows.map(buildRowKey));
+      setSelectedRecordKeys((current) =>
+        new Set(Array.from(current).filter((key) => !processedKeys.has(key) || failedKeys.has(key)))
+      );
+
+      if (failedKeys.size > 0) {
+        setError(
+          `Se validaron ${succeeded} de ${totalActions} acción(es). ` +
+            `${failedKeys.size} registro(s) con error quedaron seleccionados para reintentar.`
+        );
+      } else {
+        setStatusMessage(`Se validaron correctamente ${succeeded} acción(es) de ingreso y/o salida.`);
+      }
+    } catch (err) {
+      setError(getHttpErrorMessage(err, "No se pudieron validar todos los registros seleccionados."));
+      await loadRows();
+    } finally {
+      setBulkProgress(null);
+      setSaving(false);
+    }
+  };
+
   const handleOpenMap = (title: string, lat: string, lng: string) => {
     if (!hasCoordinates(lat, lng)) return;
     setMediaViewer({ type: "map", title, lat, lng });
@@ -1127,6 +1226,17 @@ export default function AprobarCampoPage() {
           </button>
           <button
             type="button"
+            style={selectedRecordKeys.size > 0 ? styles.successButton : styles.disabledSecondaryButton}
+            onClick={() => void handleBulkValidateMarcaciones()}
+            disabled={saving || selectedRecordKeys.size === 0}
+            title="Aprueba automáticamente el ingreso y/o la salida que estén pendientes en los registros seleccionados"
+          >
+            {bulkProgress?.type === "validar-marcaciones"
+              ? `Procesando ${bulkProgress.completed}/${bulkProgress.total}`
+              : "Validar ingreso y salida"}
+          </button>
+          <button
+            type="button"
             style={canReturnToAsistencia ? styles.secondaryButton : styles.disabledSecondaryButton}
             onClick={() => {
               if (!canReturnToAsistencia) {
@@ -1188,7 +1298,11 @@ export default function AprobarCampoPage() {
         {bulkProgress ? (
           <div style={styles.processingBanner} role="status" aria-live="polite">
             <strong>Proceso en ejecución:</strong>{" "}
-            {bulkProgress.type === "aprobar-ingreso" ? "aprobando ingresos" : "aprobando salidas"} ({bulkProgress.completed}
+            {bulkProgress.type === "aprobar-ingreso"
+              ? "aprobando ingresos"
+              : bulkProgress.type === "aprobar-salida"
+              ? "aprobando salidas"
+              : "validando ingresos y salidas"} ({bulkProgress.completed}
             /{bulkProgress.total}). Correctos: {bulkProgress.succeeded}. Con error: {bulkProgress.failed}.
           </div>
         ) : null}

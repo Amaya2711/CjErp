@@ -95,6 +95,8 @@ export type DataGridProProps<T extends object> = {
   selectionDisabled?: boolean;
   /** Agrupación controlada por la página; al cambiar, la grilla la aplica y contrae los grupos. */
   groupFields?: string[];
+  /** Campos que siempre deben conservarse como el primer nivel de la agrupación. */
+  requiredGroupFields?: string[];
   /** Relleno de las celdas de datos (CSS), p. ej. "2px 8px" para filas compactas. */
   rowPadding?: string;
   groupSummaryRender?: (group: { field: string; value: unknown; rows: T[] }) => React.ReactNode;
@@ -174,6 +176,7 @@ export default function DataGridPro<T extends object>({
   isRowSelectable,
   selectionDisabled = false,
   groupFields,
+  requiredGroupFields,
 }: DataGridProProps<T>) {
   const colMap = useMemo(() => new Map(columns.map((c) => [c.dataField, c])), [columns]);
   const pagingEnabled = paging !== false;
@@ -243,6 +246,11 @@ export default function DataGridPro<T extends object>({
   }, [stateStoringKey, order, widths, hidden, groups, sort, pageSize]);
 
   const groupFieldsKey = groupFields?.join("|");
+  const requiredGroupFieldsKey = requiredGroupFields?.join("|") ?? "";
+  const requiredGroups = useMemo(
+    () => requiredGroupFieldsKey.split("|").filter((field) => field && colMap.has(field)),
+    [requiredGroupFieldsKey, colMap]
+  );
   const [appliedGroupFieldsKey, setAppliedGroupFieldsKey] = useState<string | undefined>(undefined);
   if (groupFieldsKey !== appliedGroupFieldsKey) {
     // Agrupación controlada: se aplica al cambiar la prop (ajuste de estado durante el render).
@@ -253,6 +261,19 @@ export default function DataGridPro<T extends object>({
       setPage(0);
     }
   }
+
+  useEffect(() => {
+    if (!requiredGroups.length) return;
+    setGroups((current) => {
+      // Los grupos obligatorios siempre van primero y el criterio elegido por
+      // el usuario se aplica dentro de cada uno de esos bloques.
+      const optional = current.filter((field) => !requiredGroups.includes(field));
+      const next = [...requiredGroups, ...optional];
+      return next.length === current.length && next.every((field, index) => field === current[index])
+        ? current
+        : next;
+    });
+  }, [requiredGroups]);
 
   const orderedFields = useMemo(() => {
     const known = order.filter((f) => colMap.has(f));
@@ -421,12 +442,16 @@ export default function DataGridPro<T extends object>({
   const addGroup = (field: string) => {
     const col = colMap.get(field);
     if (!col || col.allowGrouping === false || groups.includes(field)) return;
-    setGroups((prev) => [...prev, field]);
+    setGroups((prev) => {
+      const optional = prev.filter((group) => !requiredGroups.includes(group));
+      return [...requiredGroups, ...optional, field];
+    });
     setToggledGroups(new Set());
     setPage(0);
   };
 
   const removeGroup = (field: string) => {
+    if (requiredGroups.includes(field)) return;
     setGroups((prev) => prev.filter((f) => f !== field));
     setToggledGroups(new Set());
   };
@@ -630,14 +655,16 @@ export default function DataGridPro<T extends object>({
                         current.order === "asc" ? <ArrowUp size={12} /> : <ArrowDown size={12} />
                       ) : null}
                     </button>
-                    <button
-                      type="button"
-                      style={styles.chipButton}
-                      onClick={() => removeGroup(field)}
-                      title="Quitar agrupación"
-                    >
-                      <X size={12} />
-                    </button>
+                    {!requiredGroups.includes(field) && (
+                      <button
+                        type="button"
+                        style={styles.chipButton}
+                        onClick={() => removeGroup(field)}
+                        title="Quitar agrupación"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
                   </span>
                 );
               })
