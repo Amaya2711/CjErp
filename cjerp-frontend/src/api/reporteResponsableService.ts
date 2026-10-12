@@ -48,6 +48,8 @@ export type RptResponsableRow = {
   nroOperacionPago: string;
   /** Planilla.Detalle del pago (lo completa el backend). */
   detallePago: string;
+  /** Planilla.IdSite del pago (lo completa el backend): puede diferir del sitio de la OC. */
+  idSitePlanilla: string;
   estadoAprobacionOc: string;
   aprobador1Oc: string;
   aprobador2Oc: string;
@@ -121,6 +123,7 @@ export function mapRptResponsableRow(raw: RawRow): RptResponsableRow {
     seriePago: text(get("SeriePago")),
     nroOperacionPago: text(get("NroOperacionPago")),
     detallePago: text(get("DetallePago")),
+    idSitePlanilla: text(get("IdSitePlanilla")),
     estadoAprobacionOc: text(get("EstadoAprobacionOC")),
     aprobador1Oc: text(get("Aprobador1OC")),
     aprobador2Oc: text(get("Aprobador2OC")),

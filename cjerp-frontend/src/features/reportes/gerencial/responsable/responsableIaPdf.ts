@@ -9,6 +9,7 @@ import {
   type OcAnalisis,
   type SitioAnalisis,
 } from "./responsableAnalisis";
+import type { EnlaceAnexo } from "./responsableAnexos";
 import { formatFecha, formatMonto, formatPorcentaje, periodoConsultado, type FilaReporte, type FiltrosReporte } from "./responsableLogic";
 
 type Rgb = [number, number, number];
@@ -35,7 +36,15 @@ type ContextoIa = {
   filas: FilaReporte[];
   filtros: FiltrosReporte;
   criterio: string;
+  /** OC cuyo PDF se anexará al informe (con su número de páginas) y OC cuyo PDF no se pudo descargar. */
+  anexos?: Array<{ idOc: number; paginas: number }>;
+  fallidas?: number[];
 };
+
+export type InformeGenerado = { buffer: ArrayBuffer; enlaces: EnlaceAnexo[]; nombre: string };
+
+/** Contexto de enlaces: dónde está cada OC anexada y dónde se dibujó cada zona clicable. */
+type ContextoEnlaces = { disponibles: Set<number>; enlaces: EnlaceAnexo[] };
 
 const truncar = (texto: string, max: number) => (texto.length > max ? `${texto.slice(0, max - 1)}…` : texto);
 
@@ -99,7 +108,7 @@ class Pagina {
     this.doc.setFont("helvetica", "normal");
     this.doc.setFontSize(7);
     this.doc.setTextColor(...GRY);
-    const derecha = "Informe Analítico con IA";
+    const derecha = "Informe Analítico";
     const disponible = this.ancho - this.doc.getTextWidth(derecha) - 6;
     let izquierda = this.cabecera;
     while (izquierda.length > 4 && this.doc.getTextWidth(izquierda) > disponible) izquierda = `${izquierda.slice(0, -2)}…`;
@@ -138,8 +147,11 @@ class Pagina {
   }
 }
 
-function bandaTitulo(doc: Doc, y: number, lineas: string[], nota: string) {
-  const alto = 30;
+function bandaTitulo(doc: Doc, y: number, lineas: string[]) {
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  const envueltas = lineas.flatMap((l, i) => (doc.splitTextToSize(l, ANCHO - 12) as string[]).map((t) => ({ t, grande: i === 0 })));
+  const alto = 15 + envueltas.length * 4.6;
   doc.setFillColor(...BLUE);
   doc.roundedRect(MARGEN, y, ANCHO, alto, 3, 3, "F");
   doc.setTextColor(...WHITE);
@@ -147,14 +159,10 @@ function bandaTitulo(doc: Doc, y: number, lineas: string[], nota: string) {
   doc.setFontSize(15);
   doc.text(TITULO, MARGEN + 6, y + 9);
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  doc.text(truncar(lineas[0] ?? "", 110), MARGEN + 6, y + 14.5);
-  doc.setFontSize(8);
-  doc.text(truncar(lineas[1] ?? "", 125), MARGEN + 6, y + 20);
-  doc.text(truncar(lineas[2] ?? "", 125), MARGEN + 6, y + 24.5);
-  doc.setFont("helvetica", "italic");
-  doc.setFontSize(7);
-  doc.text(nota, MARGEN + ANCHO - 5, y + alto - 3, { align: "right" });
+  envueltas.forEach(({ t, grande }, i) => {
+    doc.setFontSize(grande ? 9 : 8);
+    doc.text(t, MARGEN + 6, y + 14.5 + i * 4.6);
+  });
   doc.setTextColor(...INK);
   return y + alto;
 }
@@ -266,7 +274,18 @@ function tarjetaOc(doc: Doc, y: number, oc: OcAnalisis, ancho: number) {
   return y + alto;
 }
 
-type OpcionesTabla = { chipCols?: number[]; derecha?: number[]; anchos?: Record<number, number>; fontSize?: number; filaTotal?: boolean; rojoCol?: number };
+type OpcionesTabla = { enlaceCol?: number; enlaces?: EnlaceAnexo[]; chipCols?: number[]; derecha?: number[]; anchos?: Record<number, number>; fontSize?: number; filaTotal?: boolean; rojoCol?: number };
+
+function columnasTabla(opciones: OpcionesTabla) {
+  const estilos: Record<number, { halign?: "right"; cellWidth?: number }> = {};
+  (opciones.derecha ?? []).forEach((i) => {
+    estilos[i] = { ...estilos[i], halign: "right" };
+  });
+  Object.entries(opciones.anchos ?? {}).forEach(([i, ancho]) => {
+    estilos[Number(i)] = { ...estilos[Number(i)], cellWidth: ancho };
+  });
+  return estilos;
+}
 
 /** Tabla con el estilo del informe: cabecera azul, filas alternas y píldoras de color en las columnas indicadas. */
 function tabla(doc: Doc, autoTable: AutoTable, pagina: Pagina, head: string[], body: string[][], opciones: OpcionesTabla = {}) {
@@ -278,10 +297,7 @@ function tabla(doc: Doc, autoTable: AutoTable, pagina: Pagina, head: string[], b
     styles: { fontSize: opciones.fontSize ?? 8, cellPadding: 2, textColor: INK, lineColor: LINE, lineWidth: 0, overflow: "linebreak", valign: "middle" },
     headStyles: { fillColor: BLUE, textColor: 255, fontSize: 7, fontStyle: "bold" },
     alternateRowStyles: { fillColor: BG },
-    columnStyles: {
-      ...Object.fromEntries((opciones.derecha ?? []).map((i) => [i, { halign: "right" as const }])),
-      ...Object.fromEntries(Object.entries(opciones.anchos ?? {}).map(([i, w]) => [i, { cellWidth: w }])),
-    },
+    columnStyles: columnasTabla(opciones),
     margin: { left: MARGEN, right: MARGEN, top: 17, bottom: 17 },
     didDrawPage: () => pagina.dibujarCabecera(),
     // Sin saltos de línea dentro de las celdas de totales: el ancho de columna ya contempla el texto.
@@ -290,16 +306,32 @@ function tabla(doc: Doc, autoTable: AutoTable, pagina: Pagina, head: string[], b
       if (chipCols.includes(data.column.index)) {
         data.cell.text = [];
       }
-      if (opciones.filaTotal && data.row.index === body.length - 1) {
+      if (opciones.filaTotal) {
+        const etiquetas = (body[data.row.index] ?? []).slice(0, 2).map((c) => String(c));
+        if (etiquetas.some((c) => c.startsWith("SUBTOTAL"))) {
+          data.cell.styles.fontStyle = "bold";
+          data.cell.styles.fillColor = [226, 232, 240];
+        } else if (etiquetas.some((c) => c.startsWith("TOTAL"))) {
+          data.cell.styles.fontStyle = "bold";
+          data.cell.styles.fillColor = [203, 213, 225];
+        }
+      }
+      if (opciones.enlaceCol === data.column.index && String(data.cell.raw).startsWith("Abrir")) {
+        data.cell.styles.textColor = [26, 90, 190];
         data.cell.styles.fontStyle = "bold";
-        data.cell.styles.fillColor = [253, 236, 234];
       }
       if (opciones.rojoCol === data.column.index && String(data.cell.raw).startsWith("RECHAZADA")) {
         data.cell.styles.textColor = RED;
         data.cell.styles.fontStyle = "bold";
       }
     },
-    didDrawCell: (data: { section: string; column: { index: number }; cell: { raw: unknown; x: number; y: number; width: number; height: number } }) => {
+    didDrawCell: (data: { section: string; column: { index: number }; row: { index: number }; cell: { raw: unknown; x: number; y: number; width: number; height: number } }) => {
+      if (data.section === "body" && opciones.enlaces && opciones.enlaceCol === data.column.index && String(data.cell.raw).startsWith("Abrir")) {
+        const idOc = Number(body[data.row.index]?.[0]);
+        if (Number.isFinite(idOc)) {
+          opciones.enlaces.push({ pagina: doc.getCurrentPageInfo().pageNumber, x: data.cell.x, y: data.cell.y, ancho: data.cell.width, alto: data.cell.height, idOc });
+        }
+      }
       if (data.section !== "body" || !chipCols.includes(data.column.index)) return;
       const etiqueta = String(data.cell.raw ?? "").trim();
       if (!etiqueta) return;
@@ -321,6 +353,133 @@ function vacio(doc: Doc, pagina: Pagina, texto: string) {
   pagina.y += 8;
 }
 
+type Subtotal = { moneda: string; ocs: number; vigente: number; pagadoConOc: number; saldo: number; pagosSinOc: number; pagadoSinOc: number };
+
+/** Subtotal de un sitio por moneda. Las OC rechazadas no cuentan en el monto vigente ni en el saldo. */
+function subtotalesDeSitio(sitio: SitioAnalisis): Subtotal[] {
+  const porMoneda = new Map<string, Subtotal>();
+  const obtener = (moneda: string) => {
+    const clave = moneda || "—";
+    let sub = porMoneda.get(clave);
+    if (!sub) {
+      sub = { moneda: clave, ocs: 0, vigente: 0, pagadoConOc: 0, saldo: 0, pagosSinOc: 0, pagadoSinOc: 0 };
+      porMoneda.set(clave, sub);
+    }
+    return sub;
+  };
+  sitio.ocs.forEach((oc) => {
+    const sub = obtener(oc.moneda);
+    sub.ocs += 1;
+    sub.pagadoConOc += oc.gasto;
+    if (oc.estadoAprobacion !== "RECHAZADA") {
+      sub.vigente += oc.monto;
+      sub.saldo += Math.max(oc.saldo, 0);
+    }
+  });
+  sitio.pagos
+    .filter((p) => p.idOc === null)
+    .forEach((p) => {
+      const sub = obtener(p.moneda);
+      sub.pagosSinOc += 1;
+      sub.pagadoSinOc += p.monto;
+    });
+  return Array.from(porMoneda.values()).sort((a, b) => a.moneda.localeCompare(b.moneda, "es"));
+}
+
+const HEAD_SUBTOTAL = ["MONEDA", "OCs", "MONTO OC VIGENTE", "PAGADO CON OC", "SALDO PENDIENTE", "PAGOS SIN OC", "PAGADO SIN OC"];
+const filaSubtotal = (sub: Subtotal) => [
+  sub.moneda,
+  String(sub.ocs),
+  montoConSimbolo(sub.vigente, sub.moneda),
+  montoConSimbolo(sub.pagadoConOc, sub.moneda),
+  montoConSimbolo(sub.saldo, sub.moneda),
+  String(sub.pagosSinOc),
+  montoConSimbolo(sub.pagadoSinOc, sub.moneda),
+];
+
+/** Tabla consolidada: una fila por sitio y moneda, y total general por moneda. */
+function tablaSubtotalesPorSitio(doc: Doc, autoTable: AutoTable, pagina: Pagina, sitios: SitioAnalisis[]) {
+  const filas: string[][] = [];
+  const general = new Map<string, Subtotal>();
+  sitios.forEach((sitio) => {
+    subtotalesDeSitio(sitio).forEach((sub) => {
+      filas.push([sitio.etiqueta, ...filaSubtotal(sub)]);
+      const total = general.get(sub.moneda) ?? { moneda: sub.moneda, ocs: 0, vigente: 0, pagadoConOc: 0, saldo: 0, pagosSinOc: 0, pagadoSinOc: 0 };
+      total.ocs += sub.ocs;
+      total.vigente += sub.vigente;
+      total.pagadoConOc += sub.pagadoConOc;
+      total.saldo += sub.saldo;
+      total.pagosSinOc += sub.pagosSinOc;
+      total.pagadoSinOc += sub.pagadoSinOc;
+      general.set(sub.moneda, total);
+    });
+  });
+  Array.from(general.values())
+    .sort((a, b) => a.moneda.localeCompare(b.moneda, "es"))
+    .forEach((total) => filas.push([`TOTAL GENERAL`, ...filaSubtotal(total)]));
+  pagina.titulo("Subtotal por sitio y moneda");
+  tabla(doc, autoTable, pagina, ["SITIO", ...HEAD_SUBTOTAL], filas, {
+    fontSize: 7,
+    filaTotal: true,
+    derecha: [2, 3, 4, 5, 6, 7],
+  });
+}
+
+/** Subtotal del sitio (se imprime al terminar las OC de cada sitio cuando hay más de uno). */
+function bloqueSubtotalSitio(doc: Doc, autoTable: AutoTable, pagina: Pagina, sitio: SitioAnalisis) {
+  pagina.asegurar(34);
+  subtituloSeccion(doc, pagina, `Subtotal del sitio ${sitio.etiqueta}, por moneda`);
+  tabla(doc, autoTable, pagina, HEAD_SUBTOTAL, subtotalesDeSitio(sitio).map(filaSubtotal), {
+    fontSize: 7.5,
+    derecha: [1, 2, 3, 4, 5, 6],
+  });
+}
+
+/** Totales del resumen de OC, uno por moneda (nunca se suman monedas distintas). */
+function totalesResumenOc(ocs: OcAnalisis[]) {
+  const porMoneda = new Map<string, { moneda: string; monto: number; gasto: number; saldo: number }>();
+  ocs.forEach((oc) => {
+    const t = porMoneda.get(oc.moneda) ?? { moneda: oc.moneda, monto: 0, gasto: 0, saldo: 0 };
+    t.monto += oc.monto;
+    t.gasto += oc.gasto;
+    t.saldo += oc.saldo;
+    porMoneda.set(oc.moneda, t);
+  });
+  return Array.from(porMoneda.values()).sort((a, b) => a.moneda.localeCompare(b.moneda, "es"));
+}
+
+function filaMontos(t: { moneda: string; monto: number; gasto: number; saldo: number }) {
+  return [
+    montoConSimbolo(t.monto, t.moneda),
+    montoConSimbolo(t.gasto, t.moneda),
+    montoConSimbolo(t.saldo, t.moneda),
+    formatPorcentaje(t.monto > 0 ? (t.gasto / t.monto) * 100 : 0),
+  ];
+}
+
+/** Filas del "Resumen de OC": detalle, subtotal por sitio y moneda (solo con varios sitios) y total general por moneda. */
+function filasResumenOc(lista: Array<{ sitio: SitioAnalisis; oc: OcAnalisis }>, multiSitio: boolean): string[][] {
+  const filas: string[][] = [];
+  const grupos = new Map<string, Array<{ sitio: SitioAnalisis; oc: OcAnalisis }>>();
+  lista.forEach((item) => grupos.set(item.sitio.clave, [...(grupos.get(item.sitio.clave) ?? []), item]));
+
+  grupos.forEach((items) => {
+    items.forEach(({ sitio, oc }) => {
+      filas.push([...(multiSitio ? [sitio.etiqueta] : []), String(oc.idOc), oc.estadoAprobacion, oc.estado, ...filaMontos({ moneda: oc.moneda, monto: oc.monto, gasto: oc.gasto, saldo: oc.saldo })]);
+    });
+    if (multiSitio) {
+      totalesResumenOc(items.map(({ oc }) => oc)).forEach((t) => {
+        filas.push([items[0].sitio.etiqueta, `SUBTOTAL ${t.moneda}`, "", "", ...filaMontos(t)]);
+      });
+    }
+  });
+
+  totalesResumenOc(lista.map(({ oc }) => oc)).forEach((t) => {
+    filas.push(multiSitio ? ["", `TOTAL ${t.moneda}`, "", "", ...filaMontos(t)] : [`TOTAL ${t.moneda}`, "", "", ...filaMontos(t)]);
+  });
+  return filas;
+}
+
 function subtituloSeccion(doc: Doc, pagina: Pagina, texto: string, color: Rgb = BLUE) {
   pagina.asegurar(10);
   doc.setFont("helvetica", "bold");
@@ -332,7 +491,7 @@ function subtituloSeccion(doc: Doc, pagina: Pagina, texto: string, color: Rgb = 
 }
 
 /** Una OC completa: encabezado, detalle íntegro, aprobadores y, debajo, solo los pagos asociados a esa OC. */
-function bloqueOc(doc: Doc, autoTable: AutoTable, pagina: Pagina, sitio: SitioAnalisis, oc: OcAnalisis, mostrarSitio: boolean) {
+function bloqueOc(doc: Doc, autoTable: AutoTable, pagina: Pagina, sitio: SitioAnalisis, oc: OcAnalisis, mostrarSitio: boolean, anexos: ContextoEnlaces) {
   pagina.asegurar(mostrarSitio ? 52 : 46);
   if (mostrarSitio) {
     doc.setFont("helvetica", "bold");
@@ -345,6 +504,20 @@ function bloqueOc(doc: Doc, autoTable: AutoTable, pagina: Pagina, sitio: SitioAn
   pagina.y = tarjetaOc(doc, pagina.y, oc, pagina.anchoUtil) + 3;
 
   // Detalle completo de la OC (cada línea de DetOrdenCompra, sin recortar).
+  if (anexos.disponibles.has(oc.idOc)) {
+    const etiqueta = "Ver PDF de la OC (anexo)";
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(26, 90, 190);
+    const ancho = doc.getTextWidth(etiqueta);
+    const xEtiqueta = MARGEN + pagina.anchoUtil - ancho;
+    doc.text(etiqueta, xEtiqueta, pagina.y + 3.4);
+    doc.setDrawColor(26, 90, 190);
+    doc.setLineWidth(0.2);
+    doc.line(xEtiqueta, pagina.y + 4, xEtiqueta + ancho, pagina.y + 4);
+    doc.setTextColor(...INK);
+    anexos.enlaces.push({ pagina: doc.getCurrentPageInfo().pageNumber, x: xEtiqueta, y: pagina.y, ancho, alto: 5, idOc: oc.idOc });
+  }
   subtituloSeccion(doc, pagina, "Detalle de la OC", GRY);
   const entradas = (oc.detalle || "—").split(" | ").map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean);
   doc.setFont("helvetica", "normal");
@@ -423,8 +596,10 @@ function bloqueOc(doc: Doc, autoTable: AutoTable, pagina: Pagina, sitio: SitioAn
 }
 
 /** PDF analítico con el diseño aprobado: KPIs, lo más importante, estado de las OC, pagos sin OC, línea de tiempo, análisis y anexos. */
-export async function exportarPdfIa(ctx: ContextoIa) {
+export async function generarInformePdf(ctx: ContextoIa): Promise<InformeGenerado> {
   const { doc, autoTable } = await cargarPdf("portrait");
+  const anexosOc = new Map((ctx.anexos ?? []).map((a) => [a.idOc, a.paginas]));
+  const contextoEnlaces: ContextoEnlaces = { disponibles: new Set(anexosOc.keys()), enlaces: [] };
   const sitios = analizarPorSitio(ctx.filas);
   const responsables = responsablesAnalizados(ctx.filas);
   const kpis = calcularKpis(sitios);
@@ -439,16 +614,15 @@ export async function exportarPdfIa(ctx: ContextoIa) {
   // ---- Página 1: banda, KPIs, lo más importante, estado de las OC
   const lineasBanda = [
     unSitio ? `Sitio ${unSitio.etiqueta}${unSitio.cliente ? `  ·  Cliente ${unSitio.cliente}` : ""}${unSitio.proyecto ? `  ·  Proyecto ${unSitio.proyecto}` : ""}` : `${sitios.length} sitios analizados`,
-    `${responsables.length > 1 ? "Responsables" : "Responsable"}: ${responsables
-      .map((r) => `${r.nombre}${r.documento ? ` · RUC/Doc ${r.documento}` : ""} · IdEmpleado ${r.id}`)
-      .join("  |  ") || ctx.criterio}`,
+    ...(responsables.length > 0
+      ? responsables.map((r, i) => `${i === 0 ? (responsables.length > 1 ? "Responsables: " : "Responsable: ") : "                 "}${r.nombre}${r.documento ? ` · RUC/Doc ${r.documento}` : ""}`)
+      : [`Responsable: ${ctx.criterio}`]),
     `${periodo}  ·  Generado: ${marcaGeneracion()}`,
   ];
   pagina.y = bandaTitulo(
     doc,
     17,
     lineasBanda,
-    "Datos de CabOrdenCompra, DetOrdenCompra y Planilla (pagos en estado PAGADO).",
   );
   pagina.y += 4;
 
@@ -456,7 +630,7 @@ export async function exportarPdfIa(ctx: ContextoIa) {
   pagina.y = tarjetasKpi(doc, pagina.y, [
     { etiqueta: `MONTO OC VIGENTE (${simbolo})`, valor: formatMonto(kpis.montoVigente), sub: `${kpis.ocsAprobadas} OC aprobadas · ${kpis.ocsVigentes} vigentes`, color: BLUE },
     { etiqueta: `PAGADO CON OC (${simbolo})`, valor: formatMonto(kpis.pagadoConOc), sub: `${kpis.pagosConOc} pago(s)`, color: GRN },
-    { etiqueta: `SALDO PENDIENTE (${simbolo})`, valor: formatMonto(kpis.saldoPendiente), sub: kpis.ocsRechazadas ? `sin ${kpis.ocsRechazadas} OC rechazada(s)` : "sobre OC vigentes", color: AMB },
+    { etiqueta: `SALDO PENDIENTE (${simbolo})`, valor: formatMonto(kpis.saldoPendiente), sub: "sobre OC vigentes", color: AMB },
     { etiqueta: `PAGADO SIN OC (${simbolo})`, valor: formatMonto(kpis.pagadoSinOc), sub: `${kpis.pagosSinOc} pago(s) sin vincular`, color: RED },
     { etiqueta: "% EJECUCIÓN", valor: formatPorcentaje(kpis.ejecucion), sub: "pagado con OC / vigente", color: BLUE },
   ]);
@@ -492,19 +666,12 @@ export async function exportarPdfIa(ctx: ContextoIa) {
       autoTable,
       pagina,
       [...(multiSitio ? ["SITIO"] : []), "OC", "APROBACIÓN", "ESTADO DE PAGO", "MONTO", "PAGADO", "SALDO", "% PAGADO"],
-      listaOcs.map(({ sitio, oc }) => [
-        ...(multiSitio ? [sitio.etiqueta] : []),
-        String(oc.idOc),
-        oc.estadoAprobacion,
-        oc.estado,
-        montoConSimbolo(oc.monto, oc.moneda),
-        montoConSimbolo(oc.gasto, oc.moneda),
-        oc.estadoAprobacion === "RECHAZADA" ? "n/a" : montoConSimbolo(oc.saldo, oc.moneda),
-        formatPorcentaje(oc.monto > 0 ? (oc.gasto / oc.monto) * 100 : 0),
-      ]),
-      { chipCols: [o + 1 + 1, o + 1 + 2], derecha: [o + 3, o + 4, o + 5, o + 6], anchos: { [o + 1]: 28, [o + 2]: 34 }, fontSize: 7.5 },
+      filasResumenOc(listaOcs, multiSitio),
+      { chipCols: [o + 1, o + 2], derecha: [o + 3, o + 4, o + 5, o + 6], anchos: { [o + 1]: 26, [o + 2]: 32 }, fontSize: o ? 7 : 7.5, filaTotal: true },
     );
   }
+
+  if (multiSitio) tablaSubtotalesPorSitio(doc, autoTable, pagina, sitios);
 
   // ---- Detalle por OC (hoja horizontal): cada OC con su detalle completo y sus pagos asociados
   pagina.nueva("landscape");
@@ -514,7 +681,9 @@ export async function exportarPdfIa(ctx: ContextoIa) {
     // Cada OC empieza en una página nueva para que su detalle y sus pagos no se mezclen con otra OC.
     if (indice > 0) pagina.nueva();
     const mostrar = multiSitio;
-    bloqueOc(doc, autoTable, pagina, sitio, oc, mostrar);
+    bloqueOc(doc, autoTable, pagina, sitio, oc, mostrar, contextoEnlaces);
+    const siguiente = listaOcs[indice + 1];
+    if (multiSitio && (!siguiente || siguiente.sitio.clave !== sitio.clave)) bloqueSubtotalSitio(doc, autoTable, pagina, sitio);
   });
 
   // ---- Pagos sin OC
@@ -550,18 +719,44 @@ export async function exportarPdfIa(ctx: ContextoIa) {
         chipCols: [multiSitio ? 9 : 8],
         derecha: [multiSitio ? 8 : 7],
         anchos: {
-          ...(multiSitio ? ({ 0: 30 } as Record<number, number>) : {}),
-          [multiSitio ? 1 : 0]: 18,
-          [multiSitio ? 2 : 1]: 24,
-          [multiSitio ? 3 : 2]: 19,
-          [multiSitio ? 4 : 3]: 27,
-          [multiSitio ? 5 : 4]: 32,
-          [multiSitio ? 6 : 5]: 34,
-          [multiSitio ? 8 : 7]: 28,
-          [multiSitio ? 9 : 8]: 44,
+          ...(multiSitio ? ({ 0: 26 } as Record<number, number>) : {}),
+          [multiSitio ? 1 : 0]: 16,
+          [multiSitio ? 2 : 1]: 22,
+          [multiSitio ? 3 : 2]: 18,
+          [multiSitio ? 4 : 3]: 25,
+          [multiSitio ? 5 : 4]: 30,
+          [multiSitio ? 6 : 5]: 32,
+          [multiSitio ? 8 : 7]: 26,
+          [multiSitio ? 9 : 8]: 42,
         },
       },
     );
+  }
+
+  // ---- Anexo: índice de los PDF de las OC (el contenido de cada PDF se agrega al unir el archivo)
+  if (ctx.anexos !== undefined && (listaOcs.length > 0)) {
+    pagina.nueva();
+    pagina.titulo("Anexo · PDF de las OC", "(clic en 'Abrir PDF' para ir al documento)");
+    const sinPdf = new Set(ctx.fallidas ?? []);
+    let siguientePagina = doc.getNumberOfPages() + 1;
+    const filasAnexo = listaOcs.map(({ sitio, oc }) => {
+      const paginas = anexosOc.get(oc.idOc);
+      let ubicacion = "No disponible";
+      let enlace = sinPdf.has(oc.idOc) ? "No se pudo descargar" : "—";
+      if (paginas !== undefined) {
+        ubicacion = paginas === 1 ? `Pág. ${siguientePagina}` : `Págs. ${siguientePagina}–${siguientePagina + paginas - 1}`;
+        siguientePagina += paginas;
+        enlace = "Abrir PDF";
+      }
+      return [String(oc.idOc), sitio.etiqueta, oc.estadoAprobacion, ubicacion, enlace];
+    });
+    tabla(doc, autoTable, pagina, ["OC", "SITIO", "APROBACIÓN", "UBICACIÓN EN ESTE ARCHIVO", "PDF"], filasAnexo, {
+      fontSize: 8,
+      enlaceCol: 4,
+      enlaces: contextoEnlaces.enlaces,
+      chipCols: [2],
+      anchos: { 0: 24, 1: 70, 2: 36, 3: 50 },
+    });
   }
 
   // Numeración de páginas y pie
@@ -581,5 +776,16 @@ export async function exportarPdfIa(ctx: ContextoIa) {
     doc.text(`Página ${i} de ${total}`, MARGEN + anchoPie, altoPie - 8.5, { align: "right" });
   }
 
-  doc.save(nombreArchivo("Informe_Analitico_IA"));
+  return { buffer: doc.output("arraybuffer"), enlaces: contextoEnlaces.enlaces, nombre: nombreArchivo("Informe_Analitico_OC") };
+}
+
+/** Descarga el informe sin anexos. */
+export async function exportarPdfIa(ctx: ContextoIa) {
+  const informe = await generarInformePdf(ctx);
+  const url = URL.createObjectURL(new Blob([informe.buffer], { type: "application/pdf" }));
+  const enlace = document.createElement("a");
+  enlace.href = url;
+  enlace.download = informe.nombre;
+  enlace.click();
+  URL.revokeObjectURL(url);
 }

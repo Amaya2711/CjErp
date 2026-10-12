@@ -24,6 +24,8 @@ export type FiltrosReporte = {
   estado: string;
   moneda: string;
   vinculo: VinculoFiltro;
+  /** Retira del análisis las OC (todas sus filas) sin ningún gasto/pago asociado. */
+  omitirOcSinGastos: boolean;
 };
 
 export const FILTROS_VACIOS: FiltrosReporte = {
@@ -39,6 +41,7 @@ export const FILTROS_VACIOS: FiltrosReporte = {
   estado: "",
   moneda: "",
   vinculo: "todos",
+  omitirOcSinGastos: false,
 };
 
 export type EstadoPagoOc = "PAGADO COMPLETO" | "PAGO PARCIAL" | "SIN PAGO" | "PAGADO EN EXCESO" | "";
@@ -186,6 +189,69 @@ export function prepararFilas(rows: RptResponsableRow[]): FilaReporte[] {
   });
 }
 
+/**
+ * Con filtro por sitio, los pagos (planillas) de otro sitio no deben contarse aunque la OC compartida pertenezca al sitio elegido.
+ * Esos pagos se retiran de las filas antes de calcular gastos/saldos; la línea de la OC se conserva sin ese pago.
+ */
+export function limitarPagosPorSite(rows: RptResponsableRow[], sites: string[]): RptResponsableRow[] {
+  if (sites.length === 0) return rows;
+  const ids = new Set(sites.map((clave) => clave.split("|")[0].trim().toUpperCase()));
+  const ajena = (row: RptResponsableRow) => row.tienePago && Boolean(row.idSitePlanilla) && !ids.has(row.idSitePlanilla.trim().toUpperCase());
+  const lineaOc = (row: RptResponsableRow) => `${row.idOc ?? ""}|${row.fila ?? ""}`;
+
+  const lineasConservadas = new Set<string>();
+  rows.forEach((row) => {
+    if (row.tieneOc && !ajena(row)) lineasConservadas.add(lineaOc(row));
+  });
+
+  const resultado: RptResponsableRow[] = [];
+  rows.forEach((row) => {
+    if (!ajena(row)) {
+      resultado.push(row);
+      return;
+    }
+    if (!row.tieneOc) return;
+    const clave = lineaOc(row);
+    if (lineasConservadas.has(clave)) return;
+    lineasConservadas.add(clave);
+    resultado.push({
+      ...row,
+      tienePago: false,
+      correlativoPago: null,
+      subtotalGasto: null,
+      monedaGasto: "",
+      fechaIngresoPlanilla: "",
+      seriePago: "",
+      nroOperacionPago: "",
+      detallePago: "",
+      solicitantePlanilla: "",
+      fechaDeposito: "",
+      estadoPlanilla: "",
+      idSitePlanilla: "",
+    });
+  });
+  return resultado;
+}
+
+/**
+ * Las OC RECHAZADAS no forman parte del reporte: se retiran todas sus filas (OC, importes y pagos vinculados).
+ * Devuelve cuántas se retiraron, y cuántas de ellas tenían pagos registrados, para poder avisarlo en pantalla.
+ */
+export function excluirOcRechazadas(filas: FilaReporte[]) {
+  const rechazadas = new Set<number>();
+  const conPago = new Set<number>();
+  filas.forEach((f) => {
+    if (!f.tieneOc || f.idOc === null) return;
+    if (f.estadoAprobacionOc === "RECHAZADA") rechazadas.add(f.idOc);
+    if (f.tienePago) conPago.add(f.idOc);
+  });
+  return {
+    filas: filas.filter((f) => !(f.tieneOc && f.idOc !== null && rechazadas.has(f.idOc))),
+    excluidas: rechazadas.size,
+    excluidasConPagos: Array.from(rechazadas).filter((id) => conPago.has(id)).length,
+  };
+}
+
 export function categoria(fila: FilaReporte): Exclude<VinculoFiltro, "todos"> {
   if (!fila.tieneOc) return "planillaSinOc";
   return fila.tienePago ? "conPago" : "sinPago";
@@ -199,8 +265,17 @@ export function filtrarFilas(filas: FilaReporte[], f: FiltrosReporte) {
     return (!desde || clave >= desde) && (!hasta || clave <= hasta);
   };
 
+  // OC con al menos un gasto asociado (se evalúa sobre todas las filas de la consulta, antes de otros filtros).
+  const ocConGastos = new Set<number>();
+  if (f.omitirOcSinGastos) {
+    filas.forEach((fila) => {
+      if (fila.tieneOc && fila.idOc !== null && fila.tienePago) ocConGastos.add(fila.idOc);
+    });
+  }
+
   return filas.filter(
     (fila) =>
+      (!f.omitirOcSinGastos || !fila.tieneOc || fila.idOc === null || ocConGastos.has(fila.idOc)) &&
       enRango(fila.fechaOc, f.fechaOcDesde, f.fechaOcHasta) &&
       enRango(fila.fechaDeposito, f.fechaDepDesde, f.fechaDepHasta) &&
       (!f.cliente || fila.cliente === f.cliente) &&
@@ -450,6 +525,7 @@ export function describirFiltros(f: FiltrosReporte, criterio: string, filas: Fil
   if (f.vinculo !== "todos") {
     partes.push(`Vínculo: ${f.vinculo === "conPago" ? "Con pago" : f.vinculo === "sinPago" ? "Sin pago" : "Planilla sin OC"}`);
   }
+  if (f.omitirOcSinGastos) partes.push("Se omiten las OC sin gastos asociados");
   return partes;
 }
 

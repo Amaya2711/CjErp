@@ -4,13 +4,14 @@ import DataGridPro from "../../../components/datagrid/DataGridPro";
 import type { GridColumn } from "../../../components/datagrid/types";
 import { descargarOrdenCompraPdf } from "../../../api/ordenCompraService";
 import { buscarEmpleadosResponsables } from "../../../api/empleadoResponsableService";
-import { consultarOrdenesPorResponsable, type ConsultaPorResponsable } from "../../../api/reporteResponsableService";
+import { consultarOrdenesPorResponsable, type ConsultaPorResponsable, type RptResponsableRow } from "../../../api/reporteResponsableService";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 import {
   AGRUPACIONES,
   FILTROS_VACIOS,
   calcularResumen,
   categoria,
+  excluirOcRechazadas,
   filtrarFilas,
   formatFecha,
   formatMonto,
@@ -19,6 +20,7 @@ import {
   claveSite,
   etiquetaSite,
   opcionesDistintas,
+  limitarPagosPorSite,
   prepararFilas,
   resumirPor,
   type Agrupacion,
@@ -28,7 +30,8 @@ import {
   type ResumenGrupo,
   type VinculoFiltro,
 } from "./responsable/responsableLogic";
-import { exportarPdfIa } from "./responsable/responsableIaPdf";
+import { generarInformePdf } from "./responsable/responsableIaPdf";
+import { descargarPdfsOc, unirInformeConAnexos } from "./responsable/responsableAnexos";
 import { calcularAlertas, responsablesAnalizados } from "./responsable/responsableAnalisis";
 
 type ResponsableElegido = { id: number; nombre: string; documento: string };
@@ -70,7 +73,7 @@ export default function ReporteResponsablePage() {
   const [buscandoSugerencias, setBuscandoSugerencias] = useState(false);
   const [documento, setDocumento] = useState("");
 
-  const [filas, setFilas] = useState<FilaReporte[]>([]);
+  const [filasCrudas, setFilasCrudas] = useState<RptResponsableRow[]>([]);
   const [criterioConsultado, setCriterioConsultado] = useState("");
   const [consultado, setConsultado] = useState(false);
   const [filtros, setFiltros] = useState<FiltrosReporte>(FILTROS_VACIOS);
@@ -78,6 +81,7 @@ export default function ReporteResponsablePage() {
   const [agrupacion, setAgrupacion] = useState<Agrupacion>("responsable");
   const [cargando, setCargando] = useState(false);
   const [exportando, setExportando] = useState<"" | "ia">("");
+  const [progresoPdf, setProgresoPdf] = useState("");
   const [ocEnProceso, setOcEnProceso] = useState<number | null>(null);
   const [error, setError] = useState("");
   const consultaRef = useRef<AbortController | null>(null);
@@ -144,9 +148,8 @@ export default function ReporteResponsablePage() {
     try {
       const rows = await consultarOrdenesPorResponsable(criterio, { signal: controller.signal });
       if (controller.signal.aborted) return;
-      const preparadas = prepararFilas(rows);
-      setFilas(preparadas);
-      const nombres = responsablesAnalizados(preparadas).map((r) => r.nombre).join(", ");
+      setFilasCrudas(rows);
+      const nombres = responsablesAnalizados(excluirOcRechazadas(prepararFilas(rows)).filas).map((r) => r.nombre).join(", ");
       setCriterioConsultado(
         modo === "responsables"
           ? elegidos.map((item) => item.nombre).join(", ")
@@ -155,7 +158,7 @@ export default function ReporteResponsablePage() {
       setConsultado(true);
     } catch (err) {
       if (!controller.signal.aborted) {
-        setFilas([]);
+        setFilasCrudas([]);
         setConsultado(false);
         setError(getHttpErrorMessage(err, "No se pudo consultar el reporte por responsable."));
       }
@@ -171,11 +174,20 @@ export default function ReporteResponsablePage() {
     setSugerencias([]);
     setDocumento("");
     setFiltros(FILTROS_VACIOS);
-    setFilas([]);
+    setFilasCrudas([]);
     setConsultado(false);
     setError("");
     setCargando(false);
   };
+
+  // Todas las filas de la consulta (para las opciones de filtro) y las filas del análisis, donde con filtro por sitio
+  // los pagos de otro sitio no se cuentan.
+  const { filas: filasTodas } = useMemo(() => excluirOcRechazadas(prepararFilas(filasCrudas)), [filasCrudas]);
+  const { filas, excluidas: ocExcluidasTotal, excluidasConPagos } = useMemo(
+    () => (filtros.site.length === 0 ? excluirOcRechazadas(prepararFilas(filasCrudas)) : excluirOcRechazadas(prepararFilas(limitarPagosPorSite(filasCrudas, filtros.site)))),
+    [filasCrudas, filtros.site],
+  );
+  const ocExcluidas = { total: ocExcluidasTotal, conPagos: excluidasConPagos };
 
   const filasFiltradas = useMemo(() => filtrarFilas(filas, filtros), [filas, filtros]);
   const resumen = useMemo(() => calcularResumen(filasFiltradas), [filasFiltradas]);
@@ -186,17 +198,17 @@ export default function ReporteResponsablePage() {
 
   const opciones = useMemo(
     () => ({
-      clientes: opcionesDistintas(filas, (f) => f.cliente),
-      proyectos: opcionesDistintas(filas, (f) => f.proyecto),
-      sites: Array.from(new Map(filas.filter((f) => f.idSite).map((f) => [claveSite(f), etiquetaSite(f)])).entries())
+      clientes: opcionesDistintas(filasTodas, (f) => f.cliente),
+      proyectos: opcionesDistintas(filasTodas, (f) => f.proyecto),
+      sites: Array.from(new Map(filasTodas.filter((f) => f.idSite).map((f) => [claveSite(f), etiquetaSite(f)])).entries())
         .map(([value, label]) => ({ value, label }))
         .sort((a, b) => a.label.localeCompare(b.label, "es")),
-      tiposTrabajo: opcionesDistintas(filas, (f) => f.tipoTrabajo),
-      tiposRegistro: opcionesDistintas(filas, (f) => f.tipoRegistro),
-      estados: opcionesDistintas(filas, (f) => f.estadoNombre),
-      monedas: opcionesDistintas(filas, (f) => f.monedaClave),
+      tiposTrabajo: opcionesDistintas(filasTodas, (f) => f.tipoTrabajo),
+      tiposRegistro: opcionesDistintas(filasTodas, (f) => f.tipoRegistro),
+      estados: opcionesDistintas(filasTodas, (f) => f.estadoNombre),
+      monedas: opcionesDistintas(filasTodas, (f) => f.monedaClave),
     }),
-    [filas],
+    [filasTodas],
   );
 
   const actualizar = <K extends keyof FiltrosReporte>(campo: K, valor: FiltrosReporte[K]) =>
@@ -234,14 +246,33 @@ export default function ReporteResponsablePage() {
       setError("No hay registros para exportar.");
       return;
     }
+    const ids = Array.from(new Set(filasFiltradas.filter((f) => f.tieneOc && f.idOc !== null).map((f) => f.idOc as number))).sort((a, b) => a - b);
+    if (ids.length > 40 && !window.confirm(`Se anexarán los PDF de ${ids.length} OC al informe. Puede tardar y el archivo será pesado. ¿Continuar?`)) return;
     setExportando("ia");
     setError("");
     try {
-      await exportarPdfIa({ filas: filasFiltradas, filtros, criterio: criterioConsultado });
+      const { disponibles, fallidas } = await descargarPdfsOc(ids, (hechas, total) => setProgresoPdf(`Anexando OC ${hechas}/${total}…`));
+      setProgresoPdf("Generando…");
+      const informe = await generarInformePdf({
+        filas: filasFiltradas,
+        filtros,
+        criterio: criterioConsultado,
+        anexos: disponibles.map((d) => ({ idOc: d.idOc, paginas: d.paginas })),
+        fallidas,
+      });
+      const bytes = disponibles.length > 0 ? await unirInformeConAnexos(informe.buffer, disponibles, informe.enlaces) : new Uint8Array(informe.buffer);
+      const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: "application/pdf" }));
+      const enlace = document.createElement("a");
+      enlace.href = url;
+      enlace.download = informe.nombre;
+      enlace.click();
+      URL.revokeObjectURL(url);
+      if (fallidas.length > 0) setError(`No se pudo anexar el PDF de las OC: ${fallidas.join(", ")}. Figuran como "No disponible" en el anexo.`);
     } catch (err) {
       setError(getHttpErrorMessage(err, "No se pudo generar el PDF."));
     } finally {
       setExportando("");
+      setProgresoPdf("");
     }
   };
 
@@ -501,6 +532,10 @@ export default function ReporteResponsablePage() {
               ))}
             </select>
           </label>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 32, fontSize: 13, color: "#334155", cursor: "pointer" }}>
+            <input type="checkbox" checked={filtros.omitirOcSinGastos} onChange={(e) => actualizar("omitirOcSinGastos", e.target.checked)} />
+            Omitir OC sin gastos
+          </label>
           <div style={{ flex: 1 }} />
           <button
             type="button"
@@ -509,7 +544,7 @@ export default function ReporteResponsablePage() {
             title="Informe por OC con su detalle completo, aprobadores y pagos asociados"
             onClick={() => void exportarIa()}
           >
-            {exportando === "ia" ? "Generando…" : "Exportar PDF"}
+            {exportando === "ia" ? progresoPdf || "Generando…" : "Exportar PDF"}
           </button>
         </div>
       </form>
@@ -529,6 +564,13 @@ export default function ReporteResponsablePage() {
               <strong>{alerta.alerta}</strong> — {alerta.detalle}
             </div>
           ))}
+
+          {ocExcluidas.total > 0 ? (
+            <div role="note" style={styles.notaExcluidas}>
+              Se excluyeron {ocExcluidas.total} OC rechazada(s) del reporte
+              {ocExcluidas.conPagos > 0 ? `; ${ocExcluidas.conPagos} de ellas tenían pagos registrados (revisar en Planilla).` : "."}
+            </div>
+          ) : null}
 
           <div style={styles.responsables} aria-label="Responsables analizados">
             <span style={styles.etiqueta}>{responsablesIncluidos.length > 1 ? "Responsables incluidos en la consulta" : "Responsable analizado"}</span>
@@ -773,6 +815,7 @@ const styles = {
   error: { background: "#FEF2F2", border: "1px solid #FECACA", color: "#991B1B", borderRadius: 8, padding: "8px 12px", fontSize: 13, marginBottom: 8 },
   vacio: { color: "#64748B", fontSize: 14, padding: 24, textAlign: "center" as const },
   alertaUrgente: { background: "#B91C1C", color: "#fff", borderRadius: 8, padding: "10px 14px", fontSize: 13, marginBottom: 8, lineHeight: 1.4 },
+  notaExcluidas: { fontSize: 12, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, padding: "6px 10px", marginBottom: 8 },
   responsables: { display: "flex", flexWrap: "wrap" as const, alignItems: "center", gap: 8, margin: "0 0 8px" },
   kpis: { display: "flex", flexWrap: "wrap" as const, gap: 10 },
   kpi: { minWidth: 130, padding: "8px 14px", border: "1px solid #D8DEE8", borderRadius: 10, background: "#fff" },

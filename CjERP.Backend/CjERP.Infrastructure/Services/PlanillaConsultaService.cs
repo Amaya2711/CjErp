@@ -631,7 +631,8 @@ SELECT p.Correlativo AS Correlativo,
        p.Serie AS SeriePago,
        p.NroOperacion AS NroOperacionPago,
        p.Detalle AS DetallePago,
-       p.IdSolicitante AS IdSolicitantePlanilla
+       p.IdSolicitante AS IdSolicitantePlanilla,
+       p.IdSite AS IdSitePlanilla
 FROM dbo.Planilla p
 LEFT JOIN dbo.Constante m ON m.Campo = 'TIPO_MONEDA' AND m.Correlativo = p.TipoMoneda
 WHERE p.Correlativo IN @Ids",
@@ -706,6 +707,7 @@ WHERE p.Correlativo IN @Ids",
                     row["SeriePago"] = planilla.TryGetValue("SeriePago", out var serie) ? serie : null;
                     row["NroOperacionPago"] = planilla.TryGetValue("NroOperacionPago", out var nroOperacion) ? nroOperacion : null;
                     row["DetallePago"] = planilla.TryGetValue("DetallePago", out var detallePago) ? detallePago : null;
+                    row["IdSitePlanilla"] = planilla.TryGetValue("IdSitePlanilla", out var idSitePlanilla) ? idSitePlanilla : null;
                     if (planilla.TryGetValue("IdSolicitantePlanilla", out var idSolicitante) && idSolicitante is not null
                         && nombres.TryGetValue(Convert.ToInt32(idSolicitante), out var nombrePlanilla))
                     {
