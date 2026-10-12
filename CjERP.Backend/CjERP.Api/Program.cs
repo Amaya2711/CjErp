@@ -478,8 +478,11 @@ app.UseAuthorization();
 app.MapControllers().RequireRateLimiting("api");
 app.MapHealthChecks("/health").RequireRateLimiting("api");
 
-using (var scope = app.Services.CreateScope())
+// La programacion de jobs consulta la BD y cada intento puede tardar hasta el timeout de conexion: se hace en segundo plano
+// para que la API empiece a escuchar de inmediato (si no, Railway responde 502 durante todo el arranque).
+app.Lifetime.ApplicationStarted.Register(() => _ = Task.Run(async () =>
 {
+    using var scope = app.Services.CreateScope();
     // Un problema con la BD (p. ej. tiempo de espera) al programar los jobs no debe impedir que la API arranque.
     try
     {
@@ -521,6 +524,6 @@ using (var scope = app.Services.CreateScope())
     {
         app.Logger.LogWarning(ex, "No se pudo programar el job de push móvil (mobile-push-dispatch).");
     }
-}
+}));
 
 app.Run();
