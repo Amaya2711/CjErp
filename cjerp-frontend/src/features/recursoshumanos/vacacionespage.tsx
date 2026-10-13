@@ -126,6 +126,9 @@ const ESTADO_TABS: Array<{ key: EstadoTab; label: string; estado?: number }> = [
   { key: "movimientos", label: "Movimientos" },
 ];
 
+/** Regla de negocio: una solicitud no puede ser menor a 7 días (inicio y fin inclusive). */
+const MIN_DIAS_SOLICITUD = 7;
+
 const EMPTY_FORM: SolicitudFormState = {
   idEmpleadoCj: "",
   fechaInicio: "",
@@ -384,6 +387,15 @@ function mapLegacyVacacionToMovimiento(
   };
 }
 
+/** Suma días a una fecha ISO (yyyy-MM-dd) y la devuelve como dd/MM/yyyy para mostrarla en mensajes. */
+function addDaysToIsoDate(isoDate: string, days: number): string {
+  const date = new Date(`${isoDate}T00:00:00`);
+  date.setDate(date.getDate() + days);
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  return `${dd}/${mm}/${date.getFullYear()}`;
+}
+
 function getDaysBetween(startDate: string, endDate: string): number {
   const start = new Date(`${startDate}T00:00:00`);
   const end = new Date(`${endDate}T00:00:00`);
@@ -477,6 +489,7 @@ export default function VacacionesPage() {
   const [form, setForm] = useState<SolicitudFormState>(EMPTY_FORM);
   const [formErrors, setFormErrors] = useState<SolicitudFormErrors>({});
   const [saving, setSaving] = useState(false);
+  const [procesando, setProcesando] = useState<string | null>(null);
   const [selectedEmployeeContrato, setSelectedEmployeeContrato] = useState<ContratoEmpleadoResponse | null>(null);
   const [selectedEmployeeLoading, setSelectedEmployeeLoading] = useState(false);
   const [selectedEmployeeSaldo, setSelectedEmployeeSaldo] = useState<number | null>(null);
@@ -572,6 +585,12 @@ export default function VacacionesPage() {
 
     return getDaysBetween(form.fechaInicio, form.fechaFin);
   }, [form.fechaInicio, form.fechaFin]);
+
+  const rangoFechasMensaje =
+    formErrors.fechaFin ??
+    (requestedDays > 0 && requestedDays < MIN_DIAS_SOLICITUD
+      ? `No se puede registrar menos de ${MIN_DIAS_SOLICITUD} días de vacaciones (seleccionó ${requestedDays}).`
+      : null);
 
   const selectedMovimientoEmployee = useMemo(
     () => employees.find((item) => String(item.idEmpleado) === movimientoEmpleadoId) ?? null,
@@ -1195,8 +1214,20 @@ export default function VacacionesPage() {
       nextErrors.fechaFin = "Seleccione la fecha fin.";
     }
 
-    if (form.fechaInicio && form.fechaFin && form.fechaFin < form.fechaInicio) {
-      nextErrors.fechaFin = "La fecha fin no puede ser menor que la fecha inicio.";
+    if (form.fechaInicio && Number.isNaN(new Date(`${form.fechaInicio}T00:00:00`).getTime())) {
+      nextErrors.fechaInicio = "La fecha de inicio no es válida.";
+    }
+
+    if (form.fechaFin && Number.isNaN(new Date(`${form.fechaFin}T00:00:00`).getTime())) {
+      nextErrors.fechaFin = "La fecha fin no es válida.";
+    }
+
+    if (!nextErrors.fechaInicio && !nextErrors.fechaFin && form.fechaInicio && form.fechaFin) {
+      if (form.fechaFin < form.fechaInicio) {
+        nextErrors.fechaFin = "La fecha fin no puede ser menor que la fecha inicio.";
+      } else if (requestedDays < MIN_DIAS_SOLICITUD) {
+        nextErrors.fechaFin = `No se puede registrar menos de ${MIN_DIAS_SOLICITUD} días de vacaciones (seleccionó ${requestedDays}). La fecha fin debe ser como mínimo el ${addDaysToIsoDate(form.fechaInicio, MIN_DIAS_SOLICITUD - 1)}.`;
+      }
     }
 
     if (companyChanged) {
@@ -1238,6 +1269,10 @@ export default function VacacionesPage() {
   }
 
   async function approveRow(row: VacacionRegistro) {
+    if (procesando) {
+      return;
+    }
+
     const fechaInicio = formatDateForRequest(row.fechaInicio);
     const fechaFin = formatDateForRequest(row.fechaFin);
 
@@ -1246,8 +1281,14 @@ export default function VacacionesPage() {
       return;
     }
 
+    setProcesando(
+      row.estado === 99
+        ? "Procesando la aprobación y enviando el correo con el PDF. Por favor espere, no cierre ni actualice la página..."
+        : "Procesando la aprobación. Por favor espere..."
+    );
+
     try {
-      await aprobarVacacion({
+      const respuesta = await aprobarVacacion({
         idEmpleadoCj: row.idEmpleadoCj,
         fechaInicio,
         fechaFin,
@@ -1255,13 +1296,35 @@ export default function VacacionesPage() {
       });
 
       await loadRows();
-      window.alert("Validación registrada correctamente.");
+
+      // Al aprobar la 3ra validación el backend envía el PDF por correo e informa el resultado.
+      // httpClient ya desenvuelve {success,data}: la respuesta es el propio resultado (se tolera también el formato envuelto).
+      type ResultadoCorreo = { correoEnviado?: boolean | null; correoMensaje?: string | null };
+      const bruto = respuesta as unknown as (ResultadoCorreo & { data?: ResultadoCorreo }) | undefined;
+      const correo: ResultadoCorreo | undefined = bruto?.data ?? bruto;
+      if (row.estado === 99 && correo?.correoEnviado === true) {
+        window.alert("Validación registrada correctamente. Se envió el correo con el PDF.");
+      } else if (row.estado === 99 && correo?.correoMensaje) {
+        window.alert(`Validación registrada correctamente.\n\nCorreo: ${correo.correoMensaje}`);
+      } else if (row.estado === 99) {
+        window.alert(
+          "Validación registrada correctamente.\n\nCorreo: el servidor no informó si se envió el correo. Verifique que el backend esté actualizado con el envío de correo de la 3ra validación."
+        );
+      } else {
+        window.alert("Validación registrada correctamente.");
+      }
     } catch (approveError) {
       window.alert(getHttpMessage(approveError, "No se pudo aprobar el registro."));
+    } finally {
+      setProcesando(null);
     }
   }
 
   async function rejectRow(row: VacacionRegistro) {
+    if (procesando) {
+      return;
+    }
+
     const fechaInicio = formatDateForRequest(row.fechaInicio);
     const fechaFin = formatDateForRequest(row.fechaFin);
 
@@ -1278,6 +1341,8 @@ export default function VacacionesPage() {
       return;
     }
 
+    setProcesando("Procesando el rechazo. Por favor espere...");
+
     try {
       await rechazarVacacion({
         idEmpleadoCj: row.idEmpleadoCj,
@@ -1289,6 +1354,8 @@ export default function VacacionesPage() {
       window.alert("Registro rechazado correctamente.");
     } catch (rejectError) {
       window.alert(getHttpMessage(rejectError, "No se pudo rechazar el registro."));
+    } finally {
+      setProcesando(null);
     }
   }
 
@@ -1800,21 +1867,21 @@ export default function VacacionesPage() {
           <div style={{ display: "inline-flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
             <button
               type="button"
-              onClick={actionsDisabled ? undefined : () => void approveRow(row)}
-              disabled={actionsDisabled}
+              onClick={actionsDisabled || procesando ? undefined : () => void approveRow(row)}
+              disabled={actionsDisabled || Boolean(procesando)}
               style={actionButton(
                 "#ECFDF5",
                 "#047857",
                 "#A7F3D0",
-                actionsDisabled
+                actionsDisabled || Boolean(procesando)
               )}
             >
               Aprobar
             </button>
             <button
               type="button"
-              onClick={actionsDisabled ? undefined : () => void rejectRow(row)}
-              disabled={actionsDisabled}
+              onClick={actionsDisabled || procesando ? undefined : () => void rejectRow(row)}
+              disabled={actionsDisabled || Boolean(procesando)}
               style={actionButton(
                 "#FEF2F2",
                 "#B91C1C",
@@ -1876,6 +1943,16 @@ export default function VacacionesPage() {
 
         {error ? (
           <div style={errorBannerStyle}>{error}</div>
+        ) : null}
+
+        {procesando ? (
+          <div style={procesandoOverlayStyle} role="status" aria-live="polite">
+            <style>{"@keyframes vacacionesSpin { to { transform: rotate(360deg); } }"}</style>
+            <div style={procesandoCardStyle}>
+              <span style={procesandoSpinnerStyle} />
+              <span style={procesandoTextStyle}>{procesando}</span>
+            </div>
+          </div>
         ) : null}
 
         {activeTab === "resumen" ? (
@@ -1976,9 +2053,14 @@ export default function VacacionesPage() {
               style={inputStyle}
               disabled={saving}
             />
-            {formErrors.fechaFin ? <span style={fieldErrorStyle}>{formErrors.fechaFin}</span> : null}
           </label>
         </div>
+
+        {rangoFechasMensaje ? (
+          <div role="alert" style={rangeErrorStyle}>
+            {rangoFechasMensaje}
+          </div>
+        ) : null}
 
         <div style={infoCardStyle}>
           <AppSectionHeader title="Contexto laboral" description="Se usa para informar la cadena de validación y detectar cambio de empresa." />
@@ -2143,11 +2225,26 @@ const panelFieldsGridStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
   gap: 14,
+  alignItems: "start",
 };
 
 const fieldBlockStyle: React.CSSProperties = {
   display: "grid",
   gap: 8,
+  minWidth: 0,
+  alignContent: "start",
+};
+
+const rangeErrorStyle: React.CSSProperties = {
+  marginTop: 12,
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: "1px solid #FECACA",
+  background: "#FEF2F2",
+  color: "#B91C1C",
+  fontSize: 13,
+  fontWeight: 600,
+  lineHeight: 1.45,
 };
 
 const labelStyle: React.CSSProperties = {
@@ -2166,6 +2263,45 @@ const inputStyle: React.CSSProperties = {
   color: "#0F172A",
   boxSizing: "border-box",
   background: "#FFFFFF",
+};
+
+const procesandoOverlayStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 2000,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "rgba(15, 23, 42, 0.45)",
+  padding: 16,
+};
+
+const procesandoCardStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 14,
+  maxWidth: 440,
+  padding: "18px 22px",
+  borderRadius: 14,
+  background: "#FFFFFF",
+  boxShadow: "0 20px 45px rgba(15, 23, 42, 0.25)",
+};
+
+const procesandoSpinnerStyle: React.CSSProperties = {
+  flex: "0 0 auto",
+  width: 26,
+  height: 26,
+  borderRadius: "50%",
+  border: "3px solid #BFDBFE",
+  borderTopColor: "#1D4ED8",
+  animation: "vacacionesSpin 0.8s linear infinite",
+};
+
+const procesandoTextStyle: React.CSSProperties = {
+  color: "#0F172A",
+  fontSize: 14,
+  fontWeight: 600,
+  lineHeight: 1.45,
 };
 
 const errorBannerStyle: React.CSSProperties = {

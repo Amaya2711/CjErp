@@ -1,4 +1,4 @@
-using System.Data;
+﻿using System.Data;
 using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces.Services;
 using CjERP.Infrastructure.Persistence.Sql;
@@ -22,12 +22,22 @@ public sealed class VacacionesService : IVacacionesService
     private const string SolicitudFinalizarSp = "dbo.sp_Vacacion_Solicitud_Finalizar";
     private const string MovimientoRevertirSp = "dbo.sp_Vacacion_Movimiento_Revertir";
 
+    private const int EstadoTerceraValidacion = 99;
+    // Regla de negocio: una solicitud (inicio y fin inclusive) no puede ser menor a 7 días.
+    private const int MinDiasSolicitud = 7;
+    private static readonly TimeSpan TiempoMaximoCorreo = TimeSpan.FromSeconds(45);
+
     private readonly ISqlCommandFactory _sqlCommandFactory;
+    private readonly IVacacionesCorreoService _correoService;
     private readonly ILogger<VacacionesService> _logger;
 
-    public VacacionesService(ISqlCommandFactory sqlCommandFactory, ILogger<VacacionesService> logger)
+    public VacacionesService(
+        ISqlCommandFactory sqlCommandFactory,
+        IVacacionesCorreoService correoService,
+        ILogger<VacacionesService> logger)
     {
         _sqlCommandFactory = sqlCommandFactory;
+        _correoService = correoService;
         _logger = logger;
     }
 
@@ -142,7 +152,7 @@ public sealed class VacacionesService : IVacacionesService
             ?? result?.Resultado
             ?? 0;
 
-        return new VacacionesGrabarResultDto
+        var resultado = new VacacionesGrabarResultDto
         {
             Exito = filasActualizadas > 0 ? 1 : 0,
             Resultado = filasActualizadas > 0 ? 1 : 0,
@@ -154,6 +164,48 @@ public sealed class VacacionesService : IVacacionesService
             DiasInsertados = filasActualizadas,
             FilasEmpleadoOtrosActualizadas = filasActualizadas
         };
+
+        // Solo la aprobación de la 3ra validación dispara el correo con el PDF.
+        if (filasActualizadas > 0 && request.IdEstadoActual == EstadoTerceraValidacion)
+        {
+            await EnviarCorreoAprobacionFinalAsync(request, resultado, cancellationToken);
+        }
+
+        return resultado;
+    }
+
+    /// <summary>La aprobación ya quedó registrada: un fallo del correo no la revierte, solo se informa.</summary>
+    private async Task EnviarCorreoAprobacionFinalAsync(
+        VacacionesAprobarRequestDto request,
+        VacacionesGrabarResultDto resultado,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var limite = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            limite.CancelAfter(TiempoMaximoCorreo);
+
+            var correo = await _correoService.EnviarCorreoAprobacionFinalAsync(
+                request.IdEmpleadoCj,
+                request.FechaInicio,
+                request.FechaFin,
+                limite.Token);
+
+            resultado.CorreoEnviado = correo.Enviado;
+            resultado.CorreoMensaje = correo.Mensaje;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "[Vacaciones] No se pudo enviar el correo de aprobación final. IdEmpleadoCj={IdEmpleadoCj}, {FechaInicio:yyyy-MM-dd} a {FechaFin:yyyy-MM-dd}",
+                request.IdEmpleadoCj,
+                request.FechaInicio,
+                request.FechaFin);
+
+            resultado.CorreoEnviado = false;
+            resultado.CorreoMensaje = $"La validación se registró, pero no se pudo enviar el correo: {ex.Message}";
+        }
     }
 
     public Task<VacacionOperacionResultDto> GuardarPoliticaAsync(
@@ -655,6 +707,13 @@ public sealed class VacacionesService : IVacacionesService
         if (request.FechaFin.Date < request.FechaInicio.Date)
         {
             throw new InvalidOperationException("La fecha fin no puede ser menor que la fecha inicio.");
+        }
+
+        var dias = (request.FechaFin.Date - request.FechaInicio.Date).Days + 1;
+        if (dias < MinDiasSolicitud)
+        {
+            throw new InvalidOperationException(
+                $"No se puede registrar menos de {MinDiasSolicitud} días de vacaciones (se solicitaron {dias}).");
         }
     }
 

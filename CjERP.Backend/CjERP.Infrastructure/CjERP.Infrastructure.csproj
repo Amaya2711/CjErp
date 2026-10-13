@@ -35,6 +35,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Assets\Vacaciones\*.png" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="CjERP.Backend.Tests.Ia" />
   </ItemGroup>
 

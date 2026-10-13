@@ -33,6 +33,30 @@ public sealed class VacacionesGrabarResultDto
     public int? DiasInsertados { get; set; }
     public int? IdEmpleadoOtros { get; set; }
     public int? FilasEmpleadoOtrosActualizadas { get; set; }
+    /// <summary>Solo se informa al aprobar la 3ra validación: si el correo con el PDF se envió.</summary>
+    public bool? CorreoEnviado { get; set; }
+    public string? CorreoMensaje { get; set; }
+}
+
+public sealed class VacacionesCorreoResultDto
+{
+    public bool Enviado { get; set; }
+    public int Destinatarios { get; set; }
+    public string? Mensaje { get; set; }
+}
+
+/// <summary>Datos de la solicitud aprobada que se imprimen en la carta PDF (dbo.vVacaciones).</summary>
+public sealed class VacacionesCartaDto
+{
+    public int IdEmpleadoCj { get; set; }
+    public string? NombreEmpleado { get; set; }
+    public string? NroDocumento { get; set; }
+    public string? NombreCliente { get; set; }
+    public DateTime FechaInicio { get; set; }
+    public DateTime FechaFin { get; set; }
+    public string? PreAprobador { get; set; }
+    public string? PrimAprobador { get; set; }
+    public string? Autorizado { get; set; }
 }
 
 public sealed class VacacionPoliticaGuardarRequestDto

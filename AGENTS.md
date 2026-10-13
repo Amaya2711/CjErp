@@ -103,6 +103,7 @@ Seguridad · Tesorería/Finanzas (recibos, pagos, cheques, conciliación) · Ord
 - SP legacy (en uso): `sp_EmpleadoOtros_GrabarVacaciones`, `sp_EmpleadoOtros_ActualizaarVacaciones`, `sp_EmpleadoOtros_ListarVacaciones(Total)` · SP modelo nuevo (sin UI): `sp_Vacacion_*`
 - Tablas: EmpleadoOtros (legacy), VacacionPolitica/Periodo/Solicitud/Movimiento (nuevo)
 - Estados legacy: 97 → 98 → 99; 0 rechazado
+- Al aprobar la **3ra validación** (IdEstadoActual 99) se envía por correo el PDF de la solicitud (S/VacacionesCorreoService + VacacionesPdfDocument, SMTP vía S/SmtpMailSender) a `Constante` campo `correo_vacaciones` con `ValorFin=1` (correo en `ValorIni`, PV); datos del PDF desde `dbo.vVacaciones` (PV: no versionada). Un fallo del correo no revierte la aprobación.
 
 ### Compensación (días compensatorios)
 - FE: `features/recursoshumanos/compensacionreal.tsx`; API `api/compensacionService.ts` · BE: C/CompensacionController (`/api/admin/compensacion`) → S/CompensacionService · SP: `sp_EmpleadoCompensacion*` · Estados 97 → 98 → 9; 22 rechazado
