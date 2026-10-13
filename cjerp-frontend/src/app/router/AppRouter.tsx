@@ -24,6 +24,7 @@ const MarcacionPage = lazy(() => import("../../features/administracion/Marcacion
 const PendientesPage = lazy(() => import("../../features/administracion/pendientes"));
 const SolicitudAdministracionPage = lazy(() => import("../../features/administracion/solicitudadministracion"));
 const VacacionesPage = lazy(() => import("../../features/recursoshumanos/vacacionespage"));
+const BeneficioPage = lazy(() => import("../../features/recursoshumanos/beneficio"));
 const AlmacenPage = lazy(() => import("../../features/logistica/almacen/almacen"));
 const InventarioPage = lazy(() => import("../../features/logistica/almacen/inventario"));
 const CrucePage = lazy(() => import("../../features/logistica/gestionequipos/cruce"));
@@ -154,6 +155,7 @@ export default function AppRouter() {
             <Route path="/administracion/marcacion" element={<MarcacionPage />} />
             <Route path="/administracion/vacaciones" element={<VacacionesPage />} />
             <Route path="/recursoshumanos/vacacionespage" element={<VacacionesPage />} />
+            <Route path="/recursoshumanos/beneficio" element={<BeneficioPage />} />
 
             <Route path="/operaciones/capitalizacion" element={<CapitalizacionPage />} />
             <Route path="/operaciones/operacion" element={<OperacionPage />} />

@@ -27,6 +27,8 @@ export type VacacionesConsultaRequest = {
   fechaFin?: string;
   nombreEmpleado?: string;
   idEmpleado?: number;
+  /** Filtra por dueño de la solicitud (IdEmpleadoCj). El backend lo fuerza desde el token para el rol ESTANDAR. */
+  idEmpleadoCj?: number;
   maxRows?: number;
   consulta?: string;
 };

@@ -105,6 +105,11 @@ Seguridad · Tesorería/Finanzas (recibos, pagos, cheques, conciliación) · Ord
 - Estados legacy: 97 → 98 → 99; 0 rechazado
 - Al aprobar la **3ra validación** (IdEstadoActual 99) se envía por correo el PDF de la solicitud (S/VacacionesCorreoService + VacacionesPdfDocument, SMTP vía S/SmtpMailSender) a `Constante` campo `correo_vacaciones` con `ValorFin=1` (correo en `ValorIni`, PV); datos del PDF desde `dbo.vVacaciones` (PV: no versionada). Un fallo del correo no revierte la aprobación.
 
+### Beneficios (adelanto de sueldo / préstamo)
+- FE: `features/recursoshumanos/beneficio.tsx` (ruta `/recursoshumanos/beneficio`; pestañas Adelanto, Préstamo, Aprobar, Reporte); API `api/beneficioService.ts` · BE: C/BeneficioController (`/api/admin/beneficios`) → S/BeneficioService, BeneficioPdfDocument (QuestPDF), SMTP vía S/SmtpMailSender
+- SP: `sp_Beneficio_ListarEmpleados/Registrar/Listar/Detalle/Aprobar/Rechazar` (scripts `Database/Recursoshumanos/06`, menú `07`; PV: no ejecutados en BD real) · Tablas existentes: cabBeneficio, DetBeneficio, EmpleadoCj.IdAptoBeneficio, Constante (`CORRELATIVO`/7, `BENEFICIO`, `APROBADO_PAGO_BENEFICIO`, `correo_beneficio`)
+- Reglas (de FrmBeneficio): empleado cargo 50 y estado 1; `IdAptoBeneficio = 2` = no apto; tipo 1 = préstamo (cuotas), 2 = adelanto (siempre 1 cuota; el préstamo admite 1 a 60); IdAprobado 0 pendiente / 1 aprobado / 2 rechazado. Al aprobar se envía el PDF a `Constante correo_beneficio` con `ValorFin=1` (correo en `ValorIni`, PV); un fallo del correo no revierte la aprobación. Aprobador/usuario salen del JWT. Al rechazar, el empleado vuelve a apto (`IdAptoBeneficio = 1`, PV) si no tiene otro beneficio pendiente o aprobado (mejora sobre el original).
+
 ### Compensación (días compensatorios)
 - FE: `features/recursoshumanos/compensacionreal.tsx`; API `api/compensacionService.ts` · BE: C/CompensacionController (`/api/admin/compensacion`) → S/CompensacionService · SP: `sp_EmpleadoCompensacion*` · Estados 97 → 98 → 9; 22 rechazado
 

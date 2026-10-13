@@ -173,7 +173,7 @@ internal sealed class VacacionesPdfDocument : IDocument
 
     private static string Valor(string? valor) => string.IsNullOrWhiteSpace(valor) ? "—" : valor.Trim();
 
-    private static byte[]? LeerImagen(string nombre)
+    internal static byte[]? LeerImagen(string nombre)
     {
         var assembly = typeof(VacacionesPdfDocument).Assembly;
         var recurso = $"CjERP.Infrastructure.Assets.Vacaciones.{nombre}";

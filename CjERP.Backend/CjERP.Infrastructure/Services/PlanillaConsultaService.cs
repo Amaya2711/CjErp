@@ -996,7 +996,8 @@ WHERE Correlativo IN @Correlativos";
                         "FechaFinal",
                         "IdEstado",
                         "NombreEmpleado",
-                        "IdEmpleado"
+                        "IdEmpleado",
+                        "IdEmpleadoCj"
                     };
 
                     return parametros.Where(parametro =>

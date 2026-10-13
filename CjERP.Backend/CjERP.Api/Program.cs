@@ -258,6 +258,7 @@ builder.Services.AddScoped<IEmpleadoPendienteService, EmpleadoPendienteService>(
 builder.Services.AddScoped<ILogisticaRecojoService, LogisticaRecojoService>();
 builder.Services.AddScoped<ISmtpMailSender, SmtpMailSender>();
 builder.Services.AddScoped<IVacacionesCorreoService, VacacionesCorreoService>();
+builder.Services.AddScoped<IBeneficioService, BeneficioService>();
 builder.Services.AddScoped<ILogisticaReembolsoService, LogisticaReembolsoService>();
 builder.Services.AddScoped<ILogisticaSuministroService, LogisticaSuministroService>();
 builder.Services.AddScoped<ICompensacionService, CompensacionService>();

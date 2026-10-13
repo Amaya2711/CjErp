@@ -208,6 +208,26 @@ export default function SeguridadPermisosAccionesPage() {
       ];
     }
 
+    const esPaginaVacaciones = form.rutaPagina.endsWith("/recursoshumanos/vacacionespage");
+
+    if (form.tipoElemento === "tab" && esPaginaVacaciones) {
+      return [
+        { value: "tab.todas", label: "Todas" },
+        { value: "tab.validacion_1", label: "1ra validación" },
+        { value: "tab.validacion_2", label: "2da validación" },
+        { value: "tab.validacion_3", label: "3ra validación" },
+        { value: "tab.resumen", label: "Resumen" },
+      ];
+    }
+
+    if (form.tipoElemento === "button" && esPaginaVacaciones) {
+      return [
+        { value: "button.actualizar", label: "Actualizar" },
+        { value: "button.aprobar", label: "Aprobar" },
+        { value: "button.rechazar", label: "Rechazar" },
+      ];
+    }
+
     if (form.tipoElemento === "system") {
       return [{ value: "system.access", label: "Acceso general a la pagina" }];
     }

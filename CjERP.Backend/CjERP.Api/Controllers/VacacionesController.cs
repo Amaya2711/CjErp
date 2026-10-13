@@ -439,11 +439,39 @@ public class VacacionesController : ControllerBase
         [FromQuery] string? nombreEmpleado,
         [FromQuery] string? consulta,
         [FromQuery] int? maxRows,
+        [FromQuery] int? idEmpleadoCj,
         CancellationToken cancellationToken)
     {
         try
         {
             var parametros = new List<PlanillaConsultaParametroDto>();
+
+            // Rol ESTANDAR (7): solo ve sus propias vacaciones. El empleado sale del JWT, no de lo que envíe el cliente.
+            if (int.TryParse(User.FindFirstValue("IdRol"), out var idRol) && idRol == RolEstandar)
+            {
+                var idEmpleadoToken = ResolveIdEmpleadoCjToken();
+                if (idEmpleadoToken <= 0)
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new
+                    {
+                        success = false,
+                        message = "No se pudo identificar el empleado del usuario para consultar vacaciones."
+                    });
+                }
+
+                idEmpleadoCj = idEmpleadoToken;
+                consulta = "vacaciones";
+            }
+
+            if (idEmpleadoCj.HasValue && idEmpleadoCj.Value > 0)
+            {
+                parametros.Add(new PlanillaConsultaParametroDto
+                {
+                    Nombre = "IdEmpleadoCj",
+                    Valor = idEmpleadoCj.Value.ToString(),
+                    Tipo = "int"
+                });
+            }
 
             if (idEstado.HasValue)
             {
@@ -502,6 +530,22 @@ public class VacacionesController : ControllerBase
         {
             return StatusCode(500, new { success = false, message = ex.Message, detail = ex.InnerException?.Message });
         }
+    }
+
+    private const int RolEstandar = 7;
+
+    /// <summary>IdEmpleado (EmpleadoCj) del usuario autenticado según el JWT; 0 si no se puede resolver.</summary>
+    private int ResolveIdEmpleadoCjToken()
+    {
+        foreach (var claim in new[] { "IdEmpleadoCj", "CodEmp", "codEmp" })
+        {
+            if (int.TryParse(User.FindFirstValue(claim), out var id) && id > 0)
+            {
+                return id;
+            }
+        }
+
+        return 0;
     }
 
     private string ResolveUsuarioAccion()

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import AppPage from "../../components/base/AppPage";
 import AppSectionHeader from "../../components/base/AppSectionHeader";
 import DataGridBase, { type DataGridColumn } from "../../components/base/DataGridBase";
@@ -12,6 +12,8 @@ import {
   Tooltip,
 } from "recharts";
 import { listarEmpleadosWup } from "../../api/empleadoService";
+import { getAuthUser, hasFullPageActionAccess } from "../../utils/authStorage";
+import { seguridadPermisosAccionesService } from "../seguridad/services/seguridadPermisosAccionesService";
 import type { EmpleadoCta } from "../../models/empleadoCta";
 import {
   aprobarVacacion,
@@ -125,6 +127,20 @@ const ESTADO_TABS: Array<{ key: EstadoTab; label: string; estado?: number }> = [
   { key: "resumen", label: "Resumen" },
   { key: "movimientos", label: "Movimientos" },
 ];
+
+const RUTA_PAGINA = "/recursoshumanos/vacacionespage";
+/** Rol ESTANDAR (7): solo ve la pestaña Movimientos y el botón Nueva solicitud, salvo permisos asignados a nivel de usuario. */
+const ID_ROL_ESTANDAR = 7;
+
+/** Clave de permiso (SegPermisoAccion) por pestaña; Movimientos siempre está disponible. */
+const TAB_ACTION_KEYS: Record<EstadoTab, string | null> = {
+  todos: "tab.todas",
+  "97": "tab.validacion_1",
+  "98": "tab.validacion_2",
+  "99": "tab.validacion_3",
+  resumen: "tab.resumen",
+  movimientos: null,
+};
 
 /** Regla de negocio: una solicitud no puede ser menor a 7 días (inicio y fin inclusive). */
 const MIN_DIAS_SOLICITUD = 7;
@@ -358,13 +374,41 @@ function mapVacacionMovimientoRow(item: VacacionMovimientoListItem, index: numbe
   };
 }
 
+const ESTADOS_MOVIMIENTO = ["1ERA VALIDACIÓN", "2DA VALIDACIÓN", "3ERA VALIDACIÓN", "APROBADA", "RECHAZADA"] as const;
+
+/** Estado de la solicitud legacy: 97/98/99 = 1ra/2da/3ra validación pendiente; 0 = rechazada; el resto con aprobación = aprobada. */
+function resolveEstadoMovimientoLegacy(row: VacacionRegistro): string {
+  if (row.estado === 97) return "1ERA VALIDACIÓN";
+  if (row.estado === 98) return "2DA VALIDACIÓN";
+  if (row.estado === 99) return "3ERA VALIDACIÓN";
+  if (row.estado === 0 || row.estadoLabel.trim().toUpperCase().startsWith("RECHAZ")) return "RECHAZADA";
+  return "APROBADA";
+}
+
+function resolveMovimientoEstadoColors(estado: string): { background: string; color: string } {
+  switch (estado.toUpperCase()) {
+    case "ANULADO":
+    case "RECHAZADA":
+      return { background: "#FEF2F2", color: "#B91C1C" };
+    case "1ERA VALIDACIÓN":
+      return { background: "#EEF2FF", color: "#3730A3" };
+    case "2DA VALIDACIÓN":
+      return { background: "#F0F9FF", color: "#0369A1" };
+    case "3ERA VALIDACIÓN":
+      return { background: "#FEF3C7", color: "#B45309" };
+    case "APROBADA":
+      return { background: "#ECFDF5", color: "#047857" };
+    default:
+      return { background: "#EFF6FF", color: "#1D4ED8" };
+  }
+}
+
 function mapLegacyVacacionToMovimiento(
   row: VacacionRegistro,
   index: number
 ): VacacionMovimientoRegistro {
   const fechaBase = row.fechaAprob || row.fechaCreacion || row.fechaInicio;
   const dias = getVacacionDias(row.fechaInicio, row.fechaFin);
-  const activo = row.idActivo.trim().toUpperCase() === "ACTIVO";
 
   return {
     rowKey: `legacy-${row.rowKey}-${index}`,
@@ -378,7 +422,7 @@ function mapLegacyVacacionToMovimiento(
     fechaMovimiento: fechaBase,
     tipoMovimiento: "VACACION LEGACY",
     cantidadDias: dias,
-    estado: activo || isVacacionAprobada(row) ? "APLICADO" : "PENDIENTE",
+    estado: resolveEstadoMovimientoLegacy(row),
     referencia: `${formatDateDisplay(row.fechaInicio)} al ${formatDateDisplay(row.fechaFin)}`,
     observacion: `Registro legacy de vacaciones. Estado legacy: ${row.estadoLabel || row.estado}.`,
     idMovimientoOrigen: null,
@@ -481,7 +525,18 @@ export default function VacacionesPage() {
   const [error, setError] = useState<string | null>(null);
   const [employees, setEmployees] = useState<EmpleadoCta[]>([]);
   const [employeesLoading, setEmployeesLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<EstadoTab>("97");
+  // Rol ESTANDAR (7) sin acceso total: solo Movimientos + Nueva solicitud, más lo que se le asigne a nivel de usuario.
+  const [accesoRestringido] = useState(() => {
+    const authUser = getAuthUser();
+    return Number(authUser?.idrol) === ID_ROL_ESTANDAR && !hasFullPageActionAccess(authUser);
+  });
+  // Empleado (EmpleadoCj) relacionado al usuario: codEmp de la sesión. El rol restringido solo puede ver este empleado.
+  const [miIdEmpleado] = useState(() => {
+    const id = Math.trunc(Number(getAuthUser()?.codEmp ?? 0));
+    return Number.isFinite(id) && id > 0 ? id : null;
+  });
+  const [permisosUsuario, setPermisosUsuario] = useState<Record<string, boolean>>({});
+  const [activeTab, setActiveTab] = useState<EstadoTab>(() => (accesoRestringido ? "movimientos" : "97"));
   const [searchEmployee, setSearchEmployee] = useState("");
   const [dateStart, setDateStart] = useState("");
   const [dateEnd, setDateEnd] = useState("");
@@ -503,13 +558,26 @@ export default function VacacionesPage() {
   const [selectedResumenEmpresa, setSelectedResumenEmpresa] = useState<string>("");
   const [selectedResumenEmpleadoId, setSelectedResumenEmpleadoId] = useState<number | null>(null);
   const [searchResumenEmpleado, setSearchResumenEmpleado] = useState("");
-  const [movimientoRows, setMovimientoRows] = useState<VacacionMovimientoRegistro[]>([]);
+  const [movimientoRowsTodas, setMovimientoRows] = useState<VacacionMovimientoRegistro[]>([]);
   const [movimientoLoading, setMovimientoLoading] = useState(false);
-  const [movimientoEmpleadoId, setMovimientoEmpleadoId] = useState<string>("");
+  const [movimientoEmpleadoId, setMovimientoEmpleadoId] = useState<string>(() =>
+    accesoRestringido && miIdEmpleado ? String(miIdEmpleado) : ""
+  );
   const [movimientoEmpleadoSearch, setMovimientoEmpleadoSearch] = useState("");
   const [movimientoFechaDesde, setMovimientoFechaDesde] = useState("");
   const [movimientoFechaHasta, setMovimientoFechaHasta] = useState("");
-  const [movimientoEstadoFiltro, setMovimientoEstadoFiltro] = useState("");
+  // Sin selección se muestran todas las solicitudes excepto las RECHAZADAS; al seleccionar estados se muestran solo esos.
+  const [movimientoEstadosFiltro, setMovimientoEstadosFiltro] = useState<string[]>([]);
+  const movimientoRows = useMemo(
+    () =>
+      movimientoRowsTodas.filter((row) => {
+        const estado = row.estado.toUpperCase();
+        return movimientoEstadosFiltro.length > 0
+          ? movimientoEstadosFiltro.includes(estado)
+          : estado !== "RECHAZADA";
+      }),
+    [movimientoRowsTodas, movimientoEstadosFiltro]
+  );
 
   const activeEstado = useMemo(() => {
     const tab = ESTADO_TABS.find((item) => item.key === activeTab);
@@ -575,6 +643,65 @@ export default function VacacionesPage() {
 
     return selectedEmployeeSaldo;
   }, [companyChanged, selectedEmployeeSaldo]);
+
+  useEffect(() => {
+    if (!accesoRestringido) {
+      return;
+    }
+
+    // SegPermisoAccion referencia EmpleadoCj (codEmp en sesión); algunas sesiones traen además un IdEmpleado alterno.
+    const authUser = getAuthUser();
+    const employeeIds = [...new Set([authUser?.codEmp, authUser?.idEmpleado]
+      .map((value) => Math.trunc(Number(value ?? 0)))
+      .filter((value) => Number.isFinite(value) && value > 0))];
+    let cancelled = false;
+
+    async function cargarPermisosUsuario() {
+      try {
+        const conjuntos = await Promise.all(
+          employeeIds.map((idEmpleado) =>
+            seguridadPermisosAccionesService.listar({ rutaPagina: RUTA_PAGINA, idEmpleado })
+          )
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        // Solo permisos asignados al usuario (idEmpleado); los de perfil/rol (idRol) no aplican aquí.
+        const permitidos = conjuntos.flat().reduce<Record<string, boolean>>((resultado, permiso) => {
+          const clave = permiso.claveAccion?.trim().toLowerCase();
+          if (clave && permiso.idEmpleado) {
+            resultado[clave] = Boolean(
+              resultado[clave] || (permiso.esActivo && permiso.puedeVer && permiso.puedeEjecutar)
+            );
+          }
+          return resultado;
+        }, {});
+
+        setPermisosUsuario(permitidos);
+      } catch {
+        if (!cancelled) {
+          setPermisosUsuario({});
+        }
+      }
+    }
+
+    void cargarPermisosUsuario();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accesoRestringido]);
+
+  const puedeAccion = (clave: string) => !accesoRestringido || Boolean(permisosUsuario[clave]);
+  const puedeAprobar = puedeAccion("button.aprobar");
+  const puedeRechazar = puedeAccion("button.rechazar");
+  const puedeActualizar = puedeAccion("button.actualizar");
+  const tabsVisibles = ESTADO_TABS.filter((tab) => {
+    const clave = TAB_ACTION_KEYS[tab.key];
+    return clave === null || puedeAccion(clave);
+  });
 
   const actionsDisabled = activeTab === "todos";
 
@@ -1034,6 +1161,12 @@ export default function VacacionesPage() {
     let cancelled = false;
 
     async function loadMovimientos() {
+      if (accesoRestringido && !movimientoEmpleadoId) {
+        // Sin empleado relacionado al usuario no se muestra nada (nunca el resto de empleados).
+        setMovimientoRows([]);
+        return;
+      }
+
       setMovimientoLoading(true);
       setError(null);
 
@@ -1043,11 +1176,11 @@ export default function VacacionesPage() {
             idEmpleado: movimientoEmpleadoId ? Number(movimientoEmpleadoId) : undefined,
             fechaDesde: movimientoFechaDesde || undefined,
             fechaHasta: movimientoFechaHasta || undefined,
-            estado: movimientoEstadoFiltro || undefined,
           }),
           listarVacaciones({
             consulta: "vacaciones",
             nombreEmpleado: selectedMovimientoEmployee?.nombreEmpleado?.trim() || undefined,
+            idEmpleadoCj: accesoRestringido ? (miIdEmpleado ?? undefined) : undefined,
             fechaInicio: movimientoFechaDesde || undefined,
             fechaFin: movimientoFechaHasta || undefined,
             maxRows: 500,
@@ -1068,14 +1201,13 @@ export default function VacacionesPage() {
                 .map((row, index) => mapVacacionRow(row, index))
                 .filter((row) =>
                   (!movimientoEmpleadoId || Number(row.idEmpleadoCj) === Number(movimientoEmpleadoId)) &&
-                  (!movimientoEstadoFiltro || movimientoEstadoFiltro === "APLICADO"
-                    ? (row.idActivo.trim().toUpperCase() === "ACTIVO" || isVacacionAprobada(row))
-                    : false)
+                  (row.idActivo.trim().toUpperCase() === "ACTIVO" || isVacacionAprobada(row) || row.estado === 0)
                 )
                 .map((row, index) => mapLegacyVacacionToMovimiento(row, index))
             : [];
 
-        const finalRows = mappedNew.length > 0 ? mappedNew : mappedLegacy;
+        const todasLasFilas = mappedNew.length > 0 ? mappedNew : mappedLegacy;
+        const finalRows = todasLasFilas;
 
         setMovimientoRows(finalRows);
       } catch (loadError) {
@@ -1095,7 +1227,7 @@ export default function VacacionesPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, movimientoEmpleadoId, movimientoEstadoFiltro, movimientoFechaDesde, movimientoFechaHasta]);
+  }, [activeTab, movimientoEmpleadoId, movimientoFechaDesde, movimientoFechaHasta]);
 
   useEffect(() => {
     if (!form.idEmpleadoCj) {
@@ -1121,7 +1253,23 @@ export default function VacacionesPage() {
     setEmployeesLoading(true);
     try {
       const response = await listarEmpleadosWup();
-      setEmployees(Array.isArray(response) ? response : []);
+      const lista = Array.isArray(response) ? response : [];
+
+      if (accesoRestringido) {
+        // Rol restringido: solo el empleado relacionado a su usuario.
+        const propio = lista.find((item) => Number(item.idEmpleado) === miIdEmpleado);
+        const nombreSesion = String(getAuthUser()?.nombre ?? "").trim();
+        setEmployees(
+          propio
+            ? [propio]
+            : miIdEmpleado && nombreSesion
+              ? [{ idEmpleado: miIdEmpleado, nombreEmpleado: nombreSesion, nombreEmpleadoCJ: nombreSesion, cuenta: "", cuentaInter: "", nombreCta: "", nombreBanco: "", idDocumento: 0, nroDocumento: "", idCheque: null }]
+              : []
+        );
+        return;
+      }
+
+      setEmployees(lista);
     } catch (loadError) {
       setError(getHttpMessage(loadError, "No se pudo cargar la lista de empleados."));
     } finally {
@@ -1394,8 +1542,7 @@ export default function VacacionesPage() {
             alignItems: "center",
             padding: "6px 10px",
             borderRadius: 999,
-            background: row.estado.toUpperCase() === "ANULADO" ? "#FEF2F2" : "#EFF6FF",
-            color: row.estado.toUpperCase() === "ANULADO" ? "#B91C1C" : "#1D4ED8",
+            ...resolveMovimientoEstadoColors(row.estado),
             fontWeight: 700,
             fontSize: 12,
           }}
@@ -1466,7 +1613,12 @@ export default function VacacionesPage() {
               <input
                 type="text"
                 value={movimientoEmpleadoSearch}
+                readOnly={accesoRestringido}
                 onChange={(event) => {
+                  if (accesoRestringido) {
+                    return;
+                  }
+
                   const value = event.target.value;
                   setMovimientoEmpleadoSearch(value);
 
@@ -1477,6 +1629,10 @@ export default function VacacionesPage() {
                   setMovimientoEmpleadoId(exactMatch ? String(exactMatch.idEmpleado) : "");
                 }}
                 onBlur={() => {
+                  if (accesoRestringido) {
+                    return;
+                  }
+
                   if (!movimientoEmpleadoSearch.trim()) {
                     setMovimientoEmpleadoId("");
                     return;
@@ -1491,9 +1647,9 @@ export default function VacacionesPage() {
                     setMovimientoEmpleadoSearch(exactMatch.nombreEmpleado);
                   }
                 }}
-                list="movimientos-empleados-autocomplete"
+                list={accesoRestringido ? undefined : "movimientos-empleados-autocomplete"}
                 placeholder="Escriba nombre o documento"
-                style={inputStyle}
+                style={accesoRestringido ? { ...inputStyle, background: "#F1F5F9", cursor: "not-allowed" } : inputStyle}
               />
               <datalist id="movimientos-empleados-autocomplete">
                 {movimientoEmployeesFiltered.map((employee) => (
@@ -1515,18 +1671,14 @@ export default function VacacionesPage() {
               <input type="date" value={movimientoFechaHasta} onChange={(event) => setMovimientoFechaHasta(event.target.value)} style={inputStyle} />
             </label>
 
-            <label style={fieldBlockStyle}>
+            <div style={fieldBlockStyle}>
               <span style={labelStyle}>Estado</span>
-              <select
-                value={movimientoEstadoFiltro}
-                onChange={(event) => setMovimientoEstadoFiltro(event.target.value)}
-                style={inputStyle}
-              >
-                <option value="">Todos</option>
-                <option value="APLICADO">APLICADO</option>
-                <option value="ANULADO">ANULADO</option>
-              </select>
-            </label>
+              <EstadoMultiFiltro
+                opciones={ESTADOS_MOVIMIENTO}
+                seleccionados={movimientoEstadosFiltro}
+                onChange={setMovimientoEstadosFiltro}
+              />
+            </div>
           </div>
 
           <div style={resumenEmployeeInfoGridStyle}>
@@ -1865,6 +2017,7 @@ export default function VacacionesPage() {
         align: "center",
         render: (row) => (
           <div style={{ display: "inline-flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+            {puedeAprobar ? (
             <button
               type="button"
               onClick={actionsDisabled || procesando ? undefined : () => void approveRow(row)}
@@ -1878,6 +2031,8 @@ export default function VacacionesPage() {
             >
               Aprobar
             </button>
+            ) : null}
+            {puedeRechazar ? (
             <button
               type="button"
               onClick={actionsDisabled || procesando ? undefined : () => void rejectRow(row)}
@@ -1891,11 +2046,12 @@ export default function VacacionesPage() {
             >
               Rechazar
             </button>
+            ) : null}
           </div>
         ),
       },
     ],
-    [actionsDisabled]
+    [actionsDisabled, procesando, puedeAprobar, puedeRechazar]
   );
 
   return (
@@ -1903,9 +2059,11 @@ export default function VacacionesPage() {
       title="Vacaciones Administrativo"
       actions={
         <div style={{ display: "flex", gap: 10 }}>
-          <button type="button" onClick={() => void loadRows()} style={primaryButton("#FFFFFF", "#1D4ED8", "#BFDBFE")}>
-            Actualizar
-          </button>
+          {puedeActualizar ? (
+            <button type="button" onClick={() => void loadRows()} style={primaryButton("#FFFFFF", "#1D4ED8", "#BFDBFE")}>
+              Actualizar
+            </button>
+          ) : null}
           <button type="button" onClick={openPanel} style={primaryButton("#1D4ED8", "#FFFFFF", "#1D4ED8")}>
             Nueva solicitud
           </button>
@@ -1913,15 +2071,17 @@ export default function VacacionesPage() {
       }
     >
       <div style={panelCardStyle}>
+        {accesoRestringido ? null : (
         <div style={summaryGridStyle}>
           <SummaryCard label="Total" value={summary.total} color="#1D4ED8" />
           <SummaryCard label="1ra validación" value={summary.primer} color="#4338CA" />
           <SummaryCard label="2da validación" value={summary.segundo} color="#047857" />
           <SummaryCard label="3ra validación" value={summary.tercero} color="#B45309" />
         </div>
+        )}
 
         <div style={tabsRowStyle}>
-          {ESTADO_TABS.map((tab) => (
+          {tabsVisibles.map((tab) => (
             <button
               key={tab.key}
               type="button"
@@ -2263,6 +2423,142 @@ const inputStyle: React.CSSProperties = {
   color: "#0F172A",
   boxSizing: "border-box",
   background: "#FFFFFF",
+};
+
+/** Filtro desplegable con selección múltiple. Sin selección = "Todos" (el padre decide qué excluye por defecto). */
+function EstadoMultiFiltro({
+  opciones,
+  seleccionados,
+  onChange,
+}: {
+  opciones: readonly string[];
+  seleccionados: string[];
+  onChange: (valores: string[]) => void;
+}) {
+  const [abierto, setAbierto] = useState(false);
+  const contenedorRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!abierto) {
+      return;
+    }
+
+    const cerrarAlHacerClicFuera = (event: MouseEvent) => {
+      if (contenedorRef.current && !contenedorRef.current.contains(event.target as Node)) {
+        setAbierto(false);
+      }
+    };
+
+    document.addEventListener("mousedown", cerrarAlHacerClicFuera);
+    return () => document.removeEventListener("mousedown", cerrarAlHacerClicFuera);
+  }, [abierto]);
+
+  const resumen =
+    seleccionados.length === 0
+      ? "Todos (sin rechazadas)"
+      : seleccionados.length <= 2
+        ? seleccionados.join(", ")
+        : `${seleccionados.length} estados seleccionados`;
+
+  return (
+    <div ref={contenedorRef} style={{ position: "relative", minWidth: 0 }}>
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={abierto}
+        onClick={() => setAbierto((prev) => !prev)}
+        style={estadoFiltroBotonStyle}
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{resumen}</span>
+        <span aria-hidden="true" style={{ fontSize: 10, color: "#475569" }}>
+          ▼
+        </span>
+      </button>
+
+      {abierto ? (
+        <div style={estadoFiltroPanelStyle} role="listbox" aria-multiselectable="true">
+          {opciones.map((opcion) => (
+            <label key={opcion} style={estadoFiltroOpcionStyle}>
+              <input
+                type="checkbox"
+                checked={seleccionados.includes(opcion)}
+                onChange={() =>
+                  onChange(
+                    seleccionados.includes(opcion)
+                      ? seleccionados.filter((item) => item !== opcion)
+                      : [...seleccionados, opcion]
+                  )
+                }
+              />
+              <span>{opcion}</span>
+            </label>
+          ))}
+          {seleccionados.length > 0 ? (
+            <button type="button" onClick={() => onChange([])} style={estadoFiltroLimpiarStyle}>
+              Limpiar selección
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const estadoFiltroBotonStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 44,
+  borderRadius: 12,
+  border: "1px solid #CBD5E1",
+  padding: "0 12px",
+  fontSize: 14,
+  color: "#0F172A",
+  background: "#FFFFFF",
+  boxSizing: "border-box",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+  cursor: "pointer",
+  textAlign: "left",
+};
+
+const estadoFiltroPanelStyle: React.CSSProperties = {
+  position: "absolute",
+  top: "calc(100% + 4px)",
+  left: 0,
+  right: 0,
+  zIndex: 30,
+  padding: 8,
+  borderRadius: 12,
+  border: "1px solid #CBD5E1",
+  background: "#FFFFFF",
+  boxShadow: "0 12px 28px rgba(15, 23, 42, 0.15)",
+  display: "grid",
+  gap: 2,
+};
+
+const estadoFiltroOpcionStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  padding: "7px 8px",
+  borderRadius: 8,
+  fontSize: 13,
+  color: "#0F172A",
+  cursor: "pointer",
+};
+
+const estadoFiltroLimpiarStyle: React.CSSProperties = {
+  marginTop: 4,
+  padding: "6px 8px",
+  border: "none",
+  borderTop: "1px solid #E2E8F0",
+  background: "transparent",
+  color: "#1D4ED8",
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: "pointer",
+  textAlign: "left",
 };
 
 const procesandoOverlayStyle: React.CSSProperties = {

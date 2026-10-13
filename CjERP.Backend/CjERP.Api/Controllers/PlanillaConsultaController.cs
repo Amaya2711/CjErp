@@ -23,6 +23,7 @@ namespace CjERP.Api.Controllers
         private static readonly string[] RequiredParametersPagosV1 = [];
         private static readonly string[] RequiredParametersAprobar = ["IdCargo", "IdEmpleado", "Estados"];
         private static readonly string[] RequiredParametersVacaciones = [];
+        private const int RolEstandar = 7;
         private static readonly string[] RequiredParametersGastosFechaDeposito = ["Estados", "FechaDeposito"];
         private static readonly string[] RequiredParametersGastosRango = ["Estados", "FechaInicio", "FechaFin"];
         private static readonly string[] RequiredParametersImportarResumenOT =
@@ -91,6 +92,11 @@ namespace CjERP.Api.Controllers
 
             EnsureClaimFallback(providedParameters);
             AppendClaimFallbackParameters(parametros, providedParameters);
+
+            if (!TryRestringirVacacionesRolEstandar(consulta, parametros, out var restriccionVacaciones))
+            {
+                return restriccionVacaciones!;
+            }
 
             var providedNames = new HashSet<string>(
                 providedParameters.Keys,
@@ -631,6 +637,51 @@ namespace CjERP.Api.Controllers
                     providedParameters["IdCargo"] = resolvedIdCargo;
                 }
             }
+        }
+
+        /// <summary>
+        /// Rol ESTANDAR (7): solo puede consultar sus propias vacaciones. El filtro por empleado se toma del JWT
+        /// y reemplaza cualquier IdEmpleadoCj enviado por el cliente. Si no se puede resolver, no se consulta nada.
+        /// </summary>
+        private bool TryRestringirVacacionesRolEstandar(
+            string? consulta,
+            List<PlanillaConsultaParametroDto> parametros,
+            out IActionResult? rechazo)
+        {
+            rechazo = null;
+
+            if (!string.Equals(consulta, "vacaciones", StringComparison.OrdinalIgnoreCase) ||
+                !int.TryParse(User.FindFirstValue("IdRol"), out var idRol) ||
+                idRol != RolEstandar)
+            {
+                return true;
+            }
+
+            var idEmpleadoCj = ResolveNumericClaimValue(
+                User.FindFirstValue("IdEmpleadoCj"),
+                User.FindFirstValue("CodEmp"),
+                User.FindFirstValue("codEmp"));
+
+            if (string.IsNullOrWhiteSpace(idEmpleadoCj))
+            {
+                rechazo = StatusCode(StatusCodes.Status403Forbidden, new
+                {
+                    success = false,
+                    message = "No se pudo identificar el empleado del usuario para consultar vacaciones."
+                });
+                return false;
+            }
+
+            parametros.RemoveAll(parametro =>
+                string.Equals(parametro.Nombre?.Trim().TrimStart('@'), "IdEmpleadoCj", StringComparison.OrdinalIgnoreCase));
+            parametros.Add(new PlanillaConsultaParametroDto
+            {
+                Nombre = "IdEmpleadoCj",
+                Valor = idEmpleadoCj,
+                Tipo = "int"
+            });
+
+            return true;
         }
 
         private static void AppendClaimFallbackParameters(
