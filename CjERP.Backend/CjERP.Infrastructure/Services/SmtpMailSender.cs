@@ -11,11 +11,13 @@ namespace CjERP.Infrastructure.Services;
 public sealed class SmtpMailSender : ISmtpMailSender
 {
     private readonly SmtpSettings _smtpSettings;
+    private readonly IGraphMailSender _graphMailSender;
     private readonly ILogger<SmtpMailSender> _logger;
 
-    public SmtpMailSender(IOptions<SmtpSettings> smtpSettings, ILogger<SmtpMailSender> logger)
+    public SmtpMailSender(IOptions<SmtpSettings> smtpSettings, IGraphMailSender graphMailSender, ILogger<SmtpMailSender> logger)
     {
         _smtpSettings = smtpSettings.Value;
+        _graphMailSender = graphMailSender;
         _logger = logger;
     }
 
@@ -28,6 +30,21 @@ public sealed class SmtpMailSender : ISmtpMailSender
         string contentTypeAdjunto,
         CancellationToken cancellationToken = default)
     {
+        // Microsoft Graph (HTTPS) primero: el SMTP saliente está bloqueado desde el hosting.
+        // Si Graph no está configurado o falla, se intenta el SMTP de siempre.
+        if (_graphMailSender.EstaConfigurado)
+        {
+            try
+            {
+                await _graphMailSender.EnviarAsync(destinatarios, asunto, cuerpoTexto, nombreAdjunto, adjunto, contentTypeAdjunto, cancellationToken);
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Falló el envío de correo \"{Asunto}\" por Microsoft Graph; se intenta por SMTP.", asunto);
+            }
+        }
+
         if (string.IsNullOrWhiteSpace(_smtpSettings.Host) ||
             string.IsNullOrWhiteSpace(_smtpSettings.UserName) ||
             string.IsNullOrWhiteSpace(_smtpSettings.Password) ||

@@ -46,6 +46,7 @@ docs/            ARCHITECTURE · MODULES · API_MAP · DATABASE_MAP · PROCESS_M
 - Auditoría: reutilizar `IAuditoriaCambiosService` (`sp_AuditoriaCambios_Registrar`).
 - Catálogos: `Constante` vía `sp_Constante_ListarPorCampo` / `GET /api/lookup/constantes?campo=`.
 - Jobs: Hangfire (`CjERP.Api/Jobs`, schedulers en `CjERP.Api/Services`).
+- **Correo (regla)**: enviar siempre por `ISmtpMailSender` (Application/Interfaces/Services), que usa **Microsoft Graph primero** (`IGraphMailSender`, remitente `TI2@cj-telecom.com`) y SMTP solo como respaldo. **No** abrir `MailKit.SmtpClient` directo en código nuevo: el SMTP saliente da timeout desde Railway. No bloquear la acción de negocio esperando el correo (enviar en segundo plano o tolerar el fallo) ni loguear/mostrar credenciales. Detalle y requisitos de Azure (Mail.Send): `docs/INTEGRATIONS.md`.
 - **No replicar** desviaciones existentes: SQL en controllers (MantenimientoEmpleados/Externos, Contratos), `new SqlConnection` directo, estado estático en memoria.
 
 ## Base de datos
@@ -103,10 +104,10 @@ Seguridad · Tesorería/Finanzas (recibos, pagos, cheques, conciliación) · Ord
 - SP legacy (en uso): `sp_EmpleadoOtros_GrabarVacaciones`, `sp_EmpleadoOtros_ActualizaarVacaciones`, `sp_EmpleadoOtros_ListarVacaciones(Total)` · SP modelo nuevo (sin UI): `sp_Vacacion_*`
 - Tablas: EmpleadoOtros (legacy), VacacionPolitica/Periodo/Solicitud/Movimiento (nuevo)
 - Estados legacy: 97 → 98 → 99; 0 rechazado
-- Al aprobar la **3ra validación** (IdEstadoActual 99) se envía por correo el PDF de la solicitud (S/VacacionesCorreoService + VacacionesPdfDocument, SMTP vía S/SmtpMailSender) a `Constante` campo `correo_vacaciones` con `ValorFin=1` (correo en `ValorIni`, PV); datos del PDF desde `dbo.vVacaciones` (PV: no versionada). Un fallo del correo no revierte la aprobación.
+- Al aprobar la **3ra validación** (IdEstadoActual 99) se envía por correo el PDF de la solicitud (S/VacacionesCorreoService + VacacionesPdfDocument, correo vía S/SmtpMailSender (Graph → SMTP)) a `Constante` campo `correo_vacaciones` con `ValorFin=1` (correo en `ValorIni`, PV); datos del PDF desde `dbo.vVacaciones` (PV: no versionada). Un fallo del correo no revierte la aprobación.
 
 ### Beneficios (adelanto de sueldo / préstamo)
-- FE: `features/recursoshumanos/beneficio.tsx` (ruta `/recursoshumanos/beneficio`; pestañas Adelanto, Préstamo, Aprobar, Reporte); API `api/beneficioService.ts` · BE: C/BeneficioController (`/api/admin/beneficios`) → S/BeneficioService, BeneficioPdfDocument (QuestPDF), SMTP vía S/SmtpMailSender
+- FE: `features/recursoshumanos/beneficio.tsx` (ruta `/recursoshumanos/beneficio`; pestañas Adelanto, Préstamo, Aprobar, Reporte); API `api/beneficioService.ts` · BE: C/BeneficioController (`/api/admin/beneficios`) → S/BeneficioService, BeneficioPdfDocument (QuestPDF), correo vía S/SmtpMailSender (Graph → SMTP)
 - SP: `sp_Beneficio_ListarEmpleados/Registrar/Listar/Detalle/Aprobar/Rechazar` (scripts `Database/Recursoshumanos/06`, menú `07`; PV: no ejecutados en BD real) · Tablas existentes: cabBeneficio, DetBeneficio, EmpleadoCj.IdAptoBeneficio, Constante (`CORRELATIVO`/7, `BENEFICIO`, `APROBADO_PAGO_BENEFICIO`, `correo_beneficio`)
 - Reglas (de FrmBeneficio): empleado cargo 50 y estado 1; `IdAptoBeneficio = 2` = no apto; tipo 1 = préstamo (cuotas), 2 = adelanto (siempre 1 cuota; el préstamo admite 1 a 60); IdAprobado 0 pendiente / 1 aprobado / 2 rechazado. Al aprobar se envía el PDF a `Constante correo_beneficio` con `ValorFin=1` (correo en `ValorIni`, PV); un fallo del correo no revierte la aprobación. Aprobador/usuario salen del JWT. Al rechazar, el empleado vuelve a apto (`IdAptoBeneficio = 1`, PV) si no tiene otro beneficio pendiente o aprobado (mejora sobre el original).
 
@@ -202,7 +203,7 @@ Detalle y diagramas: `docs/PROCESS_MAP.md`.
 Estados de Planilla 0–10, super-aprobador 77, IGV 18 %, TC fijo 3.8 (⚠), detracciones por `Constante DETRACCION`, reglas de pago (estado 5/8, misma moneda, ejecutor cargo 14, fecha no futura), jornada 9.6 h (FE), validadores 1/2/3 en `EmpleadoCjDetalle`. Detalle con fuentes: `docs/BUSINESS_RULES.md`. **No cambiar reglas sin informar antes.**
 
 ## Integraciones
-SharePoint/Graph (`ISharePointCommercialUploadService`), WUP (`WupService`), Meta WhatsApp, OpenAI, Anthropic, SMTP (MailKit), Expo push, gestor legacy elnk.uno, Google Maps (FE), Hangfire. Detalle: `docs/INTEGRATIONS.md`.
+SharePoint/Graph (`ISharePointCommercialUploadService`), correo por Graph (`IGraphMailSender`, remitente TI2) con SMTP de respaldo, WUP (`WupService`), Meta WhatsApp, OpenAI, Anthropic, SMTP (MailKit), Expo push, gestor legacy elnk.uno, Google Maps (FE), Hangfire. Detalle: `docs/INTEGRATIONS.md`.
 
 ## Riesgos conocidos (resumen — ver `docs/TECHNICAL_DEBT.md`)
 - CRÍTICO: sin autorización por rol en backend; aprobador/usuario tomado del body; consulta genérica acepta IdCargo del cliente; contraseñas en texto plano; secretos en repo/historial; `KILL` de SQL para cualquier usuario; webhook sin firma; dashboard WUP expone boletas; `/tesoreria/pagos/grabar` sin controles; estado estático en TesoreriaGastosController.
