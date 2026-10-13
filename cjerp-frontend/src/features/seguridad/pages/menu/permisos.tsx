@@ -170,7 +170,14 @@ export default function SeguridadPermisosAccionesPage() {
         .sort((a, b) => a.label.localeCompare(b.label));
     }
 
-    if (form.tipoElemento === "tab" && form.rutaPagina.endsWith("/pagos_v1")) {
+    const esPaginaPagos =
+      form.rutaPagina.endsWith("/pagos_v1") ||
+      form.rutaPagina.endsWith("/pagos_v2");
+    const esPaginaOrdenCompra =
+      form.rutaPagina.endsWith("/facturacionfinanciera/oc_v1") ||
+      form.rutaPagina.endsWith("/facturacionfinanciera/oc_v2");
+
+    if (form.tipoElemento === "tab" && esPaginaPagos) {
       return [
         { value: "tab.resumen", label: "Total Ordenes" },
         { value: "tab.aprobar", label: "Aprobar" },
@@ -180,14 +187,14 @@ export default function SeguridadPermisosAccionesPage() {
       ];
     }
 
-    if (form.tipoElemento === "tab" && form.rutaPagina.endsWith("/facturacionfinanciera/oc_v1")) {
+    if (form.tipoElemento === "tab" && esPaginaOrdenCompra) {
       return [
         { value: "tab.validacion_2", label: "2da validación" },
         { value: "tab.validacion_3", label: "3ra validación" },
       ];
     }
 
-    if (form.tipoElemento === "button" && form.rutaPagina.endsWith("/pagos_v1")) {
+    if (form.tipoElemento === "button" && esPaginaPagos) {
       return [
         { value: "button.aplicar_filtros", label: "Aplicar filtros" },
         { value: "button.exportar", label: "Exportar" },

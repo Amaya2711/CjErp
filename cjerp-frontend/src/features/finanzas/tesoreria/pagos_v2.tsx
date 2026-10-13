@@ -1218,13 +1218,17 @@ export default function PagosV2Page() {
       }
 
       try {
+        // pagos_v1 y pagos_v2 son dos vistas del mismo flujo. Se consulta ambas
+        // rutas para conservar los permisos ya configurados en cualquiera de ellas.
         const permissionSets = await Promise.all(
-          employeeIds.map((idEmpleado) =>
-            seguridadPermisosAccionesService.listar({
-              rutaPagina: "/finanzas/tesoreria/pagos_v1",
-              idEmpleado,
-              tipoElemento: "tab",
-            })
+          employeeIds.flatMap((idEmpleado) =>
+            ["/finanzas/tesoreria/pagos_v1", "/finanzas/tesoreria/pagos_v2"].map((rutaPagina) =>
+              seguridadPermisosAccionesService.listar({
+                rutaPagina,
+                idEmpleado,
+                tipoElemento: "tab",
+              })
+            )
           )
         );
 
@@ -1256,7 +1260,12 @@ export default function PagosV2Page() {
   }, []);
 
   const canUseTab = useCallback(
-    (tab: PagoEstado) => Boolean(tabPermissions[TAB_ACTION_KEYS[tab]]),
+    (tab: PagoEstado) => {
+      const actionKey = TAB_ACTION_KEYS[tab];
+      // Compatibilidad con registros históricos cuya clave se guardó sin punto
+      // (p. ej. "tabhormiga" en lugar de "tab.hormiga").
+      return Boolean(tabPermissions[actionKey] || tabPermissions[actionKey.replaceAll(".", "")]);
+    },
     [tabPermissions]
   );
 
