@@ -4,6 +4,9 @@ import DataGridPro from "../../../components/datagrid/DataGridPro";
 import type { GridColumn } from "../../../components/datagrid/types";
 import { descargarOrdenCompraPdf } from "../../../api/ordenCompraService";
 import { buscarEmpleadosResponsables } from "../../../api/empleadoResponsableService";
+import { getFiltrosOperativos } from "../../../api/filtroOperativoService";
+import type { FiltroOperativoItem, FiltroOperativoValue } from "../../../models/filtroOperativo";
+import { FiltroOperativoLookup } from "../../../components/lookups/FiltroOperativoLookup";
 import { consultarOrdenesPorResponsable, type ConsultaPorResponsable, type RptResponsableRow } from "../../../api/reporteResponsableService";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 import {
@@ -36,7 +39,13 @@ import { calcularAlertas, responsablesAnalizados } from "./responsable/responsab
 
 type ResponsableElegido = { id: number; nombre: string; documento: string };
 type Vista = "resumen" | "detalle";
-type ModoBusqueda = "responsables" | "documento";
+type ModoBusqueda = "responsables" | "documento" | "operativo";
+
+const MODOS: Array<{ value: ModoBusqueda; label: string }> = [
+  { value: "responsables", label: "Por responsables" },
+  { value: "documento", label: "Por documento / RUC" },
+  { value: "operativo", label: "Por cliente / proyecto / site" },
+];
 
 const VINCULOS: Array<{ value: VinculoFiltro; label: string }> = [
   { value: "todos", label: "Todos" },
@@ -72,6 +81,13 @@ export default function ReporteResponsablePage() {
   const [sugerencias, setSugerencias] = useState<ResponsableElegido[]>([]);
   const [buscandoSugerencias, setBuscandoSugerencias] = useState(false);
   const [documento, setDocumento] = useState("");
+  // Ámbito operativo: cliente obligatorio; proyecto y site opcionales (cascada).
+  const [catalogoOperativo, setCatalogoOperativo] = useState<FiltroOperativoItem[]>([]);
+  const [cargandoCatalogo, setCargandoCatalogo] = useState(false);
+  const [idClienteSel, setIdClienteSel] = useState("");
+  const [idProyectoSel, setIdProyectoSel] = useState("");
+  const [idSiteSel, setIdSiteSel] = useState("");
+  const [lookupOperativo, setLookupOperativo] = useState<FiltroOperativoValue>({});
 
   const [filasCrudas, setFilasCrudas] = useState<RptResponsableRow[]>([]);
   const [criterioConsultado, setCriterioConsultado] = useState("");
@@ -117,6 +133,66 @@ export default function ReporteResponsablePage() {
     };
   }, [textoResponsable, modo]);
 
+  // Catálogo cliente/proyecto/site: se carga una sola vez, al abrir el modo operativo.
+  useEffect(() => {
+    if (modo !== "operativo" || catalogoOperativo.length > 0) return;
+    let activo = true;
+    setCargandoCatalogo(true);
+    getFiltrosOperativos()
+      .then((data) => {
+        if (activo) setCatalogoOperativo(Array.isArray(data) ? data : []);
+      })
+      .catch((err) => {
+        if (activo) setError(getHttpErrorMessage(err, "No se pudo cargar el catálogo de clientes, proyectos y sites."));
+      })
+      .finally(() => {
+        if (activo) setCargandoCatalogo(false);
+      });
+    return () => {
+      activo = false;
+    };
+  }, [modo, catalogoOperativo.length]);
+
+  const clientesOperativo = useMemo(
+    () =>
+      Array.from(new Map(catalogoOperativo.map((f) => [String(f.idCliente), f.nombreCliente])).entries())
+        .map(([value, label]) => ({ value, label }))
+        .sort((a, b) => a.label.localeCompare(b.label, "es")),
+    [catalogoOperativo],
+  );
+  const proyectosOperativo = useMemo(
+    () =>
+      Array.from(
+        new Map(catalogoOperativo.filter((f) => String(f.idCliente) === idClienteSel).map((f) => [String(f.idProyecto), f.nombreProyecto])).entries(),
+      )
+        .map(([value, label]) => ({ value, label }))
+        .sort((a, b) => a.label.localeCompare(b.label, "es")),
+    [catalogoOperativo, idClienteSel],
+  );
+  const sitesOperativo = useMemo(
+    () =>
+      Array.from(
+        new Map(
+          catalogoOperativo
+            .filter((f) => String(f.idCliente) === idClienteSel && (!idProyectoSel || String(f.idProyecto) === idProyectoSel))
+            .map((f) => [f.idSite, [f.idSite, f.nombreSite].filter(Boolean).join(" - ")]),
+        ).entries(),
+      )
+        .map(([value, label]) => ({ value, label }))
+        .sort((a, b) => a.label.localeCompare(b.label, "es")),
+    [catalogoOperativo, idClienteSel, idProyectoSel],
+  );
+
+  // El lookup (cliente - proyecto - site) rellena los tres selectores; los selectores permiten ampliar a cliente o proyecto.
+  const elegirDesdeLookup = (valor: FiltroOperativoValue) => {
+    const filtro = valor.filtro;
+    if (!filtro) return;
+    setLookupOperativo({ filtro });
+    setIdClienteSel(String(filtro.idCliente));
+    setIdProyectoSel(String(filtro.idProyecto));
+    setIdSiteSel(filtro.idSite);
+  };
+
   const sugerenciasVisibles = textoResponsable.trim().length >= 2 && modo === "responsables"
     ? sugerencias.filter((item) => !elegidos.some((elegido) => elegido.id === item.id))
     : [];
@@ -127,11 +203,18 @@ export default function ReporteResponsablePage() {
     setSugerencias([]);
   };
 
-  const puedeBuscar = modo === "responsables" ? elegidos.length > 0 : documento.trim().length > 0;
+  const puedeBuscar =
+    modo === "responsables" ? elegidos.length > 0 : modo === "documento" ? documento.trim().length > 0 : idClienteSel !== "";
 
   const buscar = useCallback(async () => {
     if (!puedeBuscar) {
-      setError(modo === "responsables" ? "Seleccione al menos un responsable." : "Ingrese el número de documento.");
+      setError(
+        modo === "responsables"
+          ? "Seleccione al menos un responsable."
+          : modo === "documento"
+            ? "Ingrese el número de documento."
+            : "Seleccione al menos un cliente.",
+      );
       return;
     }
     consultaRef.current?.abort();
@@ -141,7 +224,21 @@ export default function ReporteResponsablePage() {
     const criterio: ConsultaPorResponsable =
       modo === "responsables"
         ? { modo: "responsables", idResponsables: elegidos.map((item) => item.id) }
-        : { modo: "documento", nroDocumento: documento };
+        : modo === "documento"
+          ? { modo: "documento", nroDocumento: documento }
+          : {
+              modo: "operativo",
+              idCliente: Number(idClienteSel),
+              idProyecto: idProyectoSel ? Number(idProyectoSel) : undefined,
+              idSite: idSiteSel || undefined,
+            };
+    const etiquetaOperativa = [
+      clientesOperativo.find((o) => o.value === idClienteSel)?.label,
+      proyectosOperativo.find((o) => o.value === idProyectoSel)?.label,
+      sitesOperativo.find((o) => o.value === idSiteSel)?.label,
+    ]
+      .filter(Boolean)
+      .join(" / ");
 
     setCargando(true);
     setError("");
@@ -153,7 +250,9 @@ export default function ReporteResponsablePage() {
       setCriterioConsultado(
         modo === "responsables"
           ? elegidos.map((item) => item.nombre).join(", ")
-          : `Documento ${documento.trim()}${nombres ? ` (${nombres})` : ""}`,
+          : modo === "documento"
+            ? `Documento ${documento.trim()}${nombres ? ` (${nombres})` : ""}`
+            : etiquetaOperativa,
       );
       setConsultado(true);
     } catch (err) {
@@ -165,7 +264,7 @@ export default function ReporteResponsablePage() {
     } finally {
       if (!controller.signal.aborted) setCargando(false);
     }
-  }, [documento, elegidos, modo, puedeBuscar]);
+  }, [clientesOperativo, documento, elegidos, idClienteSel, idProyectoSel, idSiteSel, modo, proyectosOperativo, puedeBuscar, sitesOperativo]);
 
   const limpiar = () => {
     consultaRef.current?.abort();
@@ -173,6 +272,10 @@ export default function ReporteResponsablePage() {
     setTextoResponsable("");
     setSugerencias([]);
     setDocumento("");
+    setIdClienteSel("");
+    setIdProyectoSel("");
+    setIdSiteSel("");
+    setLookupOperativo({});
     setFiltros(FILTROS_VACIOS);
     setFilasCrudas([]);
     setConsultado(false);
@@ -427,16 +530,16 @@ export default function ReporteResponsablePage() {
       >
         <div style={styles.fila}>
           <div role="tablist" aria-label="Criterio de búsqueda" style={styles.segmento}>
-            {(["responsables", "documento"] as const).map((item) => (
+            {MODOS.map((item) => (
               <button
-                key={item}
+                key={item.value}
                 type="button"
                 role="tab"
-                aria-selected={modo === item}
-                onClick={() => setModo(item)}
-                style={{ ...styles.segmentoBoton, ...(modo === item ? styles.segmentoActivo : null) }}
+                aria-selected={modo === item.value}
+                onClick={() => setModo(item.value)}
+                style={{ ...styles.segmentoBoton, ...(modo === item.value ? styles.segmentoActivo : null) }}
               >
-                {item === "responsables" ? "Por responsables" : "Por documento / RUC"}
+                {item.label}
               </button>
             ))}
           </div>
@@ -480,11 +583,43 @@ export default function ReporteResponsablePage() {
                 </ul>
               ) : null}
             </div>
-          ) : (
+          ) : modo === "documento" ? (
             <label style={styles.campo}>
               <span style={styles.etiqueta}>Nro. documento / RUC del responsable</span>
               <input value={documento} onChange={(event) => setDocumento(event.target.value)} style={styles.control} inputMode="numeric" />
             </label>
+          ) : (
+            <>
+              <div style={styles.campo}>
+                <span style={styles.etiqueta}>Buscar site (cliente - proyecto - site)</span>
+                <FiltroOperativoLookup value={lookupOperativo} onChange={elegirDesdeLookup} showTrabajo={false} showOt={false} showTarea={false} />
+              </div>
+              <OpcionSelect
+                etiqueta={cargandoCatalogo ? "Cliente (cargando…)" : "Cliente"}
+                valor={idClienteSel}
+                opciones={clientesOperativo}
+                vacio="Seleccione…"
+                onChange={(v) => {
+                  setLookupOperativo({});
+                  setIdClienteSel(v);
+                  setIdProyectoSel("");
+                  setIdSiteSel("");
+                }}
+              />
+              <OpcionSelect
+                etiqueta="Proyecto"
+                valor={idProyectoSel}
+                opciones={proyectosOperativo}
+                vacio="Todos"
+                disabled={!idClienteSel}
+                onChange={(v) => {
+                  setLookupOperativo({});
+                  setIdProyectoSel(v);
+                  setIdSiteSel("");
+                }}
+              />
+              <OpcionSelect etiqueta="Site" valor={idSiteSel} opciones={sitesOperativo} vacio="Todos" disabled={!idClienteSel} onChange={(v) => { setLookupOperativo({}); setIdSiteSel(v); }} />
+            </>
           )}
 
           <button type="submit" style={styles.botonPrimario} disabled={cargando}>
@@ -556,7 +691,7 @@ export default function ReporteResponsablePage() {
       ) : null}
 
       {!consultado && !cargando ? (
-        <div style={styles.vacio}>Seleccione uno o varios responsables (o un documento) y presione Buscar.</div>
+        <div style={styles.vacio}>Seleccione uno o varios responsables, un documento, o un cliente (con proyecto y site opcionales) y presione Buscar.</div>
       ) : (
         <>
           {alertasUrgentes.map((alerta) => (
@@ -701,6 +836,36 @@ function Selector({ etiqueta, valor, opciones, onChange }: { etiqueta: string; v
         {opciones.map((opcion) => (
           <option key={opcion} value={opcion}>
             {opcion}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function OpcionSelect({
+  etiqueta,
+  valor,
+  opciones,
+  vacio,
+  disabled,
+  onChange,
+}: {
+  etiqueta: string;
+  valor: string;
+  opciones: Array<{ value: string; label: string }>;
+  vacio: string;
+  disabled?: boolean;
+  onChange: (valor: string) => void;
+}) {
+  return (
+    <label style={styles.campo}>
+      <span style={styles.etiqueta}>{etiqueta}</span>
+      <select value={valor} disabled={disabled} onChange={(event) => onChange(event.target.value)} style={{ ...styles.control, maxWidth: 260 }}>
+        <option value="">{vacio}</option>
+        {opciones.map((opcion) => (
+          <option key={opcion.value} value={opcion.value}>
+            {opcion.label}
           </option>
         ))}
       </select>

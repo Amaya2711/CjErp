@@ -2,10 +2,14 @@ import httpClient from "./httpClient";
 import { buildPlanillaConsultaEstadosRequest, consultarPlanillaEstados } from "./planillaConsultaService";
 import type { PlanillaConsultaParametro } from "../models/planillaConsulta";
 
-/** Criterio obligatorio del store: uno o varios responsables, o el número de documento (excluyentes). */
+/**
+ * Criterio del store: uno o varios responsables, el número de documento, o el ámbito operativo
+ * (cliente, opcionalmente proyecto y site) sin indicar responsable. Son excluyentes.
+ */
 export type ConsultaPorResponsable =
   | { modo: "responsables"; idResponsables: number[] }
-  | { modo: "documento"; nroDocumento: string };
+  | { modo: "documento"; nroDocumento: string }
+  | { modo: "operativo"; idCliente: number; idProyecto?: number; idSite?: string };
 
 export type RptResponsableRow = {
   tipoRegistro: string;
@@ -146,10 +150,16 @@ export async function consultarOrdenesPorResponsable(
   criterio: ConsultaPorResponsable,
   options?: { signal?: AbortSignal },
 ): Promise<RptResponsableRow[]> {
-  const parametros: PlanillaConsultaParametro[] =
-    criterio.modo === "responsables"
-      ? [{ nombre: "IdResponsables", valor: criterio.idResponsables.join(","), tipo: "string" }]
-      : [{ nombre: "NroDocumento", valor: criterio.nroDocumento.trim(), tipo: "string" }];
+  let parametros: PlanillaConsultaParametro[];
+  if (criterio.modo === "responsables") {
+    parametros = [{ nombre: "IdResponsables", valor: criterio.idResponsables.join(","), tipo: "string" }];
+  } else if (criterio.modo === "documento") {
+    parametros = [{ nombre: "NroDocumento", valor: criterio.nroDocumento.trim(), tipo: "string" }];
+  } else {
+    parametros = [{ nombre: "IdCliente", valor: String(criterio.idCliente), tipo: "int" }];
+    if (criterio.idProyecto) parametros.push({ nombre: "IdProyecto", valor: String(criterio.idProyecto), tipo: "int" });
+    if (criterio.idSite) parametros.push({ nombre: "IdSite", valor: criterio.idSite, tipo: "string" });
+  }
 
   const request = {
     ...buildPlanillaConsultaEstadosRequest(parametros, { baseParams: { idCargo: null, idEmpleado: null } }),
