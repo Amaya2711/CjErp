@@ -300,6 +300,13 @@ function getLimaDateOffset(days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+function avisoBusquedaSinFechas(filtros: ReporteFiltros): string {
+  if (!filtros.fechaDesde && !filtros.fechaHasta) return "La búsqueda no está limitada por fechas: se consultarán todas las órdenes de compra que cumplan los demás filtros. Puede tardar más.";
+  if (!filtros.fechaDesde) return "La búsqueda no tiene fecha inicial: se incluirán las órdenes de compra desde el inicio del historial hasta la fecha final indicada.";
+  if (!filtros.fechaHasta) return "La búsqueda no tiene fecha final: se incluirán las órdenes de compra desde la fecha inicial en adelante.";
+  return "";
+}
+
 function createReporteFiltros(tab: string): ReporteFiltros {
   const isOcGastos = tab === "oc-gastos";
   return {
@@ -310,8 +317,8 @@ function createReporteFiltros(tab: string): ReporteFiltros {
     site: "",
     estado: isOcGastos ? ESTADOS_OC_GASTOS_POR_DEFECTO : "",
     idOc: "",
-    fechaDesde: isOcGastos ? getLimaDateOffset(-7) : "",
-    fechaHasta: isOcGastos ? getLimaDateOffset(0) : "",
+    fechaDesde: "",
+    fechaHasta: "",
   };
 }
 
@@ -791,6 +798,7 @@ export default function OcV2Page() {
   const [reportePlanillaColumns, setReportePlanillaColumns] = useState<string[]>([]);
   // Filas que pasan los filtros del grid OC/Gastos (base de "Exportar Excel").
   const ocGastosFilasVisiblesRef = useRef<Record<string, unknown>[] | null>(null);
+  const [ocGastosAviso, setOcGastosAviso] = useState("");
   const [reporteConsultado, setReporteConsultado] = useState(false);
   const [pdfExportingOc, setPdfExportingOc] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
@@ -911,6 +919,7 @@ export default function OcV2Page() {
     else setReporteFiltros(createReporteFiltros(tab));
       setReporteSubtab(tab as typeof reporteSubtab);
       setReporteConsultado(false);
+      setOcGastosAviso("");
         setReportePlanillaRows([]);
       setResponsablesReporteFiltro([]);
       setBusquedaResponsableReporte("");
@@ -2679,7 +2688,7 @@ export default function OcV2Page() {
       const correosNivelFinal = respuestaAprobacion.correos ?? [];
       const correosNoEnviados = correosNivelFinal.filter((correo) => !correo.enviado);
       const mensajeCorreo = correosNivelFinal.length === 0
-        ? ""
+        ? (nivelAprobacion === 3 ? " El correo de aprobación final se envía en segundo plano." : "")
         : correosNoEnviados.length === 0
           ? ` Correo enviado a ${correosNivelFinal.reduce((total, correo) => total + correo.destinatarios, 0)} destinatario(s).`
           : ` ${correosNoEnviados.map((correo) => correo.mensaje).join(" ")}`;
@@ -3781,7 +3790,7 @@ export default function OcV2Page() {
                   type="button"
                   style={{ ...styles.secondaryButton, height: 34, minWidth: 76, padding: "0 10px", fontSize: 11, lineHeight: 1.2, whiteSpace: "normal" }}
                   onClick={() => {
-                    setReporteFiltros(createReporteFiltros(reporteSubtab)); setResponsablesReporteFiltro([]); setBusquedaResponsableReporte(""); setSolicitantesReporteFiltro([]); setBusquedaSolicitanteReporte(""); setProyectosReporteFiltro([]); setBusquedaProyectoReporte(""); setSitesReporteFiltro([]); setBusquedaSiteReporte("");
+                    setReporteFiltros(createReporteFiltros(reporteSubtab)); setOcGastosAviso(""); setResponsablesReporteFiltro([]); setBusquedaResponsableReporte(""); setSolicitantesReporteFiltro([]); setBusquedaSolicitanteReporte(""); setProyectosReporteFiltro([]); setBusquedaProyectoReporte(""); setSitesReporteFiltro([]); setBusquedaSiteReporte("");
                     setReporteDetalles([]);
                     setReporteConsultado(false);
                   }}
@@ -3789,9 +3798,14 @@ export default function OcV2Page() {
                   Limpiar filtros
                 </button>
                 {reporteSubtab === "listado" && <button type="button" style={{ ...styles.primaryButton, height: 34, minWidth: 76, padding: "0 10px", fontSize: 11, lineHeight: 1.2, whiteSpace: "normal" }} disabled={reporteLoading} onClick={() => { setReporteConsultado(false); void loadReporteDetalles(); }}>Aplicar filtros</button>}
-                {reporteSubtab === "oc-gastos" && <button type="button" style={{ ...styles.primaryButton, height: 34, minWidth: 76, padding: "0 10px", fontSize: 11, lineHeight: 1.2, whiteSpace: "normal" }} disabled={reporteLoading} onClick={() => { setReportePlanillaRows([]); void loadReporteDetalles(); }}>Aplicar filtros</button>}
+                {reporteSubtab === "oc-gastos" && <button type="button" style={{ ...styles.primaryButton, height: 34, minWidth: 76, padding: "0 10px", fontSize: 11, lineHeight: 1.2, whiteSpace: "normal" }} disabled={reporteLoading} onClick={() => { setReportePlanillaRows([]); setOcGastosAviso(avisoBusquedaSinFechas(reporteFiltros)); void loadReporteDetalles(); }}>Aplicar filtros</button>}
               </div>
             </div>
+            {reporteSubtab === "oc-gastos" && ocGastosAviso ? (
+              <div role="status" style={{ margin: "0 0 8px", padding: "8px 12px", borderRadius: 8, background: "#EFF6FF", border: "1px solid #BFDBFE", color: "#1E40AF", fontSize: 12 }}>
+                ℹ {ocGastosAviso}
+              </div>
+            ) : null}
             {reporteSubtab === "oc-gastos" ? (
               <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
                 <DataGridPro<OcGastosGridRow>

@@ -21,17 +21,20 @@ public class OrdenCompraController : ControllerBase
     private readonly IOrdenCompraService _ordenCompraService;
     private readonly IAuditoriaCambiosService _auditoriaCambiosService;
     private readonly IHttpClientFactory _httpClients;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<OrdenCompraController> _logger;
 
     public OrdenCompraController(
         IOrdenCompraService ordenCompraService,
         IAuditoriaCambiosService auditoriaCambiosService,
         IHttpClientFactory httpClients,
+        IServiceScopeFactory scopeFactory,
         ILogger<OrdenCompraController> logger)
     {
         _ordenCompraService = ordenCompraService;
         _auditoriaCambiosService = auditoriaCambiosService;
         _httpClients = httpClients;
+        _scopeFactory = scopeFactory;
         _logger = logger;
     }
 
@@ -457,14 +460,18 @@ public class OrdenCompraController : ControllerBase
                 cancellationToken);
 
             // El correo se emite únicamente después de que el nivel 3 fue
-            // confirmado. La aprobación ya está persistida si el SMTP falla.
+            // confirmado. Se envía en segundo plano: generar el PDF y negociar
+            // con el SMTP puede superar el timeout del cliente (30 s) y la
+            // aprobación ya está persistida pase lo que pase con el correo.
             var aprobacionesFinales = aprobaciones
                 .Where(item => item.Nivel == 3)
                 .Select(item => item.IdOc)
                 .ToArray();
-            var correos = aprobacionesFinales.Length == 0
-                ? []
-                : await _ordenCompraService.EnviarCorreoAprobacionFinalAsync(aprobacionesFinales, cancellationToken);
+            if (aprobacionesFinales.Length > 0)
+            {
+                EnviarCorreoAprobacionFinalEnSegundoPlano(aprobacionesFinales);
+            }
+            var correos = Array.Empty<OrdenCompraCorreoAprobacionResultDto>();
 
             return Ok(new
             {
@@ -950,5 +957,28 @@ public class OrdenCompraController : ControllerBase
         public IFormFile? Archivo { get; set; }
         public string? CodigoReferencia { get; set; }
     }
-}
 
+    private void EnviarCorreoAprobacionFinalEnSegundoPlano(int[] idsOc)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var servicio = scope.ServiceProvider.GetRequiredService<IOrdenCompraService>();
+                var resultados = await servicio.EnviarCorreoAprobacionFinalAsync(idsOc, CancellationToken.None);
+                foreach (var resultado in resultados)
+                {
+                    if (resultado.Enviado)
+                        _logger.LogInformation("Correo de aprobación final enviado para la OC {IdOc} a {Destinatarios} destinatario(s).", resultado.IdOc, resultado.Destinatarios);
+                    else
+                        _logger.LogWarning("Correo de aprobación final NO enviado para la OC {IdOc}: {Mensaje}", resultado.IdOc, resultado.Mensaje);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Falló el envío en segundo plano del correo de aprobación final de las OC {IdsOc}", string.Join(',', idsOc));
+            }
+        });
+    }
+}
