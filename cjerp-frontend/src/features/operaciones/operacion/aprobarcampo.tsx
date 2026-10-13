@@ -93,9 +93,9 @@ const visibleColumns = [
   { key: "area", label: "Área", width: "160px" },
   { key: "ubicacion", label: "Ubicación", width: "180px" },
   { key: "estado", label: "Estado", width: "140px" },
-  { key: "fechaasistencia", label: "Fecha", width: "140px" },
+  { key: "fechaAsistencia", label: "Fecha", width: "140px" },
   { key: "hora", label: "Ingreso", width: "130px" },
-  { key: "horasalida", label: "Salida", width: "130px" },
+  { key: "horaSalida", label: "Salida", width: "130px" },
   { key: "comentario", label: "Comentario", width: "240px" },
 ] as const;
 
@@ -165,7 +165,7 @@ function getValorIngreso(row: AprobarCampoRow) {
 }
 
 function getValorSalida(row: AprobarCampoRow) {
-  const val = toText(row.salida || row.horasalida);
+  const val = toText(row.salida || row.horaSalida || row.horasalida);
   return val && val !== "-" ? val : "";
 }
 
@@ -334,7 +334,7 @@ function buildDraftFromRow(row: AprobarCampoRow): Draft {
     empleado: toText(row.empleado || row.nombreempleado || row.nombreEmpleado),
     estado: toText(row.estado),
     ingreso: normalizeDateTimeLocalInput(toText(row.ingreso || row.hora)),
-    salida: normalizeDateTimeLocalInput(toText(row.salida || row.horasalida)),
+    salida: normalizeDateTimeLocalInput(toText(row.salida || row.horaSalida || row.horasalida)),
     observacion: toText(row.observacion),
     latitud: toText(row.latitud),
     longitud: toText(row.longitud),
@@ -425,7 +425,7 @@ export default function AprobarCampoPage() {
   const hasInitialNavigationFilters = Boolean(navigationState?.initialFilters);
 
   const searchFields = useMemo<CrudToolbarSearchField<AprobarCampoRow>[]>(() => {
-    const preferredKeys = ["responsable", "nombreempleado", "empleado", "estado", "comentario", "observacion", "fechaasistencia"];
+    const preferredKeys = ["responsable", "nombreempleado", "empleado", "estado", "comentario", "observacion", "fechaAsistencia"];
 
     const fields = preferredKeys.map((key) => ({
       key,
@@ -1054,8 +1054,8 @@ export default function AprobarCampoPage() {
         width: Number.parseInt(column.width, 10),
         calculateCellValue: (row) => toText(row[column.key]),
       };
-      if (column.key === "fechaasistencia") return { ...base, dataType: "date" };
-      if (column.key === "hora" || column.key === "horasalida") {
+      if (column.key === "fechaAsistencia") return { ...base, dataType: "date" };
+      if (column.key === "hora" || column.key === "horaSalida") {
         return { ...base, cellRender: (value) => formatTime(toText(value)) || "-" };
       }
       return base;
@@ -1322,7 +1322,8 @@ export default function AprobarCampoPage() {
             height="fill"
             loading={loading}
             noDataText="No hay registros para los filtros seleccionados."
-            stateStoringKey="aprobarcampo"
+            // Esta grilla tiene un orden operativo fijo. No se persiste el
+            // estado de columnas porque un orden guardado puede sobreponerlo.
             showSearchPanel={false}
             allowExport={false}
             autoExpandAll={false}
