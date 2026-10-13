@@ -54,6 +54,7 @@ import type { GridColumn } from "../../../components/datagrid/types";
 // beneficiario del pago.
 const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "EstadoOcSemaforo", "FechaOc", "Cliente", "NombreProyecto", "Site", "TipoTrabajo", "Tarea", "Detalle", "ResponsableOc", "Cuenta", "CuentaInter", "NombreCta", "Banco", "Comprobante", "MonedaOc", "SubtotalOc", "SubtotalPlanilla", "AvanceOc", "DiferenciaSubtotal", "DiferenciaAvanceOc", "PagoNuevo", "CorrelativoPlanilla", "SolicitanteOc", "PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"];
 const OC_GASTOS_MAX_COLUMNAS_VISIBLES = 32;
+type OcGastosGridRow = Record<string, unknown> & { __key: string };
 const COLORES_ESTADO_OC: Record<string, string> = {
   R: "#D32F2F",
   A: "#2E7D32",
@@ -745,10 +746,6 @@ export default function OcV2Page() {
   const [estadosOcGastosCatalogo, setEstadosOcGastosCatalogo] = useState<string[]>([]);
   const [solicitantesOcGastosCatalogo, setSolicitantesOcGastosCatalogo] = useState<Array<{ value: string; label: string }>>([]);
   const [clientesOcGastosCatalogo, setClientesOcGastosCatalogo] = useState<Array<{ value: string; label: string }>>([]);
-  const ocGastosHeaderScrollRef = useRef<HTMLDivElement | null>(null);
-  const ocGastosHeaderScrollContentRef = useRef<HTMLDivElement | null>(null);
-  const ocGastosTableScrollRef = useRef<HTMLDivElement | null>(null);
-  const ocGastosScrollSyncingRef = useRef(false);
   const reportePlanillaIdOcUnicos = useMemo(
     () => new Set(reportePlanillaRows.map(getReporteRowIdOc).filter(Boolean)).size,
     [reportePlanillaRows]
@@ -792,20 +789,8 @@ export default function OcV2Page() {
     return { subtotalesOc: subtotalesOcKpi, subtotalesPlanilla: subtotalesPlanillaKpi, avances };
   }, [reportePlanillaRows]);
   const [reportePlanillaColumns, setReportePlanillaColumns] = useState<string[]>([]);
-  const [reportePlanillaSort, setReportePlanillaSort] = useState<{ column: string; direction: "asc" | "desc" }>({ column: "", direction: "asc" });
-  const reportePlanillaRowsOrdenadas = useMemo(() => {
-    if (!reportePlanillaSort.column) return reportePlanillaRows;
-    const getValue = (row: Record<string, unknown>) => {
-      const key = Object.keys(row).find((item) => item.toLowerCase() === reportePlanillaSort.column.toLowerCase());
-      return key ? row[key] : "";
-    };
-    return [...reportePlanillaRows].sort((a, b) => {
-      const av = getValue(a); const bv = getValue(b);
-      const an = Number(av); const bn = Number(bv);
-      const comparison = !Number.isNaN(an) && !Number.isNaN(bn) ? an - bn : String(av ?? "").localeCompare(String(bv ?? ""), undefined, { numeric: true, sensitivity: "base" });
-      return reportePlanillaSort.direction === "asc" ? comparison : -comparison;
-    });
-  }, [reportePlanillaRows, reportePlanillaSort]);
+  // Filas que pasan los filtros del grid OC/Gastos (base de "Exportar Excel").
+  const ocGastosFilasVisiblesRef = useRef<Record<string, unknown>[] | null>(null);
   const [reporteConsultado, setReporteConsultado] = useState(false);
   const [pdfExportingOc, setPdfExportingOc] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
@@ -934,44 +919,6 @@ export default function OcV2Page() {
       setProyectosReporteFiltro([]);
       setBusquedaProyectoReporte("");
    };
-
-  const sincronizarScrollOcGastos = useCallback((origen: "cabecera" | "tabla") => {
-    if (ocGastosScrollSyncingRef.current) return;
-
-    const origenElement = origen === "cabecera" ? ocGastosHeaderScrollRef.current : ocGastosTableScrollRef.current;
-    const destinoElement = origen === "cabecera" ? ocGastosTableScrollRef.current : ocGastosHeaderScrollRef.current;
-    if (!origenElement || !destinoElement) return;
-
-    ocGastosScrollSyncingRef.current = true;
-    destinoElement.scrollLeft = origenElement.scrollLeft;
-    window.requestAnimationFrame(() => {
-      ocGastosScrollSyncingRef.current = false;
-    });
-  }, []);
-
-  useEffect(() => {
-    if (vistaOc !== "reporte" || reporteSubtab !== "oc-gastos") return;
-
-    const barraCabecera = ocGastosHeaderScrollRef.current;
-    const contenidoCabecera = ocGastosHeaderScrollContentRef.current;
-    const tabla = ocGastosTableScrollRef.current;
-    if (!barraCabecera || !contenidoCabecera || !tabla) return;
-
-    const actualizarAncho = () => {
-      contenidoCabecera.style.width = `${tabla.scrollWidth}px`;
-      barraCabecera.scrollLeft = tabla.scrollLeft;
-    };
-
-    actualizarAncho();
-    const resizeObserver = new ResizeObserver(actualizarAncho);
-    resizeObserver.observe(tabla);
-    window.addEventListener("resize", actualizarAncho);
-
-    return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener("resize", actualizarAncho);
-    };
-  }, [reportePlanillaColumns, reportePlanillaRows.length, reporteSubtab, vistaOc]);
 
   const camposConstantes = useMemo(
     () => ["tipo_moneda", "tipo_comprobante", "tipo_pago", "estado"],
@@ -2943,6 +2890,320 @@ export default function OcV2Page() {
     { dataField: "solicitante", caption: "Solicitante", width: 180, calculateCellValue: (item) => item.solicitante || "-" },
   ];
 
+  const leerOcGastos = (row: Record<string, unknown>, column: string): string => {
+    const aliases: Record<string, string[]> = {
+      EstadoOc: ["EstadoOc", "Estado", "IdEstadoOc"],
+      EstadoOcSemaforo: ["EstadoOcSemaforo", "EstadoOc", "IdEstadoOc"],
+      FechaOc: ["FechaOc", "FechaCreacion", "FechaOrden"],
+      PrimeraValidacion: ["PrimeraValidacion", "IdAprobador1"],
+      SegundaValidacion: ["SegundaValidacion", "IdAprobador2"],
+      TerceraValidacion: ["TerceraValidacion", "IdAprobador3"],
+      CorrelativoPlanilla: ["CorrelativoPlanilla"],
+      MonedaOc: ["MonedaOc", "MonedaPlanilla", "Moneda"],
+      EstadoPlanilla: ["EstadoPlanilla", "ValidacionResponsable", "EstadoRelacion"],
+    };
+    const names = aliases[column] || [column];
+    if (column.toLowerCase() === "montodetalleoc") {
+      const precio = Number(row[Object.keys(row).find((key) => key.toLowerCase() === "preciounioc") ?? ""] ?? 0);
+      const cantidad = Number(row[Object.keys(row).find((key) => key.toLowerCase() === "cantoc") ?? ""] ?? 0);
+      return precio && cantidad ? (precio * cantidad).toFixed(2) : "—";
+    }
+    if (column === "AvanceOc") {
+      const getMonto = (nombre: string) => {
+        const key = Object.keys(row).find((item) => item.toLowerCase() === nombre.toLowerCase());
+        return key ? toNumber(row[key] as string | number | null | undefined) : 0;
+      };
+      const subtotalOc = getMonto("SubtotalOc");
+      return subtotalOc > 0 ? String(getMonto("SubtotalPlanilla") / subtotalOc) : "0";
+    }
+    const found = names
+      .map((name) => Object.keys(row).find((key) => key.toLowerCase() === name.toLowerCase()))
+      .find((key): key is string => Boolean(key));
+    const rawValue = found ? row[found] : null;
+    if (column === "EstadoOc") return formatEstadoOcGrid(rawValue);
+    if (["PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"].includes(column)) {
+      const text = String(rawValue ?? "").trim();
+      const registrado = /^registrado/i.test(text) || Number(rawValue) > 0;
+      if (!registrado) return "Pendiente";
+      const validadorPorNivel: Record<string, string> = {
+        PrimeraValidacion: "validadoraprobador1oc",
+        SegundaValidacion: "validadoraprobador2oc",
+        TerceraValidacion: "validadoraprobador3oc",
+      };
+      const validadorKey = Object.keys(row).find((key) => key.toLowerCase() === validadorPorNivel[column]);
+      const validador = String(validadorKey ? row[validadorKey] ?? "" : "").trim();
+      return validador ? `Registrado (${validador})` : (text && !/^\d+$/.test(text) ? text : formatValidadorNivel(Number(rawValue) || null));
+    }
+    return String(rawValue ?? "—");
+  };
+
+  const ocGastosGridRows = useMemo<OcGastosGridRow[]>(
+    () => reportePlanillaRows.map((row, index) => ({ ...row, __key: String(index) })),
+    [reportePlanillaRows]
+  );
+  const filaOcGastosRechazada = (row: OcGastosGridRow) =>
+    esEstadoOcRechazado(leerOcGastos(row, "EstadoOc")) || esEstadoOcRechazado(leerOcGastos(row, "IdEstadoOc"));
+  const claveSaldoOcGastos = (row: OcGastosGridRow) =>
+    [leerOcGastos(row, "IdOc"), leerOcGastos(row, "CorrelativoPlanilla"), leerOcGastos(row, "IdSite"), row.__key].join("|");
+  const limpiarAlertaSaldo = (clave: string, campo: "subtotal" | "avance") =>
+    setOcGastosSaldoAlerts((actual) => {
+      const siguiente = { ...actual };
+      delete siguiente[`${clave}:${campo}`];
+      return siguiente;
+    });
+  const saldosOcGastos = (row: OcGastosGridRow) => {
+    const subtotalOcFila = Math.max(0, toNumber(leerOcGastos(row, "SubtotalOc")));
+    const saldoSubtotalFila = Math.max(0, subtotalOcFila - Math.max(0, toNumber(leerOcGastos(row, "SubtotalPlanilla"))));
+    const avanceOcFila = Math.min(1, Math.max(0, toNumber(leerOcGastos(row, "AvanceOc"))));
+    const saldoAvanceOcFila = subtotalOcFila > 0 ? Math.max(0, (1 - avanceOcFila) * 100) : 0;
+    return { subtotalOcFila, saldoSubtotalFila, saldoAvanceOcFila };
+  };
+
+  const renderSaldoOcGastos = (row: OcGastosGridRow, campo: "subtotal" | "avance") => {
+    const clave = claveSaldoOcGastos(row);
+    const { subtotalOcFila, saldoSubtotalFila, saldoAvanceOcFila } = saldosOcGastos(row);
+    const limite = campo === "subtotal" ? saldoSubtotalFila : saldoAvanceOcFila;
+    const valorActual = ocGastosSaldosEditables[clave]?.[campo] ?? limite.toFixed(2);
+    const alerta = ocGastosSaldoAlerts[`${clave}:${campo}`];
+
+    const registrarEdicion = (valor: string) => {
+      const numero = Number(valor);
+      if (valor === "" || (Number.isFinite(numero) && numero >= 0 && numero <= limite)) limpiarAlertaSaldo(clave, campo);
+      setOcGastosSaldosEditables((actual) => ({ ...actual, [clave]: { ...actual[clave], [campo]: valor } }));
+    };
+    const confirmar = (valor: string) => {
+      if (valor !== "" && (!Number.isFinite(Number(valor)) || Number(valor) < 0)) return;
+      if (valor === "") {
+        limpiarAlertaSaldo(clave, campo);
+        setOcGastosSaldosEditables((actual) => ({ ...actual, [clave]: { ...actual[clave], [campo]: "" } }));
+        return;
+      }
+      const numero = Number(valor);
+      if (numero > limite) {
+        const mensaje = campo === "subtotal"
+          ? `No se puede registrar ${formatMoney(numero)}. El saldo subtotal disponible es ${formatMoney(saldoSubtotalFila)}.`
+          : `No se puede registrar ${numero.toFixed(2)}%. El saldo de avance disponible es ${saldoAvanceOcFila.toFixed(2)}%.`;
+        setOcGastosSaldoAlerts((actual) => ({ ...actual, [`${clave}:${campo}`]: mensaje }));
+      } else {
+        limpiarAlertaSaldo(clave, campo);
+      }
+      const saldoSubtotal = campo === "subtotal"
+        ? Math.min(numero, saldoSubtotalFila)
+        : Math.min((numero * subtotalOcFila) / 100, saldoSubtotalFila);
+      const saldoAvance = subtotalOcFila > 0 ? Math.min((saldoSubtotal * 100) / subtotalOcFila, saldoAvanceOcFila) : 0;
+      setOcGastosSaldosEditables((actual) => ({
+        ...actual,
+        [clave]: { ...actual[clave], subtotal: saldoSubtotal.toFixed(2), avance: saldoAvance.toFixed(2) },
+      }));
+    };
+
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 116 }}>
+        <input
+          type="number"
+          min="0"
+          max={limite}
+          step="0.01"
+          value={valorActual}
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) => registrarEdicion(event.target.value)}
+          onBlur={(event) => confirmar(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              event.currentTarget.blur();
+            }
+          }}
+          title={campo === "subtotal" ? `Máximo disponible: ${formatMoney(saldoSubtotalFila)}` : `Máximo disponible: ${saldoAvanceOcFila.toFixed(2)}%`}
+          style={{ width: "100%", minWidth: 96, height: 30, border: "1px solid #CBD5E1", borderRadius: 6, padding: "0 6px", boxSizing: "border-box", fontSize: 12 }}
+        />
+        {alerta ? <span role="alert" title={alerta} onClick={(event) => event.stopPropagation()} style={{ color: "#D97706", fontSize: 16, lineHeight: 1, cursor: "help" }}>⚠</span> : null}
+      </div>
+    );
+  };
+
+  const renderPagoNuevoOcGastos = (row: OcGastosGridRow) => {
+    const clave = claveSaldoOcGastos(row);
+    const enProceso = Boolean(pagosNuevosEnProceso[clave]);
+    const { saldoSubtotalFila, saldoAvanceOcFila } = saldosOcGastos(row);
+    const saldoSubtotalValue = ocGastosSaldosEditables[clave]?.subtotal ?? saldoSubtotalFila.toFixed(2);
+    const saldoAvanceValue = ocGastosSaldosEditables[clave]?.avance ?? saldoAvanceOcFila.toFixed(2);
+    const saldosDisponibles = Number(saldoSubtotalValue) > 0 && Number(saldoAvanceValue) > 0;
+    const disponible = saldosDisponibles && !enProceso;
+    return (
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          const original = reportePlanillaRows[Number(row.__key)];
+          if (!original) return;
+          setPagoNuevoPendiente({ row: original, saldoEditableKey: clave, montoTexto: saldoSubtotalValue, saldoAvanceTexto: saldoAvanceValue });
+        }}
+        disabled={!disponible}
+        title={!saldosDisponibles
+          ? "Pago nuevo requiere saldo subtotal y saldo avance OC mayores que cero."
+          : enProceso
+            ? "Proceso en ejecución..."
+            : `Registrar ${formatMoney(Number(saldoSubtotalValue) || 0)} como nuevo pago.`}
+        aria-label={`Pago nuevo para OC ${leerOcGastos(row, "IdOc")}`}
+        style={{
+          border: "1px solid #0F766E",
+          background: disponible ? "#ECFDF5" : "#F1F5F9",
+          color: disponible ? "#0F766E" : "#94A3B8",
+          borderRadius: 6,
+          padding: "6px 8px",
+          fontSize: 11,
+          fontWeight: 700,
+          cursor: disponible ? "pointer" : "not-allowed",
+          whiteSpace: "nowrap",
+          opacity: disponible ? 1 : 0.8,
+        }}
+      >
+        {enProceso ? "Registrando..." : "Pago nuevo"}
+      </button>
+    );
+  };
+
+  const sinOpcionesDeColumna = {
+    allowSorting: false,
+    allowFiltering: false,
+    allowHeaderFilter: false,
+    allowSearch: false,
+    allowGrouping: false,
+  } as const;
+  const ocGastosGridColumns: GridColumn<OcGastosGridRow>[] = [
+    {
+      dataField: "__acciones",
+      caption: "",
+      width: 70,
+      fixed: true,
+      ...sinOpcionesDeColumna,
+      calculateCellValue: () => "",
+      cellRender: (_value, row) => {
+        const idOc = Number(leerOcGastos(row, "IdOc"));
+        return (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }} onClick={(event) => event.stopPropagation()}>
+            <button
+              type="button"
+              style={{ ...(pdfExportingOc === idOc ? styles.pdfIconButtonDisabled : styles.pdfIconButton), width: 22, height: 22, borderRadius: 6 }}
+              onClick={() => void visualizarReporteOcPdf(idOc)}
+              disabled={pdfExportingOc === idOc || !idOc}
+              title={`Visualizar PDF de la OC ${idOc}`}
+              aria-label={`Visualizar PDF de la OC ${idOc}`}
+            >
+              <Eye size={15} strokeWidth={2.3} />
+            </button>
+            <button
+              type="button"
+              style={{ ...styles.pdfIconButton, width: 22, height: 22, borderRadius: 6 }}
+              onClick={() => void visualizarDetalleReporteOc(idOc)}
+              disabled={!idOc}
+              title={`Mostrar detalle de la OC ${idOc}`}
+              aria-label={`Mostrar detalle de la OC ${idOc}`}
+            >
+              <FileText size={14} strokeWidth={2.3} />
+            </button>
+          </span>
+        );
+      },
+    },
+    ...reportePlanillaColumns.map((column, index): GridColumn<OcGastosGridRow> => {
+      const numerica = OC_GASTOS_COLUMNAS_NUMERICAS.has(column) || column === "AvanceOc";
+      const base: GridColumn<OcGastosGridRow> = {
+        dataField: column,
+        caption: OC_GASTOS_COLUMN_LABELS[column] ?? column,
+        width: 130,
+        fixed: index < 2,
+        ...(numerica ? { dataType: "number" as const, alignment: "right" as const } : {}),
+        calculateCellValue: (row) => {
+          const valor = leerOcGastos(row, column);
+          return numerica ? toNumber(valor) : valor;
+        },
+      };
+      if (column === "EstadoOcSemaforo") {
+        return {
+          ...base,
+          width: 110,
+          alignment: "center",
+          cellRender: (value, row) => {
+            const codigo = String(value ?? "").trim().toUpperCase();
+            const rechazada = filaOcGastosRechazada(row);
+            return <span title={rechazada ? "Rechazada" : ETIQUETAS_ESTADO_OC[codigo] ?? codigo}>{rechazada ? "RECHAZADA" : codigo === "P" ? "S/O" : codigo}</span>;
+          },
+          cellStyle: (value, row) => {
+            const codigo = String(value ?? "").trim().toUpperCase();
+            const rechazada = filaOcGastosRechazada(row);
+            const color = rechazada ? "#D32F2F" : COLORES_ESTADO_OC[codigo];
+            if (!color) return undefined;
+            return { background: color, color: rechazada || !["2", "P"].includes(codigo) ? "#fff" : "#1F2937", textAlign: "center", fontWeight: 700 };
+          },
+        };
+      }
+      if (column === "DiferenciaSubtotal" || column === "DiferenciaAvanceOc") {
+        return {
+          ...base,
+          width: 150,
+          ...sinOpcionesDeColumna,
+          calculateCellValue: () => "",
+          cellRender: (_value, row) => renderSaldoOcGastos(row, column === "DiferenciaSubtotal" ? "subtotal" : "avance"),
+        };
+      }
+      if (column === "PagoNuevo") {
+        return {
+          ...base,
+          width: 120,
+          ...sinOpcionesDeColumna,
+          calculateCellValue: () => "",
+          cellRender: (_value, row) => renderPagoNuevoOcGastos(row),
+        };
+      }
+      if (column === "AvanceOc") {
+        return { ...base, cellRender: (value) => formatPercent(Number(value)) };
+      }
+      if (OC_GASTOS_COLUMNAS_NUMERICAS.has(column)) {
+        return { ...base, cellRender: (value) => formatOcGastosNumber(value) };
+      }
+      if (["PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"].includes(column)) {
+        return { ...base, width: 160, cellRender: (value) => <ValidacionEstadoBadge value={String(value ?? "")} /> };
+      }
+      if (column === "PorcentajeConsumidoOc") {
+        return {
+          ...base,
+          cellRender: (value) => {
+            const n = Number(value);
+            return Number.isFinite(n) ? <PorcentajeConsumidoBar value={n} /> : String(value ?? "");
+          },
+        };
+      }
+      if (column === "CorrelativoPlanilla") {
+        return {
+          ...base,
+          width: 150,
+          cellRender: (value) => {
+            const correlativos = String(value ?? "").split(",").map((item) => Number(item.trim())).filter((item) => Number.isInteger(item) && item > 0);
+            if (!correlativos.length) return String(value ?? "");
+            return (
+              <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 5 }} onClick={(event) => event.stopPropagation()}>
+                {correlativos.map((correlativo) => (
+                  <a
+                    key={correlativo}
+                    href={`#gasto-${correlativo}`}
+                    style={styles.correlativoLink}
+                    onClick={(event) => { event.preventDefault(); void visualizarGastoPorCorrelativo(correlativo); }}
+                    aria-label={`Visualizar gasto ${correlativo}`}
+                  >
+                    {correlativo}
+                  </a>
+                ))}
+              </span>
+            );
+          },
+        };
+      }
+      return base;
+    }),
+  ];
+
   return (
     <div style={styles.page}>
       <section style={ocV1Styles.topbar}>
@@ -2960,7 +3221,7 @@ export default function OcV2Page() {
                 void exportToExcel(
                   `oc_gastos_${today}.xlsx`,
                   columns,
-                  reportePlanillaRowsOrdenadas.map((row) => columns.map((column) => getReportePlanillaColumnValue(row, column)))
+                  (ocGastosFilasVisiblesRef.current ?? reportePlanillaRows).map((row) => columns.map((column) => getReportePlanillaColumnValue(row, column)))
                 );
                 return;
               }
@@ -3421,48 +3682,29 @@ export default function OcV2Page() {
                   style={styles.input}
                 />
               </Field>
-              <Field><Label>Solicitante</Label><details style={{ position: "relative" }}><summary style={{ ...styles.input, display: "flex", alignItems: "center", cursor: "pointer" }}>Todos{solicitantesReporteFiltro.length > 0 && ` (${solicitantesReporteFiltro.length})`}</summary><div style={{ position: "absolute", zIndex: 20, top: "100%", left: 0, right: 0, maxHeight: 240, overflowY: "auto", padding: 8, background: "#fff", border: "1px solid #D1D5DB", borderRadius: 8 }}><input value={busquedaSolicitanteReporte} onChange={(e) => setBusquedaSolicitanteReporte(e.target.value)} placeholder="Escriba un solicitante..." style={styles.input} /><label style={{ display: "flex", gap: 6, padding: "6px 2px", fontSize: 12, fontWeight: 600 }}><input type="checkbox" onChange={(e) => { const disponibles = solicitanteReporteOptions.filter((item) => item.label.toLocaleLowerCase().includes(busquedaSolicitanteReporte.toLocaleLowerCase())).map((item) => item.value); const values = e.target.checked ? [...new Set([...solicitantesReporteFiltro, ...disponibles])] : solicitantesReporteFiltro.filter((v) => !disponibles.includes(v)); setSolicitantesReporteFiltro(values); setReporteFiltros((p) => ({ ...p, solicitante: values.join(",") })); }} />Marcar / desmarcar todos</label>{solicitanteReporteOptions.filter((item) => item.label.toLocaleLowerCase().includes(busquedaSolicitanteReporte.toLocaleLowerCase())).map((item) => <label key={`rep-sol-${item.value}`} style={{ display: "flex", gap: 6, padding: "4px 2px", fontSize: 12 }}><input type="checkbox" checked={solicitantesReporteFiltro.includes(item.value)} onChange={(e) => { const values = e.target.checked ? [...new Set([...solicitantesReporteFiltro, item.value])] : solicitantesReporteFiltro.filter((v) => v !== item.value); setSolicitantesReporteFiltro(values); setReporteFiltros((p) => ({ ...p, solicitante: values.join(",") })); }} />{item.label}</label>)}</div></details></Field>
               <Field>
-              <Label>Responsable</Label>
-              <details className="oc-reporte-multi-filter" style={{ position: "relative", minWidth: 180 }}>
-                <summary style={{ ...styles.input, display: "flex", alignItems: "center", cursor: "pointer" }}>Todos{responsablesReporteFiltro.length > 0 && ` (${responsablesReporteFiltro.length})`}</summary>
-                <div className="oc-reporte-multi-options" style={{ position: "absolute", zIndex: 20, top: "100%", left: 0, right: 0, maxHeight: 240, overflowY: "auto", padding: 8, background: "#fff", border: "1px solid #D1D5DB", borderRadius: 8, boxShadow: "0 6px 16px rgba(15,23,42,.12)" }}>
-                  <input value={busquedaResponsableReporte} onChange={(event) => setBusquedaResponsableReporte(event.target.value)} placeholder="Escriba un responsable..." style={styles.input} />
-                  {reporteSubtab !== "oc-gastos" ? (
-                    <label style={{ display: "flex", gap: 6, alignItems: "center", padding: "6px 2px", fontSize: 12, fontWeight: 600, borderBottom: "1px solid #E5E7EB" }}>
-                      <input
-                        type="checkbox"
-                        checked={responsableReporteOptions.filter((item) => item.label.toLocaleLowerCase().includes(busquedaResponsableReporte.toLocaleLowerCase())).every((item) => responsablesReporteFiltro.includes(item.value)) && responsableReporteOptions.length > 0}
-                        onChange={(event) => {
-                          const disponibles = responsableReporteOptions.filter((item) => item.label.toLocaleLowerCase().includes(busquedaResponsableReporte.toLocaleLowerCase())).map((item) => item.value);
-                          const values = event.target.checked ? [...new Set([...responsablesReporteFiltro, ...disponibles])] : responsablesReporteFiltro.filter((value) => !disponibles.includes(value));
-                          setResponsablesReporteFiltro(values);
-                          setReporteFiltros((prev) => ({ ...prev, responsable: values.join(",") }));
-                        }}
-                      />
-                      Marcar / desmarcar todos
-                    </label>
-                  ) : null}
-                  {responsableReporteOptions
-                    .filter((item) => item.label.toLocaleLowerCase().includes(busquedaResponsableReporte.toLocaleLowerCase()))
-                    .map((item) => (
-                      <label key={`rep-res-${item.value}`} style={{ display: "flex", gap: 6, alignItems: "center", padding: "4px 2px", fontSize: 12 }}>
-                        <input
-                          type="checkbox"
-                          checked={responsablesReporteFiltro.includes(item.value)}
-                          onChange={(event) => {
-                            const values = event.target.checked
-                              ? [...new Set([...responsablesReporteFiltro, item.value])]
-                              : responsablesReporteFiltro.filter((value) => value !== item.value);
-                            setResponsablesReporteFiltro(values);
-                            setReporteFiltros((prev) => ({ ...prev, responsable: values.join(",") }));
-                          }}
-                        />
-                        {item.label}
-                      </label>
-                    ))}
-                </div>
-              </details>
+                <Label>Solicitante</Label>
+                <MultiFiltroBuscable
+                  options={solicitanteReporteOptions}
+                  selected={solicitantesReporteFiltro}
+                  onChange={(values) => { setSolicitantesReporteFiltro(values); setReporteFiltros((prev) => ({ ...prev, solicitante: values.join(",") })); }}
+                  query={busquedaSolicitanteReporte}
+                  onQuery={setBusquedaSolicitanteReporte}
+                  placeholder="Escriba para filtrar..."
+                  allowSelectAll={true}
+                />
+              </Field>
+              <Field>
+                <Label>Responsable</Label>
+                <MultiFiltroBuscable
+                  options={responsableReporteOptions}
+                  selected={responsablesReporteFiltro}
+                  onChange={(values) => { setResponsablesReporteFiltro(values); setReporteFiltros((prev) => ({ ...prev, responsable: values.join(",") })); }}
+                  query={busquedaResponsableReporte}
+                  onQuery={setBusquedaResponsableReporte}
+                  placeholder="Escriba para filtrar..."
+                  allowSelectAll={reporteSubtab !== "oc-gastos"}
+                />
               </Field>
               <Field>
                 <Label>Cliente</Label>
@@ -3477,74 +3719,32 @@ export default function OcV2Page() {
               </Field>
               <Field>
                 <Label>Proyecto</Label>
-                <details style={{ position: "relative" }}>
-                  <summary style={{ ...styles.input, display: "flex", alignItems: "center", cursor: "pointer" }}>
-                    Todos{proyectosReporteFiltro.length > 0 && ` (${proyectosReporteFiltro.length})`}
-                  </summary>
-                  <div style={{ position: "absolute", zIndex: 20, top: "100%", left: 0, right: 0, maxHeight: 240, overflowY: "auto", padding: 8, background: "#fff", border: "1px solid #D1D5DB", borderRadius: 8 }}>
-                    <input value={busquedaProyectoReporte} onChange={(event) => setBusquedaProyectoReporte(event.target.value)} placeholder="Escriba un proyecto..." style={styles.input} />
-                    <label style={{ display: "flex", gap: 6, padding: "6px 2px", fontSize: 12, fontWeight: 600 }}>
-                      <input type="checkbox" onChange={(event) => {
-                        const disponibles = proyectoReporteOptions
-                          .filter((item) => item.label.toLocaleLowerCase().includes(busquedaProyectoReporte.toLocaleLowerCase()))
-                          .map((item) => item.value);
-                        const values = event.target.checked ? [...new Set([...proyectosReporteFiltro, ...disponibles])] : proyectosReporteFiltro.filter((value) => !disponibles.includes(value));
-                        setProyectosReporteFiltro(values);
-                        setReporteFiltros((prev) => ({ ...prev, proyecto: values.join(",") }));
-                      }} />
-                      Marcar / desmarcar todos
-                    </label>
-                    {proyectoReporteOptions
-                      .filter((item) => item.label.toLocaleLowerCase().includes(busquedaProyectoReporte.toLocaleLowerCase()))
-                      .map((item) => (
-                        <label key={`rep-pro-${item.value}`} style={{ display: "flex", gap: 6, padding: "4px 2px", fontSize: 12 }}>
-                          <input type="checkbox" checked={proyectosReporteFiltro.includes(item.value)} onChange={(event) => {
-                            const values = event.target.checked
-                              ? [...new Set([...proyectosReporteFiltro, item.value])]
-                              : proyectosReporteFiltro.filter((value) => value !== item.value);
-                            setProyectosReporteFiltro(values);
-                            setReporteFiltros((prev) => ({ ...prev, proyecto: values.join(",") }));
-                          }} />
-                          {item.label}
-                        </label>
-                      ))}
-                  </div>
-                </details>
+                <MultiFiltroBuscable
+                  options={proyectoReporteOptions}
+                  selected={proyectosReporteFiltro}
+                  onChange={(values) => { setProyectosReporteFiltro(values); setReporteFiltros((prev) => ({ ...prev, proyecto: values.join(",") })); }}
+                  query={busquedaProyectoReporte}
+                  onQuery={setBusquedaProyectoReporte}
+                  placeholder="Escriba para filtrar..."
+                  allowSelectAll={true}
+                />
               </Field>
               <Field>
                 <Label>Site</Label>
-                <details style={{ position: "relative" }}>
-                  <summary style={{ ...styles.input, display: "flex", alignItems: "center", cursor: "pointer" }}>
-                    Todos{sitesReporteFiltro.length > 0 && ` (${sitesReporteFiltro.length})`}
-                  </summary>
-                  <div style={{ position: "absolute", zIndex: 20, top: "100%", left: 0, right: 0, maxHeight: 240, overflowY: "auto", padding: 8, background: "#fff", border: "1px solid #D1D5DB", borderRadius: 8 }}>
-                    <input value={busquedaSiteReporte} onChange={(event) => setBusquedaSiteReporte(event.target.value)} placeholder="Escriba un site..." style={styles.input} />
-                    <label style={{ display: "flex", gap: 6, padding: "6px 2px", fontSize: 12, fontWeight: 600 }}>
-                      <input type="checkbox" onChange={(event) => {
-                        const disponibles = reporteSiteOptions.filter((site) => `${site.idSite} ${site.nombreSite}`.toLocaleLowerCase().includes(busquedaSiteReporte.toLocaleLowerCase())).map((site) => site.idSite);
-                        const values = event.target.checked ? [...new Set([...sitesReporteFiltro, ...disponibles])] : sitesReporteFiltro.filter((idSite) => !disponibles.includes(idSite));
-                        setSitesReporteFiltro(values);
-                        setReporteFiltros((prev) => ({ ...prev, site: values.join(",") }));
-                      }} />
-                      Marcar / desmarcar todos
-                    </label>
-                    {reporteSiteOptions.filter((site) => `${site.idSite} ${site.nombreSite}`.toLocaleLowerCase().includes(busquedaSiteReporte.toLocaleLowerCase())).map((site) => (
-                      <label key={`rep-site-${site.idSite}`} style={{ display: "flex", gap: 6, padding: "4px 2px", fontSize: 12 }}>
-                        <input type="checkbox" checked={sitesReporteFiltro.includes(site.idSite)} onChange={(event) => {
-                          const values = event.target.checked ? [...sitesReporteFiltro, site.idSite] : sitesReporteFiltro.filter((idSite) => idSite !== site.idSite);
-                          setSitesReporteFiltro(values);
-                          setReporteFiltros((prev) => ({ ...prev, site: values.join(",") }));
-                        }} />
-                        {site.nombreSite} ({site.idSite})
-                      </label>
-                    ))}
-                  </div>
-                </details>
+                <MultiFiltroBuscable
+                  options={reporteSiteOptions.map((site) => ({ value: site.idSite, label: `${site.nombreSite} (${site.idSite})` }))}
+                  selected={sitesReporteFiltro}
+                  onChange={(values) => { setSitesReporteFiltro(values); setReporteFiltros((prev) => ({ ...prev, site: values.join(",") })); }}
+                  query={busquedaSiteReporte}
+                  onQuery={setBusquedaSiteReporte}
+                  placeholder="Escriba para filtrar..."
+                  allowSelectAll={true}
+                />
               </Field>
               <Field>
                 <Label>Estado</Label>
                 <details style={{ position: "relative" }}>
-                  <summary style={{ ...styles.input, display: "flex", alignItems: "center", cursor: "pointer" }}>
+                  <summary style={multiFiltroResumenStyle}>
                     {getEstadosOcSeleccionados(reporteFiltros.estado).length
                       ? `Estados (${getEstadosOcSeleccionados(reporteFiltros.estado).length})`
                       : "Todos los estados"}
@@ -3592,41 +3792,36 @@ export default function OcV2Page() {
                 {reporteSubtab === "oc-gastos" && <button type="button" style={{ ...styles.primaryButton, height: 34, minWidth: 76, padding: "0 10px", fontSize: 11, lineHeight: 1.2, whiteSpace: "normal" }} disabled={reporteLoading} onClick={() => { setReportePlanillaRows([]); void loadReporteDetalles(); }}>Aplicar filtros</button>}
               </div>
             </div>
-            {String(reporteSubtab) === "oc-gastos" ? (
-              <div
-                ref={ocGastosHeaderScrollRef}
-                onScroll={() => sincronizarScrollOcGastos("cabecera")}
-                aria-label="Desplazamiento horizontal de columnas de OC/Gastos"
-                style={{ overflowX: "auto", overflowY: "hidden", height: 16, marginBottom: 4 }}
-              >
-                <div ref={ocGastosHeaderScrollContentRef} style={{ height: 1 }} />
+            {reporteSubtab === "oc-gastos" ? (
+              <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+                <DataGridPro<OcGastosGridRow>
+                  key="oc-gastos-grid"
+                  dataSource={ocGastosGridRows}
+                  keyExpr="__key"
+                  columns={ocGastosGridColumns}
+                  height="fill"
+                  loading={reporteLoading}
+                  noDataText={!reporteConsultado ? "Ingrese un filtro y presione Aplicar filtros o Enter en Nro OC." : "No hay registros de Planilla."}
+                  stateStoringKey="oc-v2-oc-gastos"
+                  focusedRowKey={ocGastosFilaSeleccionada}
+                  onVisibleRowsChange={(rows) => { ocGastosFilasVisiblesRef.current = rows; }}
+                  onRowClick={(item) => setOcGastosFilaSeleccionada(item.__key)}
+                  rowStyle={(item) => (filaOcGastosRechazada(item) ? { background: "#FEF2F2" } : undefined)}
+                  paging={{ pageSize: 100, pageSizes: [50, 100, 250, 500] }}
+                  allowExport={false}
+                  showSearchPanel={false}
+                  rowAlternation={false}
+                  rowPadding="3px 8px"
+                />
               </div>
-            ) : null}
-            <div
-              ref={String(reporteSubtab) === "oc-gastos" ? ocGastosTableScrollRef : undefined}
-              onScroll={String(reporteSubtab) === "oc-gastos" ? () => sincronizarScrollOcGastos("tabla") : undefined}
-              style={String(reporteSubtab) === "oc-gastos"
-                ? {
-                    ...styles.tableWrap,
-                    flex: 1,
-                    width: "100%",
-                    maxWidth: "100%",
-                    minWidth: 0,
-                    minHeight: 0,
-                    overflow: "auto",
-                  }
-                : { ...styles.tableWrap, flex: 1, minHeight: 0, overflow: "auto" }}
-            >
-              <style>{`.reporte-grid thead th { position: sticky; top: 0; z-index: 3; background: #fff; } .oc-gastos-grid th:nth-child(n+${OC_GASTOS_MAX_COLUMNAS_VISIBLES + 1}), .oc-gastos-grid td:nth-child(n+${OC_GASTOS_MAX_COLUMNAS_VISIBLES + 1}) { display: none; } .oc-gastos-grid tbody tr.oc-gastos-fila-rechazada > td { background: #FEF2F2 !important; } .oc-gastos-grid tbody tr.oc-gastos-fila-seleccionada > td { background: #FFF7ED !important; border-top: 3px solid #F97316 !important; border-bottom: 3px solid #F97316 !important; } .oc-gastos-grid tbody tr.oc-gastos-fila-seleccionada.oc-gastos-fila-rechazada > td { background: #FEE2E2 !important; } .oc-gastos-grid tbody tr.oc-gastos-fila-seleccionada > td:first-child { border-left: 3px solid #F97316 !important; } .oc-gastos-grid tbody tr.oc-gastos-fila-seleccionada > td:last-child { border-right: 3px solid #F97316 !important; } .oc-gastos-grid tbody tr > td.oc-gastos-estado-rechazada { background: #B91C1C !important; color: #FFFFFF !important; font-weight: 800 !important; }`}</style>
-              <table className={String(reporteSubtab) === "oc-gastos" ? "reporte-grid oc-gastos-grid" : "reporte-grid"} style={String(reporteSubtab) === "oc-gastos" ? { ...styles.table, width: "max-content", minWidth: "100%" } : styles.table}>
+            ) : (
+            <div style={{ ...styles.tableWrap, flex: 1, minHeight: 0, overflow: "auto" }}>
+              <style>{`.reporte-grid thead th { position: sticky; top: 0; z-index: 3; background: #fff; }`}</style>
+              <table className="reporte-grid" style={styles.table}>
                 <thead>
                   <tr>
-                    {String(reporteSubtab) === "oc-gastos" ? <>
-                      <th style={{ ...styles.th, width: 52, minWidth: 52, position: "sticky", top: 0, left: 0, zIndex: 6, background: "#fff" }} aria-label="Acciones"></th>
-                      {reportePlanillaColumns.map((column, index) => <th key={`pla-head-${column}`} style={{ ...styles.th, width: 110, minWidth: 80, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer", position: "sticky", top: 0, zIndex: index < 4 ? 5 : 2, background: "#fff", ...(index < 4 ? { left: 52 + index * 110 } : {}) }} title={`Ordenar por ${OC_GASTOS_COLUMN_LABELS[column] ?? column}`} onClick={() => setReportePlanillaSort((current) => ({ column, direction: current.column === column && current.direction === "asc" ? "desc" : "asc" }))}>{OC_GASTOS_COLUMN_LABELS[column] ?? column}{reportePlanillaSort.column === column ? (reportePlanillaSort.direction === "asc" ? " ▲" : " ▼") : ""}</th>)}
-                    </> : <th style={{ ...styles.th, width: 88 }} aria-label="Acciones">Acciones</th>}
-                    {String(reporteSubtab) !== "oc-gastos" && <>
-                      <th style={styles.th}>OC</th>
+                    <th style={{ ...styles.th, width: 88 }} aria-label="Acciones">Acciones</th>
+                    <th style={styles.th}>OC</th>
                     <th style={styles.th}>Fecha</th>
                     <th style={styles.th}>Cliente</th>
                     <th style={styles.th}>Proyecto</th>
@@ -3640,314 +3835,10 @@ export default function OcV2Page() {
                     <th style={styles.th}>1ra validación</th>
                     <th style={styles.th}>2da validación</th>
                     <th style={styles.th}>3ra validación</th>
-                    </>}
                   </tr>
                 </thead>
                 <tbody>
-                  {String(reporteSubtab) === "oc-gastos" ? (
-                    reportePlanillaRows.length === 0 ? (
-                      <tr><td style={styles.td} colSpan={Math.max(reportePlanillaColumns.length, 1)}>{reporteLoading ? "Cargando datos..." : !reporteConsultado ? "Ingrese un filtro y presione Aplicar filtros o Enter en Nro OC." : "No hay registros de Planilla."}</td></tr>
-                    ) : reportePlanillaRowsOrdenadas.map((row, index) => {
-                      const read = (column: string) => {
-                        const aliases: Record<string, string[]> = {
-        EstadoOc: ["EstadoOc", "Estado", "IdEstadoOc"],
-        EstadoOcSemaforo: ["EstadoOcSemaforo", "EstadoOc", "IdEstadoOc"],
-        FechaOc: ["FechaOc", "FechaCreacion", "FechaOrden"],
-                          PrimeraValidacion: ["PrimeraValidacion", "IdAprobador1"],
-                          SegundaValidacion: ["SegundaValidacion", "IdAprobador2"],
-                          TerceraValidacion: ["TerceraValidacion", "IdAprobador3"],
-                          CorrelativoPlanilla: ["CorrelativoPlanilla"],
-                          MonedaOc: ["MonedaOc", "MonedaPlanilla", "Moneda"],
-                          EstadoPlanilla: ["EstadoPlanilla", "ValidacionResponsable", "EstadoRelacion"],
-                        };
-                        const names = aliases[column] || [column];
-                        if (column.toLowerCase() === "montodetalleoc") {
-                          const precio = Number(row[Object.keys(row).find((key) => key.toLowerCase() === "preciounioc") ?? ""] ?? 0);
-                          const cantidad = Number(row[Object.keys(row).find((key) => key.toLowerCase() === "cantoc") ?? ""] ?? 0);
-                          return precio && cantidad ? (precio * cantidad).toFixed(2) : "—";
-                        }
-                        if (column === "AvanceOc") {
-                          const getMonto = (nombre: string) => {
-                            const key = Object.keys(row).find((item) => item.toLowerCase() === nombre.toLowerCase());
-                            return key ? toNumber(row[key] as string | number | null | undefined) : 0;
-                          };
-                          const subtotalOc = getMonto("SubtotalOc");
-                          const subtotalPlanilla = getMonto("SubtotalPlanilla");
-                          return subtotalOc > 0 ? String(subtotalPlanilla / subtotalOc) : "0";
-                        }
-                        const found = names
-                          .map((name) => Object.keys(row).find((key) => key.toLowerCase() === name.toLowerCase()))
-                          .find((key): key is string => Boolean(key));
-                        const rawValue = found ? row[found] : null;
-                        if (column === "EstadoOc") return formatEstadoOcGrid(rawValue);
-                        if (["PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"].includes(column)) {
-                          const text = String(rawValue ?? "").trim();
-                          const registrado = /^registrado/i.test(text) || Number(rawValue) > 0;
-                          if (!registrado) return "Pendiente";
-
-                          const validadorPorNivel: Record<string, string> = {
-                            PrimeraValidacion: "validadoraprobador1oc",
-                            SegundaValidacion: "validadoraprobador2oc",
-                            TerceraValidacion: "validadoraprobador3oc",
-                          };
-                          const validadorKey = Object.keys(row).find(
-                            (key) => key.toLowerCase() === validadorPorNivel[column],
-                          );
-                          const validador = String(validadorKey ? row[validadorKey] ?? "" : "").trim();
-                          return validador ? `Registrado (${validador})` : (text && !/^\d+$/.test(text) ? text : formatValidadorNivel(Number(rawValue) || null));
-                        }
-                        return String(rawValue ?? "—");
-                      };
-                      const subtotalOcFila = Math.max(0, toNumber(read("SubtotalOc")));
-                      const subtotalPlanillaFila = Math.max(0, toNumber(read("SubtotalPlanilla")));
-                      const saldoSubtotalFila = Math.max(0, subtotalOcFila - subtotalPlanillaFila);
-                      const avanceOcFila = Math.min(1, Math.max(0, toNumber(read("AvanceOc"))));
-                      const saldoAvanceOcFila = subtotalOcFila > 0 ? Math.max(0, (1 - avanceOcFila) * 100) : 0;
-                      const saldoEditableKey = [
-                        read("IdOc"),
-                        read("CorrelativoPlanilla"),
-                        read("IdSite"),
-                        index,
-                      ].join("|");
-                      const registrarEdicionSaldo = (campo: "subtotal" | "avance", valor: string) => {
-                        const numero = Number(valor);
-                        const limite = campo === "subtotal" ? saldoSubtotalFila : saldoAvanceOcFila;
-                        const valorDentroDelRango = valor === "" || (Number.isFinite(numero) && numero >= 0 && numero <= limite);
-                        if (valorDentroDelRango) {
-                          setOcGastosSaldoAlerts((actual) => {
-                            const siguiente = { ...actual };
-                            delete siguiente[`${saldoEditableKey}:${campo}`];
-                            return siguiente;
-                          });
-                        }
-                        setOcGastosSaldosEditables((actual) => ({
-                          ...actual,
-                          [saldoEditableKey]: { ...actual[saldoEditableKey], [campo]: valor },
-                        }));
-                      };
-                      const confirmarSaldoEditable = (campo: "subtotal" | "avance", valor: string) => {
-                        if (valor !== "" && (!Number.isFinite(Number(valor)) || Number(valor) < 0)) return;
-                        if (valor === "") {
-                          setOcGastosSaldoAlerts((actual) => {
-                            const siguiente = { ...actual };
-                            delete siguiente[`${saldoEditableKey}:${campo}`];
-                            return siguiente;
-                          });
-                          setOcGastosSaldosEditables((actual) => ({
-                            ...actual,
-                            [saldoEditableKey]: { ...actual[saldoEditableKey], [campo]: "" },
-                          }));
-                          return;
-                        }
-
-                        const numero = Number(valor);
-                        const excedeSaldo = campo === "subtotal"
-                          ? numero > saldoSubtotalFila
-                          : numero > saldoAvanceOcFila;
-                        if (excedeSaldo) {
-                          const mensajeExceso = campo === "subtotal"
-                            ? `No se puede registrar ${formatMoney(numero)}. El saldo subtotal disponible es ${formatMoney(saldoSubtotalFila)}.`
-                            : `No se puede registrar ${numero.toFixed(2)}%. El saldo de avance disponible es ${saldoAvanceOcFila.toFixed(2)}%.`;
-                          setOcGastosSaldoAlerts((actual) => ({
-                            ...actual,
-                            [`${saldoEditableKey}:${campo}`]: mensajeExceso,
-                          }));
-                        } else {
-                          setOcGastosSaldoAlerts((actual) => {
-                            const siguiente = { ...actual };
-                            delete siguiente[`${saldoEditableKey}:${campo}`];
-                            return siguiente;
-                          });
-                        }
-                        const saldoSubtotal = campo === "subtotal"
-                          ? Math.min(numero, saldoSubtotalFila)
-                          : Math.min((numero * subtotalOcFila) / 100, saldoSubtotalFila);
-                        const saldoAvance = subtotalOcFila > 0
-                          ? Math.min((saldoSubtotal * 100) / subtotalOcFila, saldoAvanceOcFila)
-                          : 0;
-                        setOcGastosSaldosEditables((actual) => ({
-                          ...actual,
-                          [saldoEditableKey]: {
-                            ...actual[saldoEditableKey],
-                            subtotal: saldoSubtotal.toFixed(2),
-                            avance: saldoAvance.toFixed(2),
-                          },
-                        }));
-                      };
-
-                      const filaSeleccionada = ocGastosFilaSeleccionada === saldoEditableKey;
-                      const filaRechazada = esEstadoOcRechazado(read("EstadoOc")) || esEstadoOcRechazado(read("IdEstadoOc"));
-                      return (
-                        <tr
-                          key={`pla-${read("IdOc") || "sin-oc"}-${read("CorrelativoPlanilla")}-${read("IdSite")}-${read("PrecioUniOc")}-${read("CantOc")}-${index}`}
-                          className={[
-                            filaSeleccionada ? "oc-gastos-fila-seleccionada" : "",
-                            filaRechazada ? "oc-gastos-fila-rechazada" : "",
-                          ].filter(Boolean).join(" ") || undefined}
-                          style={{ ...styles.tr, cursor: "pointer" }}
-                          onClick={() => setOcGastosFilaSeleccionada(saldoEditableKey)}
-                          aria-selected={filaSeleccionada}
-                        >
-                          <td style={{ ...styles.td, width: 52, minWidth: 52, padding: "4px 2px", whiteSpace: "nowrap", lineHeight: 0, position: "sticky", left: 0, zIndex: 2, background: "#fff" }}>
-                            <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                            <button
-                              type="button"
-                              style={{ ...(pdfExportingOc === Number(read("IdOc")) ? styles.pdfIconButtonDisabled : styles.pdfIconButton), width: 22, height: 22, borderRadius: 6, verticalAlign: "middle" }}
-                              onClick={(event) => { event.stopPropagation(); void visualizarReporteOcPdf(Number(read("IdOc"))); }}
-                              disabled={pdfExportingOc === Number(read("IdOc")) || !Number(read("IdOc"))}
-                              title={`Visualizar PDF de la OC ${read("IdOc")}`}
-                              aria-label={`Visualizar PDF de la OC ${read("IdOc")}`}
-                            >
-                              <Eye size={15} strokeWidth={2.3} />
-                            </button>
-                            <button
-                              type="button"
-                              style={{ ...styles.pdfIconButton, width: 22, height: 22, borderRadius: 6, verticalAlign: "middle" }}
-                              onClick={(event) => { event.stopPropagation(); void visualizarDetalleReporteOc(Number(read("IdOc"))); }}
-                              disabled={!Number(read("IdOc"))}
-                              title={`Mostrar detalle de la OC ${read("IdOc")}`}
-                              aria-label={`Mostrar detalle de la OC ${read("IdOc")}`}
-                            >
-                              <FileText size={14} strokeWidth={2.3} />
-                            </button>
-                            </span>
-                          </td>
-                          {reportePlanillaColumns.map((column, columnIndex) => {
-                            const rawValue = read(column);
-                            const esSaldoSubtotal = column === "DiferenciaSubtotal";
-                            const esSaldoAvance = column === "DiferenciaAvanceOc";
-                            const esPagoNuevo = column === "PagoNuevo";
-                            const esEstadoOcSemaforo = column === "EstadoOcSemaforo";
-                            const pagoNuevoEnProceso = Boolean(pagosNuevosEnProceso[saldoEditableKey]);
-                            const estadoOcSemaforo = String(rawValue ?? "").trim().toUpperCase();
-                            const colorEstadoOc = filaRechazada ? "#D32F2F" : COLORES_ESTADO_OC[estadoOcSemaforo];
-                            const estadoOcSemaforoDisplay = filaRechazada ? "RECHAZADA" : estadoOcSemaforo === "P" ? "S/O" : estadoOcSemaforo;
-                            const saldoSubtotalValue = ocGastosSaldosEditables[saldoEditableKey]?.subtotal ?? saldoSubtotalFila.toFixed(2);
-                            const saldoAvanceValue = ocGastosSaldosEditables[saldoEditableKey]?.avance ?? saldoAvanceOcFila.toFixed(2);
-                            const saldoSubtotalDisponibleParaPago = Number(saldoSubtotalValue) > 0;
-                            const saldoAvanceDisponibleParaPago = Number(saldoAvanceValue) > 0;
-                            const pagoNuevoDisponible = saldoSubtotalDisponibleParaPago
-                              && saldoAvanceDisponibleParaPago
-                              && !pagoNuevoEnProceso;
-                            const saldoSubtotalAlert = ocGastosSaldoAlerts[`${saldoEditableKey}:subtotal`];
-                            const saldoAvanceAlert = ocGastosSaldoAlerts[`${saldoEditableKey}:avance`];
-                            const value = OC_GASTOS_COLUMNAS_NUMERICAS.has(column)
-                              ? formatOcGastosNumber(rawValue)
-                              : column === "AvanceOc"
-                                ? formatPercent(Number(rawValue))
-                              : esSaldoSubtotal || esSaldoAvance || esPagoNuevo
-                                ? ""
-                              : column.toLowerCase() === "porcentajeconsumidooc" && Number.isFinite(Number(rawValue))
-                                ? Number(rawValue).toFixed(2)
-                                : rawValue;
-                            const esValidacion = ["PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"].includes(column);
-                            const esPorcentajeConsumido = column === "PorcentajeConsumidoOc" && Number.isFinite(Number(rawValue));
-                            const correlativosPlanilla = column === "CorrelativoPlanilla"
-                              ? String(rawValue ?? "").split(",").map((item) => Number(item.trim())).filter((item) => Number.isInteger(item) && item > 0)
-                              : [];
-
-                            return (
-                              <td key={`${index}-${column}`} className={esEstadoOcSemaforo && filaRechazada ? "oc-gastos-estado-rechazada" : undefined} style={{ ...styles.td, width: 110, minWidth: 80, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer", ...(columnIndex < 4 ? { position: "sticky", left: 52 + columnIndex * 110, zIndex: 2, background: esEstadoOcSemaforo && colorEstadoOc ? colorEstadoOc : "#fff", ...(esEstadoOcSemaforo && colorEstadoOc ? { color: filaRechazada || !["2", "P"].includes(estadoOcSemaforo) ? "#fff" : "#1F2937", textAlign: "center", fontWeight: 700 } : {}) } : esEstadoOcSemaforo && colorEstadoOc ? { background: colorEstadoOc, color: filaRechazada || !["2", "P"].includes(estadoOcSemaforo) ? "#fff" : "#1F2937", textAlign: "center", fontWeight: 700 } : {}) }} title={esEstadoOcSemaforo ? (filaRechazada ? "Rechazada" : ETIQUETAS_ESTADO_OC[estadoOcSemaforo] ?? value) : value} onClick={(event) => { const cell = event.currentTarget; if (cell.style.whiteSpace === "normal") cell.style.whiteSpace = "nowrap"; else if (cell.scrollWidth > cell.clientWidth) cell.style.whiteSpace = "normal"; }}>
-                                {esEstadoOcSemaforo ? estadoOcSemaforoDisplay : esSaldoSubtotal ? (
-                                  <div style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 116 }}>
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    max={saldoSubtotalFila}
-                                    step="0.01"
-                                    value={saldoSubtotalValue}
-                                    onClick={(event) => event.stopPropagation()}
-                                    onChange={(event) => registrarEdicionSaldo("subtotal", event.target.value)}
-                                    onBlur={(event) => confirmarSaldoEditable("subtotal", event.target.value)}
-                                    onKeyDown={(event) => {
-                                      if (event.key === "Enter") {
-                                        event.preventDefault();
-                                        event.currentTarget.blur();
-                                      }
-                                    }}
-                                    title={`Máximo disponible: ${formatMoney(saldoSubtotalFila)}`}
-                                    style={{ width: "100%", minWidth: 96, height: 30, border: "1px solid #CBD5E1", borderRadius: 6, padding: "0 6px", boxSizing: "border-box", fontSize: 12 }}
-                                  />
-                                  {saldoSubtotalAlert ? <span role="alert" title={saldoSubtotalAlert} onClick={(event) => event.stopPropagation()} style={{ color: "#D97706", fontSize: 16, lineHeight: 1, cursor: "help" }}>⚠</span> : null}
-                                  </div>
-                                ) : esSaldoAvance ? (
-                                  <div style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 116 }}>
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    max={saldoAvanceOcFila}
-                                    step="0.01"
-                                    value={saldoAvanceValue}
-                                    onClick={(event) => event.stopPropagation()}
-                                    onChange={(event) => registrarEdicionSaldo("avance", event.target.value)}
-                                    onBlur={(event) => confirmarSaldoEditable("avance", event.target.value)}
-                                    onKeyDown={(event) => {
-                                      if (event.key === "Enter") {
-                                        event.preventDefault();
-                                        event.currentTarget.blur();
-                                      }
-                                    }}
-                                    title={`Máximo disponible: ${saldoAvanceOcFila.toFixed(2)}%`}
-                                    style={{ width: "100%", minWidth: 96, height: 30, border: "1px solid #CBD5E1", borderRadius: 6, padding: "0 6px", boxSizing: "border-box", fontSize: 12 }}
-                                  />
-                                  {saldoAvanceAlert ? <span role="alert" title={saldoAvanceAlert} onClick={(event) => event.stopPropagation()} style={{ color: "#D97706", fontSize: 16, lineHeight: 1, cursor: "help" }}>⚠</span> : null}
-                                  </div>
-                                ) : esPagoNuevo ? (
-                                  <button
-                                    type="button"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      setPagoNuevoPendiente({
-                                        row,
-                                        saldoEditableKey,
-                                        montoTexto: saldoSubtotalValue,
-                                        saldoAvanceTexto: saldoAvanceValue,
-                                      });
-                                    }}
-                                    disabled={!pagoNuevoDisponible}
-                                    title={!saldoSubtotalDisponibleParaPago || !saldoAvanceDisponibleParaPago
-                                        ? "Pago nuevo requiere saldo subtotal y saldo avance OC mayores que cero."
-                                        : pagoNuevoEnProceso
-                                        ? "Proceso en ejecución..."
-                                        : `Registrar ${formatMoney(Number(saldoSubtotalValue) || 0)} como nuevo pago.`}
-                                    aria-label={`Pago nuevo para OC ${read("IdOc")}`}
-                                    style={{
-                                      border: "1px solid #0F766E",
-                                      background: pagoNuevoDisponible ? "#ECFDF5" : "#F1F5F9",
-                                      color: pagoNuevoDisponible ? "#0F766E" : "#94A3B8",
-                                      borderRadius: 6,
-                                      padding: "6px 8px",
-                                      fontSize: 11,
-                                      fontWeight: 700,
-                                      cursor: pagoNuevoDisponible ? "pointer" : "not-allowed",
-                                      whiteSpace: "nowrap",
-                                      opacity: pagoNuevoDisponible ? 1 : 0.8,
-                                    }}
-                                  >
-                                    {pagoNuevoEnProceso ? "Registrando..." : "Pago nuevo"}
-                                  </button>
-                                ) : esValidacion ? <ValidacionEstadoBadge value={value} /> : esPorcentajeConsumido ? <PorcentajeConsumidoBar value={Number(rawValue)} /> : correlativosPlanilla.length ? (
-                                  <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 5 }}>
-                                    {correlativosPlanilla.map((correlativo) => (
-                                      <a
-                                        key={correlativo}
-                                        href={`#gasto-${correlativo}`}
-                                        style={styles.correlativoLink}
-                                        onClick={(event) => { event.preventDefault(); void visualizarGastoPorCorrelativo(correlativo); }}
-                                        aria-label={`Visualizar gasto ${correlativo}`}
-                                      >
-                                        {correlativo}
-                                      </a>
-                                    ))}
-                                  </span>
-                                ) : value}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      );
-                    })
-                  ) : String(reporteSubtab) !== "oc-gastos" && !reporteConsultado ? (
+                  {!reporteConsultado ? (
                     <tr>
                       <td style={styles.td} colSpan={15}>
                         Seleccione al menos un filtro para consultar la trazabilidad.
@@ -4001,6 +3892,7 @@ export default function OcV2Page() {
                 </tbody>
               </table>
             </div>
+            )}
           </div>
           {reporteSubtab === "resumen" && <div style={{ ...styles.card, padding: 32, textAlign: "center", color: "#607089" }}><h2 style={styles.sectionTitle}>Resumen</h2><p style={styles.sectionText}>Seleccione los filtros para consultar esta vista.</p></div>}
         </section>
@@ -6705,6 +6597,85 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#64748B",
   },
 };
+
+// Los filtros multiselección muestran solo el resumen (aspecto de combo con flecha);
+// el único campo de texto es el buscador dentro de la lista desplegable.
+const multiFiltroResumenStyle: React.CSSProperties = {
+  ...styles.input,
+  display: "flex",
+  alignItems: "center",
+  cursor: "pointer",
+  userSelect: "none",
+  paddingRight: 24,
+  background: "#fff url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M0 0l5 6 5-6z' fill='%23475569'/></svg>\") no-repeat right 8px center",
+};
+
+type MultiFiltroBuscableProps = {
+  options: Array<{ value: string; label: string }>;
+  selected: string[];
+  onChange: (values: string[]) => void;
+  query: string;
+  onQuery: (value: string) => void;
+  placeholder?: string;
+  allowSelectAll?: boolean;
+};
+
+// Filtro multiselección: el propio cuadro es el buscador y la lista muestra las coincidencias.
+function MultiFiltroBuscable({ options, selected, onChange, query, onQuery, placeholder, allowSelectAll = true }: MultiFiltroBuscableProps) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) { setOpen(false); onQuery(""); }
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open, onQuery]);
+  const needle = query.toLocaleLowerCase();
+  const visibles = options.filter((item) => item.label.toLocaleLowerCase().includes(needle));
+  const todosMarcados = visibles.length > 0 && visibles.every((item) => selected.includes(item.value));
+  return (
+    <div ref={rootRef} style={{ position: "relative", minWidth: 180 }}>
+      <input
+        value={open ? query : selected.length ? `${selected.length} seleccionado${selected.length === 1 ? "" : "s"}` : ""}
+        placeholder={open ? placeholder : "Todos"}
+        onFocus={() => setOpen(true)}
+        onChange={(event) => { setOpen(true); onQuery(event.target.value); }}
+        onKeyDown={(event) => { if (event.key === "Escape") { setOpen(false); onQuery(""); event.currentTarget.blur(); } }}
+        style={{ ...multiFiltroResumenStyle, cursor: "text", userSelect: "auto" }}
+      />
+      {open ? (
+        <div style={{ position: "absolute", zIndex: 20, top: "100%", left: 0, right: 0, maxHeight: 240, overflowY: "auto", padding: 8, background: "#fff", border: "1px solid #D1D5DB", borderRadius: 8, boxShadow: "0 6px 16px rgba(15,23,42,.12)" }}>
+          {allowSelectAll ? (
+            <label style={{ display: "flex", gap: 6, alignItems: "center", padding: "6px 2px", fontSize: 12, fontWeight: 600, borderBottom: "1px solid #E5E7EB" }}>
+              <input
+                type="checkbox"
+                checked={todosMarcados}
+                onChange={(event) => {
+                  const valores = visibles.map((item) => item.value);
+                  onChange(event.target.checked ? [...new Set([...selected, ...valores])] : selected.filter((value) => !valores.includes(value)));
+                }}
+              />
+              Marcar / desmarcar todos
+            </label>
+          ) : null}
+          {visibles.length === 0 ? <div style={{ padding: "6px 2px", fontSize: 12, color: "#64748B" }}>Sin coincidencias</div> : null}
+          {visibles.map((item) => (
+            <label key={item.value} style={{ display: "flex", gap: 6, alignItems: "center", padding: "4px 2px", fontSize: 12 }}>
+              <input
+                type="checkbox"
+                checked={selected.includes(item.value)}
+                onChange={(event) => onChange(event.target.checked ? [...new Set([...selected, item.value])] : selected.filter((value) => value !== item.value))}
+              />
+              {item.label}
+            </label>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 
 
