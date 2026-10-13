@@ -87,6 +87,14 @@ public class OrdenCompraService : IOrdenCompraService
         FROM dbo.CabOrdenCompra
         WHERE IdOc = @IdOc;
         """;
+    private const string BuscarEstadosAprobacionBandejaSql = """
+        SELECT IdOc, IdAprobador1, IdAprobador2, IdAprobador3, IdEstado
+        FROM dbo.CabOrdenCompra
+        WHERE IdOc IN (
+            SELECT TRY_CONVERT(int, ids.value)
+            FROM STRING_SPLIT(@IdsOcCsv, ',') ids
+        );
+        """;
     private const string BuscarDestinatariosCorreoOcSql = """
         SELECT DISTINCT LTRIM(RTRIM(ValorIni))
         FROM dbo.Constante
@@ -129,16 +137,11 @@ public class OrdenCompraService : IOrdenCompraService
     private const string BuscarAprobadoresRegistradosPdfSql = """
         SELECT TOP 1
             ISNULL(cab.IdWeb, 0) AS IdWeb,
-            CASE WHEN MIN(CASE WHEN ISNULL(det.IdAprobador1, 0) > 0 THEN 1 ELSE 0 END) = 1
-                 THEN MAX(det.IdAprobador1) END AS IdAprobador1,
-            CASE WHEN MIN(CASE WHEN ISNULL(det.IdAprobador2, 0) > 0 THEN 1 ELSE 0 END) = 1
-                 THEN MAX(det.IdAprobador2) END AS IdAprobador2,
-            CASE WHEN MIN(CASE WHEN ISNULL(det.IdAprobador3, 0) > 0 THEN 1 ELSE 0 END) = 1
-                 THEN MAX(det.IdAprobador3) END AS IdAprobador3
+            cab.IdAprobador1,
+            cab.IdAprobador2,
+            cab.IdAprobador3
         FROM dbo.CabOrdenCompra cab
-        INNER JOIN dbo.DetOrdenCompra det ON det.IdOc = cab.IdOc
-        WHERE cab.IdOc = @IdOc
-        GROUP BY cab.IdOc, cab.IdWeb;
+        WHERE cab.IdOc = @IdOc;
         """;
     private const string BuscarDetalleEditarSql = """
         SELECT TOP 1
@@ -658,6 +661,27 @@ public class OrdenCompraService : IOrdenCompraService
 
         try
         {
+        var estadosAprobacion = await connection.QueryAsync<EstadoAprobacionBandejaLookup>(
+            new CommandDefinition(
+                BuscarEstadosAprobacionBandejaSql,
+                new { IdsOcCsv = string.Join(',', idsOc) },
+                cancellationToken: cancellationToken,
+                commandTimeout: 120));
+        var estadosAprobacionPorOc = estadosAprobacion
+            .GroupBy(item => item.IdOc)
+            .ToDictionary(group => group.Key, group => group.First());
+
+        foreach (var cabecera in cabeceras)
+        {
+            if (!estadosAprobacionPorOc.TryGetValue(cabecera.IdOc, out var estadoAprobacion))
+                continue;
+
+            cabecera.IdAprobador1 = estadoAprobacion.IdAprobador1;
+            cabecera.IdAprobador2 = estadoAprobacion.IdAprobador2;
+            cabecera.IdAprobador3 = estadoAprobacion.IdAprobador3;
+            cabecera.IdEstado = estadoAprobacion.IdEstado;
+        }
+
         var validadores = await connection.QueryAsync<ValidadorOcLookup>(
             new CommandDefinition(
                 """
@@ -1762,6 +1786,19 @@ public class OrdenCompraService : IOrdenCompraService
         cabecera.Validador2 = PrimerNombre(cabecera.Nombre2, PrimerNombre(detalle.Select(item => item.Nombre2).ToArray()));
         cabecera.Validador3 = PrimerNombre(cabecera.Nombre3, PrimerNombre(detalle.Select(item => item.Nombre3).ToArray()));
 
+        // Los validadores del PDF son los aprobadores registrados en CabOrdenCompra (mismos nombres que ve el reporte).
+        try
+        {
+            var registrados = await BuscarAprobadoresRegistradosPdfAsync(idOc, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(registrados.Validador1)) cabecera.Validador = registrados.Validador1;
+            if (!string.IsNullOrWhiteSpace(registrados.Validador2)) cabecera.Validador2 = registrados.Validador2;
+            if (!string.IsNullOrWhiteSpace(registrados.Validador3)) cabecera.Validador3 = registrados.Validador3;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "No se pudieron leer los aprobadores registrados de la OC {IdOc} para el PDF", idOc);
+        }
+
         var metadata = await BuscarPdfMetadataAsync(idOc, cancellationToken);
         // Logo corporativo para documentos: fondo blanco, apto para impresión.
         var logoPath = FindProjectFile("cjerp-frontend", "src", "assets", "cj-telecom-logo-white.svg");
@@ -1968,6 +2005,15 @@ public class OrdenCompraService : IOrdenCompraService
         public string? Validador3 { get; set; }
         public string? SolicitanteCabecera { get; set; }
         public string? ValidadorCabecera { get; set; }
+    }
+
+    private sealed class EstadoAprobacionBandejaLookup
+    {
+        public int IdOc { get; set; }
+        public int? IdAprobador1 { get; set; }
+        public int? IdAprobador2 { get; set; }
+        public int? IdAprobador3 { get; set; }
+        public int? IdEstado { get; set; }
     }
 
     private sealed class AprobadoresRegistradosPdfLookup

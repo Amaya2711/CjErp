@@ -473,13 +473,17 @@ public class OrdenCompraController : ControllerBase
                 data = new { aprobaciones, correos }
             });
         }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "No se pudo aprobar la(s) orden(es) de compra {IdsOc}", string.Join(',', idsOc));
             return StatusCode(500, new
             {
                 success = false,
-                message = ex.Message,
-                detail = ex.ToString()
+                message = "No se pudo aprobar la orden de compra. Intente nuevamente."
             });
         }
     }
