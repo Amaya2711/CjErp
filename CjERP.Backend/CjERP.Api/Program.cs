@@ -40,6 +40,14 @@ builder.Services.Configure<SmtpSettings>(
     builder.Configuration.GetSection("SmtpSettings"));
 builder.Services.Configure<SharePointOptions>(
     builder.Configuration.GetSection(SharePointOptions.SectionName));
+builder.Services.Configure<GraphMailSettings>(options =>
+{
+    builder.Configuration.GetSection(GraphMailSettings.SectionName).Bind(options);
+    var sharePoint = builder.Configuration.GetSection(SharePointOptions.SectionName);
+    if (string.IsNullOrWhiteSpace(options.TenantId)) options.TenantId = sharePoint["TenantId"] ?? string.Empty;
+    if (string.IsNullOrWhiteSpace(options.ClientId)) options.ClientId = sharePoint["ClientId"] ?? string.Empty;
+    if (string.IsNullOrWhiteSpace(options.ClientSecret)) options.ClientSecret = sharePoint["ClientSecret"] ?? string.Empty;
+});
 builder.Services.Configure<MobilePushOptions>(
     builder.Configuration.GetSection(MobilePushOptions.SectionName));
 builder.Services.Configure<MobileAppVersionOptions>(
@@ -257,6 +265,7 @@ builder.Services.AddScoped<IOrdenCompraService, OrdenCompraService>();
 builder.Services.AddScoped<IEmpleadoPendienteService, EmpleadoPendienteService>();
 builder.Services.AddScoped<ILogisticaRecojoService, LogisticaRecojoService>();
 builder.Services.AddScoped<ISmtpMailSender, SmtpMailSender>();
+builder.Services.AddHttpClient<IGraphMailSender, CjERP.Infrastructure.Services.Graph.GraphMailSender>();
 builder.Services.AddScoped<IVacacionesCorreoService, VacacionesCorreoService>();
 builder.Services.AddScoped<IBeneficioService, BeneficioService>();
 builder.Services.AddScoped<ILogisticaReembolsoService, LogisticaReembolsoService>();

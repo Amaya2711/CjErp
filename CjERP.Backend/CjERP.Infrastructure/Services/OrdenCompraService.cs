@@ -588,6 +588,7 @@ public class OrdenCompraService : IOrdenCompraService
     private readonly ISqlCommandFactory _sqlCommandFactory;
     private readonly IPlanillaService _planillaService;
     private readonly SmtpSettings _smtpSettings;
+    private readonly IGraphMailSender _graphMailSender;
     private readonly ILogger<OrdenCompraService> _logger;
 
     private sealed class PagoNuevoOrigen
@@ -616,11 +617,13 @@ public class OrdenCompraService : IOrdenCompraService
         ISqlCommandFactory sqlCommandFactory,
         IPlanillaService planillaService,
         IOptions<SmtpSettings> smtpSettings,
+        IGraphMailSender graphMailSender,
         ILogger<OrdenCompraService> logger)
     {
         _sqlCommandFactory = sqlCommandFactory;
         _planillaService = planillaService;
         _smtpSettings = smtpSettings.Value;
+        _graphMailSender = graphMailSender;
         _logger = logger;
     }
 
@@ -1665,6 +1668,28 @@ public class OrdenCompraService : IOrdenCompraService
         OrdenCompraPdfResultDto pdf,
         CancellationToken cancellationToken)
     {
+        // Microsoft Graph (HTTPS) primero: el SMTP saliente está bloqueado desde el hosting.
+        // Si Graph no está configurado o falla, se intenta el SMTP de siempre.
+        if (_graphMailSender.EstaConfigurado)
+        {
+            try
+            {
+                await _graphMailSender.EnviarAsync(
+                    destinatarios,
+                    $"Orden de compra aprobada - OC {idOc}",
+                    $"La orden de compra OC {idOc} fue aprobada correctamente en los tres niveles. Se adjunta el documento PDF.",
+                    pdf.FileName,
+                    pdf.Content,
+                    "application/pdf",
+                    cancellationToken);
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Falló el envío de correo de OC {IdOc} por Microsoft Graph; se intenta por SMTP.", idOc);
+            }
+        }
+
         if (string.IsNullOrWhiteSpace(_smtpSettings.Host) ||
             string.IsNullOrWhiteSpace(_smtpSettings.UserName) ||
             string.IsNullOrWhiteSpace(_smtpSettings.Password) ||
