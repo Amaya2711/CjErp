@@ -1065,7 +1065,7 @@ public class OrdenCompraService : IOrdenCompraService
                     item.Peso,
                 };
 
-                if (item.Fila is > 0)
+                if (item.Fila is >= 0)
                 {
                     var updated = await connection.ExecuteAsync(new CommandDefinition(
                         ActualizarDetalleEdicionSql, parameters, transaction, cancellationToken: cancellationToken));

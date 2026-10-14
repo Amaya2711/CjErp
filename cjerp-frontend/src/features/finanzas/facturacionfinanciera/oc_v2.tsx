@@ -1403,7 +1403,9 @@ export default function OcV2Page() {
     const monto = Number(montoTexto);
     const saldoAvance = Number(saldoAvanceTexto);
     const idOc = Number(getReporteRowValue(row, "IdOc"));
-    const fila = Number(getReporteRowValue(row, "Fila"));
+    // Fila 0 es válida (OC antiguas numeran desde 0); solo se rechaza si no viene o es negativa.
+    const filaRaw = getReporteRowValue(row, "Fila");
+    const fila = filaRaw === null || filaRaw === undefined || String(filaRaw).trim() === "" ? Number.NaN : Number(filaRaw);
     const idTarea = Number(getReporteRowValue(row, "IdTarea"));
     const idComprobante = Number(getReporteRowValue(row, "IdComprobante"));
     const cuenta = String(getReporteRowValue(row, "Cuenta") ?? "").trim();
@@ -1419,7 +1421,7 @@ export default function OcV2Page() {
 
     const camposFaltantes = [
       !Number.isInteger(idOc) || idOc <= 0 ? "OC" : null,
-      !Number.isInteger(fila) || fila <= 0 ? "Fila de detalle" : null,
+      !Number.isInteger(fila) || fila < 0 ? "Fila de detalle" : null,
       !Number.isInteger(idTarea) || idTarea <= 0 ? "Id tarea" : null,
       !Number.isInteger(idComprobante) || idComprobante <= 0 ? "Id comprobante" : null,
       !cuenta ? "Cuenta" : null,
@@ -2443,7 +2445,7 @@ export default function OcV2Page() {
     setResultadoEliminar(null);
 
     // Posición que todavía no existe en la OC (OC nueva o posición agregada sin guardar): solo se quita de la lista.
-    if (!editingOcId || !detalle.fila) {
+    if (!editingOcId || detalle.fila == null) {
       quitarDelBorrador();
       setResultadoEliminar({ tipo: "exito", texto: `La posición ${posicion} fue quitada de la lista.` });
       return;
@@ -3922,7 +3924,7 @@ export default function OcV2Page() {
             <strong>{draft.detalles.findIndex((item) => item.tempId === detallePorEliminar.tempId) + 1}</strong>
             {detallePorEliminar.detalle ? <> ({detallePorEliminar.detalle.slice(0, 80)})</> : null}?
             <br />
-            {editingOcId && detallePorEliminar.fila
+            {editingOcId && detallePorEliminar.fila != null
               ? `Se eliminará de la orden de compra ${editingOcId} y no se podrá deshacer.`
               : "Se quitará de la lista de posiciones."}
           </>

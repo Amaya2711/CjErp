@@ -159,7 +159,8 @@ public class OrdenCompraController : ControllerBase
 
         foreach (var item in request.Detalle)
         {
-            var esNuevaPosicion = item.Fila is null or <= 0;
+            // La posición 0 es una fila existente más (OC antiguas numeran desde 0); solo es nueva si no trae fila.
+            var esNuevaPosicion = item.Fila is null or < 0;
             var datosOperativosIncompletos = item.IdCliente <= 0 || item.IdProyecto <= 0 ||
                 string.IsNullOrWhiteSpace(item.IdSite) || string.IsNullOrWhiteSpace(item.TipoTrabajo) ||
                 item.IdTarea is null or <= 0;
@@ -180,7 +181,7 @@ public class OrdenCompraController : ControllerBase
     [HttpDelete("{idOc:int}/detalle/{fila:int}")]
     public async Task<IActionResult> EliminarDetalle(int idOc, int fila, CancellationToken cancellationToken)
     {
-        if (idOc <= 0 || fila <= 0)
+        if (idOc <= 0 || fila < 0)
         {
             return BadRequest(new { success = false, message = "La orden de compra o la posición no es válida." });
         }
@@ -384,7 +385,7 @@ public class OrdenCompraController : ControllerBase
         [FromBody] OrdenCompraGenerarPagoNuevoRequestDto request,
         CancellationToken cancellationToken)
     {
-        if (request is null || request.IdOc <= 0 || request.Fila <= 0 || request.IdTarea <= 0 ||
+        if (request is null || request.IdOc <= 0 || request.Fila < 0 || request.IdTarea <= 0 ||
             request.IdComprobante <= 0 || request.Monto <= 0 ||
             string.IsNullOrWhiteSpace(request.Cuenta) || string.IsNullOrWhiteSpace(request.CuentaInter) ||
             string.IsNullOrWhiteSpace(request.NombreCta))

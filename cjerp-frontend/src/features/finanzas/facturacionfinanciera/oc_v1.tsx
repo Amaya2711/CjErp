@@ -1520,7 +1520,9 @@ export default function OcV1Page() {
     const monto = Number(montoTexto);
     const saldoAvance = Number(saldoAvanceTexto);
     const idOc = Number(getReporteRowValue(row, "IdOc"));
-    const fila = Number(getReporteRowValue(row, "Fila"));
+    // Fila 0 es válida (OC antiguas numeran desde 0); solo se rechaza si no viene o es negativa.
+    const filaRaw = getReporteRowValue(row, "Fila");
+    const fila = filaRaw === null || filaRaw === undefined || String(filaRaw).trim() === "" ? Number.NaN : Number(filaRaw);
     const idTarea = Number(getReporteRowValue(row, "IdTarea"));
     const idComprobante = Number(getReporteRowValue(row, "IdComprobante"));
     const cuenta = String(getReporteRowValue(row, "Cuenta") ?? "").trim();
@@ -1536,7 +1538,7 @@ export default function OcV1Page() {
 
     const camposFaltantes = [
       !Number.isInteger(idOc) || idOc <= 0 ? "OC" : null,
-      !Number.isInteger(fila) || fila <= 0 ? "Fila de detalle" : null,
+      !Number.isInteger(fila) || fila < 0 ? "Fila de detalle" : null,
       !Number.isInteger(idTarea) || idTarea <= 0 ? "Id tarea" : null,
       !Number.isInteger(idComprobante) || idComprobante <= 0 ? "Id comprobante" : null,
       !cuenta ? "Cuenta" : null,
