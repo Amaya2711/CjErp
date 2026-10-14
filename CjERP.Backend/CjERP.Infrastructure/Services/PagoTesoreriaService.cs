@@ -84,7 +84,7 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
                 a.Subtotal, a.IGV, a.Total, a.MontoRetencion, a.TotalPagar,
                 a.NroOperacion, a.Cheque, a.Comentario AS ComentarioAdicional,
                 COALESCE(r.NombreEmpleado, a.Responsable) AS Responsable,
-                CASE WHEN ISNULL(a.IdWeb,0)=1 THEN sc.NombreEmpleado ELSE s.NombreEmpleado END AS Solicitante,
+                COALESCE(CASE WHEN ISNULL(a.IdWeb,0)=1 THEN sc.NombreEmpleado ELSE s.NombreEmpleado END, scOld.NombreEmpleado) AS Solicitante,
                 c.NombreCliente AS Cliente, p.NombreProyecto AS Proyecto, si.NombreSite AS Site,
                 a.Tipo_Trabajo AS TipoTrabajo, tarea.ValorIni AS Tarea, doc.ValorIni AS Comprobante,
                 mon.ValorIni AS Moneda, ban.ValorIni AS Banco, bcta.ValorIni AS BancoCta, trans.ValorIni AS Transferencia
@@ -98,6 +98,7 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
             LEFT JOIN Constante ren ON ren.Sociedad='PE01' AND ren.Programa='PLANTILLA' AND ren.Campo='RENDICION' AND ren.Correlativo=a.IdRendicion
             LEFT JOIN Empleado s ON s.IdEmpleado=a.IdSolicitante AND ISNULL(a.IdWeb,0)<>1
             LEFT JOIN EmpleadoCj sc ON sc.IdEmpleado=a.IdSolicitante AND ISNULL(a.IdWeb,0)=1
+            LEFT JOIN EmpleadoCj scOld ON scOld.IdEmpleado=s.IdEmpleadoCj AND ISNULL(a.IdWeb,0)<>1
             LEFT JOIN Cliente c ON c.IdCliente=a.IdCliente
             LEFT JOIN Proyecto p ON p.IdProyecto=a.IdProyecto
             LEFT JOIN Site si ON si.IdSite=a.IdSite AND si.Correlativo=a.CorreSite

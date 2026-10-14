@@ -1751,6 +1751,34 @@ export default function PagosV2Page() {
   const filtroFechaPorDeposito = filters.estado.length === 1 && filters.estado[0] === ESTADO_PAGADO;
 
   const aplicarFiltrosCabecera = () => {
+    // IdOC es el filtro principal: si se indica, la búsqueda es solo por esa orden
+    // (sin fechas, estado ni demás filtros), igual que la consulta rápida por IdOC.
+    const idOcTexto = filters.query.trim();
+    if (idOcTexto) {
+      if (!/^\d+$/.test(idOcTexto) || Number(idOcTexto) <= 0) {
+        setMessage("El IdOC debe ser un número válido.");
+        return;
+      }
+
+      const filtrosPorIdOc = {
+        ...filters,
+        query: idOcTexto,
+        estado: [],
+        solicitante: [],
+        responsable: [],
+        validador: [],
+        moneda: [],
+        correlativo: "",
+      };
+      setMessage("");
+      setResponsableTextoFiltro("");
+      tabRowsCacheRef.current.clear();
+      setResumenConsultaSolicitada(true);
+      setFilters(filtrosPorIdOc);
+      setAppliedFilters(filtrosPorIdOc);
+      return;
+    }
+
     if (!filters.fechaDesde || !filters.fechaHasta) {
       setMessage("Seleccione la fecha inicio y la fecha fin para realizar la búsqueda.");
       return;
@@ -3688,13 +3716,25 @@ export default function PagosV2Page() {
             }}
           >
             <label style={styles.cabeceraCampo}>
+              <span style={styles.cabeceraEtiqueta}>IdOC</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={filters.query}
+                placeholder="Buscar por IdOC"
+                autoComplete="off"
+                onChange={(event) => setFilters((prev) => ({ ...prev, query: event.target.value.replace(/\D/g, "") }))}
+                style={{ ...styles.cabeceraControl, minWidth: 140 }}
+              />
+            </label>
+            <label style={styles.cabeceraCampo}>
               <span style={styles.cabeceraEtiqueta}>Fecha inicio</span>
               <input
                 type="date"
                 value={filters.fechaDesde}
                 onChange={(event) => setFilters((prev) => ({ ...prev, fechaDesde: event.target.value }))}
                 style={styles.cabeceraControl}
-                required
+                required={!filters.query.trim()}
               />
             </label>
             <label style={styles.cabeceraCampo}>
@@ -3704,7 +3744,7 @@ export default function PagosV2Page() {
                 value={filters.fechaHasta}
                 onChange={(event) => setFilters((prev) => ({ ...prev, fechaHasta: event.target.value }))}
                 style={styles.cabeceraControl}
-                required
+                required={!filters.query.trim()}
               />
             </label>
             <label style={styles.cabeceraCampo}>
