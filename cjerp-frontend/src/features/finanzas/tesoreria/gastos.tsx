@@ -89,6 +89,7 @@ type GastoDto = {
   idUsuarioFactura?: number | null;
   estado?: number;
   estadoLabel?: string;
+  idOc?: string;
   fechaDeposito?: string;
   nroOperacion?: string;
   banco?: string;
@@ -138,6 +139,7 @@ type GastoForm = {
   rutaFacturaEnviada?: string;
   estado: number;
   estadoLabel?: string;
+  idOc?: string;
   fechaDeposito: string;
   nroOperacion: string;
   banco: string;
@@ -1247,6 +1249,7 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     totalMontoVisiblePorMoneda: getRecordNumber(row, "TotalMontoVisiblePorMoneda", "totalMontoVisiblePorMoneda") ?? undefined,
     idUsuarioFactura: getRecordNumber(row, "IdUsuarioFactura", "idUsuarioFactura"),
     estado: getRecordNumber(row, "Estado", "estado") ?? 0,
+    idOc: getRecordString(row, "IdOc", "IdOC", "Idoc", "idOc"),
     estadoLabel: getRecordString(
       row,
       "EstadoNombre",
@@ -1335,6 +1338,7 @@ function mapGastoDtoToView(item: GastoDto): GastoForm {
     rutaFacturaEnviada: item.rutaFacturaEnviada || "",
     estado: item.estado ?? 0,
     estadoLabel: item.estadoLabel || "",
+    idOc: item.idOc || "",
     nroOperacion: item.nroOperacion ?? "",
     banco: item.banco ?? "",
     };
@@ -1477,7 +1481,6 @@ export default function GastosPage({
   const [showFacturaSourceMenu, setShowFacturaSourceMenu] = useState(false);
   const [facturaUploadLoading, setFacturaUploadLoading] = useState(false);
   const [facturaUploadError, setFacturaUploadError] = useState<string | null>(null);
-  const [mostrarConfirmacionRechazo, setMostrarConfirmacionRechazo] = useState(false);
   const [mostrarMotivoRechazo, setMostrarMotivoRechazo] = useState(false);
   const [motivoRechazo, setMotivoRechazo] = useState("");
   const [rechazando, setRechazando] = useState(false);
@@ -2275,6 +2278,27 @@ export default function GastosPage({
       ? validadorOptions
       : validadorOptions.filter((option) => matchesFlexibleSearch(option.label, validadorInput));
   const esModoVisualizacion = modo === "ver";
+  // Gasto PAGADO (4) en edición: solo Bien, Serie, Tipo de pago y adjuntar factura.
+  const edicionPagadoRestringida = modo === "editar" && Number(form.estado) === 4;
+  const camposEditorRef = useRef<HTMLDivElement | null>(null);
+
+  // Bloquea (también por teclado) todo control del editor fuera de los marcados con data-editable-pagado.
+  useEffect(() => {
+    const root = camposEditorRef.current;
+    if (!root) return;
+    root.querySelectorAll<HTMLElement>("input, select, textarea, button").forEach((el) => {
+      const control = el as HTMLInputElement;
+      if (edicionPagadoRestringida) {
+        if (!control.disabled && !el.closest("[data-editable-pagado]")) {
+          control.disabled = true;
+          el.setAttribute("data-bloq-pagado", "1");
+        }
+      } else if (el.getAttribute("data-bloq-pagado")) {
+        control.disabled = false;
+        el.removeAttribute("data-bloq-pagado");
+      }
+    });
+  });
 
   const valoresGastoRequestKey = useMemo(() => {
     const request = buildValoresGastoRequest(form.filtroOperativo);
@@ -3046,7 +3070,8 @@ export default function GastosPage({
 
     setRechazoError(null);
     setIdEliminar(gasto.id);
-    setMostrarConfirmacionRechazo(true);
+    setMotivoRechazo("");
+    setMostrarMotivoRechazo(true);
   };
 
   const abrirEditarRef = useRef(abrirEditar);
@@ -3148,18 +3173,10 @@ export default function GastosPage({
   }, [editorRequest?.correlativo, editorRequest?.mode]);
 
   const cancelarRechazo = () => {
-    setMostrarConfirmacionRechazo(false);
     setMostrarMotivoRechazo(false);
     setMotivoRechazo("");
     setRechazoError(null);
     setIdEliminar(null);
-  };
-
-  const abrirPopupMotivoRechazo = () => {
-    setMostrarConfirmacionRechazo(false);
-    setMostrarMotivoRechazo(true);
-    setMotivoRechazo("");
-    setRechazoError(null);
   };
 
   const eliminar = async () => {
@@ -3560,6 +3577,16 @@ export default function GastosPage({
         calculateCellValue: () => "",
         cellRender: (_value, row) => {
           const accionesHabilitadas = row.gasto.estado === 0 || row.gasto.estado === 2;
+          // Editar: cualquier estado excepto Rechazado (3).
+          const edicionHabilitada = row.gasto.estado !== 3;
+          // En Consulta se puede rechazar todo registro que no esté Pagado (4) ni Rechazado (3)
+          // y que no tenga OC asociada (IdOc vacío o 0).
+          const idOcGasto = String(row.gasto.idOc ?? "").trim();
+          const sinOc = idOcGasto === "" || idOcGasto === "0" || idOcGasto === "-";
+          const rechazoHabilitado =
+            vistaGastosRef.current === "consulta"
+              ? row.gasto.estado !== 4 && row.gasto.estado !== 3 && sinOc
+              : accionesHabilitadas;
           const baseButton = {
             width: 30,
             height: 30,
@@ -3587,18 +3614,18 @@ export default function GastosPage({
                 aria-label="Editar"
                 style={{
                   ...baseButton,
-                  border: `1px solid ${accionesHabilitadas ? "#C7D2FE" : "#E5E7EB"}`,
-                  background: accionesHabilitadas ? "#EEF2FF" : "#F3F4F6",
-                  color: accionesHabilitadas ? "#3730A3" : "#9CA3AF",
-                  cursor: accionesHabilitadas ? "pointer" : "not-allowed",
-                  opacity: accionesHabilitadas ? 1 : 0.65,
+                  border: `1px solid ${edicionHabilitada ? "#C7D2FE" : "#E5E7EB"}`,
+                  background: edicionHabilitada ? "#EEF2FF" : "#F3F4F6",
+                  color: edicionHabilitada ? "#3730A3" : "#9CA3AF",
+                  cursor: edicionHabilitada ? "pointer" : "not-allowed",
+                  opacity: edicionHabilitada ? 1 : 0.65,
                 }}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (!accionesHabilitadas) return;
+                  if (!edicionHabilitada) return;
                   abrirEditarRef.current(row.gasto);
                 }}
-                disabled={!accionesHabilitadas}
+                disabled={!edicionHabilitada}
               >
                 <Pencil size={16} strokeWidth={2.2} />
               </button>
@@ -3607,18 +3634,18 @@ export default function GastosPage({
                 aria-label="Rechazar"
                 style={{
                   ...baseButton,
-                  border: `1px solid ${accionesHabilitadas ? "#FECACA" : "#E5E7EB"}`,
-                  background: accionesHabilitadas ? "#FEF2F2" : "#F3F4F6",
-                  color: accionesHabilitadas ? "#B91C1C" : "#9CA3AF",
-                  cursor: accionesHabilitadas ? "pointer" : "not-allowed",
-                  opacity: accionesHabilitadas ? 1 : 0.65,
+                  border: `1px solid ${rechazoHabilitado ? "#FECACA" : "#E5E7EB"}`,
+                  background: rechazoHabilitado ? "#FEF2F2" : "#F3F4F6",
+                  color: rechazoHabilitado ? "#B91C1C" : "#9CA3AF",
+                  cursor: rechazoHabilitado ? "pointer" : "not-allowed",
+                  opacity: rechazoHabilitado ? 1 : 0.65,
                 }}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (!accionesHabilitadas) return;
+                  if (!rechazoHabilitado) return;
                   confirmarEliminarRef.current(row.gasto, row.rowIndex);
                 }}
-                disabled={!accionesHabilitadas}
+                disabled={!rechazoHabilitado}
               >
                 <Trash2 size={16} strokeWidth={2.2} />
               </button>
@@ -4483,14 +4510,20 @@ export default function GastosPage({
             )}
 
             <div
+              ref={camposEditorRef}
               style={{
                 display: "flex",
                 flexDirection: "column",
                 gap: 1.5,
-                pointerEvents: esModoVisualizacion ? "none" : "auto",
+                pointerEvents: esModoVisualizacion || edicionPagadoRestringida ? "none" : "auto",
                 opacity: esModoVisualizacion ? 0.92 : 1,
               }}
             >
+              {edicionPagadoRestringida && (
+                <div style={{ fontSize: 12, color: "#92400E", background: "#FEF3C7", borderRadius: 8, padding: "6px 10px", fontWeight: 600, pointerEvents: "auto" }}>
+                  Gasto pagado: solo se puede modificar Bien, Serie, Tipo de pago y la factura adjunta.
+                </div>
+              )}
               <FiltroOperativoLookup
                 value={form.filtroOperativo}
                 fontSize={13}
@@ -5117,7 +5150,7 @@ export default function GastosPage({
   </div>
 </div>
 
-  <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 1" }}>
+  <div data-editable-pagado="1" style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 1", pointerEvents: "auto" }}>
     <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Bien</label>
     <select value={getSelectValue(bienOptions, form.bien)} onChange={(e) => setForm((prev) => ({ ...prev, bien: e.target.value }))} disabled={constantesLoading} style={{ width: "100%", height: 42, borderRadius: 10, border: `1px solid ${errores.bien ? "#F87171" : "#D1D5DB"}`, padding: "0 12px", fontSize: 13, background: "#FFFFFF" }}>
       <option value="">Seleccione</option>
@@ -5150,7 +5183,7 @@ export default function GastosPage({
   </div>
 
   <div style={{ display: "flex", alignItems: "center", gap: 12, gridColumn: "span 2" }}>
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 1.5 }}>
+    <div data-editable-pagado="1" style={{ flex: 1, display: "flex", flexDirection: "column", gap: 1.5, pointerEvents: "auto" }}>
       <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Serie</label>
       <input type="text" value={form.serie} onChange={(e) => setForm((prev) => ({ ...prev, serie: e.target.value }))} placeholder="Serie" style={{ width: "100%", height: 42, borderRadius: 10, border: "1px solid #D1D5DB", padding: "0 12px", fontSize: 13, boxSizing: "border-box" }} />
     </div>
@@ -5171,7 +5204,7 @@ export default function GastosPage({
   {/* Fila: importes y moneda. */}
   <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gridColumn: "1 / -1", gap: 12, marginBottom: 8 }}>
   {/* TIPO DE PAGO */}
-  <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 1" }}>
+  <div data-editable-pagado="1" style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 1", pointerEvents: "auto" }}>
     <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Tipo de pago</label>
     <select
       value={getSelectValue(tipoPagoOptions, form.tipoPago)}
@@ -6047,68 +6080,6 @@ export default function GastosPage({
         </div>
       )}
 
-      {mostrarConfirmacionRechazo && idEliminar !== null && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(15, 23, 42, 0.35)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 3100,
-          }}
-        >
-          <div
-            style={{
-              width: 420,
-              maxWidth: "calc(100% - 24px)",
-              background: "#FFFFFF",
-              borderRadius: 16,
-              padding: 24,
-              boxShadow: "0 12px 28px rgba(0,0,0,0.16)",
-            }}
-          >
-            <h3 style={{ marginTop: 0, marginBottom: 12, color: "#17143A" }}>
-              Confirmar eliminación
-            </h3>
-            <p style={{ marginTop: 0, color: "#4B5563", lineHeight: 1.6 }}>
-              ¿Desea rechazar el gasto <strong>{gastoSeleccionadoEliminar?.id}</strong>?
-            </p>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 24 }}>
-              <button
-                style={{
-                  border: "1px solid #D1D5DB",
-                  background: "#FFFFFF",
-                  color: "#17143A",
-                  padding: "10px 16px",
-                  borderRadius: 10,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-                onClick={cancelarRechazo}
-              >
-                Cancelar
-              </button>
-              <button
-                style={{
-                  border: "none",
-                  background: "#DC2626",
-                  color: "#FFFFFF",
-                  padding: "10px 16px",
-                  borderRadius: 10,
-                  fontWeight: 700,
-                  cursor: "pointer",
-                }}
-                onClick={abrirPopupMotivoRechazo}
-              >
-                Rechazar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {mostrarMotivoRechazo && idEliminar !== null && (
         <div
           style={{
@@ -6132,10 +6103,10 @@ export default function GastosPage({
             }}
           >
             <h3 style={{ marginTop: 0, marginBottom: 12, color: "#17143A" }}>
-              Motivo del rechazo
+              Rechazar gasto {gastoSeleccionadoEliminar?.id}
             </h3>
             <p style={{ marginTop: 0, color: "#4B5563", lineHeight: 1.6 }}>
-              Ingrese la observación que se enviará al rechazo del registro seleccionado.
+              Ingrese el motivo del rechazo y presione Aceptar para rechazar el registro. Cancelar cierra sin hacer cambios.
             </p>
             <textarea
               value={motivoRechazo}
@@ -6147,6 +6118,7 @@ export default function GastosPage({
               }}
               placeholder="Ingrese el motivo del rechazo"
               rows={5}
+              autoFocus
               style={{
                 width: "100%",
                 borderRadius: 12,
@@ -6157,6 +6129,9 @@ export default function GastosPage({
                 resize: "vertical",
               }}
             />
+            {rechazoError && (
+              <div style={{ marginTop: 8, color: "#B91C1C", fontSize: 12, fontWeight: 600 }}>{rechazoError}</div>
+            )}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 24 }}>
               <button
                 style={{
@@ -6186,7 +6161,7 @@ export default function GastosPage({
                 onClick={eliminar}
                 disabled={rechazando}
               >
-                {rechazando ? "Rechazando..." : "Rechazar"}
+                {rechazando ? "Rechazando..." : "Aceptar"}
               </button>
             </div>
           </div>

@@ -425,7 +425,8 @@ public class TesoreriaGastosController : ControllerBase
                 ?? User.FindFirstValue("IdEmpleado")
                 ?? User.FindFirstValue("CodEmpleadoMostrar");
 
-            var idAprobador = request.IdAprobador ?? GetNumericUserId(aprobadorClaim);
+            // El rechazador (IdRechazador) sale del JWT; el valor del body solo es respaldo.
+            var idAprobador = GetNumericUserId(aprobadorClaim) ?? request.IdAprobador;
 
             if (idAprobador is null or <= 0)
             {
