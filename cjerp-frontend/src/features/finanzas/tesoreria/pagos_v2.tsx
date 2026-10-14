@@ -1781,6 +1781,24 @@ export default function PagosV2Page() {
     setAppliedFilters(filtrosCabecera);
   };
 
+  // Pestaña Aprobar: solo aplica el rango de fechas; los demás filtros aplicados se conservan.
+  const aplicarFiltroFechasAprobar = () => {
+    if (!filters.fechaDesde || !filters.fechaHasta) {
+      setMessage("Seleccione la fecha inicio y la fecha fin para realizar la búsqueda.");
+      return;
+    }
+
+    if (filters.fechaDesde > filters.fechaHasta) {
+      setMessage("La fecha inicio no puede ser mayor que la fecha fin.");
+      return;
+    }
+
+    setMessage("");
+    tabRowsCacheRef.current.clear();
+    setAppliedFilters((prev) => ({ ...prev, fechaDesde: filters.fechaDesde, fechaHasta: filters.fechaHasta }));
+    setRefreshTick((tick) => tick + 1);
+  };
+
   const limpiarFiltrosCabecera = () => {
     const defaults = getDefaultFilterState();
     setMessage("");
@@ -3751,6 +3769,44 @@ export default function PagosV2Page() {
                 Para PAGADO las fechas se comparan con la fecha de depósito; los demás estados usan la fecha de registro.
               </span>
             ) : null}
+          </form>
+        ) : null}
+
+        {activeTab === "aprobar" ? (
+          <form
+            style={styles.cabeceraFiltros}
+            aria-label="Filtro por fechas de Aprobar"
+            onSubmit={(event) => {
+              event.preventDefault();
+              aplicarFiltroFechasAprobar();
+            }}
+          >
+            <label style={styles.cabeceraCampo}>
+              <span style={styles.cabeceraEtiqueta}>Fecha inicio</span>
+              <input
+                type="date"
+                value={filters.fechaDesde}
+                onChange={(event) => setFilters((prev) => ({ ...prev, fechaDesde: event.target.value }))}
+                style={styles.cabeceraControl}
+                required
+              />
+            </label>
+            <label style={styles.cabeceraCampo}>
+              <span style={styles.cabeceraEtiqueta}>Fecha fin</span>
+              <input
+                type="date"
+                value={filters.fechaHasta}
+                onChange={(event) => setFilters((prev) => ({ ...prev, fechaHasta: event.target.value }))}
+                style={styles.cabeceraControl}
+                required
+              />
+            </label>
+            <button type="submit" style={styles.cabeceraBoton}>
+              Buscar
+            </button>
+            <span style={styles.cabeceraNota}>
+              Documentos pendientes de aprobar (sin revisión) según la fecha de registro.
+            </span>
           </form>
         ) : null}
 
