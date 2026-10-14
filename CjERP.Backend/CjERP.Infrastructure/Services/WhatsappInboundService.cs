@@ -79,6 +79,7 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
 
         if (!_settings.Enabled)
         {
+            _logger.LogWarning("[WhatsappInbound] Webhook recibido pero WhatsappInboundSettings.Enabled=false. Se ignora.");
             actions.Add("Webhook deshabilitado");
             return new WhatsappInboundProcessResultDto
             {
@@ -92,8 +93,16 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            _logger.LogInformation(
+                "[WhatsappInbound] Entrante phone={Phone} phoneNumberId={PhoneNumberId} accion={ActionId} texto={Texto}",
+                MaskPhone(item.Phone),
+                item.PhoneNumberId,
+                string.IsNullOrWhiteSpace(item.ActionId) ? "-" : item.ActionId,
+                Truncate(item.Body, 40));
+
             if (string.IsNullOrWhiteSpace(item.Phone))
             {
+                _logger.LogWarning("[WhatsappInbound] Descartado: telefono vacio.");
                 actions.Add("Mensaje omitido: telefono vacio");
                 continue;
             }
@@ -101,6 +110,9 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
             var response = await BuildResponseAsync(item, cancellationToken);
             if (response is null)
             {
+                _logger.LogWarning(
+                    "[WhatsappInbound] Descartado phone={Phone} motivo=sin_respuesta (telefono no normalizable o sin accion).",
+                    MaskPhone(item.Phone));
                 actions.Add($"Sin accion para {item.Phone}");
                 continue;
             }
@@ -108,6 +120,11 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
             var sendResponse = await SendResponseAsync(item, response, cancellationToken);
             if (sendResponse.Success)
             {
+                _logger.LogInformation(
+                    "[WhatsappInbound] Respuesta enviada phone={Phone} tipo={Kind} statusCode={StatusCode}",
+                    MaskPhone(item.Phone),
+                    response.Kind,
+                    sendResponse.StatusCode);
                 responsesSent++;
                 actions.Add($"Respuesta enviada a {item.Phone}");
             }
@@ -141,6 +158,9 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
         var normalizedPhone = NormalizePhone(phone);
         if (string.IsNullOrWhiteSpace(normalizedPhone))
         {
+            _logger.LogWarning(
+                "[WhatsappInbound] Telefono no normalizable phone={Phone} (se esperan 9 digitos que empiecen con 9, o 11 con prefijo 51).",
+                MaskPhone(phone));
             return null;
         }
 
@@ -317,11 +337,24 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
     private bool UseMetaProvider() =>
         string.Equals(_settings.ResponseProvider?.Trim(), "meta", StringComparison.OrdinalIgnoreCase);
 
-    private static List<InboundMessage> ExtractMessages(WhatsappWebhookPayloadDto? payload)
+    private static string MaskPhone(string? phone)
+    {
+        var digits = new string((phone ?? string.Empty).Where(char.IsDigit).ToArray());
+        return digits.Length <= 6 ? "***" : $"{digits[..3]}***{digits[^3..]}";
+    }
+
+    private static string Truncate(string? value, int max)
+    {
+        var text = (value ?? string.Empty).Replace('\r', ' ').Replace('\n', ' ').Trim();
+        return text.Length <= max ? text : text[..max];
+    }
+
+    private List<InboundMessage> ExtractMessages(WhatsappWebhookPayloadDto? payload)
     {
         var result = new List<InboundMessage>();
         if (payload?.Entry is null)
         {
+            _logger.LogDebug("[WhatsappInbound] Payload sin entry.");
             return result;
         }
 
@@ -340,6 +373,10 @@ public sealed class WhatsappInboundService : IWhatsappInboundService
                     var body = ExtractBody(message);
                     if (string.IsNullOrWhiteSpace(body))
                     {
+                        _logger.LogWarning(
+                            "[WhatsappInbound] Descartado phone={Phone} motivo=tipo_no_soportado_o_vacio tipo={Tipo}",
+                            MaskPhone(message?.From),
+                            message?.Type ?? "-");
                         continue;
                     }
 
