@@ -11,13 +11,13 @@ import {
 import type { PlanillaConsultaParametro } from "../../../models/planillaConsulta";
 import CrudToolbar, { matchesCrudToolbarSearch, type CrudToolbarSearchField } from "../../../components/base/CrudToolbar";
 import { FiltroOperativoLookup } from "../../../components/lookups/FiltroOperativoLookup";
-import { getValoresGasto } from "../../../api/filtroOperativoService";
+import { getFiltrosOperativos, getValoresGasto } from "../../../api/filtroOperativoService";
 import { getGastosBootstrap } from "../../../api/gastosBootstrapService";
 import { actualizarEmpleadoResponsable, buscarEmpleadosResponsables, insertarEmpleadoResponsable } from "../../../api/empleadoResponsableService";
 import type { EmpleadoResponsableActualizarRequest } from "../../../api/empleadoResponsableService";
 import { useConstantesPorCampo } from "../../../hooks/useConstantesPorCampo";
 import type { ConstanteOption } from "../../../models/constante";
-import type { FiltroOperativoValue, TareaOption } from "../../../models/filtroOperativo";
+import type { FiltroOperativoItem, FiltroOperativoValue, TareaOption } from "../../../models/filtroOperativo";
 import type { EmpleadoCta } from "../../../models/empleadoCta";
 import type { ValoresGastoRequest, ValoresGastoResponse } from "../../../models/valoresGasto";
 import { getAuthUser } from "../../../utils/authStorage";
@@ -1421,6 +1421,9 @@ export default function GastosPage({
   const [historialSitioDetalleActivo, setHistorialSitioDetalleActivo] = useState<string | null>(null);
   const historialSitioLastKeyRef = useRef("");
   const cargaInicialGastosListaRef = useRef(false);
+  // En la pestaña Consulta no se carga nada hasta presionar BUSCAR.
+  const consultaBuscadaRef = useRef(false);
+  const [filtrosOperativosCatalogo, setFiltrosOperativosCatalogo] = useState<FiltroOperativoItem[]>([]);
   const constantesInicialesIniciadasRef = useRef(false);
   const cargaInicialGastosSolicitadaRef = useRef(false);
   const sidePanelRef = useRef<HTMLDivElement | null>(null);
@@ -1632,6 +1635,10 @@ export default function GastosPage({
         return [];
       }
 
+      if (vistaGastosRef.current === "consulta" && !consultaBuscadaRef.current) {
+        return [];
+      }
+
       const filtrosConsulta = filtrosCabeceraAplicadosRef.current;
       const parametrosConsulta: PlanillaConsultaParametro[] = [];
       // Cada grupo es un valor explícito de @Estados.
@@ -1685,11 +1692,6 @@ export default function GastosPage({
         if (buscarPorCorrelativo) {
           parametrosConsulta.push({ nombre: "Correlativo", valor: String(correlativoNumero), tipo: "int" });
         } else {
-          if (!fechaInicio && !fechaFin) {
-            setMensajeFiltroCabecera("Indique un correlativo o un rango de fechas para consultar.");
-            return [];
-          }
-
           if (!isInputDateRangeValid(fechaInicio, fechaFin)) {
             setMensajeFiltroCabecera(null);
             return [];
@@ -1923,7 +1925,7 @@ export default function GastosPage({
   useEffect(() => {
     // Responsables, cuentas, solicitantes y tareas solo se requieren dentro
     // del editor. Diferir esta consulta acelera la carga inicial del grid.
-    if (!panelAbierto) {
+    if (!panelAbierto && vistaGastos !== "consulta") {
       return;
     }
 
@@ -1984,7 +1986,28 @@ export default function GastosPage({
     return () => {
       activo = false;
     };
-  }, [idCargo, idEmpleado, panelAbierto]);
+  }, [idCargo, idEmpleado, panelAbierto, vistaGastos]);
+
+  // Los filtros Cliente/Proyecto/Site/Tipo de trabajo de la pestaña Consulta salen
+  // del catálogo operativo, no de los registros cargados en el grid.
+  useEffect(() => {
+    if (vistaGastos !== "consulta" || filtrosOperativosCatalogo.length > 0) {
+      return;
+    }
+
+    let activo = true;
+    void getFiltrosOperativos()
+      .then((data) => {
+        if (activo) setFiltrosOperativosCatalogo(Array.isArray(data) ? data : []);
+      })
+      .catch(() => {
+        if (activo) setFiltrosOperativosCatalogo([]);
+      });
+
+    return () => {
+      activo = false;
+    };
+  }, [filtrosOperativosCatalogo.length, vistaGastos]);
 
   // Algunos registros históricos llegan desde Planilla con el nombre del
   // usuario. Al estar disponible el catálogo, se conserva la etiqueta y se
@@ -3180,9 +3203,11 @@ export default function GastosPage({
 
   const handleBuscarGastos = async () => {
     if (!tieneFiltrosBusqueda) {
+      setMensajeFiltroCabecera("Seleccione al menos un parámetro para buscar.");
       return;
     }
 
+    consultaBuscadaRef.current = true;
     cargaInicialGastosListaRef.current = true;
     cargaInicialGastosSolicitadaRef.current = true;
 
@@ -3215,9 +3240,14 @@ export default function GastosPage({
 
     vistaGastosRef.current = vista;
     setVistaGastos(vista);
+    // Consulta arranca sin parámetros ni datos; solo se consulta al presionar BUSCAR.
+    consultaBuscadaRef.current = false;
 
     const hoy = obtenerFechaActual();
-    const filtrosIniciales: GastosHeaderFilters = { ...GASTOS_HEADER_FILTERS_INITIAL, fechaInicio: hoy, fechaFin: hoy };
+    const filtrosIniciales: GastosHeaderFilters =
+      vista === "consulta"
+        ? { ...GASTOS_HEADER_FILTERS_INITIAL }
+        : { ...GASTOS_HEADER_FILTERS_INITIAL, fechaInicio: hoy, fechaFin: hoy };
     filtrosCabeceraAplicadosRef.current = filtrosIniciales;
     setFiltrosCabecera(filtrosIniciales);
     setFiltrosCabeceraAplicados(filtrosIniciales);
@@ -3323,33 +3353,17 @@ export default function GastosPage({
   const headerFilterOptions = useMemo(
     () => ({
       estado: buildUniqueFilterOptions(estadoOptions.map((option) => getConstanteStoredValue(option))),
-      comprobante: buildUniqueFilterOptions(
-        gastosSafe.map((gasto) =>
-          getConstanteLabel(comprobanteOptions, gasto.comprobante) || gasto.comprobanteLabel || gasto.comprobante
-        )
-      ),
-      moneda: buildUniqueFilterOptions(
-        gastosSafe.map((gasto) => gasto.monedaLabel || getConstanteLabel(monedaOptions, gasto.moneda) || gasto.moneda)
-      ),
-      cliente: buildUniqueFilterOptions(gastosSafe.map((gasto) => gasto.filtroOperativo.filtro?.nombreCliente)),
-      proyecto: buildUniqueFilterOptions(gastosSafe.map((gasto) => gasto.filtroOperativo.filtro?.nombreProyecto)),
-      site: buildUniqueFilterOptions(gastosSafe.map((gasto) => gasto.filtroOperativo.filtro?.nombreSite)),
-      tipoTrabajo: buildUniqueFilterOptions(
-        gastosSafe.map((gasto) => gasto.filtroOperativo.filtro?.tipoTrabajo ?? gasto.filtroOperativo.tipoTrabajo?.tipoTrabajo)
-      ),
-      solicitante: buildUniqueFilterOptions(
-        gastosSafe.map((gasto) =>
-          getConstanteLabelOrFallback(solicitanteOptions, gasto.solicitante, gasto.solicitanteLabel)
-        )
-      ),
-      responsable: buildUniqueFilterOptions(gastosSafe.map((gasto) => gasto.responsableLabel || gasto.responsable)),
-      validador: buildUniqueFilterOptions(
-        gastosSafe.map((gasto) =>
-          getConstanteLabelOrFallback(validadorOptions, gasto.validador, gasto.validadorLabel)
-        )
-      ),
+      comprobante: buildUniqueFilterOptions(comprobanteOptions.map((option) => option.label)),
+      moneda: buildUniqueFilterOptions(monedaOptions.map((option) => option.label)),
+      cliente: buildUniqueFilterOptions(filtrosOperativosCatalogo.map((item) => item.nombreCliente)),
+      proyecto: buildUniqueFilterOptions(filtrosOperativosCatalogo.map((item) => item.nombreProyecto)),
+      site: buildUniqueFilterOptions(filtrosOperativosCatalogo.map((item) => item.nombreSite)),
+      tipoTrabajo: buildUniqueFilterOptions(filtrosOperativosCatalogo.map((item) => item.tipoTrabajo)),
+      solicitante: buildUniqueFilterOptions(solicitanteOptions.map((option) => option.label)),
+      responsable: buildUniqueFilterOptions(empleados.map((empleado) => empleado.nombreEmpleado)),
+      validador: buildUniqueFilterOptions(validadorOptions.map((option) => option.label)),
     }),
-    [comprobanteOptions, estadoOptions, gastosSafe, monedaOptions, solicitanteOptions, validadorOptions]
+    [comprobanteOptions, empleados, estadoOptions, filtrosOperativosCatalogo, monedaOptions, solicitanteOptions, validadorOptions]
   );
 
   const toggleMultiHeaderFilter = React.useCallback((
@@ -4692,11 +4706,22 @@ export default function GastosPage({
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
                           if (!responsableSeleccionado) return;
                           const tipoCuenta = findConstanteOption(tipoCuentaOptions, responsableSeleccionado.nombreCta);
                           const banco = findConstanteOption(bancoOptions, responsableSeleccionado.nombreBanco);
-                          const idBancoOriginal = banco ? Number(getConstanteStoredValue(banco)) : Number.NaN;
+                          let idBancoOriginal = banco ? Number(getConstanteStoredValue(banco)) : Number.NaN;
+                          // El IdBanco real de la cuenta viene del buscador de responsables; deducirlo por el nombre del banco puede no coincidir.
+                          try {
+                            const candidatas = await buscarEmpleadosResponsables(responsableSeleccionado.nombreEmpleado);
+                            const cuentaReal = candidatas.find((item) =>
+                              Number(item.idEmpleado) === Number(responsableSeleccionado.idEmpleado) &&
+                              (item.cuenta ?? "").trim() === responsableSeleccionado.cuenta.trim() &&
+                              Number(item.idBanco) > 0);
+                            if (cuentaReal) idBancoOriginal = Number(cuentaReal.idBanco);
+                          } catch {
+                            // Sin búsqueda se conserva el valor deducido del catálogo.
+                          }
                           setModoResponsableForm("editar");
                           setCuentaResponsableOriginal({
                             idBanco: Number.isInteger(idBancoOriginal) && idBancoOriginal > 0 ? idBancoOriginal : null,
