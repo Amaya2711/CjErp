@@ -186,12 +186,13 @@ builder.Services.AddHangfire(configuration => configuration
         new SqlServerStorageOptions
         {
             PrepareSchemaIfNecessary = true,
-            QueuePollInterval = TimeSpan.FromSeconds(1),
+            QueuePollInterval = TimeSpan.FromSeconds(5),
             CommandBatchMaxTimeout = TimeSpan.FromMinutes(5),
             SlidingInvisibilityTimeout = TimeSpan.FromMinutes(5),
             UseRecommendedIsolationLevel = true
         }));
-builder.Services.AddHangfireServer();
+// Por defecto Hangfire abre hasta 20 workers (una conexion SQL cada uno); se limita para no presionar al servidor SQL.
+builder.Services.AddHangfireServer(options => options.WorkerCount = 5);
 
 builder.Services.AddSwaggerGen(options =>
 {
