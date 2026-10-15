@@ -597,6 +597,17 @@ function resolveConstanteStoredValue(
   return match ? getConstanteStoredValue(match) : selectedValue?.trim() ?? "";
 }
 
+// Solicitante/Gestor/Validador salen de EmpleadoCj. Un gasto antiguo guarda ids de Empleado, que pueden
+// coincidir numéricamente con otra persona de EmpleadoCj: en edición se resuelve primero por el nombre.
+function resolveEmpleadoCjStoredValue(
+  options: ConstanteOption[],
+  selectedValue?: string | null,
+  label?: string | null
+): string {
+  const match = findConstanteOption(options, label) ?? findConstanteOption(options, selectedValue);
+  return match ? getConstanteStoredValue(match) : "";
+}
+
 function getConstanteLabel(options: ConstanteOption[], selectedValue?: string | null): string {
   const match = findConstanteOption(options, selectedValue);
   return match?.label ?? selectedValue?.trim() ?? "";
@@ -2764,17 +2775,17 @@ export default function GastosPage({
       facturaPath: facturaEditFields.facturaPath,
     };
 
-    gastoEditable.solicitante = resolveConstanteStoredValue(
+    gastoEditable.solicitante = resolveEmpleadoCjStoredValue(
       solicitanteOptions,
       gastoEditable.solicitante,
       gastoEditable.solicitanteLabel
     );
-    gastoEditable.gestor = resolveConstanteStoredValue(
+    gastoEditable.gestor = resolveEmpleadoCjStoredValue(
       gestorOptions,
       gastoEditable.gestor,
       gastoEditable.gestorLabel
     );
-    gastoEditable.validador = resolveConstanteStoredValue(
+    gastoEditable.validador = resolveEmpleadoCjStoredValue(
       validadorOptions,
       gastoEditable.validador,
       gastoEditable.validadorLabel
@@ -3012,30 +3023,17 @@ export default function GastosPage({
       nuevosErrores.moneda = "Seleccione una moneda valida.";
     }
 
-    const esValorLegadoEnEdicion = (value?: string | null, label?: string | null) =>
-      modo === "editar" && Boolean(value?.trim() || label?.trim());
-
-    if (
-      form.solicitante &&
-      !esConstanteValida(solicitanteOptions, form.solicitante) &&
-      !esValorLegadoEnEdicion(form.solicitante, form.solicitanteLabel)
-    ) {
+    // Solicitante, gestor y validador deben ser empleados CJ elegidos de los combos (EmpleadoCj),
+    // también al editar: al guardar, el gasto queda con IdWeb = 1.
+    if (!form.solicitante || !esConstanteValida(solicitanteOptions, form.solicitante)) {
       nuevosErrores.solicitante = "Seleccione un solicitante valido.";
     }
 
-    if (
-      form.gestor &&
-      !esConstanteValida(gestorOptions, form.gestor) &&
-      !esValorLegadoEnEdicion(form.gestor, form.gestorLabel)
-    ) {
+    if (!form.gestor || !esConstanteValida(gestorOptions, form.gestor)) {
       nuevosErrores.gestor = "Seleccione un gestor valido.";
     }
 
-    if (
-      form.validador &&
-      !esConstanteValida(validadorOptions, form.validador) &&
-      !esValorLegadoEnEdicion(form.validador, form.validadorLabel)
-    ) {
+    if (!form.validador || !esConstanteValida(validadorOptions, form.validador)) {
       nuevosErrores.validador = "Seleccione un validador valido.";
     }
 
