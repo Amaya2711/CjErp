@@ -46,6 +46,7 @@ public class OrdenCompraService : IOrdenCompraService
             cab.IdMoneda,
             cab.IdComprobante,
             cab.IdFormaPago,
+            ISNULL(cab.IdWeb, 0) AS IdWeb,
             cab.Subtotal AS SubtotalOc,
             site.NombreSite AS SiteNombre
         FROM dbo.CabOrdenCompra cab
@@ -609,8 +610,15 @@ public class OrdenCompraService : IOrdenCompraService
         public int IdMoneda { get; set; }
         public int IdComprobante { get; set; }
         public int IdFormaPago { get; set; }
+        public int IdWeb { get; set; }
         public decimal SubtotalOc { get; set; }
         public string? SiteNombre { get; set; }
+    }
+
+    private sealed class EmpleadoEquivalenciaCj
+    {
+        public int IdEmpleado { get; set; }
+        public int? IdEmpleadoCj { get; set; }
     }
 
     public OrdenCompraService(
@@ -1532,6 +1540,36 @@ public class OrdenCompraService : IOrdenCompraService
             throw new InvalidOperationException("La OC no tiene solicitante, responsable, gestor, validador, moneda o tipo de pago válidos.");
         }
 
+        // sp_Planilla_Insertar registra siempre IdWeb = 1: solicitante, gestor y validador de Planilla se
+        // interpretan como EmpleadoCj.IdEmpleado. Una OC con IdWeb nulo o distinto de 1 (sistema antiguo)
+        // guarda esos IDs de dbo.Empleado, por lo que se convierten a su equivalente de EmpleadoCj.
+        var idSolicitantePlanilla = origen.IdSolicitante;
+        var idGestorPlanilla = origen.IdGestor;
+        var idValidadorPlanilla = origen.IdValidador;
+        if (origen.IdWeb != 1)
+        {
+            var idsLegacy = new[] { origen.IdSolicitante, origen.IdGestor, origen.IdValidador }.Distinct().ToArray();
+            var equivalencias = (await connection.QueryAsync<EmpleadoEquivalenciaCj>(
+                _sqlCommandFactory.Create(
+                    "SELECT IdEmpleado, IdEmpleadoCj FROM dbo.Empleado WHERE IdEmpleado IN @Ids;",
+                    new { Ids = idsLegacy },
+                    CommandType.Text,
+                    cancellationToken,
+                    commandTimeout: 120)))
+                .Where(item => item.IdEmpleadoCj is > 0)
+                .ToDictionary(item => item.IdEmpleado, item => item.IdEmpleadoCj!.Value);
+
+            int Convertir(int idEmpleado, string rol) =>
+                equivalencias.TryGetValue(idEmpleado, out var idEmpleadoCj)
+                    ? idEmpleadoCj
+                    : throw new InvalidOperationException(
+                        $"La OC es del sistema antiguo y el {rol} (Empleado {idEmpleado}) no tiene equivalente en EmpleadoCj. No se generó el pago.");
+
+            idSolicitantePlanilla = Convertir(origen.IdSolicitante, "solicitante");
+            idGestorPlanilla = Convertir(origen.IdGestor, "gestor");
+            idValidadorPlanilla = Convertir(origen.IdValidador, "validador");
+        }
+
         var idBancoCta = await connection.QuerySingleOrDefaultAsync<int?>(
             _sqlCommandFactory.Create(
                 BuscarBancoCuentaPagoNuevoSql,
@@ -1585,9 +1623,9 @@ public class OrdenCompraService : IOrdenCompraService
                 Total = request.Monto + igv,
                 IdRendicion = 1,
                 Detalle = origen.Detalle ?? string.Empty,
-                Solicitante = origen.IdSolicitante.ToString(CultureInfo.InvariantCulture),
-                Gestor = origen.IdGestor.ToString(CultureInfo.InvariantCulture),
-                Validador = origen.IdValidador.ToString(CultureInfo.InvariantCulture),
+                Solicitante = idSolicitantePlanilla.ToString(CultureInfo.InvariantCulture),
+                Gestor = idGestorPlanilla.ToString(CultureInfo.InvariantCulture),
+                Validador = idValidadorPlanilla.ToString(CultureInfo.InvariantCulture),
                 Moneda = origen.IdMoneda.ToString(CultureInfo.InvariantCulture),
                 Bien = "1",
                 Comprobante = origen.IdComprobante.ToString(CultureInfo.InvariantCulture),
