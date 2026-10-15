@@ -115,9 +115,15 @@ BEGIN
                 SolCjOld.NombreEmpleado
         END AS Solicitante,
 
-        n.NombreEmpleado AS Gestor,
+        CASE
+            WHEN ISNULL(a.IdWeb, 0) = 1 THEN nCj.NombreEmpleado
+            ELSE n.NombreEmpleado
+        END AS Gestor,
 
-        o.NombreEmpleado AS Validador,
+        CASE
+            WHEN ISNULL(a.IdWeb, 0) = 1 THEN oCj.NombreEmpleado
+            ELSE o.NombreEmpleado
+        END AS Validador,
 
         p.NombreEmpleado AS Ejecutor,
 
@@ -421,12 +427,24 @@ BEGIN
        AND ISNULL(a.IdWeb, 0) = 1
 
 
+    /* Gestor / Validador: con IdWeb = 1 son ids de EmpleadoCj (igual que
+       sp_Planilla_Consulta_Estados); con IdWeb = 0/NULL son ids de Empleado. */
     LEFT JOIN Empleado n
         ON n.IdEmpleado = a.IdGestor
+       AND ISNULL(a.IdWeb, 0) <> 1
+
+    LEFT JOIN EmpleadoCj nCj
+        ON nCj.IdEmpleado = a.IdGestor
+       AND ISNULL(a.IdWeb, 0) = 1
 
 
     LEFT JOIN Empleado o
         ON o.IdEmpleado = a.IdValidador
+       AND ISNULL(a.IdWeb, 0) <> 1
+
+    LEFT JOIN EmpleadoCj oCj
+        ON oCj.IdEmpleado = a.IdValidador
+       AND ISNULL(a.IdWeb, 0) = 1
 
 
     LEFT JOIN Empleado p
