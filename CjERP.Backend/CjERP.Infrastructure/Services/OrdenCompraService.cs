@@ -1930,21 +1930,42 @@ public class OrdenCompraService : IOrdenCompraService
         if (ids.Length == 0)
             return new AprobadoresRegistradosPdf();
 
-        var tablaEmpleado = aprobadores.IdWeb == 1 ? "dbo.EmpleadoCj" : "dbo.Empleado";
-        var nombres = (await connection.QueryAsync<EmpleadoNombreLookup>(
-            _sqlCommandFactory.Create(
-                $"SELECT IdEmpleado, NombreEmpleado FROM {tablaEmpleado} WHERE IdEmpleado IN @Ids;",
-                new { Ids = ids },
-                CommandType.Text,
-                cancellationToken,
-                commandTimeout: 60)))
-            .ToDictionary(item => item.IdEmpleado, item => item.NombreEmpleado?.Trim() ?? string.Empty);
+        async Task<Dictionary<int, string>> BuscarNombresAsync(string tablaEmpleado, int[] idsEmpleado)
+        {
+            if (idsEmpleado.Length == 0)
+                return [];
+
+            return (await connection.QueryAsync<EmpleadoNombreLookup>(
+                _sqlCommandFactory.Create(
+                    $"SELECT IdEmpleado, NombreEmpleado FROM {tablaEmpleado} WHERE IdEmpleado IN @Ids;",
+                    new { Ids = idsEmpleado },
+                    CommandType.Text,
+                    cancellationToken,
+                    commandTimeout: 60)))
+                .ToDictionary(item => item.IdEmpleado, item => item.NombreEmpleado?.Trim() ?? string.Empty);
+        }
+
+        // Validador 1: tabla según el IdWeb de la OC (EmpleadoCj si es web; Empleado si es del sistema antiguo).
+        var tablaValidador1 = aprobadores.IdWeb == 1 ? "dbo.EmpleadoCj" : "dbo.Empleado";
+        var nombres1 = await BuscarNombresAsync(
+            tablaValidador1,
+            aprobadores.IdAprobador1 is > 0 ? [aprobadores.IdAprobador1.Value] : []);
+
+        // Validadores 2 y 3: se registran con el CodEmp del usuario que aprueba (EmpleadoCj), también en OC con
+        // IdWeb nulo o distinto de 1. Se buscan siempre en EmpleadoCj; en Empleado el mismo ID es otra persona.
+        var nombres23 = await BuscarNombresAsync(
+            "dbo.EmpleadoCj",
+            new[] { aprobadores.IdAprobador2, aprobadores.IdAprobador3 }
+                .Where(id => id is > 0)
+                .Select(id => id!.Value)
+                .Distinct()
+                .ToArray());
 
         return new AprobadoresRegistradosPdf
         {
-            Validador1 = aprobadores.IdAprobador1 is > 0 && nombres.TryGetValue(aprobadores.IdAprobador1.Value, out var nombre1) ? nombre1 : string.Empty,
-            Validador2 = aprobadores.IdAprobador2 is > 0 && nombres.TryGetValue(aprobadores.IdAprobador2.Value, out var nombre2) ? nombre2 : string.Empty,
-            Validador3 = aprobadores.IdAprobador3 is > 0 && nombres.TryGetValue(aprobadores.IdAprobador3.Value, out var nombre3) ? nombre3 : string.Empty,
+            Validador1 = aprobadores.IdAprobador1 is > 0 && nombres1.TryGetValue(aprobadores.IdAprobador1.Value, out var nombre1) ? nombre1 : string.Empty,
+            Validador2 = aprobadores.IdAprobador2 is > 0 && nombres23.TryGetValue(aprobadores.IdAprobador2.Value, out var nombre2) ? nombre2 : string.Empty,
+            Validador3 = aprobadores.IdAprobador3 is > 0 && nombres23.TryGetValue(aprobadores.IdAprobador3.Value, out var nombre3) ? nombre3 : string.Empty,
         };
     }
 
