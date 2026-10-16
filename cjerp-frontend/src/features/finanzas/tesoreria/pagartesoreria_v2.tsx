@@ -19,6 +19,7 @@ import {
   RefreshCw,
   Printer,
   Search,
+  Pencil,
   ShieldCheck,
   Wallet,
   X,
@@ -49,6 +50,8 @@ import { FacturaLink, type PagoRevisionGuardado } from "./PagoRevisionCells";
 import { usePagoRevisionEditor } from "./usePagoRevisionEditor";
 import DataGridPro from "../../../components/datagrid/DataGridPro";
 import type { GridColumn } from "../../../components/datagrid/types";
+import { getCellValue } from "../../../components/datagrid/gridEngine";
+import GastosPage, { type GastoEditorRequest } from "./gastos";
 
 const hoy = () =>
   new Intl.DateTimeFormat("en-CA", {
@@ -187,6 +190,7 @@ export default function PagarTesoreriaV2Page() {
   const [rows, setRows] = useState<PagoTesoreriaRow[]>([]);
   const [catalogos, setCatalogos] = useState(emptyCatalogos);
   const [puedePagar, setPuedePagar] = useState(false);
+  const [gastoEditorRequest, setGastoEditorRequest] = useState<GastoEditorRequest | null>(null);
   const [loading, setLoading] = useState(false);
   const [tabCounts, setTabCounts] = useState<Record<number, number>>({});
   const [tabCountsLoading, setTabCountsLoading] = useState(true);
@@ -942,61 +946,47 @@ export default function PagarTesoreriaV2Page() {
       setSaving(false);
     }
   };
+  // Misma regla que el lápiz de gastos: se edita todo menos Rechazado (3); si está Pagado (4)
+  // el editor restringe los campos modificables.
+  const abrirModificar = () => {
+    const fila = selectedRows[0];
+    if (!fila || selectedRows.length !== 1) return;
+    if (fila.estado === 3) { setError("Un recibo rechazado no se puede modificar."); return; }
+    setGastoEditorRequest({ correlativo: Math.trunc(fila.correlativo), mode: "editar" });
+  };
+  useEffect(() => {
+    if (!gastoEditorRequest) return;
+    const cerrarConEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setGastoEditorRequest(null);
+    };
+    window.addEventListener("keydown", cerrarConEscape);
+    return () => window.removeEventListener("keydown", cerrarConEscape);
+  }, [gastoEditorRequest]);
   const exportar = () => {
-    const etiquetaCatalogo = (opciones: PagoOpcion[], id: number | null, valorActual?: string | null) =>
-      opciones.find((item) => item.id === id)?.nombre || valorActual || (id == null ? "—" : String(id));
+    // Mismas columnas que el grid (sin las auxiliares de agrupación); "A pagar/Pagado" se separa en monto y moneda.
+    const columnas = gridColumns.filter((c) => c.visible !== false && c.dataField !== "verDetalle");
     const data = viewRows.map((r) => {
-      const fila: Record<string, string | number | null> = {
-        Recibo: r.correlativo,
-        OT: r.ot || "—",
-      };
-      if (estado === 100 || estado === 4) fila.Estado = etiquetaCatalogo(catalogos.estados, r.estado, labelEstadoHistorial(r.estado));
-      fila.Responsable = r.responsable || "Sin responsable";
-      fila.Solicitante = r.solicitante || "—";
-      if (estado === 4) fila.Rendición = r.rendicion || "Sin estado";
-      if (estado === 9) {
-        fila["Revisión PM"] = r.revisionPm || "—";
-        fila["Fecha revisión PM"] = fecha(r.fechaRevision);
+      const fila: Record<string, string | number | null> = {};
+      for (const c of columnas) {
+        const campo = c.dataField;
+        const caption = c.caption ?? campo;
+        if (campo === "totalPagar") {
+          fila[caption] = r.totalPagar;
+          fila[`${caption} - Moneda`] = r.moneda || "—";
+        } else if (campo === "correlativo") {
+          fila.Recibo = r.correlativo;
+          fila.OT = r.ot || "—";
+        } else if (campo === "imgFactura") {
+          fila[caption] = r.imgFactura || "Sin factura adjunta";
+        } else {
+          const valor = getCellValue(r, c, campo);
+          if (c.dataType === "date") fila[caption] = fecha(valor == null ? null : String(valor));
+          else if (typeof valor === "number") fila[caption] = valor;
+          else fila[caption] = valor == null || valor === "" ? "—" : String(valor);
+        }
       }
-      if (estado === 2) {
-        fila["Tipo de observación"] = r.estado === 7 ? "Observado administrativo" : "Observado de aprobación";
-        fila["Motivo observación"] = r.observacion || "Sin motivo";
-      }
-      fila.Proyecto = r.proyecto || "—";
-      fila.Site = r.site || "—";
-      fila.Cliente = r.cliente || "—";
-      fila["Id Site"] = r.idSite || "—";
-      fila.Fecha = fecha(estado === 4 ? r.fechaDeposito : r.fecha);
-      if (estado === 1 || estado === 9) fila["Revisión de aprobación"] = `${r.revisionPmAprobar?.trim() || "Sin registro"} · ${fecha(r.fechaRevisionAprobar)}`;
-      fila.Total = r.total;
-      fila.Retención = r.montoRetencion;
-      fila[estado === 4 ? "Pagado" : "A pagar"] = r.totalPagar;
-      fila.Detalle = r.detalle || "—";
-      fila.Serie = r.serie || "—";
-      fila["View factura"] = r.imgFactura || "Sin factura adjunta";
-      if (estado === 1 || estado === 9 || estado === 5 || estado === 2 || estado === 100) fila.Banco = r.banco || "—";
-      fila.Cuenta = r.cuenta || "—";
-      fila.CuentaInter = r.cuentaInter || "—";
-      fila.NombreCta = r.nombreCta || "—";
-      fila.IdBancoCta = r.idBancoCta ?? "—";
-      fila["Banco de cuenta"] = r.idBancoCta == null
-        ? "—"
-        : catalogos.bancosCuenta.find((banco) => banco.id === r.idBancoCta)?.nombre || "Banco no encontrado";
-      if (estado === 4) {
-        fila.Transferencia = r.transferencia || (r.idTransferencia != null ? String(r.idTransferencia) : "—");
-        fila.Banco = r.banco || (r.idBanco != null ? String(r.idBanco) : "—");
-        fila.NroOperacion = r.nroOperacion || "—";
-      }
-      if (estado === 1) {
-        fila.Anticipo = etiquetaCatalogo(catalogos.anticipos, r.idAnticipo);
-        fila.NroOperacion = r.nroOperacion || "—";
-        fila.Comprobante = etiquetaCatalogo(catalogos.comprobantes, r.idComprobante, r.comprobante);
-        fila.TipoPago = etiquetaCatalogo(catalogos.tiposPago, r.idTipoPago);
-        fila.Edición = permisosRevision.puedeEditar ? "Disponible" : "No disponible";
-        fila.RUC = r.ruc || "—";
-      }
-      if (estado === 9) fila.Anticipo = etiquetaCatalogo(catalogos.anticipos, r.idAnticipo);
-      if (estado === 5) fila.RUC = r.ruc || "—";
       return fila;
     });
     const sheet = XLSX.utils.json_to_sheet(data);
@@ -1812,7 +1802,7 @@ export default function PagarTesoreriaV2Page() {
                 selectedKeys={[...selected]}
                 onSelectionChanged={(keys) => setSelected(new Set(keys))}
                 isRowSelectable={esSeleccionable}
-                selectionDisabled={saving || loading || !puedePagar}
+                selectionDisabled={saving || loading || (estado !== 100 && !puedePagar)}
                 onVisibleRowsChange={handleGridRows}
                 groupFields={groupFields}
                 requiredGroupFields={estado === 1 ? ["grp_comprobante"] : undefined}
@@ -1855,6 +1845,25 @@ export default function PagarTesoreriaV2Page() {
                 >
                   <Search size={16} />
                   Buscar
+                </button>
+              )}
+              {estado === 100 && (
+                <button
+                  type="button"
+                  disabled={saving || loading || selectedRows.length !== 1 || selectedRows[0].estado === 3}
+                  onClick={abrirModificar}
+                  title={
+                    selectedRows.length !== 1
+                      ? "Seleccione un único recibo para modificar"
+                      : selectedRows[0].estado === 3
+                        ? "Un recibo rechazado no se puede modificar"
+                        : selectedRows[0].estado === 4
+                          ? "Recibo pagado: solo se pueden modificar Bien, Serie, Tipo de pago y la factura"
+                          : "Modificar el recibo seleccionado"
+                  }
+                >
+                  <Pencil size={15} />
+                  Modificar
                 </button>
               )}
               <button
@@ -2449,6 +2458,16 @@ export default function PagarTesoreriaV2Page() {
           )}
         </dialog>
       </div>
+      {gastoEditorRequest && (
+        <GastosPage
+          editorRequest={gastoEditorRequest}
+          onEditorClose={() => setGastoEditorRequest(null)}
+          onEditorUpdated={() => {
+            const parsed = Number(correlativoBusqueda.trim());
+            void load(100, desde, hasta, Number.isInteger(parsed) && parsed > 0 ? parsed : undefined);
+          }}
+        />
+      )}
     </AppPage>
   );
 }
