@@ -277,7 +277,8 @@ function formatDateInputValue(date: Date) {
 function getDefaultFilterState(): FilterState {
   const fechaHasta = new Date();
   const fechaDesde = new Date(fechaHasta);
-  fechaDesde.setDate(fechaDesde.getDate() - 8);
+  // Rango por defecto: un mes completo hacia atrás desde la fecha actual.
+  fechaDesde.setMonth(fechaDesde.getMonth() - 1);
 
   return {
     cliente: "",

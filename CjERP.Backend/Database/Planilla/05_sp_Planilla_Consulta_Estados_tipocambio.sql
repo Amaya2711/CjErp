@@ -17,7 +17,12 @@
       Columnas nuevas: SumaEmp, SumaEmpSolesNativo, SumaEmpUsdNativo,
       SumaEmpEurNativo, SumaEmpDopNativo, SumaEmpCopNativo, CantRecibosEmp,
       SubtotalOriginal, IgvOriginal, TotalOriginal (montos en moneda nativa).
-      Las columnas Subtotal/IGV/Total existentes NO cambian (siguen x3.8).
+      Subtotal/IGV/Total salen en la moneda REAL del recibo (los scripts 01/04
+      los convertian x3.8 cuando TipoMoneda <> 1, lo que mostraba 8,260.86 para un
+      recibo de US$ 2,173.91). El equivalente en soles va en SubtotalSoles,
+      IGVSoles y TotalSoles, con el tipo de cambio de la pantalla.
+      Tarea: se devuelve el nombre de la tarea (Constante TAREA, join e); los scripts
+      01/04 solo devolvian IdTarea y la columna Tarea de pagos_v2 salia vacia.
       RENDIMIENTO: SumaEmp agrupa todo Planilla en estados 4/6/0, asi que solo se
       calcula con @IncluirSumaResp = 1 (lo envia la pestana "Suma responsable").
       Con 0 (por defecto) las bandejas no pagan ese costo y las columnas SumaEmp*
@@ -227,18 +232,14 @@ BEGIN
         CAST(ISNULL(pot.TotalSubtotalPorMoneda, 0) AS DECIMAL(18, 2)) AS TotalSubtotalPorMoneda,
         CAST(ISNULL(iot.TotalMontoBckPorMoneda, 0) AS DECIMAL(18, 2)) AS TotalMontoBckPorMoneda,
         CAST(ISNULL(iot.TotalMontoVisiblePorMoneda, 0) AS DECIMAL(18, 2)) AS TotalMontoVisiblePorMoneda,
-        CASE
-            WHEN a.TipoMoneda = 1 THEN a.Subtotal
-            ELSE a.Subtotal * 3.8
-        END AS Subtotal,
-        CASE
-            WHEN a.TipoMoneda = 1 THEN a.Igv
-            ELSE a.Igv * 3.8
-        END AS IGV,
-        CASE
-            WHEN a.TipoMoneda = 1 THEN a.Total
-            ELSE a.Total * 3.8
-        END AS Total,
+        -- Subtotal / IGV / Total en la MONEDA REAL del recibo (TipoMoneda <> 1 NO se convierte).
+        a.Subtotal AS Subtotal,
+        a.Igv AS IGV,
+        a.Total AS Total,
+        -- Equivalente en soles con el tipo de cambio de la pantalla (moneda no soportada: sin conversion).
+        CAST(a.Subtotal * CASE a.TipoMoneda WHEN 2 THEN @TcUsd WHEN 3 THEN @TcEur WHEN 4 THEN @TcDop WHEN 5 THEN @TcCop ELSE 1 END AS DECIMAL(18, 2)) AS SubtotalSoles,
+        CAST(a.Igv * CASE a.TipoMoneda WHEN 2 THEN @TcUsd WHEN 3 THEN @TcEur WHEN 4 THEN @TcDop WHEN 5 THEN @TcCop ELSE 1 END AS DECIMAL(18, 2)) AS IGVSoles,
+        CAST(a.Total * CASE a.TipoMoneda WHEN 2 THEN @TcUsd WHEN 3 THEN @TcEur WHEN 4 THEN @TcDop WHEN 5 THEN @TcCop ELSE 1 END AS DECIMAL(18, 2)) AS TotalSoles,
         a.Comentario,
         CASE
             WHEN ISNULL(a.IdWeb, 0) = 1 THEN m_cj.NombreEmpleado
@@ -299,6 +300,7 @@ BEGIN
             ELSE a.TotalPagar
         END AS TotalPagar,
         a.IdTarea,
+        e.ValorIni AS Tarea,
         a.imgFactura,
         a.idprovisional,
         s1.fechaInicio,

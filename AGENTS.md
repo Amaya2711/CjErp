@@ -202,6 +202,13 @@ Detalle y diagramas: `docs/PROCESS_MAP.md`.
 ## Reglas de negocio
 Estados de Planilla 0–10, super-aprobador 77, IGV 18 %, TC fijo 3.8 (⚠), detracciones por `Constante DETRACCION`, reglas de pago (estado 5/8, misma moneda, ejecutor cargo 14, fecha no futura), jornada 9.6 h (FE), validadores 1/2/3 en `EmpleadoCjDetalle`. Detalle con fuentes: `docs/BUSINESS_RULES.md`. **No cambiar reglas sin informar antes.**
 
+> 🚨 **REGLA CRÍTICA — MONTOS Y TIPO DE CAMBIO (error grave ya ocurrido; NO repetir)**
+> - `Subtotal`, `IGV`, `Total` (y cualquier monto de `Planilla`) se devuelven y se muestran **siempre en la moneda REAL del recibo**. **Si `TipoMoneda <> 1` NO se convierte a soles** en la columna original. Ej.: recibo en DÓLARES de US$ 2,173.91 debe verse `$ 2,173.91`, **nunca** `8,260.86`.
+> - `TipoMoneda`: 1 SOLES · 2 DOLARES · 3 EUROS · 4 PESO DOMINICANO · 5 PESO COLOMBIANO (`Constante PLANTILLA/TIPO_MONEDA`).
+> - El equivalente en soles va **solo en columnas aparte** (`SubtotalSoles`, `IGVSoles`, `TotalSoles`, `SumaEmp`…) y se calcula con los **tipos de cambio de la pantalla** (`TipoCambioUSD/EUR/DOP/COP`), nunca con un `3.8` fijo ni sobrescribiendo `Subtotal/IGV/Total`.
+> - Al crear/modificar/restaurar un SP o consulta (`sp_Planilla_Consulta_Estados`, `sp_Planilla_ConsultaIni`, etc.) **verificar que `Subtotal/IGV/Total` salgan sin convertir** y que el SP acepte los parámetros `TipoCambio*` que envían `pagos_v1`, `pagos_v2` e `Historial`. Los scripts versionados `Database/Planilla/01` y `04` convierten `* 3.8` (**incorrecto**): usar `05_sp_Planilla_Consulta_Estados_tipocambio.sql`.
+> - Antes de ejecutar un script que reemplace un SP, **comparar con el SP vigente en la BD** (Script as ALTER); sobrescribirlo sin comparar causó este error y un 500 general en las grillas.
+
 ## Integraciones
 SharePoint/Graph (`ISharePointCommercialUploadService`), correo por Graph (`IGraphMailSender`, remitente TI2) con SMTP de respaldo, WUP (`WupService`), Meta WhatsApp, OpenAI, Anthropic, SMTP (MailKit), Expo push, gestor legacy elnk.uno, Google Maps (FE), Hangfire. Detalle: `docs/INTEGRATIONS.md`.
 
@@ -248,6 +255,7 @@ SharePoint/Graph (`ISharePointCommercialUploadService`), correo por Graph (`IGra
 36. Mantener cambios focalizados en el objetivo solicitado.
 37. Si existe una solución existente mejor que crear una nueva, indicarlo.
 38. Si existe incertidumbre, marcarla como **PENDIENTE DE VALIDACIÓN**.
+39. **Montos y tipo de cambio**: nunca convertir a soles `Subtotal/IGV/Total` cuando `TipoMoneda <> 1`; mostrar siempre el valor real del recibo (ver regla crítica en "Reglas de negocio").
 
 ### Procedimiento para cada solicitud
 1. Leer este archivo (`AGENTS.md`). 2. Consultar el doc de `docs/` relacionado. 3. Localizar la implementación real. 4. Buscar implementaciones similares. 5. Seguir dependencias. 6. Identificar impacto (FE, BE, SQL, permisos, procesos, integraciones). 7. Explicar brevemente **"Elementos que serán afectados"**. 8. Hacer solo los cambios necesarios. 9. Validar que no se rompa nada (`npm run build` en FE; `dotnet build` en BE). 10. Actualizar docs si cambió arquitectura, endpoint, SP, tabla, proceso, regla, integración o módulo (no por cambios triviales).
