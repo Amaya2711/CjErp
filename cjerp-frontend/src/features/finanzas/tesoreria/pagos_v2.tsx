@@ -40,11 +40,12 @@ import {
   type PermisoAccionDto,
 } from "../../seguridad/services/seguridadPermisosAccionesService";
 import GastosPage, { type GastoEditorRequest } from "./gastos";
+import PagoSumaResponsable from "./PagoSumaResponsable";
 import DataGridPro from "../../../components/datagrid/DataGridPro";
 import type { GridColumn } from "../../../components/datagrid/types";
 
 type PagoTabKey = "aprobar" | "reaprobar" | "hormiga" | "observadas" | "resumen";
-type DetailTabKey = "orden" | "resumen" | "con-pagado" | "historial" | "historial-oc";
+type DetailTabKey = "orden" | "resumen" | "suma-resp" | "con-pagado" | "historial" | "historial-oc";
 
 type PagoEstado = Exclude<PagoTabKey, "resumen">;
 
@@ -859,6 +860,30 @@ function buildHistorialOtRequest(row: PagoRow): PlanillaConsultaEstadosRequest |
   return buildPagosV1PlanillaRequest(parametros);
 }
 
+// Recibos que componen "Suma responsable" (SumaEmp del legado): estados 4, 6 y 0 del
+// mismo cliente/proyecto/site/tipo de trabajo. El responsable y la tarea se filtran en la pestaña.
+function buildSumaResponsableRequest(row: PagoRow): PlanillaConsultaEstadosRequest | null {
+  const idCliente = row?.idCliente ?? 0;
+  const idProyecto = row?.idProyecto ?? 0;
+  const idSite = row?.siteId?.trim();
+  const corSite = row?.corSite?.trim();
+  const tipoTrabajo = row?.tipoTrabajo?.trim();
+
+  if (idCliente <= 0 || idProyecto <= 0 || !idSite || !corSite || !tipoTrabajo) {
+    return null;
+  }
+
+  return buildPagosV1PlanillaRequest([
+    { nombre: "Estados", valor: "0,4,6", tipo: "string" },
+    { nombre: "IncluirSumaResp", valor: "true", tipo: "bool" },
+    { nombre: "IdCliente", valor: String(Math.trunc(idCliente)), tipo: "int" },
+    { nombre: "IdProyecto", valor: String(Math.trunc(idProyecto)), tipo: "int" },
+    { nombre: "IdSite", valor: idSite, tipo: "string" },
+    { nombre: "CorSite", valor: corSite, tipo: "int" },
+    { nombre: "TipoTrabajo", valor: tipoTrabajo, tipo: "string" },
+  ]);
+}
+
 function buildHistorialOcRequest(row: PagoRow): PlanillaConsultaEstadosRequest | null {
   const idoc = getValidOcValue(row?.idOc ?? row?.documento);
   const fila = row?.fila?.trim();
@@ -1130,6 +1155,9 @@ export default function PagosV2Page() {
   const [activeTab, setActiveTab] = useState<PagoTabKey>("aprobar");
   const [detailTab, setDetailTab] = useState<DetailTabKey>("resumen");
   const [isDetailPanelOpen, setIsDetailPanelOpen] = useState(false);
+  // Ampliación del panel "Detalles del registro" como ventana grande (popup).
+  const [isDetailExpanded, setIsDetailExpanded] = useState(false);
+  const [detailPopupSize, setDetailPopupSize] = useState<"grande" | "mediano" | "compacto">("grande");
   const [filters, setFilters] = useState<FilterState>(() => getDefaultFilterState());
   const [responsableTextoFiltro, setResponsableTextoFiltro] = useState("");
   const [resumenConsultaSolicitada, setResumenConsultaSolicitada] = useState(false);
@@ -1183,6 +1211,27 @@ export default function PagosV2Page() {
   const [historialOcRows, setHistorialOcRows] = useState<PagoRow[]>([]);
   const [historialOcLoading, setHistorialOcLoading] = useState(false);
   const [conPagadoRows, setConPagadoRows] = useState<PagoRow[]>([]);
+
+  useEffect(() => {
+    if (!isDetailExpanded) {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsDetailExpanded(false);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isDetailExpanded]);
+
+  useEffect(() => {
+    if (!isDetailPanelOpen) {
+      setIsDetailExpanded(false);
+    }
+  }, [isDetailPanelOpen]);
   const [conPagadoLoading, setConPagadoLoading] = useState(false);
   const resumenOtCacheRef = useRef<Map<string, ResumenOtDetalle[]>>(new Map());
   const historialOtCacheRef = useRef<Map<string, PagoRow[]>>(new Map());
@@ -1312,11 +1361,14 @@ export default function PagosV2Page() {
   useEffect(() => {
     const controller = new AbortController();
     const loadKpis = async () => {
+      // Solo Aprobar se acota por el rango de fechas del filtro; Re-aprobar, Hormiga y
+      // Observadas cuentan únicamente por el código de su estado.
+      const parametrosFechas: PlanillaConsultaParametro[] = [];
       const parametros: PlanillaConsultaParametro[] = [];
       const fechaInicio = formatDateParam(appliedFilters.fechaDesde);
       const fechaFin = formatDateParam(appliedFilters.fechaHasta);
-      if (fechaInicio) parametros.push({ nombre: "FechaInicio", valor: fechaInicio, tipo: "date" });
-      if (fechaFin) parametros.push({ nombre: "FechaFin", valor: fechaFin, tipo: "date" });
+      if (fechaInicio) parametrosFechas.push({ nombre: "FechaInicio", valor: fechaInicio, tipo: "date" });
+      if (fechaFin) parametrosFechas.push({ nombre: "FechaFin", valor: fechaFin, tipo: "date" });
 
       const cargarKpisDesdeConsultaPrincipal = async () => {
         const estadosKpi: Array<[Exclude<PagoTabKey, "resumen">, string]> = [
@@ -1330,7 +1382,7 @@ export default function PagosV2Page() {
             const response = await consultarPlanillaEstados(
               {
                 ...buildPagosV1PlanillaRequest([
-                  ...parametros,
+                  ...(tab === "aprobar" ? parametrosFechas : parametros),
                   { nombre: "Estados", valor: estado, tipo: "string" },
                 ]),
                 // Solo se requiere TotalRows; evita transferir la grilla completa.
@@ -1387,6 +1439,22 @@ export default function PagosV2Page() {
           }
         }
         if (controller.signal.aborted) return;
+        if (tieneResumenCompatible) {
+          // El resumen cuenta todos los estados sin fechas; Aprobar se recalcula con el rango del filtro.
+          try {
+            const respuestaAprobar = await consultarPlanillaEstados(
+              {
+                ...buildPagosV1PlanillaRequest([...parametrosFechas, { nombre: "Estados", valor: "0", tipo: "string" }]),
+                maxRows: 1,
+              },
+              { timeoutMs: 120000, signal: controller.signal },
+            );
+            next.aprobar = Number(respuestaAprobar.totalRows) || 0;
+          } catch {
+            if (controller.signal.aborted) return;
+          }
+        }
+        if (controller.signal.aborted) return;
         setKpiCounts(tieneResumenCompatible ? next : await cargarKpisDesdeConsultaPrincipal());
       } catch {
         if (!controller.signal.aborted) {
@@ -1418,19 +1486,26 @@ export default function PagosV2Page() {
     }
 
     const load = async (signal: AbortSignal) => {
-      const cacheKey = [
-        activeTab,
-        appliedFilters.fechaDesde,
-          appliedFilters.fechaHasta,
-          appliedFilters.query,
-          appliedFilters.correlativo,
-          appliedFilters.solicitante.join(","),
-          appliedFilters.responsable.join(","),
-          appliedFilters.validador.join(","),
-          appliedFilters.moneda.join(","),
-          appliedFilters.estado.join(","),
-          refreshTick,
-      ].join("|");
+      // Aprobar depende del rango de fechas; Re-aprobar, Hormiga y Observadas solo de su estado;
+      // Total Órdenes de todos los filtros de cabecera.
+      const cacheKey = (activeTab === "resumen"
+        ? [
+            activeTab,
+            appliedFilters.fechaDesde,
+            appliedFilters.fechaHasta,
+            appliedFilters.query,
+            appliedFilters.correlativo,
+            appliedFilters.solicitante.join(","),
+            appliedFilters.responsable.join(","),
+            appliedFilters.validador.join(","),
+            appliedFilters.moneda.join(","),
+            appliedFilters.estado.join(","),
+            refreshTick,
+          ]
+        : activeTab === "aprobar"
+          ? [activeTab, appliedFilters.fechaDesde, appliedFilters.fechaHasta, refreshTick]
+          : [activeTab, refreshTick]
+      ).join("|");
       const cachedRows = tabRowsCacheRef.current.get(cacheKey);
       if (cachedRows) {
         setRowsByTab((previous) => ({ ...previous, [activeTab]: cachedRows }));
@@ -1448,13 +1523,15 @@ export default function PagosV2Page() {
 
         const fechaInicio = formatDateParam(appliedFilters.fechaDesde);
         const fechaFin = formatDateParam(appliedFilters.fechaHasta);
-        const textoBusqueda = appliedFilters.query.trim();
-        const correlativo = appliedFilters.correlativo.trim();
+        // Correlativo e IdOC pertenecen solo a Total Órdenes: las demás bandejas no los heredan.
+        const esResumen = activeTab === "resumen";
+        const textoBusqueda = esResumen ? appliedFilters.query.trim() : "";
+        const correlativo = esResumen ? appliedFilters.correlativo.trim() : "";
         const correlativoNumero = Number(correlativo);
         const buscarPorCorrelativo = Number.isInteger(correlativoNumero) && correlativoNumero > 0;
         const buscarEnTotal = Boolean(textoBusqueda) || buscarPorCorrelativo;
-        const tieneFiltroFechas = Boolean(fechaInicio || fechaFin);
-        const quickIdOcOnly = getQuickIdOcOnly(appliedFilters);
+        const tieneFiltroFechas = esResumen || activeTab === "aprobar" ? Boolean(fechaInicio || fechaFin) : false;
+        const quickIdOcOnly = esResumen ? getQuickIdOcOnly(appliedFilters) : null;
 
         let nextRowsByTab: Record<PagoTabKey, PagoRow[]>;
         setLoadingStage(
@@ -1506,11 +1583,14 @@ export default function PagosV2Page() {
           // al store: este filtra por fecha regular y excluiría pagos cuyo depósito
           // sí está dentro del rango. El rango se aplica por fila más abajo.
           const resumenIncluyePagado = activeTab === "resumen" && incluyeEstadoPagado(appliedFilters);
-          if (fechaInicio && !buscarPorCorrelativo && !resumenIncluyePagado) {
+          // Aprobar se acota por las fechas del filtro; Re-aprobar, Hormiga y Observadas
+          // solo por el código de su estado (sin fechas).
+          const aplicaFechasServidor = activeTab === "aprobar" || esResumen;
+          if (aplicaFechasServidor && fechaInicio && !buscarPorCorrelativo && !resumenIncluyePagado) {
             parametros.push({ nombre: "FechaInicio", valor: fechaInicio, tipo: "date" });
           }
 
-          if (fechaFin && !buscarPorCorrelativo && !resumenIncluyePagado) {
+          if (aplicaFechasServidor && fechaFin && !buscarPorCorrelativo && !resumenIncluyePagado) {
             parametros.push({ nombre: "FechaFin", valor: fechaFin, tipo: "date" });
           }
         }
@@ -1634,6 +1714,17 @@ export default function PagosV2Page() {
         return false;
       }
 
+      // Re-aprobar, Hormiga y Observadas solo se filtran por el código de su estado,
+      // que ya se aplicó en la consulta: no heredan filtros de cabecera.
+      if (activeTab === "reaprobar" || activeTab === "hormiga" || activeTab === "observadas") {
+        return true;
+      }
+
+      // Aprobar solo considera el rango de fechas del filtro.
+      if (activeTab === "aprobar") {
+        return (!fechaDesde || rowDate >= fechaDesde) && (!fechaHasta || rowDate <= fechaHasta);
+      }
+
       // La bandeja ya está limitada al estado de la pestaña activa. Para una
       // búsqueda por correlativo no se deben volver a aplicar fechas ni los
       // demás filtros manuales sobre el resultado puntual.
@@ -1669,7 +1760,7 @@ export default function PagosV2Page() {
     return activeRows.filter(
       (row) =>
         (quickIdOcOnly || matchesAppliedFilters(row, activeTab === "aprobar")) &&
-        matchesQuickSearch(row, filters.query)
+        (activeTab === "resumen" || activeTab === "aprobar" ? matchesQuickSearch(row, filters.query) : true)
     );
   }, [activeRows, activeTab, filters.query, matchesAppliedFilters, quickIdOcOnly]);
 
@@ -3853,7 +3944,7 @@ export default function PagosV2Page() {
           <section
             style={{
               ...styles.mainGrid,
-              gridTemplateColumns: isDetailPanelOpen ? "minmax(0, 1fr) 580px" : "minmax(0, 1fr)",
+              gridTemplateColumns: isDetailPanelOpen && !isDetailExpanded ? "minmax(0, 1fr) 580px" : "minmax(0, 1fr)",
             }}
           >
           <div style={styles.leftColumn}>
@@ -3928,8 +4019,38 @@ export default function PagosV2Page() {
 
           </div>
 
+          {isDetailPanelOpen && isDetailExpanded ? (
+            <div
+              style={{ position: "fixed", inset: 0, background: "rgba(15, 23, 42, 0.55)", zIndex: 3040 }}
+              onClick={() => setIsDetailExpanded(false)}
+              aria-hidden="true"
+            />
+          ) : null}
           {isDetailPanelOpen ? (
-          <aside style={styles.ocDataCard}>
+          <aside
+            style={
+              isDetailExpanded
+                ? {
+                    ...styles.ocDataCard,
+                    position: "fixed",
+                    // Tamaño predefinido; además se puede arrastrar la esquina inferior derecha para ajustarlo.
+                    ...(DETAIL_POPUP_SIZES[detailPopupSize]),
+                    minWidth: 420,
+                    minHeight: 320,
+                    maxWidth: "98vw",
+                    maxHeight: "96vh",
+                    resize: "both",
+                    alignSelf: "stretch",
+                    zIndex: 3050,
+                    overflow: "auto",
+                    boxShadow: "0 24px 60px rgba(15, 23, 42, 0.35)",
+                  }
+                : styles.ocDataCard
+            }
+            role={isDetailExpanded ? "dialog" : undefined}
+            aria-modal={isDetailExpanded ? true : undefined}
+            aria-label="Detalles del registro"
+          >
             {filaActiva && detalleOcActiva ? (
               <>
                 <div style={styles.ocDataHeader}>
@@ -3948,9 +4069,40 @@ export default function PagosV2Page() {
                     >
                       {getStatusLabel(filaActiva.estado)}
                     </span>
+                    {isDetailExpanded ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDetailPopupSize((current) =>
+                            current === "grande" ? "mediano" : current === "mediano" ? "compacto" : "grande"
+                          )
+                        }
+                        style={{ ...styles.compactActionButton, borderColor: currentTheme.border, color: currentTheme.accent }}
+                        title="Cambiar tamaño de la ventana (también puede arrastrar la esquina inferior derecha)"
+                      >
+                        Tamaño: {detailPopupSize === "grande" ? "Grande" : detailPopupSize === "mediano" ? "Mediano" : "Compacto"}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
-                      onClick={() => setIsDetailPanelOpen(false)}
+                      onClick={() => setIsDetailExpanded((current) => !current)}
+                      style={{
+                        ...styles.detailExpandButton,
+                        color: currentTheme.accent,
+                        background: isDetailExpanded ? currentTheme.soft : "#FFFFFF",
+                        borderColor: currentTheme.border,
+                      }}
+                      aria-label={isDetailExpanded ? "Cerrar vista ampliada" : "Ampliar detalle en ventana"}
+                      title={isDetailExpanded ? "Cerrar vista ampliada (Esc)" : "Ampliar detalle en ventana"}
+                    >
+                      {isDetailExpanded ? <XCircle size={16} /> : <Maximize2 size={16} />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsDetailExpanded(false);
+                        setIsDetailPanelOpen(false);
+                      }}
                       style={{
                         ...styles.detailExpandButton,
                         color: currentTheme.accent,
@@ -3969,6 +4121,7 @@ export default function PagosV2Page() {
                   {[ 
                     { key: 'orden' as DetailTabKey, label: 'Detalle' },
                     { key: 'resumen' as DetailTabKey, label: 'Resumen' },
+                    { key: 'suma-resp' as DetailTabKey, label: 'Suma responsable' },
                     { key: 'historial' as DetailTabKey, label: 'Historial Sitio' },
                     { key: 'historial-oc' as DetailTabKey, label: 'Historial OC' },
                   ].map((tab) => {
@@ -4169,6 +4322,23 @@ export default function PagosV2Page() {
                     </div>
 
                   </>
+                ) : null}
+
+                {detailTab === 'suma-resp' ? (
+                  <PagoSumaResponsable
+                    key={filaActiva.id}
+                    fila={filaActiva}
+                    tipoCambio={{
+                      usd: Math.max(parseNumericValue(tipoCambioUsd), 0),
+                      eur: Math.max(parseNumericValue(tipoCambioEur), 0),
+                      dop: Math.max(parseNumericValue(tipoCambioDop), 0),
+                      cop: Math.max(parseNumericValue(tipoCambioCop), 0),
+                    }}
+                    request={buildSumaResponsableRequest(filaActiva)}
+                    accent={currentTheme.accent}
+                    soft={currentTheme.soft}
+                    border={currentTheme.border}
+                  />
                 ) : null}
 
                 {detailTab === 'con-pagado' ? (
@@ -5524,6 +5694,13 @@ function HistoryItem({ title, date, detail }: { title: string; date: string; det
     </div>
   );
 }
+
+// Tamaños del popup de "Detalles del registro" (centrado en pantalla).
+const DETAIL_POPUP_SIZES: Record<"grande" | "mediano" | "compacto", React.CSSProperties> = {
+  grande: { width: "94vw", height: "94vh", top: "3vh", left: "3vw" },
+  mediano: { width: "70vw", height: "80vh", top: "10vh", left: "15vw" },
+  compacto: { width: "50vw", height: "65vh", top: "17.5vh", left: "25vw" },
+};
 
 const styles: Record<string, React.CSSProperties> = {
   page: {
