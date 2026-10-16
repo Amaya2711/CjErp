@@ -99,6 +99,8 @@ type PagoRow = {
   idOc?: string;
   idEstadoOc?: number;
   estadoOcSemaforo?: string;
+  // Consumo de la OC (mismo cálculo del panel "Consumo de la OC"): (solicitado + pagado) / total OC, en %.
+  consumoOcPercent?: number;
   documento: string;
   planillaRow?: Record<string, unknown>;
 };
@@ -642,6 +644,20 @@ function getQuickIdOcOnly(filters: FilterState): number | null {
   return idOc;
 }
 
+// "% OC": mismo cálculo del panel "Consumo de la OC" (solicitado = subtotal de la fila salvo pagada/rechazada).
+function calcularConsumoOcPorcentaje(row: Record<string, unknown>, estadoCodigo: string): number | undefined {
+  const totalOc = getRecordNumber(row, "TotalOcConsumo", "totalOcConsumo");
+  if (totalOc == null || totalOc <= 0) {
+    return undefined;
+  }
+
+  const pagadoOc = Math.max(getRecordNumber(row, "PagadoOcConsumo", "pagadoOcConsumo") ?? 0, 0);
+  const estado = String(estadoCodigo ?? "").trim();
+  const subtotal = getRecordNumber(row, "SubtotalOriginal", "subtotalOriginal", "Subtotal", "subtotal") ?? 0;
+  const solicitado = estado === "4" || estado === "2" ? 0 : Math.max(subtotal, 0);
+  return getConsumptionPercent(totalOc, totalOc - (solicitado + pagadoOc));
+}
+
 function mapPlanillaConsultaRowToPagoRow(
   row: Record<string, unknown>,
   index: number,
@@ -769,6 +785,7 @@ function mapPlanillaConsultaRowToPagoRow(
     idOc: getRecordString(row, "IdOc", "IdOC", "Idoc", "OC", "Oc"),
     idEstadoOc: getRecordNumber(row, "IdEstadoOc", "idEstadoOc") ?? undefined,
     estadoOcSemaforo: getRecordString(row, "EstadoOcSemaforo", "estadoOcSemaforo", "EstadoOCSemaforo"),
+    consumoOcPercent: calcularConsumoOcPorcentaje(row, estadoCodigo),
     documento: getRecordString(row, "Documento", "documento"),
     planillaRow: row,
   };
@@ -3528,6 +3545,20 @@ export default function PagosV2Page() {
           fontWeight: 800,
         };
       },
+    },
+    {
+      dataField: "consumoOcPercent",
+      caption: "% OC",
+      dataType: "number",
+      width: 80,
+      placeAfter: "estadoOcSemaforo",
+      calculateCellValue: (row) => row.consumoOcPercent ?? null,
+      cellRender: (value) =>
+        value == null || value === "" ? (
+          "-"
+        ) : (
+          <span style={{ fontWeight: 800, color: getConsumptionBarColor(Number(value)) }}>{`${Number(value).toFixed(0)}%`}</span>
+        ),
     },
     { dataField: "subtotal", caption: "Subtotal", dataType: "number", width: 130, cellStyle: () => ({ fontWeight: 900 }), cellRender: (_v, row) => formatCurrency(row.subtotal, row.moneda) },
     { dataField: "igv", caption: "IGV", dataType: "number", width: 100, cellRender: (_v, row) => formatCurrency(row.igv, row.moneda) },

@@ -21,6 +21,9 @@
       los convertian x3.8 cuando TipoMoneda <> 1, lo que mostraba 8,260.86 para un
       recibo de US$ 2,173.91). El equivalente en soles va en SubtotalSoles,
       IGVSoles y TotalSoles, con el tipo de cambio de la pantalla.
+      TotalOcConsumo / PagadoOcConsumo: total de la OC (CabOrdenCompra.Subtotal) y pagado
+      (Planilla.Estado = 4 de esa OC); con ellos pagos_v2 muestra la columna "% OC".
+      EstadoOcSemaforo: semaforo de la OC (R/A/3/2/1/P) para la columna Est. de la grilla.
       Tarea: se devuelve el nombre de la tarea (Constante TAREA, join e); los scripts
       01/04 solo devolvian IdTarea y la columna Tarea de pagos_v2 salia vacia.
       RENDIMIENTO: SumaEmp agrupa todo Planilla en estados 4/6/0, asi que solo se
@@ -187,6 +190,20 @@ BEGIN
             LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), imp.IdSite), ''))), ISNULL(imp.Correlativo, 0),
             LTRIM(RTRIM(ISNULL(imp.TipoTrabajo, ''))), imp.IdMoneda
     ),
+    OcPagadoTotales AS
+    (
+        -- Pagado por OC (Planilla.Estado = 4), igual que /facturacionfinanciera/oc/consumo
+        -- (OrdenCompraService.BuscarConsumoOcSql). Alimenta "% OC" de la grilla de pagos.
+        SELECT
+            TRY_CONVERT(INT, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), p.IdOc))), '')) AS IdOc,
+            CAST(SUM(ISNULL(p.Subtotal, 0)) AS DECIMAL(18, 2)) AS PagadoOc
+        FROM dbo.Planilla p
+        WHERE p.Estado = 4
+          AND TRY_CONVERT(INT, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), p.IdOc))), '')) IS NOT NULL
+          AND (@IdCliente IS NULL OR p.IdCliente = @IdCliente)
+          AND (@IdProyecto IS NULL OR p.IdProyecto = @IdProyecto)
+        GROUP BY TRY_CONVERT(INT, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), p.IdOc))), ''))
+    ),
     PlanillaResponsableTotales AS
     (
         -- "Suma responsable" del legado (SumaEmp): subtotales por moneda de los
@@ -287,6 +304,18 @@ BEGIN
          g.NombreCliente AS Cliente,
          a.IdOc,
          coc.IdEstado AS IdEstadoOc,
+         -- Semaforo de la OC (columna "Est." de pagos_v1/v2): R rechazada | A aprobada |
+         -- 3, 2, 1 = en la N-esima aprobacion | P pre-aprobacion (misma regla que sp_IA_Planilla_Buscar v2).
+         CASE
+             WHEN coc.IdEstado = 6 THEN 'R'
+             WHEN ISNULL(coc.IdAprobador3, 0) > 0 THEN 'A'
+             WHEN ISNULL(coc.IdAprobador2, 0) > 0 THEN '3'
+             WHEN ISNULL(coc.IdAprobador1, 0) > 0 THEN '2'
+             WHEN ISNULL(coc.IdGestor, 0) > 0 THEN '1'
+             ELSE 'P'
+         END AS EstadoOcSemaforo,
+         CAST(COALESCE(coc.Subtotal, 0) AS DECIMAL(18, 2)) AS TotalOcConsumo,
+         CAST(ISNULL(ocp.PagadoOc, 0) AS DECIMAL(18, 2)) AS PagadoOcConsumo,
          a.MontoRetencion,
         a.TotalPagar AS TotalPagarOriginal,
         CASE
@@ -372,6 +401,8 @@ BEGIN
        AND iot.CorreSite = ISNULL(a.CorreSite, 0)
        AND iot.TipoTrabajo = LTRIM(RTRIM(ISNULL(a.Tipo_Trabajo, '')))
        AND iot.IdMoneda = a.TipoMoneda
+    LEFT JOIN OcPagadoTotales ocp
+        ON ocp.IdOc = coc.IdOc
     LEFT JOIN PlanillaResponsableTotales prt
         ON prt.IdCliente = ISNULL(a.IdCliente, 0)
        AND prt.IdProyecto = ISNULL(a.IdProyecto, 0)
