@@ -465,17 +465,17 @@ function filasResumenOc(lista: Array<{ sitio: SitioAnalisis; oc: OcAnalisis }>, 
 
   grupos.forEach((items) => {
     items.forEach(({ sitio, oc }) => {
-      filas.push([...(multiSitio ? [sitio.etiqueta] : []), String(oc.idOc), oc.estadoAprobacion, oc.estado, ...filaMontos({ moneda: oc.moneda, monto: oc.monto, gasto: oc.gasto, saldo: oc.saldo })]);
+      filas.push([...(multiSitio ? [sitio.etiqueta] : []), String(oc.idOc), oc.tareas || "—", oc.estadoAprobacion, oc.estado, ...filaMontos({ moneda: oc.moneda, monto: oc.monto, gasto: oc.gasto, saldo: oc.saldo })]);
     });
     if (multiSitio) {
       totalesResumenOc(items.map(({ oc }) => oc)).forEach((t) => {
-        filas.push([items[0].sitio.etiqueta, `SUBTOTAL ${t.moneda}`, "", "", ...filaMontos(t)]);
+        filas.push([items[0].sitio.etiqueta, `SUBTOTAL ${t.moneda}`, "", "", "", ...filaMontos(t)]);
       });
     }
   });
 
   totalesResumenOc(lista.map(({ oc }) => oc)).forEach((t) => {
-    filas.push(multiSitio ? ["", `TOTAL ${t.moneda}`, "", "", ...filaMontos(t)] : [`TOTAL ${t.moneda}`, "", "", ...filaMontos(t)]);
+    filas.push(multiSitio ? ["", `TOTAL ${t.moneda}`, "", "", "", ...filaMontos(t)] : [`TOTAL ${t.moneda}`, "", "", "", ...filaMontos(t)]);
   });
   return filas;
 }
@@ -665,9 +665,18 @@ export async function generarInformePdf(ctx: ContextoIa): Promise<InformeGenerad
       doc,
       autoTable,
       pagina,
-      [...(multiSitio ? ["SITIO"] : []), "OC", "APROBACIÓN", "ESTADO DE PAGO", "MONTO", "PAGADO", "SALDO", "% PAGADO"],
+      [...(multiSitio ? ["SITIO"] : []), "OC", "TAREAS", "APROBACIÓN", "ESTADO DE PAGO", "MONTO", "PAGADO", "SALDO", "% PAGADO"],
       filasResumenOc(listaOcs, multiSitio),
-      { chipCols: [o + 1, o + 2], derecha: [o + 3, o + 4, o + 5, o + 6], anchos: { [o + 1]: 26, [o + 2]: 32 }, fontSize: o ? 7 : 7.5, filaTotal: true },
+      {
+        chipCols: [o + 2, o + 3],
+        derecha: [o + 4, o + 5, o + 6, o + 7],
+        // Anchos fijos que suman 180 mm (con varios sitios, el resto queda para la columna SITIO).
+        anchos: multiSitio
+          ? { [o]: 14, [o + 1]: 30, [o + 2]: 20, [o + 3]: 26, [o + 4]: 19, [o + 5]: 19, [o + 6]: 19, [o + 7]: 12 }
+          : { [o]: 16, [o + 1]: 36, [o + 2]: 22, [o + 3]: 28, [o + 4]: 21, [o + 5]: 21, [o + 6]: 21, [o + 7]: 15 },
+        fontSize: o ? 6.5 : 7,
+        filaTotal: true,
+      },
     );
   }
 

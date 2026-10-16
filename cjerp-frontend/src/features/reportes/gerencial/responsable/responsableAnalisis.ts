@@ -20,6 +20,8 @@ export type OcAnalisis = {
   solicitante: string;
   responsable: string;
   detalle: string;
+  /** Tareas de las líneas de la OC, sin repetir y separadas por coma. */
+  tareas: string;
   moneda: string;
   monto: number;
   gasto: number;
@@ -113,6 +115,7 @@ export function analizarPorSitio(filas: FilaReporte[]): SitioAnalisis[] {
             solicitante: ls.find((l) => l.solicitanteOc)?.solicitanteOc ?? "",
             responsable: ls[0].responsableOc || ls[0].responsable,
             detalle: ls.map((l) => l.detalleOc).filter(Boolean).join(" | "),
+            tareas: Array.from(new Set(ls.map((l) => l.tareaOc.trim()).filter(Boolean))).join(", "),
             moneda: ls[0].monedaClave,
             monto,
             gasto,

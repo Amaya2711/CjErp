@@ -98,6 +98,7 @@ export default function ReporteResponsablePage() {
   const [cargando, setCargando] = useState(false);
   const [exportando, setExportando] = useState<"" | "ia">("");
   const [progresoPdf, setProgresoPdf] = useState("");
+  const [noAdjuntarOc, setNoAdjuntarOc] = useState(true);
   const [ocEnProceso, setOcEnProceso] = useState<number | null>(null);
   const [error, setError] = useState("");
   const consultaRef = useRef<AbortController | null>(null);
@@ -350,11 +351,14 @@ export default function ReporteResponsablePage() {
       return;
     }
     const ids = Array.from(new Set(filasFiltradas.filter((f) => f.tieneOc && f.idOc !== null).map((f) => f.idOc as number))).sort((a, b) => a - b);
-    if (ids.length > 40 && !window.confirm(`Se anexarán los PDF de ${ids.length} OC al informe. Puede tardar y el archivo será pesado. ¿Continuar?`)) return;
+    if (!noAdjuntarOc && ids.length > 40 && !window.confirm(`Se anexarán los PDF de ${ids.length} OC al informe. Puede tardar y el archivo será pesado. ¿Continuar?`)) return;
     setExportando("ia");
     setError("");
     try {
-      const { disponibles, fallidas } = await descargarPdfsOc(ids, (hechas, total) => setProgresoPdf(`Anexando OC ${hechas}/${total}…`));
+      // Con "NO adjuntar OC" no se descargan ni se unen los formatos de OC al final del informe.
+      const { disponibles, fallidas } = noAdjuntarOc
+        ? { disponibles: [], fallidas: [] as number[] }
+        : await descargarPdfsOc(ids, (hechas, total) => setProgresoPdf(`Anexando OC ${hechas}/${total}…`));
       setProgresoPdf("Generando…");
       const informe = await generarInformePdf({
         filas: filasFiltradas,
@@ -670,6 +674,10 @@ export default function ReporteResponsablePage() {
           <label style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 32, fontSize: 13, color: "#334155", cursor: "pointer" }}>
             <input type="checkbox" checked={filtros.omitirOcSinGastos} onChange={(e) => actualizar("omitirOcSinGastos", e.target.checked)} />
             Omitir OC sin gastos
+          </label>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 32, fontSize: 13, color: "#334155", cursor: "pointer" }}>
+            <input type="checkbox" checked={noAdjuntarOc} onChange={(e) => setNoAdjuntarOc(e.target.checked)} />
+            NO adjuntar OC
           </label>
           <div style={{ flex: 1 }} />
           <button

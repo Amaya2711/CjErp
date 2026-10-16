@@ -680,10 +680,17 @@ WHERE p.Correlativo IN @Ids",
             }
 
             var aprobaciones = await ObtenerAprobacionesOcAsync(connection, rows, cancellationToken);
+            var tareasOc = await ObtenerTareasOcAsync(connection, rows, cancellationToken);
 
             foreach (var row in rows)
             {
                 var idOcFila = TryGetInt(row, "IdOcDetalleOC");
+                var filaOcDetalle = TryGetInt(row, "FilaOC");
+                if (idOcFila.HasValue && filaOcDetalle.HasValue && tareasOc.TryGetValue((idOcFila.Value, filaOcDetalle.Value), out var tareaOc))
+                {
+                    row["TareaOC"] = tareaOc;
+                }
+
                 if (idOcFila.HasValue && aprobaciones.TryGetValue(idOcFila.Value, out var aprobacion))
                 {
                     foreach (var par in aprobacion)
@@ -715,6 +722,50 @@ WHERE p.Correlativo IN @Ids",
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// Nombre de la tarea de cada línea de OC (DetOrdenCompra.IdTarea → Constante campo TAREA, igual que la bandeja de OC).
+        /// </summary>
+        private async Task<Dictionary<(int IdOc, int Fila), string?>> ObtenerTareasOcAsync(
+            SqlConnection connection,
+            List<Dictionary<string, object?>> rows,
+            CancellationToken cancellationToken)
+        {
+            var resultado = new Dictionary<(int IdOc, int Fila), string?>();
+            var idsOc = rows
+                .Select(row => TryGetInt(row, "IdOcDetalleOC"))
+                .Where(value => value.HasValue && value.Value > 0)
+                .Select(value => value!.Value)
+                .Distinct()
+                .ToList();
+
+            foreach (var lote in idsOc.Chunk(1000))
+            {
+                var data = await connection.QueryAsync(
+                    CreateCommand(
+                        @"
+SELECT d.IdOc AS IdOc, d.Fila AS Fila, t.ValorIni AS Tarea
+FROM dbo.DetOrdenCompra d
+LEFT JOIN dbo.Constante t ON t.Campo = 'TAREA' AND t.Correlativo = d.IdTarea
+WHERE d.IdOc IN @Ids",
+                        new { Ids = lote },
+                        CommandType.Text,
+                        cancellationToken));
+
+                foreach (var item in data)
+                {
+                    var fila = (IDictionary<string, object?>)item;
+                    if (fila.TryGetValue("IdOc", out var idOc) && idOc is not null
+                        && fila.TryGetValue("Fila", out var numFila) && numFila is not null)
+                    {
+                        resultado[(Convert.ToInt32(idOc), Convert.ToInt32(numFila))] =
+                            fila.TryGetValue("Tarea", out var tarea) ? tarea?.ToString() : null;
+                    }
+                }
+            }
+
+            return resultado;
         }
 
         /// <summary>

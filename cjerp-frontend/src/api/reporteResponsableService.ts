@@ -40,6 +40,8 @@ export type RptResponsableRow = {
   precioUnitario: number | null;
   subtotalOc: number | null;
   detalleOc: string;
+  /** Nombre de la tarea de la línea de OC (DetOrdenCompra.IdTarea → Constante TAREA; lo completa el backend). */
+  tareaOc: string;
   correlativoPago: number | null;
   /** Planilla.Subtotal del gasto asociado (lo completa el backend; el store no lo entrega). */
   subtotalGasto: number | null;
@@ -118,6 +120,7 @@ export function mapRptResponsableRow(raw: RawRow): RptResponsableRow {
     precioUnitario: numberOrNull(get("PrecioUnitario")),
     subtotalOc: numberOrNull(get("SubtotalOC")),
     detalleOc: text(get("DetalleOC")),
+    tareaOc: text(get("TareaOC")),
     correlativoPago: numberOrNull(get("CorrelativoPago")),
     subtotalGasto: numberOrNull(get("SubtotalGasto")),
     monedaGasto: text(get("MonedaGasto")),
