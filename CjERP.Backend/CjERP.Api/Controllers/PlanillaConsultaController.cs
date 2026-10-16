@@ -20,6 +20,7 @@ namespace CjERP.Api.Controllers
     public class PlanillaConsultaController : ControllerBase
     {
         private static readonly string[] RequiredParameters = ["IdCargo", "IdEmpleado"];
+        private const string ConsultaGastosSinAlcance = "gastos-consulta";
         private static readonly string[] RequiredParametersPagosV1 = [];
         private static readonly string[] RequiredParametersAprobar = ["IdCargo", "IdEmpleado", "Estados"];
         private static readonly string[] RequiredParametersVacaciones = [];
@@ -90,8 +91,14 @@ namespace CjERP.Api.Controllers
                 providedParameters[normalizedName] = parametro.Valor;
             }
 
-            EnsureClaimFallback(providedParameters);
-            AppendClaimFallbackParameters(parametros, providedParameters);
+            // Pestaña Consulta de /finanzas/tesoreria/gastos: busca sin el alcance por usuario
+            // (no se completan IdEmpleado/IdCargo desde el JWT; el SP no filtra por solicitante).
+            var consultaSinAlcanceUsuario = string.Equals(consulta, ConsultaGastosSinAlcance, StringComparison.OrdinalIgnoreCase);
+            if (!consultaSinAlcanceUsuario)
+            {
+                EnsureClaimFallback(providedParameters);
+                AppendClaimFallbackParameters(parametros, providedParameters);
+            }
 
             if (!TryRestringirVacacionesRolEstandar(consulta, parametros, out var restriccionVacaciones))
             {
@@ -131,7 +138,8 @@ namespace CjERP.Api.Controllers
                 : string.Equals(consulta, "planilla-oc-resumen", StringComparison.OrdinalIgnoreCase)
                     ? RequiredParametersPlanillaOcResumen
                 : (string.Equals(consulta, "pagos-v1", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(consulta, "pagos-v1-resumen", StringComparison.OrdinalIgnoreCase))
+                    || string.Equals(consulta, "pagos-v1-resumen", StringComparison.OrdinalIgnoreCase)
+                    || consultaSinAlcanceUsuario)
                     ? RequiredParametersPagosV1
                 : RequiredParameters;
 

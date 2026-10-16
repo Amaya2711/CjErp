@@ -334,6 +334,7 @@ type GastoGridRow = {
   cuentaInter: string;
   validador: string;
   detalle: string;
+  observacion: string;
 };
 
 type FacturaUploadResponse = {
@@ -820,6 +821,11 @@ function tasaIgvPorComprobante(
   selectedValue?: string | null
 ): number {
   const match = findConstanteOption(options, selectedValue);
+  // HONORARIO no calcula IGV ni otros montos: Total = Subtotal = Total a pagar.
+  if (normalizeSearchText(match?.label ?? "").includes("honorario")) {
+    return 0;
+  }
+
   const idComprobante = [match?.codigo, match?.value, match?.valor, selectedValue]
     .map((value) => Number(value))
     .find((value) => Number.isInteger(value) && value > 0);
@@ -1731,10 +1737,15 @@ export default function GastosPage({
       for (const estados of gruposEstados.length > 0 ? gruposEstados : [""]) {
         respuestas.push(
           await consultarPlanillaEstados({
-            ...buildPlanillaConsultaEstadosRequest([
-              ...(estados ? [{ nombre: "Estados", valor: estados, tipo: "string" } satisfies PlanillaConsultaParametro] : []),
-              ...parametrosConsulta,
-            ]),
+            ...buildPlanillaConsultaEstadosRequest(
+              [
+                ...(estados ? [{ nombre: "Estados", valor: estados, tipo: "string" } satisfies PlanillaConsultaParametro] : []),
+                ...parametrosConsulta,
+              ],
+              // La pestaña Consulta no restringe por empleado/cargo del usuario (como ADMIN).
+              vistaGastosRef.current === "consulta" ? { baseParams: { idCargo: null, idEmpleado: null } } : undefined
+            ),
+            ...(vistaGastosRef.current === "consulta" ? { consulta: "gastos-consulta" } : {}),
           })
         );
       }
@@ -3543,6 +3554,7 @@ export default function GastosPage({
           cuentaInter: gasto.cuentaInter || "",
           validador: getConstanteLabelOrFallback(validadorOptions, gasto.validador, gasto.validadorLabel),
           detalle: gasto.detalle ? String(gasto.detalle).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim() : "",
+          observacion: gasto.observacion ? String(gasto.observacion).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim() : "",
         };
       }),
     [
@@ -3678,6 +3690,7 @@ export default function GastosPage({
       { dataField: "cuentaInter", caption: "Cuenta Inter", width: 170 },
       { dataField: "validador", caption: "Validador", width: 150 },
       { dataField: "detalle", caption: "Detalle", width: 320 },
+      { dataField: "observacion", caption: "Observación", width: 260 },
     ],
     []
   );
