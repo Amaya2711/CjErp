@@ -1265,45 +1265,21 @@ export default function PagarTesoreriaV2Page() {
           ),
         } as GridColumn<PagoTesoreriaRow>]
       : []),
-    ...(estado === 1
-      ? [{
-          dataField: "moneda",
-          caption: "Moneda",
-          width: 110,
-          calculateCellValue: (r: PagoTesoreriaRow) => r.moneda || "—",
-        } as GridColumn<PagoTesoreriaRow>]
-      : []),
-    // Administrativo no muestra Total ni Retención; A pagar y Moneda van en columnas separadas.
-    ...(estado === 5
-      ? []
-      : [
-          { dataField: "total", caption: "Total", dataType: "number", width: 110, cellRender: (_v: unknown, r: PagoTesoreriaRow) => money(r.total) } as GridColumn<PagoTesoreriaRow>,
-          { dataField: "montoRetencion", caption: "Retención", dataType: "number", width: 110, cellRender: (_v: unknown, r: PagoTesoreriaRow) => money(r.montoRetencion) } as GridColumn<PagoTesoreriaRow>,
-        ]),
+    // Sin Total ni Retención en ninguna pestaña: solo A pagar (Pagado en Rendición) y Moneda en columna aparte.
     {
       dataField: "totalPagar",
       caption: estado === 4 ? "Pagado" : "A pagar",
       dataType: "number",
       width: 130,
-      cellRender: (_v, r) =>
-        estado === 5 ? (
-          <span className="pt-amount">{money(r.totalPagar)}</span>
-        ) : (
-          <span style={cellStack}>
-            <span className="pt-amount">{money(r.totalPagar)}</span>
-            <small style={cellSub}>{r.moneda}</small>
-          </span>
-        ),
+      cellRender: (_v, r) => <span className="pt-amount">{money(r.totalPagar)}</span>,
     },
-    ...(estado === 5
-      ? [{
-          dataField: "monedaPagar",
-          caption: "Moneda",
-          placeAfter: "totalPagar",
-          width: 100,
-          calculateCellValue: (r: PagoTesoreriaRow) => r.moneda || "—",
-        } as GridColumn<PagoTesoreriaRow>]
-      : []),
+    {
+      dataField: "monedaPagar",
+      caption: "Moneda",
+      placeAfter: "totalPagar",
+      width: 100,
+      calculateCellValue: (r) => r.moneda || "—",
+    },
     {
       dataField: "verDetalle",
       caption: "Detalle",

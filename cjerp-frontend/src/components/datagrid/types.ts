@@ -21,6 +21,8 @@ export type GridColumn<T extends object = Record<string, unknown>> = {
   minWidth?: number;
   alignment?: "left" | "center" | "right";
   visible?: boolean;
+  /** Mantiene la columna siempre inmediatamente a la derecha de la columna indicada (ignora el orden guardado). */
+  placeAfter?: string;
   /** Ancla la columna a la izquierda al hacer scroll horizontal. */
   fixed?: boolean;
   allowSorting?: boolean;

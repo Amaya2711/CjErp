@@ -278,7 +278,18 @@ export default function DataGridPro<T extends object>({
   const orderedFields = useMemo(() => {
     const known = order.filter((f) => colMap.has(f));
     const missing = columns.map((c) => c.dataField).filter((f) => !known.includes(f));
-    return [...known, ...missing];
+    const base = [...known, ...missing];
+    // Columnas con placeAfter: siempre pegadas a su columna de referencia.
+    const followers = base.filter((f) => colMap.get(f)?.placeAfter && base.includes(colMap.get(f)!.placeAfter!));
+    if (!followers.length) return base;
+    const result = base.filter((f) => !followers.includes(f));
+    for (const f of followers) {
+      const anchor = result.indexOf(colMap.get(f)!.placeAfter!);
+      let at = anchor + 1;
+      while (at < result.length && colMap.get(result[at])?.placeAfter === colMap.get(f)!.placeAfter) at++;
+      result.splice(at, 0, f);
+    }
+    return result;
   }, [order, columns, colMap]);
 
   const visibleCols = useMemo(() => {
