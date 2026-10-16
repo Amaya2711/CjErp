@@ -974,7 +974,7 @@ export default function PagarTesoreriaV2Page() {
         const caption = c.caption ?? campo;
         if (campo === "totalPagar") {
           fila[caption] = r.totalPagar;
-          fila[`${caption} - Moneda`] = r.moneda || "—";
+          if (!columnas.some((col) => col.dataField === "monedaPagar")) fila[`${caption} - Moneda`] = r.moneda || "—";
         } else if (campo === "correlativo") {
           fila.Recibo = r.correlativo;
           fila.OT = r.ot || "—";
@@ -1273,20 +1273,37 @@ export default function PagarTesoreriaV2Page() {
           calculateCellValue: (r: PagoTesoreriaRow) => r.moneda || "—",
         } as GridColumn<PagoTesoreriaRow>]
       : []),
-    { dataField: "total", caption: "Total", dataType: "number", width: 110, cellRender: (_v, r) => money(r.total) },
-    { dataField: "montoRetencion", caption: "Retención", dataType: "number", width: 110, cellRender: (_v, r) => money(r.montoRetencion) },
+    // Administrativo no muestra Total ni Retención; A pagar y Moneda van en columnas separadas.
+    ...(estado === 5
+      ? []
+      : [
+          { dataField: "total", caption: "Total", dataType: "number", width: 110, cellRender: (_v: unknown, r: PagoTesoreriaRow) => money(r.total) } as GridColumn<PagoTesoreriaRow>,
+          { dataField: "montoRetencion", caption: "Retención", dataType: "number", width: 110, cellRender: (_v: unknown, r: PagoTesoreriaRow) => money(r.montoRetencion) } as GridColumn<PagoTesoreriaRow>,
+        ]),
     {
       dataField: "totalPagar",
       caption: estado === 4 ? "Pagado" : "A pagar",
       dataType: "number",
       width: 130,
-      cellRender: (_v, r) => (
-        <span style={cellStack}>
+      cellRender: (_v, r) =>
+        estado === 5 ? (
           <span className="pt-amount">{money(r.totalPagar)}</span>
-          <small style={cellSub}>{r.moneda}</small>
-        </span>
-      ),
+        ) : (
+          <span style={cellStack}>
+            <span className="pt-amount">{money(r.totalPagar)}</span>
+            <small style={cellSub}>{r.moneda}</small>
+          </span>
+        ),
     },
+    ...(estado === 5
+      ? [{
+          dataField: "monedaPagar",
+          caption: "Moneda",
+          placeAfter: "totalPagar",
+          width: 100,
+          calculateCellValue: (r: PagoTesoreriaRow) => r.moneda || "—",
+        } as GridColumn<PagoTesoreriaRow>]
+      : []),
     {
       dataField: "verDetalle",
       caption: "Detalle",
@@ -1363,6 +1380,8 @@ export default function PagarTesoreriaV2Page() {
     // Columnas auxiliares para agrupar (equivalen a las opciones de "Agrupar recibos").
     groupColumn("grp_comprobante", (r) => `${estado === 5 ? "" : `${r.revisionPm?.trim() || "Sin revisión"} · `}${nombreComprobante(r)}`, "Comprobante"),
     groupColumn("grp_proyecto", (r) => `${r.proyecto || "Sin proyecto"} · ${r.idSite || "Sin site"}${r.site ? ` · ${r.site}` : ""}`),
+    // Sin el sufijo de moneda que agrega groupColumn (evita "DOLARES · DOLARES").
+    { ...groupColumn("grp_moneda", () => "", "Moneda"), calculateCellValue: (r: PagoTesoreriaRow) => monedaGrupo(r) },
     groupColumn("grp_responsable", (r) => r.responsable || "Sin responsable", "Responsable"),
     groupColumn("grp_solicitante", (r) => r.solicitante || "Sin solicitante"),
     groupColumn("grp_banco", (r) => r.banco || "Sin banco"),
@@ -1370,7 +1389,8 @@ export default function PagarTesoreriaV2Page() {
     groupColumn("grp_serie", (r) => `${r.serie?.trim() || "Sin serie"} · ${r.imgFactura?.trim() ? "Con documento adjunto" : "Sin documento adjunto"}`),
   ];
   // Revisión inicia por comprobante y se desglosa por responsable.
-  const groupFields: string[] = estado === 1 ? ["grp_comprobante", "grp_responsable"] : [];
+  // Administrativo agrupa por Moneda por defecto.
+  const groupFields: string[] = estado === 1 ? ["grp_comprobante", "grp_responsable"] : estado === 5 ? ["grp_moneda"] : [];
 
   return (
     <AppPage title="Pagos de tesorería" fillHeight style={{ padding: "4px 8px 0" }}>
@@ -1797,7 +1817,7 @@ export default function PagarTesoreriaV2Page() {
                 }
                 // Revisión conserva un orden funcional fijo: Responsable → Comprobante
                 // y Moneda → Total. No se restaura un orden anterior del navegador.
-                stateStoringKey={estado === 1 ? undefined : `pagartesoreria-v2-o2-${estado}`}
+                stateStoringKey={estado === 1 ? undefined : `pagartesoreria-v2-o${estado === 5 ? 3 : 2}-${estado}`}
                 selection="multiple"
                 selectedKeys={[...selected]}
                 onSelectionChanged={(keys) => setSelected(new Set(keys))}

@@ -111,6 +111,12 @@ Seguridad · Tesorería/Finanzas (recibos, pagos, cheques, conciliación) · Ord
 - SP: `sp_Beneficio_ListarEmpleados/Registrar/Listar/Detalle/Aprobar/Rechazar` (scripts `Database/Recursoshumanos/06`, menú `07`; PV: no ejecutados en BD real) · Tablas existentes: cabBeneficio, DetBeneficio, EmpleadoCj.IdAptoBeneficio, Constante (`CORRELATIVO`/7, `BENEFICIO`, `APROBADO_PAGO_BENEFICIO`, `correo_beneficio`)
 - Reglas (de FrmBeneficio): empleado cargo 50 y estado 1; `IdAptoBeneficio = 2` = no apto; tipo 1 = préstamo (cuotas), 2 = adelanto (siempre 1 cuota; el préstamo admite 1 a 60); IdAprobado 0 pendiente / 1 aprobado / 2 rechazado. Al aprobar se envía el PDF a `Constante correo_beneficio` con `ValorFin=1` (correo en `ValorIni`, PV); un fallo del correo no revierte la aprobación. Aprobador/usuario salen del JWT. Al rechazar, el empleado vuelve a apto (`IdAptoBeneficio = 1`, PV) si no tiene otro beneficio pendiente o aprobado (mejora sobre el original).
 
+### Descanso médico
+- FE: `features/recursoshumanos/descansomedico.tsx` (ruta `/recursoshumanos/descansomedico`; pestañas Ingreso, Aprobar con 4 etapas, Reporte); API `api/descansoService.ts` · BE: C/DescansoController (`/api/admin/descanso`) → S/DescansoService, DescansoPdfDocument (QuestPDF), correo vía S/SmtpMailSender (Graph → SMTP), adjunto a SharePoint (`ISharePointCommercialUploadService`, carpeta `DESCANSO_MEDICO`)
+- SP: `sp_Descanso_ListarEmpleados/Registrar/Listar/Aprobar/Rechazar/Carta` (scripts `Database/Recursoshumanos/08`, menú `09`; PV: no ejecutados en BD real) · Tablas existentes: EmpleadoDescanso (una fila por día), Asistencia, Constante (`ESTADO_ASISTENCIA`, `correo_DESCANSO`)
+- Etapas (IdEstado): 97 → 98 → 99 → 100 → 5 aprobado; 0 rechazado (rechazable desde 4, 97, 98, 99). Al aprobar la etapa final (100 → 5) se marca `Asistencia.IdEstado = 5` en el rango y se envía el PDF a `Constante correo_DESCANSO` con `ValorFin=1` (correo en `ValorIni`, PV); un fallo del correo no revierte la aprobación. Aprobador/usuario salen del JWT.
+- Sin bloqueos en código: todo activo; solo se bloquea con filas de `SegPermisoAccion` por usuario (puedeVer/puedeEjecutar en NO) para `tab.ingreso/aprobar/reporte`, `tab.aprobacion_1..4`, `button.grabar/aprobar/rechazar`.
+
 ### Compensación (días compensatorios)
 - FE: `features/recursoshumanos/compensacionreal.tsx`; API `api/compensacionService.ts` · BE: C/CompensacionController (`/api/admin/compensacion`) → S/CompensacionService · SP: `sp_EmpleadoCompensacion*` · Estados 97 → 98 → 9; 22 rechazado
 
@@ -168,6 +174,7 @@ Seguridad · Tesorería/Finanzas (recibos, pagos, cheques, conciliación) · Ord
 
 ### Logística / operación
 - Recojo: FE `features/logistica/gestionequipos/recojo.tsx` · C/LogisticaRecojoController · SP `sp_Logistica_Recojo_Buscar/Insertar`
+- Equipos · ingreso (migración de FrmLogistic_v1): FE `features/logistica/gestionequipos/ingresoequipo.tsx` (+`equipos/ingreso/*`: Pedido, x Recepcionar, Series, x Validar; stock en `equipos/StockPanel.tsx`) · API `api/logisticaEquiposService.ts` · C/LogisticaEquiposController (`/api/logistica/equipos`) → S/LogisticaEquiposService · SP `sp_Logistica_Ingreso_*`, `sp_Logistica_Pedido_Importar` (+ stock `sp_Stock_Mover`) · Scripts `Database/Logistica/00-07` (PV: no ejecutados en BD real) · Estados línea (DetLogistica) 0 creado → 1 recepcionado → 2 validado; 8 no recepcionado; 4/6 observado/rechazado
 - Suministro: FE `features/operaciones/operacion/suministro.tsx` · C/LogisticaSuministroController · SP `sp_SuministroProvisional_Listar/Kpis/Insertar/Actualizar/ObtenerVigente`
 - Reembolso: FE `features/operaciones/operacion/reembolso.tsx` · C/LogisticaReembolsoController · SP `sp_Planilla_Listar_Reembolso` (actualizar = 501)
 
