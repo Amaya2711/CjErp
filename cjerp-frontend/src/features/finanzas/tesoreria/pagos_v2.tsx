@@ -276,11 +276,14 @@ function formatDateInputValue(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function getDefaultFilterState(): FilterState {
+// Días hacia atrás del rango por defecto: Total Órdenes 8; Aprobar 30 (un mes desde la fecha actual).
+const DIAS_RANGO_DEFECTO = 8;
+const DIAS_RANGO_APROBAR = 30;
+
+function getDefaultFilterState(dias: number = DIAS_RANGO_DEFECTO): FilterState {
   const fechaHasta = new Date();
   const fechaDesde = new Date(fechaHasta);
-  // Rango por defecto: un mes completo hacia atrás desde la fecha actual.
-  fechaDesde.setMonth(fechaDesde.getMonth() - 1);
+  fechaDesde.setDate(fechaDesde.getDate() - dias);
 
   return {
     cliente: "",
@@ -653,9 +656,42 @@ function calcularConsumoOcPorcentaje(row: Record<string, unknown>, estadoCodigo:
 
   const pagadoOc = Math.max(getRecordNumber(row, "PagadoOcConsumo", "pagadoOcConsumo") ?? 0, 0);
   const estado = String(estadoCodigo ?? "").trim();
-  const subtotal = getRecordNumber(row, "SubtotalOriginal", "subtotalOriginal", "Subtotal", "subtotal") ?? 0;
+  const subtotal = getRecordNumber(row, "SubtotalOriginal", "subtotalOriginal", "Subtotalb", "subtotalb", "Subtotal", "subtotal") ?? 0;
   const solicitado = estado === "4" || estado === "2" ? 0 : Math.max(subtotal, 0);
   return getConsumptionPercent(totalOc, totalOc - (solicitado + pagadoOc));
+}
+
+// Suma responsable (SumaEmp del legado) por moneda para la columna "Suma resp." de la grilla.
+type SumaRespTotales = { soles: number; usd: number; eur: number; dop: number; cop: number; cant: number };
+
+function getSumaRespKey(row: PagoRow): string {
+  const base = row.planillaRow ?? {};
+  return [
+    Math.trunc(row.idCliente ?? 0),
+    Math.trunc(row.idProyecto ?? 0),
+    (row.siteId ?? "").trim(),
+    Math.trunc(Number(row.corSite) || 0),
+    (row.tipoTrabajo ?? "").trim(),
+    Math.trunc(getRecordNumber(base, "IdTarea", "idTarea") ?? 0),
+    Math.trunc(getRecordNumber(base, "IdResponsable", "idResponsable") ?? 0),
+  ].join("|");
+}
+
+function formatSumaRespCelda(totales: SumaRespTotales | undefined): string {
+  if (!totales) {
+    return "-";
+  }
+
+  const partes: string[] = [];
+  const agregar = (valor: number, simbolo: string) => {
+    if (valor) partes.push(`${simbolo} ${valor.toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+  };
+  agregar(totales.soles, "S/");
+  agregar(totales.usd, "US$");
+  agregar(totales.eur, "€");
+  agregar(totales.dop, "RD$");
+  agregar(totales.cop, "COL$");
+  return partes.length ? partes.join(" · ") : "-";
 }
 
 function mapPlanillaConsultaRowToPagoRow(
@@ -894,6 +930,8 @@ function buildSumaResponsableRequest(row: PagoRow): PlanillaConsultaEstadosReque
   return buildPagosV1PlanillaRequest([
     { nombre: "Estados", valor: "0,4,6", tipo: "string" },
     { nombre: "IncluirSumaResp", valor: "true", tipo: "bool" },
+    // Solo recibos + SumaEmp: el SP omite los totales por banco/OT/OC que las bandejas sí necesitan.
+    { nombre: "ModoLiviano", valor: "true", tipo: "bool" },
     { nombre: "IdCliente", valor: String(Math.trunc(idCliente)), tipo: "int" },
     { nombre: "IdProyecto", valor: String(Math.trunc(idProyecto)), tipo: "int" },
     { nombre: "IdSite", valor: idSite, tipo: "string" },
@@ -1176,11 +1214,11 @@ export default function PagosV2Page() {
   // Ampliación del panel "Detalles del registro" como ventana grande (popup).
   const [isDetailExpanded, setIsDetailExpanded] = useState(false);
   const [detailPopupSize, setDetailPopupSize] = useState<"grande" | "mediano" | "compacto">("grande");
-  const [filters, setFilters] = useState<FilterState>(() => getDefaultFilterState());
+  const [filters, setFilters] = useState<FilterState>(() => getDefaultFilterState(DIAS_RANGO_APROBAR));
   const [responsableTextoFiltro, setResponsableTextoFiltro] = useState("");
   const [resumenConsultaSolicitada, setResumenConsultaSolicitada] = useState(false);
   const [historialSortConfig, setHistorialSortConfig] = useState<{ column: PagoSortColumn; direction: "asc" | "desc" } | null>(null);
-  const [appliedFilters, setAppliedFilters] = useState<FilterState>(() => getDefaultFilterState());
+  const [appliedFilters, setAppliedFilters] = useState<FilterState>(() => getDefaultFilterState(DIAS_RANGO_APROBAR));
   const [rowsByTab, setRowsByTab] = useState<Record<PagoTabKey, PagoRow[]>>({
     aprobar: [],
     reaprobar: [],
@@ -1223,12 +1261,32 @@ export default function PagosV2Page() {
   const [tipoCambioDop, setTipoCambioDop] = useState("0.057");
   const [tipoCambioCop, setTipoCambioCop] = useState("0.0010");
   const [consumoOc, setConsumoOc] = useState<OrdenCompraConsumoDto | null>(null);
+  // Totales de "Suma responsable" por combinación (segunda llamada, no bloquea la carga de la bandeja).
+  const [sumaRespMap, setSumaRespMap] = useState<Record<string, SumaRespTotales>>({});
+  const [sumaRespLoading, setSumaRespLoading] = useState(false);
   const [historialRows, setHistorialRows] = useState<PagoRow[]>([]);
   const [historialLoading, setHistorialLoading] = useState(false);
   const [historialResponsable, setHistorialResponsable] = useState("");
   const [historialOcRows, setHistorialOcRows] = useState<PagoRow[]>([]);
   const [historialOcLoading, setHistorialOcLoading] = useState(false);
   const [conPagadoRows, setConPagadoRows] = useState<PagoRow[]>([]);
+
+  // Cada vez que se activa Aprobar, su rango de fechas vuelve a un mes (30 días desde hoy) y los
+  // campos Fecha inicio / Fecha fin lo muestran. Total Órdenes recupera su rango por defecto y
+  // vuelve a pedir Buscar (no reutiliza una carga anterior).
+  useEffect(() => {
+    if (activeTab === "aprobar") {
+      const rango = getDefaultFilterState(DIAS_RANGO_APROBAR);
+      setMessage("");
+      setFilters((previous) => ({ ...previous, fechaDesde: rango.fechaDesde, fechaHasta: rango.fechaHasta }));
+      setAppliedFilters((previous) => ({ ...previous, fechaDesde: rango.fechaDesde, fechaHasta: rango.fechaHasta }));
+    } else if (activeTab === "resumen") {
+      const rango = getDefaultFilterState(DIAS_RANGO_DEFECTO);
+      setResumenConsultaSolicitada(false);
+      setFilters((previous) => ({ ...previous, fechaDesde: rango.fechaDesde, fechaHasta: rango.fechaHasta }));
+      setAppliedFilters((previous) => ({ ...previous, fechaDesde: rango.fechaDesde, fechaHasta: rango.fechaHasta }));
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     if (!isDetailExpanded) {
@@ -1706,6 +1764,68 @@ export default function PagosV2Page() {
       controller.abort();
     };
   }, [activeTab, appliedFilters, refreshTick, resumenConsultaSolicitada, runTrackedRequest]);
+
+  useEffect(() => {
+    if (activeTab === "resumen") {
+      setSumaRespMap({});
+      return;
+    }
+
+    const filasTab = rowsByTab[activeTab];
+    if (!filasTab.length) {
+      setSumaRespMap({});
+      return;
+    }
+
+    const controller = new AbortController();
+    const estados = activeTab === "aprobar" ? "0" : activeTab === "reaprobar" ? "6" : activeTab === "hormiga" ? "10" : "2,7";
+    const parametros: PlanillaConsultaParametro[] = [
+      { nombre: "Estados", valor: estados, tipo: "string" },
+      { nombre: "SoloSumaResp", valor: "true", tipo: "bool" },
+    ];
+    if (activeTab === "aprobar") {
+      const desde = formatDateParam(appliedFilters.fechaDesde);
+      const hasta = formatDateParam(appliedFilters.fechaHasta);
+      if (desde) parametros.push({ nombre: "FechaInicio", valor: desde, tipo: "date" });
+      if (hasta) parametros.push({ nombre: "FechaFin", valor: hasta, tipo: "date" });
+    }
+
+    setSumaRespLoading(true);
+    consultarPlanillaEstados(buildPagosV1PlanillaRequest(parametros), { timeoutMs: 120000, signal: controller.signal })
+      .then((response) => {
+        if (controller.signal.aborted) return;
+        const mapa: Record<string, SumaRespTotales> = {};
+        for (const item of Array.isArray(response?.rows) ? response.rows : []) {
+          const key = [
+            Math.trunc(getRecordNumber(item, "IdCliente", "idCliente") ?? 0),
+            Math.trunc(getRecordNumber(item, "IdProyecto", "idProyecto") ?? 0),
+            getRecordString(item, "IdSite", "idSite").trim(),
+            Math.trunc(getRecordNumber(item, "CorreSite", "correSite") ?? 0),
+            getRecordString(item, "TipoTrabajo", "tipoTrabajo").trim(),
+            Math.trunc(getRecordNumber(item, "IdTarea", "idTarea") ?? 0),
+            Math.trunc(getRecordNumber(item, "IdResponsable", "idResponsable") ?? 0),
+          ].join("|");
+          mapa[key] = {
+            soles: getRecordNumber(item, "SolesNativo", "solesNativo") ?? 0,
+            usd: getRecordNumber(item, "UsdNativo", "usdNativo") ?? 0,
+            eur: getRecordNumber(item, "EurNativo", "eurNativo") ?? 0,
+            dop: getRecordNumber(item, "DopNativo", "dopNativo") ?? 0,
+            cop: getRecordNumber(item, "CopNativo", "copNativo") ?? 0,
+            cant: getRecordNumber(item, "CantRecibos", "cantRecibos") ?? 0,
+          };
+        }
+        setSumaRespMap(mapa);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setSumaRespMap({});
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setSumaRespLoading(false);
+      });
+
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, rowsByTab, appliedFilters.fechaDesde, appliedFilters.fechaHasta]);
 
   const activeRows = useMemo(
     () => (activeTab === "resumen" ? rowsByTab.resumen : rowsByTab[activeTab]),
@@ -2805,23 +2925,19 @@ export default function PagosV2Page() {
   // pestañas ya representan un estado operativo específico.
   const showEstadoPlanilla = activeTab === "resumen";
   const showTotalSitio = canUseTab("reaprobar");
-  const toggleDetailForRow = (row: PagoRow) => {
-    setSelectedId(row.id);
-    setHistorialOcRows([]);
-    setIsDetailPanelOpen((prev) => {
-      const next = !prev;
-      if (next) {
-        setDetailTab("resumen");
-      }
-      return next;
-    });
-  };
-
   const openDetailForRow = (row: PagoRow) => {
     setSelectedId(row.id);
     setHistorialOcRows([]);
     setIsDetailPanelOpen(true);
     setDetailTab("resumen");
+  };
+
+  const openSumaRespForRow = (row: PagoRow) => {
+    preferredDetailTabRef.current = "suma-resp";
+    setSelectedId(row.id);
+    setHistorialOcRows([]);
+    setIsDetailPanelOpen(true);
+    setDetailTab("suma-resp");
   };
 
   const openHistorialOtForRow = (row: PagoRow) => {
@@ -2844,7 +2960,7 @@ export default function PagosV2Page() {
     }
 
     if (label === "Limpiar") {
-      const defaultFilters = getDefaultFilterState();
+      const defaultFilters = getDefaultFilterState(activeTab === "aprobar" ? DIAS_RANGO_APROBAR : DIAS_RANGO_DEFECTO);
       if (activeTab === "resumen") {
         setResumenConsultaSolicitada(false);
       }
@@ -3507,6 +3623,32 @@ export default function PagosV2Page() {
     { dataField: "tarea", caption: "Tarea", width: 130, calculateCellValue: (row) => row.tarea || "-" },
     { dataField: "responsable", caption: "Responsable", width: 280 },
     {
+      dataField: "sumaResponsable",
+      caption: "Suma resp.",
+      width: 190,
+      placeAfter: "responsable",
+      allowGrouping: false,
+      calculateCellValue: (row) =>
+        sumaRespLoading && Object.keys(sumaRespMap).length === 0
+          ? "…"
+          : formatSumaRespCelda(sumaRespMap[getSumaRespKey(row)]),
+      cellRender: (value, row) =>
+        String(value) === "-" || String(value) === "…" ? (
+          String(value)
+        ) : (
+          <span
+            title="Ver el detalle de la suma del responsable"
+            style={{ ...linkStyle, fontWeight: 700 }}
+            onClick={(event) => {
+              event.stopPropagation();
+              openSumaRespForRow(row);
+            }}
+          >
+            {String(value)}
+          </span>
+        ),
+    },
+    {
       dataField: "idOc",
       caption: "OC",
       width: 90,
@@ -3520,7 +3662,8 @@ export default function PagosV2Page() {
           style={linkStyle}
           onClick={(event) => {
             event.stopPropagation();
-            toggleDetailForRow(row);
+            // Siempre abre/actualiza el detalle del registro; ya no lo contrae si estaba abierto.
+            openDetailForRow(row);
           }}
         >
           {String(value)}

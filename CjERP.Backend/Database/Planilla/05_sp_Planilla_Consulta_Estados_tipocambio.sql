@@ -23,9 +23,19 @@
       IGVSoles y TotalSoles, con el tipo de cambio de la pantalla.
       TotalOcConsumo / PagadoOcConsumo: total de la OC (CabOrdenCompra.Subtotal) y pagado
       (Planilla.Estado = 4 de esa OC); con ellos pagos_v2 muestra la columna "% OC".
+      RENDIMIENTO: el pagado por OC se calcula por fila con OUTER APPLY (no agrupa todo
+      Planilla). Ejecutar antes Database/Planilla/06_ix_Planilla_IdOc_Estado.sql.
       EstadoOcSemaforo: semaforo de la OC (R/A/3/2/1/P) para la columna Est. de la grilla.
       Tarea: se devuelve el nombre de la tarea (Constante TAREA, join e); los scripts
       01/04 solo devolvian IdTarea y la columna Tarea de pagos_v2 salia vacia.
+      @ModoLiviano = 1 (lo envia la pestana "Suma responsable"): omite los totales por banco, por
+      OT, de Importar y el pagado por OC (solo necesita la lista de recibos y SumaEmp). Con 0 (por
+      defecto) el SP devuelve todo como antes.
+      @SoloSumaResp = 1 (lo envia la grilla de pagos_v2 en una segunda llamada, sin bloquear la
+      carga de la bandeja): devuelve UNICAMENTE los totales por moneda de la suma del responsable
+      (SolesNativo, UsdNativo, EurNativo, DopNativo, CopNativo, CantRecibos) de las combinaciones
+      cliente/proyecto/site/tipo trabajo/tarea/responsable de los recibos que cumplen @Estados y
+      las fechas, para la columna "Suma resp." de la grilla (una celda por moneda).
       RENDIMIENTO: SumaEmp agrupa todo Planilla en estados 4/6/0, asi que solo se
       calcula con @IncluirSumaResp = 1 (lo envia la pestana "Suma responsable").
       Con 0 (por defecto) las bandejas no pagan ese costo y las columnas SumaEmp*
@@ -61,7 +71,9 @@ CREATE OR ALTER PROCEDURE [dbo].[sp_Planilla_Consulta_Estados]
     @TipoCambioEUR  DECIMAL(18, 6) = NULL,
     @TipoCambioDOP  DECIMAL(18, 6) = NULL,
     @TipoCambioCOP  DECIMAL(18, 6) = NULL,
-    @IncluirSumaResp BIT = 0
+    @IncluirSumaResp BIT = 0,
+    @ModoLiviano     BIT = 0,
+    @SoloSumaResp    BIT = 0
 )
 AS
 BEGIN
@@ -125,6 +137,57 @@ BEGIN
     FROM STRING_SPLIT(@IdEmpleado2, ',')
     WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) IS NOT NULL;
 
+    IF @SoloSumaResp = 1
+    BEGIN
+        ;WITH Candidatos AS
+        (
+            SELECT DISTINCT
+                a.IdCliente, a.IdProyecto, a.IdSite, a.CorreSite, a.Tipo_Trabajo, a.IdTarea, a.IdResponsable
+            FROM Planilla a
+            WHERE (
+                    NULLIF(LTRIM(RTRIM(@Estados)), '') IS NULL
+                    OR EXISTS (SELECT 1 FROM @EstadosFiltro ef WHERE ef.Estado = a.Estado)
+                  )
+              AND (
+                    @FechaInicio IS NULL
+                    OR COALESCE(TRY_CONVERT(DATE, a.FecIngreso, 101), TRY_CONVERT(DATE, a.FecIngreso, 103), TRY_CONVERT(DATE, a.FecIngreso, 23), TRY_CONVERT(DATE, a.FecIngreso, 120), TRY_CONVERT(DATE, a.FecIngreso, 126)) >= @FechaInicio
+                  )
+              AND (
+                    @FechaFin IS NULL
+                    OR COALESCE(TRY_CONVERT(DATE, a.FecIngreso, 101), TRY_CONVERT(DATE, a.FecIngreso, 103), TRY_CONVERT(DATE, a.FecIngreso, 23), TRY_CONVERT(DATE, a.FecIngreso, 120), TRY_CONVERT(DATE, a.FecIngreso, 126)) < DATEADD(DAY, 1, @FechaFin)
+                  )
+        )
+        SELECT
+            ISNULL(c.IdCliente, 0) AS IdCliente,
+            ISNULL(c.IdProyecto, 0) AS IdProyecto,
+            LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), c.IdSite), ''))) AS IdSite,
+            ISNULL(c.CorreSite, 0) AS CorreSite,
+            LTRIM(RTRIM(ISNULL(c.Tipo_Trabajo, ''))) AS TipoTrabajo,
+            ISNULL(c.IdTarea, 0) AS IdTarea,
+            ISNULL(c.IdResponsable, 0) AS IdResponsable,
+            CAST(SUM(CASE WHEN p.TipoMoneda = 1 THEN ISNULL(p.Subtotal, 0) ELSE 0 END) AS DECIMAL(18, 2)) AS SolesNativo,
+            CAST(SUM(CASE WHEN p.TipoMoneda = 2 THEN ISNULL(p.Subtotal, 0) ELSE 0 END) AS DECIMAL(18, 2)) AS UsdNativo,
+            CAST(SUM(CASE WHEN p.TipoMoneda = 3 THEN ISNULL(p.Subtotal, 0) ELSE 0 END) AS DECIMAL(18, 2)) AS EurNativo,
+            CAST(SUM(CASE WHEN p.TipoMoneda = 4 THEN ISNULL(p.Subtotal, 0) ELSE 0 END) AS DECIMAL(18, 2)) AS DopNativo,
+            CAST(SUM(CASE WHEN p.TipoMoneda = 5 THEN ISNULL(p.Subtotal, 0) ELSE 0 END) AS DECIMAL(18, 2)) AS CopNativo,
+            COUNT(*) AS CantRecibos
+        FROM Candidatos c
+        INNER JOIN Planilla p
+            ON p.IdCliente = c.IdCliente
+           AND p.IdProyecto = c.IdProyecto
+           AND p.IdSite = c.IdSite
+           AND p.CorreSite = c.CorreSite
+           AND p.Tipo_Trabajo = c.Tipo_Trabajo
+           AND p.IdTarea = c.IdTarea
+           AND p.IdResponsable = c.IdResponsable
+        WHERE p.Estado IN (4, 6, 0)
+          AND p.TipoMoneda IN (1, 2, 3, 4, 5)
+        GROUP BY c.IdCliente, c.IdProyecto, c.IdSite, c.CorreSite, c.Tipo_Trabajo, c.IdTarea, c.IdResponsable
+        OPTION (RECOMPILE);
+
+        RETURN;
+    END;
+
     ;WITH PlanillaBancoAgrupada AS
     (
         SELECT
@@ -138,9 +201,11 @@ BEGIN
            AND banAgrupado.Programa = 'PLANTILLA'
            AND banAgrupado.Campo = 'BANCO'
            AND p.IdBanco = banAgrupado.Correlativo
-        WHERE
+        WHERE @ModoLiviano = 0
+          AND (
             UPPER(LTRIM(RTRIM(ISNULL(banAgrupado.ValorIni, '')))) LIKE '%SCOTI%'
             OR UPPER(LTRIM(RTRIM(ISNULL(banAgrupado.ValorIni, '')))) LIKE '%BCP%'
+          )
         GROUP BY LTRIM(RTRIM(p.NroOperacion))
     ),
     PlanillaOTTotales AS
@@ -154,7 +219,8 @@ BEGIN
             p.TipoMoneda,
             CAST(SUM(ISNULL(p.Subtotal, 0)) AS DECIMAL(18, 2)) AS TotalSubtotalPorMoneda
         FROM dbo.Planilla p
-        WHERE p.Estado = 4
+        WHERE @ModoLiviano = 0
+          AND p.Estado = 4
           AND UPPER(LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), p.OT), '')))) NOT IN ('', '0', 'NULL')
           AND (@OT IS NULL OR p.OT = @OT)
           AND (@IdCliente IS NULL OR p.IdCliente = @IdCliente)
@@ -178,7 +244,8 @@ BEGIN
             CAST(SUM(ISNULL(imp.Monto_Bck, 0)) AS DECIMAL(18, 2)) AS TotalMontoBckPorMoneda,
             CAST(SUM(ISNULL(imp.Monto_Visible, 0)) AS DECIMAL(18, 2)) AS TotalMontoVisiblePorMoneda
         FROM dbo.Importar imp
-        WHERE imp.IdEstado = 1
+        WHERE @ModoLiviano = 0
+          AND imp.IdEstado = 1
           AND UPPER(LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), imp.OT), '')))) NOT IN ('', '0', 'NULL')
           AND (@OT IS NULL OR imp.OT = @OT)
           AND (@IdCliente IS NULL OR imp.IdCliente = @IdCliente)
@@ -189,20 +256,6 @@ BEGIN
         GROUP BY LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), imp.OT), ''))), imp.IdCliente, imp.IdProyecto,
             LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), imp.IdSite), ''))), ISNULL(imp.Correlativo, 0),
             LTRIM(RTRIM(ISNULL(imp.TipoTrabajo, ''))), imp.IdMoneda
-    ),
-    OcPagadoTotales AS
-    (
-        -- Pagado por OC (Planilla.Estado = 4), igual que /facturacionfinanciera/oc/consumo
-        -- (OrdenCompraService.BuscarConsumoOcSql). Alimenta "% OC" de la grilla de pagos.
-        SELECT
-            TRY_CONVERT(INT, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), p.IdOc))), '')) AS IdOc,
-            CAST(SUM(ISNULL(p.Subtotal, 0)) AS DECIMAL(18, 2)) AS PagadoOc
-        FROM dbo.Planilla p
-        WHERE p.Estado = 4
-          AND TRY_CONVERT(INT, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), p.IdOc))), '')) IS NOT NULL
-          AND (@IdCliente IS NULL OR p.IdCliente = @IdCliente)
-          AND (@IdProyecto IS NULL OR p.IdProyecto = @IdProyecto)
-        GROUP BY TRY_CONVERT(INT, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), p.IdOc))), ''))
     ),
     PlanillaResponsableTotales AS
     (
@@ -401,8 +454,17 @@ BEGIN
        AND iot.CorreSite = ISNULL(a.CorreSite, 0)
        AND iot.TipoTrabajo = LTRIM(RTRIM(ISNULL(a.Tipo_Trabajo, '')))
        AND iot.IdMoneda = a.TipoMoneda
-    LEFT JOIN OcPagadoTotales ocp
-        ON ocp.IdOc = coc.IdOc
+    OUTER APPLY
+    (
+        -- Pagado por OC (Planilla.Estado = 4) solo para la OC de ESTA fila (igual que
+        -- /facturacionfinanciera/oc/consumo). Requiere IX_Planilla_IdOc_Estado (Planilla/06) para ser rapido.
+        SELECT CAST(SUM(ISNULL(po.Subtotal, 0)) AS DECIMAL(18, 2)) AS PagadoOc
+        FROM dbo.Planilla po
+        WHERE @ModoLiviano = 0
+          AND po.Estado = 4
+          AND NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), a.IdOc))), '') IS NOT NULL
+          AND po.IdOc = a.IdOc
+    ) ocp
     LEFT JOIN PlanillaResponsableTotales prt
         ON prt.IdCliente = ISNULL(a.IdCliente, 0)
        AND prt.IdProyecto = ISNULL(a.IdProyecto, 0)

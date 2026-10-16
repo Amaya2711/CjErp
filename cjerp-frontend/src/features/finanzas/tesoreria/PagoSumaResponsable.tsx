@@ -236,11 +236,11 @@ export default function PagoSumaResponsable({ fila, tipoCambio, request, accent,
         <div style={{ display: "flex", flexWrap: "wrap", gap: 18, marginTop: 8, alignItems: "baseline" }}>
           <div>
             <div style={{ fontSize: 11, color: "#64748B", fontWeight: 700 }}>SUMA RESPONSABLE (S/)</div>
-            <div style={{ fontSize: 26, fontWeight: 900, color: accent }}>{money(totalSoles)}</div>
+            <div style={{ fontSize: 26, fontWeight: 900, color: accent }}>{cargando ? "Calculando..." : money(totalSoles)}</div>
           </div>
           <div>
             <div style={{ fontSize: 11, color: "#64748B", fontWeight: 700 }}>RECIBOS</div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: "#0F172A" }}>{cantidad}</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: "#0F172A" }}>{cargando ? "…" : cantidad}</div>
           </div>
           <div style={{ fontSize: 11, color: "#64748B" }}>
             Estados incluidos: 4 (pagado), 6 y 0 · TC: US$ {tipoCambio.usd} · € {tipoCambio.eur} · RD$ {tipoCambio.dop} · COL$ {tipoCambio.cop}
@@ -256,7 +256,9 @@ export default function PagoSumaResponsable({ fila, tipoCambio, request, accent,
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 10 }}>
         <div style={card}>
           <div style={titulo}>Desglose por moneda</div>
-          {desglose.length === 0 ? (
+          {cargando ? (
+            <div style={{ fontSize: 12, color: "#64748B" }}>Calculando...</div>
+          ) : desglose.length === 0 ? (
             <div style={{ fontSize: 12, color: "#64748B" }}>Sin montos para este responsable.</div>
           ) : (
             <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
