@@ -3,16 +3,30 @@ using CjERP.Application.DTOs.Auth;
 using CjERP.Application.Interfaces.Services;
 using CjERP.Infrastructure.Persistence.Sql;
 using Dapper;
+using Microsoft.Extensions.Logging;
 
 namespace CjERP.Infrastructure.Services
 {
     public class AuthService : IAuthService
     {
-        private readonly ISqlCommandFactory _sqlCommandFactory;
+        // Par PERFIL-ROL "ESTANDAR"-"ESTANDAR" (IdPerfilRol 28) y perfil "ESTANDAR" de EmpleadoCjPerfil (PV: validar ids en BD).
+        private const int PerfilEstandar = 14;
+        private const int RolEstandar = 7;
+        private const int PerfilEmpleadoEstandar = 10;
+        private const int IdCreacionPorDefecto = 999;
 
-        public AuthService(ISqlCommandFactory sqlCommandFactory)
+        private readonly ISqlCommandFactory _sqlCommandFactory;
+        private readonly ISegMenuService _segMenuService;
+        private readonly ILogger<AuthService> _logger;
+
+        public AuthService(
+            ISqlCommandFactory sqlCommandFactory,
+            ISegMenuService segMenuService,
+            ILogger<AuthService> logger)
         {
             _sqlCommandFactory = sqlCommandFactory;
+            _segMenuService = segMenuService;
+            _logger = logger;
         }
 
         public async Task<LoginResponseDto?> LoginAsync(LoginRequestDto request, CancellationToken cancellationToken = default)
@@ -42,7 +56,73 @@ namespace CjERP.Infrastructure.Services
             // Mobile authorization must use that corporate employee identifier directly.
             result.IdEmpleadoCj = result.CodEmp;
 
+            await AsegurarAccesoEstandarAsync(connection, result, cancellationToken);
+
             return result;
+        }
+
+        /// <summary>
+        /// Si el usuario no tiene ningun perfil-rol activo (sin accesos directos), le asigna ESTANDAR-ESTANDAR
+        /// (mismo SP que usuario-perfil-rol-menu) y garantiza su registro en EmpleadoCjPerfil (perfil estandar).
+        /// Un fallo aqui no bloquea el login.
+        /// </summary>
+        private async Task AsegurarAccesoEstandarAsync(
+            Microsoft.Data.SqlClient.SqlConnection connection,
+            LoginResponseDto usuario,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var tienePerfilRol = await connection.ExecuteScalarAsync<int>(
+                    _sqlCommandFactory.Create(
+                        """
+                        SELECT CASE WHEN EXISTS (
+                            SELECT 1
+                            FROM dbo.SegUsuarioPerfilRol upr
+                            INNER JOIN dbo.SegPerfilRol pr ON pr.IdPerfilRol = upr.IdPerfilRol
+                            WHERE upr.IdUsuario = @IdUsuario
+                              AND ISNULL(upr.EsActivo, 1) = 1
+                              AND ISNULL(pr.EsActivo, 1) = 1) THEN 1 ELSE 0 END
+                        """,
+                        new { IdUsuario = usuario.IdUsuario.Trim() },
+                        cancellationToken: cancellationToken));
+
+                if (tienePerfilRol == 1)
+                    return;
+
+                await _segMenuService.GuardarUsuarioPerfilRolAsync(
+                    usuario.IdUsuario.Trim(), PerfilEstandar, RolEstandar, "SISTEMA");
+
+                usuario.IdPerfil = PerfilEstandar;
+                usuario.IdRol = RolEstandar;
+
+                if (usuario.CodEmp is not > 0)
+                    return;
+
+                // Hora de negocio America/Lima (UTC-5), fecha sin hora como el INSERT manual.
+                var fechaLima = DateTime.UtcNow.AddHours(-5).Date;
+
+                await connection.ExecuteAsync(
+                    _sqlCommandFactory.Create(
+                        """
+                        IF NOT EXISTS (SELECT 1 FROM dbo.EmpleadoCjPerfil
+                                       WHERE IdEmpleadoCj = @IdEmpleadoCj AND IdPerfil = @IdPerfil)
+                            INSERT INTO dbo.EmpleadoCjPerfil
+                            VALUES (@IdEmpleadoCj, @IdPerfil, 1, @IdCreacion, @FechaCreacion, 0, '')
+                        """,
+                        new
+                        {
+                            IdEmpleadoCj = usuario.CodEmp.Value,
+                            IdPerfil = PerfilEmpleadoEstandar,
+                            IdCreacion = IdCreacionPorDefecto,
+                            FechaCreacion = fechaLima
+                        },
+                        cancellationToken: cancellationToken));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "No se pudo asignar el acceso estandar por defecto al usuario {IdUsuario}.", usuario.IdUsuario);
+            }
         }
     }
 }
