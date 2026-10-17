@@ -130,8 +130,9 @@ public class OrdenCompraService : IOrdenCompraService
             SELECT TOP 1 c.ValorIni
             FROM dbo.Constante c
             WHERE c.Correlativo = cab.IdFormaPago
-              AND LOWER(c.Campo) IN ('forma_pago', 'tipo_pago', 'formapago', 'tipopago')
-            ORDER BY c.Campo
+              AND c.Campo = 'TIPO_PAGO'
+              AND c.Sociedad = 'PE01'
+              AND c.Programa = 'PLANTILLA'
         ) forma
         WHERE cab.IdOc = @IdOc;
         """;
