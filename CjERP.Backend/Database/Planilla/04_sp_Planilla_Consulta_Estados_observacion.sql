@@ -1,3 +1,9 @@
+/* ################################################################
+   OBSOLETO - NO EJECUTAR. Reemplazado por 05_sp_Planilla_Consulta_Estados_tipocambio.sql
+   (que ya incluye ObservacionPlanilla). Este script convierte Subtotal/IGV/Total
+   x 3.8 cuando TipoMoneda <> 1 y omite los parametros TipoCambio*: ver la regla
+   critica de montos en AGENTS.md. Se conserva solo como historial.
+   ################################################################ */
 /* ================================================================
    sp_Planilla_Consulta_Estados: agrega la columna ObservacionPlanilla
    (Planilla.Observacion) para la columna Observacion del grid y el campo
