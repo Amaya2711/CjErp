@@ -45,6 +45,8 @@ import { Eye, FileDown, FileText } from "lucide-react";
 import { buildPlanillaConsultaEstadosRequest, consultarGastosPagadosPorId, consultarPlanillaEstados } from "../../../api/planillaConsultaService";
 import GastosPage, { type GastoEditorRequest } from "../tesoreria/gastos";
 import DataGridPro from "../../../components/datagrid/DataGridPro";
+import OcResumenPanel from "./OcResumenPanel";
+import { MultiFiltroBuscable, multiFiltroResumenStyle } from "./MultiFiltroBuscable";
 import type { GridColumn } from "../../../components/datagrid/types";
 
 // Fila se mantiene en cada registro para enlazar el pago con DetOrdenCompra,
@@ -839,7 +841,17 @@ export default function OcV2Page() {
   const [busqueda, setBusqueda] = useState("");
   const [estadoVista, setEstadoVista] = useState<EstadoVista>("todos");
   const [vistaOc, setVistaOc] = useState<VistaOc>("aprobacion");
-  const [reporteSubtab, setReporteSubtab] = useState<"listado" | "oc-gastos" | "resumen">("listado");
+  const [reporteSubtab, setReporteSubtab] = useState<"listado" | "oc-gastos" | "resumen" | "relacion">("listado");
+  // Resumen gerencial: se monta la primera vez que se abre y se conserva para no repetir sus consultas.
+  const [resumenVisitado, setResumenVisitado] = useState(false);
+  useEffect(() => {
+    if (vistaOc === "reporte" && reporteSubtab === "resumen") setResumenVisitado(true);
+  }, [reporteSubtab, vistaOc]);
+  // Pestaña Relación: filtros propios de la lista de OC (independientes de la Bandeja de aprobación).
+  const [relacionBusqueda, setRelacionBusqueda] = useState("");
+  const [relacionDesde, setRelacionDesde] = useState(`${today.slice(0, 4)}-01-01`);
+  const [relacionHasta, setRelacionHasta] = useState("");
+  const [relacionEstado, setRelacionEstado] = useState<"todas" | "pendientes" | "aprobadas">("todas");
   const [nivelAprobacion, setNivelAprobacion] = useState<1 | 2 | 3>(1);
   const [approvalTabPermissions, setApprovalTabPermissions] = useState<Record<string, boolean>>({});
   const [fechaCreacionDesde, setFechaCreacionDesde] = useState(`${today.slice(0, 4)}-01-01`);
@@ -1494,7 +1506,7 @@ export default function OcV2Page() {
 
   useEffect(() => {
     const tieneFiltro = Object.values(reporteFiltros).some((value) => value.trim().length > 0);
-    if (vistaOc === "reporte" && !["oc-gastos", "listado"].includes(String(reporteSubtab)) && tieneFiltro && !reporteConsultado && !reporteLoading) {
+    if (vistaOc === "reporte" && !["oc-gastos", "listado", "relacion"].includes(String(reporteSubtab)) && tieneFiltro && !reporteConsultado && !reporteLoading) {
       void loadReporteDetalles();
     }
   }, [reporteConsultado, reporteFiltros, reporteLoading, reporteSubtab, vistaOc]);
@@ -1675,6 +1687,35 @@ export default function OcV2Page() {
       .filter((item) => filtroValidadorAprobacion.length === 0 || filtroValidadorAprobacion.includes(getValidadorAgrupacion(item))),
     [cabecerasAprobacionFiltradas, filtroValidadorAprobacion, getValidadorAgrupacion, nivelAprobacion]
   );
+
+  // Pestaña Relación: OC ya creadas (sin rechazadas) a las que se pueden asociar gastos pendientes de IdOc.
+  const cabecerasRelacion = useMemo(
+    () => cabeceras
+      .filter((item) => {
+        const vista = getEstadoVista(item);
+        if (vista === "rechazadas") return false;
+        if (relacionEstado === "pendientes" && vista !== "pendientes") return false;
+        if (relacionEstado === "aprobadas" && vista !== "aprobadas") return false;
+        const fechaCreacion = item.fecha?.slice(0, 10) ?? "";
+        if (relacionDesde && (!fechaCreacion || fechaCreacion < relacionDesde)) return false;
+        if (relacionHasta && (!fechaCreacion || fechaCreacion > relacionHasta)) return false;
+        return true;
+      })
+      .filter((item) => !relacionBusqueda.trim() || matchesCrudToolbarSearch(item, relacionBusqueda, searchFields)),
+    [cabeceras, relacionBusqueda, relacionDesde, relacionEstado, relacionHasta, searchFields]
+  );
+
+  // Al entrar o salir de Relación se limpia la OC elegida y el panel derecho (es compartido con la Bandeja de
+  // aprobación). En Relación se abre directamente en "Recibos sin asociar", que es para lo que se usa.
+  const enRelacion = vistaOc === "reporte" && reporteSubtab === "relacion";
+  useEffect(() => {
+    setSelectedOcId(null);
+    setDetalles([]);
+    setDetalleSeleccionado(null);
+    setDetalleCargadoOcId(null);
+    setDetalleOcTab(enRelacion ? "recibosSinAsociar" : "detalle");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo debe reaccionar al entrar o salir de Relación
+  }, [enRelacion]);
 
   const cabecerasBandejaIds = useMemo(
     () => cabecerasBandeja.map((item) => item.idOc),
@@ -2706,6 +2747,13 @@ export default function OcV2Page() {
     }
   }, [nivelAprobacion, seleccionadasEnBandeja, selectedCabecera?.idOc, userId]);
 
+  // Nivel con el que el backend valida la asociación (1 = cualquier recibo; 2 y 3 = solo recibos pagados).
+  // En la Bandeja es el nivel que se está revisando; en Relación se usa la misma regla según el avance de la OC
+  // elegida (OC en 1ra validación acepta cualquier recibo; en 2da/3ra o aprobada, solo pagados).
+  const nivelAsociacion = vistaOc === "reporte" && selectedCabecera
+    ? Math.min(Math.max(getNivelPendiente(selectedCabecera), 1), 3)
+    : nivelAprobacion;
+
   const asociarRecibosSeleccionados = useCallback(async () => {
     if (!selectedOcId) {
       setError("Seleccione una orden de compra para asociar recibos.");
@@ -2724,7 +2772,7 @@ export default function OcV2Page() {
       const result = await asociarRecibosOrdenCompra({
         idOc: selectedOcId,
         fila: detalleSeleccionado?.fila ?? null,
-        nivel: nivelAprobacion,
+        nivel: nivelAsociacion,
         correlativos: recibosSeleccionados,
       });
       await loadRecibosOc(selectedOcId, detalleSeleccionado?.fila ?? null);
@@ -2734,7 +2782,7 @@ export default function OcV2Page() {
     } finally {
       setAsociandoRecibos(false);
     }
-  }, [detalleSeleccionado?.fila, loadRecibosOc, nivelAprobacion, recibosSeleccionados, selectedOcId]);
+  }, [detalleSeleccionado?.fila, loadRecibosOc, nivelAsociacion, recibosSeleccionados, selectedOcId]);
 
   const normalizarTexto = (value: string | null | undefined) => value?.trim() ?? "";
   const solicitanteBandeja = (item: OrdenCompraCabeceraDto) =>
@@ -2807,6 +2855,11 @@ export default function OcV2Page() {
       allowSearch: false,
       calculateCellValue: (item) => getValidadorAgrupacion(item),
     },
+  ];
+  // Pestaña Relación: mismas columnas de la bandeja más el estado de la OC.
+  const relacionColumns: GridColumn<OrdenCompraCabeceraDto>[] = [
+    ...bandejaColumns.filter((column) => !String(column.dataField).startsWith("grp")),
+    { dataField: "estadoRelacion", caption: "Estado OC", width: 150, calculateCellValue: (item) => normalizarTexto(item.estado) || "-" },
   ];
   const groupFieldsBandeja = agrupacionAprobacion === "responsable"
     ? ["grpResponsable"]
@@ -3215,6 +3268,179 @@ export default function OcV2Page() {
     }),
   ];
 
+  // Panel derecho compartido (detalle, recibos asociados, recibos sin asociar y monto de la OC):
+  // lo usan la Bandeja de aprobación y la pestaña Relación de Seguimiento de pagos.
+  const detalleOcPanel = (
+      <section style={{ ...styles.card, ...styles.detailCard }}>
+        <div style={styles.sectionHeader}>
+          <div>
+            <h2 style={styles.sectionTitle}>Detalle</h2>
+            <p style={styles.sectionText}>
+              {selectedCabecera?.idOc
+                ? `OC ${selectedCabecera?.idOc} seleccionada.`
+                : "Seleccione una cabecera para ver las posiciones."}
+            </p>
+          </div>
+          {selectedCabecera ? (
+            detalleOcTab === "montoOc" ? (
+              <div style={{ ...styles.summaryInline, gap: 8 }}>
+                <SummaryCard label="Monto cliente" value={formatMoney(montoOcKpis.montoCliente)} />
+                <SummaryCard label="Pagado Fic" value={formatMoney(montoOcKpis.pagadoFic)} />
+                <SummaryCard label="Avance Fic" value={formatPercent(montoOcKpis.avanceFic)} />
+              </div>
+            ) : detalleOcTab === "recibosAsociados" ? (
+              <div style={{ ...styles.summaryInline, gap: 8 }}>
+                <SummaryCard
+                  label={`Monto de la OC · ${recibosAsociadosKpis.montoOc.moneda}`}
+                  value={formatMoney(recibosAsociadosKpis.montoOc.total)}
+                />
+                {recibosAsociadosKpis.recibos.map((kpi) => (
+                  <SummaryCard
+                    key={`recibos-asociados-${kpi.moneda}`}
+                    label={`Suma de recibos · ${kpi.moneda}`}
+                    value={formatMoney(kpi.total)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div style={styles.summaryInline}>
+                <span>Subtotal: {formatMoney(selectedCabecera?.subtotal)}</span>
+                <span>IGV: {formatMoney(selectedCabecera?.igv)}</span>
+                <span>Total: {formatMoney(selectedCabecera?.total)}</span>
+              </div>
+            )
+          ) : null}
+          {selectedCabecera ? (
+            <button
+              type="button"
+              style={styles.secondaryButton}
+              onClick={() => void abrirEdicionOc()}
+              disabled={loadingOcForEdit}
+            >
+              {loadingOcForEdit ? "Cargando..." : "Modificar OC"}
+            </button>
+          ) : null}
+        </div>
+        <div style={styles.detailTabs}>
+          {[
+            { key: "detalle", label: "Detalle" },
+            { key: "recibosAsociados", label: "Recibos asociados" },
+            { key: "recibosSinAsociar", label: "Recibos sin asociar" },
+            { key: "montoOc", label: "Monto de la OC" },
+          ].map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              style={{
+                ...styles.detailTab,
+                ...(detalleOcTab === tab.key ? styles.detailTabActive : {}),
+              }}
+              onClick={() => setDetalleOcTab(tab.key as DetalleOcTab)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {detalleOcTab === "detalle" ? (
+          <DataGridPro<OrdenCompraDetalleDto>
+            dataSource={detalles}
+            keyExpr={detalleKey}
+            columns={detalleGridColumns}
+            height="calc(var(--app-vh) - 520px)"
+            loading={detailLoading}
+            noDataText="Sin posiciones para mostrar."
+            focusedRowKey={detalleSeleccionado ? detalleKey(detalleSeleccionado) : null}
+            onRowClick={(item) => setDetalleSeleccionado(item)}
+            paging={false}
+            allowExport={false}
+            showGroupPanel={false}
+            showSearchPanel={false}
+            showFilterRow={false}
+            rowAlternation={false}
+            rowPadding="4px 8px"
+          />
+        ) : null}
+
+        {detalleOcTab === "recibosAsociados" ? (
+          <div>
+            <div style={styles.receiptToolbar}>
+              <strong>Recibos asociados</strong>
+              <span style={styles.counterPill}>{recibosLoading ? "Cargando..." : `${recibosAsociados.length} recibos`}</span>
+            </div>
+            <RecibosOrdenCompraTable
+              rows={recibosAsociados}
+              loading={recibosLoading}
+              emptyText={selectedCabecera ? "No hay recibos asociados para la posición seleccionada." : "Seleccione una cabecera para visualizar los recibos asociados."}
+              selectable={false}
+              hideIgvAndTotal
+              selectedIds={[]}
+              onToggle={() => undefined}
+              onDetalleClick={setDetalleCompleto}
+              onCorrelativoClick={(recibo) => visualizarGastoPorCorrelativo(recibo.correlativo)}
+            />
+          </div>
+        ) : null}
+
+        {detalleOcTab === "recibosSinAsociar" ? (
+          <div>
+            <div style={styles.receiptToolbar}>
+              <div>
+                <strong>Recibos sin asociar</strong>
+                <p style={{ ...styles.sectionText, margin: "2px 0 0" }}>
+                  Se muestran recibos compatibles con la posición seleccionada.
+                </p>
+              </div>
+              <div style={styles.actionRow}>
+                <span style={styles.counterPill}>{recibosLoading ? "Cargando..." : `${recibosSinAsociar.length} recibos`}</span>
+                <button
+                  type="button"
+                  style={styles.primaryButton}
+                  disabled={asociandoRecibos || recibosSeleccionados.length === 0}
+                  onClick={asociarRecibosSeleccionados}
+                >
+                  {asociandoRecibos ? "Asociando..." : `Asociar ${recibosSeleccionados.length || ""}`.trim()}
+                </button>
+              </div>
+            </div>
+            <RecibosOrdenCompraTable
+              rows={recibosSinAsociar}
+              loading={recibosLoading}
+              emptyText={selectedCabecera ? "No hay recibos sin asociar para la posición seleccionada." : "Seleccione una cabecera para visualizar los recibos sin asociar."}
+              selectable
+              selectedIds={recibosSeleccionados}
+              onToggle={(correlativo, checked) => setRecibosSeleccionados((prev) =>
+                checked
+                  ? Array.from(new Set([...prev, correlativo]))
+                  : prev.filter((item) => item !== correlativo)
+              )}
+              onDetalleClick={setDetalleCompleto}
+            />
+          </div>
+        ) : null}
+
+        {detalleOcTab === "montoOc" ? (
+          <div style={styles.detailTabPanel}>
+            <DataGridPro<OrdenCompraMontoOcDto & { __key: string }>
+              dataSource={montoOcRows.map((row, index) => ({ ...row, __key: String(index) }))}
+              keyExpr="__key"
+              columns={montoOcGridColumns}
+              height="calc(var(--app-vh) - 520px)"
+              loading={montoOcLoading}
+              noDataText="Sin información de monto OC para la posición seleccionada."
+              paging={false}
+              allowExport={false}
+              showGroupPanel={false}
+              showSearchPanel={false}
+              showFilterRow={false}
+              rowAlternation={false}
+              rowPadding="4px 8px"
+            />
+          </div>
+        ) : null}
+      </section>
+  );
+
   return (
     <div style={styles.page}>
       <section style={ocV1Styles.topbar}>
@@ -3439,174 +3665,7 @@ export default function OcV2Page() {
           />
         </div>      </section>
 
-      <section style={{ ...styles.card, ...styles.detailCard }}>
-        <div style={styles.sectionHeader}>
-          <div>
-            <h2 style={styles.sectionTitle}>Detalle</h2>
-            <p style={styles.sectionText}>
-              {selectedCabecera?.idOc
-                ? `OC ${selectedCabecera?.idOc} seleccionada.`
-                : "Seleccione una cabecera para ver las posiciones."}
-            </p>
-          </div>
-          {selectedCabecera ? (
-            detalleOcTab === "montoOc" ? (
-              <div style={{ ...styles.summaryInline, gap: 8 }}>
-                <SummaryCard label="Monto cliente" value={formatMoney(montoOcKpis.montoCliente)} />
-                <SummaryCard label="Pagado Fic" value={formatMoney(montoOcKpis.pagadoFic)} />
-                <SummaryCard label="Avance Fic" value={formatPercent(montoOcKpis.avanceFic)} />
-              </div>
-            ) : detalleOcTab === "recibosAsociados" ? (
-              <div style={{ ...styles.summaryInline, gap: 8 }}>
-                <SummaryCard
-                  label={`Monto de la OC · ${recibosAsociadosKpis.montoOc.moneda}`}
-                  value={formatMoney(recibosAsociadosKpis.montoOc.total)}
-                />
-                {recibosAsociadosKpis.recibos.map((kpi) => (
-                  <SummaryCard
-                    key={`recibos-asociados-${kpi.moneda}`}
-                    label={`Suma de recibos · ${kpi.moneda}`}
-                    value={formatMoney(kpi.total)}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div style={styles.summaryInline}>
-                <span>Subtotal: {formatMoney(selectedCabecera?.subtotal)}</span>
-                <span>IGV: {formatMoney(selectedCabecera?.igv)}</span>
-                <span>Total: {formatMoney(selectedCabecera?.total)}</span>
-              </div>
-            )
-          ) : null}
-          {selectedCabecera ? (
-            <button
-              type="button"
-              style={styles.secondaryButton}
-              onClick={() => void abrirEdicionOc()}
-              disabled={loadingOcForEdit}
-            >
-              {loadingOcForEdit ? "Cargando..." : "Modificar OC"}
-            </button>
-          ) : null}
-        </div>
-        <div style={styles.detailTabs}>
-          {[
-            { key: "detalle", label: "Detalle" },
-            { key: "recibosAsociados", label: "Recibos asociados" },
-            { key: "recibosSinAsociar", label: "Recibos sin asociar" },
-            { key: "montoOc", label: "Monto de la OC" },
-          ].map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              style={{
-                ...styles.detailTab,
-                ...(detalleOcTab === tab.key ? styles.detailTabActive : {}),
-              }}
-              onClick={() => setDetalleOcTab(tab.key as DetalleOcTab)}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {detalleOcTab === "detalle" ? (
-          <DataGridPro<OrdenCompraDetalleDto>
-            dataSource={detalles}
-            keyExpr={detalleKey}
-            columns={detalleGridColumns}
-            height="calc(var(--app-vh) - 520px)"
-            loading={detailLoading}
-            noDataText="Sin posiciones para mostrar."
-            focusedRowKey={detalleSeleccionado ? detalleKey(detalleSeleccionado) : null}
-            onRowClick={(item) => setDetalleSeleccionado(item)}
-            paging={false}
-            allowExport={false}
-            showGroupPanel={false}
-            showSearchPanel={false}
-            showFilterRow={false}
-            rowAlternation={false}
-            rowPadding="4px 8px"
-          />
-        ) : null}
-
-        {detalleOcTab === "recibosAsociados" ? (
-          <div>
-            <div style={styles.receiptToolbar}>
-              <strong>Recibos asociados</strong>
-              <span style={styles.counterPill}>{recibosLoading ? "Cargando..." : `${recibosAsociados.length} recibos`}</span>
-            </div>
-            <RecibosOrdenCompraTable
-              rows={recibosAsociados}
-              loading={recibosLoading}
-              emptyText={selectedCabecera ? "No hay recibos asociados para la posición seleccionada." : "Seleccione una cabecera para visualizar los recibos asociados."}
-              selectable={false}
-              hideIgvAndTotal
-              selectedIds={[]}
-              onToggle={() => undefined}
-              onDetalleClick={setDetalleCompleto}
-              onCorrelativoClick={(recibo) => visualizarGastoPorCorrelativo(recibo.correlativo)}
-            />
-          </div>
-        ) : null}
-
-        {detalleOcTab === "recibosSinAsociar" ? (
-          <div>
-            <div style={styles.receiptToolbar}>
-              <div>
-                <strong>Recibos sin asociar</strong>
-                <p style={{ ...styles.sectionText, margin: "2px 0 0" }}>
-                  Se muestran recibos compatibles con la posición seleccionada.
-                </p>
-              </div>
-              <div style={styles.actionRow}>
-                <span style={styles.counterPill}>{recibosLoading ? "Cargando..." : `${recibosSinAsociar.length} recibos`}</span>
-                <button
-                  type="button"
-                  style={styles.primaryButton}
-                  disabled={asociandoRecibos || recibosSeleccionados.length === 0}
-                  onClick={asociarRecibosSeleccionados}
-                >
-                  {asociandoRecibos ? "Asociando..." : `Asociar ${recibosSeleccionados.length || ""}`.trim()}
-                </button>
-              </div>
-            </div>
-            <RecibosOrdenCompraTable
-              rows={recibosSinAsociar}
-              loading={recibosLoading}
-              emptyText={selectedCabecera ? "No hay recibos sin asociar para la posición seleccionada." : "Seleccione una cabecera para visualizar los recibos sin asociar."}
-              selectable
-              selectedIds={recibosSeleccionados}
-              onToggle={(correlativo, checked) => setRecibosSeleccionados((prev) =>
-                checked
-                  ? Array.from(new Set([...prev, correlativo]))
-                  : prev.filter((item) => item !== correlativo)
-              )}
-              onDetalleClick={setDetalleCompleto}
-            />
-          </div>
-        ) : null}
-
-        {detalleOcTab === "montoOc" ? (
-          <div style={styles.detailTabPanel}>
-            <DataGridPro<OrdenCompraMontoOcDto & { __key: string }>
-              dataSource={montoOcRows.map((row, index) => ({ ...row, __key: String(index) }))}
-              keyExpr="__key"
-              columns={montoOcGridColumns}
-              height="calc(var(--app-vh) - 520px)"
-              loading={montoOcLoading}
-              noDataText="Sin información de monto OC para la posición seleccionada."
-              paging={false}
-              allowExport={false}
-              showGroupPanel={false}
-              showSearchPanel={false}
-              showFilterRow={false}
-              rowAlternation={false}
-              rowPadding="4px 8px"
-            />
-          </div>
-        ) : null}
-      </section>
+      {detalleOcPanel}
       </div>
       </>
       ) : null}
@@ -3614,7 +3673,7 @@ export default function OcV2Page() {
       {vistaOc === "reporte" ? (
         <section style={ocV1Styles.view}>
           <nav style={{ display: "flex", gap: 6, marginBottom: 12, borderBottom: "1px solid #DDE3E1" }} aria-label="Vistas de reporte">
-            {[{ key: "listado", label: "Listado" }, { key: "oc-gastos", label: "OC/Gastos" }, { key: "resumen", label: "Resumen" }].map((tab) => (
+            {[{ key: "listado", label: "Listado" }, { key: "oc-gastos", label: "OC/Gastos" }, { key: "relacion", label: "Relación" }, { key: "resumen", label: "Resumen" }].map((tab) => (
               <button key={tab.key} type="button" onClick={() => cambiarReporteSubtab(tab.key)} style={{ ...ocV1Styles.viewTab, ...(reporteSubtab === tab.key ? ocV1Styles.viewTabActive : {}) }}>{tab.label}</button>
             ))}
           </nav>
@@ -3910,7 +3969,95 @@ export default function OcV2Page() {
             </div>
             )}
           </div>
-          {reporteSubtab === "resumen" && <div style={{ ...styles.card, padding: 32, textAlign: "center", color: "#607089" }}><h2 style={styles.sectionTitle}>Resumen</h2><p style={styles.sectionText}>Seleccione los filtros para consultar esta vista.</p></div>}
+          {resumenVisitado ? (
+            <div style={{ display: reporteSubtab === "resumen" ? "block" : "none" }}>
+              <OcResumenPanel
+                active={reporteSubtab === "resumen"}
+                cabeceras={cabeceras}
+                cabecerasListas={cabecerasCompletasRef.current && !loading}
+                nivelDe={getNivelPendiente}
+              />
+            </div>
+          ) : null}
+          {reporteSubtab === "relacion" ? (
+            <>
+              <div style={ocV1Styles.stageToolbar}>
+                <div>
+                  <h2 style={styles.sectionTitle}>Relación de gastos con órdenes de compra</h2>
+                  <p style={styles.sectionText}>
+                    Elija una OC y, en "Recibos sin asociar", marque los gastos pendientes de IdOc para asociarlos.
+                  </p>
+                </div>
+                <div style={ocV1Styles.stageSearchActions}>
+                  <label style={ocV1Styles.stageDateFilter}>
+                    <span>Fecha creación desde</span>
+                    <input
+                      type="date"
+                      value={relacionDesde}
+                      max={relacionHasta || undefined}
+                      onChange={(event) => setRelacionDesde(event.target.value)}
+                      style={ocV1Styles.stageDateInput}
+                    />
+                  </label>
+                  <label style={ocV1Styles.stageDateFilter}>
+                    <span>Fecha creación hasta</span>
+                    <input
+                      type="date"
+                      value={relacionHasta}
+                      min={relacionDesde || undefined}
+                      onChange={(event) => setRelacionHasta(event.target.value)}
+                      style={ocV1Styles.stageDateInput}
+                    />
+                  </label>
+                  <ApprovalQuickSearch
+                    value={relacionBusqueda}
+                    onChange={setRelacionBusqueda}
+                    placeholder="Búsqueda rápida de OC, responsable, validador..."
+                  />
+                  <label style={{ ...ocV1Styles.stageDateFilter, width: 160 }}>
+                    <span>Estado de la OC</span>
+                    <select
+                      value={relacionEstado}
+                      onChange={(event) => setRelacionEstado(event.target.value as typeof relacionEstado)}
+                      style={{ ...ocV1Styles.stageDateInput, width: "100%" }}
+                    >
+                      <option value="todas">Todas</option>
+                      <option value="pendientes">En validación</option>
+                      <option value="aprobadas">Aprobadas</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+              {!panelOpen && error ? <div style={styles.errorBanner}>{error}</div> : null}
+              <div style={styles.workspaceGrid}>
+                <section style={{ ...styles.card, ...styles.masterCard }}>
+                  <div style={{ ...styles.approvalListWrap, maxHeight: "none", overflow: "visible" }}>
+                    <DataGridPro<OrdenCompraCabeceraDto>
+                      dataSource={cabecerasRelacion}
+                      keyExpr="idOc"
+                      columns={relacionColumns}
+                      height="calc(var(--app-vh) - 470px)"
+                      loading={loading}
+                      noDataText="No hay órdenes de compra para los filtros indicados."
+                      stateStoringKey="oc-v2-relacion"
+                      focusedRowKey={selectedOcId ? String(selectedOcId) : null}
+                      onRowClick={(item) => {
+                        setSelectedOcId(item.idOc);
+                        void loadDetalles(item.idOc);
+                      }}
+                      autoExpandAll={false}
+                      paging={{ pageSize: 100, pageSizes: [50, 100, 250, 500] }}
+                      allowExport={false}
+                      showSearchPanel={false}
+                      rowAlternation={false}
+                      rowPadding="3px 8px"
+                    />
+                  </div>
+                </section>
+                {detalleOcPanel}
+              </div>
+            </>
+          ) : null}
         </section>
       ) : null}
 
@@ -6613,115 +6760,3 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#64748B",
   },
 };
-
-// Los filtros multiselección muestran solo el resumen (aspecto de combo con flecha);
-// el único campo de texto es el buscador dentro de la lista desplegable.
-const multiFiltroResumenStyle: React.CSSProperties = {
-  ...styles.input,
-  display: "flex",
-  alignItems: "center",
-  cursor: "pointer",
-  userSelect: "none",
-  paddingRight: 24,
-  background: "#fff url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M0 0l5 6 5-6z' fill='%23475569'/></svg>\") no-repeat right 8px center",
-};
-
-type MultiFiltroBuscableProps = {
-  options: Array<{ value: string; label: string }>;
-  selected: string[];
-  onChange: (values: string[]) => void;
-  query: string;
-  onQuery: (value: string) => void;
-  placeholder?: string;
-  allowSelectAll?: boolean;
-};
-
-// Filtro multiselección: el propio cuadro es el buscador y la lista muestra las coincidencias.
-function MultiFiltroBuscable({ options, selected, onChange, query, onQuery, placeholder, allowSelectAll = true }: MultiFiltroBuscableProps) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) { setOpen(false); onQuery(""); }
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [open, onQuery]);
-  const needle = query.toLocaleLowerCase();
-  const visibles = options.filter((item) => item.label.toLocaleLowerCase().includes(needle));
-  const todosMarcados = visibles.length > 0 && visibles.every((item) => selected.includes(item.value));
-  return (
-    <div ref={rootRef} style={{ position: "relative", minWidth: 180 }}>
-      <input
-        value={open ? query : selected.length ? `${selected.length} seleccionado${selected.length === 1 ? "" : "s"}` : ""}
-        placeholder={open ? placeholder : "Todos"}
-        onFocus={() => setOpen(true)}
-        onChange={(event) => { setOpen(true); onQuery(event.target.value); }}
-        onKeyDown={(event) => { if (event.key === "Escape") { setOpen(false); onQuery(""); event.currentTarget.blur(); } }}
-        style={{ ...multiFiltroResumenStyle, cursor: "text", userSelect: "auto" }}
-      />
-      {open ? (
-        <div style={{ position: "absolute", zIndex: 20, top: "100%", left: 0, right: 0, maxHeight: 240, overflowY: "auto", padding: 8, background: "#fff", border: "1px solid #D1D5DB", borderRadius: 8, boxShadow: "0 6px 16px rgba(15,23,42,.12)" }}>
-          {allowSelectAll ? (
-            <label style={{ display: "flex", gap: 6, alignItems: "center", padding: "6px 2px", fontSize: 12, fontWeight: 600, borderBottom: "1px solid #E5E7EB" }}>
-              <input
-                type="checkbox"
-                checked={todosMarcados}
-                onChange={(event) => {
-                  const valores = visibles.map((item) => item.value);
-                  onChange(event.target.checked ? [...new Set([...selected, ...valores])] : selected.filter((value) => !valores.includes(value)));
-                }}
-              />
-              Marcar / desmarcar todos
-            </label>
-          ) : null}
-          {visibles.length === 0 ? <div style={{ padding: "6px 2px", fontSize: 12, color: "#64748B" }}>Sin coincidencias</div> : null}
-          {visibles.map((item) => (
-            <label key={item.value} style={{ display: "flex", gap: 6, alignItems: "center", padding: "4px 2px", fontSize: 12 }}>
-              <input
-                type="checkbox"
-                checked={selected.includes(item.value)}
-                onChange={(event) => onChange(event.target.checked ? [...new Set([...selected, item.value])] : selected.filter((value) => value !== item.value))}
-              />
-              {item.label}
-            </label>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
