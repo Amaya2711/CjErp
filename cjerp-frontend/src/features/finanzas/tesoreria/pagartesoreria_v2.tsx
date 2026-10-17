@@ -1265,7 +1265,11 @@ export default function PagarTesoreriaV2Page() {
           ),
         } as GridColumn<PagoTesoreriaRow>]
       : []),
-    // Sin Total ni Retención en ninguna pestaña: solo A pagar (Pagado en Rendición) y Moneda en columna aparte.
+    // Sin Total en ninguna pestaña; Retención solo en Contabilidad (9) y Administrativo (5).
+    // A pagar (Pagado en Rendición) y Moneda van en columnas separadas.
+    ...(estado === 9 || estado === 5
+      ? [{ dataField: "montoRetencion", caption: "Retención", dataType: "number", width: 110, cellRender: (_v: unknown, r: PagoTesoreriaRow) => money(r.montoRetencion) } as GridColumn<PagoTesoreriaRow>]
+      : []),
     {
       dataField: "totalPagar",
       caption: estado === 4 ? "Pagado" : "A pagar",
