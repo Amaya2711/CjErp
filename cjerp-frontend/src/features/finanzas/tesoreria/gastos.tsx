@@ -655,6 +655,16 @@ function getEstadoLabel(
   return normalizedValue;
 }
 
+// Colores del estado actual del recibo en la cabecera del panel (Planilla.Estado):
+// 4 pagado (verde) · 3 rechazado (rojo) · 2/7 observado (ámbar) · 0 pendiente (gris) · resto en proceso (azul).
+function getEstadoBadgeTone(estado: number): { background: string; color: string; border: string } {
+  if (estado === 4) return { background: "#DCFCE7", color: "#166534", border: "#86EFAC" };
+  if (estado === 3) return { background: "#FEE2E2", color: "#991B1B", border: "#FCA5A5" };
+  if (estado === 2 || estado === 7) return { background: "#FEF3C7", color: "#92400E", border: "#FCD34D" };
+  if (estado === 0) return { background: "#F1F5F9", color: "#334155", border: "#CBD5E1" };
+  return { background: "#DBEAFE", color: "#1E40AF", border: "#93C5FD" };
+}
+
 function buildHeaderFilterSummary(values: string[], emptyLabel = "Todos"): string {
   if (values.length === 0) {
     return emptyLabel;
@@ -4461,6 +4471,32 @@ export default function GastosPage({
                   </p>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
+                  {modo !== "nuevo" && (() => {
+                    const estadoActual = getEstadoLabel(estadoOptions, form.estado, form.estadoLabel);
+                    if (!estadoActual) return null;
+                    const tone = getEstadoBadgeTone(Number(form.estado));
+                    return (
+                      <div
+                        title="Estado actual del gasto"
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          padding: "8px 28px",
+                          borderRadius: 14,
+                          border: `2px solid ${tone.border}`,
+                          background: tone.background,
+                          color: tone.color,
+                          lineHeight: 1.1,
+                        }}
+                      >
+                        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", opacity: 0.8 }}>
+                          Estado actual
+                        </span>
+                        <span style={{ fontSize: 26, fontWeight: 800, textTransform: "uppercase" }}>{estadoActual}</span>
+                      </div>
+                    );
+                  })()}
                   <button
                     style={{
                       border: "none",
