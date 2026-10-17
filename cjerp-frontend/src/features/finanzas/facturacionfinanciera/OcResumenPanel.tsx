@@ -234,17 +234,29 @@ export default function OcResumenPanel({ active, cabeceras, cabecerasListas, niv
     [cabeceras, desde, hasta, idsFiltrados]
   );
 
-  // Solicitantes disponibles según el período y el filtro operativo (con cuántas OC tiene cada uno).
+  // Opciones en cascada: cada lista solo muestra a quienes tienen OC con lo elegido en el otro filtro,
+  // para que no se pueda armar una combinación sin resultados.
+  const respValidos = useMemo(() => {
+    const nombres = new Set(cabecerasBase.map(nombreResponsable));
+    return responsables.filter((nombre) => nombres.has(nombre));
+  }, [cabecerasBase, responsables]);
+  const solValidos = useMemo(() => {
+    const nombres = new Set(cabecerasBase.map(nombreSolicitante));
+    return solicitantes.filter((nombre) => nombres.has(nombre));
+  }, [cabecerasBase, solicitantes]);
+
+  // Solicitantes disponibles según el período, el filtro operativo y los responsables elegidos (con cuántas OC tiene cada uno).
   const solicitanteOpciones = useMemo(() => {
     const cuentas = new Map<string, number>();
     cabecerasBase.forEach((item) => {
+      if (respValidos.length > 0 && !respValidos.includes(nombreResponsable(item))) return;
       const nombre = nombreSolicitante(item);
       cuentas.set(nombre, (cuentas.get(nombre) ?? 0) + 1);
     });
     return Array.from(cuentas.entries())
       .sort((a, b) => a[0].localeCompare(b[0], "es", { sensitivity: "base" }))
       .map(([nombre, cantidad]) => ({ nombre, cantidad }));
-  }, [cabecerasBase]);
+  }, [cabecerasBase, respValidos]);
   // Los solicitantes elegidos que dejan de existir al cambiar período o filtro se ignoran.
   const solicitantesActivos = useMemo(
     () => solicitantes.filter((nombre) => solicitanteOpciones.some((item) => item.nombre === nombre)),
@@ -252,17 +264,18 @@ export default function OcResumenPanel({ active, cabeceras, cabecerasListas, niv
   );
   const hayFiltroSolicitante = solicitantesActivos.length > 0;
 
-  // Responsables disponibles según el período y el filtro operativo (con cuántas OC tiene cada uno).
+  // Responsables disponibles según el período, el filtro operativo y los solicitantes elegidos (con cuántas OC tiene cada uno).
   const responsableOpciones = useMemo(() => {
     const cuentas = new Map<string, number>();
     cabecerasBase.forEach((item) => {
+      if (solValidos.length > 0 && !solValidos.includes(nombreSolicitante(item))) return;
       const nombre = nombreResponsable(item);
       cuentas.set(nombre, (cuentas.get(nombre) ?? 0) + 1);
     });
     return Array.from(cuentas.entries())
       .sort((a, b) => a[0].localeCompare(b[0], "es", { sensitivity: "base" }))
       .map(([nombre, cantidad]) => ({ nombre, cantidad }));
-  }, [cabecerasBase]);
+  }, [cabecerasBase, solValidos]);
   const responsablesActivos = useMemo(
     () => responsables.filter((nombre) => responsableOpciones.some((item) => item.nombre === nombre)),
     [responsableOpciones, responsables]
