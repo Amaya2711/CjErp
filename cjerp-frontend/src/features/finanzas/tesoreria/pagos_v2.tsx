@@ -101,6 +101,14 @@ type PagoRow = {
   estadoOcSemaforo?: string;
   // Consumo de la OC (mismo cálculo del panel "Consumo de la OC"): (solicitado + pagado) / total OC, en %.
   consumoOcPercent?: number;
+  // Subtotal del recibo convertido a soles con el TC de la pantalla (columna aparte; Subtotal sigue en su moneda real).
+  subtotalSoles?: number;
+  // Monedas (TipoMoneda) de los pagos de la OT y de Importar, y totales de Importar en soles (% Ficticio).
+  monedasPagadoOt?: string;
+  monedasImportarOt?: string;
+  totalMontoBckSoles?: number;
+  totalMontoVisibleSoles?: number;
+  tipoMonedaId?: number;
   documento: string;
   planillaRow?: Record<string, unknown>;
 };
@@ -822,6 +830,12 @@ function mapPlanillaConsultaRowToPagoRow(
     idEstadoOc: getRecordNumber(row, "IdEstadoOc", "idEstadoOc") ?? undefined,
     estadoOcSemaforo: getRecordString(row, "EstadoOcSemaforo", "estadoOcSemaforo", "EstadoOCSemaforo"),
     consumoOcPercent: calcularConsumoOcPorcentaje(row, estadoCodigo),
+    subtotalSoles: getRecordNumber(row, "SubtotalSoles", "subtotalSoles") ?? undefined,
+    monedasPagadoOt: getRecordString(row, "MonedasPagadoOt", "monedasPagadoOt"),
+    monedasImportarOt: getRecordString(row, "MonedasImportarOt", "monedasImportarOt"),
+    totalMontoBckSoles: getRecordNumber(row, "TotalMontoBckSoles", "totalMontoBckSoles") ?? undefined,
+    totalMontoVisibleSoles: getRecordNumber(row, "TotalMontoVisibleSoles", "totalMontoVisibleSoles") ?? undefined,
+    tipoMonedaId: getRecordNumber(row, "TipoMoneda", "tipoMoneda") ?? undefined,
     documento: getRecordString(row, "Documento", "documento"),
     planillaRow: row,
   };
@@ -3582,10 +3596,52 @@ export default function PagosV2Page() {
 
   const linkStyle: React.CSSProperties = { color: "#2563EB", cursor: "pointer", textDecoration: "underline" };
   const avanceColor = (percent: number) => (percent > 70 ? "#DC2626" : percent >= 50 ? "#CA8A04" : "#16A34A");
-  const calcSubFicticio = (row: PagoRow) => (row.totalPagadoConvertidoSoles ?? 0) + row.subtotal;
+  // Monedas que intervienen en la OT del recibo: la suya, la de sus pagos y la de Importar.
+  const SIMBOLOS_MONEDA: Record<number, string> = { 1: "S/", 2: "US$", 3: "€", 4: "RD$", 5: "COL$" };
+  const getTcMoneda = (id: number) =>
+    id === 2 ? parseNumericValue(tipoCambioUsd)
+      : id === 3 ? parseNumericValue(tipoCambioEur)
+        : id === 4 ? parseNumericValue(tipoCambioDop)
+          : id === 5 ? parseNumericValue(tipoCambioCop)
+            : 1;
+  const getMonedasOt = (row: PagoRow): number[] => {
+    const ids = new Set<number>();
+    if (row.tipoMonedaId) ids.add(row.tipoMonedaId);
+    for (const lista of [row.monedasPagadoOt, row.monedasImportarOt]) {
+      for (const parte of String(lista ?? "").split(",")) {
+        const id = Number(parte.trim());
+        if (Number.isInteger(id) && id > 0) ids.add(id);
+      }
+    }
+    return [...ids].sort((a, b) => a - b);
+  };
+  // Una sola moneda: se calcula y muestra en esa moneda. Varias: todo se convierte a soles con el TC de la pantalla.
+  const getFicticioInfo = (row: PagoRow) => {
+    const monedas = getMonedasOt(row);
+    const mixto = monedas.length > 1;
+    const simbolo = mixto ? "S/" : SIMBOLOS_MONEDA[monedas[0] ?? row.tipoMonedaId ?? 1] ?? row.moneda;
+    const sub = mixto
+      ? (row.totalPagadoConvertidoSoles ?? 0) + (row.subtotalSoles ?? row.subtotal)
+      : (row.totalSubtotalPorMoneda ?? 0) + row.subtotal;
+    const visible = mixto ? row.totalMontoVisibleSoles ?? 0 : row.totalMontoVisiblePorMoneda ?? 0;
+    const bck = mixto ? row.totalMontoBckSoles ?? 0 : row.totalMontoBckPorMoneda ?? 0;
+    const nota = mixto
+      ? `Convertido a S/ · TC ${monedas.filter((id) => id !== 1).map((id) => `${SIMBOLOS_MONEDA[id] ?? id} ${getTcMoneda(id)}`).join(" · ")}`
+      : `En ${row.moneda || simbolo}`;
+    return { mixto, simbolo, sub, visible, bck, nota };
+  };
+  const formatMontoFicticio = (valor: number, simbolo: string) =>
+    `${simbolo} ${valor.toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const celdaConNota = (texto: string, nota: string) => (
+    <span style={{ display: "inline-flex", flexDirection: "column", lineHeight: 1.2 }}>
+      <span>{texto}</span>
+      <small style={{ fontSize: 10, color: "#64748B", fontWeight: 600 }}>{nota}</small>
+    </span>
+  );
+  const calcSubFicticio = (row: PagoRow) => getFicticioInfo(row).sub;
   const calcFicticio = (row: PagoRow) => {
-    const visible = row.totalMontoVisiblePorMoneda ?? 0;
-    return visible > 0 ? (calcSubFicticio(row) / visible) * 100 : 0;
+    const info = getFicticioInfo(row);
+    return info.visible > 0 ? (info.sub / info.visible) * 100 : 0;
   };
   const barCell = (percent: number) => (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 16 }}>
@@ -3750,16 +3806,23 @@ export default function PagosV2Page() {
       dataType: "number",
       width: 170,
       visible: showTotalSitio,
-      calculateCellValue: (row) => row.totalMontoBckPorMoneda ?? 0,
-      cellRender: (value, row) => formatCurrency(Number(value), row.moneda),
+      calculateCellValue: (row) => getFicticioInfo(row).bck,
+      cellRender: (value, row) => {
+        const info = getFicticioInfo(row);
+        return celdaConNota(formatMontoFicticio(Number(value), info.simbolo), info.nota);
+      },
     },
     {
       dataField: "totalVisible",
       caption: "Total Visible",
       dataType: "number",
       width: 170,
-      calculateCellValue: (row) => row.totalMontoVisiblePorMoneda ?? 0,
-      cellRender: (value, row) => formatCurrency(Number(value), row.moneda),
+      visible: showTotalSitio,
+      calculateCellValue: (row) => getFicticioInfo(row).visible,
+      cellRender: (value, row) => {
+        const info = getFicticioInfo(row);
+        return celdaConNota(formatMontoFicticio(Number(value), info.simbolo), info.nota);
+      },
     },
     {
       dataField: "subFicticio",
@@ -3768,7 +3831,10 @@ export default function PagosV2Page() {
       width: 170,
       visible: showTotalSitio,
       calculateCellValue: calcSubFicticio,
-      cellRender: (value) => formatCurrency(Number(value), "SOLES"),
+      cellRender: (value, row) => {
+        const info = getFicticioInfo(row);
+        return celdaConNota(formatMontoFicticio(Number(value), info.simbolo), info.nota);
+      },
     },
     {
       dataField: "pctFicticio",
@@ -3777,7 +3843,11 @@ export default function PagosV2Page() {
       width: 100,
       visible: showTotalSitio,
       calculateCellValue: calcFicticio,
-      cellRender: (value) => <span style={{ color: avanceColor(Number(value)) }}>{formatPercent(Number(value))}</span>,
+      cellRender: (value, row) => (
+        <span title={getFicticioInfo(row).nota} style={{ color: avanceColor(Number(value)) }}>
+          {formatPercent(Number(value))}
+        </span>
+      ),
     },
     {
       dataField: "avanceFicticio",

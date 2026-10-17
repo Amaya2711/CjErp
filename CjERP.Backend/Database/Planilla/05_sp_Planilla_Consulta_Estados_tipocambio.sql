@@ -26,6 +26,16 @@
       RENDIMIENTO: el pagado por OC se calcula por fila con OUTER APPLY (no agrupa todo
       Planilla). Ejecutar antes Database/Planilla/06_ix_Planilla_IdOc_Estado.sql.
       EstadoOcSemaforo: semaforo de la OC (R/A/3/2/1/P) para la columna Est. de la grilla.
+      TotalPagadoConvertidoSoles: total pagado (estado 4) de la OT en soles, sumando sus monedas
+      con el TC de la pantalla (columnas Total Gastado, Sub Ficticio, % Ficticio y Avance ficticio).
+      MonedasPagadoOt / MonedasImportarOt (listas de TipoMoneda), TotalMontoBckSoles y
+      TotalMontoVisibleSoles: permiten a pagos_v2 decidir el % Ficticio: si el recibo, los pagos de la
+      OT y Importar usan UNA sola moneda se calcula y muestra en esa moneda; si hay varias se convierte
+      todo a soles con el tipo de cambio de la pantalla (y se indica la conversion).
+      TotalMontoBckPorMoneda / TotalMontoVisiblePorMoneda: de Importar por OT y por moneda, SIN convertir,
+      cruzados con la moneda del recibo. El % Ficticio de un recibo que no es en soles se calcula en esa
+      misma moneda: (TotalSubtotalPorMoneda + Subtotal) / TotalMontoVisiblePorMoneda.
+      Atp / Status_Pap: de Importar (solo AMX), para las columnas ATP y Status PAP.
       Tarea: se devuelve el nombre de la tarea (Constante TAREA, join e); los scripts
       01/04 solo devolvian IdTarea y la columna Tarea de pagos_v2 salia vacia.
       @ModoLiviano = 1 (lo envia la pestana "Suma responsable"): omite los totales por banco, por
@@ -217,7 +227,9 @@ BEGIN
             ISNULL(p.CorreSite, 0) AS CorreSite,
             LTRIM(RTRIM(ISNULL(p.Tipo_Trabajo, ''))) AS TipoTrabajo,
             p.TipoMoneda,
-            CAST(SUM(ISNULL(p.Subtotal, 0)) AS DECIMAL(18, 2)) AS TotalSubtotalPorMoneda
+            CAST(SUM(ISNULL(p.Subtotal, 0)) AS DECIMAL(18, 2)) AS TotalSubtotalPorMoneda,
+            -- Mismo subtotal convertido a soles con el TC de la pantalla (alimenta TotalPagadoConvertidoSoles).
+            CAST(SUM(ISNULL(p.Subtotal, 0) * CASE p.TipoMoneda WHEN 2 THEN @TcUsd WHEN 3 THEN @TcEur WHEN 4 THEN @TcDop WHEN 5 THEN @TcCop ELSE 1 END) AS DECIMAL(18, 2)) AS SubtotalPorMonedaEnSoles
         FROM dbo.Planilla p
         WHERE @ModoLiviano = 0
           AND p.Estado = 4
@@ -232,6 +244,18 @@ BEGIN
             LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), p.IdSite), ''))), ISNULL(p.CorreSite, 0),
             LTRIM(RTRIM(ISNULL(p.Tipo_Trabajo, ''))), p.TipoMoneda
     ),
+    PlanillaOTConvertido AS
+    (
+        -- Total pagado (Estado 4) de la OT en SOLES, sumando todas sus monedas con el TC de la pantalla.
+        -- Alimenta "Total Gastado", "Sub Ficticio", "% Ficticio" y "Avance ficticio" de pagos_v2.
+        SELECT
+            OT, IdCliente, IdProyecto, IdSite, CorreSite, TipoTrabajo,
+            CAST(SUM(SubtotalPorMonedaEnSoles) AS DECIMAL(18, 2)) AS TotalPagadoConvertidoSoles,
+            -- Monedas (TipoMoneda) con pagos en la OT: el frontend decide si hay una sola moneda o varias.
+            STRING_AGG(CONVERT(VARCHAR(3), TipoMoneda), ',') AS MonedasPagado
+        FROM PlanillaOTTotales
+        GROUP BY OT, IdCliente, IdProyecto, IdSite, CorreSite, TipoTrabajo
+    ),
     ImportarOTTotales AS
     (
         SELECT
@@ -240,9 +264,15 @@ BEGIN
             LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), imp.IdSite), ''))) AS IdSite,
             ISNULL(imp.Correlativo, 0) AS CorreSite,
             LTRIM(RTRIM(ISNULL(imp.TipoTrabajo, ''))) AS TipoTrabajo,
+            -- Total Sitio / Total Visible de la OT EN LA MONEDA de Importar (sin convertir), para
+            -- cruzarlos con recibos de esa misma moneda: el % Ficticio de un recibo en dolares se
+            -- calcula en dolares.
             imp.IdMoneda,
             CAST(SUM(ISNULL(imp.Monto_Bck, 0)) AS DECIMAL(18, 2)) AS TotalMontoBckPorMoneda,
-            CAST(SUM(ISNULL(imp.Monto_Visible, 0)) AS DECIMAL(18, 2)) AS TotalMontoVisiblePorMoneda
+            CAST(SUM(ISNULL(imp.Monto_Visible, 0)) AS DECIMAL(18, 2)) AS TotalMontoVisiblePorMoneda,
+            -- Mismo total convertido a soles con el TC de la pantalla (cuando la OT mezcla monedas).
+            CAST(SUM(ISNULL(imp.Monto_Bck, 0) * CASE imp.IdMoneda WHEN 2 THEN @TcUsd WHEN 3 THEN @TcEur WHEN 4 THEN @TcDop WHEN 5 THEN @TcCop ELSE 1 END) AS DECIMAL(18, 2)) AS TotalMontoBckEnSoles,
+            CAST(SUM(ISNULL(imp.Monto_Visible, 0) * CASE imp.IdMoneda WHEN 2 THEN @TcUsd WHEN 3 THEN @TcEur WHEN 4 THEN @TcDop WHEN 5 THEN @TcCop ELSE 1 END) AS DECIMAL(18, 2)) AS TotalMontoVisibleEnSoles
         FROM dbo.Importar imp
         WHERE @ModoLiviano = 0
           AND imp.IdEstado = 1
@@ -256,6 +286,17 @@ BEGIN
         GROUP BY LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), imp.OT), ''))), imp.IdCliente, imp.IdProyecto,
             LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), imp.IdSite), ''))), ISNULL(imp.Correlativo, 0),
             LTRIM(RTRIM(ISNULL(imp.TipoTrabajo, ''))), imp.IdMoneda
+    ),
+    ImportarOTConvertido AS
+    (
+        -- Totales de Importar por OT en SOLES y las monedas que intervienen.
+        SELECT
+            OT, IdCliente, IdProyecto, IdSite, CorreSite, TipoTrabajo,
+            CAST(SUM(TotalMontoBckEnSoles) AS DECIMAL(18, 2)) AS TotalMontoBckSoles,
+            CAST(SUM(TotalMontoVisibleEnSoles) AS DECIMAL(18, 2)) AS TotalMontoVisibleSoles,
+            STRING_AGG(CONVERT(VARCHAR(3), IdMoneda), ',') AS MonedasImportar
+        FROM ImportarOTTotales
+        GROUP BY OT, IdCliente, IdProyecto, IdSite, CorreSite, TipoTrabajo
     ),
     PlanillaResponsableTotales AS
     (
@@ -302,6 +343,13 @@ BEGIN
         CAST(ISNULL(pot.TotalSubtotalPorMoneda, 0) AS DECIMAL(18, 2)) AS TotalSubtotalPorMoneda,
         CAST(ISNULL(iot.TotalMontoBckPorMoneda, 0) AS DECIMAL(18, 2)) AS TotalMontoBckPorMoneda,
         CAST(ISNULL(iot.TotalMontoVisiblePorMoneda, 0) AS DECIMAL(18, 2)) AS TotalMontoVisiblePorMoneda,
+        CAST(ISNULL(potc.TotalPagadoConvertidoSoles, 0) AS DECIMAL(18, 2)) AS TotalPagadoConvertidoSoles,
+        potc.MonedasPagado AS MonedasPagadoOt,
+        ioc.MonedasImportar AS MonedasImportarOt,
+        CAST(ISNULL(ioc.TotalMontoBckSoles, 0) AS DECIMAL(18, 2)) AS TotalMontoBckSoles,
+        CAST(ISNULL(ioc.TotalMontoVisibleSoles, 0) AS DECIMAL(18, 2)) AS TotalMontoVisibleSoles,
+        zimp.Atp AS Atp,
+        zimp.Status_Pap AS Status_Pap,
         -- Subtotal / IGV / Total en la MONEDA REAL del recibo (TipoMoneda <> 1 NO se convierte).
         a.Subtotal AS Subtotal,
         a.Igv AS IGV,
@@ -446,6 +494,30 @@ BEGIN
        AND pot.CorreSite = ISNULL(a.CorreSite, 0)
        AND pot.TipoTrabajo = LTRIM(RTRIM(ISNULL(a.Tipo_Trabajo, '')))
        AND pot.TipoMoneda = a.TipoMoneda
+    LEFT JOIN PlanillaOTConvertido potc
+        ON potc.OT = LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), a.OT), '')))
+       AND ISNULL(potc.IdCliente, 0) = ISNULL(a.IdCliente, 0)
+       AND ISNULL(potc.IdProyecto, 0) = ISNULL(a.IdProyecto, 0)
+       AND potc.IdSite = LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), a.IdSite), '')))
+       AND potc.CorreSite = ISNULL(a.CorreSite, 0)
+       AND potc.TipoTrabajo = LTRIM(RTRIM(ISNULL(a.Tipo_Trabajo, '')))
+    LEFT JOIN ImportarOTConvertido ioc
+        ON ioc.OT = LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), a.OT), '')))
+       AND ISNULL(ioc.IdCliente, 0) = ISNULL(a.IdCliente, 0)
+       AND ISNULL(ioc.IdProyecto, 0) = ISNULL(a.IdProyecto, 0)
+       AND ioc.IdSite = LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), a.IdSite), '')))
+       AND ioc.CorreSite = ISNULL(a.CorreSite, 0)
+       AND ioc.TipoTrabajo = LTRIM(RTRIM(ISNULL(a.Tipo_Trabajo, '')))
+    -- ATP y Status PAP: solo AMX (cliente 2) desde Importar, igual que sp_Planilla_ConsultaIni.
+    LEFT JOIN dbo.Importar zimp
+        ON a.IdCliente = 2
+       AND zimp.IdCliente = a.IdCliente
+       AND zimp.IdProyecto = a.IdProyecto
+       AND zimp.IdSite = a.IdSite
+       AND zimp.Correlativo = a.CorreSite
+       AND zimp.TipoTrabajo = a.Tipo_Trabajo
+       AND zimp.OT = a.OT
+       AND zimp.IdEstado = 1
     LEFT JOIN ImportarOTTotales iot
         ON iot.OT = LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), a.OT), '')))
        AND ISNULL(iot.IdCliente, 0) = ISNULL(a.IdCliente, 0)
