@@ -34,6 +34,7 @@ const SolicitudEquipoPage = lazy(() => import("../../features/logistica/gestione
 const TesoreriaDepositoPage = lazy(() => import("../../features/finanzas/tesoreria/deposito"));
 const TesoreriaChequesPage = lazy(() => import("../../features/finanzas/tesoreria/cheques"));
 const TesoreriaGastosPage = lazy(() => import("../../features/finanzas/tesoreria/gastos"));
+const TesoreriaViaticosPage = lazy(() => import("../../features/finanzas/tesoreria/viaticos"));
 const TesoreriaGastosAprobarPage = lazy(() => import("../../features/finanzas/tesoreria/gastosaprobar"));
 const TesoreriaPagosV1Page = lazy(() => import("../../features/finanzas/tesoreria/pagos_v1"));
 const TesoreriaPagosV2Page = lazy(() => import("../../features/finanzas/tesoreria/pagos_v2"));
@@ -305,6 +306,7 @@ export default function AppRouter() {
             <Route path="/finanzas/tesoreria/cheque" element={<TesoreriaChequesPage />} />
             <Route path="/finanzas/tesoreria/cheques" element={<TesoreriaChequesPage />} />
             <Route path="/finanzas/tesoreria/gastos" element={<TesoreriaGastosPage />} />
+            <Route path="/finanzas/tesoreria/viaticos" element={<TesoreriaViaticosPage />} />
             <Route path="/finanzas/tesoreria/gastosaprobar" element={<TesoreriaGastosAprobarPage />} />
             <Route path="/finanzas/tesoreria/pagos_v1" element={<TesoreriaPagosV1Page />} />
             <Route path="/finanzas/tesoreria/pagos_v2" element={<TesoreriaPagosV2Page />} />

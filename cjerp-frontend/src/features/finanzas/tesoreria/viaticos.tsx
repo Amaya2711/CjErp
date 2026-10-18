@@ -1,0 +1,6395 @@
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+  // Estado para fila seleccionada
+  
+import { useCrudForm } from "../../../hooks/useCrudForm";
+import { Eye, Pencil, Trash2 } from "lucide-react";
+import httpClient from "../../../api/httpClient";
+import {
+  buildPlanillaConsultaEstadosRequest,
+  consultarPlanillaEstados,
+} from "../../../api/planillaConsultaService";
+import type { PlanillaConsultaParametro } from "../../../models/planillaConsulta";
+import CrudToolbar, { matchesCrudToolbarSearch, type CrudToolbarSearchField } from "../../../components/base/CrudToolbar";
+import { FiltroOperativoLookup } from "../../../components/lookups/FiltroOperativoLookup";
+import { getFiltrosOperativos, getValoresGasto } from "../../../api/filtroOperativoService";
+import { getGastosBootstrap } from "../../../api/gastosBootstrapService";
+import { actualizarEmpleadoResponsable, buscarEmpleadosResponsables, insertarEmpleadoResponsable } from "../../../api/empleadoResponsableService";
+import type { EmpleadoResponsableActualizarRequest } from "../../../api/empleadoResponsableService";
+import { useConstantesPorCampo } from "../../../hooks/useConstantesPorCampo";
+import type { ConstanteOption } from "../../../models/constante";
+import type { FiltroOperativoItem, FiltroOperativoValue, TareaOption } from "../../../models/filtroOperativo";
+import type { EmpleadoCta } from "../../../models/empleadoCta";
+import type { ValoresGastoRequest, ValoresGastoResponse } from "../../../models/valoresGasto";
+import { getAuthUser } from "../../../utils/authStorage";
+import { compressImageForUpload } from "../../../utils/imageCompression";
+import { buildSharePointUrl } from "../../../utils/sharepoint";
+import { getHttpErrorMessage } from "../../../utils/httpError";
+import ViaticosResumen, { type ViaticoResumenRow } from "./ViaticosResumen";
+import DataGridPro from "../../../components/datagrid/DataGridPro";
+import type { GridColumn } from "../../../components/datagrid/types";
+
+type GastoDto = {
+  id: number;
+  idSuministroProvisional?: number | null;
+  fechaInicioSuministroProvisional?: string;
+  filtroOperativoKey: string;
+  responsable: string;
+  responsableLabel?: string;
+  idBancoCta?: number | null;
+  idProyecto?: number | null;
+  idSite?: string;
+  correSite?: number | null;
+  idTarea?: number | null;
+  tareaLabel?: string;
+  idCliente?: number | null;
+  cuenta: string;
+  cuentaNumero?: string;
+  cuentaInter?: string;
+  nombreCta?: string;
+  ruc?: string;
+  tipoPago: string;
+  monto: number;
+  totalPagar?: number;
+  subtotal?: number;
+  total?: number;
+  igv?: number;
+  totalMontoVisiblePorMoneda?: number;
+  idRendicion?: number;
+  detalle: string;
+  comentario: string;
+  observacion?: string;
+  fechaVencimiento?: string;
+  fecIngreso?: string;
+  fechaEmision?: string;
+  solicitante?: string;
+  solicitanteLabel?: string;
+  gestor?: string;
+  gestorLabel?: string;
+  validador?: string;
+  validadorLabel?: string;
+  moneda?: string;
+  monedaLabel?: string;
+  bien?: string;
+  bienLabel?: string;
+  comprobante?: string;
+  comprobanteLabel?: string;
+  tipoPagoLabel?: string;
+  serie?: string;
+  facturaUrl?: string;
+  facturaPath?: string;
+  rutaFactura?: string;
+  rutaFacturaOriginal?: string;
+  rutaFacturaUrl?: string;
+  rutaFacturaEnviada?: string;
+  nombreProyecto?: string;
+  clienteNombre?: string;
+  tipoTrabajo?: string;
+  siteNombre?: string;
+  ot?: string;
+  tipoCambio?: number;
+  idUsuarioFactura?: number | null;
+  estado?: number;
+  estadoLabel?: string;
+  idOc?: string;
+  fechaDeposito?: string;
+  nroOperacion?: string;
+  banco?: string;
+};
+
+type GastoForm = {
+  id: number | null;
+  idSuministroProvisional: string;
+  fechaInicioSuministroProvisional: string;
+  filtroOperativo: FiltroOperativoValue;
+  responsable: string;
+  responsableLabel: string;
+  idBancoCta: string;
+  cuenta: string;
+  cuentaNumero: string;
+  cuentaInter: string;
+  nombreCta: string;
+  ruc: string;
+  rendicion: boolean;
+  tipoPago: string;
+  monto: string;
+  totalPagar: string;
+  detalle: string;
+  comentario: string;
+  observacion?: string;
+  fechaVencimiento: string;
+  fecIngreso: string;
+  fechaEmision: string;
+  solicitante: string;
+  solicitanteLabel: string;
+  gestor: string;
+  gestorLabel: string;
+  validador: string;
+  validadorLabel: string;
+  moneda: string;
+  monedaLabel: string;
+  bien: string;
+  bienLabel: string;
+  comprobante: string;
+  comprobanteLabel: string;
+  serie: string;
+  facturaUrl: string;
+  facturaPath: string;
+  rutaFactura?: string;
+  rutaFacturaOriginal?: string;
+  rutaFacturaUrl?: string;
+  rutaFacturaEnviada?: string;
+  estado: number;
+  estadoLabel?: string;
+  idOc?: string;
+  fechaDeposito: string;
+  nroOperacion: string;
+  banco: string;
+};
+
+type NuevoResponsableForm = {
+  nombre: string;
+  cuenta: string;
+  cuentaInter: string;
+  tipoCuenta: string;
+  banco: string;
+  nroDocumento: string;
+};
+
+type ModoResponsableForm = "nuevo" | "editar";
+
+type CuentaResponsableOriginal = {
+  idBanco: number | null;
+  cuenta: string;
+  nombreCta: string;
+};
+
+const NUEVO_RESPONSABLE_INICIAL: NuevoResponsableForm = {
+  nombre: "",
+  cuenta: "",
+  cuentaInter: "",
+  tipoCuenta: "",
+  banco: "",
+  nroDocumento: "",
+};
+
+const CUENTA_RESPONSABLE_ORIGINAL_INICIAL: CuentaResponsableOriginal = {
+  idBanco: null,
+  cuenta: "",
+  nombreCta: "",
+};
+
+export type GastoEditorRequest = {
+  correlativo: number;
+  mode: "ver" | "editar";
+  /** Registro de Planilla ya obtenido por la pantalla invocadora. */
+  planillaRow?: Record<string, unknown>;
+};
+
+type GastosPageProps = {
+  editorRequest?: GastoEditorRequest;
+  onEditorClose?: () => void;
+  onEditorUpdated?: () => void;
+};
+
+type GastoPayload = {
+  idSuministroProvisional?: number;
+  filtroOperativoKey: string;
+  responsable: string;
+  idBancoCta?: number;
+  idProyecto?: number;
+  idSite?: string;
+  correSite?: number;
+  idTarea?: number;
+  idCliente?: number;
+  cuenta: string;
+  cuentaNumero?: string;
+  cuentaInter?: string;
+  nombreCta?: string;
+  ruc?: string;
+  tipoPago: string;
+  monto: number;
+  totalPagar?: number;
+  subtotal?: number;
+  total?: number;
+  igv?: number;
+  idRendicion: number;
+  detalle: string;
+  comentario: string;
+  fechaVencimiento?: string;
+  fecIngreso?: string;
+  fechaEmision?: string;
+  solicitante?: string;
+  solicitanteLabel?: string;
+  gestor?: string;
+  gestorLabel?: string;
+  validador?: string;
+  validadorLabel?: string;
+  moneda?: string;
+  monedaLabel?: string;
+  bien?: string;
+  bienLabel?: string;
+  comprobante?: string;
+  comprobanteLabel?: string;
+  tipoPagoLabel?: string;
+  serie?: string;
+  facturaUrl?: string;
+  facturaPath?: string;
+  tipoTrabajo?: string;
+  siteNombre?: string;
+  usuario?: string;
+  ot?: string;
+  tipoCambio?: number;
+  idUsuarioFactura?: number;
+  imgFactura?: string;
+};
+
+type GastosHeaderFilters = {
+  id: string;
+  fechaInicio: string;
+  fechaFin: string;
+  estado: string[];
+  comprobante: string[];
+  moneda: string[];
+  cliente: string[];
+  proyecto: string[];
+  site: string[];
+  tipoTrabajo: string[];
+  solicitante: string[];
+  responsable: string[];
+  validador: string[];
+};
+
+const GASTOS_HEADER_FILTERS_INITIAL: GastosHeaderFilters = {
+  id: "",
+  fechaInicio: obtenerFechaActual(),
+  fechaFin: obtenerFechaActual(),
+  // Un selector vacío representa "Todos". No se limita la carga inicial a
+  // estados editables (0, 2), porque el listado de Gastos debe mostrar todos
+  // los registros del rango y solicitante seleccionado.
+  estado: [],
+  comprobante: [],
+  moneda: [],
+  cliente: [],
+  proyecto: [],
+  site: [],
+  tipoTrabajo: [],
+  solicitante: [],
+  responsable: [],
+  validador: [],
+};
+
+// "pendientes-hoy": registros generados hoy en estado 0 (pendientes de aprobar).
+// "consulta": cualquier filtro, sin restringir por estado (equivale a "Total Órdenes" de Pagos).
+type GastosVista = "pendientes-hoy" | "consulta" | "resumen";
+
+/** IdTarea de VIATICO: base de la pestaña Resumen. */
+const ID_TAREA_VIATICO = 93;
+
+type GastosHeaderMultiFilterKey =
+  | "estado"
+  | "comprobante"
+  | "moneda"
+  | "cliente"
+  | "proyecto"
+  | "site"
+  | "tipoTrabajo"
+  | "solicitante"
+  | "responsable"
+  | "validador";
+
+type GastosHeaderSearchableFilterKey = "cliente" | "proyecto" | "site" | "tipoTrabajo" | "solicitante" | "responsable" | "validador";
+type HistorialSitioView = "listado" | "resumen";
+
+const GASTOS_HEADER_FILTER_SEARCH_INITIAL: Record<GastosHeaderSearchableFilterKey, string> = {
+  cliente: "",
+  proyecto: "",
+  site: "",
+  tipoTrabajo: "",
+  solicitante: "",
+  responsable: "",
+  validador: "",
+};
+
+/** Fila plana del grid de gastos: cada columna ya trae su valor listo para ordenar, filtrar, agrupar y exportar. */
+type GastoGridRow = {
+  rowKey: string;
+  rowIndex: number;
+  gasto: GastoForm;
+  id: number;
+  cliente: string;
+  nombreProyecto: string;
+  site: string;
+  tipoTrabajo: string;
+  tarea: string;
+  estado: string;
+  bien: string;
+  comprobante: string;
+  monto: number | null;
+  totalPagar: number | null;
+  moneda: string;
+  banco: string;
+  nroOperacion: string;
+  fechaDeposito: string;
+  fecIngreso: string;
+  ot: string;
+  solicitante: string;
+  responsable: string;
+  cuentaNumero: string;
+  cuentaInter: string;
+  validador: string;
+  detalle: string;
+  observacion: string;
+};
+
+type FacturaUploadResponse = {
+  fileName: string;
+  fileUrl: string;
+  storagePath: string;
+};
+
+type SuministroProvisionalVigenteOption = {
+  idProvisional: number;
+  idResponsable?: number | null;
+  responsable?: string;
+  idTarea?: number | null;
+  tarea?: string;
+  tipoTrabajo?: string;
+  ot?: string;
+  comentario?: string;
+  monto?: number | null;
+  fechaInicio?: string | null;
+  nombreCliente?: string;
+  nombreProyecto?: string;
+  nombreSite?: string;
+};
+
+const GASTOS_API_URL = "/tesoreria/gastos";
+const FACTURA_UPLOAD_API_URL = `${GASTOS_API_URL}/upload-factura`;
+const TIPO_CAMBIO_GASTO = 3.8;
+const TAREA_VIATICO_NOMBRE = "VIATICO";
+const esTareaViatico = (tarea: TareaOption): boolean =>
+  (tarea.tarea ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toUpperCase() === TAREA_VIATICO_NOMBRE;
+
+const TAREAS_CON_SUMINISTRO_VIGENTE = new Set([52, 53]);
+const VALORES_GASTO_INICIALES: ValoresGastoResponse = {
+  porcentaje: 0,
+  aprobado: 0,
+  pagado: 0,
+  adelantado: 0,
+  saldo2: 0,
+  saldo: 0,
+};
+
+
+function extraerArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function extraerObjeto<T>(value: T): T {
+  return value;
+}
+
+function obtenerFechaActual(): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Lima",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts();
+  const valueByType = new Map(parts.map((part) => [part.type, part.value]));
+
+  return `${valueByType.get("year")}-${valueByType.get("month")}-${valueByType.get("day")}`;
+}
+
+function toPositiveNumber(...values: Array<string | number | null | undefined>): number {
+  for (const value of values) {
+    if (value == null) {
+      continue;
+    }
+
+    const text = String(value).trim();
+    if (!text) {
+      continue;
+    }
+
+    const parsed = Number(text);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  return 0;
+}
+
+function getConstanteStoredValue(option: ConstanteOption): string {
+  return option.codigo || option.value || option.label;
+}
+
+function buildUniqueFilterOptions(values: Array<string | number | null | undefined>): string[] {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value ?? "").trim())
+        .filter(Boolean)
+    )
+  ).sort((left, right) => left.localeCompare(right, "es", { sensitivity: "base" }));
+}
+
+function normalizeDateFilterValue(dateValue?: string): string {
+  const normalized = (dateValue ?? "").trim();
+
+  if (!normalized) {
+    return "";
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    return normalized;
+  }
+
+  const slashMatch = normalized.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+
+  if (slashMatch) {
+    const [, firstPart, secondPart, year] = slashMatch;
+    const firstNumber = Number(firstPart);
+    const secondNumber = Number(secondPart);
+
+    if (Number.isFinite(firstNumber) && Number.isFinite(secondNumber)) {
+      if (firstNumber > 12 && secondNumber <= 12) {
+        return `${year}-${secondPart.padStart(2, "0")}-${firstPart.padStart(2, "0")}`;
+      }
+
+      if (secondNumber > 12 && firstNumber <= 12) {
+        return `${year}-${firstPart.padStart(2, "0")}-${secondPart.padStart(2, "0")}`;
+      }
+
+      // Cuando ambos valores son <= 12 priorizamos mm/dd/yyyy porque es el formato
+      // en el que suele llegar la fecha desde el store.
+      return `${year}-${firstPart.padStart(2, "0")}-${secondPart.padStart(2, "0")}`;
+    }
+  }
+
+  const parsed = new Date(normalized);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatInputDateForPlanillaParametro(dateValue?: string): string {
+  const normalized = (dateValue ?? "").trim();
+
+  if (!normalized) {
+    return "";
+  }
+
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (!match) {
+    return normalized;
+  }
+
+  const [, year, month, day] = match;
+  return `${month}/${day}/${year}`;
+}
+
+function formatInputDateForDisplay(dateValue?: string): string {
+  const normalized = (dateValue ?? "").trim();
+
+  if (!normalized) {
+    return "";
+  }
+
+  const slashMatch = normalized.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+
+  if (slashMatch) {
+    const [, day, month, year] = slashMatch;
+    return `${day.padStart(2, "0")}/${month.padStart(2, "0")}/${year}`;
+  }
+
+  const isoMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch;
+    return `${day}/${month}/${year}`;
+  }
+
+  return normalized;
+}
+
+function formatInputDateForInternalValidation(dateValue?: string): string {
+  const normalized = (dateValue ?? "").trim();
+
+  if (!normalized) {
+    return "";
+  }
+
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (!match) {
+    return normalized;
+  }
+
+  const [, year, month, day] = match;
+  return `${month}/${day}/${year}`;
+}
+
+function isInputDateRangeValid(startDate?: string, endDate?: string): boolean {
+  const startText = formatInputDateForInternalValidation(startDate);
+  const endText = formatInputDateForInternalValidation(endDate);
+
+  if (!startText || !endText) {
+    return true;
+  }
+
+  const start = new Date(startText);
+  const end = new Date(endText);
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return true;
+  }
+
+  return start.getTime() <= end.getTime();
+}
+
+function normalizeLookupToken(value?: string | null): string {
+  const text = value?.trim() ?? "";
+
+  if (!text) {
+    return "";
+  }
+
+  const numeric = Number(text);
+
+  if (Number.isFinite(numeric)) {
+    return String(numeric);
+  }
+
+  return text;
+}
+
+function findConstanteOption(
+  options: ConstanteOption[],
+  selectedValue?: string | null
+): ConstanteOption | undefined {
+  const value = normalizeLookupToken(selectedValue);
+
+  if (!value) {
+    return undefined;
+  }
+
+  const normalizedValue = normalizeSearchText(value);
+
+  return options.find((option) =>
+    [option.codigo, option.value, option.label].some((candidate) => {
+      const candidateValue = normalizeLookupToken(candidate);
+      return candidateValue === value || normalizeSearchText(candidateValue) === normalizedValue;
+    })
+  );
+}
+
+function normalizeConstanteValue(options: ConstanteOption[], selectedValue?: string | null): string {
+  const match = findConstanteOption(options, selectedValue);
+  return match ? getConstanteStoredValue(match) : selectedValue?.trim() ?? "";
+}
+
+function resolveConstanteStoredValue(
+  options: ConstanteOption[],
+  selectedValue?: string | null,
+  fallbackLabel?: string | null
+): string {
+  const match = findConstanteOption(options, selectedValue) ?? findConstanteOption(options, fallbackLabel);
+  return match ? getConstanteStoredValue(match) : selectedValue?.trim() ?? "";
+}
+
+// Solicitante/Gestor/Validador salen de EmpleadoCj. Un gasto antiguo guarda ids de Empleado, que pueden
+// coincidir numéricamente con otra persona de EmpleadoCj: en edición se resuelve primero por el nombre.
+function resolveEmpleadoCjStoredValue(
+  options: ConstanteOption[],
+  selectedValue?: string | null,
+  label?: string | null
+): string {
+  const match = findConstanteOption(options, label) ?? findConstanteOption(options, selectedValue);
+  return match ? getConstanteStoredValue(match) : "";
+}
+
+function getConstanteLabel(options: ConstanteOption[], selectedValue?: string | null): string {
+  const match = findConstanteOption(options, selectedValue);
+  return match?.label ?? selectedValue?.trim() ?? "";
+}
+
+function getConstanteLabelOrFallback(
+  options: ConstanteOption[],
+  selectedValue?: string | null,
+  fallbackLabel?: string | null
+): string {
+  const match = findConstanteOption(options, selectedValue);
+
+  if (match?.label) {
+    return match.label;
+  }
+
+  return fallbackLabel?.trim() ?? "";
+}
+
+function getEstadoLabel(
+  estadoOptions: ConstanteOption[],
+  selectedValue?: string | number | null,
+  fallbackLabel?: string | null
+): string {
+  const fallback = fallbackLabel?.trim() ?? "";
+
+  if (fallback) {
+    return fallback;
+  }
+
+  const normalizedValue =
+    selectedValue == null || selectedValue === ""
+      ? ""
+      : String(selectedValue).trim();
+
+  if (normalizedValue) {
+    const match = findConstanteOption(estadoOptions, normalizedValue);
+
+    if (match?.label) {
+      return match.label;
+    }
+  }
+
+  return normalizedValue;
+}
+
+// Colores del estado actual del recibo en la cabecera del panel (Planilla.Estado):
+// 4 pagado (verde) · 3 rechazado (rojo) · 2/7 observado (ámbar) · 0 pendiente (gris) · resto en proceso (azul).
+function getEstadoBadgeTone(estado: number): { background: string; color: string; border: string } {
+  if (estado === 4) return { background: "#DCFCE7", color: "#166534", border: "#86EFAC" };
+  if (estado === 3) return { background: "#FEE2E2", color: "#991B1B", border: "#FCA5A5" };
+  if (estado === 2 || estado === 7) return { background: "#FEF3C7", color: "#92400E", border: "#FCD34D" };
+  if (estado === 0) return { background: "#F1F5F9", color: "#334155", border: "#CBD5E1" };
+  return { background: "#DBEAFE", color: "#1E40AF", border: "#93C5FD" };
+}
+
+function buildHeaderFilterSummary(values: string[], emptyLabel = "Todos"): string {
+  if (values.length === 0) {
+    return emptyLabel;
+  }
+
+  if (values.length === 1) {
+    return values[0];
+  }
+
+  return `${values.length} seleccionados`;
+}
+
+function getSelectValue(options: ConstanteOption[], selectedValue?: string | null): string {
+  const match = findConstanteOption(options, selectedValue);
+  return match ? getConstanteStoredValue(match) : selectedValue?.trim() ?? "";
+}
+
+function esConstanteValida(options: ConstanteOption[], selectedValue?: string | null): boolean {
+  return Boolean(findConstanteOption(options, selectedValue));
+}
+
+function getTareaLabelOrFallback(
+  tareas: TareaOption[],
+  correlativo?: number | null,
+  fallbackLabel?: string | null
+): string {
+  if (correlativo != null) {
+    const match = tareas.find((tarea) => Number(tarea.correlativo) === Number(correlativo));
+    if (match?.tarea) {
+      return match.tarea;
+    }
+  }
+
+  return fallbackLabel?.trim() ?? "";
+}
+
+function normalizeSearchText(value?: string | null): string {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function matchesFlexibleSearch(label: string, query: string): boolean {
+  const normalizedLabel = normalizeSearchText(label);
+  const normalizedQuery = normalizeSearchText(query);
+
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  const compactLabel = normalizedLabel.replace(/\s+/g, "");
+  const compactQuery = normalizedQuery.replace(/\s+/g, "");
+
+  if (compactLabel.includes(compactQuery)) {
+    return true;
+  }
+
+  const labelWords = normalizedLabel.split(" ").filter(Boolean);
+  const queryWords = normalizedQuery.split(" ").filter(Boolean);
+
+  if (queryWords.length <= 1) {
+    return false;
+  }
+
+  let labelIndex = 0;
+
+  for (const queryWord of queryWords) {
+    let found = false;
+
+    while (labelIndex < labelWords.length) {
+      if (labelWords[labelIndex].includes(queryWord)) {
+        found = true;
+        labelIndex += 1;
+        break;
+      }
+
+      labelIndex += 1;
+    }
+
+    if (!found) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function isSearchableHeaderFilterKey(key: string): key is GastosHeaderSearchableFilterKey {
+  return key === "cliente" || key === "proyecto" || key === "site" || key === "tipoTrabajo" || key === "solicitante" || key === "responsable" || key === "validador";
+}
+
+function toNumberOrZero(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function roundToTwoDecimals(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function renderGridCellText(value: unknown): React.ReactNode {
+  const text = String(value ?? "").trim();
+
+  if (!text) {
+    return "";
+  }
+
+  return (
+    <span
+      title={text}
+      style={{
+        display: "block",
+        overflow: "hidden",
+        whiteSpace: "nowrap",
+        textOverflow: "ellipsis",
+        maxWidth: "100%",
+      }}
+    >
+      {text}
+    </span>
+  );
+}
+
+function buildSuministroVigenteLabel(item: SuministroProvisionalVigenteOption): string {
+  const idText = item.idProvisional ? String(item.idProvisional) : "";
+  const fechaText = normalizeDateForInput(item.fechaInicio ?? "");
+  const fechaDisplay = fechaText
+    ? fechaText.split("-").reverse().join("/")
+    : "";
+
+  return [idText, fechaDisplay].filter(Boolean).join(" - ");
+}
+
+function requiereSuministroVigente(idTarea?: number | null): boolean {
+  return idTarea != null && TAREAS_CON_SUMINISTRO_VIGENTE.has(Number(idTarea));
+}
+
+function normalizeColumnOptionValue(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
+function areFiltroOperativoValuesEqual(
+  left?: FiltroOperativoValue,
+  right?: FiltroOperativoValue
+): boolean {
+  return (
+    (left?.filtro?.filtroKey ?? "") === (right?.filtro?.filtroKey ?? "") &&
+    (left?.filtro?.idCliente ?? 0) === (right?.filtro?.idCliente ?? 0) &&
+    (left?.filtro?.idProyecto ?? 0) === (right?.filtro?.idProyecto ?? 0) &&
+    (left?.filtro?.idSite ?? "") === (right?.filtro?.idSite ?? "") &&
+    (left?.filtro?.correlativo ?? 0) === (right?.filtro?.correlativo ?? 0) &&
+    (left?.tipoTrabajo?.tipoTrabajo ?? "") === (right?.tipoTrabajo?.tipoTrabajo ?? "") &&
+    (left?.ot?.ot ?? "") === (right?.ot?.ot ?? "") &&
+    (left?.tarea?.correlativo ?? 0) === (right?.tarea?.correlativo ?? 0) &&
+    (left?.tarea?.tarea ?? "") === (right?.tarea?.tarea ?? "")
+  );
+}
+
+function tasaIgvPorComprobante(
+  options: ConstanteOption[],
+  selectedValue?: string | null
+): number {
+  const match = findConstanteOption(options, selectedValue);
+  // HONORARIO no calcula IGV ni otros montos: Total = Subtotal = Total a pagar.
+  if (normalizeSearchText(match?.label ?? "").includes("honorario")) {
+    return 0;
+  }
+
+  const idComprobante = [match?.codigo, match?.value, match?.valor, selectedValue]
+    .map((value) => Number(value))
+    .find((value) => Number.isInteger(value) && value > 0);
+
+  return idComprobante === 2 || idComprobante === 6
+    ? 0.18
+    : idComprobante === 5
+      ? 0.08
+      : 0;
+}
+
+function esComprobanteSinIgv(idComprobante: unknown, comprobante: unknown): boolean {
+  const id = Number(idComprobante);
+  if ([1, 3, 4, 7, 8].includes(id)) return true;
+
+  const nombre = normalizeSearchText(String(comprobante ?? ""));
+  return ["PAGO", "RENDICION", "EXONERADO", "EXENTO", "INAFECTO", "PLANILLA", "AFP"].includes(nombre);
+}
+
+function normalizarTotalPagarConsulta(
+  row: Record<string, unknown>,
+  subtotal: number | undefined,
+  total: number | undefined,
+  igv: number | undefined
+): number | undefined {
+  const totalPagar = getRecordNumber(row, "TotalPagar", "totalPagar");
+  const comprobanteId = getRecordNumber(row, "IdComprobante", "idComprobante");
+  const comprobante = getRecordString(row, "Comprobante", "comprobante", "ComprobanteLabel", "comprobanteLabel");
+
+  // TotalPagar puede quedar con el importe previo en registros históricos. Para
+  // documentos sin IGV no debe exceder el total del comprobante por un IGV inexistente.
+  if (
+    totalPagar != null &&
+    esComprobanteSinIgv(comprobanteId, comprobante) &&
+    Number(igv ?? 0) === 0
+  ) {
+    const totalSinIgv = total ?? subtotal;
+    if (totalSinIgv != null && totalPagar > totalSinIgv) return totalSinIgv;
+  }
+
+  return totalPagar ?? total ?? subtotal;
+}
+
+function buildValoresGastoRequest(
+  filtroOperativo: FiltroOperativoValue
+): ValoresGastoRequest | null {
+  const filtro = filtroOperativo.filtro;
+  const tipoTrabajo = filtroOperativo.tipoTrabajo?.tipoTrabajo?.trim();
+  const ot = filtroOperativo.ot?.ot?.trim();
+
+  if (!filtro?.filtroKey || !tipoTrabajo) {
+    return null;
+  }
+
+  const idCliente = toNumberOrZero(filtro.idCliente);
+  const idProyecto = toNumberOrZero(filtro.idProyecto);
+  const idSite = String(filtro.idSite ?? "").trim();
+  const correlativo = toNumberOrZero(filtro.correlativo);
+
+  if (idCliente <= 0 || !idSite || correlativo <= 0) {
+    return null;
+  }
+
+  return {
+    idCliente,
+    idProyecto,
+    idSite,
+    correlativo,
+    tipoTrabajo,
+    ot: ot || undefined,
+    usarOt: Boolean(ot),
+    tipoCambio: TIPO_CAMBIO_GASTO,
+  };
+}
+
+function formatDecimalValue(value: number): string {
+  return new Intl.NumberFormat("es-PE", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function getFacturaDisplayPath(facturaPath?: string, facturaUrl?: string): string {
+  // Prioriza la URL pública de SharePoint si existe
+  return facturaUrl?.trim() || facturaPath?.trim() || "";
+}
+
+function getFacturaMediaType(url: string): "image" | "pdf" | "unknown" {
+  const pathname = url.split(/[?#]/)[0]?.toLowerCase() ?? "";
+  if (/\.(jpe?g|png|gif|webp|bmp|svg)$/.test(pathname)) return "image";
+  if (/\.pdf$/.test(pathname)) return "pdf";
+  return "unknown";
+}
+
+function resolveFacturaFields(item: Partial<GastoDto>) {
+  const facturaUrl =
+    item.facturaUrl?.trim() ||
+    item.rutaFacturaUrl?.trim() ||
+    "";
+
+  const facturaPath =
+    item.facturaPath?.trim() ||
+    item.rutaFactura?.trim() ||
+    item.rutaFacturaOriginal?.trim() ||
+    item.rutaFacturaEnviada?.trim() ||
+    facturaUrl;
+
+  return { facturaUrl, facturaPath };
+}
+
+function buildCuentaResumen(empleado: EmpleadoCta): string {
+  return `Banco: ${empleado.nombreBanco || ""}, Tipo Cta: ${empleado.nombreCta || ""}, Cta. ${empleado.cuenta || ""}, CI: ${empleado.cuentaInter || ""}, Nro Doc: ${empleado.nroDocumento || ""}`;
+}
+
+function buildResponsableDisplay(empleado: EmpleadoCta): string {
+  return [empleado.nombreEmpleado, empleado.nombreBanco, empleado.nombreCta]
+    .map((value) => value?.trim())
+    .filter(Boolean)
+    .join(" - ");
+}
+
+function normalizarNombreResponsable(value: string | null | undefined): string {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleUpperCase();
+}
+
+function buildCuentaMetadata(empleado: EmpleadoCta) {
+  return {
+    cuentaNumero: empleado.cuenta || "",
+    cuentaInter: empleado.cuentaInter || "",
+    nombreCta: empleado.nombreCta || "",
+    ruc: empleado.nroDocumento || "",
+  };
+}
+
+function getIdBancoCtaValue(empleado: EmpleadoCta): string {
+  const idBancoCta = Number(empleado.idBancoCta);
+  return Number.isInteger(idBancoCta) && idBancoCta > 0 ? String(idBancoCta) : "";
+}
+
+function extractCuentaResumenParts(cuentaResumen?: string) {
+  const match = /Tipo Cta:\s*(.*?),\s*Cta\.\s*(.*?),\s*CI:\s*(.*?),\s*Nro Doc:\s*(.*)$/i.exec(
+    cuentaResumen ?? ""
+  );
+
+  return {
+    nombreCta: match?.[1]?.trim() ?? "",
+    cuentaNumero: match?.[2]?.trim() ?? "",
+    cuentaInter: match?.[3]?.trim() ?? "",
+    ruc: match?.[4]?.trim() ?? "",
+  };
+}
+
+function getNumericUserId(value?: string | null): number | undefined {
+  const digits = (value ?? "").replace(/\D/g, "");
+
+  if (!digits) {
+    return undefined;
+  }
+
+  const parsed = Number(digits);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function normalizeDateForInput(dateStr?: string | null): string {
+  const value = dateStr?.trim();
+
+  if (!value) {
+    return "";
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
+  }
+
+  const isoMatch = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T].*)?$/.exec(value);
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+
+  const slashMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T].*)?$/.exec(value);
+  if (slashMatch) {
+    const first = Number(slashMatch[1]);
+    const second = Number(slashMatch[2]);
+    const year = slashMatch[3];
+    // SQL/Dapper puede serializar fechas como MM/dd/yyyy (por ejemplo,
+    // 09/18/2026 para FecEmision), mientras que otros stores usan dd/MM/yyyy.
+    // El valor mayor que 12 identifica sin ambigüedad el día.
+    const month = first > 12 ? second : first;
+    const day = first > 12 ? first : second;
+
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    }
+
+    return value;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeFecIngresoFromStore(dateStr?: string | null): string {
+  const value = dateStr?.trim();
+
+  if (!value) {
+    return "";
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
+  }
+
+  const slashMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(value);
+  if (slashMatch) {
+    const first = Number(slashMatch[1]);
+    const second = Number(slashMatch[2]);
+    const year = slashMatch[3];
+
+    const month = first > 12 ? second : first;
+    const day = first > 12 ? first : second;
+
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getHttpMessage(error: unknown, fallback: string): string {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "response" in error &&
+    typeof (error as { response?: { data?: { message?: string } } }).response?.data?.message === "string"
+  ) {
+    return (error as { response?: { data?: { message?: string } } }).response?.data?.message ?? fallback;
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return fallback;
+}
+
+function findRecordValue(row: Record<string, unknown>, ...keys: string[]): unknown {
+  for (const key of keys) {
+    if (key in row && row[key] != null && (typeof row[key] !== "string" || row[key].trim() !== "")) {
+      return row[key];
+    }
+  }
+
+  const normalizedEntries = Object.entries(row).map(([key, value]) => [key.toLowerCase(), value] as const);
+
+  for (const key of keys) {
+    const found = normalizedEntries.find(([entryKey]) => entryKey === key.toLowerCase());
+    if (found && found[1] != null && (typeof found[1] !== "string" || found[1].trim() !== "")) {
+      return found[1];
+    }
+  }
+
+  return undefined;
+}
+
+function getRecordString(row: Record<string, unknown>, ...keys: string[]): string {
+  const value = findRecordValue(row, ...keys);
+  return value == null ? "" : String(value).trim();
+}
+
+function getRecordNumber(row: Record<string, unknown>, ...keys: string[]): number | null {
+  const value = findRecordValue(row, ...keys);
+
+  if (value == null || value === "") {
+    return null;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  const text = String(value).trim();
+  const directParsed = Number(text);
+  if (Number.isFinite(directParsed)) {
+    return directParsed;
+  }
+
+  const normalizedText = text.includes(",") && !text.includes(".")
+    ? text.replace(",", ".")
+    : text.replace(/,/g, "");
+  const normalizedParsed = Number(normalizedText);
+
+  return Number.isFinite(normalizedParsed) ? normalizedParsed : null;
+}
+
+function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: number): GastoDto {
+  const subtotal = getRecordNumber(row, "Subtotal", "subtotal", "Subtotalb", "subtotalb") ?? undefined;
+  const total = getRecordNumber(row, "Total", "total", "Totalb", "totalb", "TotalPagar", "totalPagar") ?? undefined;
+  const igv = getRecordNumber(row, "IGV", "Igv", "igv", "Igvb", "igvb") ?? undefined;
+
+  return {
+    id: getRecordNumber(row, "Corre", "CorrelativoPlanilla", "Id", "id", "IdPlanilla", "idPlanilla") ?? index + 1,
+    idSuministroProvisional:
+      getRecordNumber(
+        row,
+        "IdSuministroProvisional",
+        "idSuministroProvisional",
+        "IdProvisional",
+        "idProvisional",
+        "idprovisional"
+      ) ??
+      undefined,
+    fechaInicioSuministroProvisional: getRecordString(
+      row,
+      "FechaInicio",
+      "fechaInicio",
+      "fechainicio"
+    ),
+    filtroOperativoKey: getRecordString(row, "FiltroOperativoKey", "filtroOperativoKey", "FiltroKey", "filtroKey"),
+    responsable: getRecordString(row, "IdResponsable", "idResponsable", "ResponsableId", "responsableId"),
+    responsableLabel: getRecordString(row, "Responsable", "responsable", "NomResponsable", "nomResponsable"),
+    idBancoCta: getRecordNumber(row, "IdBancoCta", "idBancoCta"),
+    idProyecto: getRecordNumber(row, "IdProyecto", "idProyecto"),
+    idSite: getRecordString(row, "IdSite", "idSite", "Site"),
+    correSite: getRecordNumber(row, "CorSite", "corSite", "CorreSite", "correSite"),
+    idTarea: getRecordNumber(row, "IdTarea", "idTarea", "TareaId", "tareaId", "Id_Tarea", "id_tarea"),
+    tareaLabel: getRecordString(row, "Tarea", "tarea", "NomTarea", "nomTarea", "DescTarea", "descTarea"),
+    idCliente: getRecordNumber(row, "IdCliente", "idCliente"),
+    cuenta: getRecordString(row, "Cuenta", "cuenta"),
+    cuentaNumero: getRecordString(row, "CuentaNumero", "cuentaNumero", "Cuenta", "cuenta"),
+    cuentaInter: getRecordString(row, "CuentaInter", "cuentaInter", "cuentainter"),
+    nombreCta: getRecordString(row, "NombreCta", "nombreCta"),
+    ruc: getRecordString(row, "RUC", "Ruc", "ruc"),
+    tipoPago: getRecordString(row, "IdTipoPago", "idTipoPago", "TipoPago", "tipoPago"),
+    monto: getRecordNumber(row, "Total", "total", "Totalb", "totalb", "TotalPagar", "totalPagar") ?? 0,
+    totalPagar: normalizarTotalPagarConsulta(row, subtotal, total, igv),
+    subtotal,
+    total,
+    igv,
+    idRendicion: getRecordNumber(row, "IdRendicion", "idRendicion") ?? undefined,
+    detalle: getRecordString(row, "Detalle", "detalle"),
+    comentario: getRecordString(row, "Observacion", "observacion", "Comentario", "comentario"),
+    observacion: getRecordString(row, "ObservacionPlanilla", "observacionPlanilla", "Observacion", "observacion"),
+    fechaDeposito: getRecordString(row, "FechaDeposito", "fechaDeposito"),
+    fechaVencimiento: getRecordString(
+      row,
+      "FechaPagoCre",
+      "fechaPagoCre",
+      "FechaVencimiento",
+      "fechaVencimiento",
+      "FechaDeposito",
+      "fechaDeposito"
+    ),
+    fecIngreso: normalizeFecIngresoFromStore(getRecordString(
+      row,
+      "FecIngreso",
+      "fecIngreso",
+      "fecingreso",
+      "FechaIngreso",
+      "fechaIngreso",
+      "Fecha",
+      "fecha",
+      "FechaCreacion",
+      "fechaCreacion"
+    )),
+    fechaEmision: getRecordString(
+      row,
+      "FecEmision",
+      "fecEmision",
+      "FechaEmision",
+      "fechaEmision",
+      "FecIngreso",
+      "fecIngreso",
+      "fecingreso",
+      "FechaIngreso",
+      "fechaIngreso"
+    ),
+    solicitante: getRecordString(row, "IdSolicitante", "idSolicitante"),
+    solicitanteLabel: getRecordString(row, "Solicitante", "solicitante", "SolicitanteLabel", "solicitanteLabel"),
+    // Planilla entrega el nombre en Gestor y el identificador en IdGestor.
+    // La actualización exige el identificador numérico, por lo que nunca se
+    // debe usar el nombre como valor del campo Gestor.
+    gestor: getRecordString(row, "IdGestor", "idGestor", "GestorId", "gestorId", "Gestor", "gestor"),
+    gestorLabel: getRecordString(row, "Gestor", "gestor", "GestorLabel", "gestorLabel"),
+    validador: getRecordString(row, "IdValidador", "idValidador"),
+    validadorLabel: getRecordString(row, "Validador", "validador", "ValidadorLabel", "validadorLabel"),
+    moneda: getRecordString(row, "TipoMoneda", "tipoMoneda", "Moneda", "moneda"),
+    monedaLabel: getRecordString(row, "Moneda", "moneda", "MonedaLabel", "monedaLabel"),
+    bien: getRecordString(row, "IdBien", "idBien", "Bien", "bien"),
+    bienLabel: getRecordString(row, "Bien", "bien", "BienLabel", "bienLabel"),
+    comprobante: getRecordString(row, "IdComprobante", "idComprobante", "Comprobante", "comprobante"),
+    comprobanteLabel: getRecordString(row, "Comprobante", "comprobante", "ComprobanteLabel", "comprobanteLabel"),
+    tipoPagoLabel: getRecordString(row, "TipoPago", "tipoPago", "TipoPagoLabel", "tipoPagoLabel"),
+    serie: getRecordString(
+      row,
+      "Serie",
+      "serie",
+      "Documento",
+      "documento",
+      "SerieDocumento",
+      "serieDocumento",
+      "SerieFactura",
+      "serieFactura"
+    ),
+    facturaUrl: getRecordString(row, "FacturaUrl", "facturaUrl", "RutaFacturaUrl", "rutaFacturaUrl","imgFactura","ImgFactura"),
+    //facturaPath: getRecordString(row, "FacturaPath", "facturaPath", "RutaFactura", "rutaFactura"),
+    //rutaFactura: getRecordString(row, "RutaFactura", "rutaFactura"),
+    //rutaFacturaOriginal: getRecordString(row, "RutaFacturaOriginal", "rutaFacturaOriginal"),
+    //rutaFacturaUrl: getRecordString(row, "RutaFacturaUrl", "rutaFacturaUrl","imgFactura","ImgFactura"),
+    //rutaFacturaEnviada: getRecordString(row, "RutaFacturaEnviada", "rutaFacturaEnviada"),
+    nombreProyecto: getRecordString(row, "NombreProyecto", "nombreProyecto"),
+    clienteNombre: getRecordString(row, "Cliente", "cliente", "NombreCliente", "nombreCliente"),
+    tipoTrabajo: getRecordString(row, "Tipo_Trabajo", "tipo_Trabajo", "TipoTrabajo", "tipoTrabajo"),
+    siteNombre: getRecordString(row, "Site", "site", "SiteNombre", "siteNombre", "NombreSite", "nombreSite"),
+    ot: getRecordString(row, "Ot", "ot", "OT"),
+    nroOperacion: getRecordString(row, "NroOperacion", "nroOperacion"),
+    banco: getRecordString(row, "Banco", "banco"),
+    tipoCambio: getRecordNumber(row, "TipoCambio", "tipoCambio") ?? undefined,
+    totalMontoVisiblePorMoneda: getRecordNumber(row, "TotalMontoVisiblePorMoneda", "totalMontoVisiblePorMoneda") ?? undefined,
+    idUsuarioFactura: getRecordNumber(row, "IdUsuarioFactura", "idUsuarioFactura"),
+    estado: getRecordNumber(row, "Estado", "estado") ?? 0,
+    idOc: getRecordString(row, "IdOc", "IdOC", "Idoc", "idOc"),
+    estadoLabel: getRecordString(
+      row,
+      "EstadoNombre",
+      "estadoNombre",
+      "NombreEstado",
+      "nombreEstado",
+      "DescEstado",
+      "descEstado",
+      "DescripcionEstado",
+      "descripcionEstado"
+    ),
+  };
+}
+
+function mapGastoDtoToView(item: GastoDto): GastoForm {
+  const cuentaParts = extractCuentaResumenParts(item.cuenta);
+  const facturaFields = resolveFacturaFields(item);
+  const subtotalValue =
+    item.subtotal ??
+    (item.total != null && item.igv != null
+      ? roundToTwoDecimals(Number(item.total) - Number(item.igv))
+      : item.total);
+  //console.log("estado raw:", item.estado, typeof item.estado);
+
+  return {
+    id: item.id,
+    idSuministroProvisional:
+      item.idSuministroProvisional != null ? String(item.idSuministroProvisional) : "",
+    fechaInicioSuministroProvisional: item.fechaInicioSuministroProvisional ?? "",
+    filtroOperativo: {
+      filtro: {
+        filtroKey: item.filtroOperativoKey,
+        idCliente: toNumberOrZero(item.idCliente),
+        idProyecto: toNumberOrZero(item.idProyecto),
+        idSite: item.idSite ?? "",
+        correlativo: toNumberOrZero(item.correSite),
+        nroInterno: 0,
+        nombreCliente: item.clienteNombre ?? "",
+        nombreProyecto: item.nombreProyecto ?? "",
+        nombreSite: item.siteNombre ?? "",
+        tipoTrabajo: item.tipoTrabajo ?? "",
+        ot: item.ot ?? "",
+        fecAsignacion: null,
+      },
+      tipoTrabajo: item.tipoTrabajo ? { tipoTrabajo: item.tipoTrabajo } : undefined,
+      ot: item.ot ? { ot: item.ot, fecAsignacion: null } : undefined,
+      tarea: item.idTarea ? { correlativo: item.idTarea, tarea: item.tareaLabel ?? "" } : undefined,
+    } as FiltroOperativoValue,
+    responsable: item.responsable,
+    responsableLabel: item.responsableLabel || item.responsable,
+    idBancoCta: item.idBancoCta != null ? String(item.idBancoCta) : "",
+    cuenta: item.cuenta,
+    cuentaNumero: item.cuentaNumero || cuentaParts.cuentaNumero,
+    cuentaInter: item.cuentaInter || cuentaParts.cuentaInter,
+    nombreCta: item.nombreCta || cuentaParts.nombreCta,
+    ruc: item.ruc || cuentaParts.ruc,
+    rendicion: Number(item.idRendicion ?? 0) === 1,
+    tipoPago: item.tipoPago || item.tipoPagoLabel || "",
+    monto: subtotalValue != null ? subtotalValue.toString() : "",
+    totalPagar: item.totalPagar != null ? item.totalPagar.toString() : "",
+    detalle: item.detalle,
+    comentario: item.comentario ?? (item as any).observacion ?? "",
+    observacion: item.observacion ?? "",
+    fechaDeposito: item.fechaDeposito ?? "",
+    fechaVencimiento: normalizeDateForInput(item.fechaVencimiento),
+    fecIngreso: normalizeFecIngresoFromStore(item.fecIngreso || item.fechaEmision),
+    fechaEmision: normalizeDateForInput(item.fechaEmision),
+    solicitante: item.solicitante || item.solicitanteLabel || "",
+    solicitanteLabel: item.solicitanteLabel || "",
+    gestor: item.gestor || item.gestorLabel || "",
+    gestorLabel: item.gestorLabel || "",
+    validador: item.validador || item.validadorLabel || "",
+    validadorLabel: item.validadorLabel || "",
+    moneda: item.moneda || item.monedaLabel || "",
+    monedaLabel: item.monedaLabel || item.moneda || "",
+    bien: item.bien || item.bienLabel || "",
+    bienLabel: item.bienLabel || item.bien || "",
+    comprobante: item.comprobante || item.comprobanteLabel || "",
+    comprobanteLabel: item.comprobanteLabel || item.comprobante || "",
+    serie: item.serie || "",
+    facturaUrl: facturaFields.facturaUrl,
+    facturaPath: facturaFields.facturaPath,
+    rutaFactura: item.rutaFactura || "",
+    rutaFacturaOriginal: item.rutaFacturaOriginal || "",
+    rutaFacturaUrl: item.rutaFacturaUrl || "",
+    rutaFacturaEnviada: item.rutaFacturaEnviada || "",
+    estado: item.estado ?? 0,
+    estadoLabel: item.estadoLabel || "",
+    idOc: item.idOc || "",
+    nroOperacion: item.nroOperacion ?? "",
+    banco: item.banco ?? "",
+    };
+}
+
+const formularioInicial: GastoForm = {
+  id: null,
+  idSuministroProvisional: "",
+  fechaInicioSuministroProvisional: "",
+  filtroOperativo: {},
+  responsable: "",
+  responsableLabel: "",
+  idBancoCta: "",
+  cuenta: "",
+  cuentaNumero: "",
+  cuentaInter: "",
+  nombreCta: "",
+  ruc: "",
+  rendicion: false,
+  tipoPago: "",
+  monto: "",
+  totalPagar: "",
+  detalle: "",
+  comentario: "",
+  fechaDeposito: "",
+  fechaVencimiento: "",
+  fecIngreso: "",
+  fechaEmision: "",
+  solicitante: "",
+  solicitanteLabel: "",
+  gestor: "",
+  gestorLabel: "",
+  validador: "",
+  validadorLabel: "",
+  moneda: "",
+  monedaLabel: "",
+  bien: "",
+  bienLabel: "",
+  comprobante: "",
+  comprobanteLabel: "",
+  serie: "",
+  facturaUrl: "",
+  facturaPath: "",
+  estado: 0,
+  nroOperacion: "",
+  banco: "",
+};
+
+export default function GastosPage({
+  editorRequest,
+  onEditorClose,
+  onEditorUpdated,
+}: GastosPageProps = {}) {
+  const editorOnly = Boolean(editorRequest);
+  // Estado para fila seleccionada
+  const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
+  const [busqueda, setBusqueda] = useState("");
+  const [filtrosCabecera, setFiltrosCabecera] = useState<GastosHeaderFilters>(GASTOS_HEADER_FILTERS_INITIAL);
+  const [filtrosCabeceraAplicados, setFiltrosCabeceraAplicados] = useState<GastosHeaderFilters>(GASTOS_HEADER_FILTERS_INITIAL);
+  const filtrosCabeceraAplicadosRef = useRef<GastosHeaderFilters>(GASTOS_HEADER_FILTERS_INITIAL);
+  const [vistaGastos, setVistaGastos] = useState<GastosVista>("pendientes-hoy");
+  const vistaGastosRef = useRef<GastosVista>("pendientes-hoy");
+  const [headerFilterSearch, setHeaderFilterSearch] = useState<Record<GastosHeaderSearchableFilterKey, string>>(
+    GASTOS_HEADER_FILTER_SEARCH_INITIAL
+  );
+  const [mostrarFiltrosAdicionales, setMostrarFiltrosAdicionales] = useState(false);
+  const [cabeceraFiltroAbierto, setCabeceraFiltroAbierto] = useState<string | null>(null);
+  const [mensajeFiltroCabecera, setMensajeFiltroCabecera] = useState<string | null>(null);
+    // Estado para ordenamiento
+
+  const [showFacturaViewer, setShowFacturaViewer] = useState(false);
+  const [facturaViewerUrl, setFacturaViewerUrl] = useState("");
+  const [facturaViewerLoading, setFacturaViewerLoading] = useState(false);
+  const [facturaViewerError, setFacturaViewerError] = useState("");
+  const [valoresGasto, setValoresGasto] = useState<ValoresGastoResponse>(VALORES_GASTO_INICIALES);
+  const [valoresGastoLoading, setValoresGastoLoading] = useState(false);
+  const valoresGastoRequestRef = useRef(0);
+  const [gastoEditorTab, setGastoEditorTab] = useState<"principal" | "detalle-sitio">("principal");
+  const [historialSitioRows, setHistorialSitioRows] = useState<GastoDto[]>([]);
+  const [historialSitioLoading, setHistorialSitioLoading] = useState(false);
+  const [historialSitioExpanded, setHistorialSitioExpanded] = useState(false);
+  const [historialSitioView, setHistorialSitioView] = useState<HistorialSitioView>("listado");
+  const [historialSitioSolicitante, setHistorialSitioSolicitante] = useState("");
+  const [historialSitioDetalleActivo, setHistorialSitioDetalleActivo] = useState<string | null>(null);
+  const historialSitioLastKeyRef = useRef("");
+  const cargaInicialGastosListaRef = useRef(false);
+  // En la pestaña Consulta no se carga nada hasta presionar BUSCAR.
+  const consultaBuscadaRef = useRef(false);
+  const [filtrosOperativosCatalogo, setFiltrosOperativosCatalogo] = useState<FiltroOperativoItem[]>([]);
+  const constantesInicialesIniciadasRef = useRef(false);
+  const cargaInicialGastosSolicitadaRef = useRef(false);
+  const sidePanelRef = useRef<HTMLDivElement | null>(null);
+  const filtroInputRef = useRef<HTMLInputElement | null>(null);
+  const cabeceraFiltroMenuRef = useRef<HTMLDivElement | null>(null);
+  const ultimoSuministroVigenteLookupKeyRef = useRef("");
+  const preservarSuministroEdicionRef = useRef(false);
+  const authUser = getAuthUser();
+  const [errores, setErrores] = useState<Record<string, string>>({});
+  const [empleados, setEmpleados] = useState<EmpleadoCta[]>([]);
+  const [empleadosLoading, setEmpleadosLoading] = useState(false);
+  const [empleadosError, setEmpleadosError] = useState<string | null>(null);
+  const [tareasCatalogo, setTareasCatalogo] = useState<TareaOption[]>([]);
+  const [tareasCatalogoError, setTareasCatalogoError] = useState<string | null>(null);
+  const [suministrosVigentes, setSuministrosVigentes] = useState<SuministroProvisionalVigenteOption[]>([]);
+  const [suministrosVigentesLoading, setSuministrosVigentesLoading] = useState(false);
+  const [suministrosVigentesError, setSuministrosVigentesError] = useState<string | null>(null);
+  const [solicitanteOptions, setSolicitanteOptions] = useState<ConstanteOption[]>([]);
+  const [solicitanteLoading, setSolicitanteLoading] = useState(false);
+  const [solicitanteError, setSolicitanteError] = useState<string | null>(null);
+  const [solicitanteInput, setSolicitanteInput] = useState("");
+  const [showSolicitanteDropdown, setShowSolicitanteDropdown] = useState(false);
+  const [highlightedSolicitanteIdx, setHighlightedSolicitanteIdx] = useState(-1);
+  const [gestorOptions, setGestorOptions] = useState<ConstanteOption[]>([]);
+  const [gestorLoading, setGestorLoading] = useState(false);
+  const [gestorError, setGestorError] = useState<string | null>(null);
+  const [gestorInput, setGestorInput] = useState("");
+  const [showGestorDropdown, setShowGestorDropdown] = useState(false);
+  const [highlightedGestorIdx, setHighlightedGestorIdx] = useState(-1);
+  const [validadorOptions, setValidadorOptions] = useState<ConstanteOption[]>([]);
+  const [validadorLoading, setValidadorLoading] = useState(false);
+  const [validadorError, setValidadorError] = useState<string | null>(null);
+  const [validadorInput, setValidadorInput] = useState("");
+  const [showValidadorDropdown, setShowValidadorDropdown] = useState(false);
+  const [highlightedValidadorIdx, setHighlightedValidadorIdx] = useState(-1);
+  const [responsableInput, setResponsableInput] = useState("");
+  const [showResponsableDropdown, setShowResponsableDropdown] = useState(false);
+  const [highlightedResponsableIdx, setHighlightedResponsableIdx] = useState(-1);
+  const [mostrarNuevoResponsable, setMostrarNuevoResponsable] = useState(false);
+  const [modoResponsableForm, setModoResponsableForm] = useState<ModoResponsableForm>("nuevo");
+  const [nuevoResponsable, setNuevoResponsable] = useState<NuevoResponsableForm>(NUEVO_RESPONSABLE_INICIAL);
+  const [cuentaResponsableOriginal, setCuentaResponsableOriginal] = useState<CuentaResponsableOriginal>(CUENTA_RESPONSABLE_ORIGINAL_INICIAL);
+  const [nuevoResponsableError, setNuevoResponsableError] = useState<string | null>(null);
+  const [guardandoNuevoResponsable, setGuardandoNuevoResponsable] = useState(false);
+  const [coincidenciasNuevoResponsable, setCoincidenciasNuevoResponsable] = useState<string[]>([]);
+  const [buscandoNuevoResponsable, setBuscandoNuevoResponsable] = useState(false);
+  const [busquedaNuevoResponsableError, setBusquedaNuevoResponsableError] = useState<string | null>(null);
+  const [usarFechaEmision, setUsarFechaEmision] = useState(true);
+  const [usarFechaVencimiento, setUsarFechaVencimiento] = useState(false);
+  const [tipoCambio, setTipoCambio] = useState("3.80");
+  const [showFacturaSourceMenu, setShowFacturaSourceMenu] = useState(false);
+  const [facturaUploadLoading, setFacturaUploadLoading] = useState(false);
+  const [facturaUploadError, setFacturaUploadError] = useState<string | null>(null);
+  const [mostrarMotivoRechazo, setMostrarMotivoRechazo] = useState(false);
+  const [motivoRechazo, setMotivoRechazo] = useState("");
+  const [rechazando, setRechazando] = useState(false);
+  const [rechazoError, setRechazoError] = useState<string | null>(null);
+  const [externalEditorLoading, setExternalEditorLoading] = useState(false);
+  const [externalEditorError, setExternalEditorError] = useState<string | null>(null);
+  const externalEditorRequestKeyRef = useRef("");
+  const archivoFacturaInputRef = useRef<HTMLInputElement | null>(null);
+  const camaraFacturaInputRef = useRef<HTMLInputElement | null>(null);
+
+  const fechaActual = obtenerFechaActual();
+  const idCargo = toPositiveNumber(authUser?.idCargo, authUser?.idrol);
+  const idEmpleado = toPositiveNumber(authUser?.idEmpleado, authUser?.codEmp);
+  const idUsuarioFactura = getNumericUserId(
+    String(authUser?.codEmp ?? authUser?.idEmpleado ?? authUser?.empleado ?? "")
+  );
+  const [constantesRefreshKey, setConstantesRefreshKey] = useState(0);
+  const camposConstantes = useMemo(
+    () => ["tipo_bien", "tipo_comprobante", "tipo_pago", "tipo_moneda", "tipo_cta", "banco", "estado"],
+    []
+  );
+  const {
+    constantesPorCampo,
+    loading: constantesLoading,
+    error: constantesError,
+  } = useConstantesPorCampo(camposConstantes, constantesRefreshKey);
+
+  const tipoPagoOptions = constantesPorCampo.tipo_pago ?? [];
+  const tipoCuentaOptions = constantesPorCampo.tipo_cta ?? [];
+  const bancoOptions = constantesPorCampo.banco ?? [];
+  const monedaOptions = constantesPorCampo.tipo_moneda ?? [];
+  const bienOptions = constantesPorCampo.tipo_bien ?? [];
+  const comprobanteOptions = constantesPorCampo.tipo_comprobante ?? [];
+  const estadoOptions = constantesPorCampo.estado ?? [];
+  useEffect(() => {
+    filtrosCabeceraAplicadosRef.current = filtrosCabeceraAplicados;
+  }, [filtrosCabeceraAplicados]);
+  const tieneFiltrosBusqueda = useMemo(
+    () =>
+      Boolean(
+        busqueda.trim() ||
+          filtrosCabecera.id.trim() ||
+          filtrosCabecera.fechaInicio.trim() ||
+          filtrosCabecera.fechaFin.trim() ||
+          filtrosCabecera.estado.length > 0 ||
+          filtrosCabecera.cliente.length > 0 ||
+          filtrosCabecera.solicitante.length > 0 ||
+          filtrosCabecera.proyecto.length > 0 ||
+          filtrosCabecera.site.length > 0 ||
+          filtrosCabecera.comprobante.length > 0 ||
+          filtrosCabecera.moneda.length > 0 ||
+          filtrosCabecera.tipoTrabajo.length > 0 ||
+          filtrosCabecera.responsable.length > 0 ||
+          filtrosCabecera.validador.length > 0
+      ),
+    [busqueda, filtrosCabecera]
+  );
+
+  // Los controles de fecha entregan una fecha calendario (YYYY-MM-DD).
+  // Se conserva tal cual para Lima, Perú (UTC-5), sin convertirla a UTC y desplazar el día.
+  function formatDateToMMDDYYYYPeru(dateStr?: string) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr?.trim() ?? "");
+
+    if (!match) {
+      return undefined;
+    }
+
+    const [, yyyy, mm, dd] = match;
+    return `${mm}/${dd}/${yyyy}`;
+  }
+
+  const buildGastoPayload = (form: GastoForm): GastoPayload => {
+    const filtro = form.filtroOperativo.filtro;
+    const tipoTrabajo = form.filtroOperativo.tipoTrabajo?.tipoTrabajo?.trim() ?? "";
+    const ot = form.filtroOperativo.ot?.ot?.trim() ?? "";
+    const tipoCambioValue = Number(tipoCambio);
+
+    const payload: GastoPayload = {
+      idSuministroProvisional: form.idSuministroProvisional
+        ? Number(form.idSuministroProvisional)
+        : undefined,
+      filtroOperativoKey: form.filtroOperativo.filtro?.filtroKey || "",
+      responsable: form.responsable,
+      idBancoCta: form.idBancoCta ? Number(form.idBancoCta) : undefined,
+      idProyecto: toNumberOrZero(filtro?.idProyecto) || undefined,
+      idSite: String(filtro?.idSite ?? "").trim() || undefined,
+      correSite: toNumberOrZero(filtro?.correlativo) || undefined,
+      idTarea: form.filtroOperativo.tarea?.correlativo || undefined,
+      idCliente: toNumberOrZero(filtro?.idCliente) || undefined,
+      cuenta: form.cuenta,
+      cuentaNumero: form.cuentaNumero || undefined,
+      cuentaInter: form.cuentaInter || undefined,
+      nombreCta: form.nombreCta || undefined,
+      ruc: form.ruc || undefined,
+      tipoPago: normalizeConstanteValue(tipoPagoOptions, form.tipoPago),
+      tipoPagoLabel: getConstanteLabel(tipoPagoOptions, form.tipoPago) || undefined,
+      monto: Number(form.monto),
+      totalPagar: form.totalPagar ? Number(form.totalPagar) : undefined,
+      subtotal: subtotalAmount,
+      total: totalAmount,
+      igv: igvAmount,
+      idRendicion: form.rendicion ? 1 : 0,
+      detalle: form.detalle,
+      comentario: form.comentario,
+      fechaVencimiento: formatDateToMMDDYYYYPeru(form.fechaVencimiento),
+      fechaEmision: formatDateToMMDDYYYYPeru(form.fechaEmision),
+      solicitante:
+        resolveConstanteStoredValue(solicitanteOptions, form.solicitante, form.solicitanteLabel) || undefined,
+      solicitanteLabel:
+        getConstanteLabelOrFallback(solicitanteOptions, form.solicitante, form.solicitanteLabel) ||
+        undefined,
+      gestor: resolveConstanteStoredValue(gestorOptions, form.gestor, form.gestorLabel) || undefined,
+      gestorLabel: getConstanteLabel(gestorOptions, form.gestor) || undefined,
+      validador:
+        resolveConstanteStoredValue(validadorOptions, form.validador, form.validadorLabel) || undefined,
+      validadorLabel:
+        getConstanteLabelOrFallback(validadorOptions, form.validador, form.validadorLabel) ||
+        undefined,
+      moneda: normalizeConstanteValue(monedaOptions, form.moneda) || undefined,
+      monedaLabel: getConstanteLabel(monedaOptions, form.moneda) || undefined,
+      bien: normalizeConstanteValue(bienOptions, form.bien) || undefined,
+      bienLabel: getConstanteLabel(bienOptions, form.bien) || undefined,
+      comprobante: normalizeConstanteValue(comprobanteOptions, form.comprobante) || undefined,
+      comprobanteLabel: getConstanteLabel(comprobanteOptions, form.comprobante) || undefined,
+      serie: form.serie || undefined,
+      facturaUrl: form.facturaUrl || undefined,
+      facturaPath: form.facturaPath || undefined,
+      tipoTrabajo: tipoTrabajo || undefined,
+      siteNombre: filtro?.nombreSite?.trim() || undefined,
+      usuario: authUser?.usuario?.trim() || undefined,
+      ot: ot || undefined,
+      tipoCambio:
+        Number.isFinite(tipoCambioValue) && tipoCambioValue > 0
+          ? tipoCambioValue
+          : TIPO_CAMBIO_GASTO,
+      idUsuarioFactura,
+      imgFactura: form.facturaUrl || undefined,
+    };
+
+    //console.log("[Gastos] Parámetros enviados a Guardar/Planilla", payload);
+
+    return payload;
+  };
+
+  const gastosApi = {
+    list: async () => {
+      if (editorOnly) {
+        return [];
+      }
+
+      // useCrudForm ejecuta su carga al montar. Se difiere hasta que las
+      // constantes iniciales estén listas para no consultar con filtros aún
+      // incompletos y terminar mostrando un grid vacío.
+      if (!cargaInicialGastosListaRef.current) {
+        return [];
+      }
+
+      if (vistaGastosRef.current === "consulta" && !consultaBuscadaRef.current) {
+        return [];
+      }
+
+      // La pestaña Resumen carga sus propios datos (ViaticosResumen).
+      if (vistaGastosRef.current === "resumen") {
+        return [];
+      }
+
+      const filtrosConsulta = filtrosCabeceraAplicadosRef.current;
+      const parametrosConsulta: PlanillaConsultaParametro[] = [];
+      // Cada grupo es un valor explícito de @Estados.
+      const gruposEstados: string[] = [];
+
+      if (vistaGastosRef.current === "pendientes-hoy") {
+        // Solo lo generado hoy (fecha de ingreso) y pendiente de aprobar (estado 0).
+        const hoy = formatInputDateForPlanillaParametro(obtenerFechaActual());
+        gruposEstados.push("0");
+        if (hoy) {
+          parametrosConsulta.push({ nombre: "FechaInicio", valor: hoy, tipo: "date" });
+          parametrosConsulta.push({ nombre: "FechaFin", valor: hoy, tipo: "date" });
+        }
+        setMensajeFiltroCabecera(null);
+      } else {
+        // Consulta libre: sin estado consulta explícitamente todos los estados.
+        // Un correlativo identifica un registro puntual y no se limita por fechas.
+        // Si no se elige un estado, se debe consultar explícitamente el universo completo.
+        // La ausencia de @Estados no tiene la misma semántica en el procedimiento.
+        const estadosElegidos = Array.from(
+          new Set(
+            filtrosConsulta.estado
+              .map((estado) => normalizeConstanteValue(estadoOptions, estado))
+              .map((estado) => estado.trim())
+              .filter(Boolean)
+          )
+        );
+        const estadosSeleccionados = estadosElegidos.length > 0
+          ? estadosElegidos
+          : Array.from(
+            new Set(
+              estadoOptions
+                .map((estado) => normalizeConstanteValue(estadoOptions, getConstanteStoredValue(estado)).trim())
+                .filter(Boolean),
+            ),
+          );
+        const correlativoNumero = Number(filtrosConsulta.id.trim());
+        const buscarPorCorrelativo = Number.isInteger(correlativoNumero) && correlativoNumero > 0;
+        const fechaInicio = filtrosConsulta.fechaInicio.trim();
+        const fechaFin = filtrosConsulta.fechaFin.trim();
+
+        // sp_Planilla_Consulta_Estados filtra por fecha de depósito TODAS las filas cuando entre los
+        // estados viene el 4 (Pagado), y los demás estados no tienen fecha de depósito. Por eso, si se
+        // eligen el 4 y otros estados, se consultan en dos grupos (los demás por fecha de ingreso).
+        if (estadosSeleccionados.includes("4") && estadosSeleccionados.length > 1) {
+          gruposEstados.push(estadosSeleccionados.filter((estado) => estado !== "4").join(","), "4");
+        } else if (estadosSeleccionados.length > 0) {
+          gruposEstados.push(estadosSeleccionados.join(","));
+        }
+
+        if (buscarPorCorrelativo) {
+          parametrosConsulta.push({ nombre: "Correlativo", valor: String(correlativoNumero), tipo: "int" });
+        } else {
+          if (!isInputDateRangeValid(fechaInicio, fechaFin)) {
+            setMensajeFiltroCabecera(null);
+            return [];
+          }
+
+          const fechaInicioParametro = formatInputDateForPlanillaParametro(fechaInicio);
+          const fechaFinParametro = formatInputDateForPlanillaParametro(fechaFin);
+          if (fechaInicioParametro) {
+            parametrosConsulta.push({ nombre: "FechaInicio", valor: fechaInicioParametro, tipo: "date" });
+          }
+          if (fechaFinParametro) {
+            parametrosConsulta.push({ nombre: "FechaFin", valor: fechaFinParametro, tipo: "date" });
+          }
+        }
+
+        setMensajeFiltroCabecera(null);
+      }
+
+      // Cuando se combina Pagado (4) con otros estados se requieren dos
+      // consultas por la distinta fecha usada por el SP. Se ejecutan en serie
+      // para no pedir dos planes pesados a SQL Server al mismo tiempo.
+      const respuestas = [];
+      for (const estados of gruposEstados.length > 0 ? gruposEstados : [""]) {
+        respuestas.push(
+          await consultarPlanillaEstados({
+            ...buildPlanillaConsultaEstadosRequest(
+              [
+                ...(estados ? [{ nombre: "Estados", valor: estados, tipo: "string" } satisfies PlanillaConsultaParametro] : []),
+                ...parametrosConsulta,
+              ],
+              // La pestaña Consulta no restringe por empleado/cargo del usuario (como ADMIN).
+              vistaGastosRef.current === "consulta" ? { baseParams: { idCargo: null, idEmpleado: null } } : undefined
+            ),
+            ...(vistaGastosRef.current === "consulta" ? { consulta: "gastos-consulta" } : {}),
+          })
+        );
+      }
+
+      const gastosConsulta = respuestas
+        .flatMap((respuesta) => extraerArray<Record<string, unknown>>(respuesta.rows))
+        .map((row, index) => mapGastoDtoToView(mapPlanillaConsultaRowToGastoDto(row, index)));
+
+      if (respuestas.length === 1) {
+        return gastosConsulta;
+      }
+
+      // Varios grupos: se unen sin repetidos y en el mismo orden del SP (correlativo descendente).
+      const unicos = new Map<string, GastoForm>();
+      for (const gasto of gastosConsulta) {
+        unicos.set(String(gasto.id), gasto);
+      }
+      return [...unicos.values()].sort((a, b) => Number(b.id) - Number(a.id));
+    },
+
+    create: async (form: GastoForm) => {
+      const payload = buildGastoPayload(form);
+
+      const response = await httpClient.post<GastoDto>(GASTOS_API_URL, payload);
+      const data = extraerObjeto<GastoDto>(response);
+      return mapGastoDtoToView(data);
+    },
+
+    update: async (id: number, form: GastoForm) => {
+      const payload = buildGastoPayload(form);
+
+      const response = await httpClient.put<GastoDto>(`${GASTOS_API_URL}/${id}`, payload);
+      const data = extraerObjeto<GastoDto>(response);
+      return mapGastoDtoToView(data);
+    },
+
+    remove: async (id: number) => {
+      await httpClient.delete(`${GASTOS_API_URL}/${id}`);
+    },
+  };
+
+  const {
+    items: gastos,
+    form,
+    setForm,
+    loading: cargando,
+    saving: guardando,
+    error: errorGuardado,
+    setError: setErrorGuardado,
+    panelOpen: panelAbierto,
+    setPanelOpen: setPanelAbierto,
+    mode: modo,
+    setMode: setModo,
+    idToDelete: idEliminar,
+    setIdToDelete: setIdEliminar,
+    handleSave,
+    load: cargarGastos,
+  } = useCrudForm<GastoForm, GastoForm>(gastosApi, formularioInicial);
+
+  useEffect(() => {
+    if (editorOnly) {
+      return;
+    }
+
+    if (constantesLoading) {
+      constantesInicialesIniciadasRef.current = true;
+      return;
+    }
+
+    if (!constantesInicialesIniciadasRef.current || cargaInicialGastosSolicitadaRef.current) {
+      return;
+    }
+
+    cargaInicialGastosSolicitadaRef.current = true;
+    cargaInicialGastosListaRef.current = true;
+    void cargarGastos();
+  }, [constantesLoading, editorOnly]);
+
+  const historialSitioFiltro = form.filtroOperativo.filtro;
+  const historialSitioIdCliente = toNumberOrZero(historialSitioFiltro?.idCliente);
+  const historialSitioIdProyecto = toNumberOrZero(historialSitioFiltro?.idProyecto);
+  const historialSitioIdSite = String(historialSitioFiltro?.idSite ?? "").trim();
+  const historialSitioTipoTrabajo = String(form.filtroOperativo.tipoTrabajo?.tipoTrabajo ?? "").trim();
+  const historialSitioOt = String(form.filtroOperativo.ot?.ot ?? "").trim();
+  const historialSitioKey = [
+    historialSitioIdCliente,
+    historialSitioIdProyecto,
+    historialSitioIdSite,
+    historialSitioTipoTrabajo,
+    historialSitioOt,
+  ].join("|");
+
+  const historialSitioRequest = useMemo(() => {
+    const idCliente = historialSitioIdCliente;
+    const idProyecto = historialSitioIdProyecto;
+    const idSite = historialSitioIdSite;
+    const tipoTrabajo = historialSitioTipoTrabajo;
+    const ot = historialSitioOt;
+
+    if (!idCliente || !idProyecto || !idSite || !tipoTrabajo || !ot) {
+      return null;
+    }
+
+    return buildPlanillaConsultaEstadosRequest([
+      { nombre: "Estados", valor: "4", tipo: "string" },
+      { nombre: "OT", valor: ot, tipo: "string" },
+      { nombre: "IdCliente", valor: String(idCliente), tipo: "int" },
+      { nombre: "IdProyecto", valor: String(idProyecto), tipo: "int" },
+      { nombre: "IdSite", valor: idSite, tipo: "string" },
+      { nombre: "TipoTrabajo", valor: tipoTrabajo, tipo: "string" },
+    ]);
+  }, [historialSitioIdCliente, historialSitioIdProyecto, historialSitioIdSite, historialSitioOt, historialSitioTipoTrabajo]);
+
+  useEffect(() => {
+    if (!panelAbierto || gastoEditorTab !== "principal" || !historialSitioRequest) {
+      if (historialSitioLastKeyRef.current) {
+        historialSitioLastKeyRef.current = "";
+        setHistorialSitioRows([]);
+        setHistorialSitioLoading(false);
+      }
+      return;
+    }
+
+    if (historialSitioLastKeyRef.current === historialSitioKey) {
+      return;
+    }
+
+    const controller = new AbortController();
+    historialSitioLastKeyRef.current = historialSitioKey;
+    setHistorialSitioLoading(true);
+    setHistorialSitioSolicitante("");
+    void consultarPlanillaEstados(historialSitioRequest, { timeoutMs: 120000, signal: controller.signal })
+      .then((response) => {
+        if (!controller.signal.aborted) {
+          const rows = extraerArray<Record<string, unknown>>(response.rows)
+            .map((row, index) => mapPlanillaConsultaRowToGastoDto(row, index));
+          setHistorialSitioRows(rows);
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setHistorialSitioRows([]);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setHistorialSitioLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [gastoEditorTab, historialSitioKey, historialSitioRequest, panelAbierto]);
+
+  const historialSitioRowsFiltrados = useMemo(() => {
+    const solicitante = historialSitioSolicitante.trim().toLocaleLowerCase();
+    return solicitante
+      ? historialSitioRows.filter((row) => (row.solicitanteLabel || row.solicitante || "").toLocaleLowerCase().includes(solicitante))
+      : historialSitioRows;
+  }, [historialSitioRows, historialSitioSolicitante]);
+
+  const historialSitioTotalesPorMoneda = useMemo(() => {
+    const totals = new Map<string, number>();
+    historialSitioRowsFiltrados.forEach((row) => {
+      const moneda = row.monedaLabel || row.moneda || "SIN MONEDA";
+      totals.set(moneda, (totals.get(moneda) ?? 0) + Number(row.subtotal ?? row.monto ?? 0));
+    });
+    return Array.from(totals, ([moneda, total]) => ({ moneda, total }));
+  }, [historialSitioRowsFiltrados]);
+
+  const historialSitioKpisPorMoneda = useMemo(() => {
+    const visibles = new Map<string, number>();
+    historialSitioRowsFiltrados.forEach((row) => {
+      const moneda = row.monedaLabel || row.moneda || "SIN MONEDA";
+      // El store repite el total por moneda en cada registro; se conserva el
+      // mayor valor para no duplicar el KPI al sumar las filas del listado.
+      visibles.set(moneda, Math.max(visibles.get(moneda) ?? 0, Number(row.totalMontoVisiblePorMoneda ?? 0)));
+    });
+
+    return historialSitioTotalesPorMoneda.map(({ moneda, total }) => {
+      const totalVisible = visibles.get(moneda) ?? 0;
+      const porcentaje = totalVisible > 0 ? total / totalVisible * 100 : 0;
+      return { moneda, total, totalVisible, porcentaje, porcentajeBarra: Math.max(0, Math.min(porcentaje, 100)) };
+    });
+  }, [historialSitioRowsFiltrados, historialSitioTotalesPorMoneda]);
+
+  const historialSitioResumenSolicitante = useMemo(() => {
+    const byCurrency = new Map<string, Map<string, number>>();
+    historialSitioRowsFiltrados.forEach((row) => {
+      const moneda = row.monedaLabel || row.moneda || "SIN MONEDA";
+      const solicitante = row.solicitanteLabel || row.solicitante || "SIN SOLICITANTE";
+      const items = byCurrency.get(moneda) ?? new Map<string, number>();
+      items.set(solicitante, (items.get(solicitante) ?? 0) + Number(row.subtotal ?? row.monto ?? 0));
+      byCurrency.set(moneda, items);
+    });
+    return Array.from(byCurrency, ([moneda, items]) => ({
+      moneda,
+      items: Array.from(items, ([solicitante, total]) => ({ solicitante, total }))
+        .sort((left, right) => right.total - left.total || left.solicitante.localeCompare(right.solicitante, "es")),
+    }));
+  }, [historialSitioRowsFiltrados]);
+
+  // Detectar si la moneda seleccionada es SOLES
+  const monedaSeleccionada = findConstanteOption(monedaOptions, form.moneda);
+  const esSoles = monedaSeleccionada && (monedaSeleccionada.label?.toUpperCase() === "SOLES" || monedaSeleccionada.value === "SOLES" || monedaSeleccionada.codigo === "SOLES");
+
+  useEffect(() => {
+    // Responsables, cuentas, solicitantes y tareas solo se requieren dentro
+    // del editor. Diferir esta consulta acelera la carga inicial del grid.
+    if (!panelAbierto && vistaGastos !== "consulta" && vistaGastos !== "resumen") {
+      return;
+    }
+
+    let activo = true;
+
+    setEmpleadosLoading(true);
+    setEmpleadosError(null);
+    setSolicitanteLoading(true);
+    setSolicitanteError(null);
+    setGestorLoading(true);
+    setGestorError(null);
+    setValidadorLoading(true);
+    setValidadorError(null);
+    setTareasCatalogoError(null);
+
+    void getGastosBootstrap({
+      idCargo: idCargo > 0 ? idCargo : null,
+      idEmpleado: idEmpleado > 0 ? idEmpleado : null,
+    })
+      .then((data) => {
+        if (!activo) {
+          return;
+        }
+
+        setEmpleados(Array.isArray(data.empleados) ? data.empleados : []);
+        setSolicitanteOptions(Array.isArray(data.solicitantes) ? data.solicitantes : []);
+        setGestorOptions(Array.isArray(data.gestores) ? data.gestores : []);
+        setValidadorOptions(Array.isArray(data.validadores) ? data.validadores : []);
+        setTareasCatalogo(Array.isArray(data.tareas) ? data.tareas : []);
+      })
+      .catch(() => {
+        if (!activo) {
+          return;
+        }
+
+        setEmpleados([]);
+        setEmpleadosError("Error al cargar responsables");
+        setSolicitanteOptions([]);
+        setSolicitanteError("Error al cargar solicitantes");
+        setGestorOptions([]);
+        setGestorError("Error al cargar gestores");
+        setValidadorOptions([]);
+        setValidadorError("Error al cargar validadores");
+        setTareasCatalogo([]);
+        setTareasCatalogoError("Error al cargar tareas.");
+      })
+      .finally(() => {
+        if (!activo) {
+          return;
+        }
+
+        setEmpleadosLoading(false);
+        setSolicitanteLoading(false);
+        setGestorLoading(false);
+        setValidadorLoading(false);
+      });
+
+    return () => {
+      activo = false;
+    };
+  }, [idCargo, idEmpleado, panelAbierto, vistaGastos]);
+
+  // Los filtros Cliente/Proyecto/Site/Tipo de trabajo de la pestaña Consulta salen
+  // del catálogo operativo, no de los registros cargados en el grid.
+  useEffect(() => {
+    if (vistaGastos !== "consulta" || filtrosOperativosCatalogo.length > 0) {
+      return;
+    }
+
+    let activo = true;
+    void getFiltrosOperativos()
+      .then((data) => {
+        if (activo) setFiltrosOperativosCatalogo(Array.isArray(data) ? data : []);
+      })
+      .catch(() => {
+        if (activo) setFiltrosOperativosCatalogo([]);
+      });
+
+    return () => {
+      activo = false;
+    };
+  }, [filtrosOperativosCatalogo.length, vistaGastos]);
+
+  // Algunos registros históricos llegan desde Planilla con el nombre del
+  // usuario. Al estar disponible el catálogo, se conserva la etiqueta y se
+  // reemplaza el valor enviado por su código numérico.
+  useEffect(() => {
+    setForm((prev) => {
+      const solicitante = resolveConstanteStoredValue(solicitanteOptions, prev.solicitante, prev.solicitanteLabel);
+      const gestor = resolveConstanteStoredValue(gestorOptions, prev.gestor, prev.gestorLabel);
+      const validador = resolveConstanteStoredValue(validadorOptions, prev.validador, prev.validadorLabel);
+
+      if (solicitante === prev.solicitante && gestor === prev.gestor && validador === prev.validador) {
+        return prev;
+      }
+
+      return { ...prev, solicitante, gestor, validador };
+    });
+  }, [gestorOptions, solicitanteOptions, setForm, validadorOptions]);
+
+  useEffect(() => {
+    // Al registrar un gasto, el solicitante corresponde al empleado de la
+    // sesión. El catálogo llega de forma asíncrona desde el bootstrap, por lo
+    // que se resuelve recién cuando sus opciones están disponibles.
+    if (
+      !panelAbierto ||
+      modo !== "nuevo" ||
+      form.solicitante ||
+      idEmpleado <= 0 ||
+      solicitanteOptions.length === 0
+    ) {
+      return;
+    }
+
+    const solicitanteSesion = solicitanteOptions.find(
+      (option) => Number(getConstanteStoredValue(option)) === idEmpleado
+    );
+
+    if (!solicitanteSesion) {
+      return;
+    }
+
+    setForm((prev) => {
+      if (prev.solicitante) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        solicitante: getConstanteStoredValue(solicitanteSesion),
+        solicitanteLabel: solicitanteSesion.label,
+      };
+    });
+  }, [form.solicitante, idEmpleado, modo, panelAbierto, setForm, solicitanteOptions]);
+
+  const empleadosSafe = Array.isArray(empleados) ? empleados : [];
+  const gastosSafe = Array.isArray(gastos) ? gastos : [];
+  const responsableSeleccionado = empleadosSafe.find(
+    (empleado) =>
+      String(empleado.idEmpleado) === String(form.responsable) &&
+      (!form.idBancoCta || getIdBancoCtaValue(empleado) === String(form.idBancoCta)),
+  ) ?? empleadosSafe.find((empleado) => String(empleado.idEmpleado) === String(form.responsable));
+  const tipoCuentaNuevoResponsable = getConstanteLabel(tipoCuentaOptions, nuevoResponsable.tipoCuenta) || nuevoResponsable.tipoCuenta;
+  const bancoNuevoResponsable = getConstanteLabel(bancoOptions, nuevoResponsable.banco) || nuevoResponsable.banco;
+  const existeCuentaResponsableDuplicada = Boolean(
+    nuevoResponsable.nroDocumento.trim() &&
+    tipoCuentaNuevoResponsable.trim() &&
+    bancoNuevoResponsable.trim(),
+  ) && empleadosSafe.some((empleado) =>
+    (modoResponsableForm !== "editar" || getIdBancoCtaValue(empleado) !== String(form.idBancoCta)) &&
+    normalizarNombreResponsable(empleado.nroDocumento) === normalizarNombreResponsable(nuevoResponsable.nroDocumento) &&
+    normalizarNombreResponsable(empleado.nombreCta) === normalizarNombreResponsable(tipoCuentaNuevoResponsable) &&
+    normalizarNombreResponsable(empleado.nombreBanco) === normalizarNombreResponsable(bancoNuevoResponsable),
+  );
+
+  useEffect(() => {
+    const nombre = nuevoResponsable.nombre.trim();
+    if (!mostrarNuevoResponsable || nombre.length < 3) {
+      setCoincidenciasNuevoResponsable([]);
+      setBusquedaNuevoResponsableError(null);
+      setBuscandoNuevoResponsable(false);
+      return undefined;
+    }
+
+    let vigente = true;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(async () => {
+      setBuscandoNuevoResponsable(true);
+      setBusquedaNuevoResponsableError(null);
+      try {
+        const data = await buscarEmpleadosResponsables(nombre, controller.signal);
+        if (!vigente) return;
+        setCoincidenciasNuevoResponsable(
+          Array.from(new Set(data
+            .map((item) => item.nombreEmpleado || item.nombre || "")
+            .map((item) => item.trim())
+            .filter(Boolean))),
+        );
+      } catch (error) {
+        if (!vigente || controller.signal.aborted) return;
+        setCoincidenciasNuevoResponsable([]);
+        setBusquedaNuevoResponsableError(getHttpErrorMessage(error, "No se pudo buscar responsables."));
+      } finally {
+        if (vigente) setBuscandoNuevoResponsable(false);
+      }
+    }, 300);
+
+    return () => {
+      vigente = false;
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [mostrarNuevoResponsable, nuevoResponsable.nombre]);
+
+  const guardarNuevoResponsable = async () => {
+    const esEdicion = modoResponsableForm === "editar";
+    const request = {
+      idBancoCta: esEdicion && Number(form.idBancoCta) > 0 ? Number(form.idBancoCta) : undefined,
+      nombre: nuevoResponsable.nombre.trim(),
+      cuenta: nuevoResponsable.cuenta.trim(),
+      cuentaInter: nuevoResponsable.cuentaInter.trim(),
+      tipoCuenta: nuevoResponsable.tipoCuenta.trim(),
+      nombreCta: tipoCuentaNuevoResponsable.trim(),
+      banco: bancoNuevoResponsable.trim(),
+      idBanco: nuevoResponsable.banco.trim(),
+      nroDocumento: nuevoResponsable.nroDocumento.trim(),
+    };
+
+    if ([request.nombre, request.cuenta, request.cuentaInter, request.tipoCuenta, request.nombreCta, request.banco, request.idBanco, request.nroDocumento].some((value) => !value)) {
+      setNuevoResponsableError("Complete todos los datos del responsable.");
+      return;
+    }
+
+    const requestActualizar: EmpleadoResponsableActualizarRequest | null = esEdicion
+      && cuentaResponsableOriginal.idBanco
+      && cuentaResponsableOriginal.cuenta
+      && cuentaResponsableOriginal.nombreCta
+      ? {
+        ...request,
+        idBancoActual: cuentaResponsableOriginal.idBanco,
+        cuentaActual: cuentaResponsableOriginal.cuenta,
+        nombreCtaActual: cuentaResponsableOriginal.nombreCta,
+      }
+      : null;
+
+    if (esEdicion && !requestActualizar) {
+      setNuevoResponsableError("No se pudieron identificar los datos actuales de la cuenta seleccionada. Vuelva a seleccionar el responsable.");
+      return;
+    }
+
+    if (existeCuentaResponsableDuplicada) {
+      setNuevoResponsableError("Ya existe una cuenta registrada con el mismo documento, tipo de cuenta y banco.");
+      return;
+    }
+
+    setGuardandoNuevoResponsable(true);
+    setNuevoResponsableError(null);
+    try {
+      if (esEdicion) {
+        const idEmpleado = Number(form.responsable);
+        if (!Number.isInteger(idEmpleado) || idEmpleado <= 0) {
+          setNuevoResponsableError("Seleccione un responsable válido para editar.");
+          return;
+        }
+        await actualizarEmpleadoResponsable(idEmpleado, requestActualizar!);
+      } else {
+        await insertarEmpleadoResponsable(request);
+      }
+      const bootstrap = await getGastosBootstrap({
+        idCargo: idCargo > 0 ? idCargo : null,
+        idEmpleado: idEmpleado > 0 ? idEmpleado : null,
+        forzarActualizacion: true,
+      });
+      const responsablesActualizados = Array.isArray(bootstrap.empleados) ? bootstrap.empleados : [];
+      setEmpleados(responsablesActualizados);
+
+      const responsableCreado = responsablesActualizados.find(
+        (empleado) =>
+          (esEdicion
+            ? String(empleado.idEmpleado) === String(form.responsable)
+            : empleado.nombreEmpleado.trim().toLocaleLowerCase() === request.nombre.toLocaleLowerCase()) &&
+          empleado.cuenta.trim() === request.cuenta,
+      );
+
+      if (responsableCreado) {
+        const cuentaMetadata = buildCuentaMetadata(responsableCreado);
+        setForm((previous) => ({
+          ...previous,
+          responsable: String(responsableCreado.idEmpleado),
+          responsableLabel: responsableCreado.nombreEmpleado,
+          idSuministroProvisional: "",
+          idBancoCta: getIdBancoCtaValue(responsableCreado),
+          cuenta: buildCuentaResumen(responsableCreado),
+          cuentaNumero: cuentaMetadata.cuentaNumero,
+          cuentaInter: cuentaMetadata.cuentaInter,
+          nombreCta: cuentaMetadata.nombreCta,
+          ruc: cuentaMetadata.ruc,
+        }));
+        setResponsableInput(responsableCreado.nombreEmpleado);
+      }
+
+      setNuevoResponsable(NUEVO_RESPONSABLE_INICIAL);
+      setModoResponsableForm("nuevo");
+      setCuentaResponsableOriginal(CUENTA_RESPONSABLE_ORIGINAL_INICIAL);
+      setMostrarNuevoResponsable(false);
+    } catch (error) {
+      setNuevoResponsableError(getHttpErrorMessage(error, "No se pudo registrar el responsable."));
+    } finally {
+      setGuardandoNuevoResponsable(false);
+    }
+  };
+
+  // La consulta de Planilla conserva la cuenta, pero no siempre IdBancoCta.
+  // Al cargar el catálogo, completar sólo ese identificador para el gasto abierto.
+  useEffect(() => {
+    if (!form.responsable || Number(form.idBancoCta) > 0 || empleadosSafe.length === 0) {
+      return;
+    }
+
+    const empleadoResponsable = empleadosSafe.find(
+      (emp) => String(emp.idEmpleado) === String(form.responsable)
+    );
+    const idBancoCta = empleadoResponsable ? getIdBancoCtaValue(empleadoResponsable) : "";
+
+    if (!empleadoResponsable || !idBancoCta) {
+      return;
+    }
+
+    const cuentaMetadata = buildCuentaMetadata(empleadoResponsable);
+    setForm((previous) => {
+      if (String(previous.responsable) !== String(empleadoResponsable.idEmpleado) || Number(previous.idBancoCta) > 0) {
+        return previous;
+      }
+
+      return {
+        ...previous,
+        responsableLabel: previous.responsableLabel || empleadoResponsable.nombreEmpleado,
+        idBancoCta,
+        cuenta: previous.cuenta || buildCuentaResumen(empleadoResponsable),
+        cuentaNumero: previous.cuentaNumero || cuentaMetadata.cuentaNumero,
+        cuentaInter: previous.cuentaInter || cuentaMetadata.cuentaInter,
+        nombreCta: previous.nombreCta || cuentaMetadata.nombreCta,
+        ruc: previous.ruc || cuentaMetadata.ruc,
+      };
+    });
+  }, [empleadosSafe, form.idBancoCta, form.responsable, setForm]);
+
+  const filteredResponsables =
+    responsableInput.trim() === ""
+      ? empleadosSafe
+      : empleadosSafe.filter((emp) =>
+          matchesFlexibleSearch(buildResponsableDisplay(emp), responsableInput)
+        );
+
+  const filteredSolicitantes =
+    solicitanteInput.trim() === ""
+      ? solicitanteOptions
+      : solicitanteOptions.filter((option) => matchesFlexibleSearch(option.label, solicitanteInput));
+
+  const filteredGestores =
+    gestorInput.trim() === ""
+      ? gestorOptions
+      : gestorOptions.filter((option) => matchesFlexibleSearch(option.label, gestorInput));
+
+  const filteredValidadores =
+    validadorInput.trim() === ""
+      ? validadorOptions
+      : validadorOptions.filter((option) => matchesFlexibleSearch(option.label, validadorInput));
+  const esModoVisualizacion = modo === "ver";
+  // Gasto PAGADO (4) en edición: solo Bien, Serie, Tipo de pago y adjuntar factura.
+  const edicionPagadoRestringida = modo === "editar" && Number(form.estado) === 4;
+  const camposEditorRef = useRef<HTMLDivElement | null>(null);
+
+  // Bloquea (también por teclado) todo control del editor fuera de los marcados con data-editable-pagado.
+  useEffect(() => {
+    const root = camposEditorRef.current;
+    if (!root) return;
+    root.querySelectorAll<HTMLElement>("input, select, textarea, button").forEach((el) => {
+      const control = el as HTMLInputElement;
+      if (edicionPagadoRestringida) {
+        if (!control.disabled && !el.closest("[data-editable-pagado]")) {
+          control.disabled = true;
+          el.setAttribute("data-bloq-pagado", "1");
+        }
+      } else if (el.getAttribute("data-bloq-pagado")) {
+        control.disabled = false;
+        el.removeAttribute("data-bloq-pagado");
+      }
+    });
+  });
+
+  const valoresGastoRequestKey = useMemo(() => {
+    const request = buildValoresGastoRequest(form.filtroOperativo);
+
+    if (!request) {
+      return "";
+    }
+
+    return JSON.stringify(request);
+  }, [form.filtroOperativo]);
+
+  const suministroVigenteLookupKey = useMemo(
+    () =>
+      JSON.stringify({
+        filtroKey: form.filtroOperativo.filtro?.filtroKey ?? "",
+        idCliente: form.filtroOperativo.filtro?.idCliente ?? 0,
+        idProyecto: form.filtroOperativo.filtro?.idProyecto ?? 0,
+        idSite: form.filtroOperativo.filtro?.idSite ?? "",
+        correlativo: form.filtroOperativo.filtro?.correlativo ?? 0,
+        tipoTrabajo: form.filtroOperativo.tipoTrabajo?.tipoTrabajo ?? "",
+        ot: form.filtroOperativo.ot?.ot ?? "",
+        idTarea: form.filtroOperativo.tarea?.correlativo ?? 0,
+      }),
+    [form.filtroOperativo]
+  );
+
+  useEffect(() => {
+    const label = getConstanteLabelOrFallback(
+      solicitanteOptions,
+      form.solicitante,
+      form.solicitanteLabel
+    );
+    setSolicitanteInput(label);
+  }, [form.solicitante, form.solicitanteLabel, solicitanteOptions]);
+
+  useEffect(() => {
+    const label = getConstanteLabelOrFallback(
+      validadorOptions,
+      form.validador,
+      form.validadorLabel
+    );
+    setValidadorInput(label);
+  }, [form.validador, form.validadorLabel, validadorOptions]);
+
+  // Viáticos: la tarea VIATICO es la única permitida y queda por defecto.
+  useEffect(() => {
+    if (!panelAbierto || modo !== "nuevo" || form.filtroOperativo.tarea) {
+      return;
+    }
+
+    const viatico = tareasCatalogo.find(esTareaViatico);
+
+    if (!viatico) {
+      return;
+    }
+
+    setForm((prev) =>
+      prev.filtroOperativo.tarea
+        ? prev
+        : { ...prev, filtroOperativo: { ...prev.filtroOperativo, tarea: viatico } }
+    );
+  }, [panelAbierto, modo, form.filtroOperativo.tarea, tareasCatalogo]);
+
+  useEffect(() => {
+    const correlativo = form.filtroOperativo.tarea?.correlativo;
+
+    if (correlativo == null || tareasCatalogo.length === 0) {
+      return;
+    }
+
+    const tareaLabel = getTareaLabelOrFallback(
+      tareasCatalogo,
+      correlativo,
+      form.filtroOperativo.tarea?.tarea
+    );
+
+    if (!tareaLabel || form.filtroOperativo.tarea?.tarea === tareaLabel) {
+      return;
+    }
+
+    setForm((prev) => {
+      if (prev.filtroOperativo.tarea?.correlativo !== correlativo || !prev.filtroOperativo.tarea) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        filtroOperativo: {
+          ...prev.filtroOperativo,
+          tarea: {
+            ...prev.filtroOperativo.tarea,
+            tarea: tareaLabel,
+          },
+        },
+      };
+    });
+  }, [form.filtroOperativo.tarea?.correlativo, form.filtroOperativo.tarea?.tarea, tareasCatalogo]);
+
+  useEffect(() => {
+    if (!panelAbierto || modo !== "editar" || !valoresGastoRequestKey) {
+      return;
+    }
+
+    void cargarValoresGasto(form.filtroOperativo);
+  }, [panelAbierto, modo, valoresGastoRequestKey]);
+
+  useEffect(() => {
+    if (!panelAbierto) {
+      ultimoSuministroVigenteLookupKeyRef.current = "";
+      preservarSuministroEdicionRef.current = false;
+      setSuministrosVigentes([]);
+      setSuministrosVigentesLoading(false);
+      setSuministrosVigentesError(null);
+      return;
+    }
+
+    const filtro = form.filtroOperativo.filtro;
+    const idCliente = toNumberOrZero(filtro?.idCliente);
+    const idProyecto = toNumberOrZero(filtro?.idProyecto);
+    const idSite = String(filtro?.idSite ?? "").trim();
+    const correSite = toNumberOrZero(filtro?.correlativo);
+    const tipoTrabajo = form.filtroOperativo.tipoTrabajo?.tipoTrabajo?.trim() ?? "";
+    const idTarea = toNumberOrZero(form.filtroOperativo.tarea?.correlativo);
+    const requiereCombo = requiereSuministroVigente(idTarea);
+    const conservarSeleccionActual =
+      (modo === "editar" || preservarSuministroEdicionRef.current) &&
+      Boolean(form.idSuministroProvisional?.trim()) &&
+      suministrosVigentes.some(
+        (item) => String(item.idProvisional) === form.idSuministroProvisional.trim()
+      );
+
+    if (!requiereCombo || idCliente <= 0 || idProyecto <= 0 || !idSite || correSite <= 0 || !tipoTrabajo) {
+      if (!conservarSeleccionActual) {
+        ultimoSuministroVigenteLookupKeyRef.current = "";
+        setSuministrosVigentes([]);
+      }
+      setSuministrosVigentesLoading(false);
+      setSuministrosVigentesError(null);
+      if (!conservarSeleccionActual) {
+        setForm((prev) => (prev.idSuministroProvisional ? { ...prev, idSuministroProvisional: "" } : prev));
+      }
+      return;
+    }
+
+    const lookupCambioReal =
+      ultimoSuministroVigenteLookupKeyRef.current !== "" &&
+      ultimoSuministroVigenteLookupKeyRef.current !== suministroVigenteLookupKey;
+    ultimoSuministroVigenteLookupKeyRef.current = suministroVigenteLookupKey;
+
+    let activo = true;
+    setSuministrosVigentesLoading(true);
+    setSuministrosVigentesError(null);
+    if (lookupCambioReal) {
+      setForm((prev) => (prev.idSuministroProvisional ? { ...prev, idSuministroProvisional: "" } : prev));
+    }
+
+    httpClient
+      .get<SuministroProvisionalVigenteOption[]>(`${GASTOS_API_URL}/suministros-vigentes`, {
+        params: {
+          idCliente,
+          idProyecto,
+          idSite,
+          correSite,
+          tipoTrabajo,
+        },
+      })
+      .then((data) => {
+        if (!activo) {
+          return;
+        }
+
+        const items = Array.isArray(data) ? data : [];
+        const valorActual = form.idSuministroProvisional?.trim();
+        const fallbackActual =
+          (modo === "editar" || preservarSuministroEdicionRef.current) && valorActual
+            ? {
+                idProvisional: Number(valorActual),
+                fechaInicio: form.fechaInicioSuministroProvisional || undefined,
+              }
+            : null;
+
+        const itemsNormalizados =
+          fallbackActual &&
+          Number.isFinite(fallbackActual.idProvisional) &&
+          !items.some((item) => String(item.idProvisional) === String(fallbackActual.idProvisional))
+            ? [fallbackActual, ...items]
+            : items;
+
+        setSuministrosVigentes(itemsNormalizados);
+        preservarSuministroEdicionRef.current = false;
+        setForm((prev) => {
+          if (!prev.idSuministroProvisional) {
+            return prev;
+          }
+
+          const existeSeleccion = itemsNormalizados.some(
+            (item) => String(item.idProvisional) === prev.idSuministroProvisional
+          );
+
+          return existeSeleccion ? prev : { ...prev, idSuministroProvisional: "" };
+        });
+      })
+      .catch(() => {
+        if (!activo) {
+          return;
+        }
+
+        setSuministrosVigentes([]);
+        setSuministrosVigentesError("No se pudo cargar el suministro provisional vigente.");
+      })
+      .finally(() => {
+        if (!activo) {
+          return;
+        }
+
+        setSuministrosVigentesLoading(false);
+      });
+
+    return () => {
+      activo = false;
+    };
+  }, [
+    panelAbierto,
+    suministroVigenteLookupKey,
+    setForm,
+  ]);
+
+  const cargarValoresGasto = async (filtroOperativo: FiltroOperativoValue) => {
+    const request = buildValoresGastoRequest(filtroOperativo);
+
+    if (!request) {
+      //console.log("[Gastos] No se ejecuta sp_Finanzas_CargarValoresGasto porque faltan parámetros válidos.", {
+      //  filtroOperativo,
+      //});
+      valoresGastoRequestRef.current += 1;
+      setValoresGastoLoading(false);
+      setValoresGasto(VALORES_GASTO_INICIALES);
+      return;
+    }
+
+    //console.log("[Gastos] Parámetros enviados a sp_Finanzas_CargarValoresGasto", request);
+
+    const currentRequestId = valoresGastoRequestRef.current + 1;
+    valoresGastoRequestRef.current = currentRequestId;
+    setValoresGastoLoading(true);
+
+    try {
+      const response = await getValoresGasto(request);
+      //console.log("[Gastos] Respuesta de valores de gasto", response);
+
+      if (valoresGastoRequestRef.current !== currentRequestId) {
+        return;
+      }
+
+      setValoresGasto({
+        porcentaje: toNumberOrZero(response.porcentaje),
+        aprobado: toNumberOrZero(response.aprobado),
+        pagado: toNumberOrZero(response.pagado),
+        adelantado: toNumberOrZero(response.adelantado),
+        saldo2: toNumberOrZero(response.saldo2),
+        saldo: toNumberOrZero(response.saldo),
+      });
+    } catch {
+      //console.error("[Gastos] Error al consultar sp_Finanzas_CargarValoresGasto", request);
+      if (valoresGastoRequestRef.current !== currentRequestId) {
+        return;
+      }
+
+      setValoresGasto(VALORES_GASTO_INICIALES);
+    } finally {
+      if (valoresGastoRequestRef.current === currentRequestId) {
+        setValoresGastoLoading(false);
+      }
+    }
+  };
+
+  const subtotal = Number(form.monto);
+  const hasSubtotal = form.monto.trim() !== "" && Number.isFinite(subtotal);
+  const subtotalAmount = hasSubtotal ? subtotal : 0;
+  const igvAmount = roundToTwoDecimals(
+    subtotalAmount * tasaIgvPorComprobante(comprobanteOptions, form.comprobante)
+  );
+  const totalAmount = roundToTwoDecimals(subtotalAmount + igvAmount);
+  // Las rutas históricas de Planilla se guardan relativas a la biblioteca de
+  // SharePoint. Siempre se resuelven contra la base corporativa, incluso al
+  // visualizar, para evitar que el navegador las interprete como rutas SPA.
+  const facturaSourcePath = getFacturaDisplayPath(form.facturaPath, form.facturaUrl);
+  const facturaDisplayPath = buildSharePointUrl(facturaSourcePath);
+  const facturaMediaType = getFacturaMediaType(facturaDisplayPath);
+
+  useEffect(() => {
+    if (!showFacturaViewer || !facturaSourcePath) {
+      setFacturaViewerUrl("");
+      setFacturaViewerError("");
+      setFacturaViewerLoading(false);
+      return;
+    }
+
+    let activo = true;
+    let objectUrl = "";
+    setFacturaViewerLoading(true);
+    setFacturaViewerError("");
+
+    void httpClient
+      .get<Blob>(`${GASTOS_API_URL}/factura`, {
+        params: { ruta: facturaSourcePath },
+        responseType: "blob",
+      })
+      .then((archivo) => {
+        if (!activo) return;
+        objectUrl = URL.createObjectURL(archivo);
+        setFacturaViewerUrl(objectUrl);
+      })
+      .catch(() => {
+        if (activo) {
+          // SharePoint may deny embedding even though the current user can open
+          // the file directly. In that case, open its native viewer in a new
+          // tab (PDFs and images are both supported).
+          const sharePointTab = window.open(facturaDisplayPath, "_blank", "noopener,noreferrer");
+          if (!sharePointTab) {
+            window.location.assign(facturaDisplayPath);
+          }
+        }
+      })
+      .finally(() => {
+        if (activo) setFacturaViewerLoading(false);
+      });
+
+    return () => {
+      activo = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [facturaDisplayPath, facturaSourcePath, showFacturaViewer]);
+
+  const subirFactura = async (file: File) => {
+    const formData = new FormData();
+    formData.append("archivo", file);
+
+    if (form.id) {
+      formData.append("gastoId", String(form.id));
+    }
+
+    if (form.filtroOperativo.filtro?.filtroKey) {
+      formData.append("filtroOperativoKey", form.filtroOperativo.filtro.filtroKey);
+    }
+
+    if (form.serie) {
+      formData.append("serie", form.serie);
+    }
+
+    if (form.responsable) {
+      formData.append("responsable", form.responsable);
+    }
+
+    return httpClient.post<FacturaUploadResponse>(FACTURA_UPLOAD_API_URL, formData);
+  };
+
+  const procesarFacturaSeleccionada = async (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    setShowFacturaSourceMenu(false);
+
+    if (!file) {
+      return;
+    }
+
+    setFacturaUploadLoading(true);
+    setFacturaUploadError(null);
+
+    try {
+      const optimizedFile = await compressImageForUpload(file);
+      const response = await subirFactura(optimizedFile);
+      setForm((prev) => ({
+        ...prev,
+        facturaUrl: response.fileUrl || "",
+        facturaPath: response.storagePath || response.fileUrl || "",
+      }));
+    } catch (error) {
+      const errorMessage =
+        typeof error === "object" &&
+        error !== null &&
+        "response" in error &&
+        typeof (error as { response?: { data?: { message?: string } } }).response?.data?.message ===
+          "string"
+          ? (error as { response?: { data?: { message?: string } } }).response?.data?.message
+          : null;
+      setFacturaUploadError(errorMessage || "No se pudo cargar la factura en SharePoint.");
+    } finally {
+      setFacturaUploadLoading(false);
+    }
+  };
+
+  const abrirNuevo = () => {
+    // Un error de carga anterior no debe aparecer en un nuevo registro.
+    setErrorGuardado("");
+    setModo("nuevo");
+    setGastoEditorTab("principal");
+    setHistorialSitioExpanded(false);
+    setHistorialSitioView("listado");
+    setHistorialSitioSolicitante("");
+    setHistorialSitioDetalleActivo(null);
+    valoresGastoRequestRef.current += 1;
+    setValoresGastoLoading(false);
+    setValoresGasto(VALORES_GASTO_INICIALES);
+    setForm({
+      ...formularioInicial,
+      fecIngreso: fechaActual,
+      fechaEmision: fechaActual,
+      fechaVencimiento: "",
+    });
+    setUsarFechaEmision(true);
+    setUsarFechaVencimiento(false);
+    setGestorInput("");
+    setShowGestorDropdown(false);
+    setHighlightedGestorIdx(-1);
+    setValidadorInput("");
+    setShowValidadorDropdown(false);
+    setHighlightedValidadorIdx(-1);
+    setSolicitanteInput("");
+    setShowSolicitanteDropdown(false);
+    setHighlightedSolicitanteIdx(-1);
+    setResponsableInput("");
+    setHighlightedResponsableIdx(-1);
+    setShowResponsableDropdown(false);
+    setSuministrosVigentes([]);
+    setSuministrosVigentesLoading(false);
+    setSuministrosVigentesError(null);
+    setErrores({});
+    setShowFacturaSourceMenu(false);
+    setFacturaUploadError(null);
+    setPanelAbierto(true);
+    // Actualizar valores de gasto (porcentaje, etc.) al crear nuevo
+    void cargarValoresGasto(formularioInicial.filtroOperativo);
+  };
+
+  const abrirEditar = (gasto: GastoForm) => {
+    setGastoEditorTab("detalle-sitio");
+    setHistorialSitioExpanded(false);
+    setHistorialSitioView("listado");
+    setHistorialSitioSolicitante("");
+    setHistorialSitioDetalleActivo(null);
+    setConstantesRefreshKey((current) => current + 1);
+    const tareaCorrelativo = gasto.filtroOperativo.tarea?.correlativo;
+    const tareaNombre = getTareaLabelOrFallback(
+      tareasCatalogo,
+      tareaCorrelativo,
+      gasto.filtroOperativo.tarea?.tarea
+    );
+    const facturaEditFields = resolveFacturaFields({
+      facturaUrl: gasto.facturaUrl,
+      facturaPath: gasto.facturaPath,
+      rutaFactura: gasto.rutaFactura,
+      rutaFacturaOriginal: gasto.rutaFacturaOriginal,
+      rutaFacturaUrl: gasto.rutaFacturaUrl,
+      rutaFacturaEnviada: gasto.rutaFacturaEnviada,
+    });
+    // Copiar todos los campos relevantes, asegurando comentario y rutas de imagen
+    const gastoEditable: GastoForm = {
+      ...gasto,
+      comentario: gasto.comentario ?? "",
+      rutaFactura: gasto.rutaFactura ?? "",
+      rutaFacturaOriginal: gasto.rutaFacturaOriginal ?? "",
+      rutaFacturaUrl: gasto.rutaFacturaUrl ?? "",
+      rutaFacturaEnviada: gasto.rutaFacturaEnviada ?? "",
+      filtroOperativo: {
+        filtro: gasto.filtroOperativo.filtro ? { ...gasto.filtroOperativo.filtro } : undefined,
+        tipoTrabajo: gasto.filtroOperativo.tipoTrabajo ? { ...gasto.filtroOperativo.tipoTrabajo } : undefined,
+        ot: gasto.filtroOperativo.ot ? { ...gasto.filtroOperativo.ot } : undefined,
+        tarea: gasto.filtroOperativo.tarea
+          ? {
+              ...gasto.filtroOperativo.tarea,
+              tarea: tareaNombre,
+            }
+          : undefined,
+      },
+      fecIngreso: normalizeFecIngresoFromStore(gasto.fecIngreso || gasto.fechaEmision),
+      fechaEmision: normalizeDateForInput(gasto.fechaEmision),
+      fechaVencimiento: normalizeDateForInput(gasto.fechaVencimiento),
+      facturaUrl: facturaEditFields.facturaUrl,
+      facturaPath: facturaEditFields.facturaPath,
+    };
+
+    gastoEditable.solicitante = resolveEmpleadoCjStoredValue(
+      solicitanteOptions,
+      gastoEditable.solicitante,
+      gastoEditable.solicitanteLabel
+    );
+    gastoEditable.gestor = resolveEmpleadoCjStoredValue(
+      gestorOptions,
+      gastoEditable.gestor,
+      gastoEditable.gestorLabel
+    );
+    gastoEditable.validador = resolveEmpleadoCjStoredValue(
+      validadorOptions,
+      gastoEditable.validador,
+      gastoEditable.validadorLabel
+    );
+
+    setModo("editar");
+    preservarSuministroEdicionRef.current = Boolean(gastoEditable.idSuministroProvisional);
+    valoresGastoRequestRef.current += 1;
+    setValoresGastoLoading(false);
+    setValoresGasto(VALORES_GASTO_INICIALES);
+    setSuministrosVigentes(
+      gastoEditable.idSuministroProvisional
+        ? [
+            {
+              idProvisional: Number(gastoEditable.idSuministroProvisional),
+              fechaInicio: gastoEditable.fechaInicioSuministroProvisional || undefined,
+            },
+          ]
+        : []
+    );
+    setForm(gastoEditable);
+    setUsarFechaEmision(Boolean(gastoEditable.fechaEmision));
+    setUsarFechaVencimiento(Boolean(gastoEditable.fechaVencimiento));
+    setGestorInput(getConstanteLabel(gestorOptions, gastoEditable.gestor));
+    setShowGestorDropdown(false);
+    setHighlightedGestorIdx(-1);
+    setValidadorInput(
+      getConstanteLabelOrFallback(
+        validadorOptions,
+        gastoEditable.validador,
+        gastoEditable.validadorLabel
+      )
+    );
+    setShowValidadorDropdown(false);
+    setHighlightedValidadorIdx(-1);
+    setSolicitanteInput(
+      getConstanteLabelOrFallback(
+        solicitanteOptions,
+        gastoEditable.solicitante,
+        gastoEditable.solicitanteLabel
+      )
+    );
+    setShowSolicitanteDropdown(false);
+    setHighlightedSolicitanteIdx(-1);
+    const empleadoResponsable = empleadosSafe.find(
+      (emp) => String(emp.idEmpleado) === gastoEditable.responsable
+    );
+    const responsableNombre =
+      empleadoResponsable?.nombreEmpleado || gastoEditable.responsableLabel || "";
+
+    if (empleadoResponsable) {
+      const cuentaMetadata = buildCuentaMetadata(empleadoResponsable);
+      gastoEditable.idBancoCta = gastoEditable.idBancoCta || getIdBancoCtaValue(empleadoResponsable);
+      gastoEditable.cuenta = gastoEditable.cuenta || buildCuentaResumen(empleadoResponsable);
+      gastoEditable.cuentaNumero = gastoEditable.cuentaNumero || cuentaMetadata.cuentaNumero;
+      gastoEditable.cuentaInter = gastoEditable.cuentaInter || cuentaMetadata.cuentaInter;
+      gastoEditable.nombreCta = gastoEditable.nombreCta || cuentaMetadata.nombreCta;
+      gastoEditable.ruc = gastoEditable.ruc || cuentaMetadata.ruc;
+    }
+
+    setResponsableInput(responsableNombre);
+    setHighlightedResponsableIdx(-1);
+    setShowResponsableDropdown(false);
+    setErrores({});
+    setShowFacturaSourceMenu(false);
+    setFacturaUploadError(null);
+    setPanelAbierto(true);
+    // Actualizar valores de gasto (porcentaje, etc.) al editar
+    void cargarValoresGasto(gastoEditable.filtroOperativo);
+  };
+
+  const abrirVisualizar = (gasto: GastoForm) => {
+    abrirEditar(gasto);
+    setModo("ver");
+  };
+
+  const cerrarPanel = () => {
+    setErrorGuardado("");
+    setPanelAbierto(false);
+    setGastoEditorTab("principal");
+    setHistorialSitioExpanded(false);
+    setHistorialSitioSolicitante("");
+    setHistorialSitioDetalleActivo(null);
+    valoresGastoRequestRef.current += 1;
+    setValoresGastoLoading(false);
+    setValoresGasto(VALORES_GASTO_INICIALES);
+    setForm(formularioInicial);
+    setUsarFechaEmision(true);
+    setUsarFechaVencimiento(false);
+    setGestorInput("");
+    setShowGestorDropdown(false);
+    setHighlightedGestorIdx(-1);
+    setValidadorInput("");
+    setShowValidadorDropdown(false);
+    setHighlightedValidadorIdx(-1);
+    setSolicitanteInput("");
+    setShowSolicitanteDropdown(false);
+    setHighlightedSolicitanteIdx(-1);
+    setResponsableInput("");
+    setHighlightedResponsableIdx(-1);
+    setShowResponsableDropdown(false);
+    setSuministrosVigentes([]);
+    setSuministrosVigentesLoading(false);
+    setSuministrosVigentesError(null);
+    setErrores({});
+    setShowFacturaSourceMenu(false);
+    setFacturaUploadError(null);
+    if (editorOnly) {
+      onEditorClose?.();
+    }
+  };
+
+  useEffect(() => {
+    if (!panelAbierto) {
+      return;
+    }
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+    event.preventDefault();
+      if (historialSitioDetalleActivo !== null) {
+        setHistorialSitioDetalleActivo(null);
+        return;
+      }
+      if (historialSitioExpanded) {
+        setHistorialSitioExpanded(false);
+        return;
+      }
+      if (showFacturaViewer) {
+        setShowFacturaViewer(false);
+        return;
+      }
+      if (showFacturaSourceMenu) {
+        setShowFacturaSourceMenu(false);
+        return;
+      }
+      cerrarPanel();
+    };
+
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [historialSitioDetalleActivo, historialSitioExpanded, panelAbierto, showFacturaSourceMenu, showFacturaViewer]);
+
+  // Al abrir "Nuevo viático" el foco debe quedar en el campo Filtro.
+  useEffect(() => {
+    if (!panelAbierto || modo !== "nuevo") {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => filtroInputRef.current?.focus(), 80);
+    return () => window.clearTimeout(timeoutId);
+  }, [panelAbierto, modo]);
+
+  // Atajo Shift + N: equivale a presionar "Nuevo viático". Se ignora si el panel
+  // ya está abierto, si hay un campo de texto enfocado o si se usan otros modificadores.
+  const abrirNuevoRef = useRef(abrirNuevo);
+  useEffect(() => {
+    abrirNuevoRef.current = abrirNuevo;
+  });
+
+  useEffect(() => {
+    if (editorOnly || panelAbierto) {
+      return;
+    }
+
+    const handleAtajoNuevo = (event: KeyboardEvent) => {
+      if (!event.shiftKey || event.ctrlKey || event.altKey || event.metaKey || event.repeat) {
+        return;
+      }
+
+      if (event.key !== "N" && event.key !== "n") {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) {
+        return;
+      }
+
+      event.preventDefault();
+      abrirNuevoRef.current();
+    };
+
+    document.addEventListener("keydown", handleAtajoNuevo);
+    return () => document.removeEventListener("keydown", handleAtajoNuevo);
+  }, [editorOnly, panelAbierto]);
+
+  const validar = () => {
+    const nuevosErrores: Record<string, string> = {};
+
+    if (!form.filtroOperativo.filtro?.filtroKey) {
+      nuevosErrores.filtroOperativo = "Seleccione un filtro operativo.";
+    }
+
+    if (!form.responsable) {
+      nuevosErrores.responsable = "Seleccione un responsable.";
+    }
+
+    if (!form.filtroOperativo.tarea?.correlativo) {
+      nuevosErrores.tarea = "Seleccione una tarea.";
+    }
+
+    const tieneCuentaRegistrada = Boolean(
+      form.cuentaNumero?.trim() || form.cuenta?.trim() || form.cuentaInter?.trim()
+    );
+    if (form.responsable && Number(form.idBancoCta) <= 0 && !tieneCuentaRegistrada) {
+      nuevosErrores.responsable = "El responsable seleccionado no tiene una cuenta válida.";
+    }
+
+    if (!form.tipoPago) {
+      nuevosErrores.tipoPago = "Seleccione el tipo de pago.";
+    }
+
+    if (!form.monto || isNaN(Number(form.monto))) {
+      nuevosErrores.monto = "Ingrese un monto válido.";
+    }
+
+    if (form.tipoPago && !esConstanteValida(tipoPagoOptions, form.tipoPago)) {
+      nuevosErrores.tipoPago = "Seleccione un tipo de pago valido.";
+    }
+
+    if (form.bien && !esConstanteValida(bienOptions, form.bien)) {
+      nuevosErrores.bien = "Seleccione un bien valido.";
+    }
+
+    if (form.comprobante && !esConstanteValida(comprobanteOptions, form.comprobante)) {
+      nuevosErrores.comprobante = "Seleccione un comprobante valido.";
+    }
+
+    if (form.moneda && !esConstanteValida(monedaOptions, form.moneda)) {
+      nuevosErrores.moneda = "Seleccione una moneda valida.";
+    }
+
+    // Solicitante, gestor y validador deben ser empleados CJ elegidos de los combos (EmpleadoCj),
+    // también al editar: al guardar, el gasto queda con IdWeb = 1.
+    if (!form.solicitante || !esConstanteValida(solicitanteOptions, form.solicitante)) {
+      nuevosErrores.solicitante = "Seleccione un solicitante valido.";
+    }
+
+    if (!form.gestor || !esConstanteValida(gestorOptions, form.gestor)) {
+      nuevosErrores.gestor = "Seleccione un gestor valido.";
+    }
+
+    if (!form.validador || !esConstanteValida(validadorOptions, form.validador)) {
+      nuevosErrores.validador = "Seleccione un validador valido.";
+    }
+
+    setErrores(nuevosErrores);
+    return Object.keys(nuevosErrores).length === 0;
+  };
+
+  const guardar = async () => {
+    if (!validar()) return;
+
+    const guardado = await handleSave();
+    if (!guardado) {
+      return;
+    }
+
+    setPanelAbierto(false);
+    setForm(formularioInicial);
+    setResponsableInput("");
+    setShowFacturaSourceMenu(false);
+    setFacturaUploadError(null);
+    if (editorOnly) {
+      onEditorUpdated?.();
+      onEditorClose?.();
+    }
+  };
+
+  const confirmarEliminar = (gasto: GastoForm, rowIndex: number) => {
+    if (selectedRowKey !== getGastoRowKey(gasto, rowIndex)) {
+      setRechazoError("Seleccione primero el registro que desea rechazar.");
+      return;
+    }
+
+    setRechazoError(null);
+    setIdEliminar(gasto.id);
+    setMotivoRechazo("");
+    setMostrarMotivoRechazo(true);
+  };
+
+  const abrirEditarRef = useRef(abrirEditar);
+  const abrirVisualizarRef = useRef(abrirVisualizar);
+  const confirmarEliminarRef = useRef(confirmarEliminar);
+
+  useEffect(() => {
+    abrirEditarRef.current = abrirEditar;
+    abrirVisualizarRef.current = abrirVisualizar;
+    confirmarEliminarRef.current = confirmarEliminar;
+  }, [abrirEditar, abrirVisualizar, confirmarEliminar]);
+
+  useEffect(() => {
+    if (!editorRequest) {
+      externalEditorRequestKeyRef.current = "";
+      setExternalEditorLoading(false);
+      setExternalEditorError(null);
+      return;
+    }
+
+    const correlativo = Math.trunc(Number(editorRequest.correlativo));
+    const requestKey = `${correlativo}:${editorRequest.mode}`;
+    if (!Number.isFinite(correlativo) || correlativo <= 0) {
+      setExternalEditorError("No se pudo identificar el correlativo del viático.");
+      return;
+    }
+
+    if (externalEditorRequestKeyRef.current === requestKey) {
+      return;
+    }
+
+    const gastoDesdeOrigen = editorRequest.planillaRow
+      ? mapGastoDtoToView(mapPlanillaConsultaRowToGastoDto(editorRequest.planillaRow, 0))
+      : null;
+
+    if (gastoDesdeOrigen && Number(gastoDesdeOrigen.id) === correlativo) {
+      externalEditorRequestKeyRef.current = requestKey;
+      setExternalEditorLoading(false);
+      setExternalEditorError(null);
+
+      if (editorRequest.mode === "ver") {
+        abrirVisualizarRef.current(gastoDesdeOrigen);
+      } else {
+        abrirEditarRef.current(gastoDesdeOrigen);
+      }
+
+      return;
+    }
+
+    externalEditorRequestKeyRef.current = requestKey;
+    let active = true;
+    setExternalEditorLoading(true);
+    setExternalEditorError(null);
+
+    const request = {
+      ...buildPlanillaConsultaEstadosRequest(
+        [{ nombre: "Correlativo", valor: String(correlativo), tipo: "int" }],
+        { baseParams: { idCargo: null, idEmpleado: null } }
+      ),
+      // Pagos v1 consulta Planilla sin los filtros implícitos del usuario.
+      // Se conserva ese mismo contrato al abrir el editor desde esa bandeja.
+      consulta: "pagos-v1",
+    };
+
+    void consultarPlanillaEstados(request, { timeoutMs: 120000 })
+      .then((response) => {
+        if (!active) return;
+
+        const gasto = extraerArray<Record<string, unknown>>(response.rows)
+          .map((row, index) => mapGastoDtoToView(mapPlanillaConsultaRowToGastoDto(row, index)))
+          .find((item) => Number(item.id) === correlativo);
+
+        if (!gasto) {
+          throw new Error(`No se encontró el viático ${correlativo}.`);
+        }
+
+        if (editorRequest.mode === "ver") {
+          abrirVisualizarRef.current(gasto);
+        } else {
+          abrirEditarRef.current(gasto);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        externalEditorRequestKeyRef.current = "";
+        setExternalEditorError(
+          error instanceof Error && error.message
+            ? error.message
+            : "No se pudo cargar el viático seleccionado."
+        );
+      })
+      .finally(() => {
+        if (active) setExternalEditorLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [editorRequest?.correlativo, editorRequest?.mode]);
+
+  const cancelarRechazo = () => {
+    setMostrarMotivoRechazo(false);
+    setMotivoRechazo("");
+    setRechazoError(null);
+    setIdEliminar(null);
+  };
+
+  const eliminar = async () => {
+    if (idEliminar == null || !gastoSeleccionadoEliminar) return;
+
+    if (!motivoRechazo.trim()) {
+      setRechazoError("Debe ingresar el motivo del rechazo.");
+      return;
+    }
+
+    const idSiteRechazo =
+      String(gastoSeleccionadoEliminar.filtroOperativo.filtro?.idSite ?? "").trim() ||
+      String(gastoSeleccionadoEliminar.filtroOperativo.filtro?.nombreSite ?? "").trim();
+
+    if (!idSiteRechazo) {
+      setRechazoError("No se pudo obtener el IdSite del registro seleccionado.");
+      return;
+    }
+
+    try {
+      setRechazando(true);
+      setRechazoError(null);
+
+      await httpClient.post(`${GASTOS_API_URL}/${idEliminar}/rechazar`, {
+        idSite: idSiteRechazo,
+        observacion: motivoRechazo.trim(),
+        idAprobador: idEmpleado > 0 ? idEmpleado : undefined,
+      });
+
+      cancelarRechazo();
+      setSelectedRowKey(null);
+      await cargarGastos();
+    } catch (error) {
+      setRechazoError(getHttpMessage(error, "No se pudo rechazar el registro."));
+    } finally {
+      setRechazando(false);
+    }
+  };
+
+  const gastoSeleccionadoEliminar = gastosSafe.find((x) => x.id === idEliminar);
+
+  const handleBuscarGastos = async () => {
+    if (!tieneFiltrosBusqueda) {
+      setMensajeFiltroCabecera("Seleccione al menos un parámetro para buscar.");
+      return;
+    }
+
+    consultaBuscadaRef.current = true;
+    cargaInicialGastosListaRef.current = true;
+    cargaInicialGastosSolicitadaRef.current = true;
+
+    const snapshot: GastosHeaderFilters = {
+      ...filtrosCabecera,
+      estado: [...filtrosCabecera.estado],
+      cliente: [...filtrosCabecera.cliente],
+      solicitante: [...filtrosCabecera.solicitante],
+      proyecto: [...filtrosCabecera.proyecto],
+      site: [...filtrosCabecera.site],
+      comprobante: [...filtrosCabecera.comprobante],
+      moneda: [...filtrosCabecera.moneda],
+      tipoTrabajo: [...filtrosCabecera.tipoTrabajo],
+      responsable: [...filtrosCabecera.responsable],
+      validador: [...filtrosCabecera.validador],
+    };
+
+    filtrosCabeceraAplicadosRef.current = snapshot;
+    setFiltrosCabeceraAplicados(snapshot);
+    setMensajeFiltroCabecera(null);
+
+    await cargarGastos();
+  };
+
+  // Datos de la pestaña Resumen: todos los estados del rango, montos en la moneda real del recibo.
+  const cargarResumenViaticos = useCallback(
+    async (fechaInicio: string, fechaFin: string): Promise<ViaticoResumenRow[]> => {
+      const estados = Array.from(
+        new Set(
+          estadoOptions
+            .map((estado) => normalizeConstanteValue(estadoOptions, getConstanteStoredValue(estado)).trim())
+            .filter(Boolean)
+        )
+      );
+      // Pagado (4) filtra por fecha de depósito; los demás por fecha de ingreso (ver list()).
+      const grupos =
+        estados.includes("4") && estados.length > 1
+          ? [estados.filter((estado) => estado !== "4").join(","), "4"]
+          : [estados.join(",")];
+      const parametros: PlanillaConsultaParametro[] = [
+        { nombre: "FechaInicio", valor: formatInputDateForPlanillaParametro(fechaInicio), tipo: "date" },
+        { nombre: "FechaFin", valor: formatInputDateForPlanillaParametro(fechaFin), tipo: "date" },
+      ];
+      const unicos = new Map<number, ViaticoResumenRow>();
+
+      for (const grupo of grupos) {
+        const respuesta = await consultarPlanillaEstados({
+          ...buildPlanillaConsultaEstadosRequest(
+            [{ nombre: "Estados", valor: grupo, tipo: "string" }, ...parametros],
+            { baseParams: { idCargo: null, idEmpleado: null } }
+          ),
+          consulta: "gastos-consulta",
+        });
+
+        extraerArray<Record<string, unknown>>(respuesta.rows)
+          .map((row, index) => mapPlanillaConsultaRowToGastoDto(row, index))
+          .forEach((dto) => {
+            unicos.set(dto.id, {
+              id: dto.id,
+              idTarea: dto.idTarea ?? null,
+              fecha: dto.fecIngreso || normalizeDateForInput(dto.fechaDeposito),
+              estado: getEstadoLabel(estadoOptions, dto.estado, dto.estadoLabel),
+              moneda: (dto.monedaLabel || dto.moneda || "").trim(),
+              monto: Number(dto.total ?? dto.monto ?? 0) || 0,
+              cliente: dto.clienteNombre ?? "",
+              proyecto: dto.nombreProyecto ?? "",
+              site: dto.siteNombre ?? "",
+              tipoTrabajo: dto.tipoTrabajo ?? "",
+              solicitante: getConstanteLabelOrFallback(solicitanteOptions, dto.solicitante, dto.solicitanteLabel) || dto.solicitante || "",
+              responsable: dto.responsableLabel || dto.responsable || "",
+            });
+          });
+      }
+
+      return [...unicos.values()];
+    },
+    [estadoOptions, solicitanteOptions]
+  );
+
+  // Cambia entre "Pendientes de hoy" y "Consulta" y recarga con los filtros iniciales de esa vista.
+  const cambiarVistaGastos = async (vista: GastosVista) => {
+    if (vista === vistaGastosRef.current) {
+      return;
+    }
+
+    vistaGastosRef.current = vista;
+    setVistaGastos(vista);
+    // Consulta arranca sin parámetros ni datos; solo se consulta al presionar BUSCAR.
+    consultaBuscadaRef.current = false;
+
+    const hoy = obtenerFechaActual();
+    const filtrosIniciales: GastosHeaderFilters =
+      vista === "consulta"
+        ? { ...GASTOS_HEADER_FILTERS_INITIAL }
+        : { ...GASTOS_HEADER_FILTERS_INITIAL, fechaInicio: hoy, fechaFin: hoy };
+    filtrosCabeceraAplicadosRef.current = filtrosIniciales;
+    setFiltrosCabecera(filtrosIniciales);
+    setFiltrosCabeceraAplicados(filtrosIniciales);
+    setCabeceraFiltroAbierto(null);
+    setMensajeFiltroCabecera(null);
+    setBusqueda("");
+    setSelectedRowKey(null);
+
+    cargaInicialGastosListaRef.current = true;
+    cargaInicialGastosSolicitadaRef.current = true;
+    await cargarGastos();
+  };
+
+  // Solo columnas visibles: id, monto, tipoPago, ot, fecIngreso, fechaVencimiento
+  const camposBusquedaGastos = useMemo<CrudToolbarSearchField<GastoForm>[]>(
+    () => [
+      { key: "id", label: "Id", getValue: (gasto) => gasto.id },
+      { key: "cliente", label: "Cliente", getValue: (gasto) => gasto.filtroOperativo.filtro?.nombreCliente ?? "" },
+      { key: "nombreProyecto", label: "Proyecto", getValue: (gasto) => gasto.filtroOperativo.filtro?.nombreProyecto ?? "" },
+      { key: "site", label: "Site", getValue: (gasto) => gasto.filtroOperativo.filtro?.nombreSite ?? "" },
+      { key: "tipoTrabajo", label: "Tipo Trabajo", getValue: (gasto) => gasto.filtroOperativo.filtro?.tipoTrabajo ?? gasto.filtroOperativo.tipoTrabajo?.tipoTrabajo ?? "" },
+      { key: "tarea", label: "Tarea", getValue: (gasto) => getTareaLabelOrFallback(tareasCatalogo, gasto.filtroOperativo.tarea?.correlativo, gasto.filtroOperativo.tarea?.tarea) },
+      { key: "bien", label: "Bien", getValue: (gasto) => getConstanteLabel(bienOptions, gasto.bien) },
+      { key: "comprobante", label: "Comprobante", getValue: (gasto) => getConstanteLabel(comprobanteOptions, gasto.comprobante) },
+      { key: "monto", label: "Monto", getValue: (gasto) => gasto.monto },
+      { key: "totalPagar", label: "Total Pagar", getValue: (gasto) => gasto.totalPagar ?? "" },
+      { key: "moneda", label: "Moneda", getValue: (gasto) => gasto.monedaLabel || getConstanteLabel(monedaOptions, gasto.moneda) },
+      { key: "banco", label: "Banco", getValue: (gasto) => gasto.banco },
+      { key: "nroOperacion", label: "NroOperacion", getValue: (gasto) => gasto.nroOperacion },
+      { key: "fecIngreso", label: "FecIngreso", getValue: (gasto) => gasto.fecIngreso },
+      { key: "ot", label: "OT", getValue: (gasto) => gasto.filtroOperativo.ot?.ot },
+      { key: "solicitante", label: "Solicitante", getValue: (gasto) => getConstanteLabelOrFallback(solicitanteOptions, gasto.solicitante, gasto.solicitanteLabel) },
+      { key: "responsable", label: "Responsable", getValue: (gasto) => gasto.responsableLabel || gasto.responsable },
+      { key: "validador", label: "Validador", getValue: (gasto) => getConstanteLabelOrFallback(validadorOptions, gasto.validador, gasto.validadorLabel) },
+      { key: "detalle", label: "Detalle", getValue: (gasto) => gasto.detalle },
+      { key: "estado", label: "Estado", getValue: (gasto) => getEstadoLabel(estadoOptions, gasto.estado, gasto.estadoLabel) },
+    ],
+    [bienOptions, comprobanteOptions, estadoOptions, monedaOptions, solicitanteOptions, tareasCatalogo, tipoPagoOptions, validadorOptions]
+  );
+  const getGridColumnValue = React.useCallback(
+    (gasto: GastoForm, key: string): string | number => {
+      switch (key) {
+        case "id":
+          return gasto.id ?? "";
+        case "cliente":
+          return gasto.filtroOperativo.filtro?.nombreCliente ?? "";
+        case "nombreProyecto":
+          return gasto.filtroOperativo.filtro?.nombreProyecto ?? "";
+        case "site":
+          return gasto.filtroOperativo.filtro?.nombreSite ?? "";
+        case "tipoTrabajo":
+          return gasto.filtroOperativo.filtro?.tipoTrabajo ?? gasto.filtroOperativo.tipoTrabajo?.tipoTrabajo ?? "";
+        case "tarea":
+          return getTareaLabelOrFallback(
+            tareasCatalogo,
+            gasto.filtroOperativo.tarea?.correlativo,
+            gasto.filtroOperativo.tarea?.tarea
+          );
+        case "bien":
+          return getConstanteLabel(bienOptions, gasto.bien);
+        case "comprobante":
+          return getConstanteLabel(comprobanteOptions, gasto.comprobante);
+        case "monto":
+          return gasto.monto !== undefined && gasto.monto !== null && gasto.monto !== ""
+            ? Number(gasto.monto).toLocaleString("es-PE", { minimumFractionDigits: 2 })
+            : "";
+        case "totalPagar":
+          return gasto.totalPagar !== undefined && gasto.totalPagar !== null && gasto.totalPagar !== ""
+            ? Number(gasto.totalPagar).toLocaleString("es-PE", { minimumFractionDigits: 2 })
+            : "";
+        case "moneda":
+          return gasto.monedaLabel || getConstanteLabel(monedaOptions, gasto.moneda);
+        case "banco":
+          return gasto.banco ?? "";
+        case "nroOperacion":
+          return gasto.nroOperacion ?? "";
+        case "fecIngreso":
+          return formatInputDateForDisplay(gasto.fecIngreso);
+          //return gasto.fechaEmision
+          //  ? new Date(gasto.fechaEmision).toLocaleDateString("es-PE")
+          //  : "";
+        case "ot":
+          return gasto.filtroOperativo.ot?.ot ?? "";
+        case "solicitante":
+          return getConstanteLabelOrFallback(solicitanteOptions, gasto.solicitante, gasto.solicitanteLabel);
+        case "responsable":
+          return gasto.responsableLabel || gasto.responsable || "";
+        case "validador":
+          return getConstanteLabelOrFallback(validadorOptions, gasto.validador, gasto.validadorLabel);
+        case "detalle":
+          return gasto.detalle ? String(gasto.detalle).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim() : "";
+        case "estado":
+          return getEstadoLabel(estadoOptions, gasto.estado, gasto.estadoLabel);
+        default:
+          return (gasto as unknown as Record<string, unknown>)[key] == null
+            ? ""
+            : String((gasto as unknown as Record<string, unknown>)[key]);
+      }
+    },
+    [bienOptions, comprobanteOptions, estadoOptions, monedaOptions, solicitanteOptions, tareasCatalogo, validadorOptions]
+  );
+
+  const headerFilterOptions = useMemo(
+    () => ({
+      estado: buildUniqueFilterOptions(estadoOptions.map((option) => getConstanteStoredValue(option))),
+      comprobante: buildUniqueFilterOptions(comprobanteOptions.map((option) => option.label)),
+      moneda: buildUniqueFilterOptions(monedaOptions.map((option) => option.label)),
+      cliente: buildUniqueFilterOptions(filtrosOperativosCatalogo.map((item) => item.nombreCliente)),
+      proyecto: buildUniqueFilterOptions(filtrosOperativosCatalogo.map((item) => item.nombreProyecto)),
+      site: buildUniqueFilterOptions(filtrosOperativosCatalogo.map((item) => item.nombreSite)),
+      tipoTrabajo: buildUniqueFilterOptions(filtrosOperativosCatalogo.map((item) => item.tipoTrabajo)),
+      solicitante: buildUniqueFilterOptions(solicitanteOptions.map((option) => option.label)),
+      responsable: buildUniqueFilterOptions(empleados.map((empleado) => empleado.nombreEmpleado)),
+      validador: buildUniqueFilterOptions(validadorOptions.map((option) => option.label)),
+    }),
+    [comprobanteOptions, empleados, estadoOptions, filtrosOperativosCatalogo, monedaOptions, solicitanteOptions, validadorOptions]
+  );
+
+  const toggleMultiHeaderFilter = React.useCallback((
+    key: GastosHeaderMultiFilterKey,
+    value: string
+  ) => {
+    setFiltrosCabecera((prev) => ({
+      ...prev,
+      [key]: prev[key].includes(value)
+        ? prev[key].filter((item) => item !== value)
+        : [...prev[key], value].sort((left, right) => left.localeCompare(right, "es", { sensitivity: "base" })),
+    }));
+  }, []);
+  // Ordenar y luego filtrar gastos: el ordenamiento se aplica a todos los registros cargados
+  const gastosFiltradosBase = useMemo(() => {
+    const sorted = [...gastosSafe];
+    return sorted
+      .filter((gasto) => matchesCrudToolbarSearch(gasto, busqueda, camposBusquedaGastos))
+      .filter((gasto) => {
+        const idGasto = String(gasto.id ?? "").trim();
+        const estadoGasto = String(gasto.estado ?? "").trim();
+        const comprobanteGasto = String(
+          getConstanteLabel(comprobanteOptions, gasto.comprobante) || gasto.comprobanteLabel || gasto.comprobante || ""
+        ).trim();
+        const monedaGasto = String(
+          gasto.monedaLabel || getConstanteLabel(monedaOptions, gasto.moneda) || gasto.moneda || ""
+        ).trim();
+        const clienteGasto = String(gasto.filtroOperativo.filtro?.nombreCliente ?? "").trim();
+        const proyectoGasto = String(gasto.filtroOperativo.filtro?.nombreProyecto ?? "").trim();
+        const siteGasto = String(gasto.filtroOperativo.filtro?.nombreSite ?? "").trim();
+        const tipoTrabajoGasto = String(
+          gasto.filtroOperativo.filtro?.tipoTrabajo ?? gasto.filtroOperativo.tipoTrabajo?.tipoTrabajo ?? ""
+        ).trim();
+        const solicitanteGasto = String(
+          getConstanteLabelOrFallback(solicitanteOptions, gasto.solicitante, gasto.solicitanteLabel)
+        ).trim();
+        const responsableGasto = String(gasto.responsableLabel || gasto.responsable || "").trim();
+        const validadorGasto = String(
+          getConstanteLabelOrFallback(validadorOptions, gasto.validador, gasto.validadorLabel)
+        ).trim();
+
+        return (
+          (!filtrosCabeceraAplicados.id || idGasto.includes(filtrosCabeceraAplicados.id.trim())) &&
+          (filtrosCabeceraAplicados.estado.length === 0 || filtrosCabeceraAplicados.estado.includes(estadoGasto)) &&
+          (filtrosCabeceraAplicados.comprobante.length === 0 || filtrosCabeceraAplicados.comprobante.includes(comprobanteGasto)) &&
+          (filtrosCabeceraAplicados.moneda.length === 0 || filtrosCabeceraAplicados.moneda.includes(monedaGasto)) &&
+          (filtrosCabeceraAplicados.cliente.length === 0 || filtrosCabeceraAplicados.cliente.includes(clienteGasto)) &&
+          (filtrosCabeceraAplicados.proyecto.length === 0 || filtrosCabeceraAplicados.proyecto.includes(proyectoGasto)) &&
+          (filtrosCabeceraAplicados.site.length === 0 || filtrosCabeceraAplicados.site.includes(siteGasto)) &&
+          (filtrosCabeceraAplicados.tipoTrabajo.length === 0 || filtrosCabeceraAplicados.tipoTrabajo.includes(tipoTrabajoGasto)) &&
+          (filtrosCabeceraAplicados.solicitante.length === 0 || filtrosCabeceraAplicados.solicitante.includes(solicitanteGasto)) &&
+          (filtrosCabeceraAplicados.responsable.length === 0 || filtrosCabeceraAplicados.responsable.includes(responsableGasto)) &&
+          (filtrosCabeceraAplicados.validador.length === 0 || filtrosCabeceraAplicados.validador.includes(validadorGasto))
+        );
+      });
+  }, [
+    busqueda,
+    camposBusquedaGastos,
+    comprobanteOptions,
+    filtrosCabeceraAplicados,
+    gastosSafe,
+    monedaOptions,
+    solicitanteOptions,
+    validadorOptions,
+  ]);
+  const cantidadRegistrosFiltrados = gastosFiltradosBase.length;
+  const gastosFiltrados = gastosFiltradosBase;
+  const gastosFiltradosDiferidos = useDeferredValue(gastosFiltrados);
+  const handleFiltroOperativoChange = React.useCallback(
+    (val: FiltroOperativoValue) => {
+      setForm((prev) =>
+        areFiltroOperativoValuesEqual(prev.filtroOperativo, val)
+          ? prev
+          : { ...prev, filtroOperativo: val }
+      );
+    },
+    [setForm]
+  );
+  const columnasGridGastos = useMemo(
+    () => [
+      { key: "id", label: "Id", width: "80px", align: "left" as const },
+      { key: "acciones", label: "Acciones", width: "140px", align: "center" as const },
+      { key: "cliente", label: "Cliente", width: "90px", align: "left" as const },
+      { key: "nombreProyecto", label: "Proyecto", width: "100px", align: "left" as const },
+      { key: "site", label: "Site", width: "180px", align: "left" as const },
+      { key: "tipoTrabajo", label: "Tipo Trabajo", width: "100px", align: "left" as const },
+      { key: "tarea", label: "Tarea", width: "140px", align: "left" as const },
+      { key: "estado", label: "Estado", width: "80px", align: "left" as const },
+      { key: "bien", label: "Bien", width: "80px", align: "left" as const },
+      { key: "comprobante", label: "Comprobante", width: "140px", align: "left" as const },
+      { key: "monto", label: "Monto", width: "100px", align: "left" as const },
+      { key: "totalPagar", label: "Total Pagar", width: "110px", align: "left" as const },
+      { key: "moneda", label: "Moneda", width: "80px", align: "left" as const },
+      { key: "banco", label: "Banco", width: "140px", align: "left" as const },
+      { key: "nroOperacion", label: "NroOperacion", width: "140px", align: "left" as const },
+      { key: "fechaDeposito", label: "FechaDeposito", width: "130px", align: "left" as const },
+      { key: "fecIngreso", label: "FecIngreso", width: "130px", align: "left" as const },
+      { key: "ot", label: "OT", width: "70px", align: "left" as const },
+      { key: "solicitante", label: "Solicitante", width: "160px", align: "left" as const },
+      { key: "responsable", label: "Responsable", width: "180px", align: "left" as const },
+      { key: "cuentaNumero", label: "Cuenta", width: "140px", align: "left" as const },
+      { key: "cuentaInter", label: "Cuenta Inter", width: "160px", align: "left" as const },
+      { key: "validador", label: "Validador", width: "140px", align: "left" as const },
+      { key: "detalle", label: "Detalle", width: "320px", align: "left" as const },
+    ],
+    []
+  );
+
+  useEffect(() => {
+    if (!cabeceraFiltroAbierto) {
+      setHeaderFilterSearch(GASTOS_HEADER_FILTER_SEARCH_INITIAL);
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (
+        cabeceraFiltroMenuRef.current &&
+        !cabeceraFiltroMenuRef.current.contains(event.target as Node)
+      ) {
+        setCabeceraFiltroAbierto(null);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [cabeceraFiltroAbierto]);
+
+  const gastosGridRows = useMemo<GastoGridRow[]>(
+    () =>
+      gastosFiltradosDiferidos.map((gasto, rowIndex) => {
+        const filtro = gasto.filtroOperativo.filtro;
+        const numero = (value: unknown) =>
+          value !== undefined && value !== null && value !== "" && Number.isFinite(Number(value)) ? Number(value) : null;
+        return {
+          rowKey: getGastoRowKey(gasto, rowIndex),
+          rowIndex,
+          gasto,
+          id: Number(gasto.id ?? 0),
+          cliente: filtro?.nombreCliente ?? "",
+          nombreProyecto: filtro?.nombreProyecto ?? "",
+          site: filtro?.nombreSite ?? "",
+          tipoTrabajo: filtro?.tipoTrabajo ?? gasto.filtroOperativo.tipoTrabajo?.tipoTrabajo ?? "",
+          tarea: getTareaLabelOrFallback(
+            tareasCatalogo,
+            gasto.filtroOperativo.tarea?.correlativo,
+            gasto.filtroOperativo.tarea?.tarea
+          ),
+          estado: getEstadoLabel(estadoOptions, gasto.estado, gasto.estadoLabel),
+          bien: getConstanteLabel(bienOptions, gasto.bien),
+          comprobante: getConstanteLabel(comprobanteOptions, gasto.comprobante),
+          monto: numero(gasto.monto),
+          totalPagar: numero(gasto.totalPagar),
+          moneda: getConstanteLabel(monedaOptions, gasto.moneda),
+          banco: gasto.banco ?? "",
+          nroOperacion: gasto.nroOperacion ?? "",
+          fechaDeposito: normalizeFecIngresoFromStore(gasto.fechaDeposito),
+          fecIngreso: normalizeFecIngresoFromStore(gasto.fecIngreso),
+          ot: gasto.filtroOperativo.ot?.ot ?? "",
+          solicitante: getConstanteLabelOrFallback(solicitanteOptions, gasto.solicitante, gasto.solicitanteLabel),
+          responsable: gasto.responsableLabel || gasto.responsable || "",
+          cuentaNumero: gasto.cuentaNumero || gasto.cuenta || "",
+          cuentaInter: gasto.cuentaInter || "",
+          validador: getConstanteLabelOrFallback(validadorOptions, gasto.validador, gasto.validadorLabel),
+          detalle: gasto.detalle ? String(gasto.detalle).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim() : "",
+          observacion: gasto.observacion ? String(gasto.observacion).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim() : "",
+        };
+      }),
+    [
+      gastosFiltradosDiferidos,
+      tareasCatalogo,
+      estadoOptions,
+      bienOptions,
+      comprobanteOptions,
+      monedaOptions,
+      solicitanteOptions,
+      validadorOptions,
+    ]
+  );
+
+  const gastosGridColumns = useMemo<GridColumn<GastoGridRow>[]>(
+    () => [
+      { dataField: "id", caption: "Id", dataType: "number", width: 80, fixed: true, format: (value) => String(value ?? "") },
+      {
+        dataField: "acciones",
+        caption: "Acciones",
+        width: 140,
+        alignment: "center",
+        fixed: true,
+        allowSorting: false,
+        allowFiltering: false,
+        allowGrouping: false,
+        allowHeaderFilter: false,
+        allowSearch: false,
+        allowResizing: false,
+        calculateCellValue: () => "",
+        cellRender: (_value, row) => {
+          const accionesHabilitadas = row.gasto.estado === 0 || row.gasto.estado === 2;
+          // Editar: cualquier estado excepto Rechazado (3).
+          const edicionHabilitada = row.gasto.estado !== 3;
+          // En Consulta se puede rechazar todo registro que no esté Pagado (4) ni Rechazado (3)
+          // y que no tenga OC asociada (IdOc vacío o 0).
+          const idOcGasto = String(row.gasto.idOc ?? "").trim();
+          const sinOc = idOcGasto === "" || idOcGasto === "0" || idOcGasto === "-";
+          const rechazoHabilitado =
+            vistaGastosRef.current === "consulta"
+              ? row.gasto.estado !== 4 && row.gasto.estado !== 3 && sinOc
+              : accionesHabilitadas;
+          const baseButton = {
+            width: 30,
+            height: 30,
+            borderRadius: 8,
+            fontWeight: 700,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          } as const;
+          return (
+            <div style={{ display: "flex", justifyContent: "center", gap: 6 }}>
+              <button
+                title="Visualizar"
+                aria-label="Visualizar"
+                style={{ ...baseButton, border: "1px solid #BFDBFE", background: "#EFF6FF", color: "#1D4ED8", cursor: "pointer" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  abrirVisualizarRef.current(row.gasto);
+                }}
+              >
+                <Eye size={16} strokeWidth={2.2} />
+              </button>
+              <button
+                title="Editar"
+                aria-label="Editar"
+                style={{
+                  ...baseButton,
+                  border: `1px solid ${edicionHabilitada ? "#C7D2FE" : "#E5E7EB"}`,
+                  background: edicionHabilitada ? "#EEF2FF" : "#F3F4F6",
+                  color: edicionHabilitada ? "#3730A3" : "#9CA3AF",
+                  cursor: edicionHabilitada ? "pointer" : "not-allowed",
+                  opacity: edicionHabilitada ? 1 : 0.65,
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!edicionHabilitada) return;
+                  abrirEditarRef.current(row.gasto);
+                }}
+                disabled={!edicionHabilitada}
+              >
+                <Pencil size={16} strokeWidth={2.2} />
+              </button>
+              <button
+                title="Rechazar"
+                aria-label="Rechazar"
+                style={{
+                  ...baseButton,
+                  border: `1px solid ${rechazoHabilitado ? "#FECACA" : "#E5E7EB"}`,
+                  background: rechazoHabilitado ? "#FEF2F2" : "#F3F4F6",
+                  color: rechazoHabilitado ? "#B91C1C" : "#9CA3AF",
+                  cursor: rechazoHabilitado ? "pointer" : "not-allowed",
+                  opacity: rechazoHabilitado ? 1 : 0.65,
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!rechazoHabilitado) return;
+                  confirmarEliminarRef.current(row.gasto, row.rowIndex);
+                }}
+                disabled={!rechazoHabilitado}
+              >
+                <Trash2 size={16} strokeWidth={2.2} />
+              </button>
+            </div>
+          );
+        },
+      },
+      { dataField: "cliente", caption: "Cliente", width: 110, fixed: true },
+      { dataField: "nombreProyecto", caption: "Proyecto", width: 130, fixed: true },
+      { dataField: "site", caption: "Site", width: 180, fixed: true },
+      { dataField: "tipoTrabajo", caption: "Tipo Trabajo", width: 120, fixed: true },
+      { dataField: "tarea", caption: "Tarea", width: 140 },
+      { dataField: "estado", caption: "Estado", width: 100 },
+      { dataField: "bien", caption: "Bien", width: 90 },
+      { dataField: "comprobante", caption: "Comprobante", width: 140 },
+      { dataField: "monto", caption: "Monto", dataType: "number", width: 110, format: { type: "fixedPoint", precision: 2 } },
+      { dataField: "totalPagar", caption: "Total Pagar", dataType: "number", width: 120, format: { type: "fixedPoint", precision: 2 } },
+      { dataField: "moneda", caption: "Moneda", width: 90 },
+      { dataField: "banco", caption: "Banco", width: 140 },
+      { dataField: "nroOperacion", caption: "NroOperacion", width: 140 },
+      { dataField: "fechaDeposito", caption: "FechaDeposito", dataType: "date", width: 130 },
+      { dataField: "fecIngreso", caption: "FecIngreso", dataType: "date", width: 130 },
+      { dataField: "ot", caption: "OT", width: 80 },
+      { dataField: "solicitante", caption: "Solicitante", width: 170 },
+      {
+        dataField: "responsable",
+        caption: "Responsable",
+        width: 190,
+        cellStyle: () => ({ color: "#17143A", fontWeight: 700 }),
+      },
+      { dataField: "cuentaNumero", caption: "Cuenta", width: 150 },
+      { dataField: "cuentaInter", caption: "Cuenta Inter", width: 170 },
+      { dataField: "validador", caption: "Validador", width: 150 },
+      { dataField: "detalle", caption: "Detalle", width: 320 },
+      { dataField: "observacion", caption: "Observación", width: 260 },
+    ],
+    []
+  );
+
+  return (
+    <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 5 }}>
+      {!editorOnly && (
+        <>
+      <CrudToolbar
+        searchValue={busqueda}
+        onSearchChange={setBusqueda}
+        searchPlaceholder="Buscar viáticos..."
+        //searchFieldsHint={camposBusquedaGastos.map((campo) => campo.label).join(", ")}
+        buttons={[
+          {
+            key: "nuevo",
+            label: "Nuevo viático",
+            title: "Nuevo viático (Shift + N)",
+            onClick: abrirNuevo,
+          },
+          {
+            key: "buscar",
+            label: "Buscar",
+            title: "Buscar registros con los filtros seleccionados",
+            onClick: () => void handleBuscarGastos(),
+            disabled: !tieneFiltrosBusqueda || cargando,
+          },
+          {
+            key: "exportar",
+            label: "Exportar",
+            title: "Exportar",
+            iconOnly: true,
+            icon: "⇩",
+            onClick: async () => {
+              // Exportar a Excel los registros filtrados y columnas visibles
+              const XLSX = await import("xlsx");
+              const headers = columnasGridGastos.filter(c => c.key !== "acciones").map(c => c.label);
+              const keys = columnasGridGastos.filter(c => c.key !== "acciones").map(c => c.key);
+              const rows = gastosFiltrados.map(gasto =>
+                keys.map(key => {
+                  switch (key) {
+                    case "cliente":
+                      return gasto.filtroOperativo.filtro?.nombreCliente ?? "";
+                    case "nombreProyecto":
+                      return gasto.filtroOperativo.filtro?.nombreProyecto ?? "";
+                    case "tipoTrabajo":
+                      return gasto.filtroOperativo.filtro?.tipoTrabajo ?? gasto.filtroOperativo.tipoTrabajo?.tipoTrabajo ?? "";
+                    case "id":
+                      return gasto.id;
+                    case "site":
+                      return gasto.filtroOperativo.filtro?.nombreSite ?? "";
+                    case "solicitante":
+                      return getConstanteLabelOrFallback(solicitanteOptions, gasto.solicitante, gasto.solicitanteLabel);
+                    case "responsable":
+                      return gasto.responsableLabel || gasto.responsable || "";
+                    case "cuentaNumero":
+                      return gasto.cuentaNumero || gasto.cuenta || "";
+                    case "cuentaInter":
+                      return gasto.cuentaInter || "";
+                    case "validador":
+                      return getConstanteLabelOrFallback(validadorOptions, gasto.validador, gasto.validadorLabel);
+                    case "tarea":
+                      return getTareaLabelOrFallback(tareasCatalogo, gasto.filtroOperativo.tarea?.correlativo, gasto.filtroOperativo.tarea?.tarea);
+                    case "detalle":
+                      // Migrar el campo Detalle a una sola línea, reemplazando saltos de línea por espacio
+                      return gasto.detalle ? String(gasto.detalle).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim() : "";
+                    case "bien":
+                      return getConstanteLabel(bienOptions, gasto.bien);
+                    case "comprobante":
+                      return getConstanteLabel(comprobanteOptions, gasto.comprobante);
+                    case "moneda":
+                      return getConstanteLabel(monedaOptions, gasto.moneda);
+                    case "banco":
+                      return gasto.banco ?? "";
+                    case "nroOperacion":
+                      return gasto.nroOperacion ?? "";
+                    case "fechaDeposito":
+                      return formatInputDateForDisplay(gasto.fechaDeposito);
+                    case "monto":
+                      return gasto.monto !== undefined && gasto.monto !== null && gasto.monto !== ""
+                        ? Number(gasto.monto).toLocaleString("es-PE", { minimumFractionDigits: 2 })
+                        : "";
+                    case "totalPagar":
+                      return gasto.totalPagar !== undefined && gasto.totalPagar !== null && gasto.totalPagar !== ""
+                        ? Number(gasto.totalPagar).toLocaleString("es-PE", { minimumFractionDigits: 2 })
+                        : "";
+                    case "ot":
+                      return gasto.filtroOperativo.ot?.ot ?? "";
+                    case "fecIngreso":
+                      return formatInputDateForDisplay(gasto.fecIngreso);
+                    case "comentario":                      // Migrar el campo Comentario a una sola línea, reemplazando saltos de línea por espacio
+                      return gasto.comentario ? String(gasto.comentario).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim() : "";
+                    case "estado": {
+                      return getEstadoLabel(estadoOptions, gasto.estado, gasto.estadoLabel);
+                    }
+                      default:
+                      return (gasto as any)[key] ?? "";
+                  }
+                })
+              );
+              const sheetData = [headers, ...rows];
+              const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+              worksheet["!cols"] = headers.map((header, index) => {
+                const maxRowLength = rows.reduce((max, row) => {
+                  const cellValue = row[index];
+                  return Math.max(max, String(cellValue ?? "").length);
+                }, header.length);
+
+                return { wch: Math.min(Math.max(maxRowLength + 2, 12), 40) };
+              });
+
+              const workbook = XLSX.utils.book_new();
+              XLSX.utils.book_append_sheet(workbook, worksheet, "Viáticos");
+              XLSX.writeFile(workbook, `viaticos_export_${new Date().toISOString().slice(0,10)}.xlsx`);
+            },
+          },
+        ]}
+      />
+
+      <div role="tablist" aria-label="Vista de viáticos" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        {([
+          { key: "pendientes-hoy" as const, label: "Pendientes de hoy" },
+          { key: "consulta" as const, label: "Consulta" },
+          { key: "resumen" as const, label: "Resumen" },
+        ]).map((tab) => {
+          const activa = vistaGastos === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={activa}
+              disabled={cargando}
+              onClick={() => void cambiarVistaGastos(tab.key)}
+              style={{
+                border: "none",
+                borderBottom: `3px solid ${activa ? "#4F46E5" : "transparent"}`,
+                background: "transparent",
+                color: activa ? "#3730A3" : "#64748B",
+                padding: "8px 14px",
+                fontSize: 12,
+                fontWeight: 800,
+                cursor: cargando ? "not-allowed" : "pointer",
+              }}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+        <span
+          aria-live="polite"
+          title="Registros de la vista actual (con los filtros y la búsqueda aplicados)"
+          style={{
+            marginLeft: "auto",
+            background: "#EEF2FF",
+            color: "#3730A3",
+            border: "1px solid #C7D2FE",
+            borderRadius: 999,
+            padding: "4px 12px",
+            fontSize: 11,
+            fontWeight: 800,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {cargando
+            ? "Cargando..."
+            : `${cantidadRegistrosFiltrados.toLocaleString("es-PE")} ${cantidadRegistrosFiltrados === 1 ? "registro" : "registros"}`}
+        </span>
+      </div>
+
+      {vistaGastos === "pendientes-hoy" ? (
+        <div style={{ fontSize: 11, color: "#475569", fontWeight: 600, padding: "0 4px" }}>
+          Registros generados hoy y pendientes de aprobar (estado 0). Use la pestaña Consulta para filtrar por cualquier estado o fecha.
+        </div>
+      ) : null}
+
+      {vistaGastos === "resumen" && (
+        <ViaticosResumen
+          cargar={cargarResumenViaticos}
+          solicitantesCatalogo={solicitanteOptions.map((option) => option.label || getConstanteStoredValue(option))}
+          responsablesCatalogo={buildUniqueFilterOptions(empleados.map((empleado) => empleado.nombreEmpleado))}
+          hoy={obtenerFechaActual()} idTarea={ID_TAREA_VIATICO} />
+      )}
+
+      {vistaGastos === "consulta" && (
+      <div
+        style={{
+          background: "#FFFFFF",
+          borderRadius: 16,
+          padding: 16,
+          boxShadow: "0 8px 24px rgba(23,20,58,0.08)",
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+          gap: 12,
+        }}
+      >
+        {[
+          {
+            key: "id",
+            label: "Id",
+            section: "basic" as const,
+            type: "text" as const,
+            selectedValue: filtrosCabecera.id,
+          },
+          {
+            key: "estado",
+            label: "Estado",
+            section: "basic" as const,
+            // Una opción por cada fila de sp_Constante_ListarPorCampo @Campo='estado', en el orden del SP.
+            options: estadoOptions.map((option) => ({
+              value: getConstanteStoredValue(option),
+              label: option.label || getConstanteStoredValue(option),
+            })),
+            selectedValues: filtrosCabecera.estado,
+          },
+          {
+            key: "fechaInicio",
+            label: "Fecha inicio",
+            section: "basic" as const,
+            type: "date" as const,
+            selectedValue: filtrosCabecera.fechaInicio,
+          },
+          {
+            key: "fechaFin",
+            label: "Fecha fin",
+            section: "basic" as const,
+            type: "date" as const,
+            selectedValue: filtrosCabecera.fechaFin,
+          },
+          {
+            key: "cliente",
+            label: "Cliente",
+            section: "basic" as const,
+            options: headerFilterOptions.cliente.map((option) => ({ value: option, label: option })),
+            selectedValues: filtrosCabecera.cliente,
+          },
+          {
+            key: "solicitante",
+            label: "Solicitante",
+            section: "basic" as const,
+            options: headerFilterOptions.solicitante.map((option) => ({ value: option, label: option })),
+            selectedValues: filtrosCabecera.solicitante,
+          },
+          {
+            key: "proyecto",
+            label: "Proyecto",
+            section: "advanced" as const,
+            options: headerFilterOptions.proyecto.map((option) => ({ value: option, label: option })),
+            selectedValues: filtrosCabecera.proyecto,
+          },
+          {
+            key: "site",
+            label: "Site",
+            section: "advanced" as const,
+            options: headerFilterOptions.site.map((option) => ({ value: option, label: option })),
+            selectedValues: filtrosCabecera.site,
+          },
+          {
+            key: "comprobante",
+            label: "Comprobante",
+            section: "advanced" as const,
+            options: headerFilterOptions.comprobante.map((option) => ({ value: option, label: option })),
+            selectedValues: filtrosCabecera.comprobante,
+          },
+          {
+            key: "moneda",
+            label: "Moneda",
+            section: "advanced" as const,
+            options: headerFilterOptions.moneda.map((option) => ({ value: option, label: option })),
+            selectedValues: filtrosCabecera.moneda,
+          },
+          {
+            key: "tipoTrabajo",
+            label: "Tipo de trabajo",
+            section: "advanced" as const,
+            options: headerFilterOptions.tipoTrabajo.map((option) => ({ value: option, label: option })),
+            selectedValues: filtrosCabecera.tipoTrabajo,
+          },
+          {
+            key: "responsable",
+            label: "Responsable",
+            section: "advanced" as const,
+            options: headerFilterOptions.responsable.map((option) => ({ value: option, label: option })),
+            selectedValues: filtrosCabecera.responsable,
+          },
+          {
+            key: "validador",
+            label: "Validador",
+            section: "advanced" as const,
+            options: headerFilterOptions.validador.map((option) => ({ value: option, label: option })),
+            selectedValues: filtrosCabecera.validador,
+          },
+        ]
+          .filter((filter) => filter.section === "basic" || mostrarFiltrosAdicionales)
+          .map((filter) => {
+          const isOpen = cabeceraFiltroAbierto === filter.key;
+          const searchTerm = isSearchableHeaderFilterKey(filter.key) ? headerFilterSearch[filter.key] : "";
+          const visibleOptions =
+            filter.type === "date" || filter.type === "text"
+              ? filter.options ?? []
+              : (filter.options ?? []).filter((option) =>
+                  !searchTerm ? true : matchesFlexibleSearch(option.label, searchTerm)
+                );
+          const summary =
+            filter.type === "date"
+              ? formatInputDateForDisplay(filter.selectedValue) || "Seleccionar fecha"
+              : filter.type === "text"
+                ? filter.selectedValue?.trim() || "Todos"
+              : buildHeaderFilterSummary(
+                  (filter.options ?? [])
+                    .filter((option) => filter.selectedValues?.includes(option.value))
+                    .map((option) => option.label)
+                );
+
+          return (
+            <div
+              key={filter.key}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+                fontSize: 11,
+                color: "#374151",
+                fontWeight: 600,
+                position: "relative",
+              }}
+            >
+              <span>{filter.label}</span>
+              {filter.type === "date" ? (
+                <input
+                  type="date"
+                  value={filter.selectedValue}
+                  max={filter.key === "fechaFin" ? obtenerFechaActual() : undefined}
+                  onChange={(event) =>
+                    setFiltrosCabecera((prev) => ({
+                      ...prev,
+                      [filter.key]: event.target.value,
+                    }))
+                  }
+                  style={{
+                    width: "100%",
+                    height: 36,
+                    borderRadius: 10,
+                    border: "1px solid #D1D5DB",
+                    padding: "0 10px",
+                    fontSize: 11,
+                    color: "#111827",
+                    background: "#FFFFFF",
+                    boxSizing: "border-box",
+                    cursor: "pointer",
+                  }}
+                />
+              ) : (
+              <button
+                type="button"
+                onClick={() =>
+                  setCabeceraFiltroAbierto((prev) => {
+                    const nextValue = prev === filter.key ? null : filter.key;
+
+                    if (!nextValue && isSearchableHeaderFilterKey(filter.key)) {
+                      setHeaderFilterSearch((prevSearch) => ({
+                        ...prevSearch,
+                        [filter.key]: "",
+                      }));
+                    }
+
+                    return nextValue;
+                  })
+                }
+                style={{
+                  height: 36,
+                  borderRadius: 10,
+                  border: "1px solid #D1D5DB",
+                  padding: "0 10px",
+                  fontSize: 11,
+                  color: "#111827",
+                  background: "#FFFFFF",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <span
+                  style={{
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    flex: 1,
+                  }}
+                >
+                  {summary}
+                </span>
+                <span style={{ color: "#6B7280", fontSize: 10 }}>{isOpen ? "▲" : "▼"}</span>
+              </button>
+              )}
+
+              {isOpen && filter.type !== "date" && (
+                <div
+                  ref={cabeceraFiltroMenuRef}
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 6px)",
+                    left: 0,
+                    width: "100%",
+                    minWidth: 180,
+                    maxHeight: 320,
+                    overflow: "auto",
+                    borderRadius: 12,
+                    border: "1px solid #D1D5DB",
+                    background: "#FFFFFF",
+                    boxShadow: "0 12px 28px rgba(15,23,42,0.12)",
+                    padding: 10,
+                    zIndex: 20,
+                  }}
+                >
+                  {filter.type === "text" ? (
+                    <input
+                      type="text"
+                      value={filter.selectedValue ?? ""}
+                      onChange={(event) =>
+                        setFiltrosCabecera((prev) => ({
+                          ...prev,
+                          [filter.key]: event.target.value.replace(/\D/g, ""),
+                        }))
+                      }
+                      placeholder="Ingrese Id"
+                      style={{
+                        width: "100%",
+                        height: 36,
+                        borderRadius: 10,
+                        border: "1px solid #D1D5DB",
+                        padding: "0 10px",
+                        fontSize: 11,
+                        color: "#111827",
+                        background: "#FFFFFF",
+                      }}
+                    />
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {isSearchableHeaderFilterKey(filter.key) && (
+                        <input
+                          type="text"
+                          value={searchTerm}
+                          onChange={(event) =>
+                            setHeaderFilterSearch((prev) => ({
+                              ...prev,
+                              [filter.key]: event.target.value,
+                            }))
+                          }
+                          placeholder={`Buscar ${filter.label.toLowerCase()}...`}
+                          style={{
+                            width: "100%",
+                            height: 36,
+                            borderRadius: 10,
+                            border: "1px solid #D1D5DB",
+                            padding: "0 10px",
+                            fontSize: 11,
+                            color: "#111827",
+                            background: "#FFFFFF",
+                          }}
+                        />
+                      )}
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setFiltrosCabecera((prev) => ({
+                              ...prev,
+                              [filter.key]: (filter.options ?? []).map((option) => option.value),
+                            }))
+                          }
+                          style={{
+                            border: "1px solid #C7D2FE",
+                            background: "#EEF2FF",
+                            color: "#3730A3",
+                            borderRadius: 10,
+                            padding: "6px 10px",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            cursor: "pointer",
+                          }}
+                          disabled={(filter.options ?? []).length === 0}
+                        >
+                          Aplicar a todos
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setFiltrosCabecera((prev) => ({
+                              ...prev,
+                              [filter.key]: [],
+                            }))
+                          }
+                          style={{
+                            border: "1px solid #FCA5A5",
+                            background: "#FEF2F2",
+                            color: "#B91C1C",
+                            borderRadius: 10,
+                            padding: "6px 10px",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            cursor: "pointer",
+                          }}
+                          disabled={(filter.selectedValues ?? []).length === 0}
+                        >
+                          Quitar a todos
+                        </button>
+                      </div>
+                      {visibleOptions.length === 0 && (
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: "#6B7280",
+                            fontWeight: 500,
+                            padding: "4px 2px",
+                          }}
+                        >
+                          No se encontraron opciones.
+                        </div>
+                      )}
+                      {visibleOptions.map((option) => (
+                        <label
+                          key={`${filter.key}-${option.value}`}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            fontSize: 11,
+                            color: "#111827",
+                            fontWeight: 500,
+                            cursor: "pointer",
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={filter.selectedValues?.includes(option.value) ?? false}
+                            onChange={() =>
+                              toggleMultiHeaderFilter(
+                                filter.key as GastosHeaderMultiFilterKey,
+                                option.value
+                              )
+                            }
+                          />
+                          <span>{option.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+            fontSize: 11,
+            color: "#374151",
+            fontWeight: 600,
+          }}
+        >
+          <span>Más opciones</span>
+          <button
+            type="button"
+            onClick={() => {
+              setMostrarFiltrosAdicionales((prev) => {
+                const nextValue = !prev;
+                if (!nextValue && cabeceraFiltroAbierto && ["proyecto", "site", "comprobante", "moneda", "tipoTrabajo", "responsable", "validador"].includes(cabeceraFiltroAbierto)) {
+                  setCabeceraFiltroAbierto(null);
+                }
+                return nextValue;
+              });
+            }}
+            style={{
+              height: 36,
+              borderRadius: 10,
+              border: "1px solid #C7D2FE",
+              padding: "0 10px",
+              fontSize: 11,
+              color: "#3730A3",
+              background: "#EEF2FF",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+              cursor: "pointer",
+              textAlign: "left",
+              fontWeight: 700,
+            }}
+          >
+            <span>{mostrarFiltrosAdicionales ? "Ocultar filtros" : "Filtros adicionales"}</span>
+            <span style={{ color: "#6B7280", fontSize: 10 }}>{mostrarFiltrosAdicionales ? "▲" : "▼"}</span>
+          </button>
+        </div>
+      </div>
+      )}
+
+      {rechazoError && (
+        <div
+          style={{
+            background: "#FEF2F2",
+            border: "1px solid #FECACA",
+            color: "#991B1B",
+            padding: 14,
+            borderRadius: 12,
+            fontSize: 11,
+            fontWeight: 600,
+          }}
+        >
+          {rechazoError}
+        </div>
+      )}
+
+      {mensajeFiltroCabecera && (
+        <div
+          style={{
+            marginTop: 12,
+            borderRadius: 12,
+            border: "1px solid #FCA5A5",
+            background: "#FEF2F2",
+            color: "#991B1B",
+            padding: 14,
+            fontSize: 11,
+            fontWeight: 600,
+          }}
+        >
+          {mensajeFiltroCabecera}
+        </div>
+      )}
+
+      {vistaGastos !== "resumen" && (
+      <div
+        style={{
+          background: "#FFFFFF",
+          borderRadius: 16,
+          padding: 20,
+          boxShadow: "0 8px 24px rgba(23,20,58,0.08)",
+        }}
+      >
+        <DataGridPro<GastoGridRow>
+          dataSource={gastosGridRows}
+          columns={gastosGridColumns}
+          keyExpr="rowKey"
+          height="70vh"
+          loading={cargando}
+          noDataText={mensajeFiltroCabecera ? mensajeFiltroCabecera : "No se encontraron viáticos."}
+          stateStoringKey="gastos-registro"
+          showSearchPanel={false}
+          allowExport={false}
+          autoExpandAll={false}
+          rowAlternation={false}
+          rowPadding="4px 8px"
+          paging={{ pageSize: 100, pageSizes: [50, 100, 250, 500] }}
+          focusedRowKey={selectedRowKey}
+          onRowClick={(row) => {
+            setSelectedRowKey(row.rowKey);
+            if (rechazoError) {
+              setRechazoError(null);
+            }
+          }}
+          rowBackground={(_row, focused) => (focused ? "#E0E7FF" : undefined)}
+        />
+        {/* Pie de grilla: cantidad de registros y suma por moneda */}
+        <div style={{
+          width: "100%",
+          padding: "8px 0 0 0",
+          fontSize: 12,
+          color: "#374151",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center"
+        }}>
+          <span>
+            Registros encontrados: {gastosFiltrados.length}
+          </span>
+          <span>
+            {(() => {
+              // Agrupar y sumar montos por moneda
+              const resumen = new Map();
+              gastosFiltrados.forEach(gasto => {
+                const moneda = gasto.monedaLabel || gasto.moneda || "-";
+                const monto = Number(gasto.monto) || 0;
+                if (!resumen.has(moneda)) resumen.set(moneda, 0);
+                resumen.set(moneda, resumen.get(moneda) + monto);
+              });
+              return Array.from(resumen.entries())
+                .map(([moneda, suma]) => `${moneda}: ${suma.toLocaleString("es-PE", { minimumFractionDigits: 2 })}`)
+                .join(" | ");
+            })()}
+          </span>
+        </div>
+      </div>
+      )}
+        </>
+      )}
+
+      {editorOnly && (externalEditorLoading || externalEditorError) && !panelAbierto && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.35)",
+            display: "flex",
+            justifyContent: "flex-end",
+            zIndex: 3000,
+          }}
+        >
+          <div
+            style={{
+              width: "min(1280px, 94vw)",
+              maxWidth: "100%",
+              height: "100%",
+              background: "#FFFFFF",
+              padding: 24,
+              boxSizing: "border-box",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <strong style={{ color: "#17143A", fontSize: 20 }}>
+                {externalEditorLoading ? "Cargando viático..." : externalEditorError}
+              </strong>
+              <button
+                type="button"
+                onClick={onEditorClose}
+                aria-label="Cerrar"
+                style={{ border: 0, borderRadius: 8, padding: "8px 12px", cursor: "pointer" }}
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {panelAbierto && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.35)",
+            display: "flex",
+            justifyContent: "flex-end",
+            zIndex: 3000,
+          }}
+        >
+          <div
+            style={{
+              width: "min(1280px, 94vw)",
+              maxWidth: "100%",
+              height: "100%",
+              background: "#FFFFFF",
+              boxShadow: "-8px 0 24px rgba(0,0,0,0.12)",
+              padding: 24,
+              boxSizing: "border-box",
+              overflowY: "auto",
+            }}
+            ref={sidePanelRef}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 24 }}>
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", width: "100%" }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: 24, color: "#17143A" }}>
+                    {modo === "nuevo"
+                      ? "Nuevo viático"
+                      : modo === "ver"
+                        ? `Visualizar viático${form.id || editorRequest?.correlativo ? ` · ID: ${form.id || editorRequest?.correlativo}` : ""}`
+                        : `Editar viático${form.id ? ` · ID: ${form.id}` : ""}`}
+                  </h2>
+                  <p style={{ marginTop: 8, marginBottom: 0, color: "#6B7280", fontSize: 13 }}>
+                    Complete la información del gasto.
+                  </p>
+                  <p style={{ marginTop: 6, marginBottom: 0, color: "#475569", fontSize: 12 }}>
+                    El sistema registra auditoria automatica por seccion al guardar o rechazar cambios.
+                  </p>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
+                  {modo !== "nuevo" && (() => {
+                    const estadoActual = getEstadoLabel(estadoOptions, form.estado, form.estadoLabel);
+                    if (!estadoActual) return null;
+                    const tone = getEstadoBadgeTone(Number(form.estado));
+                    return (
+                      <div
+                        title="Estado actual del viático"
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          padding: "8px 28px",
+                          borderRadius: 14,
+                          border: `2px solid ${tone.border}`,
+                          background: tone.background,
+                          color: tone.color,
+                          lineHeight: 1.1,
+                        }}
+                      >
+                        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", opacity: 0.8 }}>
+                          Estado actual
+                        </span>
+                        <span style={{ fontSize: 26, fontWeight: 800, textTransform: "uppercase" }}>{estadoActual}</span>
+                      </div>
+                    );
+                  })()}
+                  <button
+                    style={{
+                      border: "none",
+                      background: "#F3F4F6",
+                      color: "#17143A",
+                      width: 34,
+                      height: 34,
+                      borderRadius: 8,
+                      cursor: "pointer",
+                      fontSize: 22,
+                      lineHeight: "22px",
+                    }}
+                    onClick={cerrarPanel}
+                  >
+                    ×
+                  </button>
+                  {/* Eliminado: Etiqueta Utilidad bajo el botón */}
+                </div>
+              </div>
+            </div>
+
+            {errorGuardado && (
+              <div
+                style={{
+                  background: "#FEF2F2",
+                  border: "1px solid #FECACA",
+                  color: "#991B1B",
+                  padding: 14,
+                  borderRadius: 12,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  marginBottom: 16,
+                }}
+              >
+                {errorGuardado}
+              </div>
+            )}
+
+            {modo !== "nuevo" && modo !== "editar" && facturaDisplayPath && (
+              <button
+                type="button"
+                onClick={() => setShowFacturaViewer(true)}
+                style={{
+                  marginBottom: 10,
+                  alignSelf: "flex-start",
+                  border: "none",
+                  background: "transparent",
+                  color: "#6E4CCB",
+                  fontWeight: 600,
+                  fontSize: 13,
+                  padding: 0,
+                  textDecoration: "underline",
+                  cursor: "pointer",
+                }}
+              >
+                Ver adjunto
+              </button>
+            )}
+
+            <div
+              ref={camposEditorRef}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 1.5,
+                pointerEvents: esModoVisualizacion || edicionPagadoRestringida ? "none" : "auto",
+                opacity: esModoVisualizacion ? 0.92 : 1,
+              }}
+            >
+              {edicionPagadoRestringida && (
+                <div style={{ fontSize: 12, color: "#92400E", background: "#FEF3C7", borderRadius: 8, padding: "6px 10px", fontWeight: 600, pointerEvents: "auto" }}>
+                  Viático pagado: solo se puede modificar Bien, Serie, Tipo de pago y la factura adjunta.
+                </div>
+              )}
+              <FiltroOperativoLookup
+                value={form.filtroOperativo}
+                fontSize={13}
+                filtroInputRef={filtroInputRef}
+                tareaFilter={esTareaViatico}
+                tareaInputMode="select"
+                onChange={handleFiltroOperativoChange}
+                onSelectionBlur={(value) => {
+                  void cargarValoresGasto(value);
+                }}
+              />
+
+              {errores.filtroOperativo && (
+                <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>
+                  {errores.filtroOperativo}
+                </div>
+              )}
+
+               {errores.tarea && (
+                 <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>
+                   {errores.tarea}
+                 </div>
+               )}
+
+               <nav
+                 aria-label="Secciones del viático"
+                  style={{ display: "flex", gap: 8, borderBottom: "1px solid #E2E8F0", marginTop: 8, marginBottom: 16, position: "relative", zIndex: 3, pointerEvents: "auto" }}
+               >
+                 {[
+                   { key: "principal" as const, label: "Datos principales" },
+                   { key: "detalle-sitio" as const, label: "Detalle del sitio" },
+                 ].map((tab) => {
+                   const active = gastoEditorTab === tab.key;
+                   return (
+                     <button
+                       key={tab.key}
+                        type="button"
+                        onClick={() => setGastoEditorTab(tab.key)}
+                        onMouseDown={(event) => { event.stopPropagation(); setGastoEditorTab(tab.key); }}
+                       style={{
+                         border: "none",
+                         borderBottom: `2px solid ${active ? "#6E4CCB" : "transparent"}`,
+                         background: "transparent",
+                         color: active ? "#5B35B5" : "#64748B",
+                         padding: "10px 14px",
+                         fontSize: 12,
+                         fontWeight: 700,
+                         cursor: "pointer",
+                       }}
+                     >
+                       {tab.label}
+                     </button>
+                   );
+                 })}
+               </nav>
+
+               {gastoEditorTab === "principal" && null /*
+                 <section
+                   aria-label="Datos principales del sitio"
+                   style={{ border: "1px solid #E2E8F0", borderRadius: 12, background: "#F8FAFC", padding: 18 }}
+                 >
+                   <h3 style={{ margin: "0 0 14px", fontSize: 14, color: "#17143A" }}>Sitio seleccionado</h3>
+                   <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
+                     {[
+                       ["Cliente", form.filtroOperativo.filtro?.nombreCliente],
+                       ["Proyecto", form.filtroOperativo.filtro?.nombreProyecto],
+                       ["Site", form.filtroOperativo.filtro?.nombreSite],
+                       ["Tipo de trabajo", form.filtroOperativo.tipoTrabajo?.tipoTrabajo],
+                       ["OT", form.filtroOperativo.ot?.ot],
+                       ["Tarea", form.filtroOperativo.tarea?.tarea],
+                     ].map(([label, value]) => (
+                       <div key={label} style={{ minWidth: 0 }}>
+                         <span style={{ display: "block", fontSize: 10, color: "#64748B", fontWeight: 700, marginBottom: 4 }}>{label}</span>
+                         <strong style={{ display: "block", fontSize: 12, color: "#1E293B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                           {value || "Sin seleccionar"}
+                         </strong>
+                       </div>
+                     ))}
+                   </div>
+                   <p style={{ margin: "16px 0 0", fontSize: 12, color: "#64748B" }}>
+                     Continúe en “Detalle del sitio” para completar responsable, cuenta, importes y demás datos del gasto.
+                   </p>
+                 </section>
+               */}
+
+               {gastoEditorTab === "principal" && (
+                 <section aria-label="Historial del sitio" style={{ border: "1px solid #DBEAFE", borderRadius: 12, background: "#F8FBFF", overflow: "hidden" }}>
+                   <div style={{ padding: "12px 14px", borderBottom: "1px solid #DBEAFE" }}>
+                     <div>
+                       <strong style={{ display: "block", color: "#0F172A", fontSize: 13 }}>Historial Sitio</strong>
+                       <span style={{ color: "#64748B", fontSize: 11 }}>Pagos del mismo cliente, proyecto, site y tipo de trabajo.</span>
+                     </div>
+                   </div>
+                   {!historialSitioRequest ? (
+                     <div style={{ padding: 16, color: "#64748B", fontSize: 12 }}>Seleccione Filtro, Trabajo, OT y Tarea para consultar el historial del sitio.</div>
+                   ) : historialSitioLoading ? (
+                     <div style={{ padding: 16, color: "#2563EB", fontSize: 12, fontWeight: 600 }}>Cargando historial del sitio…</div>
+                   ) : (
+                     <>
+                         {historialSitioKpisPorMoneda.length > 0 && (
+                           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "10px 14px 0" }}>
+                            {historialSitioKpisPorMoneda.flatMap(({ moneda, total, totalVisible, porcentaje, porcentajeBarra }) => [
+                              <div key={`${moneda}-pagado`} style={{ border: "1px solid #BFDBFE", borderRadius: 8, background: "#FFFFFF", padding: "7px 10px", minWidth: 110 }}><span style={{ display: "block", fontSize: 9, fontWeight: 800, color: "#64748B" }}>{moneda} · Pagado</span><strong style={{ fontSize: 12, color: "#0F172A" }}>{formatDecimalValue(total)}</strong></div>,
+                              <div key={`${moneda}-visible`} style={{ border: "1px solid #BFDBFE", borderRadius: 8, background: "#FFFFFF", padding: "7px 10px", minWidth: 125 }}><span style={{ display: "block", fontSize: 9, fontWeight: 800, color: "#64748B" }}>{moneda} · Total visible</span><strong style={{ fontSize: 12, color: "#0F172A" }}>{formatDecimalValue(totalVisible)}</strong></div>,
+                              <div key={`${moneda}-avance`} style={{ border: "1px solid #BFDBFE", borderRadius: 8, background: "#FFFFFF", padding: "7px 10px", minWidth: 145 }}><span style={{ display: "block", fontSize: 9, fontWeight: 800, color: "#64748B" }}>{moneda} · Avance</span><strong style={{ display: "block", fontSize: 12, color: "#0F172A", marginBottom: 5 }}>{porcentaje.toFixed(2)}%</strong><span style={{ display: "block", height: 7, borderRadius: 99, background: "#DBEAFE", overflow: "hidden" }}><i style={{ display: "block", width: `${porcentajeBarra}%`, height: "100%", borderRadius: 99, background: porcentaje > 70 ? "#DC2626" : porcentaje >= 50 ? "#CA8A04" : "#16A34A" }} /></span></div>,
+                            ])}
+                           </div>
+                         )}
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, borderBottom: "1px solid #DBEAFE", margin: "12px 14px 0" }}>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            {[{ key: "listado" as const, label: "Listado" }, { key: "resumen" as const, label: "Resumen por solicitante" }].map((tab) => (
+                              <button key={tab.key} type="button" onClick={() => setHistorialSitioView(tab.key)} style={{ border: "none", borderBottom: `2px solid ${historialSitioView === tab.key ? "#2563EB" : "transparent"}`, background: "transparent", color: historialSitioView === tab.key ? "#1D4ED8" : "#64748B", padding: "8px 10px", fontSize: 11, fontWeight: 800, cursor: "pointer" }}>
+                                {tab.label}
+                              </button>
+                            ))}
+                          </div>
+                          {historialSitioSolicitante && (
+                            <button type="button" aria-label="Limpiar filtro de solicitante" title="Limpiar filtro" onClick={() => setHistorialSitioSolicitante("")} style={{ alignSelf: "center", border: "1px solid #BFDBFE", borderRadius: 6, background: "#FFFFFF", color: "#2563EB", width: 26, height: 26, padding: 4, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v5M14 11v5" /></svg>
+                            </button>
+                          )}
+                        </div>
+                        {historialSitioView === "resumen" ? (
+                          <div style={{ display: "grid", gap: 10, maxHeight: 240, overflow: "auto", margin: 14 }}>
+                            {historialSitioResumenSolicitante.map(({ moneda, items }) => {
+                              const max = items[0]?.total || 0;
+                              return <div key={moneda}><strong style={{ display: "block", fontSize: 10, color: "#475569", marginBottom: 6 }}>{moneda}</strong>{items.map(({ solicitante, total }) => <button key={solicitante} type="button" onClick={() => { setHistorialSitioSolicitante(solicitante); setHistorialSitioView("listado"); }} style={{ width: "100%", border: "none", background: "transparent", display: "grid", gridTemplateColumns: "minmax(105px, .9fr) minmax(110px, 2fr) auto", alignItems: "center", gap: 8, padding: "4px 0", textAlign: "left", cursor: "pointer" }}><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10, color: "#334155" }}>{solicitante}</span><span style={{ height: 8, borderRadius: 99, background: "#DBEAFE", overflow: "hidden" }}><i style={{ display: "block", height: "100%", width: `${max ? Math.max(2, total / max * 100) : 0}%`, borderRadius: 99, background: "#3B82F6" }} /></span><strong style={{ fontSize: 10, color: "#0F172A" }}>{formatDecimalValue(total)}</strong></button>)}</div>;
+                            })}
+                            {!historialSitioResumenSolicitante.length && <div style={{ padding: 12, textAlign: "center", color: "#64748B", fontSize: 11 }}>No hay solicitudes para resumir.</div>}
+                          </div>
+                        ) : (
+                          <div style={{ margin: 14 }}>
+                            <DataGridPro<GastoDto>
+                              dataSource={historialSitioRowsFiltrados}
+                              columns={buildHistorialSitioColumns({ onDetalle: setHistorialSitioDetalleActivo })}
+                              keyExpr={historialSitioRowKey}
+                              height={240}
+                              noDataText={historialSitioSolicitante ? "No hay registros para el solicitante seleccionado." : "No hay registros pagados para el sitio seleccionado."}
+                              showFilterRow={false}
+                              showSearchPanel={false}
+                              showGroupPanel={false}
+                              showColumnChooser={false}
+                              allowExport={false}
+                              rowAlternation={false}
+                              rowPadding="3px 6px"
+                              paging={false}
+                            />
+                          </div>
+                        )}
+                     </>
+                   )}
+                 </section>
+               )}
+
+               {constantesError ? (
+                <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>
+                  {constantesError}
+                </div>
+              ) : null}
+
+              {solicitanteError ? (
+                <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>
+                  {solicitanteError}
+                </div>
+              ) : null}
+
+              {gestorError ? (
+                <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>
+                  {gestorError}
+                </div>
+              ) : null}
+
+              {validadorError ? (
+                <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>
+                  {validadorError}
+                </div>
+              ) : null}
+
+               <div
+                 style={{
+                   display: gastoEditorTab === "detalle-sitio" ? "grid" : "none",
+                  gridTemplateColumns: "minmax(0, 1fr)",
+                  gap: 12,
+                  alignItems: "start",
+                }}
+              >
+                <div style={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Responsable</label>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setModoResponsableForm("nuevo");
+                          setNuevoResponsable(NUEVO_RESPONSABLE_INICIAL);
+                          setCuentaResponsableOriginal(CUENTA_RESPONSABLE_ORIGINAL_INICIAL);
+                          setNuevoResponsableError(null);
+                          setMostrarNuevoResponsable(true);
+                        }}
+                        disabled={modo === "ver"}
+                        title="Registrar nuevo responsable"
+                        style={{
+                          border: "1px solid #2563EB",
+                          borderRadius: 7,
+                          background: "#EFF6FF",
+                          color: "#1D4ED8",
+                          padding: "4px 8px",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          cursor: modo === "ver" ? "not-allowed" : "pointer",
+                          opacity: modo === "ver" ? 0.55 : 1,
+                        }}
+                      >
+                        + Nuevo responsable
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!responsableSeleccionado) return;
+                          const tipoCuenta = findConstanteOption(tipoCuentaOptions, responsableSeleccionado.nombreCta);
+                          const banco = findConstanteOption(bancoOptions, responsableSeleccionado.nombreBanco);
+                          let idBancoOriginal = banco ? Number(getConstanteStoredValue(banco)) : Number.NaN;
+                          // El IdBanco real de la cuenta viene del buscador de responsables; deducirlo por el nombre del banco puede no coincidir.
+                          try {
+                            const candidatas = await buscarEmpleadosResponsables(responsableSeleccionado.nombreEmpleado);
+                            const cuentaReal = candidatas.find((item) =>
+                              Number(item.idEmpleado) === Number(responsableSeleccionado.idEmpleado) &&
+                              (item.cuenta ?? "").trim() === responsableSeleccionado.cuenta.trim() &&
+                              Number(item.idBanco) > 0);
+                            if (cuentaReal) idBancoOriginal = Number(cuentaReal.idBanco);
+                          } catch {
+                            // Sin búsqueda se conserva el valor deducido del catálogo.
+                          }
+                          setModoResponsableForm("editar");
+                          setCuentaResponsableOriginal({
+                            idBanco: Number.isInteger(idBancoOriginal) && idBancoOriginal > 0 ? idBancoOriginal : null,
+                            cuenta: responsableSeleccionado.cuenta.trim(),
+                            nombreCta: responsableSeleccionado.nombreCta.trim(),
+                          });
+                          setNuevoResponsable({
+                            nombre: responsableSeleccionado.nombreEmpleado,
+                            cuenta: responsableSeleccionado.cuenta,
+                            cuentaInter: responsableSeleccionado.cuentaInter,
+                            tipoCuenta: tipoCuenta ? getConstanteStoredValue(tipoCuenta) : responsableSeleccionado.nombreCta,
+                            banco: banco ? getConstanteStoredValue(banco) : responsableSeleccionado.nombreBanco,
+                            nroDocumento: responsableSeleccionado.nroDocumento,
+                          });
+                          setNuevoResponsableError(null);
+                          setMostrarNuevoResponsable(true);
+                        }}
+                        disabled={modo === "ver" || !responsableSeleccionado}
+                        title={responsableSeleccionado ? "Editar responsable seleccionado" : "Seleccione un responsable para editar"}
+                        style={{
+                          border: "1px solid #0F766E",
+                          borderRadius: 7,
+                          background: "#F0FDFA",
+                          color: "#0F766E",
+                          padding: "4px 8px",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          cursor: modo === "ver" || !responsableSeleccionado ? "not-allowed" : "pointer",
+                          opacity: modo === "ver" || !responsableSeleccionado ? 0.55 : 1,
+                        }}
+                      >
+                        Editar responsable
+                      </button>
+                    </div>
+                  </div>
+                  <div style={{ position: "relative", width: "100%" }}>
+                    <input
+                      type="text"
+                      value={
+                        responsableSeleccionado
+                          ? buildResponsableDisplay(responsableSeleccionado)
+                          : form.responsableLabel || responsableInput || ""
+                      }
+                      onChange={(e) => {
+                        setResponsableInput(e.target.value);
+                        setShowResponsableDropdown(true);
+                        setForm((prev) => ({
+                          ...prev,
+                          responsable: "",
+                          responsableLabel: "",
+                          idSuministroProvisional: "",
+                          idBancoCta: "",
+                          cuenta: "",
+                          cuentaNumero: "",
+                          cuentaInter: "",
+                          nombreCta: "",
+                          ruc: "",
+                        }));
+                      }}
+                      onFocus={() => {
+                        if (filteredResponsables.length > 0) setShowResponsableDropdown(true);
+                      }}
+                      onKeyDown={(e) => {
+                        if (filteredResponsables.length === 0) return;
+
+                        if (e.key === "ArrowDown") {
+                          e.preventDefault();
+                          setHighlightedResponsableIdx((idx) => Math.min(idx + 1, filteredResponsables.length - 1));
+                          setShowResponsableDropdown(true);
+                        } else if (e.key === "ArrowUp") {
+                          e.preventDefault();
+                          setHighlightedResponsableIdx((idx) => Math.max(idx - 1, 0));
+                          setShowResponsableDropdown(true);
+                        } else if (e.key === "Enter") {
+                          if (highlightedResponsableIdx >= 0 && highlightedResponsableIdx < filteredResponsables.length) {
+                            const emp = filteredResponsables[highlightedResponsableIdx];
+                            const cuentaMetadata = buildCuentaMetadata(emp);
+                            setForm((prev) => ({
+                              ...prev,
+                              responsable: String(emp.idEmpleado),
+                              responsableLabel: emp.nombreEmpleado,
+                              idSuministroProvisional: "",
+                              idBancoCta: getIdBancoCtaValue(emp),
+                              cuenta: buildCuentaResumen(emp),
+                              cuentaNumero: cuentaMetadata.cuentaNumero,
+                              cuentaInter: cuentaMetadata.cuentaInter,
+                              nombreCta: cuentaMetadata.nombreCta,
+                              ruc: cuentaMetadata.ruc,
+                            }));
+                            setResponsableInput(emp.nombreEmpleado);
+                            setShowResponsableDropdown(false);
+                            setHighlightedResponsableIdx(-1);
+                          }
+                        }
+                      }}
+                      placeholder="Seleccione..."
+                      autoComplete="off"
+                      required
+                      style={{
+                        width: "100%",
+                        height: 42,
+                        borderRadius: 10,
+                        border: `1px solid ${errores.responsable ? "#F87171" : "#D1D5DB"}`,
+                        padding: "0 12px",
+                        fontSize: 13,
+                        boxSizing: "border-box",
+                      }}
+                      disabled={empleadosLoading}
+                    />
+
+                    {showResponsableDropdown && filteredResponsables.length > 0 && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "100%",
+                          left: 0,
+                          right: 0,
+                          background: "#fff",
+                          border: "1px solid #ccc",
+                          zIndex: 1002,
+                          maxHeight: 180,
+                          overflowY: "auto",
+                        }}
+                      >
+                        {filteredResponsables.map((emp, idx) => (
+                          <div
+                            key={`responsable-${emp.idEmpleado || emp.nombreEmpleado || idx}-${idx}`}
+                            style={{
+                              padding: 6,
+                              cursor: "pointer",
+                              background: idx === highlightedResponsableIdx ? "#e6f7ff" : undefined,
+                              fontSize: 13,
+                              lineHeight: 1.1,
+                            }}
+                            onMouseDown={() => {
+                              const cuentaMetadata = buildCuentaMetadata(emp);
+                              setForm((prev) => ({
+                                ...prev,
+                                responsable: String(emp.idEmpleado),
+                                responsableLabel: emp.nombreEmpleado,
+                                idSuministroProvisional: "",
+                                idBancoCta: getIdBancoCtaValue(emp),
+                                cuenta: buildCuentaResumen(emp),
+                                cuentaNumero: cuentaMetadata.cuentaNumero,
+                                cuentaInter: cuentaMetadata.cuentaInter,
+                                nombreCta: cuentaMetadata.nombreCta,
+                                ruc: cuentaMetadata.ruc,
+                              }));
+                              setResponsableInput(emp.nombreEmpleado);
+                              setShowResponsableDropdown(false);
+                              setHighlightedResponsableIdx(-1);
+                            }}
+                          >
+                            {buildResponsableDisplay(emp)}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {empleadosLoading && <span style={{ fontSize: 12, color: "#888" }}>Cargando...</span>}
+                    {empleadosError && <span style={{ fontSize: 12, color: "red" }}>{empleadosError}</span>}
+                  </div>
+
+                  {errores.responsable && (
+                    <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>
+                      {errores.responsable}
+                    </div>
+                  )}
+                </div>
+
+              </div>
+
+        <div
+  style={{
+    display: gastoEditorTab === "detalle-sitio" ? "grid" : "none",
+    gridTemplateColumns: "repeat(12, minmax(0, 1fr))",
+    rowGap: 1.5,
+    columnGap: 12,
+    marginTop: 1.5,
+  }}
+>
+  <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "1 / -1", marginBottom: 8 }}>
+    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Cuenta</label>
+    <textarea
+      value={form.cuenta}
+      readOnly
+      rows={1}
+      placeholder="Cuenta bancaria asociada"
+      style={{
+        width: "100%",
+        height: 42,
+        borderRadius: 10,
+        border: "1px solid #D1D5DB",
+        padding: "8px 10px",
+        fontSize: 13,
+        resize: "none",
+        boxSizing: "border-box",
+        overflow: "hidden",
+        background: "#F9FAFB",
+        color: "#374151",
+      }}
+    />
+  </div>
+
+  {/* DETALLE ocupa 2 filas */}
+<div
+  style={{
+    display: "flex",
+    flexDirection: "column",
+    gap: 1.5,
+    gridColumn: "span 6",
+    gridRow: "span 2",
+    marginBottom: 8,
+  }}
+>
+  <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>
+    Detalle
+  </label>
+  <textarea
+    value={form.detalle}
+    onChange={(e) =>
+      setForm((prev) => ({ ...prev, detalle: e.target.value }))
+    }
+    rows={6}
+    placeholder="Detalle del viático"
+    style={{
+      width: "100%",
+      borderRadius: 10,
+      border: "1px solid #D1D5DB",
+      padding: 12,
+      fontSize: 13,
+      resize: "vertical",
+      boxSizing: "border-box",
+      height: "100%",
+    }}
+  />
+</div>
+
+{/* FILA DERECHA 1: COMENTARIO */}
+<div
+  style={{
+    display: "flex",
+    flexDirection: "column",
+    gap: 1.5,
+    gridColumn: "span 6",
+    marginBottom: 8,
+  }}
+>
+  <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>
+    Comentario
+  </label>
+  <textarea
+    value={form.comentario}
+    onChange={(e) =>
+      setForm((prev) => ({ ...prev, comentario: e.target.value }))
+    }
+    rows={3}
+    placeholder="Comentario adicional"
+    style={{
+      width: "100%",
+      borderRadius: 10,
+      border: "1px solid #D1D5DB",
+      padding: 12,
+      fontSize: 13,
+      resize: "vertical",
+      boxSizing: "border-box",
+    }}
+  />
+</div>
+
+{/* OBSERVACIÓN (solo lectura, solo al visualizar el gasto) */}
+{esModoVisualizacion ? (
+  <div
+    style={{
+      display: "flex",
+      flexDirection: "column",
+      gap: 1.5,
+      gridColumn: "span 6",
+      marginBottom: 8,
+    }}
+  >
+    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>
+      Observación
+    </label>
+    <textarea
+      value={form.observacion ?? ""}
+      readOnly
+      rows={3}
+      placeholder="Sin observación"
+      style={{
+        width: "100%",
+        borderRadius: 10,
+        border: "1px solid #D1D5DB",
+        padding: 12,
+        fontSize: 13,
+        resize: "vertical",
+        boxSizing: "border-box",
+        background: "#F9FAFB",
+      }}
+    />
+  </div>
+) : null}
+
+  {/* Fila: fechas, bien, comprobante, serie y rendición. */}
+  <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gridColumn: "1 / -1", gap: 12, marginBottom: 8 }}>
+  <div
+  style={{
+    display: "flex",
+    gap: 12,
+      gridColumn: "span 2",
+  }}
+>
+  {/* FECHA INGRESO */}
+  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+    <label style={{ fontSize: 13, fontWeight: 700, display: "flex", gap: 6 }}>
+      <input
+        type="checkbox"
+        checked={usarFechaEmision}
+        onChange={(e) => {
+          const checked = e.target.checked;
+          setUsarFechaEmision(checked);
+          setForm((prev) => ({
+            ...prev,
+            fechaEmision: checked
+              ? prev.fechaEmision || fechaActual
+              : "",
+          }));
+        }}
+      />
+      Fecha emision
+    </label>
+
+    <input
+      type="date"
+      value={form.fechaEmision}
+      disabled={!usarFechaEmision}
+      onChange={(e) =>
+        setForm((prev) => ({
+          ...prev,
+          fechaEmision: e.target.value,
+        }))
+      }
+      style={{
+        height: 42,
+        borderRadius: 10,
+        border: "1px solid #D1D5DB",
+        padding: "0 12px",
+        fontSize: 13,
+        background: usarFechaEmision ? "#FFFFFF" : "#F3F4F6",
+      }}
+    />
+  </div>
+
+  {/* FECHA VENCIMIENTO */}
+  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+    <label style={{ fontSize: 13, fontWeight: 700, display: "flex", gap: 6 }}>
+      <input
+        type="checkbox"
+        checked={usarFechaVencimiento}
+        onChange={(e) => {
+          const checked = e.target.checked;
+          setUsarFechaVencimiento(checked);
+          setForm((prev) => ({
+            ...prev,
+            fechaVencimiento: checked
+              ? prev.fechaVencimiento || fechaActual
+              : "",
+          }));
+        }}
+      />
+      Fecha vencimiento
+    </label>
+
+    <input
+      type="date"
+      value={form.fechaVencimiento}
+      disabled={!usarFechaVencimiento}
+      onChange={(e) =>
+        setForm((prev) => ({
+          ...prev,
+          fechaVencimiento: e.target.value,
+        }))
+      }
+      style={{
+        height: 42,
+        borderRadius: 10,
+        border: "1px solid #D1D5DB",
+        padding: "0 12px",
+        fontSize: 13,
+        background: usarFechaVencimiento ? "#FFFFFF" : "#F3F4F6",
+      }}
+    />
+  </div>
+</div>
+
+  <div data-editable-pagado="1" style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 1", pointerEvents: "auto" }}>
+    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Bien</label>
+    <select value={getSelectValue(bienOptions, form.bien)} onChange={(e) => setForm((prev) => ({ ...prev, bien: e.target.value }))} disabled={constantesLoading} style={{ width: "100%", height: 42, borderRadius: 10, border: `1px solid ${errores.bien ? "#F87171" : "#D1D5DB"}`, padding: "0 12px", fontSize: 13, background: "#FFFFFF" }}>
+      <option value="">Seleccione</option>
+     {bienOptions.map((option, index) => (
+        <option
+            key={`bien-${getConstanteStoredValue(option)}-${index}`}
+            value={getConstanteStoredValue(option)}
+          >
+            {option.label}
+        </option>
+    ))}
+    </select>
+    {errores.bien && <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>{errores.bien}</div>}
+  </div>
+
+  <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 1" }}>
+    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Comprobante</label>
+    <select value={getSelectValue(comprobanteOptions, form.comprobante)} onChange={(e) => setForm((prev) => ({ ...prev, comprobante: e.target.value }))} disabled={constantesLoading} style={{ width: "100%", height: 42, borderRadius: 10, border: `1px solid ${errores.comprobante ? "#F87171" : "#D1D5DB"}`, padding: "0 12px", fontSize: 13, background: "#FFFFFF" }}>
+      <option value="">Seleccione</option>
+      {comprobanteOptions.map((option, index) => (
+        <option
+          key={`comprobante-${getConstanteStoredValue(option)}-${index}`}
+          value={getConstanteStoredValue(option)}
+        >
+          {option.label}
+        </option>
+    ))}
+    </select>
+    {errores.comprobante && <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>{errores.comprobante}</div>}
+  </div>
+
+  <div style={{ display: "flex", alignItems: "center", gap: 12, gridColumn: "span 2" }}>
+    <div data-editable-pagado="1" style={{ flex: 1, display: "flex", flexDirection: "column", gap: 1.5, pointerEvents: "auto" }}>
+      <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Serie</label>
+      <input type="text" value={form.serie} onChange={(e) => setForm((prev) => ({ ...prev, serie: e.target.value }))} placeholder="Serie" style={{ width: "100%", height: 42, borderRadius: 10, border: "1px solid #D1D5DB", padding: "0 12px", fontSize: 13, boxSizing: "border-box" }} />
+    </div>
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <input
+        type="checkbox"
+        id="rendicion"
+        checked={form.rendicion}
+        onChange={(e) => setForm((prev) => ({ ...prev, rendicion: e.target.checked }))}
+        style={{ width: 16, height: 16 }}
+      />
+      <label htmlFor="rendicion" style={{ fontSize: 13, fontWeight: 700, color: "#374151", cursor: "pointer" }}>Rendición</label>
+    </div>
+  </div>
+
+  </div>
+
+  {/* Fila: importes y moneda. */}
+  <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gridColumn: "1 / -1", gap: 12, marginBottom: 8 }}>
+  {/* TIPO DE PAGO */}
+  <div data-editable-pagado="1" style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 1", pointerEvents: "auto" }}>
+    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Tipo de pago</label>
+    <select
+      value={getSelectValue(tipoPagoOptions, form.tipoPago)}
+      onChange={(e) => setForm((prev) => ({ ...prev, tipoPago: e.target.value }))}
+      disabled={constantesLoading}
+      style={{
+        width: "100%",
+        height: 42,
+        borderRadius: 10,
+        border: `1px solid ${errores.tipoPago ? "#F87171" : "#D1D5DB"}`,
+        padding: "0 12px",
+        fontSize: 13,
+        background: "#FFFFFF",
+        boxSizing: "border-box",
+      }}
+    >
+      <option value="">Seleccione</option>
+      {tipoPagoOptions.map((option, index) => (
+      <option
+          key={`tipoPago-${getConstanteStoredValue(option)}-${index}`}
+          value={getConstanteStoredValue(option)}
+        >
+        {option.label}
+      </option>
+      ))}
+    </select>
+    {errores.tipoPago && <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>{errores.tipoPago}</div>}
+  </div>
+
+{/* SUBTOTAL */}
+  <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 1" }}>
+    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Subtotal</label>
+    <input
+      type="number"
+      value={form.monto}
+      onChange={(e) => setForm((prev) => ({ ...prev, monto: e.target.value }))}
+      step="0.01"
+      style={{
+        width: "100%",
+        height: 42,
+        borderRadius: 10,
+        border: "1px solid #D1D5DB",
+        padding: "0 12px",
+        fontSize: 13,
+        boxSizing: "border-box",
+      }}
+    />
+  </div>
+
+{/* IGV */}
+  <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 1" }}>
+    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>IGV</label>
+    <input
+      type="number"
+      value={hasSubtotal ? igvAmount.toFixed(2) : ""}
+      readOnly
+      step="0.01"
+      style={{
+        width: "100%",
+        height: 42,
+        borderRadius: 10,
+        border: "1px solid #D1D5DB",
+        padding: "0 12px",
+        fontSize: 13,
+        background: "#F3F4F6",
+        boxSizing: "border-box",
+      }}
+    />
+  </div>
+
+{/* TOTAL */}
+  <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 1" }}>
+    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Total</label>
+    <input
+      type="number"
+      value={hasSubtotal ? totalAmount.toFixed(2) : ""}
+      readOnly
+      step="0.01"
+      style={{
+        width: "100%",
+        height: 42,
+        borderRadius: 10,
+        border: "1px solid #D1D5DB",
+        padding: "0 12px",
+        fontSize: 13,
+        background: "#F3F4F6",
+        boxSizing: "border-box",
+      }}
+    />
+  </div>
+
+{/* MONEDA */}
+  <div style={{ display: "flex", alignItems: "flex-end", gap: 12, gridColumn: "span 1" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 1.5 }}>
+      <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Moneda</label>
+      <select
+        value={getSelectValue(monedaOptions, form.moneda)}
+        onChange={(e) => setForm((prev) => ({ ...prev, moneda: e.target.value }))}
+        disabled={constantesLoading}
+        style={{
+          width: "auto",
+          minWidth: 80,
+          maxWidth: "100%",
+          height: 42,
+          borderRadius: 10,
+          border: `1px solid ${errores.moneda ? "#F87171" : "#D1D5DB"}`,
+          padding: "0 12px",
+          fontSize: 13,
+          background: "#FFFFFF",
+          boxSizing: "border-box",
+        }}
+      >
+        <option value="">Seleccione</option>
+        {monedaOptions.map((option, index) => (
+          <option
+            key={`moneda-${getConstanteStoredValue(option)}-${index}`}
+            value={getConstanteStoredValue(option)}
+          >
+            {option.label}
+          </option>
+        ))}
+      </select>
+      {errores.moneda && <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>{errores.moneda}</div>}
+    </div>
+    {!esSoles && (
+      <div style={{ display: "flex", flexDirection: "column", gap: 1.5, minWidth: 100, maxWidth: '100%', gridColumn: 'span 2' }}>
+        <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Tipo de cambio</label>
+        <input
+          type="number"
+          value={tipoCambio}
+          min="0"
+          step="0.01"
+          onChange={e => setTipoCambio(e.target.value.replace(/^(\d*\.?\d{0,2}).*$/, '$1'))}
+          placeholder="3.80"
+          style={{
+            width: "80%",
+            height: 42,
+            borderRadius: 10,
+            border: "1px solid #D1D5DB",
+            padding: "0 12px",
+            fontSize: 13,
+            boxSizing: "border-box",
+          }}
+        />
+      </div>
+    )}
+  </div>
+
+  </div>
+
+  <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 4" }}>
+    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Solicitante</label>
+    <div style={{ position: "relative", width: "100%" }}>
+      <input
+        type="text"
+        value={
+          getConstanteLabelOrFallback(solicitanteOptions, form.solicitante, form.solicitanteLabel) ||
+          solicitanteInput ||
+          ""
+        }
+        onChange={(e) => {
+          setSolicitanteInput(e.target.value);
+          setShowSolicitanteDropdown(true);
+          setHighlightedSolicitanteIdx(-1);
+          setForm((prev) => ({ ...prev, solicitante: "" }));
+        }}
+        onFocus={() => {
+          if (filteredSolicitantes.length > 0) {
+            setShowSolicitanteDropdown(true);
+          }
+        }}
+        onKeyDown={(e) => {
+          if (filteredSolicitantes.length === 0) return;
+
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setHighlightedSolicitanteIdx((idx) => Math.min(idx + 1, filteredSolicitantes.length - 1));
+            setShowSolicitanteDropdown(true);
+          } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setHighlightedSolicitanteIdx((idx) => Math.max(idx - 1, 0));
+            setShowSolicitanteDropdown(true);
+          } else if (e.key === "Enter") {
+            e.preventDefault();
+
+            if (highlightedSolicitanteIdx >= 0 && highlightedSolicitanteIdx < filteredSolicitantes.length) {
+              const option = filteredSolicitantes[highlightedSolicitanteIdx];
+              setForm((prev) => ({ ...prev, solicitante: getConstanteStoredValue(option) }));
+              setSolicitanteInput(option.label);
+              setShowSolicitanteDropdown(false);
+              setHighlightedSolicitanteIdx(-1);
+            }
+          }
+        }}
+        placeholder="Seleccione..."
+        autoComplete="off"
+        style={{
+          width: "100%",
+          height: 42,
+          borderRadius: 10,
+          border: `1px solid ${errores.solicitante ? "#F87171" : "#D1D5DB"}`,
+          padding: "0 12px",
+          fontSize: 13,
+          boxSizing: "border-box",
+          background: solicitanteLoading ? "#F3F4F6" : "#FFFFFF",
+        }}
+        disabled={solicitanteLoading || solicitanteOptions.length === 0}
+      />
+
+      {showSolicitanteDropdown && filteredSolicitantes.length > 0 && (
+        <div
+          style={{
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            right: 0,
+            background: "#fff",
+            border: "1px solid #ccc",
+            zIndex: 1002,
+            maxHeight: 180,
+            overflowY: "auto",
+          }}
+        >
+          {filteredSolicitantes.map((option, idx) => (
+            <div
+              key={`solicitante-${getConstanteStoredValue(option)}-${idx}`}
+              style={{
+                padding: 6,
+                cursor: "pointer",
+                background: idx === highlightedSolicitanteIdx ? "#e6f7ff" : undefined,
+                fontSize: 13,
+                lineHeight: 1.1,
+              }}
+              onMouseDown={() => {
+                setForm((prev) => ({ ...prev, solicitante: getConstanteStoredValue(option) }));
+                setSolicitanteInput(option.label);
+                setShowSolicitanteDropdown(false);
+                setHighlightedSolicitanteIdx(-1);
+              }}
+            >
+              {option.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+    {errores.solicitante && <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>{errores.solicitante}</div>}
+  </div>
+
+  <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 4" }}>
+    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Gestor</label>
+    <div style={{ position: "relative", width: "100%" }}>
+      <input
+        type="text"
+        value={findConstanteOption(gestorOptions, form.gestor)?.label || gestorInput || ""}
+        onChange={(e) => {
+          setGestorInput(e.target.value);
+          setShowGestorDropdown(true);
+          setHighlightedGestorIdx(-1);
+          setForm((prev) => ({ ...prev, gestor: "" }));
+        }}
+        onFocus={() => {
+          if (filteredGestores.length > 0) {
+            setShowGestorDropdown(true);
+          }
+        }}
+        onKeyDown={(e) => {
+          if (filteredGestores.length === 0) return;
+
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setHighlightedGestorIdx((idx) => Math.min(idx + 1, filteredGestores.length - 1));
+            setShowGestorDropdown(true);
+          } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setHighlightedGestorIdx((idx) => Math.max(idx - 1, 0));
+            setShowGestorDropdown(true);
+          } else if (e.key === "Enter") {
+            e.preventDefault();
+
+            if (highlightedGestorIdx >= 0 && highlightedGestorIdx < filteredGestores.length) {
+              const option = filteredGestores[highlightedGestorIdx];
+              setForm((prev) => ({ ...prev, gestor: getConstanteStoredValue(option) }));
+              setGestorInput(option.label);
+              setShowGestorDropdown(false);
+              setHighlightedGestorIdx(-1);
+            }
+          }
+        }}
+        placeholder="Seleccione..."
+        autoComplete="off"
+        style={{
+          width: "100%",
+          height: 42,
+          borderRadius: 10,
+          border: `1px solid ${errores.gestor ? "#F87171" : "#D1D5DB"}`,
+          padding: "0 12px",
+          fontSize: 13,
+          boxSizing: "border-box",
+          background: gestorLoading ? "#F3F4F6" : "#FFFFFF",
+        }}
+        disabled={gestorLoading || gestorOptions.length === 0}
+      />
+
+      {showGestorDropdown && filteredGestores.length > 0 && (
+        <div
+          style={{
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            right: 0,
+            background: "#fff",
+            border: "1px solid #ccc",
+            zIndex: 1002,
+            maxHeight: 180,
+            overflowY: "auto",
+          }}
+        >
+          {filteredGestores.map((option, idx) => (
+            <div
+              key={`gestor-${getConstanteStoredValue(option)}-${idx}`}
+              style={{
+                padding: 6,
+                cursor: "pointer",
+                background: idx === highlightedGestorIdx ? "#e6f7ff" : undefined,
+                fontSize: 13,
+                lineHeight: 1.1,
+              }}
+              onMouseDown={() => {
+                setForm((prev) => ({ ...prev, gestor: getConstanteStoredValue(option) }));
+                setGestorInput(option.label);
+                setShowGestorDropdown(false);
+                setHighlightedGestorIdx(-1);
+              }}
+            >
+              {option.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+    {errores.gestor && <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>{errores.gestor}</div>}
+  </div>
+
+  <div style={{ display: "flex", flexDirection: "column", gap: 1.5, gridColumn: "span 4" }}>
+    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Validador</label>
+    <div style={{ position: "relative", width: "100%" }}>
+      <input
+        type="text"
+        value={
+          getConstanteLabelOrFallback(validadorOptions, form.validador, form.validadorLabel) ||
+          validadorInput ||
+          ""
+        }
+        onChange={(e) => {
+          setValidadorInput(e.target.value);
+          setShowValidadorDropdown(true);
+          setHighlightedValidadorIdx(-1);
+          setForm((prev) => ({ ...prev, validador: "" }));
+        }}
+        onFocus={() => {
+          if (filteredValidadores.length > 0) {
+            setShowValidadorDropdown(true);
+          }
+        }}
+        onKeyDown={(e) => {
+          if (filteredValidadores.length === 0) return;
+
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setHighlightedValidadorIdx((idx) => Math.min(idx + 1, filteredValidadores.length - 1));
+            setShowValidadorDropdown(true);
+          } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setHighlightedValidadorIdx((idx) => Math.max(idx - 1, 0));
+            setShowValidadorDropdown(true);
+          } else if (e.key === "Enter") {
+            e.preventDefault();
+
+            if (highlightedValidadorIdx >= 0 && highlightedValidadorIdx < filteredValidadores.length) {
+              const option = filteredValidadores[highlightedValidadorIdx];
+              setForm((prev) => ({ ...prev, validador: getConstanteStoredValue(option) }));
+              setValidadorInput(option.label);
+              setShowValidadorDropdown(false);
+              setHighlightedValidadorIdx(-1);
+            }
+          }
+        }}
+        placeholder="Seleccione..."
+        autoComplete="off"
+        style={{
+          width: "100%",
+          height: 42,
+          borderRadius: 10,
+          border: `1px solid ${errores.validador ? "#F87171" : "#D1D5DB"}`,
+          padding: "0 12px",
+          fontSize: 13,
+          boxSizing: "border-box",
+          background: validadorLoading ? "#F3F4F6" : "#FFFFFF",
+        }}
+        disabled={validadorLoading || validadorOptions.length === 0}
+      />
+
+      {showValidadorDropdown && filteredValidadores.length > 0 && (
+        <div
+          style={{
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            right: 0,
+            background: "#fff",
+            border: "1px solid #ccc",
+            zIndex: 1002,
+            maxHeight: 180,
+            overflowY: "auto",
+          }}
+        >
+          {filteredValidadores.map((option, idx) => (
+            <div
+              key={`validador-${getConstanteStoredValue(option)}-${idx}`}
+              style={{
+                padding: 6,
+                cursor: "pointer",
+                background: idx === highlightedValidadorIdx ? "#e6f7ff" : undefined,
+                fontSize: 13,
+                lineHeight: 1.1,
+              }}
+              onMouseDown={() => {
+                setForm((prev) => ({ ...prev, validador: getConstanteStoredValue(option) }));
+                setValidadorInput(option.label);
+                setShowValidadorDropdown(false);
+                setHighlightedValidadorIdx(-1);
+              }}
+            >
+              {option.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+    {errores.validador && <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>{errores.validador}</div>}
+  </div>
+</div>
+            </div>
+
+            <div style={{ display: gastoEditorTab === "detalle-sitio" ? "flex" : "none", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 10 }}>
+              {/* Botón de factura alineado a la izquierda */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0, flex: 1 }}>
+                <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+                  <button
+                    style={{
+                      background: "none",
+                      border: "none",
+                      padding: 0,
+                      marginLeft: 0,
+                      cursor: esModoVisualizacion ? "not-allowed" : facturaUploadLoading ? "wait" : "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      height: 36,
+                      opacity: facturaUploadLoading || esModoVisualizacion ? 0.7 : 1,
+                    }}
+                    title="Cargar factura"
+                    type="button"
+                    disabled={facturaUploadLoading || esModoVisualizacion}
+                    onClick={() => setShowFacturaSourceMenu((prev) => !prev)}
+                  >
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <rect x="4" y="3" width="16" height="18" rx="2" fill="#6E4CCB"/>
+                      <rect x="7" y="7" width="10" height="2" rx="1" fill="#fff"/>
+                      <rect x="7" y="11" width="10" height="2" rx="1" fill="#fff"/>
+                      <rect x="7" y="15" width="6" height="2" rx="1" fill="#fff"/>
+                    </svg>
+                  </button>
+                  <div
+                    style={{
+                      minWidth: 0,
+                      fontSize: 11,
+                      color: facturaDisplayPath ? "#374151" : "#6B7280",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      cursor: facturaDisplayPath ? "pointer" : "default",
+                      textDecoration: facturaDisplayPath ? "underline" : "none",
+                    }}
+                    title={facturaDisplayPath || "Sin factura cargada"}
+                    onClick={() => {
+                      if (facturaDisplayPath) setShowFacturaViewer(true);
+                    }}
+                  >
+                    {facturaUploadLoading
+                      ? "Cargando factura en SharePoint..."
+                      : facturaDisplayPath || "Sin factura cargada"}
+                  </div>
+                        {/* Visualizador modal de factura */}
+                  {showFacturaSourceMenu && !esModoVisualizacion && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        left: 0,
+                        top: "calc(100% + 8px)",
+                        background: "#FFFFFF",
+                        border: "1px solid #E5E7EB",
+                        borderRadius: 12,
+                        boxShadow: "0 10px 28px rgba(15, 23, 42, 0.14)",
+                        padding: 8,
+                        zIndex: 1005,
+                        minWidth: 180,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => camaraFacturaInputRef.current?.click()}
+                        style={{
+                          width: "100%",
+                          border: "none",
+                          background: "transparent",
+                          textAlign: "left",
+                          padding: "10px 12px",
+                          borderRadius: 8,
+                          cursor: "pointer",
+                          fontSize: 11,
+                          color: "#17143A",
+                        }}
+                      >
+                        Tomar foto
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => archivoFacturaInputRef.current?.click()}
+                        style={{
+                          width: "100%",
+                          border: "none",
+                          background: "transparent",
+                          textAlign: "left",
+                          padding: "10px 12px",
+                          borderRadius: 8,
+                          cursor: "pointer",
+                          fontSize: 11,
+                          color: "#17143A",
+                        }}
+                      >
+                        Elegir archivo
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {facturaUploadError && (
+                  <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>
+                    {facturaUploadError}
+                  </div>
+                )}
+                <input
+                  ref={archivoFacturaInputRef}
+                  type="file"
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  onChange={procesarFacturaSeleccionada}
+                />
+                <input
+                  ref={camaraFacturaInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  style={{ display: "none" }}
+                  onChange={procesarFacturaSeleccionada}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  style={{
+                    border: "1px solid #D1D5DB",
+                    background: "#FFFFFF",
+                    color: "#17143A",
+                    padding: "10px 16px",
+                    borderRadius: 10,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                  onClick={cerrarPanel}
+                >
+                  {esModoVisualizacion ? "Cerrar" : "Cancelar"}
+                </button>
+                <button
+                  style={{
+                    border: "none",
+                    background: esModoVisualizacion ? "#CBD5E1" : "#6E4CCB",
+                    color: "#FFFFFF",
+                    padding: "10px 16px",
+                    borderRadius: 10,
+                    fontWeight: 700,
+                    cursor: esModoVisualizacion ? "not-allowed" : "pointer",
+                  }}
+                  onClick={esModoVisualizacion ? undefined : guardar}
+                  disabled={guardando || esModoVisualizacion}
+                >
+                  {guardando ? "Guardando..." : modo === "nuevo" ? "Guardar" : "Actualizar"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showFacturaViewer && facturaDisplayPath && (
+        <div
+          role="presentation"
+          onClick={() => setShowFacturaViewer(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 4300,
+            padding: 18,
+            background: "rgba(15, 23, 42, 0.60)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label="Documento adjunto"
+            onClick={(event) => event.stopPropagation()}
+            style={{
+              width: "min(1100px, 96vw)",
+              maxHeight: "92vh",
+              overflow: "hidden",
+              borderRadius: 12,
+              background: "#FFFFFF",
+              boxShadow: "0 18px 48px rgba(15,23,42,.30)",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 16px", borderBottom: "1px solid #E2E8F0" }}>
+              <strong style={{ color: "#17143A", fontSize: 14 }}>Documento adjunto</strong>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <a href={facturaDisplayPath} target="_blank" rel="noopener noreferrer" style={{ color: "#6E4CCB", fontSize: 12, fontWeight: 700 }}>
+                  Abrir en SharePoint
+                </a>
+                <button type="button" onClick={() => setShowFacturaViewer(false)} aria-label="Cerrar visor" style={{ border: "1px solid #CBD5E1", borderRadius: 7, background: "#FFFFFF", color: "#334155", width: 30, height: 30, fontSize: 18, cursor: "pointer" }}>
+                  ×
+                </button>
+              </div>
+            </header>
+            <div style={{ minHeight: 360, padding: facturaMediaType === "image" ? 16 : 0, overflow: "auto", display: "flex", alignItems: "center", justifyContent: "center", background: "#F8FAFC" }}>
+              {facturaViewerLoading ? (
+                <div style={{ color: "#475569", fontSize: 14 }}>Cargando vista previa...</div>
+              ) : facturaViewerError ? (
+                <div style={{ padding: 28, textAlign: "center", color: "#B91C1C", fontSize: 14 }}>{facturaViewerError}</div>
+              ) : facturaMediaType === "image" && facturaViewerUrl ? (
+                <img src={facturaViewerUrl} alt="Documento adjunto" style={{ display: "block", maxWidth: "100%", maxHeight: "78vh", objectFit: "contain", borderRadius: 6 }} />
+              ) : facturaMediaType === "pdf" && facturaViewerUrl ? (
+                <iframe src={facturaViewerUrl} title="Documento PDF" style={{ width: "100%", height: "78vh", minHeight: 500, border: "none" }} />
+              ) : (
+                <div style={{ padding: 28, textAlign: "center", color: "#475569", fontSize: 14 }}>
+                  Este formato no cuenta con vista previa. Use “Abrir en SharePoint” para visualizarlo o descargarlo.
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {historialSitioDetalleActivo !== null && (
+        <div role="presentation" onClick={() => setHistorialSitioDetalleActivo(null)} style={{ position: "fixed", inset: 0, zIndex: 4200, background: "rgba(15, 23, 42, 0.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
+          <section role="dialog" aria-modal="true" aria-label="Detalle del viático" onClick={(event) => event.stopPropagation()} style={{ width: "min(620px, 100%)", maxHeight: "min(420px, 100%)", overflow: "auto", borderRadius: 12, background: "#FFFFFF", boxShadow: "0 18px 48px rgba(15,23,42,.28)", padding: 20 }}>
+            <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
+              <h3 style={{ margin: 0, color: "#0F172A", fontSize: 17 }}>Detalle del viático</h3>
+              <button type="button" onClick={() => setHistorialSitioDetalleActivo(null)} style={{ border: "1px solid #CBD5E1", borderRadius: 8, padding: "6px 10px", background: "#FFFFFF", color: "#334155", cursor: "pointer", fontWeight: 700 }}>Cerrar</button>
+            </header>
+            <p style={{ margin: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere", color: "#334155", fontSize: 13, lineHeight: 1.55 }}>{historialSitioDetalleActivo}</p>
+          </section>
+        </div>
+      )}
+
+      {historialSitioExpanded && (
+        <div
+          role="presentation"
+          onClick={() => setHistorialSitioExpanded(false)}
+          style={{ position: "fixed", inset: 0, zIndex: 4100, background: "rgba(15, 23, 42, 0.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label="Historial Sitio"
+            onClick={(event) => event.stopPropagation()}
+            style={{ width: "min(1180px, 100%)", height: "min(760px, 100%)", background: "#FFFFFF", borderRadius: 14, boxShadow: "0 18px 48px rgba(15,23,42,.28)", display: "flex", flexDirection: "column", overflow: "hidden" }}
+          >
+            <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, padding: "18px 20px", borderBottom: "1px solid #E2E8F0" }}>
+              <div>
+                <span style={{ display: "block", fontSize: 10, fontWeight: 800, color: "#F59E0B", textTransform: "uppercase" }}>Historial Sitio</span>
+                <h3 style={{ margin: "4px 0", color: "#0F172A", fontSize: 19 }}>Registros pagados del sitio</h3>
+                <p style={{ margin: 0, color: "#64748B", fontSize: 12 }}>Mismo cliente, proyecto, site y tipo de trabajo seleccionados.</p>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {historialSitioSolicitante && <button type="button" onClick={() => setHistorialSitioSolicitante("")} style={{ border: "1px solid #CBD5E1", background: "#FFFFFF", color: "#475569", borderRadius: 8, padding: "8px 10px", cursor: "pointer", fontSize: 11 }}>Limpiar filtro</button>}
+                <button type="button" onClick={() => setHistorialSitioExpanded(false)} style={{ border: "1px solid #FCA5A5", background: "#FFFFFF", color: "#DC2626", borderRadius: 8, padding: "8px 10px", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>Cerrar</button>
+              </div>
+            </header>
+            <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 20 }}>
+              {historialSitioTotalesPorMoneda.length > 0 && <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
+                {historialSitioTotalesPorMoneda.map(({ moneda, total }) => <div key={moneda} style={{ minWidth: 130, border: "1px solid #DBEAFE", borderRadius: 10, padding: "9px 11px", background: "#F8FBFF" }}><span style={{ display: "block", fontSize: 10, color: "#64748B", fontWeight: 800 }}>{moneda}</span><strong style={{ color: "#0F172A", fontSize: 15 }}>{formatDecimalValue(total)}</strong></div>)}
+              </div>}
+              <div style={{ display: "flex", gap: 8, borderBottom: "1px solid #E2E8F0", marginBottom: 14 }}>
+                {[{ key: "listado" as const, label: "Listado" }, { key: "resumen" as const, label: "Resumen por solicitante" }].map((tab) => <button key={tab.key} type="button" onClick={() => setHistorialSitioView(tab.key)} style={{ border: "none", borderBottom: `3px solid ${historialSitioView === tab.key ? "#F59E0B" : "transparent"}`, background: "transparent", color: historialSitioView === tab.key ? "#B45309" : "#64748B", padding: "8px 12px", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>{tab.label}</button>)}
+              </div>
+              {historialSitioView === "resumen" ? (
+                historialSitioResumenSolicitante.length === 0 ? <div style={{ padding: 20, textAlign: "center", color: "#64748B" }}>No hay solicitudes para resumir.</div> :
+                <div style={{ display: "grid", gap: 16 }}>{historialSitioResumenSolicitante.map(({ moneda, items }) => {
+                  const max = items[0]?.total || 0;
+                  return <section key={moneda} style={{ border: "1px solid #DBEAFE", borderRadius: 12, padding: 14, background: "#F8FBFF" }}><strong style={{ color: "#0F172A", fontSize: 13 }}>{moneda}</strong><div style={{ display: "grid", gap: 9, marginTop: 12 }}>{items.map(({ solicitante, total }) => <button key={solicitante} type="button" onClick={() => { setHistorialSitioSolicitante(solicitante); setHistorialSitioView("listado"); }} style={{ border: "none", background: "transparent", display: "grid", gridTemplateColumns: "minmax(150px, .9fr) minmax(170px, 2fr) auto", alignItems: "center", gap: 12, textAlign: "left", cursor: "pointer" }}><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 700, color: "#334155" }}>{solicitante}</span><span style={{ height: 11, borderRadius: 99, background: "#E2E8F0", overflow: "hidden" }}><i style={{ display: "block", height: "100%", width: `${max ? Math.max(2, total / max * 100) : 0}%`, background: "#F59E0B", borderRadius: 99 }} /></span><strong style={{ fontSize: 12, color: "#0F172A" }}>{formatDecimalValue(total)}</strong></button>)}</div></section>;
+                })}</div>
+              ) : (
+                <DataGridPro<GastoDto>
+                  dataSource={historialSitioRowsFiltrados}
+                  columns={buildHistorialSitioColumns({ extendido: true })}
+                  keyExpr={historialSitioRowKey}
+                  height="55vh"
+                  noDataText={historialSitioSolicitante ? "No hay registros para el solicitante seleccionado." : "No hay registros para el sitio seleccionado."}
+                  showSearchPanel={false}
+                  allowExport={false}
+                  rowAlternation={false}
+                  rowPadding="4px 8px"
+                  paging={false}
+                />
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {mostrarNuevoResponsable && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="nuevo-responsable-title"
+          style={{
+            position: "fixed",
+            inset: 0,
+            // Debe quedar sobre el panel lateral de "Nuevo viático" (zIndex 3000).
+            zIndex: 5000,
+            background: "rgba(15, 23, 42, 0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 18,
+          }}
+        >
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void guardarNuevoResponsable();
+            }}
+            style={{
+              width: "min(620px, 100%)",
+              background: "#FFFFFF",
+              borderRadius: 14,
+              boxShadow: "0 24px 60px rgba(15, 23, 42, 0.25)",
+              overflow: "hidden",
+            }}
+          >
+            <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "16px 18px", borderBottom: "1px solid #E2E8F0" }}>
+              <div>
+                <h2 id="nuevo-responsable-title" style={{ margin: 0, fontSize: 18, color: "#0F172A" }}>
+                  {modoResponsableForm === "editar" ? "Editar responsable" : "Nuevo responsable"}
+                </h2>
+                <span style={{ display: "block", marginTop: 3, color: "#64748B", fontSize: 12 }}>
+                  {modoResponsableForm === "editar" ? "Actualice los datos bancarios del responsable seleccionado." : "Registre los datos bancarios del responsable."}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setMostrarNuevoResponsable(false);
+                  setModoResponsableForm("nuevo");
+                  setCuentaResponsableOriginal(CUENTA_RESPONSABLE_ORIGINAL_INICIAL);
+                }}
+                disabled={guardandoNuevoResponsable}
+                aria-label="Cerrar"
+                style={{ border: "none", background: "transparent", color: "#475569", fontSize: 24, cursor: "pointer", lineHeight: 1 }}
+              >
+                ×
+              </button>
+            </header>
+            <div style={{ display: "grid", gap: 14, padding: 18 }}>
+              {nuevoResponsableError && (
+                <div role="alert" style={{ border: "1px solid #FCA5A5", borderRadius: 8, background: "#FEF2F2", color: "#B91C1C", padding: "9px 11px", fontSize: 12 }}>
+                  {nuevoResponsableError}
+                </div>
+              )}
+              {[
+                { key: "nombre", label: "Nombre", placeholder: "Nombre completo" },
+                { key: "cuenta", label: "Cuenta", placeholder: "Número de cuenta" },
+                { key: "cuentaInter", label: "Cta. interbancaria", placeholder: "Código de cuenta interbancaria" },
+                { key: "nroDocumento", label: "Nro. documento", placeholder: "Documento de identidad" },
+              ].map((field) => (
+                <label key={field.key} style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 700, color: "#334155" }}>
+                  {field.label}
+                  <input
+                    list={field.key === "nombre" ? "nombres-responsable-encontrados" : undefined}
+                    value={nuevoResponsable[field.key as keyof NuevoResponsableForm]}
+                    onChange={(event) => {
+                      setNuevoResponsableError(null);
+                      setNuevoResponsable((previous) => ({ ...previous, [field.key]: event.target.value }));
+                    }}
+                    placeholder={field.placeholder}
+                    disabled={guardandoNuevoResponsable}
+                    style={{ height: 38, border: "1px solid #CBD5E1", borderRadius: 8, padding: "0 10px", fontSize: 13 }}
+                  />
+                  {field.key === "nombre" && (
+                    <>
+                      {buscandoNuevoResponsable && <span style={{ color: "#64748B", fontSize: 11, fontWeight: 500 }}>Buscando responsables...</span>}
+                      <datalist id="nombres-responsable-encontrados">
+                        {coincidenciasNuevoResponsable.map((nombre) => <option key={nombre} value={nombre} />)}
+                      </datalist>
+                      {busquedaNuevoResponsableError && <span style={{ color: "#DC2626", fontSize: 11, fontWeight: 600 }}>{busquedaNuevoResponsableError}</span>}
+                    </>
+                  )}
+                </label>
+              ))}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
+                <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 700, color: "#334155" }}>
+                  Tipo de cuenta
+                  <select
+                    value={nuevoResponsable.tipoCuenta}
+                    onChange={(event) => {
+                      setNuevoResponsableError(null);
+                      setNuevoResponsable((previous) => ({ ...previous, tipoCuenta: event.target.value }));
+                    }}
+                    disabled={guardandoNuevoResponsable || constantesLoading}
+                    style={{ height: 38, border: "1px solid #CBD5E1", borderRadius: 8, padding: "0 10px", fontSize: 13 }}
+                  >
+                    <option value="">{constantesLoading ? "Cargando..." : "Seleccione"}</option>
+                    {tipoCuentaOptions.map((option, index) => (
+                      <option key={`tipo-cuenta-${getConstanteStoredValue(option)}-${index}`} value={getConstanteStoredValue(option)}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 700, color: "#334155" }}>
+                  Banco
+                  <select
+                    value={nuevoResponsable.banco}
+                    onChange={(event) => {
+                      setNuevoResponsableError(null);
+                      setNuevoResponsable((previous) => ({ ...previous, banco: event.target.value }));
+                    }}
+                    disabled={guardandoNuevoResponsable || constantesLoading}
+                    style={{ height: 38, border: "1px solid #CBD5E1", borderRadius: 8, padding: "0 10px", fontSize: 13 }}
+                  >
+                    <option value="">{constantesLoading ? "Cargando..." : "Seleccione"}</option>
+                    {bancoOptions.map((option, index) => (
+                      <option key={`banco-responsable-${getConstanteStoredValue(option)}-${index}`} value={getConstanteStoredValue(option)}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              {existeCuentaResponsableDuplicada && (
+                <div style={{ color: "#B45309", fontSize: 11, fontWeight: 600 }}>
+                  Ya existe una cuenta registrada con el mismo documento, tipo de cuenta y banco.
+                </div>
+              )}
+            </div>
+            <footer style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "14px 18px", borderTop: "1px solid #E2E8F0" }}>
+              <button type="button" onClick={() => { setMostrarNuevoResponsable(false); setModoResponsableForm("nuevo"); setCuentaResponsableOriginal(CUENTA_RESPONSABLE_ORIGINAL_INICIAL); }} disabled={guardandoNuevoResponsable} style={{ border: "1px solid #CBD5E1", borderRadius: 8, padding: "9px 14px", background: "#FFFFFF", color: "#334155", fontWeight: 700, cursor: "pointer" }}>Cancelar</button>
+              <button type="submit" disabled={guardandoNuevoResponsable || existeCuentaResponsableDuplicada} style={{ border: "1px solid #2563EB", borderRadius: 8, padding: "9px 14px", background: "#2563EB", color: "#FFFFFF", fontWeight: 700, cursor: guardandoNuevoResponsable || existeCuentaResponsableDuplicada ? "not-allowed" : "pointer", opacity: guardandoNuevoResponsable || existeCuentaResponsableDuplicada ? 0.7 : 1 }}>{guardandoNuevoResponsable ? "Guardando..." : modoResponsableForm === "editar" ? "Actualizar" : "Grabar"}</button>
+            </footer>
+          </form>
+        </div>
+      )}
+
+      {mostrarMotivoRechazo && idEliminar !== null && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 3101,
+          }}
+        >
+          <div
+            style={{
+              width: 480,
+              maxWidth: "calc(100% - 24px)",
+              background: "#FFFFFF",
+              borderRadius: 16,
+              padding: 24,
+              boxShadow: "0 12px 28px rgba(0,0,0,0.16)",
+            }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 12, color: "#17143A" }}>
+              Rechazar gasto {gastoSeleccionadoEliminar?.id}
+            </h3>
+            <p style={{ marginTop: 0, color: "#4B5563", lineHeight: 1.6 }}>
+              Ingrese el motivo del rechazo y presione Aceptar para rechazar el registro. Cancelar cierra sin hacer cambios.
+            </p>
+            <textarea
+              value={motivoRechazo}
+              onChange={(e) => {
+                setMotivoRechazo(e.target.value);
+                if (rechazoError) {
+                  setRechazoError(null);
+                }
+              }}
+              placeholder="Ingrese el motivo del rechazo"
+              rows={5}
+              autoFocus
+              style={{
+                width: "100%",
+                borderRadius: 12,
+                border: "1px solid #D1D5DB",
+                padding: 12,
+                fontSize: 12,
+                boxSizing: "border-box",
+                resize: "vertical",
+              }}
+            />
+            {rechazoError && (
+              <div style={{ marginTop: 8, color: "#B91C1C", fontSize: 12, fontWeight: 600 }}>{rechazoError}</div>
+            )}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 24 }}>
+              <button
+                style={{
+                  border: "1px solid #D1D5DB",
+                  background: "#FFFFFF",
+                  color: "#17143A",
+                  padding: "10px 16px",
+                  borderRadius: 10,
+                  fontWeight: 600,
+                  cursor: rechazando ? "not-allowed" : "pointer",
+                }}
+                onClick={cancelarRechazo}
+                disabled={rechazando}
+              >
+                Cancelar
+              </button>
+              <button
+                style={{
+                  border: "none",
+                  background: "#DC2626",
+                  color: "#FFFFFF",
+                  padding: "10px 16px",
+                  borderRadius: 10,
+                  fontWeight: 700,
+                  cursor: rechazando ? "not-allowed" : "pointer",
+                }}
+                onClick={eliminar}
+                disabled={rechazando}
+              >
+                {rechazando ? "Rechazando..." : "Aceptar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+const historialSitioRowKey = (row: GastoDto) => `${row.id}-${row.idSite}-${row.correSite}`;
+
+/** Columnas del historial de gastos por sitio; `extendido` agrega IGV, Total y Responsable (vista del modal). */
+function buildHistorialSitioColumns(options: { onDetalle?: (detalle: string) => void; extendido?: boolean }): GridColumn<GastoDto>[] {
+  const { onDetalle, extendido = false } = options;
+  const dinero = { type: "fixedPoint", precision: 2 } as const;
+  return [
+    { dataField: "id", caption: "Correlativo", dataType: "number", width: 100, format: (value) => String(value ?? "") },
+    {
+      dataField: "fecIngreso",
+      caption: "Fecha",
+      dataType: "date",
+      width: 100,
+      sortOrder: "desc",
+      calculateCellValue: (row) => normalizeFecIngresoFromStore(row.fecIngreso),
+    },
+    { dataField: "clienteNombre", caption: "Cliente", width: 120, calculateCellValue: (row) => row.clienteNombre || "" },
+    { dataField: "nombreProyecto", caption: "Proyecto", width: 140, calculateCellValue: (row) => row.nombreProyecto || "" },
+    { dataField: "siteNombre", caption: "Site", width: 160, calculateCellValue: (row) => row.siteNombre || "" },
+    { dataField: "tipoTrabajo", caption: "Tipo trabajo", width: 120, calculateCellValue: (row) => row.tipoTrabajo || "" },
+    {
+      dataField: "subtotal",
+      caption: "Subtotal",
+      dataType: "number",
+      width: 110,
+      format: dinero,
+      calculateCellValue: (row) => Number(row.subtotal ?? row.monto ?? 0),
+      cellStyle: () => ({ fontWeight: 700 }),
+    },
+    ...(extendido
+      ? ([
+          { dataField: "igv", caption: "IGV", dataType: "number", width: 90, format: dinero, calculateCellValue: (row: GastoDto) => Number(row.igv ?? 0) },
+          { dataField: "total", caption: "Total", dataType: "number", width: 110, format: dinero, calculateCellValue: (row: GastoDto) => Number(row.total ?? row.totalPagar ?? 0) },
+        ] satisfies GridColumn<GastoDto>[])
+      : []),
+    { dataField: "moneda", caption: "Moneda", width: 90, calculateCellValue: (row) => row.monedaLabel || row.moneda || "" },
+    { dataField: "solicitante", caption: "Solicitante", width: 170, calculateCellValue: (row) => row.solicitanteLabel || row.solicitante || "" },
+    ...(extendido
+      ? ([
+          { dataField: "responsable", caption: "Responsable", width: 170, calculateCellValue: (row: GastoDto) => row.responsableLabel || "" },
+        ] satisfies GridColumn<GastoDto>[])
+      : []),
+    {
+      dataField: "detalle",
+      caption: "Detalle",
+      width: 220,
+      calculateCellValue: (row) => row.detalle || "",
+      cellRender: onDetalle
+        ? (_value, row) => (
+            <button
+              type="button"
+              title={row.detalle || ""}
+              onClick={(event) => {
+                event.stopPropagation();
+                onDetalle(row.detalle || "Sin detalle registrado.");
+              }}
+              style={{ border: "none", background: "transparent", color: "#1D4ED8", cursor: "pointer", padding: 0, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "left", textDecoration: "underline" }}
+            >
+              {row.detalle || "-"}
+            </button>
+          )
+        : undefined,
+    },
+  ];
+}
+
+const getGastoRowKey = (gasto: GastoForm, rowIndex: number) => {
+  const id = Number(gasto.id ?? 0);
+  const idSite = String(gasto.filtroOperativo.filtro?.idSite ?? "").trim();
+
+  if (id > 0 && idSite) {
+    return `${id}-${idSite}`;
+  }
+
+  return `${gasto.id || "sin-id"}-${rowIndex}`;
+};
