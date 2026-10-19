@@ -12,7 +12,7 @@ namespace CjERP.Infrastructure.Services
         // Par PERFIL-ROL "ESTANDAR"-"ESTANDAR" (IdPerfilRol 28) y perfil "ESTANDAR" de EmpleadoCjPerfil (PV: validar ids en BD).
         private const int PerfilEstandar = 14;
         private const int RolEstandar = 7;
-        private const int PerfilEmpleadoEstandar = 10;
+        private static readonly int[] PerfilesEmpleadoPorDefecto = { 10, 11 };
         private const int IdCreacionPorDefecto = 999;
 
         private readonly ISqlCommandFactory _sqlCommandFactory;
@@ -102,22 +102,23 @@ namespace CjERP.Infrastructure.Services
                 // Hora de negocio America/Lima (UTC-5), fecha sin hora como el INSERT manual.
                 var fechaLima = DateTime.UtcNow.AddHours(-5).Date;
 
-                await connection.ExecuteAsync(
-                    _sqlCommandFactory.Create(
-                        """
-                        IF NOT EXISTS (SELECT 1 FROM dbo.EmpleadoCjPerfil
-                                       WHERE IdEmpleadoCj = @IdEmpleadoCj AND IdPerfil = @IdPerfil)
-                            INSERT INTO dbo.EmpleadoCjPerfil
-                            VALUES (@IdEmpleadoCj, @IdPerfil, 1, @IdCreacion, @FechaCreacion, 0, '')
-                        """,
-                        new
-                        {
-                            IdEmpleadoCj = usuario.CodEmp.Value,
-                            IdPerfil = PerfilEmpleadoEstandar,
-                            IdCreacion = IdCreacionPorDefecto,
-                            FechaCreacion = fechaLima
-                        },
-                        cancellationToken: cancellationToken));
+                foreach (var idPerfil in PerfilesEmpleadoPorDefecto)
+                    await connection.ExecuteAsync(
+                        _sqlCommandFactory.Create(
+                            """
+                            IF NOT EXISTS (SELECT 1 FROM dbo.EmpleadoCjPerfil
+                                           WHERE IdEmpleadoCj = @IdEmpleadoCj AND IdPerfil = @IdPerfil)
+                                INSERT INTO dbo.EmpleadoCjPerfil
+                                VALUES (@IdEmpleadoCj, @IdPerfil, 1, @IdCreacion, @FechaCreacion, 0, '')
+                            """,
+                            new
+                            {
+                                IdEmpleadoCj = usuario.CodEmp.Value,
+                                IdPerfil = idPerfil,
+                                IdCreacion = IdCreacionPorDefecto,
+                                FechaCreacion = fechaLima
+                            },
+                            cancellationToken: cancellationToken));
             }
             catch (Exception ex)
             {
