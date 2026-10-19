@@ -34,6 +34,7 @@ import {
   obtenerHistorialEstadosPago,
   registrarPagosTesoreria, grabarPagoTesoreria,
   crearItemsTesoreria,
+  ejecutarAccionTesoreria,
 } from "../../../api/pagoTesoreriaService";
 import type {
   PagoCatalogos,
@@ -48,6 +49,7 @@ import "./pagartesoreria.css";
 import PagoEtapaForm, { PagoEtapaActions } from "./PagoEtapaForm";
 import { FacturaLink, type PagoRevisionGuardado } from "./PagoRevisionCells";
 import { usePagoRevisionEditor } from "./usePagoRevisionEditor";
+import RendicionOperacionCell from "./RendicionOperacionCell";
 import DataGridPro from "../../../components/datagrid/DataGridPro";
 import type { GridColumn } from "../../../components/datagrid/types";
 import { getCellValue } from "../../../components/datagrid/gridEngine";
@@ -1133,6 +1135,25 @@ export default function PagarTesoreriaV2Page() {
     onSaved: applyRevisionSaved,
   });
 
+  // Rendición: actualiza solo el Nro. de operación (acción "rendicion", bloque Operación) y refresca la fila
+  // para conservar la versión vigente y poder encadenar ediciones sin recargar la lista.
+  const guardarOperacionRendicion = async (row: PagoTesoreriaRow, nroOperacion: string) => {
+    await ejecutarAccionTesoreria({
+      accion: "rendicion",
+      items: crearItemsTesoreria([row]),
+      observacion: "",
+      aplicarOperacion: true,
+      nroOperacion,
+    });
+    try {
+      const [fresca] = await listarPagosTesoreria(100, "", "", undefined, row.correlativo, 4);
+      if (!fresca) throw new Error("sin fila");
+      setRows((actual) => actual.map((r) => (key(r) === key(row) ? { ...r, ...fresca } : r)));
+    } catch {
+      void load(estado, desde, hasta);
+    }
+  };
+
   const cellStack = { display: "block", lineHeight: 1.25 } as const;
   const cellSub = { display: "block", fontSize: 11, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis" } as const;
   const nombreEstado = (r: PagoTesoreriaRow) =>
@@ -1352,6 +1373,17 @@ export default function PagarTesoreriaV2Page() {
           width: 160,
           calculateCellValue: (r: PagoTesoreriaRow) => r.nroOperacion || "—",
           ...(estado === 1 ? { cellRender: (_v: unknown, r: PagoTesoreriaRow) => revisionEditor.operacion(r) } : null),
+          ...(estado === 4
+            ? {
+                cellRender: (_v: unknown, r: PagoTesoreriaRow) => (
+                  <RendicionOperacionCell
+                    row={r}
+                    disabled={saving || loading || !puedePagar || r.estado !== 4}
+                    onSave={guardarOperacionRendicion}
+                  />
+                ),
+              }
+            : null),
         } as GridColumn<PagoTesoreriaRow>]
       : []),
     ...(estado === 1 || estado === 5
