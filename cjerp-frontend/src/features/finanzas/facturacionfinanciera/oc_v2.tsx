@@ -325,6 +325,14 @@ function createReporteFiltros(tab: string): ReporteFiltros {
 }
 
 const today = getLimaNow().fecha;
+
+// Mismo día del mes anterior (si ese mes no tiene el día, el último día de ese mes): 2026-10-20 -> 2026-09-20.
+function haceUnMes(fecha: string) {
+  const [anio, mes, dia] = fecha.split("-").map(Number);
+  const ultimoDiaMesAnterior = new Date(anio, mes - 1, 0).getDate();
+  const resultado = new Date(anio, mes - 2, Math.min(dia, ultimoDiaMesAnterior));
+  return `${resultado.getFullYear()}-${String(resultado.getMonth() + 1).padStart(2, "0")}-${String(resultado.getDate()).padStart(2, "0")}`;
+}
 const archivoOcAccept = ".jpg,.jpeg,.png,.bmp,.gif,.pdf,.xls,.xlsx";
 
 const createEmptyDetalle = (): OrdenCompraDraftDetalle => ({
@@ -854,7 +862,8 @@ export default function OcV2Page() {
   const [relacionEstado, setRelacionEstado] = useState<"todas" | "pendientes" | "aprobadas">("todas");
   const [nivelAprobacion, setNivelAprobacion] = useState<1 | 2 | 3>(1);
   const [approvalTabPermissions, setApprovalTabPermissions] = useState<Record<string, boolean>>({});
-  const [fechaCreacionDesde, setFechaCreacionDesde] = useState(`${today.slice(0, 4)}-01-01`);
+  // Bandeja de aprobación: por defecto, el último mes (desde el mismo día del mes anterior hasta hoy).
+  const [fechaCreacionDesde, setFechaCreacionDesde] = useState(haceUnMes(today));
   const [fechaCreacionHasta, setFechaCreacionHasta] = useState(today);
   const [filtroValidadorAprobacion, setFiltroValidadorAprobacion] = useState<string[]>([]);
   const [agrupacionAprobacion, setAgrupacionAprobacion] = useState<AgrupacionAprobacion>("solicitante");

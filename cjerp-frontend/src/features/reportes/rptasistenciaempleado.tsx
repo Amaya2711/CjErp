@@ -441,6 +441,11 @@ function getDateRangeLabels(startValue: string, endValue: string) {
 function parseDisplayDate(value: string) {
   if (!value) return null;
 
+  const displayMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(value.trim());
+  if (displayMatch) {
+    return buildDateFromParts(Number(displayMatch[3]), Number(displayMatch[2]), Number(displayMatch[1]));
+  }
+
   const normalized = formatDateLabel(value);
   const parts = normalized.split("/");
   if (parts.length !== 3) {

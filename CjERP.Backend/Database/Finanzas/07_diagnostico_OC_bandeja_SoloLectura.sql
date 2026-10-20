@@ -16,6 +16,16 @@ EXEC dbo.sp_OrdenCompra_BuscarCabecera
      @IdCliente = NULL, @IdProyecto = NULL, @IdSite = NULL, @Correlativo = NULL,
      @Ot = NULL, @TipoTrabajo = NULL, @IdSolicitante = NULL, @IdResponsable = NULL, @IdOc = NULL;
 
+-- [1b] SSMS usa ARITHABORT ON y la app (SqlClient) ARITHABORT OFF: son planes de ejecucion distintos en cache,
+-- y el de la app puede ser mucho mas lento (parameter sniffing). Si [1b] tarda mucho mas que [1], ese es el
+-- motivo del timeout en la app y el SP necesita revision (comparar con el SP vigente en la BD antes de cambiarlo).
+SET ARITHABORT OFF;
+PRINT N'== [1b] Igual que [1] pero con ARITHABORT OFF (reproduce la sesion de la app)';
+EXEC dbo.sp_OrdenCompra_BuscarCabecera
+     @IdCliente = NULL, @IdProyecto = NULL, @IdSite = NULL, @Correlativo = NULL,
+     @Ot = NULL, @TipoTrabajo = NULL, @IdSolicitante = NULL, @IdResponsable = NULL, @IdOc = NULL;
+SET ARITHABORT ON;
+
 PRINT N'== Cantidad de OC en CabOrdenCompra';
 SELECT COUNT(*) AS TotalOc FROM dbo.CabOrdenCompra;
 

@@ -31,7 +31,25 @@ public sealed class SqlCommandFactory : ISqlCommandFactory
 
     public int DefaultCommandTimeoutSeconds { get; }
 
-    public SqlConnection CreateConnection() => new(ConnectionString);
+    public SqlConnection CreateConnection()
+    {
+        var connection = new SqlConnection(ConnectionString);
+
+        // SqlClient abre con ARITHABORT OFF y SSMS con ON: SQL Server cachea un plan distinto por cada combinación
+        // de SET, y el de la app puede ser mucho más lento (parameter sniffing). El pool ejecuta sp_reset_connection
+        // y devuelve ARITHABORT a OFF, por eso se fija en cada apertura para que la app use el mismo plan que SSMS.
+        connection.StateChange += (sender, args) =>
+        {
+            if (args.OriginalState != ConnectionState.Closed || args.CurrentState != ConnectionState.Open)
+                return;
+
+            using var command = ((SqlConnection)sender).CreateCommand();
+            command.CommandText = "SET ARITHABORT ON;";
+            command.ExecuteNonQuery();
+        };
+
+        return connection;
+    }
 
     public CommandDefinition Create(
         string sql,

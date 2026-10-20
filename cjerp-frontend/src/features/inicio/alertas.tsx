@@ -6,10 +6,11 @@ import DataGridPro from "../../components/datagrid/DataGridPro";
 import type { GridColumn } from "../../components/datagrid/types";
 import { buscarOrdenCompraCabecera, buscarOrdenCompraDetalle } from "../../api/ordenCompraService";
 import type { OrdenCompraCabeceraDto } from "../../api/ordenCompraService";
+import { buildPlanillaConsultaEstadosRequest, consultarPlanillaEstados } from "../../api/planillaConsultaService";
 import { getAuthUser } from "../../utils/authStorage";
 import { getHttpErrorMessage } from "../../utils/httpError";
 
-type AlertaTabKey = "oc";
+type AlertaTabKey = "oc" | "gastos";
 
 type AlertaTab = {
   key: AlertaTabKey;
@@ -20,7 +21,58 @@ type AlertaTab = {
 // La cabecera no trae el tipo de trabajo: se completa con el detalle de la OC (valores distintos).
 type OrdenCompraAlerta = OrdenCompraCabeceraDto & { tipoTrabajo: string };
 
-const TABS: AlertaTab[] = [{ key: "oc", label: "Órdenes de compra" }];
+const TABS: AlertaTab[] = [
+  { key: "oc", label: "Órdenes de compra" },
+  { key: "gastos", label: "Gastos" },
+];
+
+// Gasto (Planilla) pendiente del empleado: 0 = pendiente de 1ª aprobación, 2 = observado (por subsanar).
+const ESTADOS_GASTO_PENDIENTE = "0,2";
+
+type GastoAlerta = {
+  corre: number;
+  fecha: string;
+  cliente: string;
+  proyecto: string;
+  site: string;
+  tipoTrabajo: string;
+  detalle: string;
+  solicitante: string;
+  total: number;
+  moneda: string;
+  estado: string;
+};
+
+// Lee el valor de una fila del SP sin depender de mayúsculas/minúsculas del alias.
+function leerCampo(row: Record<string, unknown>, ...nombres: string[]): unknown {
+  const clave = Object.keys(row).find((k) => nombres.some((n) => n.toLowerCase() === k.toLowerCase()));
+  return clave ? row[clave] : undefined;
+}
+
+// FecIngreso llega como dd/MM/yyyy; se convierte a ISO para ordenar y filtrar como fecha.
+function fechaIso(value: unknown): string {
+  const texto = String(value ?? "").trim();
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(texto);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : texto;
+}
+
+function mapGastoRow(row: Record<string, unknown>): GastoAlerta {
+  const texto = (...n: string[]) => String(leerCampo(row, ...n) ?? "").trim();
+  return {
+    corre: Number(leerCampo(row, "Corre", "Correlativo") ?? 0),
+    fecha: fechaIso(leerCampo(row, "FecIngreso")),
+    cliente: texto("Cliente"),
+    proyecto: texto("NombreProyecto"),
+    site: texto("Site"),
+    tipoTrabajo: texto("Tipo_Trabajo", "TipoTrabajo"),
+    detalle: texto("Detalle"),
+    solicitante: texto("Solicitante"),
+    // Total en la moneda real del recibo, sin convertir a soles.
+    total: Number(leerCampo(row, "Total") ?? 0),
+    moneda: texto("Moneda"),
+    estado: texto("EstadoNombre") || texto("Estado"),
+  };
+}
 
 function toPositiveNumber(...values: Array<string | number | null | undefined>): number {
   for (const value of values) {
@@ -31,18 +83,36 @@ function toPositiveNumber(...values: Array<string | number | null | undefined>):
   return 0;
 }
 
-// Color del estado según su contenido (texto que devuelve sp_OrdenCompra_BuscarCabecera).
+// Un color distinto por estado. Textos de sp_OrdenCompra_BuscarCabecera: "en Pre Aprob.", "En 1era aprobacion",
+// "En 2da Aprob.", "En 3era Aprob.", "Aprobado" y "RECHAZADO". Los niveles se evalúan antes que "aprob".
 function estadoTono(estado: string): { color: string; background: string } {
   const texto = estado.toLowerCase();
-  if (texto.includes("rechaz")) return { color: "#B91C1C", background: "#FEE2E2" };
-  if (texto.includes("3ra")) return { color: "#1D4ED8", background: "#DBEAFE" };
-  if (texto.includes("2da")) return { color: "#C2410C", background: "#FFEDD5" };
-  if (texto.includes("1ra") || texto.includes("pend")) return { color: "#9A6700", background: "#FEF3C7" };
-  if (texto.includes("aprob")) return { color: "#047857", background: "#DCFCE7" };
-  return { color: "#475569", background: "#E2E8F0" };
+  if (texto.includes("rechaz")) return { color: "#B91C1C", background: "#FEE2E2" }; // rojo
+  if (texto.includes("pre")) return { color: "#475569", background: "#E2E8F0" }; // gris
+  if (/\b1(er|era|ra)\b/.test(texto)) return { color: "#9A6700", background: "#FEF3C7" }; // amarillo
+  if (/\b2(da|a)\b/.test(texto)) return { color: "#C2410C", background: "#FFEDD5" }; // naranja
+  if (/\b3(er|era|ra)\b/.test(texto)) return { color: "#1D4ED8", background: "#DBEAFE" }; // azul
+  if (texto.includes("aprob")) return { color: "#047857", background: "#DCFCE7" }; // verde
+  return { color: "#6D28D9", background: "#EDE9FE" }; // morado: otro estado
 }
 
-function EstadoBadge({ value }: { value: string }) {
+function estadoGastoTono(estado: string): { color: string; background: string } {
+  const texto = estado.toLowerCase();
+  if (texto.includes("rechaz")) return { color: "#B91C1C", background: "#FEE2E2" }; // rojo
+  if (texto.includes("observ")) return { color: "#C2410C", background: "#FFEDD5" }; // naranja
+  if (texto.includes("pend")) return { color: "#9A6700", background: "#FEF3C7" }; // amarillo
+  if (texto.includes("pagad")) return { color: "#047857", background: "#DCFCE7" }; // verde
+  if (texto.includes("aprob")) return { color: "#1D4ED8", background: "#DBEAFE" }; // azul
+  return { color: "#475569", background: "#E2E8F0" }; // gris
+}
+
+function EstadoBadge({
+  value,
+  tono = estadoTono,
+}: {
+  value: string;
+  tono?: (estado: string) => { color: string; background: string };
+}) {
   if (!value) return <span>-</span>;
   return (
     <span
@@ -55,13 +125,17 @@ function EstadoBadge({ value }: { value: string }) {
         fontWeight: 800,
         lineHeight: 1,
         whiteSpace: "nowrap",
-        ...estadoTono(value),
+        ...tono(value),
       }}
     >
       {value}
     </span>
   );
 }
+
+// Subir el sufijo al cambiar columnas/orden para no heredar la configuración guardada en el navegador.
+const GRID_STATE_KEY = "alertas_oc_v4";
+const GRID_STATE_KEY_GASTOS = "alertas_gastos_v1";
 
 const COLUMNAS_OC: GridColumn<OrdenCompraAlerta>[] = [
   { dataField: "idOc", caption: "OC", dataType: "number", width: 90, alignment: "left" },
@@ -70,16 +144,34 @@ const COLUMNAS_OC: GridColumn<OrdenCompraAlerta>[] = [
   { dataField: "nombreProyecto", caption: "Proyecto", minWidth: 160 },
   { dataField: "nombreSite", caption: "Site", minWidth: 160 },
   { dataField: "tipoTrabajo", caption: "Tipo trabajo", minWidth: 150 },
+  { dataField: "responsable", caption: "Responsable", minWidth: 180 },
+  // Total en la moneda real de la OC, sin convertir a soles.
+  { dataField: "total", caption: "Total", dataType: "number", width: 130, format: { type: "fixedPoint", precision: 2 } },
+  { dataField: "moneda", caption: "Moneda", width: 100, alignment: "center" },
   {
     dataField: "estado",
     caption: "Estado",
     width: 150,
     cellRender: (value) => <EstadoBadge value={String(value ?? "").trim()} />,
   },
-  { dataField: "responsable", caption: "Responsable", minWidth: 180 },
-  // Total en la moneda real de la OC, sin convertir a soles.
+];
+
+const COLUMNAS_GASTOS: GridColumn<GastoAlerta>[] = [
+  { dataField: "corre", caption: "Correlativo", dataType: "number", width: 110, alignment: "left" },
+  { dataField: "fecha", caption: "Fecha", dataType: "date", width: 110 },
+  { dataField: "cliente", caption: "Cliente", minWidth: 160 },
+  { dataField: "proyecto", caption: "Proyecto", minWidth: 160 },
+  { dataField: "site", caption: "Site", minWidth: 160 },
+  { dataField: "tipoTrabajo", caption: "Tipo trabajo", minWidth: 150 },
+  { dataField: "detalle", caption: "Detalle", minWidth: 220 },
   { dataField: "total", caption: "Total", dataType: "number", width: 130, format: { type: "fixedPoint", precision: 2 } },
   { dataField: "moneda", caption: "Moneda", width: 100, alignment: "center" },
+  {
+    dataField: "estado",
+    caption: "Estado",
+    width: 150,
+    cellRender: (value) => <EstadoBadge value={String(value ?? "").trim()} tono={estadoGastoTono} />,
+  },
 ];
 
 const styles: Record<string, CSSProperties> = {
@@ -108,6 +200,22 @@ const styles: Record<string, CSSProperties> = {
     textAlign: "center",
   },
   badgeEmpty: { background: "#CBD5E1" },
+  kpis: { display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 16 },
+  kpi: {
+    minWidth: 150,
+    padding: "10px 16px",
+    borderRadius: 12,
+    border: "1px solid #E5E7EB",
+    background: "#FFFFFF",
+    cursor: "pointer",
+    textAlign: "left",
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    font: "inherit",
+  },
+  kpiLabel: { fontSize: 12, fontWeight: 700 },
+  kpiValor: { fontSize: 24, fontWeight: 800, lineHeight: 1 },
 };
 
 export default function AlertasPage() {
@@ -118,6 +226,11 @@ export default function AlertasPage() {
   const [ordenes, setOrdenes] = useState<OrdenCompraAlerta[]>([]);
   const [loading, setLoading] = useState(idEmpleado > 0);
   const [error, setError] = useState("");
+  const [gastos, setGastos] = useState<GastoAlerta[]>([]);
+  const [loadingGastos, setLoadingGastos] = useState(idEmpleado > 0);
+  const [errorGastos, setErrorGastos] = useState("");
+  // Estado elegido en los KPI de Gastos; vacío = sin filtro. Clic otra vez sobre el mismo KPI lo revierte.
+  const [estadoGasto, setEstadoGasto] = useState("");
 
   // sp_OrdenCompra_BuscarCabecera con @IdSolicitante = empleado logueado; solo las pendientes de validar.
   useEffect(() => {
@@ -129,10 +242,10 @@ export default function AlertasPage() {
         // El detalle se consulta por OC (como en oc_v1/oc_v2): el SP no garantiza filtrar por solicitante.
         const tiposPorOc = new Map<number, string>();
         const idsOc = [...new Set(lista.map((oc) => oc.idOc))];
-        for (let i = 0; i < idsOc.length; i += 8) {
+        for (let i = 0; i < idsOc.length; i += 3) {
           if (cancelado) return;
           await Promise.all(
-            idsOc.slice(i, i + 8).map(async (idOc) => {
+            idsOc.slice(i, i + 3).map(async (idOc) => {
               try {
                 const detalles = await buscarOrdenCompraDetalle({ idOc: String(idOc) });
                 const tipos = new Set<string>();
@@ -161,7 +274,57 @@ export default function AlertasPage() {
     };
   }, [idEmpleado]);
 
-  const contadores = useMemo<Record<AlertaTabKey, number>>(() => ({ oc: ordenes.length }), [ordenes]);
+  // sp_Planilla_Consulta_Estados con @IdEmpleado = empleado logueado (sin IdCargo: el SP no debe saltarse el filtro).
+  useEffect(() => {
+    if (!idEmpleado) return;
+    let cancelado = false;
+    consultarPlanillaEstados(
+      buildPlanillaConsultaEstadosRequest(
+        [{ nombre: "Estados", valor: ESTADOS_GASTO_PENDIENTE, tipo: "string" }],
+        { baseParams: { idCargo: null, idEmpleado: String(idEmpleado) } },
+      ),
+      { timeoutMs: 120000 },
+    )
+      .then((response) => {
+        if (cancelado) return;
+        const filas = Array.isArray(response?.rows) ? response.rows : [];
+        setGastos(filas.map(mapGastoRow).filter((g) => g.corre > 0));
+      })
+      .catch((loadError) => {
+        if (!cancelado) setErrorGastos(getHttpErrorMessage(loadError, "No se pudieron cargar los gastos pendientes."));
+      })
+      .finally(() => {
+        if (!cancelado) setLoadingGastos(false);
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, [idEmpleado]);
+
+  const kpisGastos = useMemo(() => {
+    const porEstado = new Map<string, number>();
+    for (const gasto of gastos) {
+      const estado = gasto.estado || "Sin estado";
+      porEstado.set(estado, (porEstado.get(estado) ?? 0) + 1);
+    }
+    return [...porEstado.entries()].sort((a, b) => b[1] - a[1]);
+  }, [gastos]);
+
+  const gastosVisibles = useMemo(
+    () => (estadoGasto ? gastos.filter((g) => (g.estado || "Sin estado") === estadoGasto) : gastos),
+    [gastos, estadoGasto],
+  );
+
+  // Ambas pestañas se cargan al entrar a la página; el contador indica si cada una sigue cargando o falló.
+  const estadoCarga: Record<AlertaTabKey, "cargando" | "error" | "ok"> = {
+    oc: loading ? "cargando" : error ? "error" : "ok",
+    gastos: loadingGastos ? "cargando" : errorGastos ? "error" : "ok",
+  };
+
+  const contadores = useMemo<Record<AlertaTabKey, number>>(
+    () => ({ oc: ordenes.length, gastos: gastos.length }),
+    [ordenes, gastos],
+  );
 
   return (
     <AppPage title="Alertas - Notificaciones">
@@ -176,7 +339,9 @@ export default function AlertasPage() {
               onClick={() => setTab(item.key)}
             >
               {item.label}
-              <span style={{ ...styles.badge, ...(total === 0 ? styles.badgeEmpty : null) }}>{total}</span>
+              <span style={{ ...styles.badge, ...(estadoCarga[item.key] !== "ok" || total === 0 ? styles.badgeEmpty : null) }}>
+                {estadoCarga[item.key] === "cargando" ? "…" : estadoCarga[item.key] === "error" ? "!" : total}
+              </span>
             </button>
           );
         })}
@@ -185,24 +350,73 @@ export default function AlertasPage() {
       {!idEmpleado && (
         <AppStatusMessage tone="error">No se pudo identificar el empleado de la sesión.</AppStatusMessage>
       )}
-      {error && <AppStatusMessage tone="error">{error}</AppStatusMessage>}
-      {loading && <AppStatusMessage>Cargando alertas...</AppStatusMessage>}
+      {tab === "oc" && error && <AppStatusMessage tone="error">{error}</AppStatusMessage>}
+      {tab === "oc" && loading && <AppStatusMessage>Cargando alertas...</AppStatusMessage>}
+      {tab === "gastos" && errorGastos && <AppStatusMessage tone="error">{errorGastos}</AppStatusMessage>}
+      {tab === "gastos" && loadingGastos && <AppStatusMessage>Cargando alertas...</AppStatusMessage>}
 
       {tab === "oc" && !loading && idEmpleado > 0 && !error && (
         ordenes.length === 0 ? (
           <AppStatusMessage tone="success">No tienes órdenes de compra pendientes.</AppStatusMessage>
         ) : (
           <DataGridPro<OrdenCompraAlerta>
+            key={GRID_STATE_KEY}
             dataSource={ordenes}
             columns={COLUMNAS_OC}
             keyExpr="idOc"
             height="65vh"
             noDataText="No hay órdenes de compra pendientes."
-            stateStoringKey="alertas_oc"
+            stateStoringKey={GRID_STATE_KEY}
             exportFileName="alertas_oc_pendientes"
             autoExpandAll={false}
             paging={{ pageSize: 50, pageSizes: [20, 50, 100, 250] }}
           />
+        )
+      )}
+
+      {tab === "gastos" && !loadingGastos && idEmpleado > 0 && !errorGastos && (
+        gastos.length === 0 ? (
+          <AppStatusMessage tone="success">No tienes gastos pendientes.</AppStatusMessage>
+        ) : (
+          <>
+            <div style={styles.kpis}>
+              {kpisGastos.map(([estado, cantidad]) => {
+                const activo = estadoGasto === estado;
+                const { color, background } = estadoGastoTono(estado);
+                return (
+                  <button
+                    key={estado}
+                    type="button"
+                    aria-pressed={activo}
+                    title={activo ? "Quitar filtro" : `Filtrar por ${estado}`}
+                    style={{
+                      ...styles.kpi,
+                      background,
+                      color,
+                      border: `2px solid ${activo ? color : "transparent"}`,
+                      opacity: estadoGasto && !activo ? 0.55 : 1,
+                    }}
+                    onClick={() => setEstadoGasto((actual) => (actual === estado ? "" : estado))}
+                  >
+                    <span style={styles.kpiLabel}>{estado}</span>
+                    <span style={styles.kpiValor}>{cantidad}</span>
+                  </button>
+                );
+              })}
+            </div>
+          <DataGridPro<GastoAlerta>
+            key={GRID_STATE_KEY_GASTOS}
+            dataSource={gastosVisibles}
+            columns={COLUMNAS_GASTOS}
+            keyExpr={(row) => String(row.corre)}
+            height="65vh"
+            noDataText="No hay gastos pendientes."
+            stateStoringKey={GRID_STATE_KEY_GASTOS}
+            exportFileName="alertas_gastos_pendientes"
+            autoExpandAll={false}
+            paging={{ pageSize: 50, pageSizes: [20, 50, 100, 250] }}
+          />
+          </>
         )
       )}
     </AppPage>
