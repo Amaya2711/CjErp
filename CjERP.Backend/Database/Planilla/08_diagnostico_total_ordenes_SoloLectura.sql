@@ -13,5 +13,14 @@ EXEC dbo.sp_Planilla_Consulta_Estados
 EXEC dbo.sp_Planilla_Consulta_Estados @Correlativo = 129631,
      @TipoCambioUSD = 3.5, @TipoCambioEUR = 3.8, @TipoCambioDOP = 0.057, @TipoCambioCOP = 0.001;
 
+-- PAGADO sin fechas: lo que enviaba pagos_v2 antes del ajuste (todo el historico de pagados)
+EXEC dbo.sp_Planilla_Consulta_Estados @Estados = '4',
+     @TipoCambioUSD = 3.5, @TipoCambioEUR = 3.8, @TipoCambioDOP = 0.057, @TipoCambioCOP = 0.001;
+
+-- PAGADO con rango (compara contra fecha de deposito)
+EXEC dbo.sp_Planilla_Consulta_Estados @Estados = '4',
+     @FechaInicio = '2026-10-11', @FechaFin = '2026-10-19',
+     @TipoCambioUSD = 3.5, @TipoCambioEUR = 3.8, @TipoCambioDOP = 0.057, @TipoCambioCOP = 0.001;
+
 SET STATISTICS TIME OFF;
 GO

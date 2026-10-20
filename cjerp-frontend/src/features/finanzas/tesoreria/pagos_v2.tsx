@@ -632,14 +632,18 @@ function mapPlanillaEstadoToPagoEstado(value: unknown, fallback: PagoEstado): Pa
 
 const ESTADO_PAGADO = "4";
 
-/** Sin estado seleccionado, Total Órdenes también incluye los registros pagados. */
-function incluyeEstadoPagado(filters: FilterState) {
-  return filters.estado.length === 0 || filters.estado.includes(ESTADO_PAGADO);
+/**
+ * Referencia de las fechas según el estado enviado: PAGADO se compara con la fecha de depósito;
+ * sin estado u otros estados, con la fecha de ingreso (igual que sp_Planilla_Consulta_Estados).
+ * Solo en una selección mixta (PAGADO + otros) el store no puede acotar por fechas y se evalúa por fila.
+ */
+function estadoPagadoMixto(filters: FilterState) {
+  return filters.estado.includes(ESTADO_PAGADO) && filters.estado.length > 1;
 }
 
-/** En Total Órdenes cada registro pagado se compara contra su fecha de depósito. */
-function usaFechaDeposito(row: Pick<PagoRow, "estadoCodigo">) {
-  return String(row.estadoCodigo ?? "").trim() === ESTADO_PAGADO;
+/** PAGADO se compara contra su fecha de depósito solo cuando el estado PAGADO fue elegido explícitamente. */
+function usaFechaDeposito(row: Pick<PagoRow, "estadoCodigo">, filters: FilterState) {
+  return filters.estado.includes(ESTADO_PAGADO) && String(row.estadoCodigo ?? "").trim() === ESTADO_PAGADO;
 }
 
 function getQuickIdOcOnly(filters: FilterState): number | null {
@@ -1693,7 +1697,11 @@ export default function PagosV2Page() {
           // En Total Órdenes una consulta que incluya PAGADO no puede enviar fechas
           // al store: este filtra por fecha regular y excluiría pagos cuyo depósito
           // sí está dentro del rango. El rango se aplica por fila más abajo.
-          const resumenIncluyePagado = activeTab === "resumen" && incluyeEstadoPagado(appliedFilters);
+          // Las fechas siempre se envían: con PAGADO el store las compara contra la fecha de depósito
+          // (@IncluyeEstado4) y con otros estados o sin estado, contra la fecha de ingreso. Sin rango
+          // traería todo el histórico y la grilla se quedaba en "Cargando...". Solo una selección mixta
+          // (PAGADO + otros) no se puede acotar en el store y se evalúa por fila más abajo.
+          const resumenIncluyePagado = activeTab === "resumen" && estadoPagadoMixto(appliedFilters);
           // Aprobar se acota por las fechas del filtro; Re-aprobar, Hormiga y Observadas
           // solo por el código de su estado (sin fechas).
           const aplicaFechasServidor = activeTab === "aprobar" || esResumen;
@@ -1848,7 +1856,7 @@ export default function PagosV2Page() {
   const matchesAppliedFilters = useCallback(
     (row: PagoRow, includeDateFilters: boolean) => {
       const filtrosResumenAplicadosEnServidor = activeTab === "resumen";
-      const porDeposito = activeTab === "resumen" && usaFechaDeposito(row);
+      const porDeposito = activeTab === "resumen" && usaFechaDeposito(row, appliedFilters);
       // Total Órdenes necesita evaluar siempre las fechas localmente: si la
       // consulta contiene PAGADO, el backend no recibe el rango para no mezclar
       // fecha de ingreso con fecha de depósito.
