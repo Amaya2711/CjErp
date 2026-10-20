@@ -742,6 +742,28 @@ public sealed class ReporteRepository : IReporteRepository
         return result.HasValue;
     }
 
+    /// <summary>
+    /// Ejecuta dbo.sp_Asistencia_ListarMes (mes actual) y cuenta las filas cuya columna calculada
+    /// Estado (texto) es FALTA o INCOMPLETO. FALTA APROBAR no cuenta.
+    /// </summary>
+    public async Task<int> ContarAsistenciaMesFaltaOIncompletoAsync(int idEmpleado, CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        var estados = await connection.QueryAsync<AsistenciaMesEstadoRow>(
+            _sqlCommandFactory.Create(
+                "dbo.sp_Asistencia_ListarMes",
+                new { IdEmpleado = idEmpleado },
+                CommandType.StoredProcedure,
+                cancellationToken));
+
+        return estados.Count(e => e.Estado?.Trim().ToUpperInvariant() is "FALTA" or "INCOMPLETO");
+    }
+
+    private sealed class AsistenciaMesEstadoRow
+    {
+        public string? Estado { get; set; }
+    }
+
     private SqlConnection CreateConnection() => _sqlCommandFactory.CreateConnection();
 
     private static async Task EnsureReporteWupConfigSchemaAsync(SqlConnection connection, CancellationToken cancellationToken)

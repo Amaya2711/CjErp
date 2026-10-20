@@ -6,6 +6,8 @@ import { getMenuAccentByName, getMenuIconComponent } from "../../utils/menuIcons
 //import type { MenuDto } from "../../models/seguridad/menu.types";
 import type { MenuDto as MenuModelDto } from "../../models/seguridad/menu.types";
 import { getAuthUser } from "../../utils/authStorage";
+import { contarAlertasPendientes, RUTA_ALERTAS } from "../inicio/alertasPendientes";
+import { obtenerFaltasMes } from "../../api/asistenciaService";
 
 type QuickLink = {
   id: number;
@@ -93,6 +95,20 @@ function getAccesoValue(item: { acceso?: unknown }): number {
 
 function getMenuRoute(item: MenuAccesoDto): string {
   return typeof item.ruta === "string" ? item.ruta.trim() : "";
+}
+
+function normalizarRuta(ruta: string): string {
+  return ruta.toLowerCase().replace(/\/+$/, "");
+}
+
+function esRutaAlertas(ruta: string): boolean {
+  return normalizarRuta(ruta) === RUTA_ALERTAS;
+}
+
+const RUTA_ASISTENCIA_EMPLEADO = "/reportes/rptasistenciaempleado";
+
+function esRutaAsistenciaEmpleado(ruta: string): boolean {
+  return normalizarRuta(ruta) === RUTA_ASISTENCIA_EMPLEADO;
 }
 
 function getShortcutIcon(nombreMenu: string) {
@@ -246,6 +262,53 @@ export default function DashboardPage() {
       active = false;
     };
   }, []);
+
+  // Si el usuario tiene el acceso directo /inicio/alertas, se valida en segundo plano si tiene pendientes (OC o gastos).
+  const tieneAccesoAlertas = accesosDirectos.some((m) => esRutaAlertas(getMenuRoute(m)));
+  const [alertasPendientes, setAlertasPendientes] = useState(0);
+
+  useEffect(() => {
+    if (!tieneAccesoAlertas) {
+      setAlertasPendientes(0);
+      return;
+    }
+    const idEmpleado = [authUser?.idEmpleado, authUser?.codEmp]
+      .map((v) => Number(String(v ?? "").trim()))
+      .find((n) => Number.isFinite(n) && n > 0);
+    if (!idEmpleado) return;
+
+    let active = true;
+    void contarAlertasPendientes(idEmpleado).then((total) => {
+      if (active) setAlertasPendientes(total);
+    });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tieneAccesoAlertas]);
+
+  // Si tiene el acceso directo ASISTENCIA EMPLEADO, se ejecuta sp_Asistencia_ListarMes (empleado logueado):
+  // con 1 o más registros en estado FALTA o INCOMPLETO el botón se muestra en rojo.
+  const tieneAccesoAsistencia = accesosDirectos.some((m) => esRutaAsistenciaEmpleado(getMenuRoute(m)));
+  const [faltasMes, setFaltasMes] = useState(0);
+
+  useEffect(() => {
+    if (!tieneAccesoAsistencia) {
+      setFaltasMes(0);
+      return;
+    }
+    let active = true;
+    obtenerFaltasMes()
+      .then((total) => {
+        if (active) setFaltasMes(total);
+      })
+      .catch(() => {
+        if (active) setFaltasMes(0);
+      });
+    return () => {
+      active = false;
+    };
+  }, [tieneAccesoAsistencia]);
 
   const usuario = useMemo(() => {
     const nombreEmpleado =
@@ -461,25 +524,35 @@ export default function DashboardPage() {
                         <GroupIcon size={15} strokeWidth={2.2} />
                       </span>
                       <div style={styles.quickAccessButtons}>
-                        {group.items.map((item) => (
-                          <button
-                            key={item.idMenu}
-                            style={{
-                              ...styles.quickButton,
-                              borderColor: accent.border,
-                              color: accent.color,
-                              background: "#FFFFFF",
-                            }}
-                            onClick={() => {
-                              const route = getMenuRoute(item);
-                              if (route) {
-                                navigate(route);
-                              }
-                            }}
-                          >
-                            {item.nombreMenu}
-                          </button>
-                        ))}
+                        {group.items.map((item) => {
+                          const ruta = getMenuRoute(item);
+                          const conPendientes =
+                            (alertasPendientes > 0 && esRutaAlertas(ruta)) ||
+                            (faltasMes > 0 && esRutaAsistenciaEmpleado(ruta));
+                          const detallePendiente = esRutaAsistenciaEmpleado(ruta)
+                            ? `Tiene ${faltasMes} registro(s) con FALTA o INCOMPLETO en el mes`
+                            : `Tiene ${alertasPendientes} pendiente(s)`;
+                          return (
+                            <button
+                              key={item.idMenu}
+                              title={conPendientes ? detallePendiente : undefined}
+                              style={{
+                                ...styles.quickButton,
+                                borderColor: conPendientes ? "#DC2626" : accent.border,
+                                color: conPendientes ? "#FFFFFF" : accent.color,
+                                background: conPendientes ? "#DC2626" : "#FFFFFF",
+                              }}
+                              onClick={() => {
+                                const route = getMenuRoute(item);
+                                if (route) {
+                                  navigate(route);
+                                }
+                              }}
+                            >
+                              {item.nombreMenu}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   );

@@ -20,4 +20,5 @@ public interface IReporteRepository
     Task<IReadOnlyList<ReporteWhatsappLogDto>> ObtenerLogsAsync(DateTime? fechaProceso, string tipoReporte, int top, CancellationToken cancellationToken = default);
     Task<ReporteWhatsappKpiDto> ObtenerKpisAsync(DateTime? fechaProceso, string tipoReporte, CancellationToken cancellationToken = default);
     Task<bool> UsuarioTieneAccesoAdministrativoAsync(string idUsuario, IEnumerable<string> rolesPermitidos, CancellationToken cancellationToken = default);
+    Task<int> ContarAsistenciaMesFaltaOIncompletoAsync(int idEmpleado, CancellationToken cancellationToken = default);
 }

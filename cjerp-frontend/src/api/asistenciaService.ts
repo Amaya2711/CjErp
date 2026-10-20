@@ -288,3 +288,9 @@ export async function consultarSeguimientoEmpleado(payload: AsistenciaTrackingQu
     puntos,
   } satisfies AsistenciaTrackingResponse;
 }
+
+/** Faltas (estado 2) del mes del empleado logueado: sp_Asistencia_ListarMes. */
+export async function obtenerFaltasMes(): Promise<number> {
+  const response = await httpClient.get<{ faltas?: number }>("/asistencia/reporte/faltas-mes");
+  return Number(response?.faltas ?? 0) || 0;
+}

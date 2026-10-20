@@ -343,6 +343,19 @@ public class AsistenciaReporteController : ControllerBase
         }
     }
 
+    /// <summary>Faltas o incompletos del mes del empleado con el que se ingresó (claim CodEmp).</summary>
+    [HttpGet("faltas-mes")]
+    public async Task<IActionResult> ContarFaltasMes(CancellationToken cancellationToken)
+    {
+        if (!int.TryParse(User.FindFirstValue("CodEmp"), out var idEmpleado) || idEmpleado <= 0)
+        {
+            return Ok(new { success = true, message = "ok", data = new { faltas = 0 } });
+        }
+
+        var faltas = await _asistenciaReporteService.ContarFaltasMesAsync(idEmpleado, cancellationToken);
+        return Ok(new { success = true, message = "ok", data = new { faltas } });
+    }
+
     [HttpGet("tracking")]
     public async Task<IActionResult> ObtenerTrackingEmpleado(
         [FromQuery] AsistenciaTrackingConsultaRequestDto request,

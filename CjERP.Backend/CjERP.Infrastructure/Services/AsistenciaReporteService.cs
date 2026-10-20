@@ -246,6 +246,9 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             cancellationToken);
     }
 
+    public Task<int> ContarFaltasMesAsync(int idEmpleado, CancellationToken cancellationToken = default)
+        => _reporteRepository.ContarAsistenciaMesFaltaOIncompletoAsync(idEmpleado, cancellationToken);
+
     public async Task<AsistenciaTrackingConsultaDto> ObtenerTrackingEmpleadoAsync(
         AsistenciaTrackingConsultaRequestDto request,
         CancellationToken cancellationToken = default)

@@ -39,6 +39,9 @@ public interface IAsistenciaReporteService
         IReadOnlyList<int> idsEmpleado,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Cantidad de registros del mes con estado FALTA (2) o INCOMPLETO para el empleado (sp_Asistencia_ListarMes).</summary>
+    Task<int> ContarFaltasMesAsync(int idEmpleado, CancellationToken cancellationToken = default);
+
     Task<AsistenciaTrackingConsultaDto> ObtenerTrackingEmpleadoAsync(
         AsistenciaTrackingConsultaRequestDto request,
         CancellationToken cancellationToken = default);
