@@ -113,6 +113,7 @@ type PagoRow = {
   totalMontoVisibleSoles?: number;
   tipoMonedaId?: number;
   documento: string;
+  serie: string;
   planillaRow?: Record<string, unknown>;
 };
 
@@ -859,6 +860,7 @@ function mapPlanillaConsultaRowToPagoRow(
     totalMontoVisibleSoles: getRecordNumber(row, "TotalMontoVisibleSoles", "totalMontoVisibleSoles") ?? undefined,
     tipoMonedaId: getRecordNumber(row, "TipoMoneda", "tipoMoneda") ?? undefined,
     documento: getRecordString(row, "Documento", "documento"),
+    serie: getRecordString(row, "Serie", "serie", "SerieDocumento", "serieDocumento", "SerieFactura", "serieFactura"),
     planillaRow: row,
   };
 }
@@ -3431,6 +3433,7 @@ export default function PagosV2Page() {
       "Cliente",
       "Proyecto",
       "Site",
+      "Serie",
       "Tipo trabajo",
       "Tarea",
       "Responsable",
@@ -3469,6 +3472,7 @@ export default function PagosV2Page() {
         row.cliente,
         row.proyecto,
         row.site,
+        row.serie || "-",
         row.tipoTrabajo,
         row.tarea,
         row.responsable,
@@ -3706,6 +3710,7 @@ export default function PagosV2Page() {
     { dataField: "cliente", caption: "Cliente", width: 110 },
     { dataField: "proyecto", caption: "Proyecto", width: 130 },
     { dataField: "site", caption: "Site", width: 170 },
+    { dataField: "serie", caption: "Serie", width: 110, calculateCellValue: (row) => row.serie || "-" },
     { dataField: "tipoTrabajo", caption: "Tipo trabajo", width: 120 },
     {
       dataField: "tarea",
