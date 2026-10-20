@@ -75,6 +75,9 @@
 | B6 | `QuestPDF.Settings.EnableDebugging = true` (`ReportePdfService.cs` ~2167); comparación de VerifyToken no en tiempo constante; validación de adjuntos solo por extensión |
 | B7 | Carpetas de artefactos locales con copias de configuración (`CjERP.Backend/artifacts`, `bin/`, `.codexbuild`, `tmp/`) — no versionadas pero con posibles secretos en disco |
 | B8 | Repo git exterior `Cj_ERP_Web/` con snapshot antiguo que confunde (todo aparece "deleted") |
+| B9 | Objetos temporales del IA Chat en la BD de producción (detectados 2026-10-04 en el diagnóstico de Viáticos): `sp_IA_Planilla_Buscar_Backup_20261004`, `sp_IA_Planilla_Buscar_Test`, `sp_IA_Planilla_Buscar_Test_V2`. No forman parte de Viáticos y **no se tocaron**; revisar y retirar por separado (confirmar que ningún job/código los llame) |
+| B10 | Estados de `Planilla` no documentados: en BD existen 11 `REEMBOLSO_ENVIO`, 12 `REEMBOLSO_PAGADO` (3 313 filas) y 99 `MIGRADO` (23 558), además de 0–10 (`Constante MAESTRO/ESTADO`). Las columnas `EnvioReembolso`/`PagoReembolso`/`ImgReembolso` no se usan. Actualizar `AGENTS.md` y `BUSINESS_RULES.md` |
+| B11 | `sp_Planilla_ActualizarRendirMasivo` actualiza `Planilla` uniendo solo por `Correlativo` + `IdSite` (no por la PK de 6 columnas) y sin transacción; con los 78 `Correlativo` repetidos podría tocar otra fila |
 
 ## Mejoras sugeridas (no implementadas)
 1. Autorización server-side por permiso (reutilizando `SegPermisoAccion`) — prioridad máxima.
@@ -84,3 +87,6 @@
 5. Unificar duplicados (Empleados/Externos parametrizando cargo; eliminar `_dev`/legacy tras confirmar menú).
 6. IDENTITY/SEQUENCE en lugar de `MAX+1`; transacciones que incluyan auditoría.
 7. Refresh token o JWT deslizante; store de sesión persistente.
+
+### B12 - Planilla.Correlativo no es unico (validado en JC_Db, 2026-10-04, solo lectura)
+112 485 filas, 112 407 correlativos distintos: **77 correlativos repetidos**, todos `IdWeb IS NULL` (legacy) y repartidos en todo el rango (incluye los mas recientes: el sistema anterior sigue generandolos). Las 30 filas `IdWeb = 1` son unicas. La PK declarada es de 6 columnas; no hay UNIQUE sobre `Correlativo`. `sp_Planilla_Insertar` calcula `MAX(Correlativo)+1` bajo `UPDLOCK, HOLDLOCK` (serializable: sin duplicados entre llamadas a ese SP; bloquea toda insercion concurrente). Viaticos identifica sus pagos por `Correlativo + IdWeb = 1` validando 0/1/>1 filas (`sp_ViaticoInterno_ResolverPago`). No se modifico Planilla. Ver `CjERP.Backend/Docs/Viaticos_Correccion_Planilla_Correlativo.md`.

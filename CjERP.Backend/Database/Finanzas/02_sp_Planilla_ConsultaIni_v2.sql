@@ -87,20 +87,13 @@ BEGIN
 
         a.Total AS Totalb,
 
-        CASE
-            WHEN a.TipoMoneda = 1 THEN a.Subtotal
-            ELSE a.Subtotal * 3.8
-        END AS Subtotal,
+        -- REGLA CRITICA (AGENTS.md): montos SIEMPRE en la moneda real del recibo; no convertir a soles
+        -- con 3.8 fijo (un recibo de US$ 2,173.91 debe verse 2,173.91, nunca 8,260.86).
+        a.Subtotal AS Subtotal,
 
-        CASE
-            WHEN a.TipoMoneda = 1 THEN a.Igv
-            ELSE a.Igv * 3.8
-        END AS IGV,
+        a.Igv AS IGV,
 
-        CASE
-            WHEN a.TipoMoneda = 1 THEN a.Total
-            ELSE a.Total * 3.8
-        END AS Total,
+        a.Total AS Total,
 
         l.ValorIni AS Rendicion,
 

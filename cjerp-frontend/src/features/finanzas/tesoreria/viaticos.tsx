@@ -1683,7 +1683,10 @@ export default function GastosPage({
       }
 
       const filtrosConsulta = filtrosCabeceraAplicadosRef.current;
-      const parametrosConsulta: PlanillaConsultaParametro[] = [];
+      // Viáticos: el SP filtra por @IdTarea (VIATICO = 93) en todas las vistas.
+      const parametrosConsulta: PlanillaConsultaParametro[] = [
+        { nombre: "IdTarea", valor: String(ID_TAREA_VIATICO), tipo: "int" },
+      ];
       // Cada grupo es un valor explícito de @Estados.
       const gruposEstados: string[] = [];
 
@@ -3316,6 +3319,7 @@ export default function GastosPage({
           ? [estados.filter((estado) => estado !== "4").join(","), "4"]
           : [estados.join(",")];
       const parametros: PlanillaConsultaParametro[] = [
+        { nombre: "IdTarea", valor: String(ID_TAREA_VIATICO), tipo: "int" },
         { nombre: "FechaInicio", valor: formatInputDateForPlanillaParametro(fechaInicio), tipo: "date" },
         { nombre: "FechaFin", valor: formatInputDateForPlanillaParametro(fechaFin), tipo: "date" },
       ];

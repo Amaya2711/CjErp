@@ -11,10 +11,37 @@ namespace CjERP.Api.Controllers;
 public class SqlMonitorController : ControllerBase
 {
     private readonly ISqlMonitorService _sqlMonitorService;
+    private readonly IActiveUserSessionService _activeUserSessionService;
 
-    public SqlMonitorController(ISqlMonitorService sqlMonitorService)
+    public SqlMonitorController(ISqlMonitorService sqlMonitorService, IActiveUserSessionService activeUserSessionService)
     {
         _sqlMonitorService = sqlMonitorService;
+        _activeUserSessionService = activeUserSessionService;
+    }
+
+    /// <summary>Usuarios del ERP con actividad reciente (sesiones JWT en memoria del servidor).</summary>
+    [HttpGet("usuarios-activos")]
+    public IActionResult GetUsuariosActivos([FromQuery] int minutos = 10)
+    {
+        minutos = Math.Clamp(minutos, 1, 60);
+        var ahora = DateTimeOffset.UtcNow;
+        var usuarios = _activeUserSessionService
+            .ListarUsuariosActivos(ahora.AddMinutes(-minutos))
+            .Select(u => new
+            {
+                idUsuario = u.UserId,
+                sesiones = u.Sesiones,
+                ultimaActividadUtc = u.UltimaActividadUtc,
+                minutosInactivo = (int)Math.Floor((ahora - u.UltimaActividadUtc).TotalMinutes),
+            })
+            .ToList();
+
+        return Ok(new
+        {
+            success = true,
+            message = "Usuarios activos obtenidos correctamente.",
+            data = new { ventanaMinutos = minutos, total = usuarios.Count, usuarios },
+        });
     }
 
     [HttpGet("resumen")]

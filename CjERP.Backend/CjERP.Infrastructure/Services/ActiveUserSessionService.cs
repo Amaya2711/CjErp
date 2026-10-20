@@ -98,6 +98,21 @@ public class ActiveUserSessionService : IActiveUserSessionService
         return removed;
     }
 
+    public IReadOnlyList<ActiveUserSessionInfo> ListarUsuariosActivos(DateTimeOffset desdeUtc)
+    {
+        var resultado = new List<ActiveUserSessionInfo>();
+
+        foreach (var entry in _activeSessions)
+        {
+            var recientes = entry.Value.Values.Where(s => s.LastActivityUtc >= desdeUtc).ToList();
+            if (recientes.Count == 0) continue;
+
+            resultado.Add(new ActiveUserSessionInfo(entry.Key, recientes.Count, recientes.Max(s => s.LastActivityUtc)));
+        }
+
+        return resultado.OrderByDescending(x => x.UltimaActividadUtc).ToList();
+    }
+
     private void RemoveUserIfNoSessions(string userId, ConcurrentDictionary<string, SessionState> sessions)
     {
         if (sessions.IsEmpty) _activeSessions.TryRemove(userId, out _);

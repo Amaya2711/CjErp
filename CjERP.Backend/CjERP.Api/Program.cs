@@ -262,13 +262,15 @@ builder.Services.AddHttpClient<IConciliacionBcpService, ConciliacionBcpService>(
     client.Timeout = TimeSpan.FromSeconds(120);
 });
 builder.Services.AddScoped<IVacacionesService, VacacionesService>();
-builder.Services.AddScoped<IOrdenCompraService, OrdenCompraService>();
-builder.Services.AddScoped<IEmpleadoPendienteService, EmpleadoPendienteService>();
-builder.Services.AddScoped<ILogisticaRecojoService, LogisticaRecojoService>();
 builder.Services.AddScoped<ISmtpMailSender, SmtpMailSender>();
 builder.Services.AddHttpClient<IGraphMailSender, CjERP.Infrastructure.Services.Graph.GraphMailSender>();
 builder.Services.AddScoped<IVacacionesCorreoService, VacacionesCorreoService>();
 builder.Services.AddScoped<IBeneficioService, BeneficioService>();
+builder.Services.AddScoped<IDescansoService, DescansoService>();
+builder.Services.AddScoped<IOrdenCompraService, OrdenCompraService>();
+builder.Services.AddScoped<IEmpleadoPendienteService, EmpleadoPendienteService>();
+builder.Services.AddScoped<ILogisticaRecojoService, LogisticaRecojoService>();
+builder.Services.AddScoped<ILogisticaEquiposService, LogisticaEquiposService>();
 builder.Services.AddScoped<ILogisticaReembolsoService, LogisticaReembolsoService>();
 builder.Services.AddScoped<ILogisticaSuministroService, LogisticaSuministroService>();
 builder.Services.AddScoped<ICompensacionService, CompensacionService>();

@@ -48,6 +48,10 @@ export type IaChatResponse = {
   // Campos NO disponibles por permisos del usuario (p.ej. ventas y saldos de OC/site). Un campo listado
   // aqui no viene en las filas y NO equivale a cero: la UI debe mostrar "No disponible", nunca 0.
   unavailableFields?: string[] | null;
+  // Resumen calculado en SQL (modo RESUMEN): totales por moneda de TODO el universo filtrado y dimensiones
+  // pedidas (CLIENTE, MONEDA, FECHA...). detailRows trae los grupos (dimensiones + moneda).
+  totalsByCurrency?: Record<string, unknown>[] | null;
+  summaryDimensions?: string[] | null;
 };
 
 export type IaChatDashboardExportRequest = {

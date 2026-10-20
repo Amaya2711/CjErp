@@ -181,7 +181,26 @@ export type SqlMonitorAlertaFiltros = {
   fecha?: string;
 };
 
+export type SqlMonitorUsuarioActivo = {
+  idUsuario: string;
+  sesiones: number;
+  ultimaActividadUtc: string;
+  minutosInactivo: number;
+};
+
+export type SqlMonitorUsuariosActivos = {
+  ventanaMinutos: number;
+  total: number;
+  usuarios: SqlMonitorUsuarioActivo[];
+};
+
 export const sqlMonitorService = {
+  async obtenerUsuariosActivos(minutos = 10): Promise<SqlMonitorUsuariosActivos> {
+    return httpClient.get<SqlMonitorUsuariosActivos>("/sqlmonitor/usuarios-activos", {
+      params: { minutos },
+    });
+  },
+
   async obtenerResumen(): Promise<SqlMonitorResumen> {
     return httpClient.get<SqlMonitorResumen>("/sqlmonitor/resumen");
   },

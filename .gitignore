@@ -35,3 +35,6 @@ appsettings.Local.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Copias temporales de build (pueden contener appsettings con secretos)
+tmp/

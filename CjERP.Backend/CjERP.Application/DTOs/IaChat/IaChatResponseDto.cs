@@ -33,4 +33,11 @@ public sealed class IaChatResponseDto
     // tiene el permiso de totales globales). Un campo listado aqui no esta en las filas y NO equivale a
     // cero. null/vacio = todos los campos disponibles.
     public List<string>? UnavailableFields { get; set; }
+
+    // Resumen calculado en SQL (modo RESUMEN de sp_IA_Planilla_Buscar): totales por moneda de TODO el universo
+    // filtrado y dimensiones pedidas. El frontend los usa para el cuadro ejecutivo (tarjetas por moneda y tabla
+    // por cliente/fecha). null = la respuesta no viene de un resumen en SQL.
+    public List<Dictionary<string, object?>>? TotalsByCurrency { get; set; }
+
+    public List<string>? SummaryDimensions { get; set; }
 }

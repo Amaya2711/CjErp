@@ -44,6 +44,13 @@ public sealed class IaExecutiveReportPayload
     public string Conclusion { get; set; } = string.Empty;
     public List<string> Recommendations { get; set; } = [];
 
+    // Solo en resumenes calculados en SQL (modo RESUMEN): dimensiones pedidas, tabla de grupos, barras por moneda
+    // (top por moneda, importes de monedas distintas NUNCA se mezclan) y filtros aplicados a la consulta.
+    public List<string> GroupDimensions { get; set; } = [];
+    public List<Dictionary<string, object?>> GroupTable { get; set; } = [];
+    public List<Dictionary<string, object?>> BarsByCurrency { get; set; } = [];
+    public List<Dictionary<string, object?>> AppliedFilters { get; set; } = [];
+
     /// <summary>
     /// true cuando la metrica pedida (p.ej. ventas) depende de campos no disponibles por permisos: el informe
     /// NO contiene montos, porcentajes ni semaforos de esa metrica (no son cero: no existen para este usuario).
@@ -256,6 +263,260 @@ public static class IaExecutiveReportBuilder
         }
 
         return payload;
+    }
+
+    private static readonly HashSet<string> SqlSummaryMeasureFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Moneda", "Registros", "SubtotalMonedaOriginal", "IgvMonedaOriginal", "TotalMonedaOriginal",
+        "SubtotalSolesEquivalente", "FilasSinTipoCambio"
+    };
+
+    /// <summary>
+    /// Informe ejecutivo de un RESUMEN calculado en SQL (sp_IA_Planilla_Buscar modo RESUMEN). Sus filas son GRUPOS
+    /// (dimensiones + Moneda + Registros + Subtotal/Igv/Total en moneda original), no registros de detalle, por lo que
+    /// no sirven a Build(). Los importes se muestran siempre por moneda; las barras se arman por moneda.
+    /// </summary>
+    public static IaExecutiveReportPayload BuildFromSqlSummary(
+        List<Dictionary<string, object?>> groups,
+        List<Dictionary<string, object?>> totalsByCurrency,
+        IReadOnlyList<string>? dimensions,
+        int? totalRowsReportado,
+        string? question,
+        string? answer,
+        Dictionary<string, object?>? toolParameters = null)
+    {
+        var metric = DetectMetric(question, answer);
+
+        var totals = totalsByCurrency.Select(t => new
+        {
+            Moneda = ResolveFieldText(t, "Moneda") ?? "Sin dato",
+            Registros = (int)ResolveNumericField(t, "Registros"),
+            Subtotal = ResolveNumericField(t, "SubtotalMonedaOriginal"),
+            Igv = ResolveNumericField(t, "IgvMonedaOriginal"),
+            Total = ResolveNumericField(t, "TotalMonedaOriginal"),
+            Soles = ResolveNumericField(t, "SubtotalSolesEquivalente"),
+            SinTc = (int)ResolveNumericField(t, "FilasSinTipoCambio")
+        }).ToList();
+
+        var totalRecords = totals.Sum(t => t.Registros);
+        var hasMultipleCurrencies = totals.Count > 1;
+        var primaryCurrency = totals.Count > 0 ? totals[0].Moneda : "Sin dato";
+        var dimKeys = groups.Count > 0
+            ? groups[0].Keys.Where(k => !SqlSummaryMeasureFields.Contains(k)).ToList()
+            : [];
+
+        string GroupLabel(Dictionary<string, object?> row)
+        {
+            var parts = dimKeys.Select(k => ResolveFieldText(row, k) ?? "Sin dato").ToList();
+            return parts.Count > 0 ? string.Join(" / ", parts) : ResolveFieldText(row, "Moneda") ?? "Total";
+        }
+
+        decimal CurrencySubtotal(string moneda) =>
+            totals.Where(t => string.Equals(t.Moneda, moneda, StringComparison.OrdinalIgnoreCase)).Sum(t => t.Subtotal);
+
+        double Share(decimal part, decimal whole) => whole == 0 ? 0 : (double)(part / whole * 100m);
+
+        var rankedGroups = groups
+            .Select(g => new
+            {
+                Row = g,
+                Label = GroupLabel(g),
+                Moneda = ResolveFieldText(g, "Moneda") ?? "Sin dato",
+                Registros = (int)ResolveNumericField(g, "Registros"),
+                Subtotal = ResolveNumericField(g, "SubtotalMonedaOriginal"),
+                Igv = ResolveNumericField(g, "IgvMonedaOriginal"),
+                Total = ResolveNumericField(g, "TotalMonedaOriginal")
+            })
+            .ToList();
+
+        var topGroup = rankedGroups.OrderByDescending(g => g.Subtotal).FirstOrDefault();
+        var allWithRate = totals.Count > 0 && totals.All(t => t.SinTc == 0);
+        var totalSinTc = totals.Sum(t => t.SinTc);
+
+        var payload = new IaExecutiveReportPayload
+        {
+            Metric = metric,
+            Currency = primaryCurrency,
+            HasMultipleCurrencies = hasMultipleCurrencies,
+            Period = FormatSummaryPeriod(toolParameters),
+            TotalRows = totalRowsReportado ?? totalRecords,
+            FilasAnalizadas = totalRecords,
+            InformeParcial = false,
+            GroupDimensions = (dimensions ?? []).ToList(),
+            CurrencyTotals = totals.Select(t => new Dictionary<string, object?>
+            {
+                ["Moneda"] = t.Moneda,
+                ["Monto"] = FormatMoneyByLabel(t.Subtotal, t.Moneda),
+                ["Registros"] = t.Registros,
+                ["Participacion"] = $"{Share(t.Registros, totalRecords):F2}% de los registros"
+            }).ToList(),
+            CurrencyTable = totals.Select(t => new Dictionary<string, object?>
+            {
+                ["Moneda"] = t.Moneda,
+                ["Subtotal"] = FormatMoneyByLabel(t.Subtotal, t.Moneda),
+                ["IGV"] = FormatMoneyByLabel(t.Igv, t.Moneda),
+                ["Total"] = FormatMoneyByLabel(t.Total, t.Moneda),
+                ["Registros"] = t.Registros
+            }).ToList(),
+            GroupTable = rankedGroups.Take(15).Select(g =>
+            {
+                var row = new Dictionary<string, object?>();
+                foreach (var key in dimKeys)
+                {
+                    row[key] = ResolveFieldText(g.Row, key) ?? "Sin dato";
+                }
+
+                row["Moneda"] = g.Moneda;
+                row["Registros"] = g.Registros;
+                row["Subtotal"] = FormatMoneyByLabel(g.Subtotal, g.Moneda);
+                row["IGV"] = FormatMoneyByLabel(g.Igv, g.Moneda);
+                row["Total"] = FormatMoneyByLabel(g.Total, g.Moneda);
+                row["Participacion"] = $"{Share(g.Subtotal, CurrencySubtotal(g.Moneda)):F2}%";
+                return row;
+            }).ToList(),
+            BarsByCurrency = totals.SelectMany(t => rankedGroups
+                .Where(g => string.Equals(g.Moneda, t.Moneda, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(g => g.Subtotal)
+                .Take(10)
+                .Select(g => new Dictionary<string, object?>
+                {
+                    ["Moneda"] = t.Moneda,
+                    ["Etiqueta"] = g.Label,
+                    ["MontoNumero"] = g.Subtotal,
+                    ["Monto"] = FormatMoneyByLabel(g.Subtotal, t.Moneda),
+                    ["Participacion"] = Share(g.Subtotal, t.Subtotal)
+                })).ToList()
+        };
+
+        payload.AppliedFilters = BuildAppliedFilterRows(toolParameters);
+
+        payload.KpiRows =
+        [
+            new Dictionary<string, object?> { ["Indicador"] = "Total registros", ["Resultado"] = totalRecords.ToString("N0", Pe) },
+            .. totals.Select(t => new Dictionary<string, object?>
+            {
+                ["Indicador"] = $"Subtotal {t.Moneda}",
+                ["Resultado"] = $"{FormatMoneyByLabel(t.Subtotal, t.Moneda)} ({t.Registros:N0} registros)"
+            }),
+            .. totals.Select(t => new Dictionary<string, object?>
+            {
+                ["Indicador"] = $"Total con IGV {t.Moneda}",
+                ["Resultado"] = FormatMoneyByLabel(t.Total, t.Moneda)
+            }),
+            new Dictionary<string, object?>
+            {
+                ["Indicador"] = "Grupo principal",
+                ["Resultado"] = topGroup is null
+                    ? "Sin dato"
+                    : $"{topGroup.Label} ({FormatMoneyByLabel(topGroup.Subtotal, topGroup.Moneda)})"
+            },
+            .. (hasMultipleCurrencies && allWithRate
+                ? [new Dictionary<string, object?>
+                {
+                    ["Indicador"] = "Equivalente en soles (referencial, tipo de cambio aplicado)",
+                    ["Resultado"] = FormatMoneyByLabel(totals.Sum(t => t.Soles), "PEN")
+                }]
+                : Array.Empty<Dictionary<string, object?>>()),
+            .. (totalSinTc > 0
+                ? [new Dictionary<string, object?>
+                {
+                    ["Indicador"] = "Registros sin tipo de cambio",
+                    ["Resultado"] = totalSinTc.ToString("N0", Pe)
+                }]
+                : Array.Empty<Dictionary<string, object?>>())
+        ];
+
+        payload.SummaryRows =
+        [
+            KeyValueRow("Periodo evaluado", payload.Period),
+            KeyValueRow("Agrupado por", payload.GroupDimensions.Count > 0 ? string.Join(", ", payload.GroupDimensions) : "Moneda"),
+            KeyValueRow("Cantidad de registros", totalRecords),
+            KeyValueRow("Monedas identificadas", totals.Count > 0 ? string.Join(", ", totals.Select(t => t.Moneda)) : "Sin moneda"),
+            KeyValueRow("Cobertura del análisis", $"{totalRecords} registros agrupados en {groups.Count} grupos (los importes no mezclan monedas)")
+        ];
+
+        payload.ExecutiveReading = string.Join(" ", new List<string?>
+        {
+            hasMultipleCurrencies ? $"La data incluye varias monedas; los importes se presentan separados: {string.Join(" | ", totals.Select(t => $"{t.Moneda}: {FormatMoneyByLabel(t.Subtotal, t.Moneda)}"))}." : null,
+            topGroup is not null ? $"El grupo con mayor monto es {topGroup.Label}, con {FormatMoneyByLabel(topGroup.Subtotal, topGroup.Moneda)} ({Share(topGroup.Subtotal, CurrencySubtotal(topGroup.Moneda)):F2}% de su moneda)." : null,
+            $"Se analizaron {totalRecords:N0} registros en {groups.Count} grupos."
+        }.Where(s => !string.IsNullOrEmpty(s)));
+
+        payload.Conclusion = topGroup is not null
+            ? $"El gasto se concentra principalmente en {topGroup.Label}. Conviene dar seguimiento a ese grupo y revisar el detalle de los registros que lo componen."
+            : "No hay grupos suficientes para una lectura gerencial.";
+
+        payload.Recommendations = new List<string?>
+        {
+            topGroup is not null ? $"Revisar el detalle de {topGroup.Label} por su mayor participación." : null,
+            totalSinTc > 0 ? "Registrar el tipo de cambio de las monedas sin equivalencia para consolidar en soles." : null,
+            "Consultar el detalle de un grupo específico para validar sus registros."
+        }.Where(s => !string.IsNullOrEmpty(s)).Select(s => s!).ToList();
+
+        return payload;
+    }
+
+    private static string FormatSummaryPeriod(Dictionary<string, object?>? toolParameters)
+    {
+        var start = ResolveToolText(toolParameters, "fechaInicio");
+        var end = ResolveToolText(toolParameters, "fechaFin");
+        return start is null && end is null ? "No especificado" : $"{start ?? "…"} a {end ?? "…"}";
+    }
+
+    private static List<Dictionary<string, object?>> BuildAppliedFilterRows(Dictionary<string, object?>? toolParameters)
+    {
+        var labels = new (string Key, string Label)[]
+        {
+            ("estados", "Estado"), ("cliente", "Cliente"), ("proyecto", "Proyecto"), ("site", "Site"), ("idSite", "Id site"),
+            ("ot", "OT"), ("responsable", "Responsable"), ("solicitante", "Solicitante"), ("textoBusqueda", "Texto de búsqueda")
+        };
+
+        var rows = labels
+            .Select(l => (l.Label, Value: ResolveToolText(toolParameters, l.Key)))
+            .Where(l => l.Value is not null)
+            .Select(l => KeyValueRow(l.Label, l.Value))
+            .ToList();
+
+        if (toolParameters is not null && toolParameters.TryGetValue("todosLosEstados", out var all) && all is true)
+        {
+            rows.Insert(0, KeyValueRow("Estado", "Todos los estados"));
+        }
+
+        return rows;
+    }
+
+    private static string? ResolveToolText(Dictionary<string, object?>? toolParameters, string key)
+    {
+        if (toolParameters is null || !TryGetCaseInsensitive(toolParameters, key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        var text = Convert.ToString(value, CultureInfo.InvariantCulture)?.Trim();
+        return string.IsNullOrEmpty(text) ? null : text;
+    }
+
+    // Etiqueta de moneda de Constante.ValorIni (SOLES, DOLARES, EUROS...) -> simbolo. Las demas se muestran con su etiqueta.
+    private static string FormatMoneyByLabel(decimal value, string currencyLabel)
+    {
+        var normalized = NormalizeAscii(currencyLabel);
+        var formatted = value.ToString("N2", Pe);
+        if (normalized is "pen" or "s/" or "s/." || normalized.Contains("sol"))
+        {
+            return $"S/ {formatted}";
+        }
+
+        if (normalized.Contains("usd") || normalized.Contains("dolar") || normalized.Contains("us$"))
+        {
+            return $"US$ {formatted}";
+        }
+
+        if (normalized.Contains("eur"))
+        {
+            return $"€ {formatted}";
+        }
+
+        return $"{formatted} {currencyLabel}";
     }
 
     private static IaExecutiveReportPayload BuildUnavailablePayload(

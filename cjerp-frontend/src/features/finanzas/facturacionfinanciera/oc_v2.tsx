@@ -1692,10 +1692,12 @@ export default function OcV2Page() {
   const cabecerasRelacion = useMemo(
     () => cabeceras
       .filter((item) => {
-        const vista = getEstadoVista(item);
-        if (vista === "rechazadas") return false;
-        if (relacionEstado === "pendientes" && vista !== "pendientes") return false;
-        if (relacionEstado === "aprobadas" && vista !== "aprobadas") return false;
+        // Se usa el avance de aprobación (aprobadores registrados) y no el texto del estado: el store devuelve
+        // textos como "En 2da Aprob." que contienen "aprob" y getEstadoVista los tomaría como aprobadas.
+        const nivel = getNivelPendiente(item);
+        if (nivel === 0) return false;
+        if (relacionEstado === "pendientes" && nivel === 4) return false;
+        if (relacionEstado === "aprobadas" && nivel !== 4) return false;
         const fechaCreacion = item.fecha?.slice(0, 10) ?? "";
         if (relacionDesde && (!fechaCreacion || fechaCreacion < relacionDesde)) return false;
         if (relacionHasta && (!fechaCreacion || fechaCreacion > relacionHasta)) return false;

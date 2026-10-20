@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using Xunit;
 
 namespace CjERP.Backend.Tests.Ia.UnitTests;
@@ -15,7 +15,7 @@ public sealed class IaScopedSpV3ScriptContractTests
     private static readonly string[] Dimensions =
     [
         "CLIENTE", "PROYECTO", "RESPONSABLE", "SOLICITANTE", "SITE", "ESTADO", "MONEDA", "BIEN",
-        "COMPROBANTE", "TIPOPAGO", "TIPOTRABAJO", "FECHA", "MES"
+        "COMPROBANTE", "TIPOPAGO", "TIPOTRABAJO", "FECHA", "MES", "COINCIDENCIA"
     ];
 
     private static readonly Lazy<string> Script = new(() => LoadScript());
@@ -62,6 +62,7 @@ public sealed class IaScopedSpV3ScriptContractTests
     [InlineData("50021")]
     [InlineData("50022")]
     [InlineData("50023")]
+    [InlineData("50024")]
     public void ConservaLasValidacionesDeAlcanceYAgregaLasDelModo(string errorNumber) =>
         Assert.Contains($"THROW {errorNumber},", Script.Value);
 
@@ -108,6 +109,23 @@ public sealed class IaScopedSpV3ScriptContractTests
         Assert.Matches(@"a\.Correlativo = c\.IdPlanilla\s+AND a\.IdProyecto = c\.KProyecto\s+AND a\.IdSite = c\.KSite\s+AND a\.IdTipoTrabajo = c\.KTipoTrabajo\s+AND a\.IdTarea = c\.KTarea\s+AND a\.IdCliente = c\.KCliente", sql);
         Assert.Matches(@"a\.Correlativo = pg\.IdPlanilla\s+AND a\.IdProyecto = pg\.KProyecto\s+AND a\.IdSite = pg\.KSite\s+AND a\.IdTipoTrabajo = pg\.KTipoTrabajo\s+AND a\.IdTarea = pg\.KTarea\s+AND a\.IdCliente = pg\.KCliente", sql);
         Assert.DoesNotMatch(@"GROUP BY\s+x\.IdPlanilla\s*;", sql);   // ya no se agrupa solo por Correlativo
+    }
+
+    [Fact]
+    public void LaCoincidenciaAgrupaPorElNombreQueCoincidio_ConLosTerminosDeLaBusqueda()
+    {
+        // Regla de negocio 2026-10-04: una busqueda por nombre se mantiene por CUALQUIER palabra, pero el resultado
+        // se muestra por coincidencia (nombre, registros y monto por moneda).
+        var sql = Script.Value;
+        var rama = RamaResumen();
+
+        Assert.Contains("#TerminosCoincidencia", sql);
+        Assert.Contains("INTO #TerminosCoincidencia", rama);       // los terminos viajan al SQL dinamico
+        Assert.Contains("N''Solicitante'' AS Rol", sql);            // una fila por rol, con columna Rol
+        Assert.Contains("SELECT N''Responsable''", sql);
+        Assert.Contains("N''Otro campo''", sql);
+        Assert.Contains("co.Rol AS [Rol]", rama);
+        Assert.Contains("THROW 50024", sql);                        // sin terminos no hay coincidencias
     }
 
     [Fact]

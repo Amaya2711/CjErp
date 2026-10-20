@@ -386,13 +386,14 @@ function subtotalesDeSitio(sitio: SitioAnalisis): Subtotal[] {
   return Array.from(porMoneda.values()).sort((a, b) => a.moneda.localeCompare(b.moneda, "es"));
 }
 
-const HEAD_SUBTOTAL = ["MONEDA", "OCs", "MONTO OC VIGENTE", "PAGADO CON OC", "SALDO PENDIENTE", "PAGOS SIN OC", "PAGADO SIN OC"];
+const HEAD_SUBTOTAL = ["MONEDA", "OCs", "MONTO OC VIGENTE", "PAGADO CON OC", "SALDO PENDIENTE", "% SALDO", "PAGOS SIN OC", "PAGADO SIN OC"];
 const filaSubtotal = (sub: Subtotal) => [
   sub.moneda,
   String(sub.ocs),
   montoConSimbolo(sub.vigente, sub.moneda),
   montoConSimbolo(sub.pagadoConOc, sub.moneda),
   montoConSimbolo(sub.saldo, sub.moneda),
+  formatPorcentaje(sub.vigente > 0 ? (sub.saldo / sub.vigente) * 100 : 0),
   String(sub.pagosSinOc),
   montoConSimbolo(sub.pagadoSinOc, sub.moneda),
 ];
@@ -421,7 +422,7 @@ function tablaSubtotalesPorSitio(doc: Doc, autoTable: AutoTable, pagina: Pagina,
   tabla(doc, autoTable, pagina, ["SITIO", ...HEAD_SUBTOTAL], filas, {
     fontSize: 7,
     filaTotal: true,
-    derecha: [2, 3, 4, 5, 6, 7],
+    derecha: [2, 3, 4, 5, 6, 7, 8],
   });
 }
 
@@ -431,7 +432,7 @@ function bloqueSubtotalSitio(doc: Doc, autoTable: AutoTable, pagina: Pagina, sit
   subtituloSeccion(doc, pagina, `Subtotal del sitio ${sitio.etiqueta}, por moneda`);
   tabla(doc, autoTable, pagina, HEAD_SUBTOTAL, subtotalesDeSitio(sitio).map(filaSubtotal), {
     fontSize: 7.5,
-    derecha: [1, 2, 3, 4, 5, 6],
+    derecha: [1, 2, 3, 4, 5, 6, 7],
   });
 }
 

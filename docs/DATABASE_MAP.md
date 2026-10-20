@@ -255,7 +255,7 @@ Columnas: **Módulo | SP | Tipo | Def. en repo | Llamado desde (clase C#)**. Tip
 | Tesorería/Planilla (recibos) | sp_Planilla_AdministrativoMasivo | PROCESO PAGO (5→4) | No | PagoTesoreriaService |
 | Tesorería/Planilla (recibos) | sp_Planilla_ConsultaIni | CONSULTA | No | PagoTesoreriaWorkflow |
 | Tesorería/Planilla (recibos) | sp_Planilla_Consulta_Aprobar | CONSULTA (bandeja aprobar) | No | PlanillaConsultaController, PlanillaConsultaService |
-| Tesorería/Planilla (recibos) | sp_Planilla_Consulta_Estados | CONSULTA (principal) | Sí | PlanillaConsultaController, ConciliacionBcpService, PlanillaConsultaService |
+| Tesorería/Planilla (recibos) | sp_Planilla_Consulta_Estados (param. `@IdTarea` para filtrar por tarea) | CONSULTA (principal) | Sí | PlanillaConsultaController, ConciliacionBcpService, PlanillaConsultaService |
 | Tesorería/Planilla (recibos) | sp_Planilla_Consulta_Gastos_Pagados | CONSULTA | No | PlanillaConsultaService (constante SIN USO) |
 | Tesorería/Planilla (recibos) | sp_Planilla_ConsultarPagados_Dsh | REPORTE | No | PlanillaConsultaController, PlanillaConsultaService |
 | Tesorería/Planilla (recibos) | sp_Planilla_ContabilidadMasivo | PROCESO (9→8) | No | PagoTesoreriaWorkflow |
@@ -297,7 +297,7 @@ Scripts con SPs versionados: `Database/Arrendamientos/*`, `Database/Finanzas/00-
 | Arrendamientos | `sp_a_Contrato_Guardar` definido en 3 scripts (00, 01, 02 — gana el último ejecutado); `sp_a_EstadoCuenta_Consultar` sin uso (SQL inline equivalente) |
 | Menú | `sp_Seguridad_ObtenerMenuDinamico` vs SQL inline `SegMenuService.ListarPorUsuarioAsync` (dos fuentes de verdad) |
 | Sin uso | `sp_Planilla_Consulta_Gastos_Pagados` (constante), `sp_Seguridad_ObtenerMenuDinamicoTotal` (endpoint sin consumidor) |
-| Script ≠ BD | `Database/Planilla/01_sp_Planilla_Consulta_Estados.sql` no declara parámetros que envía `pagos_v1.tsx` (TipoCambioUSD/EUR/DOP/COP) ⇒ la versión en producción difiere del repo |
+| Script ≠ BD | `Database/Planilla/01_sp_Planilla_Consulta_Estados.sql` no declara parámetros que envía `pagos_v1.tsx` (TipoCambioUSD/EUR/DOP/COP) ⇒ la versión en producción difiere del repo. La referencia vigente (2026-10-19, ya en BD) es `07_sp_Planilla_Consulta_Estados_idtarea.sql`: agrega `@IdTarea` (filtra consulta principal, `@SoloSumaResp` y suma por responsable), usado por la pestaña Consulta de gastos y por toda la pantalla de viáticos (`IdTarea = 93`) |
 
 ## 5. PENDIENTE DE VALIDACIÓN (BD)
 - Definiciones de los ~122 SPs marcados "No" (prioridad: `sp_Planilla_Insertar/Actualizar/ActualizarEstado/ProcesarAprobacionMasiva`, `sp_Planilla_Consulta_Aprobar`, 7 SPs de etapas de tesorería, `sp_OrdenCompra_*`, `sp_EmpleadoOtros_*`, `RptAsistenciaFechas`, `sp_Seguridad_ObtenerMenuDinamico`, `sp_Asistencia_Aprobar*`).

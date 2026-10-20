@@ -912,11 +912,15 @@ export default function DataGridPro<T extends object>({
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={colSpanAll} style={styles.emptyCell}>Cargando...</td>
+                <td colSpan={colSpanAll} style={styles.emptyCell}>
+                  <span style={styles.emptyCellText}>Cargando...</span>
+                </td>
               </tr>
             ) : pageItems.length === 0 ? (
               <tr>
-                <td colSpan={colSpanAll} style={styles.emptyCell}>{noDataText}</td>
+                <td colSpan={colSpanAll} style={styles.emptyCell}>
+                  <span style={styles.emptyCellText}>{noDataText}</span>
+                </td>
               </tr>
             ) : (
               pageItems.map((item, index) => {
@@ -1562,7 +1566,10 @@ const styles: Record<string, React.CSSProperties> = {
     borderTop: "1px solid #E5E7EB",
     whiteSpace: "nowrap",
   },
-  emptyCell: { padding: 24, textAlign: "center", color: "#64748B", fontSize: 14 },
+  // El mensaje abarca todas las columnas (tabla muy ancha): alineado a la izquierda y fijo al borde visible
+  // para que "Cargando..." / "sin datos" siempre se vea aunque la grilla tenga scroll horizontal.
+  emptyCell: { padding: 24, textAlign: "left", color: "#64748B", fontSize: 14 },
+  emptyCellText: { position: "sticky", left: 24, display: "inline-block" },
   pager: {
     display: "flex",
     alignItems: "center",

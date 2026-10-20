@@ -43,6 +43,7 @@ import {
   exportarDashboardIaChat,
   getIaChatErrorMessage,
 } from "./iachat/services/iaChatService";
+import { SqlSummaryBlock } from "./iachat/components/SqlSummaryBlock";
 import { useSpeechDictation } from "./iachat/hooks/useSpeechDictation";
 import { cancelSpeech, useSpeechReader } from "./iachat/hooks/useSpeechReader";
 import type {
@@ -2194,6 +2195,53 @@ function buildExecutiveRowsFromChart(response: IaChatResponse) {
   }).filter((row) => row.__category !== "Sin dato" || row.__value !== 0);
 }
 
+// Etiquetas legibles (periodo, estado, filtros) para el cuadro ejecutivo del resumen en SQL.
+function buildSummaryChips(response: IaChatResponse): { label: string; value: string }[] {
+  const raw = response.interpretedFilters?.toolParameters;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return [];
+  }
+
+  const params = raw as Record<string, unknown>;
+  const text = (key: string) => {
+    const value = params[key];
+    return value === null || value === undefined || value === "" ? null : String(value);
+  };
+  const chips: { label: string; value: string }[] = [];
+
+  const from = text("fechaInicio");
+  const to = text("fechaFin");
+  if (from || to) {
+    chips.push({ label: "Periodo", value: `${from ?? "..."} a ${to ?? "..."}` });
+  }
+
+  if (params["todosLosEstados"] === true) {
+    chips.push({ label: "Estado", value: "todos" });
+  } else if (text("estados")) {
+    chips.push({
+      label: "Estado",
+      value: params["estadoAplicadoPorDefecto"] === true ? `${text("estados")} (por defecto)` : String(text("estados")),
+    });
+  }
+
+  for (const [key, label] of [
+    ["cliente", "Cliente"],
+    ["proyecto", "Proyecto"],
+    ["site", "Site"],
+    ["responsable", "Responsable"],
+    ["solicitante", "Solicitante"],
+    ["ot", "OT"],
+    ["textoBusqueda", "Texto"],
+  ] as const) {
+    const value = text(key);
+    if (value) {
+      chips.push({ label, value });
+    }
+  }
+
+  return chips;
+}
+
 function buildDisplayFilters(response: IaChatResponse) {
   const source = response.interpretedFilters;
   if (!source || typeof source !== "object") {
@@ -2427,7 +2475,9 @@ function StructuredResponseBlock({ response }: { response: IaChatResponse }) {
   const [isExportingDetailExcel, setIsExportingDetailExcel] = useState(false);
   const autoExportKeyRef = useRef<string | null>(null);
   const reportPreviewRef = useRef<HTMLDivElement | null>(null);
-  const rawRows = response.detailRows ?? [];
+  // Resumen calculado en SQL: se muestra el cuadro ejecutivo; sus filas son grupos, no registros de detalle.
+  const sqlSummary = response.responseType === "summary" && (response.totalsByCurrency?.length ?? 0) > 0;
+  const rawRows = sqlSummary ? [] : (response.detailRows ?? []);
   const reportMetric = detectReportMetric(response);
   const unavailable = resolveUnavailable(response);
   const detailedGridRows = buildDetailedGridRows(rawRows, unavailable);
@@ -2494,7 +2544,13 @@ function StructuredResponseBlock({ response }: { response: IaChatResponse }) {
         throw new Error(exportResponse.errorMessage || "No fue posible generar el dashboard ejecutivo.");
       }
 
-      setReportPreviewHtml(injectDashboardFallbacksIntoHtml(exportResponse.htmlContent, dashboardData));
+      // Los respaldos del frontend se calculan con filas de detalle; en un resumen SQL no hay (el backend ya
+      // armó KPIs y barras por moneda), así que se mostraría un recuadro "sin datos" sobre el informe correcto.
+      setReportPreviewHtml(
+        sqlSummary
+          ? exportResponse.htmlContent
+          : injectDashboardFallbacksIntoHtml(exportResponse.htmlContent, dashboardData),
+      );
       setReportPreviewTitle(
         exportResponse.fileName?.trim()
           ? exportResponse.fileName.trim().replace(/\.(pdf|html?)$/i, "")
@@ -2637,7 +2693,16 @@ function StructuredResponseBlock({ response }: { response: IaChatResponse }) {
         </button>
       </div>
 
-      {numericSummary.length > 0 && (
+      {sqlSummary && (
+        <SqlSummaryBlock
+          dimensions={response.summaryDimensions ?? []}
+          groups={response.detailRows ?? []}
+          totals={response.totalsByCurrency ?? []}
+          filters={buildSummaryChips(response)}
+        />
+      )}
+
+      {!sqlSummary && numericSummary.length > 0 && (
         <div style={styles.kpiGrid}>
           {numericSummary.map((item) => (
             <div key={item.label} style={styles.kpiCard}>

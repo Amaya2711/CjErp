@@ -228,6 +228,29 @@ export default function SeguridadPermisosAccionesPage() {
       ];
     }
 
+    const esPaginaDescanso = form.rutaPagina.endsWith("/recursoshumanos/descansomedico");
+
+    // Descanso médico: todo está activo por defecto; una fila activa con "ver" o "ejecutar" en NO bloquea ese elemento.
+    if (form.tipoElemento === "tab" && esPaginaDescanso) {
+      return [
+        { value: "tab.ingreso", label: "Ingreso" },
+        { value: "tab.aprobar", label: "Aprobar" },
+        { value: "tab.reporte", label: "Reporte" },
+        { value: "tab.aprobacion_1", label: "1era aprobación" },
+        { value: "tab.aprobacion_2", label: "2da aprobación" },
+        { value: "tab.aprobacion_3", label: "3era aprobación" },
+        { value: "tab.aprobacion_4", label: "4ta aprobación" },
+      ];
+    }
+
+    if (form.tipoElemento === "button" && esPaginaDescanso) {
+      return [
+        { value: "button.grabar", label: "Grabar descanso" },
+        { value: "button.aprobar", label: "Aprobar" },
+        { value: "button.rechazar", label: "Rechazar" },
+      ];
+    }
+
     if (form.tipoElemento === "system") {
       return [{ value: "system.access", label: "Acceso general a la pagina" }];
     }

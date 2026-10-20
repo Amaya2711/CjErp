@@ -9,7 +9,8 @@ function mapConstanteToOption(item: ConstanteLookupDto): ConstanteOption {
   const campoNormalizado = String(item.campo ?? "").trim().toLowerCase();
   const firstNonEmpty = (...values: Array<string | null | undefined>) =>
     values.find((value) => String(value ?? "").trim())?.trim() ?? "";
-  const label = campoNormalizado === "estado_cheque"
+  // En "estado" el nombre del estado es ValorIni; Detalle es solo una nota descriptiva y no debe usarse como etiqueta.
+  const label = campoNormalizado === "estado_cheque" || campoNormalizado === "estado"
     ? firstNonEmpty(item.valorIni, item.descripcion)
     : campoNormalizado === "banco"
       ? firstNonEmpty(item.valorIni, item.descripcion, item.detalle, item.valor)

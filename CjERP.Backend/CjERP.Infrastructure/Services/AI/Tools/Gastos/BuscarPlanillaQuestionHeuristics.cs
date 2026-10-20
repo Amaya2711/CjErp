@@ -68,12 +68,41 @@ internal static class BuscarPlanillaQuestionHeuristics
             args.Ot = ot;
         }
 
+        // Regla: si el usuario escribio "cliente X" / "proyecto Y", el valor va SOLO en @Cliente / @Proyecto, no en @TextoBusqueda.
+        args.TextoBusqueda = RemoveTermsOfExplicitFilter(args.TextoBusqueda, cliente, proyecto);
+
         if (IsMetricOnlySearchText(args.TextoBusqueda))
         {
             args.TextoBusqueda = null;
         }
 
         return args.Normalize();
+    }
+
+    /// <summary>Quita del texto libre las palabras que ya viajan en un filtro explicito (cliente/proyecto); null si no queda nada.</summary>
+    internal static string? RemoveTermsOfExplicitFilter(string? textoBusqueda, params string?[] explicitValues)
+    {
+        if (string.IsNullOrWhiteSpace(textoBusqueda))
+        {
+            return textoBusqueda;
+        }
+
+        var explicitWords = explicitValues
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .SelectMany(v => v!.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (explicitWords.Count == 0)
+        {
+            return textoBusqueda;
+        }
+
+        var remaining = textoBusqueda
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Where(word => !explicitWords.Contains(word))
+            .ToArray();
+
+        return remaining.Length == 0 ? null : string.Join(' ', remaining);
     }
 
     internal static BuscarPlanillaArgs BuildSearchArgsFromQuestion(string question)
@@ -161,6 +190,14 @@ internal static class BuscarPlanillaQuestionHeuristics
         @"(\bpor|\bseg[uú]n|\bagrupad[oa]s?\s+por|\bseparad[oa]s?\s+por|\bdesglos\w*\s+por|\bclasificad[oa]s?\s+por|\bordenad[oa]s?\s+por|\bdetalle\s+por|\bresumen\s+por)\s*$",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
+    // Corta el valor de un filtro nombrado en la primera frase de periodo/enlace: "para ...", "durante ...", "mes ...",
+    // un mes del año ("de septiembre", "setiembre") o un año de 4 digitos. No corta "de" a secas (hay nombres como "EXPANSION DE RADIO").
+    // REGLA (2026-10-04): tambien corta en cualquier palabra que sea el nombre de otro parametro (cliente, proyecto, site, ot,
+    // responsable, solicitante, estado, moneda...): "cliente sdp proyecto Canon" => cliente = "sdp", proyecto = "Canon".
+    private static readonly System.Text.RegularExpressions.Regex TrailingPeriodPhrase = new(
+        @"\s+(clientes?|proyectos?|sites?|sitios?|ot|responsables?|solicitantes?|estados?|monedas?|periodo|per[ií]odo|fecha|para|durante|desde|hasta|entre|seg[uú]n|en\s+el|del?\s+(el\s+)?(mes|a[nñ]o)|mes|a[nñ]o|(del?\s+)?(enero|febrero|marzo|abril|mayo|junio|julio|agosto|set?iembre|octubre|noviembre|diciembre)|(del?\s+)?(19|20)\d{2})\b.*$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
     // Si el "valor" empieza con una palabra de enlace no es un nombre ("cliente y moneda", "proyecto para ...").
     private static readonly HashSet<string> NonNameLeadingWords = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -190,6 +227,8 @@ internal static class BuscarPlanillaQuestionHeuristics
                 @"\b(de este mes|del este mes|de este año|del este año|de 20\d{2}|del 20\d{2}|este mes|este año|mes pasado|hoy|ayer)\b.*$",
                 string.Empty,
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+            // El valor termina donde empieza la frase de periodo u otra instruccion ("sdp para el mes de septiembre 2026" => "sdp").
+            value = TrailingPeriodPhrase.Replace(value, string.Empty);
 
             var normalizedValue = NormalizeText(value);
             if (string.IsNullOrWhiteSpace(normalizedValue))
@@ -234,7 +273,7 @@ internal static class BuscarPlanillaQuestionHeuristics
 
         normalized = System.Text.RegularExpressions.Regex.Replace(
             normalized,
-            @"\b(comparacion|comparar|comparando|comparativa|comparativo|contra|vs|versus|frente|frentea|montooc2|montooc|monto|oc2|conpagado|conpagadosoles|subtotalesoles|subtotalsoles|saldoocsitio|suboc|subplanilla|adelafic|diferenciafic|venta|ventas|quiero|saber|mostrar|consultar|buscar|registros|registro|planilla|detalle|detalles|total|suma|sumado|gasto|gastos|cliente|clientes|proyecto|proyectos|site|sitio|sitios|responsable|responsables|solicitante|solicitantes|estado|estados|considerando|considera|considerar|pagado|pagada|pagados|pagadas|aprobado|aprobada|aprobados|aprobadas|pendiente|pendientes|observado|observada|observados|observadas|rechazado|rechazada|rechazados|rechazadas|separado|separada|separados|separadas|agrupado|agrupada|agrupados|agrupadas|de|del|para|por|con|en|el|la|los|las|periodo|mes|ano|año|moneda|monedas|enero|febrero|marzo|abril|mayo|junio|julio|agosto|setiembre|septiembre|octubre|noviembre|diciembre|realizado|realizados|realizada|realizadas|desglose|desglosado|desglosada|resumen|inicio|fin|desde|hasta|ejecuta|ejecutar|store|sp|ia|modulo|módulo|texto|busqueda|general|coincidir|todas)\b",
+            @"\b(comparacion|comparar|comparando|comparativa|comparativo|contra|vs|versus|frente|frentea|montooc2|montooc|monto|oc2|conpagado|conpagadosoles|subtotalesoles|subtotalsoles|saldoocsitio|suboc|subplanilla|adelafic|diferenciafic|venta|ventas|quiero|saber|mostrar|consultar|buscar|registros|registro|planilla|detalle|detalles|total|suma|sumado|gasto|gastos|cliente|clientes|proyecto|proyectos|site|sitio|sitios|responsable|responsables|solicitante|solicitantes|estado|estados|considerando|considera|considerar|pagado|pagada|pagados|pagadas|aprobado|aprobada|aprobados|aprobadas|pendiente|pendientes|observado|observada|observados|observadas|rechazado|rechazada|rechazados|rechazadas|separado|separada|separados|separadas|agrupado|agrupada|agrupados|agrupadas|de|del|para|por|con|en|el|la|los|las|periodo|mes|ano|año|pasame|pásame|dame|muestrame|muéstrame|indicado|indicada|moneda|monedas|enero|febrero|marzo|abril|mayo|junio|julio|agosto|setiembre|septiembre|octubre|noviembre|diciembre|realizado|realizados|realizada|realizadas|desglose|desglosado|desglosada|resumen|inicio|fin|desde|hasta|ejecuta|ejecutar|store|sp|ia|modulo|módulo|texto|busqueda|general|coincidir|todas)\b",
             " ",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
@@ -317,6 +356,7 @@ internal static class BuscarPlanillaQuestionHeuristics
                 string.Empty,
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
+            value = TrailingPeriodPhrase.Replace(value.Trim(), string.Empty);
             value = value.Trim().TrimEnd('.', ',', ';', ':');
             if (!string.IsNullOrWhiteSpace(value))
             {
@@ -355,6 +395,7 @@ internal static class BuscarPlanillaQuestionHeuristics
                 string.Empty,
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
+            value = TrailingPeriodPhrase.Replace(value.Trim(), string.Empty);
             value = SanitizePersonFilterValue(value);
             if (!string.IsNullOrWhiteSpace(value) && LooksLikePersonName(value))
             {
@@ -427,7 +468,7 @@ internal static class BuscarPlanillaQuestionHeuristics
     }
 
     private const string DimensionPattern =
-        @"(?:clientes?|proyectos?|responsables?|solicitantes?|sites?|sitios?|estados?|monedas?|bien(?:es)?|comprobantes?|tipos?\s+de\s+pago|tipos?\s+de\s+trabajo|fechas?|d[ií]as?|diari[oa]s?|mes(?:es)?|mensual(?:es)?)";
+        @"(?:clientes?|proyectos?|responsables?|solicitantes?|sites?|sitios?|estados?|monedas?|bien(?:es)?|comprobantes?|tipos?\s+de\s+pago|tipos?\s+de\s+trabajo|fechas?|d[ií]as?|diari[oa]s?|mes(?:es)?|mensual(?:es)?|coincidencias?)";
 
     private static readonly System.Text.RegularExpressions.Regex SummaryGrouping = new(
         $@"\b(?:por|seg[uú]n)\s+(?<d1>{DimensionPattern})(?:\s*(?:,|\by\b|\be\b)\s*(?:por\s+)?(?<d2>{DimensionPattern}))?(?:\s*(?:,|\by\b|\be\b)\s*(?:por\s+)?(?<d3>{DimensionPattern}))?\b",
@@ -473,6 +514,46 @@ internal static class BuscarPlanillaQuestionHeuristics
         return dimensions.Count > 0;
     }
 
+    /// <summary>
+    /// REGLA (2026-10-04): una busqueda por NOMBRE se mantiene por CUALQUIERA de sus palabras, pero el resultado se
+    /// muestra POR COINCIDENCIA (cada nombre que coincidio, con sus registros y monto por moneda) para saber el monto
+    /// exacto de cada persona. Es busqueda por nombre cuando el texto libre tiene 2 o mas palabras escritas como
+    /// nombre propio (MAYUSCULAS o Capitalizadas en la pregunta), no hay filtro de campo y no se pide el detalle.
+    /// </summary>
+    internal static bool IsNameSearch(BuscarPlanillaArgs args, string? question)
+    {
+        if (string.IsNullOrWhiteSpace(args.TextoBusqueda) || string.IsNullOrWhiteSpace(question) || DetailRequest.IsMatch(question))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(args.Cliente) || !string.IsNullOrWhiteSpace(args.Proyecto) ||
+            !string.IsNullOrWhiteSpace(args.Responsable) || !string.IsNullOrWhiteSpace(args.Solicitante) ||
+            !string.IsNullOrWhiteSpace(args.Site) || !string.IsNullOrWhiteSpace(args.IdSite) ||
+            !string.IsNullOrWhiteSpace(args.Ot))
+        {
+            return false;
+        }
+
+        var tokens = System.Text.RegularExpressions.Regex
+            .Matches(args.TextoBusqueda, @"\p{L}{3,}")
+            .Select(match => match.Value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return tokens.Count >= 2 && tokens.All(token => IsWrittenAsProperName(question, token));
+    }
+
+    private static bool IsWrittenAsProperName(string question, string token)
+    {
+        var matches = System.Text.RegularExpressions.Regex.Matches(
+            question,
+            $@"(?<!\p{{L}}){System.Text.RegularExpressions.Regex.Escape(token)}(?!\p{{L}})",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+        return matches.Any(match => char.IsUpper(match.Value[0]));
+    }
+
     private static string? MapSummaryDimension(string word)
     {
         var text = System.Text.RegularExpressions.Regex.Replace(word.Trim().ToLowerInvariant(), @"\s+", " ");
@@ -492,6 +573,7 @@ internal static class BuscarPlanillaQuestionHeuristics
             _ when text.Contains("de trabajo") => "TIPOTRABAJO",
             _ when text.StartsWith("fecha") || text.StartsWith("dia") || text.StartsWith("día") || text.StartsWith("diari") => "FECHA",
             _ when text.StartsWith("mes") || text.StartsWith("mensual") => "MES",
+            _ when text.StartsWith("coincidencia") => "COINCIDENCIA",
             _ => null
         };
     }

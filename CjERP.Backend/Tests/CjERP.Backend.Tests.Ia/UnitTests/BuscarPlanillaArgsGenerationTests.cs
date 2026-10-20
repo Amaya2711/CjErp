@@ -1,4 +1,5 @@
 using CjERP.Backend.Tests.Ia.TestSupport;
+using CjERP.Infrastructure.Services;
 using Xunit;
 
 namespace CjERP.Backend.Tests.Ia.UnitTests;
@@ -118,16 +119,32 @@ public sealed class BuscarPlanillaArgsGenerationTests
     }
 
     [Fact]
-    public void HallazgoDocumentado_FiltroPorCliente_NoRecortaTextoDeRangoDeFechaPegadoALaEtiqueta()
+    public void FiltroPorCliente_RecortaFraseDeRangoDeFechaPegadaALaEtiqueta()
     {
-        // HALLAZGO DOCUMENTADO (no es un bug a corregir en Fase 1.0): ExtractNamedFilter (IaChatService.cs:4286-4308)
-        // SI recorta frases especificas conocidas como "este mes"/"mes pasado"/"hoy"/"ayer" pegadas al
-        // final del valor capturado, pero NO recorta otras frases de fecha en lenguaje natural como
-        // "en el ultimo mes". Por eso, para esta pregunta concreta, el filtro de Cliente termina
-        // incluyendo literalmente "en el ultimo mes" como parte del nombre del cliente.
+        // Antes (hallazgo documentado de Fase 1.0) el valor incluia "en el ultimo mes". Desde 2026-10-04 el valor
+        // termina donde empieza la frase de periodo.
         var args = IaChatServiceReflection.BuildSearchArgsFromQuestion("gastos del cliente Claro en el ultimo mes");
 
-        Assert.Equal("Claro en el ultimo mes", args.Cliente);
+        Assert.Equal("Claro", args.Cliente);
+    }
+
+    [Fact]
+    public void FiltroPorCliente_NoIncluyeLaFraseDeMesYAnio()
+    {
+        var args = IaChatServiceReflection.BuildSearchArgsFromQuestion("gastos del cliente sdp para el mes de septiembre 2026");
+
+        Assert.Equal("sdp", args.Cliente);
+    }
+
+    [Fact]
+    public void ClienteYProyectoEnLaMismaPregunta_CadaUnoVaEnSuParametro()
+    {
+        var args = IaChatServiceReflection.BuildSearchArgsFromQuestion("gastos del cliente sdp proyecto Canon mes de septiembre del año 2026");
+
+        Assert.Equal("sdp", args.Cliente);
+        Assert.Equal("Canon", args.Proyecto);
+        // Ninguna palabra que es parametro (cliente, proyecto) ni el valor de un filtro se repite como texto libre.
+        Assert.True(string.IsNullOrWhiteSpace(args.TextoBusqueda), $"TextoBusqueda inesperado: '{args.TextoBusqueda}'");
     }
 
     [Fact]

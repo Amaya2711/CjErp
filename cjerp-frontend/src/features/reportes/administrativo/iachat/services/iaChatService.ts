@@ -8,9 +8,17 @@ import type {
 } from "../types";
 
 export async function consultarIaChat(request: IaChatRequest): Promise<IaChatResponse> {
-  return httpClient.post<IaChatResponse>("/ia-chat/consultar", request, {
+  const response = await httpClient.post<IaChatResponse>("/ia-chat/consultar", request, {
     timeout: 300000,
   });
+
+  // TEMPORAL (depuración): parámetros usados en dbo.sp_IA_Planilla_Buscar. Quitar tras depurar.
+  const spParameters = response?.interpretedFilters?.spParameters;
+  if (Array.isArray(spParameters) && spParameters.length > 0) {
+    console.log("[IA Chat] Parámetros enviados a sp_IA_Planilla_Buscar:\n" + spParameters.join("\n"));
+  }
+
+  return response;
 }
 
 export async function exportarDashboardIaChat(

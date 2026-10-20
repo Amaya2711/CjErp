@@ -20,6 +20,7 @@ public sealed class ResumenSqlRouteTests
     [InlineData("gastos por responsable y estado", "RESPONSABLE,ESTADO")]
     [InlineData("gastos por tipo de pago", "TIPOPAGO")]
     [InlineData("gastos por moneda y por cliente", "MONEDA,CLIENTE")]
+    [InlineData("gastos de huaman callupe por coincidencia", "COINCIDENCIA")]
     public void DetectaLasDimensionesDeAgrupacion(string pregunta, string esperadas)
     {
         Assert.True(BuscarPlanillaQuestionHeuristics.TryResolveSummaryDimensions(pregunta, out var dimensions));
@@ -37,6 +38,28 @@ public sealed class ResumenSqlRouteTests
     {
         Assert.False(BuscarPlanillaQuestionHeuristics.TryResolveSummaryDimensions(pregunta, out var dimensions));
         Assert.Empty(dimensions);
+    }
+
+    [Theory]
+    [InlineData("HUAMAN CALLUPE RONALDO DIDI", "pasame el desglose de HUAMAN CALLUPE RONALDO DIDI para el periodo indicado", true)]
+    [InlineData("Huaman Callupe", "gastos de Huaman Callupe en setiembre", true)]
+    [InlineData("combustible peaje", "gastos de combustible peaje", false)]            // palabras comunes, no un nombre
+    [InlineData("huaman callupe", "gastos de huaman callupe", false)]                  // escrito en minusculas
+    [InlineData("SDP", "gastos de SDP en setiembre", false)]                            // una sola palabra
+    [InlineData("HUAMAN CALLUPE", "detalle de gastos de HUAMAN CALLUPE", false)]       // pide el detalle
+    public void DetectaLaBusquedaPorNombre(string textoBusqueda, string pregunta, bool esperado)
+    {
+        var args = new BuscarPlanillaArgs { TextoBusqueda = textoBusqueda };
+
+        Assert.Equal(esperado, BuscarPlanillaQuestionHeuristics.IsNameSearch(args, pregunta));
+    }
+
+    [Fact]
+    public void UnaBusquedaPorNombreConFiltroDeCampo_NoEsBusquedaPorNombre()
+    {
+        var args = new BuscarPlanillaArgs { TextoBusqueda = "HUAMAN CALLUPE", Solicitante = "HUAMAN CALLUPE" };
+
+        Assert.False(BuscarPlanillaQuestionHeuristics.IsNameSearch(args, "gastos del solicitante HUAMAN CALLUPE"));
     }
 
     [Fact]

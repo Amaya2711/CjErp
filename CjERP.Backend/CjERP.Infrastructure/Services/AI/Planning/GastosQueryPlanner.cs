@@ -57,6 +57,7 @@ Reglas:
 - No conviertas un nombre de persona en responsable o solicitante solo por detectarlo. Usa responsable o solicitante unicamente si el usuario lo indica de forma explicita.
 - Si el usuario menciona nombres, clientes, proyectos, sites u otras palabras de negocio sin etiqueta explicita, mantenlos en textoBusqueda.
 - Si el usuario escribe una etiqueta explicita como "responsable X", "solicitante Y", "cliente Z", "proyecto P", "site S" u "ot N", eso ya no es ambiguo: llena ese campo y usa route buscar_planilla.
+- REGLA: si el usuario escribe "cliente X" el valor X va SOLO en buscarArgs.cliente; si escribe "proyecto Y" va SOLO en buscarArgs.proyecto (igual con site, ot, responsable, solicitante). Nunca repitas ese valor en textoBusqueda. El valor termina antes de la frase de periodo ("cliente sdp para el mes de septiembre 2026" => cliente = "sdp").
 - No respondas pidiendo confirmacion si la etiqueta del filtro ya fue escrita de forma explicita por el usuario.
 - Frases como "separado por cliente y proyecto" o "agrupado por cliente y proyecto" son instrucciones de presentacion, no filtros adicionales.
 - Si menciona cliente, proyecto, site, OT, estado o fechas, llena los campos adecuados.

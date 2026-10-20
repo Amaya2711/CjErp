@@ -137,6 +137,15 @@ public sealed class IaOrchestrator : IIaChatService
         IaChatResponseDto WithConversationId(IaChatResponseDto response)
         {
             response.ConversationId = conversationId;
+
+            // TEMPORAL (depuracion): el frontend imprime esto en la consola del navegador (F12).
+            var spLines = _gastosQueryExecutor.LastSpParameterLines;
+            if (spLines.Count > 0)
+            {
+                response.InterpretedFilters ??= new Dictionary<string, object?>();
+                response.InterpretedFilters["spParameters"] = spLines.ToList();
+            }
+
             return response;
         }
 
@@ -672,6 +681,8 @@ public sealed class IaOrchestrator : IIaChatService
         var detailRows = new List<Dictionary<string, object?>>();
         var groupedRows = new List<Dictionary<string, object?>>();
         Dictionary<string, object?>? summary = null;
+        List<Dictionary<string, object?>>? summaryTotals = null;
+        List<string>? summaryDimensionList = null;
         IaChatChartResponseDto? chart = null;
         var responseType = "conversation";
         var answer = string.Empty;
@@ -711,6 +722,8 @@ public sealed class IaOrchestrator : IIaChatService
                     ? ParseBuscarPlanillaArgs(plannerDecision.BuscarArgs)
                     : BuildSearchArgsFromQuestion(question);
 
+                // Regla: los filtros de la conversacion se suman (cliente, fechas, estado, etc. de la consulta anterior).
+                args = InheritPreviousFilters(question, conversationState, args);
                 args = ApplyExplicitStructuredFilters(question, args);
 
                 args.TamanoPagina = MaxPageSize;
@@ -720,9 +733,27 @@ public sealed class IaOrchestrator : IIaChatService
                 // (sp_IA_Planilla_Buscar en modo RESUMEN, mismo filtrado y alcance que el detalle) y no se traen miles
                 // de filas al backend. Las preguntas que dependen de metricas globales (ventas, saldos...) o piden el
                 // detalle siguen por la ruta de detalle.
-                if (scope is not null
-                    && TryResolveSummaryDimensions(question, out var summaryDimensions)
-                    && !IaGlobalColumns.MentionsGlobalMetric(question))
+                List<string>? summaryDimensions = null;
+                if (scope is not null && !IaGlobalColumns.MentionsGlobalMetric(question))
+                {
+                    if (TryResolveSummaryDimensions(question, out var requestedDimensions))
+                    {
+                        summaryDimensions = requestedDimensions;
+                    }
+                    else if (IsNameSearch(args, question))
+                    {
+                        // Regla: busqueda por nombre (cualquier palabra) => resultado POR COINCIDENCIA.
+                        summaryDimensions = ["COINCIDENCIA"];
+                    }
+
+                    // COINCIDENCIA solo tiene sentido con texto de busqueda (el store lo exige).
+                    if (summaryDimensions is not null && summaryDimensions.Contains("COINCIDENCIA") && string.IsNullOrWhiteSpace(args.TextoBusqueda))
+                    {
+                        summaryDimensions = null;
+                    }
+                }
+
+                if (summaryDimensions is not null)
                 {
                     lastToolName = ToolBuscarPlanilla;
                     lastToolInput = args.AsDictionary();
@@ -735,6 +766,8 @@ public sealed class IaOrchestrator : IIaChatService
                     totalRows = resumen.TotalRows;
                     detailRows = [];
                     groupedRows = resumen.Groups;
+                    summaryTotals = resumen.TotalsByCurrency;
+                    summaryDimensionList = summaryDimensions.ToList();
                     summary = new Dictionary<string, object?>
                     {
                         ["cantidadRegistros"] = resumen.TotalRows,
@@ -878,6 +911,8 @@ public sealed class IaOrchestrator : IIaChatService
                 Summary = summary,
                 Chart = chart,
                 TotalRows = totalRows,
+                TotalsByCurrency = summaryTotals,
+                SummaryDimensions = summaryDimensionList,
                 UnavailableFields = unavailableFields.Count > 0 ? unavailableFields.ToList() : null
             }, lastToolName, lastToolInput);
             await _auditService.RegistrarAsync(
@@ -909,6 +944,8 @@ public sealed class IaOrchestrator : IIaChatService
                 Summary = summary,
                 Chart = chart,
                 TotalRows = totalRows,
+                TotalsByCurrency = summaryTotals,
+                SummaryDimensions = summaryDimensionList,
                 UnavailableFields = unavailableFields.Count > 0 ? unavailableFields.ToList() : null
             });
         }
@@ -1090,12 +1127,23 @@ public sealed class IaOrchestrator : IIaChatService
             ? IaGlobalColumns.Names
             : lastResponse.UnavailableFields;
 
-        var reportPayload = IaExecutiveReportBuilder.Build(
-            exportRows,
-            lastResponse.TotalRows,
-            question,
-            lastResponse.Answer,
-            exportUnavailable);
+        // Resumen calculado en SQL: sus filas son GRUPOS (no registros), con totales por moneda aparte; Build() no
+        // las entiende (esperaria Subtotal/Estado/Fecha por registro) y el informe saldria vacio o en cero.
+        var reportPayload = lastResponse.TotalsByCurrency is { Count: > 0 }
+            ? IaExecutiveReportBuilder.BuildFromSqlSummary(
+                exportRows,
+                lastResponse.TotalsByCurrency,
+                lastResponse.SummaryDimensions,
+                lastResponse.TotalRows,
+                question,
+                lastResponse.Answer,
+                access.State!.LastToolParameters)
+            : IaExecutiveReportBuilder.Build(
+                exportRows,
+                lastResponse.TotalRows,
+                question,
+                lastResponse.Answer,
+                exportUnavailable);
 
         var structuredDataJson = JsonSerializer.Serialize(reportPayload, IaChatSharedDefaults.JsonOptions);
 

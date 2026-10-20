@@ -35,6 +35,13 @@ public class AsistenciaValidarCampoService : IAsistenciaValidarCampoService
         int? idResponsable = null)
     {
         await using var connection = BuildConnection();
+
+        // Sin empleados asignados como responsable => ve todos los pendientes (como ADMIN).
+        if (idResponsable is > 0 && !await TieneEmpleadosAsignadosAsync(connection, idResponsable.Value, cancellationToken))
+        {
+            idResponsable = null;
+        }
+
         var rows = (await connection.QueryAsync(
                 CreateCommand(
                     ListarSp,
@@ -56,6 +63,21 @@ public class AsistenciaValidarCampoService : IAsistenciaValidarCampoService
             Columns = columns,
             Rows = filtered
         };
+    }
+
+    private async Task<bool> TieneEmpleadosAsignadosAsync(
+        SqlConnection connection,
+        int idResponsable,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+        SELECT CASE WHEN EXISTS (
+            SELECT 1 FROM dbo.EmpleadoCjDetalle WHERE IdResponsableCj = @IdResponsable
+        ) THEN 1 ELSE 0 END;
+        """;
+
+        return await connection.ExecuteScalarAsync<int>(
+            CreateCommand(sql, new { IdResponsable = idResponsable }, cancellationToken: cancellationToken)) == 1;
     }
 
     public async Task<Dictionary<string, object?>?> ObtenerPorClaveAsync(

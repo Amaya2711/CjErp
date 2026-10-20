@@ -33,7 +33,7 @@ import type {
 import { getHttpErrorMessage } from "../../../utils/httpError";
 import { getAuthUser, hasFullPageActionAccess } from "../../../utils/authStorage";
 import { type OrdenCompraConsumoDto } from "../../../api/ordenCompraService";
-import { listarPagosTesoreriaV1, obtenerCatalogosPago } from "../../../api/pagoTesoreriaService";
+import { obtenerCatalogosPago } from "../../../api/pagoTesoreriaService";
 import { listarSolicitanteOptions } from "../../../api/solicitanteService";
 import {
   seguridadPermisosAccionesService,
@@ -103,6 +103,9 @@ type PagoRow = {
   consumoOcPercent?: number;
   // Subtotal del recibo convertido a soles con el TC de la pantalla (columna aparte; Subtotal sigue en su moneda real).
   subtotalSoles?: number;
+  // Ids del recibo: Total Órdenes filtra por responsable/solicitante en el cliente (el store no los recibe).
+  idResponsable?: number;
+  idSolicitante?: number;
   // Monedas (TipoMoneda) de los pagos de la OT y de Importar, y totales de Importar en soles (% Ficticio).
   monedasPagadoOt?: string;
   monedasImportarOt?: string;
@@ -120,6 +123,9 @@ type TabTheme = {
   border: string;
   icon: React.ReactNode;
 };
+
+// Tarea VIATICO (Constante TAREA, IdTarea 93): su celda se resalta en verde en la grilla de pagos.
+const ID_TAREA_VIATICO = 93;
 
 const COLORES_ESTADO_OC: Record<string, string> = {
   R: "#D32F2F",
@@ -669,6 +675,16 @@ function calcularConsumoOcPorcentaje(row: Record<string, unknown>, estadoCodigo:
   return getConsumptionPercent(totalOc, totalOc - (solicitado + pagadoOc));
 }
 
+function esTareaViatico(row: PagoRow): boolean {
+  const idTarea = getRecordNumber(row.planillaRow ?? {}, "IdTarea", "idTarea");
+  if (idTarea != null) {
+    return Math.trunc(idTarea) === ID_TAREA_VIATICO;
+  }
+
+  // Sin IdTarea en la fila se compara por el nombre de la tarea.
+  return normalizeText(row.tarea ?? "") === "viatico";
+}
+
 // Suma responsable (SumaEmp del legado) por moneda para la columna "Suma resp." de la grilla.
 type SumaRespTotales = { soles: number; usd: number; eur: number; dop: number; cop: number; cant: number };
 
@@ -831,6 +847,8 @@ function mapPlanillaConsultaRowToPagoRow(
     estadoOcSemaforo: getRecordString(row, "EstadoOcSemaforo", "estadoOcSemaforo", "EstadoOCSemaforo"),
     consumoOcPercent: calcularConsumoOcPorcentaje(row, estadoCodigo),
     subtotalSoles: getRecordNumber(row, "SubtotalSoles", "subtotalSoles") ?? undefined,
+    idResponsable: getRecordNumber(row, "IdResponsable", "idResponsable") ?? undefined,
+    idSolicitante: getRecordNumber(row, "IdSolicitante", "idSolicitante") ?? undefined,
     monedasPagadoOt: getRecordString(row, "MonedasPagadoOt", "monedasPagadoOt"),
     monedasImportarOt: getRecordString(row, "MonedasImportarOt", "monedasImportarOt"),
     totalMontoBckSoles: getRecordNumber(row, "TotalMontoBckSoles", "totalMontoBckSoles") ?? undefined,
@@ -1455,6 +1473,8 @@ export default function PagosV2Page() {
       // Observadas cuentan únicamente por el código de su estado.
       const parametrosFechas: PlanillaConsultaParametro[] = [];
       const parametros: PlanillaConsultaParametro[] = [];
+      // Estas consultas solo cuentan filas (maxRows 1): ModoLiviano evita calcular totales por banco/OT/Importar/OC.
+      const soloConteo: PlanillaConsultaParametro = { nombre: "ModoLiviano", valor: "true", tipo: "bool" };
       const fechaInicio = formatDateParam(appliedFilters.fechaDesde);
       const fechaFin = formatDateParam(appliedFilters.fechaHasta);
       if (fechaInicio) parametrosFechas.push({ nombre: "FechaInicio", valor: fechaInicio, tipo: "date" });
@@ -1473,6 +1493,7 @@ export default function PagosV2Page() {
               {
                 ...buildPagosV1PlanillaRequest([
                   ...(tab === "aprobar" ? parametrosFechas : parametros),
+                  soloConteo,
                   { nombre: "Estados", valor: estado, tipo: "string" },
                 ]),
                 // Solo se requiere TotalRows; evita transferir la grilla completa.
@@ -1516,7 +1537,7 @@ export default function PagosV2Page() {
           try {
             const respuesta7 = await consultarPlanillaEstados(
               {
-                ...buildPagosV1PlanillaRequest([...parametros, { nombre: "Estados", valor: "7", tipo: "string" }]),
+                ...buildPagosV1PlanillaRequest([...parametros, soloConteo, { nombre: "Estados", valor: "7", tipo: "string" }]),
                 maxRows: 1,
               },
               { timeoutMs: 120000, signal: controller.signal },
@@ -1534,7 +1555,7 @@ export default function PagosV2Page() {
           try {
             const respuestaAprobar = await consultarPlanillaEstados(
               {
-                ...buildPagosV1PlanillaRequest([...parametrosFechas, { nombre: "Estados", valor: "0", tipo: "string" }]),
+                ...buildPagosV1PlanillaRequest([...parametrosFechas, soloConteo, { nombre: "Estados", valor: "0", tipo: "string" }]),
                 maxRows: 1,
               },
               { timeoutMs: 120000, signal: controller.signal },
@@ -1691,31 +1712,9 @@ export default function PagosV2Page() {
         setLoadingStage("Enviando consulta a la API...");
         let rows: Record<string, unknown>[] = [];
 
-        if (activeTab === "resumen" && !quickIdOcOnly) {
-          // Total Órdenes consulta por los identificadores de sus filtros de
-          // cabecera. No descarga primero todos los recibos para filtrarlos en el navegador.
-          const idEstado = Number(appliedFilters.estado[0] ?? 0);
-          const idResponsable = Number(appliedFilters.responsable[0] ?? 0);
-          const idSolicitante = Number(appliedFilters.solicitante[0] ?? 0);
-          const consultaResumen = await runTrackedRequest(
-            "Consulta de Total Órdenes por filtros de cabecera",
-            () =>
-              listarPagosTesoreriaV1(
-                100,
-                buscarPorCorrelativo ? "" : fechaInicio,
-                buscarPorCorrelativo ? "" : fechaFin,
-                signal,
-                buscarPorCorrelativo ? correlativoNumero : undefined,
-                Number.isInteger(idEstado) && idEstado > 0 ? idEstado : undefined,
-                {
-                  idResponsable: Number.isInteger(idResponsable) && idResponsable > 0 ? idResponsable : undefined,
-                  idSolicitante: Number.isInteger(idSolicitante) && idSolicitante > 0 ? idSolicitante : undefined,
-                }
-              ),
-            signal
-          );
-          rows = (Array.isArray(consultaResumen) ? consultaResumen : []) as unknown as Record<string, unknown>[];
-        } else {
+        {
+          // Todas las pestañas (incluida Total Órdenes) consultan el mismo store
+          // sp_Planilla_Consulta_Estados: montos en la moneda real del recibo.
           const requestBuildStart = performance.now();
           const request = buildPagosV1PlanillaRequest(parametros);
           pushLoadTrace(`Armado de request: ${(performance.now() - requestBuildStart).toFixed(0)} ms`);
@@ -1890,8 +1889,13 @@ export default function PagosV2Page() {
         matchesTextFilter(row.site, appliedFilters.site) &&
         matchesTextFilter(row.tipoTrabajo, appliedFilters.tipoTrabajo) &&
         matchesTextFilter(row.tarea, appliedFilters.tarea) &&
-        (filtrosResumenAplicadosEnServidor || matchesContainsFilter(row.solicitante, appliedFilters.solicitante)) &&
-        (filtrosResumenAplicadosEnServidor || matchesContainsFilter(row.responsable, appliedFilters.responsable)) &&
+        // Total Órdenes: solicitante/responsable llegan como ids del catálogo; el store no los filtra.
+        (!filtrosResumenAplicadosEnServidor
+          ? matchesContainsFilter(row.solicitante, appliedFilters.solicitante)
+          : appliedFilters.solicitante.length === 0 || appliedFilters.solicitante.includes(String(row.idSolicitante ?? ""))) &&
+        (!filtrosResumenAplicadosEnServidor
+          ? matchesContainsFilter(row.responsable, appliedFilters.responsable)
+          : appliedFilters.responsable.length === 0 || appliedFilters.responsable.includes(String(row.idResponsable ?? ""))) &&
         matchesMultiTextFilter(row.validador, appliedFilters.validador) &&
         matchesMultiTextFilter(row.moneda, appliedFilters.moneda) &&
         // Cada bandeja ya se consulta con su estado operativo. El filtro Estado
@@ -3630,6 +3634,25 @@ export default function PagosV2Page() {
       : `En ${row.moneda || simbolo}`;
     return { mixto, simbolo, sub, visible, bck, nota };
   };
+  // Total Sitio / Total Visible vienen de Importar: solo se indica conversión si Importar tiene montos en
+  // una moneda distinta de soles y la OT mezcla monedas; si están en soles se dice "En SOLES".
+  const getNotaImportar = (row: PagoRow, info: ReturnType<typeof getFicticioInfo>) => {
+    if (!info.mixto) {
+      return `En ${row.moneda || info.simbolo}`;
+    }
+
+    const foraneas = String(row.monedasImportarOt ?? "")
+      .split(",")
+      .map((parte) => Number(parte.trim()))
+      .filter((id, indice, lista) => Number.isInteger(id) && id > 1 && lista.indexOf(id) === indice)
+      .sort((a, b) => a - b);
+
+    if (foraneas.length === 0) {
+      return "En SOLES";
+    }
+
+    return `Convertido a S/ · TC ${foraneas.map((id) => `${SIMBOLOS_MONEDA[id] ?? id} ${getTcMoneda(id)}`).join(" · ")}`;
+  };
   const formatMontoFicticio = (valor: number, simbolo: string) =>
     `${simbolo} ${valor.toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const celdaConNota = (texto: string, nota: string) => (
@@ -3676,7 +3699,17 @@ export default function PagosV2Page() {
     { dataField: "proyecto", caption: "Proyecto", width: 130 },
     { dataField: "site", caption: "Site", width: 170 },
     { dataField: "tipoTrabajo", caption: "Tipo trabajo", width: 120 },
-    { dataField: "tarea", caption: "Tarea", width: 130, calculateCellValue: (row) => row.tarea || "-" },
+    {
+      dataField: "tarea",
+      caption: "Tarea",
+      width: 130,
+      calculateCellValue: (row) => row.tarea || "-",
+      // Tarea VIATICO (IdTarea 93): fondo verde para que resalte, en todas las pestañas.
+      cellStyle: (_v, row) =>
+        esTareaViatico(row)
+          ? { background: "#16A34A", color: "#FFFFFF", fontWeight: 800 }
+          : undefined,
+    },
     { dataField: "responsable", caption: "Responsable", width: 280 },
     {
       dataField: "sumaResponsable",
@@ -3809,7 +3842,7 @@ export default function PagosV2Page() {
       calculateCellValue: (row) => getFicticioInfo(row).bck,
       cellRender: (value, row) => {
         const info = getFicticioInfo(row);
-        return celdaConNota(formatMontoFicticio(Number(value), info.simbolo), info.nota);
+        return celdaConNota(formatMontoFicticio(Number(value), info.simbolo), getNotaImportar(row, info));
       },
     },
     {
@@ -3821,7 +3854,7 @@ export default function PagosV2Page() {
       calculateCellValue: (row) => getFicticioInfo(row).visible,
       cellRender: (value, row) => {
         const info = getFicticioInfo(row);
-        return celdaConNota(formatMontoFicticio(Number(value), info.simbolo), info.nota);
+        return celdaConNota(formatMontoFicticio(Number(value), info.simbolo), getNotaImportar(row, info));
       },
     },
     {

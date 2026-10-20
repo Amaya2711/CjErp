@@ -16,6 +16,9 @@ using static CjERP.Infrastructure.Services.IaChatSharedDefaults;
 
 public interface IGastosQueryExecutor
 {
+    /// <summary>TEMPORAL (depuracion): parametros exactos enviados a dbo.sp_IA_Planilla_Buscar en la solicitud actual.</summary>
+    IReadOnlyList<string> LastSpParameterLines => Array.Empty<string>();
+
     Task<PlanillaBuscarExecutionResult> EjecutarBuscarPlanillaAsync(
         BuscarPlanillaArgs args,
         CancellationToken cancellationToken,
@@ -97,6 +100,7 @@ public sealed class GastosQueryExecutor : IGastosQueryExecutor
         await using var connection = _sqlCommandFactory.CreateConnection();
 
         var parameters = BuildResumenParameters(args, dimensions, top, scope);
+        DebugWriteSpParameters("RESUMEN", parameters); // TEMPORAL: quitar tras depurar
         _logger.LogInformation(
             "IA Chat ejecutando {StoredProcedure} en modo RESUMEN agrupando por {Dimensiones}",
             StoredProcedureBuscar,
@@ -225,6 +229,7 @@ public sealed class GastosQueryExecutor : IGastosQueryExecutor
         await using var connection = _sqlCommandFactory.CreateConnection();
 
         var parameters = BuildParameters(args, scope);
+        DebugWriteSpParameters("DETALLE", parameters); // TEMPORAL: quitar tras depurar
         _logger.LogInformation(
             "IA Chat ejecutando {StoredProcedure} con parametros: {Parametros}",
             StoredProcedureBuscar,
@@ -249,6 +254,30 @@ public sealed class GastosQueryExecutor : IGastosQueryExecutor
 
         return rows;
     }
+
+    // TEMPORAL: imprime en consola los parametros EXACTOS enviados a dbo.sp_IA_Planilla_Buscar (incluye alcance). Quitar tras depurar.
+    private readonly List<string> _lastSpParameterLines = new();
+
+    public IReadOnlyList<string> LastSpParameterLines => _lastSpParameterLines;
+
+    private void DebugWriteSpParameters(string modo, DynamicParameters parameters)
+    {
+        var parts = parameters.ParameterNames
+            .Select(name => $"@{name} = {FormatDebugValue(parameters.Get<object?>(name))}");
+        var line = $"[{modo}] " + string.Join(", ", parts);
+        Console.WriteLine($"[IA-SP {StoredProcedureBuscar}] {line}");
+
+        // Con paginacion se ejecuta varias veces con los mismos filtros: se conserva solo la ultima.
+        _lastSpParameterLines.Clear();
+        _lastSpParameterLines.Add(line);
+    }
+
+    private static string FormatDebugValue(object? value) => value switch
+    {
+        null => "NULL",
+        string s => $"'{s}'",
+        _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? "NULL"
+    };
 
     /// <summary>
     /// Parametros del SP. Con alcance, agrega los 4 parametros de alcance; sin alcance (ruta heredada)

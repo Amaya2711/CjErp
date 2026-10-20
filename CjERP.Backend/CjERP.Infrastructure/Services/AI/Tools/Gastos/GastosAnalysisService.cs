@@ -238,6 +238,9 @@ public static class GastosAnalysisService
                 analysisRule = analysisRuleSummary,
                 unavailableFieldsRule = hasUnavailableFields ? IaGlobalColumns.AnalysisRule : null,
                 analysisMode = compareVentasAndGastos ? "comparison_ventas_vs_gastos" : "single_metric",
+                searchMatchMode = string.IsNullOrWhiteSpace(args.TextoBusqueda)
+                    ? null
+                    : args.CoincidirTodas ? "todos_los_terminos" : "cualquier_termino",
                 multipleCurrencies = hasMultipleCurrencies
             },
             totalRows,
@@ -294,6 +297,9 @@ public static class GastosAnalysisService
                 defaultState = args.EstadosAplicadosPorDefecto ? args.Estados : null,
                 defaultPeriodApplied = args.FechasAplicadasPorDefecto,
                 analysisMode = "sql_summary",
+                searchMatchMode = string.IsNullOrWhiteSpace(args.TextoBusqueda)
+                    ? null
+                    : args.CoincidirTodas ? "todos_los_terminos" : "cualquier_termino",
                 multipleCurrencies = hasMultipleCurrencies
             },
             summaryMode = new

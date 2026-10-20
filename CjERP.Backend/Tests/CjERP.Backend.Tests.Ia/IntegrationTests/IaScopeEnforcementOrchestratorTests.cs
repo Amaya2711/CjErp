@@ -242,7 +242,30 @@ public sealed class IaScopeEnforcementOrchestratorTests
         Assert.Equal("summary", response.ResponseType);
         Assert.Equal(4, response.TotalRows);
         Assert.Equal(2, response.DetailRows!.Count);          // los grupos
+        Assert.Equal(2, response.TotalsByCurrency!.Count);    // totales por moneda para el cuadro ejecutivo
+        Assert.Equal(["CLIENTE", "MONEDA"], response.SummaryDimensions);
         Assert.Contains("sql_summary", handler.RequestBodies[1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Activado_BusquedaPorNombre_SeMuestraPorCoincidencia()
+    {
+        var scope = Restricted(globals: true, 7);
+        var auth = new FakeAuth { Next = () => IaAuthorizationResult.Allow(scope) };
+        var handler = new FakeHttpMessageHandler()
+            .EnqueueJson(PlannerEnvelope("buscar_planilla"))
+            .EnqueueJson(TextEnvelope("Coincidencias por nombre."));
+        var executor = new SpyExecutor();
+        var h = Build(auth, enabled: true, handler, executor);
+
+        var response = await Ask(h, "pasame el desglose de HUAMAN CALLUPE RONALDO DIDI para el periodo indicado");
+
+        Assert.True(response.Success);
+        Assert.Equal(1, executor.SummaryCalls);
+        Assert.Equal(0, executor.ScopedCalls);                      // no se carga el detalle
+        Assert.Equal(["COINCIDENCIA"], executor.LastDimensions);
+        Assert.Equal(["COINCIDENCIA"], response.SummaryDimensions);
+        Assert.Equal("summary", response.ResponseType);
     }
 
     [Fact]

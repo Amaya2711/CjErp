@@ -25,11 +25,15 @@ const PendientesPage = lazy(() => import("../../features/administracion/pendient
 const SolicitudAdministracionPage = lazy(() => import("../../features/administracion/solicitudadministracion"));
 const VacacionesPage = lazy(() => import("../../features/recursoshumanos/vacacionespage"));
 const BeneficioPage = lazy(() => import("../../features/recursoshumanos/beneficio"));
+const DescansoMedicoPage = lazy(() => import("../../features/recursoshumanos/descansomedico"));
 const AlmacenPage = lazy(() => import("../../features/logistica/almacen/almacen"));
 const InventarioPage = lazy(() => import("../../features/logistica/almacen/inventario"));
 const CrucePage = lazy(() => import("../../features/logistica/gestionequipos/cruce"));
 const DesmontadoPage = lazy(() => import("../../features/logistica/gestionequipos/desmontado"));
 const RecojoPage = lazy(() => import("../../features/logistica/gestionequipos/recojo"));
+const IngresoEquipoPage = lazy(() => import("../../features/logistica/gestionequipos/ingresoequipo"));
+const CampoEquipoPage = lazy(() => import("../../features/logistica/gestionequipos/campoequipo"));
+const ReporteResponsablePage = lazy(() => import("../../features/reportes/gerencial/responsable"));
 const SolicitudEquipoPage = lazy(() => import("../../features/logistica/gestionequipos/solicitudequipo"));
 const TesoreriaDepositoPage = lazy(() => import("../../features/finanzas/tesoreria/deposito"));
 const TesoreriaChequesPage = lazy(() => import("../../features/finanzas/tesoreria/cheques"));
@@ -97,7 +101,6 @@ const DashboardCjPage = lazy(() => import("../../features/reportes/gerencial/das
 const Dashboard1Page = lazy(() => import("../../features/reportes/gerencial/dashboard1"));
 const Dashboard3Page = lazy(() => import("../../features/reportes/gerencial/dashboard3"));
 const BacklogPage = lazy(() => import("../../features/reportes/gerencial/backlog"));
-const ReporteResponsablePage = lazy(() => import("../../features/reportes/gerencial/responsable"));
 const IngresosEgresosPage = lazy(() => import("../../features/reportes/gerencial/ingresosegresos"));
 const AnalisisPage = lazy(() => import("../../features/reportes/gerencial/analisis"));
 const AnalisisProyectoPage = lazy(() => import("../../features/reportes/gerencial/analisisproyecto"));
@@ -157,6 +160,7 @@ export default function AppRouter() {
             <Route path="/administracion/vacaciones" element={<VacacionesPage />} />
             <Route path="/recursoshumanos/vacacionespage" element={<VacacionesPage />} />
             <Route path="/recursoshumanos/beneficio" element={<BeneficioPage />} />
+            <Route path="/recursoshumanos/descansomedico" element={<DescansoMedicoPage />} />
 
             <Route path="/operaciones/capitalizacion" element={<CapitalizacionPage />} />
             <Route path="/operaciones/operacion" element={<OperacionPage />} />
@@ -282,6 +286,14 @@ export default function AppRouter() {
             <Route
               path="/logistica/gestionequipos/solicitudequipo"
               element={<SolicitudEquipoPage />}
+            />
+            <Route
+              path="/logistica/gestionequipos/ingresoequipo"
+              element={<IngresoEquipoPage />}
+            />
+            <Route
+              path="/logistica/gestionequipos/campoequipo"
+              element={<CampoEquipoPage />}
             />
             <Route
               path="/logistica/gestionequipos/recojo"

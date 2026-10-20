@@ -13,6 +13,7 @@ import {
   RefreshCw,
   ShieldAlert,
   TimerReset,
+  Users,
   Zap,
 } from "lucide-react";
 import AppCard from "../../../components/base/AppCard";
@@ -32,6 +33,7 @@ import {
   type SqlMonitorResumen,
   type SqlMonitorSesionActiva,
   type SqlMonitorTopSql,
+  type SqlMonitorUsuariosActivos,
 } from "../../../api/sqlMonitorService";
 
 type TabKey = "dashboard" | "queries" | "top-sql" | "bloqueos" | "network" | "alertas" | "overhead";
@@ -223,6 +225,23 @@ export default function SqlMonitorPage() {
   const [sessionSortKey, setSessionSortKey] = useState<keyof SqlMonitorSesionActiva>("sessionId");
   const [sessionSortDirection, setSessionSortDirection] = useState<"asc" | "desc">("asc");
   const [cancelingSessionId, setCancelingSessionId] = useState<number | null>(null);
+  const [usersVisible, setUsersVisible] = useState(false);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState<string | null>(null);
+  const [usersData, setUsersData] = useState<SqlMonitorUsuariosActivos | null>(null);
+
+  const openActiveUsers = useCallback(async () => {
+    setUsersVisible(true);
+    setUsersLoading(true);
+    setUsersError(null);
+    try {
+      setUsersData(await sqlMonitorService.obtenerUsuariosActivos(10));
+    } catch (err) {
+      setUsersError(getHttpErrorMessage(err, "No se pudo obtener los usuarios activos."));
+    } finally {
+      setUsersLoading(false);
+    }
+  }, []);
 
   const selectedQueryId = Number(params.id ?? 0);
 
@@ -994,6 +1013,10 @@ export default function SqlMonitorPage() {
                 {tab.label}
               </button>
             ))}
+            <button style={styles.iconButton} onClick={() => void openActiveUsers()}>
+              <Users size={16} />
+              Usuarios activos
+            </button>
             <button style={styles.iconButton} onClick={() => void loadCurrentTab()}>
               <RefreshCw size={16} />
               Refrescar
@@ -1085,6 +1108,69 @@ export default function SqlMonitorPage() {
                   </AppCard>
                 </>
               ) : null}
+            </div>
+          </div>
+        )}
+
+        {usersVisible && (
+          <div style={styles.modalBackdrop} onClick={() => setUsersVisible(false)}>
+            <div style={styles.modal} onClick={(event) => event.stopPropagation()}>
+              <div style={styles.modalHeader}>
+                <div>
+                  <div style={styles.eyebrow}>Uso del sistema</div>
+                  <h2 style={styles.modalTitle}>Usuarios activos en el ERP</h2>
+                </div>
+                <div style={styles.modalActions}>
+                  <button style={styles.smallButton} onClick={() => void openActiveUsers()} disabled={usersLoading}>
+                    <RefreshCw size={14} />
+                    Actualizar
+                  </button>
+                  <button style={styles.smallButton} onClick={() => setUsersVisible(false)}>
+                    Cerrar
+                  </button>
+                </div>
+              </div>
+
+              {usersError ? (
+                <AppStatusMessage tone="error">{usersError}</AppStatusMessage>
+              ) : usersLoading || !usersData ? (
+                <AppStatusMessage tone="info">Consultando usuarios activos...</AppStatusMessage>
+              ) : usersData.total === 0 ? (
+                <AppStatusMessage tone="success">
+                  Nadie con actividad en los últimos {usersData.ventanaMinutos} min: es buen momento para subir el cambio.
+                </AppStatusMessage>
+              ) : (
+                <>
+                  <AppStatusMessage tone="error" style={{ marginBottom: 12 }}>
+                    {usersData.total} usuario(s) con actividad en los últimos {usersData.ventanaMinutos} min. Subir el
+                    cambio reinicia el servidor y puede interrumpirlos.
+                  </AppStatusMessage>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ textAlign: "left", borderBottom: "1px solid #CBD5E1" }}>
+                        <th style={{ padding: "6px 8px" }}>Usuario</th>
+                        <th style={{ padding: "6px 8px" }}>Sesiones</th>
+                        <th style={{ padding: "6px 8px" }}>Última actividad</th>
+                        <th style={{ padding: "6px 8px" }}>Hace</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {usersData.usuarios.map((u) => (
+                        <tr key={u.idUsuario} style={{ borderBottom: "1px solid #E2E8F0" }}>
+                          <td style={{ padding: "6px 8px", fontWeight: 700 }}>{u.idUsuario}</td>
+                          <td style={{ padding: "6px 8px" }}>{u.sesiones}</td>
+                          <td style={{ padding: "6px 8px" }}>{formatDateTime(u.ultimaActividadUtc)}</td>
+                          <td style={{ padding: "6px 8px" }}>{u.minutosInactivo} min</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
+              <div style={{ ...styles.subtitle, marginTop: 12 }}>
+                Se toma de las sesiones en memoria del servidor (la web cierra sesión a los 10 min sin uso). Si el
+                servidor se reinició hace poco, la lista parte vacía.
+              </div>
             </div>
           </div>
         )}

@@ -75,6 +75,12 @@ Seguridad · Tesorería/Finanzas (recibos, pagos, cheques, conciliación) · Ord
 - Tablas: Planilla, Constante, CuentaEmpleado, Empleado/EmpleadoCj
 - Procesos: registro → aprobación (1ª/2ª, observar, rechazar) → tesorería
 
+### Viáticos (copia de gastos filtrada por tarea)
+- FE: `features/finanzas/tesoreria/viaticos.tsx` (copia de `gastos.tsx`; ruta `/finanzas/tesoreria/viaticos`, ítem `SegMenu` PV) + `ViaticosResumen.tsx` (pestaña **Resumen**); mismos servicios, endpoints y tabla `Planilla` que gastos (no hay backend propio)
+- Solo tarea VIATICO: constante `ID_TAREA_VIATICO = 93`; todas las consultas envían `IdTarea=93` a `sp_Planilla_Consulta_Estados` (param. `@IdTarea`, script de referencia `Database/Planilla/07_...idtarea.sql`); en "Nuevo viático" la Tarea es una lista con solo VIATICO, preseleccionada
+- Resumen: filtros Cliente-Proyecto-Site (`FiltroOperativoLookup`), Solicitante y Responsable (multiselección con autollenado; sin filtros listan todo el catálogo, con filtros solo lo existente en los datos), rango de fechas y moneda; KPIs, gráficos (mensual, estado, Top solicitantes/responsables/clientes/proyectos/sites/tipo de trabajo, diario) y cuadros por responsable y solicitante con suma por moneda. Montos siempre en la moneda real del recibo (sin convertir); pagados (estado 4) se ubican por fecha de depósito
+- Etiquetas visibles dicen "viático(s)" en lugar de "gasto(s)"
+
 ### Pago de tesorería
 - FE: `features/finanzas/tesoreria/pagartesoreria.tsx` (+`PagoEtapaForm.tsx`, `PagoRevisionCells.tsx`), `pagartesoreria_v1.tsx`, `pagartesoreria_v2.tsx` (copia de v1 con `DataGridPro`; edición de Revisión en `usePagoRevisionEditor.tsx`); API `api/pagoTesoreriaService.ts`
 - BE: C/PagoTesoreriaController → S/PagoTesoreriaService, PagoTesoreriaWorkflow (`EstadoDestino`), PagoTesoreriaRevision

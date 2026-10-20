@@ -279,6 +279,65 @@ public static class IaConversationFollowUpResolver
         return true;
     }
 
+    // Frases con las que el usuario pide expresamente NO arrastrar los filtros de la consulta anterior.
+    private static readonly System.Text.RegularExpressions.Regex ResetFiltersPhrase = new(
+        @"\b(nueva\s+consulta|desde\s+cero|emp(?:ie|e)z\w*\s+de\s+nuevo|sin\s+(los\s+)?filtros|ignora\w*\s+(los\s+)?filtros|olvida\w*\s+(los\s+)?filtros|quita\w*\s+(los\s+)?filtros|limpi\w*\s+(los\s+)?filtros|todos\s+los\s+(clientes|proyectos|sites|sitios))\b",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// REGLA (2026-10-04): los filtros de la conversacion se SUMAN. Una pregunta de seguimiento hereda de la ultima
+    /// consulta (state.LastToolParameters) todo filtro que la pregunta nueva no especifique (fechas, estados, cliente,
+    /// proyecto, site, ot, responsable, solicitante, texto). Un valor escrito en la pregunta nueva reemplaza al anterior.
+    /// No hereda si la conversacion se limpio (no hay estado previo) o si la pregunta pide empezar de nuevo.
+    /// Debe llamarse justo despues de armar los args desde el planner, ANTES de ApplyExplicitStructuredFilters
+    /// (los indicadores *AplicadosPorDefecto solo son fiables tras la primera Normalize).
+    /// </summary>
+    public static BuscarPlanillaArgs InheritPreviousFilters(string question, ConversationState state, BuscarPlanillaArgs args)
+    {
+        if (!string.Equals(state.LastToolName, ToolBuscarPlanilla, StringComparison.OrdinalIgnoreCase) ||
+            ResetFiltersPhrase.IsMatch(question))
+        {
+            return args;
+        }
+
+        var previous = BuildArgsFromToolParameters(state.LastToolParameters);
+        if (previous is null)
+        {
+            return args;
+        }
+
+        if (args.FechasAplicadasPorDefecto)
+        {
+            args.FechaInicio = previous.FechaInicio;
+            args.FechaFin = previous.FechaFin;
+        }
+
+        if (args.EstadosAplicadosPorDefecto)
+        {
+            args.TodosLosEstados = previous.TodosLosEstados;
+            args.Estados = previous.TodosLosEstados ? null : previous.Estados;
+        }
+
+        args.TextoBusqueda = FirstNonEmpty(args.TextoBusqueda, previous.TextoBusqueda);
+        args.Cliente = FirstNonEmpty(args.Cliente, previous.Cliente);
+        args.Proyecto = FirstNonEmpty(args.Proyecto, previous.Proyecto);
+        args.Responsable = FirstNonEmpty(args.Responsable, previous.Responsable);
+        args.Solicitante = FirstNonEmpty(args.Solicitante, previous.Solicitante);
+        args.Ot = FirstNonEmpty(args.Ot, previous.Ot);
+        args.Site = FirstNonEmpty(args.Site, previous.Site);
+        args.IdSite = FirstNonEmpty(args.IdSite, previous.IdSite);
+        args.CorreSite ??= previous.CorreSite;
+        args.IdCliente ??= previous.IdCliente;
+        args.IdProyecto ??= previous.IdProyecto;
+        args.IdSolicitante ??= previous.IdSolicitante;
+        args.IdValidador ??= previous.IdValidador;
+
+        return args;
+    }
+
+    private static string? FirstNonEmpty(string? current, string? inherited) =>
+        string.IsNullOrWhiteSpace(current) ? inherited : current;
+
     public static bool TryBuildContextualRefinementArgs(string question, ConversationState state, out BuscarPlanillaArgs args)
     {
         args = new BuscarPlanillaArgs();

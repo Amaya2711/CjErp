@@ -31,6 +31,9 @@ BEGIN CATCH INSERT @R VALUES (N'M05 RESUMEN sin alcance', 50010, ERROR_NUMBER())
 BEGIN TRY EXEC dbo.sp_IA_Planilla_Buscar @AlcanceNivel='RESTRINGIDO', @AlcanceCampos='RS', @AlcanceEmpleados=N'1 OR 1=1', @VerTotalesGlobales=0, @Modo='RESUMEN', @AgruparPor='CLIENTE'; INSERT @R VALUES (N'M06 alcance invalido en RESUMEN', 50015, 0); END TRY
 BEGIN CATCH INSERT @R VALUES (N'M06 alcance invalido en RESUMEN', 50015, ERROR_NUMBER()); END CATCH;
 
+BEGIN TRY EXEC dbo.sp_IA_Planilla_Buscar @AlcanceNivel='TOTAL', @VerTotalesGlobales=0, @Modo='RESUMEN', @AgruparPor='COINCIDENCIA'; INSERT @R VALUES (N'M07 COINCIDENCIA sin texto de busqueda', 50024, 0); END TRY
+BEGIN CATCH INSERT @R VALUES (N'M07 COINCIDENCIA sin texto de busqueda', 50024, ERROR_NUMBER()); END CATCH;
+
 SELECT Caso, Esperado, Obtenido, Resultado FROM @R ORDER BY Caso;
 IF EXISTS (SELECT 1 FROM @R WHERE Resultado = 'FAIL') PRINT 'PARTE A: HAY CASOS FAIL - NO continuar.';
 ELSE PRINT 'PARTE A: todos los casos PASS.';
@@ -79,3 +82,13 @@ EXEC dbo.sp_IA_Planilla_Buscar @AlcanceNivel='TOTAL', @VerTotalesGlobales=0,
      @FechaInicio='2026-01-01', @FechaFin='2026-12-31', @Estados='PAGADO',
      @Modo='RESUMEN', @AgruparPor='CLIENTE,MES', @Top=200;
 SET STATISTICS TIME OFF;
+
+-- B07 COINCIDENCIA (regla 2026-10-04): la busqueda por nombre sigue siendo por CUALQUIER palabra (@CoincidirTodas=0) y el
+--     resultado se agrupa por el nombre que coincidio ("Solicitante: ...", "Responsable: ...", "Otro campo ...") con
+--     sus registros y monto por moneda. Result set 1: una fila por coincidencia y moneda; result set 2: totales por moneda.
+--     Debe cumplirse: la SUMA de Registros del result set 1 por moneda = Registros del result set 2 (el TOP no pierde datos
+--     si hay menos de @Top coincidencias), y cada nombre listado contiene al menos una de las palabras buscadas.
+EXEC dbo.sp_IA_Planilla_Buscar @AlcanceNivel='TOTAL', @VerTotalesGlobales=0,
+     @FechaInicio='2026-09-01', @FechaFin='2026-09-30', @Estados='PAGADO',
+     @TextoBusqueda=N'HUAMAN CALLUPE RONALDO DIDI', @CoincidirTodas=0,
+     @Modo='RESUMEN', @AgruparPor='COINCIDENCIA', @Top=100;

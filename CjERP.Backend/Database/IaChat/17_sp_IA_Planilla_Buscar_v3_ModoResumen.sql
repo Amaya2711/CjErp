@@ -14,7 +14,13 @@ GO
         @Modo        VARCHAR(10)   'DETALLE' (por defecto, identico a la v2) | 'RESUMEN'
         @AgruparPor  VARCHAR(100)  lista de 1 a 3 dimensiones separadas por coma (solo RESUMEN):
                                    CLIENTE, PROYECTO, RESPONSABLE, SOLICITANTE, SITE, ESTADO, MONEDA, BIEN,
-                                   COMPROBANTE, TIPOPAGO, TIPOTRABAJO, FECHA (dia), MES
+                                   COMPROBANTE, TIPOPAGO, TIPOTRABAJO, FECHA (dia), MES, COINCIDENCIA
+        COINCIDENCIA (solo con @TextoBusqueda): agrupa por el NOMBRE que coincidio con alguno de los terminos de la
+                     busqueda y devuelve la columna [Rol] (Solicitante / Responsable / Otro campo) + [Coincidencia]
+                     (nombre). Regla: solicitantes con Empleado.IdCargo IN (10, 11) = un solo solicitante por NroDocumento
+                     (tambien aplica a AgruparPor SOLICITANTE). Un registro cuyo solicitante y responsable coinciden sale en ambas filas (los totales
+                     por moneda del result set 2 no se duplican). Permite ver el monto exacto de cada persona que coincide con un nombre
+                     buscado por cualquiera de sus palabras (regla de negocio 2026-10-04).
         @Top         INT           maximo de grupos devueltos en el primer result set (por defecto 100; 1 a 1000)
    En modo RESUMEN el SP usa EXACTAMENTE el mismo filtrado de #Candidatos (alcance, fechas, estado, texto, etc.)
    y agrupa dentro de SQL, sin paginar, sin las columnas globales y sin traer las ~90 columnas por fila:
@@ -23,7 +29,8 @@ GO
                       SubtotalSolesEquivalente, FilasSinTipoCambio.
         Result set 2: totales por moneda de TODO el universo filtrado (no solo del TOP).
    Las dimensiones salen de una lista blanca (sin concatenar texto del usuario). Errores nuevos: 50020 (modo),
-   50021 (AgruparPor ausente), 50022 (dimension no permitida), 50023 (mas de 3 dimensiones).
+   50021 (AgruparPor ausente), 50022 (dimension no permitida), 50023 (mas de 3 dimensiones),
+   50024 (COINCIDENCIA sin @TextoBusqueda).
    CORRECCION DE IDENTIDAD DE FILA (valida en detalle y resumen): Planilla.Correlativo NO es unico (77 correlativos
    repetidos, 155 filas). La clave primaria real es (IdProyecto, IdSite, IdTipoTrabajo, IdTarea, Correlativo,
    IdCliente). Antes los candidatos se identificaban solo por Correlativo y se volvia a unir a Planilla por
@@ -226,7 +233,7 @@ BEGIN
     (
         Nombre VARCHAR(20) NOT NULL PRIMARY KEY,
         Alias  VARCHAR(20) NOT NULL,
-        Expr   NVARCHAR(400) NOT NULL
+        Expr   NVARCHAR(MAX) NOT NULL
     );
 
     INSERT INTO @Whitelist (Nombre, Alias, Expr)
@@ -234,7 +241,7 @@ BEGIN
         ('CLIENTE',     'Cliente',     N'ISNULL(cli.NombreCliente, N''Sin dato'')'),
         ('PROYECTO',    'Proyecto',    N'ISNULL(pro.NombreProyecto, N''Sin dato'')'),
         ('RESPONSABLE', 'Responsable', N'COALESCE(emp.NombreEmpleado, a.Responsable, N''Sin dato'')'),
-        ('SOLICITANTE', 'Solicitante', N'ISNULL(CASE WHEN ISNULL(a.IdWeb, 0) = 1 THEN m_cj.NombreEmpleado ELSE m_emp.NombreEmpleado END, N''Sin dato'')'),
+        ('SOLICITANTE', 'Solicitante', N'ISNULL(sol.Nombre, N''Sin dato'')'),
         ('SITE',        'Site',        N'ISNULL(sit.NombreSite, N''Sin dato'')'),
         ('ESTADO',      'Estado',      N'ISNULL(est.ValorIni, N''Sin dato'')'),
         ('MONEDA',      'Moneda',      N'ISNULL(mon.ValorIni, N''Sin dato'')'),
@@ -243,7 +250,10 @@ BEGIN
         ('TIPOPAGO',    'TipoPago',    N'ISNULL(tpago.ValorIni, N''Sin dato'')'),
         ('TIPOTRABAJO', 'TipoTrabajo', N'ISNULL(a.Tipo_Trabajo, N''Sin dato'')'),
         ('FECHA',       'Fecha',       N'ISNULL(CONVERT(NVARCHAR(10), TRY_CONVERT(DATE, a.FecIngreso, 101), 23), N''Sin fecha'')'),
-        ('MES',         'Mes',         N'ISNULL(CONVERT(NVARCHAR(7), TRY_CONVERT(DATE, a.FecIngreso, 101), 23), N''Sin fecha'')');
+        ('MES',         'Mes',         N'ISNULL(CONVERT(NVARCHAR(7), TRY_CONVERT(DATE, a.FecIngreso, 101), 23), N''Sin fecha'')'),
+        -- Nombre que coincidio con algun termino de la busqueda; el rol (Solicitante/Responsable/Otro campo) sale en la
+        -- columna [Rol] y las filas se generan con el CROSS APPLY [co] del resumen (un registro puede salir en 2 roles).
+        ('COINCIDENCIA', 'Coincidencia', N'co.Nombre');
 
     DECLARE @Dims TABLE
     (
@@ -273,6 +283,11 @@ BEGIN
 
         IF (SELECT COUNT(*) FROM @Dims) = 0 OR (SELECT COUNT(*) FROM @Dims) > 3
             THROW 50023, 'AgruparPor admite de 1 a 3 dimensiones.', 1;
+
+        -- Fuera del TRY principal para que el error conserve su numero (el CATCH general lo convertiria en 50001).
+        IF EXISTS (SELECT 1 FROM @Dims WHERE Nombre = 'COINCIDENCIA')
+           AND NULLIF(LTRIM(RTRIM(@TextoBusqueda)), N'') IS NULL
+            THROW 50024, 'AgruparPor COINCIDENCIA requiere @TextoBusqueda.', 1;
 
         SET @TopN = CASE WHEN ISNULL(@Top, 0) < 1 THEN 100 WHEN @Top > 1000 THEN 1000 ELSE @Top END;
     END;
@@ -847,6 +862,47 @@ BEGIN
            ============================================================ */
         IF @Modo = 'RESUMEN'
         BEGIN
+            IF EXISTS (SELECT 1 FROM @Dims WHERE Nombre = 'COINCIDENCIA')
+               AND NOT EXISTS (SELECT 1 FROM @Terminos)
+                THROW 50024, 'AgruparPor COINCIDENCIA requiere @TextoBusqueda con al menos un termino valido.', 1;
+
+            -- Los terminos de la busqueda se materializan para que el SQL dinamico (otro ambito) los vea.
+            SELECT t.Termino INTO #TerminosCoincidencia FROM @Terminos t;
+
+            -- Regla 2026-10-04: los solicitantes con Empleado.IdCargo IN (10, 11) se consideran UN solo solicitante por
+            -- NroDocumento (varios codigos / nombres con espacios distintos de la misma persona = un agrupador).
+            -- Clave = IdEmpleado (solicitante legacy, EsWeb=0) o IdEmpleadoCj (solicitante web, EsWeb=1).
+            SELECT x.Clave, x.EsWeb, MIN(x.Nombre) AS Nombre
+            INTO #SolicitanteUnico
+            FROM
+            (
+                SELECT e.IdEmpleado AS Clave, CAST(0 AS BIT) AS EsWeb,
+                       dc.Nombre
+                FROM dbo.Empleado e
+                INNER JOIN
+                (
+                    SELECT d.NroDocumento,
+                           MIN(LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(d.NombreEmpleado, N' ', N'<>'), N'><', N''), N'<>', N' ')))) AS Nombre
+                    FROM dbo.Empleado d
+                    WHERE d.IdCargo IN (10, 11) AND NULLIF(LTRIM(RTRIM(d.NroDocumento)), N'') IS NOT NULL
+                    GROUP BY d.NroDocumento
+                ) dc ON dc.NroDocumento = e.NroDocumento
+                WHERE e.IdCargo IN (10, 11)
+                UNION ALL
+                SELECT e.IdEmpleadoCj, CAST(1 AS BIT), dc.Nombre
+                FROM dbo.Empleado e
+                INNER JOIN
+                (
+                    SELECT d.NroDocumento,
+                           MIN(LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(d.NombreEmpleado, N' ', N'<>'), N'><', N''), N'<>', N' ')))) AS Nombre
+                    FROM dbo.Empleado d
+                    WHERE d.IdCargo IN (10, 11) AND NULLIF(LTRIM(RTRIM(d.NroDocumento)), N'') IS NOT NULL
+                    GROUP BY d.NroDocumento
+                ) dc ON dc.NroDocumento = e.NroDocumento
+                WHERE e.IdCargo IN (10, 11) AND e.IdEmpleadoCj IS NOT NULL
+            ) x
+            GROUP BY x.Clave, x.EsWeb;
+
             DECLARE @SelDims NVARCHAR(MAX);
             DECLARE @GrpDims NVARCHAR(MAX);
 
@@ -855,6 +911,35 @@ BEGIN
                 @GrpDims = STRING_AGG(CONVERT(NVARCHAR(MAX), w.Expr), N', ') WITHIN GROUP (ORDER BY d.Pos)
             FROM @Dims d
             INNER JOIN @Whitelist w ON w.Nombre = d.Nombre;
+
+            DECLARE @ApplyCoincidencia NVARCHAR(MAX) = N'';
+            IF EXISTS (SELECT 1 FROM @Dims WHERE Nombre = 'COINCIDENCIA')
+            BEGIN
+                SET @SelDims = REPLACE(@SelDims, N'co.Nombre AS [Coincidencia]', N'co.Rol AS [Rol], co.Nombre AS [Coincidencia]');
+                SET @GrpDims = REPLACE(@GrpDims, N'co.Nombre', N'co.Rol, co.Nombre');
+                -- Una fila por rol en que el registro coincide: Solicitante, Responsable y, si no coincide ninguno, Otro campo.
+                SET @ApplyCoincidencia = N'
+CROSS APPLY
+(
+    SELECT N''Solicitante'' AS Rol, sol.Nombre AS Nombre
+    WHERE EXISTS (SELECT 1 FROM #TerminosCoincidencia tm
+                  WHERE ISNULL(sol.Nombre, N''@'')
+                        COLLATE Latin1_General_100_CI_AI LIKE N''%'' + tm.Termino COLLATE Latin1_General_100_CI_AI + N''%'')
+    UNION ALL
+    SELECT N''Responsable'', COALESCE(emp.NombreEmpleado, a.Responsable)
+    WHERE EXISTS (SELECT 1 FROM #TerminosCoincidencia tm
+                  WHERE COALESCE(emp.NombreEmpleado, a.Responsable, N''@'')
+                        COLLATE Latin1_General_100_CI_AI LIKE N''%'' + tm.Termino COLLATE Latin1_General_100_CI_AI + N''%'')
+    UNION ALL
+    SELECT N''Otro campo'', N''(detalle, comentario, cliente, site...)''
+    WHERE NOT EXISTS (SELECT 1 FROM #TerminosCoincidencia tm
+                      WHERE ISNULL(sol.Nombre, N''@'')
+                            COLLATE Latin1_General_100_CI_AI LIKE N''%'' + tm.Termino COLLATE Latin1_General_100_CI_AI + N''%'')
+      AND NOT EXISTS (SELECT 1 FROM #TerminosCoincidencia tm
+                      WHERE COALESCE(emp.NombreEmpleado, a.Responsable, N''@'')
+                            COLLATE Latin1_General_100_CI_AI LIKE N''%'' + tm.Termino COLLATE Latin1_General_100_CI_AI + N''%'')
+) co';
+            END;
 
             -- La moneda SIEMPRE forma parte del grupo: ninguna cifra mezcla monedas.
             IF NOT EXISTS (SELECT 1 FROM @Dims WHERE Nombre = 'MONEDA')
@@ -874,6 +959,13 @@ LEFT JOIN dbo.Site sit ON sit.IdSite = a.IdSite AND sit.Correlativo = a.CorreSit
 LEFT JOIN dbo.Empleado emp ON emp.IdEmpleado = a.IdResponsable
 LEFT JOIN dbo.Empleado m_emp ON m_emp.IdEmpleado = a.IdSolicitante AND ISNULL(a.IdWeb, 0) <> 1
 LEFT JOIN dbo.EmpleadoCj m_cj ON m_cj.IdEmpleado = a.IdSolicitante AND ISNULL(a.IdWeb, 0) = 1
+LEFT JOIN #SolicitanteUnico sc ON sc.Clave = a.IdSolicitante AND sc.EsWeb = CASE WHEN ISNULL(a.IdWeb, 0) = 1 THEN 1 ELSE 0 END
+OUTER APPLY
+(
+    -- Solicitante unico: cargo 10/11 = un solo nombre por NroDocumento; el resto, su nombre con espacios normalizados.
+    SELECT COALESCE(sc.Nombre,
+                    LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(CASE WHEN ISNULL(a.IdWeb, 0) = 1 THEN m_cj.NombreEmpleado ELSE m_emp.NombreEmpleado END, N'' '', N''<>''), N''><'', N''''), N''<>'', N'' ''))) ) AS Nombre
+) sol
 LEFT JOIN dbo.Constante bien ON bien.Sociedad = ''PE01'' AND bien.Programa = ''PLANTILLA'' AND bien.Campo = ''TIPO_BIEN'' AND bien.Correlativo = a.IdBien
 LEFT JOIN dbo.Constante comp ON comp.Sociedad = ''PE01'' AND comp.Programa = ''PLANTILLA'' AND comp.Campo = ''TIPO_COMPROBANTE'' AND comp.Correlativo = a.IdComprobante
 LEFT JOIN dbo.Constante tpago ON tpago.Sociedad = ''PE01'' AND tpago.Programa = ''PLANTILLA'' AND tpago.Campo = ''TIPO_PAGO'' AND tpago.Correlativo = a.IdTipoPago
@@ -898,7 +990,7 @@ SELECT TOP (@pTop) ' + @SelDims + N',
        SUM(ISNULL(a.Total, 0)) AS TotalMonedaOriginal,
        SUM(ISNULL(a.Subtotal, 0) * tc.Tc) AS SubtotalSolesEquivalente,
        SUM(CASE WHEN tc.Tc IS NULL THEN 1 ELSE 0 END) AS FilasSinTipoCambio'
-                + @FromResumen + N'
+                + @FromResumen + @ApplyCoincidencia + N'
 GROUP BY ' + @GrpDims + N'
 ORDER BY SUM(ISNULL(a.Subtotal, 0) * tc.Tc) DESC, COUNT(*) DESC
 OPTION (RECOMPILE);';

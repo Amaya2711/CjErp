@@ -52,6 +52,7 @@ type GastoDto = {
   subtotal?: number;
   total?: number;
   igv?: number;
+  montoRetencion?: number;
   totalMontoVisiblePorMoneda?: number;
   idRendicion?: number;
   detalle: string;
@@ -112,6 +113,9 @@ type GastoForm = {
   tipoPago: string;
   monto: string;
   totalPagar: string;
+  igv?: number;
+  total?: number;
+  montoRetencion?: number;
   detalle: string;
   comentario: string;
   observacion?: string;
@@ -211,6 +215,7 @@ type GastoPayload = {
   subtotal?: number;
   total?: number;
   igv?: number;
+  montoRetencion?: number;
   idRendicion: number;
   detalle: string;
   comentario: string;
@@ -253,6 +258,7 @@ type GastosHeaderFilters = {
   proyecto: string[];
   site: string[];
   tipoTrabajo: string[];
+  tarea: string[];
   solicitante: string[];
   responsable: string[];
   validador: string[];
@@ -272,6 +278,7 @@ const GASTOS_HEADER_FILTERS_INITIAL: GastosHeaderFilters = {
   proyecto: [],
   site: [],
   tipoTrabajo: [],
+  tarea: [],
   solicitante: [],
   responsable: [],
   validador: [],
@@ -289,11 +296,12 @@ type GastosHeaderMultiFilterKey =
   | "proyecto"
   | "site"
   | "tipoTrabajo"
+  | "tarea"
   | "solicitante"
   | "responsable"
   | "validador";
 
-type GastosHeaderSearchableFilterKey = "cliente" | "proyecto" | "site" | "tipoTrabajo" | "solicitante" | "responsable" | "validador";
+type GastosHeaderSearchableFilterKey = "cliente" | "proyecto" | "site" | "tipoTrabajo" | "tarea" | "solicitante" | "responsable" | "validador";
 type HistorialSitioView = "listado" | "resumen";
 
 const GASTOS_HEADER_FILTER_SEARCH_INITIAL: Record<GastosHeaderSearchableFilterKey, string> = {
@@ -301,6 +309,7 @@ const GASTOS_HEADER_FILTER_SEARCH_INITIAL: Record<GastosHeaderSearchableFilterKe
   proyecto: "",
   site: "",
   tipoTrabajo: "",
+  tarea: "",
   solicitante: "",
   responsable: "",
   validador: "",
@@ -321,6 +330,9 @@ type GastoGridRow = {
   bien: string;
   comprobante: string;
   monto: number | null;
+  igv: number | null;
+  total: number | null;
+  montoRetencion: number | null;
   totalPagar: number | null;
   moneda: string;
   banco: string;
@@ -756,7 +768,7 @@ function matchesFlexibleSearch(label: string, query: string): boolean {
 }
 
 function isSearchableHeaderFilterKey(key: string): key is GastosHeaderSearchableFilterKey {
-  return key === "cliente" || key === "proyecto" || key === "site" || key === "tipoTrabajo" || key === "solicitante" || key === "responsable" || key === "validador";
+  return key === "cliente" || key === "proyecto" || key === "site" || key === "tipoTrabajo" || key === "tarea" || key === "solicitante" || key === "responsable" || key === "validador";
 }
 
 function toNumberOrZero(value: unknown): number {
@@ -1194,6 +1206,7 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     subtotal,
     total,
     igv,
+    montoRetencion: getRecordNumber(row, "MontoRetencion", "montoRetencion") ?? undefined,
     idRendicion: getRecordNumber(row, "IdRendicion", "idRendicion") ?? undefined,
     detalle: getRecordString(row, "Detalle", "detalle"),
     comentario: getRecordString(row, "Observacion", "observacion", "Comentario", "comentario"),
@@ -1232,14 +1245,14 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
       "FechaIngreso",
       "fechaIngreso"
     ),
-    solicitante: getRecordString(row, "IdSolicitante", "idSolicitante"),
+    solicitante: getRecordString(row, "IdSolicitanteCj", "idSolicitanteCj", "IdSolicitante", "idSolicitante"),
     solicitanteLabel: getRecordString(row, "Solicitante", "solicitante", "SolicitanteLabel", "solicitanteLabel"),
     // Planilla entrega el nombre en Gestor y el identificador en IdGestor.
     // La actualización exige el identificador numérico, por lo que nunca se
     // debe usar el nombre como valor del campo Gestor.
-    gestor: getRecordString(row, "IdGestor", "idGestor", "GestorId", "gestorId", "Gestor", "gestor"),
+    gestor: getRecordString(row, "IdGestorCj", "idGestorCj", "IdGestor", "idGestor", "GestorId", "gestorId", "Gestor", "gestor"),
     gestorLabel: getRecordString(row, "Gestor", "gestor", "GestorLabel", "gestorLabel"),
-    validador: getRecordString(row, "IdValidador", "idValidador"),
+    validador: getRecordString(row, "IdValidadorCj", "idValidadorCj", "IdValidador", "idValidador"),
     validadorLabel: getRecordString(row, "Validador", "validador", "ValidadorLabel", "validadorLabel"),
     moneda: getRecordString(row, "TipoMoneda", "tipoMoneda", "Moneda", "moneda"),
     monedaLabel: getRecordString(row, "Moneda", "moneda", "MonedaLabel", "monedaLabel"),
@@ -1337,6 +1350,9 @@ function mapGastoDtoToView(item: GastoDto): GastoForm {
     tipoPago: item.tipoPago || item.tipoPagoLabel || "",
     monto: subtotalValue != null ? subtotalValue.toString() : "",
     totalPagar: item.totalPagar != null ? item.totalPagar.toString() : "",
+    igv: item.igv,
+    total: item.total,
+    montoRetencion: item.montoRetencion,
     detalle: item.detalle,
     comentario: item.comentario ?? (item as any).observacion ?? "",
     observacion: item.observacion ?? "",
@@ -1468,6 +1484,9 @@ export default function GastosPage({
   const [empleadosLoading, setEmpleadosLoading] = useState(false);
   const [empleadosError, setEmpleadosError] = useState<string | null>(null);
   const [tareasCatalogo, setTareasCatalogo] = useState<TareaOption[]>([]);
+  // gastosApi.list se captura al montar: la lista de tareas se lee por ref para no usar un valor vacío.
+  const tareasCatalogoRef = useRef<TareaOption[]>([]);
+  tareasCatalogoRef.current = tareasCatalogo;
   const [tareasCatalogoError, setTareasCatalogoError] = useState<string | null>(null);
   const [suministrosVigentes, setSuministrosVigentes] = useState<SuministroProvisionalVigenteOption[]>([]);
   const [suministrosVigentesLoading, setSuministrosVigentesLoading] = useState(false);
@@ -1520,7 +1539,9 @@ export default function GastosPage({
 
   const fechaActual = obtenerFechaActual();
   const idCargo = toPositiveNumber(authUser?.idCargo, authUser?.idrol);
-  const idEmpleado = toPositiveNumber(authUser?.idEmpleado, authUser?.codEmp);
+  // Código EmpleadoCj del usuario (CodEmp). authUser.idEmpleado puede traer el id de la tabla legacy
+  // Empleado, que no coincide con EmpleadoCjPerfil (solicitante) ni con los combos de este módulo.
+  const idEmpleado = toPositiveNumber(authUser?.codEmp, authUser?.idEmpleado);
   const idUsuarioFactura = getNumericUserId(
     String(authUser?.codEmp ?? authUser?.idEmpleado ?? authUser?.empleado ?? "")
   );
@@ -1560,6 +1581,7 @@ export default function GastosPage({
           filtrosCabecera.comprobante.length > 0 ||
           filtrosCabecera.moneda.length > 0 ||
           filtrosCabecera.tipoTrabajo.length > 0 ||
+          filtrosCabecera.tarea.length > 0 ||
           filtrosCabecera.responsable.length > 0 ||
           filtrosCabecera.validador.length > 0
       ),
@@ -1743,14 +1765,30 @@ export default function GastosPage({
       // Cuando se combina Pagado (4) con otros estados se requieren dos
       // consultas por la distinta fecha usada por el SP. Se ejecutan en serie
       // para no pedir dos planes pesados a SQL Server al mismo tiempo.
+      // Tarea (pestaña Consulta): sp_Planilla_Consulta_Estados filtra por @IdTarea (una por consulta).
+      // Con varias tareas elegidas se consulta cada una y se unen los resultados.
+      const idsTarea: number[] =
+        vistaGastosRef.current === "consulta"
+          ? Array.from(
+              new Set(
+                tareasCatalogoRef.current
+                  .filter((tarea) => filtrosCabeceraAplicadosRef.current.tarea.includes(tarea.tarea))
+                  .map((tarea) => tarea.correlativo)
+                  .filter((correlativo) => Number.isInteger(correlativo) && correlativo > 0)
+              )
+            )
+          : [];
+
       const respuestas = [];
       for (const estados of gruposEstados.length > 0 ? gruposEstados : [""]) {
+       for (const idTarea of idsTarea.length > 0 ? idsTarea : [null]) {
         respuestas.push(
           await consultarPlanillaEstados({
             ...buildPlanillaConsultaEstadosRequest(
               [
                 ...(estados ? [{ nombre: "Estados", valor: estados, tipo: "string" } satisfies PlanillaConsultaParametro] : []),
                 ...parametrosConsulta,
+                ...(idTarea != null ? [{ nombre: "IdTarea", valor: String(idTarea), tipo: "int" } satisfies PlanillaConsultaParametro] : []),
               ],
               // La pestaña Consulta no restringe por empleado/cargo del usuario (como ADMIN).
               vistaGastosRef.current === "consulta" ? { baseParams: { idCargo: null, idEmpleado: null } } : undefined
@@ -1758,6 +1796,7 @@ export default function GastosPage({
             ...(vistaGastosRef.current === "consulta" ? { consulta: "gastos-consulta" } : {}),
           })
         );
+       }
       }
 
       const gastosConsulta = respuestas
@@ -3257,6 +3296,7 @@ export default function GastosPage({
       comprobante: [...filtrosCabecera.comprobante],
       moneda: [...filtrosCabecera.moneda],
       tipoTrabajo: [...filtrosCabecera.tipoTrabajo],
+      tarea: [...filtrosCabecera.tarea],
       responsable: [...filtrosCabecera.responsable],
       validador: [...filtrosCabecera.validador],
     };
@@ -3395,11 +3435,12 @@ export default function GastosPage({
       proyecto: buildUniqueFilterOptions(filtrosOperativosCatalogo.map((item) => item.nombreProyecto)),
       site: buildUniqueFilterOptions(filtrosOperativosCatalogo.map((item) => item.nombreSite)),
       tipoTrabajo: buildUniqueFilterOptions(filtrosOperativosCatalogo.map((item) => item.tipoTrabajo)),
+      tarea: buildUniqueFilterOptions(tareasCatalogo.map((item) => item.tarea)),
       solicitante: buildUniqueFilterOptions(solicitanteOptions.map((option) => option.label)),
       responsable: buildUniqueFilterOptions(empleados.map((empleado) => empleado.nombreEmpleado)),
       validador: buildUniqueFilterOptions(validadorOptions.map((option) => option.label)),
     }),
-    [comprobanteOptions, empleados, estadoOptions, filtrosOperativosCatalogo, monedaOptions, solicitanteOptions, validadorOptions]
+    [comprobanteOptions, empleados, estadoOptions, filtrosOperativosCatalogo, monedaOptions, solicitanteOptions, tareasCatalogo, validadorOptions]
   );
 
   const toggleMultiHeaderFilter = React.useCallback((
@@ -3433,6 +3474,9 @@ export default function GastosPage({
         const tipoTrabajoGasto = String(
           gasto.filtroOperativo.filtro?.tipoTrabajo ?? gasto.filtroOperativo.tipoTrabajo?.tipoTrabajo ?? ""
         ).trim();
+        const tareaGasto = String(
+          getTareaLabelOrFallback(tareasCatalogo, gasto.filtroOperativo.tarea?.correlativo, gasto.filtroOperativo.tarea?.tarea)
+        ).trim();
         const solicitanteGasto = String(
           getConstanteLabelOrFallback(solicitanteOptions, gasto.solicitante, gasto.solicitanteLabel)
         ).trim();
@@ -3450,6 +3494,7 @@ export default function GastosPage({
           (filtrosCabeceraAplicados.proyecto.length === 0 || filtrosCabeceraAplicados.proyecto.includes(proyectoGasto)) &&
           (filtrosCabeceraAplicados.site.length === 0 || filtrosCabeceraAplicados.site.includes(siteGasto)) &&
           (filtrosCabeceraAplicados.tipoTrabajo.length === 0 || filtrosCabeceraAplicados.tipoTrabajo.includes(tipoTrabajoGasto)) &&
+          (filtrosCabeceraAplicados.tarea.length === 0 || filtrosCabeceraAplicados.tarea.includes(tareaGasto)) &&
           (filtrosCabeceraAplicados.solicitante.length === 0 || filtrosCabeceraAplicados.solicitante.includes(solicitanteGasto)) &&
           (filtrosCabeceraAplicados.responsable.length === 0 || filtrosCabeceraAplicados.responsable.includes(responsableGasto)) &&
           (filtrosCabeceraAplicados.validador.length === 0 || filtrosCabeceraAplicados.validador.includes(validadorGasto))
@@ -3463,6 +3508,7 @@ export default function GastosPage({
     gastosSafe,
     monedaOptions,
     solicitanteOptions,
+    tareasCatalogo,
     validadorOptions,
   ]);
   const cantidadRegistrosFiltrados = gastosFiltradosBase.length;
@@ -3491,6 +3537,9 @@ export default function GastosPage({
       { key: "bien", label: "Bien", width: "80px", align: "left" as const },
       { key: "comprobante", label: "Comprobante", width: "140px", align: "left" as const },
       { key: "monto", label: "Monto", width: "100px", align: "left" as const },
+      { key: "igv", label: "IGV", width: "90px", align: "left" as const },
+      { key: "total", label: "Total", width: "100px", align: "left" as const },
+      { key: "montoRetencion", label: "Monto Retención", width: "120px", align: "left" as const },
       { key: "totalPagar", label: "Total Pagar", width: "110px", align: "left" as const },
       { key: "moneda", label: "Moneda", width: "80px", align: "left" as const },
       { key: "banco", label: "Banco", width: "140px", align: "left" as const },
@@ -3551,6 +3600,9 @@ export default function GastosPage({
           bien: getConstanteLabel(bienOptions, gasto.bien),
           comprobante: getConstanteLabel(comprobanteOptions, gasto.comprobante),
           monto: numero(gasto.monto),
+          igv: numero(gasto.igv),
+          total: numero(gasto.total),
+          montoRetencion: numero(gasto.montoRetencion),
           totalPagar: numero(gasto.totalPagar),
           moneda: getConstanteLabel(monedaOptions, gasto.moneda),
           banco: gasto.banco ?? "",
@@ -3682,6 +3734,9 @@ export default function GastosPage({
       { dataField: "bien", caption: "Bien", width: 90 },
       { dataField: "comprobante", caption: "Comprobante", width: 140 },
       { dataField: "monto", caption: "Monto", dataType: "number", width: 110, format: { type: "fixedPoint", precision: 2 } },
+      { dataField: "igv", caption: "IGV", dataType: "number", width: 100, format: { type: "fixedPoint", precision: 2 } },
+      { dataField: "total", caption: "Total", dataType: "number", width: 110, format: { type: "fixedPoint", precision: 2 } },
+      { dataField: "montoRetencion", caption: "Monto Retención", dataType: "number", width: 130, format: { type: "fixedPoint", precision: 2 } },
       { dataField: "totalPagar", caption: "Total Pagar", dataType: "number", width: 120, format: { type: "fixedPoint", precision: 2 } },
       { dataField: "moneda", caption: "Moneda", width: 90 },
       { dataField: "banco", caption: "Banco", width: 140 },
@@ -3779,13 +3834,22 @@ export default function GastosPage({
                       return gasto.nroOperacion ?? "";
                     case "fechaDeposito":
                       return formatInputDateForDisplay(gasto.fechaDeposito);
+                    // Montos como número real (no texto) para poder sumarlos en Excel.
                     case "monto":
-                      return gasto.monto !== undefined && gasto.monto !== null && gasto.monto !== ""
-                        ? Number(gasto.monto).toLocaleString("es-PE", { minimumFractionDigits: 2 })
+                      return gasto.monto !== undefined && gasto.monto !== null && gasto.monto !== "" && Number.isFinite(Number(gasto.monto))
+                        ? Number(gasto.monto)
                         : "";
+                    case "igv":
+                    case "total":
+                    case "montoRetencion": {
+                      const importe = (gasto as unknown as Record<string, unknown>)[key];
+                      return importe !== undefined && importe !== null && importe !== "" && Number.isFinite(Number(importe))
+                        ? Number(importe)
+                        : "";
+                    }
                     case "totalPagar":
-                      return gasto.totalPagar !== undefined && gasto.totalPagar !== null && gasto.totalPagar !== ""
-                        ? Number(gasto.totalPagar).toLocaleString("es-PE", { minimumFractionDigits: 2 })
+                      return gasto.totalPagar !== undefined && gasto.totalPagar !== null && gasto.totalPagar !== "" && Number.isFinite(Number(gasto.totalPagar))
+                        ? Number(gasto.totalPagar)
                         : "";
                     case "ot":
                       return gasto.filtroOperativo.ot?.ot ?? "";
@@ -3803,6 +3867,14 @@ export default function GastosPage({
               );
               const sheetData = [headers, ...rows];
               const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+              // Formato de miles con 2 decimales para las columnas de importes (el valor sigue siendo numérico).
+              keys.forEach((key, colIndex) => {
+                if (!["monto", "igv", "total", "montoRetencion", "totalPagar"].includes(key)) return;
+                rows.forEach((_, rowIndex) => {
+                  const cell = worksheet[XLSX.utils.encode_cell({ r: rowIndex + 1, c: colIndex })];
+                  if (cell && cell.t === "n") cell.z = "#,##0.00";
+                });
+              });
               worksheet["!cols"] = headers.map((header, index) => {
                 const maxRowLength = rows.reduce((max, row) => {
                   const cellValue = row[index];
@@ -3969,6 +4041,13 @@ export default function GastosPage({
             section: "advanced" as const,
             options: headerFilterOptions.tipoTrabajo.map((option) => ({ value: option, label: option })),
             selectedValues: filtrosCabecera.tipoTrabajo,
+          },
+          {
+            key: "tarea",
+            label: "Tarea",
+            section: "advanced" as const,
+            options: headerFilterOptions.tarea.map((option) => ({ value: option, label: option })),
+            selectedValues: filtrosCabecera.tarea,
           },
           {
             key: "responsable",
@@ -4264,7 +4343,7 @@ export default function GastosPage({
             onClick={() => {
               setMostrarFiltrosAdicionales((prev) => {
                 const nextValue = !prev;
-                if (!nextValue && cabeceraFiltroAbierto && ["proyecto", "site", "comprobante", "moneda", "tipoTrabajo", "responsable", "validador"].includes(cabeceraFiltroAbierto)) {
+                if (!nextValue && cabeceraFiltroAbierto && ["proyecto", "site", "comprobante", "moneda", "tipoTrabajo", "tarea", "responsable", "validador"].includes(cabeceraFiltroAbierto)) {
                   setCabeceraFiltroAbierto(null);
                 }
                 return nextValue;
@@ -4573,6 +4652,11 @@ export default function GastosPage({
               )}
               <FiltroOperativoLookup
                 value={form.filtroOperativo}
+                // VIÁTICOS tiene su propio módulo: no se ofrece como tarea de gasto (se conserva si el gasto ya la tiene).
+                tareaFilter={(tarea) =>
+                  !normalizeSearchText(tarea.tarea).includes("viatico") ||
+                  tarea.correlativo === form.filtroOperativo.tarea?.correlativo
+                }
                 fontSize={13}
                 filtroInputRef={filtroInputRef}
                 onChange={handleFiltroOperativoChange}

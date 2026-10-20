@@ -1552,13 +1552,28 @@ public class OrdenCompraService : IOrdenCompraService
             var idsLegacy = new[] { origen.IdSolicitante, origen.IdGestor, origen.IdValidador }.Distinct().ToArray();
             var equivalencias = (await connection.QueryAsync<EmpleadoEquivalenciaCj>(
                 _sqlCommandFactory.Create(
-                    "SELECT IdEmpleado, IdEmpleadoCj FROM dbo.Empleado WHERE IdEmpleado IN @Ids;",
+                    // Un mismo IdEmpleado puede tener varias filas en dbo.Empleado (distinto cargo): se elige una sola
+                    // con el mismo criterio de sp_OrdenCompra_BuscarCabecera (cargo 10, 11, 83 y luego el resto).
+                    """
+                    SELECT IdEmpleado, IdEmpleadoCj
+                    FROM (
+                        SELECT e.IdEmpleado, e.IdEmpleadoCj,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY e.IdEmpleado
+                                   ORDER BY CASE e.IdCargo WHEN 10 THEN 1 WHEN 11 THEN 2 WHEN 83 THEN 3 ELSE 99 END,
+                                            e.IdEmpleadoCj) AS rn
+                        FROM dbo.Empleado e
+                        WHERE e.IdEmpleado IN @Ids AND e.IdEmpleadoCj > 0
+                    ) ranked
+                    WHERE rn = 1;
+                    """,
                     new { Ids = idsLegacy },
                     CommandType.Text,
                     cancellationToken,
                     commandTimeout: 120)))
                 .Where(item => item.IdEmpleadoCj is > 0)
-                .ToDictionary(item => item.IdEmpleado, item => item.IdEmpleadoCj!.Value);
+                .GroupBy(item => item.IdEmpleado)
+                .ToDictionary(group => group.Key, group => group.First().IdEmpleadoCj!.Value);
 
             int Convertir(int idEmpleado, string rol) =>
                 equivalencias.TryGetValue(idEmpleado, out var idEmpleadoCj)
@@ -1943,7 +1958,8 @@ public class OrdenCompraService : IOrdenCompraService
                     CommandType.Text,
                     cancellationToken,
                     commandTimeout: 60)))
-                .ToDictionary(item => item.IdEmpleado, item => item.NombreEmpleado?.Trim() ?? string.Empty);
+                .GroupBy(item => item.IdEmpleado)
+                .ToDictionary(group => group.Key, group => group.First().NombreEmpleado?.Trim() ?? string.Empty);
         }
 
         // Validador 1: tabla según el IdWeb de la OC (EmpleadoCj si es web; Empleado si es del sistema antiguo).

@@ -27,6 +27,7 @@
 | Página (ruta) | Archivo | Estado |
 |---|---|---|
 | Registro de gastos `/finanzas/tesoreria/gastos` | `features/finanzas/tesoreria/gastos.tsx` (5707 l) | ACTIVA (también embebida en pagos_v1) |
+| **Viáticos** `/finanzas/tesoreria/viaticos` | `viaticos.tsx` (copia de `gastos.tsx`) + `ViaticosResumen.tsx` | ACTIVA — igual que gastos pero solo tarea VIATICO (`IdTarea = 93`, enviada como `@IdTarea` a `sp_Planilla_Consulta_Estados`); pestañas Pendientes de hoy, Consulta y Resumen (gráficos recharts; ver AGENTS.md). Falta ítem `SegMenu` (PV) |
 | Bandeja aprobar `/finanzas/tesoreria/gastosaprobar` | `gastosaprobar.tsx` (6217 l) | ACTIVA (~66 % duplicado de gastos; filtra y rechaza, no aprueba) |
 | **Aprobaciones** `/finanzas/tesoreria/pagos_v1` | `pagos_v1.tsx` (6510 l) | ACTIVA — bandeja principal (pestañas aprobar/reaprobar/hormiga/observadas/resumen) |
 | `/finanzas/tesoreria/pagos_dev` | `pagos_dev.tsx` (4884 l) | LEGACY/DUP de pagos_v1 (**único uso de DevExtreme**) |
@@ -66,7 +67,7 @@
 | Ficha `/recursoshumanos/ficha` | `ficha.tsx` | ACTIVA |
 | Compensación días `/recursoshumanos/compensacionreal`, `/compensacion` | `compensacionreal.tsx` (2790 l) | ACTIVA |
 | Boletas XML `/recursoshumanos/planillas` | `planillas.tsx` | ACTIVA |
-| `/recursoshumanos/{personal,asistencia}` | — | STUB · `descansomedico.tsx`, `evaluacion.tsx` vacíos |
+| `/recursoshumanos/{personal,asistencia}` | — | STUB · `evaluacion.tsx` vacío; `descansomedico.tsx` implementado (ver AGENTS.md) |
 - **BE**: VacacionesController, CompensacionController, ContratosController (SQL inline), EmpleadoFichaController, PlanillaBoletaController · VacacionesService, CompensacionService, PlanillaBoletaService/Repository/PdfGenerator.
 - **SPs**: `sp_EmpleadoOtros_*` (vacaciones legacy, **en uso**), `sp_Vacacion_*` (modelo nuevo, **sin UI**), `sp_EmpleadoCompensacion*`, `sp_EmpleadoCj_Ficha`, `sp_PlanillaBoleta_ImportarXml`.
 - **Tablas**: EmpleadoOtros, Vacacion*, EmpleadoCompensacion*, EmpleadoCjSolicitudVigencia, EmpleadoCjHistorialLaboral, PlanillaBoleta*.

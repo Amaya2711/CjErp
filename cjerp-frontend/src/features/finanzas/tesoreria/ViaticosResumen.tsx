@@ -293,7 +293,11 @@ export default function ViaticosResumen({ cargar, solicitantesCatalogo, responsa
   }, [cargar, fechaInicio, fechaFin, idTarea]);
 
   // Primera carga al abrir la pestaña (mes en curso).
+  // El ref evita la doble carga del montaje doble de React.StrictMode (desarrollo).
+  const cargaInicialRef = useRef(false);
   useEffect(() => {
+    if (cargaInicialRef.current) return;
+    cargaInicialRef.current = true;
     void consultar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
