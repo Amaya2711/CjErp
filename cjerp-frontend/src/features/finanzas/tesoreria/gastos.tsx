@@ -340,6 +340,7 @@ type GastoGridRow = {
   fechaDeposito: string;
   fecIngreso: string;
   ot: string;
+  idOc: string;
   solicitante: string;
   responsable: string;
   cuentaNumero: string;
@@ -3407,6 +3408,8 @@ export default function GastosPage({
           //  : "";
         case "ot":
           return gasto.filtroOperativo.ot?.ot ?? "";
+        case "idOc":
+          return gasto.idOc ?? "";
         case "solicitante":
           return getConstanteLabelOrFallback(solicitanteOptions, gasto.solicitante, gasto.solicitanteLabel);
         case "responsable":
@@ -3547,6 +3550,7 @@ export default function GastosPage({
       { key: "fechaDeposito", label: "FechaDeposito", width: "130px", align: "left" as const },
       { key: "fecIngreso", label: "FecIngreso", width: "130px", align: "left" as const },
       { key: "ot", label: "OT", width: "70px", align: "left" as const },
+      { key: "idOc", label: "IdOc", width: "80px", align: "left" as const },
       { key: "solicitante", label: "Solicitante", width: "160px", align: "left" as const },
       { key: "responsable", label: "Responsable", width: "180px", align: "left" as const },
       { key: "cuentaNumero", label: "Cuenta", width: "140px", align: "left" as const },
@@ -3610,6 +3614,7 @@ export default function GastosPage({
           fechaDeposito: normalizeFecIngresoFromStore(gasto.fechaDeposito),
           fecIngreso: normalizeFecIngresoFromStore(gasto.fecIngreso),
           ot: gasto.filtroOperativo.ot?.ot ?? "",
+          idOc: String(gasto.idOc ?? "").trim(),
           solicitante: getConstanteLabelOrFallback(solicitanteOptions, gasto.solicitante, gasto.solicitanteLabel),
           responsable: gasto.responsableLabel || gasto.responsable || "",
           cuentaNumero: gasto.cuentaNumero || gasto.cuenta || "",
@@ -3651,13 +3656,10 @@ export default function GastosPage({
           const accionesHabilitadas = row.gasto.estado === 0 || row.gasto.estado === 2;
           // Editar: cualquier estado excepto Rechazado (3).
           const edicionHabilitada = row.gasto.estado !== 3;
-          // En Consulta se puede rechazar todo registro que no esté Pagado (4) ni Rechazado (3)
-          // y que no tenga OC asociada (IdOc vacío o 0).
-          const idOcGasto = String(row.gasto.idOc ?? "").trim();
-          const sinOc = idOcGasto === "" || idOcGasto === "0" || idOcGasto === "-";
+          // En Consulta se puede rechazar todo registro que no esté Pagado (4) ni Rechazado (3).
           const rechazoHabilitado =
             vistaGastosRef.current === "consulta"
-              ? row.gasto.estado !== 4 && row.gasto.estado !== 3 && sinOc
+              ? row.gasto.estado !== 4 && row.gasto.estado !== 3
               : accionesHabilitadas;
           const baseButton = {
             width: 30,
@@ -3744,6 +3746,7 @@ export default function GastosPage({
       { dataField: "fechaDeposito", caption: "FechaDeposito", dataType: "date", width: 130 },
       { dataField: "fecIngreso", caption: "FecIngreso", dataType: "date", width: 130 },
       { dataField: "ot", caption: "OT", width: 80 },
+      { dataField: "idOc", caption: "IdOc", width: 90, calculateCellValue: (row) => (row.idOc && row.idOc !== "0" ? row.idOc : "-") },
       { dataField: "solicitante", caption: "Solicitante", width: 170 },
       {
         dataField: "responsable",
@@ -3853,6 +3856,8 @@ export default function GastosPage({
                         : "";
                     case "ot":
                       return gasto.filtroOperativo.ot?.ot ?? "";
+                    case "idOc":
+                      return gasto.idOc ?? "";
                     case "fecIngreso":
                       return formatInputDateForDisplay(gasto.fecIngreso);
                     case "comentario":                      // Migrar el campo Comentario a una sola línea, reemplazando saltos de línea por espacio
