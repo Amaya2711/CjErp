@@ -280,7 +280,11 @@ export default function AlertasPage() {
     let cancelado = false;
     consultarPlanillaEstados(
       buildPlanillaConsultaEstadosRequest(
-        [{ nombre: "Estados", valor: ESTADOS_GASTO_PENDIENTE, tipo: "string" }],
+        [
+          { nombre: "Estados", valor: ESTADOS_GASTO_PENDIENTE, tipo: "string" },
+          // Solo se listan filas: ModoLiviano omite los totales por OT/Importar/OC/banco que esta pantalla no muestra.
+          { nombre: "ModoLiviano", valor: "true", tipo: "bool" },
+        ],
         { baseParams: { idCargo: null, idEmpleado: String(idEmpleado) } },
       ),
       { timeoutMs: 120000 },

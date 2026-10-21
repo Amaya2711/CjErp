@@ -1851,7 +1851,7 @@ export default function PagosV2Page() {
   }, [activeTab, rowsByTab, appliedFilters.fechaDesde, appliedFilters.fechaHasta]);
 
   const activeRows = useMemo(
-    () => (activeTab === "resumen" ? rowsByTab.resumen : rowsByTab[activeTab]),
+    () => (activeTab === "resumen" ? rowsByTab.resumen : rowsByTab[activeTab]).filter((row) => row.idSolicitante !== 0),
     [activeTab, rowsByTab]
   );
 
