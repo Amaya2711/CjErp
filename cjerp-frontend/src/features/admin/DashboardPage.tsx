@@ -6,7 +6,7 @@ import { getMenuAccentByName, getMenuIconComponent } from "../../utils/menuIcons
 //import type { MenuDto } from "../../models/seguridad/menu.types";
 import type { MenuDto as MenuModelDto } from "../../models/seguridad/menu.types";
 import { getAuthUser } from "../../utils/authStorage";
-import { contarAlertasPendientes, RUTA_ALERTAS } from "../inicio/alertasPendientes";
+import { obtenerIndicadorPendientes, RUTA_ALERTAS } from "../inicio/alertasPendientes";
 import { obtenerFaltasMes } from "../../api/asistenciaService";
 
 type QuickLink = {
@@ -263,7 +263,7 @@ export default function DashboardPage() {
     };
   }, []);
 
-  // Si el usuario tiene el acceso directo /inicio/alertas, se valida en segundo plano si tiene pendientes (OC o gastos).
+  // Si el usuario tiene el acceso directo /inicio/alertas, solo se consultan los totales (indicador 0/1) en segundo plano.
   const tieneAccesoAlertas = accesosDirectos.some((m) => esRutaAlertas(getMenuRoute(m)));
   const [alertasPendientes, setAlertasPendientes] = useState(0);
 
@@ -272,19 +272,17 @@ export default function DashboardPage() {
       setAlertasPendientes(0);
       return;
     }
-    const idEmpleado = [authUser?.idEmpleado, authUser?.codEmp]
-      .map((v) => Number(String(v ?? "").trim()))
-      .find((n) => Number.isFinite(n) && n > 0);
-    if (!idEmpleado) return;
-
     let active = true;
-    void contarAlertasPendientes(idEmpleado).then((total) => {
-      if (active) setAlertasPendientes(total);
-    });
+    obtenerIndicadorPendientes()
+      .then((indicador) => {
+        if (active) setAlertasPendientes(indicador);
+      })
+      .catch(() => {
+        if (active) setAlertasPendientes(0);
+      });
     return () => {
       active = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tieneAccesoAlertas]);
 
   // Si tiene el acceso directo ASISTENCIA EMPLEADO, se ejecuta sp_Asistencia_ListarMes (empleado logueado):
@@ -531,7 +529,7 @@ export default function DashboardPage() {
                             (faltasMes > 0 && esRutaAsistenciaEmpleado(ruta));
                           const detallePendiente = esRutaAsistenciaEmpleado(ruta)
                             ? `Tiene ${faltasMes} registro(s) con FALTA o INCOMPLETO en el mes`
-                            : `Tiene ${alertasPendientes} pendiente(s)`;
+                            : "Tiene pendientes por atender";
                           return (
                             <button
                               key={item.idMenu}

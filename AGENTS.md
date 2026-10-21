@@ -213,7 +213,7 @@ Detalle y diagramas: `docs/PROCESS_MAP.md`.
 - Versiones de pantalla con sufijo `_v1` = versión vigente; `_dev`/sin sufijo suele ser legacy (confirmar en menú).
 
 ## Reglas de negocio
-Estados de Planilla 0–10, super-aprobador 77, IGV 18 %, TC fijo 3.8 (⚠), detracciones por `Constante DETRACCION`, reglas de pago (estado 5/8, misma moneda, ejecutor cargo 14, fecha no futura), jornada 9.6 h (FE), validadores 1/2/3 en `EmpleadoCjDetalle`. Detalle con fuentes: `docs/BUSINESS_RULES.md`. **No cambiar reglas sin informar antes.**
+Estados de Planilla 0–10, super-aprobador 77, IGV 18 % (solo `IdComprobante` 2 y 6; **`IdComprobante = 5` NO calcula IGV: IGV = 0, Total = Total a pagar = Subtotal**; calculado en `gastos.tsx#tasaIgvPorComprobante` y `PlanillaService.ObtenerTasaIgv`), TC fijo 3.8 (⚠), detracciones por `Constante DETRACCION`, reglas de pago (estado 5/8, misma moneda, ejecutor cargo 14, fecha no futura), jornada 9.6 h (FE), validadores 1/2/3 en `EmpleadoCjDetalle`. Detalle con fuentes: `docs/BUSINESS_RULES.md`. **No cambiar reglas sin informar antes.**
 
 > 🚨 **REGLA CRÍTICA — MONTOS Y TIPO DE CAMBIO (error grave ya ocurrido; NO repetir)**
 > - `Subtotal`, `IGV`, `Total` (y cualquier monto de `Planilla`) se devuelven y se muestran **siempre en la moneda REAL del recibo**. **Si `TipoMoneda <> 1` NO se convierte a soles** en la columna original. Ej.: recibo en DÓLARES de US$ 2,173.91 debe verse `$ 2,173.91`, **nunca** `8,260.86`.

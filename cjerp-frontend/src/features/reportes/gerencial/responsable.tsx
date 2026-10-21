@@ -657,7 +657,7 @@ export default function ReporteResponsablePage() {
         </div>
 
         <div style={styles.fila}>
-          <Selector etiqueta="Tipo de trabajo" valor={filtros.tipoTrabajo} opciones={opciones.tiposTrabajo} onChange={(v) => actualizar("tipoTrabajo", v)} />
+          <MultiSelector etiqueta="Tipo de trabajo (uno o varios)" valores={filtros.tipoTrabajo} opciones={opciones.tiposTrabajo.map((valor) => ({ value: valor, label: valor }))} onChange={(v) => actualizar("tipoTrabajo", v)} />
           <Selector etiqueta="Tipo de registro" valor={filtros.tipoRegistro} opciones={opciones.tiposRegistro} onChange={(v) => actualizar("tipoRegistro", v)} />
           <Selector etiqueta="Estado de planilla" valor={filtros.estado} opciones={opciones.estados} onChange={(v) => actualizar("estado", v)} />
           <Selector etiqueta="Moneda" valor={filtros.moneda} opciones={opciones.monedas} onChange={(v) => actualizar("moneda", v)} />

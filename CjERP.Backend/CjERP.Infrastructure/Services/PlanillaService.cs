@@ -21,7 +21,7 @@ namespace CjERP.Infrastructure.Services
         private static decimal ObtenerTasaIgv(int idComprobante) => idComprobante switch
         {
             2 or 6 => 0.18m,
-            5 => 0.08m,
+            // IdComprobante 5 no calcula IGV (regla de negocio): IGV = 0 y Total = Subtotal.
             _ => 0m,
         };
 

@@ -853,16 +853,13 @@ function tasaIgvPorComprobante(
     .map((value) => Number(value))
     .find((value) => Number.isInteger(value) && value > 0);
 
-  return idComprobante === 2 || idComprobante === 6
-    ? 0.18
-    : idComprobante === 5
-      ? 0.08
-      : 0;
+  // Regla de negocio: IdComprobante 5 no calcula IGV (IGV = 0, Total = Total a pagar = Subtotal).
+  return idComprobante === 2 || idComprobante === 6 ? 0.18 : 0;
 }
 
 function esComprobanteSinIgv(idComprobante: unknown, comprobante: unknown): boolean {
   const id = Number(idComprobante);
-  if ([1, 3, 4, 7, 8].includes(id)) return true;
+  if ([1, 3, 4, 5, 7, 8].includes(id)) return true;
 
   const nombre = normalizeSearchText(String(comprobante ?? ""));
   return ["PAGO", "RENDICION", "EXONERADO", "EXENTO", "INAFECTO", "PLANILLA", "AFP"].includes(nombre);
@@ -1482,12 +1479,16 @@ export default function GastosPage({
   const authUser = getAuthUser();
   const [errores, setErrores] = useState<Record<string, string>>({});
   const [empleados, setEmpleados] = useState<EmpleadoCta[]>([]);
+  const empleadosRef = useRef<EmpleadoCta[]>([]);
+  empleadosRef.current = empleados;
   const [empleadosLoading, setEmpleadosLoading] = useState(false);
   const [empleadosError, setEmpleadosError] = useState<string | null>(null);
   const [tareasCatalogo, setTareasCatalogo] = useState<TareaOption[]>([]);
   // gastosApi.list se captura al montar: la lista de tareas se lee por ref para no usar un valor vacío.
   const tareasCatalogoRef = useRef<TareaOption[]>([]);
   tareasCatalogoRef.current = tareasCatalogo;
+  const filtrosOperativosCatalogoRef = useRef<FiltroOperativoItem[]>([]);
+  filtrosOperativosCatalogoRef.current = filtrosOperativosCatalogo;
   const [tareasCatalogoError, setTareasCatalogoError] = useState<string | null>(null);
   const [suministrosVigentes, setSuministrosVigentes] = useState<SuministroProvisionalVigenteOption[]>([]);
   const [suministrosVigentesLoading, setSuministrosVigentesLoading] = useState(false);
@@ -1744,6 +1745,8 @@ export default function GastosPage({
 
         if (buscarPorCorrelativo) {
           parametrosConsulta.push({ nombre: "Correlativo", valor: String(correlativoNumero), tipo: "int" });
+        } else if (filtrosConsulta.site.length > 0 && vistaGastosRef.current === "consulta") {
+          // Con Site elegido la consulta va directa al SP por @IdSite, sin acotar por fechas.
         } else {
           if (!isInputDateRangeValid(fechaInicio, fechaFin)) {
             setMensajeFiltroCabecera(null);
@@ -1780,9 +1783,58 @@ export default function GastosPage({
             )
           : [];
 
+      // Cliente / Proyecto / Site / Tipo de trabajo (pestaña Consulta): los nombres elegidos se traducen con el
+      // catálogo operativo a @IdCliente, @IdProyecto, @IdSite y @TipoTrabajo del SP. Cada combinación distinta es
+      // una llamada. Si hay demasiadas, no se envían al SP (el filtro en el navegador sigue aplicando igual).
+      const MAX_COMBINACIONES_FILTRO_OPERATIVO = 12;
+      type CombinacionOperativa = { idCliente?: number; idProyecto?: number; idSite?: string; tipoTrabajo?: string };
+      const combinacionesOperativas: CombinacionOperativa[] = (() => {
+        if (vistaGastosRef.current !== "consulta") {
+          return [];
+        }
+        const f = filtrosCabeceraAplicadosRef.current;
+        if (f.cliente.length === 0 && f.proyecto.length === 0 && f.site.length === 0 && f.tipoTrabajo.length === 0) {
+          return [];
+        }
+        const texto = (valor: unknown) => String(valor ?? "").trim();
+        const unicas = new Map<string, CombinacionOperativa>();
+        for (const item of filtrosOperativosCatalogoRef.current) {
+          if (f.cliente.length > 0 && !f.cliente.includes(texto(item.nombreCliente))) continue;
+          if (f.proyecto.length > 0 && !f.proyecto.includes(texto(item.nombreProyecto))) continue;
+          if (f.site.length > 0 && !f.site.includes(texto(item.nombreSite))) continue;
+          if (f.tipoTrabajo.length > 0 && !f.tipoTrabajo.includes(texto(item.tipoTrabajo))) continue;
+          const combinacion: CombinacionOperativa = {
+            ...(f.cliente.length > 0 && item.idCliente > 0 ? { idCliente: item.idCliente } : {}),
+            ...(f.proyecto.length > 0 && item.idProyecto > 0 ? { idProyecto: item.idProyecto } : {}),
+            ...(f.site.length > 0 && texto(item.idSite) ? { idSite: texto(item.idSite) } : {}),
+            ...(f.tipoTrabajo.length > 0 && texto(item.tipoTrabajo) ? { tipoTrabajo: texto(item.tipoTrabajo) } : {}),
+          };
+          unicas.set(JSON.stringify(combinacion), combinacion);
+        }
+        return unicas.size > 0 && unicas.size <= MAX_COMBINACIONES_FILTRO_OPERATIVO ? [...unicas.values()] : [];
+      })();
+
+      // Responsable (pestaña Consulta): los nombres elegidos se traducen a IdEmpleado (CuentaEmpleado/Empleado,
+      // el mismo que Planilla.IdResponsable) y viajan como @IdResponsable (CSV) al SP.
+      if (vistaGastosRef.current === "consulta" && filtrosCabeceraAplicadosRef.current.responsable.length > 0) {
+        const nombresResponsable = new Set(filtrosCabeceraAplicadosRef.current.responsable.map((nombre) => nombre.trim()));
+        const idsResponsable = Array.from(
+          new Set(
+            empleadosRef.current
+              .filter((empleado) => nombresResponsable.has(String(empleado.nombreEmpleado ?? "").trim()))
+              .map((empleado) => Number(empleado.idEmpleado))
+              .filter((id) => Number.isInteger(id) && id > 0)
+          )
+        );
+        if (idsResponsable.length > 0) {
+          parametrosConsulta.push({ nombre: "IdResponsable", valor: idsResponsable.join(","), tipo: "string" });
+        }
+      }
+
       const respuestas = [];
       for (const estados of gruposEstados.length > 0 ? gruposEstados : [""]) {
        for (const idTarea of idsTarea.length > 0 ? idsTarea : [null]) {
+        for (const operativa of combinacionesOperativas.length > 0 ? combinacionesOperativas : [null]) {
         respuestas.push(
           await consultarPlanillaEstados({
             ...buildPlanillaConsultaEstadosRequest(
@@ -1790,6 +1842,10 @@ export default function GastosPage({
                 ...(estados ? [{ nombre: "Estados", valor: estados, tipo: "string" } satisfies PlanillaConsultaParametro] : []),
                 ...parametrosConsulta,
                 ...(idTarea != null ? [{ nombre: "IdTarea", valor: String(idTarea), tipo: "int" } satisfies PlanillaConsultaParametro] : []),
+                ...(operativa?.idCliente != null ? [{ nombre: "IdCliente", valor: String(operativa.idCliente), tipo: "int" } satisfies PlanillaConsultaParametro] : []),
+                ...(operativa?.idProyecto != null ? [{ nombre: "IdProyecto", valor: String(operativa.idProyecto), tipo: "int" } satisfies PlanillaConsultaParametro] : []),
+                ...(operativa?.idSite != null ? [{ nombre: "IdSite", valor: operativa.idSite, tipo: "string" } satisfies PlanillaConsultaParametro] : []),
+                ...(operativa?.tipoTrabajo != null ? [{ nombre: "TipoTrabajo", valor: operativa.tipoTrabajo, tipo: "string" } satisfies PlanillaConsultaParametro] : []),
               ],
               // La pestaña Consulta no restringe por empleado/cargo del usuario (como ADMIN).
               vistaGastosRef.current === "consulta" ? { baseParams: { idCargo: null, idEmpleado: null } } : undefined
@@ -1797,6 +1853,7 @@ export default function GastosPage({
             ...(vistaGastosRef.current === "consulta" ? { consulta: "gastos-consulta" } : {}),
           })
         );
+        }
        }
       }
 
@@ -3072,7 +3129,10 @@ export default function GastosPage({
       nuevosErrores.tipoPago = "Seleccione un tipo de pago valido.";
     }
 
-    if (form.bien && !esConstanteValida(bienOptions, form.bien)) {
+    // El backend (PlanillaService.ParseRequiredInt) exige IdBien numérico: sin Bien el insert falla con 500.
+    if (!form.bien) {
+      nuevosErrores.bien = "Seleccione un bien.";
+    } else if (!esConstanteValida(bienOptions, form.bien)) {
       nuevosErrores.bien = "Seleccione un bien valido.";
     }
 

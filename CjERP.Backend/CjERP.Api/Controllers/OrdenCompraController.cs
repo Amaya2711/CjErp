@@ -387,7 +387,7 @@ public class OrdenCompraController : ControllerBase
     {
         if (request is null || request.IdOc <= 0 || request.Fila < 0 || request.IdTarea <= 0 ||
             request.IdComprobante <= 0 || request.Monto <= 0 ||
-            string.IsNullOrWhiteSpace(request.Cuenta) || string.IsNullOrWhiteSpace(request.CuentaInter) ||
+            (string.IsNullOrWhiteSpace(request.Cuenta) && string.IsNullOrWhiteSpace(request.CuentaInter)) ||
             string.IsNullOrWhiteSpace(request.NombreCta))
         {
             return BadRequest(new { success = false, message = "La fila de OC, cuenta, comprobante y monto son obligatorios para generar el pago." });

@@ -2391,13 +2391,6 @@ export default function RptAsistenciaPage() {
               onEmployeeFilterChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, employee: value }))}
               responsableFilter={employeeGridFilters.responsable}
               onResponsableFilterChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, responsable: value }))}
-              validationFilter={employeeGridFilters.estadoValidacionHoras}
-              validationOptions={employeeGridValidationOptions}
-              onValidationFilterChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, estadoValidacionHoras: value }))}
-              differenceOperator={employeeGridFilters.diferenciaOperator}
-              differenceValue={employeeGridFilters.diferenciaValue}
-              onDifferenceOperatorChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, diferenciaOperator: value }))}
-              onDifferenceValueChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, diferenciaValue: value }))}
               sortKey={employeeGridSort.key}
               sortDirection={employeeGridSort.direction}
               onToggleSort={(key) =>
@@ -2906,13 +2899,6 @@ export default function RptAsistenciaPage() {
               onEmployeeFilterChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, employee: value }))}
               responsableFilter={employeeGridFilters.responsable}
               onResponsableFilterChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, responsable: value }))}
-              validationFilter={employeeGridFilters.estadoValidacionHoras}
-              validationOptions={employeeGridValidationOptions}
-              onValidationFilterChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, estadoValidacionHoras: value }))}
-              differenceOperator={employeeGridFilters.diferenciaOperator}
-              differenceValue={employeeGridFilters.diferenciaValue}
-              onDifferenceOperatorChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, diferenciaOperator: value }))}
-              onDifferenceValueChange={(value) => setEmployeeGridFilters((prev) => ({ ...prev, diferenciaValue: value }))}
               sortKey={employeeGridSort.key}
               sortDirection={employeeGridSort.direction}
               onToggleSort={(key) =>
@@ -3506,13 +3492,6 @@ function SimpleEmployeeStateGrid({
   onEmployeeFilterChange,
   responsableFilter,
   onResponsableFilterChange,
-  validationFilter,
-  validationOptions,
-  onValidationFilterChange,
-  differenceOperator,
-  differenceValue,
-  onDifferenceOperatorChange,
-  onDifferenceValueChange,
   sortKey,
   sortDirection,
   onToggleSort,
@@ -3524,13 +3503,6 @@ function SimpleEmployeeStateGrid({
   onEmployeeFilterChange: (value: string) => void;
   responsableFilter: string;
   onResponsableFilterChange: (value: string) => void;
-  validationFilter: string;
-  validationOptions: string[];
-  onValidationFilterChange: (value: string) => void;
-  differenceOperator: "" | "lt" | "gt" | "eq";
-  differenceValue: string;
-  onDifferenceOperatorChange: (value: "" | "lt" | "gt" | "eq") => void;
-  onDifferenceValueChange: (value: string) => void;
   sortKey: EmployeeGridSortKey;
   sortDirection: "asc" | "desc";
   onToggleSort: (key: EmployeeGridSortKey) => void;
@@ -3560,7 +3532,7 @@ function SimpleEmployeeStateGrid({
         <div
           style={{
             ...styles.stateDateGrid,
-            gridTemplateColumns: `220px 150px 180px 160px 170px 150px 170px 110px 110px 100px 110px 140px 150px repeat(${states.length}, minmax(88px, 1fr))`,
+            gridTemplateColumns: `220px 150px 180px 160px 170px 150px 170px repeat(${states.length}, minmax(88px, 1fr))`,
           }}
         >
           <div style={{ ...styles.stateDateGridHeader, ...styles.stateDateGridCorner }}>
@@ -3602,77 +3574,6 @@ function SimpleEmployeeStateGrid({
           <div style={styles.stateDateGridHeader}>Cliente</div>
           <div style={styles.stateDateGridHeader}>Area</div>
           <div style={styles.stateDateGridHeader}>Ubicacion</div>
-          <div style={styles.stateDateGridHeader}>
-            <button type="button" style={styles.employeeGridSortButton} onClick={() => onToggleSort("total")}>
-              <span>Total horas</span>
-              <span style={styles.employeeGridSortPill}>
-                {sortKey === "total" ? (sortDirection === "asc" ? "ASC" : "DESC") : "ORD"}
-              </span>
-            </button>
-          </div>
-          <div style={styles.stateDateGridHeader}>
-            <button type="button" style={styles.employeeGridSortButton} onClick={() => onToggleSort("otros")}>
-              <span>Hrs Otros</span>
-              <span style={styles.employeeGridSortPill}>
-                {sortKey === "otros" ? (sortDirection === "asc" ? "ASC" : "DESC") : "ORD"}
-              </span>
-            </button>
-          </div>
-          <div style={styles.stateDateGridHeader}>
-            <button type="button" style={styles.employeeGridSortButton} onClick={() => onToggleSort("faltaAprobar")}>
-              <span>Falta aprobar (hrs)</span>
-              <span style={styles.employeeGridSortPill}>
-                {sortKey === "faltaAprobar" ? (sortDirection === "asc" ? "ASC" : "DESC") : "ORD"}
-              </span>
-            </button>
-          </div>
-          <div style={styles.stateDateGridHeader}>Hrs Lab.</div>
-          <div style={styles.stateDateGridHeader}>
-            <div style={styles.employeeGridHeaderStack}>
-              <button type="button" style={styles.employeeGridSortButton} onClick={() => onToggleSort("diferencia")}>
-                <span>Diferencia</span>
-                <span style={styles.employeeGridSortPill}>
-                  {sortKey === "diferencia" ? (sortDirection === "asc" ? "ASC" : "DESC") : "ORD"}
-                </span>
-              </button>
-              <select
-                value={differenceOperator}
-                onChange={(event) => {
-                  const value = event.target.value as "" | "lt" | "gt" | "eq";
-                  onDifferenceOperatorChange(value);
-                  if (value === "") onDifferenceValueChange("0");
-                }}
-                style={styles.employeeGridHeaderSelect}
-              >
-                <option value="">Sin filtro</option>
-                <option value="lt">Menor a</option>
-                <option value="gt">Mayor a</option>
-                <option value="eq">Igual a</option>
-              </select>
-              {differenceOperator !== "" ? (
-                <input
-                  type="number"
-                  step="0.01"
-                  value={differenceValue}
-                  onChange={(event) => onDifferenceValueChange(event.target.value)}
-                  placeholder="Nro"
-                  style={styles.employeeGridHeaderInput}
-                />
-              ) : null}
-            </div>
-          </div>
-          <div style={styles.stateDateGridHeader}>
-            <div style={styles.employeeGridHeaderStack}>
-              <span>Estado valid.</span>
-              <select value={validationFilter} onChange={(event) => onValidationFilterChange(event.target.value)} style={styles.employeeGridHeaderSelect}>
-                {validationOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option === ALL_OPTION ? "Todos" : option}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
           {states.map((state) => {
             const stateSortKey = `state:${state}` as EmployeeGridSortKey;
             return (
@@ -3786,83 +3687,6 @@ function SimpleEmployeeStateGrid({
                 >
                   <span style={styles.employeeGridValidationText}>{item.ubicacion || "Sin ubicacion"}</span>
                 </div>
-                <div
-                  style={{
-                    ...styles.stateDateGridCell,
-                    ...styles.employeeGridTotalCell,
-                    background: differenceTone.rowBackground,
-                    color: differenceTone.rowText,
-                    cursor: onRowSelect ? "pointer" : "default",
-                  }}
-                  {...rowSelectProps}
-                >
-                  <span style={styles.stateDateGridCellCount}>{item.total > 0 ? formatDecimal(item.total, 2) : "0.00"}</span>
-                  <span style={styles.stateDateGridCellHours}>h</span>
-                </div>
-                <div
-                  style={{
-                    ...styles.stateDateGridCell,
-                    ...styles.employeeGridTotalCell,
-                    background: item.totalHorasFaltaIncompleto > 0 ? "#FEF3C7" : "#F8FAFC",
-                    color: item.totalHorasFaltaIncompleto > 0 ? "#92400E" : "#94A3B8",
-                    cursor: onRowSelect ? "pointer" : "default",
-                  }}
-                  {...rowSelectProps}
-                >
-                  <span style={styles.stateDateGridCellCount}>{item.totalHorasFaltaIncompleto > 0 ? formatDecimal(item.totalHorasFaltaIncompleto, 2) : "0.00"}</span>
-                  <span style={styles.stateDateGridCellHours}>h</span>
-                </div>
-                <div
-                  style={{
-                    ...styles.stateDateGridCell,
-                    ...styles.employeeGridTotalCell,
-                    background: item.totalHorasFaltaAprobar > 0 ? "#DBEAFE" : "#F8FAFC",
-                    color: item.totalHorasFaltaAprobar > 0 ? "#1D4ED8" : "#94A3B8",
-                    cursor: onRowSelect ? "pointer" : "default",
-                  }}
-                  {...rowSelectProps}
-                >
-                  <span style={styles.stateDateGridCellCount}>{item.totalHorasFaltaAprobar > 0 ? formatDecimal(item.totalHorasFaltaAprobar, 2) : "0.00"}</span>
-                  <span style={styles.stateDateGridCellHours}>h</span>
-                </div>
-                <div
-                  style={{
-                    ...styles.stateDateGridCell,
-                    ...styles.employeeGridTotalCell,
-                    background: differenceTone.rowBackground,
-                    color: differenceTone.rowText,
-                    cursor: onRowSelect ? "pointer" : "default",
-                  }}
-                  {...rowSelectProps}
-                >
-                  <span style={styles.stateDateGridCellCount}>{item.totalHorasLaborales > 0 ? formatDecimal(item.totalHorasLaborales, 2) : "0.00"}</span>
-                  <span style={styles.stateDateGridCellHours}>h</span>
-                </div>
-                <div
-                  style={{
-                    ...styles.stateDateGridCell,
-                    ...styles.employeeGridTotalCell,
-                    background: differenceTone.accentBackground,
-                    color: differenceTone.accentText,
-                    cursor: onRowSelect ? "pointer" : "default",
-                  }}
-                  {...rowSelectProps}
-                >
-                  <span style={styles.stateDateGridCellCount}>{formatDecimal(item.diferenciaHoras, 2)}</span>
-                  <span style={styles.stateDateGridCellHours}>h</span>
-                </div>
-                <div
-                  style={{
-                    ...styles.stateDateGridCell,
-                    ...styles.employeeGridValidationCell,
-                    background: differenceTone.rowBackground,
-                    color: differenceTone.rowText,
-                    cursor: onRowSelect ? "pointer" : "default",
-                  }}
-                  {...rowSelectProps}
-                >
-                  <span style={styles.employeeGridValidationText}>{item.estadoValidacionHoras || "Sin validacion"}</span>
-                </div>
                 {states.map((state, index) => {
                   const count = item.stateCounts[state] ?? 0;
                   const stateVisual = getStateVisual(state, index);
@@ -3898,13 +3722,6 @@ function SimpleEmployeeDateGrid({
   onEmployeeFilterChange,
   responsableFilter,
   onResponsableFilterChange,
-  validationFilter,
-  validationOptions,
-  onValidationFilterChange,
-  differenceOperator,
-  differenceValue,
-  onDifferenceOperatorChange,
-  onDifferenceValueChange,
   sortKey,
   sortDirection,
   onToggleSort,
@@ -3916,19 +3733,12 @@ function SimpleEmployeeDateGrid({
   onEmployeeFilterChange: (value: string) => void;
   responsableFilter: string;
   onResponsableFilterChange: (value: string) => void;
-  validationFilter: string;
-  validationOptions: string[];
-  onValidationFilterChange: (value: string) => void;
-  differenceOperator: "" | "lt" | "gt" | "eq";
-  differenceValue: string;
-  onDifferenceOperatorChange: (value: "" | "lt" | "gt" | "eq") => void;
-  onDifferenceValueChange: (value: string) => void;
   sortKey: EmployeeGridSortKey;
   sortDirection: "asc" | "desc";
   onToggleSort: (key: EmployeeGridSortKey) => void;
   onCellSelect?: (nombreEmpleado: string, fecha: string) => void;
 }) {
-  const max = Math.max(
+  const max =Math.max(
     ...data.flatMap((item) => item.fechas.map((fecha) => fecha.totalHoras)),
     1
   );
@@ -3999,7 +3809,7 @@ function SimpleEmployeeDateGrid({
             <div
               style={{
                 ...styles.stateDateGrid,
-                gridTemplateColumns: `220px 180px 110px 110px 100px 140px 150px 150px repeat(${fechas.length}, minmax(88px, 1fr))`,
+                gridTemplateColumns: `220px 180px repeat(${fechas.length}, minmax(88px, 1fr))`,
               }}
             >
             <div style={{ ...styles.stateDateGridHeader, ...styles.stateDateGridCorner }}>
@@ -4044,99 +3854,6 @@ function SimpleEmployeeDateGrid({
                 />
               </div>
             </div>
-            <div style={styles.stateDateGridHeader}>
-              <button
-                type="button"
-                style={styles.employeeGridSortButton}
-                onClick={() => onToggleSort("total")}
-              >
-                <span>Total horas</span>
-                <span style={styles.employeeGridSortPill}>
-                  {sortKey === "total" ? (sortDirection === "asc" ? "ASC" : "DESC") : "ORD"}
-                </span>
-              </button>
-            </div>
-            <div style={styles.stateDateGridHeader}>
-              <button
-                type="button"
-                style={styles.employeeGridSortButton}
-                onClick={() => onToggleSort("otros")}
-              >
-                <span>Hrs Otros</span>
-                <span style={styles.employeeGridSortPill}>
-                  {sortKey === "otros" ? (sortDirection === "asc" ? "ASC" : "DESC") : "ORD"}
-                </span>
-              </button>
-            </div>
-            <div style={styles.stateDateGridHeader}>
-              <button
-                type="button"
-                style={styles.employeeGridSortButton}
-                onClick={() => onToggleSort("faltaAprobar")}
-              >
-                <span>Falta aprobar</span>
-                <span style={styles.employeeGridSortPill}>
-                  {sortKey === "faltaAprobar" ? (sortDirection === "asc" ? "ASC" : "DESC") : "ORD"}
-                </span>
-              </button>
-            </div>
-            <div style={styles.stateDateGridHeader}>
-              Hrs Lab.
-            </div>
-            <div style={styles.stateDateGridHeader}>
-              <div style={styles.employeeGridHeaderStack}>
-                <button
-                  type="button"
-                  style={styles.employeeGridSortButton}
-                  onClick={() => onToggleSort("diferencia")}
-                >
-                  <span>Diferencia</span>
-                  <span style={styles.employeeGridSortPill}>
-                    {sortKey === "diferencia" ? (sortDirection === "asc" ? "ASC" : "DESC") : "ORD"}
-                  </span>
-                </button>
-                <select
-                  value={differenceOperator}
-                  onChange={e => {
-                    const val = e.target.value as "" | "lt" | "gt" | "eq";
-                    onDifferenceOperatorChange(val);
-                    if (val === "") onDifferenceValueChange("0");
-                  }}
-                  style={styles.employeeGridHeaderSelect}
-                >
-                  <option value="">Sin filtro</option>
-                  <option value="lt">Menor a</option>
-                  <option value="gt">Mayor a</option>
-                  <option value="eq">Igual a</option>
-                </select>
-                {differenceOperator !== "" && (
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={differenceValue}
-                    onChange={event => onDifferenceValueChange(event.target.value)}
-                    placeholder="Nro"
-                    style={styles.employeeGridHeaderInput}
-                  />
-                )}
-              </div>
-            </div>
-            <div style={styles.stateDateGridHeader}>
-              <div style={styles.employeeGridHeaderStack}>
-                <span>Estado valid.</span>
-                <select
-                  value={validationFilter}
-                  onChange={(event) => onValidationFilterChange(event.target.value)}
-                  style={styles.employeeGridHeaderSelect}
-                >
-                  {validationOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option === ALL_OPTION ? "Todos" : option}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
             {fechas.map((fecha) => (
               <div key={`head-employee-${fecha}`} style={styles.stateDateGridHeader}>
                 <div style={styles.employeeGridDateHeader}>
@@ -4176,89 +3893,6 @@ function SimpleEmployeeDateGrid({
                 >
                   <span style={styles.employeeGridValidationText}>
                     {item.responsable || "Sin responsable"}
-                  </span>
-                </div>
-                <div
-                  style={{
-                    ...styles.stateDateGridCell,
-                    ...styles.employeeGridTotalCell,
-                    background: differenceTone.rowBackground,
-                    color: differenceTone.rowText,
-                  }}
-                  title={`${item.employee}: ${formatDecimal(item.total, 2)} horas totales`}
-                >
-                  <span style={styles.stateDateGridCellCount}>
-                    {item.total > 0 ? formatDecimal(item.total, 2) : "0.00"}
-                  </span>
-                  <span style={styles.stateDateGridCellHours}>h</span>
-                </div>
-                <div
-                  style={{
-                    ...styles.stateDateGridCell,
-                    ...styles.employeeGridTotalCell,
-                    background: item.totalHorasFaltaIncompleto > 0 ? "#FEF3C7" : "#F8FAFC",
-                    color: item.totalHorasFaltaIncompleto > 0 ? "#92400E" : "#94A3B8",
-                  }}
-                  title={`${item.employee}: ${formatDecimal(item.totalHorasFaltaIncompleto, 2)} horas por FALTA/INCOMPLETO`}
-                >
-                  <span style={styles.stateDateGridCellCount}>
-                    {item.totalHorasFaltaIncompleto > 0 ? formatDecimal(item.totalHorasFaltaIncompleto, 2) : "0.00"}
-                  </span>
-                  <span style={styles.stateDateGridCellHours}>h</span>
-                </div>
-                <div
-                  style={{
-                    ...styles.stateDateGridCell,
-                    ...styles.employeeGridTotalCell,
-                    background: item.totalHorasFaltaAprobar > 0 ? "#DBEAFE" : "#F8FAFC",
-                    color: item.totalHorasFaltaAprobar > 0 ? "#1D4ED8" : "#94A3B8",
-                  }}
-                  title={`${item.employee}: ${formatDecimal(item.totalHorasFaltaAprobar, 2)} horas por falta aprobar`}
-                >
-                  <span style={styles.stateDateGridCellCount}>
-                    {item.totalHorasFaltaAprobar > 0 ? formatDecimal(item.totalHorasFaltaAprobar, 2) : "0.00"}
-                  </span>
-                  <span style={styles.stateDateGridCellHours}>h</span>
-                </div>
-                <div
-                  style={{
-                    ...styles.stateDateGridCell,
-                    ...styles.employeeGridTotalCell,
-                    background: differenceTone.rowBackground,
-                    color: differenceTone.rowText,
-                  }}
-                  title={`${item.employee}: ${formatDecimal(item.totalHorasLaborales, 2)} horas laborales`}
-                >
-                  <span style={styles.stateDateGridCellCount}>
-                    {item.totalHorasLaborales > 0 ? formatDecimal(item.totalHorasLaborales, 2) : "0.00"}
-                  </span>
-                  <span style={styles.stateDateGridCellHours}>h</span>
-                </div>
-                <div
-                  style={{
-                    ...styles.stateDateGridCell,
-                    ...styles.employeeGridTotalCell,
-                    background: differenceTone.accentBackground,
-                    color: differenceTone.accentText,
-                  }}
-                  title={`${item.employee}: ${formatDecimal(item.diferenciaHoras, 2)} horas de diferencia`}
-                >
-                  <span style={styles.stateDateGridCellCount}>
-                    {formatDecimal(item.diferenciaHoras, 2)}
-                  </span>
-                  <span style={styles.stateDateGridCellHours}>h</span>
-                </div>
-                <div
-                  style={{
-                    ...styles.stateDateGridCell,
-                    ...styles.employeeGridValidationCell,
-                    background: differenceTone.rowBackground,
-                    color: differenceTone.rowText,
-                  }}
-                  title={`${item.employee}: ${item.estadoValidacionHoras || "Sin validacion"}`}
-                >
-                  <span style={styles.employeeGridValidationText}>
-                    {item.estadoValidacionHoras || "Sin validacion"}
                   </span>
                 </div>
                 {item.fechas.map((cell) => {

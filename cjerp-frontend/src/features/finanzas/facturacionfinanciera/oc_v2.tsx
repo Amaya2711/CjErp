@@ -1445,8 +1445,8 @@ export default function OcV2Page() {
       !Number.isInteger(fila) || fila < 0 ? "Fila de detalle" : null,
       !Number.isInteger(idTarea) || idTarea <= 0 ? "Id tarea" : null,
       !Number.isInteger(idComprobante) || idComprobante <= 0 ? "Id comprobante" : null,
-      !cuenta ? "Cuenta" : null,
-      !cuentaInter ? "Cuenta interbancaria" : null,
+      // Basta con una de las dos cuentas (normal o interbancaria).
+      !cuenta && !cuentaInter ? "Cuenta o cuenta interbancaria" : null,
       !nombreCta ? "Titular de cuenta" : null,
     ].filter((campo): campo is string => campo !== null);
 

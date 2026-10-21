@@ -4264,7 +4264,9 @@ export default function PagosV2Page() {
               rowPadding="2px 8px"
               rowClassName={(row) => `pagos-v1-data-row${row.id === selectedId ? " pagos-v1-selected-row" : ""}`}
               rowBackground={(row, focused) => {
-                const exceeded = (row.totalSubtotalPorMoneda ?? 0) > (row.totalMontoBckPorMoneda ?? 0);
+                // Misma base que las columnas Sub Ficticio / Total Sitio (en soles si la OT mezcla monedas).
+                const ficticio = getFicticioInfo(row);
+                const exceeded = ficticio.sub > ficticio.bck;
                 if (exceeded) return focused ? "#FECACA" : "#FFF1F2";
                 return focused ? "#DBEAFE" : "#FFFFFF";
               }}

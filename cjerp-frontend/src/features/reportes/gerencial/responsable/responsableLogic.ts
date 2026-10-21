@@ -19,7 +19,7 @@ export type FiltrosReporte = {
   cliente: string;
   proyecto: string;
   site: string[];
-  tipoTrabajo: string;
+  tipoTrabajo: string[];
   tipoRegistro: string;
   estado: string;
   moneda: string;
@@ -36,7 +36,7 @@ export const FILTROS_VACIOS: FiltrosReporte = {
   cliente: "",
   proyecto: "",
   site: [],
-  tipoTrabajo: "",
+  tipoTrabajo: [],
   tipoRegistro: "",
   estado: "",
   moneda: "",
@@ -281,7 +281,7 @@ export function filtrarFilas(filas: FilaReporte[], f: FiltrosReporte) {
       (!f.cliente || fila.cliente === f.cliente) &&
       (!f.proyecto || fila.proyecto === f.proyecto) &&
       (f.site.length === 0 || f.site.includes(claveSite(fila))) &&
-      (!f.tipoTrabajo || fila.tipoTrabajo === f.tipoTrabajo) &&
+      (f.tipoTrabajo.length === 0 || f.tipoTrabajo.includes(fila.tipoTrabajo)) &&
       (!f.tipoRegistro || fila.tipoRegistro === f.tipoRegistro) &&
       (!f.estado || fila.estadoNombre === f.estado) &&
       (!f.moneda || fila.monedaClave === f.moneda) &&
@@ -518,7 +518,7 @@ export function describirFiltros(f: FiltrosReporte, criterio: string, filas: Fil
     const etiquetas = new Map(filas.map((fila) => [claveSite(fila), etiquetaSite(fila)]));
     partes.push(`Site: ${f.site.map((clave) => etiquetas.get(clave) ?? clave.replace("|", "-")).join(", ")}`);
   }
-  if (f.tipoTrabajo) partes.push(`Tipo de trabajo: ${f.tipoTrabajo}`);
+  if (f.tipoTrabajo.length > 0) partes.push(`Tipo de trabajo: ${f.tipoTrabajo.join(", ")}`);
   if (f.tipoRegistro) partes.push(`Tipo de registro: ${f.tipoRegistro}`);
   if (f.estado) partes.push(`Estado de planilla: ${f.estado}`);
   if (f.moneda) partes.push(`Moneda: ${f.moneda}`);

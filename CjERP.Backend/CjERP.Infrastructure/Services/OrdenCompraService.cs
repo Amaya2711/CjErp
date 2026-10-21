@@ -26,6 +26,7 @@ public class OrdenCompraService : IOrdenCompraService
 
     private const string BuscarCabeceraSp = "dbo.sp_OrdenCompra_BuscarCabecera";
     private const string BuscarDetalleSp = "dbo.sp_OrdenCompra_BuscarDetalle";
+    private const string BuscarRecibosAsociadosSp = "dbo.sp_OrdenCompra_BuscarRecibosAsociados";
     private const string InsertarSp = "dbo.sp_OrdenCompra_Insertar";
     private const string RechazarMasivoSp = "dbo.sp_OrdenCompra_RechazarMasivo";
     private const string BuscarOrigenPagoNuevoSql = """
@@ -55,13 +56,18 @@ public class OrdenCompraService : IOrdenCompraService
         WHERE cab.IdOc = @IdOc
           AND det.Fila = @Fila;
         """;
-    private const string BuscarBancoCuentaPagoNuevoSql = """
+    // La grilla envía los textos ya limpios (el trim de JS quita espacios duros y de control), pero
+    // CuentaEmpleado puede traer NBSP, tabulaciones o saltos de línea que LTRIM/RTRIM de SQL no quitan.
+    private static string NormalizarTextoCuentaSql(string expresion) =>
+        $"LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(ISNULL({expresion}, N''), NCHAR(160), N' '), NCHAR(9), N' '), NCHAR(10), N' '), NCHAR(13), N' '), NCHAR(8203), N''), NCHAR(65279), N'')))";
+
+    private static readonly string BuscarBancoCuentaPagoNuevoSql = $"""
         SELECT TOP 1 cuenta.IdBanco
         FROM dbo.CuentaEmpleado cuenta
         WHERE cuenta.IdEmpleado = @IdResponsable
-          AND LTRIM(RTRIM(ISNULL(cuenta.Cuenta, ''))) = LTRIM(RTRIM(@Cuenta))
-          AND LTRIM(RTRIM(ISNULL(cuenta.CuentaInter, ''))) = LTRIM(RTRIM(@CuentaInter))
-          AND LTRIM(RTRIM(ISNULL(cuenta.NombreCta, ''))) = LTRIM(RTRIM(@NombreCta));
+          AND {NormalizarTextoCuentaSql("cuenta.Cuenta")} = {NormalizarTextoCuentaSql("@Cuenta")}
+          AND {NormalizarTextoCuentaSql("cuenta.CuentaInter")} = {NormalizarTextoCuentaSql("@CuentaInter")}
+          AND {NormalizarTextoCuentaSql("cuenta.NombreCta")} = {NormalizarTextoCuentaSql("@NombreCta")};
         """;
     private const string BuscarSaldoPagoNuevoSql = """
         SELECT ISNULL(SUM(ISNULL(planilla.Subtotal, 0)), 0)
@@ -166,50 +172,6 @@ public class OrdenCompraService : IOrdenCompraService
           AND IdSite = @IdSite
           AND (@Correlativo IS NULL OR Correlativo = @Correlativo)
           AND (@Fila IS NULL OR Fila = @Fila);
-        """;
-    private const string BuscarRecibosAsociadosSql = """
-        SELECT
-            a.Correlativo,
-            a.FecIngreso,
-            a.Subtotal,
-            a.Igv,
-            a.Total,
-            b.ValorIni AS Moneda,
-            a.Detalle,
-            COALESCE(a.ImgSustento, '') AS RutaImagen,
-            a.IdCliente,
-            a.IdProyecto,
-            a.IdSite,
-            a.CorreSite,
-            a.Tipo_Trabajo AS TipoTrabajo,
-            c.ValorIni AS Comprobante,
-            COALESCE(NULLIF(LTRIM(RTRIM(tipoPago.ValorIni)), ''), CONVERT(varchar(20), a.IdTipoPago), '') AS TipoPago,
-            COALESCE(responsableCj.NombreEmpleado, d.NombreEmpleado, responsablePorCj.NombreEmpleado, CONVERT(varchar(20), a.IdResponsable), '') AS Responsable,
-            COALESCE(gestorCj.NombreEmpleado, gestorLegacy.NombreEmpleado, gestorPorCj.NombreEmpleado, CONVERT(varchar(20), a.IdGestor), '') AS Gestor,
-            COALESCE(validadorCj.NombreEmpleado, validadorLegacy.NombreEmpleado, validadorPorCj.NombreEmpleado, CONVERT(varchar(20), a.IdValidador), '') AS Validador,
-            d.NroDocumento,
-            e.ValorIni AS Estado,
-            f.ValorIni AS Tarea,
-            a.Fila,
-            TRY_CONVERT(int, NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), a.IdOc))), '')) AS IdOc
-        FROM dbo.Planilla a
-        LEFT JOIN dbo.Constante b ON b.Campo = 'TIPO_MONEDA' AND a.TipoMoneda = b.Correlativo
-        LEFT JOIN dbo.Constante c ON c.Campo = 'TIPO_COMPROBANTE' AND a.IdComprobante = c.Correlativo
-        LEFT JOIN dbo.Constante tipoPago ON tipoPago.Campo = 'TIPO_PAGO' AND a.IdTipoPago = tipoPago.Correlativo
-        LEFT JOIN dbo.Empleado d ON a.IdResponsable = d.IdEmpleado
-        LEFT JOIN dbo.EmpleadoCj responsableCj ON a.IdResponsable = responsableCj.IdEmpleado AND ISNULL(a.IdWeb, 0) = 1
-        LEFT JOIN dbo.Empleado responsablePorCj ON a.IdResponsable = responsablePorCj.IdEmpleadoCj
-        LEFT JOIN dbo.Empleado gestorLegacy ON a.IdGestor = gestorLegacy.IdEmpleado AND ISNULL(a.IdWeb, 0) <> 1
-        LEFT JOIN dbo.EmpleadoCj gestorCj ON a.IdGestor = gestorCj.IdEmpleado AND ISNULL(a.IdWeb, 0) = 1
-        LEFT JOIN dbo.Empleado gestorPorCj ON a.IdGestor = gestorPorCj.IdEmpleadoCj
-        LEFT JOIN dbo.Empleado validadorLegacy ON a.IdValidador = validadorLegacy.IdEmpleado AND ISNULL(a.IdWeb, 0) <> 1
-        LEFT JOIN dbo.EmpleadoCj validadorCj ON a.IdValidador = validadorCj.IdEmpleado AND ISNULL(a.IdWeb, 0) = 1
-        LEFT JOIN dbo.Empleado validadorPorCj ON a.IdValidador = validadorPorCj.IdEmpleadoCj
-        LEFT JOIN dbo.Constante e ON e.Campo = 'ESTADO' AND e.Correlativo = a.Estado
-        LEFT JOIN dbo.Constante f ON f.Campo = 'TAREA' AND f.Correlativo = a.IdTarea
-        WHERE TRY_CONVERT(int, NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), a.IdOc))), '')) = @IdOc
-          AND (@Fila IS NULL OR a.Fila = @Fila)
-        ORDER BY a.TipoMoneda, a.FecIngreso, a.Correlativo;
         """;
     private const string BuscarRecibosSinAsociarSql = """
         SELECT
@@ -1395,9 +1357,9 @@ public class OrdenCompraService : IOrdenCompraService
         await using var connection = _sqlCommandFactory.CreateConnection();
         return await connection.QueryAsync<OrdenCompraReciboDto>(
             _sqlCommandFactory.Create(
-                BuscarRecibosAsociadosSql,
+                BuscarRecibosAsociadosSp,
                 new { request.IdOc, request.Fila },
-                CommandType.Text,
+                CommandType.StoredProcedure,
                 cancellationToken,
                 commandTimeout: 120));
     }
@@ -1592,8 +1554,8 @@ public class OrdenCompraService : IOrdenCompraService
                 new
                 {
                     IdResponsable = origen.IdResponsable,
-                    Cuenta = request.Cuenta.Trim(),
-                    CuentaInter = request.CuentaInter.Trim(),
+                    Cuenta = (request.Cuenta ?? string.Empty).Trim(),
+                    CuentaInter = (request.CuentaInter ?? string.Empty).Trim(),
                     NombreCta = request.NombreCta.Trim()
                 },
                 CommandType.Text,
@@ -1629,8 +1591,8 @@ public class OrdenCompraService : IOrdenCompraService
                 Responsable = origen.IdResponsable.ToString(CultureInfo.InvariantCulture),
                 IdCliente = origen.IdCliente,
                 IdBancoCta = idBancoCta,
-                CuentaNumero = request.Cuenta.Trim(),
-                CuentaInter = request.CuentaInter.Trim(),
+                CuentaNumero = (request.Cuenta ?? string.Empty).Trim(),
+                CuentaInter = (request.CuentaInter ?? string.Empty).Trim(),
                 NombreCta = request.NombreCta.Trim(),
                 TipoPago = origen.IdFormaPago.ToString(CultureInfo.InvariantCulture),
                 Monto = request.Monto,
