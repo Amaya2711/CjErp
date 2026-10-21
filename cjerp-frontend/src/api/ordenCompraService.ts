@@ -138,6 +138,8 @@ export type OrdenCompraRechazoMasivoPayload = {
   idsOc: number[];
   observacion: string;
   idAprobador?: number;
+  /** El backend rechaza la petición si alguna OC tiene recibos asociados. */
+  soloSinRecibos?: boolean;
 };
 
 export type OrdenCompraAprobarPayload = {

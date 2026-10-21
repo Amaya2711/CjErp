@@ -1104,6 +1104,30 @@ public class OrdenCompraService : IOrdenCompraService
 
         var idsOcCsv = string.Join(",", idsOc);
 
+        if (request.SoloSinRecibos && idsOc.Length > 0)
+        {
+            // Mismo criterio que sp_OrdenCompra_BuscarRecibosAsociados (dbo.Planilla con IdOc = OC), pero los
+            // recibos rechazados (Estado 3) no impiden rechazar la OC: basta uno no rechazado para bloquearla.
+            var conRecibos = (await connection.QueryAsync<int>(
+                new CommandDefinition(
+                    """
+                    SELECT DISTINCT TRY_CONVERT(int, NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), p.IdOc))), ''))
+                    FROM dbo.Planilla p
+                    WHERE TRY_CONVERT(int, NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), p.IdOc))), ''))
+                          IN (SELECT TRY_CONVERT(int, ids.value) FROM STRING_SPLIT(@IdsOcCsv, ',') ids)
+                      AND ISNULL(TRY_CONVERT(int, p.Estado), -1) <> 3;
+                    """,
+                    new { IdsOcCsv = idsOcCsv },
+                    cancellationToken: cancellationToken,
+                    commandTimeout: 120))).ToList();
+
+            if (conRecibos.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"No se puede rechazar la orden de compra {string.Join(", ", conRecibos)}: tiene recibos asociados que no están rechazados.");
+            }
+        }
+
         var parameters = new DynamicParameters();
         parameters.Add("@IdsOc", idsOcCsv, DbType.String);
         parameters.Add("@Observacion", NullIfWhiteSpace(request.Observacion), DbType.String);

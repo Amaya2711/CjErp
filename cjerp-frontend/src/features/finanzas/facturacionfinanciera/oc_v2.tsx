@@ -911,6 +911,9 @@ export default function OcV2Page() {
   const [rechazoError, setRechazoError] = useState("");
   const [rechazando, setRechazando] = useState(false);
   const [idsOcRechazo, setIdsOcRechazo] = useState<number[]>([]);
+  // Rechazo desde la pestaña Relación: el backend valida que la OC no tenga recibos asociados.
+  const [rechazoSoloSinRecibos, setRechazoSoloSinRecibos] = useState(false);
+  const [verificandoRechazoOc, setVerificandoRechazoOc] = useState<number | null>(null);
   const [aprobando, setAprobando] = useState(false);
   const [reporteFiltros, setReporteFiltros] = useState<ReporteFiltros>({
     solicitante: "",
@@ -2649,6 +2652,7 @@ export default function OcV2Page() {
     setError("");
     setRechazoError("");
     setIdsOcRechazo(idsValidos);
+    setRechazoSoloSinRecibos(false);
     setMostrarConfirmacionRechazo(false);
     setMostrarMotivoRechazo(true);
     setMotivoRechazo("");
@@ -2660,7 +2664,38 @@ export default function OcV2Page() {
     setMotivoRechazo("");
     setRechazoError("");
     setIdsOcRechazo([]);
+    setRechazoSoloSinRecibos(false);
   }, []);
+
+  // Pestaña Relación: solo se puede rechazar una OC sin recibos asociados, o cuyos recibos estén todos rechazados
+  // (Planilla.Estado 3). La verificación definitiva (por Estado numérico) la hace el backend con `soloSinRecibos`.
+  const solicitarRechazoRelacion = useCallback(async (item: OrdenCompraCabeceraDto) => {
+    if (getEstadoVista(item) === "rechazadas") {
+      setError(`La OC ${item.idOc} ya está rechazada.`);
+      return;
+    }
+
+    try {
+      setVerificandoRechazoOc(item.idOc);
+      setError("");
+      setMessage("");
+      const recibos = await buscarRecibosAsociadosOrdenCompra({ idOc: item.idOc });
+      // El listado trae el estado como texto (Constante ESTADO), no el código: se reconoce "Rechazado".
+      const noRechazados = (Array.isArray(recibos) ? recibos : [])
+        .filter((recibo) => !(recibo.estado ?? "").toLowerCase().includes("rechaz"));
+      const total = noRechazados.length;
+      if (total > 0) {
+        setError(`No se puede rechazar la OC ${item.idOc}: tiene ${total} recibo${total === 1 ? "" : "s"} asociado${total === 1 ? "" : "s"} sin rechazar.`);
+        return;
+      }
+      abrirRechazo([item.idOc]);
+      setRechazoSoloSinRecibos(true);
+    } catch (err) {
+      setError(getHttpErrorMessage(err, "No se pudo verificar los recibos asociados de la orden de compra."));
+    } finally {
+      setVerificandoRechazoOc(null);
+    }
+  }, [abrirRechazo]);
 
   const abrirPopupMotivoRechazo = useCallback(() => {
     setMostrarConfirmacionRechazo(false);
@@ -2690,6 +2725,7 @@ export default function OcV2Page() {
         idsOc: idsOcRechazo,
         observacion: motivoRechazo.trim(),
         idAprobador: userId > 0 ? userId : undefined,
+        ...(rechazoSoloSinRecibos ? { soloSinRecibos: true } : {}),
       };
       // No exponer parámetros de rechazo masivo en consola.
       await rechazarOrdenCompraMasivo(params);
@@ -2710,7 +2746,7 @@ export default function OcV2Page() {
     } finally {
       setRechazando(false);
     }
-  }, [cancelarRechazo, idsOcRechazo, motivoRechazo, userId]);
+  }, [cancelarRechazo, idsOcRechazo, motivoRechazo, rechazoSoloSinRecibos, userId]);
 
   const aprobarOrdenSeleccionada = useCallback(async () => {
     const idsAprobar = seleccionadasEnBandeja.length > 0
@@ -2871,6 +2907,33 @@ export default function OcV2Page() {
   const relacionColumns: GridColumn<OrdenCompraCabeceraDto>[] = [
     ...bandejaColumns.filter((column) => !String(column.dataField).startsWith("grp")),
     { dataField: "estadoRelacion", caption: "Estado OC", width: 150, calculateCellValue: (item) => normalizarTexto(item.estado) || "-" },
+    {
+      dataField: "accionesRelacion",
+      caption: "Acciones",
+      width: 80,
+      alignment: "center",
+      allowFiltering: false,
+      allowHeaderFilter: false,
+      allowSearch: false,
+      allowSorting: false,
+      allowGrouping: false,
+      calculateCellValue: () => "",
+      cellRender: (_value, item) => (
+        <button
+          type="button"
+          style={styles.smallDangerButton}
+          disabled={getEstadoVista(item) === "rechazadas" || rechazando || verificandoRechazoOc !== null}
+          title="Rechazar la OC (solo si no tiene recibos asociados)"
+          aria-label={`Rechazar OC ${item.idOc}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            void solicitarRechazoRelacion(item);
+          }}
+        >
+          {verificandoRechazoOc === item.idOc ? "…" : "🗑"}
+        </button>
+      ),
+    },
   ];
   const groupFieldsBandeja = agrupacionAprobacion === "responsable"
     ? ["grpResponsable"]
@@ -3040,6 +3103,8 @@ export default function OcV2Page() {
     const limite = campo === "subtotal" ? saldoSubtotalFila : saldoAvanceOcFila;
     const valorActual = ocGastosSaldosEditables[clave]?.[campo] ?? limite.toFixed(2);
     const alerta = ocGastosSaldoAlerts[`${clave}:${campo}`];
+    // OC rechazada: los saldos no se pueden editar (el botón Pago nuevo también queda inactivo).
+    const ocRechazada = filaOcGastosRechazada(row);
 
     const registrarEdicion = (valor: string) => {
       const numero = Number(valor);
@@ -3080,6 +3145,7 @@ export default function OcV2Page() {
           max={limite}
           step="0.01"
           value={valorActual}
+          disabled={ocRechazada}
           onClick={(event) => event.stopPropagation()}
           onChange={(event) => registrarEdicion(event.target.value)}
           onBlur={(event) => confirmar(event.target.value)}
@@ -3089,8 +3155,20 @@ export default function OcV2Page() {
               event.currentTarget.blur();
             }
           }}
-          title={campo === "subtotal" ? `Máximo disponible: ${formatMoney(saldoSubtotalFila)}` : `Máximo disponible: ${saldoAvanceOcFila.toFixed(2)}%`}
-          style={{ width: "100%", minWidth: 96, height: 30, border: "1px solid #CBD5E1", borderRadius: 6, padding: "0 6px", boxSizing: "border-box", fontSize: 12 }}
+          title={ocRechazada
+            ? "Orden de compra rechazada: no se puede editar."
+            : campo === "subtotal" ? `Máximo disponible: ${formatMoney(saldoSubtotalFila)}` : `Máximo disponible: ${saldoAvanceOcFila.toFixed(2)}%`}
+          style={{
+            width: "100%",
+            minWidth: 96,
+            height: 30,
+            border: "1px solid #CBD5E1",
+            borderRadius: 6,
+            padding: "0 6px",
+            boxSizing: "border-box",
+            fontSize: 12,
+            ...(ocRechazada ? { background: "#F1F5F9", color: "#94A3B8", cursor: "not-allowed" } : {}),
+          }}
         />
         {alerta ? <span role="alert" title={alerta} onClick={(event) => event.stopPropagation()} style={{ color: "#D97706", fontSize: 16, lineHeight: 1, cursor: "help" }}>⚠</span> : null}
       </div>
@@ -3104,18 +3182,23 @@ export default function OcV2Page() {
     const saldoSubtotalValue = ocGastosSaldosEditables[clave]?.subtotal ?? saldoSubtotalFila.toFixed(2);
     const saldoAvanceValue = ocGastosSaldosEditables[clave]?.avance ?? saldoAvanceOcFila.toFixed(2);
     const saldosDisponibles = Number(saldoSubtotalValue) > 0 && Number(saldoAvanceValue) > 0;
-    const disponible = saldosDisponibles && !enProceso;
+    // OC rechazada (columna Estado OC): no se genera un pago nuevo.
+    const ocRechazada = filaOcGastosRechazada(row);
+    const disponible = saldosDisponibles && !enProceso && !ocRechazada;
     return (
       <button
         type="button"
         onClick={(event) => {
           event.stopPropagation();
+          if (ocRechazada) return;
           const original = reportePlanillaRows[Number(row.__key)];
           if (!original) return;
           setPagoNuevoPendiente({ row: original, saldoEditableKey: clave, montoTexto: saldoSubtotalValue, saldoAvanceTexto: saldoAvanceValue });
         }}
         disabled={!disponible}
-        title={!saldosDisponibles
+        title={ocRechazada
+          ? "Pago nuevo no disponible: la orden de compra está rechazada."
+          : !saldosDisponibles
           ? "Pago nuevo requiere saldo subtotal y saldo avance OC mayores que cero."
           : enProceso
             ? "Proceso en ejecución..."

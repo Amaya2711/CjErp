@@ -195,6 +195,13 @@ public class OrdenCompraRechazoMasivoRequestDto
     public List<int> IdsOc { get; set; } = [];
     public string Observacion { get; set; } = string.Empty;
     public int? IdAprobador { get; set; }
+
+    /// <summary>
+    /// Si es true, no se rechaza ninguna OC con recibos asociados (Planilla.IdOc) que no estén rechazados
+    /// (Planilla.Estado = 3); los recibos rechazados no la bloquean. Lo usa la pestaña
+    /// Relación de Seguimiento de pagos; la bandeja de aprobación conserva su comportamiento anterior.
+    /// </summary>
+    public bool SoloSinRecibos { get; set; }
 }
 
 public class OrdenCompraAprobarRequestDto

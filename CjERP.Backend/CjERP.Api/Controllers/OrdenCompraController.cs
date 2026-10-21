@@ -360,6 +360,10 @@ public class OrdenCompraController : ControllerBase
 
             return Ok(new { success = true, message = "Orden(es) de compra rechazada(s) correctamente." });
         }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
         catch (SqlException ex)
         {
             return StatusCode(500, new
