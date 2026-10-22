@@ -50,6 +50,8 @@ public sealed class DescansoSolicitudKeyDto
 public sealed class DescansoAccionRequestDto
 {
     public List<DescansoSolicitudKeyDto> Solicitudes { get; set; } = new();
+    /// <summary>Motivo del rechazo (obligatorio al rechazar); se graba en EmpleadoDescanso.Observacion.</summary>
+    public string? Motivo { get; set; }
 }
 
 public sealed class DescansoAccionItemResultDto

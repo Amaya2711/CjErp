@@ -75,6 +75,8 @@ export async function listarDescansos(params: {
   idEmpleadoCj?: number;
   fechaInicial?: string;
   fechaFinal?: string;
+  /** Solo pendientes que le toca validar al usuario autenticado (1er/2do/3er validador). */
+  soloMios?: boolean;
 } = {}): Promise<Descanso[]> {
   return extraerArray<Descanso>(await httpClient.get<Descanso[]>(BASE_URL, { params }));
 }
@@ -104,9 +106,10 @@ export async function aprobarDescansos(solicitudes: DescansoSolicitudKey[]): Pro
   );
 }
 
-export async function rechazarDescansos(solicitudes: DescansoSolicitudKey[]): Promise<DescansoAccionResultado[]> {
+/** `motivo` es obligatorio; el backend lo graba en EmpleadoDescanso.Observacion. */
+export async function rechazarDescansos(solicitudes: DescansoSolicitudKey[], motivo: string): Promise<DescansoAccionResultado[]> {
   return extraerArray<DescansoAccionResultado>(
-    await httpClient.post<DescansoAccionResultado[]>(`${BASE_URL}/rechazar`, { solicitudes })
+    await httpClient.post<DescansoAccionResultado[]>(`${BASE_URL}/rechazar`, { solicitudes, motivo })
   );
 }
 

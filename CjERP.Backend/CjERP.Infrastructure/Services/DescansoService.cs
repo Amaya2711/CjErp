@@ -45,6 +45,7 @@ public sealed class DescansoService : IDescansoService
         int? idEmpleadoCj,
         DateTime? fechaInicial,
         DateTime? fechaFinal,
+        int? idValidador = null,
         CancellationToken cancellationToken = default)
     {
         await using var connection = _sql.CreateConnection();
@@ -56,7 +57,8 @@ public sealed class DescansoService : IDescansoService
                     IdEstado = idEstado,
                     IdEmpleadoCj = idEmpleadoCj,
                     FechaInicial = fechaInicial?.Date,
-                    FechaFinal = fechaFinal?.Date
+                    FechaFinal = fechaFinal?.Date,
+                    IdValidador = idValidador
                 },
                 CommandType.StoredProcedure,
                 cancellationToken,
@@ -155,6 +157,7 @@ public sealed class DescansoService : IDescansoService
     public async Task<IReadOnlyList<DescansoAccionItemResultDto>> RechazarAsync(
         IReadOnlyCollection<DescansoSolicitudKeyDto> solicitudes,
         int idRechazo,
+        string motivo,
         CancellationToken cancellationToken = default)
     {
         var resultados = new List<DescansoAccionItemResultDto>();
@@ -169,7 +172,8 @@ public sealed class DescansoService : IDescansoService
                     solicitud.IdEmpleadoCj,
                     FechaInicio = solicitud.FechaInicio.Date,
                     FechaFin = solicitud.FechaFin.Date,
-                    IdRechazo = idRechazo
+                    IdRechazo = idRechazo,
+                    Observacion = motivo
                 },
                 cancellationToken);
 

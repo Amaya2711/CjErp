@@ -9,6 +9,7 @@ type ConfirmDialogProps = {
   onConfirm: () => void;
   onCancel: () => void;
   destructive?: boolean;
+  confirmDisabled?: boolean;
 };
 
 export default function ConfirmDialog({
@@ -20,6 +21,7 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel,
   destructive = false,
+  confirmDisabled = false,
 }: ConfirmDialogProps) {
   if (!open) {
     return null;
@@ -39,7 +41,9 @@ export default function ConfirmDialog({
             style={{
               ...styles.confirmButton,
               ...(destructive ? styles.destructiveButton : undefined),
+              ...(confirmDisabled ? { opacity: 0.5, cursor: "not-allowed" } : undefined),
             }}
+            disabled={confirmDisabled}
             onClick={onConfirm}
           >
             {confirmLabel}

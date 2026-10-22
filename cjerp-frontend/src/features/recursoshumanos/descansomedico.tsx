@@ -24,13 +24,14 @@ import { getAuthUser, hasFullPageActionAccess } from "../../utils/authStorage";
 import { buildSharePointUrl } from "../../utils/sharepoint";
 import { getHttpErrorMessage } from "../../utils/httpError";
 
-type DescansoTab = "ingreso" | "aprobar" | "reporte";
+type DescansoTab = "ingreso" | "aprobar" | "pendientes" | "reporte";
 
 const RUTA_PAGINA = "/recursoshumanos/descansomedico";
 
 const TABS: Array<{ key: DescansoTab; label: string; permiso: string }> = [
   { key: "ingreso", label: "Ingreso", permiso: "tab.ingreso" },
   { key: "aprobar", label: "Aprobar", permiso: "tab.aprobar" },
+  { key: "pendientes", label: "Mis pendientes", permiso: "tab.pendientes" },
   { key: "reporte", label: "Reporte", permiso: "tab.reporte" },
 ];
 
@@ -128,6 +129,7 @@ export default function DescansoMedicoPage() {
   const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
   const [accionPendiente, setAccionPendiente] = useState<"aprobar" | "rechazar" | null>(null);
   const [rechazoFila, setRechazoFila] = useState<Descanso | null>(null);
+  const [motivoRechazo, setMotivoRechazo] = useState("");
 
   const dias =
     fechaInicio && fechaFin && fechaFin >= fechaInicio
@@ -213,6 +215,9 @@ export default function DescansoMedicoPage() {
         );
         setConteoEtapas(Object.fromEntries(porEtapa.map(([estado, filas]) => [estado, filas.length])));
         lista = porEtapa.find(([estado]) => estado === etapaActiva)?.[1] ?? [];
+      } else if (tabActivo === "pendientes") {
+        // Solo lo que le toca validar al usuario que ingresó (1er/2do/3er validador del empleado).
+        lista = await listarDescansos({ soloMios: true });
       } else {
         lista =
           tabActivo === "ingreso"
@@ -287,10 +292,13 @@ export default function DescansoMedicoPage() {
       window.alert("Seleccione al menos una solicitud.");
       return;
     }
+    setMotivoRechazo("");
     setAccionPendiente(accion);
   }
 
   async function ejecutarSeleccion(accion: "aprobar" | "rechazar") {
+    const motivo = motivoRechazo.trim();
+    if (accion === "rechazar" && !motivo) return;
     setAccionPendiente(null);
     const filas = descansos.filter((item) => seleccionados.has(claveSolicitud(item)));
     if (filas.length === 0) return;
@@ -298,13 +306,13 @@ export default function DescansoMedicoPage() {
     const solicitudes = filas.map((fila) => aKey(fila, fila.idEstado));
     setProcesando(
       accion === "aprobar"
-        ? etapaActiva === ESTADO_DESCANSO.CUARTA
+        ? tabActivo === "aprobar" && etapaActiva === ESTADO_DESCANSO.CUARTA
           ? "Procesando la aprobación final y enviando el correo con el PDF. Por favor espere, no cierre ni actualice la página..."
           : "Procesando la aprobación. Por favor espere..."
         : "Procesando el rechazo. Por favor espere..."
     );
     try {
-      const resultados = accion === "aprobar" ? await aprobarDescansos(solicitudes) : await rechazarDescansos(solicitudes);
+      const resultados = accion === "aprobar" ? await aprobarDescansos(solicitudes) : await rechazarDescansos(solicitudes, motivo);
       await cargarDescansos();
       window.alert(resumirAcciones(resultados));
     } catch (actionError) {
@@ -315,10 +323,12 @@ export default function DescansoMedicoPage() {
   }
 
   async function rechazarFila(fila: Descanso) {
+    const motivo = motivoRechazo.trim();
+    if (!motivo) return;
     setRechazoFila(null);
     setProcesando("Procesando el rechazo. Por favor espere...");
     try {
-      const resultados = await rechazarDescansos([aKey(fila, fila.idEstado)]);
+      const resultados = await rechazarDescansos([aKey(fila, fila.idEstado)], motivo);
       await cargarDescansos();
       window.alert(resumirAcciones(resultados));
     } catch (actionError) {
@@ -387,7 +397,7 @@ export default function DescansoMedicoPage() {
               Documento
             </button>
             {!bloqueado("button.rechazar") && ESTADOS_RECHAZABLES.includes(row.idEstado) ? (
-              <button type="button" style={{ ...accionButtonStyle, color: "#B91C1C", borderColor: "#FECACA", background: "#FEF2F2" }} onClick={() => setRechazoFila(row)}>
+              <button type="button" style={{ ...accionButtonStyle, color: "#B91C1C", borderColor: "#FECACA", background: "#FEF2F2" }} onClick={() => { setMotivoRechazo(""); setRechazoFila(row); }}>
                 Rechazar
               </button>
             ) : null}
@@ -449,21 +459,39 @@ export default function DescansoMedicoPage() {
   );
 
   const esIngreso = tabActivo === "ingreso";
+  // "Aprobar" y "Mis pendientes" comparten grilla con selección múltiple y acciones aprobar/rechazar.
+  const esAprobacion = tabActivo === "aprobar" || tabActivo === "pendientes";
   const puedeGrabar = !bloqueado("button.grabar");
+  const puedeRechazarEtapa = tabActivo === "pendientes" || ESTADOS_RECHAZABLES.includes(etapaActiva);
+
+  const motivoField = (
+    <label style={{ display: "grid", gap: 4, fontSize: 13, fontWeight: 600, color: "#0F172A" }}>
+      Motivo del rechazo (obligatorio)
+      <textarea
+        value={motivoRechazo}
+        onChange={(event) => setMotivoRechazo(event.target.value)}
+        maxLength={500}
+        rows={3}
+        autoFocus
+        placeholder="Indique por qué se rechaza la solicitud"
+        style={{ border: "1px solid #CBD5E1", borderRadius: 8, padding: 8, fontSize: 14, fontWeight: 400, resize: "vertical", fontFamily: "inherit" }}
+      />
+    </label>
+  );
 
   return (
     <AppPage
       title="Descanso médico"
       fillHeight={!esIngreso}
       actions={
-        tabActivo === "aprobar" ? (
+        esAprobacion ? (
           <div style={{ display: "flex", gap: 10 }}>
             {!bloqueado("button.rechazar") ? (
               <button
                 type="button"
                 onClick={() => solicitarConfirmacion("rechazar")}
-                disabled={seleccionados.size === 0 || Boolean(procesando) || !ESTADOS_RECHAZABLES.includes(etapaActiva)}
-                style={botonStyle("#FEF2F2", "#B91C1C", "#FECACA", seleccionados.size === 0 || Boolean(procesando) || !ESTADOS_RECHAZABLES.includes(etapaActiva))}
+                disabled={seleccionados.size === 0 || Boolean(procesando) || !puedeRechazarEtapa}
+                style={botonStyle("#FEF2F2", "#B91C1C", "#FECACA", seleccionados.size === 0 || Boolean(procesando) || !puedeRechazarEtapa)}
               >
                 Rechazar
               </button>
@@ -610,18 +638,18 @@ export default function DescansoMedicoPage() {
               keyExpr={claveSolicitud}
               height="fill"
               loading={descansosLoading}
-              noDataText={tabActivo === "aprobar" ? "No hay solicitudes en esta etapa." : "No se encontraron descansos."}
+              noDataText={tabActivo === "aprobar" ? "No hay solicitudes en esta etapa." : tabActivo === "pendientes" ? "No tiene solicitudes pendientes por validar." : "No se encontraron descansos."}
               showFilterRow
               showSearchPanel
               showGroupPanel
               allowColumnResizing
               allowExport
-              exportFileName={tabActivo === "aprobar" ? "Descanso_medico_pendientes" : "Descanso_medico"}
+              exportFileName={esAprobacion ? "Descanso_medico_pendientes" : "Descanso_medico"}
               paging={{ pageSize: 25 }}
               stateStoringKey={`descanso_${tabActivo}`}
-              selection={tabActivo === "aprobar" ? "multiple" : "none"}
-              selectedKeys={tabActivo === "aprobar" ? [...seleccionados] : undefined}
-              onSelectionChanged={tabActivo === "aprobar" ? (keys) => setSeleccionados(new Set(keys)) : undefined}
+              selection={esAprobacion ? "multiple" : "none"}
+              selectedKeys={esAprobacion ? [...seleccionados] : undefined}
+              onSelectionChanged={esAprobacion ? (keys) => setSeleccionados(new Set(keys)) : undefined}
               selectionDisabled={Boolean(procesando)}
               summary={{ totalItems: [{ column: "dias", type: "sum", label: "Días" }] }}
             />
@@ -636,7 +664,7 @@ export default function DescansoMedicoPage() {
           <div style={{ display: "grid", gap: 8 }}>
             <span>
               {accionPendiente === "aprobar"
-                ? `¿Está seguro de APROBAR ${seleccionados.size} solicitud(es)?${etapaActiva === ESTADO_DESCANSO.CUARTA ? " Es la aprobación final: se enviará el PDF por correo." : ""}`
+                ? `¿Está seguro de APROBAR ${seleccionados.size} solicitud(es)?${tabActivo === "aprobar" && etapaActiva === ESTADO_DESCANSO.CUARTA ? " Es la aprobación final: se enviará el PDF por correo." : ""}`
                 : `¿Está seguro de RECHAZAR ${seleccionados.size} solicitud(es)?`}
             </span>
             <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "#475569" }}>
@@ -650,10 +678,12 @@ export default function DescansoMedicoPage() {
                 ))}
               {seleccionados.size > 5 ? <li>y {seleccionados.size - 5} más...</li> : null}
             </ul>
+            {accionPendiente === "rechazar" ? motivoField : null}
           </div>
         }
         confirmLabel={accionPendiente === "aprobar" ? "Aprobar" : "Rechazar"}
         destructive={accionPendiente === "rechazar"}
+        confirmDisabled={accionPendiente === "rechazar" && !motivoRechazo.trim()}
         onConfirm={() => accionPendiente && void ejecutarSeleccion(accionPendiente)}
         onCancel={() => setAccionPendiente(null)}
       />
@@ -662,12 +692,20 @@ export default function DescansoMedicoPage() {
         open={rechazoFila !== null}
         title="Rechazar solicitud"
         message={
-          rechazoFila
-            ? `¿Está seguro de RECHAZAR el descanso de ${rechazoFila.nombreEmpleado || `empleado ${rechazoFila.idEmpleadoCj}`} del ${formatFecha(rechazoFila.fechaInicio)} al ${formatFecha(rechazoFila.fechaFin)}?`
-            : ""
+          rechazoFila ? (
+            <div style={{ display: "grid", gap: 8 }}>
+              <span>
+                {`¿Está seguro de RECHAZAR el descanso de ${rechazoFila.nombreEmpleado || `empleado ${rechazoFila.idEmpleadoCj}`} del ${formatFecha(rechazoFila.fechaInicio)} al ${formatFecha(rechazoFila.fechaFin)}?`}
+              </span>
+              {motivoField}
+            </div>
+          ) : (
+            ""
+          )
         }
         confirmLabel="Rechazar"
         destructive
+        confirmDisabled={!motivoRechazo.trim()}
         onConfirm={() => rechazoFila && void rechazarFila(rechazoFila)}
         onCancel={() => setRechazoFila(null)}
       />

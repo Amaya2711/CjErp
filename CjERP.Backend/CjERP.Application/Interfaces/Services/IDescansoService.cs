@@ -11,6 +11,7 @@ public interface IDescansoService
         int? idEmpleadoCj,
         DateTime? fechaInicial,
         DateTime? fechaFinal,
+        int? idValidador = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>Registra una fila por día del rango (estado 97). Devuelve los días registrados.</summary>
@@ -28,6 +29,7 @@ public interface IDescansoService
     Task<IReadOnlyList<DescansoAccionItemResultDto>> RechazarAsync(
         IReadOnlyCollection<DescansoSolicitudKeyDto> solicitudes,
         int idRechazo,
+        string motivo,
         CancellationToken cancellationToken = default);
 
     /// <summary>PDF de la solicitud (null si no existe).</summary>

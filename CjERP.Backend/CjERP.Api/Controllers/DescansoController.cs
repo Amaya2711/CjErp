@@ -38,12 +38,29 @@ public class DescansoController : ControllerBase
         [FromQuery] int? idEmpleadoCj,
         [FromQuery] DateTime? fechaInicial,
         [FromQuery] DateTime? fechaFinal,
+        [FromQuery] bool soloMios,
         CancellationToken cancellationToken) =>
-        Ejecutar(async () => Ok(new
+        Ejecutar(async () =>
         {
-            success = true,
-            data = await _descansoService.ListarAsync(idEstado, idEmpleadoCj, fechaInicial, fechaFinal, cancellationToken)
-        }));
+            // soloMios: pendientes de los empleados cuyo validador (1ro/2do/3ro) es el usuario del JWT, nunca un id del cliente.
+            int? idValidador = null;
+            if (soloMios)
+            {
+                var id = ResolveIdEmpleadoCj();
+                if (id <= 0)
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = "No se pudo identificar al usuario." });
+                }
+
+                idValidador = id;
+            }
+
+            return Ok(new
+            {
+                success = true,
+                data = await _descansoService.ListarAsync(idEstado, idEmpleadoCj, fechaInicial, fechaFinal, idValidador, cancellationToken)
+            });
+        });
 
     [HttpGet("pdf")]
     public Task<IActionResult> Pdf(
@@ -132,13 +149,24 @@ public class DescansoController : ControllerBase
                 return BadRequest(new { success = false, message = "Seleccione al menos una solicitud." });
             }
 
+            var motivo = request.Motivo?.Trim();
+            if (string.IsNullOrEmpty(motivo))
+            {
+                return BadRequest(new { success = false, message = "Debe ingresar el motivo del rechazo." });
+            }
+
+            if (motivo.Length > 500)
+            {
+                return BadRequest(new { success = false, message = "El motivo no puede superar los 500 caracteres." });
+            }
+
             var idRechazo = ResolveIdEmpleadoCj();
             if (idRechazo <= 0)
             {
                 return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = "No se pudo identificar al usuario." });
             }
 
-            var result = await _descansoService.RechazarAsync(request.Solicitudes, idRechazo, cancellationToken);
+            var result = await _descansoService.RechazarAsync(request.Solicitudes, idRechazo, motivo, cancellationToken);
             return Ok(new { success = true, message = "Proceso de rechazo finalizado.", data = result });
         });
 

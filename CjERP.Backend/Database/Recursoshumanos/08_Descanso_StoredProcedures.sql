@@ -29,6 +29,11 @@ BEGIN
 END
 GO
 
+/* 0b) Motivo del rechazo. PV: si la columna Observacion ya existe en la BD real no hace nada. */
+IF COL_LENGTH(N'dbo.EmpleadoDescanso', N'Observacion') IS NULL
+    ALTER TABLE dbo.EmpleadoDescanso ADD Observacion NVARCHAR(500) NULL;
+GO
+
 /* 1) Empleados para el combo (misma regla que frmDescanso: cargo 50 y estado 1). */
 CREATE OR ALTER PROCEDURE dbo.sp_Descanso_ListarEmpleados
 AS
@@ -114,7 +119,10 @@ CREATE OR ALTER PROCEDURE dbo.sp_Descanso_Listar
     @IdEstado     INT  = NULL,
     @IdEmpleadoCj INT  = NULL,
     @FechaInicial DATE = NULL,
-    @FechaFinal   DATE = NULL
+    @FechaFinal   DATE = NULL,
+    -- "Mis pendientes": solo solicitudes en la etapa que le corresponde al validador (PV: 97 = 1er validador,
+    -- 98 = 2do, 99 = 3ro, según EmpleadoCjDetalle.IdResponsableCj / IdSegundoVacaciones / IdTerceroVacaciones).
+    @IdValidador  INT  = NULL
 )
 AS
 BEGIN
@@ -149,6 +157,10 @@ BEGIN
       AND (@IdEmpleadoCj IS NULL OR a.IdEmpleadoCj = @IdEmpleadoCj)
       AND (@FechaInicial IS NULL OR @FechaFinal IS NULL
            OR (CONVERT(DATE, a.FechaInicio) <= @FechaFinal AND CONVERT(DATE, a.FechaFin) >= @FechaInicial))
+      AND (@IdValidador IS NULL
+           OR (a.IdEstado = 97 AND d.IdResponsableCj      = @IdValidador)
+           OR (a.IdEstado = 98 AND d.IdSegundoVacaciones  = @IdValidador)
+           OR (a.IdEstado = 99 AND d.IdTerceroVacaciones  = @IdValidador))
     GROUP BY a.IdEmpleadoCj, a.IdEstado, CASE WHEN a.IdEstado = 0 THEN 'RECHAZADO' ELSE c.ValorIni END,
              b.NombreEmpleado, b.NroDocumento, CONVERT(DATE, a.FechaInicio), CONVERT(DATE, a.FechaFin),
              r.NombreEmpleado, s.NombreEmpleado, t.NombreEmpleado
@@ -225,21 +237,27 @@ BEGIN
 END;
 GO
 
-/* 5) Rechaza una solicitud (IdEstado 97, 98, 99 o 4 -> 0, IdActivo 0). Devuelve los días actualizados. */
+/* 5) Rechaza una solicitud (IdEstado 97, 98, 99 o 4 -> 0, IdActivo 0) y graba el motivo en Observacion.
+      Devuelve los días actualizados. */
 CREATE OR ALTER PROCEDURE dbo.sp_Descanso_Rechazar
 (
     @IdEmpleadoCj INT,
     @FechaInicio  DATE,
     @FechaFin     DATE,
-    @IdRechazo    INT
+    @IdRechazo    INT,
+    @Observacion  NVARCHAR(500)
 )
 AS
 BEGIN
     SET NOCOUNT ON;
 
+    IF @Observacion IS NULL OR LTRIM(RTRIM(@Observacion)) = ''
+        THROW 50113, 'Debe ingresar el motivo del rechazo.', 1;
+
     UPDATE dbo.EmpleadoDescanso
     SET IdEstado = 0,
         IdActivo = 0,
+        Observacion = LTRIM(RTRIM(@Observacion)),
         IdRechazo = @IdRechazo,
         FechaRechazo = CONVERT(DATE, GETDATE())
     WHERE IdEmpleadoCj = @IdEmpleadoCj
