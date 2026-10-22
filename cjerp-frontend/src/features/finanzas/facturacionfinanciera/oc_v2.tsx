@@ -992,13 +992,19 @@ export default function OcV2Page() {
       if (employeeIds.length === 0) return;
 
       try {
-        const permissionSets = await Promise.all(employeeIds.map((idEmpleado) =>
-          seguridadPermisosAccionesService.listar({
-            rutaPagina: "/finanzas/facturacionfinanciera/oc_v1",
-            idEmpleado,
-            tipoElemento: "tab",
-          })
-        ));
+        // oc_v1 y oc_v2 son dos vistas del mismo flujo. Se consultan ambas rutas para conservar
+        // los permisos ya configurados en cualquiera de ellas (la pantalla de permisos guarda por ruta).
+        const permissionSets = await Promise.all(
+          employeeIds.flatMap((idEmpleado) =>
+            ["/finanzas/facturacionfinanciera/oc_v1", "/finanzas/facturacionfinanciera/oc_v2"].map((rutaPagina) =>
+              seguridadPermisosAccionesService.listar({
+                rutaPagina,
+                idEmpleado,
+                tipoElemento: "tab",
+              })
+            )
+          )
+        );
 
         if (cancelled) return;
 
