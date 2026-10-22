@@ -871,6 +871,10 @@ function normalizarTotalPagarConsulta(
   total: number | undefined,
   igv: number | undefined
 ): number | undefined {
+  // La columna Total Pagar muestra TotalPagarOriginal (moneda real del recibo); TotalPagar puede venir convertido.
+  const totalPagarOriginal = getRecordNumber(row, "TotalPagarOriginal", "totalPagarOriginal");
+  if (totalPagarOriginal != null) return totalPagarOriginal;
+
   const totalPagar = getRecordNumber(row, "TotalPagar", "totalPagar");
   const comprobanteId = getRecordNumber(row, "IdComprobante", "idComprobante");
   const comprobante = getRecordString(row, "Comprobante", "comprobante", "ComprobanteLabel", "comprobanteLabel");
@@ -1207,7 +1211,8 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     montoRetencion: getRecordNumber(row, "MontoRetencion", "montoRetencion") ?? undefined,
     idRendicion: getRecordNumber(row, "IdRendicion", "idRendicion") ?? undefined,
     detalle: getRecordString(row, "Detalle", "detalle"),
-    comentario: getRecordString(row, "Observacion", "observacion", "Comentario", "comentario"),
+    // El SP devuelve Comentario y Observacion (Planilla.Observacion): "comentario" sigue siendo Comentario.
+    comentario: getRecordString(row, "Comentario", "comentario", "Observacion", "observacion"),
     observacion: getRecordString(row, "ObservacionPlanilla", "observacionPlanilla", "Observacion", "observacion"),
     fechaDeposito: getRecordString(row, "FechaDeposito", "fechaDeposito"),
     fechaVencimiento: getRecordString(
@@ -2202,7 +2207,13 @@ export default function GastosPage({
   ) ?? empleadosSafe.find((empleado) => String(empleado.idEmpleado) === String(form.responsable));
   const tipoCuentaNuevoResponsable = getConstanteLabel(tipoCuentaOptions, nuevoResponsable.tipoCuenta) || nuevoResponsable.tipoCuenta;
   const bancoNuevoResponsable = getConstanteLabel(bancoOptions, nuevoResponsable.banco) || nuevoResponsable.banco;
-  const existeCuentaResponsableDuplicada = Boolean(
+  // Al editar, la cuenta se ubica por documento + banco + tipo; solo se valida duplicado
+  // si alguno de esos tres datos cambió (nombre, cuenta e interbancaria se editan libremente).
+  const claveCuentaResponsableCambio = modoResponsableForm !== "editar"
+    || normalizarNombreResponsable(responsableSeleccionado?.nroDocumento) !== normalizarNombreResponsable(nuevoResponsable.nroDocumento)
+    || normalizarNombreResponsable(cuentaResponsableOriginal.nombreCta) !== normalizarNombreResponsable(tipoCuentaNuevoResponsable)
+    || String(cuentaResponsableOriginal.idBanco ?? "") !== nuevoResponsable.banco.trim();
+  const existeCuentaResponsableDuplicada = claveCuentaResponsableCambio && Boolean(
     nuevoResponsable.nroDocumento.trim() &&
     tipoCuentaNuevoResponsable.trim() &&
     bancoNuevoResponsable.trim(),
@@ -3796,11 +3807,11 @@ export default function GastosPage({
       { dataField: "bien", caption: "Bien", width: 90 },
       { dataField: "comprobante", caption: "Comprobante", width: 140 },
       { dataField: "monto", caption: "Monto", dataType: "number", width: 110, format: { type: "fixedPoint", precision: 2 } },
-      { dataField: "igv", caption: "IGV", dataType: "number", width: 100, format: { type: "fixedPoint", precision: 2 } },
-      { dataField: "total", caption: "Total", dataType: "number", width: 110, format: { type: "fixedPoint", precision: 2 } },
-      { dataField: "montoRetencion", caption: "Monto Retención", dataType: "number", width: 130, format: { type: "fixedPoint", precision: 2 } },
-      { dataField: "totalPagar", caption: "Total Pagar", dataType: "number", width: 120, format: { type: "fixedPoint", precision: 2 } },
-      { dataField: "moneda", caption: "Moneda", width: 90 },
+      { dataField: "igv", placeAfter: "monto", caption: "IGV", dataType: "number", width: 100, format: { type: "fixedPoint", precision: 2 } },
+      { dataField: "total", placeAfter: "monto", caption: "Total", dataType: "number", width: 110, format: { type: "fixedPoint", precision: 2 } },
+      { dataField: "montoRetencion", placeAfter: "monto", caption: "Monto Retención", dataType: "number", width: 130, format: { type: "fixedPoint", precision: 2 } },
+      { dataField: "totalPagar", placeAfter: "monto", caption: "Total Pagar", dataType: "number", width: 120, format: { type: "fixedPoint", precision: 2 } },
+      { dataField: "moneda", placeAfter: "monto", caption: "Moneda", width: 90 },
       { dataField: "banco", caption: "Banco", width: 140 },
       { dataField: "nroOperacion", caption: "NroOperacion", width: 140 },
       { dataField: "fechaDeposito", caption: "FechaDeposito", dataType: "date", width: 130 },

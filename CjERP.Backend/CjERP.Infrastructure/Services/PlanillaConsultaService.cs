@@ -246,7 +246,8 @@ namespace CjERP.Infrastructure.Services
 
             if (isPagosV1Consulta)
             {
-                // sp_Planilla_Consulta_Estados no devuelve Observacion; se completa para "Visualizar gasto".
+                // Respaldo: la versión vigente del SP ya devuelve ObservacionPlanilla/Observacion (AgregarObservacionAsync no hace nada
+                // en ese caso); solo completa la observación si el SP en la BD es una versión anterior.
                 await AgregarObservacionAsync(connection, rows, cancellationToken);
             }
 
@@ -602,7 +603,7 @@ namespace CjERP.Infrastructure.Services
         /// Completa las filas del reporte por responsable con datos que el store no entrega:
         /// SubtotalGasto, MonedaGasto, FechaIngresoPlanilla y SolicitantePlanilla (Planilla.Subtotal, TipoMoneda,
         /// FecIngreso e IdSolicitante) y SolicitanteOC (CabOrdenCompra.IdSolicitante que ya devuelve el store).
-        /// Los nombres se resuelven en dbo.Empleado, igual que el responsable en el store.
+        /// Los nombres del solicitante se resuelven según IdWeb (1 → dbo.EmpleadoCj, 0 → dbo.Empleado).
         /// </summary>
         private async Task AgregarMontoGastoAsync(
             SqlConnection connection,
@@ -632,6 +633,7 @@ SELECT p.Correlativo AS Correlativo,
        p.NroOperacion AS NroOperacionPago,
        p.Detalle AS DetallePago,
        p.IdSolicitante AS IdSolicitantePlanilla,
+       p.IdWeb AS IdWebPlanilla,
        p.IdSite AS IdSitePlanilla
 FROM dbo.Planilla p
 LEFT JOIN dbo.Constante m ON m.Campo = 'TIPO_MONEDA' AND m.Correlativo = p.TipoMoneda
@@ -659,25 +661,33 @@ WHERE p.Correlativo IN @Ids",
                 .Distinct()
                 .ToList();
 
-            var nombres = new Dictionary<int, string?>();
+            // Regla: IdWeb = 1 → nombre en dbo.EmpleadoCj; IdWeb = 0 → dbo.Empleado (igual que la bandeja de OC).
+            var nombresEmpleado = new Dictionary<int, string?>();
+            var nombresEmpleadoCj = new Dictionary<int, string?>();
             foreach (var lote in idsSolicitantes.Chunk(1000))
             {
-                var data = await connection.QueryAsync(
-                    CreateCommand(
-                        "SELECT e.IdEmpleado AS IdEmpleado, e.NombreEmpleado AS NombreEmpleado FROM dbo.Empleado e WHERE e.IdEmpleado IN @Ids",
-                        new { Ids = lote },
-                        CommandType.Text,
-                        cancellationToken));
-
-                foreach (var item in data)
+                foreach (var (tabla, destino) in new[] { ("dbo.Empleado", nombresEmpleado), ("dbo.EmpleadoCj", nombresEmpleadoCj) })
                 {
-                    var fila = (IDictionary<string, object?>)item;
-                    if (fila.TryGetValue("IdEmpleado", out var id) && id is not null)
+                    var data = await connection.QueryAsync(
+                        CreateCommand(
+                            $"SELECT e.IdEmpleado AS IdEmpleado, e.NombreEmpleado AS NombreEmpleado FROM {tabla} e WHERE e.IdEmpleado IN @Ids",
+                            new { Ids = lote },
+                            CommandType.Text,
+                            cancellationToken));
+
+                    foreach (var item in data)
                     {
-                        nombres[Convert.ToInt32(id)] = fila.TryGetValue("NombreEmpleado", out var nombre) ? nombre?.ToString() : null;
+                        var fila = (IDictionary<string, object?>)item;
+                        if (fila.TryGetValue("IdEmpleado", out var id) && id is not null)
+                        {
+                            destino[Convert.ToInt32(id)] = fila.TryGetValue("NombreEmpleado", out var nombre) ? nombre?.ToString() : null;
+                        }
                     }
                 }
             }
+
+            bool TryNombreSolicitante(int idSolicitante, int? idWeb, out string? nombre) =>
+                (idWeb == 1 ? nombresEmpleadoCj : nombresEmpleado).TryGetValue(idSolicitante, out nombre);
 
             var aprobaciones = await ObtenerAprobacionesOcAsync(connection, rows, cancellationToken);
             var tareasOc = await ObtenerTareasOcAsync(connection, rows, cancellationToken);
@@ -700,7 +710,7 @@ WHERE p.Correlativo IN @Ids",
                 }
 
                 var idSolicitanteOc = TryGetInt(row, "IdSolicitante");
-                if (idSolicitanteOc.HasValue && nombres.TryGetValue(idSolicitanteOc.Value, out var nombreOc))
+                if (idSolicitanteOc.HasValue && TryNombreSolicitante(idSolicitanteOc.Value, TryGetInt(row, "IdWebOC"), out var nombreOc))
                 {
                     row["SolicitanteOC"] = nombreOc;
                 }
@@ -716,7 +726,10 @@ WHERE p.Correlativo IN @Ids",
                     row["DetallePago"] = planilla.TryGetValue("DetallePago", out var detallePago) ? detallePago : null;
                     row["IdSitePlanilla"] = planilla.TryGetValue("IdSitePlanilla", out var idSitePlanilla) ? idSitePlanilla : null;
                     if (planilla.TryGetValue("IdSolicitantePlanilla", out var idSolicitante) && idSolicitante is not null
-                        && nombres.TryGetValue(Convert.ToInt32(idSolicitante), out var nombrePlanilla))
+                        && TryNombreSolicitante(
+                            Convert.ToInt32(idSolicitante),
+                            planilla.TryGetValue("IdWebPlanilla", out var idWebPlanilla) && idWebPlanilla is not null ? Convert.ToInt32(idWebPlanilla) : null,
+                            out var nombrePlanilla))
                     {
                         row["SolicitantePlanilla"] = nombrePlanilla;
                     }

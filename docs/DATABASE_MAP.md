@@ -198,7 +198,7 @@ Columnas: **Módulo | SP | Tipo | Def. en repo | Llamado desde (clase C#)**. Tip
 | Mobile | sp_DispositivoMovil_Desactivar | UPDATE/UPSERT | Sí | MobileDeviceService |
 | Mobile | sp_DispositivoMovil_ListarAdmin | CONSULTA | Sí | MobileDeviceService |
 | Mobile | sp_DispositivoMovil_Registrar | INSERT | Sí | MobileDeviceService |
-| Orden de Compra | sp_OrdenCompra_BuscarCabecera | CONSULTA | No | OrdenCompraService |
+| Orden de Compra | sp_OrdenCompra_BuscarCabecera | CONSULTA | Sí (Finanzas/12) | OrdenCompraService |
 | Orden de Compra | sp_OrdenCompra_BuscarDetalle | CONSULTA | No | OrdenCompraService |
 | Orden de Compra | sp_OrdenCompra_Consulta_Estados | REPORTE | Sí | PlanillaConsultaService |
 | Orden de Compra | sp_OrdenCompra_Insertar | INSERT | No | OrdenCompraService |

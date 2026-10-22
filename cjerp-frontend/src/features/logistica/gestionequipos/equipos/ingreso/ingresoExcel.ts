@@ -117,6 +117,7 @@ export async function leerSeries(archivo: File): Promise<Array<IngresoSerieMasiv
         pedido: texto(f.get("pedido")),
         codPap: texto(f.get("codpap")),
         site: texto(f.get("site")),
+        idSite: texto(f.get("idsite")),
         serie: texto(f.get("serie")),
       };
     })

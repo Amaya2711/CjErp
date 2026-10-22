@@ -93,7 +93,7 @@ export default function ReporteResponsablePage() {
   const [criterioConsultado, setCriterioConsultado] = useState("");
   const [consultado, setConsultado] = useState(false);
   const [filtros, setFiltros] = useState<FiltrosReporte>(FILTROS_VACIOS);
-  const [vista, setVista] = useState<Vista>("resumen");
+  const [vista, setVista] = useState<Vista>("detalle");
   const [agrupacion, setAgrupacion] = useState<Agrupacion>("responsable");
   const [cargando, setCargando] = useState(false);
   const [exportando, setExportando] = useState<"" | "ia">("");
@@ -102,6 +102,7 @@ export default function ReporteResponsablePage() {
   const [ocEnProceso, setOcEnProceso] = useState<number | null>(null);
   const [error, setError] = useState("");
   const consultaRef = useRef<AbortController | null>(null);
+  const exportarDetalleRef = useRef<(() => void) | null>(null);
 
   // Autollenado de responsables: consulta el buscador existente de empleados responsables.
   useEffect(() => {
@@ -410,6 +411,20 @@ export default function ReporteResponsablePage() {
   ];
 
   const columnasDetalle: GridColumn<FilaReporte>[] = [
+    { dataField: "cliente", caption: "Cliente", width: 170, calculateCellValue: (f) => f.cliente || "—" },
+    { dataField: "proyecto", caption: "Proyecto", width: 170, calculateCellValue: (f) => f.proyecto || "—" },
+    { dataField: "idSite", caption: "IdSite", width: 100, calculateCellValue: (f) => f.idSite || "—" },
+    { dataField: "site", caption: "Site", width: 170, calculateCellValue: (f) => f.site || "—" },
+    { dataField: "correSite", caption: "CorreSite", width: 90, calculateCellValue: (f) => f.correSite ?? "—" },
+    { dataField: "tipoTrabajo", caption: "Tipo de trabajo", width: 150, calculateCellValue: (f) => f.tipoTrabajo || "—" },
+    { dataField: "idOc", caption: "Nro. OC", width: 90, calculateCellValue: (f) => f.idOc ?? "—" },
+    {
+      dataField: "solicitante",
+      caption: "Solicitante",
+      width: 200,
+      calculateCellValue: (f) => f.solicitanteOc || f.solicitantePlanilla || "—",
+    },
+    { dataField: "responsable", caption: "Responsable", width: 220, groupIndex: 0, sortOrder: "asc" },
     {
       dataField: "acciones",
       caption: "OC",
@@ -438,7 +453,6 @@ export default function ReporteResponsablePage() {
           </button>
         ),
     },
-    { dataField: "responsable", caption: "Responsable", width: 220, groupIndex: 0, sortOrder: "asc" },
     {
       dataField: "tipoRegistro",
       caption: "Tipo de registro",
@@ -451,14 +465,7 @@ export default function ReporteResponsablePage() {
     { dataField: "observacionVinculacion", caption: "Observación de vinculación", width: 240 },
     { dataField: "responsableOc", caption: "Responsable OC", width: 200, calculateCellValue: (f) => f.responsableOc || "—" },
     { dataField: "responsablePlanilla", caption: "Responsable planilla", width: 200, calculateCellValue: (f) => f.responsablePlanilla || "—" },
-    { dataField: "cliente", caption: "Cliente", width: 170, calculateCellValue: (f) => f.cliente || "—" },
-    { dataField: "proyecto", caption: "Proyecto", width: 170, calculateCellValue: (f) => f.proyecto || "—" },
-    { dataField: "site", caption: "Site", width: 170, calculateCellValue: (f) => f.site || "—" },
-    { dataField: "idSite", caption: "IdSite", width: 100, calculateCellValue: (f) => f.idSite || "—" },
-    { dataField: "correSite", caption: "CorreSite", width: 90, calculateCellValue: (f) => f.correSite ?? "—" },
     { dataField: "ot", caption: "OT", width: 110, calculateCellValue: (f) => f.ot || "—" },
-    { dataField: "tipoTrabajo", caption: "Tipo de trabajo", width: 150, calculateCellValue: (f) => f.tipoTrabajo || "—" },
-    { dataField: "idOc", caption: "Nro. OC", width: 90, calculateCellValue: (f) => f.idOc ?? "—" },
     { dataField: "fila", caption: "Fila", width: 60, calculateCellValue: (f) => f.fila ?? "—" },
     { dataField: "fechaOc", caption: "Fecha OC", width: 100, calculateCellValue: (f) => formatFecha(f.fechaOc) || "—" },
     { dataField: "detalleOc", caption: "Detalle OC", width: 260, calculateCellValue: (f) => f.detalleOc || "—" },
@@ -524,6 +531,7 @@ export default function ReporteResponsablePage() {
 
   return (
     <AppPage title="Reporte ejecutivo por responsable" fillHeight>
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
       <form
         style={styles.panel}
         aria-label="Filtros del reporte"
@@ -783,7 +791,16 @@ export default function ReporteResponsablePage() {
                 ))}
               </select>
             </label>
-          ) : null}
+          ) : (
+            <button
+              type="button"
+              style={styles.botonVerOc}
+              disabled={cargando || filasFiltradas.length === 0}
+              onClick={() => exportarDetalleRef.current?.()}
+            >
+              Exportar Excel
+            </button>
+          )}
           </div>
 
           <div style={styles.gridHost}>
@@ -813,10 +830,10 @@ export default function ReporteResponsablePage() {
                 height="fill"
                 loading={cargando}
                 noDataText="Sin resultados para los filtros indicados."
-                stateStoringKey="reporte-responsable-detalle"
                 showSearchPanel
                 allowExport
                 exportFileName="reporte_responsable_detalle"
+                exportRef={exportarDetalleRef}
                 autoExpandAll={false}
                 rowAlternation={false}
                 rowPadding="3px 8px"
@@ -831,6 +848,7 @@ export default function ReporteResponsablePage() {
           </p>
         </>
       )}
+      </div>
     </AppPage>
   );
 }

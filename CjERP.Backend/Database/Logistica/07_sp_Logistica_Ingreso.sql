@@ -279,6 +279,10 @@ BEGIN
 
   IF @Serie IS NOT NULL AND @Serie <> N'' AND @Serie <> N'NO APLICA'
   BEGIN
+    -- Como el sistema antiguo: solo los materiales con serie (no cod. 10 ni sin codigo) admiten asignarla.
+    IF EXISTS (SELECT 1 FROM dbo.DetLogistica d WHERE d.Correlativo = @Correlativo AND (d.CodPap IS NULL OR LEN(d.CodPap) < 2 OR LEFT(d.CodPap, 2) = N'10'))
+      THROW 51132, 'Los materiales cod. 10 no llevan serie.', 1;
+
     IF EXISTS (SELECT 1 FROM dbo.DetLogistica d WHERE d.Serie = @Serie AND d.Correlativo <> @Correlativo AND d.IdEstado <> 99)
        OR EXISTS (SELECT 1 FROM dbo.MaterialSerie m WHERE m.Serie = @Serie AND m.IdEstado <> 0
                   AND CONVERT(varchar(36), m.Correlativo) <> CONVERT(varchar(36), @Correlativo))
@@ -330,14 +334,15 @@ BEGIN
   DECLARE @hoy date = CAST(@ahora AS date);
 
   CREATE TABLE #x (
-    Fila int NOT NULL, PedidoSap nvarchar(50) NULL, CodPap nvarchar(50) NULL, Site nvarchar(100) NULL, Serie nvarchar(100) NULL,
-    Ord int NULL, Estado varchar(8) NOT NULL DEFAULT 'OK', Mensaje nvarchar(300) NOT NULL DEFAULT N'', Destino uniqueidentifier NULL);
+    Fila int NOT NULL, PedidoSap nvarchar(50) NULL, CodPap nvarchar(50) NULL, Site nvarchar(100) NULL, IdSite nvarchar(20) NULL,
+    Serie nvarchar(100) NULL, Ord int NULL, Estado varchar(8) NOT NULL DEFAULT 'OK', Mensaje nvarchar(300) NOT NULL DEFAULT N'', Destino uniqueidentifier NULL);
 
-  INSERT INTO #x (Fila, PedidoSap, CodPap, Site, Serie)
+  INSERT INTO #x (Fila, PedidoSap, CodPap, Site, IdSite, Serie)
   SELECT CAST(a.[key] AS int) + 1,
          NULLIF(LTRIM(RTRIM(JSON_VALUE(a.value, '$.pedido'))), N''),
          NULLIF(LTRIM(RTRIM(JSON_VALUE(a.value, '$.codPap'))), N''),
          NULLIF(LTRIM(RTRIM(JSON_VALUE(a.value, '$.site'))), N''),
+         NULLIF(LTRIM(RTRIM(JSON_VALUE(a.value, '$.idSite'))), N''),
          NULLIF(LTRIM(RTRIM(JSON_VALUE(a.value, '$.serie'))), N'')
   FROM OPENJSON(@Items) a;
 
@@ -348,6 +353,13 @@ BEGIN
 
   UPDATE #x SET Estado = 'ERROR', Mensaje = N'Falta pedido, codigo de material o serie.'
   WHERE PedidoSap IS NULL OR CodPap IS NULL OR Serie IS NULL;
+
+  -- Como el sistema antiguo: el site de la fila (IDSITE y/o SITE del Excel, los que vengan) debe existir.
+  UPDATE x SET Estado = 'ERROR', Mensaje = N'No existe correlativo de SITE.'
+  FROM #x x
+  WHERE x.Estado = 'OK' AND (x.IdSite IS NOT NULL OR x.Site IS NOT NULL)
+    AND NOT EXISTS (SELECT 1 FROM dbo.Site s
+                    WHERE (x.IdSite IS NULL OR s.IdSite = x.IdSite) AND (x.Site IS NULL OR s.NombreSite = x.Site));
 
   UPDATE x SET Estado = 'ERROR', Mensaje = N'Serie repetida en el archivo.'
   FROM #x x WHERE x.Estado = 'OK' AND EXISTS (SELECT 1 FROM #x y WHERE y.Serie = x.Serie AND y.Fila <> x.Fila);

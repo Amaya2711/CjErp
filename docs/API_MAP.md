@@ -95,7 +95,7 @@
 ## 4. Orden de Compra — `/facturacionfinanciera/oc`
 | Método Ruta | Servicio (S/OrdenCompraService) → SP/SQL | FE |
 |---|---|---|
-| GET /cabecera | `sp_OrdenCompra_BuscarCabecera` + SQL inline validador | ordenCompraService.ts (oc, oc_v1) |
+| GET /cabecera | `sp_OrdenCompra_BuscarCabecera` + SQL inline validador | ordenCompraService.ts (oc, oc_v1, oc_v2). Query opcionales: idCliente, idProyecto, idSite, correlativo, ot, tipoTrabajo, idSolicitante, idResponsable, idOc, soloPendientesAprobacion, fechaDesde/fechaHasta (→ `@FechaInicio/@FechaFin`; oc_v2 Relación) |
 | GET /detalle | `sp_OrdenCompra_BuscarDetalle` o SQL inline (edición) | idem |
 | POST / | `sp_OrdenCompra_Insertar` (@Detalle JSON) + UPDATE IdWeb + N UPDATE (sin tx) | idem |
 | GET /{idOc}/edicion · PUT /{idOc} | SQL inline; PUT en tx con `MAX(Fila)+1` | oc_v1 |

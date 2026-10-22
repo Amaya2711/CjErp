@@ -118,6 +118,22 @@ export function columnasEstado(
   ];
 }
 
+/** Pestañas subrayadas de segundo nivel (Principal/Secundario, Individual/Masivo), mismo aspecto que las de etapa. */
+export const estiloPestanas = {
+  tabs: { display: "flex", gap: 2, borderBottom: "1px solid #d8dee8", flexWrap: "wrap" as const },
+  tab: {
+    background: "transparent",
+    border: 0,
+    borderBottom: "3px solid transparent",
+    padding: "8px 16px",
+    cursor: "pointer",
+    fontSize: 13,
+    fontWeight: 600,
+    color: "#475569",
+  },
+  tabActive: { color: "#1f6f8b", borderBottom: "3px solid #1f6f8b" },
+};
+
 export const ingresoStyles = {
   root: { display: "flex", flexDirection: "column" as const, flex: 1, minHeight: 0, gap: 10 },
   toolbar: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" as const },

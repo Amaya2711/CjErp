@@ -94,7 +94,7 @@ export type IngresoCambioEstado = {
 
 export type IngresoCambioEstadoResultado = { actualizadas: number; pedidosCompletos: number };
 
-export type IngresoSerieMasivaItem = { pedido: string; codPap: string; site: string; serie: string };
+export type IngresoSerieMasivaItem = { pedido: string; codPap: string; site: string; idSite?: string; serie: string };
 
 export type IngresoGuia = {
   pedidos: string[];

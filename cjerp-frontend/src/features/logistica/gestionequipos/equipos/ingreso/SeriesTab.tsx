@@ -14,7 +14,10 @@ import type { IngresoLinea, IngresoSerieMasivaItem } from "../../../../../models
 import { getHttpErrorMessage } from "../../../../../utils/httpError";
 import { leerSeries } from "./ingresoExcel";
 import BarraFiltros from "./BarraFiltros";
-import { construirConsulta, filtrosIniciales, ingresoStyles as styles } from "./ingresoComun";
+import { construirConsulta, estiloPestanas, filtrosIniciales, ingresoStyles as styles } from "./ingresoComun";
+
+/** Estados que el sistema antiguo pintaba en rojo: 4 rechazado, 6 observado, 8 no recepcionado. */
+const ESTADOS_EN_ROJO = new Set([4, 6, 8]);
 
 const fechaCorta = (valor: unknown) => String(valor ?? "").slice(0, 10);
 const hoyIso = () => new Date().toISOString().slice(0, 10);
@@ -45,6 +48,7 @@ const COLUMNAS_MASIVO: GridColumn<FilaMasiva>[] = [
   { dataField: "fila", caption: "Fila Excel", dataType: "number", width: 90 },
   { dataField: "pedido", caption: "Pedido", width: 130 },
   { dataField: "codPap", caption: "COD.PAP", width: 120 },
+  { dataField: "idSite", caption: "IDSITE", width: 100 },
   { dataField: "site", caption: "Site", width: 160 },
   { dataField: "serie", caption: "Serie", width: 200 },
 ];
@@ -56,7 +60,7 @@ export default function SeriesTab() {
   const [modo, setModo] = useState<Modo>("individual");
   return (
     <div style={styles.root}>
-      <div role="tablist" aria-label="Modo de series" style={{ display: "inline-flex", border: "1px solid #CBD5E1", borderRadius: 8, overflow: "hidden", alignSelf: "flex-start" }}>
+      <div role="tablist" aria-label="Modo de series" style={estiloPestanas.tabs}>
         {(["individual", "masivo"] as const).map((m) => (
           <button
             key={m}
@@ -64,14 +68,7 @@ export default function SeriesTab() {
             role="tab"
             aria-selected={modo === m}
             onClick={() => setModo(m)}
-            style={{
-              border: 0,
-              padding: "7px 16px",
-              cursor: "pointer",
-              fontSize: 13,
-              background: modo === m ? "#1F6F8B" : "#fff",
-              color: modo === m ? "#fff" : "#475569",
-            }}
+            style={{ ...estiloPestanas.tab, ...(modo === m ? estiloPestanas.tabActive : null) }}
           >
             {m === "individual" ? "Individual" : "Masivo"}
           </button>
@@ -125,6 +122,13 @@ function SerieIndividual() {
     const texto = String(valor ?? "").trim();
     setError("");
     setMensaje("");
+    // Como el sistema antiguo: los materiales cód. 10 (o sin código) no llevan serie.
+    const codigo = (anterior.codPap ?? "").trim();
+    if (field === "serie" && texto && (codigo.length < 2 || codigo.startsWith("10"))) {
+      setFilas((actuales) => actuales.map((f) => (f.correlativo === key ? { ...f, serie: anterior.serie } : f)));
+      setError("Los materiales cód. 10 no llevan serie.");
+      return;
+    }
     setFilas((actuales) => actuales.map((f) => (f.correlativo === key ? { ...f, [field]: texto } : f)));
     try {
       await actualizarSerieEquipo({
@@ -224,6 +228,7 @@ function SerieIndividual() {
           selection="multiple"
           onSelectionChanged={(keys) => setSeleccion(keys)}
           editing={{ allowUpdating: true, onCellChanged: ({ key, field, value }) => void editarCelda(key, field, value) }}
+          rowStyle={(fila) => (ESTADOS_EN_ROJO.has(fila.idEstado) ? { color: "#B91C1C", fontWeight: 600 } : undefined)}
           showSearchPanel={false}
           allowExport
           exportFileName="ingreso_series"
@@ -265,27 +270,32 @@ function SerieMasivo() {
     setError("");
     setMensaje("");
     setValidado(false);
+    let leidas: FilaMasiva[] = [];
     try {
       const series = await leerSeries(file);
       setArchivo(file.name);
-      setFilas(series.map((s, indice) => ({ ...s, indice, estado: "", mensaje: "" })));
+      leidas = series.map((s, indice) => ({ ...s, indice, estado: "", mensaje: "" }));
+      setFilas(leidas);
     } catch (err) {
       setFilas([]);
       setArchivo("");
       setError(err instanceof Error ? err.message : "No se pudo leer el archivo.");
+      return;
     } finally {
       if (entrada.current) entrada.current.value = "";
     }
+    // Como "Cargar" del formulario antiguo: al cargar el archivo se valida automáticamente.
+    await procesar(true, leidas);
   };
 
-  const procesar = async (soloValidar: boolean) => {
+  const procesar = async (soloValidar: boolean, base: FilaMasiva[] = filas) => {
     setConfirmar(false);
     setTrabajando(true);
     setError("");
     setMensaje("");
     try {
       const resultado = await importarSeriesEquipos(
-        filas.map((f) => ({ pedido: f.pedido, codPap: f.codPap, site: f.site, serie: f.serie })),
+        base.map((f) => ({ pedido: f.pedido, codPap: f.codPap, site: f.site, idSite: f.idSite, serie: f.serie })),
         soloValidar,
       );
       // La API numera las líneas por su posición en el arreglo enviado (1, 2, 3…).
@@ -319,10 +329,7 @@ function SerieMasivo() {
       <div style={styles.toolbar}>
         <input ref={entrada} type="file" accept=".xlsx,.xls" hidden onChange={(e) => void cargarArchivo(e.target.files?.[0])} />
         <button type="button" onClick={() => entrada.current?.click()} disabled={trabajando} style={styles.secondary}>
-          Cargar Excel (PEDIDO, COD.PAP, SITE, SERIE)
-        </button>
-        <button type="button" onClick={() => void procesar(true)} disabled={trabajando || filas.length === 0} style={styles.secondary}>
-          Validar
+          Cargar Excel (PEDIDO, COD.PAP, SITE, IDSITE, SERIE)
         </button>
         <button type="button" onClick={() => setConfirmar(true)} disabled={trabajando || !validado} style={styles.primary}>
           {trabajando ? "Procesando…" : "Asignar series"}

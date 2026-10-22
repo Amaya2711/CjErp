@@ -86,6 +86,7 @@ public class LogisticaIngresoSerieMasivaItemDto
     public string? Pedido { get; set; }
     public string? CodPap { get; set; }
     public string? Site { get; set; }
+    public string? IdSite { get; set; }
     public string? Serie { get; set; }
 }
 

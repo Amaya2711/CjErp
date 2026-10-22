@@ -94,6 +94,9 @@ export type OrdenCompraConsultaParams = {
   idOc?: string | null;
   /** Solo cabeceras: devuelve únicamente las OC pendientes de 1ra/2da/3ra validación (bandeja de aprobación). */
   soloPendientesAprobacion?: boolean;
+  /** Solo cabeceras: rango de fecha de creación (yyyy-MM-dd, inclusive). */
+  fechaDesde?: string;
+  fechaHasta?: string;
 };
 
 export type OrdenCompraInsertDetallePayload = {

@@ -379,6 +379,8 @@ const cabeceraColumns = [
   { key: "moneda", label: "Moneda", width: "75px" },
 ] as const;
 
+type RelacionConsulta = { desde: string; hasta: string; idSolicitante: number; idResponsable: number; idOc: string };
+
 function normalizeOptionValue(option: ConstanteOption): string {
   return option.codigo || option.value || option.label;
 }
@@ -428,9 +430,7 @@ function tasaIgvPorComprobante(idComprobante: string | number | null | undefined
     case 2: // FACTURA
     case 6: // RENDICION FACTURA
       return 0.18;
-    case 5: // HONORARIO
-      return 0.08;
-    default:
+    default: // HONORARIOS (5) y demás: sin IGV
       return 0;
   }
 }
@@ -820,8 +820,19 @@ export default function OcV2Page() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [selectedOcId, setSelectedOcId] = useState<number | null>(null);
+  // Pestaña Relación: solo se consulta al pulsar Buscar (rango de fechas), sin cargar todo el historial.
+  const [relacionRows, setRelacionRows] = useState<OrdenCompraCabeceraDto[]>([]);
+  const [relacionLoading, setRelacionLoading] = useState(false);
+  const [relacionBuscado, setRelacionBuscado] = useState(false);
+  const [relacionError, setRelacionError] = useState("");
+  const relacionRequestRef = useRef(0);
+  const [relacionSolicitante, setRelacionSolicitante] = useState("");
+  const [relacionResponsable, setRelacionResponsable] = useState("");
+  const [relacionIdOc, setRelacionIdOc] = useState("");
+  const relacionConsultaRef = useRef<RelacionConsulta | null>(null);
   const recibosAsociadosKpis = useMemo(() => {
-    const cabeceraActual = cabeceras.find((item) => item.idOc === selectedOcId);
+    const cabeceraActual = cabeceras.find((item) => item.idOc === selectedOcId)
+      ?? relacionRows.find((item) => item.idOc === selectedOcId);
     const subtotalesPorMoneda = new Map<string, number>();
     recibosAsociados.forEach((recibo) => {
       const moneda = recibo.moneda?.trim() || "Sin moneda";
@@ -836,7 +847,7 @@ export default function OcV2Page() {
       recibos: Array.from(subtotalesPorMoneda, ([moneda, total]) => ({ moneda, total }))
         .sort((left, right) => left.moneda.localeCompare(right.moneda)),
     };
-  }, [cabeceras, recibosAsociados, selectedOcId]);
+  }, [cabeceras, relacionRows, recibosAsociados, selectedOcId]);
   const [panelOpen, setPanelOpen] = useState(false);
   const [draft, setDraft] = useState<OrdenCompraDraft>(createInitialDraft);
   const [detalleForm, setDetalleForm] = useState<OrdenCompraDraftDetalle>(createEmptyDetalle);
@@ -859,7 +870,6 @@ export default function OcV2Page() {
   const [relacionBusqueda, setRelacionBusqueda] = useState("");
   const [relacionDesde, setRelacionDesde] = useState(`${today.slice(0, 4)}-01-01`);
   const [relacionHasta, setRelacionHasta] = useState("");
-  const [relacionEstado, setRelacionEstado] = useState<"todas" | "pendientes" | "aprobadas">("todas");
   const [nivelAprobacion, setNivelAprobacion] = useState<1 | 2 | 3>(1);
   const [approvalTabPermissions, setApprovalTabPermissions] = useState<Record<string, boolean>>({});
   // Bandeja de aprobación: por defecto, el último mes (desde el mismo día del mes anterior hasta hoy).
@@ -1117,7 +1127,46 @@ export default function OcV2Page() {
       if (requestId === cabecerasRequestRef.current) {
         setLoading(false);
         setCabecerasListas(true);
+        // Tras acciones que recargan las OC (asociar recibos, rechazar...) se refresca la última búsqueda de Relación.
+        if (relacionConsultaRef.current) void buscarRelacion(relacionConsultaRef.current);
       }
+    }
+  };
+
+  const buscarRelacion = async (previa?: RelacionConsulta) => {
+    const consulta = previa ?? {
+      desde: relacionDesde,
+      hasta: relacionHasta,
+      idSolicitante: Number(relacionSolicitante) || 0,
+      idResponsable: Number(relacionResponsable) || 0,
+      idOc: relacionIdOc.trim(),
+    };
+    if (!consulta.idOc && !consulta.desde && !consulta.hasta) {
+      setRelacionError("Indique un IdOc o al menos una fecha de creación (desde o hasta) para buscar.");
+      return;
+    }
+    const requestId = ++relacionRequestRef.current;
+    setRelacionLoading(true);
+    setRelacionError("");
+    try {
+      const response = await buscarOrdenCompraCabecera({
+        // Con IdOc la búsqueda es directa: no se aplica el rango de fechas.
+        fechaDesde: consulta.idOc ? undefined : consulta.desde || undefined,
+        fechaHasta: consulta.idOc ? undefined : consulta.hasta || undefined,
+        idSolicitante: consulta.idSolicitante || undefined,
+        idResponsable: consulta.idResponsable || undefined,
+        idOc: consulta.idOc || undefined,
+      });
+      if (requestId !== relacionRequestRef.current) return;
+      relacionConsultaRef.current = consulta;
+      setRelacionRows(distinctCabecerasPorOc(Array.isArray(response) ? response : []));
+      setRelacionBuscado(true);
+    } catch (err) {
+      if (requestId === relacionRequestRef.current) {
+        setRelacionError(getHttpErrorMessage(err, "No se pudo cargar la relación de órdenes de compra."));
+      }
+    } finally {
+      if (requestId === relacionRequestRef.current) setRelacionLoading(false);
     }
   };
 
@@ -1512,9 +1561,10 @@ export default function OcV2Page() {
 
   useEffect(() => {
     // El historial completo solo se necesita en Seguimiento de pagos.
-    if (vistaOc === "reporte") void asegurarCabecerasCompletas();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo debe reaccionar al cambio de vista
-  }, [vistaOc]);
+    // Relación tiene su propia consulta por rango de fechas (botón Buscar) y no necesita el historial completo.
+    if (vistaOc === "reporte" && reporteSubtab !== "relacion") void asegurarCabecerasCompletas();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo debe reaccionar al cambio de vista o subpestaña
+  }, [vistaOc, reporteSubtab]);
 
   useEffect(() => {
     const tieneFiltro = Object.values(reporteFiltros).some((value) => value.trim().length > 0);
@@ -1702,21 +1752,21 @@ export default function OcV2Page() {
 
   // Pestaña Relación: OC ya creadas (sin rechazadas) a las que se pueden asociar gastos pendientes de IdOc.
   const cabecerasRelacion = useMemo(
-    () => cabeceras
+    () => relacionRows
       .filter((item) => {
         // Se usa el avance de aprobación (aprobadores registrados) y no el texto del estado: el store devuelve
         // textos como "En 2da Aprob." que contienen "aprob" y getEstadoVista los tomaría como aprobadas.
         const nivel = getNivelPendiente(item);
         if (nivel === 0) return false;
-        if (relacionEstado === "pendientes" && nivel === 4) return false;
-        if (relacionEstado === "aprobadas" && nivel !== 4) return false;
         const fechaCreacion = item.fecha?.slice(0, 10) ?? "";
+        const idOcFiltro = relacionConsultaRef.current?.idOc ?? "";
+        if (idOcFiltro) return String(item.idOc) === idOcFiltro;
         if (relacionDesde && (!fechaCreacion || fechaCreacion < relacionDesde)) return false;
         if (relacionHasta && (!fechaCreacion || fechaCreacion > relacionHasta)) return false;
         return true;
       })
       .filter((item) => !relacionBusqueda.trim() || matchesCrudToolbarSearch(item, relacionBusqueda, searchFields)),
-    [cabeceras, relacionBusqueda, relacionDesde, relacionEstado, relacionHasta, searchFields]
+    [relacionRows, relacionBusqueda, relacionDesde, relacionHasta, searchFields]
   );
 
   // Al entrar o salir de Relación se limpia la OC elegida y el panel derecho (es compartido con la Bandeja de
@@ -2069,8 +2119,9 @@ export default function OcV2Page() {
   }, []);
 
   const selectedCabecera = useMemo(
-    () => cabeceras.find((item) => item.idOc === selectedOcId) ?? null,
-    [cabeceras, selectedOcId]
+    () => cabeceras.find((item) => item.idOc === selectedOcId)
+      ?? relacionRows.find((item) => item.idOc === selectedOcId) ?? null,
+    [cabeceras, relacionRows, selectedOcId]
   );
 
   const detalleMontoResumen = useMemo(
@@ -4103,26 +4154,53 @@ export default function OcV2Page() {
                       style={ocV1Styles.stageDateInput}
                     />
                   </label>
+                  <label style={{ ...ocV1Styles.stageDateFilter, width: 100 }}>
+                    <span>IdOc</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={relacionIdOc}
+                      onChange={(event) => setRelacionIdOc(event.target.value.replace(/\D/g, ""))}
+                      onKeyDown={(event) => { if (event.key === "Enter") void buscarRelacion(); }}
+                      placeholder="Todos"
+                      style={ocV1Styles.stageDateInput}
+                    />
+                  </label>
+                  <div style={{ ...ocV1Styles.stageDateFilter, width: 200, position: "relative" }}>
+                    <span>Solicitante</span>
+                    <SolicitanteTypeahead
+                      options={solicitanteOptions}
+                      selectedValue={relacionSolicitante}
+                      onSelect={setRelacionSolicitante}
+                      placeholder="Todos"
+                      clearable
+                    />
+                  </div>
+                  <div style={{ ...ocV1Styles.stageDateFilter, width: 200, position: "relative" }}>
+                    <span>Responsable</span>
+                    <ResponsableTypeahead
+                      options={responsableOptions}
+                      selectedId={relacionResponsable}
+                      onSelect={setRelacionResponsable}
+                      placeholder="Todos"
+                    />
+                  </div>
                   <ApprovalQuickSearch
                     value={relacionBusqueda}
                     onChange={setRelacionBusqueda}
                     placeholder="Búsqueda rápida de OC, responsable, validador..."
                   />
-                  <label style={{ ...ocV1Styles.stageDateFilter, width: 160 }}>
-                    <span>Estado de la OC</span>
-                    <select
-                      value={relacionEstado}
-                      onChange={(event) => setRelacionEstado(event.target.value as typeof relacionEstado)}
-                      style={{ ...ocV1Styles.stageDateInput, width: "100%" }}
-                    >
-                      <option value="todas">Todas</option>
-                      <option value="pendientes">En validación</option>
-                      <option value="aprobadas">Aprobadas</option>
-                    </select>
-                  </label>
+                  <button
+                    type="button"
+                    style={{ ...styles.primaryButton, height: 34, alignSelf: "flex-end" }}
+                    disabled={relacionLoading}
+                    onClick={() => void buscarRelacion()}
+                  >
+                    {relacionLoading ? "Buscando..." : "Buscar"}
+                  </button>
                 </div>
               </div>
-              {!panelOpen && error ? <div style={styles.errorBanner}>{error}</div> : null}
+              {!panelOpen && (relacionError || error) ? <div style={styles.errorBanner}>{relacionError || error}</div> : null}
               <div style={styles.workspaceGrid}>
                 <section style={{ ...styles.card, ...styles.masterCard }}>
                   <div style={{ ...styles.approvalListWrap, maxHeight: "none", overflow: "visible" }}>
@@ -4131,8 +4209,8 @@ export default function OcV2Page() {
                       keyExpr="idOc"
                       columns={relacionColumns}
                       height="calc(var(--app-vh) - 470px)"
-                      loading={loading}
-                      noDataText="No hay órdenes de compra para los filtros indicados."
+                      loading={relacionLoading}
+                      noDataText={relacionBuscado ? "No hay órdenes de compra para los filtros indicados." : "Indique el rango de fechas y pulse Buscar."}
                       stateStoringKey="oc-v2-relacion"
                       focusedRowKey={selectedOcId ? String(selectedOcId) : null}
                       onRowClick={(item) => {
@@ -5348,11 +5426,14 @@ const SolicitanteTypeahead = React.memo(function SolicitanteTypeahead({
   selectedValue,
   onSelect,
   placeholder,
+  clearable = false,
 }: {
   options: ConstanteOption[];
   selectedValue: string;
   onSelect: (value: string) => void;
   placeholder?: string;
+  /** Al vaciar el texto se limpia la selección (filtros opcionales). */
+  clearable?: boolean;
 }) {
   const [inputValue, setInputValue] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
@@ -5391,6 +5472,7 @@ const SolicitanteTypeahead = React.memo(function SolicitanteTypeahead({
           setInputValue(event.target.value);
           setShowDropdown(true);
           setHighlightedIdx(-1);
+          if (clearable && event.target.value === "" && selectedValue) onSelect("");
         }}
         onFocus={() => {
           if (filteredOptions.length > 0) {

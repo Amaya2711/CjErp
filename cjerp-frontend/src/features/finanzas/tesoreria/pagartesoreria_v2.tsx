@@ -76,6 +76,11 @@ const currencySymbol = (currency: string | null | undefined) => {
 };
 const fecha = (value: string | null) =>
   value ? value.slice(0, 10).split("-").reverse().join("/") : "—";
+// El SP puede devolver la fecha como dd/MM/yyyy; el grid filtra y ordena con ISO (yyyy-MM-dd).
+const fechaIso = (value: string | null | undefined) => {
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(String(value ?? "").trim());
+  return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : value || null;
+};
 const normalizarTextoFiltro = (value: string | null | undefined) =>
   String(value ?? "")
     .normalize("NFD")
@@ -1219,7 +1224,7 @@ export default function PagarTesoreriaV2Page() {
       caption: "Fecha",
       dataType: "date",
       width: 100,
-      calculateCellValue: (r) => (estado === 4 ? r.fechaDeposito : r.fecha),
+      calculateCellValue: (r) => fechaIso(estado === 4 ? r.fechaDeposito : r.fecha),
       cellRender: (v) => fecha(v == null ? null : String(v)),
     },
     { dataField: "solicitante", caption: "Solicitante", width: 180, calculateCellValue: (r) => r.solicitante || "—" },

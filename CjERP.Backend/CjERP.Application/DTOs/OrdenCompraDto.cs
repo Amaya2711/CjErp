@@ -18,6 +18,13 @@ public class OrdenCompraConsultaRequestDto
     /// el tiempo de respuesta y el tamaño de la bandeja de aprobación. Por defecto no filtra.
     /// </summary>
     public bool SoloPendientesAprobacion { get; set; }
+
+    /// <summary>
+    /// Solo cabeceras: rango de fecha de creación de la OC (inclusive, solo la parte de fecha). El SP no lo recibe,
+    /// se aplica sobre su resultado antes de enriquecer y serializar. Opcional.
+    /// </summary>
+    public DateTime? FechaDesde { get; set; }
+    public DateTime? FechaHasta { get; set; }
 }
 
 public class OrdenCompraCabeceraDto

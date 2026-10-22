@@ -6,7 +6,7 @@ import { consultarIngreso, importarPedidoEquipos, importarSecundarioEquipos } fr
 import type { IngresoLinea, IngresoLineaResultado, PedidoItem, SecundarioItem } from "../../../../../models/logisticaEquipos";
 import { getHttpErrorMessage } from "../../../../../utils/httpError";
 import { leerPedidos, leerSecundario } from "./ingresoExcel";
-import { ingresoStyles as styles } from "./ingresoComun";
+import { estiloPestanas, ingresoStyles as styles } from "./ingresoComun";
 
 type Resultado = { estado: string; mensaje: string };
 type FilaPedido = PedidoItem & Resultado;
@@ -77,9 +77,97 @@ const estiloRow = (r: Resultado) =>
 
 const sinResultado = <T extends object>(item: T): T & Resultado => ({ ...item, estado: "", mensaje: "" });
 
+const aItemsPedido = (filas: FilaPedido[]): PedidoItem[] =>
+  filas.map((f) => ({
+    fila: f.fila,
+    pedidoSap: f.pedidoSap,
+    idSolicitud: f.idSolicitud,
+    site: f.site,
+    descSite: f.descSite,
+    solicitante: f.solicitante,
+    codPap: f.codPap,
+    descripcion: f.descripcion,
+    cantSolicitada: f.cantSolicitada,
+    cantSap: f.cantSap,
+    centro: f.centro,
+    almOrigen: f.almOrigen,
+    lote: f.lote,
+    obsSolic: f.obsSolic,
+    region: f.region,
+    oc: f.oc,
+    posicion: f.posicion,
+    cliente: f.cliente,
+    proyecto: f.proyecto,
+    tipoTrabajo: f.tipoTrabajo,
+    fecIngreso: f.fecIngreso,
+    guia: f.guia,
+  }));
+
+const aItemsSecundario = (filas: FilaSecundario[]): SecundarioItem[] =>
+  filas.map((f) => ({
+    fila: f.fila,
+    idMaterial: f.idMaterial,
+    idSolicitud: f.idSolicitud,
+    site: f.site,
+    descSite: f.descSite,
+    descripcion: f.descripcion,
+    cantidad: f.cantidad,
+    lote: f.lote,
+  }));
+
+const conResultados = <T extends { fila: number } & Resultado>(filas: T[], lineas: IngresoLineaResultado[]): T[] => {
+  const porFila = new Map(lineas.map((l) => [l.fila, l]));
+  return filas.map((f) => {
+    const r = porFila.get(f.fila);
+    return r ? { ...f, estado: r.estado, mensaje: r.mensaje ?? "" } : f;
+  });
+};
+
+const contar = (filas: Resultado[], estado: string) => filas.filter((f) => f.estado === estado).length;
+
+const texto = (valor: unknown) => String(valor ?? "").trim();
+
 /**
- * Pestaña "Pedido". Hoja PRINCIPAL: crea pedido, líneas y stock. Hoja SECUNDARIO: reasigna lo ya cargado entre sites.
- * Cada hoja se valida e importa por separado (primero PRINCIPAL, luego SECUNDARIO).
+ * Valida las dos hojas como lo hacía "Cargar" en el formulario antiguo (FrmLogistic_v1):
+ *  - PRINCIPAL: lote, site, cliente, proyecto y relación cliente-proyecto-site (servidor, sin grabar).
+ *  - SECUNDARIO: cada ID_MATERIAL debe existir en la lista PRINCIPAL del mismo archivo (local).
+ *  - SECUNDARIO contra la BD solo se puede validar si el pedido PRINCIPAL ya estaba cargado; si es nuevo,
+ *    sus líneas aún no existen y se valida completa al importar, después de la hoja PRINCIPAL.
+ */
+async function validarHojas(pri: FilaPedido[], sec: FilaSecundario[]) {
+  let p = pri.map(sinResultado);
+  let s = sec.map(sinResultado);
+
+  if (p.length > 0) {
+    const r = await importarPedidoEquipos(aItemsPedido(p), true);
+    p = conResultados(p, r.lineas);
+  }
+
+  const codigos = new Set(p.map((f) => texto(f.codPap)));
+  s = s.map((f) =>
+    codigos.has(texto(f.idMaterial))
+      ? f
+      : { ...f, estado: "ERROR", mensaje: `No existe el material ${texto(f.idMaterial)} dentro de la lista de la hoja PRINCIPAL.` },
+  );
+
+  if (s.length > 0) {
+    const principalPendiente = p.some((f) => f.estado === "OK");
+    if (!principalPendiente && contar(s, "ERROR") === 0) {
+      const r = await importarSecundarioEquipos(aItemsSecundario(s), true);
+      s = conResultados(s, r.lineas);
+    } else if (principalPendiente) {
+      s = s.map((f) => (f.estado === "" ? { ...f, mensaje: "Se valida por completo al importar, después de la hoja PRINCIPAL." } : f));
+    }
+  }
+
+  return { p, s, errP: contar(p, "ERROR"), errS: contar(s, "ERROR") };
+}
+
+/**
+ * Pestaña "Pedido" (equivale a XtabPedido de FrmLogistic_v1).
+ * - Cargar Excel lee las hojas PRINCIPAL y SECUNDARIO y valida ambas (el importar solo se habilita sin errores en ninguna).
+ * - Importar pedido: PRINCIPAL crea pedido, líneas y stock; luego SECUNDARIO reasigna sites. Con la pestaña PRINCIPAL activa,
+ *   si todo el pedido ya existía no se continúa con SECUNDARIO ("los datos ya existen"); con SECUNDARIO activa siempre se aplica.
  */
 export default function PedidoTab() {
   const entrada = useRef<HTMLInputElement>(null);
@@ -95,28 +183,40 @@ export default function PedidoTab() {
   const [mensaje, setMensaje] = useState("");
   const [confirmar, setConfirmar] = useState(false);
 
-  const filasActivas = hoja === "principal" ? principal : secundario;
-
   const resumen = useMemo(() => {
     const pedidos = new Set(principal.map((f) => f.pedidoSap).filter(Boolean));
     const solicitudes = new Set([...principal.map((f) => f.idSolicitud), ...secundario.map((f) => f.idSolicitud)].filter(Boolean));
     return {
       pedidos: Array.from(pedidos),
       solicitudes: Array.from(solicitudes),
-      errores: filasActivas.filter((f) => f.estado === "ERROR").length,
-      omitidas: filasActivas.filter((f) => f.estado === "OMITIDO").length,
+      errPrincipal: contar(principal, "ERROR"),
+      errSecundario: contar(secundario, "ERROR"),
+      nuevas: contar(principal, "OK"),
     };
-  }, [principal, secundario, filasActivas]);
+  }, [principal, secundario]);
 
-  const aplicarResultados = (lineas: IngresoLineaResultado[]) => {
-    const porFila = new Map(lineas.map((l) => [l.fila, l]));
-    const aplicar = <T extends { fila: number } & Resultado>(actuales: T[]) =>
-      actuales.map((f) => {
-        const r = porFila.get(f.fila);
-        return r ? { ...f, estado: r.estado, mensaje: r.mensaje ?? "" } : f;
-      });
-    if (hoja === "principal") setPrincipal(aplicar);
-    else setSecundario(aplicar);
+  const ejecutarValidacion = async (pri: FilaPedido[], sec: FilaSecundario[]) => {
+    setTrabajando(true);
+    setError("");
+    setMensaje("");
+    setValidado(false);
+    try {
+      const { p, s, errP, errS } = await validarHojas(pri, sec);
+      setPrincipal(p);
+      setSecundario(s);
+      if (errP + errS === 0) {
+        setValidado(true);
+        setMensaje("Validación correcta: el archivo puede importarse.");
+      } else {
+        if (errP === 0 && errS > 0) setHoja("secundario");
+        if (errP > 0) setHoja("principal");
+        setMensaje(`Hay ${errP} línea(s) con error en PRINCIPAL y ${errS} en SECUNDARIO. Corrija el archivo y vuelva a cargarlo.`);
+      }
+    } catch (err) {
+      setError(getHttpErrorMessage(err, "No se pudo validar el archivo."));
+    } finally {
+      setTrabajando(false);
+    }
   };
 
   const cargarArchivo = async (file: File | undefined) => {
@@ -126,89 +226,43 @@ export default function PedidoTab() {
     setValidado(false);
     setMigrado([]);
     setVista("previa");
+    let pri: FilaPedido[] = [];
+    let sec: FilaSecundario[] = [];
     try {
       const [hojaPrincipal, hojaSecundario] = await Promise.all([leerPedidos(file), leerSecundario(file)]);
       if (hojaPrincipal === null && hojaSecundario === null) {
         throw new Error("El archivo no contiene las hojas PRINCIPAL ni SECUNDARIO.");
       }
+      pri = (hojaPrincipal ?? []).map(sinResultado);
+      sec = (hojaSecundario ?? []).map(sinResultado);
       setArchivo(file.name);
-      setPrincipal((hojaPrincipal ?? []).map(sinResultado));
-      setSecundario((hojaSecundario ?? []).map(sinResultado));
-      setHoja(hojaPrincipal && hojaPrincipal.length > 0 ? "principal" : "secundario");
+      setPrincipal(pri);
+      setSecundario(sec);
+      setHoja(pri.length > 0 ? "principal" : "secundario");
     } catch (err) {
       setPrincipal([]);
       setSecundario([]);
       setArchivo("");
       setError(err instanceof Error ? err.message : "No se pudo leer el archivo.");
+      return;
     } finally {
       if (entrada.current) entrada.current.value = "";
     }
+    await ejecutarValidacion(pri, sec);
   };
 
   const cambiarHoja = (siguiente: Hoja) => {
     setHoja(siguiente);
-    setValidado(false);
     setVista("previa");
-    setError("");
-    setMensaje("");
   };
 
-  const enviar = async (soloValidar: boolean) => {
-    if (hoja === "principal") {
-      const items: PedidoItem[] = principal.map((f) => ({
-        fila: f.fila,
-        pedidoSap: f.pedidoSap,
-        idSolicitud: f.idSolicitud,
-        site: f.site,
-        descSite: f.descSite,
-        solicitante: f.solicitante,
-        codPap: f.codPap,
-        descripcion: f.descripcion,
-        cantSolicitada: f.cantSolicitada,
-        cantSap: f.cantSap,
-        centro: f.centro,
-        almOrigen: f.almOrigen,
-        lote: f.lote,
-        obsSolic: f.obsSolic,
-        region: f.region,
-        oc: f.oc,
-        posicion: f.posicion,
-        cliente: f.cliente,
-        proyecto: f.proyecto,
-        tipoTrabajo: f.tipoTrabajo,
-        fecIngreso: f.fecIngreso,
-        guia: f.guia,
-      }));
-      return importarPedidoEquipos(items, soloValidar);
-    }
-    const items: SecundarioItem[] = secundario.map((f) => ({
-      fila: f.fila,
-      idMaterial: f.idMaterial,
-      idSolicitud: f.idSolicitud,
-      site: f.site,
-      descSite: f.descSite,
-      descripcion: f.descripcion,
-      cantidad: f.cantidad,
-      lote: f.lote,
-    }));
-    return importarSecundarioEquipos(items, soloValidar);
-  };
-
-  const validar = async () => {
-    setTrabajando(true);
-    setError("");
-    setMensaje("");
-    try {
-      const resultado = await enviar(true);
-      aplicarResultados(resultado.lineas);
-      const errores = resultado.lineas.filter((l) => l.estado === "ERROR").length;
-      setValidado(errores === 0);
-      setMensaje(errores === 0 ? "Validación correcta: la hoja puede importarse." : `Hay ${errores} línea(s) con error. Corrija el archivo y vuelva a cargarlo.`);
-    } catch (err) {
-      setError(getHttpErrorMessage(err, "No se pudo validar el archivo."));
-    } finally {
-      setTrabajando(false);
-    }
+  const cargarMigrado = async (pri: FilaPedido[], sec: FilaSecundario[]) => {
+    const pedidos = Array.from(new Set(pri.map((f) => f.pedidoSap).filter(Boolean)));
+    const solicitudes = Array.from(new Set([...pri.map((f) => f.idSolicitud), ...sec.map((f) => f.idSolicitud)].filter(Boolean)));
+    setMigrado(
+      await consultarIngreso(pedidos.length > 0 ? { etapa: "PEDIDO", pedidos: pedidos.join(",") } : { etapa: "PEDIDO", solicitudes: solicitudes.join(",") }),
+    );
+    setVista("migrado");
   };
 
   const importar = async () => {
@@ -216,28 +270,59 @@ export default function PedidoTab() {
     setTrabajando(true);
     setError("");
     setMensaje("");
+    let pri = principal;
+    let sec = secundario;
+    const partes: string[] = [];
     try {
-      const resultado = await enviar(false);
-      aplicarResultados(resultado.lineas);
-      if (!resultado.aplicado) {
+      let principalAplicado = false;
+
+      if (pri.length > 0) {
+        const r = await importarPedidoEquipos(aItemsPedido(pri), false);
+        pri = conResultados(pri, r.lineas);
+        setPrincipal(pri);
+        if (contar(pri, "ERROR") > 0) {
+          setValidado(false);
+          setHoja("principal");
+          setError("La hoja PRINCIPAL tiene errores: no se importó ningún dato. Revise los mensajes de la grilla.");
+          return;
+        }
+        principalAplicado = r.aplicado;
+        if (principalAplicado) {
+          const omitidas = contar(pri, "OMITIDO");
+          partes.push(`PRINCIPAL: ${contar(pri, "OK")} línea(s) cargada(s)${omitidas ? `, ${omitidas} omitida(s) por existir` : ""}`);
+        }
+      }
+
+      // Regla del formulario antiguo: con la pestaña PRINCIPAL activa, si el pedido ya existía no se sigue con SECUNDARIO.
+      if (hoja === "principal" && pri.length > 0 && !principalAplicado) {
         setValidado(false);
-        setError("No se importó ningún dato: revise los mensajes de la grilla.");
+        setMensaje("Los datos ya existen en la BD. No se copian nuevamente.");
+        await cargarMigrado(pri, sec);
         return;
       }
-      const cargadas = resultado.lineas.filter((l) => l.estado === "OK").length;
-      const omitidas = resultado.lineas.filter((l) => l.estado === "OMITIDO").length;
-      setMensaje(
-        hoja === "principal"
-          ? `Datos migrados: ${cargadas} línea(s) cargada(s)${omitidas ? `, ${omitidas} omitida(s) por existir` : ""}.`
-          : `Reasignación aplicada: ${cargadas} línea(s) del archivo${omitidas ? `, ${omitidas} omitida(s)` : ""}.`,
-      );
+
+      if (sec.length > 0) {
+        const r = await importarSecundarioEquipos(aItemsSecundario(sec), false);
+        sec = conResultados(sec, r.lineas);
+        setSecundario(sec);
+        if (contar(sec, "ERROR") > 0) {
+          setValidado(false);
+          setHoja("secundario");
+          setError(
+            `${principalAplicado ? "La hoja PRINCIPAL ya se importó, pero " : ""}la hoja SECUNDARIO tiene errores y no se reasignó ningún site. Revise los mensajes de la grilla.`,
+          );
+          if (principalAplicado) await cargarMigrado(pri, sec);
+          return;
+        }
+        if (r.aplicado) {
+          const omitidas = contar(sec, "OMITIDO");
+          partes.push(`SECUNDARIO: ${contar(sec, "OK")} línea(s) reasignada(s)${omitidas ? `, ${omitidas} omitida(s)` : ""}`);
+        }
+      }
+
       setValidado(false);
-      setMigrado(
-        await consultarIngreso(
-          hoja === "principal" ? { etapa: "PEDIDO", pedidos: resumen.pedidos.join(",") } : { etapa: "PEDIDO", solicitudes: resumen.solicitudes.join(",") },
-        ),
-      );
-      setVista("migrado");
+      setMensaje(partes.length > 0 ? `Datos migrados. ${partes.join(" · ")}.` : "No había datos nuevos para importar.");
+      await cargarMigrado(pri, sec);
     } catch (err) {
       setError(getHttpErrorMessage(err, "No se pudo importar el archivo."));
     } finally {
@@ -270,24 +355,34 @@ export default function PedidoTab() {
     </div>
   );
 
+  const etiquetaHoja = (nombre: string, total: number, errores: number) => `${nombre} (${total})${errores ? ` · ${errores} con error` : ""}`;
+
   return (
     <div style={styles.root}>
+      <div role="tablist" aria-label="Hoja del archivo" style={estiloPestanas.tabs}>
+        {(["principal", "secundario"] as const).map((v) => (
+          <button
+            key={v}
+            type="button"
+            role="tab"
+            aria-selected={hoja === v}
+            onClick={() => cambiarHoja(v)}
+            style={{ ...estiloPestanas.tab, ...(hoja === v ? estiloPestanas.tabActive : null) }}
+          >
+            {v === "principal"
+              ? etiquetaHoja("Principal", principal.length, resumen.errPrincipal)
+              : etiquetaHoja("Secundario", secundario.length, resumen.errSecundario)}
+          </button>
+        ))}
+      </div>
+
       <div style={styles.toolbar}>
         <input ref={entrada} type="file" accept=".xlsx,.xls" hidden onChange={(e) => void cargarArchivo(e.target.files?.[0])} />
         <button type="button" onClick={() => entrada.current?.click()} disabled={trabajando} style={styles.secondary}>
           Cargar Excel
         </button>
-        {tabs(
-          ["principal", "secundario"],
-          hoja,
-          (v) => (v === "principal" ? `Principal (${principal.length})` : `Secundario (${secundario.length})`),
-          (v) => cambiarHoja(v as Hoja),
-        )}
-        <button type="button" onClick={() => void validar()} disabled={trabajando || filasActivas.length === 0} style={styles.secondary}>
-          Validar
-        </button>
         <button type="button" onClick={() => setConfirmar(true)} disabled={trabajando || !validado} style={styles.primary}>
-          {trabajando ? "Procesando…" : hoja === "principal" ? "Importar pedido" : "Reasignar sites"}
+          {trabajando ? "Procesando…" : "Importar pedido"}
         </button>
         {tabs(
           ["previa", "migrado"],
@@ -296,16 +391,13 @@ export default function PedidoTab() {
           (v) => setVista(v as Vista),
           (v) => v === "migrado" && migrado.length === 0,
         )}
-        <span style={styles.resumen}>
-          {archivo ? `${archivo} · ${filasActivas.length} línea(s)` : "Cargue la plantilla de pedidos"}
-          {resumen.errores ? ` · ${resumen.errores} con error` : ""}
-        </span>
+        <span style={styles.resumen}>{archivo ? `${archivo} · Principal ${principal.length} · Secundario ${secundario.length}` : "Cargue la plantilla de pedidos"}</span>
       </div>
 
       {hoja === "secundario" ? (
         <div style={{ ...styles.panel, fontSize: 12, color: "#475569" }}>
           Cód. 40: mueve esas unidades al site indicado. Cód. 10: reparte la cantidad entre sites (la suma por solicitud, material y lote debe ser igual a la existente).
-          No modifica el stock. Importe primero la hoja PRINCIPAL si el pedido es nuevo.
+          No modifica el stock. Cada material debe existir en la hoja PRINCIPAL. Al importar se procesa primero PRINCIPAL y luego SECUNDARIO.
         </div>
       ) : null}
 
@@ -365,13 +457,11 @@ export default function PedidoTab() {
 
       <ConfirmDialog
         open={confirmar}
-        title={hoja === "principal" ? "Importar pedido" : "Reasignar sites"}
-        message={
-          hoja === "principal"
-            ? `Se crearán las líneas de ${resumen.pedidos.length} pedido(s) (${principal.length - resumen.omitidas} línea(s) nuevas) y se sumará el stock a Disponible. ¿Continuar?`
-            : `Se reasignarán ${secundario.length - resumen.omitidas} línea(s) entre sites. No se modifica el stock. ¿Continuar?`
-        }
-        confirmLabel={hoja === "principal" ? "Importar" : "Reasignar"}
+        title="Importar pedido"
+        message={`Se importarán ${resumen.nuevas} línea(s) nuevas de ${resumen.pedidos.length} pedido(s) (hoja PRINCIPAL, suma stock a Disponible)${
+          secundario.length > 0 ? ` y luego se reasignarán ${secundario.length} línea(s) entre sites (hoja SECUNDARIO, no modifica el stock)` : ""
+        }. ¿Continuar?`}
+        confirmLabel="Importar"
         onConfirm={() => void importar()}
         onCancel={() => setConfirmar(false)}
       />

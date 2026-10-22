@@ -603,10 +603,11 @@ public class OrdenCompraService : IOrdenCompraService
         CancellationToken cancellationToken = default)
     {
         await using var connection = _sqlCommandFactory.CreateConnection();
+        // El rango de fechas (CabOrdenCompra.FechaCreacion) lo resuelve el SP con @FechaInicio/@FechaFin.
         var cabeceras = (await connection.QueryAsync<OrdenCompraCabeceraDto>(
             _sqlCommandFactory.Create(
                 BuscarCabeceraSp,
-                BuildConsultaParameters(request),
+                BuildConsultaParameters(request, incluirFechas: true),
                 CommandType.StoredProcedure,
                 cancellationToken,
                 commandTimeout: 120))).ToList();
@@ -1989,7 +1990,7 @@ public class OrdenCompraService : IOrdenCompraService
         return null;
     }
 
-    private static DynamicParameters BuildConsultaParameters(OrdenCompraConsultaRequestDto request)
+    private static DynamicParameters BuildConsultaParameters(OrdenCompraConsultaRequestDto request, bool incluirFechas = false)
     {
         var parameters = new DynamicParameters();
         parameters.Add("@IdCliente", request.IdCliente, DbType.Int32);
@@ -2001,6 +2002,11 @@ public class OrdenCompraService : IOrdenCompraService
         parameters.Add("@IdSolicitante", request.IdSolicitante, DbType.Int32);
         parameters.Add("@IdResponsable", request.IdResponsable, DbType.Int32);
         parameters.Add("@IdOc", NullIfWhiteSpace(request.IdOc), DbType.String);
+        if (incluirFechas)
+        {
+            parameters.Add("@FechaInicio", request.FechaDesde?.Date, DbType.Date);
+            parameters.Add("@FechaFin", request.FechaHasta?.Date, DbType.Date);
+        }
         return parameters;
     }
 

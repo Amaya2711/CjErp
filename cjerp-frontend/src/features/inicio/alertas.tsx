@@ -7,10 +7,13 @@ import type { GridColumn } from "../../components/datagrid/types";
 import { buscarOrdenCompraCabecera, buscarOrdenCompraDetalle } from "../../api/ordenCompraService";
 import type { OrdenCompraCabeceraDto } from "../../api/ordenCompraService";
 import { buildPlanillaConsultaEstadosRequest, consultarPlanillaEstados } from "../../api/planillaConsultaService";
+import { listarBeneficios, TIPO_ADELANTO, TIPO_PRESTAMO, type Beneficio } from "../../api/beneficioService";
+import { ESTADO_DESCANSO, listarDescansos, type Descanso } from "../../api/descansoService";
+import { listarVacaciones } from "../../api/vacacionesService";
 import { getAuthUser } from "../../utils/authStorage";
 import { getHttpErrorMessage } from "../../utils/httpError";
 
-type AlertaTabKey = "oc" | "gastos";
+type AlertaTabKey = "oc" | "gastos" | "vacaciones" | "descanso" | "adelanto" | "prestamo";
 
 type AlertaTab = {
   key: AlertaTabKey;
@@ -24,7 +27,95 @@ type OrdenCompraAlerta = OrdenCompraCabeceraDto & { tipoTrabajo: string };
 const TABS: AlertaTab[] = [
   { key: "oc", label: "Órdenes de compra" },
   { key: "gastos", label: "Gastos" },
+  { key: "vacaciones", label: "Vacaciones" },
+  { key: "descanso", label: "Descanso médico" },
+  { key: "adelanto", label: "Adelanto de sueldo" },
+  { key: "prestamo", label: "Préstamo" },
 ];
+
+// Descanso médico en aprobación (97 a 100): propios del empleado o que le toca validar (1ro/2do/3er validador).
+type DescansoAlerta = {
+  clave: string;
+  empleado: string;
+  fechaInicio: string;
+  fechaFin: string;
+  dias: number;
+  estado: string;
+  relacion: string;
+};
+
+const ESTADOS_DESCANSO_PENDIENTE: Record<number, string> = {
+  [ESTADO_DESCANSO.PRIMERA]: "1ERA APROBACIÓN",
+  [ESTADO_DESCANSO.SEGUNDA]: "2DA APROBACIÓN",
+  [ESTADO_DESCANSO.TERCERA]: "3ERA APROBACIÓN",
+  [ESTADO_DESCANSO.CUARTA]: "4TA APROBACIÓN",
+};
+
+function mapDescansoAlerta(d: Descanso, relacion: string): DescansoAlerta {
+  const fechaInicio = fechaDia(d.fechaInicio);
+  const fechaFin = fechaDia(d.fechaFin);
+  return {
+    clave: `${d.idEmpleadoCj}|${fechaInicio}|${fechaFin}`,
+    empleado: (d.nombreEmpleado ?? "").trim(),
+    fechaInicio,
+    fechaFin,
+    dias: Number(d.dias ?? 0),
+    estado: ESTADOS_DESCANSO_PENDIENTE[d.idEstado] ?? (d.estado ?? "").trim(),
+    relacion,
+  };
+}
+
+// Beneficio (adelanto / préstamo) propio pendiente de aprobación (IdAprobado = 0), como en /recursoshumanos/beneficio.
+type BeneficioAlerta = {
+  idBeneficio: number;
+  empleado: string;
+  monto: number;
+  meses: number;
+  mesInicio: string;
+  fechaCreacion: string;
+  estado: string;
+};
+
+// Mes de inicio como texto MM/yyyy (puede llegar como fecha ISO, dd/MM/yyyy o ya como MM/yyyy).
+function mesAnio(value: unknown): string {
+  const texto = String(value ?? "").trim();
+  const iso = /^(\d{4})-(\d{2})/.exec(texto);
+  if (iso) return `${iso[2]}/${iso[1]}`;
+  const dma = /^\d{2}\/(\d{2})\/(\d{4})/.exec(texto);
+  return dma ? `${dma[1]}/${dma[2]}` : texto;
+}
+
+function mapBeneficioAlerta(b: Beneficio): BeneficioAlerta {
+  return {
+    idBeneficio: b.idBeneficio,
+    empleado: (b.nombreEmpleado ?? "").trim(),
+    monto: Number(b.monto ?? 0),
+    meses: Number(b.meses ?? 0),
+    mesInicio: mesAnio(b.mesInicio),
+    fechaCreacion: fechaDia(b.fechaCreacion),
+    estado: (b.txtAprobado ?? "").trim() || "PENDIENTE",
+  };
+}
+
+// Vacaciones (legacy) pendientes de validar: 97 = 1ra validación, 98 = 2da, 99 = 3ra. Le corresponde al
+// validador respectivo del empleado (EmpleadoCjDetalle: IdResponsableCj / IdSegundoVacaciones / IdTerceroVacaciones).
+type VacacionAlerta = {
+  clave: string;
+  empleado: string;
+  fechaInicio: string;
+  fechaFin: string;
+  dias: number;
+  estado: string;
+  saldo: number | null;
+  /** "Mi solicitud" (el empleado es el usuario) o "Por validar" (el usuario es el validador de la etapa). */
+  relacion: string;
+};
+
+const ESTADOS_VACACION: Record<number, string> = {
+  97: "1ERA VALIDACIÓN",
+  98: "2DA VALIDACIÓN",
+  99: "3ERA VALIDACIÓN",
+};
 
 // Gasto (Planilla) pendiente del empleado: 0 = pendiente de 1ª aprobación, 2 = observado (por subsanar).
 const ESTADOS_GASTO_PENDIENTE = "0,2";
@@ -37,6 +128,7 @@ type GastoAlerta = {
   site: string;
   tipoTrabajo: string;
   detalle: string;
+  observacion: string;
   solicitante: string;
   total: number;
   moneda: string;
@@ -44,10 +136,18 @@ type GastoAlerta = {
 };
 
 // Lee el valor de una fila del SP sin depender de mayúsculas/minúsculas del alias.
+// Respeta el orden de prioridad de `nombres` (no el orden de columnas de la fila) y salta valores vacíos.
 function leerCampo(row: Record<string, unknown>, ...nombres: string[]): unknown {
-  const clave = Object.keys(row).find((k) => nombres.some((n) => n.toLowerCase() === k.toLowerCase()));
-  return clave ? row[clave] : undefined;
+  const claves = Object.keys(row);
+  for (const nombre of nombres) {
+    const clave = claves.find((k) => k.toLowerCase() === nombre.toLowerCase());
+    if (clave && row[clave] != null && String(row[clave]).trim() !== "") return row[clave];
+  }
+  return undefined;
 }
+
+// Identificadores numéricos (correlativo, OC, N°): sin separador de miles.
+const formatoId = (valor: unknown) => String(valor ?? "");
 
 // FecIngreso llega como dd/MM/yyyy; se convierte a ISO para ordenar y filtrar como fecha.
 function fechaIso(value: unknown): string {
@@ -66,12 +166,55 @@ function mapGastoRow(row: Record<string, unknown>): GastoAlerta {
     site: texto("Site"),
     tipoTrabajo: texto("Tipo_Trabajo", "TipoTrabajo"),
     detalle: texto("Detalle"),
+    observacion: texto("ObservacionPlanilla", "Observacion"),
     solicitante: texto("Solicitante"),
     // Total en la moneda real del recibo, sin convertir a soles.
     total: Number(leerCampo(row, "Total") ?? 0),
     moneda: texto("Moneda"),
     estado: texto("EstadoNombre") || texto("Estado"),
   };
+}
+
+function fechaDia(value: unknown): string {
+  const texto = String(value ?? "").trim();
+  return /^\d{4}-\d{2}-\d{2}/.test(texto) ? texto.slice(0, 10) : fechaIso(texto);
+}
+
+function mapVacacionAlerta(row: Record<string, unknown>, index: number, misIds: Set<number>): VacacionAlerta | null {
+  const num = (...n: string[]) => {
+    const valor = leerCampo(row, ...n);
+    const parsed = Number(valor);
+    return valor == null || valor === "" || !Number.isFinite(parsed) ? null : parsed;
+  };
+  const idEstado = num("IdEstado") ?? 0;
+  const validador = idEstado === 97 ? num("IdResponsableCj") : idEstado === 98 ? num("IdSegundoVacaciones") : idEstado === 99 ? num("IdTerceroVacaciones") : null;
+  if (!ESTADOS_VACACION[idEstado]) return null;
+  const idDueno = num("IdEmpleadoCj");
+  const esMia = idDueno != null && misIds.has(idDueno);
+  const porValidar = validador != null && misIds.has(validador);
+  if (!esMia && !porValidar) return null;
+
+  const fechaInicio = fechaDia(leerCampo(row, "FechaInicio"));
+  const fechaFin = fechaDia(leerCampo(row, "FechaFin"));
+  const dias = fechaInicio && fechaFin
+    ? Math.round((new Date(`${fechaFin}T00:00:00`).getTime() - new Date(`${fechaInicio}T00:00:00`).getTime()) / 86_400_000) + 1
+    : 0;
+  return {
+    clave: `${num("IdEmpleadoCj") ?? index}|${fechaInicio}|${fechaFin}`,
+    empleado: String(leerCampo(row, "NombreEmpleado") ?? "").trim(),
+    fechaInicio,
+    fechaFin,
+    dias: Number.isFinite(dias) ? dias : 0,
+    estado: ESTADOS_VACACION[idEstado],
+    saldo: num("SaldoVacaciones"),
+    relacion: porValidar ? "Por validar" : "Mi solicitud",
+  };
+}
+
+function estadoVacacionTono(estado: string): { color: string; background: string } {
+  if (estado.startsWith("1")) return { color: "#3730A3", background: "#EEF2FF" };
+  if (estado.startsWith("2")) return { color: "#0369A1", background: "#F0F9FF" };
+  return { color: "#B45309", background: "#FEF3C7" };
 }
 
 function toPositiveNumber(...values: Array<string | number | null | undefined>): number {
@@ -135,10 +278,14 @@ function EstadoBadge({
 
 // Subir el sufijo al cambiar columnas/orden para no heredar la configuración guardada en el navegador.
 const GRID_STATE_KEY = "alertas_oc_v4";
-const GRID_STATE_KEY_GASTOS = "alertas_gastos_v1";
+const GRID_STATE_KEY_GASTOS = "alertas_gastos_v2";
+const GRID_STATE_KEY_DESCANSO = "alertas_descanso_v1";
+const GRID_STATE_KEY_ADELANTO = "alertas_adelanto_v2";
+const GRID_STATE_KEY_PRESTAMO = "alertas_prestamo_v2";
+const GRID_STATE_KEY_VACACIONES = "alertas_vacaciones_v2";
 
 const COLUMNAS_OC: GridColumn<OrdenCompraAlerta>[] = [
-  { dataField: "idOc", caption: "OC", dataType: "number", width: 90, alignment: "left" },
+  { dataField: "idOc", caption: "OC", dataType: "number", width: 90, alignment: "left", format: formatoId },
   { dataField: "fecha", caption: "Fecha", dataType: "date", width: 110 },
   { dataField: "nombreCliente", caption: "Cliente", minWidth: 160 },
   { dataField: "nombreProyecto", caption: "Proyecto", minWidth: 160 },
@@ -157,15 +304,60 @@ const COLUMNAS_OC: GridColumn<OrdenCompraAlerta>[] = [
 ];
 
 const COLUMNAS_GASTOS: GridColumn<GastoAlerta>[] = [
-  { dataField: "corre", caption: "Correlativo", dataType: "number", width: 110, alignment: "left" },
+  { dataField: "corre", caption: "Correlativo", dataType: "number", width: 110, alignment: "left", format: formatoId },
   { dataField: "fecha", caption: "Fecha", dataType: "date", width: 110 },
   { dataField: "cliente", caption: "Cliente", minWidth: 160 },
   { dataField: "proyecto", caption: "Proyecto", minWidth: 160 },
   { dataField: "site", caption: "Site", minWidth: 160 },
   { dataField: "tipoTrabajo", caption: "Tipo trabajo", minWidth: 150 },
   { dataField: "detalle", caption: "Detalle", minWidth: 220 },
+  { dataField: "observacion", caption: "Observación", minWidth: 240 },
   { dataField: "total", caption: "Total", dataType: "number", width: 130, format: { type: "fixedPoint", precision: 2 } },
   { dataField: "moneda", caption: "Moneda", width: 100, alignment: "center" },
+  {
+    dataField: "estado",
+    caption: "Estado",
+    width: 150,
+    cellRender: (value) => <EstadoBadge value={String(value ?? "").trim()} tono={estadoGastoTono} />,
+  },
+];
+
+const COLUMNAS_VACACIONES: GridColumn<VacacionAlerta>[] = [
+  { dataField: "empleado", caption: "Empleado", minWidth: 220 },
+  { dataField: "fechaInicio", caption: "Fecha inicio", dataType: "date", width: 120 },
+  { dataField: "fechaFin", caption: "Fecha fin", dataType: "date", width: 120 },
+  { dataField: "dias", caption: "Días", dataType: "number", width: 80, alignment: "right" },
+  { dataField: "relacion", caption: "Relación", width: 120 },
+  { dataField: "saldo", caption: "Saldo", dataType: "number", width: 100, alignment: "right" },
+  {
+    dataField: "estado",
+    caption: "Estado",
+    width: 170,
+    cellRender: (value) => <EstadoBadge value={String(value ?? "").trim()} tono={estadoVacacionTono} />,
+  },
+];
+
+const COLUMNAS_DESCANSO: GridColumn<DescansoAlerta>[] = [
+  { dataField: "empleado", caption: "Empleado", minWidth: 220 },
+  { dataField: "fechaInicio", caption: "Fecha inicio", dataType: "date", width: 120 },
+  { dataField: "fechaFin", caption: "Fecha fin", dataType: "date", width: 120 },
+  { dataField: "dias", caption: "Días", dataType: "number", width: 80, alignment: "right" },
+  { dataField: "relacion", caption: "Relación", width: 120 },
+  {
+    dataField: "estado",
+    caption: "Estado",
+    width: 170,
+    cellRender: (value) => <EstadoBadge value={String(value ?? "").trim()} tono={estadoVacacionTono} />,
+  },
+];
+
+const COLUMNAS_BENEFICIO: GridColumn<BeneficioAlerta>[] = [
+  { dataField: "idBeneficio", caption: "N°", dataType: "number", width: 110, alignment: "left", format: formatoId },
+  { dataField: "empleado", caption: "Empleado", minWidth: 220 },
+  { dataField: "fechaCreacion", caption: "Fecha solicitud", dataType: "date", width: 130 },
+  { dataField: "mesInicio", caption: "Mes inicio", width: 110, alignment: "center" },
+  { dataField: "monto", caption: "Monto", dataType: "number", width: 120, format: { type: "fixedPoint", precision: 2 } },
+  { dataField: "meses", caption: "Cuotas", dataType: "number", width: 90, alignment: "right" },
   {
     dataField: "estado",
     caption: "Estado",
@@ -223,12 +415,24 @@ export default function AlertasPage() {
   const idEmpleado = toPositiveNumber(authUser?.idEmpleado, authUser?.codEmp);
 
   const [tab, setTab] = useState<AlertaTabKey>("oc");
+  // Si el usuario aún no eligió pestaña, al terminar de cargar se abre la primera que tenga pendientes.
+  const [tabElegida, setTabElegida] = useState(false);
   const [ordenes, setOrdenes] = useState<OrdenCompraAlerta[]>([]);
   const [loading, setLoading] = useState(idEmpleado > 0);
   const [error, setError] = useState("");
   const [gastos, setGastos] = useState<GastoAlerta[]>([]);
   const [loadingGastos, setLoadingGastos] = useState(idEmpleado > 0);
   const [errorGastos, setErrorGastos] = useState("");
+  const [descansos, setDescansos] = useState<DescansoAlerta[]>([]);
+  const [loadingDescansos, setLoadingDescansos] = useState(idEmpleado > 0);
+  const [errorDescansos, setErrorDescansos] = useState("");
+  const [adelantos, setAdelantos] = useState<BeneficioAlerta[]>([]);
+  const [prestamos, setPrestamos] = useState<BeneficioAlerta[]>([]);
+  const [loadingBeneficios, setLoadingBeneficios] = useState(idEmpleado > 0);
+  const [errorBeneficios, setErrorBeneficios] = useState("");
+  const [vacaciones, setVacaciones] = useState<VacacionAlerta[]>([]);
+  const [loadingVacaciones, setLoadingVacaciones] = useState(idEmpleado > 0);
+  const [errorVacaciones, setErrorVacaciones] = useState("");
   // Estado elegido en los KPI de Gastos; vacío = sin filtro. Clic otra vez sobre el mismo KPI lo revierte.
   const [estadoGasto, setEstadoGasto] = useState("");
 
@@ -305,6 +509,98 @@ export default function AlertasPage() {
     };
   }, [idEmpleado]);
 
+  // Vacaciones pendientes propias del usuario o cuyo validador de la etapa actual es el usuario (EmpleadoCj = codEmp).
+  useEffect(() => {
+    const misIds = new Set([authUser?.codEmp, authUser?.idEmpleado].map((v) => toPositiveNumber(v)).filter((v) => v > 0));
+    if (misIds.size === 0) {
+      setLoadingVacaciones(false);
+      return;
+    }
+    let cancelado = false;
+    listarVacaciones({ maxRows: 5000 })
+      .then((response) => {
+        if (cancelado) return;
+        const filas = Array.isArray(response?.rows) ? response.rows : [];
+        setVacaciones(filas.map((row, i) => mapVacacionAlerta(row, i, misIds)).filter((v): v is VacacionAlerta => v !== null));
+      })
+      .catch((loadError) => {
+        if (!cancelado) setErrorVacaciones(getHttpErrorMessage(loadError, "No se pudieron cargar las vacaciones pendientes."));
+      })
+      .finally(() => {
+        if (!cancelado) setLoadingVacaciones(false);
+      });
+    return () => {
+      cancelado = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idEmpleado]);
+
+  // Descansos médicos en aprobación: los del propio empleado y los que le toca validar (soloMios = validador del JWT).
+  useEffect(() => {
+    const misIds = [...new Set([authUser?.codEmp, authUser?.idEmpleado].map((v) => toPositiveNumber(v)).filter((v) => v > 0))];
+    if (misIds.length === 0) {
+      setLoadingDescansos(false);
+      return;
+    }
+    let cancelado = false;
+    const pendiente = (d: Descanso) => d.idEstado in ESTADOS_DESCANSO_PENDIENTE;
+    Promise.all([
+      Promise.all(misIds.map((id) => listarDescansos({ idEmpleadoCj: id }))).then((listas) => listas.flat()),
+      // Si el SP aún no tiene @IdValidador esta consulta falla: se ignora y quedan solo los propios.
+      listarDescansos({ soloMios: true }).catch(() => [] as Descanso[]),
+    ])
+      .then(([propios, porValidar]) => {
+        if (cancelado) return;
+        const mapa = new Map<string, DescansoAlerta>();
+        for (const d of propios.filter(pendiente)) mapa.set(mapDescansoAlerta(d, "").clave, mapDescansoAlerta(d, "Mi solicitud"));
+        for (const d of porValidar.filter(pendiente)) {
+          const alerta = mapDescansoAlerta(d, "Por validar");
+          mapa.set(alerta.clave, alerta);
+        }
+        setDescansos([...mapa.values()]);
+      })
+      .catch((loadError) => {
+        if (!cancelado) setErrorDescansos(getHttpErrorMessage(loadError, "No se pudieron cargar los descansos médicos pendientes."));
+      })
+      .finally(() => {
+        if (!cancelado) setLoadingDescansos(false);
+      });
+    return () => {
+      cancelado = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idEmpleado]);
+
+  // Adelantos y préstamos sin aprobar (sp_Beneficio_Listar @IdAprobado = 0).
+  useEffect(() => {
+    const misIds = new Set([authUser?.codEmp, authUser?.idEmpleado].map((v) => toPositiveNumber(v)).filter((v) => v > 0));
+    if (misIds.size === 0) {
+      setLoadingBeneficios(false);
+      return;
+    }
+    let cancelado = false;
+    // Solo los beneficios pendientes del empleado que ingresó (EmpleadoCj = codEmp).
+    listarBeneficios({ idAprobado: 0 })
+      .then((lista) => {
+        if (cancelado) return;
+        const propios = lista.filter((b) => b.idEstado !== 0 && misIds.has(Number(b.idEmpleado)));
+        // Por id de tipo o, si no coincide, por el texto del tipo ("PRESTAMO" / "ADELANTO ...").
+        const tipoTexto = (b: Beneficio) => (b.tipoBeneficio ?? "").toUpperCase();
+        setAdelantos(propios.filter((b) => b.idTipoBeneficio === TIPO_ADELANTO || tipoTexto(b).includes("ADELANTO")).map(mapBeneficioAlerta));
+        setPrestamos(propios.filter((b) => b.idTipoBeneficio === TIPO_PRESTAMO || tipoTexto(b).includes("PRESTAMO") || tipoTexto(b).includes("PRÉSTAMO")).map(mapBeneficioAlerta));
+      })
+      .catch((loadError) => {
+        if (!cancelado) setErrorBeneficios(getHttpErrorMessage(loadError, "No se pudieron cargar los adelantos y préstamos pendientes."));
+      })
+      .finally(() => {
+        if (!cancelado) setLoadingBeneficios(false);
+      });
+    return () => {
+      cancelado = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idEmpleado]);
+
   const kpisGastos = useMemo(() => {
     const porEstado = new Map<string, number>();
     for (const gasto of gastos) {
@@ -323,12 +619,23 @@ export default function AlertasPage() {
   const estadoCarga: Record<AlertaTabKey, "cargando" | "error" | "ok"> = {
     oc: loading ? "cargando" : error ? "error" : "ok",
     gastos: loadingGastos ? "cargando" : errorGastos ? "error" : "ok",
+    vacaciones: loadingVacaciones ? "cargando" : errorVacaciones ? "error" : "ok",
+    descanso: loadingDescansos ? "cargando" : errorDescansos ? "error" : "ok",
+    adelanto: loadingBeneficios ? "cargando" : errorBeneficios ? "error" : "ok",
+    prestamo: loadingBeneficios ? "cargando" : errorBeneficios ? "error" : "ok",
   };
 
   const contadores = useMemo<Record<AlertaTabKey, number>>(
-    () => ({ oc: ordenes.length, gastos: gastos.length }),
-    [ordenes, gastos],
+    () => ({ oc: ordenes.length, gastos: gastos.length, vacaciones: vacaciones.length, descanso: descansos.length, adelanto: adelantos.length, prestamo: prestamos.length }),
+    [ordenes, gastos, vacaciones, descansos, adelantos, prestamos],
   );
+
+  const cargando = Object.values(estadoCarga).some((estado) => estado === "cargando");
+  useEffect(() => {
+    if (tabElegida || cargando) return;
+    const primera = TABS.find((item) => contadores[item.key] > 0);
+    if (primera) setTab(primera.key);
+  }, [cargando, contadores, tabElegida]);
 
   return (
     <AppPage title="Alertas - Notificaciones">
@@ -340,7 +647,10 @@ export default function AlertasPage() {
               key={item.key}
               type="button"
               style={{ ...styles.tab, ...(tab === item.key ? styles.tabActive : null) }}
-              onClick={() => setTab(item.key)}
+              onClick={() => {
+                setTabElegida(true);
+                setTab(item.key);
+              }}
             >
               {item.label}
               <span style={{ ...styles.badge, ...(estadoCarga[item.key] !== "ok" || total === 0 ? styles.badgeEmpty : null) }}>
@@ -358,6 +668,75 @@ export default function AlertasPage() {
       {tab === "oc" && loading && <AppStatusMessage>Cargando alertas...</AppStatusMessage>}
       {tab === "gastos" && errorGastos && <AppStatusMessage tone="error">{errorGastos}</AppStatusMessage>}
       {tab === "gastos" && loadingGastos && <AppStatusMessage>Cargando alertas...</AppStatusMessage>}
+
+      {tab === "vacaciones" && errorVacaciones && <AppStatusMessage tone="error">{errorVacaciones}</AppStatusMessage>}
+      {tab === "vacaciones" && loadingVacaciones && <AppStatusMessage>Cargando alertas...</AppStatusMessage>}
+
+      {tab === "vacaciones" && !loadingVacaciones && idEmpleado > 0 && !errorVacaciones && (
+        vacaciones.length === 0 ? (
+          <AppStatusMessage tone="success">No tienes vacaciones pendientes.</AppStatusMessage>
+        ) : (
+          <DataGridPro<VacacionAlerta>
+            key={GRID_STATE_KEY_VACACIONES}
+            dataSource={vacaciones}
+            columns={COLUMNAS_VACACIONES}
+            keyExpr="clave"
+            height="65vh"
+            noDataText="No hay vacaciones pendientes."
+            stateStoringKey={GRID_STATE_KEY_VACACIONES}
+            exportFileName="alertas_vacaciones_pendientes"
+            autoExpandAll={false}
+            paging={{ pageSize: 50, pageSizes: [20, 50, 100, 250] }}
+          />
+        )
+      )}
+
+      {tab === "descanso" && errorDescansos && <AppStatusMessage tone="error">{errorDescansos}</AppStatusMessage>}
+      {tab === "descanso" && loadingDescansos && <AppStatusMessage>Cargando alertas...</AppStatusMessage>}
+
+      {tab === "descanso" && !loadingDescansos && idEmpleado > 0 && !errorDescansos && (
+        descansos.length === 0 ? (
+          <AppStatusMessage tone="success">No tienes descansos médicos pendientes.</AppStatusMessage>
+        ) : (
+          <DataGridPro<DescansoAlerta>
+            key={GRID_STATE_KEY_DESCANSO}
+            dataSource={descansos}
+            columns={COLUMNAS_DESCANSO}
+            keyExpr="clave"
+            height="65vh"
+            noDataText="No hay descansos médicos pendientes."
+            stateStoringKey={GRID_STATE_KEY_DESCANSO}
+            exportFileName="alertas_descanso_medico_pendientes"
+            autoExpandAll={false}
+            paging={{ pageSize: 50, pageSizes: [20, 50, 100, 250] }}
+          />
+        )
+      )}
+
+      {(tab === "adelanto" || tab === "prestamo") && errorBeneficios && <AppStatusMessage tone="error">{errorBeneficios}</AppStatusMessage>}
+      {(tab === "adelanto" || tab === "prestamo") && loadingBeneficios && <AppStatusMessage>Cargando alertas...</AppStatusMessage>}
+
+      {(tab === "adelanto" || tab === "prestamo") && !loadingBeneficios && idEmpleado > 0 && !errorBeneficios && (() => {
+        const esAdelanto = tab === "adelanto";
+        const filas = esAdelanto ? adelantos : prestamos;
+        const clave = esAdelanto ? GRID_STATE_KEY_ADELANTO : GRID_STATE_KEY_PRESTAMO;
+        return filas.length === 0 ? (
+          <AppStatusMessage tone="success">{esAdelanto ? "No hay adelantos de sueldo pendientes." : "No hay préstamos pendientes."}</AppStatusMessage>
+        ) : (
+          <DataGridPro<BeneficioAlerta>
+            key={clave}
+            dataSource={filas}
+            columns={COLUMNAS_BENEFICIO}
+            keyExpr={(row) => String(row.idBeneficio)}
+            height="65vh"
+            noDataText="No hay solicitudes pendientes."
+            stateStoringKey={clave}
+            exportFileName={esAdelanto ? "alertas_adelantos_pendientes" : "alertas_prestamos_pendientes"}
+            autoExpandAll={false}
+            paging={{ pageSize: 50, pageSizes: [20, 50, 100, 250] }}
+          />
+        );
+      })()}
 
       {tab === "oc" && !loading && idEmpleado > 0 && !error && (
         ordenes.length === 0 ? (

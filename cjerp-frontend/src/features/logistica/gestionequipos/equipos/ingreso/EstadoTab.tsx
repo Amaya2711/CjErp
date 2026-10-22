@@ -30,6 +30,8 @@ type EstadoTabProps = {
   grabar: (request: IngresoCambioEstado) => Promise<IngresoCambioEstadoResultado>;
   /** Solo validación: permite indicar la zona del almacén donde queda el pedido. */
   conZonaAlmacen?: boolean;
+  /** Barra de filtros de cabecera (pedido, solicitud, fecha de guía, almacén) y botón Buscar. */
+  mostrarFiltros?: boolean;
 };
 
 const ETIQUETAS_RESPALDO: Record<number, string> = {
@@ -51,6 +53,7 @@ export default function EstadoTab({
   verbo,
   grabar,
   conZonaAlmacen = false,
+  mostrarFiltros = true,
 }: EstadoTabProps) {
   const catalogos = useCatalogosIngreso();
   const [filtros, setFiltros] = useState(filtrosIniciales);
@@ -160,15 +163,17 @@ export default function EstadoTab({
 
   return (
     <div style={styles.root}>
-      <BarraFiltros
-        filtros={filtros}
-        onChange={setFiltros}
-        ubicaciones={catalogos.ubicaciones}
-        mostrarUbicacion
-        cargando={cargando}
-        onBuscar={() => void buscar()}
-        resumen={`Son: ${filas.length}`}
-      />
+      {mostrarFiltros ? (
+        <BarraFiltros
+          filtros={filtros}
+          onChange={setFiltros}
+          ubicaciones={catalogos.ubicaciones}
+          mostrarUbicacion
+          cargando={cargando}
+          onBuscar={() => void buscar()}
+          resumen={`Son: ${filas.length}`}
+        />
+      ) : null}
 
       <div style={styles.toolbar}>
         {conZonaAlmacen ? (
@@ -196,7 +201,7 @@ export default function EstadoTab({
           {guardando ? "Grabando…" : `Grabar (${verbo})`}
         </button>
         <span style={styles.resumen}>
-          Marcados: {claves.size}. Para cambiar a otro estado, elíjalo en la columna Estado.
+          {mostrarFiltros ? "" : `Son: ${filas.length}. `}Marcados: {claves.size}. Para cambiar a otro estado, elíjalo en la columna Estado.
         </span>
       </div>
 

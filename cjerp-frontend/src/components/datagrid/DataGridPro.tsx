@@ -68,6 +68,8 @@ export type DataGridProProps<T extends object> = {
   /** Si se indica, orden/ancho/visibilidad/agrupación/orden se guardan en localStorage. */
   stateStoringKey?: string;
   toolbarExtra?: React.ReactNode;
+  /** Expone la exportación a Excel de la grilla (filas filtradas, columnas visibles) para dispararla desde fuera. */
+  exportRef?: React.MutableRefObject<(() => void) | null>;
   onRowClick?: (row: T) => void;
   onRowDoubleClick?: (row: T) => void;
   rowStyle?: (row: T) => React.CSSProperties | undefined;
@@ -161,6 +163,7 @@ export default function DataGridPro<T extends object>({
   masterDetail,
   stateStoringKey,
   toolbarExtra,
+  exportRef,
   onRowClick,
   onRowDoubleClick,
   rowStyle,
@@ -280,7 +283,11 @@ export default function DataGridPro<T extends object>({
     const missing = columns.map((c) => c.dataField).filter((f) => !known.includes(f));
     const base = [...known, ...missing];
     // Columnas con placeAfter: siempre pegadas a su columna de referencia.
-    const followers = base.filter((f) => colMap.get(f)?.placeAfter && base.includes(colMap.get(f)!.placeAfter!));
+    // Entre seguidoras de una misma referencia se respeta el orden de definición de `columns`.
+    const defIndex = new Map(columns.map((c, i) => [c.dataField, i]));
+    const followers = base
+      .filter((f) => colMap.get(f)?.placeAfter && base.includes(colMap.get(f)!.placeAfter!))
+      .sort((a, b) => (defIndex.get(a) ?? 0) - (defIndex.get(b) ?? 0));
     if (!followers.length) return base;
     const result = base.filter((f) => !followers.includes(f));
     for (const f of followers) {
@@ -526,6 +533,7 @@ export default function DataGridPro<T extends object>({
     XLSX.utils.book_append_sheet(book, sheet, "Datos");
     XLSX.writeFile(book, `${exportFileName}.xlsx`);
   };
+  if (exportRef) exportRef.current = () => void exportExcel();
 
   // ---------- Edición ----------
   const canEdit = (col: GridColumn<T>) =>
@@ -1092,6 +1100,11 @@ export default function DataGridPro<T extends object>({
           {filtered.length === dataSource.length
             ? `${dataSource.length} registros`
             : `${filtered.length} de ${dataSource.length} registros`}
+          {tree
+            ? ` · ${tree.length} ${tree.length === 1 ? "grupo" : "grupos"}${
+                groups.length > 1 ? ` (${collectGroupKeys(tree).length} en total)` : ""
+              }`
+            : ""}
           {selected.size > 0 ? ` · ${selected.size} seleccionados` : ""}
         </span>
         {pagingEnabled ? (

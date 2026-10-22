@@ -17,6 +17,7 @@ const ETAPAS: EtapaTab[] = [
         estadoDefecto={1}
         etiquetaEstadoActual="Est. recepción"
         verbo="recepcionar"
+        mostrarFiltros={false}
         grabar={recepcionarEquipos}
       />
     ),

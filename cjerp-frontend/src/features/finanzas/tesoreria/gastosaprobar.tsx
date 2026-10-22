@@ -1134,7 +1134,8 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
     montoOc2: getRecordString(row, "MontoOc2", "montoOc2"),
     idRendicion: getRecordNumber(row, "IdRendicion", "idRendicion") ?? undefined,
     detalle: getRecordString(row, "Detalle", "detalle"),
-    comentario: getRecordString(row, "Observacion", "observacion", "Comentario", "comentario"),
+    // El SP devuelve Comentario y Observacion (Planilla.Observacion): "comentario" sigue siendo Comentario.
+    comentario: getRecordString(row, "Comentario", "comentario", "Observacion", "observacion"),
     fechaVencimiento: getRecordString(row, "FechaDeposito", "fechaDeposito", "FechaVencimiento", "fechaVencimiento"),
     fecIngreso: getRecordString(
       row,

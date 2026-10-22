@@ -498,6 +498,7 @@ BEGIN
         a.serie,
         a.NroOperacion,
         CAST(a.Observacion AS VARCHAR(MAX)) AS ObservacionPlanilla,
+        CAST(a.Observacion AS VARCHAR(MAX)) AS Observacion,
         a.Subtotal AS SubtotalOriginal,
         a.Igv AS IgvOriginal,
         a.Total AS TotalOriginal,
@@ -816,7 +817,7 @@ BEGIN
         HoraCreacion, NomResponsable, IdTipoDoc, Fila, IdTransferencia, NombreProyecto, Site, CorSite,
         Tipo_Trabajo, Responsable, Cliente, IdOc, IdEstadoOc, EstadoOcSemaforo, TotalOcConsumo, PagadoOcConsumo,
         MontoRetencion, TotalPagarOriginal, TotalPlanillaBase, TotalPagar, IdTarea, Tarea, imgFactura,
-        idprovisional, fechaInicio, NombreEstado, serie, NroOperacion, ObservacionPlanilla,
+        idprovisional, fechaInicio, NombreEstado, serie, NroOperacion, ObservacionPlanilla, Observacion,
         SubtotalOriginal, IgvOriginal, TotalOriginal, SumaEmp, SumaEmpSolesNativo, SumaEmpUsdNativo,
         SumaEmpEurNativo, SumaEmpDopNativo, SumaEmpCopNativo, CantRecibosEmp,
         IdGestor, IdSolicitanteCj, IdGestorCj, IdValidadorCj
