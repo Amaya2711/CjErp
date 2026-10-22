@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
+import { FileSpreadsheet } from "lucide-react";
 import AppPage from "../../components/base/AppPage";
 import AppStatusMessage from "../../components/base/AppStatusMessage";
 import DataGridPro from "../../components/datagrid/DataGridPro";
@@ -368,6 +369,19 @@ const COLUMNAS_BENEFICIO: GridColumn<BeneficioAlerta>[] = [
 
 const styles: Record<string, CSSProperties> = {
   tabs: { display: "flex", gap: 8, borderBottom: "1px solid #E5E7EB", marginBottom: 16 },
+  exportar: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "8px 14px",
+    border: "1px solid #CBD5E1",
+    borderRadius: 8,
+    background: "#FFFFFF",
+    cursor: "pointer",
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#334155",
+  },
   tab: {
     display: "flex",
     alignItems: "center",
@@ -637,8 +651,57 @@ export default function AlertasPage() {
     if (primera) setTab(primera.key);
   }, [cargando, contadores, tabElegida]);
 
+  // Exporta a un solo Excel todas las pestañas (una hoja por pestaña, con los mismos encabezados del grid).
+  const exportarTodo = async () => {
+    const XLSX = await import("xlsx");
+    const hoja = <T extends object>(columnas: GridColumn<T>[], filas: T[]) =>
+      filas.map((fila) => {
+        const salida: Record<string, string | number> = {};
+        for (const c of columnas) {
+          const valor = (fila as Record<string, unknown>)[c.dataField];
+          salida[c.caption ?? c.dataField] =
+            typeof valor === "number" ? valor : valor == null || valor === "" ? "" : String(valor);
+        }
+        return salida;
+      });
+    const hojas: Array<[string, Record<string, string | number>[]]> = [
+      ["Órdenes de compra", hoja(COLUMNAS_OC, ordenes)],
+      ["Gastos", hoja(COLUMNAS_GASTOS, gastos)],
+      ["Vacaciones", hoja(COLUMNAS_VACACIONES, vacaciones)],
+      ["Descanso médico", hoja(COLUMNAS_DESCANSO, descansos)],
+      ["Adelanto de sueldo", hoja(COLUMNAS_BENEFICIO, adelantos)],
+      ["Préstamo", hoja(COLUMNAS_BENEFICIO, prestamos)],
+    ];
+    const libro = XLSX.utils.book_new();
+    for (const [nombre, filas] of hojas) {
+      // Una pestaña sin alertas se exporta igual, con una hoja vacía, para que el archivo siempre tenga las 6.
+      const hojaXlsx = filas.length ? XLSX.utils.json_to_sheet(filas) : XLSX.utils.aoa_to_sheet([["Sin alertas pendientes"]]);
+      if (filas.length) {
+        hojaXlsx["!cols"] = Object.keys(filas[0]).map((encabezado) => ({ wch: Math.min(Math.max(encabezado.length + 2, 14), 40) }));
+      }
+      XLSX.utils.book_append_sheet(libro, hojaXlsx, nombre);
+    }
+    const hoy = new Date();
+    const fecha = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, "0")}-${String(hoy.getDate()).padStart(2, "0")}`;
+    XLSX.writeFile(libro, `alertas_${fecha}.xlsx`);
+  };
+
   return (
-    <AppPage title="Alertas - Notificaciones">
+    <AppPage
+      title="Alertas - Notificaciones"
+      actions={
+        <button
+          type="button"
+          style={styles.exportar}
+          disabled={cargando || idEmpleado <= 0}
+          onClick={() => void exportarTodo()}
+          title="Exportar todas las pestañas a un Excel"
+        >
+          <FileSpreadsheet size={16} color="#15803D" />
+          Exportar
+        </button>
+      }
+    >
       <div style={styles.tabs}>
         {TABS.map((item) => {
           const total = contadores[item.key];

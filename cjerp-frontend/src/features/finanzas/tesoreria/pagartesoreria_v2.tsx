@@ -1002,6 +1002,40 @@ export default function PagarTesoreriaV2Page() {
     XLSX.utils.book_append_sheet(book, sheet, estado === 4 ? "Rendicion" : "Recibos");
     XLSX.writeFile(book, `tesoreria-${estado}-${hoy()}.xlsx`);
   };
+  // Campos del detalle del recibo: los usa el cuadro de detalle y su exportación a Excel.
+  const camposDetalle = (d: PagoTesoreriaRow): Array<[string, string | null | undefined]> => [
+    ["Responsable", d.responsable],
+    ["Solicitante", d.solicitante],
+    ["Cliente", d.cliente],
+    ["Proyecto", d.proyecto],
+    ["Site", `${d.idSite} · ${d.site || ""}`],
+    ["OT", d.ot],
+    ["Tipo de trabajo", d.tipoTrabajo],
+    ["Tarea", d.tarea],
+    ["Comprobante", d.comprobante],
+    ["Serie", d.serie],
+    ["RUC", d.ruc],
+    ["Fecha de emisión", fecha(d.fecEmision)],
+    ["Rendición", d.rendicion],
+    ["Turno de revisión", d.revisionPm],
+    ["Revisión de aprobación", d.revisionPmAprobar],
+    ["Fecha de revisión de aprobación", fecha(d.fechaRevisionAprobar)],
+    ["Fecha de revisión", fecha(d.fechaRevision)],
+    ["Ingreso", fecha(d.fecha)],
+    ["Depósito", fecha(d.fechaDeposito)],
+    ["Banco del pago", d.banco],
+    [
+      "IdBancoCta",
+      d.idBancoCta == null
+        ? null
+        : `${d.idBancoCta} · ${catalogos.bancosCuenta.find((b) => b.id === d.idBancoCta)?.nombre || "Banco no encontrado"}`,
+    ],
+    ["Cuenta", d.cuenta],
+    ["CuentaInter", d.cuentaInter],
+    ["NombreCta", d.nombreCta],
+    ["Operación / Cheque", `${d.nroOperacion || "—"} / ${d.cheque || "—"}`],
+    ["Observación", d.observacion],
+  ];
   const exportarPaolo = () => {
     const agrupados = new Map<string, {
       Cliente: string;
@@ -2383,42 +2417,7 @@ export default function PagarTesoreriaV2Page() {
                   : tabs.find((t) => t.estado === detail.estado)?.label}
               </span>
               <dl className="pt-detail-grid">
-                {[
-                  ["Responsable", detail.responsable],
-                  ["Solicitante", detail.solicitante],
-                  ["Cliente", detail.cliente],
-                  ["Proyecto", detail.proyecto],
-                  ["Site", `${detail.idSite} · ${detail.site || ""}`],
-                  ["OT", detail.ot],
-                  ["Tipo de trabajo", detail.tipoTrabajo],
-                  ["Tarea", detail.tarea],
-                  ["Comprobante", detail.comprobante],
-                  ["Serie", detail.serie],
-                  ["RUC", detail.ruc],
-                  ["Fecha de emisión", fecha(detail.fecEmision)],
-                  ["Rendición", detail.rendicion],
-                  ["Turno de revisión", detail.revisionPm],
-                  ["Revisión de aprobación", detail.revisionPmAprobar],
-                  ["Fecha de revisión de aprobación", fecha(detail.fechaRevisionAprobar)],
-                  ["Fecha de revisión", fecha(detail.fechaRevision)],
-                  ["Ingreso", fecha(detail.fecha)],
-                  ["Depósito", fecha(detail.fechaDeposito)],
-                  ["Banco del pago", detail.banco],
-                  [
-                    "IdBancoCta",
-                    detail.idBancoCta == null
-                      ? null
-                      : `${detail.idBancoCta} · ${catalogos.bancosCuenta.find((b) => b.id === detail.idBancoCta)?.nombre || "Banco no encontrado"}`,
-                  ],
-                  ["Cuenta", detail.cuenta],
-                  ["CuentaInter", detail.cuentaInter],
-                  ["NombreCta", detail.nombreCta],
-                  [
-                    "Operación / Cheque",
-                    `${detail.nroOperacion || "—"} / ${detail.cheque || "—"}`,
-                  ],
-                  ["Observación", detail.observacion],
-                ].map(([label, value]) => (
+                {camposDetalle(detail).map(([label, value]) => (
                   <div key={label}>
                     <dt>{label}</dt>
                     <dd className={label === "Observación" ? "pt-preserve" : undefined}>{value || "—"}</dd>
