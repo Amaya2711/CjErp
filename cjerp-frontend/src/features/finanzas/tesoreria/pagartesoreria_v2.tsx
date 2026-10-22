@@ -1471,7 +1471,7 @@ export default function PagarTesoreriaV2Page() {
             ))}
           </nav>
         )}
-            {estado === 100 && <form
+            {(estado === 4 || estado === 100) && <form
           className="pt-filters"
           onSubmit={(e) => {
             e.preventDefault();
@@ -1513,8 +1513,9 @@ export default function PagarTesoreriaV2Page() {
 						type="button"
 						disabled={loading}
 						onClick={() => {
-							const rangoDesde = "";
-							const rangoHasta = "";
+							// Rendición vuelve al mes en curso; Búsqueda queda sin rango
+							const rangoDesde = estado === 4 ? inicioMesActual() : "";
+							const rangoHasta = estado === 4 ? hoy() : "";
 							setQuery("");
 							setDesde(rangoDesde);
 							setHasta(rangoHasta);
