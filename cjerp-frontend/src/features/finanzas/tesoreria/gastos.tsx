@@ -2,7 +2,7 @@ import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from "r
   // Estado para fila seleccionada
   
 import { useCrudForm } from "../../../hooks/useCrudForm";
-import { Eye, Pencil, Trash2 } from "lucide-react";
+import { Eye, FileImage, Pencil, Trash2 } from "lucide-react";
 import httpClient from "../../../api/httpClient";
 import {
   buildPlanillaConsultaEstadosRequest,
@@ -348,6 +348,9 @@ type GastoGridRow = {
   validador: string;
   detalle: string;
   observacion: string;
+  serie: string;
+  /** Ruta de la factura adjunta (Planilla.imgFactura); vacío si no tiene. */
+  factura: string;
 };
 
 type FacturaUploadResponse = {
@@ -935,6 +938,31 @@ function formatDecimalValue(value: number): string {
 function getFacturaDisplayPath(facturaPath?: string, facturaUrl?: string): string {
   // Prioriza la URL pública de SharePoint si existe
   return facturaUrl?.trim() || facturaPath?.trim() || "";
+}
+
+// Abre en una pestaña nueva la factura adjunta; si el servidor no la entrega, abre su visor nativo de SharePoint.
+async function abrirFacturaEnPestana(ruta: string) {
+  // La pestaña se abre antes de la espera para que el navegador no la bloquee como ventana emergente.
+  const ventana = window.open("", "_blank");
+  const abrir = (url: string) => {
+    if (ventana) {
+      ventana.location.href = url;
+    } else {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  };
+
+  try {
+    const archivo = await httpClient.get<Blob>(`${GASTOS_API_URL}/factura`, {
+      params: { ruta },
+      responseType: "blob",
+    });
+    const objectUrl = URL.createObjectURL(archivo);
+    abrir(objectUrl);
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+  } catch {
+    abrir(buildSharePointUrl(ruta));
+  }
 }
 
 function getFacturaMediaType(url: string): "image" | "pdf" | "unknown" {
@@ -3693,6 +3721,8 @@ export default function GastosPage({
           validador: getConstanteLabelOrFallback(validadorOptions, gasto.validador, gasto.validadorLabel),
           detalle: gasto.detalle ? String(gasto.detalle).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim() : "",
           observacion: gasto.observacion ? String(gasto.observacion).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim() : "",
+          serie: String(gasto.serie ?? "").trim(),
+          factura: getFacturaDisplayPath(gasto.facturaPath, gasto.facturaUrl),
         };
       }),
     [
@@ -3806,6 +3836,45 @@ export default function GastosPage({
       { dataField: "estado", caption: "Estado", width: 100 },
       { dataField: "bien", caption: "Bien", width: 90 },
       { dataField: "comprobante", caption: "Comprobante", width: 140 },
+      { dataField: "serie", caption: "Serie", width: 110 },
+      {
+        dataField: "factura",
+        caption: "Factura",
+        width: 90,
+        alignment: "center",
+        allowGrouping: false,
+        calculateCellValue: (row) => (row.factura ? "Con factura" : "Sin factura"),
+        cellRender: (_value, row) => {
+          const tieneFactura = row.factura.trim() !== "";
+          return (
+            <button
+              type="button"
+              title={tieneFactura ? "Ver factura adjunta" : "Sin factura adjunta"}
+              aria-label={tieneFactura ? "Ver factura adjunta" : "Sin factura adjunta"}
+              disabled={!tieneFactura}
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 8,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                border: `1px solid ${tieneFactura ? "#BBF7D0" : "#E5E7EB"}`,
+                background: tieneFactura ? "#F0FDF4" : "#F3F4F6",
+                color: tieneFactura ? "#047857" : "#9CA3AF",
+                cursor: tieneFactura ? "pointer" : "not-allowed",
+                opacity: tieneFactura ? 1 : 0.65,
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (tieneFactura) void abrirFacturaEnPestana(row.factura);
+              }}
+            >
+              <FileImage size={16} strokeWidth={2.2} />
+            </button>
+          );
+        },
+      },
       { dataField: "monto", caption: "Monto", dataType: "number", width: 110, format: { type: "fixedPoint", precision: 2 } },
       { dataField: "igv", placeAfter: "monto", caption: "IGV", dataType: "number", width: 100, format: { type: "fixedPoint", precision: 2 } },
       { dataField: "total", placeAfter: "monto", caption: "Total", dataType: "number", width: 110, format: { type: "fixedPoint", precision: 2 } },
