@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text.Json;
 using CjERP.Application.DTOs;
 using CjERP.Application.DTOs.ReportesWhatsapp;
+using CjERP.Application.DTOs.WhatsappInbound;
 using CjERP.Application.Interfaces.Repositories;
 using CjERP.Application.Interfaces.Services;
 using Microsoft.Extensions.Logging;
@@ -19,6 +20,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
     private static readonly string[] RutasModuloRptWup =
     [
         "/mantenimiento/sistemas/rptwup",
+        "/mantenimiento/sistemas/rptwup_v1",
         "/mantenimiento/sistemas/rptwupgerencial",
         "/mantenimiento/sistemas/rptboleta"
     ];
@@ -30,6 +32,8 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
     private readonly IAsistenciaReporteService _asistenciaReporteService;
     private readonly IPlanillaBoletaService _planillaBoletaService;
     private readonly IWupService _wupService;
+    private readonly IMetaWhatsAppService _metaWhatsAppService;
+    private readonly MetaWhatsAppSettings _metaSettings;
     private readonly IReporteWhatsappRuntimeMonitor _runtimeMonitor;
     private readonly ISegMenuService _segMenuService;
     private readonly ReporteWhatsappJobDefaultsOptions _defaults;
@@ -43,6 +47,8 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
         IAsistenciaReporteService asistenciaReporteService,
         IPlanillaBoletaService planillaBoletaService,
         IWupService wupService,
+        IMetaWhatsAppService metaWhatsAppService,
+        IOptions<MetaWhatsAppSettings> metaSettings,
         IReporteWhatsappRuntimeMonitor runtimeMonitor,
         ISegMenuService segMenuService,
         IOptions<ReporteWhatsappJobDefaultsOptions> defaults,
@@ -54,6 +60,8 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
         _asistenciaReporteService = asistenciaReporteService;
         _planillaBoletaService = planillaBoletaService;
         _wupService = wupService;
+        _metaWhatsAppService = metaWhatsAppService;
+        _metaSettings = metaSettings.Value;
         _runtimeMonitor = runtimeMonitor;
         _segMenuService = segMenuService;
         _defaults = defaults.Value;
@@ -72,6 +80,98 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(BuildPeriodoActual(ReporteWhatsappTipos.Operativo, null, null));
+    }
+
+    public async Task<(byte[] Pdf, string NombreArchivo)> GenerarVistaPreviaPdfAsync(string tipoReporte, int? idEmpleado = null, CancellationToken cancellationToken = default)
+    {
+        var normalizedType = ReporteWhatsappTipos.Normalize(tipoReporte);
+        if (ReporteWhatsappTipos.IsBoleta(normalizedType))
+        {
+            throw new InvalidOperationException("La vista previa de boletas se obtiene desde la columna PDF de cada boleta.");
+        }
+
+        var configuracion = await ObtenerConfiguracionAsync(normalizedType, cancellationToken);
+        var periodo = BuildPeriodoActual(normalizedType, configuracion, null);
+
+        if (ReporteWhatsappTipos.IsGerencial(normalizedType))
+        {
+            var pdfGerencial = await _asistenciaReporteService.GenerarPdfGerencialEjecutivoAsync(
+                new AsistenciaGerencialPdfRequestDto
+                {
+                    FechaInicio = periodo.FechaInicio,
+                    FechaFin = periodo.FechaFin,
+                    UsarPeriodoAutomatico = false,
+                    Destinatario = "Gerencia CJ Telecom"
+                },
+                cancellationToken);
+            return (pdfGerencial, BuildFileName(normalizedType, new ReporteWhatsappEmpleadoDto(), periodo));
+        }
+
+        var empleados = await _reporteRepository.ObtenerEmpleadosDestinoAsync(normalizedType, cancellationToken);
+        var candidatos = idEmpleado is > 0
+            ? empleados.Where(e => e.IdEmpleado == idEmpleado.Value).ToList()
+            : empleados.Take(25).ToList();
+        if (candidatos.Count == 0)
+        {
+            throw new InvalidOperationException("No hay empleados destino para generar la vista previa.");
+        }
+
+        // Sin empleado indicado se usa el primero que tenga asistencia en el período (los demás se omitirían en el job).
+        foreach (var empleado in candidatos)
+        {
+            var detalle = await _reporteRepository.ObtenerReporteAsistenciaAsync(
+                periodo.FechaInicio,
+                periodo.FechaFin,
+                empleado.IdEmpleado,
+                cancellationToken);
+            if (detalle.Count == 0)
+            {
+                continue;
+            }
+
+            var pdf = await _reportePdfService.GenerarReportePdfAsync(normalizedType, empleado, periodo, detalle, cancellationToken);
+            return (pdf, BuildFileName(normalizedType, empleado, periodo));
+        }
+
+        throw new InvalidOperationException("Ningún empleado destino tiene asistencia en el período actual para generar la vista previa.");
+    }
+
+    public async Task<IReadOnlyList<ReporteMetaDestinatarioDto>> ObtenerDestinatariosMetaAsync(CancellationToken cancellationToken = default)
+    {
+        var empleados = await _reporteRepository.ObtenerEmpleadosDestinoAsync(ReporteWhatsappTipos.Meta, cancellationToken);
+        var excluidos = (await _reporteRepository.ObtenerEmpleadosExcluidosAsync(ReporteWhatsappTipos.Meta, cancellationToken)).ToHashSet();
+
+        return empleados
+            .Where(x => x.IdEmpleado > 0)
+            .GroupBy(x => x.IdEmpleado)
+            .Select(group => group.First())
+            .Select(x => new ReporteMetaDestinatarioDto
+            {
+                IdEmpleado = x.IdEmpleado,
+                Usuario = x.Usuario,
+                NombreEmpleado = x.NombreEmpleado,
+                Telefono = x.Telefono,
+                Ubicacion = x.Ubicacion,
+                Correo = x.Correo,
+                TelefonoValido = !string.IsNullOrWhiteSpace(NormalizePhone(x.Telefono)),
+                Habilitado = !excluidos.Contains(x.IdEmpleado)
+            })
+            .OrderBy(x => x.NombreEmpleado, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+    }
+
+    public Task ActualizarDestinatariosMetaAsync(ReporteMetaDestinatariosUpdateDto request, string usuarioModificacion, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return _reporteRepository.ReemplazarEmpleadosExcluidosAsync(ReporteWhatsappTipos.Meta, request.IdsExcluidos ?? Array.Empty<int>(), usuarioModificacion, cancellationToken);
+    }
+
+    private void EnsureMetaConfigured()
+    {
+        if (!_metaSettings.IsReady())
+        {
+            throw new InvalidOperationException("MetaWhatsApp no esta configurado. Revise MetaWhatsAppSettings__Enabled, __AccessToken y __PhoneNumberId.");
+        }
     }
 
     public async Task<ReporteWhatsappDashboardDto> ObtenerDashboardAsync(string idUsuario, string tipoReporte, string? periodo = null, int topLogs = 200, CancellationToken cancellationToken = default)
@@ -170,7 +270,14 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
 
         try
         {
-            _wupSettings.EnsureConfigured();
+            if (ReporteWhatsappTipos.IsMeta(normalizedType))
+            {
+                EnsureMetaConfigured();
+            }
+            else
+            {
+                _wupSettings.EnsureConfigured();
+            }
 
             var empleados = soloFallidos
                 ? await _reporteRepository.ObtenerEmpleadosFallidosAsync(periodoActual.FechaProceso, normalizedType, cancellationToken)
@@ -208,6 +315,18 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
                 empleados = empleados
                     .Where(x => empleadosSeleccionados.Contains(x.IdEmpleado))
                     .ToList();
+            }
+
+            if (ReporteWhatsappTipos.IsMeta(normalizedType))
+            {
+                // Solo reciben el reporte los empleados marcados (sin fila en la tabla de excluidos).
+                var excluidos = (await _reporteRepository.ObtenerEmpleadosExcluidosAsync(normalizedType, cancellationToken)).ToHashSet();
+                if (excluidos.Count > 0)
+                {
+                    empleados = empleados
+                        .Where(x => !excluidos.Contains(x.IdEmpleado))
+                        .ToList();
+                }
             }
 
             var empleadosReporteGerencial = Array.Empty<ReporteWhatsappEmpleadoDto>();
@@ -543,7 +662,10 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
                 return;
             }
 
-            if (await _reporteRepository.ExisteEnvioExitosoAsync(empleado.IdEmpleado, periodo.FechaProceso, tipoReporte, cancellationToken))
+            // En Meta el envio manual es a demanda: se reenvia aunque ya exista un envio exitoso del periodo.
+            var omitirDuplicado = ReporteWhatsappTipos.IsMeta(tipoReporte)
+                && string.Equals(origenEjecucion, "MANUAL", StringComparison.OrdinalIgnoreCase);
+            if (!omitirDuplicado && await _reporteRepository.ExisteEnvioExitosoAsync(empleado.IdEmpleado, periodo.FechaProceso, tipoReporte, cancellationToken))
             {
                 log.EstadoEnvio = "DUPLICADO_OMITIDO";
                 log.MensajeError = "Ya existe un envio exitoso para el empleado y periodo actual.";
@@ -707,11 +829,57 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
                 request.NombreArchivo,
                 request.Contenido?.Length ?? 0);
 
+            var esMeta = ReporteWhatsappTipos.IsMeta(tipoReporte);
             var response = await ExecuteWithRetryAsync(
                 async sendToken =>
                 {
                     using var attemptTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(sendToken);
                     attemptTimeoutCts.CancelAfter(WupSendTimeout);
+                    if (esMeta && !string.IsNullOrWhiteSpace(_metaSettings.ReportTemplateName))
+                    {
+                        // Plantilla aprobada: entrega fuera de la ventana de 24 h. Variable {{1}} = periodo del reporte.
+                        var templateResponse = await _metaWhatsAppService.SendTemplateWithDocumentAsync(
+                            new MetaWhatsAppSendTemplateDocumentRequestDto
+                            {
+                                To = telefonoNormalizado,
+                                TemplateName = _metaSettings.ReportTemplateName,
+                                LanguageCode = string.IsNullOrWhiteSpace(_metaSettings.ReportTemplateLanguage) ? "es_PE" : _metaSettings.ReportTemplateLanguage,
+                                FileName = nombreArchivo,
+                                FileBytes = pdfBytes,
+                                BodyParameters = new[] { periodo.EtiquetaPeriodo }
+                            },
+                            attemptTimeoutCts.Token);
+
+                        return new ReporteWhatsappSendResponseDto
+                        {
+                            Success = templateResponse.Success,
+                            StatusCode = templateResponse.StatusCode,
+                            ResponseBody = templateResponse.ResponseBody,
+                            ErrorMessage = templateResponse.ErrorMessage
+                        };
+                    }
+
+                    if (esMeta)
+                    {
+                        var metaResponse = await _metaWhatsAppService.SendDocumentAsync(
+                            new MetaWhatsAppSendDocumentRequestDto
+                            {
+                                To = telefonoNormalizado,
+                                FileName = nombreArchivo,
+                                Caption = request.Mensaje,
+                                FileBytes = pdfBytes
+                            },
+                            attemptTimeoutCts.Token);
+
+                        return new ReporteWhatsappSendResponseDto
+                        {
+                            Success = metaResponse.Success,
+                            StatusCode = metaResponse.StatusCode,
+                            ResponseBody = metaResponse.ResponseBody,
+                            ErrorMessage = metaResponse.ErrorMessage
+                        };
+                    }
+
                     return await _wupService.EnviarAdjuntoAsync(request, attemptTimeoutCts.Token);
                 },
                 WupMaxAttempts,
@@ -721,7 +889,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
 
             if (!response.Success)
             {
-                log.EstadoEnvio = "ERROR_ENDPOINT_WUP";
+                log.EstadoEnvio = esMeta ? "ERROR_META" : "ERROR_ENDPOINT_WUP";
                 log.MensajeError = string.IsNullOrWhiteSpace(response.ErrorMessage)
                     ? "El endpoint WUP respondio sin confirmar exito."
                     : response.ErrorMessage;
@@ -1057,6 +1225,20 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
                 _defaults.UsarSemanaEnCursoGerencial,
                 _defaults.UsarMesEnCursoGerencial,
                 string.IsNullOrWhiteSpace(_defaults.MensajeAdjuntoGerencial) ? _defaults.MensajeAdjunto : _defaults.MensajeAdjuntoGerencial);
+        }
+
+        if (ReporteWhatsappTipos.IsMeta(tipoReporte))
+        {
+            // El job por Meta nace deshabilitado: se activa desde la pantalla.
+            return (
+                _defaults.HoraEjecucion,
+                NormalizeDiasEjecucion(_defaults.DiasEjecucion),
+                _defaults.CantidadEmpleadosPorBloque,
+                _defaults.DelaySegundosEntreBloques,
+                false,
+                false,
+                false,
+                _defaults.MensajeAdjunto);
         }
 
         return (

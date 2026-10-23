@@ -8,9 +8,16 @@ public static class ReporteWhatsappTipos
     public const string Gerencial = "ASISTENCIA_WUP_GERENCIAL";
     public const string Boleta = "PLANILLA_BOLETA_WUP";
     public const string LlamadaAtencionAsistencia = "ASISTENCIA_LLAMADA_ATENCION";
+    public const string Meta = "ASISTENCIA_META";
 
     public static string Normalize(string? value)
     {
+        if (string.Equals(value?.Trim(), "meta", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value?.Trim(), Meta, StringComparison.OrdinalIgnoreCase))
+        {
+            return Meta;
+        }
+
         if (string.Equals(value?.Trim(), "boleta", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(value?.Trim(), Boleta, StringComparison.OrdinalIgnoreCase))
         {
@@ -36,10 +43,15 @@ public static class ReporteWhatsappTipos
 
     public static string ToRouteValue(string? value) =>
         IsBoleta(value) ? "boleta" :
+        IsMeta(value) ? "meta" :
         IsGerencial(value) ? "gerencial" : "operativo";
 
     public static bool IsGerencial(string? value) =>
         string.Equals(Normalize(value), Gerencial, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Reporte operativo de asistencia enviado por la API oficial de Meta (WhatsApp Cloud) en lugar de WUP.</summary>
+    public static bool IsMeta(string? value) =>
+        string.Equals(Normalize(value), Meta, StringComparison.OrdinalIgnoreCase);
 
     public static bool IsBoleta(string? value) =>
         string.Equals(Normalize(value), Boleta, StringComparison.OrdinalIgnoreCase);
@@ -188,6 +200,25 @@ public sealed class ReporteWhatsappEmpleadoDto
     public int? IdBoleta { get; set; }
     public string PeriodoBoleta { get; set; } = string.Empty;
     public bool PdfDisponible { get; set; }
+}
+
+public sealed class ReporteMetaDestinatarioDto
+{
+    public int IdEmpleado { get; set; }
+    public string Usuario { get; set; } = string.Empty;
+    public string NombreEmpleado { get; set; } = string.Empty;
+    public string Telefono { get; set; } = string.Empty;
+    public string Ubicacion { get; set; } = string.Empty;
+    public string Correo { get; set; } = string.Empty;
+    public bool TelefonoValido { get; set; }
+    /// <summary>Marcado = el job y el envio manual le envian el reporte. Por defecto todos estan habilitados.</summary>
+    public bool Habilitado { get; set; } = true;
+}
+
+public sealed class ReporteMetaDestinatariosUpdateDto
+{
+    /// <summary>Empleados desmarcados; los demas del listado del store quedan habilitados.</summary>
+    public IReadOnlyList<int> IdsExcluidos { get; set; } = Array.Empty<int>();
 }
 
 public sealed class ReporteWhatsappBoletaDestinoDto

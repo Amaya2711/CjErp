@@ -167,6 +167,12 @@ Seguridad · Tesorería/Finanzas (recibos, pagos, cheques, conciliación) · Ord
 - BE: C/ReportesWhatsappController, C/WhatsappWebhookController → S/ReporteAutomaticoService, S/ReportePdfService, Repositories/ReporteRepository, S/WupService, S/WupAuthService, S/WhatsappInboundService, S/MetaWhatsAppService · Job ReporteWhatsAppJob · Scheduler Api/Services/ReporteWhatsappJobScheduler
 - SP: `RptAsistenciaFechas`, `sp_EmpleadoCj_Listar_Wup(_Gerencia)` · Tablas: ReporteWupConfig, ReporteWhatsAppLog(Gerencia)
 
+### Reporte de asistencia por WhatsApp oficial de Meta (rptwup_v1)
+- FE: `features/mantenimiento/sistemas/rptwup_v1.tsx` (ruta `/mantenimiento/sistemas/rptwup_v1`, ítem `SegMenu` PV: script `Database/Reportes/03_ReporteWhatsappExcluido.sql`); API `api/reportesWhatsappService.ts` (`obtenerDestinatariosMeta`, `guardarDestinatariosMeta`, `ejecutarAhora("meta")`)
+- BE: tipo `ASISTENCIA_META` (`ReporteWhatsappTipos.Meta`, ruta `meta`) sobre el mismo pipeline de `rptwup`: C/ReportesWhatsappController (`meta/destinatarios` GET/PUT) → S/ReporteAutomaticoService (envío por `IMetaWhatsAppService.SendDocumentAsync` en lugar de WUP) · job Hangfire `reporte-whatsapp-asistencia-meta` (nace deshabilitado) · config en `ReporteWupConfig`, logs en `ReporteWhatsAppLog` (TipoReporte = ASISTENCIA_META)
+- Lista = `sp_EmpleadoCj_Listar_Wup`; tabla `ReporteWhatsappExcluido(TipoReporte, IdEmpleado)` guarda los DESMARCADOS (sin fila = marcado). Job y envío manual solo envían a marcados; el manual reenvía aunque ya exista envío del período.
+- PV: Meta solo entrega mensajes con documento libre dentro de la ventana de 24 h del usuario; fuera de ella exige plantilla aprobada (no implementada).
+
 ### Reportes gerenciales
 - FE: `features/reportes/gerencial/*` (dashboardcj, dashboard1, dashboard3, backlog, ingresosegresos, analisis, analisisproyecto, mapasite); API `importarConsultaService`, `movimientosConsultaService`, `mapasiteService`
 - BE: C/ReportesGerencialesController, C/PlanillaConsultaController · SP: `sp_Importar_ConsultaDsh`, `sp_Movimientos_Consulta_GastosIngresos`, `sp_Site_Listar`, `sp_Asistencia_UltimoMovimientoEmpleado`

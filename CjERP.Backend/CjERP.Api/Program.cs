@@ -505,6 +505,7 @@ app.Lifetime.ApplicationStarted.Register(() => _ = Task.Run(async () =>
         var scheduler = scope.ServiceProvider.GetRequiredService<IReporteWhatsappJobScheduler>();
         await scheduler.ReprogramarAsync(ReporteWhatsappTipos.Operativo);
         await scheduler.ReprogramarAsync(ReporteWhatsappTipos.Gerencial);
+        await scheduler.ReprogramarAsync(ReporteWhatsappTipos.Meta);
     }
     catch (Exception ex)
     {

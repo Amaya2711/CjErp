@@ -7,6 +7,7 @@ import type {
   ReporteWhatsappEjecucionResultado,
   ReporteWhatsappManualSendRequest,
   ReporteWhatsappManualSendResult,
+  ReporteMetaDestinatario,
 } from "../models/reportesWhatsapp";
 
 const BASE_URL = "/reportes-whatsapp";
@@ -23,6 +24,25 @@ export const reportesWhatsappService = {
       ...config,
       params: { topLogs, ...(tipo ? { tipo } : {}), ...(periodo ? { periodo } : {}) },
     });
+  },
+
+  /** PDF que enviaría el job (sin enviarlo): primer empleado destino con datos, o el indicado. */
+  async vistaPreviaPdf(tipo?: string, idEmpleado?: number) {
+    return await httpClient.get<Blob>(`${BASE_URL}/vista-previa-pdf`, {
+      params: { ...(tipo ? { tipo } : {}), ...(idEmpleado ? { idEmpleado } : {}) },
+      responseType: "blob",
+      timeout: 120000,
+    });
+  },
+
+  /** Listado de sp_EmpleadoCj_Listar_Wup con la marca de habilitado para el envío por Meta. */
+  async obtenerDestinatariosMeta() {
+    return await httpClient.get<ReporteMetaDestinatario[]>(`${BASE_URL}/meta/destinatarios`);
+  },
+
+  /** Guarda los empleados desmarcados; el resto del listado queda habilitado. */
+  async guardarDestinatariosMeta(idsExcluidos: number[]) {
+    return await httpClient.put<boolean>(`${BASE_URL}/meta/destinatarios`, { idsExcluidos });
   },
 
   async obtenerConfiguracion(tipo?: string) {

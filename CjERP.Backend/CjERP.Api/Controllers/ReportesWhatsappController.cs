@@ -32,6 +32,50 @@ public sealed class ReportesWhatsappController : ControllerBase
         return Ok(new { success = true, message = "ok", data = dashboard });
     }
 
+    [HttpGet("vista-previa-pdf")]
+    public async Task<IActionResult> VistaPreviaPdf([FromQuery] string? tipo = null, [FromQuery] int? idEmpleado = null, CancellationToken cancellationToken = default)
+    {
+        if (!await UsuarioAutorizadoAsync(cancellationToken))
+        {
+            return Forbid();
+        }
+
+        try
+        {
+            var (pdf, nombreArchivo) = await _reporteAutomaticoService.GenerarVistaPreviaPdfAsync(ResolveTipo(tipo), idEmpleado, cancellationToken);
+            Response.Headers["Content-Disposition"] = $"inline; filename=\"{nombreArchivo}\"";
+            return File(pdf, "application/pdf");
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpGet("meta/destinatarios")]
+    public async Task<IActionResult> ObtenerDestinatariosMeta(CancellationToken cancellationToken = default)
+    {
+        if (!await UsuarioAutorizadoAsync(cancellationToken))
+        {
+            return Forbid();
+        }
+
+        var destinatarios = await _reporteAutomaticoService.ObtenerDestinatariosMetaAsync(cancellationToken);
+        return Ok(new { success = true, message = "ok", data = destinatarios });
+    }
+
+    [HttpPut("meta/destinatarios")]
+    public async Task<IActionResult> ActualizarDestinatariosMeta([FromBody] ReporteMetaDestinatariosUpdateDto request, CancellationToken cancellationToken = default)
+    {
+        if (!await UsuarioAutorizadoAsync(cancellationToken))
+        {
+            return Forbid();
+        }
+
+        await _reporteAutomaticoService.ActualizarDestinatariosMetaAsync(request, GetUsuarioActual(), cancellationToken);
+        return Ok(new { success = true, message = "Seleccion de destinatarios actualizada.", data = true });
+    }
+
     [HttpGet("configuracion")]
     public async Task<IActionResult> ObtenerConfiguracion([FromQuery] string? tipo = null, CancellationToken cancellationToken = default)
     {

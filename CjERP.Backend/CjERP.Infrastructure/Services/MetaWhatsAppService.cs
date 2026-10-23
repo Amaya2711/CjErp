@@ -94,6 +94,75 @@ public sealed class MetaWhatsAppService : IMetaWhatsAppService
         return await SendMessageAsync(phoneNumberId, payload, cancellationToken);
     }
 
+    public async Task<MetaWhatsAppSendResponseDto> SendTemplateWithDocumentAsync(MetaWhatsAppSendTemplateDocumentRequestDto request, CancellationToken cancellationToken = default)
+    {
+        if (!TryResolvePhoneNumberId(request.PhoneNumberId, out var phoneNumberId, out var error))
+        {
+            return ErrorResponse(0, string.Empty, error);
+        }
+
+        if (request.FileBytes is null || request.FileBytes.Length == 0)
+        {
+            return ErrorResponse(0, string.Empty, "MetaWhatsApp: el archivo PDF a enviar esta vacio.");
+        }
+
+        var mediaUpload = await UploadMediaAsync(
+            phoneNumberId,
+            new MetaWhatsAppSendDocumentRequestDto
+            {
+                FileName = request.FileName,
+                FileBytes = request.FileBytes,
+                ContentType = request.ContentType
+            },
+            cancellationToken);
+        if (!mediaUpload.Success)
+        {
+            return mediaUpload;
+        }
+
+        var mediaId = ExtractMediaId(mediaUpload.ResponseBody);
+        if (string.IsNullOrWhiteSpace(mediaId))
+        {
+            return ErrorResponse(mediaUpload.StatusCode, mediaUpload.ResponseBody, "MetaWhatsApp: no se obtuvo media id despues de subir el PDF.");
+        }
+
+        var components = new List<object>
+        {
+            new
+            {
+                type = "header",
+                parameters = new object[]
+                {
+                    new { type = "document", document = new { id = mediaId, filename = request.FileName.Trim() } }
+                }
+            }
+        };
+
+        var bodyParameters = (request.BodyParameters ?? Array.Empty<string>())
+            .Select(x => (object)new { type = "text", text = x })
+            .ToArray();
+        if (bodyParameters.Length > 0)
+        {
+            components.Add(new { type = "body", parameters = bodyParameters });
+        }
+
+        var payload = new
+        {
+            messaging_product = "whatsapp",
+            recipient_type = "individual",
+            to = request.To.Trim(),
+            type = "template",
+            template = new
+            {
+                name = request.TemplateName.Trim(),
+                language = new { code = request.LanguageCode.Trim() },
+                components
+            }
+        };
+
+        return await SendMessageAsync(phoneNumberId, payload, cancellationToken);
+    }
+
     public async Task<MetaWhatsAppSendResponseDto> SendReplyButtonsAsync(MetaWhatsAppSendReplyButtonsRequestDto request, CancellationToken cancellationToken = default)
     {
         if (!TryResolvePhoneNumberId(request.PhoneNumberId, out var phoneNumberId, out var error))

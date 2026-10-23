@@ -1434,7 +1434,10 @@ public class OrdenCompraService : IOrdenCompraService
         try
         {
             var asociados = 0;
-            var requierePagado = request.Nivel is 2 or 3 ? 1 : 0;
+            // VALIDACION INACTIVA (hasta nuevo aviso): si la OC ya paso la 1ra validacion (nivel 2 o 3, o aprobada),
+            // solo se asociaban recibos pagados (Estado 4). Para reactivarla, restaurar la linea comentada.
+            // var requierePagado = request.Nivel is 2 or 3 ? 1 : 0;
+            var requierePagado = 0;
 
             foreach (var correlativo in correlativos)
             {

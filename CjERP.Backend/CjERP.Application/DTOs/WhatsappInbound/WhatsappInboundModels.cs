@@ -21,6 +21,9 @@ public sealed class MetaWhatsAppSettings
     public string AccessToken { get; set; } = string.Empty;
     public string PhoneNumberId { get; set; } = string.Empty;
     public string GraphVersion { get; set; } = "v23.0";
+    /// <summary>Plantilla aprobada (encabezado DOCUMENTO + 1 variable de cuerpo) para el reporte de asistencia. Vacio = mensaje libre (solo dentro de la ventana de 24 h).</summary>
+    public string ReportTemplateName { get; set; } = string.Empty;
+    public string ReportTemplateLanguage { get; set; } = "es_PE";
 
     public bool HasConfiguredAccessToken() =>
         !string.IsNullOrWhiteSpace(AccessToken) &&
@@ -193,6 +196,18 @@ public sealed class MetaWhatsAppSendDocumentRequestDto
     public string Caption { get; set; } = string.Empty;
     public byte[] FileBytes { get; set; } = Array.Empty<byte>();
     public string ContentType { get; set; } = "application/pdf";
+    public string? PhoneNumberId { get; set; }
+}
+
+public sealed class MetaWhatsAppSendTemplateDocumentRequestDto
+{
+    public string To { get; set; } = string.Empty;
+    public string TemplateName { get; set; } = string.Empty;
+    public string LanguageCode { get; set; } = "es_PE";
+    public string FileName { get; set; } = string.Empty;
+    public byte[] FileBytes { get; set; } = Array.Empty<byte>();
+    public string ContentType { get; set; } = "application/pdf";
+    public IReadOnlyList<string> BodyParameters { get; set; } = Array.Empty<string>();
     public string? PhoneNumberId { get; set; }
 }
 

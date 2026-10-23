@@ -97,7 +97,9 @@ public sealed class ReporteWhatsappJobScheduler : IReporteWhatsappJobScheduler
     private string BuildRecurringJobId(string tipoReporte) =>
         ReporteWhatsappTipos.IsGerencial(tipoReporte)
             ? "reporte-whatsapp-asistencia-wup-gerencial"
-            : "reporte-whatsapp-asistencia-wup";
+            : ReporteWhatsappTipos.IsMeta(tipoReporte)
+                ? "reporte-whatsapp-asistencia-meta"
+                : "reporte-whatsapp-asistencia-wup";
 
     private string BuildRecurringJobId(string tipoReporte, string diaEjecucion) =>
         $"{BuildRecurringJobId(tipoReporte)}-{diaEjecucion.ToLowerInvariant()}";
@@ -115,7 +117,7 @@ public sealed class ReporteWhatsappJobScheduler : IReporteWhatsappJobScheduler
         return (
             _defaults.HoraEjecucion,
             NormalizeDiasEjecucion(_defaults.DiasEjecucion, Array.Empty<string>()),
-            _defaults.Activo);
+            !ReporteWhatsappTipos.IsMeta(tipoReporte) && _defaults.Activo);
     }
 
     private void RemoveRecurringJobs(string tipoReporte)

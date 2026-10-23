@@ -958,6 +958,33 @@ export function RptWupModulePage({
     }
   };
 
+  // Muestra el PDF que enviaría el job (reporte operativo), sin enviarlo ni registrar nada.
+  const verPdfEjemplo = async () => {
+    // La pestaña se abre antes de la espera para que el navegador no la bloquee como ventana emergente.
+    const ventana = window.open("", "_blank");
+    setDownloadingPdf(true);
+    setError("");
+    setSuccess("");
+    try {
+      const blob = await reportesWhatsappService.vistaPreviaPdf(tipoApi);
+      if (!(blob instanceof Blob) || blob.size === 0) {
+        throw new Error("El PDF no contiene datos.");
+      }
+      const url = URL.createObjectURL(blob);
+      if (ventana) {
+        ventana.location.href = url;
+      } else {
+        window.open(url, "_blank");
+      }
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      ventana?.close();
+      setError(await getBlobHttpErrorMessage(err, "No se pudo generar la vista previa del PDF."));
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
+
   const visualizarPdfBoleta = async (row: ReporteWhatsappBoletaDestino) => {
     if (!row.idBoleta || row.idBoleta <= 0) {
       setError("No se encontro la boleta asociada para visualizar el PDF.");
@@ -1021,6 +1048,17 @@ export function RptWupModulePage({
                     ) : null}
                   </div>
                   <div style={styles.heroActions}>
+                    {tipoApi === "operativo" ? (
+                      <button
+                        type="button"
+                        style={styles.secondaryButton}
+                        onClick={() => void verPdfEjemplo()}
+                        disabled={runningAction !== "" || downloadingPdf}
+                        title="Genera el PDF que envía el job, sin enviarlo"
+                      >
+                        {downloadingPdf ? "Generando..." : "Ver PDF de ejemplo"}
+                      </button>
+                    ) : null}
                     {tipoApi === "gerencial" && enableGerencialPdfPreview ? (
                       <button
                         type="button"

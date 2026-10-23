@@ -32,7 +32,10 @@ public sealed class ReportePdfService : IReportePdfService
             ? BuildGerencialDocument(empleadoDestino, periodo, detalle)
             : UseLegacyOperativoAsistenciaPdf
                 ? BuildOperativoDocument(empleadoDestino, periodo, detalle)
-                : BuildOperativoValidationDocument(BuildValidationRequestFromReporte(empleadoDestino, periodo, detalle));
+                : BuildOperativoValidationDocument(
+                    BuildValidationRequestFromReporte(empleadoDestino, periodo, detalle),
+                    incluirDetalleDias: true,
+                    soloDiasConObservacion: ReporteWhatsappTipos.IsMeta(normalizedType));
 
         return Task.FromResult(document.GeneratePdf());
     }
@@ -211,7 +214,7 @@ public sealed class ReportePdfService : IReportePdfService
         });
     }
 
-    private static Document BuildOperativoValidationDocument(AsistenciaReportePdfRequestDto request)
+    private static Document BuildOperativoValidationDocument(AsistenciaReportePdfRequestDto request, bool incluirDetalleDias = false, bool soloDiasConObservacion = false)
     {
         var items = FilterValidationItemsByPeriodo(request)
             .Where(item => item is not null)
@@ -277,26 +280,25 @@ public sealed class ReportePdfService : IReportePdfService
                         card.Item().Text(validationTitle).SemiBold().FontColor(validationAccent);
                     });
 
-                    column.Item().Background(Colors.White).Border(1).BorderColor(Colors.Grey.Lighten2).Padding(12).Column(card =>
+                    // Contenido de "Detalle estado PRESENTE" (desglose en horario / tolerancia / tardanza / fuera de horario).
+                    void RenderDetallePresente(IContainer detalleContainer) => detalleContainer.Column(detalle =>
                     {
-                        card.Spacing(10);
-                        card.Item().Text("KPIs por estado").Bold().FontSize(12);
-                        card.Item().Element(c => RenderEstadoKpiCards(c, resumen));
-                    });
+                        detalle.Spacing(soloDiasConObservacion ? 4 : 10);
+                        if (!soloDiasConObservacion)
+                        {
+                            detalle.Item().Text("Detalle estado PRESENTE").Bold().FontSize(12).FontColor("#123B5D");
+                            detalle.Item().Text($"Los porcentajes se calculan sobre {resumenPresentes.TotalRegistros} registros presentes.")
+                                .FontSize(8)
+                                .FontColor("#667085");
+                        }
 
-                    column.Item().Section(BuildPresentStateSectionId()).Background(Colors.White).Border(1).BorderColor(Colors.Grey.Lighten2).Padding(12).Column(card =>
-                    {
-                        card.Spacing(10);
-                        card.Item().Text("Detalle estado PRESENTE").Bold().FontSize(12).FontColor("#123B5D");
-                        card.Item().Text($"Los porcentajes se calculan sobre {resumenPresentes.TotalRegistros} registros presentes.")
-                            .FontSize(8)
-                            .FontColor("#667085");
-                        card.Item().Element(c => RenderEstadoKpiCards(
+                        detalle.Item().Element(c => RenderEstadoKpiCards(
                             c,
                             resumenPresentes,
                             BuildPresentStateSectionId(),
-                            "Cada porcentaje refleja la participación dentro del conjunto PRESENTE.",
+                            soloDiasConObservacion ? null : "Cada porcentaje refleja la participación dentro del conjunto PRESENTE.",
                             customOrder: new[] { "PRESENTE", "TOLERANCIA", "TARDANZA", "FUERA DE HORARIO" },
+                            compact: soloDiasConObservacion,
                             customTitleMap: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                             {
                                 ["PRESENTE"] = "EN HORARIO"
@@ -309,6 +311,34 @@ public sealed class ReportePdfService : IReportePdfService
                                 ["FUERA DE HORARIO"] = "Despues de las 9am"
                             }));
                     });
+
+                    column.Item().Background(Colors.White).Border(1).BorderColor(Colors.Grey.Lighten2).Padding(12).Column(card =>
+                    {
+                        card.Spacing(10);
+                        card.Item().Text("KPIs por estado").Bold().FontSize(12);
+                        // Envio por Meta: el detalle PRESENTE va justo debajo de la tarjeta PRESENTE.
+                        card.Item().Element(c => RenderEstadoKpiCards(
+                            c,
+                            resumen,
+                            detalleBajoPresente: soloDiasConObservacion ? RenderDetallePresente : null));
+                    });
+
+                    if (!soloDiasConObservacion)
+                    {
+                        column.Item().Section(BuildPresentStateSectionId()).Background(Colors.White).Border(1).BorderColor(Colors.Grey.Lighten2).Padding(12)
+                            .Element(RenderDetallePresente);
+                    }
+
+                    if (incluirDetalleDias)
+                    {
+                        if (soloDiasConObservacion)
+                        {
+                            // Envio por Meta: el detalle de dias con observacion siempre inicia en una hoja nueva.
+                            column.Item().PageBreak();
+                        }
+
+                        column.Item().Element(c => RenderDetalleDiasSection(c, items, soloDiasConObservacion));
+                    }
 
                 });
 
@@ -349,6 +379,114 @@ public sealed class ReportePdfService : IReportePdfService
                         });
                 });
             });
+        });
+    }
+
+    private static bool TieneEstadoConObservacion(string? estadoMarcacionTexto) =>
+        SplitEstadoMarcacion(estadoMarcacionTexto)
+            .Any(state => state is not ("PRESENTE" or "SABADO" or "SÁBADO" or "DOMINGO" or "FERIADO"));
+
+    private static readonly string[] DiasSemanaCortos = { "DOM", "LUN", "MAR", "MIE", "JUE", "VIE", "SAB" };
+
+    // Segmento final del PDF del job: un renglon por dia con hora de entrada, hora de salida y observacion.
+    // soloDiasConObservacion (envio por Meta): solo los dias cuyo estado no sea PRESENTE, SABADO, DOMINGO ni FERIADO (FALTA, FALTA APROBAR, etc.).
+    private static void RenderDetalleDiasSection(IContainer container, IReadOnlyList<AsistenciaReportePdfItemDto> items, bool soloDiasConObservacion = false)
+    {
+        var filas = items
+            .Where(item => !soloDiasConObservacion || TieneEstadoConObservacion(item.EstadoMarcacionTexto))
+            .OrderBy(item => ParseDisplayDate(item.Fecha) ?? DateTime.MaxValue)
+            .ThenBy(item => item.Hora)
+            .ToList();
+
+        container.Background(Colors.White).Border(1).BorderColor(Colors.Grey.Lighten2).Padding(12).Column(card =>
+        {
+            card.Spacing(8);
+            card.Item().Text(soloDiasConObservacion ? "Detalle de dias con observacion" : "Detalle por dia").Bold().FontSize(12).FontColor("#123B5D");
+            if (soloDiasConObservacion)
+            {
+                card.Item().Text("Se listan los dias con estado distinto de PRESENTE, SABADO, DOMINGO y FERIADO (por ejemplo FALTA o FALTA APROBAR).")
+                    .FontSize(8)
+                    .FontColor("#667085");
+            }
+
+            if (filas.Count == 0)
+            {
+                card.Item().Text(soloDiasConObservacion ? "No hay dias con observacion en el periodo." : "Sin registros en el periodo.").FontSize(9).FontColor("#667085");
+                return;
+            }
+
+            Action<IContainer, IReadOnlyList<AsistenciaReportePdfItemDto>> renderTabla = (host, rowsTabla) => host.Table(table =>
+            {
+                table.ColumnsDefinition(columns =>
+                {
+                    columns.ConstantColumn(66);
+                    columns.ConstantColumn(44);
+                    columns.ConstantColumn(58);
+                    columns.ConstantColumn(58);
+                    columns.RelativeColumn();
+                });
+
+                static IContainer HeaderCell(IContainer cell) =>
+                    cell.Background("#F1F5F9").BorderBottom(1).BorderColor("#CBD5E1").PaddingVertical(4).PaddingHorizontal(5);
+                static IContainer BodyCell(IContainer cell) =>
+                    cell.BorderBottom(1).BorderColor("#E5E7EB").PaddingVertical(3).PaddingHorizontal(5);
+
+                table.Header(header =>
+                {
+                    header.Cell().Element(HeaderCell).AlignCenter().Text("Fecha").SemiBold().FontSize(9);
+                    header.Cell().Element(HeaderCell).AlignCenter().Text("DIA").Bold().FontSize(9);
+                    header.Cell().Element(HeaderCell).Text("Hora entrada").SemiBold().FontSize(9);
+                    header.Cell().Element(HeaderCell).Text("Hora salida").SemiBold().FontSize(9);
+                    header.Cell().Element(HeaderCell).Text("Observacion").SemiBold().FontSize(9);
+                });
+
+                foreach (var fila in rowsTabla)
+                {
+                    var fecha = ParseDisplayDate(fila.Fecha);
+                    var textoFecha = fecha is null ? EmptyIfMissing(fila.Fecha) : fecha.Value.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+                    var nombreDia = fecha is null ? "-" : DiasSemanaCortos[(int)fecha.Value.DayOfWeek];
+                    var finDeSemana = fecha is not null && fecha.Value.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday;
+
+                    table.Cell().Element(BodyCell).AlignCenter().Text(textoFecha).FontSize(9);
+                    // El dia va aparte, en mayuscula, centrado y resaltado para distinguirlo de la fecha (fin de semana en rojo).
+                    table.Cell().Element(BodyCell)
+                        .Background(finDeSemana ? "#FEE4E2" : "#E0EAF5")
+                        .AlignCenter()
+                        .Text(nombreDia).Bold().FontSize(9).FontColor(finDeSemana ? "#B42318" : "#123B5D");
+                    table.Cell().Element(BodyCell).Text(EmptyIfMissing(fila.Hora)).FontSize(9);
+                    table.Cell().Element(BodyCell).Text(EmptyIfMissing(fila.Salida)).FontSize(9);
+                    table.Cell().Element(BodyCell).Text(EmptyIfMissing(fila.Observacion)).FontSize(9);
+                }
+            });
+
+            if (!soloDiasConObservacion)
+            {
+                renderTabla(card.Item(), filas);
+                return;
+            }
+
+            // Envio por Meta: un bloque por estado (FALTA y FALTA APROBAR primero, luego el resto por nombre).
+            var grupos = filas
+                .GroupBy(item => string.Join(", ", SplitEstadoMarcacion(item.EstadoMarcacionTexto)))
+                .OrderBy(grupo => grupo.Key switch { "FALTA" => 0, "FALTA APROBAR" => 1, _ => 2 })
+                .ThenBy(grupo => grupo.Key, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            foreach (var grupo in grupos)
+            {
+                card.Item().ShowEntire().Column(bloque =>
+                {
+                    bloque.Spacing(3);
+                    bloque.Item().Row(titulo =>
+                    {
+                        titulo.AutoItem().Background("#FEE4E2").PaddingVertical(2).PaddingHorizontal(8)
+                            .Text(grupo.Key).Bold().FontSize(9).FontColor("#B42318");
+                        titulo.RelativeItem().PaddingLeft(6).AlignMiddle()
+                            .Text($"{grupo.Count()} dia(s)").FontSize(8).FontColor("#667085");
+                    });
+                    renderTabla(bloque.Item(), grupo.ToList());
+                });
+            }
         });
     }
 
@@ -1261,7 +1399,9 @@ public sealed class ReportePdfService : IReportePdfService
         string? subtitle = null,
         IReadOnlyList<string>? customOrder = null,
         IReadOnlyDictionary<string, string>? customTitleMap = null,
-        IReadOnlyDictionary<string, string>? customDescriptionMap = null)
+        IReadOnlyDictionary<string, string>? customDescriptionMap = null,
+        bool compact = false,
+        Action<IContainer>? detalleBajoPresente = null)
     {
         var items = resumen.Resumen.ToList();
 
@@ -1293,16 +1433,16 @@ public sealed class ReportePdfService : IReportePdfService
 
         var max = Math.Max(1, items.First().Cantidad);
 
-        container.Border(1).BorderColor(Colors.Grey.Lighten2).Padding(14).Column(column =>
+        container.Border(1).BorderColor(Colors.Grey.Lighten2).Padding(compact ? 8 : 14).Column(column =>
         {
-            column.Spacing(8);
+            column.Spacing(compact ? 4 : 8);
 
             if (!string.IsNullOrWhiteSpace(subtitle))
             {
                 column.Item().Text(subtitle).FontSize(8).FontColor("#667085");
             }
 
-            foreach (var item in items)
+            void RenderCard(IContainer host, ReporteWhatsappResumenEstadoDto item)
             {
                 var (accent, background) = GetDynamicEstadoMarcacionCardColors(item.EstadoMarcacionTexto);
                 var sectionId = sectionLinkId is not null && string.Equals(item.EstadoMarcacionTexto, "PRESENTE", StringComparison.OrdinalIgnoreCase)
@@ -1312,15 +1452,15 @@ public sealed class ReportePdfService : IReportePdfService
                 var fillUnits = Math.Max(1, (int)Math.Round(fillPercent * 100));
                 var emptyUnits = Math.Max(1, 100 - fillUnits);
 
-                column.Item().Background(background).Border(1).BorderColor("#D9E2EC").PaddingVertical(10).PaddingHorizontal(10).Column(card =>
+                host.Background(background).Border(1).BorderColor("#D9E2EC").PaddingVertical(compact ? 4 : 10).PaddingHorizontal(compact ? 8 : 10).Column(card =>
                 {
-                    card.Spacing(6);
+                    card.Spacing(compact ? 2 : 6);
 
                     card.Item().Row(row =>
                     {
-                        row.Spacing(10);
-                        row.ConstantItem(6).Height(28).Background(accent);
-                        row.ConstantItem(150).Column(label =>
+                        row.Spacing(compact ? 6 : 10);
+                        row.ConstantItem(compact ? 4 : 6).Height(compact ? 16 : 28).Background(accent);
+                        row.ConstantItem(compact ? 78 : 150).Column(label =>
                         {
                             label.Spacing(1);
                             var stateText = label.Item();
@@ -1336,14 +1476,14 @@ public sealed class ReportePdfService : IReportePdfService
                                 ? mappedDescription
                                 : "Estado";
 
-                            stateText.Text(stateTitle).SemiBold().FontSize(10).FontColor("#0F172A");
-                            label.Item().Text(stateDescription).FontSize(7).FontColor("#64748B");
+                            stateText.Text(stateTitle).SemiBold().FontSize(compact ? 8 : 10).FontColor("#0F172A");
+                            label.Item().Text(stateDescription).FontSize(compact ? 6 : 7).FontColor("#64748B");
                         });
 
                         row.RelativeItem().Column(barColumn =>
                         {
-                            barColumn.Spacing(4);
-                            barColumn.Item().Height(16).Element(bar =>
+                            barColumn.Spacing(compact ? 1 : 4);
+                            barColumn.Item().Height(compact ? 8 : 16).Element(bar =>
                             {
                                 bar.Border(1).BorderColor(background).Background("#E5E7EB").Padding(1).Row(inner =>
                                 {
@@ -1352,16 +1492,51 @@ public sealed class ReportePdfService : IReportePdfService
                                 });
                             });
 
-                            barColumn.Item().Text($"{item.Porcentaje:0.00}% del total").FontSize(7.5f).FontColor("#667085");
+                            barColumn.Item().Text($"{item.Porcentaje:0.00}% del total").FontSize(compact ? 6.5f : 7.5f).FontColor("#667085");
                         });
 
-                        row.ConstantItem(68).AlignRight().Column(metric =>
+                        row.ConstantItem(compact ? 38 : 68).AlignRight().Column(metric =>
                         {
                             metric.Spacing(1);
-                            metric.Item().Text(item.Cantidad.ToString(CultureInfo.InvariantCulture)).Bold().FontSize(13).FontColor(accent);
-                            metric.Item().Text("registros").FontSize(7).FontColor("#667085");
+                            metric.Item().Text(item.Cantidad.ToString(CultureInfo.InvariantCulture)).Bold().FontSize(compact ? 9 : 13).FontColor(accent);
+                            metric.Item().Text("registros").FontSize(compact ? 6 : 7).FontColor("#667085");
                         });
                     });
+                });
+            }
+
+            if (!compact)
+            {
+                foreach (var item in items)
+                {
+                    RenderCard(column.Item(), item);
+                    if (detalleBajoPresente is not null && string.Equals(item.EstadoMarcacionTexto, "PRESENTE", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Sangrado bajo la tarjeta PRESENTE, con una linea lateral que lo une a ella.
+                        column.Item().PaddingLeft(18).BorderLeft(2).BorderColor("#94A3B8").PaddingLeft(10).Element(detalleBajoPresente);
+                    }
+                }
+
+                return;
+            }
+
+            // Modo compacto: dos estados por fila.
+            for (var index = 0; index < items.Count; index += 2)
+            {
+                var left = items[index];
+                var right = index + 1 < items.Count ? items[index + 1] : null;
+                column.Item().Row(pair =>
+                {
+                    pair.Spacing(6);
+                    pair.RelativeItem().Element(c => RenderCard(c, left));
+                    if (right is null)
+                    {
+                        pair.RelativeItem();
+                    }
+                    else
+                    {
+                        pair.RelativeItem().Element(c => RenderCard(c, right));
+                    }
                 });
             }
         });

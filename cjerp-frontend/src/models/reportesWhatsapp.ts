@@ -1,4 +1,15 @@
-export type ReporteWhatsappTipo = "operativo" | "gerencial" | "boleta";
+export type ReporteWhatsappTipo = "operativo" | "gerencial" | "boleta" | "meta";
+
+export type ReporteMetaDestinatario = {
+  idEmpleado: number;
+  usuario: string;
+  nombreEmpleado: string;
+  telefono: string;
+  ubicacion: string;
+  correo: string;
+  telefonoValido: boolean;
+  habilitado: boolean;
+};
 
 export type ReporteWhatsappConfiguracion = {
   tipoReporte?: string;

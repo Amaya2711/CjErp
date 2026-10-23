@@ -222,6 +222,8 @@ export default function PagarTesoreriaV2Page() {
   const [estadoBusqueda, setEstadoBusqueda] = useState<string[]>([]);
   const [desde, setDesde] = useState(inicioMesActual);
   const [hasta, setHasta] = useState(hoy);
+  // Rango de la última consulta de Rendición (el aviso muestra lo consultado, no lo escrito en los campos).
+  const [rangoRendicionAplicado, setRangoRendicionAplicado] = useState<{ desde: string; hasta: string } | null>(null);
   const [groupBy, setGroupBy] = useState<"todos" | "comprobante" | "proyecto-site" | "responsable" | "solicitante" | "banco" | "adjunto" | "serie-view-detalle">("todos");
   const [form, setForm] = useState(initialForm);
   const [operationSaving, setSaving] = useState(false);
@@ -345,6 +347,7 @@ export default function PagarTesoreriaV2Page() {
       fetchRef.current?.abort();
       const controller = new AbortController();
       fetchRef.current = controller;
+      if (status === 4) setRangoRendicionAplicado({ desde: start, hasta: end });
       setSelected(new Set());
       setRows([]);
       setError("");
@@ -838,7 +841,10 @@ export default function PagarTesoreriaV2Page() {
     setRegistroPagoAbierto(false);
     setContabilidadValida(false);
     setSuccess("");
-    if (next === 100) {
+    setRangoRendicionAplicado(null);
+    // Búsqueda y Rendición no consultan al entrar: esperan el botón Buscar (Rendición queda con el mes en curso).
+    if (next === 100 || next === 4) {
+      fetchRef.current?.abort();
       setRows([]);
       setLoading(false);
     } else {
@@ -1509,6 +1515,8 @@ export default function PagarTesoreriaV2Page() {
           className="pt-filters"
           onSubmit={(e) => {
             e.preventDefault();
+            // Rendición solo consulta al pulsar el botón Buscar (no con Enter ni al cambiar fechas).
+            if (estado === 4) return;
             if (desde && hasta && desde > hasta) {
               setError("La fecha inicial no puede superar la final.");
               return;
@@ -1543,6 +1551,29 @@ export default function PagarTesoreriaV2Page() {
                 onChange={(e) => setHasta(e.target.value)}
               />
             </label>
+            {estado === 4 && (
+              <button
+                type="button"
+                className="pt-primary"
+                disabled={loading}
+                onClick={() => {
+                  if (!desde || !hasta) {
+                    setError("Ingrese la fecha de inicio y la fecha fin para realizar la búsqueda.");
+                    return;
+                  }
+                  if (desde > hasta) {
+                    setError("La fecha inicial no puede superar la final.");
+                    return;
+                  }
+                  setError("");
+                  setSelected(new Set());
+                  void load(estado, desde, hasta);
+                }}
+              >
+                <Search size={15} />
+                Buscar
+              </button>
+            )}
 					<button
 						type="button"
 						disabled={loading}
@@ -1677,9 +1708,9 @@ export default function PagarTesoreriaV2Page() {
               </div>
             )}
             {!esReporte && <>
-            {estado === 4 && desde && hasta && (
+            {estado === 4 && rangoRendicionAplicado && (
               <div className="pt-success" role="status">
-                Se esta filtrando por el rango de fechas : {fecha(desde)} - {fecha(hasta)}
+                Se esta filtrando por el rango de fechas : {fecha(rangoRendicionAplicado.desde)} - {fecha(rangoRendicionAplicado.hasta)}
               </div>
             )}
             {estado === 100 && <fieldset className="pt-local-filters" disabled={saving}>

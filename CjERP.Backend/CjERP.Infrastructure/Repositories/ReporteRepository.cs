@@ -17,6 +17,7 @@ public sealed class ReporteRepository : IReporteRepository
     private const string ReporteWhatsappLogTable = "dbo.ReporteWhatsAppLog";
     private const string ReporteWhatsappLogGerenciaTable = "dbo.ReporteWhatsAppLogGerencia";
     private const string ReporteWhatsappConfigTable = "dbo.ReporteWupConfig";
+    private const string ReporteWhatsappExcluidoTable = "dbo.ReporteWhatsappExcluido";
 
     private readonly ISqlCommandFactory _sqlCommandFactory;
     private readonly ILogger<ReporteRepository> _logger;
@@ -762,6 +763,73 @@ public sealed class ReporteRepository : IReporteRepository
     private sealed class AsistenciaMesEstadoRow
     {
         public string? Estado { get; set; }
+    }
+
+    public async Task<IReadOnlyList<int>> ObtenerEmpleadosExcluidosAsync(string tipoReporte, CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        await EnsureReporteExcluidoTableAsync(connection, cancellationToken);
+
+        var ids = await connection.QueryAsync<int>(
+            new CommandDefinition(
+                $"SELECT IdEmpleado FROM {ReporteWhatsappExcluidoTable} WHERE TipoReporte = @TipoReporte;",
+                new { TipoReporte = ReporteWhatsappTipos.Normalize(tipoReporte) },
+                cancellationToken: cancellationToken));
+
+        return ids.ToList();
+    }
+
+    public async Task ReemplazarEmpleadosExcluidosAsync(string tipoReporte, IReadOnlyList<int> idsEmpleado, string usuarioModificacion, CancellationToken cancellationToken = default)
+    {
+        var normalizedType = ReporteWhatsappTipos.Normalize(tipoReporte);
+        var ids = idsEmpleado.Where(id => id > 0).Distinct().ToList();
+
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await EnsureReporteExcluidoTableAsync(connection, cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        await connection.ExecuteAsync(
+            new CommandDefinition(
+                $"DELETE FROM {ReporteWhatsappExcluidoTable} WHERE TipoReporte = @TipoReporte;",
+                new { TipoReporte = normalizedType },
+                transaction,
+                cancellationToken: cancellationToken));
+
+        if (ids.Count > 0)
+        {
+            await connection.ExecuteAsync(
+                new CommandDefinition(
+                    $"""
+                    INSERT INTO {ReporteWhatsappExcluidoTable} (TipoReporte, IdEmpleado, UsuarioModificacion, FechaModificacion)
+                    VALUES (@TipoReporte, @IdEmpleado, @UsuarioModificacion, GETDATE());
+                    """,
+                    ids.Select(id => new { TipoReporte = normalizedType, IdEmpleado = id, UsuarioModificacion = usuarioModificacion }),
+                    transaction,
+                    cancellationToken: cancellationToken));
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task EnsureReporteExcluidoTableAsync(SqlConnection connection, CancellationToken cancellationToken)
+    {
+        // Misma definicion que Database/Reportes/03_ReporteWhatsappExcluido.sql (idempotente).
+        const string sql = """
+        IF OBJECT_ID('dbo.ReporteWhatsappExcluido', 'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.ReporteWhatsappExcluido
+            (
+                TipoReporte nvarchar(50) NOT NULL,
+                IdEmpleado int NOT NULL,
+                UsuarioModificacion nvarchar(100) NULL,
+                FechaModificacion datetime NOT NULL CONSTRAINT DF_ReporteWhatsappExcluido_Fecha DEFAULT (GETDATE()),
+                CONSTRAINT PK_ReporteWhatsappExcluido PRIMARY KEY (TipoReporte, IdEmpleado)
+            );
+        END;
+        """;
+
+        await connection.ExecuteAsync(new CommandDefinition(sql, cancellationToken: cancellationToken));
     }
 
     private SqlConnection CreateConnection() => _sqlCommandFactory.CreateConnection();
