@@ -38,6 +38,7 @@ docs/            ARCHITECTURE · MODULES · API_MAP · DATABASE_MAP · PROCESS_M
 - Nueva página: `features/<modulo>/<pagina>.tsx` + ruta lazy en `app/router/AppRouter.tsx` + ítem en `SegMenu` (BD) con la **misma ruta**.
 - HTTP **siempre** con `src/api/httpClient.ts` (desenvuelve `{success,data}`, rechaza `success:false`, 401 → login). Errores: `utils/httpError.ts#getHttpErrorMessage`.
 - Reutilizar: `components/base/` (AppPage, AppCard, DataGridBase, StoredProcedureGrid, SidePanelForm, CrudToolbar, ConfirmDialog, InputBase, SelectBase, AppStatusMessage, ToolbarFiltro, PlaceholderPage), `components/datagrid/DataGridPro` (grilla avanzada: agrupar, filtros, resumen, edición, export; reemplaza la necesidad de DevExtreme), `components/lookups/FiltroOperativoLookup`, hooks `useConstantesPorCampo`, `useCrudForm`, `useFiltroOperativoLookup`, utils `sharepoint`, `imageCompression`, `authStorage`.
+- **REGLA — GRIDS**: toda grilla/tabla de datos nueva (carga de Excel, reportes, listados, resultados) **debe** usar `components/datagrid/DataGridPro` (`GridColumn` de `components/datagrid/types`; ejemplo mínimo: `features/finanzas/tesoreria/cheques.tsx`, `features/reportes/gerencial/ventassunat.tsx`). No crear `<table>` manuales ni nuevas grillas propias; `DataGridBase`/`StoredProcedureGrid` solo se mantienen donde ya existen. Si falta una capacidad, extender `DataGridPro`.
 - Estilo dominante: estilos inline tipados. Sin store global. Grillas propias (DataGridBase). Excel `xlsx` y PDF `jspdf` con import dinámico. Gráficos `recharts`.
 
 ## Backend
