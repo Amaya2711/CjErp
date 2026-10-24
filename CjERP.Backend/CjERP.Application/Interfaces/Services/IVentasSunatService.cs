@@ -10,4 +10,10 @@ public interface IVentasSunatService
         CancellationToken cancellationToken = default);
 
     Task<VentasSunatValidacionResultDto> ValidarAsync(Guid lote, CancellationToken cancellationToken = default);
+
+    /// <summary>Periodos ya cargados (el mas reciente primero).</summary>
+    Task<IReadOnlyList<VentasSunatPeriodoDto>> ListarPeriodosAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Indica si el periodo (AAAAMM) del RUC emisor ya esta cargado y devuelve su historial.</summary>
+    Task<VentasSunatHistorialDto> ConsultarPeriodoAsync(string periodo, string rucEmisor, CancellationToken cancellationToken = default);
 }

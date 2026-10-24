@@ -50,6 +50,15 @@ public sealed class VentasSunatRegistroDto : VentasSunatFilaDto
     public long IdVentaSunat { get; set; }
     public int? IdEmpresa { get; set; }
     public int? IdCliente { get; set; }
+
+    /// <summary>
+    /// Empresa de venta: NroDocIdentidad = ValorIni de RELACION_VTA, y su ValorFin = ValorFin de EMPRESA_VTA, cuyo ValorIni es la empresa.
+    /// Se calcula al validar y se graba en dbo.VentasSunat.Empresa; IdEmpresa es el ValorFin de RELACION_VTA para el RUC del cliente.
+    /// </summary>
+    public string? Empresa { get; set; }
+
+    /// <summary>NombreCliente de dbo.Cliente para el IdCliente asignado (NroDocIdentidad = Cliente.NroDocumento).</summary>
+    public string? NombreCliente { get; set; }
 }
 
 public sealed class VentasSunatCargarRequestDto
@@ -81,4 +90,26 @@ public sealed class VentasSunatValidacionResultDto
 {
     public VentasSunatValidacionResumenDto Resumen { get; set; } = new();
     public IReadOnlyList<VentasSunatRegistroDto> Registros { get; set; } = Array.Empty<VentasSunatRegistroDto>();
+}
+
+/// <summary>Historial de un periodo ya cargado (si existe): datos de la carga y sus registros con IdCliente / IdEmpresa / Empresa.</summary>
+public sealed class VentasSunatHistorialDto
+{
+    public bool Existe { get; set; }
+    public int Cantidad { get; set; }
+    public Guid? Lote { get; set; }
+    public DateTime? FechaCarga { get; set; }
+    public string? UsuarioCarga { get; set; }
+    public IReadOnlyList<VentasSunatRegistroDto> Registros { get; set; } = Array.Empty<VentasSunatRegistroDto>();
+}
+
+/// <summary>Periodo ya cargado (un renglon por Periodo + RUC emisor) para el Historial de la pantalla.</summary>
+public sealed class VentasSunatPeriodoDto
+{
+    public string Periodo { get; set; } = string.Empty;
+    public string RucEmisor { get; set; } = string.Empty;
+    public int Cantidad { get; set; }
+    public DateTime? FechaCarga { get; set; }
+    public Guid? Lote { get; set; }
+    public string? UsuarioCarga { get; set; }
 }

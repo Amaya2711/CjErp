@@ -1,4 +1,4 @@
--- Reporte / Ventas SUNAT: carga mensual del "Registro de Ventas" SIRE (Excel) y validación de IdCliente (IdEmpresa queda pendiente de regla).
+-- Reporte / Ventas SUNAT: carga mensual del "Registro de Ventas" SIRE (Excel); la validación asigna IdCliente (NroDocIdentidad = Cliente.NroDocumento), Empresa e IdEmpresa (RELACION_VTA / EMPRESA_VTA).
 -- Una carga = un periodo (año-mes, columna Periodo AAAAMM) de un RUC emisor: recargar el mismo periodo REEMPLAZA lo anterior.
 -- Idempotente (IF NOT EXISTS / CREATE OR ALTER). PV: no ejecutado en la BD real; validar que dbo.Cliente tenga IdCliente, NombreCliente, Estado.
 SET XACT_ABORT ON;
@@ -58,8 +58,9 @@ BEGIN
         TipoOperacion              VARCHAR(10)          NULL,
         DamCp                      VARCHAR(30)          NULL,
         Clu                        VARCHAR(30)          NULL,
-        IdEmpresa                  INT                  NULL,       -- pendiente: se registrará con una regla propia (no la asigna la validación)
+        IdEmpresa                  INT                  NULL,       -- ValorFin de Constante RELACION_VTA cuyo ValorIni = NroDocIdentidad (RUC del cliente)
         IdCliente                  INT                  NULL,       -- dbo.Cliente.IdCliente cuando NombreCliente = RazonSocial
+        Empresa                    VARCHAR(150)         NULL,       -- ValorIni de Constante EMPRESA_VTA (via RELACION_VTA por RUC del cliente)
         FechaCarga                 DATETIME2(0)         NOT NULL CONSTRAINT DF_VentasSunat_FechaCarga DEFAULT (SYSDATETIME()),
         UsuarioCarga               VARCHAR(100)         NULL
     );
@@ -67,6 +68,11 @@ BEGIN
     CREATE INDEX IX_VentasSunat_Periodo ON dbo.VentasSunat (Periodo, RucEmisor);
     CREATE INDEX IX_VentasSunat_Doc ON dbo.VentasSunat (RucEmisor, TipoCp, Serie, NroCp);
 END
+GO
+
+-- Tablas creadas con una version anterior de este script: agregar la columna Empresa.
+IF COL_LENGTH('dbo.VentasSunat', 'Empresa') IS NULL
+    ALTER TABLE dbo.VentasSunat ADD Empresa VARCHAR(150) NULL;
 GO
 
 -- @Datos: JSON array con las filas del Excel SIRE (claves camelCase). Reemplaza TODO lo cargado antes del mismo
@@ -153,8 +159,9 @@ BEGIN
 END
 GO
 
--- Asigna IdCliente: ventassunat.RazonSocial = cliente.NombreCliente (cliente del comprobante).
--- IdEmpresa NO se asigna aquí: la columna queda para una regla de registro posterior.
+-- Asigna IdCliente: ventassunat.NroDocIdentidad (RUC del cliente) = dbo.Cliente.NroDocumento.
+-- IdEmpresa y Empresa NO se asignan aqui: los graba sp_VentasSunat_AsignarEmpresa (regla RELACION_VTA / EMPRESA_VTA, resuelta por el backend).
+-- PV: confirmar en la BD que dbo.Cliente tenga la columna NroDocumento.
 CREATE OR ALTER PROCEDURE dbo.sp_VentasSunat_Validar
     @Lote UNIQUEIDENTIFIER
 AS
@@ -164,27 +171,28 @@ BEGIN
 
     BEGIN TRANSACTION;
 
-    -- ventassunat.RazonSocial = cliente.NombreCliente (sin distinguir mayúsculas/tildes ni espacios dobles/sobrantes).
-    -- Si el nombre está repetido se toma un solo IdCliente: primero el activo (Estado = 1), luego el menor id.
-    SELECT Nombre, IdCliente
+    -- Si el documento esta repetido en Cliente se toma un solo IdCliente: primero el activo (Estado = 1), luego el menor id.
+    SELECT Doc, IdCliente
     INTO #Cli
     FROM (
-        SELECT REPLACE(REPLACE(REPLACE(LTRIM(RTRIM(NombreCliente)), '  ', ' '), '  ', ' '), '  ', ' ') COLLATE Latin1_General_CI_AI AS Nombre,
+        SELECT LTRIM(RTRIM(CONVERT(VARCHAR(30), NroDocumento))) AS Doc,
                IdCliente,
                ROW_NUMBER() OVER (
-                   PARTITION BY REPLACE(REPLACE(REPLACE(LTRIM(RTRIM(NombreCliente)), '  ', ' '), '  ', ' '), '  ', ' ') COLLATE Latin1_General_CI_AI
+                   PARTITION BY LTRIM(RTRIM(CONVERT(VARCHAR(30), NroDocumento)))
                    ORDER BY CASE WHEN Estado = 1 THEN 0 ELSE 1 END, IdCliente) AS rn
         FROM dbo.Cliente
-        WHERE NombreCliente IS NOT NULL
+        WHERE NroDocumento IS NOT NULL
+          AND LTRIM(RTRIM(CONVERT(VARCHAR(30), NroDocumento))) <> ''
     ) x
     WHERE rn = 1;
 
+    -- Se reasigna todo el lote: un RUC que ya no coincide deja el IdCliente en NULL.
     UPDATE v SET IdCliente = c.IdCliente
     FROM dbo.VentasSunat v
-    JOIN #Cli c
-      ON c.Nombre = REPLACE(REPLACE(REPLACE(LTRIM(RTRIM(v.RazonSocial)), '  ', ' '), '  ', ' '), '  ', ' ') COLLATE Latin1_General_CI_AI
+    LEFT JOIN #Cli c ON c.Doc = LTRIM(RTRIM(v.NroDocIdentidad))
     WHERE v.Lote = @Lote;
-    DECLARE @ClienteAsignado INT = @@ROWCOUNT;
+
+    DECLARE @ClienteAsignado INT = (SELECT COUNT(*) FROM dbo.VentasSunat WHERE Lote = @Lote AND IdCliente IS NOT NULL);
 
     COMMIT;
 
@@ -196,12 +204,81 @@ BEGIN
 END
 GO
 
+-- Informa si el periodo (AAAAMM) del RUC emisor ya esta cargado: cantidad de registros, lote mas reciente, fecha y usuario de la carga.
+-- Cantidad = 0 cuando no existe. Se usa antes de grabar para preguntar si se reemplaza.
+CREATE OR ALTER PROCEDURE dbo.sp_VentasSunat_ConsultarPeriodo
+    @Periodo    CHAR(6),
+    @RucEmisor  VARCHAR(11)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        COUNT(*)           AS Cantidad,
+        (SELECT TOP (1) Lote         FROM dbo.VentasSunat WHERE Periodo = @Periodo AND RucEmisor = @RucEmisor ORDER BY IdVentaSunat DESC) AS Lote,
+        MAX(FechaCarga)    AS FechaCarga,
+        (SELECT TOP (1) UsuarioCarga FROM dbo.VentasSunat WHERE Periodo = @Periodo AND RucEmisor = @RucEmisor ORDER BY IdVentaSunat DESC) AS UsuarioCarga
+    FROM dbo.VentasSunat
+    WHERE Periodo = @Periodo AND RucEmisor = @RucEmisor;
+END
+GO
+
+-- Periodos cargados (uno por Periodo + RucEmisor): cantidad de registros, lote mas reciente, fecha y usuario de la carga.
+-- Alimenta el Historial de la pantalla al abrirla, sin necesidad de cargar un Excel.
+CREATE OR ALTER PROCEDURE dbo.sp_VentasSunat_ListarPeriodos
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        v.Periodo,
+        v.RucEmisor,
+        COUNT(*)           AS Cantidad,
+        MAX(v.FechaCarga)  AS FechaCarga,
+        (SELECT TOP (1) x.Lote         FROM dbo.VentasSunat x WHERE x.Periodo = v.Periodo AND x.RucEmisor = v.RucEmisor ORDER BY x.IdVentaSunat DESC) AS Lote,
+        (SELECT TOP (1) x.UsuarioCarga FROM dbo.VentasSunat x WHERE x.Periodo = v.Periodo AND x.RucEmisor = v.RucEmisor ORDER BY x.IdVentaSunat DESC) AS UsuarioCarga
+    FROM dbo.VentasSunat v
+    GROUP BY v.Periodo, v.RucEmisor
+    ORDER BY v.Periodo DESC, v.RucEmisor;
+END
+GO
+
+-- Graba Empresa e IdEmpresa de cada RUC de cliente del lote. @Asignaciones: JSON [{ "ruc": "...", "empresa": "..." | null, "idEmpresa": 1 | null }].
+-- La regla (RELACION_VTA -> EMPRESA_VTA de dbo.Constante) la resuelve el backend con sp_Constante_ListarPorCampo:
+-- IdEmpresa = ValorFin de RELACION_VTA (ValorIni = RUC del cliente) y Empresa = ValorIni de la fila de EMPRESA_VTA con ese mismo ValorFin.
+-- Un RUC sin empresa queda en NULL (revalidar refresca el valor).
+CREATE OR ALTER PROCEDURE dbo.sp_VentasSunat_AsignarEmpresa
+    @Lote          UNIQUEIDENTIFIER,
+    @Asignaciones  NVARCHAR(MAX)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    SELECT ruc, empresa, idEmpresa
+    INTO #Asig
+    FROM OPENJSON(@Asignaciones) WITH
+    (
+        ruc       VARCHAR(20)  '$.ruc',
+        empresa   VARCHAR(150) '$.empresa',
+        idEmpresa INT          '$.idEmpresa'
+    );
+
+    UPDATE v SET Empresa = a.empresa, IdEmpresa = a.idEmpresa
+    FROM dbo.VentasSunat v
+    JOIN #Asig a ON a.ruc = LTRIM(RTRIM(v.NroDocIdentidad))
+    WHERE v.Lote = @Lote;
+
+    SELECT @@ROWCOUNT AS Actualizados;
+END
+GO
+
 CREATE OR ALTER PROCEDURE dbo.sp_VentasSunat_Listar
     @Lote UNIQUEIDENTIFIER
 AS
 BEGIN
     SET NOCOUNT ON;
-    SELECT IdVentaSunat,
+    SELECT v.IdVentaSunat,
            RucEmisor AS rucEmisor, RazonSocialEmisor AS razonSocialEmisor, Periodo AS periodo, CarSunat AS carSunat,
            FechaEmision AS fechaEmision, FechaVcto AS fechaVcto, TipoCp AS tipoCp, Serie AS serie, NroCp AS nroCp,
            NroFinal AS nroFinal, TipoDocIdentidad AS tipoDocIdentidad, NroDocIdentidad AS nroDocIdentidad,
@@ -211,10 +288,11 @@ BEGIN
            TotalCp AS totalCp, Moneda AS moneda, TipoCambio AS tipoCambio, FecEmisionDocMod AS fecEmisionDocMod,
            TipoCpMod AS tipoCpMod, SerieCpMod AS serieCpMod, NroCpMod AS nroCpMod, IdProyectoOperadores AS idProyectoOperadores,
            TipoNota AS tipoNota, EstComp AS estComp, ValorFobEmbarcado AS valorFobEmbarcado, ValorOpGratuitas AS valorOpGratuitas,
-           TipoOperacion AS tipoOperacion, DamCp AS damCp, Clu AS clu, IdEmpresa, IdCliente
-    FROM dbo.VentasSunat
-    WHERE Lote = @Lote
-    ORDER BY IdVentaSunat;
+           TipoOperacion AS tipoOperacion, DamCp AS damCp, Clu AS clu, IdEmpresa, v.IdCliente, v.Empresa, cli.NombreCliente
+    FROM dbo.VentasSunat v
+    OUTER APPLY (SELECT TOP (1) c.NombreCliente FROM dbo.Cliente c WHERE c.IdCliente = v.IdCliente) cli
+    WHERE v.Lote = @Lote
+    ORDER BY v.IdVentaSunat;
 END
 GO
 

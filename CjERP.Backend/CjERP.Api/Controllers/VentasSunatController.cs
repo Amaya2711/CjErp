@@ -36,6 +36,38 @@ public sealed class VentasSunatController : ControllerBase
         }
     }
 
+    [HttpGet("periodos")]
+    public async Task<IActionResult> ListarPeriodos(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var data = await _service.ListarPeriodosAsync(cancellationToken);
+            return Ok(new { success = true, message = "ok", data });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { success = false, message = "Ocurrio un error interno al listar los periodos.", detail = ex.Message });
+        }
+    }
+
+    [HttpGet("periodo")]
+    public async Task<IActionResult> ConsultarPeriodo([FromQuery] string periodo, [FromQuery] string rucEmisor, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var data = await _service.ConsultarPeriodoAsync(periodo, rucEmisor, cancellationToken);
+            return Ok(new { success = true, message = "ok", data });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { success = false, message = "Ocurrio un error interno al consultar el periodo.", detail = ex.Message });
+        }
+    }
+
     [HttpPost("validar")]
     public async Task<IActionResult> Validar([FromBody] VentasSunatValidarRequestDto request, CancellationToken cancellationToken)
     {

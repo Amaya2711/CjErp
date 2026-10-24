@@ -471,7 +471,7 @@ export default function DashboardPage() {
         </div>
         <div style={styles.heroBadge}>
           <div style={styles.heroBadgeLabel}>Ambiente</div>
-          <div style={styles.heroBadgeValue}>Desarrollo</div>
+          <div style={styles.heroBadgeValue}>{import.meta.env.DEV ? "Desarrollo" : "Productivo"}</div>
         </div>
       </div>
 
