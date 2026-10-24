@@ -119,13 +119,15 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
         }
 
         // Sin empleado indicado se usa el primero que tenga asistencia en el período (los demás se omitirían en el job).
-        foreach (var empleado in candidatos)
-        {
-            var detalle = await _reporteRepository.ObtenerReporteAsistenciaAsync(
+        // RptAsistenciaFechas devuelve a todos los empleados: se ejecuta una vez y se agrupa en memoria.
+        var detallePeriodo = (await _reporteRepository.ObtenerReporteAsistenciaPeriodoAsync(
                 periodo.FechaInicio,
                 periodo.FechaFin,
-                empleado.IdEmpleado,
-                cancellationToken);
+                cancellationToken))
+            .ToLookup(item => item.IdEmpleado);
+        foreach (var empleado in candidatos)
+        {
+            var detalle = detallePeriodo[empleado.IdEmpleado].ToList();
             if (detalle.Count == 0)
             {
                 continue;
@@ -283,7 +285,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             throw new InvalidOperationException("La cantidad de empleados por bloque debe ser mayor o igual a 1.");
         }
 
-        if (request.DelaySegundosEntreBloques < 5)
+        if (!ReporteWhatsappTipos.IsMeta(request.TipoReporte) && request.DelaySegundosEntreBloques < 5)
         {
             throw new InvalidOperationException("El tiempo de espera entre bloques debe ser mayor o igual a 5 segundos.");
         }
@@ -393,6 +395,20 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
                 }
             }
 
+            ILookup<int, ReporteWhatsappAsistenciaItemDto>? detallePorEmpleadoMeta = null;
+            if (ReporteWhatsappTipos.IsMeta(normalizedType) && empleados.Count > 0)
+            {
+                // RptAsistenciaFechas no tiene parametro de empleado y devuelve a todos: una sola ejecucion para el periodo
+                // (antes se ejecutaba completo una vez por empleado y se descartaba casi todo).
+                runtime.Mensaje = "Consultando la asistencia del periodo.";
+                _runtimeMonitor.Update(normalizedType, Clone(runtime));
+                var detallePeriodoMeta = await _reporteRepository.ObtenerReporteAsistenciaPeriodoAsync(
+                    periodoActual.FechaInicio,
+                    periodoActual.FechaFin,
+                    cancellationToken);
+                detallePorEmpleadoMeta = detallePeriodoMeta.ToLookup(item => item.IdEmpleado);
+            }
+
             var empleadosReporteGerencial = Array.Empty<ReporteWhatsappEmpleadoDto>();
             IReadOnlyList<ReporteWhatsappAsistenciaItemDto>? detalleGerencial = null;
             if (ReporteWhatsappTipos.IsGerencial(normalizedType))
@@ -466,6 +482,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
                                 numeroBloque,
                                 item.Orden,
                                 runtime,
+                                detallePorEmpleadoMeta,
                                 token);
                         });
                 }
@@ -491,6 +508,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
                             bloqueIndex + 1,
                             ordenEnvio,
                             runtime,
+                            null,
                             cancellationToken);
                     }
                 }
@@ -721,6 +739,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
         int numeroBloque,
         int ordenEnvio,
         ReporteWhatsappRuntimeStatusDto runtime,
+        ILookup<int, ReporteWhatsappAsistenciaItemDto>? detallePorEmpleado,
         CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -791,11 +810,13 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             else
             {
                 SetRuntimeStep(tipoReporte, runtime, $"Consultando asistencia para {empleado.NombreEmpleado}.");
-                detalle = await _reporteRepository.ObtenerReporteAsistenciaAsync(
-                    periodo.FechaInicio,
-                    periodo.FechaFin,
-                    empleado.IdEmpleado,
-                    cancellationToken);
+                detalle = detallePorEmpleado is not null
+                    ? detallePorEmpleado[empleado.IdEmpleado].ToList()
+                    : await _reporteRepository.ObtenerReporteAsistenciaAsync(
+                        periodo.FechaInicio,
+                        periodo.FechaFin,
+                        empleado.IdEmpleado,
+                        cancellationToken);
             }
 
             if (detalle.Count == 0)

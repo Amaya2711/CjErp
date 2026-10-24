@@ -4,6 +4,7 @@ using CjERP.Application.DTOs.ReportesWhatsapp;
 using CjERP.Application.Interfaces.Repositories;
 using CjERP.Application.Interfaces.Services;
 using Hangfire;
+using Hangfire.Storage;
 using Microsoft.Extensions.Options;
 
 namespace CjERP.Api.Services;
@@ -11,17 +12,20 @@ namespace CjERP.Api.Services;
 public sealed class ReporteWhatsappJobScheduler : IReporteWhatsappJobScheduler
 {
     private readonly IRecurringJobManager _recurringJobManager;
+    private readonly JobStorage _jobStorage;
     private readonly IBackgroundJobClient _backgroundJobClient;
     private readonly IReporteRepository _reporteRepository;
     private readonly ReporteWhatsappJobDefaultsOptions _defaults;
 
     public ReporteWhatsappJobScheduler(
         IRecurringJobManager recurringJobManager,
+        JobStorage jobStorage,
         IBackgroundJobClient backgroundJobClient,
         IReporteRepository reporteRepository,
         IOptions<ReporteWhatsappJobDefaultsOptions> defaults)
     {
         _recurringJobManager = recurringJobManager;
+        _jobStorage = jobStorage;
         _backgroundJobClient = backgroundJobClient;
         _reporteRepository = reporteRepository;
         _defaults = defaults.Value;
@@ -53,7 +57,7 @@ public sealed class ReporteWhatsappJobScheduler : IReporteWhatsappJobScheduler
         // sin dias marcados corre todos los dias.
         if (ReporteWhatsappTipos.IsGerencial(normalizedType) || (ReporteWhatsappTipos.IsMeta(normalizedType) && dias.Count > 0))
         {
-            RemoveRecurringJobs(normalizedType);
+            RemoveRecurringJobs(normalizedType, dias.Select(dia => BuildRecurringJobId(normalizedType, dia)).ToArray());
 
             if (dias.Count == 0)
             {
@@ -78,7 +82,7 @@ public sealed class ReporteWhatsappJobScheduler : IReporteWhatsappJobScheduler
         if (ReporteWhatsappTipos.IsMeta(normalizedType))
         {
             // Si antes tenia dias marcados, se eliminan sus jobs por dia antes de programar el diario.
-            RemoveRecurringJobs(normalizedType);
+            RemoveRecurringJobs(normalizedType, new[] { recurringJobId });
         }
 
         _recurringJobManager.AddOrUpdate<ReporteWhatsAppJob>(
@@ -129,14 +133,29 @@ public sealed class ReporteWhatsappJobScheduler : IReporteWhatsappJobScheduler
             !ReporteWhatsappTipos.IsMeta(tipoReporte) && _defaults.Activo);
     }
 
-    private void RemoveRecurringJobs(string tipoReporte)
+    // Elimina los jobs recurrentes de este reporte (el diario y los de cada dia) que existan y no esten en "conservar".
+    // Se consultan una sola vez los jobs existentes: antes eran 8 eliminaciones (una por posible dia) contra la BD de Hangfire
+    // en cada guardado, y con latencia a la BD podia pasar los 30 s de espera de la pantalla.
+    private void RemoveRecurringJobs(string tipoReporte, IReadOnlyCollection<string>? conservar = null)
     {
-        var baseJobId = BuildRecurringJobId(tipoReporte);
-        _recurringJobManager.RemoveIfExists(baseJobId);
-
+        var candidatos = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { BuildRecurringJobId(tipoReporte) };
         foreach (var dia in DiasSemana)
         {
-            _recurringJobManager.RemoveIfExists(BuildRecurringJobId(tipoReporte, dia));
+            candidatos.Add(BuildRecurringJobId(tipoReporte, dia));
+        }
+
+        using var connection = _jobStorage.GetConnection();
+        var existentes = connection.GetRecurringJobs()
+            .Select(job => job.Id)
+            .Where(id => candidatos.Contains(id))
+            .ToList();
+
+        foreach (var id in existentes)
+        {
+            if (conservar is null || !conservar.Contains(id, StringComparer.OrdinalIgnoreCase))
+            {
+                _recurringJobManager.RemoveIfExists(id);
+            }
         }
     }
 

@@ -58,7 +58,8 @@ export const reportesWhatsappService = {
   },
 
   async actualizarConfiguracion(payload: ReporteWhatsappConfiguracion, tipo?: string) {
-    return await httpClient.put<boolean>(`${BASE_URL}/configuracion`, payload, buildConfig(tipo));
+    // Guardar reprograma el job en Hangfire (varias consultas a la BD): se da más margen que los 30 s por defecto.
+    return await httpClient.put<boolean>(`${BASE_URL}/configuracion`, payload, { ...buildConfig(tipo), timeout: 120000 });
   },
 
   async reprogramarJob(tipo?: string) {

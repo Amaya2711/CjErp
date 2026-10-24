@@ -66,7 +66,7 @@ const destinatarioColumns: GridColumn<ReporteMetaDestinatario>[] = [
 const sinPdf = (estado: string) => /^(OMITIDO|DUPLICADO|ERROR_GENERANDO)/i.test(estado);
 
 const logColumns: GridColumn<ReporteWhatsappLog>[] = [
-  { dataField: "idLog", caption: "#", width: 70, dataType: "number" },
+  { dataField: "idLog", caption: "#", width: 70, dataType: "number", format: (value) => String(value ?? "") },
   {
     dataField: "pdf",
     caption: "PDF",
@@ -80,7 +80,7 @@ const logColumns: GridColumn<ReporteWhatsappLog>[] = [
     calculateCellValue: () => "",
     cellRender: (_value, row) => <PdfLogButton row={row} />,
   },
-  { dataField: "idEmpleado", caption: "Id empleado", dataType: "number", width: 100 },
+  { dataField: "idEmpleado", caption: "Id empleado", dataType: "number", width: 100, format: (value) => String(value ?? "") },
   { dataField: "nombreEmpleado", caption: "Empleado", minWidth: 200 },
   { dataField: "telefono", caption: "Teléfono", width: 130 },
   { dataField: "estadoEnvio", caption: "Estado", width: 190 },
@@ -190,6 +190,8 @@ export default function RptWupV1Page() {
   const [success, setSuccess] = useState("");
   const configDirtyRef = useRef(false);
   const inFlightRef = useRef(false);
+  // El error del dashboard (p. ej. timeout al abrir) se limpia solo cuando una consulta posterior sí responde.
+  const dashboardErrorRef = useRef(false);
 
   configDirtyRef.current = configDirty;
 
@@ -200,7 +202,7 @@ export default function RptWupV1Page() {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     try {
-      const response = await reportesWhatsappService.obtenerDashboard(50, TIPO);
+      const response = await reportesWhatsappService.obtenerDashboard(50, TIPO, undefined, { timeout: 90000 });
       setDashboard(response);
       if (!configDirtyRef.current) {
         setConfig({
@@ -211,9 +213,15 @@ export default function RptWupV1Page() {
           delaySegundosEntreBloques: response.configuracion.delaySegundosEntreBloques || 30,
         });
       }
-      if (!silent) setError("");
+      if (!silent || dashboardErrorRef.current) {
+        dashboardErrorRef.current = false;
+        setError("");
+      }
     } catch (err) {
-      if (!silent) setError(getHttpErrorMessage(err, "No se pudo cargar el estado del reporte."));
+      if (!silent) {
+        dashboardErrorRef.current = true;
+        setError(getHttpErrorMessage(err, "No se pudo cargar el estado del reporte."));
+      }
     } finally {
       inFlightRef.current = false;
     }

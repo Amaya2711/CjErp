@@ -626,6 +626,8 @@ public sealed class ReporteRepository : IReporteRepository
             return Array.Empty<ReporteWhatsappLogDto>();
         }
 
+        // En el reporte por Meta RequestJson lleva el PDF en base64 (cientos de KB por fila): se pide por registro, no en el listado.
+        var requestJsonColumn = ReporteWhatsappTipos.IsMeta(tipoReporte) ? "CAST('' AS nvarchar(1)) AS RequestJson" : "l.RequestJson";
         var sql = $"""
         SELECT TOP (@Top)
             l.IdLog,
@@ -637,7 +639,7 @@ public sealed class ReporteRepository : IReporteRepository
             l.EstadoEnvio,
             l.MensajeError,
             l.FechaEnvio,
-            l.RequestJson,
+            {requestJsonColumn},
             l.ResponseJson,
             l.NumeroBloque,
             l.OrdenEnvio,

@@ -116,8 +116,17 @@ public sealed class ReportesWhatsappController : ControllerBase
         }
 
         request.TipoReporte = ResolveTipo(tipo, request.TipoReporte);
-        await _reporteAutomaticoService.ActualizarConfiguracionAsync(request, GetUsuarioActual(), cancellationToken);
-        await _jobScheduler.ReprogramarAsync(request.TipoReporte, cancellationToken);
+        try
+        {
+            await _reporteAutomaticoService.ActualizarConfiguracionAsync(request, GetUsuarioActual(), cancellationToken);
+            await _jobScheduler.ReprogramarAsync(request.TipoReporte, cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Validaciones de la configuracion (hora, dias, etc.): se informan en pantalla en lugar de un 500 sin detalle.
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+
         return Ok(new { success = true, message = "Configuracion actualizada.", data = true });
     }
 
