@@ -16,6 +16,8 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
     private static readonly TimeSpan PdfGenerationTimeout = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan WupSendTimeout = TimeSpan.FromSeconds(30);
     private const int WupMaxAttempts = 2;
+    // Envios simultaneos al reporte por Meta (limite prudente para no saturar PDF/BD ni la API).
+    private const int MetaMaxParalelismo = 5;
     private const int WupRetryDelaySeconds = 2;
     private static readonly string[] RutasModuloRptWup =
     [
@@ -160,6 +162,46 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             .ToList();
     }
 
+    public async Task<(byte[] Pdf, string NombreArchivo)?> ObtenerPdfEnviadoMetaAsync(int idLog, CancellationToken cancellationToken = default)
+    {
+        var requestJson = await _reporteRepository.ObtenerRequestJsonLogAsync(idLog, ReporteWhatsappTipos.Meta, cancellationToken);
+        if (string.IsNullOrWhiteSpace(requestJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(requestJson);
+            string? Leer(string nombre)
+            {
+                foreach (var propiedad in document.RootElement.EnumerateObject())
+                {
+                    if (string.Equals(propiedad.Name, nombre, StringComparison.OrdinalIgnoreCase)
+                        && propiedad.Value.ValueKind == JsonValueKind.String)
+                    {
+                        return propiedad.Value.GetString();
+                    }
+                }
+
+                return null;
+            }
+
+            var contenido = Leer("Contenido");
+            if (string.IsNullOrWhiteSpace(contenido))
+            {
+                return null;
+            }
+
+            var nombreArchivo = Leer("NombreArchivo");
+            return (Convert.FromBase64String(contenido), string.IsNullOrWhiteSpace(nombreArchivo) ? $"reporte_{idLog}.pdf" : nombreArchivo);
+        }
+        catch (Exception ex) when (ex is JsonException or FormatException)
+        {
+            return null;
+        }
+    }
+
     public Task ActualizarDestinatariosMetaAsync(ReporteMetaDestinatariosUpdateDto request, string usuarioModificacion, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -180,6 +222,15 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
         var configuracion = await ObtenerConfiguracionAsync(normalizedType, cancellationToken);
         var periodoActual = BuildPeriodoActual(normalizedType, configuracion, periodo);
         var logs = await _reporteRepository.ObtenerLogsAsync(periodoActual.FechaProceso, normalizedType, topLogs, cancellationToken);
+        if (ReporteWhatsappTipos.IsMeta(normalizedType))
+        {
+            // El request incluye el PDF en base64: no se envia en cada consulta del dashboard (se pide por registro).
+            foreach (var log in logs)
+            {
+                log.RequestJson = string.Empty;
+            }
+        }
+
         var kpis = await _reporteRepository.ObtenerKpisAsync(periodoActual.FechaProceso, normalizedType, cancellationToken);
         var runtime = _runtimeMonitor.GetSnapshot(normalizedType);
         var puedeAdministrar = await UsuarioTieneAccesoAdministrativoAsync(idUsuario, cancellationToken);
@@ -220,6 +271,13 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             throw new InvalidOperationException("Seleccione al menos un dia de ejecucion para el reporte gerencial.");
         }
 
+        if (ReporteWhatsappTipos.IsMeta(request.TipoReporte))
+        {
+            // Meta Cloud API no necesita espera entre bloques: se envia de corrido (la pantalla ya no pide estos datos).
+            request.CantidadEmpleadosPorBloque = Math.Max(1, request.CantidadEmpleadosPorBloque);
+            request.DelaySegundosEntreBloques = 0;
+        }
+
         if (request.CantidadEmpleadosPorBloque < 1)
         {
             throw new InvalidOperationException("La cantidad de empleados por bloque debe ser mayor o igual a 1.");
@@ -237,6 +295,12 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
     {
         var normalizedType = ReporteWhatsappTipos.Normalize(tipoReporte);
         var configuracion = await ObtenerConfiguracionAsync(normalizedType, cancellationToken);
+        if (ReporteWhatsappTipos.IsMeta(normalizedType))
+        {
+            // Sin espera entre bloques, aunque la configuracion guardada traiga una (de pruebas anteriores).
+            configuracion.DelaySegundosEntreBloques = 0;
+        }
+
         var periodoActual = BuildPeriodoActual(normalizedType, configuracion, periodo);
         var executionId = Guid.NewGuid().ToString("N");
         var empleadosSeleccionados = (idsEmpleadoSeleccionados ?? Array.Empty<int>())
@@ -376,27 +440,59 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
                 runtime.Mensaje = $"Procesando bloque {runtime.BloqueActual} de {runtime.TotalBloques}.";
                 _runtimeMonitor.Update(normalizedType, Clone(runtime));
 
-                foreach (var empleado in bloques[bloqueIndex])
+                if (ReporteWhatsappTipos.IsMeta(normalizedType))
                 {
-                    ordenEnvio++;
-                    runtime.EmpleadoActualId = empleado.IdEmpleado;
-                    runtime.EmpleadoActualNombre = empleado.NombreEmpleado;
-                    runtime.SegundosRestantesEstimados = EstimateRemainingSeconds(runtime, configuracion.DelaySegundosEntreBloques);
-                    _runtimeMonitor.Update(normalizedType, Clone(runtime));
+                    // Meta Cloud API admite envios simultaneos: varios empleados a la vez (PDF + subida + mensaje).
+                    var bloqueMeta = bloques[bloqueIndex];
+                    var ordenBase = ordenEnvio;
+                    ordenEnvio += bloqueMeta.Count;
+                    var numeroBloque = bloqueIndex + 1;
+                    await Parallel.ForEachAsync(
+                        bloqueMeta.Select((empleadoMeta, posicion) => (Empleado: empleadoMeta, Orden: ordenBase + posicion + 1)),
+                        new ParallelOptions { MaxDegreeOfParallelism = MetaMaxParalelismo, CancellationToken = cancellationToken },
+                        async (item, token) =>
+                        {
+                            runtime.EmpleadoActualId = item.Empleado.IdEmpleado;
+                            runtime.EmpleadoActualNombre = item.Empleado.NombreEmpleado;
+                            await ProcesarEmpleadoAsync(
+                                normalizedType,
+                                item.Empleado,
+                                empleados,
+                                detalleGerencial,
+                                periodoActual,
+                                configuracion,
+                                origenEjecucion,
+                                usuarioEjecucion,
+                                numeroBloque,
+                                item.Orden,
+                                runtime,
+                                token);
+                        });
+                }
+                else
+                {
+                    foreach (var empleado in bloques[bloqueIndex])
+                    {
+                        ordenEnvio++;
+                        runtime.EmpleadoActualId = empleado.IdEmpleado;
+                        runtime.EmpleadoActualNombre = empleado.NombreEmpleado;
+                        runtime.SegundosRestantesEstimados = EstimateRemainingSeconds(runtime, configuracion.DelaySegundosEntreBloques);
+                        _runtimeMonitor.Update(normalizedType, Clone(runtime));
 
-                    await ProcesarEmpleadoAsync(
-                        normalizedType,
-                        empleado,
-                        ReporteWhatsappTipos.IsGerencial(normalizedType) ? empleadosReporteGerencial : empleados,
-                        detalleGerencial,
-                        periodoActual,
-                        configuracion,
-                        origenEjecucion,
-                        usuarioEjecucion,
-                        bloqueIndex + 1,
-                        ordenEnvio,
-                        runtime,
-                        cancellationToken);
+                        await ProcesarEmpleadoAsync(
+                            normalizedType,
+                            empleado,
+                            ReporteWhatsappTipos.IsGerencial(normalizedType) ? empleadosReporteGerencial : empleados,
+                            detalleGerencial,
+                            periodoActual,
+                            configuracion,
+                            origenEjecucion,
+                            usuarioEjecucion,
+                            bloqueIndex + 1,
+                            ordenEnvio,
+                            runtime,
+                            cancellationToken);
+                    }
                 }
 
                 var isLastBlock = bloqueIndex == bloques.Count - 1;
@@ -669,7 +765,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             {
                 log.EstadoEnvio = "DUPLICADO_OMITIDO";
                 log.MensajeError = "Ya existe un envio exitoso para el empleado y periodo actual.";
-                runtime.Duplicados++;
+                lock (runtime) { runtime.Duplicados++; }
                 return;
             }
 
@@ -761,7 +857,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             {
                 log.EstadoEnvio = "ERROR_GENERANDO_REPORTE_TIMEOUT";
                 log.MensajeError = $"La generacion del PDF supero el tiempo maximo permitido de {PdfGenerationTimeout.TotalSeconds:0} segundos.";
-                runtime.Errores++;
+                lock (runtime) { runtime.Errores++; }
                 SetRuntimeStep(tipoReporte, runtime, $"Timeout generando PDF para {empleado.NombreEmpleado}.");
                 return;
             }
@@ -769,7 +865,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             {
                 log.EstadoEnvio = "ERROR_GENERANDO_REPORTE";
                 log.MensajeError = ex.Message;
-                runtime.Errores++;
+                lock (runtime) { runtime.Errores++; }
                 return;
             }
 
@@ -786,7 +882,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             {
                 log.EstadoEnvio = "ERROR_CONVERSION_BASE64";
                 log.MensajeError = ex.Message;
-                runtime.Errores++;
+                lock (runtime) { runtime.Errores++; }
                 return;
             }
 
@@ -893,21 +989,21 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
                 log.MensajeError = string.IsNullOrWhiteSpace(response.ErrorMessage)
                     ? "El endpoint WUP respondio sin confirmar exito."
                     : response.ErrorMessage;
-                runtime.Errores++;
+                lock (runtime) { runtime.Errores++; }
                 SetRuntimeStep(tipoReporte, runtime, $"WUP rechazo o no confirmo el envio para {empleado.NombreEmpleado}.");
                 return;
             }
 
             log.EstadoEnvio = "ENVIADO";
             log.FechaEnvio = GetPeruNow();
-            runtime.Enviados++;
+            lock (runtime) { runtime.Enviados++; }
             SetRuntimeStep(tipoReporte, runtime, $"PDF enviado correctamente a {empleado.NombreEmpleado}.");
         }
         catch (Exception ex)
         {
             log.EstadoEnvio = "ERROR";
             log.MensajeError = ex.Message;
-            runtime.Errores++;
+            lock (runtime) { runtime.Errores++; }
             SetRuntimeStep(tipoReporte, runtime, $"Error procesando a {empleado.NombreEmpleado}: {ex.Message}");
         }
         finally
@@ -917,15 +1013,15 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
 
             if (log.EstadoEnvio.StartsWith("OMITIDO", StringComparison.OrdinalIgnoreCase))
             {
-                runtime.Omitidos++;
+                lock (runtime) { runtime.Omitidos++; }
             }
 
             if (log.EstadoEnvio == "DUPLICADO_OMITIDO")
             {
-                runtime.Omitidos++;
+                lock (runtime) { runtime.Omitidos++; }
             }
 
-            runtime.EmpleadosProcesados++;
+            lock (runtime) { runtime.EmpleadosProcesados++; }
             runtime.SegundosRestantesEstimados = EstimateRemainingSeconds(runtime, configuracion.DelaySegundosEntreBloques);
 
             try
@@ -934,7 +1030,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             }
             catch (Exception ex)
             {
-                runtime.Errores++;
+                lock (runtime) { runtime.Errores++; }
                 runtime.Mensaje = $"No se pudo registrar el log del envio: {ex.Message}";
                 _logger.LogError(
                     ex,
@@ -1056,7 +1152,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
         {
             log.EstadoEnvio = "ERROR_GENERANDO_REPORTE";
             log.MensajeError = ex.Message;
-            runtime.Errores++;
+            lock (runtime) { runtime.Errores++; }
             return;
         }
 
@@ -1103,14 +1199,14 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             log.MensajeError = string.IsNullOrWhiteSpace(response.ErrorMessage)
                 ? "El endpoint WUP respondio sin confirmar exito."
                 : response.ErrorMessage;
-            runtime.Errores++;
+            lock (runtime) { runtime.Errores++; }
             SetRuntimeStep(tipoReporte, runtime, $"WUP rechazo o no confirmo la boleta para {empleado.NombreEmpleado}.");
             return;
         }
 
         log.EstadoEnvio = "ENVIADO";
         log.FechaEnvio = GetPeruNow();
-        runtime.Enviados++;
+        lock (runtime) { runtime.Enviados++; }
         SetRuntimeStep(tipoReporte, runtime, $"Boleta enviada correctamente a {empleado.NombreEmpleado}.");
     }
 

@@ -19,6 +19,16 @@ const TIPO = "meta";
 const POLLING_RUNNING_MS = 2000;
 const POLLING_IDLE_MS = 10000;
 
+const DIAS_SEMANA = [
+  { value: "MONDAY", label: "Lun" },
+  { value: "TUESDAY", label: "Mar" },
+  { value: "WEDNESDAY", label: "Mié" },
+  { value: "THURSDAY", label: "Jue" },
+  { value: "FRIDAY", label: "Vie" },
+  { value: "SATURDAY", label: "Sáb" },
+  { value: "SUNDAY", label: "Dom" },
+] as const;
+
 const configInicial: ReporteWhatsappConfiguracion = {
   horaEjecucion: "07:00",
   diasEjecucion: [],
@@ -52,8 +62,25 @@ const destinatarioColumns: GridColumn<ReporteMetaDestinatario>[] = [
   },
 ];
 
+// Registros que no llegaron a generar un PDF (omitidos, duplicados, error generando el reporte).
+const sinPdf = (estado: string) => /^(OMITIDO|DUPLICADO|ERROR_GENERANDO)/i.test(estado);
+
 const logColumns: GridColumn<ReporteWhatsappLog>[] = [
   { dataField: "idLog", caption: "#", width: 70, dataType: "number" },
+  {
+    dataField: "pdf",
+    caption: "PDF",
+    width: 70,
+    alignment: "center",
+    allowSorting: false,
+    allowFiltering: false,
+    allowGrouping: false,
+    allowHeaderFilter: false,
+    allowSearch: false,
+    calculateCellValue: () => "",
+    cellRender: (_value, row) => <PdfLogButton row={row} />,
+  },
+  { dataField: "idEmpleado", caption: "Id empleado", dataType: "number", width: 100 },
   { dataField: "nombreEmpleado", caption: "Empleado", minWidth: 200 },
   { dataField: "telefono", caption: "Teléfono", width: 130 },
   { dataField: "estadoEnvio", caption: "Estado", width: 190 },
@@ -84,11 +111,67 @@ async function getBlobHttpErrorMessage(error: unknown, fallback: string) {
   return getHttpErrorMessage(error, fallback);
 }
 
+function descripcionDias(dias?: string[]) {
+  const marcados = DIAS_SEMANA.filter((d) => (dias ?? []).includes(d.value));
+  if (marcados.length === 0 || marcados.length === DIAS_SEMANA.length) return "todos los días";
+  return `los ${marcados.map((d) => d.label).join(", ")}`;
+}
+
 function formatHora(value: string) {
   const [h, m] = value.split(":");
   const hour = Number(h);
   if (Number.isNaN(hour)) return value;
   return `${hour % 12 || 12}:${m ?? "00"} ${hour < 12 ? "a. m." : "p. m."}`;
+}
+
+function PdfLogButton({ row }: { row: ReporteWhatsappLog }) {
+  const [abriendo, setAbriendo] = useState(false);
+  const habilitado = !sinPdf(row.estadoEnvio);
+
+  const abrir = async () => {
+    // La pestaña se abre antes de la espera para que el navegador no la bloquee como ventana emergente.
+    const ventana = window.open("", "_blank");
+    setAbriendo(true);
+    try {
+      const blob = await reportesWhatsappService.pdfEnviadoMeta(row.idLog);
+      if (!(blob instanceof Blob) || blob.size === 0) throw new Error("El PDF no contiene datos.");
+      const url = URL.createObjectURL(blob);
+      if (ventana) ventana.location.href = url;
+      else window.open(url, "_blank");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      ventana?.close();
+      window.alert(await getBlobHttpErrorMessage(err, "No se pudo abrir el PDF de este registro."));
+    } finally {
+      setAbriendo(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      title={habilitado ? "Ver el PDF enviado" : "Este registro no generó PDF"}
+      aria-label={habilitado ? "Ver el PDF enviado" : "Este registro no generó PDF"}
+      disabled={!habilitado || abriendo}
+      onClick={(e) => {
+        e.stopPropagation();
+        void abrir();
+      }}
+      style={{
+        width: 30,
+        height: 28,
+        borderRadius: 8,
+        border: `1px solid ${habilitado ? "#BFDBFE" : "#E5E7EB"}`,
+        background: habilitado ? "#EFF6FF" : "#F3F4F6",
+        color: habilitado ? "#1D4ED8" : "#9CA3AF",
+        cursor: habilitado ? "pointer" : "not-allowed",
+        fontSize: 11,
+        fontWeight: 700,
+      }}
+    >
+      {abriendo ? "…" : "PDF"}
+    </button>
+  );
 }
 
 export default function RptWupV1Page() {
@@ -190,25 +273,20 @@ export default function RptWupV1Page() {
       setError("La hora del job debe tener formato HH:mm.");
       return;
     }
-    if (config.cantidadEmpleadosPorBloque < 1) {
-      setError("La cantidad por bloque debe ser mayor o igual a 1.");
-      return;
-    }
-    if (config.delaySegundosEntreBloques < 5) {
-      setError("La espera entre bloques debe ser mayor o igual a 5 segundos.");
-      return;
-    }
-
     setBusy("config");
     setError("");
     setSuccess("");
     try {
-      await reportesWhatsappService.actualizarConfiguracion(config, TIPO);
+      await reportesWhatsappService.actualizarConfiguracion(
+        // Meta envía de corrido: sin bloques ni espera entre ellos.
+        { ...config, cantidadEmpleadosPorBloque: 100, delaySegundosEntreBloques: 0 },
+        TIPO
+      );
       setConfigDirty(false);
       configDirtyRef.current = false;
       setSuccess(
         config.activo
-          ? `Job habilitado: se ejecutará todos los días a las ${formatHora(config.horaEjecucion)} (hora Lima).`
+          ? `Job habilitado: se ejecutará ${descripcionDias(config.diasEjecucion)} a las ${formatHora(config.horaEjecucion)} (hora Lima).`
           : "Job deshabilitado: no se enviarán mensajes automáticos."
       );
       await loadDashboard(true);
@@ -315,34 +393,6 @@ export default function RptWupV1Page() {
               }}
             />
           </label>
-          <label style={styles.field}>
-            <span style={styles.label}>Empleados por bloque</span>
-            <input
-              type="number"
-              min={1}
-              style={{ ...styles.input, width: 110 }}
-              value={config.cantidadEmpleadosPorBloque}
-              disabled={!puedeAdministrar || busy !== ""}
-              onChange={(e) => {
-                setConfig({ ...config, cantidadEmpleadosPorBloque: Number(e.target.value) });
-                setConfigDirty(true);
-              }}
-            />
-          </label>
-          <label style={styles.field}>
-            <span style={styles.label}>Espera entre bloques (seg)</span>
-            <input
-              type="number"
-              min={5}
-              style={{ ...styles.input, width: 110 }}
-              value={config.delaySegundosEntreBloques}
-              disabled={!puedeAdministrar || busy !== ""}
-              onChange={(e) => {
-                setConfig({ ...config, delaySegundosEntreBloques: Number(e.target.value) });
-                setConfigDirty(true);
-              }}
-            />
-          </label>
           <label style={{ ...styles.field, justifyContent: "flex-end" }}>
             <span style={styles.checkRow}>
               <input
@@ -357,6 +407,34 @@ export default function RptWupV1Page() {
               <span style={{ fontWeight: 600 }}>Envío del job habilitado</span>
             </span>
           </label>
+          <div style={styles.field}>
+            <span style={styles.label}>Días de ejecución (sin marcar = todos los días)</span>
+            <div style={{ display: "flex", gap: 10, height: 34, alignItems: "center", flexWrap: "wrap" }}>
+              {DIAS_SEMANA.map((dia) => {
+                const marcado = (config.diasEjecucion ?? []).includes(dia.value);
+                return (
+                  <label key={dia.value} style={styles.checkRow}>
+                    <input
+                      type="checkbox"
+                      checked={marcado}
+                      disabled={!puedeAdministrar || busy !== ""}
+                      onChange={(e) => {
+                        const actuales = config.diasEjecucion ?? [];
+                        setConfig({
+                          ...config,
+                          diasEjecucion: e.target.checked
+                            ? [...actuales, dia.value]
+                            : actuales.filter((d) => d !== dia.value),
+                        });
+                        setConfigDirty(true);
+                      }}
+                    />
+                    <span>{dia.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
           <button
             type="button"
             style={{ ...styles.primaryButton, opacity: configDirty ? 1 : 0.6 }}
@@ -369,12 +447,24 @@ export default function RptWupV1Page() {
         <p style={styles.hint}>
           {dashboard
             ? config.activo && !configDirty
-              ? `El job está habilitado y envía todos los días a las ${formatHora(config.horaEjecucion)} solo a los empleados marcados.`
+              ? `El job está habilitado y envía ${descripcionDias(config.diasEjecucion)} a las ${formatHora(config.horaEjecucion)} solo a los empleados marcados.`
               : "El job está deshabilitado o tiene cambios sin guardar."
             : "Cargando..."}
           {" "}Período del reporte: {dashboard?.periodoActual.etiquetaPeriodo ?? "-"}.
         </p>
       </AppCard>
+
+      {dashboard ? (
+        <div style={styles.kpiRow}>
+          <span>Período {dashboard.periodoActual.etiquetaPeriodo}:</span>
+          <strong>Procesados {dashboard.kpis.totalProcesados}</strong>
+          <span style={{ color: "#047857" }}>Enviados {dashboard.kpis.totalEnviados}</span>
+          <span style={{ color: dashboard.kpis.totalErrores > 0 ? "#B91C1C" : undefined, fontWeight: dashboard.kpis.totalErrores > 0 ? 700 : 400 }}>
+            Errores {dashboard.kpis.totalErrores}
+          </span>
+          <span>Omitidos {dashboard.kpis.totalOmitidos + dashboard.kpis.totalDuplicados}</span>
+        </div>
+      ) : null}
 
       {runtime && runtime.executionId ? (
         <AppCard title="Ejecución actual">
@@ -509,6 +599,7 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: 600,
     cursor: "pointer",
   },
+  kpiRow: { display: "flex", gap: 18, flexWrap: "wrap", alignItems: "center", fontSize: 13, margin: "0 0 12px", padding: "8px 14px", background: "#fff", border: "1px solid #E5E7EB", borderRadius: 8 },
   runtimeRow: { display: "flex", gap: 16, flexWrap: "wrap", padding: "12px 20px 4px", fontSize: 13 },
   progressTrack: { margin: "4px 20px 14px", height: 8, borderRadius: 4, background: "#E5E7EB", overflow: "hidden" },
   progressBar: { height: "100%", background: "#047857", transition: "width 0.4s" },

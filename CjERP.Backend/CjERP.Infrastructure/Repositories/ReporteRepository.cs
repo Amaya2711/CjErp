@@ -765,6 +765,22 @@ public sealed class ReporteRepository : IReporteRepository
         public string? Estado { get; set; }
     }
 
+    public async Task<string?> ObtenerRequestJsonLogAsync(int idLog, string tipoReporte, CancellationToken cancellationToken = default)
+    {
+        var logTable = GetLogTableName(tipoReporte);
+        if (!await ExisteTablaLogAsync(tipoReporte, cancellationToken))
+        {
+            return null;
+        }
+
+        await using var connection = CreateConnection();
+        return await connection.QueryFirstOrDefaultAsync<string?>(
+            new CommandDefinition(
+                $"SELECT RequestJson FROM {logTable} WHERE IdLog = @IdLog AND TipoReporte = @TipoReporte;",
+                new { IdLog = idLog, TipoReporte = ReporteWhatsappTipos.Normalize(tipoReporte) },
+                cancellationToken: cancellationToken));
+    }
+
     public async Task<IReadOnlyList<int>> ObtenerEmpleadosExcluidosAsync(string tipoReporte, CancellationToken cancellationToken = default)
     {
         await using var connection = CreateConnection();

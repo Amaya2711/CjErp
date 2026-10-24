@@ -40,6 +40,14 @@ export const reportesWhatsappService = {
     return await httpClient.get<ReporteMetaDestinatario[]>(`${BASE_URL}/meta/destinatarios`);
   },
 
+  /** PDF que se envió en un registro del log del reporte por Meta. */
+  async pdfEnviadoMeta(idLog: number) {
+    return await httpClient.get<Blob>(`${BASE_URL}/meta/logs/${idLog}/pdf`, {
+      responseType: "blob",
+      timeout: 60000,
+    });
+  },
+
   /** Guarda los empleados desmarcados; el resto del listado queda habilitado. */
   async guardarDestinatariosMeta(idsExcluidos: number[]) {
     return await httpClient.put<boolean>(`${BASE_URL}/meta/destinatarios`, { idsExcluidos });

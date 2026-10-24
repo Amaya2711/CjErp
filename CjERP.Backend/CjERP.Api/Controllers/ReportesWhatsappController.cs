@@ -76,6 +76,24 @@ public sealed class ReportesWhatsappController : ControllerBase
         return Ok(new { success = true, message = "Seleccion de destinatarios actualizada.", data = true });
     }
 
+    [HttpGet("meta/logs/{idLog:int}/pdf")]
+    public async Task<IActionResult> PdfEnviadoMeta(int idLog, CancellationToken cancellationToken = default)
+    {
+        if (!await UsuarioAutorizadoAsync(cancellationToken))
+        {
+            return Forbid();
+        }
+
+        var resultado = await _reporteAutomaticoService.ObtenerPdfEnviadoMetaAsync(idLog, cancellationToken);
+        if (resultado is null)
+        {
+            return NotFound(new { success = false, message = "Este registro no tiene un PDF asociado." });
+        }
+
+        Response.Headers["Content-Disposition"] = $"inline; filename=\"{resultado.Value.NombreArchivo}\"";
+        return File(resultado.Value.Pdf, "application/pdf");
+    }
+
     [HttpGet("configuracion")]
     public async Task<IActionResult> ObtenerConfiguracion([FromQuery] string? tipo = null, CancellationToken cancellationToken = default)
     {

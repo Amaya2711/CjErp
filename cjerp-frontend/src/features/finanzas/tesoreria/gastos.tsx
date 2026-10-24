@@ -1017,6 +1017,36 @@ function buildCuentaMetadata(empleado: EmpleadoCta) {
   };
 }
 
+function normalizarNroCuenta(value: string | null | undefined): string {
+  return String(value ?? "").replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+}
+
+// Un responsable puede tener varias cuentas (una fila por banco en el catálogo). La cuenta del gasto se ubica por
+// IdBancoCta; si la consulta no lo trae, por el número de cuenta guardado en el gasto, y solo al final se toma la primera
+// fila del responsable (antes se tomaba siempre esa primera fila y mostraba otro banco, p. ej. Santander en vez de Interbank).
+function elegirCuentaResponsable(
+  empleados: EmpleadoCta[],
+  responsable: string | number | undefined,
+  idBancoCta: string | number | undefined,
+  cuentaNumero: string | undefined
+): EmpleadoCta | undefined {
+  const delResponsable = empleados.filter((empleado) => String(empleado.idEmpleado) === String(responsable));
+  if (delResponsable.length === 0) return undefined;
+
+  if (idBancoCta) {
+    const porId = delResponsable.find((empleado) => getIdBancoCtaValue(empleado) === String(idBancoCta));
+    if (porId) return porId;
+  }
+
+  const cuentaGasto = normalizarNroCuenta(cuentaNumero);
+  if (cuentaGasto) {
+    const porCuenta = delResponsable.find((empleado) => normalizarNroCuenta(empleado.cuenta) === cuentaGasto);
+    if (porCuenta) return porCuenta;
+  }
+
+  return delResponsable[0];
+}
+
 function getIdBancoCtaValue(empleado: EmpleadoCta): string {
   const idBancoCta = Number(empleado.idBancoCta);
   return Number.isInteger(idBancoCta) && idBancoCta > 0 ? String(idBancoCta) : "";
@@ -2228,11 +2258,7 @@ export default function GastosPage({
 
   const empleadosSafe = Array.isArray(empleados) ? empleados : [];
   const gastosSafe = Array.isArray(gastos) ? gastos : [];
-  const responsableSeleccionado = empleadosSafe.find(
-    (empleado) =>
-      String(empleado.idEmpleado) === String(form.responsable) &&
-      (!form.idBancoCta || getIdBancoCtaValue(empleado) === String(form.idBancoCta)),
-  ) ?? empleadosSafe.find((empleado) => String(empleado.idEmpleado) === String(form.responsable));
+  const responsableSeleccionado = elegirCuentaResponsable(empleadosSafe, form.responsable, form.idBancoCta, form.cuentaNumero);
   const tipoCuentaNuevoResponsable = getConstanteLabel(tipoCuentaOptions, nuevoResponsable.tipoCuenta) || nuevoResponsable.tipoCuenta;
   const bancoNuevoResponsable = getConstanteLabel(bancoOptions, nuevoResponsable.banco) || nuevoResponsable.banco;
   // Al editar, la cuenta se ubica por documento + banco + tipo; solo se valida duplicado
@@ -2396,9 +2422,7 @@ export default function GastosPage({
       return;
     }
 
-    const empleadoResponsable = empleadosSafe.find(
-      (emp) => String(emp.idEmpleado) === String(form.responsable)
-    );
+    const empleadoResponsable = elegirCuentaResponsable(empleadosSafe, form.responsable, form.idBancoCta, form.cuentaNumero);
     const idBancoCta = empleadoResponsable ? getIdBancoCtaValue(empleadoResponsable) : "";
 
     if (!empleadoResponsable || !idBancoCta) {

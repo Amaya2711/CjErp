@@ -474,7 +474,7 @@ public sealed class ReportePdfService : IReportePdfService
 
             foreach (var grupo in grupos)
             {
-                card.Item().ShowEntire().Column(bloque =>
+                card.Item().EnsureSpace(90).Column(bloque =>
                 {
                     bloque.Spacing(3);
                     bloque.Item().Row(titulo =>

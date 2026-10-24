@@ -47,9 +47,12 @@ public sealed class ReporteWhatsappJobScheduler : IReporteWhatsappJobScheduler
             time = TimeSpan.Parse(defaults.HoraEjecucion, CultureInfo.InvariantCulture);
         }
 
-        if (ReporteWhatsappTipos.IsGerencial(normalizedType))
+        var dias = NormalizeDiasEjecucion(config?.DiasEjecucion, defaults.DiasEjecucion);
+
+        // Gerencial siempre corre por dias de la semana. El reporte por Meta corre solo los dias marcados;
+        // sin dias marcados corre todos los dias.
+        if (ReporteWhatsappTipos.IsGerencial(normalizedType) || (ReporteWhatsappTipos.IsMeta(normalizedType) && dias.Count > 0))
         {
-            var dias = NormalizeDiasEjecucion(config?.DiasEjecucion, defaults.DiasEjecucion);
             RemoveRecurringJobs(normalizedType);
 
             if (dias.Count == 0)
@@ -70,6 +73,12 @@ public sealed class ReporteWhatsappJobScheduler : IReporteWhatsappJobScheduler
             }
 
             return;
+        }
+
+        if (ReporteWhatsappTipos.IsMeta(normalizedType))
+        {
+            // Si antes tenia dias marcados, se eliminan sus jobs por dia antes de programar el diario.
+            RemoveRecurringJobs(normalizedType);
         }
 
         _recurringJobManager.AddOrUpdate<ReporteWhatsAppJob>(
