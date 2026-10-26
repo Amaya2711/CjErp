@@ -66,6 +66,7 @@ type PagoRow = {
   statusPap: string;
   fecha: string;
   fechaDeposito?: string;
+  fechaReaprobador?: string;
   solicitante: string;
   responsable: string;
   validador: string;
@@ -114,6 +115,7 @@ type PagoRow = {
   tipoMonedaId?: number;
   documento: string;
   serie: string;
+  comprobante: string;
   planillaRow?: Record<string, unknown>;
 };
 
@@ -786,6 +788,7 @@ function mapPlanillaConsultaRowToPagoRow(
     tarea: getRecordString(row, "Tarea", "tarea", "DescTarea", "descTarea"),
     fecha: getRecordString(row, "Fecha", "fecha", "FecIngreso", "fecIngreso", "FechaIngreso", "fechaIngreso"),
     fechaDeposito: getRecordString(row, "FechaDeposito", "fechaDeposito", "FecDeposito", "fecDeposito"),
+    fechaReaprobador: getRecordString(row, "FechaReaprobador", "fechaReaprobador"),
     solicitante: getRecordString(row, "Solicitante", "solicitante", "NombreSolicitante", "nombreSolicitante"),
     responsable: getRecordString(row, "Responsable", "responsable", "NombreResponsable", "nombreResponsable"),
     validador: getRecordString(
@@ -869,6 +872,7 @@ function mapPlanillaConsultaRowToPagoRow(
     tipoMonedaId: getRecordNumber(row, "TipoMoneda", "tipoMoneda") ?? undefined,
     documento: getRecordString(row, "Documento", "documento"),
     serie: getRecordString(row, "Serie", "serie", "SerieDocumento", "serieDocumento", "SerieFactura", "serieFactura"),
+    comprobante: getRecordString(row, "Comprobante", "comprobante"),
     planillaRow: row,
   };
 }
@@ -3442,6 +3446,7 @@ export default function PagosV2Page() {
       "Proyecto",
       "Site",
       "Serie",
+      "Comprobante",
       "Tipo trabajo",
       "Tarea",
       "Responsable",
@@ -3458,7 +3463,7 @@ export default function PagosV2Page() {
       "% Avance",
       "Avance",
       ...(showTotalSitio ? ["Sub Ficticio", "% Ficticio", "Avance ficticio"] : []),
-      ...(showEstadoPlanilla ? ["Estado planilla"] : []),
+      ...(showEstadoPlanilla ? ["Estado planilla", "Fecha reaprobador"] : []),
       "Validador",
       "OT",
       "ATP",
@@ -3481,6 +3486,7 @@ export default function PagosV2Page() {
         row.proyecto,
         row.site,
         row.serie || "-",
+        row.comprobante || "-",
         row.tipoTrabajo,
         row.tarea,
         row.responsable,
@@ -3499,7 +3505,7 @@ export default function PagosV2Page() {
         porcentajeAvance,
         porcentajeAvance,
         ...(showTotalSitio ? [subFicticio, porcentajeFicticio, porcentajeFicticio] : []),
-        ...(showEstadoPlanilla ? [getEstadoPlanillaNombre(row)] : []),
+        ...(showEstadoPlanilla ? [getEstadoPlanillaNombre(row), row.fechaReaprobador ? formatDate(row.fechaReaprobador) : "-"] : []),
         row.validador || "-",
         row.ot || "-",
         row.atp || "-",
@@ -3719,6 +3725,7 @@ export default function PagosV2Page() {
     { dataField: "proyecto", caption: "Proyecto", width: 130 },
     { dataField: "site", caption: "Site", width: 170 },
     { dataField: "serie", caption: "Serie", width: 110, calculateCellValue: (row) => row.serie || "-" },
+    { dataField: "comprobante", caption: "Comprobante", width: 130, calculateCellValue: (row) => row.comprobante || "-" },
     { dataField: "tipoTrabajo", caption: "Tipo trabajo", width: 120 },
     {
       dataField: "tarea",
@@ -3927,6 +3934,14 @@ export default function PagosV2Page() {
           </span>
         );
       },
+    },
+    {
+      dataField: "fechaReaprobador",
+      caption: "Fecha reaprobador",
+      dataType: "date",
+      width: 130,
+      visible: showEstadoPlanilla,
+      calculateCellValue: (row) => toComparableDateKey(row.fechaReaprobador ?? ""),
     },
     { dataField: "validador", caption: "Validador", width: 130, calculateCellValue: (row) => row.validador || "-" },
     { dataField: "ot", caption: "OT", width: 100, calculateCellValue: (row) => row.ot || "-" },
