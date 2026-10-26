@@ -16,6 +16,7 @@ import {
 } from "../../../api/ventasSunatService";
 import DataGridPro from "../../../components/datagrid/DataGridPro";
 import VentasSunatAnalisis from "./VentasSunatAnalisis";
+import VentasSunatResumen from "./VentasSunatResumen";
 import type { GridColumn, GridFormat } from "../../../components/datagrid/types";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 
@@ -229,7 +230,7 @@ export default function VentasSunatPage() {
   const [periodoSel, setPeriodoSel] = useState("");
   // Verificacion del periodo del Excel cargado (null = sin verificar): decide si al grabar se pregunta por reemplazar.
   const [verificacion, setVerificacion] = useState<VentasSunatHistorialDto | null>(null);
-  const [tab, setTab] = useState<"cargar" | "historial" | "analisis">("cargar");
+  const [tab, setTab] = useState<"cargar" | "historial" | "analisis" | "resumen">("cargar");
 
   const claveDe = (p: { periodo: string; rucEmisor: string }) => `${p.periodo}|${p.rucEmisor}`;
 
@@ -521,6 +522,9 @@ export default function VentasSunatPage() {
               <button type="button" style={tab === "analisis" ? tabActiveStyle : tabStyle} onClick={() => setTab("analisis")}>
                 Análisis
               </button>
+              <button type="button" style={tab === "resumen" ? tabActiveStyle : tabStyle} onClick={() => setTab("resumen")}>
+                Resumen
+              </button>
             </div>
 
             {tab === "cargar" ? (
@@ -539,6 +543,11 @@ export default function VentasSunatPage() {
                   summary={{ totalItems: [{ column: "totalCp", type: "sum" }, { column: "documento", type: "count" }] }}
                 />
               </AppCard>
+            ) : tab === "resumen" ? (
+              <>
+                {selectorPeriodo}
+                <VentasSunatResumen periodos={periodos} periodoSel={periodoSel} registrosActuales={registros} />
+              </>
             ) : tab === "analisis" ? (
               <VentasSunatAnalisis
                 registros={registros}

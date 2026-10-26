@@ -8,17 +8,21 @@ import type { MenuDto as MenuModelDto } from "../../models/seguridad/menu.types"
 import { getAuthUser } from "../../utils/authStorage";
 import { obtenerIndicadorPendientes, RUTA_ALERTAS } from "../inicio/alertasPendientes";
 import { obtenerFaltasMes } from "../../api/asistenciaService";
+import { useAlertasConteos, type AlertaKpiKey } from "../inicio/useAlertasConteos";
+
+const KPIS_ALERTAS: Array<{ key: AlertaKpiKey; label: string }> = [
+  { key: "oc", label: "Órdenes de compra" },
+  { key: "gastos", label: "Gastos" },
+  { key: "vacaciones", label: "Vacaciones" },
+  { key: "descanso", label: "Descanso médico" },
+  { key: "adelanto", label: "Adelanto de sueldo" },
+  { key: "prestamo", label: "Préstamo" },
+];
 
 type QuickLink = {
   id: number;
   titulo: string;
   descripcion: string;
-};
-type AvisoItem = {
-  id: number;
-  titulo: string;
-  detalle: string;
-  tipo: "info" | "warning" | "success";
 };
 
 
@@ -308,6 +312,10 @@ export default function DashboardPage() {
     };
   }, [tieneAccesoAsistencia]);
 
+  const conteosAlertas = useAlertasConteos(tieneAccesoAlertas);
+  // Los KPI en 0 (o aún sin cargar) no se muestran.
+  const kpisAlertasVisibles = KPIS_ALERTAS.filter(({ key }) => (conteosAlertas[key] ?? 0) > 0);
+
   const usuario = useMemo(() => {
     const nombreEmpleado =
       authUser?.nombreEmpleado ||
@@ -408,36 +416,7 @@ export default function DashboardPage() {
       });
   }, [accesosDirectos, menuCompleto]);
 
-  const avisos: AvisoItem[] = [
-    {
-      id: 1,
-      titulo: "Comunicados",
-      detalle:
-        "Utiliza el menú lateral para acceder únicamente a los módulos habilitados según tu perfil.",
-      tipo: "info",
-    },
-    {
-      id: 2,
-      titulo: "Encuestas",
-      detalle:
-        "Si no visualizas una opción necesaria para tu trabajo, solicita la autorización al administrador del sistema.",
-      tipo: "warning",
-    },
-    {
-      id: 3,
-      titulo: "Estado del sistema",
-      detalle:
-        "La plataforma se encuentra operativa y disponible para navegación general.",
-      tipo: "success",
-    },
-  ];
-
   const quickLinks: QuickLink[] = [
-    {
-      id: 2,
-      titulo: "Mesa de ayuda",
-      descripcion: "Reporta incidencias funcionales o técnicas.",
-    },
     {
       id: 4,
       titulo: "Cambio de contraseña",
@@ -447,6 +426,11 @@ export default function DashboardPage() {
       id: 5,
       titulo: "Asistencia",
       descripcion: "Gestiona las fechas de asistencia en un periodo de tiempo.",
+    },
+    {
+      id: 6,
+      titulo: "Noticias",
+      descripcion: "Reporte diario gerencial del rubro y la economía.",
     },
   ];
 
@@ -563,32 +547,38 @@ export default function DashboardPage() {
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
           <div style={styles.card}>
             <div style={styles.cardHeader}>
-              <h2 style={styles.cardTitle}>Avisos generales</h2>
+              <h2 style={styles.cardTitle}>Pendientes</h2>
               <span style={styles.cardTag}>Institucional</span>
             </div>
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 12
-            }}>
-              {avisos.filter((aviso) => aviso.titulo !== "Estado del sistema").map((aviso) => (
-                <div
-                  key={aviso.id}
-                  style={{
-                    ...styles.noticeItem,
-                    borderLeft:
-                      aviso.tipo === "info"
-                        ? "4px solid #3B82F6"
-                        : aviso.tipo === "warning"
-                        ? "4px solid #F59E0B"
-                        : "4px solid #10B981",
-                  }}
-                >
-                  <div style={styles.noticeTitle}>{aviso.titulo}</div>
-                  <div style={styles.noticeText}>{aviso.detalle}</div>
-                </div>
-              ))}
-            </div>
+            {tieneAccesoAlertas && kpisAlertasVisibles.length > 0 && (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10, marginBottom: 12 }}>
+                {kpisAlertasVisibles.map(({ key, label }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    title="Pendiente de aprobación: ver detalle"
+                    onClick={() => navigate(`${RUTA_ALERTAS}?tab=${key}`)}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "flex-start",
+                      gap: 6,
+                      padding: "10px 14px",
+                      borderRadius: 14,
+                      cursor: "pointer",
+                      font: "inherit",
+                      textAlign: "left",
+                      border: "1px solid #FCA5A5",
+                      background: "#FEF2F2",
+                      color: "#B91C1C",
+                    }}
+                  >
+                    <span style={{ fontSize: 12, fontWeight: 700 }}>{label}</span>
+                    <span style={{ fontSize: 28, fontWeight: 800, lineHeight: 1 }}>{conteosAlertas[key]}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div style={styles.card}>
             <div style={styles.cardHeader}>
@@ -607,6 +597,8 @@ export default function DashboardPage() {
                       onClick={() => {
                         if (item.titulo === "Asistencia") {
                           navigate("/reportes/rptasistenciaempleado");
+                        } else if (item.titulo === "Noticias") {
+                          navigate("/inicio/noticias");
                         }
                       }}
                     >

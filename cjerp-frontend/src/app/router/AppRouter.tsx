@@ -92,6 +92,7 @@ const RptBoletaPage = lazy(() => import("../../features/mantenimiento/sistemas/r
 const IndicadoresGerencialesPage = lazy(() => import("../../features/inicio/indicadoresgerenciales"));
 const PanelPrincipalPage = lazy(() => import("../../features/inicio/panelprincipal"));
 const AlertasPage = lazy(() => import("../../features/inicio/alertas"));
+const NoticiasGerencialesPage = lazy(() => import("../../features/inicio/noticias"));
 const EnvioMensajesPage = lazy(() => import("../../features/inicio/enviomensajes"));
 const PlantaPrincipalPage = lazy(() => import("../../features/planta/principal"));
 const EppsPage = lazy(() => import("../../features/planta/epps"));
@@ -248,6 +249,7 @@ export default function AppRouter() {
             />
             <Route path="/inicio/panelprincipal" element={<PanelPrincipalPage />} />
             <Route path="/inicio/alertas" element={<AlertasPage />} />
+            <Route path="/inicio/noticias" element={<NoticiasGerencialesPage />} />
             <Route path="/inicio/enviomensajes" element={<EnvioMensajesPage />} />
 
             <Route path="/planta/principal" element={<PlantaPrincipalPage />} />

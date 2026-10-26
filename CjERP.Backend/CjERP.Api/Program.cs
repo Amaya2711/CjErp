@@ -271,6 +271,10 @@ builder.Services.AddScoped<IBeneficioService, BeneficioService>();
 builder.Services.AddScoped<IDescansoService, DescansoService>();
 builder.Services.AddScoped<IOrdenCompraService, OrdenCompraService>();
 builder.Services.AddScoped<IEmpleadoPendienteService, EmpleadoPendienteService>();
+builder.Services.AddHttpClient<INoticiasGerencialesService, NoticiasGerencialesService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(60);
+});
 builder.Services.AddScoped<ILogisticaRecojoService, LogisticaRecojoService>();
 builder.Services.AddScoped<ILogisticaEquiposService, LogisticaEquiposService>();
 builder.Services.AddScoped<ILogisticaReembolsoService, LogisticaReembolsoService>();

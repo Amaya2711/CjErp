@@ -277,6 +277,14 @@ const TAB_THEME: Record<PagoTabKey, TabTheme> = {
   },
 };
 
+const PAGO_TABS: Array<{ key: PagoTabKey; label: string; icon: React.ReactNode }> = [
+  { key: "aprobar", label: "Aprobar", icon: <ReceiptText size={14} /> },
+  { key: "reaprobar", label: "Re-aprobar", icon: <RotateCcw size={14} /> },
+  { key: "hormiga", label: "Hormiga", icon: <HandCoins size={14} /> },
+  { key: "observadas", label: "Observadas", icon: <AlertTriangle size={14} /> },
+  { key: "resumen", label: "Total Órdenes", icon: <ShieldCheck size={14} /> },
+];
+
 const TAB_ACTION_KEYS: Record<PagoEstado, string> = {
   aprobar: "tab.aprobar",
   reaprobar: "tab.reaprobar",
@@ -3994,80 +4002,45 @@ export default function PagosV2Page() {
           }}
         >
           <div style={styles.heroTopRow}>
-            <div style={styles.heroTitleBlock}>
-              <div style={{ ...styles.kicker, color: currentTheme.accent, background: currentTheme.soft, borderColor: currentTheme.border }}>
-                <ReceiptText size={14} />
-                <span>TESORERIA / PAGOS</span>
+            <div style={styles.pagoTabs} role="tablist">
+              {PAGO_TABS.map(({ key, label, icon }) => {
+                const theme = TAB_THEME[key];
+                const selected = activeTab === key;
+                const disabled = key !== "resumen" && !canUseTab(key);
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    aria-selected={selected}
+                    disabled={disabled}
+                    style={{
+                      ...styles.pagoTab,
+                      color: selected ? theme.accent : "#64748B",
+                      borderBottomColor: selected ? theme.accent : "transparent",
+                      cursor: disabled ? "not-allowed" : "pointer",
+                      opacity: disabled ? 0.5 : 1,
+                    }}
+                    onClick={() => {
+                      if (disabled) return;
+                      // Total Órdenes puede abarcar muchos registros: su consulta
+                      // siempre se inicia al confirmar filtros con el botón Buscar.
+                      if (key === "resumen") setResumenConsultaSolicitada(false);
+                      setActiveTab(key);
+                    }}
+                  >
+                    {icon}
+                    {label}
+                    <span style={{ ...styles.pagoTabBadge, background: selected ? theme.accent : "#CBD5E1" }}>{tabStats[key]}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {activeTab === "aprobar" && rangoFechasVisibles ? (
+              <div style={styles.rangoFechasLeyenda} role="status">
+                Registros del <strong>{rangoFechasVisibles.desde}</strong> al <strong>{rangoFechasVisibles.hasta}</strong>
               </div>
-              {activeTab === "aprobar" && rangoFechasVisibles ? (
-                <div style={styles.rangoFechasLeyenda} role="status">
-                  Registros del <strong>{rangoFechasVisibles.desde}</strong> al <strong>{rangoFechasVisibles.hasta}</strong>
-                </div>
-              ) : null}
-
-            </div>
-
-            <div style={styles.metricsStrip}>
-              <KpiCard
-                label="Aprobar"
-                value={tabStats.aprobar}
-                accent="#F59E0B"
-                soft="#FFFBEB"
-                border="#FCD34D"
-                icon={<ReceiptText size={14} />}
-                selected={activeTab === "aprobar"}
-                disabled={!canUseTab("aprobar")}
-                onClick={() => canUseTab("aprobar") && setActiveTab("aprobar")}
-              />
-              <KpiCard
-                label="Re-aprobar"
-                value={tabStats.reaprobar}
-                accent="#2563EB"
-                soft="#EFF6FF"
-                border="#93C5FD"
-                icon={<RotateCcw size={14} />}
-                selected={activeTab === "reaprobar"}
-                disabled={!canUseTab("reaprobar")}
-                onClick={() => canUseTab("reaprobar") && setActiveTab("reaprobar")}
-              />
-              <KpiCard
-                label="Hormiga"
-                value={tabStats.hormiga}
-                accent="#059669"
-                soft="#F0FDF4"
-                border="#86EFAC"
-                icon={<HandCoins size={14} />}
-                selected={activeTab === "hormiga"}
-                disabled={!canUseTab("hormiga")}
-                onClick={() => canUseTab("hormiga") && setActiveTab("hormiga")}
-              />
-              <KpiCard
-                label="Observadas"
-                value={tabStats.observadas}
-                accent="#DC2626"
-                soft="#FEF2F2"
-                border="#FCA5A5"
-                icon={<AlertTriangle size={14} />}
-                selected={activeTab === "observadas"}
-                disabled={!canUseTab("observadas")}
-                onClick={() => canUseTab("observadas") && setActiveTab("observadas")}
-              />
-              <KpiCard
-                label="Total Órdenes"
-                value={tabStats.resumen}
-                accent="#7C3AED"
-                soft="#F5F3FF"
-                border="#C4B5FD"
-                icon={<ShieldCheck size={14} />}
-                selected={activeTab === "resumen"}
-                onClick={() => {
-                  // Total Órdenes puede abarcar muchos registros: su consulta
-                  // siempre se inicia al confirmar filtros con el botón Buscar.
-                  setResumenConsultaSolicitada(false);
-                  setActiveTab("resumen");
-                }}
-              />
-            </div>
+            ) : null}
           </div>
         </section>
         {message ? (
@@ -5837,56 +5810,6 @@ export default function PagosV2Page() {
   );
 }
 
-function KpiCard({
-  label,
-  value,
-  accent,
-  soft,
-  border,
-  icon,
-  selected = false,
-  disabled = false,
-  onClick,
-}: {
-  label: string;
-  value: number;
-  accent: string;
-  soft: string;
-  border: string;
-  icon: React.ReactNode;
-  selected?: boolean;
-  disabled?: boolean;
-  onClick?: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      style={{
-        ...styles.kpiCard,
-        borderColor: selected ? accent : border,
-        background: selected ? soft : "#FFFFFF",
-        cursor: disabled ? "not-allowed" : onClick ? "pointer" : "default",
-        opacity: disabled ? 0.58 : 1,
-        textAlign: "left",
-        width: "100%",
-        boxShadow: selected ? `0 4px 12px ${accent}22` : "none",
-        transform: selected ? "translateY(-1px)" : "none",
-        borderWidth: selected ? 2 : 1,
-      }}
-    >
-      <div style={{ ...styles.kpiIcon, color: accent, background: soft, borderColor: border }}>
-        {icon}
-      </div>
-      <div style={styles.kpiBody}>
-        <div style={styles.kpiLabel}>{label}</div>
-        <div style={{ ...styles.kpiValue, color: accent }}>{value}</div>
-      </div>
-    </button>
-  );
-}
-
 function FilterField({
   label,
   value,
@@ -6016,8 +5939,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   heroTopRow: {
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1.45fr) minmax(0, 0.95fr)",
-    gap: 10,
+    gridTemplateColumns: "minmax(0, 1fr)",
+    gap: 6,
     alignItems: "start",
   },
   heroTitleBlock: {
@@ -6293,6 +6216,35 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     fontWeight: 800,
     fontSize: 13,
+  },
+  pagoTabs: {
+    display: "flex",
+    gap: 4,
+    alignItems: "flex-end",
+    flexWrap: "nowrap",
+    overflowX: "auto",
+    borderBottom: "1px solid #E5E7EB",
+  },
+  pagoTab: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "8px 14px",
+    border: "none",
+    borderBottom: "2px solid transparent",
+    background: "transparent",
+    fontSize: 13,
+    fontWeight: 800,
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+  },
+  pagoTabBadge: {
+    minWidth: 20,
+    padding: "1px 7px",
+    borderRadius: 999,
+    color: "#FFFFFF",
+    fontSize: 11,
+    textAlign: "center",
   },
   metricsStrip: {
     display: "grid",

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { FileSpreadsheet } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import AppPage from "../../components/base/AppPage";
 import AppStatusMessage from "../../components/base/AppStatusMessage";
 import DataGridPro from "../../components/datagrid/DataGridPro";
@@ -428,9 +429,12 @@ export default function AlertasPage() {
   const authUser = getAuthUser();
   const idEmpleado = toPositiveNumber(authUser?.idEmpleado, authUser?.codEmp);
 
-  const [tab, setTab] = useState<AlertaTabKey>("oc");
+  // `?tab=` permite abrir directo una pestaña (por ejemplo desde los KPI del dashboard).
+  const [searchParams] = useSearchParams();
+  const tabInicial = TABS.find((item) => item.key === searchParams.get("tab"))?.key;
+  const [tab, setTab] = useState<AlertaTabKey>(tabInicial ?? "oc");
   // Si el usuario aún no eligió pestaña, al terminar de cargar se abre la primera que tenga pendientes.
-  const [tabElegida, setTabElegida] = useState(false);
+  const [tabElegida, setTabElegida] = useState(Boolean(tabInicial));
   const [ordenes, setOrdenes] = useState<OrdenCompraAlerta[]>([]);
   const [loading, setLoading] = useState(idEmpleado > 0);
   const [error, setError] = useState("");
@@ -646,10 +650,14 @@ export default function AlertasPage() {
 
   const cargando = Object.values(estadoCarga).some((estado) => estado === "cargando");
   useEffect(() => {
-    if (tabElegida || cargando) return;
+    // También cambia si la pestaña activa quedó sin registros (se oculta).
+    if (cargando || (tabElegida && contadores[tab] > 0)) return;
     const primera = TABS.find((item) => contadores[item.key] > 0);
     if (primera) setTab(primera.key);
-  }, [cargando, contadores, tabElegida]);
+  }, [cargando, contadores, tabElegida, tab]);
+
+  // Solo se muestran las pestañas con registros (o aún cargando / con error, cuyo total se desconoce).
+  const tabsVisibles = TABS.filter((item) => estadoCarga[item.key] !== "ok" || contadores[item.key] > 0);
 
   // Exporta a un solo Excel todas las pestañas (una hoja por pestaña, con los mismos encabezados del grid).
   const exportarTodo = async () => {
@@ -703,7 +711,7 @@ export default function AlertasPage() {
       }
     >
       <div style={styles.tabs}>
-        {TABS.map((item) => {
+        {tabsVisibles.map((item) => {
           const total = contadores[item.key];
           return (
             <button
