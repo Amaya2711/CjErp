@@ -52,6 +52,9 @@ export type IaChatResponse = {
   // pedidas (CLIENTE, MONEDA, FECHA...). detailRows trae los grupos (dimensiones + moneda).
   totalsByCurrency?: Record<string, unknown>[] | null;
   summaryDimensions?: string[] | null;
+  // Grupos (dimensiones + moneda) del resumen jerarquico que acompana a una respuesta de detalle filtrada por
+  // cliente/proyecto/site; detailRows conserva las filas de detalle.
+  summaryGroups?: Record<string, unknown>[] | null;
 };
 
 export type IaChatDashboardExportRequest = {

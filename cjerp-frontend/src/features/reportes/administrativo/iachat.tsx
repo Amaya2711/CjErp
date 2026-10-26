@@ -2442,7 +2442,9 @@ const MessageBubble = memo(function MessageBubble({ message }: { message: IaChat
         {isAssistant && message.tone !== "error" ? (
           <div style={styles.assistantNarrativeCard}>
             <div style={styles.assistantNarrativeLabel}>Resumen contextual</div>
-            <div style={styles.assistantNarrativeText}>{message.text}</div>
+            <div style={styles.assistantNarrativeText}>
+              <NarrativeText text={message.text} />
+            </div>
           </div>
         ) : (
           <div style={styles.messageText}>{message.text}</div>
@@ -2464,6 +2466,54 @@ const MessageBubble = memo(function MessageBubble({ message }: { message: IaChat
   );
 });
 
+// Texto del asistente con formato basico (titulos "###", viñetas "- ", negritas "**"); sin HTML crudo.
+function renderInlineBold(text: string, keyPrefix: string) {
+  return text.split(/\*\*(.+?)\*\*/g).map((part, index) =>
+    index % 2 === 1 ? <strong key={`${keyPrefix}-${index}`}>{part}</strong> : part
+  );
+}
+
+function NarrativeText({ text }: { text: string }) {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+
+  return (
+    <>
+      {lines.map((line, index) => {
+        const key = `l${index}`;
+        const heading = /^\s{0,3}#{1,6}\s+(.*)$/.exec(line);
+        if (heading) {
+          return (
+            <div key={key} style={{ fontWeight: 800, fontSize: 14, color: "#0F766E", margin: "10px 0 4px" }}>
+              {renderInlineBold(heading[1], key)}
+            </div>
+          );
+        }
+
+        const bullet = /^(\s*)[-*•]\s+(.*)$/.exec(line);
+        if (bullet) {
+          const level = Math.min(Math.floor(bullet[1].length / 2), 3);
+          return (
+            <div key={key} style={{ display: "flex", gap: 8, paddingLeft: 6 + level * 18, margin: "2px 0" }}>
+              <span aria-hidden="true">{level > 0 ? "◦" : "•"}</span>
+              <span>{renderInlineBold(bullet[2], key)}</span>
+            </div>
+          );
+        }
+
+        if (!line.trim()) {
+          return <div key={key} style={{ height: 6 }} />;
+        }
+
+        return (
+          <div key={key} style={{ margin: "2px 0" }}>
+            {renderInlineBold(line, key)}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 function StructuredResponseBlock({ response }: { response: IaChatResponse }) {
   const [showExecutive, setShowExecutive] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
@@ -2477,6 +2527,9 @@ function StructuredResponseBlock({ response }: { response: IaChatResponse }) {
   const reportPreviewRef = useRef<HTMLDivElement | null>(null);
   // Resumen calculado en SQL: se muestra el cuadro ejecutivo; sus filas son grupos, no registros de detalle.
   const sqlSummary = response.responseType === "summary" && (response.totalsByCurrency?.length ?? 0) > 0;
+  // Detalle filtrado por cliente/proyecto/site: el cuadro agrupado va arriba y el detalle de filas se conserva.
+  const hierarchicalSummary =
+    !sqlSummary && (response.summaryGroups?.length ?? 0) > 0 && (response.totalsByCurrency?.length ?? 0) > 0;
   const rawRows = sqlSummary ? [] : (response.detailRows ?? []);
   const reportMetric = detectReportMetric(response);
   const unavailable = resolveUnavailable(response);
@@ -2693,10 +2746,10 @@ function StructuredResponseBlock({ response }: { response: IaChatResponse }) {
         </button>
       </div>
 
-      {sqlSummary && (
+      {(sqlSummary || hierarchicalSummary) && (
         <SqlSummaryBlock
           dimensions={response.summaryDimensions ?? []}
-          groups={response.detailRows ?? []}
+          groups={sqlSummary ? (response.detailRows ?? []) : (response.summaryGroups ?? [])}
           totals={response.totalsByCurrency ?? []}
           filters={buildSummaryChips(response)}
         />

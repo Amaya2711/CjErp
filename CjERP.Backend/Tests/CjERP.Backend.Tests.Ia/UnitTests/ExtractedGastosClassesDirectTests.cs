@@ -51,7 +51,8 @@ public sealed class ExtractedGastosClassesDirectTests
     {
         var args = BuscarPlanillaArgsParser.ParseBuscarPlanillaArgs(null);
 
-        Assert.Equal("PAGADO", args.Estados);
+        Assert.Null(args.Estados);
+        Assert.True(args.TodosLosEstados);
         Assert.True(args.EstadosAplicadosPorDefecto);
         Assert.Equal(50, args.TamanoPagina);
     }

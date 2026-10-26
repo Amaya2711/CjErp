@@ -13,7 +13,7 @@ public sealed class BuscarPlanillaArgs
 
     public string? Estados { get; set; }
 
-    // true = el usuario pidio expresamente considerar TODOS los estados: no se aplica el estado por defecto (PAGADO).
+    // true = se consideran TODOS los estados (sin filtro): lo pidio el usuario o no indico ningun estado.
     public bool TodosLosEstados { get; set; }
 
     public DateOnly? FechaInicio { get; set; }
@@ -71,14 +71,16 @@ public sealed class BuscarPlanillaArgs
         Solicitante = NormalizeText(Solicitante);
         Ot = NormalizeText(Ot);
 
+        // Regla (2026-10-23): sin estado explicito se consideran TODOS los estados (antes se aplicaba PAGADO).
+        // EstadosAplicadosPorDefecto se conserva para que los seguimientos hereden el estado de la consulta anterior.
         if (TodosLosEstados)
         {
             Estados = null;
-            EstadosAplicadosPorDefecto = false;
         }
         else if (string.IsNullOrWhiteSpace(Estados))
         {
-            Estados = "PAGADO";
+            Estados = null;
+            TodosLosEstados = true;
             EstadosAplicadosPorDefecto = true;
         }
         else

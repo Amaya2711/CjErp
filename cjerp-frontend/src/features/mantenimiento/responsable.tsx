@@ -69,9 +69,9 @@ export default function MantenimientoResponsablePage() {
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const { constantesPorCampo, loading: cargandoConstantes, error: errorConstantes } = useConstantesPorCampo(["tipo_cta", "banco"]);
+  const { constantesPorCampo, loading: cargandoConstantes, error: errorConstantes } = useConstantesPorCampo(["tipo_cta", "banco_emp"]);
   const tiposCuenta = constantesPorCampo.tipo_cta ?? [];
-  const bancos = constantesPorCampo.banco ?? [];
+  const bancos = constantesPorCampo.banco_emp ?? [];
 
   const esEdicion = idEmpleado !== null && original !== null;
   const nombreTipoCuenta = useMemo(

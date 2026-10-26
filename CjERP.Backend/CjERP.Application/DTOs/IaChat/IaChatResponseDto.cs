@@ -40,4 +40,9 @@ public sealed class IaChatResponseDto
     public List<Dictionary<string, object?>>? TotalsByCurrency { get; set; }
 
     public List<string>? SummaryDimensions { get; set; }
+
+    // Grupos (dimensiones + moneda) del resumen jerarquico que acompana a una respuesta de DETALLE filtrada por
+    // cliente/proyecto/site (DetailRows conserva las filas). Junto con TotalsByCurrency y SummaryDimensions alimenta
+    // el cuadro ejecutivo. null = sin resumen complementario.
+    public List<Dictionary<string, object?>>? SummaryGroups { get; set; }
 }

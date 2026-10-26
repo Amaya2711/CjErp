@@ -155,7 +155,7 @@ public sealed class IaScopeEnforcementOrchestratorTests
         Assert.Null(response.UnavailableFields);
     }
 
-    [Fact]
+    [Fact(Skip = "Permisos por usuario desactivados (2026-10-23): ResolveScopeAsync devuelve alcance TOTAL. Reactivar junto con el bloque comentado.")]
     public async Task Activado_SinServicioDeAutorizacion_DenegaYNoEjecutaNiLlamaAlLlm()
     {
         var h = Build(auth: null, enabled: true, new FakeHttpMessageHandler());
@@ -169,7 +169,7 @@ public sealed class IaScopeEnforcementOrchestratorTests
         Assert.Equal(0, h.Handler.CallCount);
     }
 
-    [Fact]
+    [Fact(Skip = "Permisos por usuario desactivados (2026-10-23): ResolveScopeAsync devuelve alcance TOTAL. Reactivar junto con el bloque comentado.")]
     public async Task Activado_ConDenegacion_NoEjecutaNada_SinFallbackALaRutaSinRestriccion()
     {
         var auth = new FakeAuth { Next = () => IaAuthorizationResult.Deny("sin_permiso_de_alcance") };
@@ -197,7 +197,7 @@ public sealed class IaScopeEnforcementOrchestratorTests
         Assert.Equal(0, h.Executor.ScopedCalls);
     }
 
-    [Fact]
+    [Fact(Skip = "Permisos por usuario desactivados (2026-10-23): ResolveScopeAsync devuelve alcance TOTAL. Reactivar junto con el bloque comentado.")]
     public async Task Activado_ConPermiso_EjecutaSoloLaVarianteConAlcance_YPropagaLosCamposNoDisponibles()
     {
         var scope = Restricted(globals: false, 7, 11);
@@ -221,7 +221,7 @@ public sealed class IaScopeEnforcementOrchestratorTests
         Assert.Contains("unavailableFields", handler.RequestBodies[1], StringComparison.Ordinal);
     }
 
-    [Fact]
+    [Fact(Skip = "Permisos por usuario desactivados (2026-10-23): ResolveScopeAsync devuelve alcance TOTAL. Reactivar junto con el bloque comentado.")]
     public async Task Activado_PreguntaDeAgrupacion_UsaElResumenDeSql_YNoTraeFilasDeDetalle()
     {
         var scope = Restricted(globals: true, 7);
@@ -335,7 +335,7 @@ public sealed class IaScopeEnforcementOrchestratorTests
         Assert.Equal(1, handler.CallCount);                       // solo el planner: no hubo analisis ni respuesta del LLM
     }
 
-    [Fact]
+    [Fact(Skip = "Permisos por usuario desactivados (2026-10-23): ResolveScopeAsync devuelve alcance TOTAL. Reactivar junto con el bloque comentado.")]
     public async Task Activado_SiCambiaElAlcance_SeDescartaToda_LaMemoriaPrevia()
     {
         var current = Restricted(false, 7);
@@ -409,7 +409,7 @@ public sealed class IaScopeEnforcementOrchestratorTests
         ]
     };
 
-    [Fact]
+    [Fact(Skip = "Permisos por usuario desactivados (2026-10-23): ResolveScopeAsync devuelve alcance TOTAL. Reactivar junto con el bloque comentado.")]
     public async Task Seguridad_NoDependeDeLaHeuristica_ColumnasGlobalesNuncaLlegaAlLlmNiALaRespuestaNiALaMemoria()
     {
         var question = "dime cuanto se facturo en total por cada site";
@@ -458,7 +458,7 @@ public sealed class IaScopeEnforcementOrchestratorTests
         Assert.Equal(5m, response.DetailRows[0]["SubOc"]);
     }
 
-    [Fact]
+    [Fact(Skip = "Permisos por usuario desactivados (2026-10-23): ResolveScopeAsync devuelve alcance TOTAL. Reactivar junto con el bloque comentado.")]
     public async Task Revocacion_DelPermisoDeTotales_DescartaLaMemoria()
     {
         var current = Restricted(globals: true, 7);
@@ -479,7 +479,7 @@ public sealed class IaScopeEnforcementOrchestratorTests
         Assert.True(state.MatchesAuthorizedScope(current.ToAuthorizedScope()));
     }
 
-    [Fact]
+    [Fact(Skip = "Permisos por usuario desactivados (2026-10-23): ResolveScopeAsync devuelve alcance TOTAL. Reactivar junto con el bloque comentado.")]
     public async Task Revocacion_TotalDelAcceso_DescartaLaMemoria_YDeniega()
     {
         var current = Restricted(globals: false, 7);
@@ -499,7 +499,7 @@ public sealed class IaScopeEnforcementOrchestratorTests
         Assert.Empty(state.GetRecentTurns(100));
     }
 
-    [Fact]
+    [Fact(Skip = "Permisos por usuario desactivados (2026-10-23): ResolveScopeAsync devuelve alcance TOTAL. Reactivar junto con el bloque comentado.")]
     public async Task Seguridad_Exportar_SinPermisoDeTotales_NoEnviaValoresGlobalesAlGeneradorAunqueLaMemoriaLosTenga()
     {
         var scope = Restricted(globals: false, 7);

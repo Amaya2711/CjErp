@@ -183,9 +183,89 @@ public static class IaConversationFollowUpResolver
         return true;
     }
 
+    private static readonly System.Text.RegularExpressions.Regex OfferedOptionLine = new(
+        @"^\s*(?<n>\d{1,2})\s*[\.\)\-]\s*(?<t>\S.*?)\s*$",
+        System.Text.RegularExpressions.RegexOptions.Multiline | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    private static readonly System.Text.RegularExpressions.Regex OptionPick = new(
+        @"^\s*(?:(?:la\s+)?opci[oó]n\s*)?(?<n>\d{1,2})\s*(?:[\.\)\-:]\s*.*)?$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// REGLA (2026-10-23): el asistente recuerda lo que ofrecio. Si su ultima respuesta propuso desgloses numerados
+    /// ("1. site, 2. cliente-proyecto-site, 3. estado y moneda...") y el usuario elige una opcion ("3", "3. estado y
+    /// moneda...", "opcion 3", o "si" cuando solo hay una), la pregunta se reescribe como una consulta de agrupacion
+    /// ("gastos por estado y moneda"); el resto del flujo hereda los filtros de la consulta anterior. Si la opcion no es
+    /// una agrupacion conocida, o "si" es ambiguo (varias opciones), no reescribe.
+    /// </summary>
+    public static bool TryResolveOfferedBreakdown(string question, ConversationState state, out string rewrittenQuestion)
+    {
+        rewrittenQuestion = question;
+
+        var lastAnswer = state.LastResponse?.Answer;
+        if (string.IsNullOrWhiteSpace(lastAnswer))
+        {
+            return false;
+        }
+
+        var options = new Dictionary<int, string>();
+        foreach (System.Text.RegularExpressions.Match match in OfferedOptionLine.Matches(lastAnswer))
+        {
+            options.TryAdd(int.Parse(match.Groups["n"].Value), match.Groups["t"].Value);
+        }
+
+        if (options.Count == 0)
+        {
+            return false;
+        }
+
+        string? chosen = null;
+        var pick = OptionPick.Match(question);
+        if (pick.Success)
+        {
+            options.TryGetValue(int.Parse(pick.Groups["n"].Value), out chosen);
+        }
+        else if (IsConfirmation(question) && options.Count == 1)
+        {
+            chosen = options.Values.First();
+        }
+
+        if (string.IsNullOrWhiteSpace(chosen))
+        {
+            return false;
+        }
+
+        var cleaned = System.Text.RegularExpressions.Regex.Replace(chosen.ToLowerInvariant(), @"\*\*|`", string.Empty);
+        cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"\s+para\s+.*$", string.Empty);
+        cleaned = cleaned.Replace('-', ',');
+        cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"[\s,;.:]+(?:o|u)?\s*$", string.Empty).Trim();
+
+        if (!TryResolveSummaryDimensions($"por {cleaned}", out var dimensions) || dimensions.Count == 0)
+        {
+            return false;
+        }
+
+        rewrittenQuestion = $"gastos por {cleaned.Replace(",", ", ").Replace("  ", " ")}";
+        return true;
+    }
+
+    private static bool IsConfirmation(string question)
+    {
+        var normalized = NormalizeText(question)?.ToLowerInvariant().Trim('.', '!', ' ') ?? string.Empty;
+        return normalized is "ok" or "si" or "sí" or "dale" or "listo" or "perfecto" or "correcto";
+    }
+
     public static bool TryBuildAmbiguousRoleFollowUpArgs(string question, ConversationState state, out BuscarPlanillaArgs args)
     {
         args = new BuscarPlanillaArgs();
+
+        // Solo aplica cuando el asistente pidio aclarar el rol (responsable / solicitante). Sin esa pregunta, un "si"
+        // o "ok" no es una aclaracion y NO se debe convertir la consulta anterior en filtro de persona.
+        var lastAnswerText = state.LastResponse?.Answer?.ToLowerInvariant() ?? string.Empty;
+        if (!lastAnswerText.Contains("responsable") || !lastAnswerText.Contains("solicitante"))
+        {
+            return false;
+        }
 
         var normalized = NormalizeText(question)?.ToLowerInvariant() ?? string.Empty;
         var wantsAmbos = normalized == "ambos" ||

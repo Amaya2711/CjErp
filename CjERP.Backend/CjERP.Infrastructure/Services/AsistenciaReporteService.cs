@@ -348,9 +348,15 @@ public class AsistenciaReporteService : IAsistenciaReporteService
         return digits;
     }
 
-    public async Task<AsistenciaGerencialPdfDto> ObtenerReporteGerencialAsync(
+    public Task<AsistenciaGerencialPdfDto> ObtenerReporteGerencialAsync(
         AsistenciaGerencialPdfRequestDto request,
         CancellationToken cancellationToken = default)
+        => ObtenerReporteGerencialInternoAsync(request, incluirPeriodoAnterior: false, cancellationToken);
+
+    private async Task<AsistenciaGerencialPdfDto> ObtenerReporteGerencialInternoAsync(
+        AsistenciaGerencialPdfRequestDto request,
+        bool incluirPeriodoAnterior,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -364,17 +370,58 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             throw new InvalidOperationException("No existen datos de asistencia para el periodo consultado.");
         }
 
-        return BuildExecutiveReport(
-            detalle,
-            periodo,
-            string.IsNullOrWhiteSpace(request.Destinatario) ? "Gerencia CJ Telecom" : request.Destinatario.Trim());
+        var destinatario = string.IsNullOrWhiteSpace(request.Destinatario) ? "Gerencia CJ Telecom" : request.Destinatario.Trim();
+        var reporte = BuildExecutiveReport(detalle, periodo, destinatario);
+
+        if (incluirPeriodoAnterior)
+        {
+            await TryCompletarPeriodoAnteriorAsync(reporte, periodo, cancellationToken);
+        }
+
+        return reporte;
+    }
+
+    // Comparativo contra el periodo inmediato anterior de igual duracion. Es opcional: si falla, el reporte sale sin comparativo.
+    private async Task TryCompletarPeriodoAnteriorAsync(
+        AsistenciaGerencialPdfDto reporte,
+        AsistenciaGerencialPeriodoDto periodo,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var dias = (periodo.FechaFin.Date - periodo.FechaInicio.Date).Days + 1;
+            var inicio = periodo.FechaInicio.Date.AddDays(-dias);
+            var fin = periodo.FechaInicio.Date.AddDays(-1);
+            var anterior = new AsistenciaGerencialPeriodoDto
+            {
+                FechaInicio = inicio,
+                FechaFin = fin,
+                FechaInicioTexto = inicio.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture),
+                FechaFinTexto = fin.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture)
+            };
+
+            var rows = await QueryReporteRowsAsync(anterior.FechaInicioTexto, anterior.FechaFinTexto, cancellationToken);
+            var detalle = rows.Select(MapPdfRow).ToList();
+            if (detalle.Count == 0)
+            {
+                return;
+            }
+
+            var kpisAnterior = BuildExecutiveReport(detalle, anterior, reporte.Destinatario).Kpis;
+            reporte.Kpis.AsistenciaPeriodoAnterior = kpisAnterior.PorcentajeAsistencia;
+            reporte.Kpis.IncidenciasPeriodoAnterior = kpisAnterior.IncidenciasCriticas;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Sin comparativo: no se bloquea el reporte.
+        }
     }
 
     public async Task<byte[]> GenerarPdfGerencialEjecutivoAsync(
         AsistenciaGerencialPdfRequestDto request,
         CancellationToken cancellationToken = default)
     {
-        var reporte = await ObtenerReporteGerencialAsync(request, cancellationToken);
+        var reporte = await ObtenerReporteGerencialInternoAsync(request, incluirPeriodoAnterior: true, cancellationToken);
         return await _reportePdfService.GenerarReporteGerencialEjecutivoPdfAsync(reporte, cancellationToken);
     }
 
@@ -587,7 +634,11 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             PromedioHorasPorEmpleado = Math.Round(promedioHoras, 2),
             PendientesAprobacion = pendientesAprobacion.Count,
             EmpleadosConDiferenciaNegativa = employeesWithNegativeDifference.Count,
-            SemaforoGeneral = porcentajeAsistencia >= 95m ? "VERDE" : "ROJO"
+            SemaforoGeneral = porcentajeAsistencia >= 95m ? "VERDE" : "ROJO",
+            Faltas = detalle.Count(item => SplitStates(item.EstadoMarcacionTexto, item.Estado).Contains("FALTA")),
+            Incompletos = detalle.Count(item => SplitStates(item.EstadoMarcacionTexto, item.Estado).Any(state => state.Contains("INCOMPLETO", StringComparison.Ordinal))),
+            FaltaAprobar = detalle.Count(item => SplitStates(item.EstadoMarcacionTexto, item.Estado).Contains("FALTA APROBAR")),
+            IncidenciasCriticas = alertRows.Count
         };
 
         var tendenciaDiaria = detalle
@@ -608,7 +659,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
                     TotalRegistros = totalDia,
                     Presentes = presentesDia,
                     Incidencias = incidenciasDia,
-                    PorcentajeAsistencia = totalDia == 0 ? 0m : Math.Round(incidenciasDia * 100m / totalDia, 2)
+                    PorcentajeAsistencia = totalDia == 0 ? 0m : Math.Round((totalDia - incidenciasDia) * 100m / totalDia, 2)
                 };
             })
             .ToList();
@@ -655,8 +706,13 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             .Take(10)
             .ToList();
 
+        var empleadosCriticos = BuildEmpleadosCriticos(detalle);
+        var responsablesCriticos = BuildResponsablesCriticos(detalle);
+
         var incidencias = new AsistenciaGerencialIncidenciasDto
         {
+            EmpleadosCriticos = empleadosCriticos,
+            ResponsablesCriticos = responsablesCriticos,
             IncidenciasPorResponsable = BuildNegativeDifferenceByResponsable(employeesWithNegativeDifference),
             IncidenciasPorCliente = BuildGroupedIncidencias(alertRows, item => EmptyIfMissing(item.Cliente, "Sin cliente"), includeOnlyIncidents: false),
             IncidenciasPorArea = BuildGroupedIncidencias(alertRows, item => EmptyIfMissing(item.Area, "Sin area"), includeOnlyIncidents: false),
@@ -693,6 +749,85 @@ public class AsistenciaReporteService : IAsistenciaReporteService
             Incidencias = incidencias,
             ResumenEjecutivo = BuildExecutiveConclusions(chartEstado)
         };
+    }
+
+    private static readonly string[] DiasSemanaAbreviados = { "dom", "lun", "mar", "mié", "jue", "vie", "sáb" };
+
+    private static string EmpleadoKey(ReporteWhatsappAsistenciaItemDto item) =>
+        item.IdEmpleado > 0 ? item.IdEmpleado.ToString(CultureInfo.InvariantCulture) : NormalizeText(item.NombreEmpleado);
+
+    private static IReadOnlyList<AsistenciaGerencialEmpleadoCriticoDto> BuildEmpleadosCriticos(
+        IReadOnlyList<ReporteWhatsappAsistenciaItemDto> detalle)
+    {
+        return detalle
+            .GroupBy(EmpleadoKey)
+            .Select(group =>
+            {
+                var incidentes = group.Where(IsAlertState).ToList();
+                if (incidentes.Count == 0)
+                {
+                    return null;
+                }
+
+                var principal = group.OrderByDescending(GetRowScore).First();
+                var fechas = incidentes
+                    .Select(item => ParseDate(item.Fecha)?.Date)
+                    .Where(fecha => fecha.HasValue)
+                    .Select(fecha => fecha!.Value)
+                    .Distinct()
+                    .OrderBy(fecha => fecha)
+                    .Take(5)
+                    .Select(fecha => $"{DiasSemanaAbreviados[(int)fecha.DayOfWeek]} {fecha:dd}")
+                    .ToList();
+
+                return new AsistenciaGerencialEmpleadoCriticoDto
+                {
+                    NombreEmpleado = principal.NombreEmpleado,
+                    Responsable = EmptyIfMissing(principal.Responsable, "Sin responsable"),
+                    Cliente = EmptyIfMissing(principal.Cliente, "Sin cliente"),
+                    Faltas = group.Count(item => SplitStates(item.EstadoMarcacionTexto, item.Estado).Contains("FALTA")),
+                    Incompletos = group.Count(item => SplitStates(item.EstadoMarcacionTexto, item.Estado).Any(state => state.Contains("INCOMPLETO", StringComparison.Ordinal))),
+                    FaltaAprobar = group.Count(item => SplitStates(item.EstadoMarcacionTexto, item.Estado).Contains("FALTA APROBAR")),
+                    Incidencias = incidentes.Count,
+                    DiferenciaHoras = Math.Round(group.Min(item => item.DiferenciaHoras), 2),
+                    DiasConIncidencia = string.Join(", ", fechas)
+                };
+            })
+            .Where(item => item is not null)
+            .Select(item => item!)
+            .OrderByDescending(item => item.Incidencias)
+            .ThenBy(item => item.DiferenciaHoras)
+            .ThenBy(item => item.NombreEmpleado, StringComparer.OrdinalIgnoreCase)
+            .Take(15)
+            .ToList();
+    }
+
+    private static IReadOnlyList<AsistenciaGerencialResponsableDto> BuildResponsablesCriticos(
+        IReadOnlyList<ReporteWhatsappAsistenciaItemDto> detalle)
+    {
+        return detalle
+            .GroupBy(item => EmptyIfMissing(item.Responsable, "Sin responsable"))
+            .Select(group =>
+            {
+                var porEmpleado = group.GroupBy(EmpleadoKey).ToList();
+                var afectados = porEmpleado.Where(emp => emp.Any(IsAlertState)).ToList();
+
+                return new AsistenciaGerencialResponsableDto
+                {
+                    Responsable = group.Key,
+                    EmpleadosACargo = porEmpleado.Count,
+                    EmpleadosAfectados = afectados.Count,
+                    Incidencias = group.Count(IsAlertState),
+                    PendientesAprobacion = group.Count(item => SplitStates(item.EstadoMarcacionTexto, item.Estado).Contains("FALTA APROBAR")),
+                    HorasEnBrecha = Math.Round(afectados.Sum(emp => Math.Min(0m, emp.Min(item => item.DiferenciaHoras)) * -1m), 2)
+                };
+            })
+            .Where(item => item.Incidencias > 0)
+            .OrderByDescending(item => item.Incidencias)
+            .ThenByDescending(item => item.PendientesAprobacion)
+            .ThenBy(item => item.Responsable, StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
     }
 
     private static IReadOnlyList<AsistenciaGerencialGrupoIncidenciaDto> BuildGroupedIncidencias(
@@ -756,7 +891,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
         if (estadoCritico is not null)
         {
             recommendations.Add(
-                $"Accion critica: el estado {estadoCritico.Estado} concentra {estadoCritico.Cantidad} registros ({estadoCritico.Porcentaje:0.00}% del total). Priorizar regularizacion y sustento documentado antes del siguiente cierre.");
+                $"Acción crítica: el estado {estadoCritico.Estado} concentra {estadoCritico.Cantidad} registros ({estadoCritico.Porcentaje:0.00}% del total). Priorizar regularización y sustento documentado antes del siguiente cierre.");
         }
 
         var responsableCritico = topResponsables
@@ -767,7 +902,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
         if (responsableCritico is not null && responsableCritico.Cantidad > 0)
         {
             recommendations.Add(
-                $"Seguimiento responsable: {responsableCritico.Nombre} concentra {responsableCritico.Cantidad} incidencias{(string.IsNullOrWhiteSpace(responsableCritico.EtiquetaSecundaria) ? string.Empty : $" en {responsableCritico.EtiquetaSecundaria}")}. Solicitar cierre de casos y validacion de marcaciones dentro de 72 horas.");
+                $"Seguimiento al responsable: {responsableCritico.Nombre} concentra {responsableCritico.Cantidad} incidencias{(string.IsNullOrWhiteSpace(responsableCritico.EtiquetaSecundaria) ? string.Empty : $" ({responsableCritico.EtiquetaSecundaria})")}. Solicitar cierre de casos y validación de marcaciones dentro de 72 horas.");
         }
 
         var pendientePrincipal = pendientesAprobacion
@@ -779,7 +914,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
         if (pendientePrincipal is not null && (pendientePrincipal.CantidadPendientes > 0 || pendientePrincipal.HorasPendientes > 0m))
         {
             recommendations.Add(
-                $"Pendientes de aprobacion: {pendientePrincipal.NombreEmpleado} registra {pendientePrincipal.CantidadPendientes} pendientes y {pendientePrincipal.HorasPendientes:0.00} horas por validar. Confirmar aprobacion o regularizacion para evitar ajustes posteriores.");
+                $"Pendientes de aprobación: {pendientePrincipal.NombreEmpleado} registra {pendientePrincipal.CantidadPendientes} pendientes y {pendientePrincipal.HorasPendientes:0.00} horas por validar. Confirmar la aprobación o regularización para evitar ajustes posteriores.");
         }
 
         var brechaCritica = topEmpleados
@@ -791,7 +926,7 @@ public class AsistenciaReporteService : IAsistenciaReporteService
         if (brechaCritica is not null)
         {
             recommendations.Add(
-                $"Brecha operativa: {brechaCritica.Nombre} presenta una diferencia de {brechaCritica.Horas:0.00} horas y {brechaCritica.Cantidad} incidencias asociadas. Verificar si corresponde a omision de marcacion, ausencia real o ajuste manual.");
+                $"Brecha operativa: {brechaCritica.Nombre} presenta una diferencia de {brechaCritica.Horas:0.00} horas y {brechaCritica.Cantidad} incidencias asociadas. Verificar si corresponde a omisión de marcación, ausencia real o ajuste manual.");
         }
 
         var clienteCritico = incidenciasPorCliente
@@ -813,26 +948,26 @@ public class AsistenciaReporteService : IAsistenciaReporteService
                 : $"cliente {clienteCritico.Nombre} con {clienteCritico.Cantidad} incidencias ({clienteCritico.Porcentaje:0.00}%)";
             var areaTexto = areaCritica is null
                 ? string.Empty
-                : $"area {areaCritica.Nombre} con {areaCritica.Cantidad} incidencias ({areaCritica.Porcentaje:0.00}%)";
+                : $"área {areaCritica.Nombre} con {areaCritica.Cantidad} incidencias ({areaCritica.Porcentaje:0.00}%)";
             var union = !string.IsNullOrWhiteSpace(clienteTexto) && !string.IsNullOrWhiteSpace(areaTexto) ? " y " : string.Empty;
 
             recommendations.Add(
-                $"Foco de seguimiento: concentrar revision en {clienteTexto}{union}{areaTexto}. Estos segmentos acumulan la mayor presion operativa del periodo y requieren monitoreo preventivo.");
+                $"Foco de seguimiento: concentrar revisión en {clienteTexto}{union}{areaTexto}. Estos segmentos acumulan la mayor presión operativa del periodo y requieren monitoreo preventivo.");
         }
 
         if (recommendations.Count < 5 && totalPrecauciones > 0)
         {
             var porcentajePrecaucion = totalRegistros == 0 ? 0m : Math.Round(totalPrecauciones * 100m / totalRegistros, 2);
             recommendations.Add(
-                $"Prevencion: se identificaron {totalPrecauciones} registros en PRECAUCION ({porcentajePrecaucion:0.00}% del total). Revisarlos a tiempo evita que evolucionen a ALERTA en el siguiente corte.");
+                $"Prevención: se identificaron {totalPrecauciones} registros en PRECAUCION ({porcentajePrecaucion:0.00}% del total). Revisarlos a tiempo evita que evolucionen a ALERTA en el siguiente corte.");
         }
 
         if (recommendations.Count == 0)
         {
             recommendations.Add(
                 totalAlertas > 0
-                    ? $"Se detectaron {totalAlertas} registros en ALERTA. Mantener seguimiento diario hasta cerrar regularizaciones y evitar arrastre al siguiente periodo."
-                    : "No se detectaron alertas criticas en el periodo. Mantener el seguimiento preventivo de aprobaciones y diferencias para sostener el nivel operativo.");
+                    ? $"Se detectaron {totalAlertas} registros en ALERTA. Mantener seguimiento diario hasta cerrar las regularizaciones y evitar arrastre al siguiente periodo."
+                    : "No se detectaron alertas críticas en el periodo. Mantener el seguimiento preventivo de aprobaciones y diferencias para sostener el nivel operativo.");
         }
 
         return recommendations.Take(5).ToList();

@@ -163,6 +163,17 @@ public sealed class AsistenciaGerencialKpisDto
     public int PendientesAprobacion { get; set; }
     public int EmpleadosConDiferenciaNegativa { get; set; }
     public string SemaforoGeneral { get; set; } = "VERDE";
+    /// <summary>Registros con estado FALTA (sin FALTA APROBAR).</summary>
+    public int Faltas { get; set; }
+    /// <summary>Registros con estado INCOMPLETO.</summary>
+    public int Incompletos { get; set; }
+    /// <summary>Registros con estado FALTA APROBAR (pendientes de validar por el responsable).</summary>
+    public int FaltaAprobar { get; set; }
+    /// <summary>Registros con alguna incidencia critica (FALTA, FALTA APROBAR, INCOMPLETO, RECHAZADO).</summary>
+    public int IncidenciasCriticas { get; set; }
+    /// <summary>% de asistencia del periodo anterior de igual duracion; null si no hay datos.</summary>
+    public decimal? AsistenciaPeriodoAnterior { get; set; }
+    public int? IncidenciasPeriodoAnterior { get; set; }
 }
 
 public sealed class AsistenciaGerencialGraficosDto
@@ -182,6 +193,33 @@ public sealed class AsistenciaGerencialIncidenciasDto
     public IReadOnlyList<AsistenciaGerencialPendienteAprobacionDto> PendientesAprobacion { get; set; } = Array.Empty<AsistenciaGerencialPendienteAprobacionDto>();
     public IReadOnlyList<AsistenciaGerencialEmpleadoDiferenciaDto> EmpleadosConDiferenciaNegativa { get; set; } = Array.Empty<AsistenciaGerencialEmpleadoDiferenciaDto>();
     public IReadOnlyList<string> RecomendacionesEjecutivas { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<AsistenciaGerencialResponsableDto> ResponsablesCriticos { get; set; } = Array.Empty<AsistenciaGerencialResponsableDto>();
+    public IReadOnlyList<AsistenciaGerencialEmpleadoCriticoDto> EmpleadosCriticos { get; set; } = Array.Empty<AsistenciaGerencialEmpleadoCriticoDto>();
+}
+
+public sealed class AsistenciaGerencialResponsableDto
+{
+    public string Responsable { get; set; } = string.Empty;
+    public int EmpleadosACargo { get; set; }
+    public int EmpleadosAfectados { get; set; }
+    public int Incidencias { get; set; }
+    public int PendientesAprobacion { get; set; }
+    /// <summary>Suma de la brecha negativa de horas de sus empleados (valor positivo).</summary>
+    public decimal HorasEnBrecha { get; set; }
+}
+
+public sealed class AsistenciaGerencialEmpleadoCriticoDto
+{
+    public string NombreEmpleado { get; set; } = string.Empty;
+    public string Responsable { get; set; } = string.Empty;
+    public string Cliente { get; set; } = string.Empty;
+    public int Faltas { get; set; }
+    public int Incompletos { get; set; }
+    public int FaltaAprobar { get; set; }
+    public int Incidencias { get; set; }
+    public decimal DiferenciaHoras { get; set; }
+    /// <summary>Fechas con incidencia (ej. "lun 20, mar 21"), maximo 5.</summary>
+    public string DiasConIncidencia { get; set; } = string.Empty;
 }
 
 public sealed class AsistenciaGerencialConclusionDto

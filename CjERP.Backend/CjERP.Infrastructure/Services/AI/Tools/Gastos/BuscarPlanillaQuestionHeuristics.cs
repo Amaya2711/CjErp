@@ -79,6 +79,75 @@ internal static class BuscarPlanillaQuestionHeuristics
         return args.Normalize();
     }
 
+    internal sealed record RelaxedFilterCandidate(BuscarPlanillaArgs Args, string Dimension, string Campo, string Valor, string Palabra);
+
+    private static readonly HashSet<string> RelaxedStopWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "del", "los", "las", "una", "uno", "con", "sin", "por", "para", "que", "site", "sitio", "cliente", "proyecto"
+    };
+
+    /// <summary>Palabras de un valor de filtro (separadas por espacio, _, -, .), de 3+ letras, sin repetir, de la mas larga a la mas corta.</summary>
+    internal static List<string> SplitFilterWords(string? value) =>
+        System.Text.RegularExpressions.Regex.Split(value ?? string.Empty, @"[\s_\-\.]+")
+            .Where(w => w.Length >= 3 && !RelaxedStopWords.Contains(w))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(w => w.Length)
+            .ToList();
+
+    /// <summary>
+    /// REGLA (2026-10-23): la busqueda por site/cliente/proyecto es primero por el valor COMPLETO; si no encuentra nada se
+    /// reintenta por COINCIDENCIA: cada palabra del valor (la mas larga primero) como filtro del mismo campo, y el resultado se
+    /// agrupa por ese campo (SITE/CLIENTE/PROYECTO). Un codigo de site (IdSite) sin resultados tambien se reintenta como
+    /// nombre. Solo se relaja el primer campo que aplique; devuelve los candidatos en orden de preferencia.
+    /// </summary>
+    internal static List<RelaxedFilterCandidate> BuildRelaxedFilterCandidates(BuscarPlanillaArgs args)
+    {
+        var candidates = new List<RelaxedFilterCandidate>();
+
+        BuscarPlanillaArgs Clone() => args.WithPage(1, args.TamanoPagina);
+
+        if (!string.IsNullOrWhiteSpace(args.IdSite) && string.IsNullOrWhiteSpace(args.Site))
+        {
+            var byName = Clone();
+            byName.Site = args.IdSite;
+            byName.IdSite = null;
+            candidates.Add(new RelaxedFilterCandidate(byName, "SITE", "site", args.IdSite!, args.IdSite!));
+            return candidates;
+        }
+
+        foreach (var (campo, valor, dimension) in new[]
+                 {
+                     ("site", args.Site, "SITE"),
+                     ("cliente", args.Cliente, "CLIENTE"),
+                     ("proyecto", args.Proyecto, "PROYECTO")
+                 })
+        {
+            var words = SplitFilterWords(valor);
+            // Una sola palabra ya se busca como "contiene" en el SP: reintentar no aporta nada.
+            if (words.Count < 2)
+            {
+                continue;
+            }
+
+            foreach (var word in words)
+            {
+                var relaxed = Clone();
+                switch (campo)
+                {
+                    case "site": relaxed.Site = word; relaxed.IdSite = null; break;
+                    case "cliente": relaxed.Cliente = word; break;
+                    default: relaxed.Proyecto = word; break;
+                }
+
+                candidates.Add(new RelaxedFilterCandidate(relaxed, dimension, campo, valor!, word));
+            }
+
+            break;
+        }
+
+        return candidates;
+    }
+
     /// <summary>Quita del texto libre las palabras que ya viajan en un filtro explicito (cliente/proyecto); null si no queda nada.</summary>
     internal static string? RemoveTermsOfExplicitFilter(string? textoBusqueda, params string?[] explicitValues)
     {
@@ -468,7 +537,7 @@ internal static class BuscarPlanillaQuestionHeuristics
     }
 
     private const string DimensionPattern =
-        @"(?:clientes?|proyectos?|responsables?|solicitantes?|sites?|sitios?|estados?|monedas?|bien(?:es)?|comprobantes?|tipos?\s+de\s+pago|tipos?\s+de\s+trabajo|fechas?|d[ií]as?|diari[oa]s?|mes(?:es)?|mensual(?:es)?|coincidencias?)";
+        @"(?:clientes?|proyectos?|responsables?|solicitantes?|sites?|sitios?|estados?|monedas?|bien(?:es)?|comprobantes?|tipos?\s+de\s+pago|tipos?\s+de\s+trabajo|tareas?|fechas?|d[ií]as?|diari[oa]s?|mes(?:es)?|mensual(?:es)?|coincidencias?)";
 
     private static readonly System.Text.RegularExpressions.Regex SummaryGrouping = new(
         $@"\b(?:por|seg[uú]n)\s+(?<d1>{DimensionPattern})(?:\s*(?:,|\by\b|\be\b)\s*(?:por\s+)?(?<d2>{DimensionPattern}))?(?:\s*(?:,|\by\b|\be\b)\s*(?:por\s+)?(?<d3>{DimensionPattern}))?\b",
@@ -554,6 +623,61 @@ internal static class BuscarPlanillaQuestionHeuristics
         return matches.Any(match => char.IsUpper(match.Value[0]));
     }
 
+    /// <summary>
+    /// REGLA (2026-10-23): el agrupador del resultado sigue la jerarquia del filtro operativo.
+    /// Por cliente => CLIENTE · por proyecto => CLIENTE-PROYECTO · por site, tipo de trabajo o tarea => CLIENTE-PROYECTO-SITE.
+    /// El store admite 3 dimensiones y agrega MONEDA por su cuenta, asi que MONEDA se omite y las dimensiones ajenas a la
+    /// jerarquia solo entran si caben. Sin dimension jerarquica devuelve la lista tal cual.
+    /// </summary>
+    internal static List<string> ApplyHierarchicalGrouping(IReadOnlyList<string> dimensions)
+    {
+        string[] prefix = dimensions.Any(d => d is "SITE" or "TIPOTRABAJO")
+            ? ["CLIENTE", "PROYECTO", "SITE"]
+            : dimensions.Contains("PROYECTO")
+                ? ["CLIENTE", "PROYECTO"]
+                : [];
+
+        if (prefix.Length == 0)
+        {
+            return dimensions.ToList();
+        }
+
+        return prefix
+            .Concat(dimensions.Where(d => !prefix.Contains(d) && d is not ("TIPOTRABAJO" or "MONEDA")))
+            .Take(3)
+            .ToList();
+    }
+
+    /// <summary>
+    /// REGLA (2026-10-23): una consulta FILTRADA por cliente, proyecto o site (sin "por X" ni pedido de detalle) se
+    /// responde ademas con un resumen agrupado por la jerarquia: cliente => CLIENTE · proyecto => CLIENTE-PROYECTO ·
+    /// site => CLIENTE-PROYECTO-SITE (gana el filtro mas especifico). Es un complemento: el detalle de filas se conserva.
+    /// Los filtros por tipo de trabajo/tarea no existen en BuscarPlanillaArgs.
+    /// </summary>
+    internal static bool TryResolveDimensionsFromFilters(BuscarPlanillaArgs args, string? question, out List<string> dimensions)
+    {
+        dimensions = [];
+        if (string.IsNullOrWhiteSpace(question) || DetailRequest.IsMatch(question))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(args.Site) || !string.IsNullOrWhiteSpace(args.IdSite))
+        {
+            dimensions = ["CLIENTE", "PROYECTO", "SITE"];
+        }
+        else if (!string.IsNullOrWhiteSpace(args.Proyecto) || args.IdProyecto is > 0)
+        {
+            dimensions = ["CLIENTE", "PROYECTO"];
+        }
+        else if (!string.IsNullOrWhiteSpace(args.Cliente) || args.IdCliente is > 0)
+        {
+            dimensions = ["CLIENTE"];
+        }
+
+        return dimensions.Count > 0;
+    }
+
     private static string? MapSummaryDimension(string word)
     {
         var text = System.Text.RegularExpressions.Regex.Replace(word.Trim().ToLowerInvariant(), @"\s+", " ");
@@ -570,7 +694,7 @@ internal static class BuscarPlanillaQuestionHeuristics
             _ when text.StartsWith("bien") => "BIEN",
             _ when text.StartsWith("comprobante") => "COMPROBANTE",
             _ when text.Contains("de pago") => "TIPOPAGO",
-            _ when text.Contains("de trabajo") => "TIPOTRABAJO",
+            _ when text.Contains("de trabajo") || text.StartsWith("tarea") => "TIPOTRABAJO",
             _ when text.StartsWith("fecha") || text.StartsWith("dia") || text.StartsWith("día") || text.StartsWith("diari") => "FECHA",
             _ when text.StartsWith("mes") || text.StartsWith("mensual") => "MES",
             _ when text.StartsWith("coincidencia") => "COINCIDENCIA",
@@ -579,7 +703,7 @@ internal static class BuscarPlanillaQuestionHeuristics
     }
 
     // El usuario pide expresamente no limitar por estado ("todos los estados", "sin importar el estado"...).
-    // Sin esta peticion explicita el sistema considera solo PAGADO (regla de negocio, 2026-10-03).
+    // Sin estado explicito tambien se consideran todos los estados (regla 2026-10-23; antes PAGADO por defecto).
     private static readonly System.Text.RegularExpressions.Regex AllStatesRequest = new(
         @"\b(todos\s+los\s+estados|todo\s+estado|cualquier\s+estado|en\s+cualquier\s+estado|sin\s+(importar|filtrar|considerar)\s+(el\s+|por\s+)?estados?|sin\s+filtros?\s+(de|por)\s+estados?|independientemente\s+del\s+estado|sin\s+restringir\s+(el\s+|por\s+)?estado)\b",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);

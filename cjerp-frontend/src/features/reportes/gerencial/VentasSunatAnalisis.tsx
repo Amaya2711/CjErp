@@ -219,7 +219,7 @@ function Kpi({ label, valor, sub, alerta }: { label: string; valor: string; sub?
 export default function VentasSunatAnalisis({ registros, selector, periodoTexto }: Props) {
   const [empresasSel, setEmpresasSel] = useState<string[]>([]); // vacio = todas las empresas
   const [clientesSel, setClientesSel] = useState<string[]>([]); // vacio = todos los clientes
-  const [moneda, setMoneda] = useState(""); // "" = todas (equivalente en soles)
+  const [moneda, setMoneda] = useState(""); // "" = todas; filtra por la moneda del comprobante (los importes siempre están en soles)
   const [tipo, setTipo] = useState("");
   const [metrica, setMetrica] = useState<Metrica>("totalCp");
   const [exportando, setExportando] = useState(false);
@@ -245,13 +245,10 @@ export default function VentasSunatAnalisis({ registros, selector, periodoTexto 
 
   // Con "Todas" las monedas, los importes en dólares se expresan en soles con el tipo de cambio del propio comprobante
   // (solo para este análisis; el dato grabado no se modifica). Con una moneda elegida se muestra el importe original.
-  const convertir = (r: VentasSunatRegistroDto, valor: number | null | undefined) => {
-    const importe = numero(valor);
-    if (moneda || (r.moneda ?? "").trim().toUpperCase() === "PEN") return importe;
-    return importe * (numero(r.tipoCambio) || 1);
-  };
-  const simbolo = moneda === "USD" ? "US$" : moneda && moneda !== "PEN" ? moneda : "S/";
-  const etiquetaImporte = moneda ? `Importes en ${moneda}` : "Importes en soles (USD convertido con el T/C del comprobante)";
+  // El Registro de Ventas SIRE ya entrega todos los importes en soles (también los comprobantes en USD): no se convierte.
+  const convertir = (_r: VentasSunatRegistroDto, valor: number | null | undefined) => numero(valor);
+  const simbolo = "S/";
+  const etiquetaImporte = "Importes en soles (ya convertidos en el registro)";
 
   const valorMetrica = (r: VentasSunatRegistroDto) => convertir(r, r[metrica]);
 
@@ -342,7 +339,7 @@ export default function VentasSunatAnalisis({ registros, selector, periodoTexto 
       const filtrosTexto = [
         `Empresas: ${empresasSel.length ? empresasSel.join(", ") : "Todas"}`,
         `Clientes: ${clientesSel.length ? clientesSel.join(", ") : "Todos"}`,
-        `Moneda: ${moneda || "Todas (equivalente en soles)"}`,
+        `Moneda del comprobante: ${moneda || "Todas"}`,
         `Tipo de comprobante: ${tipo ? nombreTipo(tipo) : "Todos"}`,
         etiquetaImporte + ".",
       ].join("   |   ");
@@ -463,9 +460,9 @@ export default function VentasSunatAnalisis({ registros, selector, periodoTexto 
           <SelectorMultiple opciones={clientes} seleccion={clientesSel} onChange={setClientesSel} singular="cliente" plural="clientes" />
         </div>
         <label style={styles.campo}>
-          Moneda
+          Moneda del comprobante
           <select style={styles.select} value={moneda} onChange={(e) => setMoneda(e.target.value)}>
-            <option value="">Todas (equivalente en S/)</option>
+            <option value="">Todas</option>
             {monedas.map((x) => (
               <option key={x} value={x}>{x}</option>
             ))}

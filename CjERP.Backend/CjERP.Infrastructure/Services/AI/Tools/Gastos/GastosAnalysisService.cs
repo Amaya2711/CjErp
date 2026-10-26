@@ -150,7 +150,9 @@ public static class GastosAnalysisService
         }
         else if (args.TodosLosEstados)
         {
-            parts.Add("considerando todos los estados");
+            parts.Add(args.EstadosAplicadosPorDefecto
+                ? "considerando todos los estados (aplicado por defecto)"
+                : "considerando todos los estados");
         }
 
         if (args.FechaInicio.HasValue || args.FechaFin.HasValue)
@@ -312,10 +314,73 @@ public static class GastosAnalysisService
             totalRows = result.TotalRows,
             hasMultipleCurrencies,
             totalsByCurrency = result.TotalsByCurrency,
-            groups = TrimBreakdown(result.Groups, groupsLimit),
+            groups = TrimBreakdown(KeepCurrenciesTogether(result.Groups), groupsLimit),
             toolParameters,
             interpretedFilters
         };
+    }
+
+    /// <summary>
+    /// Agrega al payload de detalle el resumen jerarquico calculado en SQL (hierarchicalSummary): grupos con todas sus
+    /// monedas juntas y totales por moneda de todo el universo filtrado.
+    /// </summary>
+    internal static object AddHierarchicalSummary(
+        object detailPayload,
+        IReadOnlyList<string> dimensions,
+        PlanillaResumenExecutionResult resumen)
+    {
+        const int groupsLimit = 200;
+        var node = System.Text.Json.JsonSerializer.SerializeToNode(detailPayload)?.AsObject();
+        if (node is null)
+        {
+            return detailPayload;
+        }
+
+        node["hierarchicalSummary"] = System.Text.Json.JsonSerializer.SerializeToNode(new
+        {
+            dimensions,
+            source = "Agrupado dentro de SQL sobre el 100% del universo filtrado. groups trae una fila por grupo y moneda, con las filas de un mismo grupo contiguas; totalsByCurrency, los totales por moneda de todo el universo.",
+            groupsTruncated = resumen.Groups.Count > groupsLimit,
+            totalsByCurrency = resumen.TotalsByCurrency,
+            groups = TrimBreakdown(KeepCurrenciesTogether(resumen.Groups), groupsLimit)
+        });
+
+        return node;
+    }
+
+    private static readonly HashSet<string> ResumenMeasureColumns = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Moneda", "Registros", "SubtotalMonedaOriginal", "IgvMonedaOriginal", "TotalMonedaOriginal",
+        "SubtotalSolesEquivalente", "FilasSinTipoCambio"
+    };
+
+    /// <summary>
+    /// REGLA (2026-10-23): un mismo grupo (p. ej. cliente-proyecto-site) con varias monedas se muestra UNA vez con todas
+    /// sus monedas. El store devuelve una fila por grupo y moneda ordenada por monto en soles, asi que las monedas de un
+    /// grupo pueden quedar separadas: aqui se agrupan juntas respetando el orden de aparicion del grupo.
+    /// </summary>
+    internal static List<Dictionary<string, object?>> KeepCurrenciesTogether(List<Dictionary<string, object?>> groups)
+    {
+        var order = new List<string>();
+        var byKey = new Dictionary<string, List<Dictionary<string, object?>>>(StringComparer.Ordinal);
+
+        foreach (var row in groups)
+        {
+            var key = string.Join("\u001f", row
+                .Where(item => !ResumenMeasureColumns.Contains(item.Key))
+                .Select(item => $"{item.Key}={item.Value}"));
+
+            if (!byKey.TryGetValue(key, out var list))
+            {
+                list = [];
+                byKey[key] = list;
+                order.Add(key);
+            }
+
+            list.Add(row);
+        }
+
+        return order.SelectMany(key => byKey[key]).ToList();
     }
 
     internal static List<Dictionary<string, object?>> ApplyBusinessAnalysisRules(

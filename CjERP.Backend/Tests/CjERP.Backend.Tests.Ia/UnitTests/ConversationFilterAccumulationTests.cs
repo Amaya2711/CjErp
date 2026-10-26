@@ -48,7 +48,8 @@ public sealed class ConversationFilterAccumulationTests
         Assert.Equal("Cano", args.Proyecto);
         Assert.Equal(new DateOnly(2026, 9, 1), args.FechaInicio);   // NO el ano completo
         Assert.Equal(new DateOnly(2026, 9, 30), args.FechaFin);
-        Assert.Equal("PAGADO", args.Estados);
+        Assert.Null(args.Estados);          // sin estado explicito = todos los estados (regla 2026-10-23)
+        Assert.True(args.TodosLosEstados);
     }
 
     [Fact]

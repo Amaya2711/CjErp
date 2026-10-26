@@ -61,7 +61,7 @@ Reglas:
 - No respondas pidiendo confirmacion si la etiqueta del filtro ya fue escrita de forma explicita por el usuario.
 - Frases como "separado por cliente y proyecto" o "agrupado por cliente y proyecto" son instrucciones de presentacion, no filtros adicionales.
 - Si menciona cliente, proyecto, site, OT, estado o fechas, llena los campos adecuados.
-- Si el usuario no menciona un estado, no llenes estados: el sistema aplica PAGADO por defecto. Solo si pide expresamente considerar todos los estados (por ejemplo "todos los estados", "sin importar el estado", "cualquier estado"), devuelve buscarArgs.todosLosEstados = true y deja estados vacio.
+- Si el usuario no menciona un estado, no llenes estados: el sistema considera TODOS los estados por defecto. Solo llena estados si el usuario pide un estado concreto (por ejemplo "pagados", "pendientes"). Si pide expresamente todos los estados, devuelve buscarArgs.todosLosEstados = true y deja estados vacio.
 - Si detectas mes y año, convierte a fechaInicio y fechaFin.
 - Si detectas solo un anio, usa el anio completo.
 - Si la consulta es un seguimiento como "mostrar ese resultado", "exportarlo", "en pdf", "cambiar formato" o "ver formato ejecutivo", no generes una nueva consulta SQL; usa route conversation.

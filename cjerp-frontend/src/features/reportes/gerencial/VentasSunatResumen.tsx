@@ -78,7 +78,7 @@ export default function VentasSunatResumen({ periodos, periodoSel, registrosActu
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState("");
   const [empresasSel, setEmpresasSel] = useState<string[]>([]); // vacio = todas
-  const [moneda, setMoneda] = useState(""); // "" = todas (equivalente en soles)
+  const [moneda, setMoneda] = useState(""); // "" = todas; filtra por la moneda del comprobante (los importes siempre están en soles)
 
   // Todos los periodos cargados del mismo RUC emisor; el seleccionado se toma de lo ya cargado en pantalla.
   useEffect(() => {
@@ -115,12 +115,8 @@ export default function VentasSunatResumen({ periodos, periodoSel, registrosActu
   const empresas = useMemo(() => Array.from(new Set(todos.map(empresaDe))).sort(), [todos]);
   const monedas = useMemo(() => Array.from(new Set(todos.map((r) => (r.moneda ?? "").trim()).filter(Boolean))).sort(), [todos]);
 
-  // Con "Todas" las monedas, lo que no es soles se convierte con el T/C del propio comprobante (solo en este resumen).
-  const convertir = (r: VentasSunatRegistroDto, valor: number | null | undefined) => {
-    const importe = numero(valor);
-    if (moneda || (r.moneda ?? "").trim().toUpperCase() === "PEN") return importe;
-    return importe * (numero(r.tipoCambio) || 1);
-  };
+  // El Registro de Ventas SIRE ya entrega todos los importes en soles (también los comprobantes en USD): no se convierte.
+  const convertir = (_r: VentasSunatRegistroDto, valor: number | null | undefined) => numero(valor);
 
   const filtrados = useMemo(
     () =>
@@ -135,9 +131,11 @@ export default function VentasSunatResumen({ periodos, periodoSel, registrosActu
     for (const r of filtrados) {
       const k = clave(r);
       const fila = mapa.get(k) ?? { clave: k, nombre: nombre(k), afecto: 0, inafecto: 0, igv: 0, total: 0 };
-      fila.afecto += convertir(r, r.biGravada);
+      // Afecto = BI gravada menos el descuento. Dscto BI viene siempre en negativo: se resta su valor absoluto.
+      fila.afecto += convertir(r, r.biGravada) - Math.abs(convertir(r, r.dsctoBi));
       fila.inafecto += convertir(r, r.mtoInafecto);
-      fila.igv += convertir(r, r.igv);
+      // IGV e IPM menos el descuento de IGV (valor absoluto, porque viene en negativo).
+      fila.igv += convertir(r, r.igv) - Math.abs(convertir(r, r.dsctoIgv));
       fila.total += convertir(r, r.totalCp);
       mapa.set(k, fila);
     }
@@ -178,9 +176,9 @@ export default function VentasSunatResumen({ periodos, periodoSel, registrosActu
           </div>
         </div>
         <label style={styles.campo}>
-          Moneda
+          Moneda del comprobante (importes en S/)
           <select style={styles.select} value={moneda} onChange={(e) => setMoneda(e.target.value)}>
-            <option value="">Todas (equivalente en S/)</option>
+            <option value="">Todas</option>
             {monedas.map((m) => (
               <option key={m} value={m}>
                 {m}

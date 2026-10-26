@@ -1612,7 +1612,7 @@ export default function GastosPage({
   );
   const [constantesRefreshKey, setConstantesRefreshKey] = useState(0);
   const camposConstantes = useMemo(
-    () => ["tipo_bien", "tipo_comprobante", "tipo_pago", "tipo_moneda", "tipo_cta", "banco", "estado"],
+    () => ["tipo_bien", "tipo_comprobante", "tipo_pago", "tipo_moneda", "tipo_cta", "banco_emp", "estado"],
     []
   );
   const {
@@ -1623,7 +1623,7 @@ export default function GastosPage({
 
   const tipoPagoOptions = constantesPorCampo.tipo_pago ?? [];
   const tipoCuentaOptions = constantesPorCampo.tipo_cta ?? [];
-  const bancoOptions = constantesPorCampo.banco ?? [];
+  const bancoOptions = constantesPorCampo.banco_emp ?? [];
   const monedaOptions = constantesPorCampo.tipo_moneda ?? [];
   const bienOptions = constantesPorCampo.tipo_bien ?? [];
   const comprobanteOptions = constantesPorCampo.tipo_comprobante ?? [];

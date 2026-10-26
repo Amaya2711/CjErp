@@ -181,7 +181,7 @@ Prioridad: P0 (inmediata), P1 (1-2 sprints), P2 (planificable), P3 (mejora).
 
 | Prompt | Ubicación | Observación |
 |---|---|---|
-| Planner (JSON) | `GastosQueryPlanner.DecideAsync` | Reglas en español: etiquetas explícitas, PAGADO por defecto, fechas ISO; salida `route/responseType/answer/buscarArgs`. Embebido en C# (no versionado ni externalizado). |
+| Planner (JSON) | `GastosQueryPlanner.DecideAsync` | Reglas en español: etiquetas explícitas, todos los estados por defecto (desde 2026-10-23; antes PAGADO), fechas ISO; salida `route/responseType/answer/buscarArgs`. Embebido en C# (no versionado ni externalizado). |
 | Narrador | `ResponseGenerator` | Obliga a no inventar, separar por moneda, honrar `unavailableFields` (no estimar campos ocultos). Buen control de "no disponible != 0". |
 | Dashboard | `IaDashboardExportService` | Pide HTML completo con Chart.js por CDN; "prioriza el JSON estructurado". Sin sanitización de salida (ver IA-02). |
 

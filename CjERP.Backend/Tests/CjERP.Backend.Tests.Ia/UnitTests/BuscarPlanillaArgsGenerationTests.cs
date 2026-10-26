@@ -36,13 +36,13 @@ public sealed class BuscarPlanillaArgsGenerationTests
     }
 
     [Fact]
-    public void SinEstadoExplicito_AplicaPagadoPorDefecto()
+    public void SinEstadoExplicito_ConsideraTodosLosEstados()
     {
-        // Comportamiento actual documentado: Normalize() fuerza Estados="PAGADO" cuando el usuario
-        // no menciona ningun estado, y marca EstadosAplicadosPorDefecto=true (IaChatService.cs:5618-5626).
+        // Regla (2026-10-23): Normalize() ya no fuerza PAGADO; sin estado explicito se consideran todos los estados
+        // (Estados = null, TodosLosEstados = true) y se marca EstadosAplicadosPorDefecto=true para la herencia.
         var args = IaChatServiceReflection.BuildSearchArgsFromQuestion("Muestrame los gastos del cliente Claro");
 
-        Assert.Equal("PAGADO", args.Estados);
+        Assert.Null(args.Estados);
         Assert.True(args.EstadosAplicadosPorDefecto);
     }
 
@@ -82,12 +82,12 @@ public sealed class BuscarPlanillaArgsGenerationTests
     [InlineData("gastos por cliente y moneda para el mes de setiembre 2026")]
     [InlineData("gastos de setiembre 2026")]
     [InlineData("todos los gastos del cliente Claro")]
-    public void SinEstadoExplicito_SeAplicaPagadoPorDefecto(string pregunta)
+    public void SinEstadoExplicito_SeConsideranTodosLosEstados(string pregunta)
     {
-        // Regla de negocio (2026-10-03): sin estado explicito solo se consideran los gastos PAGADO.
+        // Regla de negocio (2026-10-23): sin estado explicito se consideran todos los estados (antes solo PAGADO).
         var args = IaChatServiceReflection.BuildSearchArgsFromQuestion(pregunta);
 
-        Assert.Equal("PAGADO", args.Estados);
+        Assert.Null(args.Estados);
     }
 
     [Theory]

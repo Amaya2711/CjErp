@@ -176,6 +176,13 @@ public sealed class IaOrchestrator : IIaChatService
             conversationState.SetTurnScope(currentScope);
         }
 
+        // Regla (2026-10-23): si el usuario elige una opcion que el asistente ofrecio ("3" / "3. estado y moneda..."),
+        // la consulta se reescribe como la agrupacion ofrecida y hereda los filtros de la consulta anterior.
+        if (TryResolveOfferedBreakdown(question, conversationState, out var offeredQuestion))
+        {
+            question = offeredQuestion;
+        }
+
         var conversationContext = BuildConversationContext(conversationState);
         var attachment = NormalizeAttachment(request?.Attachment);
         var hasAttachment = attachment is not null;
@@ -683,6 +690,7 @@ public sealed class IaOrchestrator : IIaChatService
         Dictionary<string, object?>? summary = null;
         List<Dictionary<string, object?>>? summaryTotals = null;
         List<string>? summaryDimensionList = null;
+        List<Dictionary<string, object?>>? summaryGroups = null;
         IaChatChartResponseDto? chart = null;
         var responseType = "conversation";
         var answer = string.Empty;
@@ -745,7 +753,6 @@ public sealed class IaOrchestrator : IIaChatService
                         // Regla: busqueda por nombre (cualquier palabra) => resultado POR COINCIDENCIA.
                         summaryDimensions = ["COINCIDENCIA"];
                     }
-
                     // COINCIDENCIA solo tiene sentido con texto de busqueda (el store lo exige).
                     if (summaryDimensions is not null && summaryDimensions.Contains("COINCIDENCIA") && string.IsNullOrWhiteSpace(args.TextoBusqueda))
                     {
@@ -753,8 +760,26 @@ public sealed class IaOrchestrator : IIaChatService
                     }
                 }
 
+                // Regla (2026-10-23): sin resultados por el valor completo de site/cliente/proyecto, se busca por
+                // coincidencia (palabra a palabra) y el resultado se agrupa por ese campo.
+                string? coincidenceNote = null;
+                if (scope is not null && !IaGlobalColumns.MentionsGlobalMetric(question))
+                {
+                    var relaxed = await TryRelaxNamedFilterAsync(args, scope, cancellationToken);
+                    if (relaxed is not null)
+                    {
+                        args = relaxed.Args;
+                        summaryDimensions = summaryDimensions is null
+                            ? [relaxed.Dimension]
+                            : new[] { relaxed.Dimension }.Concat(summaryDimensions.Where(d => d != relaxed.Dimension)).Take(3).ToList();
+                        coincidenceNote = $"No se encontraron resultados para {relaxed.Campo} '{relaxed.Valor}'; se muestran los {relaxed.Campo}s que coinciden con '{relaxed.Palabra}', agrupados por {relaxed.Campo}.";
+                        interpretedFilters["busquedaPorCoincidencia"] = coincidenceNote;
+                    }
+                }
+
                 if (summaryDimensions is not null)
                 {
+                    summaryDimensions = ApplyHierarchicalGrouping(summaryDimensions);
                     lastToolName = ToolBuscarPlanilla;
                     lastToolInput = args.AsDictionary();
                     lastToolInput["modo"] = "RESUMEN";
@@ -793,6 +818,11 @@ public sealed class IaOrchestrator : IIaChatService
                         answer = resumen.TotalRows <= 0
                             ? "No se encontraron registros para los filtros indicados."
                             : $"Se agruparon {resumen.TotalRows} registros por {string.Join(", ", summaryDimensions)} y moneda ({resumen.Groups.Count} grupos).";
+                    }
+
+                    if (coincidenceNote is not null)
+                    {
+                        answer = $"{coincidenceNote}\n\n{answer}";
                     }
 
                     interpretedFilters["provider"] = "openai";
@@ -839,6 +869,30 @@ public sealed class IaOrchestrator : IIaChatService
                         interpretedFilters,
                         unavailableFields);
 
+                    object finalPayload = payload;
+                    if (scope is not null &&
+                        !IaGlobalColumns.MentionsGlobalMetric(question) &&
+                        TryResolveDimensionsFromFilters(args, question, out var filterDimensions))
+                    {
+                        // Regla (2026-10-23): consulta por cliente/proyecto/site => ademas del detalle, resumen
+                        // jerarquico (todas las monedas de cada grupo) para que el analisis salga agrupado.
+                        try
+                        {
+                            filterDimensions = ApplyHierarchicalGrouping(filterDimensions);
+                            var resumenFiltro = await _gastosQueryExecutor.EjecutarResumenPlanillaConAlcanceAsync(
+                                args, filterDimensions, MaxSummaryGroups, scope, cancellationToken);
+                            finalPayload = AddHierarchicalSummary(payload, filterDimensions, resumenFiltro);
+                            summaryGroups = KeepCurrenciesTogether(resumenFiltro.Groups);
+                            summaryTotals = resumenFiltro.TotalsByCurrency;
+                            summaryDimensionList = filterDimensions.ToList();
+                            interpretedFilters["groupBy"] = string.Join(",", filterDimensions);
+                        }
+                        catch (Exception exResumen) when (exResumen is not OperationCanceledException)
+                        {
+                            _logger.LogWarning(exResumen, "No se pudo calcular el resumen jerarquico; se responde solo con el detalle.");
+                        }
+                    }
+
                     answer = await _responseGenerator.GenerateOpenAiFinalAnswerAsync(
                         question,
                         conversationContext,
@@ -846,7 +900,7 @@ public sealed class IaOrchestrator : IIaChatService
                         plannerRoute,
                         responseType,
                         args,
-                        payload,
+                        finalPayload,
                         cancellationToken);
 
                     if (string.IsNullOrWhiteSpace(answer))
@@ -913,6 +967,7 @@ public sealed class IaOrchestrator : IIaChatService
                 TotalRows = totalRows,
                 TotalsByCurrency = summaryTotals,
                 SummaryDimensions = summaryDimensionList,
+                SummaryGroups = summaryGroups,
                 UnavailableFields = unavailableFields.Count > 0 ? unavailableFields.ToList() : null
             }, lastToolName, lastToolInput);
             await _auditService.RegistrarAsync(
@@ -946,6 +1001,7 @@ public sealed class IaOrchestrator : IIaChatService
                 TotalRows = totalRows,
                 TotalsByCurrency = summaryTotals,
                 SummaryDimensions = summaryDimensionList,
+                SummaryGroups = summaryGroups,
                 UnavailableFields = unavailableFields.Count > 0 ? unavailableFields.ToList() : null
             });
         }
@@ -1015,9 +1071,64 @@ public sealed class IaOrchestrator : IIaChatService
         return result;
     }
 
+    /// <summary>
+    /// Si la busqueda por el valor completo de site/cliente/proyecto no devuelve nada, prueba por coincidencia (palabra a palabra,
+    /// la mas larga primero) y devuelve el primer candidato con resultados; null = no hace falta o no hay coincidencias.
+    /// </summary>
+    private async Task<RelaxedFilterCandidate?> TryRelaxNamedFilterAsync(
+        BuscarPlanillaArgs args,
+        IaResolvedScope scope,
+        CancellationToken cancellationToken)
+    {
+        var candidates = BuildRelaxedFilterCandidates(args);
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            var primary = await _gastosQueryExecutor.EjecutarResumenPlanillaConAlcanceAsync(
+                args, [candidates[0].Dimension], 1, scope, cancellationToken);
+            if (primary.TotalRows > 0)
+            {
+                return null;
+            }
+
+            foreach (var candidate in candidates)
+            {
+                var probe = await _gastosQueryExecutor.EjecutarResumenPlanillaConAlcanceAsync(
+                    candidate.Args, [candidate.Dimension], 1, scope, cancellationToken);
+                if (probe.TotalRows > 0)
+                {
+                    return candidate;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // La busqueda por coincidencia es un apoyo: si falla, la consulta principal reporta su propio resultado/error.
+            _logger.LogWarning(ex, "IA Chat: fallo la busqueda por coincidencia; se mantiene la consulta original.");
+        }
+
+        return null;
+    }
+
     /// <summary>Autoriza por cuenta; null = denegado (identidad, permiso, fallo de verificacion o servicio ausente).</summary>
     private async Task<IaResolvedScope?> ResolveScopeAsync(string idUsuario, CancellationToken cancellationToken)
     {
+        // DECISION 2026-10-23: validaciones de permisos/alcance por usuario DESACTIVADAS (comentadas, no eliminadas).
+        // El acceso a esta pagina se controla solo por menu (SegMenu) y esta reservado a personal que puede consultar todo.
+        // Se devuelve siempre alcance TOTAL con totales globales: el SP recibe @AlcanceNivel='TOTAL' y no restringe filas
+        // ni retira las columnas globales. Para reactivar el control por usuario: borrar el return de abajo y
+        // descomentar el bloque original (requiere dbo.IaToolPermiso y los permisos por cuenta; ver docs/AI_COPILOT_FASE2_*.md).
+        return await Task.FromResult<IaResolvedScope?>(IaResolvedScope.ForTotal(canViewGlobalTotals: true));
+
+        /* --- BLOQUE ORIGINAL (autorizacion por cuenta: Propio/Equipo/Total) ---
         if (_authorizationService is null)
         {
             _logger.LogError("IA Chat: la aplicacion del alcance esta activa pero no hay IIaAuthorizationService registrado; se deniega.");
@@ -1041,6 +1152,7 @@ public sealed class IaOrchestrator : IIaChatService
             _logger.LogError(ex, "IA Chat: fallo al autorizar al usuario {Usuario}; se deniega.", idUsuario);
             return null;
         }
+        --- FIN BLOQUE ORIGINAL --- */
     }
 
     public async Task<IaChatDashboardExportResponseDto> GenerarDashboardReporteAsync(

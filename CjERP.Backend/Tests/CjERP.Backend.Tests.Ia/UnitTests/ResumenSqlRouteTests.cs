@@ -28,6 +28,70 @@ public sealed class ResumenSqlRouteTests
     }
 
     [Theory]
+    [InlineData("gastos por cliente", "CLIENTE")]
+    [InlineData("gastos por proyecto", "CLIENTE,PROYECTO")]
+    [InlineData("gastos por site", "CLIENTE,PROYECTO,SITE")]
+    [InlineData("gastos por tipo de trabajo", "CLIENTE,PROYECTO,SITE")]
+    [InlineData("gastos por tarea", "CLIENTE,PROYECTO,SITE")]
+    [InlineData("gastos por site y moneda", "CLIENTE,PROYECTO,SITE")]
+    [InlineData("gastos por proyecto y estado", "CLIENTE,PROYECTO,ESTADO")]
+    [InlineData("gastos por responsable y estado", "RESPONSABLE,ESTADO")]
+    public void AgrupaSegunLaJerarquiaClienteProyectoSite(string pregunta, string esperadas)
+    {
+        Assert.True(BuscarPlanillaQuestionHeuristics.TryResolveSummaryDimensions(pregunta, out var dimensions));
+        Assert.Equal(esperadas.Split(','), BuscarPlanillaQuestionHeuristics.ApplyHierarchicalGrouping(dimensions));
+    }
+
+    [Theory]
+    [InlineData("Claro", null, null, "gastos del cliente Claro", "CLIENTE")]
+    [InlineData("Claro", "Torres", null, "gastos del proyecto Torres", "CLIENTE,PROYECTO")]
+    [InlineData("Claro", "Torres", "Lima 01", "gastos del site Lima 01", "CLIENTE,PROYECTO,SITE")]
+    [InlineData(null, null, null, "gastos de setiembre", null)]
+    [InlineData("Claro", null, null, "detalle de gastos del cliente Claro", null)]
+    public void UnaConsultaFiltradaSeResumeSegunLaJerarquia(string? cliente, string? proyecto, string? site, string pregunta, string? esperadas)
+    {
+        var args = new BuscarPlanillaArgs { Cliente = cliente, Proyecto = proyecto, Site = site };
+
+        var resuelto = BuscarPlanillaQuestionHeuristics.TryResolveDimensionsFromFilters(args, pregunta, out var dimensions);
+
+        Assert.Equal(esperadas is not null, resuelto);
+        Assert.Equal(esperadas?.Split(',') ?? [], dimensions);
+    }
+
+    [Fact]
+    public void ElResumenJerarquicoSeAgregaAlPayloadSinPerderElDetalle()
+    {
+        var resumen = new PlanillaResumenExecutionResult
+        {
+            Groups = [new() { ["Cliente"] = "CLARO", ["Moneda"] = "SOLES", ["Registros"] = 2 }],
+            TotalsByCurrency = [new() { ["Moneda"] = "SOLES", ["Registros"] = 2 }],
+            TotalRows = 2
+        };
+
+        var node = (System.Text.Json.Nodes.JsonObject)GastosAnalysisService.AddHierarchicalSummary(
+            new { totalRows = 2 }, ["CLIENTE"], resumen);
+
+        Assert.Equal(2, (int)node["totalRows"]!);
+        Assert.Equal("CLARO", (string)node["hierarchicalSummary"]!["groups"]![0]!["Cliente"]!);
+    }
+
+    [Fact]
+    public void UnMismoSiteConVariasMonedas_QuedaJuntoConTodasSusMonedas()
+    {
+        static Dictionary<string, object?> Fila(string site, string moneda) => new()
+        {
+            ["Cliente"] = "CLARO", ["Proyecto"] = "P1", ["Site"] = site, ["Moneda"] = moneda,
+            ["Registros"] = 1, ["TotalMonedaOriginal"] = 10m
+        };
+
+        var ordenadas = GastosAnalysisService.KeepCurrenciesTogether(
+            [Fila("A", "SOLES"), Fila("B", "SOLES"), Fila("A", "DOLARES"), Fila("B", "DOLARES")]);
+
+        Assert.Equal(new[] { "A", "A", "B", "B" }, ordenadas.Select(f => (string)f["Site"]!));
+        Assert.Equal(new[] { "SOLES", "DOLARES", "SOLES", "DOLARES" }, ordenadas.Select(f => (string)f["Moneda"]!));
+    }
+
+    [Theory]
     [InlineData("gastos pendientes de setiembre 2026")]
     [InlineData("gastos del cliente Claro")]
     [InlineData("gastos por aprobar")]                        // "por aprobar" no es una dimension
