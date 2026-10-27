@@ -344,6 +344,8 @@ public class OrdenCompraService : IOrdenCompraService
             Ot = @Ot,
             IdComprobante = COALESCE(@IdComprobante, @IdComprobanteCabecera),
             IdEstado = COALESCE(@IdEstadoDetalle, det.IdEstado),
+            -- sp_OrdenCompra_Insertar (no versionado) graba el precio a 2 decimales; la columna es numeric(18,4).
+            PrecioUnitario = CAST(@PrecioUnitarioTexto AS DECIMAL(18,4)),
             UsuarioCreacion = @UsuarioCreacion,
             FechaCreacion = @FechaCreacion,
             HoraCreacion = @HoraCreacion
@@ -840,6 +842,7 @@ public class OrdenCompraService : IOrdenCompraService
                              IdComprobante = item.IdComprobante,
                              IdComprobanteCabecera = request.IdComprobante,
                              IdEstadoDetalle = item.IdEstadoDetalle,
+                             PrecioUnitarioTexto = item.PrecioUnitario.ToString("0.0000", CultureInfo.InvariantCulture),
                              UsuarioCreacion = NullIfWhiteSpace(request.UsuarioCreacion),
                              FechaCreacion = request.FechaCreacion.Date,
                              HoraCreacion = request.HoraCreacion,

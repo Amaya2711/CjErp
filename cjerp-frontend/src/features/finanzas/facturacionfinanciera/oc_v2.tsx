@@ -464,6 +464,16 @@ function formatMoney(value: number | null | undefined) {
   return toNumber(value).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// Precio unitario: la BD guarda 4 decimales (numeric(18,4)); se muestran los reales (mínimo 2, máximo 4).
+function formatPrecioUnitario(value: number | null | undefined) {
+  return toNumber(value).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+}
+
+// Montos de la OC (subtotal, IGV, total): se muestran con 4 decimales, como se guardan.
+function formatMonto4(value: number | null | undefined) {
+  return toNumber(value).toLocaleString("es-PE", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+}
+
 function formatOcGastosNumber(value: unknown) {
   const text = String(value ?? "").trim();
   if (!text || text === "—") return "—";
@@ -906,6 +916,8 @@ export default function OcV2Page() {
   const [solicitanteOptions, setSolicitanteOptions] = useState<ConstanteOption[]>([]);
   const [gestorOptions, setGestorOptions] = useState<ConstanteOption[]>([]);
   const [validadorOptions, setValidadorOptions] = useState<ConstanteOption[]>([]);
+  // Validadores del solicitante elegido (los que ofrece el combo Validador); validadorOptions es el catálogo completo para etiquetas.
+  const [validadoresSolicitanteOptions, setValidadoresSolicitanteOptions] = useState<ConstanteOption[]>([]);
   const [responsableOptions, setResponsableOptions] = useState<EmpleadoCta[]>([]);
   const opcionesDependientesRequestRef = useRef(0);
   const [mostrarConfirmacionRechazo, setMostrarConfirmacionRechazo] = useState(false);
@@ -1035,8 +1047,12 @@ export default function OcV2Page() {
     [approvalTabPermissions]
   );
 
+  const opcionesRegistroCargadasRef = useRef(false);
   useEffect(() => {
-    if (!cabecerasListas) return;
+    // En Registro los combos se cargan de inmediato: esperar a la bandeja (consulta pesada, ~10 s) los retrasaba.
+    if (!cabecerasListas && vistaOc !== "registro") return;
+    if (opcionesRegistroCargadasRef.current) return;
+    opcionesRegistroCargadasRef.current = true;
     const loadOptions = async () => {
       try {
         const [solicitantes, responsables, gestores] = await Promise.allSettled([
@@ -1069,20 +1085,20 @@ export default function OcV2Page() {
     };
 
     void loadOptions();
-  }, [cabecerasListas, userCargoId, userId]);
+  }, [cabecerasListas, vistaOc, userCargoId, userId]);
 
   const cargarOpcionesDependientesSolicitante = async (idSolicitante: number) => {
     const requestId = ++opcionesDependientesRequestRef.current;
     setGestorOptions([]);
-    // No limpiar este catálogo: contiene todos los gestores cargados desde
-    // dbo.sp_ListarGestor y debe seguir disponible al cambiar solicitante.
-    // Solo se actualiza el valor seleccionado con el validador sugerido.
+    setValidadoresSolicitanteOptions([]);
+    // validadorOptions (catálogo completo de dbo.sp_ListarGestor) no se limpia: se usa para etiquetas de la bandeja.
 
     try {
       const { gestores, validadores } = await listarGestorValidadorOptions(idSolicitante);
 
       if (requestId !== opcionesDependientesRequestRef.current) return;
       setGestorOptions(gestores);
+      setValidadoresSolicitanteOptions(validadores);
       // No limitar el selector a los validadores retornados para el solicitante:
       // conserva el catálogo completo de dbo.sp_ListarGestor. Si el valor
       // asignado no viniera en ese catálogo, se agrega para que siga visible.
@@ -2218,7 +2234,9 @@ export default function OcV2Page() {
 
   const openNuevo = () => {
     const solicitanteDefault = userId > 0 ? String(userId) : "";
-    const validadorDefault = validadorOptions[0] ? normalizeOptionValue(validadorOptions[0]) : "";
+    // El validador depende del solicitante: se completa al cargar sus opciones (cargarOpcionesDependientesSolicitante).
+    const validadorDefault = "";
+    setValidadoresSolicitanteOptions([]);
     const responsableDefault =
       responsableOptions.find((item) => item.idEmpleado === userId)?.idEmpleado ??
       responsableOptions[0]?.idEmpleado ??
@@ -2245,6 +2263,7 @@ export default function OcV2Page() {
     setMessage("");
     setError("");
     setPanelOpen(true);
+    if (userId > 0) void cargarOpcionesDependientesSolicitante(userId);
   };
 
   const closePanel = () => {
@@ -2271,6 +2290,16 @@ export default function OcV2Page() {
         listarGestorOptions(),
       ]);
       setGestorOptions(gestores);
+      // Validadores del solicitante de la OC; si el validador guardado no viene en la lista, se agrega para que siga visible.
+      const validadoresOc = await listarGestorValidadorOptions(oc.idSolicitante)
+        .then((resultado) => resultado.validadores)
+        .catch(() => [] as ConstanteOption[]);
+      const idValidadorOc = String(oc.idValidador ?? "");
+      const incluyeValidador = validadoresOc.some((option) => normalizeOptionValue(option) === idValidadorOc);
+      const validadorGuardado = incluyeValidador || !idValidadorOc
+        ? []
+        : [...gestores, ...validadorOptions].filter((option) => normalizeOptionValue(option) === idValidadorOc).slice(0, 1);
+      setValidadoresSolicitanteOptions([...validadoresOc, ...validadorGuardado]);
       const fechaOrden = oc.fechaOrden ? oc.fechaOrden.slice(0, 10) : today;
       const detallesCargados: OrdenCompraDraftDetalle[] = oc.detalle.map((item, index) => ({
         ...createEmptyDetalle(),
@@ -2597,8 +2626,8 @@ export default function OcV2Page() {
     { dataField: "nro", caption: "N°", dataType: "number", width: 60, alignment: "left", calculateCellValue: (item) => (masivoPreview?.filas.indexOf(item) ?? -1) + 1 },
     { dataField: "detalle", caption: "Detalle", width: 380, calculateCellValue: (item) => item.detalle },
     { dataField: "cantidad", caption: "Cantidad", dataType: "number", width: 100, calculateCellValue: (item) => toNumber(item.cantidad), cellRender: (_value, item) => formatMoney(toNumber(item.cantidad)) },
-    { dataField: "precioUnitario", caption: "Precio unit.", dataType: "number", width: 110, calculateCellValue: (item) => toNumber(item.precioUnitario), cellRender: (_value, item) => formatMoney(toNumber(item.precioUnitario)) },
-    { dataField: "subtotal", caption: "Subtotal", dataType: "number", width: 110, calculateCellValue: (item) => toNumber(item.cantidad) * toNumber(item.precioUnitario), cellRender: (_value, item) => formatMoney(toNumber(item.cantidad) * toNumber(item.precioUnitario)) },
+    { dataField: "precioUnitario", caption: "Precio unit.", dataType: "number", width: 110, calculateCellValue: (item) => toNumber(item.precioUnitario), cellRender: (_value, item) => formatPrecioUnitario(toNumber(item.precioUnitario)) },
+    { dataField: "subtotal", caption: "Subtotal", dataType: "number", width: 110, calculateCellValue: (item) => toNumber(item.cantidad) * toNumber(item.precioUnitario), cellRender: (_value, item) => formatMonto4(toNumber(item.cantidad) * toNumber(item.precioUnitario)) },
   ];
 
   const editDetalle = useCallback((item: OrdenCompraDraftDetalle) => {
@@ -3026,15 +3055,15 @@ export default function OcV2Page() {
       dataType: "number",
       width: 110,
       calculateCellValue: (item) => toNumber(item.subtotal),
-      cellRender: (_value, item) => <span style={styles.approvalAmount}>{formatMoney(item.subtotal)}</span>,
+      cellRender: (_value, item) => <span style={styles.approvalAmount}>{formatMonto4(item.subtotal)}</span>,
     },
     { dataField: "moneda", caption: "Moneda", width: 90, calculateCellValue: (item) => normalizarTexto(item.moneda) || "-" },
     // Columnas opcionales (selector de columnas).
     { dataField: "validadorBandeja", caption: "Validador", width: 180, visible: false, calculateCellValue: (item) => getValidadorAgrupacion(item) },
     { dataField: "nombreProyecto", caption: "Proyecto", width: 170, visible: false, calculateCellValue: (item) => normalizarTexto(item.nombreProyecto) || "-" },
     { dataField: "nombreSite", caption: "Site", width: 170, visible: false, calculateCellValue: (item) => normalizarTexto(item.nombreSite) || "-" },
-    { dataField: "igv", caption: "IGV", dataType: "number", width: 100, visible: false, calculateCellValue: (item) => toNumber(item.igv), cellRender: (_value, item) => formatMoney(item.igv) },
-    { dataField: "total", caption: "Total", dataType: "number", width: 110, visible: false, calculateCellValue: (item) => toNumber(item.total), cellRender: (_value, item) => formatMoney(item.total) },
+    { dataField: "igv", caption: "IGV", dataType: "number", width: 100, visible: false, calculateCellValue: (item) => toNumber(item.igv), cellRender: (_value, item) => formatMonto4(item.igv) },
+    { dataField: "total", caption: "Total", dataType: "number", width: 110, visible: false, calculateCellValue: (item) => toNumber(item.total), cellRender: (_value, item) => formatMonto4(item.total) },
     // Agrupaciones de la bandeja (las elige el selector "Agrupar por").
     {
       dataField: "grpSolicitante",
@@ -3134,10 +3163,10 @@ export default function OcV2Page() {
       ),
     },
     { dataField: "cantidad", caption: "Cantidad", dataType: "number", width: 90, calculateCellValue: (item) => toNumber(item.cantidad), cellRender: (_value, item) => formatMoney(item.cantidad) },
-    { dataField: "precioUnitario", caption: "Precio unit.", dataType: "number", width: 100, calculateCellValue: (item) => toNumber(item.precioUnitario), cellRender: (_value, item) => formatMoney(item.precioUnitario) },
-    { dataField: "subtotalD", caption: "Subtotal", dataType: "number", width: 100, calculateCellValue: (item) => toNumber(item.subtotalD), cellRender: (_value, item) => formatMoney(item.subtotalD) },
-    { dataField: "igvD", caption: "IGV", dataType: "number", width: 90, calculateCellValue: (item) => toNumber(item.igvD), cellRender: (_value, item) => formatMoney(item.igvD) },
-    { dataField: "totalD", caption: "Total", dataType: "number", width: 100, calculateCellValue: (item) => toNumber(item.totalD), cellRender: (_value, item) => formatMoney(item.totalD) },
+    { dataField: "precioUnitario", caption: "Precio unit.", dataType: "number", width: 100, calculateCellValue: (item) => toNumber(item.precioUnitario), cellRender: (_value, item) => formatPrecioUnitario(toNumber(item.precioUnitario)) },
+    { dataField: "subtotalD", caption: "Subtotal", dataType: "number", width: 100, calculateCellValue: (item) => toNumber(item.subtotalD), cellRender: (_value, item) => formatMonto4(item.subtotalD) },
+    { dataField: "igvD", caption: "IGV", dataType: "number", width: 90, calculateCellValue: (item) => toNumber(item.igvD), cellRender: (_value, item) => formatMonto4(item.igvD) },
+    { dataField: "totalD", caption: "Total", dataType: "number", width: 100, calculateCellValue: (item) => toNumber(item.totalD), cellRender: (_value, item) => formatMonto4(item.totalD) },
     {
       dataField: "adjuntos",
       caption: "Adjuntos",
@@ -3651,9 +3680,9 @@ export default function OcV2Page() {
               </div>
             ) : (
               <div style={styles.summaryInline}>
-                <span>Subtotal: {formatMoney(selectedCabecera?.subtotal)}</span>
-                <span>IGV: {formatMoney(selectedCabecera?.igv)}</span>
-                <span>Total: {formatMoney(selectedCabecera?.total)}</span>
+                <span>Subtotal: {formatMonto4(selectedCabecera?.subtotal)}</span>
+                <span>IGV: {formatMonto4(selectedCabecera?.igv)}</span>
+                <span>Total: {formatMonto4(selectedCabecera?.total)}</span>
               </div>
             )
           ) : null}
@@ -3851,9 +3880,9 @@ export default function OcV2Page() {
               </div>
               <div style={styles.summaryBoard}>
                 <SummaryCard label="Items" value={String(draft.detalles.length)} />
-                <SummaryCard label="Subtotal" value={formatMoney(draftTotals.subtotal)} />
-                <SummaryCard label="IGV" value={formatMoney(draftTotals.igv)} />
-                <SummaryCard label="Total" value={formatMoney(draftTotals.total)} />
+                <SummaryCard label="Subtotal" value={formatMonto4(draftTotals.subtotal)} />
+                <SummaryCard label="IGV" value={formatMonto4(draftTotals.igv)} />
+                <SummaryCard label="Total" value={formatMonto4(draftTotals.total)} />
               </div>
             </section>
           </div>
@@ -4318,7 +4347,7 @@ export default function OcV2Page() {
                       <td style={styles.td} title={item.tareaResumen}>{item.tareaResumen || "-"}</td>
                       <td style={styles.td}>{item.solicitante}</td>
                       <td style={styles.td}>{item.comprobante}</td>
-                      <td style={styles.td}>{formatMoney(item.subtotal)}</td>
+                      <td style={styles.td}>{formatMonto4(item.subtotal)}</td>
                       <td style={styles.td}>{item.estado}</td>
                       <td style={styles.td}><ValidationBadge value={item.idAprobador1} /></td>
                       <td style={styles.td}><ValidationBadge value={item.idAprobador2} /></td>
@@ -4641,9 +4670,9 @@ export default function OcV2Page() {
                           </td>
                           <td style={styles.td}>{row.cantidad ?? 0}</td>
                           <td style={styles.td}>{formatMoney(row.precioUnitario)}</td>
-                          <td style={styles.td}>{formatMoney(row.subtotalD)}</td>
-                          <td style={styles.td}>{formatMoney(row.igvD)}</td>
-                          <td style={styles.td}>{formatMoney(row.totalD)}</td>
+                          <td style={styles.td}>{formatMonto4(row.subtotalD)}</td>
+                          <td style={styles.td}>{formatMonto4(row.igvD)}</td>
+                          <td style={styles.td}>{formatMonto4(row.totalD)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -4731,9 +4760,9 @@ export default function OcV2Page() {
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
               <div style={{ display: "flex", gap: 12 }}>
-                <SummaryCard label="Subtotal" value={formatMoney(draftTotals.subtotal)} />
-                <SummaryCard label="IGV" value={formatMoney(draftTotals.igv)} />
-                <SummaryCard label="Total" value={formatMoney(draftTotals.total)} />
+                <SummaryCard label="Subtotal" value={formatMonto4(draftTotals.subtotal)} />
+                <SummaryCard label="IGV" value={formatMonto4(draftTotals.igv)} />
+                <SummaryCard label="Total" value={formatMonto4(draftTotals.total)} />
                 <SummaryCard label="Peso" value={formatMoney(draftTotals.peso)} />
               </div>
               <div style={{ display: "flex", gap: 10 }}>
@@ -4785,7 +4814,7 @@ export default function OcV2Page() {
               <Label>Validador</Label>
               <select disabled={!draft.solicitante} value={draft.validador} onChange={(event) => setDraft((prev) => ({ ...prev, validador: event.target.value }))} style={styles.input}>
                 <option value="">Seleccione...</option>
-                {validadorOptions.map((option) => (
+                {validadoresSolicitanteOptions.map((option) => (
                   <option key={`val-${normalizeOptionValue(option)}`} value={normalizeOptionValue(option)}>{option.label}</option>
                 ))}
               </select>
@@ -4900,7 +4929,7 @@ export default function OcV2Page() {
               <BufferedNumberInput
                 type="number"
                 min="0"
-                step="0.01"
+                step="0.0001"
                 value={detalleForm.precioUnitario}
                 onBlur={syncDetalleBuffer}
                 onValueChange={handlePrecioUnitarioInputChange}
@@ -4909,7 +4938,7 @@ export default function OcV2Page() {
             </Field>
             <Field>
               <Label>Subtotal</Label>
-              <input type="text" readOnly value={formatMoney(toNumber(cantidadInputRef.current) * toNumber(precioUnitarioInputRef.current))} style={{ ...styles.input2, background: "#F8FAFC" }} />
+              <input type="text" readOnly value={formatMonto4(toNumber(cantidadInputRef.current) * toNumber(precioUnitarioInputRef.current))} style={{ ...styles.input2, background: "#F8FAFC" }} />
             </Field>
             <Field>
               <Label>IGV</Label>
@@ -4917,7 +4946,7 @@ export default function OcV2Page() {
                 const subtotal = toNumber(cantidadInputRef.current) * toNumber(precioUnitarioInputRef.current);
                 const igv = subtotal * tasaIgvPorComprobante(draft.comprobante);
                 return (
-                  <input type="text" readOnly value={formatMoney(igv)} style={{ ...styles.input2, background: "#F8FAFC" }} />
+                  <input type="text" readOnly value={formatMonto4(igv)} style={{ ...styles.input2, background: "#F8FAFC" }} />
                 );
               })()}
             </Field>
@@ -5108,10 +5137,10 @@ export default function OcV2Page() {
                         <td style={styles.td}>{getOptionLabel(monedaOptions, item.moneda)}</td>
                         <td style={styles.td}>{item.diasPago}</td>
                         <td style={styles.td}>{formatMoney(toNumber(item.cantidad))}</td>
-                        <td style={styles.td}>{formatMoney(toNumber(item.precioUnitario))}</td>
-                        <td style={styles.td}>{formatMoney(subtotal)}</td>
-                        <td style={styles.td}>{formatMoney(igv)}</td>
-                        <td style={styles.td}>{formatMoney(total)}</td>
+                        <td style={styles.td}>{formatPrecioUnitario(toNumber(item.precioUnitario))}</td>
+                        <td style={styles.td}>{formatMonto4(subtotal)}</td>
+                        <td style={styles.td}>{formatMonto4(igv)}</td>
+                        <td style={styles.td}>{formatMonto4(total)}</td>
                         <td style={styles.td}>{[item.ocClienteNombre || item.imgOc ? "OC cliente" : "", item.presupuestoNombre || item.imgPresupuesto ? "Presupuesto" : ""].filter(Boolean).join(" / ")}</td>
                     <td style={styles.td}>{editingDetalleId === item.tempId ? "En ediciÃ³n" : "Pendiente"}</td>
                       </tr>
@@ -5186,8 +5215,8 @@ export default function OcV2Page() {
                       <td style={styles.td}>{item.filtroOperativo.tarea?.tarea ?? ""}</td>
                       <td style={styles.td}>{item.detalle}</td>
                       <td style={styles.td}>{formatMoney(toNumber(item.cantidad))}</td>
-                      <td style={styles.td}>{formatMoney(toNumber(item.precioUnitario))}</td>
-                      <td style={styles.td}>{formatMoney(toNumber(item.cantidad) * toNumber(item.precioUnitario))}</td>
+                      <td style={styles.td}>{formatPrecioUnitario(toNumber(item.precioUnitario))}</td>
+                      <td style={styles.td}>{formatMonto4(toNumber(item.cantidad) * toNumber(item.precioUnitario))}</td>
                       <td style={styles.td}>{formatMoney(toNumber(item.peso))}</td>
                     </tr>
                   ))
@@ -6022,10 +6051,10 @@ const DraftDetalleTable = React.memo(function DraftDetalleTable({
     { dataField: "moneda", caption: "Moneda", width: 100, calculateCellValue: (item) => getOptionLabel(monedaOptions, item.moneda) },
     { dataField: "diasPago", caption: "Días de pago", width: 100, calculateCellValue: (item) => item.diasPago },
     { dataField: "cantidad", caption: "Cantidad", dataType: "number", width: 90, calculateCellValue: (item) => toNumber(item.cantidad), cellRender: (_value, item) => formatMoney(toNumber(item.cantidad)) },
-    { dataField: "precioUnitario", caption: "Precio unit.", dataType: "number", width: 100, calculateCellValue: (item) => toNumber(item.precioUnitario), cellRender: (_value, item) => formatMoney(toNumber(item.precioUnitario)) },
-    { dataField: "subtotal", caption: "Subtotal", dataType: "number", width: 100, calculateCellValue: (item) => calcular(item).subtotal, cellRender: (_value, item) => formatMoney(calcular(item).subtotal) },
-    { dataField: "igv", caption: "IGV", dataType: "number", width: 90, calculateCellValue: (item) => calcular(item).igv, cellRender: (_value, item) => formatMoney(calcular(item).igv) },
-    { dataField: "total", caption: "Total", dataType: "number", width: 100, calculateCellValue: (item) => calcular(item).total, cellRender: (_value, item) => formatMoney(calcular(item).total) },
+    { dataField: "precioUnitario", caption: "Precio unit.", dataType: "number", width: 100, calculateCellValue: (item) => toNumber(item.precioUnitario), cellRender: (_value, item) => formatPrecioUnitario(toNumber(item.precioUnitario)) },
+    { dataField: "subtotal", caption: "Subtotal", dataType: "number", width: 100, calculateCellValue: (item) => calcular(item).subtotal, cellRender: (_value, item) => formatMonto4(calcular(item).subtotal) },
+    { dataField: "igv", caption: "IGV", dataType: "number", width: 90, calculateCellValue: (item) => calcular(item).igv, cellRender: (_value, item) => formatMonto4(calcular(item).igv) },
+    { dataField: "total", caption: "Total", dataType: "number", width: 100, calculateCellValue: (item) => calcular(item).total, cellRender: (_value, item) => formatMonto4(calcular(item).total) },
     {
       dataField: "adjuntos",
       caption: "Adjuntos",
