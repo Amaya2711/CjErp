@@ -52,6 +52,7 @@ const ActFacturaPage = lazy(() => import("../../features/finanzas/facturacionfin
 const OcPage = lazy(() => import("../../features/finanzas/facturacionfinanciera/oc"));
 const OcV1Page = lazy(() => import("../../features/finanzas/facturacionfinanciera/oc_v1"));
 const OcV2Page = lazy(() => import("../../features/finanzas/facturacionfinanciera/oc_v2"));
+const OcMasivoV1Page = lazy(() => import("../../features/finanzas/facturacionfinanciera/oc_masivo_v1"));
 const AsientosPage = lazy(() => import("../../features/finanzas/contabilidad/asientos"));
 const CierreContablePage = lazy(() => import("../../features/finanzas/contabilidad/cierrecontable"));
 const LibroDiarioPage = lazy(() => import("../../features/finanzas/contabilidad/librodiario"));
@@ -347,6 +348,7 @@ export default function AppRouter() {
             <Route path="/finanzas/facturacionfinanciera/oc" element={<OcPage />} />
             <Route path="/finanzas/facturacionfinanciera/oc_v1" element={<OcV1Page />} />
             <Route path="/finanzas/facturacionfinanciera/oc_v2" element={<OcV2Page />} />
+            <Route path="/finanzas/facturacionfinanciera/oc_masivo_v1" element={<OcMasivoV1Page />} />
 
             <Route
               path="/finanzas/contabilidad"

@@ -18,12 +18,14 @@ import {
   descargarArchivoOrdenCompra,
   descargarOrdenCompraPdf,
   generarPagoNuevoOrdenCompra,
+  generarPagoNuevoMasivoOrdenCompra,
   insertarOrdenCompra,
   obtenerOrdenCompraEdicion,
   rechazarOrdenCompraMasivo,
   subirArchivoOrdenCompra,
   type OrdenCompraCabeceraDto,
   type OrdenCompraDetalleDto,
+  type OrdenCompraGenerarPagoNuevoPayload,
   type OrdenCompraInsertPayload,
   type OrdenCompraMontoOcDto,
   type OrdenCompraReciboDto,
@@ -41,8 +43,7 @@ import type { ConstanteOption } from "../../../models/constante";
 import type { EmpleadoCta } from "../../../models/empleadoCta";
 import type { FiltroOperativoValue } from "../../../models/filtroOperativo";
 import { getHttpErrorMessage } from "../../../utils/httpError";
-import { Eye, FileDown, FileText } from "lucide-react";
-import { buildPlanillaConsultaEstadosRequest, consultarGastosPagadosPorId, consultarPlanillaEstados } from "../../../api/planillaConsultaService";
+import { Eye, FileDown, FileText } from "lucide-react";import { buildPlanillaConsultaEstadosRequest, consultarGastosPagadosPorId, consultarPlanillaEstados } from "../../../api/planillaConsultaService";
 import GastosPage, { type GastoEditorRequest } from "../tesoreria/gastos";
 import DataGridPro from "../../../components/datagrid/DataGridPro";
 import OcResumenPanel from "./OcResumenPanel";
@@ -696,6 +697,8 @@ function downloadBlob(blob: Blob, fileName: string) {
 }
 
 export default function OcV2Page() {
+  const masivoInputRef = useRef<HTMLInputElement>(null);
+  const [masivoPreview, setMasivoPreview] = useState<{ nombre: string; filas: OrdenCompraDraftDetalle[] } | null>(null);
   const authUser = getAuthUser();
   const userId = toPositiveNumber(authUser?.idEmpleado, authUser?.codEmp);
   const userCargoId = toPositiveNumber(authUser?.idCargo, authUser?.idrol);
@@ -755,6 +758,10 @@ export default function OcV2Page() {
     montoTexto: string;
     saldoAvanceTexto: string;
   } | null>(null);
+  const [ocGastosSeleccionadas, setOcGastosSeleccionadas] = useState<string[]>([]);
+  const [pagoMasivoConfirmar, setPagoMasivoConfirmar] = useState(false);
+  const [pagoMasivoEnProceso, setPagoMasivoEnProceso] = useState(false);
+  const [pagoMasivoProgreso, setPagoMasivoProgreso] = useState("");
   const [resultadoPagoNuevo, setResultadoPagoNuevo] = useState<{
     tipo: "exito" | "error";
     titulo: string;
@@ -2497,6 +2504,103 @@ export default function OcV2Page() {
     }, 0);
   };
 
+  // Carga masiva: cada fila del Excel (detalle, cantidad, precio) crea una posición con el resto de datos del formulario actual.
+  const cargarDetalleMasivo = async (file: File) => {
+    if (editingDetalleId) {
+      setError("Termine o cancele la edición de la posición antes de usar Masivo.");
+      return;
+    }
+
+    const base = {
+      ...detalleForm,
+      peso: resolveBufferedValue(pesoInputRef.current, detalleForm.peso),
+      comprobante: draft.comprobante,
+      formaPago: draft.formaPago,
+      moneda: draft.moneda,
+      diasPago: resolveBufferedValue(diasPagoInputRef.current, draft.diasPago),
+    };
+    // Valida los datos comunes con valores de ejemplo para detalle/cantidad/precio.
+    if (!validateDetalleForm({ ...base, detalle: "x", cantidad: "1", precioUnitario: "1" })) {
+      setError("Complete cliente, proyecto, site, tipo de trabajo, tarea, comprobante, tipo de pago y moneda antes de cargar el Excel masivo.");
+      return;
+    }
+
+    try {
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const filas = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "", blankrows: false });
+      const normalizar = (valor: unknown) => String(valor ?? "").trim().toLowerCase();
+      const encabezadoValido =
+        normalizar(filas[0]?.[0]) === "detalle" &&
+        normalizar(filas[0]?.[1]) === "cantidad" &&
+        ["precio", "preciounitario", "precio unitario"].includes(normalizar(filas[0]?.[2]));
+      if (!encabezadoValido) {
+        setError("Formato excel incorrecto");
+        return;
+      }
+      const tieneEncabezado = true;
+      const datos = filas.slice(1);
+
+      const nuevos: OrdenCompraDraftDetalle[] = [];
+      const invalidas: number[] = [];
+      datos.forEach((fila, index) => {
+        const detalle = String(fila[0] ?? "").trim();
+        const cantidad = String(fila[1] ?? "").trim();
+        const precioUnitario = String(fila[2] ?? "").trim();
+        if (!detalle && !cantidad && !precioUnitario) return;
+        if (!detalle || !(toNumber(cantidad) > 0) || !(toNumber(precioUnitario) > 0)) {
+          invalidas.push(index + (tieneEncabezado ? 2 : 1));
+          return;
+        }
+        nuevos.push({
+          ...base,
+          tempId: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          fila: null,
+          filtroOperativo: { ...base.filtroOperativo },
+          detalle,
+          cantidad,
+          precioUnitario,
+        });
+      });
+
+      if (invalidas.length > 0) {
+        setError(`El Excel tiene filas inválidas (detalle, cantidad y precio deben ser válidos y mayores a 0): fila(s) ${invalidas.slice(0, 15).join(", ")}${invalidas.length > 15 ? "…" : ""}. No se cargó ninguna.`);
+        return;
+      }
+      if (nuevos.length === 0) {
+        setError("Formato excel incorrecto");
+        return;
+      }
+
+      setError("");
+      setMasivoPreview({ nombre: file.name, filas: nuevos });
+    } catch {
+      setError("Formato excel incorrecto");
+    }
+  };
+
+  // Confirmado por el usuario: recién aquí se agregan las posiciones al borrador.
+  const confirmarCargaMasiva = () => {
+    const filas = masivoPreview?.filas ?? [];
+    setMasivoPreview(null);
+    if (filas.length === 0) return;
+    setDraft((prev) => ({ ...prev, detalles: [...prev.detalles, ...filas] }));
+    setDetalleForm(createEmptyDetalle());
+    detalleInputRef.current = "";
+    cantidadInputRef.current = "";
+    precioUnitarioInputRef.current = "";
+    pesoInputRef.current = "";
+  };
+
+  const masivoPreviewColumns: GridColumn<OrdenCompraDraftDetalle>[] = [
+    { dataField: "nro", caption: "N°", dataType: "number", width: 60, alignment: "left", calculateCellValue: (item) => (masivoPreview?.filas.indexOf(item) ?? -1) + 1 },
+    { dataField: "detalle", caption: "Detalle", width: 380, calculateCellValue: (item) => item.detalle },
+    { dataField: "cantidad", caption: "Cantidad", dataType: "number", width: 100, calculateCellValue: (item) => toNumber(item.cantidad), cellRender: (_value, item) => formatMoney(toNumber(item.cantidad)) },
+    { dataField: "precioUnitario", caption: "Precio unit.", dataType: "number", width: 110, calculateCellValue: (item) => toNumber(item.precioUnitario), cellRender: (_value, item) => formatMoney(toNumber(item.precioUnitario)) },
+    { dataField: "subtotal", caption: "Subtotal", dataType: "number", width: 110, calculateCellValue: (item) => toNumber(item.cantidad) * toNumber(item.precioUnitario), cellRender: (_value, item) => formatMoney(toNumber(item.cantidad) * toNumber(item.precioUnitario)) },
+  ];
+
   const editDetalle = useCallback((item: OrdenCompraDraftDetalle) => {
     setDetalleForm({ ...item, filtroOperativo: { ...item.filtroOperativo } });
     detalleInputRef.current = item.detalle;
@@ -3279,6 +3383,97 @@ export default function OcV2Page() {
     );
   };
 
+  // Datos de pago de una fila (monto = saldo subtotal vigente/editado). Devuelve el motivo si no se puede pagar.
+  const armarPagoDesdeFila = (row: OcGastosGridRow) => {
+    const original = reportePlanillaRows[Number(row.__key)] as Record<string, unknown> | undefined;
+    const idOc = leerOcGastos(row, "IdOc");
+    if (!original) return { idOc, error: "no se encontró la fila" };
+    if (filaOcGastosRechazada(row)) return { idOc, error: "OC rechazada" };
+
+    const clave = claveSaldoOcGastos(row);
+    const { saldoSubtotalFila, saldoAvanceOcFila } = saldosOcGastos(row);
+    const monto = Number(ocGastosSaldosEditables[clave]?.subtotal ?? saldoSubtotalFila.toFixed(2));
+    const saldoAvance = Number(ocGastosSaldosEditables[clave]?.avance ?? saldoAvanceOcFila.toFixed(2));
+    if (!Number.isFinite(monto) || monto <= 0 || !Number.isFinite(saldoAvance) || saldoAvance <= 0) {
+      return { idOc, error: "saldo subtotal o saldo avance en cero" };
+    }
+
+    const filaRaw = getReporteRowValue(original, "Fila");
+    const fila = filaRaw === null || filaRaw === undefined || String(filaRaw).trim() === "" ? Number.NaN : Number(filaRaw);
+    const idTarea = Number(getReporteRowValue(original, "IdTarea"));
+    const idComprobante = Number(getReporteRowValue(original, "IdComprobante"));
+    const cuenta = String(getReporteRowValue(original, "Cuenta") ?? "").trim();
+    const cuentaInter = String(getReporteRowValue(original, "CuentaInter") ?? "").trim();
+    const nombreCta = String(getReporteRowValue(original, "NombreCta") ?? "").trim();
+    const idOcNum = Number(getReporteRowValue(original, "IdOc"));
+    if (
+      !Number.isInteger(idOcNum) || idOcNum <= 0 || !Number.isInteger(fila) || fila < 0 ||
+      !Number.isInteger(idTarea) || idTarea <= 0 || !Number.isInteger(idComprobante) || idComprobante <= 0 ||
+      (!cuenta && !cuentaInter) || !nombreCta
+    ) {
+      return { idOc, error: "faltan datos de la fila (fila, tarea, comprobante o cuenta)" };
+    }
+    return { idOc, clave, params: { idOc: idOcNum, fila, idTarea, idComprobante, monto, cuenta, cuentaInter, nombreCta } };
+  };
+
+  const filaOcGastosPagable = (row: OcGastosGridRow) => {
+    const { saldoSubtotalFila, saldoAvanceOcFila } = saldosOcGastos(row);
+    return !filaOcGastosRechazada(row) && saldoSubtotalFila > 0 && saldoAvanceOcFila > 0;
+  };
+
+  // Pago masivo: un pago individual (generarPagoNuevoOrdenCompra) por cada fila seleccionada, por su monto registrado.
+  const ejecutarPagoMasivo = async () => {
+    const claves = new Set(ocGastosSeleccionadas);
+    const filas = ocGastosGridRows.filter((row) => claves.has(row.__key));
+    if (filas.length === 0) return;
+
+    setError("");
+    setPagoMasivoEnProceso(true);
+    const generados: string[] = [];
+    const fallidos: string[] = [];
+    try {
+      const pagos: OrdenCompraGenerarPagoNuevoPayload[] = [];
+      for (const row of filas) {
+        const armado = armarPagoDesdeFila(row);
+        if (armado.params) pagos.push(armado.params);
+        else fallidos.push(`OC ${armado.idOc}: ${armado.error}`);
+      }
+
+      // Lotes de 100 por request (límite del backend): cada pago se valida en el servidor, uno tras otro, contra el saldo actualizado.
+      const TAMANO_LOTE = 100;
+      for (let inicio = 0; inicio < pagos.length; inicio += TAMANO_LOTE) {
+        const lote = pagos.slice(inicio, inicio + TAMANO_LOTE);
+        setPagoMasivoProgreso(`${Math.min(inicio + lote.length, pagos.length)}/${pagos.length}`);
+        try {
+          const resultados = await generarPagoNuevoMasivoOrdenCompra(lote);
+          resultados.forEach((resultado) => {
+            if (resultado.success) generados.push(String(resultado.correlativo ?? ""));
+            else fallidos.push(`OC ${resultado.idOc}: ${resultado.message ?? "no se pudo registrar el pago"}`);
+          });
+        } catch (err) {
+          const motivo = getHttpErrorMessage(err, "no se pudo registrar el pago");
+          lote.forEach((pago) => fallidos.push(`OC ${pago.idOc}: ${motivo}`));
+        }
+      }
+      setOcGastosSeleccionadas([]);
+      setOcGastosSaldosEditables({});
+      await loadReporteDetalles();
+    } finally {
+      setPagoMasivoEnProceso(false);
+      setPagoMasivoProgreso("");
+    }
+
+    const resumen = `Pagos generados: ${generados.length} de ${filas.length}.`;
+    const detalleFallos = fallidos.length > 0
+      ? ` No se generaron ${fallidos.length}: ${fallidos.slice(0, 5).join(" | ")}${fallidos.length > 5 ? " …" : ""}`
+      : "";
+    setResultadoPagoNuevo({
+      tipo: fallidos.length === 0 ? "exito" : "error",
+      titulo: fallidos.length === 0 ? "Pago masivo generado" : "Pago masivo con observaciones",
+      mensaje: resumen + detalleFallos,
+    });
+  };
+
   const sinOpcionesDeColumna = {
     allowSorting: false,
     allowFiltering: false,
@@ -3842,6 +4037,15 @@ export default function OcV2Page() {
               </div>
               {reporteSubtab === "oc-gastos" ? (
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <button
+                    type="button"
+                    style={{ ...styles.primaryButton, height: 30, padding: "0 12px", fontSize: 12, whiteSpace: "nowrap", background: "#0F766E", opacity: ocGastosSeleccionadas.length === 0 || pagoMasivoEnProceso ? 0.6 : 1 }}
+                    disabled={ocGastosSeleccionadas.length === 0 || pagoMasivoEnProceso || reporteLoading}
+                    title="Genera un pago individual por cada registro seleccionado, por el monto de su saldo subtotal."
+                    onClick={() => setPagoMasivoConfirmar(true)}
+                  >
+                    {pagoMasivoEnProceso ? `Pagando ${pagoMasivoProgreso}...` : `Pago masivo (${ocGastosSeleccionadas.length})`}
+                  </button>
                   <span style={styles.counterPill}>
                     {reporteLoading ? "Cargando detalle..." : reporteConsultado ? `${reportePlanillaRows.length} registros` : "Seleccione filtros"}
                   </span>
@@ -4010,7 +4214,7 @@ export default function OcV2Page() {
                   Limpiar filtros
                 </button>
                 {reporteSubtab === "listado" && <button type="button" style={{ ...styles.primaryButton, height: 34, minWidth: 76, padding: "0 10px", fontSize: 11, lineHeight: 1.2, whiteSpace: "normal" }} disabled={reporteLoading} onClick={() => { setReporteConsultado(false); void loadReporteDetalles(); }}>Aplicar filtros</button>}
-                {reporteSubtab === "oc-gastos" && <button type="button" style={{ ...styles.primaryButton, height: 34, minWidth: 76, padding: "0 10px", fontSize: 11, lineHeight: 1.2, whiteSpace: "normal" }} disabled={reporteLoading} onClick={() => { setReportePlanillaRows([]); setOcGastosAviso(avisoBusquedaSinFechas(reporteFiltros)); void loadReporteDetalles(); }}>Aplicar filtros</button>}
+                {reporteSubtab === "oc-gastos" && <button type="button" style={{ ...styles.primaryButton, height: 34, minWidth: 76, padding: "0 10px", fontSize: 11, lineHeight: 1.2, whiteSpace: "normal" }} disabled={reporteLoading} onClick={() => { setReportePlanillaRows([]); setOcGastosSeleccionadas([]); setOcGastosAviso(avisoBusquedaSinFechas(reporteFiltros)); void loadReporteDetalles(); }}>Aplicar filtros</button>}
               </div>
             </div>
             {reporteSubtab === "oc-gastos" && ocGastosAviso ? (
@@ -4030,6 +4234,11 @@ export default function OcV2Page() {
                   noDataText={!reporteConsultado ? "Ingrese un filtro y presione Aplicar filtros o Enter en Nro OC." : "No hay registros de Planilla."}
                   stateStoringKey="oc-v2-oc-gastos"
                   focusedRowKey={ocGastosFilaSeleccionada}
+                  selection="multiple"
+                  selectedKeys={ocGastosSeleccionadas}
+                  onSelectionChanged={(keys) => setOcGastosSeleccionadas(keys)}
+                  isRowSelectable={filaOcGastosPagable}
+                  selectionDisabled={pagoMasivoEnProceso}
                   onVisibleRowsChange={(rows) => { ocGastosFilasVisiblesRef.current = rows; }}
                   onRowClick={(item) => setOcGastosFilaSeleccionada(item.__key)}
                   rowStyle={(item) => (filaOcGastosRechazada(item) ? { background: "#FEF2F2" } : undefined)}
@@ -4279,6 +4488,24 @@ export default function OcV2Page() {
         }}
       />
 
+      <ConfirmDialog
+        open={pagoMasivoConfirmar}
+        title="Pago masivo"
+        message={(
+          <>
+            ¿Desea generar <strong>{ocGastosSeleccionadas.length}</strong> pago(s) individual(es), uno por cada registro seleccionado,
+            {" "}por el monto registrado en su saldo subtotal?
+          </>
+        )}
+        confirmLabel="Generar pagos"
+        cancelLabel="Cancelar"
+        onCancel={() => setPagoMasivoConfirmar(false)}
+        onConfirm={() => {
+          setPagoMasivoConfirmar(false);
+          void ejecutarPagoMasivo();
+        }}
+      />
+
       {resultadoPagoNuevo ? (
         <div style={styles.modalOverlay} role="dialog" aria-modal="true" aria-labelledby="resultado-pago-nuevo-titulo">
           <div style={styles.modalCardSmall}>
@@ -4291,6 +4518,41 @@ export default function OcV2Page() {
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 24 }}>
               <button type="button" style={styles.primaryButton} onClick={() => setResultadoPagoNuevo(null)}>
                 Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {masivoPreview ? (
+        <div style={styles.modalOverlay}>
+          <div style={{ ...styles.modalCard, width: "min(820px, 96vw)", maxWidth: "none" }}>
+            <h3 style={{ marginTop: 0, marginBottom: 8, color: "#17143A" }}>Carga masiva de posiciones</h3>
+            <p style={{ marginTop: 0, color: "#4B5563", lineHeight: 1.6 }}>
+              Archivo <strong>{masivoPreview.nombre}</strong>: <strong>{masivoPreview.filas.length}</strong> registro(s) a cargar.
+              Se agregarán a la OC con los datos ya ingresados (cliente, proyecto, site, tarea, comprobante, moneda, etc.).
+            </p>
+            <DataGridPro<OrdenCompraDraftDetalle>
+              dataSource={masivoPreview.filas}
+              keyExpr={(item) => item.tempId}
+              columns={masivoPreviewColumns}
+              height={320}
+              noDataText="Sin registros."
+              paging={false}
+              allowExport={false}
+              showGroupPanel={false}
+              showSearchPanel={false}
+              showFilterRow={false}
+            />
+            <p style={{ margin: "12px 0 0", color: "#17143A", fontWeight: 600 }}>
+              Total de registros: {masivoPreview.filas.length}
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
+              <button type="button" style={styles.secondaryButton} onClick={() => setMasivoPreview(null)}>
+                Cancelar
+              </button>
+              <button type="button" style={styles.primaryButton} onClick={confirmarCargaMasiva}>
+                Cargar {masivoPreview.filas.length} registro(s)
               </button>
             </div>
           </div>
@@ -4764,6 +5026,24 @@ export default function OcV2Page() {
               <button type="button" onClick={upsertDetalle} style={styles.primaryButton}>
                 {editingDetalleId ? "Actualizar posiciÃ³n" : "Agregar"}
               </button>
+              <button
+                type="button"
+                onClick={() => masivoInputRef.current?.click()}
+                style={styles.secondaryButton}
+              >
+                Masivo
+              </button>
+              <input
+                ref={masivoInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                style={{ display: "none" }}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (file) void cargarDetalleMasivo(file);
+                }}
+              />
             </div>
           </div>
 
@@ -5700,105 +5980,90 @@ const DraftDetalleTable = React.memo(function DraftDetalleTable({
   onRemove: (tempId: string) => void;
   onDetalleClick: (detalle: string) => void;
 }) {
-  return (
-    <div style={styles.tableWrap}>
-      <style>{`
-        .oc-detalle-seleccionado > td { border-top: 2px solid #2563EB !important; border-bottom: 2px solid #2563EB !important; background: #EFF6FF !important; }
-        .oc-detalle-seleccionado > td:first-child { border-left: 2px solid #2563EB !important; }
-        .oc-detalle-seleccionado > td:last-child { border-right: 2px solid #2563EB !important; }
-      `}</style>
-      <table style={styles.table}>
-        <thead>
-          <tr>
-            <th style={styles.th}>Acciones</th>
-            <th style={styles.th}>Fila</th>
-            <th style={styles.th}>Cliente</th>
-            <th style={styles.th}>Proyecto</th>
-            <th style={styles.th}>Site</th>
-            <th style={styles.th}>Tipo trabajo</th>
-            <th style={styles.th}>OT</th>
-            <th style={styles.th}>Tarea</th>
-            <th style={styles.th}>Detalle</th>
-            <th style={styles.th}>Comprobante</th>
-            <th style={styles.th}>Tipo de pago</th>
-            <th style={styles.th}>Moneda</th>
-            <th style={styles.th}>Dias de pago</th>
-            <th style={styles.th}>Cantidad</th>
-            <th style={styles.th}>Precio unit.</th>
-            <th style={styles.th}>Subtotal</th>
-            <th style={styles.th}>IGV</th>
-            <th style={styles.th}>Total</th>
-            <th style={styles.th}>Adjuntos</th>
-            <th style={styles.th}>Estado</th>
-          </tr>
-        </thead>
-      </table>
-      <div style={{ width: "100%", maxHeight: "50vh", overflow: "auto" }}>
-        <table style={styles.table}>
-          <tbody>
-            {detalles.length === 0 ? (
-              <tr>
-                <td style={styles.td} colSpan={20}>No hay posiciones registradas.</td>
-              </tr>
-            ) : (
-              detalles.map((item, index) => {
-                  const subtotal = toNumber(item.cantidad) * toNumber(item.precioUnitario);
-                  const igv = subtotal * tasaIgvPorComprobante(item.comprobante);
-                  const total = subtotal + igv;
-                  const isEditing = editingDetalleId === item.tempId;
+  const textoBoton = (texto: string) => (
+    <button type="button" style={styles.truncatedCellButton} title={texto} onClick={(event) => { event.stopPropagation(); onDetalleClick(texto); }}>{texto}</button>
+  );
+  const calcular = (item: OrdenCompraDraftDetalle) => {
+    const subtotal = toNumber(item.cantidad) * toNumber(item.precioUnitario);
+    const igv = subtotal * tasaIgvPorComprobante(item.comprobante);
+    return { subtotal, igv, total: subtotal + igv };
+  };
+  const indiceDe = (item: OrdenCompraDraftDetalle) => detalles.indexOf(item) + 1;
+  const tipoTrabajoDe = (item: OrdenCompraDraftDetalle) => item.filtroOperativo.tipoTrabajo?.tipoTrabajo ?? item.filtroOperativo.filtro?.tipoTrabajo ?? "";
 
-                return (
-                  <tr
-                    key={`top-${item.tempId}`}
-                    className={isEditing ? "oc-detalle-seleccionado" : undefined}
-                    style={styles.tr}
-                    aria-label={isEditing ? "Posición seleccionada" : undefined}
-                    aria-selected={isEditing}
-                    onClick={(event) => {
-                      // Un clic en la fila la selecciona; los botones y enlaces de las celdas conservan su propia acción.
-                      if ((event.target as HTMLElement).closest("button, a, input, select, textarea")) return;
-                      onEdit(item);
-                    }}
-                  >
-                    <td style={styles.td}>
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button type="button" style={styles.smallActionButton} title="Editar posición" aria-label="Editar posición" onClick={() => onEdit(item)}>✎</button>
-                        <button type="button" style={styles.smallDangerButton} title="Eliminar posición" aria-label="Eliminar posición" disabled={isAccepted} onClick={() => onRemove(item.tempId)}>🗑</button>
-                      </div>
-                    </td>
-                    <td style={styles.td}>{index + 1}</td>
-                    <td style={styles.td}><button type="button" style={styles.truncatedCellButton} title={item.filtroOperativo.filtro?.nombreCliente ?? ""} onClick={() => onDetalleClick(item.filtroOperativo.filtro?.nombreCliente ?? "")}>{item.filtroOperativo.filtro?.nombreCliente ?? ""}</button></td>
-                    <td style={styles.td}><button type="button" style={styles.truncatedCellButton} title={item.filtroOperativo.filtro?.nombreProyecto ?? ""} onClick={() => onDetalleClick(item.filtroOperativo.filtro?.nombreProyecto ?? "")}>{item.filtroOperativo.filtro?.nombreProyecto ?? ""}</button></td>
-                    <td style={styles.td}><button type="button" style={styles.truncatedCellButton} title={item.filtroOperativo.filtro?.nombreSite ?? ""} onClick={() => onDetalleClick(item.filtroOperativo.filtro?.nombreSite ?? "")}>{item.filtroOperativo.filtro?.nombreSite ?? ""}</button></td>
-                    <td style={styles.td}><button type="button" style={styles.truncatedCellButton} title={item.filtroOperativo.tipoTrabajo?.tipoTrabajo ?? item.filtroOperativo.filtro?.tipoTrabajo ?? ""} onClick={() => onDetalleClick(item.filtroOperativo.tipoTrabajo?.tipoTrabajo ?? item.filtroOperativo.filtro?.tipoTrabajo ?? "")}>{item.filtroOperativo.tipoTrabajo?.tipoTrabajo ?? item.filtroOperativo.filtro?.tipoTrabajo ?? ""}</button></td>
-                    <td style={styles.td}>{item.filtroOperativo.ot?.ot ?? item.filtroOperativo.filtro?.ot ?? ""}</td>
-                    <td style={styles.td}><button type="button" style={styles.truncatedCellButton} title={item.filtroOperativo.tarea?.tarea ?? ""} onClick={() => onDetalleClick(item.filtroOperativo.tarea?.tarea ?? "")}>{item.filtroOperativo.tarea?.tarea ?? ""}</button></td>
-                    <td style={styles.td}><button type="button" style={styles.truncatedCellButton} title={item.detalle ?? ""} onClick={() => onDetalleClick(item.detalle ?? "")}>{item.detalle || "-"}</button></td>
-                    <td style={styles.td}>{getOptionLabel(comprobanteOptions, item.comprobante)}</td>
-                    <td style={styles.td}>{getOptionLabel(tipoPagoOptions, item.formaPago)}</td>
-                    <td style={styles.td}>{getOptionLabel(monedaOptions, item.moneda)}</td>
-                    <td style={styles.td}>{item.diasPago}</td>
-                    <td style={styles.td}>{formatMoney(toNumber(item.cantidad))}</td>
-                    <td style={styles.td}>{formatMoney(toNumber(item.precioUnitario))}</td>
-                    <td style={styles.td}>{formatMoney(subtotal)}</td>
-                    <td style={styles.td}>{formatMoney(igv)}</td>
-                    <td style={styles.td}>{formatMoney(total)}</td>
-                    <td style={styles.td}>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        {item.imgOc || item.ocClienteArchivo || item.ocClienteNombre ? <AttachmentButton codigo={item.imgOc} archivo={item.ocClienteArchivo} label="Ver OC cliente" /> : null}
-                        {item.imgPresupuesto || item.presupuestoArchivo || item.presupuestoNombre ? <AttachmentButton codigo={item.imgPresupuesto} archivo={item.presupuestoArchivo} label="Ver presupuesto" /> : null}
-                        {!item.imgOc && !item.ocClienteArchivo && !item.ocClienteNombre && !item.imgPresupuesto && !item.presupuestoArchivo && !item.presupuestoNombre ? "-" : null}
-                      </div>
-                    </td>
-                    <td style={styles.td}>{editingDetalleId === item.tempId ? "En ediciÃ³n" : "Pendiente"}</td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
+  const columns: GridColumn<OrdenCompraDraftDetalle>[] = [
+    {
+      dataField: "acciones",
+      caption: "Acciones",
+      width: 90,
+      allowSorting: false,
+      allowFiltering: false,
+      allowHeaderFilter: false,
+      allowSearch: false,
+      calculateCellValue: () => "",
+      cellRender: (_value, item) => (
+        <div style={{ display: "flex", gap: 8 }} onClick={(event) => event.stopPropagation()}>
+          <button type="button" style={styles.smallActionButton} title="Editar posición" aria-label="Editar posición" onClick={() => onEdit(item)}>✎</button>
+          <button type="button" style={styles.smallDangerButton} title="Eliminar posición" aria-label="Eliminar posición" disabled={isAccepted} onClick={() => onRemove(item.tempId)}>🗑</button>
+        </div>
+      ),
+    },
+    { dataField: "fila", caption: "Fila", dataType: "number", width: 70, alignment: "left", calculateCellValue: indiceDe },
+    { dataField: "cliente", caption: "Cliente", width: 180, calculateCellValue: (item) => item.filtroOperativo.filtro?.nombreCliente ?? "", cellRender: (value) => textoBoton(String(value ?? "")) },
+    { dataField: "proyecto", caption: "Proyecto", width: 180, calculateCellValue: (item) => item.filtroOperativo.filtro?.nombreProyecto ?? "", cellRender: (value) => textoBoton(String(value ?? "")) },
+    { dataField: "site", caption: "Site", width: 180, calculateCellValue: (item) => item.filtroOperativo.filtro?.nombreSite ?? "", cellRender: (value) => textoBoton(String(value ?? "")) },
+    { dataField: "tipoTrabajo", caption: "Tipo trabajo", width: 140, calculateCellValue: tipoTrabajoDe, cellRender: (value) => textoBoton(String(value ?? "")) },
+    { dataField: "ot", caption: "OT", width: 110, calculateCellValue: (item) => item.filtroOperativo.ot?.ot ?? item.filtroOperativo.filtro?.ot ?? "" },
+    { dataField: "tarea", caption: "Tarea", width: 140, calculateCellValue: (item) => item.filtroOperativo.tarea?.tarea ?? "", cellRender: (value) => textoBoton(String(value ?? "")) },
+    { dataField: "detalle", caption: "Detalle", width: 260, calculateCellValue: (item) => item.detalle ?? "", cellRender: (value) => textoBoton(String(value || "-")) },
+    { dataField: "comprobante", caption: "Comprobante", width: 120, calculateCellValue: (item) => getOptionLabel(comprobanteOptions, item.comprobante) },
+    { dataField: "formaPago", caption: "Tipo de pago", width: 120, calculateCellValue: (item) => getOptionLabel(tipoPagoOptions, item.formaPago) },
+    { dataField: "moneda", caption: "Moneda", width: 100, calculateCellValue: (item) => getOptionLabel(monedaOptions, item.moneda) },
+    { dataField: "diasPago", caption: "Días de pago", width: 100, calculateCellValue: (item) => item.diasPago },
+    { dataField: "cantidad", caption: "Cantidad", dataType: "number", width: 90, calculateCellValue: (item) => toNumber(item.cantidad), cellRender: (_value, item) => formatMoney(toNumber(item.cantidad)) },
+    { dataField: "precioUnitario", caption: "Precio unit.", dataType: "number", width: 100, calculateCellValue: (item) => toNumber(item.precioUnitario), cellRender: (_value, item) => formatMoney(toNumber(item.precioUnitario)) },
+    { dataField: "subtotal", caption: "Subtotal", dataType: "number", width: 100, calculateCellValue: (item) => calcular(item).subtotal, cellRender: (_value, item) => formatMoney(calcular(item).subtotal) },
+    { dataField: "igv", caption: "IGV", dataType: "number", width: 90, calculateCellValue: (item) => calcular(item).igv, cellRender: (_value, item) => formatMoney(calcular(item).igv) },
+    { dataField: "total", caption: "Total", dataType: "number", width: 100, calculateCellValue: (item) => calcular(item).total, cellRender: (_value, item) => formatMoney(calcular(item).total) },
+    {
+      dataField: "adjuntos",
+      caption: "Adjuntos",
+      width: 150,
+      allowSorting: false,
+      allowFiltering: false,
+      allowHeaderFilter: false,
+      allowSearch: false,
+      calculateCellValue: () => "",
+      cellRender: (_value, item) => {
+        const tieneOc = Boolean(item.imgOc || item.ocClienteArchivo || item.ocClienteNombre);
+        const tienePresupuesto = Boolean(item.imgPresupuesto || item.presupuestoArchivo || item.presupuestoNombre);
+        return (
+          <div style={{ display: "flex", gap: 6 }} onClick={(event) => event.stopPropagation()}>
+            {tieneOc ? <AttachmentButton codigo={item.imgOc} archivo={item.ocClienteArchivo} label="Ver OC cliente" /> : null}
+            {tienePresupuesto ? <AttachmentButton codigo={item.imgPresupuesto} archivo={item.presupuestoArchivo} label="Ver presupuesto" /> : null}
+            {!tieneOc && !tienePresupuesto ? "-" : null}
+          </div>
+        );
+      },
+    },
+    { dataField: "estado", caption: "Estado", width: 100, calculateCellValue: (item) => (editingDetalleId === item.tempId ? "En edición" : "Pendiente") },
+  ];
+
+  return (
+    <DataGridPro<OrdenCompraDraftDetalle>
+      dataSource={detalles}
+      keyExpr={(item) => item.tempId}
+      columns={columns}
+      height={detalles.length > 8 ? "50vh" : undefined}
+      noDataText="No hay posiciones registradas."
+      focusedRowKey={editingDetalleId}
+      onRowClick={onEdit}
+      paging={false}
+      allowExport={false}
+      showGroupPanel={false}
+      showSearchPanel={false}
+      showFilterRow={false}
+    />
   );
 });
 

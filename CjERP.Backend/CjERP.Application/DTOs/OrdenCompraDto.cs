@@ -137,6 +137,9 @@ public class OrdenCompraInsertDetalleDto
     public string ImgOc { get; set; } = string.Empty;
     public string ImgPresupuesto { get; set; } = string.Empty;
     public decimal Peso { get; set; }
+    // Opcional: si viene, se fuerza DetOrdenCompra.IdEstado al insertar (carga masiva = 1).
+    // Sin valor se conserva lo que asigne el store.
+    public int? IdEstadoDetalle { get; set; }
 }
 
 public class OrdenCompraInsertRequestDto
@@ -300,6 +303,21 @@ public sealed class OrdenCompraGenerarPagoNuevoResultDto
     public decimal Igv { get; set; }
     public decimal Total { get; set; }
 }
+
+public sealed class OrdenCompraGenerarPagoNuevoMasivoRequestDto
+{
+    public List<OrdenCompraGenerarPagoNuevoRequestDto> Items { get; set; } = [];
+}
+
+public sealed class OrdenCompraGenerarPagoNuevoMasivoItemResultDto
+{
+    public int IdOc { get; set; }
+    public int Fila { get; set; }
+    public bool Success { get; set; }
+    public int? Correlativo { get; set; }
+    public string? Message { get; set; }
+}
+
 public class OrdenCompraMontoOcDto
 {
     public int? IdOc { get; set; }

@@ -8,6 +8,7 @@ import {
   FileDown,
   Filter,
   HandCoins,
+  Lock,
   Maximize2,
   Printer,
   Pencil,
@@ -23,7 +24,6 @@ import {
   buildPlanillaConsultaEstadosRequest,
   aprobarPlanillaMasiva,
   consultarPlanillaEstados,
-  rechazarPlanilla,
 } from "../../../api/planillaConsultaService";
 import type {
   AprobacionResultadoDto,
@@ -2934,7 +2934,7 @@ export default function PagosV2Page() {
           primary: { label: "Re-aprobar", icon: <RotateCcw size={18} />, color: "#1D4ED8", soft: "#EFF6FF", border: "#93C5FD" },
           secondary: { label: "Observar", icon: <Eye size={18} />, color: "#F59E0B", soft: "#FFFBEB", border: "#FCD34D" },
           tertiary: { label: "Rechazar", icon: <XCircle size={18} />, color: "#DC2626", soft: "#FEF2F2", border: "#FCA5A5" },
-          quaternary: { label: "Ver PDF", icon: <Printer size={18} />, color: "#334155", soft: "#FFFFFF", border: "#CBD5E1" },
+          quaternary: { label: "Regularizar", icon: <ShieldCheck size={18} />, color: "#0F766E", soft: "#F0FDFA", border: "#5EEAD4" },
         };
       case "hormiga":
         return {
@@ -3305,16 +3305,20 @@ export default function PagosV2Page() {
     try {
       setRechazoModal((prev) => (prev ? { ...prev, submitting: true, error: null } : prev));
 
-      for (const row of rechazoModal.rows) {
-        await rechazarPlanilla(
-          {
+      // Una sola llamada masiva (como Observar): un POST por registro superaba el rate limit (429).
+      await aprobarPlanillaMasiva(
+        {
+          codEstado: 3,
+          observacion,
+          idRegularizar: 0,
+          registros: rechazoModal.rows.map((row) => ({
             correlativo: Math.trunc(Number(row.correlativo)),
             idSite: row.siteId,
-            observacion,
-          },
-          { timeoutMs: 120000 }
-        );
-      }
+            tipoMoneda: Math.trunc(Number(row.tipoMoneda ?? 0)),
+          })),
+        },
+        { timeoutMs: 120000 }
+      );
 
       const total = rechazoModal.rows.length;
       resetDetailStateAfterMutation();
@@ -3429,7 +3433,9 @@ export default function PagosV2Page() {
     }
 
     setRegularizarConfirm(null);
-    await handleAprobarSeleccionados(1, true);
+    // En Re-aprobar los recibos están en estado 6: el SP solo acepta CodEstado 6 (re-aprobación) y
+    // la primera aprobación (10) exige estado 0 o 2.
+    await handleAprobarSeleccionados(1, true, activeTab === "reaprobar" ? 6 : 10);
   };
 
   const handleCancelarRegularizacion = () => {
@@ -3984,6 +3990,10 @@ export default function PagosV2Page() {
             </button>
             <button type="button" title={accionesHabilitadas ? "Rechazar gasto" : "Rechazar no disponible para el estado actual"} aria-label={`Rechazar gasto ${row.correlativo}`} disabled={!accionesHabilitadas} onClick={(event) => { event.stopPropagation(); if (accionesHabilitadas) openRechazoModal([row]); }} style={actionStyle(accionesHabilitadas, "#B91C1C", "#FEF2F2", "#FECACA")}>
               <Trash2 size={14} />
+            </button>
+            {/* Solo diseño: el cierre de la orden de compra aún no tiene funcionalidad. */}
+            <button type="button" title="Cerrar orden de compra (próximamente)" aria-label={`Cerrar orden de compra ${row.idOc || row.documento || ""}`} onClick={(event) => event.stopPropagation()} style={actionStyle(true, "#B45309", "#FFFBEB", "#FDE68A")}>
+              <Lock size={14} />
             </button>
           </div>
         );

@@ -115,6 +115,8 @@ export type OrdenCompraInsertDetallePayload = {
   imgOc?: string;
   imgPresupuesto?: string;
   peso?: number;
+  /** Solo al insertar: fuerza DetOrdenCompra.IdEstado (la carga masiva envía 1). */
+  idEstadoDetalle?: number | null;
 };
 
 export type OrdenCompraInsertPayload = {
@@ -397,6 +399,23 @@ export async function generarPagoNuevoOrdenCompra(payload: OrdenCompraGenerarPag
   return await httpClient.post<OrdenCompraGenerarPagoNuevoResult>(
     "/facturacionfinanciera/oc/pago-nuevo",
     payload,
+  );
+}
+
+export type OrdenCompraPagoNuevoMasivoItemResult = {
+  idOc: number;
+  fila: number;
+  success: boolean;
+  correlativo?: number | null;
+  message?: string | null;
+};
+
+// Un request por lote (el backend admite hasta 100 ítems) para no agotar el rate limit del API.
+export async function generarPagoNuevoMasivoOrdenCompra(items: OrdenCompraGenerarPagoNuevoPayload[]) {
+  return await httpClient.post<OrdenCompraPagoNuevoMasivoItemResult[]>(
+    "/facturacionfinanciera/oc/pago-nuevo-masivo",
+    { items },
+    { timeout: 120000 },
   );
 }
 

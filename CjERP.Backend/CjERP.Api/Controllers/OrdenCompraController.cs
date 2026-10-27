@@ -427,6 +427,87 @@ public class OrdenCompraController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Pago masivo desde OC/Gastos: un pago individual por cada ítem (misma lógica y validaciones de
+    /// <c>pago-nuevo</c>), en un solo request para no agotar el rate limit. Cada ítem es independiente:
+    /// el fallo de uno no revierte ni detiene los demás.
+    /// </summary>
+    [HttpPost("pago-nuevo-masivo")]
+    public async Task<IActionResult> GenerarPagoNuevoMasivo(
+        [FromBody] OrdenCompraGenerarPagoNuevoMasivoRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        const int maxItems = 100;
+        var items = request?.Items ?? [];
+        if (items.Count == 0)
+        {
+            return BadRequest(new { success = false, message = "Seleccione al menos un registro para generar el pago masivo." });
+        }
+
+        if (items.Count > maxItems)
+        {
+            return BadRequest(new { success = false, message = $"El pago masivo admite hasta {maxItems} registros por solicitud." });
+        }
+
+        var usuarioAccion = ResolveUsuarioAccion();
+        var resultados = new List<OrdenCompraGenerarPagoNuevoMasivoItemResultDto>(items.Count);
+
+        foreach (var item in items)
+        {
+            var resultado = new OrdenCompraGenerarPagoNuevoMasivoItemResultDto { IdOc = item?.IdOc ?? 0, Fila = item?.Fila ?? 0 };
+            resultados.Add(resultado);
+
+            if (item is null || item.IdOc <= 0 || item.Fila < 0 || item.IdTarea <= 0 ||
+                item.IdComprobante <= 0 || item.Monto <= 0 ||
+                (string.IsNullOrWhiteSpace(item.Cuenta) && string.IsNullOrWhiteSpace(item.CuentaInter)) ||
+                string.IsNullOrWhiteSpace(item.NombreCta))
+            {
+                resultado.Message = "La fila de OC, cuenta, comprobante y monto son obligatorios.";
+                continue;
+            }
+
+            try
+            {
+                var result = await _ordenCompraService.GenerarPagoNuevoAsync(item, usuarioAccion, cancellationToken);
+                resultado.Success = true;
+                resultado.Correlativo = result.Correlativo;
+
+                try
+                {
+                    await _auditoriaCambiosService.RegistrarLoteAsync(
+                        BuildPagoNuevoAuditEntries(item, result, usuarioAccion),
+                        cancellationToken);
+                }
+                catch (Exception auditEx)
+                {
+                    // El pago ya se generó: un fallo de auditoría no debe marcarlo como fallido.
+                    _logger.LogError(auditEx, "No se pudo auditar el pago masivo {Correlativo}", result.Correlativo);
+                }
+            }
+            catch (InvalidOperationException ex)
+            {
+                resultado.Message = ex.Message;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "No se pudo generar el pago masivo desde la OC {IdOc}, fila {Fila}", item.IdOc, item.Fila);
+                resultado.Message = "No se pudo registrar el pago nuevo.";
+            }
+        }
+
+        var generados = resultados.Count(r => r.Success);
+        return Ok(new
+        {
+            success = true,
+            message = $"Pagos generados: {generados} de {resultados.Count}.",
+            data = resultados
+        });
+    }
+
     [HttpPost("aprobar")]
     public async Task<IActionResult> Aprobar(
         [FromBody] OrdenCompraAprobarRequestDto request,

@@ -343,6 +343,7 @@ public class OrdenCompraService : IOrdenCompraService
             IdTarea = @IdTarea,
             Ot = @Ot,
             IdComprobante = COALESCE(@IdComprobante, @IdComprobanteCabecera),
+            IdEstado = COALESCE(@IdEstadoDetalle, det.IdEstado),
             UsuarioCreacion = @UsuarioCreacion,
             FechaCreacion = @FechaCreacion,
             HoraCreacion = @HoraCreacion
@@ -838,6 +839,7 @@ public class OrdenCompraService : IOrdenCompraService
                             Ot = NullIfWhiteSpace(item.Ot),
                              IdComprobante = item.IdComprobante,
                              IdComprobanteCabecera = request.IdComprobante,
+                             IdEstadoDetalle = item.IdEstadoDetalle,
                              UsuarioCreacion = NullIfWhiteSpace(request.UsuarioCreacion),
                              FechaCreacion = request.FechaCreacion.Date,
                              HoraCreacion = request.HoraCreacion,
