@@ -3439,8 +3439,9 @@ export default function OcV2Page() {
         else fallidos.push(`OC ${armado.idOc}: ${armado.error}`);
       }
 
-      // Lotes de 100 por request (límite del backend): cada pago se valida en el servidor, uno tras otro, contra el saldo actualizado.
-      const TAMANO_LOTE = 100;
+      // Lotes chicos: cada pago tarda varios segundos en producción y un request largo vence por timeout (120 s) con el
+      // servidor aún procesando. Dentro del lote los pagos se validan uno tras otro contra el saldo actualizado.
+      const TAMANO_LOTE = 5;
       for (let inicio = 0; inicio < pagos.length; inicio += TAMANO_LOTE) {
         const lote = pagos.slice(inicio, inicio + TAMANO_LOTE);
         setPagoMasivoProgreso(`${Math.min(inicio + lote.length, pagos.length)}/${pagos.length}`);
@@ -3451,7 +3452,7 @@ export default function OcV2Page() {
             else fallidos.push(`OC ${resultado.idOc}: ${resultado.message ?? "no se pudo registrar el pago"}`);
           });
         } catch (err) {
-          const motivo = getHttpErrorMessage(err, "no se pudo registrar el pago");
+          const motivo = `${getHttpErrorMessage(err, "no se pudo registrar el pago")} (verifique en la grilla si se generó antes de reintentar)`;
           lote.forEach((pago) => fallidos.push(`OC ${pago.idOc}: ${motivo}`));
         }
       }
