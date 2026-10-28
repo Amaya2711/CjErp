@@ -361,6 +361,13 @@ type GastoGridRow = {
   factura: string;
 };
 
+type ActualizacionMasivaResponse = {
+  idLote: string;
+  solicitados: number;
+  actualizados: number;
+  errores: Array<{ correlativo: number; mensaje: string }>;
+};
+
 type FacturaUploadResponse = {
   fileName: string;
   fileUrl: string;
@@ -1513,6 +1520,18 @@ export default function GastosPage({
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   // Filas marcadas con checkbox (selección múltiple, solo pestaña Consulta)
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
+  // Actualización masiva (pestaña Consulta): serie, FecEmision, FechaPagoCre e imagen de factura
+  const [masivoAbierto, setMasivoAbierto] = useState(false);
+  const [masivoPaso, setMasivoPaso] = useState<"datos" | "confirmar">("datos");
+  const [masivoSerie, setMasivoSerie] = useState("");
+  const [masivoFecEmision, setMasivoFecEmision] = useState("");
+  const [masivoFechaPagoCre, setMasivoFechaPagoCre] = useState("");
+  const [masivoMotivo, setMasivoMotivo] = useState("");
+  const [masivoFactura, setMasivoFactura] = useState<{ nombre: string; path: string } | null>(null);
+  const [masivoSubiendo, setMasivoSubiendo] = useState(false);
+  const [masivoGuardando, setMasivoGuardando] = useState(false);
+  const [masivoError, setMasivoError] = useState<string | null>(null);
+  const [masivoResultado, setMasivoResultado] = useState<ActualizacionMasivaResponse | null>(null);
 const [busqueda, setBusqueda] = useState("");
   const [filtrosCabecera, setFiltrosCabecera] = useState<GastosHeaderFilters>(GASTOS_HEADER_FILTERS_INITIAL);
   const [filtrosCabeceraAplicados, setFiltrosCabeceraAplicados] = useState<GastosHeaderFilters>(GASTOS_HEADER_FILTERS_INITIAL);
@@ -1936,7 +1955,7 @@ const [busqueda, setBusqueda] = useState("");
               vistaGastosRef.current === "consulta" ? { baseParams: { idCargo: null, idEmpleado: null } } : undefined
             ),
             ...(vistaGastosRef.current === "consulta" ? { consulta: "gastos-consulta" } : {}),
-          })
+          }, { timeoutMs: 120000 })
         );
         }
        }
@@ -3935,7 +3954,7 @@ const [busqueda, setBusqueda] = useState("");
       { dataField: "fechaDeposito", caption: "FechaDeposito", dataType: "date", width: 130 },
       { dataField: "fecIngreso", caption: "FecIngreso", dataType: "date", width: 130 },
       { dataField: "fecEmision", caption: "FecEmision", dataType: "date", width: 130 },
-      { dataField: "fechaPagoCre", caption: "FechaPagoCre", dataType: "date", width: 130 },
+      { dataField: "fechaPagoCre", caption: "Fecha vencimiento", dataType: "date", width: 130 },
       { dataField: "ot", caption: "OT", width: 80 },
       { dataField: "idOc", caption: "IdOc", width: 90, calculateCellValue: (row) => (row.idOc && row.idOc !== "0" ? row.idOc : "-") },
       { dataField: "solicitante", caption: "Solicitante", width: 170 },
@@ -3954,6 +3973,106 @@ const [busqueda, setBusqueda] = useState("");
     []
   );
 
+  // ---------- Actualización masiva ----------
+  const masivoSeleccion = useMemo(() => {
+    const marcadas = new Set(selectedRowKeys);
+    return gastosGridRows.filter((row) => marcadas.has(row.rowKey));
+  }, [gastosGridRows, selectedRowKeys]);
+  // Los rechazados (estado 3) no se pueden modificar (igual que el botón Editar).
+  const masivoObjetivo = useMemo(
+    () => masivoSeleccion.filter((row) => row.gasto.estado !== 3),
+    [masivoSeleccion]
+  );
+  const masivoExcluidos = masivoSeleccion.length - masivoObjetivo.length;
+  const masivoHayDatos =
+    masivoSerie.trim() !== "" || masivoFecEmision !== "" || masivoFechaPagoCre !== "" || masivoFactura !== null;
+
+  const abrirActualizacionMasiva = () => {
+    setMasivoPaso("datos");
+    setMasivoSerie("");
+    setMasivoFecEmision("");
+    setMasivoFechaPagoCre("");
+    setMasivoMotivo("");
+    setMasivoFactura(null);
+    setMasivoError(null);
+    setMasivoResultado(null);
+    setMasivoAbierto(true);
+  };
+
+  const cerrarActualizacionMasiva = () => {
+    if (masivoGuardando || masivoSubiendo) return;
+    setMasivoAbierto(false);
+  };
+
+  const seleccionarFacturaMasiva = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setMasivoSubiendo(true);
+    setMasivoError(null);
+    try {
+      const optimizedFile = await compressImageForUpload(file);
+      const formData = new FormData();
+      formData.append("archivo", optimizedFile);
+      if (masivoSerie.trim()) {
+        formData.append("serie", masivoSerie.trim());
+      }
+      const response = await httpClient.post<FacturaUploadResponse>(FACTURA_UPLOAD_API_URL, formData);
+      setMasivoFactura({
+        nombre: response.fileName || file.name,
+        path: response.storagePath || response.fileUrl || "",
+      });
+    } catch (error) {
+      setMasivoError(getHttpErrorMessage(error, "No se pudo cargar la imagen de la factura."));
+    } finally {
+      setMasivoSubiendo(false);
+    }
+  };
+
+  const revisarActualizacionMasiva = () => {
+    if (masivoObjetivo.length === 0) {
+      setMasivoError("No hay registros modificables seleccionados.");
+      return;
+    }
+    if (!masivoHayDatos) {
+      setMasivoError("Ingrese al menos un dato a modificar (serie, fecha de emisión, fecha de vencimiento o imagen).");
+      return;
+    }
+    if (masivoFecEmision && masivoFechaPagoCre && masivoFechaPagoCre < masivoFecEmision) {
+      setMasivoError("La fecha de vencimiento no puede ser anterior a la fecha de emisión.");
+      return;
+    }
+    if (masivoMotivo.trim().length < 5) {
+      setMasivoError("Ingrese el motivo de la modificación (mínimo 5 caracteres) para la auditoría.");
+      return;
+    }
+    setMasivoError(null);
+    setMasivoPaso("confirmar");
+  };
+
+  const ejecutarActualizacionMasiva = async () => {
+    setMasivoGuardando(true);
+    setMasivoError(null);
+    try {
+      const resultado = await httpClient.post<ActualizacionMasivaResponse>(`${GASTOS_API_URL}/actualizar-masivo`, {
+        correlativos: masivoObjetivo.map((row) => Number(row.gasto.id)).filter((id) => id > 0),
+        serie: masivoSerie.trim() || undefined,
+        fecEmision: masivoFecEmision || undefined,
+        fechaPagoCre: masivoFechaPagoCre || undefined,
+        facturaPath: masivoFactura?.path || undefined,
+        motivo: masivoMotivo.trim(),
+      });
+      setMasivoResultado(resultado);
+      // Refresca la grilla con los mismos filtros para ver los valores nuevos.
+      void handleBuscarGastos();
+    } catch (error) {
+      setMasivoError(getHttpErrorMessage(error, "No se pudo completar la actualización masiva."));
+    } finally {
+      setMasivoGuardando(false);
+    }
+  };
+
   return (
     <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 5 }}>
       {!editorOnly && (
@@ -3969,6 +4088,14 @@ const [busqueda, setBusqueda] = useState("");
             label: "Nuevo gasto",
             title: "Nuevo gasto (Shift + N)",
             onClick: abrirNuevo,
+          },
+          {
+            key: "actualizar-masivo",
+            label: "Actualizar masivo",
+            title: "Modificar serie, fechas e imagen de factura de los registros seleccionados",
+            onClick: abrirActualizacionMasiva,
+            visible: vistaGastos === "consulta",
+            disabled: selectedRowKeys.length === 0 || cargando,
           },
           {
             key: "buscar",
@@ -6502,6 +6629,237 @@ const [busqueda, setBusqueda] = useState("");
                 {rechazando ? "Rechazando..." : "Aceptar"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {masivoAbierto && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 3102,
+          }}
+        >
+          <div
+            style={{
+              width: 560,
+              maxWidth: "calc(100% - 24px)",
+              maxHeight: "calc(100vh - 24px)",
+              overflowY: "auto",
+              background: "#FFFFFF",
+              borderRadius: 16,
+              padding: 24,
+              boxShadow: "0 12px 28px rgba(0,0,0,0.16)",
+            }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 8, color: "#17143A" }}>Actualización masiva</h3>
+            <div
+              style={{
+                background: "#EEF2FF",
+                border: "1px solid #C7D2FE",
+                color: "#3730A3",
+                borderRadius: 10,
+                padding: "10px 12px",
+                fontSize: 12,
+                fontWeight: 700,
+                marginBottom: 12,
+              }}
+            >
+              Se modificarán {masivoObjetivo.length} registro(s)
+              {masivoExcluidos > 0 ? ` · ${masivoExcluidos} rechazado(s) quedan excluidos` : ""}.
+            </div>
+
+            {masivoResultado ? (
+              <div style={{ fontSize: 12, color: "#374151", lineHeight: 1.7 }}>
+                <div style={{ fontWeight: 700, color: masivoResultado.errores.length === 0 ? "#047857" : "#B45309" }}>
+                  {masivoResultado.actualizados} de {masivoResultado.solicitados} registro(s) actualizado(s).
+                </div>
+                <div>Lote de auditoría: {masivoResultado.idLote}</div>
+                {masivoResultado.errores.length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ fontWeight: 700, color: "#B91C1C" }}>Registros con error:</div>
+                    <ul style={{ margin: "4px 0 0", paddingLeft: 18, maxHeight: 160, overflowY: "auto" }}>
+                      {masivoResultado.errores.map((item) => (
+                        <li key={item.correlativo}>
+                          #{item.correlativo}: {item.mensaje}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 20 }}>
+                  <button
+                    style={{ border: "none", background: "#2563EB", color: "#FFFFFF", padding: "10px 16px", borderRadius: 10, fontWeight: 700, cursor: "pointer" }}
+                    onClick={() => {
+                      setMasivoAbierto(false);
+                      setSelectedRowKeys([]);
+                    }}
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              </div>
+            ) : masivoPaso === "datos" ? (
+              <>
+                <p style={{ marginTop: 0, color: "#4B5563", fontSize: 12, lineHeight: 1.6 }}>
+                  Complete solo los datos que desea cambiar; los campos vacíos se conservan. Los valores se aplicarán a todos los registros seleccionados.
+                </p>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 600, color: "#17143A", gridColumn: "1 / -1" }}>
+                    Serie
+                    <input
+                      value={masivoSerie}
+                      maxLength={20}
+                      onChange={(e) => setMasivoSerie(e.target.value)}
+                      style={{ border: "1px solid #D1D5DB", borderRadius: 8, padding: "8px 10px", fontSize: 12 }}
+                    />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 600, color: "#17143A" }}>
+                    Fecha de emisión (FecEmision)
+                    <input
+                      type="date"
+                      value={masivoFecEmision}
+                      onChange={(e) => setMasivoFecEmision(e.target.value)}
+                      style={{ border: "1px solid #D1D5DB", borderRadius: 8, padding: "8px 10px", fontSize: 12 }}
+                    />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 600, color: "#17143A" }}>
+                    Fecha vencimiento
+                    <input
+                      type="date"
+                      value={masivoFechaPagoCre}
+                      onChange={(e) => setMasivoFechaPagoCre(e.target.value)}
+                      style={{ border: "1px solid #D1D5DB", borderRadius: 8, padding: "8px 10px", fontSize: 12 }}
+                    />
+                  </label>
+                  <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 6, fontSize: 12, fontWeight: 600, color: "#17143A" }}>
+                    Imagen de la factura (imgFactura)
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <label
+                        style={{
+                          border: "1px solid #C7D2FE",
+                          background: "#EEF2FF",
+                          color: "#3730A3",
+                          borderRadius: 8,
+                          padding: "8px 12px",
+                          cursor: masivoSubiendo ? "not-allowed" : "pointer",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {masivoSubiendo ? "Subiendo..." : masivoFactura ? "Cambiar imagen" : "Seleccionar imagen"}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          disabled={masivoSubiendo}
+                          onChange={(e) => void seleccionarFacturaMasiva(e)}
+                          style={{ display: "none" }}
+                        />
+                      </label>
+                      {masivoFactura && (
+                        <>
+                          <span style={{ fontWeight: 500, color: "#374151" }}>{masivoFactura.nombre}</span>
+                          <button
+                            type="button"
+                            onClick={() => setMasivoFactura(null)}
+                            style={{ border: "none", background: "transparent", color: "#B91C1C", cursor: "pointer", fontWeight: 700 }}
+                          >
+                            Quitar
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    <span style={{ fontWeight: 400, color: "#6B7280" }}>
+                      La misma imagen reemplazará la factura de todos los registros seleccionados.
+                    </span>
+                  </div>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 600, color: "#17143A", gridColumn: "1 / -1" }}>
+                    Motivo de la modificación (auditoría) *
+                    <textarea
+                      value={masivoMotivo}
+                      onChange={(e) => setMasivoMotivo(e.target.value)}
+                      rows={3}
+                      style={{ border: "1px solid #D1D5DB", borderRadius: 8, padding: "8px 10px", fontSize: 12, resize: "vertical" }}
+                    />
+                  </label>
+                </div>
+                {masivoError && <div style={{ marginTop: 10, color: "#B91C1C", fontSize: 12, fontWeight: 600 }}>{masivoError}</div>}
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
+                  <button
+                    style={{ border: "1px solid #D1D5DB", background: "#FFFFFF", color: "#17143A", padding: "10px 16px", borderRadius: 10, fontWeight: 600, cursor: "pointer" }}
+                    onClick={cerrarActualizacionMasiva}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    style={{ border: "none", background: "#2563EB", color: "#FFFFFF", padding: "10px 16px", borderRadius: 10, fontWeight: 700, cursor: masivoSubiendo ? "not-allowed" : "pointer" }}
+                    onClick={revisarActualizacionMasiva}
+                    disabled={masivoSubiendo}
+                  >
+                    Continuar
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 12, color: "#374151", lineHeight: 1.7 }}>
+                  <div style={{ fontWeight: 700, color: "#17143A", marginBottom: 4 }}>Resumen antes de actualizar</div>
+                  <div>Registros a modificar: <strong>{masivoObjetivo.length}</strong></div>
+                  <div>
+                    Correlativos: {masivoObjetivo.slice(0, 20).map((row) => row.gasto.id).join(", ")}
+                    {masivoObjetivo.length > 20 ? ` … (+${masivoObjetivo.length - 20})` : ""}
+                  </div>
+                  <div>
+                    Estados: {Array.from(
+                      masivoObjetivo.reduce((acc, row) => {
+                        const nombre = row.estado || String(row.gasto.estado ?? "");
+                        return acc.set(nombre, (acc.get(nombre) ?? 0) + 1);
+                      }, new Map<string, number>())
+                    ).map(([nombre, cantidad]) => `${nombre}: ${cantidad}`).join(" | ")}
+                  </div>
+                  {masivoObjetivo.some((row) => row.gasto.estado === 4) && (
+                    <div style={{ color: "#B45309", fontWeight: 700 }}>
+                      Incluye registros pagados (estado 4).
+                    </div>
+                  )}
+                  {masivoExcluidos > 0 && <div style={{ color: "#B45309" }}>Excluidos por estar rechazados: {masivoExcluidos}</div>}
+                  <div style={{ marginTop: 8, fontWeight: 700, color: "#17143A" }}>Valores que se aplicarán</div>
+                  {masivoSerie.trim() && <div>Serie: {masivoSerie.trim()}</div>}
+                  {masivoFecEmision && <div>FecEmision: {formatInputDateForDisplay(masivoFecEmision)}</div>}
+                  {masivoFechaPagoCre && <div>Fecha vencimiento: {formatInputDateForDisplay(masivoFechaPagoCre)}</div>}
+                  {masivoFactura && <div>imgFactura: {masivoFactura.nombre}</div>}
+                  <div style={{ marginTop: 8, fontWeight: 700, color: "#17143A" }}>Auditoría</div>
+                  <div>
+                    Usuario: {authUser?.nombreEmpleado || authUser?.nombre || authUser?.usuario || authUser?.userName || authUser?.username || "-"}
+                  </div>
+                  <div>Fecha y hora: {new Date().toLocaleString("es-PE", { timeZone: "America/Lima" })}</div>
+                  <div>Motivo: {masivoMotivo.trim()}</div>
+                  <div style={{ color: "#6B7280" }}>
+                    Cada cambio se registra por registro en la auditoría de cambios (valor anterior y nuevo) con un id de lote.
+                  </div>
+                </div>
+                {masivoError && <div style={{ marginTop: 10, color: "#B91C1C", fontSize: 12, fontWeight: 600 }}>{masivoError}</div>}
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
+                  <button
+                    style={{ border: "1px solid #D1D5DB", background: "#FFFFFF", color: "#17143A", padding: "10px 16px", borderRadius: 10, fontWeight: 600, cursor: masivoGuardando ? "not-allowed" : "pointer" }}
+                    onClick={() => setMasivoPaso("datos")}
+                    disabled={masivoGuardando}
+                  >
+                    Volver
+                  </button>
+                  <button
+                    style={{ border: "none", background: "#16A34A", color: "#FFFFFF", padding: "10px 16px", borderRadius: 10, fontWeight: 700, cursor: masivoGuardando ? "not-allowed" : "pointer" }}
+                    onClick={() => void ejecutarActualizacionMasiva()}
+                    disabled={masivoGuardando}
+                  >
+                    {masivoGuardando ? "Actualizando..." : `Actualizar ${masivoObjetivo.length} registro(s)`}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

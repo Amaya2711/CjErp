@@ -13,6 +13,10 @@ namespace CjERP.Application.Interfaces.Services
             PlanillaActualizarNroOperacionRequestDto request,
             string usuarioAccion,
             CancellationToken cancellationToken = default);
+        Task<PlanillaActualizarMasivoResponseDto> ActualizarMasivoAsync(
+            PlanillaActualizarMasivoRequestDto request,
+            string usuarioAccion,
+            CancellationToken cancellationToken = default);
         Task ActualizarTareaPlanillaAsync(
             PlanillaActualizarTareaRequestDto request,
             string usuarioAccion,

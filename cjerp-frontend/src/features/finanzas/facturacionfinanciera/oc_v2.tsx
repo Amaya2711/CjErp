@@ -55,7 +55,7 @@ import type { GridColumn } from "../../../components/datagrid/types";
 // IdResponsable se conserva en cada fila para filtros y validaciones; no se
 // agrega a las columnas visibles. El nombre sí se muestra para identificar al
 // beneficiario del pago.
-const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "EstadoOcSemaforo", "FechaOc", "Cliente", "NombreProyecto", "Site", "TipoTrabajo", "Tarea", "Detalle", "ResponsableOc", "Cuenta", "CuentaInter", "NombreCta", "Banco", "Comprobante", "MonedaOc", "SubtotalOc", "SubtotalPlanilla", "AvanceOc", "DiferenciaSubtotal", "DiferenciaAvanceOc", "PagoNuevo", "CorrelativoPlanilla", "SolicitanteOc", "PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"];
+const OC_GASTOS_COLUMNAS_INICIALES = ["IdOc", "Fila", "EstadoOcSemaforo", "FechaOc", "Cliente", "NombreProyecto", "Site", "TipoTrabajo", "Tarea", "Detalle", "ResponsableOc", "Cuenta", "CuentaInter", "NombreCta", "Banco", "Comprobante", "MonedaOc", "SubtotalOc", "SubtotalPlanilla", "AvanceOc", "DiferenciaSubtotal", "DiferenciaAvanceOc", "PagoNuevo", "CorrelativoPlanilla", "SolicitanteOc", "PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"];
 const OC_GASTOS_MAX_COLUMNAS_VISIBLES = 32;
 type OcGastosGridRow = Record<string, unknown> & { __key: string };
 const COLORES_ESTADO_OC: Record<string, string> = {
@@ -84,6 +84,7 @@ const OC_GASTOS_COLUMNAS_NUMERICAS = new Set([
 ]);
 const OC_GASTOS_COLUMN_LABELS: Record<string, string> = {
   IdOc: "OC",
+  Fila: "Fila",
   EstadoOcSemaforo: "Estado OC",
   FechaOc: "Fecha",
   NombreProyecto: "Proyecto",
@@ -3299,7 +3300,7 @@ export default function OcV2Page() {
     const clave = claveSaldoOcGastos(row);
     const { subtotalOcFila, saldoSubtotalFila, saldoAvanceOcFila } = saldosOcGastos(row);
     const limite = campo === "subtotal" ? saldoSubtotalFila : saldoAvanceOcFila;
-    const valorActual = ocGastosSaldosEditables[clave]?.[campo] ?? limite.toFixed(2);
+    const valorActual = ocGastosSaldosEditables[clave]?.[campo] ?? limite.toFixed(campo === "subtotal" ? 4 : 2);
     const alerta = ocGastosSaldoAlerts[`${clave}:${campo}`];
     // OC rechazada: los saldos no se pueden editar (el botón Pago nuevo también queda inactivo).
     const ocRechazada = filaOcGastosRechazada(row);
@@ -3319,7 +3320,7 @@ export default function OcV2Page() {
       const numero = Number(valor);
       if (numero > limite) {
         const mensaje = campo === "subtotal"
-          ? `No se puede registrar ${formatMoney(numero)}. El saldo subtotal disponible es ${formatMoney(saldoSubtotalFila)}.`
+          ? `No se puede registrar ${formatMonto4(numero)}. El saldo subtotal disponible es ${formatMonto4(saldoSubtotalFila)}.`
           : `No se puede registrar ${numero.toFixed(2)}%. El saldo de avance disponible es ${saldoAvanceOcFila.toFixed(2)}%.`;
         setOcGastosSaldoAlerts((actual) => ({ ...actual, [`${clave}:${campo}`]: mensaje }));
       } else {
@@ -3331,7 +3332,7 @@ export default function OcV2Page() {
       const saldoAvance = subtotalOcFila > 0 ? Math.min((saldoSubtotal * 100) / subtotalOcFila, saldoAvanceOcFila) : 0;
       setOcGastosSaldosEditables((actual) => ({
         ...actual,
-        [clave]: { ...actual[clave], subtotal: saldoSubtotal.toFixed(2), avance: saldoAvance.toFixed(2) },
+        [clave]: { ...actual[clave], subtotal: saldoSubtotal.toFixed(4), avance: saldoAvance.toFixed(2) },
       }));
     };
 
@@ -3341,7 +3342,7 @@ export default function OcV2Page() {
           type="number"
           min="0"
           max={limite}
-          step="0.01"
+          step={campo === "subtotal" ? "0.0001" : "0.01"}
           value={valorActual}
           disabled={ocRechazada}
           onClick={(event) => event.stopPropagation()}
@@ -3355,7 +3356,7 @@ export default function OcV2Page() {
           }}
           title={ocRechazada
             ? "Orden de compra rechazada: no se puede editar."
-            : campo === "subtotal" ? `Máximo disponible: ${formatMoney(saldoSubtotalFila)}` : `Máximo disponible: ${saldoAvanceOcFila.toFixed(2)}%`}
+            : campo === "subtotal" ? `Máximo disponible: ${formatMonto4(saldoSubtotalFila)}` : `Máximo disponible: ${saldoAvanceOcFila.toFixed(2)}%`}
           style={{
             width: "100%",
             minWidth: 96,
@@ -3377,7 +3378,7 @@ export default function OcV2Page() {
     const clave = claveSaldoOcGastos(row);
     const enProceso = Boolean(pagosNuevosEnProceso[clave]);
     const { saldoSubtotalFila, saldoAvanceOcFila } = saldosOcGastos(row);
-    const saldoSubtotalValue = ocGastosSaldosEditables[clave]?.subtotal ?? saldoSubtotalFila.toFixed(2);
+    const saldoSubtotalValue = ocGastosSaldosEditables[clave]?.subtotal ?? saldoSubtotalFila.toFixed(4);
     const saldoAvanceValue = ocGastosSaldosEditables[clave]?.avance ?? saldoAvanceOcFila.toFixed(2);
     const saldosDisponibles = Number(saldoSubtotalValue) > 0 && Number(saldoAvanceValue) > 0;
     // OC rechazada (columna Estado OC): no se genera un pago nuevo.
@@ -3400,7 +3401,7 @@ export default function OcV2Page() {
           ? "Pago nuevo requiere saldo subtotal y saldo avance OC mayores que cero."
           : enProceso
             ? "Proceso en ejecución..."
-            : `Registrar ${formatMoney(Number(saldoSubtotalValue) || 0)} como nuevo pago.`}
+            : `Registrar ${formatMonto4(Number(saldoSubtotalValue) || 0)} como nuevo pago.`}
         aria-label={`Pago nuevo para OC ${leerOcGastos(row, "IdOc")}`}
         style={{
           border: "1px solid #0F766E",
@@ -3429,7 +3430,7 @@ export default function OcV2Page() {
 
     const clave = claveSaldoOcGastos(row);
     const { saldoSubtotalFila, saldoAvanceOcFila } = saldosOcGastos(row);
-    const monto = Number(ocGastosSaldosEditables[clave]?.subtotal ?? saldoSubtotalFila.toFixed(2));
+    const monto = Number(ocGastosSaldosEditables[clave]?.subtotal ?? saldoSubtotalFila.toFixed(4));
     const saldoAvance = Number(ocGastosSaldosEditables[clave]?.avance ?? saldoAvanceOcFila.toFixed(2));
     if (!Number.isFinite(monto) || monto <= 0 || !Number.isFinite(saldoAvance) || saldoAvance <= 0) {
       return { idOc, error: "saldo subtotal o saldo avance en cero" };
@@ -3561,13 +3562,15 @@ export default function OcV2Page() {
         dataField: column,
         caption: OC_GASTOS_COLUMN_LABELS[column] ?? column,
         width: 130,
-        fixed: index < 2,
+        fixed: index < 3,
         ...(numerica ? { dataType: "number" as const, alignment: "right" as const } : {}),
         calculateCellValue: (row) => {
           const valor = leerOcGastos(row, column);
           return numerica ? toNumber(valor) : valor;
         },
       };
+      // placeAfter: con el orden de columnas ya guardado en el navegador, una columna nueva iria al final.
+      if (column === "Fila") return { ...base, width: 70, placeAfter: "IdOc" };
       if (column === "EstadoOcSemaforo") {
         return {
           ...base,
@@ -3607,6 +3610,9 @@ export default function OcV2Page() {
       }
       if (column === "AvanceOc") {
         return { ...base, cellRender: (value) => formatPercent(Number(value)) };
+      }
+      if (column === "SubtotalOc" || column === "SubtotalPlanilla") {
+        return { ...base, cellRender: (value) => formatMonto4(toNumber(String(value ?? "").replace(/,/g, ""))) };
       }
       if (OC_GASTOS_COLUMNAS_NUMERICAS.has(column)) {
         return { ...base, cellRender: (value) => formatOcGastosNumber(value) };

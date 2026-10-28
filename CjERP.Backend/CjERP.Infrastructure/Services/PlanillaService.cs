@@ -273,6 +273,140 @@ namespace CjERP.Infrastructure.Services
                 cancellationToken);
         }
 
+        /// <summary>
+        /// Actualiza Serie, FecEmision, FechaPagoCre e imgFactura de varios recibos con sp_Planilla_Actualizar
+        /// (los parametros no enviados conservan el valor actual). Cada registro se procesa por separado y
+        /// los cambios quedan en AuditoriaCambios con el id de lote.
+        /// </summary>
+        public async Task<PlanillaActualizarMasivoResponseDto> ActualizarMasivoAsync(
+            PlanillaActualizarMasivoRequestDto request,
+            string usuarioAccion,
+            CancellationToken cancellationToken = default)
+        {
+            var correlativos = (request.Correlativos ?? new List<int>()).Where(x => x > 0).Distinct().ToList();
+            if (correlativos.Count == 0)
+            {
+                throw new InvalidOperationException("Debe seleccionar al menos un registro.");
+            }
+
+            var serie = NullIfWhiteSpace(request.Serie);
+            var fecEmision = ParseNullableDate(request.FecEmision);
+            var fechaPagoCre = ParseNullableDate(request.FechaPagoCre);
+            var facturaPath = NullIfWhiteSpace(request.FacturaPath);
+
+            if (serie is null && fecEmision is null && fechaPagoCre is null && facturaPath is null)
+            {
+                throw new InvalidOperationException("Debe ingresar al menos un dato a modificar.");
+            }
+
+            var usuario = ResolveUsuarioAccion(usuarioAccion);
+            var idLote = Guid.NewGuid().ToString("N");
+            var respuesta = new PlanillaActualizarMasivoResponseDto
+            {
+                IdLote = idLote,
+                Solicitados = correlativos.Count
+            };
+
+            const string selectSql = """
+                SELECT TOP (1)
+                    CONVERT(VARCHAR(10), Estado) AS Estado,
+                    Serie,
+                    CONVERT(VARCHAR(30), FecEmision, 23) AS FecEmision,
+                    CONVERT(VARCHAR(30), FechaPagoCre, 23) AS FechaPagoCre,
+                    ImgFactura
+                FROM dbo.Planilla
+                WHERE Correlativo = @Correlativo;
+                """;
+
+            await using var connection = _sqlCommandFactory.CreateConnection();
+
+            foreach (var correlativo in correlativos)
+            {
+                try
+                {
+                    var anterior = await connection.QuerySingleOrDefaultAsync<PlanillaMasivoAuditRow>(
+                        _sqlCommandFactory.Create(selectSql, new { Correlativo = correlativo }, cancellationToken: cancellationToken));
+
+                    if (anterior is null)
+                    {
+                        throw new InvalidOperationException("No se encontro el registro.");
+                    }
+
+                    if (anterior.Estado == "3")
+                    {
+                        throw new InvalidOperationException("El registro esta rechazado (estado 3) y no se puede modificar.");
+                    }
+
+                    var parameters = new DynamicParameters();
+                    parameters.Add("@Correlativo", correlativo, DbType.Int32);
+                    if (serie is not null) parameters.Add("@Serie", serie, DbType.String);
+                    if (fecEmision is not null) parameters.Add("@FecEmision", fecEmision.Value.Date, DbType.Date);
+                    if (fechaPagoCre is not null) parameters.Add("@FechaVencimiento", fechaPagoCre.Value.Date, DbType.Date);
+                    if (facturaPath is not null) parameters.Add("@RutaFactura", facturaPath, DbType.String);
+
+                    await connection.ExecuteAsync(
+                        _sqlCommandFactory.Create(
+                            UpdateStoredProcedureName,
+                            parameters,
+                            CommandType.StoredProcedure,
+                            cancellationToken,
+                            commandTimeout: 120));
+
+                    var actual = await connection.QuerySingleOrDefaultAsync<PlanillaMasivoAuditRow>(
+                        _sqlCommandFactory.Create(selectSql, new { Correlativo = correlativo }, cancellationToken: cancellationToken));
+
+                    var observacion = $"Actualizacion masiva (lote {idLote}, {correlativos.Count} registros)"
+                        + (string.IsNullOrWhiteSpace(request.Motivo) ? "." : $": {request.Motivo.Trim()}");
+                    var cambios = new List<AuditoriaCambioDto>();
+
+                    void AddCambio(string campo, string? antes, string? despues)
+                    {
+                        if (string.Equals(antes?.Trim() ?? string.Empty, despues?.Trim() ?? string.Empty, StringComparison.Ordinal))
+                        {
+                            return;
+                        }
+
+                        cambios.Add(new AuditoriaCambioDto
+                        {
+                            Modulo = "Planilla",
+                            Entidad = "Planilla",
+                            IdRegistro = correlativo.ToString(CultureInfo.InvariantCulture),
+                            Accion = "UPDATE",
+                            Seccion = "Gastos",
+                            Campo = campo,
+                            ValorAnterior = antes,
+                            ValorNuevo = despues,
+                            UsuarioAccion = usuario,
+                            Observacion = observacion
+                        });
+                    }
+
+                    if (serie is not null) AddCambio("Serie", anterior.Serie, actual?.Serie);
+                    if (fecEmision is not null) AddCambio("FecEmision", anterior.FecEmision, actual?.FecEmision);
+                    if (fechaPagoCre is not null) AddCambio("FechaPagoCre", anterior.FechaPagoCre, actual?.FechaPagoCre);
+                    if (facturaPath is not null) AddCambio("ImgFactura", anterior.ImgFactura, actual?.ImgFactura);
+
+                    if (cambios.Count > 0)
+                    {
+                        await _auditoriaCambiosService.RegistrarLoteAsync(cambios, cancellationToken);
+                    }
+
+                    respuesta.Actualizados++;
+                }
+                catch (Exception ex) when (ex is SqlException or InvalidOperationException)
+                {
+                    _logger.LogWarning(ex, "[PlanillaService] Actualizacion masiva: fallo el correlativo {Correlativo} (lote {IdLote})", correlativo, idLote);
+                    respuesta.Errores.Add(new PlanillaActualizarMasivoErrorDto { Correlativo = correlativo, Mensaje = ex.Message });
+                }
+            }
+
+            _logger.LogInformation(
+                "[PlanillaService] Actualizacion masiva lote {IdLote} usuario {Usuario}: {Actualizados}/{Solicitados} actualizados, {Errores} con error",
+                idLote, usuario, respuesta.Actualizados, respuesta.Solicitados, respuesta.Errores.Count);
+
+            return respuesta;
+        }
+
         public async Task ActualizarTareaPlanillaAsync(
             PlanillaActualizarTareaRequestDto request,
             string usuarioAccion,
@@ -927,6 +1061,15 @@ namespace CjERP.Infrastructure.Services
         {
             public int? IdTarea { get; set; }
             public string? Tarea { get; set; }
+        }
+
+        private sealed class PlanillaMasivoAuditRow
+        {
+            public string? Estado { get; set; }
+            public string? Serie { get; set; }
+            public string? FecEmision { get; set; }
+            public string? FechaPagoCre { get; set; }
+            public string? ImgFactura { get; set; }
         }
 
         private sealed class PlanillaNroOperacionAuditRow

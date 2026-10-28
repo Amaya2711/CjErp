@@ -7,15 +7,12 @@ import {
   type VentasSunatPeriodoDto,
   type VentasSunatRegistroDto,
 } from "../../../api/ventasSunatService";
+import SelectorMultiple from "./VentasSunatSelectorMultiple";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 
 type Props = {
-  /** Periodos cargados en la BD (se resume el RUC emisor del periodo seleccionado). */
+  /** Periodos cargados en la BD (se resumen todos los RUC emisores). */
   periodos: VentasSunatPeriodoDto[];
-  /** Clave "periodo|ruc" seleccionada en el historial. */
-  periodoSel: string;
-  /** Registros ya cargados del periodo seleccionado (evita consultarlo de nuevo). */
-  registrosActuales: VentasSunatRegistroDto[];
 };
 
 type FilaResumen = {
@@ -72,32 +69,28 @@ const summary = {
   ],
 };
 
-export default function VentasSunatResumen({ periodos, periodoSel, registrosActuales }: Props) {
-  const [periodoActual, rucActual] = periodoSel.split("|");
+export default function VentasSunatResumen({ periodos }: Props) {
   const [porPeriodo, setPorPeriodo] = useState<Record<string, VentasSunatRegistroDto[]>>({});
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState("");
   const [empresasSel, setEmpresasSel] = useState<string[]>([]); // vacio = todas
   const [moneda, setMoneda] = useState(""); // "" = todas; filtra por la moneda del comprobante (los importes siempre están en soles)
 
-  // Todos los periodos cargados del mismo RUC emisor; el seleccionado se toma de lo ya cargado en pantalla.
+  // Todos los periodos cargados de todos los RUC emisores (clave periodo|ruc). El filtro Empresa acota las grillas;
+  // "Ventas por empresa" siempre muestra todas.
   useEffect(() => {
-    if (!rucActual) return;
+    if (periodos.length === 0) return;
     let activo = true;
     setCargando(true);
     setError("");
     (async () => {
       try {
-        const lista = periodos.filter((p) => p.rucEmisor === rucActual);
         const mapa: Record<string, VentasSunatRegistroDto[]> = {};
-        for (const p of lista) {
-          if (p.periodo === periodoActual && registrosActuales.length > 0) {
-            mapa[p.periodo] = registrosActuales;
-            continue;
-          }
+        for (const p of periodos) {
+          const clave = `${p.periodo}|${p.rucEmisor}`;
           const h = await consultarPeriodoVentasSunat(p.periodo, p.rucEmisor);
           if (!activo) return;
-          mapa[p.periodo] = h.registros;
+          mapa[clave] = h.registros;
         }
         if (activo) setPorPeriodo(mapa);
       } catch (err) {
@@ -109,9 +102,10 @@ export default function VentasSunatResumen({ periodos, periodoSel, registrosActu
     return () => {
       activo = false;
     };
-  }, [periodos, rucActual, periodoActual, registrosActuales]);
+  }, [periodos]);
 
   const todos = useMemo(() => Object.values(porPeriodo).flat(), [porPeriodo]);
+  const todosLosEmisores = todos;
   const empresas = useMemo(() => Array.from(new Set(todos.map(empresaDe))).sort(), [todos]);
   const monedas = useMemo(() => Array.from(new Set(todos.map((r) => (r.moneda ?? "").trim()).filter(Boolean))).sort(), [todos]);
 
@@ -126,9 +120,13 @@ export default function VentasSunatResumen({ periodos, periodoSel, registrosActu
     [todos, empresasSel, moneda]
   );
 
-  const agrupar = (clave: (r: VentasSunatRegistroDto) => string, nombre: (c: string) => string = (c) => c): FilaResumen[] => {
+  const agrupar = (
+    clave: (r: VentasSunatRegistroDto) => string,
+    nombre: (c: string) => string = (c) => c,
+    origen: VentasSunatRegistroDto[] = filtrados
+  ): FilaResumen[] => {
     const mapa = new Map<string, FilaResumen>();
-    for (const r of filtrados) {
+    for (const r of origen) {
       const k = clave(r);
       const fila = mapa.get(k) ?? { clave: k, nombre: nombre(k), afecto: 0, inafecto: 0, igv: 0, total: 0 };
       // Afecto = BI gravada menos el descuento. Dscto BI viene siempre en negativo: se resta su valor absoluto.
@@ -147,13 +145,15 @@ export default function VentasSunatResumen({ periodos, periodoSel, registrosActu
     () => agrupar((r) => r.periodo ?? "", nombrePeriodo).filter((f) => f.clave).sort((a, b) => a.clave.localeCompare(b.clave)),
     [filtrados, moneda]
   );
-  const filasEmpresa = useMemo(() => agrupar(empresaDe).sort((a, b) => b.total - a.total), [filtrados, moneda]);
+  // "Ventas por empresa" muestra todas las empresas de todos los RUC emisores: no depende del RUC ni de los filtros de empresa/moneda.
+  const filasEmpresa = useMemo(
+    () => agrupar(empresaDe, undefined, todosLosEmisores).sort((a, b) => b.total - a.total),
+    [todosLosEmisores]
+  );
   const filasCliente = useMemo(() => agrupar(clienteDe).sort((a, b) => b.total - a.total), [filtrados, moneda]);
   /* eslint-enable react-hooks/exhaustive-deps */
 
-  const alternar = (e: string) => setEmpresasSel((a) => (a.includes(e) ? a.filter((x) => x !== e) : [...a, e]));
-
-  if (!rucActual) {
+  if (periodos.length === 0) {
     return <div style={{ ...styles.tarjeta, color: "#64748B", fontSize: 13 }}>No hay periodos cargados para resumir.</div>;
   }
 
@@ -161,19 +161,8 @@ export default function VentasSunatResumen({ periodos, periodoSel, registrosActu
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
         <div style={styles.campo}>
-          Empresa {empresasSel.length > 0 ? "(filtrada)" : "(todas)"}
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {empresas.map((e) => (
-              <button key={e} type="button" style={{ ...styles.chip, ...(empresasSel.includes(e) ? styles.chipOn : null) }} onClick={() => alternar(e)}>
-                {e}
-              </button>
-            ))}
-            {empresasSel.length > 0 ? (
-              <button type="button" style={styles.chip} onClick={() => setEmpresasSel([])}>
-                Quitar filtro
-              </button>
-            ) : null}
-          </div>
+          Empresa
+          <SelectorMultiple opciones={empresas} seleccion={empresasSel} onChange={setEmpresasSel} singular="empresa" plural="empresas" />
         </div>
         <label style={styles.campo}>
           Moneda del comprobante (importes en S/)

@@ -544,10 +544,7 @@ export default function VentasSunatPage() {
                 />
               </AppCard>
             ) : tab === "resumen" ? (
-              <>
-                {selectorPeriodo}
-                <VentasSunatResumen periodos={periodos} periodoSel={periodoSel} registrosActuales={registros} />
-              </>
+              <VentasSunatResumen periodos={periodos} />
             ) : tab === "analisis" ? (
               <VentasSunatAnalisis
                 registros={registros}

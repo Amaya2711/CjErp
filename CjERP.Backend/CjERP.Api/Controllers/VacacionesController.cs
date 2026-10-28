@@ -15,15 +15,47 @@ public class VacacionesController : ControllerBase
     private readonly IVacacionesService _vacacionesService;
     private readonly IPlanillaConsultaService _planillaConsultaService;
     private readonly IVacacionesCorreoService _vacacionesCorreoService;
+    private readonly ISegPermisoAccionService _permisoAccionService;
+
+    private const string RutaPaginaVacaciones = "/recursoshumanos/vacacionespage";
+    private static readonly string[] ClavesTabValidacion = { "tab.validacion_1", "tab.validacion_2", "tab.validacion_3" };
 
     public VacacionesController(
         IVacacionesService vacacionesService,
         IPlanillaConsultaService planillaConsultaService,
-        IVacacionesCorreoService vacacionesCorreoService)
+        IVacacionesCorreoService vacacionesCorreoService,
+        ISegPermisoAccionService permisoAccionService)
     {
         _vacacionesService = vacacionesService;
         _planillaConsultaService = planillaConsultaService;
         _vacacionesCorreoService = vacacionesCorreoService;
+        _permisoAccionService = permisoAccionService;
+    }
+
+    /// <summary>True si el usuario tiene asignada (SegPermisoAccion, por empleado) alguna pestaña de validación: ve todos los pendientes.</summary>
+    private async Task<bool> TieneAccesoPestanaValidacionAsync()
+    {
+        var ids = new HashSet<int>();
+        foreach (var claim in new[] { "IdEmpleadoCj", "CodEmp", "codEmp", "IdEmpleado" })
+        {
+            if (int.TryParse(User.FindFirstValue(claim), out var id) && id > 0)
+            {
+                ids.Add(id);
+            }
+        }
+
+        foreach (var id in ids)
+        {
+            var permisos = await _permisoAccionService.ListarAsync(RutaPaginaVacaciones, null, id);
+            if (permisos.Any(p =>
+                    p.IdEmpleado.HasValue && p.EsActivo && p.PuedeVer && p.PuedeEjecutar &&
+                    ClavesTabValidacion.Contains((p.ClaveAccion ?? string.Empty).Trim().ToLowerInvariant())))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Vista previa del PDF que se envía por correo al aprobar la 3ra validación.</summary>
@@ -476,7 +508,9 @@ public class VacacionesController : ControllerBase
 
             // Rol ESTANDAR (7), salvo perfil 2: solo ve sus propias vacaciones. El empleado sale del JWT, no de lo que envíe el cliente.
             var veTodas = int.TryParse(User.FindFirstValue("IdPerfil"), out var idPerfil) && idPerfil == PerfilVeTodasLasVacaciones;
-            if (!veTodas && int.TryParse(User.FindFirstValue("IdRol"), out var idRol) && idRol == RolEstandar)
+            // Con acceso a una pestaña de validación se muestran todos los pendientes.
+            if (!veTodas && int.TryParse(User.FindFirstValue("IdRol"), out var idRol) && idRol == RolEstandar
+                && !await TieneAccesoPestanaValidacionAsync())
             {
                 var idEmpleadoToken = ResolveIdEmpleadoCjToken();
                 if (idEmpleadoToken <= 0)

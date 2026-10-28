@@ -385,6 +385,31 @@ public class TesoreriaGastosController : ControllerBase
         }
     }
 
+    [HttpPost("actualizar-masivo")]
+    public async Task<IActionResult> ActualizarMasivo(
+        [FromBody] PlanillaActualizarMasivoRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var resultado = await _planillaService.ActualizarMasivoAsync(request, ResolveUsuarioAccion(), cancellationToken);
+            var mensaje = resultado.Errores.Count == 0
+                ? $"{resultado.Actualizados} registro(s) actualizado(s)."
+                : $"{resultado.Actualizados} de {resultado.Solicitados} registro(s) actualizado(s); {resultado.Errores.Count} con error.";
+
+            return Ok(new { success = true, message = mensaje, data = resultado });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[TesoreriaGastos] Error no controlado en actualizacion masiva de PLANILLA");
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
+
     [HttpDelete("{id}")]
     public IActionResult Delete(int id)
     {

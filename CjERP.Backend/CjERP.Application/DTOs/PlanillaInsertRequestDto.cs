@@ -69,6 +69,30 @@ namespace CjERP.Application.DTOs
         public string NroOperacion { get; set; } = string.Empty;
     }
 
+    public class PlanillaActualizarMasivoRequestDto
+    {
+        public List<int> Correlativos { get; set; } = new();
+        public string? Serie { get; set; }
+        public string? FecEmision { get; set; }
+        public string? FechaPagoCre { get; set; }
+        public string? FacturaPath { get; set; }
+        public string? Motivo { get; set; }
+    }
+
+    public class PlanillaActualizarMasivoErrorDto
+    {
+        public int Correlativo { get; set; }
+        public string Mensaje { get; set; } = string.Empty;
+    }
+
+    public class PlanillaActualizarMasivoResponseDto
+    {
+        public string IdLote { get; set; } = string.Empty;
+        public int Solicitados { get; set; }
+        public int Actualizados { get; set; }
+        public List<PlanillaActualizarMasivoErrorDto> Errores { get; set; } = new();
+    }
+
     public class SuministroProvisionalVigenteRequestDto
     {
         public int? IdResponsable { get; set; }
