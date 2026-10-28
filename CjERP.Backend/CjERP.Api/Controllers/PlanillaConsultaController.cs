@@ -25,6 +25,8 @@ namespace CjERP.Api.Controllers
         private static readonly string[] RequiredParametersAprobar = ["IdCargo", "IdEmpleado", "Estados"];
         private static readonly string[] RequiredParametersVacaciones = [];
         private const int RolEstandar = 7;
+        // Perfil que ve las vacaciones de todos los empleados aunque tenga rol ESTANDAR.
+        private const int PerfilVeTodasLasVacaciones = 2;
         private static readonly string[] RequiredParametersGastosFechaDeposito = ["Estados", "FechaDeposito"];
         private static readonly string[] RequiredParametersGastosRango = ["Estados", "FechaInicio", "FechaFin"];
         private static readonly string[] RequiredParametersImportarResumenOT =
@@ -648,7 +650,7 @@ namespace CjERP.Api.Controllers
         }
 
         /// <summary>
-        /// Rol ESTANDAR (7): solo puede consultar sus propias vacaciones. El filtro por empleado se toma del JWT
+        /// Rol ESTANDAR (7), salvo perfil 2: solo puede consultar sus propias vacaciones. El filtro por empleado se toma del JWT
         /// y reemplaza cualquier IdEmpleadoCj enviado por el cliente. Si no se puede resolver, no se consulta nada.
         /// </summary>
         private bool TryRestringirVacacionesRolEstandar(
@@ -660,7 +662,8 @@ namespace CjERP.Api.Controllers
 
             if (!string.Equals(consulta, "vacaciones", StringComparison.OrdinalIgnoreCase) ||
                 !int.TryParse(User.FindFirstValue("IdRol"), out var idRol) ||
-                idRol != RolEstandar)
+                idRol != RolEstandar ||
+                (int.TryParse(User.FindFirstValue("IdPerfil"), out var idPerfil) && idPerfil == PerfilVeTodasLasVacaciones))
             {
                 return true;
             }

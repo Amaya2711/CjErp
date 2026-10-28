@@ -474,8 +474,9 @@ public class VacacionesController : ControllerBase
         {
             var parametros = new List<PlanillaConsultaParametroDto>();
 
-            // Rol ESTANDAR (7): solo ve sus propias vacaciones. El empleado sale del JWT, no de lo que envíe el cliente.
-            if (int.TryParse(User.FindFirstValue("IdRol"), out var idRol) && idRol == RolEstandar)
+            // Rol ESTANDAR (7), salvo perfil 2: solo ve sus propias vacaciones. El empleado sale del JWT, no de lo que envíe el cliente.
+            var veTodas = int.TryParse(User.FindFirstValue("IdPerfil"), out var idPerfil) && idPerfil == PerfilVeTodasLasVacaciones;
+            if (!veTodas && int.TryParse(User.FindFirstValue("IdRol"), out var idRol) && idRol == RolEstandar)
             {
                 var idEmpleadoToken = ResolveIdEmpleadoCjToken();
                 if (idEmpleadoToken <= 0)
@@ -561,6 +562,9 @@ public class VacacionesController : ControllerBase
     }
 
     private const int RolEstandar = 7;
+
+    // Perfil que ve las vacaciones de todos los empleados aunque tenga rol ESTANDAR.
+    private const int PerfilVeTodasLasVacaciones = 2;
 
     /// <summary>IdEmpleado (EmpleadoCj) del usuario autenticado según el JWT; 0 si no se puede resolver.</summary>
     private int ResolveIdEmpleadoCjToken()

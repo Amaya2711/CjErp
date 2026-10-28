@@ -136,6 +136,8 @@ const ESTADO_TABS: Array<{ key: EstadoTab; label: string; estado?: number }> = [
 const RUTA_PAGINA = "/recursoshumanos/vacacionespage";
 /** Rol ESTANDAR (7): solo ve la pestaña Movimientos y el botón Nueva solicitud, salvo permisos asignados a nivel de usuario. */
 const ID_ROL_ESTANDAR = 7;
+// Perfil con acceso a los datos de todos los empleados en esta pantalla (además del acceso total perfil 8 + rol 5).
+const ID_PERFIL_VE_TODOS = 2;
 
 /** Clave de permiso (SegPermisoAccion) por pestaña; Movimientos siempre está disponible. */
 const TAB_ACTION_KEYS: Record<EstadoTab, string | null> = {
@@ -548,7 +550,11 @@ export default function VacacionesPage() {
   // Rol ESTANDAR (7) sin acceso total: solo Movimientos + Nueva solicitud, más lo que se le asigne a nivel de usuario.
   const [accesoRestringido] = useState(() => {
     const authUser = getAuthUser();
-    return Number(authUser?.idrol) === ID_ROL_ESTANDAR && !hasFullPageActionAccess(authUser);
+    return (
+      Number(authUser?.idrol) === ID_ROL_ESTANDAR &&
+      Number(authUser?.idperfil) !== ID_PERFIL_VE_TODOS &&
+      !hasFullPageActionAccess(authUser)
+    );
   });
   // Empleado (EmpleadoCj) relacionado al usuario: codEmp de la sesión. El rol restringido solo puede ver este empleado.
   const [miIdEmpleado] = useState(() => {
