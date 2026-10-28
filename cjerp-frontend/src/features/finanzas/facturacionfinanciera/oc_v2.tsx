@@ -1718,6 +1718,14 @@ export default function OcV2Page() {
     );
   }, [cabecerasFiltradas, exportarOrdenesSolicitado, loading]);
 
+  // Combo Validador: catálogo completo (para poder cambiarlo) + los del solicitante que no estén en él.
+  // El validador asociado al solicitante se preselecciona en cargarOpcionesDependientesSolicitante.
+  const validadoresRegistroOptions = useMemo(() => {
+    const existentes = new Set(validadorOptions.map((option) => normalizeOptionValue(option)));
+    const extras = validadoresSolicitanteOptions.filter((option) => !existentes.has(normalizeOptionValue(option)));
+    return [...validadorOptions, ...extras];
+  }, [validadorOptions, validadoresSolicitanteOptions]);
+
   const validadorLabelById = useMemo(() => {
     const result = new Map<string, string>();
     validadorOptions.forEach((option) => {
@@ -4814,7 +4822,7 @@ export default function OcV2Page() {
               <Label>Validador</Label>
               <select disabled={!draft.solicitante} value={draft.validador} onChange={(event) => setDraft((prev) => ({ ...prev, validador: event.target.value }))} style={styles.input}>
                 <option value="">Seleccione...</option>
-                {validadoresSolicitanteOptions.map((option) => (
+                {validadoresRegistroOptions.map((option) => (
                   <option key={`val-${normalizeOptionValue(option)}`} value={normalizeOptionValue(option)}>{option.label}</option>
                 ))}
               </select>

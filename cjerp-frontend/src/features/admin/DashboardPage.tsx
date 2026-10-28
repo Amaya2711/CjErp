@@ -448,7 +448,7 @@ export default function DashboardPage() {
               {getSaludo()}, {usuario.usuarioLogin}
             </div>
             <div style={styles.heroSubtitle}>
-              Bienvenido al portal corporativo de CJ.
+              Bienvenido a la plataforma empresarial integrada de CJ.
             </div>
             {/* <div style={styles.heroDate}>{fechaHora}</div> */}
           </div>

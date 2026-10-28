@@ -676,14 +676,23 @@ function getQuickIdOcOnly(filters: FilterState): number | null {
   return idOc;
 }
 
-// "% OC": mismo cálculo del panel "Consumo de la OC" (solicitado = subtotal de la fila salvo pagada/rechazada).
+// "% OC": consumo de la línea de la OC (DetOrdenCompra IdOc + Fila): TotalOcFila / PagadoOcFila del SP.
+// Si el SP aún no devuelve esas columnas, respaldo: consumo a nivel de cabecera de la OC.
+// Solicitado = subtotal de la fila salvo pagada/rechazada.
 function calcularConsumoOcPorcentaje(row: Record<string, unknown>, estadoCodigo: string): number | undefined {
-  const totalOc = getRecordNumber(row, "TotalOcConsumo", "totalOcConsumo");
+  const totalFila = getRecordNumber(row, "TotalOcFila", "totalOcFila");
+  const usaFila = totalFila != null;
+  const totalOc = usaFila ? totalFila : getRecordNumber(row, "TotalOcConsumo", "totalOcConsumo");
   if (totalOc == null || totalOc <= 0) {
     return undefined;
   }
 
-  const pagadoOc = Math.max(getRecordNumber(row, "PagadoOcConsumo", "pagadoOcConsumo") ?? 0, 0);
+  const pagadoOc = Math.max(
+    (usaFila
+      ? getRecordNumber(row, "PagadoOcFila", "pagadoOcFila")
+      : getRecordNumber(row, "PagadoOcConsumo", "pagadoOcConsumo")) ?? 0,
+    0
+  );
   const estado = String(estadoCodigo ?? "").trim();
   const subtotal = getRecordNumber(row, "SubtotalOriginal", "subtotalOriginal", "Subtotalb", "subtotalb", "Subtotal", "subtotal") ?? 0;
   const solicitado = estado === "4" || estado === "2" ? 0 : Math.max(subtotal, 0);

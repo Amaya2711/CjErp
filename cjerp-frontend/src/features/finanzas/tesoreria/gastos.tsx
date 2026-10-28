@@ -61,6 +61,8 @@ type GastoDto = {
   fechaVencimiento?: string;
   fecIngreso?: string;
   fechaEmision?: string;
+  fecEmisionConsulta?: string;
+  fechaPagoCre?: string;
   solicitante?: string;
   solicitanteLabel?: string;
   gestor?: string;
@@ -122,6 +124,8 @@ type GastoForm = {
   fechaVencimiento: string;
   fecIngreso: string;
   fechaEmision: string;
+  fecEmisionConsulta?: string;
+  fechaPagoCre?: string;
   solicitante: string;
   solicitanteLabel: string;
   gestor: string;
@@ -249,6 +253,7 @@ type GastoPayload = {
 
 type GastosHeaderFilters = {
   id: string;
+  idOc: string;
   fechaInicio: string;
   fechaFin: string;
   estado: string[];
@@ -266,6 +271,7 @@ type GastosHeaderFilters = {
 
 const GASTOS_HEADER_FILTERS_INITIAL: GastosHeaderFilters = {
   id: "",
+  idOc: "",
   fechaInicio: obtenerFechaActual(),
   fechaFin: obtenerFechaActual(),
   // Un selector vacío representa "Todos". No se limita la carga inicial a
@@ -339,6 +345,8 @@ type GastoGridRow = {
   nroOperacion: string;
   fechaDeposito: string;
   fecIngreso: string;
+  fecEmision: string;
+  fechaPagoCre: string;
   ot: string;
   idOc: string;
   solicitante: string;
@@ -1294,6 +1302,8 @@ function mapPlanillaConsultaRowToGastoDto(row: Record<string, unknown>, index: n
       "FechaCreacion",
       "fechaCreacion"
     )),
+    fecEmisionConsulta: getRecordString(row, "FecEmision", "fecEmision"),
+    fechaPagoCre: getRecordString(row, "FechaPagoCre", "fechaPagoCre"),
     fechaEmision: getRecordString(
       row,
       "FecEmision",
@@ -1420,6 +1430,8 @@ function mapGastoDtoToView(item: GastoDto): GastoForm {
     fechaDeposito: item.fechaDeposito ?? "",
     fechaVencimiento: normalizeDateForInput(item.fechaVencimiento),
     fecIngreso: normalizeFecIngresoFromStore(item.fecIngreso || item.fechaEmision),
+    fecEmisionConsulta: item.fecEmisionConsulta ?? "",
+    fechaPagoCre: item.fechaPagoCre ?? "",
     fechaEmision: normalizeDateForInput(item.fechaEmision),
     solicitante: item.solicitante || item.solicitanteLabel || "",
     solicitanteLabel: item.solicitanteLabel || "",
@@ -1499,7 +1511,9 @@ export default function GastosPage({
   const editorOnly = Boolean(editorRequest);
   // Estado para fila seleccionada
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
-  const [busqueda, setBusqueda] = useState("");
+  // Filas marcadas con checkbox (selección múltiple, solo pestaña Consulta)
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
+const [busqueda, setBusqueda] = useState("");
   const [filtrosCabecera, setFiltrosCabecera] = useState<GastosHeaderFilters>(GASTOS_HEADER_FILTERS_INITIAL);
   const [filtrosCabeceraAplicados, setFiltrosCabeceraAplicados] = useState<GastosHeaderFilters>(GASTOS_HEADER_FILTERS_INITIAL);
   const filtrosCabeceraAplicadosRef = useRef<GastosHeaderFilters>(GASTOS_HEADER_FILTERS_INITIAL);
@@ -1636,6 +1650,7 @@ export default function GastosPage({
       Boolean(
         busqueda.trim() ||
           filtrosCabecera.id.trim() ||
+          filtrosCabecera.idOc.trim() ||
           filtrosCabecera.fechaInicio.trim() ||
           filtrosCabecera.fechaFin.trim() ||
           filtrosCabecera.estado.length > 0 ||
@@ -1806,8 +1821,15 @@ export default function GastosPage({
           gruposEstados.push(estadosSeleccionados.join(","));
         }
 
+        const idOcFiltro = filtrosConsulta.idOc.trim();
+        if (idOcFiltro) {
+          parametrosConsulta.push({ nombre: "IdOc", valor: idOcFiltro, tipo: "string" });
+        }
+
         if (buscarPorCorrelativo) {
           parametrosConsulta.push({ nombre: "Correlativo", valor: String(correlativoNumero), tipo: "int" });
+        } else if (idOcFiltro && vistaGastosRef.current === "consulta") {
+          // Con OC elegida la consulta va directa al SP por @IdOc, sin acotar por fechas.
         } else if (filtrosConsulta.site.length > 0 && vistaGastosRef.current === "consulta") {
           // Con Site elegido la consulta va directa al SP por @IdSite, sin acotar por fechas.
         } else {
@@ -3613,6 +3635,7 @@ export default function GastosPage({
 
         return (
           (!filtrosCabeceraAplicados.id || idGasto.includes(filtrosCabeceraAplicados.id.trim())) &&
+          (!filtrosCabeceraAplicados.idOc || String(gasto.idOc ?? "").trim() === filtrosCabeceraAplicados.idOc.trim()) &&
           (filtrosCabeceraAplicados.estado.length === 0 || filtrosCabeceraAplicados.estado.includes(estadoGasto)) &&
           (filtrosCabeceraAplicados.comprobante.length === 0 || filtrosCabeceraAplicados.comprobante.includes(comprobanteGasto)) &&
           (filtrosCabeceraAplicados.moneda.length === 0 || filtrosCabeceraAplicados.moneda.includes(monedaGasto)) &&
@@ -3736,6 +3759,8 @@ export default function GastosPage({
           nroOperacion: gasto.nroOperacion ?? "",
           fechaDeposito: normalizeFecIngresoFromStore(gasto.fechaDeposito),
           fecIngreso: normalizeFecIngresoFromStore(gasto.fecIngreso),
+          fecEmision: normalizeFecIngresoFromStore(gasto.fecEmisionConsulta),
+          fechaPagoCre: normalizeFecIngresoFromStore(gasto.fechaPagoCre),
           ot: gasto.filtroOperativo.ot?.ot ?? "",
           idOc: String(gasto.idOc ?? "").trim(),
           solicitante: getConstanteLabelOrFallback(solicitanteOptions, gasto.solicitante, gasto.solicitanteLabel),
@@ -3909,6 +3934,8 @@ export default function GastosPage({
       { dataField: "nroOperacion", caption: "NroOperacion", width: 140 },
       { dataField: "fechaDeposito", caption: "FechaDeposito", dataType: "date", width: 130 },
       { dataField: "fecIngreso", caption: "FecIngreso", dataType: "date", width: 130 },
+      { dataField: "fecEmision", caption: "FecEmision", dataType: "date", width: 130 },
+      { dataField: "fechaPagoCre", caption: "FechaPagoCre", dataType: "date", width: 130 },
       { dataField: "ot", caption: "OT", width: 80 },
       { dataField: "idOc", caption: "IdOc", width: 90, calculateCellValue: (row) => (row.idOc && row.idOc !== "0" ? row.idOc : "-") },
       { dataField: "solicitante", caption: "Solicitante", width: 170 },
@@ -4136,6 +4163,13 @@ export default function GastosPage({
             section: "basic" as const,
             type: "text" as const,
             selectedValue: filtrosCabecera.id,
+          },
+          {
+            key: "idOc",
+            label: "OC",
+            section: "basic" as const,
+            type: "text" as const,
+            selectedValue: filtrosCabecera.idOc,
           },
           {
             key: "estado",
@@ -4368,7 +4402,7 @@ export default function GastosPage({
                           [filter.key]: event.target.value.replace(/\D/g, ""),
                         }))
                       }
-                      placeholder="Ingrese Id"
+                      placeholder={filter.key === "idOc" ? "Ingrese OC" : "Ingrese Id"}
                       style={{
                         width: "100%",
                         height: 36,
@@ -4598,6 +4632,9 @@ export default function GastosPage({
           rowPadding="4px 8px"
           paging={{ pageSize: 100, pageSizes: [50, 100, 250, 500] }}
           focusedRowKey={selectedRowKey}
+          selection={vistaGastos === "consulta" ? "multiple" : "none"}
+          selectedKeys={vistaGastos === "consulta" ? selectedRowKeys : undefined}
+          onSelectionChanged={(keys) => setSelectedRowKeys(keys)}
           onRowClick={(row) => {
             setSelectedRowKey(row.rowKey);
             if (rechazoError) {
@@ -4618,6 +4655,7 @@ export default function GastosPage({
         }}>
           <span>
             Registros encontrados: {gastosFiltrados.length}
+            {vistaGastos === "consulta" && selectedRowKeys.length > 0 ? ` | Seleccionados: ${selectedRowKeys.length}` : ""}
           </span>
           <span>
             {(() => {
