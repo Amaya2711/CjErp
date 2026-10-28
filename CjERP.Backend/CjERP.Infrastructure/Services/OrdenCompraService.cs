@@ -72,7 +72,8 @@ public class OrdenCompraService : IOrdenCompraService
     private const string BuscarSaldoPagoNuevoSql = """
         SELECT ISNULL(SUM(ISNULL(planilla.Subtotal, 0)), 0)
         FROM dbo.Planilla planilla
-        WHERE TRY_CONVERT(INT, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), planilla.IdOc))), '')) = @IdOc
+        WHERE planilla.IdOc = @IdOcTexto
+          AND TRY_CONVERT(INT, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), planilla.IdOc))), '')) = @IdOc
           AND planilla.IdProyecto = @IdProyecto
           AND planilla.IdSite = @IdSite
           AND ISNULL(planilla.CorreSite, 0) = ISNULL(@CorreSite, 0)
@@ -1509,6 +1510,7 @@ public class OrdenCompraService : IOrdenCompraService
         string usuarioAccion,
         CancellationToken cancellationToken = default)
     {
+        var cronometro = System.Diagnostics.Stopwatch.StartNew();
         await using var connection = _sqlCommandFactory.CreateConnection();
         var origen = await connection.QuerySingleOrDefaultAsync<PagoNuevoOrigen>(
             _sqlCommandFactory.Create(
@@ -1603,10 +1605,11 @@ public class OrdenCompraService : IOrdenCompraService
         var subtotalRegistrado = await connection.ExecuteScalarAsync<decimal>(
             _sqlCommandFactory.Create(
                 BuscarSaldoPagoNuevoSql,
-                new { request.IdOc, origen.IdProyecto, origen.IdSite, origen.CorreSite },
+                new { request.IdOc, IdOcTexto = request.IdOc.ToString(CultureInfo.InvariantCulture), origen.IdProyecto, origen.IdSite, origen.CorreSite },
                 CommandType.Text,
                 cancellationToken,
                 commandTimeout: 120));
+        var tSaldo = cronometro.ElapsedMilliseconds;
         var saldoDisponible = Math.Max(0m, origen.SubtotalOc - subtotalRegistrado);
         if (request.Monto > saldoDisponible)
         {
@@ -1656,6 +1659,10 @@ public class OrdenCompraService : IOrdenCompraService
                 CommandType.Text,
                 cancellationToken,
                 commandTimeout: 120));
+
+        _logger.LogInformation(
+            "Pago nuevo OC {IdOc} fila {Fila}: saldo hasta {SaldoMs} ms, total {TotalMs} ms",
+            request.IdOc, request.Fila, tSaldo, cronometro.ElapsedMilliseconds);
 
         return new OrdenCompraGenerarPagoNuevoResultDto
         {
