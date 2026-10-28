@@ -8,7 +8,9 @@ namespace CjERP.Infrastructure.Services;
 
 /// <summary>
 /// Carta "Solicitud de Vacaciones" con las tres aprobaciones del sistema.
-/// Basada en el reporte XtraReport1 de DXAsignacion (membrete, asunto, cuerpo, aprobaciones, pie).
+/// Réplica del reporte XtraReport1 de DXAsignacion (XtraReport1.Designer.vb): hoja Carta, márgenes laterales de 1",
+/// controles en posición absoluta. Las coordenadas están en centésimas de pulgada (unidad de DevExpress) y se
+/// convierten a puntos (x 0.72).
 /// </summary>
 internal sealed class VacacionesPdfDocument : IDocument
 {
@@ -16,7 +18,11 @@ internal sealed class VacacionesPdfDocument : IDocument
     private const string Direccion = "Calle Santa Justina 620, Cercado de Lima";
     // Destinataria fija de la carta, igual que en el reporte de referencia.
     private const string Atencion = "Angela Ortiz Quispe";
-    private static readonly string Gris = Colors.Grey.Darken2;
+
+    private const float Punto = 0.72f;                 // 1/100 de pulgada -> puntos
+    private const float MargenX = 100f;                // margen lateral del reporte (1")
+    private const float AnchoContenido = 650f;
+    private const float AltoPagina = 1100f;
 
     private readonly VacacionesCartaDto _carta;
     private readonly DateTime _fechaEmision;
@@ -39,137 +45,104 @@ internal sealed class VacacionesPdfDocument : IDocument
     {
         container.Page(page =>
         {
-            page.Size(PageSizes.A4);
-            page.MarginTop(12, Unit.Millimetre);
-            page.MarginBottom(14, Unit.Millimetre);
-            page.MarginHorizontal(22, Unit.Millimetre);
-            page.DefaultTextStyle(style => style.FontFamily("Arial").FontSize(10).FontColor(Colors.Black));
+            page.Size(PageSizes.Letter);
+            page.Margin(0);
+            page.DefaultTextStyle(style => style.FontFamily("Arial").FontSize(9.75f).FontColor(Colors.Black));
 
-            page.Header().Element(ComposeHeader);
-            page.Content().Element(ComposeContent);
-            page.Footer().Element(ComposeFooter);
+            page.Content().Layers(layers =>
+            {
+                layers.PrimaryLayer().Width(AnchoContenido * Punto + 2 * MargenX * Punto).Height(AltoPagina * Punto);
+                ComponerContenido(layers);
+            });
         });
     }
 
-    private void ComposeHeader(IContainer container)
+    private void ComponerContenido(LayersDescriptor layers)
     {
-        container.PaddingBottom(6).Column(column =>
-        {
-            if (_membrete is not null)
-            {
-                column.Item().Image(_membrete).FitWidth();
-            }
-            else
-            {
-                column.Item().Text("CJ Telecom SAC").FontSize(14).Bold();
-            }
-        });
-    }
-
-    private void ComposeContent(IContainer container)
-    {
-        var inicio = _carta.FechaInicio.ToString("dd/MM/yyyy", EsPe);
-        var fin = _carta.FechaFin.ToString("dd/MM/yyyy", EsPe);
+        var inicio = _carta.FechaInicio.ToString("d", EsPe);
+        var fin = _carta.FechaFin.ToString("d", EsPe);
         var nombre = Valor(_carta.NombreEmpleado);
 
-        container.PaddingTop(10).Column(column =>
+        // Membrete (TopMargin: 0,0 - 650 x 146.67)
+        if (_membrete is not null)
         {
-            column.Spacing(8);
+            Colocar(layers, 0, 0, 650f, 146.6667f).Image(_membrete).FitArea();
+        }
+        else
+        {
+            Colocar(layers, 0, 0, 650f, 146.6667f).Text("CJ Telecom SAC").FontSize(14).Bold();
+        }
 
-            column.Item().AlignCenter().Text("SOLICITUD DE VACACIONES").FontSize(13).Bold();
+        // Título centrado
+        Colocar(layers, 0, 146.6667f, 650f, 23f).AlignMiddle().AlignCenter()
+            .Text("SOLICITUD DE VACACIONES").FontSize(11).Bold();
 
-            if (!string.IsNullOrWhiteSpace(_carta.NombreCliente))
-            {
-                column.Item().Text(_carta.NombreCliente!.Trim()).FontSize(11).Bold();
-            }
+        if (!string.IsNullOrWhiteSpace(_carta.NombreCliente))
+        {
+            Colocar(layers, 29.16667f, 197f, 230.8333f, 23f).AlignMiddle()
+                .Text(_carta.NombreCliente!.Trim()).FontSize(11).Bold();
+        }
 
-            column.Item().Column(datos =>
-            {
-                datos.Spacing(2);
-                datos.Item().Text(Direccion);
-                datos.Item().Text($"Lima, {_fechaEmision.ToString("d 'de' MMMM 'de' yyyy", EsPe)}");
-            });
+        Colocar(layers, 29.16667f, 220f, 330f, 23f).AlignMiddle().Text(Direccion).FontSize(10);
 
-            column.Item().PaddingTop(4).Column(destino =>
-            {
-                destino.Spacing(3);
-                destino.Item().Text(text =>
-                {
-                    text.Span("Atención : ").Bold();
-                    text.Span(Atencion);
-                });
-                destino.Item().Text(text =>
-                {
-                    text.Span("Asunto : ").Bold();
-                    text.Span("Solicitud de Vacaciones");
-                });
-            });
+        // Solo la fecha (el reporte original no antepone "Lima,")
+        Colocar(layers, 26.66667f, 243f, 365.8333f, 26.3333f).AlignMiddle()
+            .Text(_fechaEmision.ToString("d 'de' MMMM 'de' yyyy", EsPe));
 
-            column.Item().PaddingTop(6).Text(
-                $"Por medio de la presente, yo {nombre}, identificado(a) con Nro. {Valor(_carta.NroDocumento)}, " +
-                "me dirijo a usted para solicitar la autorización de mis vacaciones.")
-                .Justify();
+        Colocar(layers, 26.66667f, 285f, 88.3333f, 23f).AlignMiddle().Text("Atención :").FontSize(10).Bold();
+        Colocar(layers, 115f, 285f, 218.3333f, 23f).AlignMiddle().Text(Atencion);
 
-            column.Item().Text(
-                $"Solicito tomar mis días de descanso desde el {inicio} hasta el {fin}, " +
-                "en cumplimiento con la normativa laboral y el reglamento interno de la empresa.")
-                .Justify();
+        Colocar(layers, 29.16667f, 343.3334f, 88.3333f, 23f).AlignMiddle().Text("Asunto :").FontSize(10).Bold();
+        Colocar(layers, 117.5f, 343.3334f, 215.8333f, 23f).AlignMiddle().Text("Solicitud de Vacaciones");
 
-            column.Item().Text(
-                "Agradezco su confirmación y la coordinación necesaria para garantizar la continuidad " +
-                "de mis funciones durante mi ausencia. Quedo a la espera de su pronta respuesta.")
-                .Justify();
+        Colocar(layers, 27.5f, 404.6667f, 584.1667f, 60f).Text(
+            $"Por medio de la presente, yo {nombre}, identificado con Nro: {Valor(_carta.NroDocumento)} " +
+            "me dirijo a usted para solicitar la autorización de mis vacaciones.");
 
-            column.Item().PaddingTop(8).Column(firma =>
-            {
-                firma.Spacing(2);
-                firma.Item().Text("Atentamente,");
-                firma.Item().PaddingTop(22).Text(nombre).Bold();
-            });
+        Colocar(layers, 27.5f, 467.8334f, 584.1666f, 52f).Text(
+            $"Solicito tomar mis días de descanso desde el {inicio} hasta el {fin}, " +
+            "en cumplimiento con la normativa laboral y el reglamento interno de la empresa.");
 
-            column.Item().PaddingTop(10).Element(ComposeAprobaciones);
-        });
+        Colocar(layers, 27.5f, 523.5002f, 584.1666f, 40f).Text(
+            "Agradezco su confirmación y la coordinación necesaria para garantizar la continuidad " +
+            "de mis funciones durante mi ausencia. Quedo atento a su pronta respuesta.");
+
+        // Firma en el lado derecho
+        Colocar(layers, 358.3333f, 585.9999f, 281.6667f, 23f).Text("Atentamente,");
+        Colocar(layers, 358.3333f, 608.9999f, 281.6667f, 23f).AlignMiddle().Text(nombre);
+
+        // Aprobaciones (Arial 8)
+        FilaAprobacion(layers, 697.4999f, "1era Aprobacion: ( x Sistema)", _carta.PreAprobador);
+        FilaAprobacion(layers, 720.4998f, "2da Aprobacion:  ( x Sistema)", _carta.PrimAprobador);
+        FilaAprobacion(layers, 743.4998f, "3ra Aprobacion:   ( x Sistema)", _carta.Autorizado);
+
+        // Pie (BottomMargin, 1" desde el borde inferior de la hoja)
+        var yPie = AltoPagina - 100f;
+        if (_pie2 is not null)
+        {
+            Colocar(layers, 496.6667f, yPie, 82.5f, 78.33334f).Image(_pie2).FitArea();
+        }
+
+        if (_pie1 is not null)
+        {
+            Colocar(layers, 579.1667f, yPie, 60.83334f, 100f).Image(_pie1).FitArea();
+        }
     }
 
-    private void ComposeAprobaciones(IContainer container)
+    private static void FilaAprobacion(LayersDescriptor layers, float y, string etiqueta, string? aprobador)
     {
-        container.Column(column =>
-        {
-            column.Spacing(3);
-            column.Item().Text("Aprobaciones registradas en el sistema").Bold().FontColor(Gris);
-            column.Item().Element(c => FilaAprobacion(c, "1era Aprobación: (x Sistema)", _carta.PreAprobador));
-            column.Item().Element(c => FilaAprobacion(c, "2da Aprobación: (x Sistema)", _carta.PrimAprobador));
-            column.Item().Element(c => FilaAprobacion(c, "3ra Aprobación: (x Sistema)", _carta.Autorizado));
-        });
+        Colocar(layers, 37.49995f, y, 153.3333f, 23f).AlignMiddle().Text(etiqueta).FontSize(8);
+        Colocar(layers, 190.8333f, y, 219.1667f, 23f).AlignMiddle().Text(Valor(aprobador)).FontSize(8);
     }
 
-    private static void FilaAprobacion(IContainer container, string etiqueta, string? aprobador)
-    {
-        container.Row(row =>
-        {
-            row.ConstantItem(170).Text(etiqueta).FontSize(9);
-            row.RelativeItem().Text(Valor(aprobador)).FontSize(9).Bold();
-        });
-    }
-
-    private void ComposeFooter(IContainer container)
-    {
-        container.Row(row =>
-        {
-            row.RelativeItem().AlignBottom().Text("Documento generado automáticamente por el sistema ERP de CJ Telecom.")
-                .FontSize(7).FontColor(Gris);
-
-            if (_pie2 is not null)
-            {
-                row.ConstantItem(42).AlignBottom().Image(_pie2).FitWidth();
-            }
-
-            if (_pie1 is not null)
-            {
-                row.ConstantItem(32).PaddingLeft(6).AlignBottom().Image(_pie1).FitWidth();
-            }
-        });
-    }
+    /// <summary>Coloca un contenedor en posición absoluta (coordenadas del reporte, relativas al margen lateral).</summary>
+    private static IContainer Colocar(LayersDescriptor layers, float x, float y, float ancho, float alto) =>
+        layers.Layer()
+            .TranslateX((MargenX + x) * Punto)
+            .TranslateY(y * Punto)
+            .Width(ancho * Punto)
+            .Height(alto * Punto)
+            .PaddingHorizontal(2 * Punto);
 
     private static string Valor(string? valor) => string.IsNullOrWhiteSpace(valor) ? "—" : valor.Trim();
 

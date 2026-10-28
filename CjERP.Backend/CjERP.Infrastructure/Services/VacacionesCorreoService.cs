@@ -34,6 +34,28 @@ public sealed class VacacionesCorreoService : IVacacionesCorreoService
         ORDER BY FechaFin DESC;
         """;
 
+    // Respaldo cuando vVacaciones no devuelve la solicitud (p. ej. aún no aprobada en las 3 etapas): se arma la carta con
+    // los datos del empleado y sus 3 validadores de vacaciones (mismas tablas/columnas que Database/Recursoshumanos/08).
+    // El cliente no se obtiene de estas tablas: la carta lo omite.
+    private const string CartaRespaldoSql = """
+        SELECT TOP 1
+            b.IdEmpleado AS IdEmpleadoCj,
+            CONVERT(nvarchar(200), b.NombreEmpleado) AS NombreEmpleado,
+            CONVERT(nvarchar(50), b.NroDocumento) AS NroDocumento,
+            CAST(NULL AS nvarchar(200)) AS NombreCliente,
+            @FechaInicio AS FechaInicio,
+            @FechaFin AS FechaFin,
+            CONVERT(nvarchar(200), r.NombreEmpleado) AS PreAprobador,
+            CONVERT(nvarchar(200), s.NombreEmpleado) AS PrimAprobador,
+            CONVERT(nvarchar(200), t.NombreEmpleado) AS Autorizado
+        FROM dbo.EmpleadoCj b
+        LEFT JOIN dbo.EmpleadoCjDetalle d ON d.IdEmpleadoCj = b.IdEmpleado
+        LEFT JOIN dbo.EmpleadoCj r        ON d.IdResponsableCj = r.IdEmpleado
+        LEFT JOIN dbo.EmpleadoCj s        ON d.IdSegundoVacaciones = s.IdEmpleado
+        LEFT JOIN dbo.EmpleadoCj t        ON d.IdTerceroVacaciones = t.IdEmpleado
+        WHERE b.IdEmpleado = @IdEmpleadoCj;
+        """;
+
     private readonly ISqlCommandFactory _sqlCommandFactory;
     private readonly ISmtpMailSender _mailSender;
     private readonly ILogger<VacacionesCorreoService> _logger;
@@ -107,6 +129,23 @@ public sealed class VacacionesCorreoService : IVacacionesCorreoService
         };
     }
 
+    public async Task<(byte[] Contenido, string NombreArchivo)?> GenerarCartaPdfAsync(
+        int idEmpleadoCj,
+        DateTime fechaInicio,
+        DateTime fechaFin,
+        CancellationToken cancellationToken = default)
+    {
+        var carta = await ObtenerCartaAsync(idEmpleadoCj, fechaInicio, fechaFin, cancellationToken);
+        if (carta is null)
+        {
+            return null;
+        }
+
+        var nombre = string.IsNullOrWhiteSpace(carta.NombreEmpleado) ? $"Empleado {idEmpleadoCj}" : carta.NombreEmpleado.Trim();
+        var pdf = new VacacionesPdfDocument(carta, HoraLima()).GeneratePdf();
+        return (pdf, NombreArchivo(nombre, carta.FechaInicio));
+    }
+
     private async Task<IReadOnlyList<string>> ObtenerDestinatariosAsync(CancellationToken cancellationToken)
     {
         await using var connection = _sqlCommandFactory.CreateConnection();
@@ -161,7 +200,24 @@ public sealed class VacacionesCorreoService : IVacacionesCorreoService
                     cancellationToken,
                     commandTimeout: 30));
 
-        return await Buscar(true) ?? await Buscar(false);
+        var carta = await Buscar(true) ?? await Buscar(false);
+        if (carta is not null)
+        {
+            return carta;
+        }
+
+        _logger.LogWarning(
+            "[Vacaciones] vVacaciones no devolvió la solicitud (IdEmpleadoCj={IdEmpleadoCj}, {Inicio:yyyy-MM-dd}); se usa el respaldo desde EmpleadoCj.",
+            idEmpleadoCj,
+            fechaInicio);
+
+        return await connection.QueryFirstOrDefaultAsync<VacacionesCartaDto>(
+            _sqlCommandFactory.Create(
+                CartaRespaldoSql,
+                new { IdEmpleadoCj = idEmpleadoCj, FechaInicio = fechaInicio.Date, FechaFin = fechaFin.Date },
+                CommandType.Text,
+                cancellationToken,
+                commandTimeout: 30));
     }
 
     private static string? Texto(IDictionary<string, object?> data, string campo)

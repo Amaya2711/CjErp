@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import AppPage from "../../components/base/AppPage";
 import AppSectionHeader from "../../components/base/AppSectionHeader";
-import DataGridBase, { type DataGridColumn } from "../../components/base/DataGridBase";
+import DataGridPro from "../../components/datagrid/DataGridPro";
+import type { GridColumn } from "../../components/datagrid/types";
 import SidePanelForm from "../../components/base/SidePanelForm";
 import {
   Cell,
@@ -18,6 +19,7 @@ import type { EmpleadoCta } from "../../models/empleadoCta";
 import {
   aprobarVacacion,
   crearVacacion,
+  descargarCartaPdfVacacion,
   listarMovimientosVacaciones,
   listarVacaciones,
   rechazarVacacion,
@@ -460,6 +462,17 @@ function getVacacionDias(fechaInicio: string, fechaFin: string): number {
   }
 
   return getDaysBetween(start, end);
+}
+
+const DIAS_MINIMOS_SOLICITUD = 7;
+const MIN_SELECCION_MASIVA = 2;
+const FILA_POCOS_DIAS_BG = "#FEE2E2";
+const FILA_POCOS_DIAS_BG_FOCO = "#FECACA";
+const filaPocosDiasStyle = { color: "#991B1B" } as const;
+
+function filaPocosDiasBackground(pocosDias: boolean, focused: boolean): string | undefined {
+  if (!pocosDias) return undefined;
+  return focused ? FILA_POCOS_DIAS_BG_FOCO : FILA_POCOS_DIAS_BG;
 }
 
 function normalizeSearchText(value?: string | null): string {
@@ -1416,6 +1429,112 @@ export default function VacacionesPage() {
     }
   }
 
+  const [selectedBandejaKeys, setSelectedBandejaKeys] = useState<string[]>([]);
+
+  useEffect(() => {
+    setSelectedBandejaKeys([]);
+  }, [activeTab]);
+
+  const selectedBandejaRows = useMemo(() => {
+    const keys = new Set(selectedBandejaKeys);
+    return filteredRows.filter((row) => keys.has(row.rowKey));
+  }, [filteredRows, selectedBandejaKeys]);
+
+  async function procesarMasivo(accion: "aprobar" | "rechazar") {
+    if (procesando || selectedBandejaRows.length < MIN_SELECCION_MASIVA) {
+      return;
+    }
+
+    const rows = selectedBandejaRows;
+    const verbo = accion === "aprobar" ? "aprobar" : "rechazar";
+    if (!window.confirm(`¿Desea ${verbo} ${rows.length} registro(s) seleccionado(s)?`)) {
+      return;
+    }
+
+    let correctos = 0;
+    const fallidos: string[] = [];
+
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
+      const nombre = row.nombreEmpleado || `Empleado ${row.idEmpleadoCj}`;
+      const fechaInicio = formatDateForRequest(row.fechaInicio);
+      const fechaFin = formatDateForRequest(row.fechaFin);
+
+      setProcesando(
+        `Procesando ${accion === "aprobar" ? "la aprobación" : "el rechazo"} ${index + 1} de ${rows.length}. Por favor espere, no cierre ni actualice la página...`
+      );
+
+      if (!row.idEmpleadoCj || !fechaInicio || !fechaFin) {
+        fallidos.push(`${nombre}: no se pudo identificar el registro.`);
+        continue;
+      }
+
+      try {
+        if (accion === "aprobar") {
+          await aprobarVacacion({ idEmpleadoCj: row.idEmpleadoCj, fechaInicio, fechaFin, idEstadoActual: row.estado });
+        } else {
+          await rechazarVacacion({ idEmpleadoCj: row.idEmpleadoCj, fechaInicio, fechaFin });
+        }
+        correctos += 1;
+      } catch (itemError) {
+        fallidos.push(`${nombre}: ${getHttpMessage(itemError, `No se pudo ${verbo} el registro.`)}`);
+      }
+    }
+
+    try {
+      await loadRows();
+    } finally {
+      setSelectedBandejaKeys([]);
+      setProcesando(null);
+    }
+
+    window.alert(
+      fallidos.length === 0
+        ? `${correctos} registro(s) procesado(s) correctamente.`
+        : `${correctos} registro(s) procesado(s) correctamente.` +
+          `\n\nNo se pudieron procesar ${fallidos.length}:\n${fallidos.join("\n")}`
+    );
+  }
+
+  // Vista previa del PDF que se envía por correo al aprobar la 3ra validación (no envía nada).
+  async function verFormatoRow(row: VacacionRegistro) {
+    if (procesando) {
+      return;
+    }
+
+    const fechaInicio = formatDateForRequest(row.fechaInicio);
+    const fechaFin = formatDateForRequest(row.fechaFin);
+
+    if (!row.idEmpleadoCj || !fechaInicio || !fechaFin) {
+      window.alert("No se pudo identificar el registro seleccionado.");
+      return;
+    }
+
+    setProcesando("Generando la vista previa del formato. Por favor espere...");
+
+    try {
+      const blob = await descargarCartaPdfVacacion({ idEmpleadoCj: row.idEmpleadoCj, fechaInicio, fechaFin });
+      const url = URL.createObjectURL(new Blob([blob], { type: "application/pdf" }));
+      window.open(url, "_blank");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (previewError) {
+      // Con responseType "blob" el cuerpo del error llega como Blob: se lee para mostrar el mensaje del servidor.
+      let detalle: string | null = null;
+      const cuerpo = (previewError as { response?: { data?: unknown } })?.response?.data;
+      if (cuerpo instanceof Blob) {
+        try {
+          const json = JSON.parse(await cuerpo.text()) as { message?: string; detail?: string };
+          detalle = [json.message, json.detail].filter(Boolean).join(" — ") || null;
+        } catch {
+          detalle = null;
+        }
+      }
+      window.alert(detalle ?? getHttpMessage(previewError, "No se pudo generar la vista previa del formato."));
+    } finally {
+      setProcesando(null);
+    }
+  }
+
   async function approveRow(row: VacacionRegistro) {
     if (procesando) {
       return;
@@ -1507,11 +1626,13 @@ export default function VacacionesPage() {
     }
   }
 
-  const movimientoColumns = useMemo<DataGridColumn<VacacionMovimientoRegistro>[]>(() => [
+  const movimientoColumns = useMemo<GridColumn<VacacionMovimientoRegistro>[]>(() => [
     {
-      key: "empleado",
-      header: "Empleado",
-      render: (row) => (
+      dataField: "nombreEmpleado",
+      caption: "Empleado",
+      minWidth: 220,
+      calculateCellValue: (row) => row.nombreEmpleado || `Empleado ${row.idEmpleado}`,
+      cellRender: (_value, row) => (
         <div>
           <div style={{ fontWeight: 700, color: "#0F172A" }}>{row.nombreEmpleado || `Empleado ${row.idEmpleado}`}</div>
           <div style={{ fontSize: 12, color: "#64748B" }}>
@@ -1520,27 +1641,23 @@ export default function VacacionesPage() {
         </div>
       ),
     },
+    { dataField: "tipoMovimiento", caption: "Movimiento", minWidth: 140 },
     {
-      key: "movimiento",
-      header: "Movimiento",
-      render: (row) => (
-        <div>
-          <div style={{ fontWeight: 700 }}>{row.tipoMovimiento || "-"}</div>
-          <div style={{ fontSize: 12, color: "#64748B" }}>
-            {formatDateDisplay(row.fechaMovimiento)} {row.fechaCreacion ? `· ${formatDateDisplay(row.fechaCreacion)}` : ""}
-          </div>
-        </div>
-      ),
+      dataField: "fechaMovimiento",
+      caption: "Fecha movimiento",
+      width: 140,
+      calculateCellValue: (row) => formatDateDisplay(row.fechaMovimiento),
     },
     {
-      key: "estado",
-      header: "Estado",
-      render: (row) => (
+      dataField: "estado",
+      caption: "Estado",
+      width: 130,
+      cellRender: (_value, row) => (
         <span
           style={{
             display: "inline-flex",
             alignItems: "center",
-            padding: "6px 10px",
+            padding: "4px 10px",
             borderRadius: 999,
             ...resolveMovimientoEstadoColors(row.estado),
             fontWeight: 700,
@@ -1552,41 +1669,25 @@ export default function VacacionesPage() {
       ),
     },
     {
-      key: "dias",
-      header: "Días",
-      align: "right",
-      render: (row) => <strong>{row.cantidadDias.toFixed(2)}</strong>,
+      dataField: "cantidadDias",
+      caption: "Días",
+      dataType: "number",
+      alignment: "right",
+      width: 90,
+      format: { type: "fixedPoint", precision: 2 },
     },
+    { dataField: "anio", caption: "Año", width: 80, calculateCellValue: (row) => row.anio ?? "-" },
+    { dataField: "idPeriodo", caption: "Periodo", width: 90, calculateCellValue: (row) => row.idPeriodo || "-" },
+    { dataField: "idSolicitud", caption: "Solicitud", width: 100, calculateCellValue: (row) => row.idSolicitud ?? "-" },
+    { dataField: "idMovimientoOrigen", caption: "Origen", width: 90, calculateCellValue: (row) => row.idMovimientoOrigen ?? "-" },
+    { dataField: "referencia", caption: "Referencia", minWidth: 120, calculateCellValue: (row) => row.referencia || "-" },
+    { dataField: "observacion", caption: "Observación", minWidth: 200, calculateCellValue: (row) => row.observacion || "-" },
+    { dataField: "usuarioCreacion", caption: "Usuario", width: 130, calculateCellValue: (row) => row.usuarioCreacion || "-" },
     {
-      key: "periodo",
-      header: "Periodo",
-      render: (row) => (
-        <div>
-          <div>{row.anio ?? "-"}</div>
-          <div style={{ fontSize: 12, color: "#64748B" }}>Periodo {row.idPeriodo || "-"}</div>
-        </div>
-      ),
-    },
-    {
-      key: "relacion",
-      header: "Relación",
-      render: (row) => (
-        <div style={{ display: "grid", gap: 4, fontSize: 12 }}>
-          <span><strong>Solicitud:</strong> {row.idSolicitud ?? "-"}</span>
-          <span><strong>Origen:</strong> {row.idMovimientoOrigen ?? "-"}</span>
-          <span><strong>Ref:</strong> {row.referencia || "-"}</span>
-        </div>
-      ),
-    },
-    {
-      key: "detalle",
-      header: "Detalle",
-      render: (row) => (
-        <div style={{ display: "grid", gap: 4 }}>
-          <div style={{ fontSize: 12, color: "#334155" }}>{row.observacion || "-"}</div>
-          <div style={{ fontSize: 12, color: "#64748B" }}>Usuario: {row.usuarioCreacion || "-"}</div>
-        </div>
-      ),
+      dataField: "fechaCreacion",
+      caption: "Fecha creación",
+      width: 140,
+      calculateCellValue: (row) => (row.fechaCreacion ? formatDateDisplay(row.fechaCreacion) : "-"),
     },
   ], []);
 
@@ -1688,13 +1789,23 @@ export default function VacacionesPage() {
             <InfoItem label="Días impactados" value={`${movimientoResumen.dias.toFixed(2)} día(s)`} />
           </div>
 
-          <DataGridBase
+          <DataGridPro<VacacionMovimientoRegistro>
+            dataSource={movimientoRows}
             columns={movimientoColumns}
-            rows={movimientoRows}
+            keyExpr="rowKey"
+            height="60vh"
             loading={movimientoLoading}
-            loadingMessage="Cargando movimientos vacacionales..."
-            emptyMessage="No se encontraron movimientos para los filtros seleccionados."
-            getRowKey={(row) => row.rowKey}
+            noDataText="No se encontraron movimientos para los filtros seleccionados."
+            selection="multiple"
+            stateStoringKey="vacaciones_movimientos"
+            rowBackground={(row, focused) =>
+              filaPocosDiasBackground(Math.abs(row.cantidadDias) < DIAS_MINIMOS_SOLICITUD, focused)
+            }
+            rowStyle={(row) => (Math.abs(row.cantidadDias) < DIAS_MINIMOS_SOLICITUD ? filaPocosDiasStyle : undefined)}
+            exportFileName="vacaciones_movimientos"
+            allowExport
+            rowAlternation={false}
+            rowPadding="4px 8px"
           />
         </div>
       </div>
@@ -1915,42 +2026,43 @@ export default function VacacionesPage() {
           {resumenDetalle.length === 0 ? (
             <div style={resumenEmptyStyle}>No hay vacaciones aprobadas para el empleado seleccionado.</div>
           ) : (
-            <div style={resumenTableWrapStyle}>
-              <table style={resumenTableStyle}>
-                <thead>
-                  <tr>
-                    <th style={resumenThStyle}>Fecha inicio</th>
-                    <th style={resumenThStyle}>Fecha fin</th>
-                    <th style={resumenThStyle}>Días</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {resumenDetalle.map((item) => {
-                    const contrato = resumenContratos[item.idEmpleadoCj];
-                    const diasVacaciones = getVacacionDias(item.fechaInicio, item.fechaFin);
-                    return (
-                      <tr key={item.rowKey}>
-                        <td style={resumenTdStyle}>{formatDateDisplay(item.fechaInicio)}</td>
-                        <td style={resumenTdStyle}>{formatDateDisplay(item.fechaFin)}</td>
-                        <td style={resumenTdStyle}>{diasVacaciones}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <DataGridPro<VacacionRegistro>
+              dataSource={resumenDetalle}
+              columns={resumenDetalleColumns}
+              keyExpr="rowKey"
+              height={320}
+              noDataText="No hay vacaciones aprobadas para el empleado seleccionado."
+              selection="multiple"
+              stateStoringKey="vacaciones_resumen_detalle"
+              rowBackground={(row, focused) =>
+                filaPocosDiasBackground(getVacacionDias(row.fechaInicio, row.fechaFin) < DIAS_MINIMOS_SOLICITUD, focused)
+              }
+              rowStyle={(row) =>
+                getVacacionDias(row.fechaInicio, row.fechaFin) < DIAS_MINIMOS_SOLICITUD ? filaPocosDiasStyle : undefined
+              }
+              exportFileName="vacaciones_aprobadas"
+              allowExport
+              rowAlternation={false}
+              rowPadding="4px 8px"
+              summary={{ totalItems: [{ column: "dias", type: "sum", label: "Total" }] }}
+            />
           )}
         </section>
       </div>
     );
   }
 
-  const columns = useMemo<DataGridColumn<VacacionRegistro>[]>(
+  // Con 2 o más registros marcados (acción masiva), los botones por fila se deshabilitan.
+  const accionesFilaDeshabilitadas = actionsDisabled || selectedBandejaRows.length >= MIN_SELECCION_MASIVA;
+
+  const columns = useMemo<GridColumn<VacacionRegistro>[]>(
     () => [
       {
-        key: "empleado",
-        header: "Empleado",
-        render: (row) => (
+        dataField: "nombreEmpleado",
+        caption: "Empleado",
+        minWidth: 220,
+        calculateCellValue: (row) => row.nombreEmpleado || `Empleado ${row.idEmpleadoCj}`,
+        cellRender: (_value, row) => (
           <div>
             <div style={{ fontWeight: 700, color: "#0F172A" }}>{row.nombreEmpleado || `Empleado ${row.idEmpleadoCj}`}</div>
             <div style={{ fontSize: 12, color: "#64748B" }}>ID {row.idEmpleadoCj}</div>
@@ -1958,26 +2070,39 @@ export default function VacacionesPage() {
         ),
       },
       {
-        key: "fechas",
-        header: "Rango",
-        render: (row) => (
-          <div>
-            <div>{formatDateDisplay(row.fechaInicio)}</div>
-            <div style={{ fontSize: 12, color: "#64748B" }}>{formatDateDisplay(row.fechaFin)}</div>
-          </div>
-        ),
+        dataField: "fechaInicio",
+        caption: "Fecha inicio",
+        width: 120,
+        calculateCellValue: (row) => formatDateDisplay(row.fechaInicio),
       },
       {
-        key: "estado",
-        header: "Estado",
-        render: (row) => {
+        dataField: "fechaFin",
+        caption: "Fecha fin",
+        width: 120,
+        calculateCellValue: (row) => formatDateDisplay(row.fechaFin),
+      },
+      {
+        dataField: "diasSolicitados",
+        placeAfter: "fechaFin",
+        caption: "Días solicitados",
+        dataType: "number",
+        alignment: "right",
+        width: 120,
+        calculateCellValue: (row) => getVacacionDias(row.fechaInicio, row.fechaFin),
+      },
+      {
+        dataField: "estadoLabel",
+        caption: "Estado",
+        width: 150,
+        calculateCellValue: (row) => resolveEstadoBadge(row.estado, row.estadoLabel).label,
+        cellRender: (_value, row) => {
           const badge = resolveEstadoBadge(row.estado, row.estadoLabel);
           return (
             <span
               style={{
                 display: "inline-flex",
                 alignItems: "center",
-                padding: "6px 10px",
+                padding: "4px 10px",
                 borderRadius: 999,
                 background: badge.background,
                 color: badge.color,
@@ -1990,68 +2115,78 @@ export default function VacacionesPage() {
           );
         },
       },
+      { dataField: "primerValidador", caption: "1er validador", minWidth: 150, calculateCellValue: (row) => row.primerValidador || "-" },
+      { dataField: "segundoValidador", caption: "2do validador", minWidth: 150, calculateCellValue: (row) => row.segundoValidador || "-" },
+      { dataField: "tercerValidador", caption: "3er validador", minWidth: 150, calculateCellValue: (row) => row.tercerValidador || "-" },
       {
-        key: "validadores",
-        header: "Validadores",
-        render: (row) => (
-          <div style={{ display: "grid", gap: 4, fontSize: 12 }}>
-            <span><strong>1:</strong> {row.primerValidador || "-"}</span>
-            <span><strong>2:</strong> {row.segundoValidador || "-"}</span>
-            <span><strong>3:</strong> {row.tercerValidador || "-"}</span>
-          </div>
-        ),
+        dataField: "saldoVacaciones",
+        caption: "Saldo",
+        dataType: "number",
+        alignment: "right",
+        width: 90,
+        format: { type: "fixedPoint", precision: 2 },
       },
       {
-        key: "saldo",
-        header: "Saldo",
-        align: "right",
-        render: (row) => (
-          <span style={{ fontWeight: 700 }}>
-            {row.saldoVacaciones == null ? "-" : row.saldoVacaciones.toFixed(2)}
-          </span>
-        ),
-      },
-      {
-        key: "acciones",
-        header: "Acciones",
-        align: "center",
-        render: (row) => (
+        dataField: "acciones",
+        caption: "Acciones",
+        alignment: "center",
+        width: 280,
+        allowSorting: false,
+        allowFiltering: false,
+        allowGrouping: false,
+        allowHeaderFilter: false,
+        cellRender: (_value, row) => (
           <div style={{ display: "inline-flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+            {row.estado === 99 ? (
+              <button
+                type="button"
+                onClick={procesando ? undefined : () => void verFormatoRow(row)}
+                disabled={Boolean(procesando)}
+                style={actionButton("#EFF6FF", "#1D4ED8", "#BFDBFE", Boolean(procesando))}
+              >
+                Ver formato
+              </button>
+            ) : null}
             {puedeAprobar ? (
-            <button
-              type="button"
-              onClick={actionsDisabled || procesando ? undefined : () => void approveRow(row)}
-              disabled={actionsDisabled || Boolean(procesando)}
-              style={actionButton(
-                "#ECFDF5",
-                "#047857",
-                "#A7F3D0",
-                actionsDisabled || Boolean(procesando)
-              )}
-            >
-              Aprobar
-            </button>
+              <button
+                type="button"
+                onClick={accionesFilaDeshabilitadas || procesando ? undefined : () => void approveRow(row)}
+                disabled={accionesFilaDeshabilitadas || Boolean(procesando)}
+                style={actionButton("#ECFDF5", "#047857", "#A7F3D0", accionesFilaDeshabilitadas || Boolean(procesando))}
+              >
+                Aprobar
+              </button>
             ) : null}
             {puedeRechazar ? (
-            <button
-              type="button"
-              onClick={actionsDisabled || procesando ? undefined : () => void rejectRow(row)}
-              disabled={actionsDisabled || Boolean(procesando)}
-              style={actionButton(
-                "#FEF2F2",
-                "#B91C1C",
-                "#FECACA",
-                actionsDisabled
-              )}
-            >
-              Rechazar
-            </button>
+              <button
+                type="button"
+                onClick={accionesFilaDeshabilitadas || procesando ? undefined : () => void rejectRow(row)}
+                disabled={accionesFilaDeshabilitadas || Boolean(procesando)}
+                style={actionButton("#FEF2F2", "#B91C1C", "#FECACA", accionesFilaDeshabilitadas || Boolean(procesando))}
+              >
+                Rechazar
+              </button>
             ) : null}
           </div>
         ),
       },
     ],
-    [actionsDisabled, procesando, puedeAprobar, puedeRechazar]
+    [accionesFilaDeshabilitadas, procesando, puedeAprobar, puedeRechazar]
+  );
+
+  const resumenDetalleColumns = useMemo<GridColumn<VacacionRegistro>[]>(
+    () => [
+      { dataField: "fechaInicio", caption: "Fecha inicio", calculateCellValue: (row) => formatDateDisplay(row.fechaInicio) },
+      { dataField: "fechaFin", caption: "Fecha fin", calculateCellValue: (row) => formatDateDisplay(row.fechaFin) },
+      {
+        dataField: "dias",
+        caption: "Días",
+        dataType: "number",
+        alignment: "right",
+        calculateCellValue: (row) => getVacacionDias(row.fechaInicio, row.fechaFin),
+      },
+    ],
+    []
   );
 
   return (
@@ -2142,15 +2277,58 @@ export default function VacacionesPage() {
                 <span style={labelStyle}>Fecha inicio hasta</span>
                 <input type="date" value={dateEnd} onChange={(event) => setDateEnd(event.target.value)} style={inputStyle} />
               </label>
+
+              {puedeAprobar || puedeRechazar ? (
+                <div style={fieldBlockStyle}>
+                  <span style={labelStyle}>Acciones masivas ({selectedBandejaRows.length} seleccionado(s))</span>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {puedeAprobar ? (
+                      <button
+                        type="button"
+                        onClick={() => void procesarMasivo("aprobar")}
+                        disabled={actionsDisabled || Boolean(procesando) || selectedBandejaRows.length < MIN_SELECCION_MASIVA}
+                        style={actionButton("#ECFDF5", "#047857", "#A7F3D0", actionsDisabled || Boolean(procesando) || selectedBandejaRows.length < MIN_SELECCION_MASIVA)}
+                      >
+                        Aprobar seleccionados
+                      </button>
+                    ) : null}
+                    {puedeRechazar ? (
+                      <button
+                        type="button"
+                        onClick={() => void procesarMasivo("rechazar")}
+                        disabled={actionsDisabled || Boolean(procesando) || selectedBandejaRows.length < MIN_SELECCION_MASIVA}
+                        style={actionButton("#FEF2F2", "#B91C1C", "#FECACA", actionsDisabled || Boolean(procesando) || selectedBandejaRows.length < MIN_SELECCION_MASIVA)}
+                      >
+                        Rechazar seleccionados
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
             </div>
 
-            <DataGridBase
+            <DataGridPro<VacacionRegistro>
+              dataSource={filteredRows}
               columns={columns}
-              rows={filteredRows}
+              keyExpr="rowKey"
+              height="60vh"
               loading={loading}
-              loadingMessage="Cargando bandeja de vacaciones..."
-              emptyMessage="No se encontraron registros para los filtros actuales."
-              getRowKey={(row) => row.rowKey}
+              noDataText="No se encontraron registros para los filtros actuales."
+              selection="multiple"
+              selectedKeys={selectedBandejaKeys}
+              onSelectionChanged={(keys) => setSelectedBandejaKeys(keys)}
+              selectionDisabled={Boolean(procesando)}
+              stateStoringKey="vacaciones_bandeja"
+              rowBackground={(row, focused) =>
+                filaPocosDiasBackground(getVacacionDias(row.fechaInicio, row.fechaFin) < DIAS_MINIMOS_SOLICITUD, focused)
+              }
+              rowStyle={(row) =>
+                getVacacionDias(row.fechaInicio, row.fechaFin) < DIAS_MINIMOS_SOLICITUD ? filaPocosDiasStyle : undefined
+              }
+              exportFileName="vacaciones"
+              allowExport
+              rowAlternation={false}
+              rowPadding="4px 8px"
             />
           </>
         )}

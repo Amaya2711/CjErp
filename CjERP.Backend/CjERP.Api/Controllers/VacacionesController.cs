@@ -14,13 +14,40 @@ public class VacacionesController : ControllerBase
 {
     private readonly IVacacionesService _vacacionesService;
     private readonly IPlanillaConsultaService _planillaConsultaService;
+    private readonly IVacacionesCorreoService _vacacionesCorreoService;
 
     public VacacionesController(
         IVacacionesService vacacionesService,
-        IPlanillaConsultaService planillaConsultaService)
+        IPlanillaConsultaService planillaConsultaService,
+        IVacacionesCorreoService vacacionesCorreoService)
     {
         _vacacionesService = vacacionesService;
         _planillaConsultaService = planillaConsultaService;
+        _vacacionesCorreoService = vacacionesCorreoService;
+    }
+
+    /// <summary>Vista previa del PDF que se envía por correo al aprobar la 3ra validación.</summary>
+    [HttpGet("carta-pdf")]
+    public async Task<IActionResult> CartaPdf(
+        [FromQuery] int idEmpleadoCj,
+        [FromQuery] DateTime fechaInicio,
+        [FromQuery] DateTime fechaFin,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var pdf = await _vacacionesCorreoService.GenerarCartaPdfAsync(idEmpleadoCj, fechaInicio, fechaFin, cancellationToken);
+            if (pdf is null)
+            {
+                return NotFound(new { success = false, message = "No se encontró la solicitud en vVacaciones para generar el PDF." });
+            }
+
+            return File(pdf.Value.Contenido, "application/pdf", pdf.Value.NombreArchivo);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { success = false, message = ex.Message, detail = ex.InnerException?.Message });
+        }
     }
 
     [HttpPost]

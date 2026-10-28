@@ -180,6 +180,15 @@ export async function aprobarVacacion(payload: VacacionesAprobarRequest) {
   );
 }
 
+/** Vista previa del PDF que se envía por correo al aprobar la 3ra validación. Fechas en formato yyyy-MM-dd. */
+export async function descargarCartaPdfVacacion(params: {
+  idEmpleadoCj: number;
+  fechaInicio: string;
+  fechaFin: string;
+}): Promise<Blob> {
+  return await httpClient.get<Blob>("/admin/vacaciones/carta-pdf", { params, responseType: "blob" });
+}
+
 export async function listarVacaciones(payload: VacacionesConsultaRequest = {}): Promise<PlanillaConsultaEstadosResponse> {
   const params: VacacionesConsultaRequest = {
     consulta: "vacaciones",

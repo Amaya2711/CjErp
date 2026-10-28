@@ -13,4 +13,14 @@ public interface IVacacionesCorreoService
         DateTime fechaInicio,
         DateTime fechaFin,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Genera el mismo PDF que se adjunta al correo de la 3ra validación, sin enviarlo (vista previa).
+    /// Devuelve null si la solicitud no existe en vVacaciones.
+    /// </summary>
+    Task<(byte[] Contenido, string NombreArchivo)?> GenerarCartaPdfAsync(
+        int idEmpleadoCj,
+        DateTime fechaInicio,
+        DateTime fechaFin,
+        CancellationToken cancellationToken = default);
 }
