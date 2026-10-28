@@ -328,6 +328,8 @@ public class OrdenCompraService : IOrdenCompraService
         FROM dbo.CabOrdenCompra
         WHERE IdOc = @IdOc;
         """;
+    // Una sola sentencia para todas las posiciones (JSON con su número de posición): con la BD remota lenta,
+    // un UPDATE por posición (round-trip cada uno) superaba el timeout al guardar OC de más de 100 posiciones.
     private const string ActualizarDatosOperativosInsertSql = """
         ;WITH DetalleOrdenado AS (
             SELECT
@@ -336,17 +338,30 @@ public class OrdenCompraService : IOrdenCompraService
                 ROW_NUMBER() OVER (PARTITION BY IdOc ORDER BY Fila) AS Posicion
             FROM dbo.DetOrdenCompra
             WHERE IdOc = @IdOc
+        ),
+        Datos AS (
+            SELECT Posicion, Correlativo, TipoTrabajo, IdTarea, Ot, IdComprobante, IdEstadoDetalle, PrecioUnitario
+            FROM OPENJSON(@DatosJson) WITH (
+                Posicion INT '$.posicion',
+                Correlativo INT '$.correlativo',
+                TipoTrabajo NVARCHAR(200) '$.tipoTrabajo',
+                IdTarea INT '$.idTarea',
+                Ot NVARCHAR(200) '$.ot',
+                IdComprobante INT '$.idComprobante',
+                IdEstadoDetalle INT '$.idEstadoDetalle',
+                PrecioUnitario DECIMAL(18,4) '$.precioUnitario'
+            )
         )
         UPDATE det
-        SET Correlativo = @Correlativo,
-            TipoTrabajo = @TipoTrabajo,
+        SET Correlativo = datos.Correlativo,
+            TipoTrabajo = datos.TipoTrabajo,
             IdTipoTrabajo = COALESCE(tipoTrabajo.IdTipoTrabajo, det.IdTipoTrabajo),
-            IdTarea = @IdTarea,
-            Ot = @Ot,
-            IdComprobante = COALESCE(@IdComprobante, @IdComprobanteCabecera),
-            IdEstado = COALESCE(@IdEstadoDetalle, det.IdEstado),
+            IdTarea = datos.IdTarea,
+            Ot = datos.Ot,
+            IdComprobante = COALESCE(datos.IdComprobante, @IdComprobanteCabecera),
+            IdEstado = COALESCE(datos.IdEstadoDetalle, det.IdEstado),
             -- sp_OrdenCompra_Insertar (no versionado) graba el precio a 2 decimales; la columna es numeric(18,4).
-            PrecioUnitario = CAST(@PrecioUnitarioTexto AS DECIMAL(18,4)),
+            PrecioUnitario = datos.PrecioUnitario,
             UsuarioCreacion = @UsuarioCreacion,
             FechaCreacion = @FechaCreacion,
             HoraCreacion = @HoraCreacion
@@ -354,15 +369,16 @@ public class OrdenCompraService : IOrdenCompraService
         INNER JOIN DetalleOrdenado ordenado
             ON ordenado.IdOc = det.IdOc
            AND ordenado.Fila = det.Fila
+        INNER JOIN Datos datos
+            ON datos.Posicion = ordenado.Posicion
         OUTER APPLY (
             SELECT TOP (1) constante.Correlativo AS IdTipoTrabajo
             FROM dbo.Constante constante
             WHERE constante.Campo = 'TIPO_TRABAJO'
-              AND UPPER(LTRIM(RTRIM(constante.ValorIni))) = UPPER(LTRIM(RTRIM(@TipoTrabajo)))
+              AND UPPER(LTRIM(RTRIM(constante.ValorIni))) = UPPER(LTRIM(RTRIM(datos.TipoTrabajo)))
             ORDER BY constante.Correlativo
         ) tipoTrabajo
-        WHERE det.IdOc = @IdOc
-          AND ordenado.Posicion = @Posicion;
+        WHERE det.IdOc = @IdOc;
         """;
     private const string ActualizarCabeceraEdicionSql = """
         UPDATE dbo.CabOrdenCompra
@@ -825,33 +841,34 @@ public class OrdenCompraService : IOrdenCompraService
         // operativo al consultarla o editarla.
         if (idOc > 0)
         {
-            var posicion = 0;
-            foreach (var item in request.Detalle)
-            {
-                posicion++;
-                await connection.ExecuteAsync(
-                    _sqlCommandFactory.Create(
-                        ActualizarDatosOperativosInsertSql,
-                        new
-                        {
-                            IdOc = idOc,
-                            Posicion = posicion,
-                            Correlativo = item.Correlativo,
-                            TipoTrabajo = NullIfWhiteSpace(item.TipoTrabajo),
-                            IdTarea = item.IdTarea,
-                            Ot = NullIfWhiteSpace(item.Ot),
-                             IdComprobante = item.IdComprobante,
-                             IdComprobanteCabecera = request.IdComprobante,
-                             IdEstadoDetalle = item.IdEstadoDetalle,
-                             PrecioUnitarioTexto = item.PrecioUnitario.ToString("0.0000", CultureInfo.InvariantCulture),
-                             UsuarioCreacion = NullIfWhiteSpace(request.UsuarioCreacion),
-                             FechaCreacion = request.FechaCreacion.Date,
-                             HoraCreacion = request.HoraCreacion,
-                        },
-                        CommandType.Text,
-                        cancellationToken,
-                        commandTimeout: 120));
-            }
+            var datosJson = JsonSerializer.Serialize(
+                request.Detalle.Select((item, indice) => new
+                {
+                    posicion = indice + 1,
+                    correlativo = item.Correlativo,
+                    tipoTrabajo = NullIfWhiteSpace(item.TipoTrabajo),
+                    idTarea = item.IdTarea,
+                    ot = NullIfWhiteSpace(item.Ot),
+                    idComprobante = item.IdComprobante,
+                    idEstadoDetalle = item.IdEstadoDetalle,
+                    precioUnitario = item.PrecioUnitario.ToString("0.0000", CultureInfo.InvariantCulture)
+                }));
+
+            await connection.ExecuteAsync(
+                _sqlCommandFactory.Create(
+                    ActualizarDatosOperativosInsertSql,
+                    new
+                    {
+                        IdOc = idOc,
+                        DatosJson = datosJson,
+                        IdComprobanteCabecera = request.IdComprobante,
+                        UsuarioCreacion = NullIfWhiteSpace(request.UsuarioCreacion),
+                        FechaCreacion = request.FechaCreacion.Date,
+                        HoraCreacion = request.HoraCreacion,
+                    },
+                    CommandType.Text,
+                    cancellationToken,
+                    commandTimeout: 120));
 
             await connection.QuerySingleAsync<TotalesCabecera>(
                 _sqlCommandFactory.Create(
