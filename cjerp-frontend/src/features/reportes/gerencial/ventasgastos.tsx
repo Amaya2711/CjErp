@@ -86,6 +86,15 @@ const numero = (v: unknown): number => {
 const fmt = (v: number) => v.toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const pad = (n: number) => String(n).padStart(2, "0");
 const nombreMes = (periodo: string) => `${MESES[Number(periodo.slice(4)) - 1] ?? periodo.slice(4)} ${periodo.slice(0, 4)}`;
+// Nombre comparable: sin tildes, símbolos ni sufijo societario (SAC, SA, SRL, EIRL).
+const claveNombre = (v: string) =>
+  v
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9 ]+/g, "")
+    .replace(/\b(SAC|SA|SRL|EIRL|SAA)\b/g, "")
+    .replace(/\s+/g, "");
 const empresaDe = (r: VentasSunatRegistroDto) => (r.empresa ?? "").trim() || SIN_EMPRESA;
 
 function pick(row: RawRow, keys: string[]): string {
@@ -307,7 +316,13 @@ export default function VentasGastosPage() {
       const ruc = (r.rucEmisor ?? "").trim();
       if (ruc && elegidas.some((c) => c.ruc && c.ruc === ruc)) return true;
       if (r.idEmpresa != null && elegidas.some((c) => c.id === String(r.idEmpresa))) return true;
-      return empresasSel.includes(empresaDe(r));
+      if (empresasSel.includes(empresaDe(r))) return true;
+      // Último recurso: el nombre del catálogo y el de la venta difieren por sufijos ("MCJ PYDEX S.A.C" / "MCJ PYDEX", "CJ TELECOM" / "TELECOM").
+      const nombreVenta = claveNombre(empresaDe(r));
+      return nombreVenta.length > 0 && elegidas.some((c) => {
+        const n = claveNombre(c.nombre);
+        return n.length > 0 && (n.includes(nombreVenta) || nombreVenta.includes(n));
+      });
     },
     [empresasSel, catalogo],
   );

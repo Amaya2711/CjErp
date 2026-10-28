@@ -57,7 +57,14 @@ export default function VentasConcentracionChart({ anio, registros, importe, sel
     return visibles.map((c) => ({ ...c, participacion: (c.venta / total) * 100 }));
   }, [anio, registros, importe]);
 
-  if (barras.length === 0) return null;
+  if (barras.length === 0) {
+    return (
+      <div style={tarjeta}>
+        <h3 style={{ fontSize: 14, fontWeight: 800, color: "#0F172A", margin: "0 0 4px" }}>Concentración de la venta</h3>
+        <div style={{ fontSize: 13, color: "#64748B" }}>Sin ventas para los filtros elegidos.</div>
+      </div>
+    );
+  }
 
   return (
     <div style={tarjeta}>
