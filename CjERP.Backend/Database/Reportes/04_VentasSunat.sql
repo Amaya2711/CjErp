@@ -1,4 +1,4 @@
--- Reporte / Ventas SUNAT: carga mensual del "Registro de Ventas" SIRE (Excel); la validación asigna IdCliente (NroDocIdentidad = Cliente.NroDocumento), Empresa e IdEmpresa (RELACION_VTA / EMPRESA_VTA).
+-- Reporte / Ventas SUNAT: carga mensual del "Registro de Ventas" SIRE (Excel); la validación asigna IdCliente (NroDocIdentidad = Cliente.NroDocumento), Empresa e IdEmpresa (por RUC emisor, constante EMPRESA_cj).
 -- Una carga = un periodo (año-mes, columna Periodo AAAAMM) de un RUC emisor: recargar el mismo periodo REEMPLAZA lo anterior.
 -- Idempotente (IF NOT EXISTS / CREATE OR ALTER). PV: no ejecutado en la BD real; validar que dbo.Cliente tenga IdCliente, NombreCliente, Estado.
 SET XACT_ABORT ON;
@@ -58,9 +58,9 @@ BEGIN
         TipoOperacion              VARCHAR(10)          NULL,
         DamCp                      VARCHAR(30)          NULL,
         Clu                        VARCHAR(30)          NULL,
-        IdEmpresa                  INT                  NULL,       -- ValorFin de Constante RELACION_VTA cuyo ValorIni = NroDocIdentidad (RUC del cliente)
+        IdEmpresa                  INT                  NULL,       -- Constante.Correlativo de EMPRESA_cj (Adicional = RucEmisor)
         IdCliente                  INT                  NULL,       -- dbo.Cliente.IdCliente cuando NombreCliente = RazonSocial
-        Empresa                    VARCHAR(150)         NULL,       -- ValorIni de Constante EMPRESA_VTA (via RELACION_VTA por RUC del cliente)
+        Empresa                    VARCHAR(150)         NULL,       -- Constante.ValorIni de EMPRESA_cj (Adicional = RucEmisor)
         FechaCarga                 DATETIME2(0)         NOT NULL CONSTRAINT DF_VentasSunat_FechaCarga DEFAULT (SYSDATETIME()),
         UsuarioCarga               VARCHAR(100)         NULL
     );
@@ -160,7 +160,7 @@ END
 GO
 
 -- Asigna IdCliente: ventassunat.NroDocIdentidad (RUC del cliente) = dbo.Cliente.NroDocumento.
--- IdEmpresa y Empresa NO se asignan aqui: los graba sp_VentasSunat_AsignarEmpresa (regla RELACION_VTA / EMPRESA_VTA, resuelta por el backend).
+-- IdEmpresa y Empresa NO se asignan aqui: los graba sp_VentasSunat_AsignarEmpresa (por RUC emisor, constante EMPRESA_cj, resuelta por el backend).
 -- PV: confirmar en la BD que dbo.Cliente tenga la columna NroDocumento.
 CREATE OR ALTER PROCEDURE dbo.sp_VentasSunat_Validar
     @Lote UNIQUEIDENTIFIER
@@ -243,31 +243,19 @@ BEGIN
 END
 GO
 
--- Graba Empresa e IdEmpresa de cada RUC de cliente del lote. @Asignaciones: JSON [{ "ruc": "...", "empresa": "..." | null, "idEmpresa": 1 | null }].
--- La regla (RELACION_VTA -> EMPRESA_VTA de dbo.Constante) la resuelve el backend con sp_Constante_ListarPorCampo:
--- IdEmpresa = ValorFin de RELACION_VTA (ValorIni = RUC del cliente) y Empresa = ValorIni de la fila de EMPRESA_VTA con ese mismo ValorFin.
--- Un RUC sin empresa queda en NULL (revalidar refresca el valor).
+-- Graba IdEmpresa y Empresa en todo el lote. El backend los resuelve por el RUC emisor con sp_Constante_ListarPorCampo 'EMPRESA_cj':
+-- Constante.Adicional = VentasSunat.RucEmisor -> IdEmpresa = Constante.Correlativo y Empresa = Constante.ValorIni.
+-- Un RUC emisor sin fila en EMPRESA_cj queda en NULL (revalidar refresca el valor).
+-- Cambio de firma: ya no recibe @Asignaciones (regla anterior RELACION_VTA / EMPRESA_VTA por RUC de cliente).
 CREATE OR ALTER PROCEDURE dbo.sp_VentasSunat_AsignarEmpresa
-    @Lote          UNIQUEIDENTIFIER,
-    @Asignaciones  NVARCHAR(MAX)
+    @Lote       UNIQUEIDENTIFIER,
+    @IdEmpresa  INT = NULL,
+    @Empresa    VARCHAR(150) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
-    SET XACT_ABORT ON;
 
-    SELECT ruc, empresa, idEmpresa
-    INTO #Asig
-    FROM OPENJSON(@Asignaciones) WITH
-    (
-        ruc       VARCHAR(20)  '$.ruc',
-        empresa   VARCHAR(150) '$.empresa',
-        idEmpresa INT          '$.idEmpresa'
-    );
-
-    UPDATE v SET Empresa = a.empresa, IdEmpresa = a.idEmpresa
-    FROM dbo.VentasSunat v
-    JOIN #Asig a ON a.ruc = LTRIM(RTRIM(v.NroDocIdentidad))
-    WHERE v.Lote = @Lote;
+    UPDATE dbo.VentasSunat SET IdEmpresa = @IdEmpresa, Empresa = @Empresa WHERE Lote = @Lote;
 
     SELECT @@ROWCOUNT AS Actualizados;
 END

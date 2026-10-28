@@ -14,6 +14,7 @@ import {
   rechazarDescansos,
   registrarDescanso,
   subirAdjuntoDescanso,
+  cargarAnexoDescanso,
   type Descanso,
   type DescansoAccionResultado,
   type DescansoEmpleado,
@@ -356,6 +357,39 @@ export default function DescansoMedicoPage() {
     }
   }
 
+  // Reporte: la grilla se memoriza una sola vez, por eso el anexo usa refs para ver siempre la versión vigente.
+  const anexoInputRef = useRef<HTMLInputElement | null>(null);
+  const anexoFilaRef = useRef<Descanso | null>(null);
+  const recargarRef = useRef<() => Promise<void>>(async () => {});
+  recargarRef.current = cargarDescansos;
+
+  function elegirAnexo(fila: Descanso) {
+    anexoFilaRef.current = fila;
+    anexoInputRef.current?.click();
+  }
+
+  async function subirAnexo(archivoAnexo: File | null) {
+    const fila = anexoFilaRef.current;
+    if (anexoInputRef.current) anexoInputRef.current.value = "";
+    anexoFilaRef.current = null;
+    if (!archivoAnexo || !fila) return;
+
+    setProcesando("Subiendo el documento anexo a SharePoint. Por favor espere...");
+    try {
+      await cargarAnexoDescanso(archivoAnexo, {
+        idEmpleadoCj: fila.idEmpleadoCj,
+        fechaInicio: fechaIso(fila.fechaInicio),
+        fechaFin: fechaIso(fila.fechaFin),
+      });
+      await recargarRef.current();
+      window.alert("Documento anexo cargado correctamente.");
+    } catch (uploadError) {
+      window.alert(getHttpErrorMessage(uploadError, "No se pudo cargar el documento anexo."));
+    } finally {
+      setProcesando(null);
+    }
+  }
+
   function verAdjunto(fila: Descanso) {
     if (!fila.ruta) {
       window.alert("No hay ruta de documento registrada.");
@@ -434,7 +468,7 @@ export default function DescansoMedicoPage() {
       {
         dataField: "acciones",
         caption: "Acciones",
-        width: 170,
+        width: 260,
         alignment: "center",
         allowSorting: false,
         allowFiltering: false,
@@ -450,12 +484,17 @@ export default function DescansoMedicoPage() {
             <button type="button" style={accionButtonStyle} onClick={() => void abrirPdf(row)}>
               PDF
             </button>
+            {tabActivo === "reporte" && !bloqueado("button.anexo") ? (
+              <button type="button" style={accionButtonStyle} onClick={() => elegirAnexo(row)}>
+                {row.ruta ? "Reemplazar anexo" : "Cargar anexo"}
+              </button>
+            ) : null}
           </div>
         ),
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
+    [tabActivo, bloqueado]
   );
 
   const esIngreso = tabActivo === "ingreso";
@@ -708,6 +747,14 @@ export default function DescansoMedicoPage() {
         confirmDisabled={!motivoRechazo.trim()}
         onConfirm={() => rechazoFila && void rechazarFila(rechazoFila)}
         onCancel={() => setRechazoFila(null)}
+      />
+
+      <input
+        ref={anexoInputRef}
+        type="file"
+        accept=".jpg,.jpeg,.png,.bmp,.webp,.pdf"
+        style={{ display: "none" }}
+        onChange={(event) => void subirAnexo(event.target.files?.[0] ?? null)}
       />
 
       {procesando ? (

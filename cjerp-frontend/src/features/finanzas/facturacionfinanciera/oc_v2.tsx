@@ -3064,15 +3064,15 @@ export default function OcV2Page() {
       dataType: "number",
       width: 110,
       calculateCellValue: (item) => toNumber(item.subtotal),
-      cellRender: (_value, item) => <span style={styles.approvalAmount}>{formatMonto4(item.subtotal)}</span>,
+      cellRender: (_value, item) => <span style={styles.approvalAmount}>{formatMoney(item.subtotal)}</span>,
     },
     { dataField: "moneda", caption: "Moneda", width: 90, calculateCellValue: (item) => normalizarTexto(item.moneda) || "-" },
     // Columnas opcionales (selector de columnas).
     { dataField: "validadorBandeja", caption: "Validador", width: 180, visible: false, calculateCellValue: (item) => getValidadorAgrupacion(item) },
     { dataField: "nombreProyecto", caption: "Proyecto", width: 170, visible: false, calculateCellValue: (item) => normalizarTexto(item.nombreProyecto) || "-" },
     { dataField: "nombreSite", caption: "Site", width: 170, visible: false, calculateCellValue: (item) => normalizarTexto(item.nombreSite) || "-" },
-    { dataField: "igv", caption: "IGV", dataType: "number", width: 100, visible: false, calculateCellValue: (item) => toNumber(item.igv), cellRender: (_value, item) => formatMonto4(item.igv) },
-    { dataField: "total", caption: "Total", dataType: "number", width: 110, visible: false, calculateCellValue: (item) => toNumber(item.total), cellRender: (_value, item) => formatMonto4(item.total) },
+    { dataField: "igv", caption: "IGV", dataType: "number", width: 100, visible: false, calculateCellValue: (item) => toNumber(item.igv), cellRender: (_value, item) => formatMoney(item.igv) },
+    { dataField: "total", caption: "Total", dataType: "number", width: 110, visible: false, calculateCellValue: (item) => toNumber(item.total), cellRender: (_value, item) => formatMoney(item.total) },
     // Agrupaciones de la bandeja (las elige el selector "Agrupar por").
     {
       dataField: "grpSolicitante",
@@ -3173,9 +3173,9 @@ export default function OcV2Page() {
     },
     { dataField: "cantidad", caption: "Cantidad", dataType: "number", width: 90, calculateCellValue: (item) => toNumber(item.cantidad), cellRender: (_value, item) => formatMoney(item.cantidad) },
     { dataField: "precioUnitario", caption: "Precio unit.", dataType: "number", width: 100, calculateCellValue: (item) => toNumber(item.precioUnitario), cellRender: (_value, item) => formatPrecioUnitario(toNumber(item.precioUnitario)) },
-    { dataField: "subtotalD", caption: "Subtotal", dataType: "number", width: 100, calculateCellValue: (item) => toNumber(item.subtotalD), cellRender: (_value, item) => formatMonto4(item.subtotalD) },
-    { dataField: "igvD", caption: "IGV", dataType: "number", width: 90, calculateCellValue: (item) => toNumber(item.igvD), cellRender: (_value, item) => formatMonto4(item.igvD) },
-    { dataField: "totalD", caption: "Total", dataType: "number", width: 100, calculateCellValue: (item) => toNumber(item.totalD), cellRender: (_value, item) => formatMonto4(item.totalD) },
+    { dataField: "subtotalD", caption: "Subtotal", dataType: "number", width: 100, calculateCellValue: (item) => toNumber(item.subtotalD), cellRender: (_value, item) => formatMoney(item.subtotalD) },
+    { dataField: "igvD", caption: "IGV", dataType: "number", width: 90, calculateCellValue: (item) => toNumber(item.igvD), cellRender: (_value, item) => formatMoney(item.igvD) },
+    { dataField: "totalD", caption: "Total", dataType: "number", width: 100, calculateCellValue: (item) => toNumber(item.totalD), cellRender: (_value, item) => formatMoney(item.totalD) },
     {
       dataField: "adjuntos",
       caption: "Adjuntos",
@@ -3694,9 +3694,9 @@ export default function OcV2Page() {
               </div>
             ) : (
               <div style={styles.summaryInline}>
-                <span>Subtotal: {formatMonto4(selectedCabecera?.subtotal)}</span>
-                <span>IGV: {formatMonto4(selectedCabecera?.igv)}</span>
-                <span>Total: {formatMonto4(selectedCabecera?.total)}</span>
+                <span>Subtotal: {formatMoney(selectedCabecera?.subtotal)}</span>
+                <span>IGV: {formatMoney(selectedCabecera?.igv)}</span>
+                <span>Total: {formatMoney(selectedCabecera?.total)}</span>
               </div>
             )
           ) : null}

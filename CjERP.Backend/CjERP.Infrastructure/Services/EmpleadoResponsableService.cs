@@ -103,6 +103,8 @@ public sealed class EmpleadoResponsableService : IEmpleadoResponsableService
         CancellationToken cancellationToken)
     {
         await using var connection = _sqlCommandFactory.CreateConnection();
+        await ValidarCuentasUnicasAsync(connection, request, cancellationToken);
+
         var parameters = (await connection.QueryAsync<StoredProcedureParameter>(
             _sqlCommandFactory.Create(
                 """
@@ -163,6 +165,79 @@ public sealed class EmpleadoResponsableService : IEmpleadoResponsableService
                 string.IsNullOrWhiteSpace(resultado.Mensaje)
                     ? "No se pudo actualizar el responsable."
                     : resultado.Mensaje);
+        }
+    }
+
+    // Un mismo responsable (IdEmpleado, o el de igual NroDocumento al insertar; IdCargo 10) no puede tener
+    // dos cuentas con el mismo nro. de cuenta, la misma interbancaria, ni el mismo banco + tipo de cuenta.
+    // En edición se excluye la cuenta que se está modificando (IdEmpleado + banco + tipo + cuenta actuales).
+    private async Task ValidarCuentasUnicasAsync(
+        IDbConnection connection,
+        EmpleadoResponsableInsertarRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var cuenta = request.Cuenta?.Trim() ?? string.Empty;
+        var cuentaInter = request.CuentaInter?.Trim() ?? string.Empty;
+        if (cuenta.Length == 0 && cuentaInter.Length == 0)
+        {
+            return;
+        }
+
+        var esEdicion = request.IdEmpleado.GetValueOrDefault() > 0
+            && request.IdBancoActual.GetValueOrDefault() > 0
+            && !string.IsNullOrWhiteSpace(request.CuentaActual);
+
+        _ = int.TryParse(request.IdBanco?.Trim(), out var idBanco);
+
+        var duplicado = await connection.QueryFirstOrDefaultAsync<(int PorCuenta, int PorInter, int PorBancoTipo)>(
+            _sqlCommandFactory.Create(
+                """
+                SELECT
+                    ISNULL(MAX(CASE WHEN @Cuenta <> '' AND LTRIM(RTRIM(ISNULL(CE.Cuenta, ''))) = @Cuenta THEN 1 END), 0) AS PorCuenta,
+                    ISNULL(MAX(CASE WHEN @CuentaInter <> '' AND LTRIM(RTRIM(ISNULL(CE.CuentaInter, ''))) = @CuentaInter THEN 1 END), 0) AS PorInter,
+                    ISNULL(MAX(CASE WHEN @IdBanco > 0 AND @NombreCta <> ''
+                                     AND CE.IdBanco = @IdBanco
+                                     AND UPPER(LTRIM(RTRIM(ISNULL(CE.NombreCta, '')))) = UPPER(@NombreCta) THEN 1 END), 0) AS PorBancoTipo
+                FROM dbo.CuentaEmpleado CE
+                INNER JOIN dbo.Empleado E ON E.IdEmpleado = CE.IdEmpleado AND E.IdCargo = CE.IdCargo
+                WHERE CE.IdCargo = 10
+                  AND (CE.IdEmpleado = @IdEmpleado
+                       OR (@NroDocumento <> '' AND LTRIM(RTRIM(ISNULL(E.NroDocumento, ''))) = @NroDocumento))
+                  AND NOT (@EsEdicion = 1
+                           AND CE.IdEmpleado = @IdEmpleado
+                           AND CE.IdBanco = @IdBancoActual
+                           AND UPPER(LTRIM(RTRIM(ISNULL(CE.NombreCta, '')))) = UPPER(@NombreCtaActual)
+                           AND LTRIM(RTRIM(ISNULL(CE.Cuenta, ''))) = @CuentaActual);
+                """,
+                new
+                {
+                    Cuenta = cuenta,
+                    CuentaInter = cuentaInter,
+                    IdBanco = idBanco,
+                    NombreCta = request.NombreCta?.Trim() ?? string.Empty,
+                    NroDocumento = request.NroDocumento?.Trim() ?? string.Empty,
+                    EsEdicion = esEdicion ? 1 : 0,
+                    IdEmpleado = request.IdEmpleado ?? 0,
+                    IdBancoActual = request.IdBancoActual ?? 0,
+                    NombreCtaActual = request.NombreCtaActual?.Trim() ?? string.Empty,
+                    CuentaActual = request.CuentaActual?.Trim() ?? string.Empty,
+                },
+                CommandType.Text,
+                cancellationToken));
+
+        if (duplicado.PorCuenta == 1)
+        {
+            throw new InvalidOperationException($"El responsable ya tiene registrada la cuenta {cuenta}.");
+        }
+
+        if (duplicado.PorInter == 1)
+        {
+            throw new InvalidOperationException($"El responsable ya tiene registrada la cuenta interbancaria {cuentaInter}.");
+        }
+
+        if (duplicado.PorBancoTipo == 1)
+        {
+            throw new InvalidOperationException("El responsable ya tiene una cuenta del mismo banco y tipo de cuenta.");
         }
     }
 

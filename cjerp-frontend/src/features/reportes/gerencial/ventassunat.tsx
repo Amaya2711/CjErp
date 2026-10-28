@@ -480,7 +480,7 @@ export default function VentasSunatPage() {
             <div style={{ fontSize: 13, color: "#64748B", lineHeight: 1.5 }}>
               Cargue el Excel del Registro de Ventas SIRE <strong>de un solo mes</strong>: al grabar se reemplaza lo cargado antes para ese
               periodo y se valida el cliente automáticamente: <strong>IdCliente</strong> (tabla Cliente, por documento), <strong>IdEmpresa</strong> y{" "}
-              <strong>Empresa</strong> (constantes RELACION_VTA / EMPRESA_VTA).
+              <strong>Empresa</strong> (por RUC emisor, constante EMPRESA_cj).
             </div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <input ref={inputRef} type="file" accept=".xlsx,.xls" onChange={onFile} style={{ display: "none" }} />

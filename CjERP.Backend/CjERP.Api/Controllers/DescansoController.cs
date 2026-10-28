@@ -28,6 +28,14 @@ public class DescansoController : ControllerBase
         public int? IdEmpleadoCj { get; set; }
     }
 
+    public class UploadDescansoAnexoRequest
+    {
+        public IFormFile? Archivo { get; set; }
+        public int IdEmpleadoCj { get; set; }
+        public DateTime FechaInicio { get; set; }
+        public DateTime FechaFin { get; set; }
+    }
+
     [HttpGet("empleados")]
     public Task<IActionResult> Empleados(CancellationToken cancellationToken) =>
         Ejecutar(async () => Ok(new { success = true, data = await _descansoService.ListarEmpleadosAsync(cancellationToken) }));
@@ -118,6 +126,45 @@ public class DescansoController : ControllerBase
             var usuario = User.FindFirstValue("IdUsuario") ?? User.FindFirstValue(ClaimTypes.Name) ?? "sistema";
             var dias = await _descansoService.RegistrarAsync(request, usuario, cancellationToken);
             return Ok(new { success = true, message = "Descanso registrado correctamente.", data = new { diasRegistrados = dias } });
+        });
+
+    /// <summary>Sube el documento anexo a SharePoint (DESCANSO_MEDICO) y lo asocia a una solicitud ya registrada.</summary>
+    [HttpPost("anexo")]
+    [RequestSizeLimit(10_000_000)]
+    public Task<IActionResult> Anexo([FromForm] UploadDescansoAnexoRequest request, CancellationToken cancellationToken) =>
+        Ejecutar(async () =>
+        {
+            if (request.Archivo is null || request.IdEmpleadoCj <= 0)
+            {
+                return BadRequest(new { success = false, message = "Debe seleccionar un archivo." });
+            }
+
+            var usuario = User.FindFirstValue("IdUsuario") ?? User.FindFirstValue(ClaimTypes.Name) ?? "sistema";
+            var uploadResult = await _sharePointUploadService.UploadExpenseInvoiceAsync(
+                request.Archivo,
+                new ExpenseInvoiceUploadContext(
+                    null,
+                    request.IdEmpleadoCj.ToString(),
+                    null,
+                    usuario,
+                    "DESCANSO_MEDICO",
+                    "descanso",
+                    "descanso"),
+                cancellationToken);
+
+            var filas = await _descansoService.ActualizarRutaAsync(
+                request.IdEmpleadoCj, request.FechaInicio, request.FechaFin, uploadResult.StoragePath, cancellationToken);
+            if (filas <= 0)
+            {
+                return NotFound(new { success = false, message = "No se encontró la solicitud para asociar el documento." });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = "Documento anexo cargado correctamente.",
+                data = new { fileName = uploadResult.FileName, fileUrl = uploadResult.FileUrl, storagePath = uploadResult.StoragePath }
+            });
         });
 
     [HttpPost("aprobar")]

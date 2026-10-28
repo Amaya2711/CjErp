@@ -5,8 +5,8 @@
     (empleado identificado por su documento). CuentaActual solo desambigua si esa clave
     devuelve mas de una fila.
   - Se puede cambiar nombre, cuenta e interbancaria sin disparar la validacion de duplicado.
-  - La validacion de duplicado (NroDocumento + IdBanco + NombreCta) solo corre si cambia
-    el documento, el banco o el tipo de cuenta, y excluye la fila que se edita.
+  - Se ELIMINO la validacion de duplicado (NroDocumento + IdBanco + NombreCta): se permite
+    grabar responsables con el mismo documento, banco y tipo de cuenta.
   Firma sin cambios: el backend (EmpleadoResponsableService) enlaza parametros por nombre.
   PV: ejecutar en BD real tras comparar con el SP vigente (Script as ALTER).
 */
@@ -103,37 +103,8 @@ BEGIN
         IF @Cantidad > 1
         BEGIN SELECT 0 AS Resultado, 'Existen varias cuentas con el mismo documento, banco y tipo de cuenta. No es posible determinar qué registro actualizar.' AS Mensaje, @IdEmpleado AS IdEmpleado; RETURN; END;
 
-        ------------------------------------------------------------
-        -- DUPLICADO: solo si cambia documento, banco o tipo de cuenta
-        ------------------------------------------------------------
-        IF (@NroDocumento <> @NroDocumentoActual
-            OR @IdBanco <> @IdBancoActual
-            OR @NombreCta <> @NombreCtaActual)
-           AND EXISTS
-           (
-               SELECT 1
-               FROM dbo.Empleado E
-               INNER JOIN dbo.CuentaEmpleado CE ON CE.IdEmpleado = E.IdEmpleado
-               WHERE E.IdCargo = 10
-                 AND LTRIM(RTRIM(ISNULL(E.NroDocumento, ''))) = @NroDocumento
-                 AND CE.IdBanco = @IdBanco
-                 AND UPPER(LTRIM(RTRIM(ISNULL(CE.NombreCta, '')))) = @NombreCta
-                 AND NOT
-                 (
-                     CE.IdEmpleado = @IdEmpleado
-                     AND CE.IdCargo = 10
-                     AND CE.IdBanco = @IdBancoActual
-                     AND UPPER(LTRIM(RTRIM(ISNULL(CE.NombreCta, '')))) = @NombreCtaActual
-                     AND (@UsarCuenta = 0 OR LTRIM(RTRIM(ISNULL(CE.Cuenta, ''))) = @CuentaActual)
-                 )
-           )
-        BEGIN
-            SELECT 0 AS Resultado,
-                   'Ya existe un registro con el documento ' + @NroDocumento
-                   + ', banco seleccionado y tipo de cuenta ' + @NombreCta + '.' AS Mensaje,
-                   @IdEmpleado AS IdEmpleado;
-            RETURN;
-        END;
+        -- Sin validacion de duplicado: se permite mas de una cuenta con el mismo
+        -- documento, banco y tipo de cuenta (solicitado 2026-10-28).
 
         ------------------------------------------------------------
         -- ACTUALIZAR

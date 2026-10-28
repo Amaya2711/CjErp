@@ -17,6 +17,9 @@ public interface IDescansoService
     /// <summary>Registra una fila por día del rango (estado 97). Devuelve los días registrados.</summary>
     Task<int> RegistrarAsync(DescansoRegistrarRequestDto request, string usuario, CancellationToken cancellationToken = default);
 
+    /// <summary>Graba (o reemplaza) la ruta del documento anexo de una solicitud. Devuelve los días actualizados.</summary>
+    Task<int> ActualizarRutaAsync(int idEmpleadoCj, DateTime fechaInicio, DateTime fechaFin, string ruta, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Avanza cada solicitud a la siguiente etapa. En la etapa final (100 a 5) marca la asistencia y envía el PDF por correo
     /// a Constante correo_DESCANSO con ValorFin = 1.

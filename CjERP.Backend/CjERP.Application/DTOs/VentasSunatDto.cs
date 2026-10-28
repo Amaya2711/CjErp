@@ -52,8 +52,8 @@ public sealed class VentasSunatRegistroDto : VentasSunatFilaDto
     public int? IdCliente { get; set; }
 
     /// <summary>
-    /// Empresa de venta: NroDocIdentidad = ValorIni de RELACION_VTA, y su ValorFin = ValorFin de EMPRESA_VTA, cuyo ValorIni es la empresa.
-    /// Se calcula al validar y se graba en dbo.VentasSunat.Empresa; IdEmpresa es el ValorFin de RELACION_VTA para el RUC del cliente.
+    /// Empresa de venta: RucEmisor = Constante.Adicional del campo EMPRESA_cj; Empresa = su ValorIni e IdEmpresa = su Correlativo.
+    /// Se calcula al validar y se graba en dbo.VentasSunat (Empresa, IdEmpresa).
     /// </summary>
     public string? Empresa { get; set; }
 

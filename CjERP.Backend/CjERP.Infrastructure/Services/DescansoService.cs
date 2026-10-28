@@ -109,6 +109,31 @@ public sealed class DescansoService : IDescansoService
         }
     }
 
+    public async Task<int> ActualizarRutaAsync(int idEmpleadoCj, DateTime fechaInicio, DateTime fechaFin, string ruta, CancellationToken cancellationToken = default)
+    {
+        if (idEmpleadoCj <= 0 || string.IsNullOrWhiteSpace(ruta))
+        {
+            throw new InvalidOperationException("Datos incompletos para registrar el documento.");
+        }
+
+        try
+        {
+            await using var connection = _sql.CreateConnection();
+            var filas = await connection.QueryFirstOrDefaultAsync<int?>(
+                _sql.Create(
+                    "dbo.sp_Descanso_ActualizarRuta",
+                    new { IdEmpleadoCj = idEmpleadoCj, FechaInicio = fechaInicio.Date, FechaFin = fechaFin.Date, Ruta = ruta.Trim() },
+                    CommandType.StoredProcedure,
+                    cancellationToken,
+                    commandTimeout: 60));
+            return filas ?? 0;
+        }
+        catch (SqlException ex) when (ex.Number == 50113)
+        {
+            throw new InvalidOperationException(ex.Message);
+        }
+    }
+
     public async Task<IReadOnlyList<DescansoAccionItemResultDto>> AprobarAsync(
         IReadOnlyCollection<DescansoSolicitudKeyDto> solicitudes,
         int idAprobador,

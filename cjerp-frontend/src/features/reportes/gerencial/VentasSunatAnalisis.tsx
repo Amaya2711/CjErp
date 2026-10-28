@@ -212,7 +212,7 @@ export default function VentasSunatAnalisis({ registros, selector, periodoTexto 
     { label: "Clientes", valor: String(kpis.clientesUnicos), sub: "clientes distintos" },
     { label: "Ticket promedio", valor: `${simbolo} ${formatear(kpis.ticket)}`, sub: "Total CP / comprobante" },
     { label: "Notas de crédito", valor: `${simbolo} ${formatear(kpis.montoNotas)}`, sub: `${kpis.notas} comprobantes`, alerta: kpis.notas > 0 },
-    { label: "Sin empresa asignada", valor: String(kpis.sinEmpresa), sub: "RUC fuera de RELACION_VTA", alerta: kpis.sinEmpresa > 0 },
+    { label: "Sin empresa asignada", valor: String(kpis.sinEmpresa), sub: "RUC emisor fuera de EMPRESA_cj", alerta: kpis.sinEmpresa > 0 },
   ];
 
   // Exporta a PDF todo lo visualizado: filtros aplicados, KPIs y graficos con los filtros actuales.

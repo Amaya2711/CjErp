@@ -91,6 +91,19 @@ export async function subirAdjuntoDescanso(archivo: File, idEmpleadoCj?: number)
   return await httpClient.post<DescansoAdjuntoResultado>(`${BASE_URL}/adjunto`, formData);
 }
 
+/** Sube el documento anexo a SharePoint (DESCANSO_MEDICO) y lo asocia a una solicitud ya registrada. */
+export async function cargarAnexoDescanso(
+  archivo: File,
+  params: { idEmpleadoCj: number; fechaInicio: string; fechaFin: string }
+): Promise<DescansoAdjuntoResultado> {
+  const formData = new FormData();
+  formData.append("archivo", archivo);
+  formData.append("idEmpleadoCj", String(params.idEmpleadoCj));
+  formData.append("fechaInicio", params.fechaInicio);
+  formData.append("fechaFin", params.fechaFin);
+  return await httpClient.post<DescansoAdjuntoResultado>(`${BASE_URL}/anexo`, formData);
+}
+
 export async function registrarDescanso(payload: {
   idEmpleadoCj: number;
   fechaInicio: string;

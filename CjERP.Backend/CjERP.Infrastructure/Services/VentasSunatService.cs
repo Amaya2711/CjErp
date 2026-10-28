@@ -125,9 +125,9 @@ public sealed class VentasSunatService : IVentasSunatService
     }
 
     /// <summary>
-    /// Empresa de cada registro: 1) NroDocIdentidad se compara con ValorIni de la constante RELACION_VTA y su ValorFin es el IdEmpresa;
-    /// 2) con ese ValorFin se busca la fila de EMPRESA_VTA cuyo ValorFin coincide y su ValorIni es el nombre de la Empresa.
-    /// Ambos se graban en dbo.VentasSunat (IdEmpresa, Empresa).
+    /// Empresa del lote por RUC emisor: VentasSunat.RucEmisor se compara con Constante.Adicional del campo EMPRESA_cj;
+    /// su Correlativo es el IdEmpresa y su ValorIni el nombre de la Empresa. Ambos se graban en dbo.VentasSunat (IdEmpresa, Empresa).
+    /// Un RUC emisor que no esté en EMPRESA_cj deja IdEmpresa y Empresa en NULL.
     /// </summary>
     private async Task AsignarEmpresaAsync(System.Data.IDbConnection connection, Guid lote, List<VentasSunatRegistroDto> registros, CancellationToken cancellationToken)
     {
@@ -136,82 +136,48 @@ public sealed class VentasSunatService : IVentasSunatService
             return;
         }
 
-        var relacion = await ListarConstanteAsync(connection, "RELACION_VTA", cancellationToken);
-        var empresas = await ListarConstanteAsync(connection, "EMPRESA_VTA", cancellationToken);
-
-        // RUC del cliente (ValorIni de RELACION_VTA) -> ValorFin (= IdEmpresa).
-        var valorFinPorRuc = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (valorIni, valorFin) in relacion)
-        {
-            if (!string.IsNullOrWhiteSpace(valorIni) && !string.IsNullOrWhiteSpace(valorFin))
-            {
-                valorFinPorRuc.TryAdd(valorIni, valorFin);
-            }
-        }
-
-        // ValorFin -> nombre de la empresa (ValorIni de EMPRESA_VTA).
-        var nombrePorValorFin = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (valorIni, valorFin) in empresas)
-        {
-            if (!string.IsNullOrWhiteSpace(valorIni) && !string.IsNullOrWhiteSpace(valorFin))
-            {
-                nombrePorValorFin.TryAdd(valorFin, valorIni);
-            }
-        }
-
-        (int? IdEmpresa, string? Empresa) Resolver(string? nroDocIdentidad)
-        {
-            var ruc = (nroDocIdentidad ?? string.Empty).Trim();
-            if (ruc.Length == 0 || !valorFinPorRuc.TryGetValue(ruc, out var valorFin))
-            {
-                return (null, null);
-            }
-
-            var idEmpresa = int.TryParse(valorFin, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var id) ? id : (int?)null;
-            return (idEmpresa, nombrePorValorFin.TryGetValue(valorFin, out var nombre) ? nombre : null);
-        }
+        var rucEmisor = registros.Select(x => (x.RucEmisor ?? string.Empty).Trim()).FirstOrDefault(x => x.Length > 0) ?? string.Empty;
+        var (idEmpresa, empresa) = await ResolverEmpresaPorEmisorAsync(connection, rucEmisor, cancellationToken);
 
         foreach (var registro in registros)
         {
-            var (idEmpresa, empresa) = Resolver(registro.NroDocIdentidad);
             registro.IdEmpresa = idEmpresa;
             registro.Empresa = empresa;
         }
 
-        // Un RUC sin coincidencia en RELACION_VTA queda con IdEmpresa y Empresa en NULL.
-        var asignaciones = registros
-            .Select(r => (r.NroDocIdentidad ?? string.Empty).Trim())
-            .Where(ruc => ruc.Length > 0)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Select(ruc =>
-            {
-                var (idEmpresa, empresa) = Resolver(ruc);
-                return new { ruc, empresa, idEmpresa };
-            })
-            .ToList();
-
         await connection.ExecuteAsync(
             _sql.Create(
                 "dbo.sp_VentasSunat_AsignarEmpresa",
-                new { Lote = lote, Asignaciones = JsonSerializer.Serialize(asignaciones, new JsonSerializerOptions(JsonSerializerDefaults.Web)) },
+                new { Lote = lote, IdEmpresa = idEmpresa, Empresa = empresa },
                 CommandType.StoredProcedure,
                 cancellationToken,
                 commandTimeout: 120));
     }
 
-    private async Task<List<(string ValorIni, string ValorFin)>> ListarConstanteAsync(System.Data.IDbConnection connection, string campo, CancellationToken cancellationToken)
+    private async Task<(int? IdEmpresa, string? Empresa)> ResolverEmpresaPorEmisorAsync(System.Data.IDbConnection connection, string rucEmisor, CancellationToken cancellationToken)
     {
-        var filas = await connection.QueryAsync(
-            _sql.Create("dbo.sp_Constante_ListarPorCampo", new { Campo = campo }, CommandType.StoredProcedure, cancellationToken, commandTimeout: 30));
+        if (rucEmisor.Length == 0)
+        {
+            return (null, null);
+        }
 
-        var resultado = new List<(string, string)>();
+        var filas = await connection.QueryAsync(
+            _sql.Create("dbo.sp_Constante_ListarPorCampo", new { Campo = "EMPRESA_cj" }, CommandType.StoredProcedure, cancellationToken, commandTimeout: 30));
+
         foreach (var fila in filas)
         {
             var datos = (IDictionary<string, object?>)fila;
-            resultado.Add((Texto(datos, "ValorIni"), Texto(datos, "ValorFin")));
+            if (!string.Equals(Texto(datos, "Adicional"), rucEmisor, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var id = int.TryParse(Texto(datos, "Correlativo"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var n) ? n : (int?)null;
+            var nombre = Texto(datos, "ValorIni");
+            return (id, nombre.Length > 0 ? nombre : null);
         }
 
-        return resultado;
+        return (null, null);
     }
 
     private static string Texto(IDictionary<string, object?> datos, string columna)
