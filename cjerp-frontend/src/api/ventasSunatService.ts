@@ -107,3 +107,8 @@ export async function cargarVentasSunat(datos: VentasSunatFilaDto[]): Promise<Ve
 export async function validarVentasSunat(lote: string): Promise<VentasSunatValidacionDto> {
   return await httpClient.post<VentasSunatValidacionDto>("/reportes/ventassunat/validar", { lote });
 }
+
+/** Registros del ultimo lote de cada periodo y RUC emisor del año (AAAA), en una sola llamada. */
+export async function consultarAnioVentasSunat(anio: number): Promise<VentasSunatRegistroDto[]> {
+  return await httpClient.get<VentasSunatRegistroDto[]>("/reportes/ventassunat/anio", { params: { anio: String(anio) } });
+}

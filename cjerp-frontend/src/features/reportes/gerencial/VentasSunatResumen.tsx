@@ -167,8 +167,8 @@ export default function VentasSunatResumen({ periodos, coincideEmpresa, registro
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
-        <div style={{ ...styles.campo, display: coincideEmpresa ? "none" : "flex" }}>
+      <div style={{ display: coincideEmpresa ? "none" : "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div style={styles.campo}>
           Empresa
           <SelectorMultiple opciones={empresas} seleccion={empresasSel} onChange={setEmpresasSel} singular="empresa" plural="empresas" />
         </div>

@@ -103,6 +103,20 @@ public sealed class VentasSunatService : IVentasSunatService
         return resumen;
     }
 
+    public async Task<IReadOnlyList<VentasSunatRegistroDto>> ConsultarAnioAsync(string anio, CancellationToken cancellationToken = default)
+    {
+        anio = (anio ?? string.Empty).Trim();
+        if (!System.Text.RegularExpressions.Regex.IsMatch(anio, @"^\d{4}$"))
+        {
+            throw new InvalidOperationException("El anio debe tener formato AAAA.");
+        }
+
+        await using var connection = _sql.CreateConnection();
+        var registros = await connection.QueryAsync<VentasSunatRegistroDto>(
+            _sql.Create("dbo.sp_VentasSunat_ListarAnio", new { Anio = anio }, CommandType.StoredProcedure, cancellationToken, commandTimeout: 120));
+        return registros.ToList();
+    }
+
     public async Task<VentasSunatValidacionResultDto> ValidarAsync(Guid lote, CancellationToken cancellationToken = default)
     {
         await using var connection = _sql.CreateConnection();

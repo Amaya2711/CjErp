@@ -16,4 +16,7 @@ public interface IVentasSunatService
 
     /// <summary>Indica si el periodo (AAAAMM) del RUC emisor ya esta cargado y devuelve su historial.</summary>
     Task<VentasSunatHistorialDto> ConsultarPeriodoAsync(string periodo, string rucEmisor, CancellationToken cancellationToken = default);
+
+    /// <summary>Registros del ultimo lote de cada periodo y RUC emisor del anio (AAAA), en una sola consulta.</summary>
+    Task<IReadOnlyList<VentasSunatRegistroDto>> ConsultarAnioAsync(string anio, CancellationToken cancellationToken = default);
 }

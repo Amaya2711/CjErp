@@ -50,6 +50,24 @@ public sealed class VentasSunatController : ControllerBase
         }
     }
 
+    [HttpGet("anio")]
+    public async Task<IActionResult> ConsultarAnio([FromQuery] string anio, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var data = await _service.ConsultarAnioAsync(anio, cancellationToken);
+            return Ok(new { success = true, message = "ok", data });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { success = false, message = "Ocurrio un error interno al consultar el anio.", detail = ex.Message });
+        }
+    }
+
     [HttpGet("periodo")]
     public async Task<IActionResult> ConsultarPeriodo([FromQuery] string periodo, [FromQuery] string rucEmisor, CancellationToken cancellationToken)
     {

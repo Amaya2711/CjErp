@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import AppCard from "../../../components/base/AppCard";
@@ -11,6 +11,7 @@ import {
   consultarPlanillaEstados,
 } from "../../../api/planillaConsultaService";
 import {
+  consultarAnioVentasSunat,
   consultarPeriodoVentasSunat,
   listarPeriodosVentasSunat,
   type VentasSunatPeriodoDto,
@@ -42,6 +43,11 @@ const MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Set", "O
 const EMPRESAS_POR_DEFECTO = ["CJ TELECOM"];
 const SIN_EMPRESA = "Sin empresa";
 const REQUEST_TIMEOUT_MS = 120000;
+const VENTAS_CACHE_MS = 10 * 60 * 1000; // las ventas cargadas cambian poco: se reutilizan al volver a la pantalla
+const VENTAS_CONCURRENCIA = 3;
+
+// Caché a nivel de módulo (sobrevive a la navegación entre pantallas).
+const cacheVentasAnio = new Map<number, { t: number; registros: VentasSunatRegistroDto[] }>();
 const MONTO: GridFormat = { type: "fixedPoint", precision: 2 };
 const PORCENTAJE: GridFormat = { type: "fixedPoint", precision: 1 };
 
@@ -207,7 +213,6 @@ export default function VentasGastosPage() {
   const [catalogo, setCatalogo] = useState<{ id: string; ruc: string; nombre: string }[]>([]);
   const [empresasElegidas, setEmpresasElegidas] = useState<string[]>(EMPRESAS_POR_DEFECTO); // vacio = todas
   const [cargandoVentas, setCargandoVentas] = useState(false);
-  const cacheVentas = useRef(new Map<string, VentasSunatRegistroDto[]>());
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
@@ -217,25 +222,39 @@ export default function VentasGastosPage() {
   const importe = useMemo(() => ({ incluirIgv: modoImporte === "igv", incluirInafecto: modoImporte === "inafecto" }), [modoImporte]);
   const etiqueta = etiquetaImporte(importe);
   // Filtros cruzados de la pestaña Ventas: clic en una barra de mes o de cliente (otro clic la quita).
+  const [moneda, setMoneda] = useState(""); // "" = todas; moneda del comprobante (los importes siempre están en soles)
   const [mesSel, setMesSel] = useState<string | null>(null);
   const [clienteSel, setClienteSel] = useState<string | null>(null);
   const [tab, setTab] = useState<"comparativo" | "ventas">("comparativo");
 
-  // Ventas del año (una consulta por periodo y RUC, con caché para no repetirlas: el servidor limita las peticiones).
+  // Ventas del año: una sola llamada (sp_VentasSunat_ListarAnio) con caché; si el SP aún no existe en la BD,
+  // se consulta periodo por periodo con pocas peticiones simultáneas (el servidor limita las peticiones).
   const cargarVentas = useCallback(async (anioSel: number, lista: VentasSunatPeriodoDto[], forzar: boolean) => {
+    const enCache = cacheVentasAnio.get(anioSel);
+    if (!forzar && enCache && Date.now() - enCache.t < VENTAS_CACHE_MS) {
+      setVentas(enCache.registros);
+      return;
+    }
     setCargandoVentas(true);
     try {
-      const out: VentasSunatRegistroDto[] = [];
-      for (const p of lista.filter((x) => x.periodo.startsWith(String(anioSel)))) {
-        const clave = `${p.periodo}|${p.rucEmisor}`;
-        let regs = forzar ? undefined : cacheVentas.current.get(clave);
-        if (!regs) {
-          regs = (await consultarPeriodoVentasSunat(p.periodo, p.rucEmisor)).registros;
-          cacheVentas.current.set(clave, regs);
-        }
-        out.push(...regs);
+      let registros: VentasSunatRegistroDto[];
+      try {
+        registros = await consultarAnioVentasSunat(anioSel);
+      } catch {
+        const pendientes = lista.filter((x) => x.periodo.startsWith(String(anioSel)));
+        const partes: VentasSunatRegistroDto[][] = new Array(pendientes.length);
+        let siguiente = 0;
+        const worker = async () => {
+          while (siguiente < pendientes.length) {
+            const i = siguiente++;
+            partes[i] = (await consultarPeriodoVentasSunat(pendientes[i].periodo, pendientes[i].rucEmisor)).registros;
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(VENTAS_CONCURRENCIA, pendientes.length) }, worker));
+        registros = partes.flat();
       }
-      setVentas(out);
+      cacheVentasAnio.set(anioSel, { t: Date.now(), registros });
+      setVentas(registros);
     } catch (err) {
       setError(getHttpErrorMessage(err, "No se pudieron cargar las ventas."));
     } finally {
@@ -289,7 +308,7 @@ export default function VentasGastosPage() {
       for (const k of Object.keys(TC_DEFECTO)) tc[k] = numero(tcTexto[k]) || TC_DEFECTO[k as keyof typeof TC_DEFECTO];
 
       const hastaMes = anio === anioActual ? new Date().getMonth() + 1 : 12;
-      const [gastosAnio] = await Promise.all([consultarGastosAnio(anio, tc, hastaMes), cargarVentas(anio, periodos, true)]);
+      const [gastosAnio] = await Promise.all([consultarGastosAnio(anio, tc, hastaMes), cargarVentas(anio, periodos, false)]);
 
       setGastos(gastosAnio.gastos);
       if (gastosAnio.truncado) setAviso("Algún mes de gastos superó el límite de filas de la consulta: los totales pueden estar incompletos.");
@@ -327,7 +346,13 @@ export default function VentasGastosPage() {
     [empresasSel, catalogo],
   );
 
-  const ventasFiltradas = useMemo(() => ventas.filter(coincideEmpresa), [ventas, coincideEmpresa]);
+  const monedas = useMemo(() => Array.from(new Set(ventas.map((r) => (r.moneda ?? "").trim()).filter(Boolean))).sort(), [ventas]);
+  // Filtros de cabecera aplicados a las ventas: empresa y moneda del comprobante.
+  const coincideVenta = useCallback(
+    (r: VentasSunatRegistroDto) => coincideEmpresa(r) && (!moneda || (r.moneda ?? "").trim() === moneda),
+    [coincideEmpresa, moneda],
+  );
+  const ventasFiltradas = useMemo(() => ventas.filter(coincideVenta), [ventas, coincideVenta]);
 
   const ventasParaMes = useMemo(() => (clienteSel ? ventasFiltradas.filter((r) => clienteDeVenta(r) === clienteSel) : ventasFiltradas), [ventasFiltradas, clienteSel]);
   const ventasParaCliente = useMemo(() => (mesSel ? ventasFiltradas.filter((r) => r.periodo === mesSel) : ventasFiltradas), [ventasFiltradas, mesSel]);
@@ -362,7 +387,7 @@ export default function VentasGastosPage() {
       return f;
     };
     for (const r of ventas) {
-      if (!coincideEmpresa(r)) continue;
+      if (!coincideVenta(r)) continue;
       if (!r.periodo) continue;
       // Venta neta = BI gravada - dscto BI + inafecto (el SIRE ya viene en soles).
       fila(r.periodo).ventas += importeVenta(r, importe);
@@ -376,7 +401,7 @@ export default function VentasGastosPage() {
       .filter((f) => f.periodo.startsWith(String(anio)))
       .map((f) => ({ ...f, resultado: f.ventas - f.gastos, ratio: f.ventas > 0 ? (f.gastos / f.ventas) * 100 : null }))
       .sort((a, b) => a.periodo.localeCompare(b.periodo));
-  }, [ventas, gastos, coincideEmpresa, anio, importe]);
+  }, [ventas, gastos, coincideVenta, anio, importe]);
 
   const totales = useMemo(() => {
     const v = filas.reduce((s, f) => s + f.ventas, 0);
@@ -416,6 +441,17 @@ export default function VentasGastosPage() {
               }}
               singular="empresa" plural="empresas" />
           </div>
+          <label style={styles.campo}>
+            Moneda del comprobante
+            <select style={styles.select} value={moneda} onChange={(e) => setMoneda(e.target.value)}>
+              <option value="">Todas</option>
+              {monedas.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </label>
           <div style={styles.campo}>
             Importe de ventas
             <div style={{ display: "flex", gap: 14, alignItems: "center", height: 34, fontWeight: 500 }}>
@@ -504,7 +540,7 @@ export default function VentasGastosPage() {
           </div>
         <VentasSunatResumen
           periodos={periodos}
-          coincideEmpresa={coincideEmpresa}
+          coincideEmpresa={coincideVenta}
           registros={ventasDetalle}
           cargandoExterno={cargandoVentas}
         />
