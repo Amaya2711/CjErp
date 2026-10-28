@@ -328,7 +328,10 @@ export async function buscarOrdenCompraDetalle(params?: OrdenCompraConsultaParam
 }
 
 export async function insertarOrdenCompra(payload: OrdenCompraInsertPayload) {
-  return await httpClient.post<{ idOc: number }>("/facturacionfinanciera/oc", payload);
+  // Guardar con muchas posiciones (carga masiva) hace varios SP/UPDATE por fila; con la BD lenta supera los 30 s globales.
+  return await httpClient.post<{ idOc: number }>("/facturacionfinanciera/oc", payload, {
+    timeout: OC_CONSULTA_TIMEOUT_MS,
+  });
 }
 
 export async function obtenerOrdenCompraEdicion(idOc: number) {
@@ -336,7 +339,9 @@ export async function obtenerOrdenCompraEdicion(idOc: number) {
 }
 
 export async function actualizarOrdenCompra(payload: OrdenCompraActualizarPayload) {
-  return await httpClient.put<{ idOc: number }>(`/facturacionfinanciera/oc/${payload.idOc}`, payload);
+  return await httpClient.put<{ idOc: number }>(`/facturacionfinanciera/oc/${payload.idOc}`, payload, {
+    timeout: OC_CONSULTA_TIMEOUT_MS,
+  });
 }
 
 /** Elimina una posición (fila de DetOrdenCompra) de la orden de compra y recalcula sus totales. */
