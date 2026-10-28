@@ -133,6 +133,7 @@ public sealed class VacacionesCorreoService : IVacacionesCorreoService
         int idEmpleadoCj,
         DateTime fechaInicio,
         DateTime fechaFin,
+        bool autorizado = false,
         CancellationToken cancellationToken = default)
     {
         var carta = await ObtenerCartaAsync(idEmpleadoCj, fechaInicio, fechaFin, cancellationToken);
@@ -142,7 +143,7 @@ public sealed class VacacionesCorreoService : IVacacionesCorreoService
         }
 
         var nombre = string.IsNullOrWhiteSpace(carta.NombreEmpleado) ? $"Empleado {idEmpleadoCj}" : carta.NombreEmpleado.Trim();
-        var pdf = new VacacionesPdfDocument(carta, HoraLima()).GeneratePdf();
+        var pdf = new VacacionesPdfDocument(carta, HoraLima(), autorizado).GeneratePdf();
         return (pdf, NombreArchivo(nombre, carta.FechaInicio));
     }
 

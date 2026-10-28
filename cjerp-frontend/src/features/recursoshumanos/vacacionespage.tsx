@@ -81,6 +81,9 @@ type VacacionMovimientoRegistro = {
   idMovimientoOrigen: number | null;
   usuarioCreacion: string;
   fechaCreacion: string;
+  /** Fechas de la solicitud (solo filas legacy): necesarias para generar el PDF de la solicitud. */
+  fechaInicio: string;
+  fechaFin: string;
 };
 
 type EstadoTab = "todos" | "97" | "98" | "99" | "resumen" | "movimientos";
@@ -373,6 +376,8 @@ function mapVacacionMovimientoRow(item: VacacionMovimientoListItem, index: numbe
     idMovimientoOrigen: item.idMovimientoOrigen == null ? null : Number(item.idMovimientoOrigen),
     usuarioCreacion: String(item.usuarioCreacion ?? "").trim(),
     fechaCreacion: String(item.fechaCreacion ?? "").trim(),
+    fechaInicio: "",
+    fechaFin: "",
   };
 }
 
@@ -430,6 +435,8 @@ function mapLegacyVacacionToMovimiento(
     idMovimientoOrigen: null,
     usuarioCreacion: row.usuario || "-",
     fechaCreacion: row.fechaCreacion,
+    fechaInicio: row.fechaInicio,
+    fechaFin: row.fechaFin,
   };
 }
 
@@ -1496,24 +1503,25 @@ export default function VacacionesPage() {
     );
   }
 
-  // Vista previa del PDF que se envía por correo al aprobar la 3ra validación (no envía nada).
-  async function verFormatoRow(row: VacacionRegistro) {
+  // Abre el PDF de la solicitud (el mismo que se envía por correo al aprobar la 3ra validación).
+  // Sin la 3ra aprobación (autorizado = false) el PDF lleva la marca de agua "NO AUTORIZADO".
+  async function abrirCartaPdf(idEmpleadoCj: number, fechaInicioRaw: string, fechaFinRaw: string, autorizado: boolean) {
     if (procesando) {
       return;
     }
 
-    const fechaInicio = formatDateForRequest(row.fechaInicio);
-    const fechaFin = formatDateForRequest(row.fechaFin);
+    const fechaInicio = formatDateForRequest(fechaInicioRaw);
+    const fechaFin = formatDateForRequest(fechaFinRaw);
 
-    if (!row.idEmpleadoCj || !fechaInicio || !fechaFin) {
+    if (!idEmpleadoCj || !fechaInicio || !fechaFin) {
       window.alert("No se pudo identificar el registro seleccionado.");
       return;
     }
 
-    setProcesando("Generando la vista previa del formato. Por favor espere...");
+    setProcesando("Generando el PDF de la solicitud. Por favor espere...");
 
     try {
-      const blob = await descargarCartaPdfVacacion({ idEmpleadoCj: row.idEmpleadoCj, fechaInicio, fechaFin });
+      const blob = await descargarCartaPdfVacacion({ idEmpleadoCj, fechaInicio, fechaFin, autorizado });
       const url = URL.createObjectURL(new Blob([blob], { type: "application/pdf" }));
       window.open(url, "_blank");
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
@@ -1529,10 +1537,20 @@ export default function VacacionesPage() {
           detalle = null;
         }
       }
-      window.alert(detalle ?? getHttpMessage(previewError, "No se pudo generar la vista previa del formato."));
+      window.alert(detalle ?? getHttpMessage(previewError, "No se pudo generar el PDF de la solicitud."));
     } finally {
       setProcesando(null);
     }
+  }
+
+  // Bandeja (3ra validación): la solicitud aún no tiene la 3ra aprobación.
+  function verFormatoRow(row: VacacionRegistro) {
+    return abrirCartaPdf(row.idEmpleadoCj, row.fechaInicio, row.fechaFin, false);
+  }
+
+  // Movimientos: solo la fila APROBADA (3 etapas completas) sale sin marca de agua.
+  function verPdfMovimiento(row: VacacionMovimientoRegistro) {
+    return abrirCartaPdf(row.idEmpleado, row.fechaInicio, row.fechaFin, row.estado.trim().toUpperCase() === "APROBADA");
   }
 
   async function approveRow(row: VacacionRegistro) {
@@ -1641,7 +1659,6 @@ export default function VacacionesPage() {
         </div>
       ),
     },
-    { dataField: "tipoMovimiento", caption: "Movimiento", minWidth: 140 },
     {
       dataField: "fechaMovimiento",
       caption: "Fecha movimiento",
@@ -1681,15 +1698,29 @@ export default function VacacionesPage() {
     { dataField: "idSolicitud", caption: "Solicitud", width: 100, calculateCellValue: (row) => row.idSolicitud ?? "-" },
     { dataField: "idMovimientoOrigen", caption: "Origen", width: 90, calculateCellValue: (row) => row.idMovimientoOrigen ?? "-" },
     { dataField: "referencia", caption: "Referencia", minWidth: 120, calculateCellValue: (row) => row.referencia || "-" },
-    { dataField: "observacion", caption: "Observación", minWidth: 200, calculateCellValue: (row) => row.observacion || "-" },
     { dataField: "usuarioCreacion", caption: "Usuario", width: 130, calculateCellValue: (row) => row.usuarioCreacion || "-" },
     {
-      dataField: "fechaCreacion",
-      caption: "Fecha creación",
-      width: 140,
-      calculateCellValue: (row) => (row.fechaCreacion ? formatDateDisplay(row.fechaCreacion) : "-"),
+      dataField: "acciones",
+      caption: "Acciones",
+      alignment: "center",
+      width: 120,
+      allowSorting: false,
+      allowFiltering: false,
+      allowGrouping: false,
+      allowHeaderFilter: false,
+      cellRender: (_value, row) =>
+        row.fechaInicio && row.fechaFin ? (
+          <button
+            type="button"
+            onClick={() => void verPdfMovimiento(row)}
+            disabled={Boolean(procesando)}
+            style={actionButton("#EFF6FF", "#1D4ED8", "#BFDBFE", Boolean(procesando))}
+          >
+            Ver PDF
+          </button>
+        ) : null,
     },
-  ], []);
+  ], [procesando]);
 
   function renderMovimientosView() {
     return (

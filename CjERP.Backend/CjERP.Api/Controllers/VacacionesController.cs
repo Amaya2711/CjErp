@@ -32,11 +32,12 @@ public class VacacionesController : ControllerBase
         [FromQuery] int idEmpleadoCj,
         [FromQuery] DateTime fechaInicio,
         [FromQuery] DateTime fechaFin,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] bool autorizado = false)
     {
         try
         {
-            var pdf = await _vacacionesCorreoService.GenerarCartaPdfAsync(idEmpleadoCj, fechaInicio, fechaFin, cancellationToken);
+            var pdf = await _vacacionesCorreoService.GenerarCartaPdfAsync(idEmpleadoCj, fechaInicio, fechaFin, autorizado, cancellationToken);
             if (pdf is null)
             {
                 return NotFound(new { success = false, message = "No se encontró la solicitud en vVacaciones para generar el PDF." });

@@ -185,6 +185,8 @@ export async function descargarCartaPdfVacacion(params: {
   idEmpleadoCj: number;
   fechaInicio: string;
   fechaFin: string;
+  /** false (por defecto): sin la 3ra aprobación, el PDF lleva la marca de agua "NO AUTORIZADO". */
+  autorizado?: boolean;
 }): Promise<Blob> {
   return await httpClient.get<Blob>("/admin/vacaciones/carta-pdf", { params, responseType: "blob" });
 }

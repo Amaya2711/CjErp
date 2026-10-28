@@ -16,11 +16,13 @@ public interface IVacacionesCorreoService
 
     /// <summary>
     /// Genera el mismo PDF que se adjunta al correo de la 3ra validación, sin enviarlo (vista previa).
-    /// Devuelve null si la solicitud no existe en vVacaciones.
+    /// Con <paramref name="autorizado"/> en false (solicitud sin la 3ra aprobación) el PDF lleva la marca de agua "NO AUTORIZADO".
+    /// Devuelve null si no se encuentra la solicitud.
     /// </summary>
     Task<(byte[] Contenido, string NombreArchivo)?> GenerarCartaPdfAsync(
         int idEmpleadoCj,
         DateTime fechaInicio,
         DateTime fechaFin,
+        bool autorizado = false,
         CancellationToken cancellationToken = default);
 }
