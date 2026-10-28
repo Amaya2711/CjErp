@@ -13,6 +13,11 @@ import { getHttpErrorMessage } from "../../../utils/httpError";
 type Props = {
   /** Periodos cargados en la BD (se resumen todos los RUC emisores). */
   periodos: VentasSunatPeriodoDto[];
+  /** Filtro de empresa de la pantalla padre: si se informa, el selector Empresa propio no se muestra. */
+  coincideEmpresa?: (r: VentasSunatRegistroDto) => boolean;
+  /** Registros ya cargados por la pantalla padre (evita volver a consultar cada periodo). */
+  registros?: VentasSunatRegistroDto[];
+  cargandoExterno?: boolean;
 };
 
 type FilaResumen = {
@@ -69,9 +74,10 @@ const summary = {
   ],
 };
 
-export default function VentasSunatResumen({ periodos }: Props) {
+export default function VentasSunatResumen({ periodos, coincideEmpresa, registros, cargandoExterno }: Props) {
   const [porPeriodo, setPorPeriodo] = useState<Record<string, VentasSunatRegistroDto[]>>({});
-  const [cargando, setCargando] = useState(false);
+  const [cargandoPropio, setCargando] = useState(false);
+  const cargando = cargandoPropio || Boolean(cargandoExterno);
   const [error, setError] = useState("");
   const [empresasSel, setEmpresasSel] = useState<string[]>([]); // vacio = todas
   const [moneda, setMoneda] = useState(""); // "" = todas; filtra por la moneda del comprobante (los importes siempre están en soles)
@@ -79,7 +85,7 @@ export default function VentasSunatResumen({ periodos }: Props) {
   // Todos los periodos cargados de todos los RUC emisores (clave periodo|ruc). El filtro Empresa acota las grillas;
   // "Ventas por empresa" siempre muestra todas.
   useEffect(() => {
-    if (periodos.length === 0) return;
+    if (registros || periodos.length === 0) return;
     let activo = true;
     setCargando(true);
     setError("");
@@ -102,9 +108,9 @@ export default function VentasSunatResumen({ periodos }: Props) {
     return () => {
       activo = false;
     };
-  }, [periodos]);
+  }, [periodos, registros]);
 
-  const todos = useMemo(() => Object.values(porPeriodo).flat(), [porPeriodo]);
+  const todos = useMemo(() => registros ?? Object.values(porPeriodo).flat(), [registros, porPeriodo]);
   const todosLosEmisores = todos;
   const empresas = useMemo(() => Array.from(new Set(todos.map(empresaDe))).sort(), [todos]);
   const monedas = useMemo(() => Array.from(new Set(todos.map((r) => (r.moneda ?? "").trim()).filter(Boolean))).sort(), [todos]);
@@ -115,9 +121,11 @@ export default function VentasSunatResumen({ periodos }: Props) {
   const filtrados = useMemo(
     () =>
       todos.filter(
-        (r) => (empresasSel.length === 0 || empresasSel.includes(empresaDe(r))) && (!moneda || (r.moneda ?? "").trim() === moneda)
+        (r) =>
+          (coincideEmpresa ? coincideEmpresa(r) : empresasSel.length === 0 || empresasSel.includes(empresaDe(r))) &&
+          (!moneda || (r.moneda ?? "").trim() === moneda)
       ),
-    [todos, empresasSel, moneda]
+    [todos, empresasSel, moneda, coincideEmpresa]
   );
 
   const agrupar = (
@@ -160,7 +168,7 @@ export default function VentasSunatResumen({ periodos }: Props) {
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
-        <div style={styles.campo}>
+        <div style={{ ...styles.campo, display: coincideEmpresa ? "none" : "flex" }}>
           Empresa
           <SelectorMultiple opciones={empresas} seleccion={empresasSel} onChange={setEmpresasSel} singular="empresa" plural="empresas" />
         </div>

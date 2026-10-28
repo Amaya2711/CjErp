@@ -7,6 +7,8 @@ export interface ConstanteLookupDto {
   valorFin?: string | null;
   detalle?: string | null;
   orden: number;
+  correlativo?: string | null;
+  adicional?: string | null;
 }
 
 export interface ConstanteOption {

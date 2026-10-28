@@ -308,7 +308,9 @@ namespace CjERP.Infrastructure.Services
                 ValorIni = GetStringAllowEmpty(data, "ValorIni", "valorIni"),
                 ValorFin = GetStringAllowEmpty(data, "ValorFin", "valorFin"),
                 Detalle = GetStringAllowEmpty(data, "Detalle", "detalle"),
-                Orden = GetInt(data, "Orden", "orden", "correlativo", "Correlativo")
+                Orden = GetInt(data, "Orden", "orden", "correlativo", "Correlativo"),
+                Correlativo = GetStringAllowEmpty(data, "Correlativo", "correlativo"),
+                Adicional = GetStringAllowEmpty(data, "Adicional", "adicional")
             };
         }
 

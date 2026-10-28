@@ -10,5 +10,7 @@ namespace CjERP.Application.DTOs
         public string? ValorFin { get; set; }
         public string? Detalle { get; set; }
         public int Orden { get; set; }
+        public string? Correlativo { get; set; }
+        public string? Adicional { get; set; }
     }
 }
