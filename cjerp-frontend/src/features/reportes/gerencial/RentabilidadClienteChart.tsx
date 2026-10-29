@@ -50,7 +50,7 @@ function TooltipRentabilidad({ active, payload }: TooltipProps) {
   );
 }
 
-// Etiqueta al extremo de cada barra (a la derecha si es utilidad, a la izquierda si es pérdida): importe y margen.
+// Etiqueta de cada barra con importe y margen.
 function etiquetaBarra(props: unknown, filas: RentabilidadCliente[]) {
   const p = props as { x?: number; y?: number; width?: number; height?: number; index?: number };
   const fila = p.index != null ? filas[p.index] : undefined;
@@ -60,8 +60,17 @@ function etiquetaBarra(props: unknown, filas: RentabilidadCliente[]) {
   const izquierda = Math.min(p.x, p.x + p.width);
   const derecha = Math.max(p.x, p.x + p.width);
   const texto = `${abreviado(fila.utilidad)}${fila.margen == null ? "" : ` · ${fila.margen.toFixed(1)}%`}`;
+  // Dentro de la barra si el texto cabe; si no, al lado que no tapa el nombre del cliente (derecha de la barra o de la línea del cero).
+  const cabe = derecha - izquierda >= texto.length * 6.6 + 12;
+  if (cabe) {
+    return (
+      <text x={negativa ? izquierda + 6 : derecha - 6} y={p.y + p.height / 2} dy={4} fontSize={12} fontWeight={600} fill="#fff" textAnchor={negativa ? "start" : "end"}>
+        {texto}
+      </text>
+    );
+  }
   return (
-    <text x={negativa ? izquierda - 6 : derecha + 6} y={p.y + p.height / 2} dy={4} fontSize={12} fill="#0F172A" textAnchor={negativa ? "end" : "start"}>
+    <text x={(negativa ? derecha : derecha) + 6} y={p.y + p.height / 2} dy={4} fontSize={12} fill="#0F172A" textAnchor="start">
       {texto}
     </text>
   );

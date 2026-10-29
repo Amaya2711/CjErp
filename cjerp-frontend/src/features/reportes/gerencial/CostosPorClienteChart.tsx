@@ -44,6 +44,19 @@ const leyenda = (color: string, texto: string) => (
 );
 
 // Gasto (soles) por cliente (RUC/DNI + nombre). Azul = el cliente tiene ventas en el año; naranja = sin venta asignada.
+// Texto de la barra: dentro (blanco, pegado al extremo) si cabe; si es muy corta, justo a su derecha.
+function etiquetaEnBarra(props: unknown, texto: (v: number) => string) {
+  const p = props as { x?: number; y?: number; width?: number; height?: number; value?: number };
+  if (p.x == null || p.y == null || p.width == null || p.height == null || p.value == null) return null;
+  const t = texto(Number(p.value));
+  const cabe = p.width >= t.length * 6.6 + 12;
+  return (
+    <text x={cabe ? p.x + p.width - 6 : p.x + p.width + 6} y={p.y + p.height / 2} dy={4} fontSize={12} fontWeight={cabe ? 600 : 400} fill={cabe ? "#fff" : "#0F172A"} textAnchor={cabe ? "end" : "start"}>
+      {t}
+    </text>
+  );
+}
+
 export default function CostosPorClienteChart({ anio, filas, seleccionado, onSeleccionar }: Props) {
   const barras = useMemo<Barra[]>(() => construirCostosCliente(filas), [filas]);
 
@@ -90,7 +103,7 @@ export default function CostosPorClienteChart({ anio, filas, seleccionado, onSel
                   fillOpacity={seleccionado && seleccionado !== b.clave ? 0.35 : 1}
                 />
               ))}
-              <LabelList dataKey="costo" position="right" fontSize={12} fill="#0F172A" formatter={(v: unknown) => `S/ ${abreviado(Number(v))}`} />
+              <LabelList dataKey="costo" content={(p) => etiquetaEnBarra(p, (v) => `S/ ${abreviado(v)}`)} />
             </Bar>
           </BarChart>
         </ResponsiveContainer>

@@ -23,6 +23,17 @@ public class LogisticaEquiposService : ILogisticaEquiposService
     private const string PedidoImportarSp = "dbo.sp_Logistica_Pedido_Importar";
     private const string PedidoImportarSecundarioSp = "dbo.sp_Logistica_Pedido_ImportarSecundario";
 
+    private const string SolicitudCatalogosSp = "dbo.sp_Logistica_Solicitud_Catalogos";
+    private const string SolicitudDisponibleSp = "dbo.sp_Logistica_Solicitud_Disponible";
+    private const string SolicitudConsumibleSp = "dbo.sp_Logistica_Solicitud_Consumible";
+    private const string SolicitudRegistrarSp = "dbo.sp_Logistica_Solicitud_Registrar";
+    private const string SolicitudPorAprobarSp = "dbo.sp_Logistica_Solicitud_PorAprobar";
+    private const string SolicitudDetalleSp = "dbo.sp_Logistica_Solicitud_Detalle";
+    private const string SolicitudAprobarSp = "dbo.sp_Logistica_Solicitud_Aprobar";
+    private const string SolicitudCorreoSp = "dbo.sp_Logistica_Solicitud_Correo";
+    private const string CampoConsultarSp = "dbo.sp_Logistica_Campo_Consultar";
+    private const string CampoGrabarSp = "dbo.sp_Logistica_Campo_Grabar";
+
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     private readonly ISqlCommandFactory _sqlCommandFactory;
@@ -264,6 +275,209 @@ public class LogisticaEquiposService : ILogisticaEquiposService
         {
             Aplicado = parametros.Get<bool?>("@Aplicado") ?? false,
             Lineas = lineas.ToList(),
+        };
+    }
+
+    // ---- Solicitud y x Aprobar ----
+
+    public async Task<IEnumerable<LogisticaSolicitudCatalogoDto>> ListarCatalogosSolicitudAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        return await connection.QueryAsync<LogisticaSolicitudCatalogoDto>(
+            _sqlCommandFactory.Create(SolicitudCatalogosSp, null, CommandType.StoredProcedure, cancellationToken, commandTimeout: 60));
+    }
+
+    public async Task<IEnumerable<LogisticaSolicitudDisponibleDto>> ListarDisponiblesSolicitudAsync(
+        string? texto,
+        string? idSite,
+        int? correSite,
+        int? idCliente,
+        int? idProyecto,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        return await EjecutarAsync(() => connection.QueryAsync<LogisticaSolicitudDisponibleDto>(
+            _sqlCommandFactory.Create(
+                SolicitudDisponibleSp,
+                new
+                {
+                    Texto = NullIfWhiteSpace(texto),
+                    IdSite = NullIfWhiteSpace(idSite),
+                    CorreSite = correSite,
+                    IdCliente = idCliente,
+                    IdProyecto = idProyecto,
+                },
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120)));
+    }
+
+    public async Task<IEnumerable<LogisticaSolicitudConsumibleDto>> ListarConsumiblesSolicitudAsync(
+        string? texto,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        return await connection.QueryAsync<LogisticaSolicitudConsumibleDto>(
+            _sqlCommandFactory.Create(
+                SolicitudConsumibleSp,
+                new { Texto = NullIfWhiteSpace(texto) },
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 60));
+    }
+
+    public async Task<LogisticaSolicitudRegistrarResultDto> RegistrarSolicitudAsync(
+        LogisticaSolicitudRegistrarDto request,
+        string usuario,
+        int? idEmpleadoCj,
+        CancellationToken cancellationToken = default)
+    {
+        var parametros = new DynamicParameters();
+        parametros.Add("@IdCliente", request.IdCliente, DbType.Int32);
+        parametros.Add("@IdProyecto", request.IdProyecto, DbType.Int32);
+        parametros.Add("@IdSite", request.IdSite, DbType.String);
+        parametros.Add("@CorreSite", request.CorreSite, DbType.Int32);
+        parametros.Add("@TipoTrabajo", request.TipoTrabajo, DbType.String);
+        parametros.Add("@IdSolicitante", request.IdSolicitante, DbType.Int32);
+        parametros.Add("@FormaEnvio", request.FormaEnvio, DbType.Int32);
+        parametros.Add("@RazonSocial", request.RazonSocial, DbType.Int32);
+        parametros.Add("@Ubigeo", request.Ubigeo, DbType.String);
+        parametros.Add("@Direccion", request.Direccion, DbType.String);
+        parametros.Add("@Referencia", NullIfWhiteSpace(request.Referencia), DbType.String);
+        parametros.Add("@IdConEntrega1", request.IdConEntrega1, DbType.Int32);
+        parametros.Add("@IdConEntrega2", request.IdConEntrega2, DbType.Int32);
+        parametros.Add("@ImagenSolicitud", NullIfWhiteSpace(request.ImagenSolicitud), DbType.String);
+        parametros.Add("@Items", JsonSerializer.Serialize(request.Items, JsonOptions), DbType.String);
+        parametros.Add("@Usuario", usuario, DbType.String);
+        parametros.Add("@IdEmpleadoCj", idEmpleadoCj, DbType.Int32);
+        parametros.Add("@NroSolicitud", dbType: DbType.String, size: 50, direction: ParameterDirection.Output);
+        parametros.Add("@IdEstado", dbType: DbType.Int32, direction: ParameterDirection.Output);
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        await EjecutarAsync(() => connection.ExecuteAsync(
+            _sqlCommandFactory.Create(SolicitudRegistrarSp, parametros, CommandType.StoredProcedure, cancellationToken, commandTimeout: 180)));
+
+        return new LogisticaSolicitudRegistrarResultDto
+        {
+            NroSolicitud = parametros.Get<string?>("@NroSolicitud") ?? string.Empty,
+            IdEstado = parametros.Get<int?>("@IdEstado") ?? 0,
+        };
+    }
+
+    public async Task<IEnumerable<LogisticaSolicitudPorAprobarDto>> ListarPorAprobarAsync(
+        LogisticaSolicitudPorAprobarConsultaDto consulta,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        return await connection.QueryAsync<LogisticaSolicitudPorAprobarDto>(
+            _sqlCommandFactory.Create(
+                SolicitudPorAprobarSp,
+                new { consulta.IdCliente, consulta.IdProyecto, IdSite = NullIfWhiteSpace(consulta.IdSite), consulta.CorreSite },
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120));
+    }
+
+    public async Task<IEnumerable<LogisticaSolicitudDetalleDto>> ListarDetalleSolicitudAsync(
+        string nroSolicitud,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        return await connection.QueryAsync<LogisticaSolicitudDetalleDto>(
+            _sqlCommandFactory.Create(
+                SolicitudDetalleSp,
+                new { NroSolicitud = nroSolicitud.Trim() },
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 60));
+    }
+
+    public async Task<LogisticaSolicitudAprobarResultDto> AprobarSolicitudesAsync(
+        LogisticaSolicitudAprobarDto request,
+        string usuario,
+        int? idEmpleadoCj,
+        CancellationToken cancellationToken = default)
+    {
+        var items = request.Solicitudes.Select(nro => new { nroSolicitud = nro });
+        var parametros = new DynamicParameters();
+        parametros.Add("@Items", JsonSerializer.Serialize(items, JsonOptions), DbType.String);
+        parametros.Add("@Accion", request.Accion?.Trim().ToUpperInvariant() ?? string.Empty, DbType.String);
+        parametros.Add("@IdValidador", request.IdValidador, DbType.Int32);
+        parametros.Add("@Observacion", NullIfWhiteSpace(request.Observacion), DbType.String);
+        parametros.Add("@Usuario", usuario, DbType.String);
+        parametros.Add("@IdEmpleadoCj", idEmpleadoCj, DbType.Int32);
+        parametros.Add("@Procesadas", dbType: DbType.Int32, direction: ParameterDirection.Output);
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        await EjecutarAsync(() => connection.ExecuteAsync(
+            _sqlCommandFactory.Create(SolicitudAprobarSp, parametros, CommandType.StoredProcedure, cancellationToken, commandTimeout: 180)));
+
+        return new LogisticaSolicitudAprobarResultDto { Procesadas = parametros.Get<int?>("@Procesadas") ?? 0 };
+    }
+
+    public async Task<LogisticaSolicitudCorreoCabDto?> ObtenerCabeceraSolicitudAsync(
+        string nroSolicitud,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        return await connection.QueryFirstOrDefaultAsync<LogisticaSolicitudCorreoCabDto>(
+            _sqlCommandFactory.Create(
+                SolicitudCorreoSp,
+                new { NroSolicitud = nroSolicitud.Trim() },
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 60));
+    }
+
+    // ---- x Campo ----
+
+    public async Task<IEnumerable<LogisticaCampoLineaDto>> ConsultarCampoAsync(
+        LogisticaCampoConsultaDto consulta,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        return await EjecutarAsync(() => connection.QueryAsync<LogisticaCampoLineaDto>(
+            _sqlCommandFactory.Create(
+                CampoConsultarSp,
+                new
+                {
+                    Solicitudes = NullIfWhiteSpace(consulta.Solicitudes),
+                    FechaIni = consulta.FechaIni?.Date,
+                    FechaFin = consulta.FechaFin?.Date,
+                    consulta.IdRespCampo,
+                    consulta.IdCliente,
+                    consulta.IdProyecto,
+                    IdSite = NullIfWhiteSpace(consulta.IdSite),
+                    consulta.CorreSite,
+                },
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120)));
+    }
+
+    public async Task<LogisticaCampoGrabarResultDto> GrabarCampoAsync(
+        LogisticaCampoGrabarDto request,
+        string usuario,
+        int? idEmpleadoCj,
+        CancellationToken cancellationToken = default)
+    {
+        var parametros = new DynamicParameters();
+        parametros.Add("@Items", JsonSerializer.Serialize(request.Items, JsonOptions), DbType.String);
+        parametros.Add("@Usuario", usuario, DbType.String);
+        parametros.Add("@IdEmpleadoCj", idEmpleadoCj, DbType.Int32);
+        parametros.Add("@IdResponsable", idEmpleadoCj, DbType.Int32);
+        parametros.Add("@Procesadas", dbType: DbType.Int32, direction: ParameterDirection.Output);
+        parametros.Add("@ConDiferencia", dbType: DbType.Int32, direction: ParameterDirection.Output);
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        await EjecutarAsync(() => connection.ExecuteAsync(
+            _sqlCommandFactory.Create(CampoGrabarSp, parametros, CommandType.StoredProcedure, cancellationToken, commandTimeout: 180)));
+
+        return new LogisticaCampoGrabarResultDto
+        {
+            Procesadas = parametros.Get<int?>("@Procesadas") ?? 0,
+            ConDiferencia = parametros.Get<int?>("@ConDiferencia") ?? 0,
         };
     }
 

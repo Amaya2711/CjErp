@@ -1,5 +1,9 @@
 import httpClient from "./httpClient";
 import type {
+  CampoConsulta,
+  CampoGrabarResultado,
+  CampoItem,
+  CampoLinea,
   IngresoCambioEstado,
   IngresoCambioEstadoResultado,
   IngresoCargaResultado,
@@ -14,6 +18,16 @@ import type {
   LogisticaStockDescuadre,
   PedidoItem,
   SecundarioItem,
+  SolicitudAprobar,
+  SolicitudAprobarResultado,
+  SolicitudCatalogo,
+  SolicitudConsumible,
+  SolicitudDetalle,
+  SolicitudDisponible,
+  SolicitudPorAprobar,
+  SolicitudPorAprobarConsulta,
+  SolicitudRegistrar,
+  SolicitudRegistrarResultado,
 } from "../models/logisticaEquipos";
 
 export async function listarMaterialesLogistica(texto?: string, soloActivos = true) {
@@ -68,4 +82,60 @@ export async function importarPedidoEquipos(items: PedidoItem[], soloValidar: bo
 
 export async function importarSecundarioEquipos(items: SecundarioItem[], soloValidar: boolean) {
   return await httpClient.post<IngresoCargaResultado>("/logistica/equipos/pedidos/importar-secundario", { items, soloValidar }, { timeout: 300000 });
+}
+
+// ---- Solicitud y x Aprobar ----
+
+export async function listarCatalogosSolicitud() {
+  return await httpClient.get<SolicitudCatalogo[]>("/logistica/equipos/solicitud/catalogos");
+}
+
+export async function listarDisponiblesSolicitud(params: {
+  texto?: string;
+  idSite?: string;
+  correSite?: number;
+  idCliente?: number;
+  idProyecto?: number;
+}) {
+  return await httpClient.get<SolicitudDisponible[]>("/logistica/equipos/solicitud/disponibles", {
+    params: {
+      texto: params.texto?.trim() || undefined,
+      idSite: params.idSite || undefined,
+      correSite: params.correSite,
+      idCliente: params.idCliente,
+      idProyecto: params.idProyecto,
+    },
+  });
+}
+
+export async function listarConsumiblesSolicitud(texto?: string) {
+  return await httpClient.get<SolicitudConsumible[]>("/logistica/equipos/solicitud/consumibles", {
+    params: { texto: texto?.trim() || undefined },
+  });
+}
+
+export async function registrarSolicitudEquipos(request: SolicitudRegistrar) {
+  return await httpClient.post<SolicitudRegistrarResultado>("/logistica/equipos/solicitud/registrar", request, { timeout: 120000 });
+}
+
+export async function listarSolicitudesPorAprobar(consulta: SolicitudPorAprobarConsulta) {
+  return await httpClient.post<SolicitudPorAprobar[]>("/logistica/equipos/solicitud/por-aprobar", consulta);
+}
+
+export async function listarDetalleSolicitud(nroSolicitud: string) {
+  return await httpClient.get<SolicitudDetalle[]>(`/logistica/equipos/solicitud/${encodeURIComponent(nroSolicitud)}/detalle`);
+}
+
+// ---- x Campo ----
+
+export async function consultarCampo(consulta: CampoConsulta) {
+  return await httpClient.post<CampoLinea[]>("/logistica/equipos/campo/consultar", consulta);
+}
+
+export async function grabarCampo(items: CampoItem[]) {
+  return await httpClient.post<CampoGrabarResultado>("/logistica/equipos/campo/grabar", { items }, { timeout: 120000 });
+}
+
+export async function aprobarSolicitudesEquipos(request: SolicitudAprobar) {
+  return await httpClient.post<SolicitudAprobarResultado>("/logistica/equipos/solicitud/aprobar", request, { timeout: 120000 });
 }

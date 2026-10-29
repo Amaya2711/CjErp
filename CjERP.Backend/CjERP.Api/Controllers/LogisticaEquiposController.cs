@@ -13,11 +13,16 @@ namespace CjERP.Api.Controllers;
 public class LogisticaEquiposController : ControllerBase
 {
     private readonly ILogisticaEquiposService _service;
+    private readonly ILogisticaSolicitudCorreoService _correo;
     private readonly ILogger<LogisticaEquiposController> _logger;
 
-    public LogisticaEquiposController(ILogisticaEquiposService service, ILogger<LogisticaEquiposController> logger)
+    public LogisticaEquiposController(
+        ILogisticaEquiposService service,
+        ILogisticaSolicitudCorreoService correo,
+        ILogger<LogisticaEquiposController> logger)
     {
         _service = service;
+        _correo = correo;
         _logger = logger;
     }
 
@@ -90,6 +95,81 @@ public class LogisticaEquiposController : ControllerBase
     [HttpPost("pedidos/importar-secundario")]
     public Task<IActionResult> ImportarSecundario([FromBody] LogisticaSecundarioImportarDto request, CancellationToken cancellationToken = default)
         => Ejecutar(async () => await _service.ImportarSecundarioAsync(request, ResolveUsuario(), cancellationToken), "reasignar el pedido");
+
+    [HttpGet("solicitud/catalogos")]
+    public async Task<IActionResult> CatalogosSolicitud(CancellationToken cancellationToken = default)
+    {
+        var data = await _service.ListarCatalogosSolicitudAsync(cancellationToken);
+        return Ok(new { success = true, message = "ok", data });
+    }
+
+    [HttpGet("solicitud/disponibles")]
+    public Task<IActionResult> DisponiblesSolicitud(
+        [FromQuery] string? texto,
+        [FromQuery] string? idSite,
+        [FromQuery] int? correSite,
+        [FromQuery] int? idCliente,
+        [FromQuery] int? idProyecto,
+        CancellationToken cancellationToken = default)
+        => Ejecutar(async () => await _service.ListarDisponiblesSolicitudAsync(texto, idSite, correSite, idCliente, idProyecto, cancellationToken), "consultar los equipos disponibles");
+
+    [HttpGet("solicitud/consumibles")]
+    public Task<IActionResult> ConsumiblesSolicitud([FromQuery] string? texto, CancellationToken cancellationToken = default)
+        => Ejecutar(async () => await _service.ListarConsumiblesSolicitudAsync(texto, cancellationToken), "consultar los consumibles");
+
+    /// <summary>Registra la solicitud. Si no requiere aprobacion (estado 3) se envia el PDF por correo; un fallo del correo no la revierte.</summary>
+    [HttpPost("solicitud/registrar")]
+    public Task<IActionResult> RegistrarSolicitud([FromBody] LogisticaSolicitudRegistrarDto request, CancellationToken cancellationToken = default)
+        => Ejecutar(async () =>
+        {
+            var resultado = await _service.RegistrarSolicitudAsync(request, ResolveUsuario(), ResolveIdEmpleadoCj(), cancellationToken);
+            if (resultado.IdEstado == 3)
+            {
+                var (enviado, mensaje) = await _correo.EnviarSolicitudAsync(resultado.NroSolicitud, "PROGRAMACION DESPACHO EQUIPOS", cancellationToken);
+                resultado.CorreoEnviado = enviado;
+                resultado.CorreoMensaje = mensaje;
+            }
+
+            return resultado;
+        }, "registrar la solicitud");
+
+    [HttpPost("solicitud/por-aprobar")]
+    public Task<IActionResult> PorAprobar([FromBody] LogisticaSolicitudPorAprobarConsultaDto request, CancellationToken cancellationToken = default)
+        => Ejecutar(async () => await _service.ListarPorAprobarAsync(request, cancellationToken), "consultar las solicitudes por aprobar");
+
+    [HttpGet("solicitud/{nroSolicitud}/detalle")]
+    public Task<IActionResult> DetalleSolicitud(string nroSolicitud, CancellationToken cancellationToken = default)
+        => Ejecutar(async () => await _service.ListarDetalleSolicitudAsync(nroSolicitud, cancellationToken), "consultar el detalle de la solicitud");
+
+    /// <summary>Aprueba u observa solicitudes en estado 9. Al aprobar se envia el PDF por correo; un fallo del correo no revierte la aprobacion.</summary>
+    [HttpPost("solicitud/aprobar")]
+    public Task<IActionResult> AprobarSolicitudes([FromBody] LogisticaSolicitudAprobarDto request, CancellationToken cancellationToken = default)
+        => Ejecutar(async () =>
+        {
+            var resultado = await _service.AprobarSolicitudesAsync(request, ResolveUsuario(), ResolveIdEmpleadoCj(), cancellationToken);
+            if (string.Equals(request.Accion, "APROBAR", StringComparison.OrdinalIgnoreCase))
+            {
+                var fallos = new List<string>();
+                foreach (var nro in request.Solicitudes.Distinct())
+                {
+                    var (enviado, mensaje) = await _correo.EnviarSolicitudAsync(nro, "PROGRAMACION DESPACHO EQUIPOS", cancellationToken);
+                    if (enviado) resultado.CorreosEnviados++;
+                    else fallos.Add($"{nro}: {mensaje}");
+                }
+
+                resultado.CorreoMensaje = fallos.Count == 0 ? null : string.Join(" ", fallos);
+            }
+
+            return resultado;
+        }, "aprobar u observar las solicitudes");
+
+    [HttpPost("campo/consultar")]
+    public Task<IActionResult> ConsultarCampo([FromBody] LogisticaCampoConsultaDto request, CancellationToken cancellationToken = default)
+        => Ejecutar(async () => await _service.ConsultarCampoAsync(request, cancellationToken), "consultar las lineas de campo");
+
+    [HttpPost("campo/grabar")]
+    public Task<IActionResult> GrabarCampo([FromBody] LogisticaCampoGrabarDto request, CancellationToken cancellationToken = default)
+        => Ejecutar(async () => await _service.GrabarCampoAsync(request, ResolveUsuario(), ResolveIdEmpleadoCj(), cancellationToken), "grabar la conformidad de campo");
 
     /// <summary>Los errores de negocio de los SP llegan como InvalidOperationException y se devuelven como 400 con su mensaje.</summary>
     private async Task<IActionResult> Ejecutar<T>(Func<Task<T>> accion, string descripcion)

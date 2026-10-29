@@ -32,6 +32,8 @@ const CrucePage = lazy(() => import("../../features/logistica/gestionequipos/cru
 const DesmontadoPage = lazy(() => import("../../features/logistica/gestionequipos/desmontado"));
 const RecojoPage = lazy(() => import("../../features/logistica/gestionequipos/recojo"));
 const IngresoEquipoPage = lazy(() => import("../../features/logistica/gestionequipos/ingresoequipo"));
+const GestionEquiposDemoPage = lazy(() => import("../../features/logistica/gestionequipos/demo"));
+const GestionEquiposAllPage = lazy(() => import("../../features/logistica/gestionequipos/all"));
 const CampoEquipoPage = lazy(() => import("../../features/logistica/gestionequipos/campoequipo"));
 const ReporteResponsablePage = lazy(() => import("../../features/reportes/gerencial/responsable"));
 const SolicitudEquipoPage = lazy(() => import("../../features/logistica/gestionequipos/solicitudequipo"));
@@ -293,6 +295,14 @@ export default function AppRouter() {
             <Route
               path="/logistica/gestionequipos/desmontado"
               element={<DesmontadoPage />}
+            />
+            <Route
+              path="/logistica/gestionequipos/demo"
+              element={<GestionEquiposDemoPage />}
+            />
+            <Route
+              path="/logistica/gestionequipos/all"
+              element={<GestionEquiposAllPage />}
             />
             <Route
               path="/logistica/gestionequipos/solicitudequipo"

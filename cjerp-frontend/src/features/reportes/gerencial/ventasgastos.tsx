@@ -182,6 +182,14 @@ const claveNombre = (v: string) =>
 // Nro de documento comparable (RUC o DNI): sin espacios ni guiones. Es la llave que relaciona ventas y costos de un cliente.
 const normDoc = (v: string | null | undefined) => String(v ?? "").replace(/[^0-9A-Za-z]/g, "").toUpperCase();
 // Clave de cliente para unir ventas y costos: RUC/DNI y, si no hay, IdCliente o nombre.
+// Clientes que se quitan de ventas, costos y rentabilidad mientras esté marcada la casilla de exclusión del filtro de clientes.
+const CLIENTES_EXCLUIDOS_DEFECTO = ["PLANILLA", "CJ TELECOM"];
+const CLIENTE_FINANCIERO = "FINANCIERO"; // se quita con su propia casilla (SIN FINANCIERO)
+const claveNombreCliente = (n: string) =>
+  n.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
+const CLAVES_EXCLUIDAS_DEFECTO = CLIENTES_EXCLUIDOS_DEFECTO.map(claveNombreCliente);
+const CLAVE_FINANCIERO = claveNombreCliente(CLIENTE_FINANCIERO);
+
 const claveClienteRentabilidad = (doc: string, idCliente: number, nombre: string) => (doc ? `d:${doc}` : idCliente > 0 ? `i:${idCliente}` : `n:${nombre}`);
 const empresaDe = (r: VentasSunatRegistroDto) => (r.empresa ?? "").trim() || SIN_EMPRESA;
 
@@ -418,6 +426,10 @@ export default function VentasGastosPage() {
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(true); // expande o contrae la cabecera de filtros para ganar espacio
   const [graficosExpandidos, setGraficosExpandidos] = useState(false); // al ampliar, los dos gráficos de Rentabilidad pasan a una sola columna: uno sobre otro, cada uno a todo el ancho
   const [clienteRentSel, setClienteRentSel] = useState<string | null>(null); // clave del cliente elegido en el gráfico de rentabilidad
+  // Clientes desmarcados (claves normalizadas): los clientes nuevos entran marcados salvo los excluidos por defecto.
+  const [clientesDesmarcados, setClientesDesmarcados] = useState<string[]>([]);
+  const [excluirClientes, setExcluirClientes] = useState(true);
+  const [sinFinanciero, setSinFinanciero] = useState(true);
   const [clienteCostoSel, setClienteCostoSel] = useState<string | null>(null); // clave del cliente elegido en el gráfico de costos
   const [clientes, setClientes] = useState<VentasSunatClienteDto[]>(cacheClientes ?? []);
   const [cargandoClientes, setCargandoClientes] = useState(false);
@@ -604,11 +616,28 @@ export default function VentasGastosPage() {
     [empresasSel, catalogo],
   );
 
+  const clienteActivo = useCallback(
+    (nombre: string) => {
+      const k = claveNombreCliente(nombre);
+      return !clientesDesmarcados.includes(k) && !(excluirClientes && CLAVES_EXCLUIDAS_DEFECTO.includes(k)) && !(sinFinanciero && k === CLAVE_FINANCIERO);
+    },
+    [clientesDesmarcados, excluirClientes, sinFinanciero],
+  );
+  // Nombre del cliente de un gasto: el de dbo.Cliente y, si falta, el que trae el recibo.
+  const clientePorId = useMemo(() => new Map(clientes.map((c) => [c.idCliente, c])), [clientes]);
+  const nombreClienteGasto = useCallback(
+    (g: { idCliente: number; cliente: string }) => {
+      const maestro = g.idCliente > 0 ? clientePorId.get(g.idCliente) : undefined;
+      return (maestro?.nombreCliente ?? "").trim() || g.cliente;
+    },
+    [clientePorId],
+  );
+
   const monedas = useMemo(() => Array.from(new Set(ventas.map((r) => (r.moneda ?? "").trim()).filter(Boolean))).sort(), [ventas]);
   // Filtros de cabecera aplicados a las ventas: empresa y moneda del comprobante.
   const coincideVenta = useCallback(
-    (r: VentasSunatRegistroDto) => coincideEmpresa(r) && (!moneda || (r.moneda ?? "").trim() === moneda),
-    [coincideEmpresa, moneda],
+    (r: VentasSunatRegistroDto) => coincideEmpresa(r) && (!moneda || (r.moneda ?? "").trim() === moneda) && clienteActivo(clienteDeVenta(r)),
+    [coincideEmpresa, moneda, clienteActivo],
   );
   const ventasFiltradas = useMemo(() => ventas.filter(coincideVenta), [ventas, coincideVenta]);
 
@@ -634,6 +663,21 @@ export default function VentasGastosPage() {
     return { total, promedio, proyeccion: promedio * 12, mesesCerrados: cerrados.length };
   }, [ventasFiltradas, anio, importe]);
 
+  // Opciones del filtro de clientes: los del año en ventas (de las empresas/moneda elegidas) y en gastos.
+  const opcionesClientes = useMemo(() => {
+    const mapa = new Map<string, string>();
+    const agregar = (n: string) => {
+      const k = claveNombreCliente(n);
+      if (k && !mapa.has(k)) mapa.set(k, n.trim());
+    };
+    for (const r of ventas) if ((r.periodo ?? "").startsWith(String(anio)) && coincideEmpresa(r)) agregar(clienteDeVenta(r));
+    for (const g of gastos) if (g.periodo.startsWith(String(anio))) agregar(nombreClienteGasto(g));
+    if (excluirClientes) for (const k of CLAVES_EXCLUIDAS_DEFECTO) mapa.delete(k);
+    if (sinFinanciero) mapa.delete(CLAVE_FINANCIERO);
+    return Array.from(mapa.values()).sort((a, b) => a.localeCompare(b));
+  }, [ventas, gastos, anio, coincideEmpresa, nombreClienteGasto, excluirClientes, sinFinanciero]);
+  const clientesMarcados = useMemo(() => opcionesClientes.filter(clienteActivo), [opcionesClientes, clienteActivo]);
+
   // Gastos para Costos y Rentabilidad: Inafecto usa el SUBTOTAL; Con IGV usa el TOTAL A PAGAR (monto original y en soles).
   // Empresa dueña de los gastos (EMPRESA_cj con Correlativo 1). Si el catálogo aún no cargó, no se anula nada.
   const empresaGastos = useMemo(() => catalogo.find((c) => c.id === ID_EMPRESA_GASTOS)?.nombre ?? null, [catalogo]);
@@ -645,11 +689,11 @@ export default function VentasGastosPage() {
     if (!gastosAplican) return [];
     const tc: Record<string, number> = {};
     for (const k of Object.keys(TC_DEFECTO)) tc[k] = numero(tcTexto[k]) || TC_DEFECTO[k as keyof typeof TC_DEFECTO];
-    return gastos.map((g) => {
+    return gastos.filter((g) => clienteActivo(nombreClienteGasto(g))).map((g) => {
       const factor = g.moneda === "PEN" ? 1 : (tc[g.moneda] ?? 1);
       return { ...g, montoPen: g.monto * factor, totalPagarPen: g.totalPagar * factor };
     });
-  }, [gastos, tcTexto, gastosAplican]);
+  }, [gastos, tcTexto, gastosAplican, clienteActivo, nombreClienteGasto]);
 
   const gastosCosto = useMemo(
     () => (incluirIgv ? gastosConv.map((g) => ({ ...g, monto: g.totalPagar, montoPen: g.totalPagarPen })) : gastosConv),
@@ -850,6 +894,7 @@ export default function VentasGastosPage() {
       const filtros: string[] = [
         `Año: ${anio}`,
         `Empresa: ${empresasSel.length ? empresasSel.join(", ") : "Todas"}`,
+        `Clientes: ${clientesMarcados.length === opcionesClientes.length ? "Todos" : `${clientesMarcados.length} de ${opcionesClientes.length} (excluidos: ${opcionesClientes.filter((c) => !clienteActivo(c)).join(", ")})`}${excluirClientes ? `; sin ${CLIENTES_EXCLUIDOS_DEFECTO.join(", ")}` : ""}${sinFinanciero ? `; sin ${CLIENTE_FINANCIERO}` : ""}`,
         `Moneda del comprobante: ${moneda || "Todas"}`,
         `Importe de ventas: ${etiqueta}`,
       ];
@@ -1060,7 +1105,7 @@ export default function VentasGastosPage() {
           </button>
           {filtrosAbiertos ? null : (
             <span style={{ fontSize: 12, color: "#475569" }}>
-              Año {anio} · Empresa: {empresasSel.length ? empresasSel.join(", ") : "Todas"} · Moneda: {moneda || "Todas"} · Importe: {incluirIgv ? "Con IGV" : "Inafecto"} · Rentabilidad:{" "}
+              Año {anio} · Empresa: {empresasSel.length ? empresasSel.join(", ") : "Todas"} · Clientes: {clientesMarcados.length}/{opcionesClientes.length} · Moneda: {moneda || "Todas"} · Importe: {incluirIgv ? "Con IGV" : "Inafecto"} · Rentabilidad:{" "}
               {rentabilidadSel.length === 1 ? rentabilidadSel[0] : "Ambos"}
             </span>
           )}
@@ -1096,6 +1141,55 @@ export default function VentasGastosPage() {
                 setClienteSel(null);
               }}
               singular="empresa" plural="empresas" />
+          </div>
+          <div style={styles.campo}>
+            <span style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              Clientes
+              <label style={{ display: "flex", gap: 4, alignItems: "center", cursor: "pointer", fontWeight: 500, fontSize: 12 }} title={CLIENTES_EXCLUIDOS_DEFECTO.join(", ")}>
+                <input
+                  type="checkbox"
+                  checked={excluirClientes}
+                  onChange={(e) => {
+                    setExcluirClientes(e.target.checked);
+                    setMesSel(null);
+                    setClienteSel(null);
+                    setClienteCostoSel(null);
+                    setClienteRentSel(null);
+                  }}
+                />
+                Quitar
+              </label>
+              <label style={{ display: "flex", gap: 4, alignItems: "center", cursor: "pointer", fontWeight: 500, fontSize: 12 }}>
+                <input
+                  type="checkbox"
+                  checked={sinFinanciero}
+                  onChange={(e) => {
+                    setSinFinanciero(e.target.checked);
+                    setMesSel(null);
+                    setClienteSel(null);
+                    setClienteCostoSel(null);
+                    setClienteRentSel(null);
+                  }}
+                />
+                SIN FINANCIERO
+              </label>
+            </span>
+            <SelectorMultiple
+              opciones={opcionesClientes}
+              seleccion={clientesMarcados}
+              onChange={(v) => {
+                const marcados = new Set(v.map(claveNombreCliente));
+                const visibles = new Set(opcionesClientes.map(claveNombreCliente));
+                setClientesDesmarcados((prev) => [...prev.filter((k) => !visibles.has(k)), ...Array.from(visibles).filter((k) => !marcados.has(k))]);
+                setMesSel(null);
+                setClienteSel(null);
+                setClienteCostoSel(null);
+                setClienteRentSel(null);
+              }}
+              singular="cliente"
+              plural="clientes"
+              textoTodos="Ningún cliente"
+            />
           </div>
           <label style={styles.campo}>
             Moneda del comprobante

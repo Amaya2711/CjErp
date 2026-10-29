@@ -151,3 +151,170 @@ export type SecundarioItem = {
   cantidad: number;
   lote: string;
 };
+
+// ---- Solicitud y x Aprobar ----
+
+export type SolicitudCatalogoTipo = "FORMA_ENVIO" | "ENTREGA" | "SOLICITANTE" | "VALIDADOR";
+
+export type SolicitudCatalogo = {
+  tipo: SolicitudCatalogoTipo;
+  id: number;
+  nombre?: string | null;
+  documento?: string | null;
+  telefono?: string | null;
+};
+
+/** Línea validada (estado 2) con saldo disponible para solicitar. */
+export type SolicitudDisponible = {
+  correlativo: string;
+  pedidoSap?: string | null;
+  codPap: string;
+  nombreMaterial?: string | null;
+  unidadMedida?: string | null;
+  serie?: string | null;
+  cantSap: number;
+  saldo: number;
+  idCliente?: number | null;
+  idProyecto?: number | null;
+  idSite?: string | null;
+  correSite?: number | null;
+  tipoTrabajo?: string | null;
+  nombreSite?: string | null;
+  nombreCliente?: string | null;
+  nombreProyecto?: string | null;
+  mismoSite: boolean;
+  stockDisponible: number;
+};
+
+/** Material consumible (cod. 30) con stock disponible, sin línea de origen. */
+export type SolicitudConsumible = {
+  codPap: string;
+  nombreMaterial?: string | null;
+  unidadMedida?: string | null;
+  disponible: number;
+};
+
+export type SolicitudItem ={ correlativo?: string | null; codPap: string; cantidad: number };
+
+export type SolicitudRegistrar = {
+  idCliente: number;
+  idProyecto: number;
+  idSite: string;
+  correSite: number;
+  tipoTrabajo: string;
+  idSolicitante: number;
+  formaEnvio: number;
+  razonSocial: number;
+  ubigeo: string;
+  direccion: string;
+  referencia?: string;
+  idConEntrega1: number;
+  idConEntrega2?: number | null;
+  imagenSolicitud?: string | null;
+  items: SolicitudItem[];
+};
+
+export type SolicitudRegistrarResultado = {
+  nroSolicitud: string;
+  /** 9 = pendiente de aprobación; 3 = sin aprobación. */
+  idEstado: number;
+  correoEnviado: boolean;
+  correoMensaje?: string | null;
+};
+
+export type SolicitudPorAprobarConsulta = { idCliente?: number; idProyecto?: number; idSite?: string; correSite?: number };
+
+export type SolicitudPorAprobar = {
+  nroSolicitud: string;
+  idCliente?: number | null;
+  idProyecto?: number | null;
+  idSite?: string | null;
+  correSite?: number | null;
+  tipoTrabajo?: string | null;
+  nombreCliente?: string | null;
+  nombreProyecto?: string | null;
+  nombreSite?: string | null;
+  usuario?: string | null;
+  fechaCreacion?: string | null;
+  solicitante?: string | null;
+  formaEnvio?: string | null;
+  direccion?: string | null;
+  referencia?: string | null;
+  lineas: number;
+  cantidad: number;
+  idEstado: number;
+};
+
+export type SolicitudDetalle = {
+  posicion?: string | null;
+  correlativo?: string | null;
+  pedidoSap?: string | null;
+  codPap?: string | null;
+  nombreMaterial?: string | null;
+  unidadMedida?: string | null;
+  cantSap: number;
+  serie?: string | null;
+  idEstado: number;
+  nomEstado?: string | null;
+  idSiteOrigen?: string | null;
+  nombreSiteOrigen?: string | null;
+};
+
+export type SolicitudAprobar = {
+  solicitudes: string[];
+  accion: "APROBAR" | "OBSERVAR";
+  idValidador?: number | null;
+  observacion?: string;
+};
+
+export type SolicitudAprobarResultado = { procesadas: number; correosEnviados: number; correoMensaje?: string | null };
+
+// ---- x Campo ----
+
+export type CampoConsulta = {
+  solicitudes?: string;
+  fechaIni?: string;
+  fechaFin?: string;
+  idRespCampo?: number | null;
+  idCliente?: number;
+  idProyecto?: number;
+  idSite?: string;
+  correSite?: number;
+};
+
+export type CampoLinea = {
+  nroSolicitud: string;
+  pedidoSap?: string | null;
+  correlativo?: string | null;
+  posicion: string;
+  codPap?: string | null;
+  nombreMaterial?: string | null;
+  unidadMedida?: string | null;
+  cantSap: number;
+  serie?: string | null;
+  observacion?: string | null;
+  rutaImagen?: string | null;
+  imagenEnvio?: string | null;
+  idEstado: number;
+  nomEstado?: string | null;
+  idCliente?: number | null;
+  idProyecto?: number | null;
+  idSite?: string | null;
+  correSite?: number | null;
+  tipoTrabajo?: string | null;
+  nombreSite?: string | null;
+  nombreProyecto?: string | null;
+  nombreCliente?: string | null;
+  fechaCreacion?: string | null;
+};
+
+export type CampoItem = {
+  nroSolicitud: string;
+  posicion: string;
+  correlativo?: string | null;
+  idEstado?: number | null;
+  cantidad?: number | null;
+  observacion?: string;
+};
+
+export type CampoGrabarResultado = { procesadas: number; conDiferencia: number };

@@ -277,6 +277,7 @@ builder.Services.AddHttpClient<INoticiasGerencialesService, NoticiasGerencialesS
 });
 builder.Services.AddScoped<ILogisticaRecojoService, LogisticaRecojoService>();
 builder.Services.AddScoped<ILogisticaEquiposService, LogisticaEquiposService>();
+builder.Services.AddScoped<ILogisticaSolicitudCorreoService, LogisticaSolicitudCorreoService>();
 builder.Services.AddScoped<ILogisticaReembolsoService, LogisticaReembolsoService>();
 builder.Services.AddScoped<ILogisticaSuministroService, LogisticaSuministroService>();
 builder.Services.AddScoped<ICompensacionService, CompensacionService>();

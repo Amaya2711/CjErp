@@ -5,7 +5,7 @@ import SeriesTab from "./equipos/ingreso/SeriesTab";
 import { recepcionarEquipos, validarEquipos } from "../../../api/logisticaEquiposService";
 
 /** Página 1 de logística de equipos: ingreso (pedido, recepción, series y validación). Equivale a FrmLogistic_v1. */
-const ETAPAS: EtapaTab[] = [
+export const ETAPAS: EtapaTab[] = [
   { key: "pedido", label: "Pedido", content: <PedidoTab /> },
   {
     key: "recepcionar",

@@ -34,6 +34,7 @@ import { useConstantesPorCampo } from "../../../hooks/useConstantesPorCampo";
 import { listarSolicitanteOptions } from "../../../api/solicitanteService";
 import { listarGestorOptions, listarGestorValidadorOptions } from "../../../api/gestorService";
 import { listarEmpleadosCta } from "../../../api/empleadoService";
+import { getFiltrosOperativos } from "../../../api/filtroOperativoService";
 import { getAuthUser, hasFullPageActionAccess } from "../../../utils/authStorage";
 import {
   seguridadPermisosAccionesService,
@@ -780,6 +781,8 @@ export default function OcV2Page() {
   } | null>(null);
   const [estadosOcGastosCatalogo, setEstadosOcGastosCatalogo] = useState<string[]>([]);
   const [solicitantesOcGastosCatalogo, setSolicitantesOcGastosCatalogo] = useState<Array<{ value: string; label: string }>>([]);
+  // Sites del catálogo operativo (consulta liviana): los filtros de OC/Gastos no deben esperar al historial completo de OC.
+  const [sitesCatalogoOcGastos, setSitesCatalogoOcGastos] = useState<Array<{ idSite: string; nombreSite: string }>>([]);
   const [clientesOcGastosCatalogo, setClientesOcGastosCatalogo] = useState<Array<{ value: string; label: string }>>([]);
   const reportePlanillaIdOcUnicos = useMemo(
     () => new Set(reportePlanillaRows.map(getReporteRowIdOc).filter(Boolean)).size,
@@ -1582,12 +1585,27 @@ export default function OcV2Page() {
     void loadCabeceras();
   }, []);
 
+  const catalogosOcGastosPedidosRef = useRef(false);
   useEffect(() => {
-    // Catálogos solo del reporte OC/Gastos: se piden cuando la bandeja ya respondió.
-    if (!cabecerasListas) return;
+    // Catálogos de los filtros de OC/Gastos: se piden al entrar a Seguimiento de pagos, sin esperar a las
+    // consultas pesadas de OC (bandeja e historial completo), que con la BD lenta dejaban los filtros vacíos.
+    if (vistaOc !== "reporte" || catalogosOcGastosPedidosRef.current) return;
+    catalogosOcGastosPedidosRef.current = true;
     void loadClientesOcGastos();
     void loadProyectosOcGastos();
-  }, [cabecerasListas]);
+    void getFiltrosOperativos()
+      .then((items) => {
+        const sites = new Map<string, string>();
+        items.forEach((item) => {
+          const idSite = String(item.idSite ?? "").trim();
+          if (idSite && !sites.has(idSite)) sites.set(idSite, String(item.nombreSite ?? "").trim() || idSite);
+        });
+        setSitesCatalogoOcGastos(Array.from(sites, ([idSite, nombreSite]) => ({ idSite, nombreSite })));
+      })
+      .catch(() => {
+        // Los sites se completan con los de las cabeceras cuando terminen de cargar.
+      });
+  }, [vistaOc]);
 
   useEffect(() => {
     // El historial completo solo se necesita en Seguimiento de pagos.
@@ -1945,9 +1963,13 @@ export default function OcV2Page() {
 
   const solicitanteReporteOptions = useMemo(
     () => reporteSubtab === "oc-gastos"
-      ? (solicitantesOcGastosCatalogo.length ? solicitantesOcGastosCatalogo : solicitantesOcGastosGenerales)
+      ? (solicitantesOcGastosCatalogo.length
+        ? solicitantesOcGastosCatalogo
+        : solicitantesOcGastosGenerales.length
+          ? solicitantesOcGastosGenerales
+          : solicitanteOptions.map((item) => ({ value: item.value, label: item.label })))
       : reporteOptions.solicitantes.map((nombre) => ({ value: nombre, label: nombre })),
-    [reporteOptions.solicitantes, reporteSubtab, solicitantesOcGastosCatalogo, solicitantesOcGastosGenerales]
+    [reporteOptions.solicitantes, reporteSubtab, solicitantesOcGastosCatalogo, solicitantesOcGastosGenerales, solicitanteOptions]
   );
 
   const responsablesOcGastosOptions = useMemo(() => {
@@ -1960,11 +1982,19 @@ export default function OcV2Page() {
       }
     });
 
+    // Mientras llegan las cabeceras (consulta pesada) se usa el catálogo de empleados ya cargado.
+    responsableOptions.forEach((item) => {
+      const idResponsable = Number(item.idEmpleado) || 0;
+      if (idResponsable > 0 && !responsables.has(idResponsable)) {
+        responsables.set(idResponsable, item.nombreEmpleado?.trim() || `Responsable ${idResponsable}`);
+      }
+    });
+
     return Array.from(responsables, ([id, nombre]) => ({
       value: String(id),
       label: `${nombre} (${id})`,
     })).sort((left, right) => left.label.localeCompare(right.label, "es"));
-  }, [cabeceras]);
+  }, [cabeceras, responsableOptions]);
 
   const proyectosOcGastosOptions = useMemo(() => {
     if (proyectosOcGastosCatalogo.length > 0) {
@@ -2012,9 +2042,12 @@ export default function OcV2Page() {
       const idSite = String(item.idSite ?? "").trim();
       if (idSite) sites.set(idSite, item.nombreSite?.trim() || idSite);
     });
+    sitesCatalogoOcGastos.forEach(({ idSite, nombreSite }) => {
+      if (!sites.has(idSite)) sites.set(idSite, nombreSite);
+    });
     return Array.from(sites, ([idSite, nombreSite]) => ({ idSite, nombreSite }))
       .sort((left, right) => left.nombreSite.localeCompare(right.nombreSite));
-  }, [cabeceras]);
+  }, [cabeceras, sitesCatalogoOcGastos]);
 
   const reporteRowsFiltradas = useMemo(() => {
     const idOcFiltro = reporteFiltros.idOc.trim();

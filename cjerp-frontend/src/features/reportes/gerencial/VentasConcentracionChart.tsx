@@ -39,6 +39,19 @@ function TooltipConcentracion({ active, payload }: TooltipProps) {
 }
 
 // Participación de cada cliente en la venta (importe elegido en la cabecera) del año elegido. Los 3 primeros se destacan.
+// Texto de la barra: dentro (blanco, pegado al extremo) si cabe; si es muy corta, justo a su derecha.
+function etiquetaEnBarra(props: unknown, texto: (v: number) => string) {
+  const p = props as { x?: number; y?: number; width?: number; height?: number; value?: number };
+  if (p.x == null || p.y == null || p.width == null || p.height == null || p.value == null) return null;
+  const t = texto(Number(p.value));
+  const cabe = p.width >= t.length * 6.6 + 12;
+  return (
+    <text x={cabe ? p.x + p.width - 6 : p.x + p.width + 6} y={p.y + p.height / 2} dy={4} fontSize={12} fontWeight={cabe ? 600 : 400} fill={cabe ? "#fff" : "#0F172A"} textAnchor={cabe ? "end" : "start"}>
+      {t}
+    </text>
+  );
+}
+
 export default function VentasConcentracionChart({ anio, registros, importe, seleccionado, onSeleccionar }: Props) {
   const barras = useMemo<Barra[]>(() => construirConcentracion(anio, registros, importe), [anio, registros, importe]);
 
@@ -84,13 +97,7 @@ export default function VentasConcentracionChart({ anio, registros, importe, sel
               {barras.map((b, i) => (
                 <Cell key={b.cliente} fill={seleccionado ? (b.cliente === seleccionado ? COLOR : COLOR_RESTO) : i < TOP_DESTACADOS ? COLOR : COLOR_RESTO} />
               ))}
-              <LabelList
-                dataKey="participacion"
-                position="right"
-                fontSize={12}
-                fill="#0F172A"
-                formatter={(v: unknown) => `${Number(v).toFixed(1)}%`}
-              />
+              <LabelList dataKey="participacion" content={(p) => etiquetaEnBarra(p, (v) => `${v.toFixed(1)}%`)} />
             </Bar>
           </BarChart>
         </ResponsiveContainer>
