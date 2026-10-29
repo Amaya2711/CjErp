@@ -13,12 +13,15 @@ export default function SelectorMultiple({
   onChange,
   singular,
   plural,
+  textoTodos = "Todos",
 }: {
   opciones: string[];
   seleccion: string[];
   onChange: (valor: string[]) => void;
   singular: string;
   plural: string;
+  /** Texto cuando no hay nada marcado (equivale a todas las opciones). */
+  textoTodos?: string;
 }) {
   const [abierto, setAbierto] = useState(false);
   const [busqueda, setBusqueda] = useState("");
@@ -42,7 +45,7 @@ export default function SelectorMultiple({
     onChange(seleccion.includes(opcion) ? seleccion.filter((c) => c !== opcion) : [...seleccion, opcion]);
 
   const resumen =
-    seleccion.length === 0 ? "Todos" : seleccion.length === 1 ? seleccion[0] : `${seleccion.length} ${plural} seleccionados`;
+    seleccion.length === 0 ? textoTodos : seleccion.length === 1 ? seleccion[0] : `${seleccion.length} ${plural} seleccionados`;
 
   return (
     <div ref={contenedor} style={{ position: "relative" }}>

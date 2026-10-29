@@ -22,10 +22,13 @@ import {
 import SelectorMultiple from "./VentasSunatSelectorMultiple";
 import VentasSunatResumen from "./VentasSunatResumen";
 import VentasPorMesChart from "./VentasPorMesChart";
-import { clienteDeVenta, etiquetaImporte, importeVenta } from "./ventasImporte";
+import { afectoDe, clienteDeVenta, etiquetaImporte, igvDe, importeVenta, inafectoDe } from "./ventasImporte";
 import VentasConcentracionChart from "./VentasConcentracionChart";
 import CostosPorMoneda from "./CostosPorMoneda";
 import CostosPorClienteChart from "./CostosPorClienteChart";
+import RentabilidadClienteChart from "./RentabilidadClienteChart";
+import { exportarPdf, type PdfTabla } from "./exportarVentasGastosPdf";
+import RentabilidadMensualChart, { type RentabilidadMes } from "./RentabilidadMensualChart";
 import { getConstantesPorCampo } from "../../../api/constantesService";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 
@@ -140,6 +143,8 @@ const claveNombre = (v: string) =>
     .replace(/\s+/g, "");
 // Nro de documento comparable (RUC o DNI): sin espacios ni guiones. Es la llave que relaciona ventas y costos de un cliente.
 const normDoc = (v: string | null | undefined) => String(v ?? "").replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+// Clave de cliente para unir ventas y costos: RUC/DNI y, si no hay, IdCliente o nombre.
+const claveClienteRentabilidad = (doc: string, idCliente: number, nombre: string) => (doc ? `d:${doc}` : idCliente > 0 ? `i:${idCliente}` : `n:${nombre}`);
 const empresaDe = (r: VentasSunatRegistroDto) => (r.empresa ?? "").trim() || SIN_EMPRESA;
 
 function pick(row: RawRow, keys: string[]): string {
@@ -348,24 +353,43 @@ export default function VentasGastosPage() {
   const [moneda, setMoneda] = useState(""); // "" = todas; moneda del comprobante (los importes siempre están en soles)
   const [mesSel, setMesSel] = useState<string | null>(null);
   const [clienteSel, setClienteSel] = useState<string | null>(null);
-  const [tab, setTab] = useState<"comparativo" | "ventas" | "costos" | "rentabilidad">("comparativo");
+  const [tab, setTab] = useState<"comparativo" | "ventas" | "costos" | "rentabilidad">("rentabilidad");
+  // Filtro de rentabilidad por cliente: ambas (por defecto), solo positiva (utilidad > 0) o solo negativa (utilidad < 0).
+  const [rentabilidadSel, setRentabilidadSel] = useState<string[]>([]); // vacío o ambas marcadas = ambos
+  const contenidoRef = useRef<HTMLDivElement | null>(null); // contenido de la pestaña activa: de aquí se capturan los gráficos para el PDF
+  const [exportandoPdf, setExportandoPdf] = useState(false);
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(true); // expande o contrae la cabecera de filtros para ganar espacio
+  const [graficosExpandidos, setGraficosExpandidos] = useState(false); // al ampliar, los dos gráficos de Rentabilidad pasan a una sola columna: uno sobre otro, cada uno a todo el ancho
+  const [clienteRentSel, setClienteRentSel] = useState<string | null>(null); // clave del cliente elegido en el gráfico de rentabilidad
   const [clienteCostoSel, setClienteCostoSel] = useState<string | null>(null); // clave del cliente elegido en el gráfico de costos
   const [clientes, setClientes] = useState<VentasSunatClienteDto[]>(cacheClientes ?? []);
   const [cargandoClientes, setCargandoClientes] = useState(false);
 
-  // Clientes (NroDocumento + NombreCliente) para la pestaña Costos; se piden la primera vez que se abre.
-  const abrirTabConClientes = useCallback((destino: "costos" | "rentabilidad") => {
-    setTab(destino);
-    if (cacheClientes || cargandoClientes) return;
+  // Clientes (NroDocumento + NombreCliente) para Costos y Rentabilidad; se piden una sola vez al entrar a la pantalla.
+  const clientesPedidos = useRef(false);
+  const cargarClientes = useCallback(() => {
+    if (cacheClientes || clientesPedidos.current) return;
+    clientesPedidos.current = true;
     setCargandoClientes(true);
     listarClientesVentasSunat()
       .then((lista) => {
         cacheClientes = lista;
         setClientes(lista);
       })
-      .catch((err) => setError(getHttpErrorMessage(err, "No se pudo cargar el listado de clientes.")))
+      .catch((err) => {
+        clientesPedidos.current = false;
+        setError(getHttpErrorMessage(err, "No se pudo cargar el listado de clientes."));
+      })
       .finally(() => setCargandoClientes(false));
-  }, [cargandoClientes]);
+  }, []);
+
+  const abrirTabConClientes = useCallback(
+    (destino: "costos" | "rentabilidad") => {
+      setTab(destino);
+      cargarClientes();
+    },
+    [cargarClientes],
+  );
 
   // Ventas del año: una sola llamada (sp_VentasSunat_ListarAnio) con caché; si el SP aún no existe en la BD,
   // se consulta periodo por periodo con pocas peticiones simultáneas (el servidor limita las peticiones).
@@ -452,12 +476,13 @@ export default function VentasGastosPage() {
         setAnio(inicial);
         void cargarVentas(inicial, lista, false);
         void cargarGastos(inicial, tcInicial, false);
+        cargarClientes();
       })
       .catch((err) => activo && setError(getHttpErrorMessage(err, "No se pudo listar los periodos de ventas.")));
     return () => {
       activo = false;
     };
-  }, [anioActual, cargarVentas, cargarGastos, tcInicial]);
+  }, [anioActual, cargarVentas, cargarGastos, cargarClientes, tcInicial]);
 
   // Catálogo de empresas (Constante EMPRESA_cj; nombre en ValorIni). Se descartan las marcadas inactivas (ValorFin = 0).
   useEffect(() => {
@@ -578,7 +603,7 @@ export default function VentasGastosPage() {
     const porId = new Map(clientes.map((c) => [c.idCliente, c]));
     const mapa = new Map<string, FilaRentabilidad>();
     const fila = (doc: string, idCliente: number, nombre: string) => {
-      const clave = doc ? `d:${doc}` : idCliente > 0 ? `i:${idCliente}` : `n:${nombre}`;
+      const clave = claveClienteRentabilidad(doc, idCliente, nombre);
       let f = mapa.get(clave);
       if (!f) {
         f = { clave, nroDocumento: doc, nombreCliente: nombre, ventas: 0, costos: 0, utilidad: 0, margen: null };
@@ -602,11 +627,55 @@ export default function VentasGastosPage() {
       .sort((a, b) => b.ventas - a.ventas || b.costos - a.costos);
   }, [ventasFiltradas, gastosCosto, clientes, docPorCliente, anio, importe]);
 
+  // Clientes que cumplen el filtro de rentabilidad (ambas / positiva / negativa) de la cabecera.
+  const filasRentabilidadVista = useMemo(
+    () => {
+      const positiva = rentabilidadSel.includes("Positiva");
+      const negativa = rentabilidadSel.includes("Negativa");
+      if (positiva === negativa) return filasRentabilidad; // ninguna o ambas marcadas
+      return filasRentabilidad.filter((f) => (positiva ? f.utilidad > 0 : f.utilidad < 0));
+    },
+    [filasRentabilidad, rentabilidadSel],
+  );
+
+  // Evolución mensual (ventas, costos) con la misma clave de cliente de la grilla; si hay un cliente elegido, solo ese.
+  const datosMensualesRent = useMemo<RentabilidadMes[]>(() => {
+    const visibles = new Set(filasRentabilidadVista.map((f) => f.clave));
+    const porId = new Map(clientes.map((c) => [c.idCliente, c]));
+    const mapa = new Map<string, RentabilidadMes>();
+    const mes = (periodo: string) => {
+      let m = mapa.get(periodo);
+      if (!m) {
+        m = { periodo, ventas: 0, costos: 0 };
+        mapa.set(periodo, m);
+      }
+      return m;
+    };
+    for (const r of ventasFiltradas) {
+      const periodo = r.periodo ?? "";
+      if (!periodo.startsWith(String(anio))) continue;
+      const doc = normDoc(r.nroDocIdentidad) || (r.idCliente != null ? docPorCliente.get(r.idCliente) ?? "" : "");
+      const claveVenta = claveClienteRentabilidad(doc, r.idCliente ?? 0, clienteDeVenta(r));
+      if (!visibles.has(claveVenta) || (clienteRentSel && claveVenta !== clienteRentSel)) continue;
+      mes(periodo).ventas += importeVenta(r, importe);
+    }
+    for (const g of gastosCosto) {
+      if (!g.periodo.startsWith(String(anio))) continue;
+      const maestro = g.idCliente > 0 ? porId.get(g.idCliente) : undefined;
+      const doc = g.idCliente > 0 ? docPorCliente.get(g.idCliente) ?? "" : "";
+      const nombre = (maestro?.nombreCliente ?? "").trim() || g.cliente;
+      const claveGastoCliente = claveClienteRentabilidad(doc, g.idCliente, nombre);
+      if (!visibles.has(claveGastoCliente) || (clienteRentSel && claveGastoCliente !== clienteRentSel)) continue;
+      mes(g.periodo).costos += g.montoPen;
+    }
+    return Array.from(mapa.values());
+  }, [ventasFiltradas, gastosCosto, clientes, docPorCliente, anio, importe, clienteRentSel, filasRentabilidadVista]);
+
   const totalesRentabilidad = useMemo(() => {
-    const ventasT = filasRentabilidad.reduce((s, f) => s + f.ventas, 0);
-    const costosT = filasRentabilidad.reduce((s, f) => s + f.costos, 0);
+    const ventasT = filasRentabilidadVista.reduce((s, f) => s + f.ventas, 0);
+    const costosT = filasRentabilidadVista.reduce((s, f) => s + f.costos, 0);
     return { ventas: ventasT, costos: costosT, utilidad: ventasT - costosT, margen: ventasT > 0 ? ((ventasT - costosT) / ventasT) * 100 : null };
-  }, [filasRentabilidad]);
+  }, [filasRentabilidadVista]);
 
   // Misma clave de cliente que usa filasCostos (IdCliente, o el nombre cuando el gasto no trae IdCliente).
   const claveGasto = useCallback(
@@ -681,11 +750,145 @@ export default function VentasGastosPage() {
     return { ventas: v, gastos: g, resultado: v - g, ratio: v > 0 ? (g / v) * 100 : null };
   }, [filas]);
 
+  // Exporta a PDF la pestaña activa con los filtros aplicados: KPIs, gráficos visibles y tablas con los mismos datos.
+  const exportarPestanaPdf = async () => {
+    setExportandoPdf(true);
+    try {
+      const soles = (v: number) => `S/ ${fmt(v)}`;
+      const margenTxt = (m: number | null) => (m == null ? "-" : `${m.toFixed(1)}%`);
+      const filtros: string[] = [
+        `Año: ${anio}`,
+        `Empresa: ${empresasSel.length ? empresasSel.join(", ") : "Todas"}`,
+        `Moneda del comprobante: ${moneda || "Todas"}`,
+        `Importe de ventas: ${etiqueta}`,
+      ];
+      const nombreEn = (lista: { clave: string; nombreCliente: string }[], clave: string | null) => lista.find((f) => f.clave === clave)?.nombreCliente ?? clave ?? "";
+      const tablas: PdfTabla[] = [];
+      let titulo = "Ventas vs Gastos";
+      let kpis: { etiqueta: string; valor: string }[] = [];
+      const notas: string[] = [];
+
+      if (tab === "rentabilidad") {
+        titulo = `Rentabilidad por cliente ${anio}`;
+        filtros.push(`Rentabilidad: ${rentabilidadSel.length === 1 ? rentabilidadSel[0] : "Ambos"}`);
+        filtros.push(`Tipos de cambio a S/: ${Object.keys(TC_DEFECTO).map((k) => `${k} ${tcTexto[k]}`).join(", ")}`);
+        if (clienteRentSel) filtros.push(`Cliente: ${nombreEn(filasRentabilidad, clienteRentSel)}`);
+        kpis = [
+          { etiqueta: `Ventas ${anio}`, valor: soles(totalesRentabilidad.ventas) },
+          { etiqueta: `Costos ${anio}`, valor: soles(totalesRentabilidad.costos) },
+          { etiqueta: "Utilidad", valor: soles(totalesRentabilidad.utilidad) },
+          { etiqueta: "Margen", valor: margenTxt(totalesRentabilidad.margen) },
+        ];
+        notas.push("Verde: utilidad. Rojo: pérdida. Utilidad = ventas - costos (gastos pagados, en soles).");
+        const filas = clienteRentSel ? filasRentabilidadVista.filter((f) => f.clave === clienteRentSel) : filasRentabilidadVista;
+        const v = filas.reduce((a, f) => a + f.ventas, 0);
+        const c = filas.reduce((a, f) => a + f.costos, 0);
+        tablas.push({
+          titulo: `Rentabilidad por cliente ${anio}`,
+          columnas: ["Nro documento (RUC/DNI)", "Nombre cliente", "Ventas (S/)", "Costos (S/)", "Utilidad (S/)", "Margen %"],
+          filas: filas.map((f) => [f.nroDocumento, f.nombreCliente, fmt(f.ventas), fmt(f.costos), fmt(f.utilidad), margenTxt(f.margen)]),
+          totales: ["", "Total", fmt(v), fmt(c), fmt(v - c), margenTxt(v > 0 ? ((v - c) / v) * 100 : null)],
+          numericas: [2, 3, 4, 5],
+        });
+      } else if (tab === "ventas") {
+        titulo = `Ventas ${anio}`;
+        if (mesSel) filtros.push(`Mes: ${nombreMes(mesSel)}`);
+        if (clienteSel) filtros.push(`Cliente: ${clienteSel}`);
+        kpis = [
+          { etiqueta: `Total ventas ${anio}`, valor: soles(kpisVentas.total) },
+          { etiqueta: `Promedio mensual (${kpisVentas.mesesCerrados} meses cerrados)`, valor: soles(kpisVentas.promedio) },
+          { etiqueta: "Proyección anual", valor: soles(kpisVentas.proyeccion) },
+        ];
+        type Suma = { nombre: string; afecto: number; inafecto: number; igv: number; total: number };
+        const agrupar = (clave: (r: VentasSunatRegistroDto) => string, nombre: (c: string) => string) => {
+          const mapa = new Map<string, Suma>();
+          for (const r of ventasDetalle) {
+            const k = clave(r);
+            const f = mapa.get(k) ?? { nombre: nombre(k), afecto: 0, inafecto: 0, igv: 0, total: 0 };
+            f.afecto += afectoDe(r);
+            f.inafecto += inafectoDe(r);
+            f.igv += igvDe(r);
+            f.total += numero(r.totalCp);
+            mapa.set(k, f);
+          }
+          return Array.from(mapa.entries());
+        };
+        const tablaSumas = (tituloTabla: string, primera: string, entradas: [string, Suma][]): PdfTabla => {
+          const totales = entradas.reduce((a, [, f]) => ({ afecto: a.afecto + f.afecto, inafecto: a.inafecto + f.inafecto, igv: a.igv + f.igv, total: a.total + f.total }), { afecto: 0, inafecto: 0, igv: 0, total: 0 });
+          return {
+            titulo: tituloTabla,
+            columnas: [primera, "Suma de Afecto", "Suma de Inafecto", "Suma de IGV e IPM", "Suma de Total"],
+            filas: entradas.map(([, f]) => [f.nombre, fmt(f.afecto), fmt(f.inafecto), fmt(f.igv), fmt(f.total)]),
+            totales: ["Total", fmt(totales.afecto), fmt(totales.inafecto), fmt(totales.igv), fmt(totales.total)],
+            numericas: [1, 2, 3, 4],
+          };
+        };
+        tablas.push(
+          tablaSumas("Ventas por periodo", "PERIODO", agrupar((r) => r.periodo ?? "", (c) => (c.length === 6 ? nombreMes(c) : c)).filter(([k]) => k).sort((a, b) => a[0].localeCompare(b[0]))),
+          tablaSumas("Ventas por cliente", "CLIENTES", agrupar(clienteDeVenta, (c) => c).sort((a, b) => b[1].total - a[1].total)),
+        );
+      } else if (tab === "costos") {
+        titulo = `Costos ${anio}`;
+        filtros.push(`Costos según: ${incluirIgv ? "total a pagar (con IGV)" : "subtotal (sin IGV)"}`);
+        filtros.push(`Tipos de cambio a S/: ${Object.keys(TC_DEFECTO).map((k) => `${k} ${tcTexto[k]}`).join(", ")}`);
+        if (clienteCostoSel) filtros.push(`Cliente (gasto por moneda): ${nombreEn(filasCostos, clienteCostoSel)}`);
+        kpis = [
+          { etiqueta: `Total costos ${anio} (S/)`, valor: soles(kpisCostos.total) },
+          { etiqueta: `Promedio mensual (${kpisCostos.mesesCerrados} meses cerrados)`, valor: soles(kpisCostos.promedio) },
+          { etiqueta: "Proyección anual", valor: soles(kpisCostos.proyeccion) },
+        ];
+        notas.push("Gasto por RUC / cliente: azul = cliente con venta, naranja = sin venta asignada, gris = otros clientes agrupados.");
+        const tot = (campo: "PEN" | "USD" | "EUR" | "DOP" | "COP" | "costo" | "cantidad") => filasCostos.reduce((a, f) => a + f[campo], 0);
+        tablas.push({
+          titulo: `Costos por cliente ${anio}`,
+          columnas: ["Nro documento (RUC/DNI)", "Nombre cliente", "N° gastos", "Soles (S/)", "Dólares (US$)", "Euros", "Peso dominicano", "Peso colombiano", "Total en soles (S/)", "Participación %"],
+          filas: filasCostos.map((f) => [f.nroDocumento, f.nombreCliente, String(f.cantidad), fmt(f.PEN), fmt(f.USD), fmt(f.EUR), fmt(f.DOP), fmt(f.COP), fmt(f.costo), `${f.participacion.toFixed(1)}%`]),
+          totales: ["", "Total", String(tot("cantidad")), fmt(tot("PEN")), fmt(tot("USD")), fmt(tot("EUR")), fmt(tot("DOP")), fmt(tot("COP")), fmt(tot("costo")), ""],
+          numericas: [2, 3, 4, 5, 6, 7, 8, 9],
+        });
+      } else {
+        return;
+      }
+
+      await exportarPdf({
+        archivo: `ventas-vs-gastos-${tab}-${anio}.pdf`,
+        titulo,
+        filtros,
+        kpis,
+        contenedorGraficos: contenidoRef.current,
+        notas,
+        tablas,
+      });
+    } catch (err) {
+      setError(getHttpErrorMessage(err, "No se pudo generar el PDF."));
+    } finally {
+      setExportandoPdf(false);
+    }
+  };
+
   const hayDatos = ventas.length > 0 || gastos.length > 0;
 
   return (
     <AppPage title="Ventas vs Gastos">
       <AppCard>
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: filtrosAbiertos ? 12 : 0 }}>
+          <button
+            type="button"
+            style={{ ...styles.chip, cursor: "pointer", background: "#fff", fontSize: 12 }}
+            aria-expanded={filtrosAbiertos}
+            onClick={() => setFiltrosAbiertos((v) => !v)}
+          >
+            {filtrosAbiertos ? "▲ Ocultar filtros" : "▼ Mostrar filtros"}
+          </button>
+          {filtrosAbiertos ? null : (
+            <span style={{ fontSize: 12, color: "#475569" }}>
+              Año {anio} · Empresa: {empresasSel.length ? empresasSel.join(", ") : "Todas"} · Moneda: {moneda || "Todas"} · Importe: {incluirIgv ? "Con IGV" : "Inafecto"} · Rentabilidad:{" "}
+              {rentabilidadSel.length === 1 ? rentabilidadSel[0] : "Ambos"}
+            </span>
+          )}
+        </div>
+        {filtrosAbiertos ? (
+          <>
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={styles.campo}>
             Año
@@ -695,6 +898,7 @@ export default function VentasGastosPage() {
                 setGastos([]);
                 void cargarGastos(a, tcTexto, false);
                 setClienteCostoSel(null);
+                setClienteRentSel(null);
                 setMesSel(null);
                 setClienteSel(null);
                 void cargarVentas(a, periodos, false);
@@ -739,6 +943,20 @@ export default function VentasGastosPage() {
               ))}
             </div>
           </div>
+          <div style={styles.campo}>
+            Rentabilidad
+            <SelectorMultiple
+              opciones={["Positiva", "Negativa"]}
+              seleccion={rentabilidadSel}
+              onChange={(v) => {
+                setRentabilidadSel(v);
+                setClienteRentSel(null);
+              }}
+              singular="rentabilidad"
+              plural="rentabilidades"
+              textoTodos="Ambos"
+            />
+          </div>
           {Object.keys(TC_DEFECTO).map((k) => (
             <label key={k} style={styles.campo}>
               TC {k} → S/
@@ -758,14 +976,17 @@ export default function VentasGastosPage() {
           Ventas: Registro de Ventas SIRE, importe {etiqueta}, ya en soles. Gastos: recibos pagados (estado 4) por fecha de depósito, subtotal sin IGV,
           convertido a soles con los tipos de cambio de esta pantalla solo para la comparación.
         </div>
+          </>
+        ) : null}
       </AppCard>
 
       {error ? <AppStatusMessage tone="error">{error}</AppStatusMessage> : null}
       {aviso ? <AppStatusMessage tone="info">{aviso}</AppStatusMessage> : null}
 
       <div style={tabsStyle}>
-        <button type="button" style={tab === "comparativo" ? tabActiveStyle : tabStyle} onClick={() => setTab("comparativo")}>
-          Ventas vs Gastos
+        {/* Pestaña "Ventas vs Gastos" oculta por ahora: su contenido y cálculos se conservan (tab "comparativo"). */}
+        <button type="button" style={tab === "rentabilidad" ? tabActiveStyle : tabStyle} onClick={() => abrirTabConClientes("rentabilidad")}>
+          Rentabilidad
         </button>
         <button type="button" style={tab === "ventas" ? tabActiveStyle : tabStyle} onClick={() => setTab("ventas")}>
           Ventas
@@ -773,11 +994,17 @@ export default function VentasGastosPage() {
         <button type="button" style={tab === "costos" ? tabActiveStyle : tabStyle} onClick={() => abrirTabConClientes("costos")}>
           Costos
         </button>
-        <button type="button" style={tab === "rentabilidad" ? tabActiveStyle : tabStyle} onClick={() => abrirTabConClientes("rentabilidad")}>
-          Rentabilidad
+        <button
+          type="button"
+          style={{ ...styles.boton, marginLeft: "auto", alignSelf: "center", opacity: exportandoPdf ? 0.6 : 1 }}
+          disabled={exportandoPdf || tab === "comparativo"}
+          onClick={() => void exportarPestanaPdf()}
+        >
+          {exportandoPdf ? "Generando PDF..." : "Exportar PDF"}
         </button>
       </div>
 
+      <div ref={contenidoRef}>
       {tab === "ventas" ? (
         <div style={{ display: "grid", gap: 16 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
@@ -849,6 +1076,36 @@ export default function VentasGastosPage() {
               <div style={styles.kpiValor}>{totalesRentabilidad.margen == null ? "-" : `${totalesRentabilidad.margen.toFixed(1)}%`}</div>
             </div>
           </div>
+          {clienteRentSel ? (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", fontSize: 12, color: "#334155" }}>
+              <strong>Filtrado por:</strong>
+              <span style={styles.chip}>Cliente: {filasRentabilidad.find((f) => f.clave === clienteRentSel)?.nombreCliente ?? clienteRentSel}</span>
+              <button type="button" style={{ ...styles.chip, cursor: "pointer", background: "#fff" }} onClick={() => setClienteRentSel(null)}>
+                Quitar filtro
+              </button>
+            </div>
+          ) : null}
+          <div style={{ display: "grid", gridTemplateColumns: graficosExpandidos ? "1fr" : "repeat(auto-fit, minmax(480px, 1fr))", gap: 16, alignItems: "start" }}>
+            <div>
+              <RentabilidadMensualChart
+                anio={anio}
+                datos={datosMensualesRent}
+                cliente={clienteRentSel ? filasRentabilidad.find((f) => f.clave === clienteRentSel)?.nombreCliente : null}
+                expandido={graficosExpandidos}
+                onAlternarExpandir={() => setGraficosExpandidos((v) => !v)}
+              />
+            </div>
+            <div>
+              <RentabilidadClienteChart
+                anio={anio}
+                filas={filasRentabilidadVista}
+                seleccionado={clienteRentSel}
+                onSeleccionar={setClienteRentSel}
+                expandido={graficosExpandidos}
+                onAlternarExpandir={() => setGraficosExpandidos((v) => !v)}
+              />
+            </div>
+          </div>
           <div style={styles.tarjeta}>
             <h3 style={styles.titulo}>Rentabilidad por cliente {anio}</h3>
             <div style={{ fontSize: 12, color: "#64748B", marginBottom: 8 }}>
@@ -856,7 +1113,7 @@ export default function VentasGastosPage() {
               Margen = utilidad / ventas.
             </div>
             <DataGridPro<FilaRentabilidad>
-              dataSource={filasRentabilidad}
+              dataSource={clienteRentSel ? filasRentabilidadVista.filter((f) => f.clave === clienteRentSel) : filasRentabilidadVista}
               columns={columnasRentabilidad}
               keyExpr="clave"
               height="65vh"
@@ -930,6 +1187,8 @@ export default function VentasGastosPage() {
           </div>
         )
       ) : null}
+
+      </div>
 
       {tab === "comparativo" ? (
       <div style={{ display: "grid", gap: 16 }}>
