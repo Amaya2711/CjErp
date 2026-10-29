@@ -71,7 +71,11 @@ export default function MantenimientoResponsablePage() {
   const [error, setError] = useState<string | null>(null);
   const { constantesPorCampo, loading: cargandoConstantes, error: errorConstantes } = useConstantesPorCampo(["tipo_cta", "banco_emp"]);
   const tiposCuenta = constantesPorCampo.tipo_cta ?? [];
-  const bancos = constantesPorCampo.banco_emp ?? [];
+  // En banco_emp el id numérico (IdBanco INT del SP) es el Correlativo (codigo); "valor" trae el nombre del banco.
+  const bancos = useMemo(
+    () => (constantesPorCampo.banco_emp ?? []).map((item) => ({ ...item, value: String(item.codigo ?? "") })),
+    [constantesPorCampo.banco_emp],
+  );
 
   const esEdicion = idEmpleado !== null && original !== null;
   const nombreTipoCuenta = useMemo(

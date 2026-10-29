@@ -168,7 +168,7 @@ public sealed class EmpleadoResponsableService : IEmpleadoResponsableService
         }
     }
 
-    // Un mismo responsable (IdEmpleado, o el de igual NroDocumento al insertar; IdCargo 10) no puede tener
+    // Un mismo responsable (IdEmpleado, o el de igual NroDocumento al insertar; IdCargo 10, IdEstado 1 activo) no puede tener
     // dos cuentas con el mismo nro. de cuenta, la misma interbancaria, ni el mismo banco + tipo de cuenta.
     // En edición se excluye la cuenta que se está modificando (IdEmpleado + banco + tipo + cuenta actuales).
     private async Task ValidarCuentasUnicasAsync(
@@ -201,6 +201,7 @@ public sealed class EmpleadoResponsableService : IEmpleadoResponsableService
                 FROM dbo.CuentaEmpleado CE
                 INNER JOIN dbo.Empleado E ON E.IdEmpleado = CE.IdEmpleado AND E.IdCargo = CE.IdCargo
                 WHERE CE.IdCargo = 10
+                  AND E.IdEstado = 1
                   AND (CE.IdEmpleado = @IdEmpleado
                        OR (@NroDocumento <> '' AND LTRIM(RTRIM(ISNULL(E.NroDocumento, ''))) = @NroDocumento))
                   AND NOT (@EsEdicion = 1
