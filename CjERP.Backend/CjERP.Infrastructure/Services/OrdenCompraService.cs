@@ -48,7 +48,8 @@ public class OrdenCompraService : IOrdenCompraService
             cab.IdComprobante,
             cab.IdFormaPago,
             ISNULL(cab.IdWeb, 0) AS IdWeb,
-            cab.Subtotal AS SubtotalOc,
+            -- Saldo por posición: subtotal de la fila (cantidad x precio), no el de toda la OC.
+            CAST(det.Cantidad AS DECIMAL(18,4)) * CAST(det.PrecioUnitario AS DECIMAL(18,4)) AS SubtotalOc,
             site.NombreSite AS SiteNombre
         FROM dbo.CabOrdenCompra cab
         INNER JOIN dbo.DetOrdenCompra det ON det.IdOc = cab.IdOc
@@ -74,9 +75,7 @@ public class OrdenCompraService : IOrdenCompraService
         FROM dbo.Planilla planilla
         WHERE planilla.IdOc = @IdOcTexto
           AND TRY_CONVERT(INT, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), planilla.IdOc))), '')) = @IdOc
-          AND planilla.IdProyecto = @IdProyecto
-          AND planilla.IdSite = @IdSite
-          AND ISNULL(planilla.CorreSite, 0) = ISNULL(@CorreSite, 0)
+          AND planilla.Fila = @Fila
           AND ISNULL(planilla.Estado, 0) <> 3;
         """;
     private const string AsociarPagoNuevoOcSql = """
@@ -1622,7 +1621,7 @@ public class OrdenCompraService : IOrdenCompraService
         var subtotalRegistrado = await connection.ExecuteScalarAsync<decimal>(
             _sqlCommandFactory.Create(
                 BuscarSaldoPagoNuevoSql,
-                new { request.IdOc, IdOcTexto = request.IdOc.ToString(CultureInfo.InvariantCulture), origen.IdProyecto, origen.IdSite, origen.CorreSite },
+                new { request.IdOc, IdOcTexto = request.IdOc.ToString(CultureInfo.InvariantCulture), request.Fila },
                 CommandType.Text,
                 cancellationToken,
                 commandTimeout: 120));

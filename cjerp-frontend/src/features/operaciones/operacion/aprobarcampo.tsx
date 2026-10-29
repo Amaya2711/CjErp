@@ -1071,10 +1071,7 @@ export default function AprobarCampoPage() {
       allowSearch: false,
       calculateCellValue: () => "",
       cellRender: (_value, row) => {
-        const enabled =
-          canApproveIngreso(row) &&
-          Boolean(getValorIngreso(row)) &&
-          hasCoordinates(getIngresoCoordinates(row).lat, getIngresoCoordinates(row).lng);
+        const enabled = hasCoordinates(getIngresoCoordinates(row).lat, getIngresoCoordinates(row).lng);
         return (
           <button
             type="button"
@@ -1101,10 +1098,7 @@ export default function AprobarCampoPage() {
       allowSearch: false,
       calculateCellValue: () => "",
       cellRender: (_value, row) => {
-        const enabled =
-          canApproveSalida(row) &&
-          Boolean(getValorSalida(row)) &&
-          hasCoordinates(getSalidaCoordinates(row).lat, getSalidaCoordinates(row).lng);
+        const enabled = hasCoordinates(getSalidaCoordinates(row).lat, getSalidaCoordinates(row).lng);
         return (
           <button
             type="button"
@@ -1135,7 +1129,7 @@ export default function AprobarCampoPage() {
       allowSearch: false,
       calculateCellValue: () => "",
       cellRender: (_value, row) => {
-        const enabled = canApproveIngreso(row) && Boolean(getValorIngreso(row)) && Boolean(getIngresoImage(row));
+        const enabled = Boolean(getIngresoImage(row));
         return (
           <button
             type="button"
@@ -1162,7 +1156,7 @@ export default function AprobarCampoPage() {
       allowSearch: false,
       calculateCellValue: () => "",
       cellRender: (_value, row) => {
-        const enabled = canApproveSalida(row) && Boolean(getValorSalida(row)) && Boolean(getSalidaImage(row));
+        const enabled = Boolean(getSalidaImage(row));
         return (
           <button
             type="button"
