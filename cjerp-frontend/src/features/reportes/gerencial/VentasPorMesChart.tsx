@@ -2,7 +2,8 @@ import { useMemo } from "react";
 import type { CSSProperties } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { VentasSunatRegistroDto } from "../../../api/ventasSunatService";
-import { afectoDe, igvDe, importeVenta, inafectoDe, type OpcionesImporte } from "./ventasImporte";
+import type { OpcionesImporte } from "./ventasImporte";
+import { construirVentasPorMes } from "./ventasGastosDatos";
 
 type Props = {
   anio: number;
@@ -16,12 +17,10 @@ type Props = {
 
 type Barra = { mes: string; periodo: string; afecto: number; inafecto: number; igv: number; total: number; monto: number; parcial: boolean };
 
-const MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Set", "Oct", "Nov", "Dic"];
 const MESES_LARGO = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Setiembre", "Octubre", "Noviembre", "Diciembre"];
 const COLOR = "#2878D8";
 const COLOR_PARCIAL = "#A9C9EE";
 
-const numero = (v: number | null | undefined) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 const fmt = (v: number) => v.toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const millones = (v: number) => `S/ ${(v / 1_000_000).toFixed(2)} MM`;
 
@@ -46,29 +45,7 @@ function TooltipVentas({ active, payload }: TooltipProps) {
 
 // Barras de ventas por mes del año elegido. El mes en curso (si va al corte) se pinta claro y no entra en el promedio.
 export default function VentasPorMesChart({ anio, registros, importe, etiqueta, seleccionado, onSeleccionar }: Props) {
-  const { barras, promedio, mesParcial } = useMemo(() => {
-    const hoy = new Date();
-    const periodoActual = `${hoy.getFullYear()}${String(hoy.getMonth() + 1).padStart(2, "0")}`;
-    const porPeriodo = new Map<string, Barra>();
-    for (const r of registros) {
-      const p = r.periodo ?? "";
-      if (!p.startsWith(String(anio))) continue;
-      const b = porPeriodo.get(p) ?? { mes: MESES[Number(p.slice(4)) - 1] ?? p, periodo: p, afecto: 0, inafecto: 0, igv: 0, total: 0, monto: 0, parcial: p === periodoActual };
-      b.afecto += afectoDe(r);
-      b.inafecto += inafectoDe(r);
-      b.igv += igvDe(r);
-      b.monto += importeVenta(r, importe);
-      b.total += numero(r.totalCp);
-      porPeriodo.set(p, b);
-    }
-    const lista = Array.from(porPeriodo.values()).sort((a, b) => a.periodo.localeCompare(b.periodo));
-    const cerrados = lista.filter((b) => !b.parcial);
-    return {
-      barras: lista,
-      promedio: cerrados.length ? cerrados.reduce((s, b) => s + b.monto, 0) / cerrados.length : 0,
-      mesParcial: lista.find((b) => b.parcial),
-    };
-  }, [anio, registros, importe]);
+  const { barras, promedio, mesParcial } = useMemo(() => construirVentasPorMes(anio, registros, importe), [anio, registros, importe]);
 
 
   if (barras.length === 0) {

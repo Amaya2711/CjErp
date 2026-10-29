@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { construirRentabilidadCliente } from "./ventasGastosDatos";
 import { Bar, BarChart, Cell, LabelList, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 export type RentabilidadCliente = {
@@ -22,7 +23,6 @@ type Props = {
   onAlternarExpandir?: () => void;
 };
 
-const MAX_CLIENTES = 25;
 const COLOR_UTILIDAD = "#1FA97A";
 const COLOR_PERDIDA = "#D9534F";
 
@@ -69,14 +69,7 @@ function etiquetaBarra(props: unknown, filas: RentabilidadCliente[]) {
 
 // Vista gerencial: utilidad (ventas - costos) por cliente, de mayor a menor; verde = utilidad, rojo = pérdida.
 export default function RentabilidadClienteChart({ anio, filas, seleccionado, onSeleccionar, expandido = false, onAlternarExpandir }: Props) {
-  const barras = useMemo<RentabilidadCliente[]>(() => {
-    const relevantes = filas.filter((f) => f.ventas !== 0 || f.costos !== 0);
-    // Los de mayor impacto (en valor absoluto) y luego ordenados de mejor a peor utilidad.
-    return [...relevantes]
-      .sort((a, b) => Math.abs(b.utilidad) - Math.abs(a.utilidad))
-      .slice(0, MAX_CLIENTES)
-      .sort((a, b) => b.utilidad - a.utilidad);
-  }, [filas]);
+  const barras = useMemo<RentabilidadCliente[]>(() => construirRentabilidadCliente(filas), [filas]);
 
   const omitidos = filas.filter((f) => f.ventas !== 0 || f.costos !== 0).length - barras.length;
   if (barras.length === 0) return null;

@@ -1,3 +1,4 @@
+import { construirPuntosMensuales } from "./ventasGastosDatos";
 import { Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 export type RentabilidadMes = { periodo: string; ventas: number; costos: number };
@@ -43,20 +44,7 @@ function TooltipMes({ active, payload }: TooltipProps) {
 
 // Evolución mensual: barras de ventas y costos (soles) y línea del margen % (utilidad / ventas) en el eje derecho.
 export default function RentabilidadMensualChart({ anio, datos, cliente, expandido = false, onAlternarExpandir }: Props) {
-  const hoy = new Date();
-  const periodoActual = `${hoy.getFullYear()}${String(hoy.getMonth() + 1).padStart(2, "0")}`;
-  const puntos: Punto[] = [...datos]
-    .filter((d) => d.periodo.startsWith(String(anio)))
-    .sort((a, b) => a.periodo.localeCompare(b.periodo))
-    .map((d) => ({
-      mes: MESES[Number(d.periodo.slice(4)) - 1] ?? d.periodo,
-      periodo: d.periodo,
-      ventas: d.ventas,
-      costos: d.costos,
-      utilidad: d.ventas - d.costos,
-      margen: d.ventas > 0 ? ((d.ventas - d.costos) / d.ventas) * 100 : null,
-      parcial: d.periodo === periodoActual,
-    }));
+  const puntos = construirPuntosMensuales(anio, datos);
 
   return (
     <div style={{ border: "1px solid #D8E5F2", borderRadius: 14, padding: 14, background: "#fff" }}>

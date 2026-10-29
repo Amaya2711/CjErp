@@ -27,8 +27,17 @@ import VentasConcentracionChart from "./VentasConcentracionChart";
 import CostosPorMoneda from "./CostosPorMoneda";
 import CostosPorClienteChart from "./CostosPorClienteChart";
 import RentabilidadClienteChart from "./RentabilidadClienteChart";
-import { exportarPdf, type PdfTabla } from "./exportarVentasGastosPdf";
-import RentabilidadMensualChart, { type RentabilidadMes } from "./RentabilidadMensualChart";
+import { exportarPdf, type PdfSeccion, type PdfTabla } from "./exportarVentasGastosPdf";
+import {
+  construirConcentracion,
+  construirCostosCliente,
+  construirGastoPorMoneda,
+  construirPuntosMensuales,
+  construirRentabilidadCliente,
+  construirVentasPorMes,
+  type RentabilidadMesDato,
+} from "./ventasGastosDatos";
+import RentabilidadMensualChart from "./RentabilidadMensualChart";
 import { getConstantesPorCampo } from "../../../api/constantesService";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 
@@ -44,7 +53,10 @@ type FilaMes = {
   cantGastos: number;
 };
 
-type GastoNormalizado = { periodo: string; monto: number; montoPen: number; totalPagar: number; totalPagarPen: number; moneda: Moneda; idCliente: number; cliente: string };
+// Gasto agrupado (periodo, cliente, moneda): montos en la moneda real del recibo. Es lo que se guarda en caché.
+type GastoBase = { periodo: string; monto: number; totalPagar: number; moneda: Moneda; idCliente: number; cliente: string; n: number };
+// Con el equivalente en soles según los tipos de cambio de la pantalla (se recalcula al cambiarlos, sin volver a consultar).
+type GastoNormalizado = GastoBase & { montoPen: number; totalPagarPen: number };
 
 type FilaRentabilidad = {
   clave: string;
@@ -86,7 +98,31 @@ const VENTAS_CONCURRENCIA = 3;
 // Caché a nivel de módulo (sobrevive a la navegación entre pantallas).
 let cacheClientes: VentasSunatClienteDto[] | null = null;
 // Gastos ya consultados por año y tipos de cambio (la consulta de gastos es lenta).
-const cacheGastos = new Map<string, { t: number; gastos: GastoNormalizado[]; truncado: boolean; sinFecha: number }>();
+type GastosCargados = { t: number; gastos: GastoBase[]; truncado: boolean; sinFecha: number };
+const cacheGastos = new Map<number, GastosCargados>();
+const GASTOS_CONCURRENCIA = 4; // meses consultados a la vez (el servidor limita a 120 peticiones por minuto)
+const PREFIJO_CACHE_GASTOS = "ventasgastos_gastos_v1_";
+// Años cerrados casi no cambian: duran más en caché; el año en curso se refresca antes.
+const ttlGastos = (anio: number) => (anio < new Date().getFullYear() ? 6 * 60 * 60 * 1000 : 15 * 60 * 1000);
+
+function leerCacheGastos(anio: number): GastosCargados | null {
+  try {
+    const crudo = localStorage.getItem(`${PREFIJO_CACHE_GASTOS}${anio}`);
+    if (!crudo) return null;
+    const dato = JSON.parse(crudo) as GastosCargados;
+    return Date.now() - dato.t < ttlGastos(anio) ? dato : null;
+  } catch {
+    return null;
+  }
+}
+
+function guardarCacheGastos(anio: number, dato: GastosCargados) {
+  try {
+    localStorage.setItem(`${PREFIJO_CACHE_GASTOS}${anio}`, JSON.stringify(dato));
+  } catch {
+    // Sin espacio o sin almacenamiento: la pantalla funciona igual, solo sin caché persistente.
+  }
+}
 const cacheVentasAnio = new Map<number, { t: number; registros: VentasSunatRegistroDto[] }>();
 const MONTO: GridFormat = { type: "fixedPoint", precision: 2 };
 const PORCENTAJE: GridFormat = { type: "fixedPoint", precision: 1 };
@@ -179,7 +215,7 @@ function monedaDe(row: RawRow): Moneda {
 }
 
 // Gasto = Subtotal (sin IGV) en la moneda real del recibo. Pagados (estado 4) se ubican por fecha de depósito.
-function normalizarGasto(row: RawRow, tc: Record<string, number>): GastoNormalizado | null {
+function normalizarGasto(row: RawRow): GastoBase | null {
   // El año/mes del gasto es siempre el de la fecha de depósito (sin respaldo en otras fechas).
   const periodo = periodoDeFecha(
     pick(row, ["FechaDeposito", "fechaDeposito", "fechadeposito", "FechaDepositoTexto", "fechaDepositoTexto", "FecDeposito", "fecDeposito"]),
@@ -188,26 +224,42 @@ function normalizarGasto(row: RawRow, tc: Record<string, number>): GastoNormaliz
   // Subtotal (sin IGV) y Total a pagar (con IGV), ambos en la moneda real del recibo.
   const monto = numero(row.Subtotal ?? row.subtotal) || numero(row.TotalPagar ?? row.totalPagar) || numero(row.Total ?? row.total);
   const totalPagar = numero(row.TotalPagar ?? row.totalPagar) || numero(row.Total ?? row.total) || monto;
-  const moneda = monedaDe(row);
-  const aSoles = (v: number) => (moneda === "PEN" ? v : v * (tc[moneda] ?? 1));
   return {
     periodo,
     monto,
-    montoPen: aSoles(monto),
     totalPagar,
-    totalPagarPen: aSoles(totalPagar),
-    moneda,
+    moneda: monedaDe(row),
     idCliente: numero(row.IdCliente ?? row.idCliente),
     cliente: pick(row, ["Cliente", "cliente", "NombreCliente", "nombreCliente", "clienteNombre"]) || "Sin cliente",
+    n: 1,
   };
 }
 
-// Una consulta por mes: evita topes de filas/timeouts del SP en rangos largos.
-async function consultarGastosAnio(anio: number, tc: Record<string, number>, hastaMes: number) {
+// Junta los gastos del mismo periodo, cliente y moneda: la pantalla solo necesita esos totales (menos memoria y caché más pequeña).
+function agruparGastos(lista: GastoBase[]): GastoBase[] {
+  const mapa = new Map<string, GastoBase>();
+  for (const g of lista) {
+    const clave = `${g.periodo}|${g.idCliente}|${g.cliente}|${g.moneda}`;
+    const actual = mapa.get(clave);
+    if (actual) {
+      actual.monto += g.monto;
+      actual.totalPagar += g.totalPagar;
+      actual.n += g.n;
+    } else {
+      mapa.set(clave, { ...g });
+    }
+  }
+  return Array.from(mapa.values());
+}
+
+// Una consulta por mes (evita topes de filas y timeouts del SP) con varios meses a la vez. Cada mes que llega se informa en
+// `alLlegarMes` para que la pantalla se vaya llenando sin esperar al último.
+async function consultarGastosAnio(anio: number, hastaMes: number, alLlegarMes?: (parcial: GastoBase[], hechos: number) => void) {
   const meses = Array.from({ length: hastaMes }, (_, i) => i + 1);
-  const resultados: GastoNormalizado[] = [];
+  let acumulado: GastoBase[] = [];
   let truncado = false;
   let sinFecha = 0;
+  let hechos = 0;
   const cola = [...meses];
   const worker = async () => {
     while (cola.length) {
@@ -218,15 +270,19 @@ async function consultarGastosAnio(anio: number, tc: Record<string, number>, has
         { timeoutMs: REQUEST_TIMEOUT_MS },
       );
       if (resp.limitExceeded) truncado = true;
+      const delMes: GastoBase[] = [];
       for (const row of Array.isArray(resp.rows) ? (resp.rows as RawRow[]) : []) {
-        const g = normalizarGasto(row, tc);
-        if (g) resultados.push(g);
+        const g = normalizarGasto(row);
+        if (g) delMes.push(g);
         else sinFecha += 1;
       }
+      acumulado = agruparGastos([...acumulado, ...agruparGastos(delMes)]);
+      hechos += 1;
+      alLlegarMes?.(acumulado, hechos);
     }
   };
-  await Promise.all([worker(), worker()]);
-  return { gastos: resultados, truncado, sinFecha };
+  await Promise.all(Array.from({ length: Math.min(GASTOS_CONCURRENCIA, Math.max(hastaMes, 1)) }, worker));
+  return { gastos: acumulado, truncado, sinFecha };
 }
 
 const columnaMoneda = (dataField: keyof FilaCosto, caption: string): GridColumn<FilaCosto> => ({
@@ -331,10 +387,10 @@ export default function VentasGastosPage() {
     DOP: String(TC_DEFECTO.DOP),
     COP: String(TC_DEFECTO.COP),
   });
-  const tcInicial = useMemo(() => Object.fromEntries(Object.entries(TC_DEFECTO).map(([k, v]) => [k, String(v)])), []);
   const [periodos, setPeriodos] = useState<VentasSunatPeriodoDto[]>([]);
   const [ventas, setVentas] = useState<VentasSunatRegistroDto[]>([]);
-  const [gastos, setGastos] = useState<GastoNormalizado[]>([]);
+  const [gastos, setGastos] = useState<GastoBase[]>([]);
+  const [progresoGastos, setProgresoGastos] = useState<{ hechos: number; total: number } | null>(null);
   const [catalogo, setCatalogo] = useState<{ id: string; ruc: string; nombre: string }[]>([]);
   const [empresasElegidas, setEmpresasElegidas] = useState<string[]>(EMPRESAS_POR_DEFECTO); // vacio = todas
   const [cargandoVentas, setCargandoVentas] = useState(false);
@@ -356,7 +412,6 @@ export default function VentasGastosPage() {
   const [tab, setTab] = useState<"comparativo" | "ventas" | "costos" | "rentabilidad">("rentabilidad");
   // Filtro de rentabilidad por cliente: ambas (por defecto), solo positiva (utilidad > 0) o solo negativa (utilidad < 0).
   const [rentabilidadSel, setRentabilidadSel] = useState<string[]>([]); // vacío o ambas marcadas = ambos
-  const contenidoRef = useRef<HTMLDivElement | null>(null); // contenido de la pestaña activa: de aquí se capturan los gráficos para el PDF
   const [exportandoPdf, setExportandoPdf] = useState(false);
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(true); // expande o contrae la cabecera de filtros para ganar espacio
   const [graficosExpandidos, setGraficosExpandidos] = useState(false); // al ampliar, los dos gráficos de Rentabilidad pasan a una sola columna: uno sobre otro, cada uno a todo el ancho
@@ -429,12 +484,9 @@ export default function VentasGastosPage() {
   // Gastos pagados del año (se cargan al entrar a la pantalla y al cambiar de año; "Consultar" los vuelve a pedir).
   const solicitudGastos = useRef(0);
   const cargarGastos = useCallback(
-    async (anioSel: number, tcT: Record<string, string>, forzar: boolean) => {
+    async (anioSel: number, forzar: boolean) => {
       const id = ++solicitudGastos.current;
-      const tc: Record<string, number> = {};
-      for (const k of Object.keys(TC_DEFECTO)) tc[k] = numero(tcT[k]) || TC_DEFECTO[k as keyof typeof TC_DEFECTO];
-      const clave = `${anioSel}|${Object.keys(TC_DEFECTO).map((k) => tc[k]).join("|")}`;
-      const aplicar = (r: { gastos: GastoNormalizado[]; truncado: boolean; sinFecha: number }) => {
+      const aplicar = (r: { gastos: GastoBase[]; truncado: boolean; sinFecha: number }) => {
         setGastos(r.gastos);
         const avisos: string[] = [];
         if (r.truncado) avisos.push("Algún mes de gastos superó el límite de filas de la consulta: los totales pueden estar incompletos.");
@@ -442,24 +494,40 @@ export default function VentasGastosPage() {
         setAviso(avisos.join(" "));
       };
 
-      const enCache = cacheGastos.get(clave);
-      if (!forzar && enCache && Date.now() - enCache.t < VENTAS_CACHE_MS) {
-        aplicar(enCache);
-        return;
+      // Caché en memoria y luego en el navegador: al volver a entrar a la pantalla los gastos aparecen al instante.
+      if (!forzar) {
+        const guardado = cacheGastos.get(anioSel) ?? leerCacheGastos(anioSel);
+        if (guardado && Date.now() - guardado.t < ttlGastos(anioSel)) {
+          cacheGastos.set(anioSel, guardado);
+          setProgresoGastos(null);
+          setCargando(false);
+          aplicar(guardado);
+          return;
+        }
       }
 
       setCargando(true);
       setAviso("");
+      // Año pasado: los 12 meses; año en curso: hasta el mes actual; año futuro: sin consulta de gastos.
+      const hastaMes = anioSel < anioActual ? 12 : anioSel === anioActual ? new Date().getMonth() + 1 : 0;
+      setProgresoGastos({ hechos: 0, total: hastaMes });
       try {
-        // Año pasado: los 12 meses; año en curso: hasta el mes actual; año futuro: sin consulta de gastos.
-        const hastaMes = anioSel < anioActual ? 12 : anioSel === anioActual ? new Date().getMonth() + 1 : 0;
-        const r = await consultarGastosAnio(anioSel, tc, hastaMes);
-        cacheGastos.set(clave, { t: Date.now(), ...r });
+        const r = await consultarGastosAnio(anioSel, hastaMes, (parcial, hechos) => {
+          if (id !== solicitudGastos.current) return;
+          setGastos(parcial);
+          setProgresoGastos({ hechos, total: hastaMes });
+        });
+        const entrada: GastosCargados = { t: Date.now(), ...r };
+        cacheGastos.set(anioSel, entrada);
+        guardarCacheGastos(anioSel, entrada);
         if (id === solicitudGastos.current) aplicar(r);
       } catch (err) {
         if (id === solicitudGastos.current) setError(getHttpErrorMessage(err, "No se pudieron cargar los gastos."));
       } finally {
-        if (id === solicitudGastos.current) setCargando(false);
+        if (id === solicitudGastos.current) {
+          setCargando(false);
+          setProgresoGastos(null);
+        }
       }
     },
     [anioActual],
@@ -475,14 +543,14 @@ export default function VentasGastosPage() {
         const inicial = Math.min(Math.max(anioActual, ANIOS[0]), ANIOS[ANIOS.length - 1]);
         setAnio(inicial);
         void cargarVentas(inicial, lista, false);
-        void cargarGastos(inicial, tcInicial, false);
+        void cargarGastos(inicial, false);
         cargarClientes();
       })
       .catch((err) => activo && setError(getHttpErrorMessage(err, "No se pudo listar los periodos de ventas.")));
     return () => {
       activo = false;
     };
-  }, [anioActual, cargarVentas, cargarGastos, cargarClientes, tcInicial]);
+  }, [anioActual, cargarVentas, cargarGastos, cargarClientes]);
 
   // Catálogo de empresas (Constante EMPRESA_cj; nombre en ValorIni). Se descartan las marcadas inactivas (ValorFin = 0).
   useEffect(() => {
@@ -504,8 +572,8 @@ export default function VentasGastosPage() {
 
   const cargar = useCallback(async () => {
     setError("");
-    await Promise.all([cargarGastos(anio, tcTexto, true), cargarVentas(anio, periodos, false)]);
-  }, [anio, periodos, tcTexto, cargarGastos, cargarVentas]);
+    await Promise.all([cargarGastos(anio, true), cargarVentas(anio, periodos, false)]);
+  }, [anio, periodos, cargarGastos, cargarVentas]);
 
   // Empresas activas del catálogo (+ "Sin empresa" si hay ventas sin empresa asignada).
   const empresas = useMemo(() => {
@@ -565,9 +633,19 @@ export default function VentasGastosPage() {
   }, [ventasFiltradas, anio, importe]);
 
   // Gastos para Costos y Rentabilidad: Inafecto usa el SUBTOTAL; Con IGV usa el TOTAL A PAGAR (monto original y en soles).
+  // Equivalente en soles con los tipos de cambio de la cabecera: cambiarlos recalcula al instante, sin consultar de nuevo.
+  const gastosConv = useMemo<GastoNormalizado[]>(() => {
+    const tc: Record<string, number> = {};
+    for (const k of Object.keys(TC_DEFECTO)) tc[k] = numero(tcTexto[k]) || TC_DEFECTO[k as keyof typeof TC_DEFECTO];
+    return gastos.map((g) => {
+      const factor = g.moneda === "PEN" ? 1 : (tc[g.moneda] ?? 1);
+      return { ...g, montoPen: g.monto * factor, totalPagarPen: g.totalPagar * factor };
+    });
+  }, [gastos, tcTexto]);
+
   const gastosCosto = useMemo(
-    () => (incluirIgv ? gastos.map((g) => ({ ...g, monto: g.totalPagar, montoPen: g.totalPagarPen })) : gastos),
-    [gastos, incluirIgv],
+    () => (incluirIgv ? gastosConv.map((g) => ({ ...g, monto: g.totalPagar, montoPen: g.totalPagarPen })) : gastosConv),
+    [gastosConv, incluirIgv],
   );
 
   // KPIs de costos (en soles): total del año, promedio de los meses cerrados (el mes en curso va al corte) y proyección = promedio x 12.
@@ -639,10 +717,10 @@ export default function VentasGastosPage() {
   );
 
   // Evolución mensual (ventas, costos) con la misma clave de cliente de la grilla; si hay un cliente elegido, solo ese.
-  const datosMensualesRent = useMemo<RentabilidadMes[]>(() => {
+  const datosMensualesRent = useMemo<RentabilidadMesDato[]>(() => {
     const visibles = new Set(filasRentabilidadVista.map((f) => f.clave));
     const porId = new Map(clientes.map((c) => [c.idCliente, c]));
-    const mapa = new Map<string, RentabilidadMes>();
+    const mapa = new Map<string, RentabilidadMesDato>();
     const mes = (periodo: string) => {
       let m = mapa.get(periodo);
       if (!m) {
@@ -707,7 +785,7 @@ export default function VentasGastosPage() {
       const clave = g.idCliente > 0 ? String(g.idCliente) : `n:${nombre}`;
       const fila = mapa.get(clave) ?? { clave, nroDocumento: (maestro?.nroDocumento ?? "").trim() || (g.idCliente > 0 ? docPorCliente.get(g.idCliente) ?? "" : ""), nombreCliente: nombre, cantidad: 0, PEN: 0, USD: 0, EUR: 0, DOP: 0, COP: 0, costo: 0, participacion: 0, conVenta: false };
       fila.conVenta = fila.conVenta || (fila.nroDocumento !== "" && conVentaDoc.has(normDoc(fila.nroDocumento)));
-      fila.cantidad += 1;
+      fila.cantidad += g.n;
       fila[g.moneda] += g.monto;
       fila.costo += g.montoPen;
       mapa.set(clave, fila);
@@ -733,16 +811,16 @@ export default function VentasGastosPage() {
       // Venta neta = BI gravada - dscto BI + inafecto (el SIRE ya viene en soles).
       fila(r.periodo).ventas += importeVenta(r, importe);
     }
-    for (const g of gastos) {
+    for (const g of gastosConv) {
       const f = fila(g.periodo);
       f.gastos += g.montoPen;
-      f.cantGastos += 1;
+      f.cantGastos += g.n;
     }
     return Array.from(mapa.values())
       .filter((f) => f.periodo.startsWith(String(anio)))
       .map((f) => ({ ...f, resultado: f.ventas - f.gastos, ratio: f.ventas > 0 ? (f.gastos / f.ventas) * 100 : null }))
       .sort((a, b) => a.periodo.localeCompare(b.periodo));
-  }, [ventas, gastos, coincideVenta, anio, importe]);
+  }, [ventas, gastosConv, coincideVenta, anio, importe]);
 
   const totales = useMemo(() => {
     const v = filas.reduce((s, f) => s + f.ventas, 0);
@@ -750,11 +828,16 @@ export default function VentasGastosPage() {
     return { ventas: v, gastos: g, resultado: v - g, ratio: v > 0 ? (g / v) * 100 : null };
   }, [filas]);
 
-  // Exporta a PDF la pestaña activa con los filtros aplicados: KPIs, gráficos visibles y tablas con los mismos datos.
+  // Exporta a PDF la pestaña activa con los filtros aplicados: KPIs, gráficos y tablas con los mismos datos que se ven en pantalla.
   const exportarPestanaPdf = async () => {
     setExportandoPdf(true);
     try {
       const soles = (v: number) => `S/ ${fmt(v)}`;
+      const abrev = (v: number) => {
+        const a = Math.abs(v);
+        const t = a >= 1_000_000 ? `${(a / 1_000_000).toFixed(2)} MM` : a >= 1_000 ? `${(a / 1_000).toFixed(1)}k` : fmt(a);
+        return `${v < 0 ? "-" : ""}S/ ${t}`;
+      };
       const margenTxt = (m: number | null) => (m == null ? "-" : `${m.toFixed(1)}%`);
       const filtros: string[] = [
         `Año: ${anio}`,
@@ -763,15 +846,20 @@ export default function VentasGastosPage() {
         `Importe de ventas: ${etiqueta}`,
       ];
       const nombreEn = (lista: { clave: string; nombreCliente: string }[], clave: string | null) => lista.find((f) => f.clave === clave)?.nombreCliente ?? clave ?? "";
-      const tablas: PdfTabla[] = [];
+      const tcTxt = `Tipos de cambio a S/: ${Object.keys(TC_DEFECTO).map((k) => `${k} ${tcTexto[k]}`).join(", ")}`;
+      const secciones: PdfSeccion[] = [];
       let titulo = "Ventas vs Gastos";
       let kpis: { etiqueta: string; valor: string }[] = [];
       const notas: string[] = [];
+      const AZUL = "#2878D8";
+      const NARANJA = "#EA6B33";
+      const VERDE = "#1FA97A";
+      const ROJO = "#D9534F";
+      const GRIS_CLARO = "#C4C4B8";
 
       if (tab === "rentabilidad") {
         titulo = `Rentabilidad por cliente ${anio}`;
-        filtros.push(`Rentabilidad: ${rentabilidadSel.length === 1 ? rentabilidadSel[0] : "Ambos"}`);
-        filtros.push(`Tipos de cambio a S/: ${Object.keys(TC_DEFECTO).map((k) => `${k} ${tcTexto[k]}`).join(", ")}`);
+        filtros.push(`Rentabilidad: ${rentabilidadSel.length === 1 ? rentabilidadSel[0] : "Ambos"}`, tcTxt);
         if (clienteRentSel) filtros.push(`Cliente: ${nombreEn(filasRentabilidad, clienteRentSel)}`);
         kpis = [
           { etiqueta: `Ventas ${anio}`, valor: soles(totalesRentabilidad.ventas) },
@@ -779,11 +867,43 @@ export default function VentasGastosPage() {
           { etiqueta: "Utilidad", valor: soles(totalesRentabilidad.utilidad) },
           { etiqueta: "Margen", valor: margenTxt(totalesRentabilidad.margen) },
         ];
-        notas.push("Verde: utilidad. Rojo: pérdida. Utilidad = ventas - costos (gastos pagados, en soles).");
+        const puntos = construirPuntosMensuales(anio, datosMensualesRent);
+        secciones.push({
+          tipo: "columnas",
+          titulo: "Evolución mensual de la rentabilidad",
+          subtitulo: `Ventas y costos por mes (S/) y margen % sobre ventas ${anio}${clienteRentSel ? ` - Cliente: ${nombreEn(filasRentabilidad, clienteRentSel)}` : ""}.`,
+          categorias: puntos.map((p) => p.mes),
+          series: [
+            { nombre: "Ventas", color: AZUL, valores: puntos.map((p) => p.ventas) },
+            { nombre: "Costos", color: NARANJA, valores: puntos.map((p) => p.costos) },
+          ],
+          linea: { nombre: "Margen %", color: VERDE, valores: puntos.map((p) => p.margen), formato: (v) => `${v.toFixed(0)}%` },
+          formatoEje: abrev,
+        });
+        const barras = construirRentabilidadCliente(filasRentabilidadVista);
+        secciones.push({
+          tipo: "barrasH",
+          nuevaPagina: true, // página 2: rentabilidad por cliente (gerencial)
+          titulo: "Rentabilidad por cliente (gerencial)",
+          subtitulo: `Utilidad ${anio} = ventas - costos, en soles, con el margen sobre ventas. Se muestran los ${barras.length} clientes de mayor impacto.`,
+          leyenda: [
+            { color: VERDE, texto: "Utilidad" },
+            { color: ROJO, texto: "Pérdida" },
+          ],
+          items: barras.map((b) => ({
+            etiqueta: b.nombreCliente,
+            valor: b.utilidad,
+            color: b.utilidad < 0 ? ROJO : VERDE,
+            texto: `${abrev(b.utilidad)}${b.margen == null ? "" : ` | ${b.margen.toFixed(1)}%`}`,
+            atenuar: clienteRentSel != null && clienteRentSel !== b.clave,
+          })),
+        });
         const filas = clienteRentSel ? filasRentabilidadVista.filter((f) => f.clave === clienteRentSel) : filasRentabilidadVista;
         const v = filas.reduce((a, f) => a + f.ventas, 0);
         const c = filas.reduce((a, f) => a + f.costos, 0);
-        tablas.push({
+        secciones.push({
+          tipo: "tabla",
+          nuevaPagina: true, // página 3: detalle de rentabilidad por cliente
           titulo: `Rentabilidad por cliente ${anio}`,
           columnas: ["Nro documento (RUC/DNI)", "Nombre cliente", "Ventas (S/)", "Costos (S/)", "Utilidad (S/)", "Margen %"],
           filas: filas.map((f) => [f.nroDocumento, f.nombreCliente, fmt(f.ventas), fmt(f.costos), fmt(f.utilidad), margenTxt(f.margen)]),
@@ -799,8 +919,31 @@ export default function VentasGastosPage() {
           { etiqueta: `Promedio mensual (${kpisVentas.mesesCerrados} meses cerrados)`, valor: soles(kpisVentas.promedio) },
           { etiqueta: "Proyección anual", valor: soles(kpisVentas.proyeccion) },
         ];
+        const porMes = construirVentasPorMes(anio, ventasParaMes, importe);
+        secciones.push({
+          tipo: "columnas",
+          titulo: "Ventas por mes",
+          subtitulo: `Ventas ${etiqueta} por mes. Línea punteada: promedio de los meses cerrados${porMes.mesParcial ? "; el mes en curso va al corte (color claro)" : ""}.`,
+          categorias: porMes.barras.map((b) => b.mes),
+          series: [{ nombre: "Ventas", color: AZUL, valores: porMes.barras.map((b) => b.monto) }],
+          referencia: porMes.promedio > 0 ? { valor: porMes.promedio, texto: `Promedio ${abrev(porMes.promedio)}` } : undefined,
+          formatoEje: abrev,
+          atenuar: porMes.barras.map((b) => b.parcial || (mesSel != null && mesSel !== b.periodo)),
+        });
+        const conc = construirConcentracion(anio, ventasParaCliente, importe);
+        secciones.push({
+          tipo: "barrasH",
+          titulo: "Concentración de la venta",
+          subtitulo: `Participación de cada cliente en la venta del periodo (${anio}). Azul: los 3 principales.`,
+          items: conc.map((b, i) => ({
+            etiqueta: b.cliente,
+            valor: b.venta,
+            color: clienteSel ? (b.cliente === clienteSel ? AZUL : GRIS_CLARO) : i < 3 ? AZUL : GRIS_CLARO,
+            texto: `${b.participacion.toFixed(1)}%`,
+          })),
+        });
         type Suma = { nombre: string; afecto: number; inafecto: number; igv: number; total: number };
-        const agrupar = (clave: (r: VentasSunatRegistroDto) => string, nombre: (c: string) => string) => {
+        const agrupar = (clave: (r: VentasSunatRegistroDto) => string, nombre: (c: string) => string): [string, Suma][] => {
           const mapa = new Map<string, Suma>();
           for (const r of ventasDetalle) {
             const k = clave(r);
@@ -814,32 +957,66 @@ export default function VentasGastosPage() {
           return Array.from(mapa.entries());
         };
         const tablaSumas = (tituloTabla: string, primera: string, entradas: [string, Suma][]): PdfTabla => {
-          const totales = entradas.reduce((a, [, f]) => ({ afecto: a.afecto + f.afecto, inafecto: a.inafecto + f.inafecto, igv: a.igv + f.igv, total: a.total + f.total }), { afecto: 0, inafecto: 0, igv: 0, total: 0 });
+          const t = entradas.reduce((a, [, f]) => ({ afecto: a.afecto + f.afecto, inafecto: a.inafecto + f.inafecto, igv: a.igv + f.igv, total: a.total + f.total }), { afecto: 0, inafecto: 0, igv: 0, total: 0 });
           return {
+            tipo: "tabla",
             titulo: tituloTabla,
             columnas: [primera, "Suma de Afecto", "Suma de Inafecto", "Suma de IGV e IPM", "Suma de Total"],
             filas: entradas.map(([, f]) => [f.nombre, fmt(f.afecto), fmt(f.inafecto), fmt(f.igv), fmt(f.total)]),
-            totales: ["Total", fmt(totales.afecto), fmt(totales.inafecto), fmt(totales.igv), fmt(totales.total)],
+            totales: ["Total", fmt(t.afecto), fmt(t.inafecto), fmt(t.igv), fmt(t.total)],
             numericas: [1, 2, 3, 4],
           };
         };
-        tablas.push(
+        secciones.push(
           tablaSumas("Ventas por periodo", "PERIODO", agrupar((r) => r.periodo ?? "", (c) => (c.length === 6 ? nombreMes(c) : c)).filter(([k]) => k).sort((a, b) => a[0].localeCompare(b[0]))),
+          tablaSumas("Ventas por empresa", "EMPRESA", agrupar(empresaDe, (c) => c).sort((a, b) => b[1].total - a[1].total)),
           tablaSumas("Ventas por cliente", "CLIENTES", agrupar(clienteDeVenta, (c) => c).sort((a, b) => b[1].total - a[1].total)),
         );
       } else if (tab === "costos") {
         titulo = `Costos ${anio}`;
-        filtros.push(`Costos según: ${incluirIgv ? "total a pagar (con IGV)" : "subtotal (sin IGV)"}`);
-        filtros.push(`Tipos de cambio a S/: ${Object.keys(TC_DEFECTO).map((k) => `${k} ${tcTexto[k]}`).join(", ")}`);
+        filtros.push(`Costos según: ${incluirIgv ? "total a pagar (con IGV)" : "subtotal (sin IGV)"}`, tcTxt);
         if (clienteCostoSel) filtros.push(`Cliente (gasto por moneda): ${nombreEn(filasCostos, clienteCostoSel)}`);
         kpis = [
           { etiqueta: `Total costos ${anio} (S/)`, valor: soles(kpisCostos.total) },
           { etiqueta: `Promedio mensual (${kpisCostos.mesesCerrados} meses cerrados)`, valor: soles(kpisCostos.promedio) },
           { etiqueta: "Proyección anual", valor: soles(kpisCostos.proyeccion) },
         ];
-        notas.push("Gasto por RUC / cliente: azul = cliente con venta, naranja = sin venta asignada, gris = otros clientes agrupados.");
+        const barras = construirCostosCliente(filasCostos);
+        secciones.push({
+          tipo: "barrasH",
+          titulo: "Gasto por RUC / cliente",
+          subtitulo: `Gastos pagados ${anio} en soles convertidos. El color indica si el cliente tiene venta asociada.`,
+          leyenda: [
+            { color: AZUL, texto: "Cliente con venta" },
+            { color: NARANJA, texto: "Sin venta asignada" },
+          ],
+          items: barras.map((b) => ({
+            etiqueta: b.etiqueta,
+            valor: b.costo,
+            color: b.conVenta === null ? GRIS_CLARO : b.conVenta ? AZUL : NARANJA,
+            texto: abrev(b.costo),
+            atenuar: clienteCostoSel != null && clienteCostoSel !== b.clave,
+          })),
+        });
+        const COLOR_MONEDA: Record<string, string> = { PEN: AZUL, USD: NARANJA, DOP: VERDE, EUR: "#8B5CF6", COP: "#CA8A04" };
+        const SIMBOLO: Record<string, string> = { PEN: "S/", USD: "$", EUR: "EUR", DOP: "RD$", COP: "COL$" };
+        const porMoneda = construirGastoPorMoneda(anio, gastosParaMoneda);
+        secciones.push({
+          tipo: "apilada",
+          titulo: "Gasto por moneda",
+          subtitulo: `Gastos pagados ${anio} por moneda del recibo, convertidos al tipo de cambio de la cabecera${clienteCostoSel ? ` - Cliente: ${nombreEn(filasCostos, clienteCostoSel)}` : ""}.`,
+          segmentos: porMoneda.map((m) => ({ etiqueta: m.moneda, color: COLOR_MONEDA[m.moneda] ?? "#64748B", valor: m.soles })),
+        });
+        secciones.push({
+          tipo: "tabla",
+          titulo: "Detalle por moneda",
+          columnas: ["Moneda", "Monto original", "En soles (S/)", "%"],
+          filas: porMoneda.map((m) => [m.moneda, `${SIMBOLO[m.moneda] ?? m.moneda} ${fmt(m.original)}`, fmt(m.soles), `${m.porcentaje.toFixed(1)}%`]),
+          numericas: [1, 2, 3],
+        });
         const tot = (campo: "PEN" | "USD" | "EUR" | "DOP" | "COP" | "costo" | "cantidad") => filasCostos.reduce((a, f) => a + f[campo], 0);
-        tablas.push({
+        secciones.push({
+          tipo: "tabla",
           titulo: `Costos por cliente ${anio}`,
           columnas: ["Nro documento (RUC/DNI)", "Nombre cliente", "N° gastos", "Soles (S/)", "Dólares (US$)", "Euros", "Peso dominicano", "Peso colombiano", "Total en soles (S/)", "Participación %"],
           filas: filasCostos.map((f) => [f.nroDocumento, f.nombreCliente, String(f.cantidad), fmt(f.PEN), fmt(f.USD), fmt(f.EUR), fmt(f.DOP), fmt(f.COP), fmt(f.costo), `${f.participacion.toFixed(1)}%`]),
@@ -850,15 +1027,7 @@ export default function VentasGastosPage() {
         return;
       }
 
-      await exportarPdf({
-        archivo: `ventas-vs-gastos-${tab}-${anio}.pdf`,
-        titulo,
-        filtros,
-        kpis,
-        contenedorGraficos: contenidoRef.current,
-        notas,
-        tablas,
-      });
+      await exportarPdf({ archivo: `ventas-vs-gastos-${tab}-${anio}.pdf`, titulo, filtros, kpis, notas, secciones });
     } catch (err) {
       setError(getHttpErrorMessage(err, "No se pudo generar el PDF."));
     } finally {
@@ -896,7 +1065,7 @@ export default function VentasGastosPage() {
                 const a = Number(e.target.value);
                 setAnio(a);
                 setGastos([]);
-                void cargarGastos(a, tcTexto, false);
+                void cargarGastos(a, false);
                 setClienteCostoSel(null);
                 setClienteRentSel(null);
                 setMesSel(null);
@@ -969,7 +1138,7 @@ export default function VentasGastosPage() {
             </label>
           ))}
           <button type="button" style={{ ...styles.boton, opacity: cargando ? 0.6 : 1 }} disabled={cargando} onClick={() => void cargar()}>
-            {cargando ? "Cargando..." : "Consultar"}
+            {cargando ? (progresoGastos && progresoGastos.total > 0 ? `Cargando gastos ${progresoGastos.hechos}/${progresoGastos.total}...` : "Cargando...") : "Consultar"}
           </button>
         </div>
         <div style={{ fontSize: 12, color: "#64748B", marginTop: 10 }}>
@@ -1004,7 +1173,7 @@ export default function VentasGastosPage() {
         </button>
       </div>
 
-      <div ref={contenidoRef}>
+      <div>
       {tab === "ventas" ? (
         <div style={{ display: "grid", gap: 16 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>

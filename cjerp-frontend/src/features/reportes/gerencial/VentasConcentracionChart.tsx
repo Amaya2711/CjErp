@@ -2,7 +2,8 @@ import { useMemo } from "react";
 import type { CSSProperties } from "react";
 import { Bar, BarChart, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { VentasSunatRegistroDto } from "../../../api/ventasSunatService";
-import { clienteDeVenta, importeVenta, type OpcionesImporte } from "./ventasImporte";
+import type { OpcionesImporte } from "./ventasImporte";
+import { construirConcentracion } from "./ventasGastosDatos";
 
 type Props = {
   anio: number;
@@ -15,7 +16,6 @@ type Props = {
 
 type Barra = { cliente: string; venta: number; participacion: number };
 
-const MAX_CLIENTES = 20;
 const TOP_DESTACADOS = 3;
 const COLOR = "#2878D8";
 const COLOR_RESTO = "#C4C4B8";
@@ -40,22 +40,7 @@ function TooltipConcentracion({ active, payload }: TooltipProps) {
 
 // Participación de cada cliente en la venta (importe elegido en la cabecera) del año elegido. Los 3 primeros se destacan.
 export default function VentasConcentracionChart({ anio, registros, importe, seleccionado, onSeleccionar }: Props) {
-  const barras = useMemo<Barra[]>(() => {
-    const porCliente = new Map<string, number>();
-    for (const r of registros) {
-      if (!(r.periodo ?? "").startsWith(String(anio))) continue;
-      const k = clienteDeVenta(r);
-      porCliente.set(k, (porCliente.get(k) ?? 0) + importeVenta(r, importe));
-    }
-    // Clientes con venta neta negativa (notas de crédito) no participan de la concentración.
-    const ordenados = Array.from(porCliente, ([cliente, venta]) => ({ cliente, venta })).filter((c) => c.venta > 0).sort((a, b) => b.venta - a.venta);
-    const total = ordenados.reduce((s, c) => s + c.venta, 0);
-    if (total <= 0) return [];
-    const visibles = ordenados.slice(0, MAX_CLIENTES);
-    const resto = ordenados.slice(MAX_CLIENTES);
-    if (resto.length) visibles.push({ cliente: `Otros (${resto.length})`, venta: resto.reduce((s, c) => s + c.venta, 0) });
-    return visibles.map((c) => ({ ...c, participacion: (c.venta / total) * 100 }));
-  }, [anio, registros, importe]);
+  const barras = useMemo<Barra[]>(() => construirConcentracion(anio, registros, importe), [anio, registros, importe]);
 
   if (barras.length === 0) {
     return (

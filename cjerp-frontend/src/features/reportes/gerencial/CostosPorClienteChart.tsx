@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { construirCostosCliente } from "./ventasGastosDatos";
 import { Bar, BarChart, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 export type CostoCliente = { clave: string; nroDocumento: string; nombreCliente: string; costo: number; conVenta: boolean };
@@ -13,7 +14,6 @@ type Props = {
 
 type Barra = { clave: string; etiqueta: string; nroDocumento: string; costo: number; conVenta: boolean | null };
 
-const MAX_CLIENTES = 25;
 const COLOR_CON_VENTA = "#2878D8";
 const COLOR_SIN_VENTA = "#EA6B33";
 const COLOR_OTROS = "#C4C4B8";
@@ -45,13 +45,7 @@ const leyenda = (color: string, texto: string) => (
 
 // Gasto (soles) por cliente (RUC/DNI + nombre). Azul = el cliente tiene ventas en el año; naranja = sin venta asignada.
 export default function CostosPorClienteChart({ anio, filas, seleccionado, onSeleccionar }: Props) {
-  const barras = useMemo<Barra[]>(() => {
-    const ordenadas = [...filas].filter((f) => f.costo > 0).sort((a, b) => b.costo - a.costo);
-    const visibles: Barra[] = ordenadas.slice(0, MAX_CLIENTES).map((f) => ({ clave: f.clave, etiqueta: f.nombreCliente, nroDocumento: f.nroDocumento, costo: f.costo, conVenta: f.conVenta }));
-    const resto = ordenadas.slice(MAX_CLIENTES);
-    if (resto.length) visibles.push({ clave: "", etiqueta: `Otros (${resto.length})`, nroDocumento: "", costo: resto.reduce((s, f) => s + f.costo, 0), conVenta: null });
-    return visibles;
-  }, [filas]);
+  const barras = useMemo<Barra[]>(() => construirCostosCliente(filas), [filas]);
 
   if (barras.length === 0) return null;
 

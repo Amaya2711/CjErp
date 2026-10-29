@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { construirGastoPorMoneda } from "./ventasGastosDatos";
 import type { CSSProperties } from "react";
 
 type GastoMoneda = { periodo: string; moneda: string; monto: number; montoPen: number };
@@ -21,19 +22,7 @@ const cabecera: CSSProperties = { padding: "8px", textAlign: "right", fontSize: 
 
 // Gasto por moneda: monto original (moneda real del recibo) y su equivalente en soles con los tipos de cambio de la cabecera.
 export default function CostosPorMoneda({ anio, gastos }: Props) {
-  const filas = useMemo<Fila[]>(() => {
-    const mapa = new Map<string, Fila>();
-    for (const g of gastos) {
-      if (!g.periodo.startsWith(String(anio))) continue;
-      const f = mapa.get(g.moneda) ?? { moneda: g.moneda, original: 0, soles: 0, porcentaje: 0 };
-      f.original += g.monto;
-      f.soles += g.montoPen;
-      mapa.set(g.moneda, f);
-    }
-    const lista = Array.from(mapa.values()).sort((a, b) => b.soles - a.soles);
-    const total = lista.reduce((s, f) => s + f.soles, 0);
-    return lista.map((f) => ({ ...f, porcentaje: total > 0 ? (f.soles / total) * 100 : 0 }));
-  }, [anio, gastos]);
+  const filas = useMemo<Fila[]>(() => construirGastoPorMoneda(anio, gastos), [anio, gastos]);
 
   if (filas.length === 0) return null;
 
