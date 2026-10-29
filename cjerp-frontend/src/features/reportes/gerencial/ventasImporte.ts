@@ -16,9 +16,8 @@ export function importeVenta(r: VentasSunatRegistroDto, o: OpcionesImporte): num
 }
 
 export function etiquetaImporte(o: OpcionesImporte): string {
-  if (o.incluirIgv) return "con IGV (afecto + IGV)";
-  if (o.incluirInafecto) return "con inafecto (afecto + inafecto)";
-  return "sin IGV (afecto)";
+  const base = o.incluirInafecto ? "afecto + inafecto" : "afecto";
+  return o.incluirIgv ? `con IGV (${base} + IGV)` : `sin IGV (${base})`;
 }
 
 /** Cliente de la venta: el de la tabla Cliente y, si no hay, la razón social del comprobante. */

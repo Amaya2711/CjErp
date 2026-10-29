@@ -216,10 +216,10 @@ export default function VentasGastosPage() {
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
-  // Importe de ventas: una sola opción a la vez (por defecto sin IGV = solo afecto).
-  const [modoImporte, setModoImporte] = useState<"sin" | "igv" | "inafecto">("sin");
+  // Importe de ventas: sin IGV (afecto + inafecto, por defecto) o con IGV (afecto + inafecto + IGV).
+  const [modoImporte, setModoImporte] = useState<"sin" | "igv">("sin");
   const incluirIgv = modoImporte === "igv";
-  const importe = useMemo(() => ({ incluirIgv: modoImporte === "igv", incluirInafecto: modoImporte === "inafecto" }), [modoImporte]);
+  const importe = useMemo(() => ({ incluirIgv: modoImporte === "igv", incluirInafecto: true }), [modoImporte]);
   const etiqueta = etiquetaImporte(importe);
   // Filtros cruzados de la pestaña Ventas: clic en una barra de mes o de cliente (otro clic la quita).
   const [moneda, setMoneda] = useState(""); // "" = todas; moneda del comprobante (los importes siempre están en soles)
@@ -458,7 +458,6 @@ export default function VentasGastosPage() {
               {([
                 ["sin", "Sin IGV"],
                 ["igv", "Con IGV"],
-                ["inafecto", "Con inafecto"],
               ] as const).map(([valor, texto]) => (
                 <label key={valor} style={{ display: "flex", gap: 5, alignItems: "center", cursor: "pointer" }}>
                   <input type="radio" name="importeVentas" checked={modoImporte === valor} onChange={() => setModoImporte(valor)} /> {texto}
