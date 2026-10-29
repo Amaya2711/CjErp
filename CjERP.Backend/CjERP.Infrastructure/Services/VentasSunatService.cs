@@ -117,6 +117,15 @@ public sealed class VentasSunatService : IVentasSunatService
         return registros.ToList();
     }
 
+    // PV: dbo.Cliente.NroDocumento (ya lo usa la validacion de ventas para asignar IdCliente).
+    public async Task<IReadOnlyList<VentasSunatClienteDto>> ListarClientesAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = _sql.CreateConnection();
+        var clientes = await connection.QueryAsync<VentasSunatClienteDto>(
+            _sql.Create("SELECT IdCliente, NroDocumento, NombreCliente FROM dbo.Cliente", null, CommandType.Text, cancellationToken, commandTimeout: 60));
+        return clientes.ToList();
+    }
+
     public async Task<VentasSunatValidacionResultDto> ValidarAsync(Guid lote, CancellationToken cancellationToken = default)
     {
         await using var connection = _sql.CreateConnection();

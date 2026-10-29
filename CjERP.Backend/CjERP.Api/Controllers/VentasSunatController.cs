@@ -50,6 +50,20 @@ public sealed class VentasSunatController : ControllerBase
         }
     }
 
+    [HttpGet("clientes")]
+    public async Task<IActionResult> ListarClientes(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var data = await _service.ListarClientesAsync(cancellationToken);
+            return Ok(new { success = true, message = "ok", data });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { success = false, message = "Ocurrio un error interno al listar los clientes.", detail = ex.Message });
+        }
+    }
+
     [HttpGet("anio")]
     public async Task<IActionResult> ConsultarAnio([FromQuery] string anio, CancellationToken cancellationToken)
     {

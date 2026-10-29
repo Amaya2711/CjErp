@@ -112,3 +112,14 @@ export async function validarVentasSunat(lote: string): Promise<VentasSunatValid
 export async function consultarAnioVentasSunat(anio: number): Promise<VentasSunatRegistroDto[]> {
   return await httpClient.get<VentasSunatRegistroDto[]>("/reportes/ventassunat/anio", { params: { anio: String(anio) } });
 }
+
+/** Cliente de dbo.Cliente: NroDocumento es el RUC o DNI. */
+export type VentasSunatClienteDto = {
+  idCliente: number;
+  nroDocumento: string | null;
+  nombreCliente: string | null;
+};
+
+export async function listarClientesVentasSunat(): Promise<VentasSunatClienteDto[]> {
+  return await httpClient.get<VentasSunatClienteDto[]>("/reportes/ventassunat/clientes");
+}

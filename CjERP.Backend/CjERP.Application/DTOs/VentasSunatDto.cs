@@ -113,3 +113,11 @@ public sealed class VentasSunatPeriodoDto
     public Guid? Lote { get; set; }
     public string? UsuarioCarga { get; set; }
 }
+
+/// <summary>Cliente de dbo.Cliente (IdCliente, NroDocumento = RUC o DNI, NombreCliente) para agrupar costos por cliente.</summary>
+public sealed class VentasSunatClienteDto
+{
+    public int IdCliente { get; set; }
+    public string? NroDocumento { get; set; }
+    public string? NombreCliente { get; set; }
+}
