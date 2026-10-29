@@ -1809,14 +1809,13 @@ export default function PagosV2Page() {
     };
   }, [activeTab, appliedFilters, refreshTick, resumenConsultaSolicitada, runTrackedRequest]);
 
-  useEffect(() => {
-    if (activeTab === "resumen") {
-      setSumaRespMap({});
-      return;
-    }
+  // La suma por responsable es una consulta pesada (SoloSumaResp escanea Planilla). Depender de
+  // rowsByTab la relanzaba en cada carga/aprobación/cambio de pestaña; solo importa si la bandeja
+  // tiene filas, y tras aprobar se recalcula una vez vía kpiRefreshTick/refreshTick.
+  const bandejaTieneFilas = activeTab !== "resumen" && rowsByTab[activeTab].length > 0;
 
-    const filasTab = rowsByTab[activeTab];
-    if (!filasTab.length) {
+  useEffect(() => {
+    if (!bandejaTieneFilas) {
       setSumaRespMap({});
       return;
     }
@@ -1835,6 +1834,9 @@ export default function PagosV2Page() {
     }
 
     setSumaRespLoading(true);
+    // Espera breve: si el usuario cambia de pestaña o aprueba en seguida, la consulta anterior
+    // ni siquiera sale hacia el servidor.
+    const timer = window.setTimeout(() => {
     consultarPlanillaEstados(buildPagosV1PlanillaRequest(parametros), { timeoutMs: 120000, signal: controller.signal })
       .then((response) => {
         if (controller.signal.aborted) return;
@@ -1866,10 +1868,14 @@ export default function PagosV2Page() {
       .finally(() => {
         if (!controller.signal.aborted) setSumaRespLoading(false);
       });
+    }, 800);
 
-    return () => controller.abort();
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, rowsByTab, appliedFilters.fechaDesde, appliedFilters.fechaHasta]);
+  }, [activeTab, bandejaTieneFilas, appliedFilters.fechaDesde, appliedFilters.fechaHasta, refreshTick, kpiRefreshTick]);
 
   const activeRows = useMemo(
     () => (activeTab === "resumen" ? rowsByTab.resumen : rowsByTab[activeTab]).filter((row) => row.idSolicitante !== 0),
