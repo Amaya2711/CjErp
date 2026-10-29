@@ -90,6 +90,8 @@ const MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Set", "O
 const EMPRESAS_POR_DEFECTO = ["CJ TELECOM"];
 // Años disponibles en el filtro de cabecera.
 const ANIOS = [2024, 2025, 2026, 2027, 2028, 2029, 2030];
+// Los gastos (Planilla) se registran siempre a nombre de CJ TELECOM (IdEmpresa 1): con otra empresa elegida los costos son 0.
+const ID_EMPRESA_GASTOS = "1";
 const SIN_EMPRESA = "Sin empresa";
 const REQUEST_TIMEOUT_MS = 120000;
 const VENTAS_CACHE_MS = 10 * 60 * 1000; // las ventas cargadas cambian poco: se reutilizan al volver a la pantalla
@@ -633,15 +635,21 @@ export default function VentasGastosPage() {
   }, [ventasFiltradas, anio, importe]);
 
   // Gastos para Costos y Rentabilidad: Inafecto usa el SUBTOTAL; Con IGV usa el TOTAL A PAGAR (monto original y en soles).
+  // Empresa dueña de los gastos (EMPRESA_cj con Correlativo 1). Si el catálogo aún no cargó, no se anula nada.
+  const empresaGastos = useMemo(() => catalogo.find((c) => c.id === ID_EMPRESA_GASTOS)?.nombre ?? null, [catalogo]);
+  // Sin empresa elegida = todas (incluye la de los gastos). Con una selección, solo cuenta si incluye a la empresa de los gastos.
+  const gastosAplican = empresaGastos == null || empresasSel.length === 0 || empresasSel.includes(empresaGastos);
+
   // Equivalente en soles con los tipos de cambio de la cabecera: cambiarlos recalcula al instante, sin consultar de nuevo.
   const gastosConv = useMemo<GastoNormalizado[]>(() => {
+    if (!gastosAplican) return [];
     const tc: Record<string, number> = {};
     for (const k of Object.keys(TC_DEFECTO)) tc[k] = numero(tcTexto[k]) || TC_DEFECTO[k as keyof typeof TC_DEFECTO];
     return gastos.map((g) => {
       const factor = g.moneda === "PEN" ? 1 : (tc[g.moneda] ?? 1);
       return { ...g, montoPen: g.monto * factor, totalPagarPen: g.totalPagar * factor };
     });
-  }, [gastos, tcTexto]);
+  }, [gastos, tcTexto, gastosAplican]);
 
   const gastosCosto = useMemo(
     () => (incluirIgv ? gastosConv.map((g) => ({ ...g, monto: g.totalPagar, montoPen: g.totalPagarPen })) : gastosConv),
@@ -851,6 +859,7 @@ export default function VentasGastosPage() {
       let titulo = "Ventas vs Gastos";
       let kpis: { etiqueta: string; valor: string }[] = [];
       const notas: string[] = [];
+      if ((tab === "rentabilidad" || tab === "costos") && !gastosAplican) notas.push(`Los gastos pertenecen a ${empresaGastos}: con la empresa elegida los costos son 0.`);
       const AZUL = "#2878D8";
       const NARANJA = "#EA6B33";
       const VERDE = "#1FA97A";
@@ -1220,6 +1229,12 @@ export default function VentasGastosPage() {
           cargandoExterno={cargandoVentas}
         />
         </div>
+      ) : null}
+
+      {(tab === "rentabilidad" || tab === "costos") && !gastosAplican ? (
+        <AppStatusMessage tone="info">
+          Los gastos pertenecen a {empresaGastos}. Con la empresa elegida ({empresasSel.join(", ")}) los costos son 0.
+        </AppStatusMessage>
       ) : null}
 
       {tab === "rentabilidad" ? (
