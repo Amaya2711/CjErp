@@ -106,7 +106,7 @@ public class LogisticaEquiposController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "[LogisticaEquiposController] Error al {Accion}.", descripcion);
-            return StatusCode(500, new { success = false, message = $"No se pudo {descripcion}." });
+            return StatusCode(500, new { success = false, message = $"No se pudo {descripcion}.", detail = ex.GetBaseException().Message });
         }
     }
 
