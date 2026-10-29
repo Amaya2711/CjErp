@@ -216,10 +216,13 @@ export default function VentasGastosPage() {
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
-  // Importe de ventas: sin IGV (afecto + inafecto, por defecto) o con IGV (afecto + inafecto + IGV).
-  const [modoImporte, setModoImporte] = useState<"sin" | "igv">("sin");
+  // Importe de ventas: con IGV (afecto + inafecto + IGV, por defecto) o inafecto (solo afecto).
+  const [modoImporte, setModoImporte] = useState<"igv" | "inafecto">("igv");
   const incluirIgv = modoImporte === "igv";
-  const importe = useMemo(() => ({ incluirIgv: modoImporte === "igv", incluirInafecto: true }), [modoImporte]);
+  const importe = useMemo(
+    () => ({ incluirIgv: modoImporte === "igv", incluirInafecto: modoImporte === "igv" }),
+    [modoImporte],
+  );
   const etiqueta = etiquetaImporte(importe);
   // Filtros cruzados de la pestaña Ventas: clic en una barra de mes o de cliente (otro clic la quita).
   const [moneda, setMoneda] = useState(""); // "" = todas; moneda del comprobante (los importes siempre están en soles)
@@ -456,8 +459,8 @@ export default function VentasGastosPage() {
             Importe de ventas
             <div style={{ display: "flex", gap: 14, alignItems: "center", height: 34, fontWeight: 500 }}>
               {([
-                ["sin", "Sin IGV"],
                 ["igv", "Con IGV"],
+                ["inafecto", "Inafecto"],
               ] as const).map(([valor, texto]) => (
                 <label key={valor} style={{ display: "flex", gap: 5, alignItems: "center", cursor: "pointer" }}>
                   <input type="radio" name="importeVentas" checked={modoImporte === valor} onChange={() => setModoImporte(valor)} /> {texto}
@@ -554,7 +557,7 @@ export default function VentasGastosPage() {
         <div style={{ display: "grid", gap: 16 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
             <div style={styles.tarjeta}>
-              <div style={styles.kpiLabel}>Ventas {incluirIgv ? "(con IGV)" : "(sin IGV)"}</div>
+              <div style={styles.kpiLabel}>Ventas {incluirIgv ? "(con IGV)" : "(inafecto)"}</div>
               <div style={styles.kpiValor}>S/ {fmt(totales.ventas)}</div>
             </div>
             <div style={styles.tarjeta}>
