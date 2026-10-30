@@ -886,6 +886,56 @@ function mapPlanillaConsultaRowToPagoRow(
   };
 }
 
+// Primer pintado ligero (sp_Planilla_Consulta_Estados_Ligero) + totales financieros diferidos
+// (sp_Planilla_Consulta_Estados_Totales). Desactivable por usuario: localStorage["pagosV2Ligero"] = "0".
+function pagosLigeroHabilitado() {
+  try {
+    return window.localStorage.getItem("pagosV2Ligero") !== "0";
+  } catch {
+    return true;
+  }
+}
+
+const CAMPOS_TOTALES_DIFERIDOS = [
+  "TotalSubtotalPorMoneda",
+  "TotalMontoBckPorMoneda",
+  "TotalMontoVisiblePorMoneda",
+  "TotalPagadoConvertidoSoles",
+  "MonedasPagadoOt",
+  "MonedasImportarOt",
+  "TotalMontoBckSoles",
+  "TotalMontoVisibleSoles",
+  "PagadoOcConsumo",
+  "PagadoOcFila",
+  "TotalPlanillaBase",
+  "TotalPagar",
+] as const;
+
+const TOTALES_DIFERIDOS_LOTE = 3000;
+
+function claveTotalesDiferidos(correlativo: string, idSite: string) {
+  return `${correlativo.trim()}|${idSite.trim()}`;
+}
+
+/** Completa las filas ya pintadas con los totales diferidos; conserva el id de fila (selección) y el resto de columnas. */
+function aplicarTotalesDiferidos(rows: PagoRow[], totales: Map<string, Record<string, unknown>>): PagoRow[] {
+  return rows.map((row) => {
+    const totalesFila = totales.get(claveTotalesDiferidos(row.correlativo, row.siteId));
+    if (!totalesFila || !row.planillaRow) {
+      return row;
+    }
+
+    const raw: Record<string, unknown> = { ...row.planillaRow };
+    for (const campo of CAMPOS_TOTALES_DIFERIDOS) {
+      if (campo in totalesFila) {
+        raw[campo] = totalesFila[campo];
+      }
+    }
+
+    return { ...mapPlanillaConsultaRowToPagoRow(raw, 0, row.estado), id: row.id };
+  });
+}
+
 function matchesMultiTextFilter(rowValue: string, selectedValues: string[]) {
   if (selectedValues.length === 0) {
     return true;
@@ -1299,6 +1349,8 @@ export default function PagosV2Page() {
   const [checkedIds, setCheckedIds] = useState<number[]>([]);
   const [refreshTick, setRefreshTick] = useState(0);
   const [kpiRefreshTick, setKpiRefreshTick] = useState(0);
+  // Los contadores esperan solo a la PRIMERA carga de la grilla; después dependen únicamente de fechas/aprobaciones.
+  const [primeraCargaTerminada, setPrimeraCargaTerminada] = useState(false);
   const [filtersVisible, setFiltersVisible] = useState(true);
   const [isHistorialPopupOpen, setIsHistorialPopupOpen] = useState(false);
   const [historialPopupView, setHistorialPopupView] = useState<"listado" | "resumen">("listado");
@@ -1372,6 +1424,9 @@ export default function PagosV2Page() {
   const historialOtCacheRef = useRef<Map<string, PagoRow[]>>(new Map());
   const historialOcCacheRef = useRef<Map<string, PagoRow[]>>(new Map());
   const tabRowsCacheRef = useRef<Map<string, PagoRow[]>>(new Map());
+  // Si la consulta ligera falla de inmediato en servidor (SP aún no creado), la sesión vuelve a la consulta completa.
+  const ligeroDisponibleRef = useRef(true);
+  const [totalesCargando, setTotalesCargando] = useState(false);
   const preferredDetailTabRef = useRef<DetailTabKey | null>(null);
   const previousCheckedIdsRef = useRef<number[]>([]);
   const loadTimeoutMs = 15000;
@@ -1491,10 +1546,74 @@ export default function PagosV2Page() {
     [pushLoadTrace]
   );
 
+  const cargarTotalesDiferidos = useCallback(
+    async (
+      tab: PagoTabKey,
+      filas: PagoRow[],
+      cacheKey: string,
+      parametros: PlanillaConsultaParametro[],
+      signal: AbortSignal,
+    ) => {
+      const correlativos = Array.from(
+        new Set(
+          filas
+            .map((fila) => Math.trunc(Number(fila.correlativo)))
+            .filter((valor) => Number.isFinite(valor) && valor > 0),
+        ),
+      );
+      if (correlativos.length === 0) {
+        return;
+      }
+
+      const tiposCambio = parametros.filter((parametro) => parametro.nombre.startsWith("TipoCambio"));
+      const totales = new Map<string, Record<string, unknown>>();
+      setTotalesCargando(true);
+
+      try {
+        for (let inicio = 0; inicio < correlativos.length; inicio += TOTALES_DIFERIDOS_LOTE) {
+          const lote = correlativos.slice(inicio, inicio + TOTALES_DIFERIDOS_LOTE);
+          const response = await consultarPlanillaEstados(
+            buildPagosV1PlanillaRequest(
+              [{ nombre: "Correlativos", valor: lote.join(","), tipo: "string" }, ...tiposCambio],
+              "pagos-v2-totales",
+            ),
+            { timeoutMs: 120000, signal },
+          );
+          if (signal.aborted) return;
+
+          for (const item of Array.isArray(response?.rows) ? response.rows : []) {
+            totales.set(
+              claveTotalesDiferidos(getRecordString(item, "Corre", "Correlativo"), getRecordString(item, "IdSite", "idSite")),
+              item,
+            );
+          }
+
+          // Los lotes se aplican a medida que llegan (las columnas se rellenan de forma progresiva).
+          setRowsByTab((previous) => ({ ...previous, [tab]: aplicarTotalesDiferidos(previous[tab], totales) }));
+        }
+
+        if (signal.aborted) return;
+        // Recién con los totales completos la bandeja es reutilizable desde el caché.
+        tabRowsCacheRef.current.set(cacheKey, aplicarTotalesDiferidos(filas, totales));
+      } catch (error) {
+        if (!signal.aborted) {
+          pushLoadTrace(`Totales diferidos no disponibles: ${getHttpErrorMessage(error, "error")}`);
+        }
+      } finally {
+        if (!signal.aborted) {
+          setTotalesCargando(false);
+        }
+      }
+    },
+    [pushLoadTrace],
+  );
+
   // Los indicadores se consultan sin descargar las filas del grid. Cada
   // pestaña solicitará sus registros recién cuando el usuario la active.
   useEffect(() => {
     const controller = new AbortController();
+    // Se piden después de la primera carga de la grilla: lanzarlos a la vez saturaba el servidor.
+    if (!primeraCargaTerminada) return () => controller.abort();
     const loadKpis = async () => {
       // Solo Aprobar se acota por el rango de fechas del filtro; Re-aprobar, Hormiga y
       // Observadas cuentan únicamente por el código de su estado.
@@ -1608,7 +1727,11 @@ export default function PagosV2Page() {
     };
     void loadKpis();
     return () => controller.abort();
-  }, [appliedFilters.fechaDesde, appliedFilters.fechaHasta, refreshTick, kpiRefreshTick]);
+  }, [appliedFilters.fechaDesde, appliedFilters.fechaHasta, refreshTick, kpiRefreshTick, primeraCargaTerminada]);
+
+  useEffect(() => {
+    if (!loadingData) setPrimeraCargaTerminada(true);
+  }, [loadingData]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1624,6 +1747,7 @@ export default function PagosV2Page() {
     }
 
     const load = async (signal: AbortSignal) => {
+      setTotalesCargando(false);
       // Aprobar depende del rango de fechas; Re-aprobar, Hormiga y Observadas solo de su estado;
       // Total Órdenes de todos los filtros de cabecera.
       const cacheKey = (activeTab === "resumen"
@@ -1742,18 +1866,40 @@ export default function PagosV2Page() {
 
         setLoadingStage("Enviando consulta a la API...");
         let rows: Record<string, unknown>[] = [];
+        let usoLigero = false;
 
         {
           // Todas las pestañas (incluida Total Órdenes) consultan el mismo store
           // sp_Planilla_Consulta_Estados: montos en la moneda real del recibo.
           const requestBuildStart = performance.now();
-          const request = buildPagosV1PlanillaRequest(parametros);
+          const ligero = pagosLigeroHabilitado() && ligeroDisponibleRef.current;
+          const request = buildPagosV1PlanillaRequest(parametros, ligero ? "pagos-v2-ligero" : "pagos-v1");
           pushLoadTrace(`Armado de request: ${(performance.now() - requestBuildStart).toFixed(0)} ms`);
-          const response = await runTrackedRequest(
-            buscarEnTotal ? "Búsqueda global en Planilla" : tieneFiltroFechas ? "Consulta por fechas" : "Consulta consolidada",
-            () => consultarPlanillaEstados(request, { timeoutMs: 120000, signal }),
-            signal
-          );
+          const etiquetaConsulta = buscarEnTotal ? "Búsqueda global en Planilla" : tieneFiltroFechas ? "Consulta por fechas" : "Consulta consolidada";
+          const consultaStart = performance.now();
+          let response: Awaited<ReturnType<typeof consultarPlanillaEstados>> | undefined;
+          try {
+            response = await runTrackedRequest(
+              ligero ? `${etiquetaConsulta} (ligera)` : etiquetaConsulta,
+              () => consultarPlanillaEstados(request, { timeoutMs: 120000, signal }),
+              signal
+            );
+            usoLigero = ligero;
+          } catch (error) {
+            // Un fallo inmediato de servidor (p. ej. SP ligero aún no creado en la BD) devuelve a la consulta completa.
+            const status = (error as { response?: { status?: number } })?.response?.status ?? 0;
+            const fallaInmediata = performance.now() - consultaStart < 15000;
+            if (!ligero || signal.aborted || status < 500 || !fallaInmediata) {
+              throw error;
+            }
+            ligeroDisponibleRef.current = false;
+            pushLoadTrace("Consulta ligera no disponible; se usa la consulta completa");
+            response = await runTrackedRequest(
+              etiquetaConsulta,
+              () => consultarPlanillaEstados(buildPagosV1PlanillaRequest(parametros), { timeoutMs: 120000, signal }),
+              signal
+            );
+          }
           rows = Array.isArray(response?.rows) ? response.rows : [];
         }
 
@@ -1788,7 +1934,12 @@ export default function PagosV2Page() {
           ...previous,
           [activeTab]: nextRowsByTab[activeTab],
         }));
-        tabRowsCacheRef.current.set(cacheKey, nextRowsByTab[activeTab]);
+        if (usoLigero && nextRowsByTab[activeTab].length > 0) {
+          // Las columnas financieras (Total Gastado, % Ficticio, % OC...) llegan aparte, solo de las filas mostradas.
+          void cargarTotalesDiferidos(activeTab, nextRowsByTab[activeTab], cacheKey, parametros, signal);
+        } else {
+          tabRowsCacheRef.current.set(cacheKey, nextRowsByTab[activeTab]);
+        }
       } catch (error) {
         if (!cancelled && !controller.signal.aborted) {
           setMessage(getHttpErrorMessage(error, "No se pudieron cargar las Órdenes desde Planilla."));
@@ -1807,7 +1958,7 @@ export default function PagosV2Page() {
       cancelled = true;
       controller.abort();
     };
-  }, [activeTab, appliedFilters, refreshTick, resumenConsultaSolicitada, runTrackedRequest]);
+  }, [activeTab, appliedFilters, refreshTick, resumenConsultaSolicitada, runTrackedRequest, cargarTotalesDiferidos]);
 
   // La suma por responsable es una consulta pesada (SoloSumaResp escanea Planilla). Depender de
   // rowsByTab la relanzaba en cada carga/aprobación/cambio de pestaña; solo importa si la bandeja
@@ -1819,6 +1970,8 @@ export default function PagosV2Page() {
       setSumaRespMap({});
       return;
     }
+    // Espera a que termine la carga de la grilla.
+    if (loadingData) return;
 
     const controller = new AbortController();
     const estados = activeTab === "aprobar" ? "0" : activeTab === "reaprobar" ? "6" : activeTab === "hormiga" ? "10" : "2,7";
@@ -1875,7 +2028,7 @@ export default function PagosV2Page() {
       controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, bandejaTieneFilas, appliedFilters.fechaDesde, appliedFilters.fechaHasta, refreshTick, kpiRefreshTick]);
+  }, [activeTab, bandejaTieneFilas, appliedFilters.fechaDesde, appliedFilters.fechaHasta, refreshTick, kpiRefreshTick, loadingData]);
 
   const activeRows = useMemo(
     () => (activeTab === "resumen" ? rowsByTab.resumen : rowsByTab[activeTab]).filter((row) => row.idSolicitante !== 0),
@@ -4079,6 +4232,11 @@ export default function PagosV2Page() {
             {activeTab === "aprobar" && rangoFechasVisibles ? (
               <div style={styles.rangoFechasLeyenda} role="status">
                 Registros del <strong>{rangoFechasVisibles.desde}</strong> al <strong>{rangoFechasVisibles.hasta}</strong>
+              </div>
+            ) : null}
+            {totalesCargando ? (
+              <div style={styles.rangoFechasLeyenda} role="status">
+                Calculando totales financieros…
               </div>
             ) : null}
           </div>

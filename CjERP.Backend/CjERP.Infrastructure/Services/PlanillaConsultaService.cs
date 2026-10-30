@@ -20,6 +20,10 @@ namespace CjERP.Infrastructure.Services
     {
         private const string StoredProcedureEstados = "dbo.sp_Planilla_Consulta_Estados";
         private const string StoredProcedureEstadosResumen = "dbo.sp_Planilla_Consulta_Estados_Resumen";
+        // pagos_v2: primer pintado sin agregados financieros + totales diferidos solo de los correlativos mostrados.
+        private const string StoredProcedureEstadosLigero = "dbo.sp_Planilla_Consulta_Estados_Ligero";
+        private const string StoredProcedureEstadosTotales = "dbo.sp_Planilla_Consulta_Estados_Totales";
+        private const int MaxCorrelativosTotalesLength = 60000;
         private const string StoredProcedureAprobar = "dbo.sp_Planilla_Consulta_Aprobar";
         private const string StoredProcedureVacaciones = "dbo.sp_EmpleadoOtros_ListarVacaciones";
         private const string StoredProcedureVacacionesTotal = "dbo.sp_EmpleadoOtros_ListarVacacionesTotal";
@@ -194,9 +198,22 @@ namespace CjERP.Infrastructure.Services
                     StoredProcedureEstados,
                     StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(consulta, "pagos-v1", StringComparison.OrdinalIgnoreCase);
-            var serviceStart = isPagosV1Consulta ? Stopwatch.StartNew() : null;
+            // Las consultas de pagos_v2 (ligero / totales) registran los mismos tiempos que pagos-v1.
+            var isTimedConsulta = isPagosV1Consulta
+                || string.Equals(storedProcedureName, StoredProcedureEstadosLigero, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(storedProcedureName, StoredProcedureEstadosTotales, StringComparison.OrdinalIgnoreCase);
+            var serviceStart = isTimedConsulta ? Stopwatch.StartNew() : null;
 
-            if (isPagosV1Consulta)
+            if (string.Equals(storedProcedureName, StoredProcedureEstadosTotales, StringComparison.OrdinalIgnoreCase))
+            {
+                var correlativos = GetStringParameterValue(parametrosFiltrados, "Correlativos");
+                if (string.IsNullOrWhiteSpace(correlativos) || correlativos.Length > MaxCorrelativosTotalesLength)
+                {
+                    throw new InvalidOperationException("Debe indicar los correlativos a totalizar (maximo " + MaxCorrelativosTotalesLength + " caracteres).");
+                }
+            }
+
+            if (isTimedConsulta)
             {
                 var openStart = Stopwatch.StartNew();
                 if (connection.State != ConnectionState.Open)
@@ -229,7 +246,7 @@ namespace CjERP.Infrastructure.Services
             catch
             {
                 queryStart.Stop();
-                if (isPagosV1Consulta)
+                if (isTimedConsulta)
                 {
                     _logger.LogError(
                         "[PagosV1Timing] storeFailedMs={StoreFailedMs}",
@@ -251,8 +268,18 @@ namespace CjERP.Infrastructure.Services
                 await AgregarObservacionAsync(connection, rows, cancellationToken);
             }
 
-            if (isPagosV1Consulta)
+            if (isTimedConsulta)
             {
+                // Consulta lenta: queda en el log como advertencia para seguimiento.
+                if (queryStart.Elapsed.TotalSeconds > 5)
+                {
+                    _logger.LogWarning(
+                        "[PagosV1Timing] CONSULTA LENTA store={Store} storeMs={StoreMs} rows={Rows}",
+                        storedProcedureName,
+                        queryStart.Elapsed.TotalMilliseconds,
+                        rows.Count);
+                }
+
                 _logger.LogInformation(
                     "[PagosV1Timing] storeMs={StoreMs} materializationMs={MaterializationMs} rows={Rows}",
                     queryStart.Elapsed.TotalMilliseconds,
@@ -312,7 +339,7 @@ namespace CjERP.Infrastructure.Services
             var enrichElapsedMs = 0d;
             // sp_Planilla_Consulta_Estados ya entrega Comentario e imgFactura.
             // Evita consultas adicionales a Planilla en la carga inicial de Gastos.
-            if (!limitExceeded && !string.Equals(storedProcedureName, StoredProcedureEstados, StringComparison.OrdinalIgnoreCase))
+            if (!limitExceeded && !IsEstadosFamily(storedProcedureName))
             {
                 var enrichStart = Stopwatch.StartNew();
                 await EnrichRowsWithFacturaDataAsync(connection, pagedRows, cancellationToken);
@@ -407,6 +434,13 @@ namespace CjERP.Infrastructure.Services
             };
         }
 
+        private static bool IsEstadosFamily(string storedProcedureName)
+        {
+            return string.Equals(storedProcedureName, StoredProcedureEstados, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(storedProcedureName, StoredProcedureEstadosLigero, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(storedProcedureName, StoredProcedureEstadosTotales, StringComparison.OrdinalIgnoreCase);
+        }
+
         private static string ResolveStoredProcedureName(string? consulta)
         {
             return (consulta ?? string.Empty).Trim().ToLowerInvariant() switch
@@ -423,6 +457,8 @@ namespace CjERP.Infrastructure.Services
                 "analisis-gastos" => StoredProcedureAnalisisGastos,
                 "planilla-por-ot" => StoredProcedurePlanillaPorOt,
                 "pagos-v1-resumen" => StoredProcedureEstadosResumen,
+                "pagos-v2-ligero" => StoredProcedureEstadosLigero,
+                "pagos-v2-totales" => StoredProcedureEstadosTotales,
                 "clientes-activos" => QueryClientesActivos,
                 "proyectos-activos" => QueryProyectosActivos,
                 _ => StoredProcedureEstados
@@ -1137,6 +1173,15 @@ WHERE Correlativo IN @Correlativos";
                     return parametros.Where(p => !string.IsNullOrWhiteSpace(p.Nombre) && allowed.Contains(p.Nombre.Trim().TrimStart('@')));
                 }
 
+                if (string.Equals(storedProcedureName, StoredProcedureEstadosTotales, StringComparison.OrdinalIgnoreCase))
+                {
+                    // El controller completa IdEmpleado/IdCargo desde el JWT; este SP solo recibe los correlativos
+                    // ya mostrados y los tipos de cambio de la pantalla.
+                    var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    { "Correlativos", "TipoCambioUSD", "TipoCambioEUR", "TipoCambioDOP", "TipoCambioCOP" };
+                    return parametros.Where(p => !string.IsNullOrWhiteSpace(p.Nombre) && allowed.Contains(p.Nombre.Trim().TrimStart('@')));
+                }
+
                 if (string.Equals(storedProcedureName, StoredProcedureEstadosResumen, StringComparison.OrdinalIgnoreCase))
                 {
                     // El controller completa IdEmpleado e IdCargo desde el JWT para
@@ -1181,7 +1226,8 @@ WHERE Correlativo IN @Correlativos";
             string storedProcedureName,
             CancellationToken cancellationToken)
         {
-            if (!string.Equals(storedProcedureName, StoredProcedureEstados, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(storedProcedureName, StoredProcedureEstados, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(storedProcedureName, StoredProcedureEstadosLigero, StringComparison.OrdinalIgnoreCase))
             {
                 return parametros;
             }

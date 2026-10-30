@@ -141,6 +141,8 @@ namespace CjERP.Api.Controllers
                     ? RequiredParametersPlanillaOcResumen
                 : (string.Equals(consulta, "pagos-v1", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(consulta, "pagos-v1-resumen", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(consulta, "pagos-v2-ligero", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(consulta, "pagos-v2-totales", StringComparison.OrdinalIgnoreCase)
                     || consultaSinAlcanceUsuario)
                     ? RequiredParametersPagosV1
                 : RequiredParameters;
