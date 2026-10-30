@@ -13,6 +13,7 @@ import {
   Printer,
   Pencil,
   ReceiptText,
+  RefreshCw,
   RotateCcw,
   ShieldCheck,
   Trash2,
@@ -1317,17 +1318,18 @@ function getStateColor(tab: Exclude<PagoTabKey, "resumen">) {
 }
 
 export default function PagosV2Page() {
-  const [activeTab, setActiveTab] = useState<PagoTabKey>("aprobar");
+  // Total Órdenes es la pestaña por defecto, pero NO consulta nada hasta pulsar Buscar.
+  const [activeTab, setActiveTab] = useState<PagoTabKey>("resumen");
   const [detailTab, setDetailTab] = useState<DetailTabKey>("resumen");
   const [isDetailPanelOpen, setIsDetailPanelOpen] = useState(false);
   // Ampliación del panel "Detalles del registro" como ventana grande (popup).
   const [isDetailExpanded, setIsDetailExpanded] = useState(false);
   const [detailPopupSize, setDetailPopupSize] = useState<"grande" | "mediano" | "compacto">("grande");
-  const [filters, setFilters] = useState<FilterState>(() => getDefaultFilterState(DIAS_RANGO_APROBAR));
+  const [filters, setFilters] = useState<FilterState>(() => getDefaultFilterState(DIAS_RANGO_DEFECTO));
   const [responsableTextoFiltro, setResponsableTextoFiltro] = useState("");
   const [resumenConsultaSolicitada, setResumenConsultaSolicitada] = useState(false);
   const [historialSortConfig, setHistorialSortConfig] = useState<{ column: PagoSortColumn; direction: "asc" | "desc" } | null>(null);
-  const [appliedFilters, setAppliedFilters] = useState<FilterState>(() => getDefaultFilterState(DIAS_RANGO_APROBAR));
+  const [appliedFilters, setAppliedFilters] = useState<FilterState>(() => getDefaultFilterState(DIAS_RANGO_DEFECTO));
   const [rowsByTab, setRowsByTab] = useState<Record<PagoTabKey, PagoRow[]>>({
     aprobar: [],
     reaprobar: [],
@@ -1342,7 +1344,8 @@ export default function PagosV2Page() {
     observadas: 0,
     resumen: 0,
   });
-  const [loadingData, setLoadingData] = useState(true);
+  // Falso al abrir: Total Órdenes (pestaña inicial) no consulta hasta pulsar Buscar.
+  const [loadingData, setLoadingData] = useState(false);
   const [tabPermissions, setTabPermissions] = useState<Record<string, boolean>>({});
   const [, setLoadingStage] = useState<string>("Iniciando carga...");
   const [selectedId, setSelectedId] = useState<number>(0);
@@ -1380,22 +1383,54 @@ export default function PagosV2Page() {
   const [historialOcLoading, setHistorialOcLoading] = useState(false);
   const [conPagadoRows, setConPagadoRows] = useState<PagoRow[]>([]);
 
-  // Cada vez que se activa Aprobar, su rango de fechas vuelve a un mes (30 días desde hoy) y los
-  // campos Fecha inicio / Fecha fin lo muestran. Total Órdenes recupera su rango por defecto y
-  // vuelve a pedir Buscar (no reutiliza una carga anterior).
-  useEffect(() => {
-    if (activeTab === "aprobar") {
-      const rango = getDefaultFilterState(DIAS_RANGO_APROBAR);
-      setMessage("");
-      setFilters((previous) => ({ ...previous, fechaDesde: rango.fechaDesde, fechaHasta: rango.fechaHasta }));
-      setAppliedFilters((previous) => ({ ...previous, fechaDesde: rango.fechaDesde, fechaHasta: rango.fechaHasta }));
-    } else if (activeTab === "resumen") {
-      const rango = getDefaultFilterState(DIAS_RANGO_DEFECTO);
-      setResumenConsultaSolicitada(false);
-      setFilters((previous) => ({ ...previous, fechaDesde: rango.fechaDesde, fechaHasta: rango.fechaHasta }));
-      setAppliedFilters((previous) => ({ ...previous, fechaDesde: rango.fechaDesde, fechaHasta: rango.fechaHasta }));
+  // Cambio de pestaña: cada una conserva sus filtros y lo ya cargado. Solo la primera vez que se entra a Aprobar o
+  // a Total Órdenes se aplica su rango por defecto (30 y 8 días); después se restauran sus filtros guardados, así
+  // la clave de caché coincide y se muestra la información cargada la primera vez, sin consultar de nuevo.
+  const cambiarPestana = (destino: PagoTabKey) => {
+    if (destino === activeTab) return;
+
+    snapshotsPestanaRef.current[activeTab] = { filters, applied: appliedFilters };
+    const guardado = snapshotsPestanaRef.current[destino];
+    let nuevosFiltros = guardado?.filters;
+    let nuevosAplicados = guardado?.applied;
+
+    if (!guardado && (destino === "aprobar" || destino === "resumen")) {
+      const rango = getDefaultFilterState(destino === "aprobar" ? DIAS_RANGO_APROBAR : DIAS_RANGO_DEFECTO);
+      nuevosFiltros = { ...filters, fechaDesde: rango.fechaDesde, fechaHasta: rango.fechaHasta };
+      nuevosAplicados = { ...appliedFilters, fechaDesde: rango.fechaDesde, fechaHasta: rango.fechaHasta };
     }
-  }, [activeTab]);
+
+    setMessage("");
+    if (nuevosFiltros) setFilters(nuevosFiltros);
+    if (nuevosAplicados) setAppliedFilters(nuevosAplicados);
+    setActiveTab(destino);
+  };
+
+  // Descarta lo guardado de UNA pestaña (filas y suma por responsable); las demás conservan lo que ya cargaron.
+  const limpiarCachePestana = (tab: PagoTabKey) => {
+    const prefijo = `${tab}|`;
+    for (const clave of Array.from(tabRowsCacheRef.current.keys())) {
+      if (clave.startsWith(prefijo)) tabRowsCacheRef.current.delete(clave);
+    }
+    for (const clave of Array.from(sumaRespCacheRef.current.keys())) {
+      if (clave.startsWith(prefijo)) sumaRespCacheRef.current.delete(clave);
+    }
+  };
+
+  // Botón Actualizar: descarta lo cargado de la pestaña activa y la consulta de nuevo (y refresca los contadores).
+  const handleActualizarPestana = () => {
+    if (loadingData) return;
+
+    if (activeTab === "resumen" && !resumenConsultaSolicitada) {
+      aplicarFiltrosCabecera();
+      return;
+    }
+
+    limpiarCachePestana(activeTab);
+    setMessage("");
+    setActualizarTabTick((current) => current + 1);
+    setKpiManualTick((current) => current + 1);
+  };
 
   useEffect(() => {
     if (!isDetailExpanded) {
@@ -1422,6 +1457,12 @@ export default function PagosV2Page() {
   const historialOtCacheRef = useRef<Map<string, PagoRow[]>>(new Map());
   const historialOcCacheRef = useRef<Map<string, PagoRow[]>>(new Map());
   const tabRowsCacheRef = useRef<Map<string, PagoRow[]>>(new Map());
+  // Cada pestaña conserva lo que se cargó la primera vez: al volver a ella no se consulta de nuevo. Solo el botón
+  // Actualizar (o una acción que modifica datos) la vuelve a cargar.
+  const sumaRespCacheRef = useRef<Map<string, Record<string, SumaRespTotales>>>(new Map());
+  const snapshotsPestanaRef = useRef<Partial<Record<PagoTabKey, { filters: FilterState; applied: FilterState }>>>({});
+  const [actualizarTabTick, setActualizarTabTick] = useState(0);
+  const [kpiManualTick, setKpiManualTick] = useState(0);
   // Si la consulta ligera falla de inmediato en servidor (SP aún no creado), la sesión vuelve a la consulta completa.
   const ligeroDisponibleRef = useRef(true);
   const [totalesCargando, setTotalesCargando] = useState(false);
@@ -1725,7 +1766,7 @@ export default function PagosV2Page() {
     };
     void loadKpis();
     return () => controller.abort();
-  }, [appliedFilters.fechaDesde, appliedFilters.fechaHasta, refreshTick, kpiRefreshTick]);
+  }, [appliedFilters.fechaDesde, appliedFilters.fechaHasta, refreshTick, kpiRefreshTick, kpiManualTick]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1952,7 +1993,7 @@ export default function PagosV2Page() {
       cancelled = true;
       controller.abort();
     };
-  }, [activeTab, appliedFilters, refreshTick, resumenConsultaSolicitada, runTrackedRequest, cargarTotalesDiferidos]);
+  }, [activeTab, appliedFilters, refreshTick, actualizarTabTick, resumenConsultaSolicitada, runTrackedRequest, cargarTotalesDiferidos]);
 
   // La suma por responsable es una consulta pesada (SoloSumaResp escanea Planilla). Depender de
   // rowsByTab la relanzaba en cada carga/aprobación/cambio de pestaña; solo importa si la bandeja
@@ -1978,6 +2019,15 @@ export default function PagosV2Page() {
       const hasta = formatDateParam(appliedFilters.fechaHasta);
       if (desde) parametros.push({ nombre: "FechaInicio", valor: desde, tipo: "date" });
       if (hasta) parametros.push({ nombre: "FechaFin", valor: hasta, tipo: "date" });
+    }
+
+    // Si esta pestaña ya se calculó, se muestra lo guardado (sin consultar al servidor).
+    const claveSuma = `${activeTab}|${appliedFilters.fechaDesde}|${appliedFilters.fechaHasta}|${refreshTick}|${kpiRefreshTick}`;
+    const sumaGuardada = sumaRespCacheRef.current.get(claveSuma);
+    if (sumaGuardada) {
+      setSumaRespMap(sumaGuardada);
+      setSumaRespLoading(false);
+      return;
     }
 
     setSumaRespLoading(true);
@@ -2007,6 +2057,7 @@ export default function PagosV2Page() {
             cant: getRecordNumber(item, "CantRecibos", "cantRecibos") ?? 0,
           };
         }
+        sumaRespCacheRef.current.set(claveSuma, mapa);
         setSumaRespMap(mapa);
       })
       .catch(() => {
@@ -2022,7 +2073,7 @@ export default function PagosV2Page() {
       controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, bandejaTieneFilas, appliedFilters.fechaDesde, appliedFilters.fechaHasta, refreshTick, kpiRefreshTick, loadingData]);
+  }, [activeTab, bandejaTieneFilas, appliedFilters.fechaDesde, appliedFilters.fechaHasta, refreshTick, kpiRefreshTick, actualizarTabTick, loadingData]);
 
   const activeRows = useMemo(
     () => (activeTab === "resumen" ? rowsByTab.resumen : rowsByTab[activeTab]).filter((row) => row.idSolicitante !== 0),
@@ -2203,7 +2254,7 @@ export default function PagosV2Page() {
       };
       setMessage("");
       setResponsableTextoFiltro("");
-      tabRowsCacheRef.current.clear();
+      limpiarCachePestana("resumen");
       setResumenConsultaSolicitada(true);
       setFilters(filtrosPorCorrelativo);
       setAppliedFilters(filtrosPorCorrelativo);
@@ -2234,7 +2285,7 @@ export default function PagosV2Page() {
       responsable: responsable ? [responsable.codigo] : [],
     };
     setMessage("");
-    tabRowsCacheRef.current.clear();
+    limpiarCachePestana("resumen");
     setResumenConsultaSolicitada(true);
     setFilters(filtrosCabecera);
     setAppliedFilters(filtrosCabecera);
@@ -2253,9 +2304,9 @@ export default function PagosV2Page() {
     }
 
     setMessage("");
-    tabRowsCacheRef.current.clear();
+    limpiarCachePestana("aprobar");
     setAppliedFilters((prev) => ({ ...prev, fechaDesde: filters.fechaDesde, fechaHasta: filters.fechaHasta }));
-    setRefreshTick((tick) => tick + 1);
+    setKpiManualTick((tick) => tick + 1);
   };
 
   const limpiarFiltrosCabecera = () => {
@@ -3209,11 +3260,11 @@ export default function PagosV2Page() {
       return;
     }
     if (label === "Hormiga") {
-      setActiveTab("hormiga");
+      cambiarPestana("hormiga");
       return;
     }
     if (label === "Observadas") {
-      setActiveTab("observadas");
+      cambiarPestana("observadas");
       return;
     }
     if (label === "Rechazar") {
@@ -4241,10 +4292,8 @@ export default function PagosV2Page() {
                     }}
                     onClick={() => {
                       if (disabled) return;
-                      // Total Órdenes puede abarcar muchos registros: su consulta
-                      // siempre se inicia al confirmar filtros con el botón Buscar.
-                      if (key === "resumen") setResumenConsultaSolicitada(false);
-                      setActiveTab(key);
+                      // Total Órdenes solo consulta con Buscar; si ya se consultó, se muestra lo cargado.
+                      cambiarPestana(key);
                     }}
                   >
                     {icon}
@@ -4253,10 +4302,41 @@ export default function PagosV2Page() {
                   </button>
                 );
               })}
+              <button
+                type="button"
+                onClick={handleActualizarPestana}
+                disabled={loadingData}
+                title="Volver a cargar los datos de esta pestaña"
+                style={{
+                  ...styles.cabeceraBotonSecundario,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  height: 28,
+                  marginLeft: "auto",
+                  alignSelf: "center",
+                  flexShrink: 0,
+                  opacity: loadingData ? 0.6 : 1,
+                  cursor: loadingData ? "not-allowed" : "pointer",
+                }}
+              >
+                <RefreshCw size={14} />
+                Actualizar
+              </button>
             </div>
             {activeTab === "aprobar" && rangoFechasVisibles ? (
               <div style={styles.rangoFechasLeyenda} role="status">
                 Registros del <strong>{rangoFechasVisibles.desde}</strong> al <strong>{rangoFechasVisibles.hasta}</strong>
+              </div>
+            ) : null}
+            {loadingData ? (
+              <div style={styles.rangoFechasLeyenda} role="status" aria-live="polite">
+                Cargando información de <strong>{PAGO_TABS.find((tab) => tab.key === activeTab)?.label ?? "la pestaña"}</strong>…
+              </div>
+            ) : null}
+            {!loadingData && activeTab === "resumen" && !resumenConsultaSolicitada ? (
+              <div style={styles.rangoFechasLeyenda} role="status">
+                Elija los filtros y presione <strong>Buscar</strong> para cargar Total Órdenes.
               </div>
             ) : null}
             {totalesCargando ? (

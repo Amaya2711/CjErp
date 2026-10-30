@@ -25,6 +25,11 @@ const ACTIVITY_EVENTS: Array<keyof WindowEventMap> = [
   "click",
 ];
 
+// mousemove y scroll disparan decenas de veces por segundo: cada uno leía y escribía localStorage y decodificaba el
+// JWT. Con la inactividad en minutos basta procesarlos como máximo una vez por segundo; clic y teclado no se limitan.
+const THROTTLED_ACTIVITY_EVENTS = new Set<string>(["mousemove", "scroll"]);
+const ACTIVITY_THROTTLE_MS = 1000;
+
 function getIdleTimeoutMs() {
   const configuredMinutes = Number(import.meta.env.VITE_IDLE_TIMEOUT_MINUTES ?? DEFAULT_IDLE_TIMEOUT_MINUTES);
   const safeMinutes = Number.isFinite(configuredMinutes) && configuredMinutes > 0
@@ -119,7 +124,16 @@ export default function SessionManager() {
       }
     };
 
-    const handleActivity = () => {
+    let lastThrottledActivityAt = 0;
+    const handleActivity = (event: Event) => {
+      if (THROTTLED_ACTIVITY_EVENTS.has(event.type)) {
+        const now = Date.now();
+        if (now - lastThrottledActivityAt < ACTIVITY_THROTTLE_MS) {
+          return;
+        }
+        lastThrottledActivityAt = now;
+      }
+
       if (!getAuthUser()?.token) {
         return;
       }
