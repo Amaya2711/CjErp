@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import {
   AlertTriangle,
@@ -22,7 +22,7 @@ import {
 import AppPage from "../../../components/base/AppPage";
 import {
   buildPlanillaConsultaEstadosRequest,
-  aprobarPlanillaMasiva,
+  aprobarPlanillaMasivaPorBloques,
   consultarPlanillaEstados,
 } from "../../../api/planillaConsultaService";
 import type {
@@ -911,7 +911,7 @@ const CAMPOS_TOTALES_DIFERIDOS = [
   "TotalPagar",
 ] as const;
 
-const TOTALES_DIFERIDOS_LOTE = 3000;
+const TOTALES_DIFERIDOS_LOTE = 7500;
 
 function claveTotalesDiferidos(correlativo: string, idSite: string) {
   return `${correlativo.trim()}|${idSite.trim()}`;
@@ -1349,8 +1349,6 @@ export default function PagosV2Page() {
   const [checkedIds, setCheckedIds] = useState<number[]>([]);
   const [refreshTick, setRefreshTick] = useState(0);
   const [kpiRefreshTick, setKpiRefreshTick] = useState(0);
-  // Los contadores esperan solo a la PRIMERA carga de la grilla; después dependen únicamente de fechas/aprobaciones.
-  const [primeraCargaTerminada, setPrimeraCargaTerminada] = useState(false);
   const [filtersVisible, setFiltersVisible] = useState(true);
   const [isHistorialPopupOpen, setIsHistorialPopupOpen] = useState(false);
   const [historialPopupView, setHistorialPopupView] = useState<"listado" | "resumen">("listado");
@@ -1588,11 +1586,13 @@ export default function PagosV2Page() {
             );
           }
 
-          // Los lotes se aplican a medida que llegan (las columnas se rellenan de forma progresiva).
-          setRowsByTab((previous) => ({ ...previous, [tab]: aplicarTotalesDiferidos(previous[tab], totales) }));
         }
 
         if (signal.aborted) return;
+        // Una sola fusión, en transición: la grilla se reprocesa una vez y sin bloquear clics ni el cierre de sesión.
+        startTransition(() => {
+          setRowsByTab((previous) => ({ ...previous, [tab]: aplicarTotalesDiferidos(previous[tab], totales) }));
+        });
         // Recién con los totales completos la bandeja es reutilizable desde el caché.
         tabRowsCacheRef.current.set(cacheKey, aplicarTotalesDiferidos(filas, totales));
       } catch (error) {
@@ -1612,8 +1612,6 @@ export default function PagosV2Page() {
   // pestaña solicitará sus registros recién cuando el usuario la active.
   useEffect(() => {
     const controller = new AbortController();
-    // Se piden después de la primera carga de la grilla: lanzarlos a la vez saturaba el servidor.
-    if (!primeraCargaTerminada) return () => controller.abort();
     const loadKpis = async () => {
       // Solo Aprobar se acota por el rango de fechas del filtro; Re-aprobar, Hormiga y
       // Observadas cuentan únicamente por el código de su estado.
@@ -1727,11 +1725,7 @@ export default function PagosV2Page() {
     };
     void loadKpis();
     return () => controller.abort();
-  }, [appliedFilters.fechaDesde, appliedFilters.fechaHasta, refreshTick, kpiRefreshTick, primeraCargaTerminada]);
-
-  useEffect(() => {
-    if (!loadingData) setPrimeraCargaTerminada(true);
-  }, [loadingData]);
+  }, [appliedFilters.fechaDesde, appliedFilters.fechaHasta, refreshTick, kpiRefreshTick]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -3407,7 +3401,8 @@ export default function PagosV2Page() {
     }
 
     try {
-      const response = await aprobarPlanillaMasiva(
+      // Envío en bloques de 40: cada bloque es una transacción corta en el SP (sin bloqueos largos sobre Planilla).
+      const resultado = await aprobarPlanillaMasivaPorBloques(
         {
           codEstado,
           observacion: null,
@@ -3418,33 +3413,42 @@ export default function PagosV2Page() {
             tipoMoneda: Math.trunc(Number(row.tipoMoneda ?? 0)),
           })),
         },
-        { timeoutMs: 120000 }
+        {
+          timeoutMs: 120000,
+          onProgreso: (actual, total) => {
+            if (total > 1) setMessage(`Procesando bloque ${actual} de ${total}…`);
+          },
+        }
       );
 
-      const resumen = response?.resumen;
-      const mensajes: string[] = [];
-
-      if (resumen?.procesados != null) {
-        mensajes.push(`${resumen.procesados} de ${selectedRows.length} registro(s) procesado(s).`);
+      const { detalle, resumen, error: errorBloque } = resultado;
+      if (errorBloque && detalle.length === 0) {
+        setMessage(getHttpErrorMessage(errorBloque, "No se pudo completar la aprobación."));
+        return;
       }
 
-      if (resumen?.enviadosSegundaAprobacion && resumen.enviadosSegundaAprobacion > 0) {
+      const mensajes: string[] = [];
+      mensajes.push(`${resumen.procesados} de ${selectedRows.length} registro(s) procesado(s).`);
+
+      if (resumen.enviadosSegundaAprobacion > 0) {
         mensajes.push(`${resumen.enviadosSegundaAprobacion} registro(s) fueron enviados a segunda aprobación.`);
       }
 
-      if (resumen?.noProcesados && resumen.noProcesados > 0) {
-        mensajes.push(`${resumen.noProcesados} registro(s) no pudieron ser procesados.${resumirNoProcesados(response?.detalle ?? [])}`);
+      if (resumen.noProcesados > 0) {
+        mensajes.push(`${resumen.noProcesados} registro(s) no pudieron ser procesados.${resumirNoProcesados(detalle)}`);
       }
 
-      if (mensajes.length === 0) {
-        mensajes.push("Operación realizada correctamente.");
+      if (errorBloque) {
+        mensajes.push(
+          `Se detuvo en el bloque ${resultado.bloquesCompletados + 1} de ${resultado.bloquesTotales}: ${getHttpErrorMessage(errorBloque, "error de servidor")}. Los bloques anteriores sí quedaron aplicados.`
+        );
       }
 
       resetDetailStateAfterMutation();
       setCheckedIds([]);
       setSelectedId(0);
       setMessage(mensajes.join(" "));
-      refreshAfterApproval(response?.detalle ?? [], resumen?.procesados);
+      refreshAfterApproval(detalle, resumen.procesados);
     } catch (error) {
       setMessage(getHttpErrorMessage(error, "No se pudo completar la aprobación."));
     }
@@ -3473,8 +3477,8 @@ export default function PagosV2Page() {
     try {
       setRechazoModal((prev) => (prev ? { ...prev, submitting: true, error: null } : prev));
 
-      // Una sola llamada masiva (como Observar): un POST por registro superaba el rate limit (429).
-      await aprobarPlanillaMasiva(
+      // Llamadas masivas por bloques de 40 (un POST por registro superaba el rate limit, 429).
+      const resultadoRechazo = await aprobarPlanillaMasivaPorBloques(
         {
           codEstado: 3,
           observacion,
@@ -3487,6 +3491,15 @@ export default function PagosV2Page() {
         },
         { timeoutMs: 120000 }
       );
+      if (resultadoRechazo.error) {
+        if (resultadoRechazo.bloquesCompletados > 0) {
+          reloadAfterMutation();
+          throw new Error(
+            `Se rechazaron ${resultadoRechazo.resumen.procesados} registro(s) y el proceso se detuvo en el bloque ${resultadoRechazo.bloquesCompletados + 1} de ${resultadoRechazo.bloquesTotales}: ${getHttpErrorMessage(resultadoRechazo.error, "error de servidor")}. Cierre la ventana y revise la bandeja.`
+          );
+        }
+        throw resultadoRechazo.error;
+      }
 
       const total = rechazoModal.rows.length;
       resetDetailStateAfterMutation();
@@ -3539,7 +3552,7 @@ export default function PagosV2Page() {
     try {
       setObservacionModal((prev) => (prev ? { ...prev, submitting: true, error: null } : prev));
 
-      const response = await aprobarPlanillaMasiva(
+      const resultadoObservacion = await aprobarPlanillaMasivaPorBloques(
         {
           codEstado: 2,
           observacion,
@@ -3552,6 +3565,15 @@ export default function PagosV2Page() {
         },
         { timeoutMs: 120000 }
       );
+      if (resultadoObservacion.error) {
+        if (resultadoObservacion.bloquesCompletados > 0) {
+          reloadAfterMutation();
+          throw new Error(
+            `Se observaron ${resultadoObservacion.resumen.procesados} registro(s) y el proceso se detuvo en el bloque ${resultadoObservacion.bloquesCompletados + 1} de ${resultadoObservacion.bloquesTotales}: ${getHttpErrorMessage(resultadoObservacion.error, "error de servidor")}. Cierre la ventana y revise la bandeja.`
+          );
+        }
+        throw resultadoObservacion.error;
+      }
 
       const total = observacionModal.rows.length;
       resetDetailStateAfterMutation();
@@ -3874,7 +3896,7 @@ export default function PagosV2Page() {
     </div>
   );
 
-  const mainColumns: GridColumn<PagoRow>[] = [
+  const mainColumns = useMemo<GridColumn<PagoRow>[]>(() => [
     {
       dataField: "correlativo",
       caption: "Correlativo",
@@ -4167,7 +4189,10 @@ export default function PagosV2Page() {
         );
       },
     },
-  ];
+    // Columnas estables: cualquier setState de la página (contadores, suma por responsable, totales) ya no
+    // obliga a DataGridPro a filtrar/ordenar/agrupar de nuevo todas las filas. Solo cambian con estos valores.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [sumaRespMap, sumaRespLoading, showEstadoPlanilla, showTotalSitio, getEstadoPlanillaNombre, tipoCambioUsd, tipoCambioEur, tipoCambioDop, tipoCambioCop]);
 
   return (
     <AppPage title="Pagos" fillHeight style={{ padding: "4px 8px 0" }}>
