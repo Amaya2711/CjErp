@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Data;
 using System.Globalization;
 using System.Text.Json;
@@ -308,112 +309,138 @@ namespace CjERP.Infrastructure.Services
             };
 
             const string selectSql = """
-                SELECT TOP (1)
+                SELECT
+                    Correlativo,
                     CONVERT(VARCHAR(10), Estado) AS Estado,
                     Serie,
                     CONVERT(VARCHAR(30), FecEmision, 23) AS FecEmision,
                     CONVERT(VARCHAR(30), FechaPagoCre, 23) AS FechaPagoCre,
                     ImgFactura
                 FROM dbo.Planilla
-                WHERE Correlativo = @Correlativo;
+                WHERE Correlativo IN @Correlativos;
                 """;
 
-            await using var connection = _sqlCommandFactory.CreateConnection();
-            var auditoriaPendiente = new List<AuditoriaCambioDto>();
+            // Una sola consulta para todos los registros (antes eran 2 viajes a SQL por registro).
+            async Task<Dictionary<int, PlanillaMasivoAuditRow>> LeerFilasAsync(IReadOnlyCollection<int> ids, CancellationToken ct)
+            {
+                await using var lectura = _sqlCommandFactory.CreateConnection();
+                var filas = await lectura.QueryAsync<PlanillaMasivoAuditRow>(
+                    _sqlCommandFactory.Create(selectSql, new { Correlativos = ids }, cancellationToken: ct));
+                return filas.GroupBy(f => f.Correlativo).ToDictionary(g => g.Key, g => g.First());
+            }
+
+            var anteriores = await LeerFilasAsync(correlativos, cancellationToken);
+            var validos = new List<int>();
+            foreach (var correlativo in correlativos)
+            {
+                if (!anteriores.TryGetValue(correlativo, out var fila))
+                {
+                    respuesta.Errores.Add(new PlanillaActualizarMasivoErrorDto { Correlativo = correlativo, Mensaje = "No se encontro el registro." });
+                }
+                else if (fila.Estado == "3")
+                {
+                    respuesta.Errores.Add(new PlanillaActualizarMasivoErrorDto { Correlativo = correlativo, Mensaje = "El registro esta rechazado (estado 3) y no se puede modificar." });
+                }
+                else
+                {
+                    validos.Add(correlativo);
+                }
+            }
+
+            var actualizados = new ConcurrentBag<int>();
+            var errores = new ConcurrentBag<PlanillaActualizarMasivoErrorDto>();
 
             try
             {
-            foreach (var correlativo in correlativos)
+                // sp_Planilla_Actualizar tarda ~1.3 s por registro (cada uno es una fila distinta): se ejecutan varios a la vez.
+                await Parallel.ForEachAsync(
+                    validos,
+                    new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellationToken },
+                    async (correlativo, ct) =>
+                    {
+                        try
+                        {
+                            var parameters = new DynamicParameters();
+                            parameters.Add("@Correlativo", correlativo, DbType.Int32);
+                            if (serie is not null) parameters.Add("@Serie", serie, DbType.String);
+                            if (fecEmision is not null) parameters.Add("@FecEmision", fecEmision.Value.Date, DbType.Date);
+                            if (fechaPagoCre is not null) parameters.Add("@FechaVencimiento", fechaPagoCre.Value.Date, DbType.Date);
+                            if (facturaPath is not null) parameters.Add("@RutaFactura", facturaPath, DbType.String);
+
+                            var cronometro = System.Diagnostics.Stopwatch.StartNew();
+                            await using var connection = _sqlCommandFactory.CreateConnection();
+                            await connection.ExecuteAsync(
+                                _sqlCommandFactory.Create(
+                                    UpdateStoredProcedureName,
+                                    parameters,
+                                    CommandType.StoredProcedure,
+                                    ct,
+                                    commandTimeout: 120));
+
+                            _logger.LogInformation(
+                                "[PlanillaService] Actualizacion masiva correlativo {Correlativo}: sp_Planilla_Actualizar {MsSp} ms",
+                                correlativo, cronometro.ElapsedMilliseconds);
+                            actualizados.Add(correlativo);
+                        }
+                        catch (Exception ex) when (ex is SqlException or InvalidOperationException)
+                        {
+                            _logger.LogWarning(ex, "[PlanillaService] Actualizacion masiva: fallo el correlativo {Correlativo} (lote {IdLote})", correlativo, idLote);
+                            errores.Add(new PlanillaActualizarMasivoErrorDto { Correlativo = correlativo, Mensaje = ex.Message });
+                        }
+                    });
+            }
+            finally
             {
-                try
+                // Se audita aunque la ejecucion se interrumpa, para no perder lo ya actualizado.
+                var ok = actualizados.OrderBy(x => x).ToList();
+                if (ok.Count > 0)
                 {
-                    var anterior = await connection.QuerySingleOrDefaultAsync<PlanillaMasivoAuditRow>(
-                        _sqlCommandFactory.Create(selectSql, new { Correlativo = correlativo }, cancellationToken: cancellationToken));
-
-                    if (anterior is null)
-                    {
-                        throw new InvalidOperationException("No se encontro el registro.");
-                    }
-
-                    if (anterior.Estado == "3")
-                    {
-                        throw new InvalidOperationException("El registro esta rechazado (estado 3) y no se puede modificar.");
-                    }
-
-                    var parameters = new DynamicParameters();
-                    parameters.Add("@Correlativo", correlativo, DbType.Int32);
-                    if (serie is not null) parameters.Add("@Serie", serie, DbType.String);
-                    if (fecEmision is not null) parameters.Add("@FecEmision", fecEmision.Value.Date, DbType.Date);
-                    if (fechaPagoCre is not null) parameters.Add("@FechaVencimiento", fechaPagoCre.Value.Date, DbType.Date);
-                    if (facturaPath is not null) parameters.Add("@RutaFactura", facturaPath, DbType.String);
-
-                    var cronometro = System.Diagnostics.Stopwatch.StartNew();
-                    await connection.ExecuteAsync(
-                        _sqlCommandFactory.Create(
-                            UpdateStoredProcedureName,
-                            parameters,
-                            CommandType.StoredProcedure,
-                            cancellationToken,
-                            commandTimeout: 120));
-                    var msSp = cronometro.ElapsedMilliseconds;
-
-                    var actual = await connection.QuerySingleOrDefaultAsync<PlanillaMasivoAuditRow>(
-                        _sqlCommandFactory.Create(selectSql, new { Correlativo = correlativo }, cancellationToken: cancellationToken));
-
+                    var actuales = await LeerFilasAsync(ok, CancellationToken.None);
                     var observacion = $"Actualizacion masiva (lote {idLote}, {correlativos.Count} registros)"
                         + (string.IsNullOrWhiteSpace(request.Motivo) ? "." : $": {request.Motivo.Trim()}");
                     var cambios = new List<AuditoriaCambioDto>();
 
-                    void AddCambio(string campo, string? antes, string? despues)
+                    foreach (var correlativo in ok)
                     {
-                        if (string.Equals(antes?.Trim() ?? string.Empty, despues?.Trim() ?? string.Empty, StringComparison.Ordinal))
+                        var anterior = anteriores[correlativo];
+                        actuales.TryGetValue(correlativo, out var actual);
+
+                        void AddCambio(string campo, string? antes, string? despues)
                         {
-                            return;
+                            if (string.Equals(antes?.Trim() ?? string.Empty, despues?.Trim() ?? string.Empty, StringComparison.Ordinal))
+                            {
+                                return;
+                            }
+
+                            cambios.Add(new AuditoriaCambioDto
+                            {
+                                Modulo = "Planilla",
+                                Entidad = "Planilla",
+                                IdRegistro = correlativo.ToString(CultureInfo.InvariantCulture),
+                                Accion = "UPDATE",
+                                Seccion = "Gastos",
+                                Campo = campo,
+                                ValorAnterior = antes,
+                                ValorNuevo = despues,
+                                UsuarioAccion = usuario,
+                                Observacion = observacion
+                            });
                         }
 
-                        cambios.Add(new AuditoriaCambioDto
-                        {
-                            Modulo = "Planilla",
-                            Entidad = "Planilla",
-                            IdRegistro = correlativo.ToString(CultureInfo.InvariantCulture),
-                            Accion = "UPDATE",
-                            Seccion = "Gastos",
-                            Campo = campo,
-                            ValorAnterior = antes,
-                            ValorNuevo = despues,
-                            UsuarioAccion = usuario,
-                            Observacion = observacion
-                        });
+                        if (serie is not null) AddCambio("Serie", anterior.Serie, actual?.Serie);
+                        if (fecEmision is not null) AddCambio("FecEmision", anterior.FecEmision, actual?.FecEmision);
+                        if (fechaPagoCre is not null) AddCambio("FechaPagoCre", anterior.FechaPagoCre, actual?.FechaPagoCre);
+                        if (facturaPath is not null) AddCambio("ImgFactura", anterior.ImgFactura, actual?.ImgFactura);
                     }
 
-                    if (serie is not null) AddCambio("Serie", anterior.Serie, actual?.Serie);
-                    if (fecEmision is not null) AddCambio("FecEmision", anterior.FecEmision, actual?.FecEmision);
-                    if (fechaPagoCre is not null) AddCambio("FechaPagoCre", anterior.FechaPagoCre, actual?.FechaPagoCre);
-                    if (facturaPath is not null) AddCambio("ImgFactura", anterior.ImgFactura, actual?.ImgFactura);
-
-                    // La auditoria se acumula y se envia una sola vez al final (abrir conexion + verificar el SP por registro era lo mas lento).
-                    auditoriaPendiente.AddRange(cambios);
-
-                    _logger.LogInformation(
-                        "[PlanillaService] Actualizacion masiva correlativo {Correlativo}: sp_Planilla_Actualizar {MsSp} ms, total registro {MsTotal} ms",
-                        correlativo, msSp, cronometro.ElapsedMilliseconds);
-
-                    respuesta.Actualizados++;
+                    if (cambios.Count > 0)
+                    {
+                        await _auditoriaCambiosService.RegistrarLoteAsync(cambios, CancellationToken.None);
+                    }
                 }
-                catch (Exception ex) when (ex is SqlException or InvalidOperationException)
-                {
-                    _logger.LogWarning(ex, "[PlanillaService] Actualizacion masiva: fallo el correlativo {Correlativo} (lote {IdLote})", correlativo, idLote);
-                    respuesta.Errores.Add(new PlanillaActualizarMasivoErrorDto { Correlativo = correlativo, Mensaje = ex.Message });
-                }
-            }
-            }
-            finally
-            {
-                // Se registra aunque la ejecucion se interrumpa, para no perder la auditoria de lo ya actualizado.
-                if (auditoriaPendiente.Count > 0)
-                {
-                    await _auditoriaCambiosService.RegistrarLoteAsync(auditoriaPendiente, CancellationToken.None);
-                }
+
+                respuesta.Actualizados = ok.Count;
+                respuesta.Errores.AddRange(errores.OrderBy(e => e.Correlativo));
             }
 
             _logger.LogInformation(
@@ -1081,6 +1108,7 @@ namespace CjERP.Infrastructure.Services
 
         private sealed class PlanillaMasivoAuditRow
         {
+            public int Correlativo { get; set; }
             public string? Estado { get; set; }
             public string? Serie { get; set; }
             public string? FecEmision { get; set; }
