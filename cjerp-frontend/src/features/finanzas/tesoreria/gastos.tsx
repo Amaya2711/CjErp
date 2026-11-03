@@ -1532,6 +1532,8 @@ export default function GastosPage({
   const [masivoFactura, setMasivoFactura] = useState<{ nombre: string; path: string } | null>(null);
   const [masivoSubiendo, setMasivoSubiendo] = useState(false);
   const [masivoGuardando, setMasivoGuardando] = useState(false);
+  const [masivoProgreso, setMasivoProgreso] = useState<{ hechos: number; total: number; inicio: number } | null>(null);
+  const [masivoSegundos, setMasivoSegundos] = useState(0);
   const [masivoError, setMasivoError] = useState<string | null>(null);
   const [masivoResultado, setMasivoResultado] = useState<ActualizacionMasivaResponse | null>(null);
 const [busqueda, setBusqueda] = useState("");
@@ -4060,6 +4062,7 @@ const [busqueda, setBusqueda] = useState("");
       // El servidor actualiza registro por registro (varias consultas cada uno) y en producción 30 s no alcanzan:
       // se envía en bloques con espera ampliada y se acumula el resultado.
       const correlativos = masivoObjetivo.map((row) => Number(row.gasto.id)).filter((id) => id > 0);
+      setMasivoProgreso({ hechos: 0, total: correlativos.length, inicio: Date.now() });
       const resultado: ActualizacionMasivaResponse = { idLote: "", solicitados: 0, actualizados: 0, errores: [] };
       const lotes: string[] = [];
       for (let i = 0; i < correlativos.length; i += BLOQUE_ACTUALIZACION_MASIVA) {
@@ -4080,6 +4083,7 @@ const [busqueda, setBusqueda] = useState("");
         resultado.errores.push(...parcial.errores);
         lotes.push(parcial.idLote);
         resultado.idLote = lotes.join(", ");
+        setMasivoProgreso((prev) => (prev ? { ...prev, hechos: Math.min(prev.total, i + BLOQUE_ACTUALIZACION_MASIVA) } : prev));
       }
       setMasivoResultado(resultado);
       // Refresca la grilla con los mismos filtros para ver los valores nuevos.
@@ -4088,8 +4092,18 @@ const [busqueda, setBusqueda] = useState("");
       setMasivoError(getHttpErrorMessage(error, "No se pudo completar la actualización masiva."));
     } finally {
       setMasivoGuardando(false);
+      setMasivoProgreso(null);
     }
   };
+
+  useEffect(() => {
+    if (!masivoGuardando || !masivoProgreso) return;
+    const inicio = masivoProgreso.inicio;
+    const timer = window.setInterval(() => setMasivoSegundos(Math.floor((Date.now() - inicio) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+    // Solo depende de que haya una ejecución en curso (el inicio no cambia durante ella).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [masivoGuardando]);
 
   return (
     <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 5 }}>
@@ -6860,6 +6874,26 @@ const [busqueda, setBusqueda] = useState("");
                   </div>
                 </div>
                 {masivoError && <div style={{ marginTop: 10, color: "#B91C1C", fontSize: 12, fontWeight: 600 }}>{masivoError}</div>}
+                {masivoGuardando && masivoProgreso && (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#17143A" }}>
+                      Procesando {masivoProgreso.hechos} de {masivoProgreso.total} registros · {masivoSegundos} s
+                    </div>
+                    <div style={{ height: 8, background: "#E5E7EB", borderRadius: 999, marginTop: 6, overflow: "hidden" }}>
+                      <div
+                        style={{
+                          height: "100%",
+                          width: `${masivoProgreso.total ? Math.round((masivoProgreso.hechos / masivoProgreso.total) * 100) : 0}%`,
+                          background: "#16A34A",
+                          transition: "width 0.3s",
+                        }}
+                      />
+                    </div>
+                    <div style={{ fontSize: 11, color: "#6B7280", marginTop: 4 }}>
+                      No cierre ni recargue la página hasta que termine.
+                    </div>
+                  </div>
+                )}
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
                   <button
                     style={{ border: "1px solid #D1D5DB", background: "#FFFFFF", color: "#17143A", padding: "10px 16px", borderRadius: 10, fontWeight: 600, cursor: masivoGuardando ? "not-allowed" : "pointer" }}

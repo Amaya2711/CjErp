@@ -562,6 +562,7 @@ export default function VacacionesPage() {
     const id = Math.trunc(Number(getAuthUser()?.codEmp ?? 0));
     return Number.isFinite(id) && id > 0 ? id : null;
   });
+  const [accesoTotal] = useState(() => hasFullPageActionAccess(getAuthUser()));
   const [permisosUsuario, setPermisosUsuario] = useState<Record<string, boolean>>({});
   const [activeTab, setActiveTab] = useState<EstadoTab>(() => (accesoRestringido ? "movimientos" : "97"));
   const [searchEmployee, setSearchEmployee] = useState("");
@@ -672,7 +673,7 @@ export default function VacacionesPage() {
   }, [companyChanged, selectedEmployeeSaldo]);
 
   useEffect(() => {
-    if (!accesoRestringido) {
+    if (accesoTotal) {
       return;
     }
 
@@ -719,7 +720,7 @@ export default function VacacionesPage() {
     return () => {
       cancelled = true;
     };
-  }, [accesoRestringido]);
+  }, [accesoTotal]);
 
   const puedeAccion = (clave: string) => !accesoRestringido || Boolean(permisosUsuario[clave]);
   const puedeAprobar = puedeAccion("button.aprobar");
@@ -728,6 +729,10 @@ export default function VacacionesPage() {
   const puedeActualizar = puedeAccion("button.actualizar");
   const tabsVisibles = ESTADO_TABS.filter((tab) => {
     const clave = TAB_ACTION_KEYS[tab.key];
+    if (tab.key === "98" || tab.key === "99") {
+      // 2da y 3ra validación: desactivadas por defecto; requieren acceso total o permiso asignado al usuario.
+      return accesoTotal || Boolean(clave && permisosUsuario[clave]);
+    }
     return clave === null || puedeAccion(clave);
   });
 

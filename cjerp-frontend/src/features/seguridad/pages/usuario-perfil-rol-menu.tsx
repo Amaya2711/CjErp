@@ -20,6 +20,7 @@ import {
   usuariosService,
   type UsuarioDto,
 } from "../services/usuariosService";
+import UsuariosPerfilRolTab from "../components/UsuariosPerfilRolTab";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 
 type RolOption = {
@@ -210,6 +211,7 @@ function MenuTreeItem({
 }
 
 export default function SeguridadPerfilRolMenu() {
+  const [tab, setTab] = useState<"asignacion" | "usuarios">("asignacion");
   const [cargando, setCargando] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [creandoNodo, setCreandoNodo] = useState(false);
@@ -326,18 +328,22 @@ export default function SeguridadPerfilRolMenu() {
     }
   };
 
-  const cargarRolesPorPerfil = async (idPerfil: number) => {
+  const cargarRolesPorPerfil = async (_idPerfil: number) => {
     try {
       setCargando(true);
       setError("");
       setMensaje("");
 
-      const rolesData = await rolesService.listarRolesPorPerfil(idPerfil);
+      // Se listan todos los roles (sp_SegRol_Listar); si la combinación perfil-rol
+      // no existe, el backend la crea al guardar.
+      const todosRoles = await rolesService.listarRoles();
 
-      const rolesMapped: RolOption[] = rolesData.map((r: RolDto) => ({
-        id: r.idRol,
-        nombre: r.nombreRol,
-      }));
+      const rolesMapped: RolOption[] = todosRoles
+        .filter((r: RolDto) => r.esActivo !== false && r.estado !== false)
+        .map((r: RolDto) => ({
+          id: r.idRol,
+          nombre: r.nombreRol,
+        }));
 
       setRoles(rolesMapped);
       setRolId("");
@@ -576,8 +582,30 @@ export default function SeguridadPerfilRolMenu() {
 
   const menuVisual = useMemo(() => cloneDeep(menuBase), [menuBase]);
 
+  const tabButton = (id: "asignacion" | "usuarios", label: string) => (
+    <button
+      type="button"
+      onClick={() => setTab(id)}
+      style={{
+        ...styles.secondaryBtn,
+        background: tab === id ? "#17143A" : "#F8FAFC",
+        color: tab === id ? "#FFFFFF" : "#334155",
+      }}
+    >
+      {label}
+    </button>
+  );
+
   return (
     <div style={styles.page}>
+      <div style={{ display: "flex", gap: 8 }}>
+        {tabButton("asignacion", "Asignación de menú")}
+        {tabButton("usuarios", "Usuarios, perfil y rol")}
+      </div>
+
+      {tab === "usuarios" ? <UsuariosPerfilRolTab /> : null}
+
+      <div style={{ ...styles.page, padding: 0, flex: 1, display: tab === "asignacion" ? "flex" : "none" }}>
       {mostrarCrearNodo && (
         <div style={styles.card}>
           <div style={styles.treeHeader}>
@@ -737,6 +765,7 @@ export default function SeguridadPerfilRolMenu() {
           </div>
         )}
       </AppCard>
+      </div>
     </div>
   );
 }

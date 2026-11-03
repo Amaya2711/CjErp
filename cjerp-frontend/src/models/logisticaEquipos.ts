@@ -187,6 +187,11 @@ export type SolicitudDisponible = {
   utilizado: number;
   idEstado?: number | null;
   nomEstado?: string | null;
+  region?: string | null;
+  idSolicitud?: string | null;
+  nroGuia?: string | null;
+  cantBloq: number;
+  nroEnvio?: number | null;
 };
 
 /** Material consumible (cod. 30) con stock disponible, sin línea de origen. */

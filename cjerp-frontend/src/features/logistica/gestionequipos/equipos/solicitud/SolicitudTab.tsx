@@ -320,19 +320,11 @@ export default function SolicitudTab() {
   /** Listado como el sistema antiguo: una fila por línea; Saldo = stock disponible, Utilizado = stock − disponible. */
   const columnasListado = useMemo<GridColumn<FilaDisponible>[]>(
     () => [
-      {
-        dataField: "cantSol",
-        caption: "Cant. a solicitar",
-        dataType: "number",
-        width: 120,
-        fixed: true,
-        allowEditing: true,
-        cellStyle: (v) => (Number(v) > 0 ? { fontWeight: 700, color: "#1F6F8B" } : { color: "#94A3B8" }),
-      },
       { dataField: "pedidoSap", caption: "Pedido SAP", width: 120 },
       { dataField: "idSite", caption: "Site", width: 90 },
       { dataField: "nombreSite", caption: "Desc. site", width: 180 },
-      { dataField: "codPap", caption: "Código", width: 110 },
+      { dataField: "region", caption: "Region", width: 90 },
+      { dataField: "codPap", caption: "Codigo", width: 110 },
       { dataField: "nombreMaterial", caption: "Material", width: 300 },
       { dataField: "unidadMedida", caption: "UM", width: 60 },
       { dataField: "cantSap", caption: "Cant. pedido", dataType: "number", width: 110 },
@@ -344,17 +336,27 @@ export default function SolicitudTab() {
         width: 100,
         cellStyle: (v) => (Number(v) < 0 ? { background: "#FED7AA" } : Number(v) === 0 ? { background: "#F0E68C" } : {}),
       },
-      { dataField: "saldo", caption: "Saldo línea", dataType: "number", width: 100 },
+      {
+        dataField: "cantSol",
+        caption: "Cant. solicitada",
+        dataType: "number",
+        width: 120,
+        allowEditing: true,
+        cellStyle: (v) => (Number(v) > 0 ? { fontWeight: 700, color: "#1F6F8B" } : { color: "#94A3B8" }),
+      },
+      { dataField: "cantBloq", caption: "Cant. bloq.", dataType: "number", width: 100 },
+      { dataField: "nroGuia", caption: "NroGuia", width: 110 },
+      { dataField: "nombreCliente", caption: "Cliente", width: 140 },
+      { dataField: "nombreProyecto", caption: "Proyecto", width: 160 },
+      { dataField: "tipoTrabajo", caption: "Trabajo", width: 110 },
       {
         dataField: "nomEstado",
         caption: "Est. val.",
         width: 150,
         cellStyle: (_v, fila) => (fila?.idEstado !== 2 ? { color: "#B91C1C", fontWeight: 600 } : {}),
       },
-      { dataField: "serie", caption: "Serie", width: 140 },
-      { dataField: "nombreCliente", caption: "Cliente", width: 140 },
-      { dataField: "nombreProyecto", caption: "Proyecto", width: 160 },
-      { dataField: "tipoTrabajo", caption: "Trabajo", width: 110 },
+      { dataField: "idSolicitud", caption: "IdSolicitud", width: 120 },
+      { dataField: "nroEnvio", caption: "NroEnvio", dataType: "number", width: 90 },
     ],
     [],
   );
@@ -476,7 +478,7 @@ export default function SolicitudTab() {
                 height="fill"
                 loading={cargando}
                 noDataText="El site no tiene equipos en estado 2 o 3."
-                stateStoringKey="logistica-solicitud-listado-v2"
+                stateStoringKey="logistica-solicitud-listado-v4"
                 editing={{
                   allowUpdating: true,
                   onCellChanged: ({ key, field, value }) => {

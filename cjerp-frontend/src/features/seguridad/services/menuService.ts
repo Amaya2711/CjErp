@@ -28,6 +28,14 @@ export interface ExisteUsuarioPerfilRequest {
   idRol: number;
 }
 
+export interface CambiarUsuarioPerfilRolRequest {
+  idUsuario: string;
+  idPerfilAnterior: number;
+  idRolAnterior: number;
+  idPerfil: number;
+  idRol: number;
+}
+
 export interface GuardarUsuarioPerfilRequest {
   idUsuario: string;
   idPerfil: number;
@@ -243,6 +251,17 @@ export const menuService = {
       `${BASE_URL}/usuario/${encodeURIComponent(idUsuario)}/perfil-rol`
     );
     return extraerArray<UsuarioPerfilRolDto>(response);
+  },
+
+  async listarUsuariosPerfilRol(): Promise<UsuarioPerfilRolDto[]> {
+    const response = await httpClient.get<UsuarioPerfilRolDto[]>(`${BASE_URL}/usuarios-perfil-rol`);
+    return extraerArray<UsuarioPerfilRolDto>(response);
+  },
+
+  async cambiarUsuarioPerfilRol(payload: CambiarUsuarioPerfilRolRequest) {
+    const response = await httpClient.put(`${BASE_URL}/usuario-perfil-rol`, payload);
+    clearCachedMenu(payload.idUsuario);
+    return response;
   },
 
   async crearMenuPrincipal(payload: CrearMenuPrincipalRequest) {

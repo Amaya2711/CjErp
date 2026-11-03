@@ -308,6 +308,75 @@ public class SegMenuService : ISegMenuService
                 new { IdUsuario = idUsuario.Trim() }));
     }
 
+    public async Task<IEnumerable<UsuarioPerfilRolDto>> ListarUsuariosPerfilRolAsync()
+    {
+        await using var connection = CreateConnection();
+
+        return await connection.QueryAsync<UsuarioPerfilRolDto>(
+            _sqlCommandFactory.Create(
+                """
+                SELECT DISTINCT
+                    upr.IdUsuario,
+                    p.IdPerfil,
+                    p.NombrePerfil,
+                    r.IdRol,
+                    r.NombreRol
+                FROM dbo.SegUsuarioPerfilRol upr
+                INNER JOIN dbo.SegPerfilRol pr
+                    ON pr.IdPerfilRol = upr.IdPerfilRol
+                   AND ISNULL(pr.EsActivo, 1) = 1
+                INNER JOIN dbo.SegPerfil p
+                    ON p.IdPerfil = pr.IdPerfil
+                   AND ISNULL(p.EsActivo, 1) = 1
+                INNER JOIN dbo.SegRol r
+                    ON r.IdRol = pr.IdRol
+                   AND ISNULL(r.EsActivo, 1) = 1
+                WHERE ISNULL(upr.EsActivo, 1) = 1
+                ORDER BY upr.IdUsuario, p.NombrePerfil, r.NombreRol;
+                """));
+    }
+
+    public async Task CambiarUsuarioPerfilRolAsync(CambiarUsuarioPerfilRolRequest request, string usuario)
+    {
+        await using var connection = CreateConnection();
+
+        const string sqlIdPerfilRol = """
+            SELECT TOP 1 pr.IdPerfilRol
+            FROM dbo.SegPerfilRol pr
+            WHERE pr.IdPerfil = @IdPerfil
+              AND pr.IdRol = @IdRol
+              AND ISNULL(pr.EsActivo, 1) = 1
+            """;
+
+        // Si la combinación perfil-rol no existe, se crea (GuardarUsuarioPerfilRolAsync la asegura).
+        var idPerfilRolNuevo = await connection.QueryFirstOrDefaultAsync<int?>(
+            _sqlCommandFactory.Create(sqlIdPerfilRol, new { request.IdPerfil, request.IdRol }));
+
+        var idPerfilRolAnterior = await connection.QueryFirstOrDefaultAsync<int?>(
+            _sqlCommandFactory.Create(
+                sqlIdPerfilRol,
+                new { IdPerfil = request.IdPerfilAnterior, IdRol = request.IdRolAnterior }));
+
+        if (idPerfilRolNuevo.HasValue && idPerfilRolAnterior == idPerfilRolNuevo)
+            return;
+
+        // Primero se crea la nueva relación; si falla, la anterior se conserva.
+        await GuardarUsuarioPerfilRolAsync(request.IdUsuario, request.IdPerfil, request.IdRol, usuario);
+
+        if (idPerfilRolAnterior.HasValue)
+        {
+            await connection.ExecuteAsync(
+                _sqlCommandFactory.Create(
+                    """
+                    UPDATE dbo.SegUsuarioPerfilRol
+                    SET EsActivo = 0
+                    WHERE IdUsuario = @IdUsuario
+                      AND IdPerfilRol = @IdPerfilRol
+                    """,
+                    new { request.IdUsuario, IdPerfilRol = idPerfilRolAnterior.Value }));
+        }
+    }
+
     public async Task<int> CrearMenuAsync(CrearMenuPrincipalRequest request, string usuario)
     {
         await using var connection = CreateConnection();
@@ -396,19 +465,7 @@ public class SegMenuService : ISegMenuService
     {
         await using var connection = CreateConnection();
 
-        var idPerfilRol = await connection.QueryFirstOrDefaultAsync<int?>(
-            _sqlCommandFactory.Create(
-                """
-                SELECT TOP 1 pr.IdPerfilRol
-                FROM dbo.SegPerfilRol pr
-                WHERE pr.IdPerfil = @IdPerfil
-                  AND pr.IdRol = @IdRol
-                  AND ISNULL(pr.EsActivo, 1) = 1
-                """,
-                new { IdPerfil = idPerfil, IdRol = idRol }));
-
-        if (!idPerfilRol.HasValue)
-            throw new InvalidOperationException("No existe una relación activa Perfil-Rol para los datos seleccionados.");
+        var idPerfilRol = await AsegurarPerfilRolAsync(connection, idPerfil, idRol, usuario);
 
         await connection.ExecuteAsync(
             _sqlCommandFactory.Create(
@@ -416,11 +473,68 @@ public class SegMenuService : ISegMenuService
                 new
                 {
                     IdUsuario = idUsuario,
-                    IdPerfilRol = idPerfilRol.Value,
+                    IdPerfilRol = idPerfilRol,
                     UsuarioCreacion = usuario
                 },
                 CommandType.StoredProcedure,
                 commandTimeout: 120));
+    }
+
+    /// <summary>
+    /// Devuelve el IdPerfilRol activo del par perfil-rol. Si no existe lo crea (o reactiva el inactivo),
+    /// como si se diera de alta una relación nueva. Las columnas de auditoría se incluyen solo si existen.
+    /// </summary>
+    private async Task<int> AsegurarPerfilRolAsync(SqlConnection connection, int idPerfil, int idRol, string usuario)
+    {
+        var existenPerfilYRol = await connection.QueryFirstAsync<bool>(
+            _sqlCommandFactory.Create(
+                """
+                SELECT CASE WHEN EXISTS (SELECT 1 FROM dbo.SegPerfil WHERE IdPerfil = @IdPerfil)
+                             AND EXISTS (SELECT 1 FROM dbo.SegRol WHERE IdRol = @IdRol)
+                            THEN 1 ELSE 0 END
+                """,
+                new { IdPerfil = idPerfil, IdRol = idRol }));
+
+        if (!existenPerfilYRol)
+            throw new InvalidOperationException("El perfil o el rol seleccionado no existe.");
+
+        return await connection.QueryFirstAsync<int>(
+            _sqlCommandFactory.Create(
+                """
+                DECLARE @Id INT = (
+                    SELECT TOP 1 IdPerfilRol FROM dbo.SegPerfilRol
+                    WHERE IdPerfil = @IdPerfil AND IdRol = @IdRol
+                    ORDER BY ISNULL(EsActivo, 1) DESC, IdPerfilRol);
+
+                IF @Id IS NOT NULL
+                BEGIN
+                    UPDATE dbo.SegPerfilRol SET EsActivo = 1
+                    WHERE IdPerfilRol = @Id AND ISNULL(EsActivo, 1) = 0;
+                END
+                ELSE
+                BEGIN
+                    DECLARE @cols NVARCHAR(400) = N'IdPerfil, IdRol, EsActivo';
+                    DECLARE @vals NVARCHAR(400) = N'@IdPerfil, @IdRol, 1';
+                    IF COL_LENGTH('dbo.SegPerfilRol', 'UsuarioCreacion') IS NOT NULL
+                        SELECT @cols += N', UsuarioCreacion', @vals += N', @Usuario';
+                    IF COL_LENGTH('dbo.SegPerfilRol', 'FechaCreacion') IS NOT NULL
+                        SELECT @cols += N', FechaCreacion', @vals += N', GETDATE()';
+
+                    DECLARE @sql NVARCHAR(MAX) =
+                        N'INSERT INTO dbo.SegPerfilRol (' + @cols + N') VALUES (' + @vals + N');';
+                    EXEC sp_executesql @sql,
+                        N'@IdPerfil INT, @IdRol INT, @Usuario NVARCHAR(100)',
+                        @IdPerfil = @IdPerfil, @IdRol = @IdRol, @Usuario = @Usuario;
+
+                    SET @Id = (
+                        SELECT TOP 1 IdPerfilRol FROM dbo.SegPerfilRol
+                        WHERE IdPerfil = @IdPerfil AND IdRol = @IdRol
+                        ORDER BY IdPerfilRol DESC);
+                END
+
+                SELECT @Id;
+                """,
+                new { IdPerfil = idPerfil, IdRol = idRol, Usuario = usuario }));
     }
 
     public async Task<int> SincronizarPerfilUsuarioAsync(int idPerfil, string idUsuario)

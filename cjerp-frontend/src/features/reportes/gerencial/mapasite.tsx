@@ -738,6 +738,10 @@ export default function MapaSitePage() {
   const [activeMapTab, setActiveMapTab] = useState<MapTab>("cobertura");
   const [personalTypeFilter, setPersonalTypeFilter] = useState<"all" | "campo" | "2x1">("all");
   const [departamentoExpanded, setDepartamentoExpanded] = useState(false);
+  const [empleadoFilters, setEmpleadoFilters] = useState<string[]>([]);
+  const [appliedEmpleadoFilters, setAppliedEmpleadoFilters] = useState<string[]>([]);
+  const [empleadoExpanded, setEmpleadoExpanded] = useState(false);
+  const [empleadoSearch, setEmpleadoSearch] = useState("");
   const [departmentInsightsExpanded, setDepartmentInsightsExpanded] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>("operativa");
   const [routeOrigin, setRouteOrigin] = useState<any | null>(null);
@@ -1339,6 +1343,43 @@ export default function MapaSitePage() {
     return [...values].sort(compareVisualText);
   }, [siteRows]);
 
+  const empleadoOptions = useMemo(() => {
+    const byKey = new Map<string, string>();
+    for (const row of personalRows) {
+      const key = getPersonalKey(row);
+      if (!byKey.has(key)) {
+        byKey.set(key, getPersonalName(row));
+      }
+    }
+    return [...byKey.entries()]
+      .map(([key, nombre]) => ({ key, nombre }))
+      .sort((a, b) => compareVisualText(a.nombre, b.nombre));
+  }, [personalRows]);
+
+  const empleadoOptionsFiltradas = useMemo(() => {
+    const query = normalizeText(empleadoSearch);
+    if (!query) {
+      return empleadoOptions;
+    }
+
+    return empleadoOptions.filter((item) => normalizeText(item.nombre).includes(query));
+  }, [empleadoOptions, empleadoSearch]);
+
+  const empleadoSummary = useMemo(() => {
+    if (appliedEmpleadoFilters.length === 0) {
+      return "Todos los empleados";
+    }
+
+    if (appliedEmpleadoFilters.length === 1) {
+      return empleadoOptions.find((item) => item.key === appliedEmpleadoFilters[0])?.nombre ?? "1 empleado";
+    }
+
+    return `${appliedEmpleadoFilters.length} empleados seleccionados`;
+  }, [appliedEmpleadoFilters, empleadoOptions]);
+
+  const matchesEmpleadoFilter = (row: MapaSiteRow) =>
+    appliedEmpleadoFilters.length === 0 || appliedEmpleadoFilters.includes(getPersonalKey(row));
+
   const departamentoSummary = useMemo(() => {
     if (appliedDepartamentoFilters.length === 0 || appliedDepartamentoFilters.length === departamentos.length) {
       return "Todos los departamentos";
@@ -1441,6 +1482,7 @@ export default function MapaSitePage() {
 
       return personalRows
         .filter((row) => personalTypeFilter === "all" || getPersonalType(row) === personalTypeFilter)
+        .filter(matchesEmpleadoFilter)
         .filter((row) => {
           if (appliedDepartamentoFilters.length === 0) {
             return true;
@@ -1485,7 +1527,7 @@ export default function MapaSitePage() {
           return true;
         });
     },
-    [appliedDepartamentoFilters, mostrarPersonal, personalRows, personalTypeFilter, visibleSitePositions],
+    [appliedDepartamentoFilters, appliedEmpleadoFilters, mostrarPersonal, personalRows, personalTypeFilter, visibleSitePositions],
   ).sort((a, b) => {
     const departmentCompare = compareVisualText(a.departamento, b.departamento);
     if (departmentCompare !== 0) {
@@ -1510,6 +1552,7 @@ export default function MapaSitePage() {
 
     return personalRows
       .filter((row) => personalTypeFilter === "all" || getPersonalType(row) === personalTypeFilter)
+      .filter(matchesEmpleadoFilter)
       .filter((row) => {
         if (departmentQueries.length === 0) {
           return true;
@@ -1549,7 +1592,7 @@ export default function MapaSitePage() {
         seen.add(item.key);
         return true;
       });
-  }, [appliedDepartamentoFilters, mostrarPersonal, personalRows, personalTypeFilter]);
+  }, [appliedDepartamentoFilters, appliedEmpleadoFilters, mostrarPersonal, personalRows, personalTypeFilter]);
 
   const visibleDepartments = useMemo(() => {
     const values = new Set<string>();
@@ -2354,6 +2397,7 @@ export default function MapaSitePage() {
               event.preventDefault();
               setAppliedNombreSitioFilter(nombreSitioFilter.trim());
               setAppliedDepartamentoFilters(departamentoFilters);
+              setAppliedEmpleadoFilters(empleadoFilters);
               setAppliedClienteFilter(clienteFilter.trim());
               setAppliedProyectoFilter(proyectoFilter.trim());
               recenterPeruRef.current = true;
@@ -2422,6 +2466,64 @@ export default function MapaSitePage() {
               </label>
 
               <label style={styles.filterField}>
+                <span style={styles.label}>Empleado</span>
+                <button
+                  type="button"
+                  onClick={() => setEmpleadoExpanded((current) => !current)}
+                  style={styles.compactSelect}
+                  aria-expanded={empleadoExpanded}
+                >
+                  <span style={styles.compactSelectText}>{empleadoSummary}</span>
+                  {empleadoExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                </button>
+                {empleadoExpanded ? (
+                  <div style={styles.checkboxGroup}>
+                    <input
+                      value={empleadoSearch}
+                      onChange={(event) => setEmpleadoSearch(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                        }
+                      }}
+                      placeholder="Escribe para buscar..."
+                      style={styles.input}
+                      autoFocus
+                    />
+                    <label key="__todos_empleados__" style={styles.checkboxItem}>
+                      <input
+                        type="checkbox"
+                        checked={empleadoFilters.length === 0}
+                        onChange={() => setEmpleadoFilters([])}
+                        style={styles.checkboxInput}
+                      />
+                      <span style={styles.checkboxText}>Todos</span>
+                    </label>
+                    {empleadoOptionsFiltradas.length === 0 ? (
+                      <span style={styles.checkboxText}>Sin coincidencias</span>
+                    ) : null}
+                    {empleadoOptionsFiltradas.map((item) => (
+                      <label key={item.key} style={styles.checkboxItem}>
+                        <input
+                          type="checkbox"
+                          checked={empleadoFilters.includes(item.key)}
+                          onChange={(event) =>
+                            setEmpleadoFilters((current) =>
+                              event.target.checked
+                                ? current.filter((value) => value !== item.key).concat(item.key)
+                                : current.filter((value) => value !== item.key),
+                            )
+                          }
+                          style={styles.checkboxInput}
+                        />
+                        <span style={styles.checkboxText}>{item.nombre}</span>
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
+              </label>
+
+              <label style={styles.filterField}>
                 <span style={styles.label}>Cliente</span>
                 <select value={clienteFilter} onChange={(event) => setClienteFilter(event.target.value)} style={styles.input}>
                   <option value="">Todos los clientes</option>
@@ -2482,6 +2584,10 @@ export default function MapaSitePage() {
                     setPersonalTypeFilter("all");
                     setDepartamentoFilters([]);
                     setAppliedDepartamentoFilters([]);
+                    setEmpleadoFilters([]);
+                    setAppliedEmpleadoFilters([]);
+                    setEmpleadoExpanded(false);
+                    setEmpleadoSearch("");
                     setAppliedNombreSitioFilter("");
                     setAppliedClienteFilter("");
                     setAppliedProyectoFilter("");

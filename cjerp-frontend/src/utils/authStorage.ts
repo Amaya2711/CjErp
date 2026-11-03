@@ -44,9 +44,13 @@ export function clearAuthUser() {
   sessionStorage.clear();
 }
 
-/** Perfil 8 y rol 5 omiten restricciones de acciones internas de las páginas. */
+export const ID_ROL_ADMIN = 4;
+export const ID_ROL_SISTEMAS = 5;
+
+/** Rol 4 (ADMIN) o 5 (SISTEMAS) omiten restricciones de acciones internas de las páginas; el resto queda sujeto a sus permisos. */
 export function hasFullPageActionAccess(user: AuthUser | null = getAuthUser()): boolean {
-  return Number(user?.idperfil) === 8 && Number(user?.idrol) === 5;
+  const idRol = Number(user?.idrol);
+  return idRol === ID_ROL_ADMIN || idRol === ID_ROL_SISTEMAS;
 }
 
 export function markAuthActivity(timestamp = Date.now()) {

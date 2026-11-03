@@ -48,7 +48,13 @@ BEGIN
          -- Como el Listado antiguo: Utilizado = Stock - Disponible (global por material).
          CAST(ISNULL(ms.Stock, 0) - ISNULL(ms.Disponible, 0) AS decimal(18,4)) AS Utilizado,
          d.IdEstado,
-         e.ValorIni                                           AS NomEstado
+         e.ValorIni                                           AS NomEstado,
+         -- PV: columnas del Listado antiguo (Region/IdSolicitud/NroGuia de CabLogistica; Cant.Bloq y NroEnvio de DetSolicitud).
+         CAST(cab.Region AS nvarchar(100))                    AS Region,
+         CAST(cab.IdSolicitud AS nvarchar(100))               AS IdSolicitud,
+         CAST(cab.NroGuia AS nvarchar(100))                   AS NroGuia,
+         CAST(ISNULL(r.Bloqueado, 0) AS decimal(18,4))        AS CantBloq,
+         r.NroEnvio                                           AS NroEnvio
   FROM dbo.DetLogistica d
   LEFT JOIN dbo.Material m       ON m.CodPap = d.CodPap
   LEFT JOIN dbo.Site s           ON s.IdSite = d.IdSite AND s.Correlativo = d.CorreSite
@@ -56,7 +62,12 @@ BEGIN
   LEFT JOIN dbo.Proyecto pr      ON pr.IdProyecto = d.IdProyecto
   LEFT JOIN dbo.MaterialStock ms ON ms.CodPap = d.CodPap
   LEFT JOIN dbo.Constante e      ON e.Campo = 'ESTADO_LOG' AND e.Correlativo = d.IdEstado
-  OUTER APPLY (SELECT SUM(ds.CantSap) AS Reservado
+  OUTER APPLY (SELECT TOP (1) a.Region, a.IdSolicitud, a.NroGuia
+               FROM dbo.CabLogistica a
+               WHERE a.PedidoSap = d.PedidoSap AND a.IdSite = d.IdSite AND a.CorreSite = d.CorreSite) cab
+  OUTER APPLY (SELECT SUM(ds.CantSap) AS Reservado,
+                      SUM(CASE WHEN ds.IdBloqueo = 1 THEN ds.CantSap ELSE 0 END) AS Bloqueado,
+                      MAX(ds.NroEnvio) AS NroEnvio
                FROM dbo.DetSolicitud ds
                WHERE ds.Correlativo = CONVERT(varchar(36), d.Correlativo)
                  AND ds.IdDespacho = 1 AND ds.IdEstado NOT IN (6, 19)) r

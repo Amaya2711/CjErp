@@ -319,7 +319,10 @@ namespace CjERP.Infrastructure.Services
                 """;
 
             await using var connection = _sqlCommandFactory.CreateConnection();
+            var auditoriaPendiente = new List<AuditoriaCambioDto>();
 
+            try
+            {
             foreach (var correlativo in correlativos)
             {
                 try
@@ -344,6 +347,7 @@ namespace CjERP.Infrastructure.Services
                     if (fechaPagoCre is not null) parameters.Add("@FechaVencimiento", fechaPagoCre.Value.Date, DbType.Date);
                     if (facturaPath is not null) parameters.Add("@RutaFactura", facturaPath, DbType.String);
 
+                    var cronometro = System.Diagnostics.Stopwatch.StartNew();
                     await connection.ExecuteAsync(
                         _sqlCommandFactory.Create(
                             UpdateStoredProcedureName,
@@ -351,6 +355,7 @@ namespace CjERP.Infrastructure.Services
                             CommandType.StoredProcedure,
                             cancellationToken,
                             commandTimeout: 120));
+                    var msSp = cronometro.ElapsedMilliseconds;
 
                     var actual = await connection.QuerySingleOrDefaultAsync<PlanillaMasivoAuditRow>(
                         _sqlCommandFactory.Create(selectSql, new { Correlativo = correlativo }, cancellationToken: cancellationToken));
@@ -386,10 +391,12 @@ namespace CjERP.Infrastructure.Services
                     if (fechaPagoCre is not null) AddCambio("FechaPagoCre", anterior.FechaPagoCre, actual?.FechaPagoCre);
                     if (facturaPath is not null) AddCambio("ImgFactura", anterior.ImgFactura, actual?.ImgFactura);
 
-                    if (cambios.Count > 0)
-                    {
-                        await _auditoriaCambiosService.RegistrarLoteAsync(cambios, cancellationToken);
-                    }
+                    // La auditoria se acumula y se envia una sola vez al final (abrir conexion + verificar el SP por registro era lo mas lento).
+                    auditoriaPendiente.AddRange(cambios);
+
+                    _logger.LogInformation(
+                        "[PlanillaService] Actualizacion masiva correlativo {Correlativo}: sp_Planilla_Actualizar {MsSp} ms, total registro {MsTotal} ms",
+                        correlativo, msSp, cronometro.ElapsedMilliseconds);
 
                     respuesta.Actualizados++;
                 }
@@ -397,6 +404,15 @@ namespace CjERP.Infrastructure.Services
                 {
                     _logger.LogWarning(ex, "[PlanillaService] Actualizacion masiva: fallo el correlativo {Correlativo} (lote {IdLote})", correlativo, idLote);
                     respuesta.Errores.Add(new PlanillaActualizarMasivoErrorDto { Correlativo = correlativo, Mensaje = ex.Message });
+                }
+            }
+            }
+            finally
+            {
+                // Se registra aunque la ejecucion se interrumpa, para no perder la auditoria de lo ya actualizado.
+                if (auditoriaPendiente.Count > 0)
+                {
+                    await _auditoriaCambiosService.RegistrarLoteAsync(auditoriaPendiente, CancellationToken.None);
                 }
             }
 

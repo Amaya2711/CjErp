@@ -36,6 +36,11 @@ public class LogisticaSolicitudDisponibleDto
     public decimal Utilizado { get; set; }
     public int? IdEstado { get; set; }
     public string? NomEstado { get; set; }
+    public string? Region { get; set; }
+    public string? IdSolicitud { get; set; }
+    public string? NroGuia { get; set; }
+    public decimal CantBloq { get; set; }
+    public int? NroEnvio { get; set; }
 }
 
 /// <summary>Material consumible (cod. 30) con stock disponible, sin linea de origen.</summary>

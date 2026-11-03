@@ -110,6 +110,33 @@ public class SegMenuController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("usuarios-perfil-rol")]
+    public async Task<IActionResult> ListarUsuariosPerfilRol()
+    {
+        var result = await _segMenuService.ListarUsuariosPerfilRolAsync();
+        return Ok(result);
+    }
+
+    [HttpPut("usuario-perfil-rol")]
+    public async Task<IActionResult> CambiarUsuarioPerfilRol([FromBody] CambiarUsuarioPerfilRolRequest request)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.IdUsuario)
+            || request.IdPerfil <= 0 || request.IdRol <= 0)
+            return BadRequest(new { message = "Datos inválidos." });
+
+        request.IdUsuario = request.IdUsuario.Trim();
+
+        try
+        {
+            await _segMenuService.CambiarUsuarioPerfilRolAsync(request, User?.Identity?.Name ?? "SISTEMA");
+            return Ok(new { message = "Perfil y rol del usuario actualizados correctamente." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpPost("principal")]
     public async Task<IActionResult> CrearMenuPrincipal([FromBody] CrearMenuPrincipalRequest request)
     {
